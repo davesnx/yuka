@@ -994,6 +994,11 @@ let html_float_special () =
   check "ordinary" "-0.5" (html (float (-0.5)));
   check "whole" "3.0" (html (float 3.0))
 
+let html_format_array () =
+  check "format" "3 of 10 &lt;done&gt;" (html (format "%d of %d %s" 3 10 "<done>"));
+  check "array" "a<!---->b" (html (array [| text "a"; text "b" |]));
+  check "empty array" "" (html (array [||]))
+
 let all =
   [
     ("first run", first_run);
@@ -1058,5 +1063,6 @@ let all =
     ("mount disposes when the function raises", mount_raises_disposes);
     ("json depth limit", json_depth_limit);
     ("html float special values", html_float_special);
+    ("html format and array", html_format_array);
     ("owned disposes when the function raises", owned_raises_disposes);
   ]

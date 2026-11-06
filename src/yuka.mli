@@ -165,8 +165,13 @@ val float : float -> 'kind element
 (** Printed as JSON prints a float: [1.0], [2.5]. Not-a-number and the
     infinities are printed as [NaN], [Infinity] and [-Infinity]. *)
 
+val format : ('a, unit, string, 'kind element) format4 -> 'a
+(** [format "%d of %d" done total]: a text element made with [Printf]. *)
+
 val list : 'kind element list -> 'kind element
 (** The same as [fragment]. *)
+
+val array : 'kind element array -> 'kind element
 
 val empty : 'kind element
 val fragment : 'kind element list -> 'kind element

@@ -207,7 +207,8 @@ The server output and the client hydration must agree on this format.
 
 - Text children stay explicit, as `React.string` in reason-react: the ppx
   cannot know the type of a child. The core adds `Yuka.int`, `Yuka.float`
-  and `Yuka.list` (same as `fragment`) to make it shorter.
+  and `Yuka.list` (same as `fragment`) to make it shorter. Later, as in
+  html_of_jsx: `Yuka.format` (printf to text) and `Yuka.array`.
 - A component body runs once. A `State.get` in a `let` before the JSX reads
   the value once and is not tracked; only reads inside JSX children and
   attributes (holes), `memo`, effects and `each` lists are tracked.

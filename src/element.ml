@@ -13,6 +13,8 @@ let float f =
      else Json.to_string (`Float f))
 let empty = Fragment []
 let list children = Fragment children
+let array children = Fragment (Array.to_list children)
+let format fmt = Printf.ksprintf text fmt
 let fragment children = Fragment children
 let lower tag attrs children = Element { tag; attrs; children }
 let attr name value = Static (name, value)
