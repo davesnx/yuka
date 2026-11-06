@@ -1,8 +1,14 @@
-module Dom = struct
-  type element = Web.node
-end
+include Island
+open Types
 
-open Yuka.Internal
+type container = Web.node
+type 'a promise = 'a Web.promise
+
+let promise_map = Web.promise_map
+
+let insert parent n = function
+  | None -> Web.append_child parent n
+  | Some before -> Web.insert_before parent n before
 
 type ctx = {
   doc : Web.node;
@@ -16,7 +22,7 @@ type pos = {
   svg : bool;
 }
 
-type 'a entry = {
+type 'a row = {
   key : string;
   mutable value : 'a;
   start : Web.node;
@@ -26,7 +32,7 @@ type 'a entry = {
 
 let svg_ns = "http://www.w3.org/2000/svg"
 
-let on_dispose cleanup = Yuka.Effect.run ~cleanup (fun () -> ())
+let on_dispose cleanup = Base.Effect.run ~cleanup (fun () -> ())
 
 let non_bubbling =
   [ "focus"; "blur"; "mouseenter"; "mouseleave"; "load"; "error"; "scroll" ]
@@ -47,7 +53,7 @@ let comment_where pos matches data =
   | Some n -> n
   | None ->
       let n = Web.create_comment pos.ctx.doc data in
-      Web.insert pos.parent n pos.cur;
+      insert pos.parent n pos.cur;
       n
 
 let comment pos data = comment_where pos (String.equal data) data
@@ -74,7 +80,7 @@ let walk_region pos visit =
 let drop_to_end pos = if pos.adopt then walk_region pos Web.remove
 
 let mount_slot pos slot =
-  let dom = Yuka.Internal.slot_dom slot in
+  let dom = slot.dom in
   match take pos 8 (fun n -> Web.data n = "[$") with
   | Some _ ->
       let nodes = ref [] in
@@ -83,8 +89,8 @@ let mount_slot pos slot =
       ignore (comment pos "]")
   | None ->
       let start = Web.create_comment pos.ctx.doc "[$" in
-      Web.insert pos.parent start pos.cur;
-      List.iter (fun n -> Web.insert pos.parent (Obj.obj n) pos.cur) !dom;
+      insert pos.parent start pos.cur;
+      List.iter (fun n -> insert pos.parent (Obj.obj n) pos.cur) !dom;
       ignore (comment pos "]")
 
 let text pos s =
@@ -94,7 +100,7 @@ let text pos s =
       n
   | None ->
       let n = Web.create_text pos.ctx.doc s in
-      Web.insert pos.parent n pos.cur;
+      insert pos.parent n pos.cur;
       n
 
 let rec remove_between start stop =
@@ -257,7 +263,7 @@ let compiled_template doc id node =
         Option.map
           (fun paths ->
             let template = Web.create_element doc "template" in
-            Web.set_inner_html template (Yuka.Internal.skeleton_html node);
+            Web.set_inner_html template (Printer.skeleton_html node);
             { template; paths })
           (plan node)
       in
@@ -292,18 +298,18 @@ let rec mount_node pos last n =
       let inner_last = ref false in
       List.iter (mount_node inner inner_last) children;
       List.iter (mount_attr pos.ctx svg el (Option.is_some adopted)) attrs;
-      if Option.is_none adopted then Web.insert pos.parent el pos.cur
+      if Option.is_none adopted then insert pos.parent el pos.cur
   | Hole f ->
       last := false;
       mount_hole pos f
   | Await { async; loading; failed; render } ->
       last := false;
-      let status = Yuka.Async.watch async in
+      let status = Async.watch async in
       mount_hole pos (fun () ->
-          match Yuka.State.get status with
-          | Yuka.Async.Pending -> loading
-          | Yuka.Async.Done v -> render v
-          | Yuka.Async.Failed m -> failed m)
+          match Base.State.get status with
+          | Async.Pending -> loading
+          | Async.Done v -> render v
+          | Async.Failed m -> failed m)
   | Slot slot ->
       last := false;
       mount_slot pos slot
@@ -328,8 +334,8 @@ let rec mount_node pos last n =
             targets.(k) <- !cur
           done;
           mount_planned pos.ctx pos.svg parents targets (ref 0) node;
-          Web.insert pos.parent clone pos.cur)
-  | Island _ -> failwith "Yuka_client: islands are not supported yet"
+          insert pos.parent clone pos.cur)
+  | Island _ -> failwith "Yuka.Client: islands are not supported yet"
   | Each { items; key; equal; render } ->
       last := false;
       mount_each pos items key equal render
@@ -361,7 +367,7 @@ and mount_planned ctx svg parents targets next node =
 
 and mount_attr ctx svg el adopted = function
   | Static (name, value) -> if not adopted then set_attr svg el name (Some value)
-  | Dynamic (name, f) -> Yuka.Effect.run (fun () -> set_attr svg el name (f ()))
+  | Dynamic (name, f) -> Base.Effect.run (fun () -> set_attr svg el name (f ()))
   | Handler (event, handler) -> add_handler ctx el event handler
 
 and mount_hole pos f =
@@ -376,7 +382,7 @@ and mount_hole pos f =
         text_node := None;
         mount_node pos (ref false) n
   in
-  Yuka.Effect.run (fun () ->
+  Base.Effect.run (fun () ->
       let n = f () in
       match !stop with
       | None ->
@@ -401,19 +407,19 @@ and mount_each :
  fun pos items key equal render ->
   let start = comment pos "[" in
   ignore start;
-  let source = Yuka.State.memo ~equal:(fun _ _ -> false) items in
+  let source = Base.State.memo ~equal:(fun _ _ -> false) items in
   let make_entry pos k v =
     let start = comment pos "[" in
     let (), dispose =
-      Yuka.mount (fun () ->
-          untracked (fun () -> mount_node pos (ref false) (render v)))
+      Base.mount (fun () ->
+          Scheduler.untrack (fun () -> mount_node pos (ref false) (render v)))
     in
     { key = k; value = v; start; stop = comment pos "]"; dispose }
   in
   let entries =
     ref
       (Array.of_list
-         (List.map (fun v -> make_entry pos (key v) v) (Yuka.State.peek source)))
+         (List.map (fun v -> make_entry pos (key v) v) (Base.State.peek source)))
   in
   let stop = comment pos "]" in
   let reconcile list =
@@ -453,8 +459,8 @@ and mount_each :
               e.dispose ();
               remove_between e.start e.stop;
               let (), dispose =
-                Yuka.mount (fun () ->
-                    untracked (fun () ->
+                Base.mount (fun () ->
+                    Scheduler.untrack (fun () ->
                         mount_node (fresh e.stop) (ref false) (render items.(j))))
               in
               e.dispose <- dispose;
@@ -469,14 +475,18 @@ and mount_each :
     done;
     entries := Array.of_list !next
   in
-  Yuka.Effect.on_change
+  Base.Effect.on_change
     ~equal:(fun _ _ -> false)
     source
     (fun ~prev:_ ~next -> reconcile next);
   on_dispose (fun () -> Array.iter (fun e -> e.dispose ()) !entries)
 
+let platform_installed = ref false
+
 let install_platform () =
-  platform :=
+  if not !platform_installed then begin
+  platform_installed := true;
+  Platform.platform :=
     {
       target_value = (fun e -> Web.value (Web.target e));
       target_checked = (fun e -> Web.checked (Web.target e));
@@ -499,6 +509,7 @@ let install_platform () =
           Web.add_listener (Web.window ()) name handler;
           fun () -> Web.remove_listener (Web.window ()) name handler);
     }
+  end
 
 let start ~adopt container f =
   install_platform ();
@@ -508,8 +519,8 @@ let start ~adopt container f =
     }
   in
   let (), dispose =
-    Yuka.mount (fun () ->
-        let n = Yuka.Internal.node (f ()) in
+    Base.mount (fun () ->
+        let n = f () in
         if not adopt then Web.clear container "";
         mount_node
           { ctx; parent = container; cur = Web.first_child container; adopt; svg = false }
@@ -530,17 +541,17 @@ let register cleanup =
   !next_cleanup
 
 let transport name input =
-  let result, resolve, fail = Yuka.Async.make () in
+  let result, resolve, fail = Async.make () in
   let failf fmt = Printf.ksprintf fail fmt in
   let id = register ignore in
   let finish () = Hashtbl.remove cleanups id in
   let abort =
     Web.fetch_post
     ("/_yuka/action/" ^ Web.encode_uri name)
-    (Yuka.Json.to_string input)
+    (Json.to_string input)
     (fun status body ->
       finish ();
-      match Yuka.Json.of_string body with
+      match Json.of_string body with
       | Ok (`Assoc fields) -> (
           match (List.assoc_opt "ok" fields, List.assoc_opt "error" fields) with
           | Some value, _ -> resolve value
@@ -558,7 +569,7 @@ let transport name input =
   result
 
 let async_value id =
-  let result, resolve, fail = Yuka.Async.make () in
+  let result, resolve, fail = Async.make () in
   let find () =
     let found =
       List.find_opt
@@ -571,10 +582,10 @@ let async_value id =
     | Some script when Web.text_content script = "" -> false
     | Some script when
         Web.ready_state () = "loading"
-        && Result.is_error (Yuka.Json.of_string (Web.text_content script)) ->
+        && Result.is_error (Json.of_string (Web.text_content script)) ->
         false
     | Some script ->
-        (match Yuka.Json.of_string (Web.text_content script) with
+        (match Json.of_string (Web.text_content script) with
         | Ok (`Assoc fields) -> (
             match (List.assoc_opt "ok" fields, List.assoc_opt "error" fields) with
             | Some value, _ -> resolve value
@@ -585,9 +596,24 @@ let async_value id =
         true
   in
   if not (find ()) then begin
-    let id = register ignore in
-    let disconnect = Web.watch_document (fun () -> find () && (Hashtbl.remove cleanups id; true)) in
-    Hashtbl.replace cleanups id disconnect
+    let cleanup_id = register ignore in
+    let touches nodes =
+      Array.exists
+        (fun n ->
+          let own = if Web.local_name n = "script" then [| n |] else [||] in
+          Array.exists
+            (fun s -> Web.get_attribute s "data-yuka-async" = Some id)
+            (Array.append own (Web.query_all n "script[data-yuka-async]")))
+        nodes
+    in
+    let disconnect =
+      Web.watch_added (fun nodes ->
+          touches nodes
+          && find ()
+          && (Hashtbl.remove cleanups cleanup_id;
+              true))
+    in
+    Hashtbl.replace cleanups cleanup_id disconnect
   end;
   result
 
@@ -595,8 +621,8 @@ let started_key = "__yuka_started"
 
 type lazy_entry = {
   lazy_name : string;
-  load : unit -> Yuka.Client.entry Js.Promise.t;
-  mutable loading : Yuka.Client.entry Js.Promise.t option;
+  load : unit -> Island.entry Web.promise;
+  mutable loading : Island.entry Web.promise option;
 }
 
 let lazy_entry ~name load = { lazy_name = name; load; loading = None }
@@ -608,19 +634,19 @@ let boot entries props island =
     Web.console_error (Printf.sprintf "yuka island %s (%s): %s" id name reason);
     None
   in
-  let entry = List.find_opt (fun e -> Yuka.Internal.entry_name e = name) entries in
+  let entry = List.find_opt (fun e -> e.name = name) entries in
   match (entry, Hashtbl.find_opt props id) with
   | None, _ -> fail "unknown island name"
   | _, None -> fail "props script not found"
   | Some entry, Some text -> (
-      match Yuka.Json.of_string text with
+      match Json.of_string text with
       | Error message -> fail ("bad props JSON: " ^ message)
       | Ok json -> (
-          match Yuka.Internal.entry_decode entry json with
+          match entry.decode json with
           | Error message -> fail ("cannot decode props: " ^ message)
           | Ok build -> (
               try
-                Some (hydrate island (fun () -> Yuka.Internal.element (build ())))
+                Some (hydrate island build)
               with e -> fail (Printexc.to_string e))))
 
 let schedule strategy island run =
@@ -672,7 +698,7 @@ let start_island entries lazy_entries props island =
   let id = register ignore in
   let fired = ref false in
   let name = Option.value (Web.get_attribute island "data-name") ~default:"" in
-  let known = List.exists (fun e -> Yuka.Internal.entry_name e = name) entries in
+  let known = List.exists (fun e -> e.name = name) entries in
   let strategy = Web.get_attribute island "data-start" in
   let deferred =
     (not known)
@@ -707,17 +733,13 @@ let start_island entries lazy_entries props island =
                (Option.value (Web.get_attribute island "data-id") ~default:"")
                name reason)
         in
-        ignore
-          (Js.Promise.catch
-             (fun e ->
-               forget ();
-               if not !cancelled then report (Web.error_message e);
-               Js.Promise.resolve ())
-             (Js.Promise.then_
-                (fun entry ->
-                  if not !cancelled then finish (boot [ entry ] props island);
-                  Js.Promise.resolve ())
-                promise))
+        Web.promise_then
+          (fun entry ->
+            if not !cancelled then finish (boot [ entry ] props island))
+          (fun message ->
+            forget ();
+            if not !cancelled then report message)
+          promise
   in
   let cancel = schedule strategy island run in
   if not !fired then
@@ -725,39 +747,77 @@ let start_island entries lazy_entries props island =
         cancel ();
         drop_events ())
 
-let scan ?(parsed = false) entries lazy_entries =
-  let doc = Web.document () in
-  let final = parsed || Web.ready_state () <> "loading" in
-  let props = Hashtbl.create 8 in
-  Array.iter
-    (fun script ->
-      Option.iter
-        (fun id ->
-          let text = Web.text_content script in
-          if final || Result.is_ok (Yuka.Json.of_string text) then
-            Hashtbl.replace props id text)
-        (Web.get_attribute script "data-yuka-props"))
-    (Web.query_all doc "script[data-yuka-props]");
-  Array.iter
-    (fun island ->
-      let started : bool option = Web.get_prop island started_key in
-      let id = Option.value (Web.get_attribute island "data-id") ~default:"" in
-      if started <> Some true && (final || Hashtbl.mem props id) then
-        start_island entries lazy_entries props island)
-    (Web.query_all doc "yuka-island")
+let script_props script =
+  match Web.get_attribute script "data-yuka-props" with
+  | Some id -> Some (id, Web.text_content script)
+  | None -> None
 
 let start ?(lazy_entries = []) entries =
   install_platform ();
-  Yuka.Internal.call_action := transport;
-  Yuka.Internal.async_source := async_value;
-  scan entries lazy_entries;
-  let rescan () =
-    scan entries lazy_entries;
-    false
+  Action.transport := transport;
+  Types.async_source := async_value;
+  let props = Hashtbl.create 8 in
+  let waiting = Hashtbl.create 8 in
+  let island_id island =
+    Option.value (Web.get_attribute island "data-id") ~default:""
   in
-  let id = register ignore in
-  let disconnect = Web.watch_document rescan in
-  let remove_ready = Web.on_dom_ready (fun () -> scan ~parsed:true entries lazy_entries) in
-  Hashtbl.replace cleanups id (fun () ->
-      disconnect ();
-      remove_ready ())
+  let start_waiting ~final =
+    let ready =
+      Hashtbl.fold
+        (fun id island acc ->
+          if final || Hashtbl.mem props id then island :: acc else acc)
+        waiting []
+    in
+    List.iter
+      (fun island ->
+        Hashtbl.remove waiting (island_id island);
+        let started : bool option = Web.get_prop island started_key in
+        if started <> Some true then
+          start_island entries lazy_entries props island)
+      ready
+  in
+  let note_island island =
+    let started : bool option = Web.get_prop island started_key in
+    if started <> Some true then Hashtbl.replace waiting (island_id island) island
+  in
+  let note_script ~final script =
+    match script_props script with
+    | Some (id, text) ->
+        if final || Result.is_ok (Json.of_string text) then
+          Hashtbl.replace props id text
+    | None -> ()
+  in
+  let full ~final =
+    let doc = Web.document () in
+    Array.iter (note_script ~final) (Web.query_all doc "script[data-yuka-props]");
+    Array.iter note_island (Web.query_all doc "yuka-island");
+    start_waiting ~final
+  in
+  let parsed = Web.ready_state () <> "loading" in
+  full ~final:parsed;
+  if not parsed then begin
+    let id = register ignore in
+    let disconnect = ref ignore and remove_ready = ref ignore in
+    let release () =
+      !disconnect ();
+      !remove_ready ();
+      Hashtbl.remove cleanups id
+    in
+    disconnect :=
+      Web.watch_added (fun nodes ->
+          Array.iter
+            (fun n ->
+              if Web.local_name n = "yuka-island" then note_island n;
+              if Web.local_name n = "script" then note_script ~final:false n;
+              Array.iter note_island (Web.query_all n "yuka-island");
+              Array.iter (note_script ~final:false)
+                (Web.query_all n "script[data-yuka-props]"))
+            nodes;
+          start_waiting ~final:false;
+          false);
+    remove_ready :=
+      Web.on_dom_ready (fun () ->
+          full ~final:true;
+          release ());
+    Hashtbl.replace cleanups id release
+  end

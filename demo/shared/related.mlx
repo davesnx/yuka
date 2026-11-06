@@ -3,9 +3,9 @@ open Model
 let%client make ~(related : Model.Issue.t list Yuka.Async.t) () =
   <div class_="related">
     <h2 class_="section-title">"Related issues"</h2>
-    (Yuka.await related
-       ~loading:(Views.Skeleton.make ~lines:3 ())
-       ~failed:(fun m -> <p class_="error">(Yuka.text ("Could not load: " ^ m))</p>)
+    <Yuka.Await async=related
+       loading=(<Views.Skeleton lines=3 />)
+       failed=(fun m -> <p class_="error">(Yuka.text ("Could not load: " ^ m))</p>)>
        (fun issues ->
          if issues = [] then <p class_="muted">"None."</p>
          else
@@ -18,5 +18,6 @@ let%client make ~(related : Model.Issue.t list Yuka.Async.t) () =
                        <a href=(Routes.issue_url i.id)>(Yuka.text (i.id ^ " " ^ i.title))</a>
                      </li>)
                    issues))
-           </ul>))
+           </ul>)
+    </Yuka.Await>
   </div>

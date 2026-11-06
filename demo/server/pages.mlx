@@ -21,13 +21,14 @@ let my_issues () =
 
 let issue ?(delay = 0.6) (i : Model.Issue.t) =
   let comments =
-    Yuka.await (Store.comments_async ~delay i.id)
-      ~loading:<Views.Skeleton lines=3 />
-      ~failed:(fun m -> <p class_="error">(Yuka.text ("Could not load comments: " ^ m))</p>)
+    <Yuka.Await async=(Store.comments_async ~delay i.id)
+      loading=(<Views.Skeleton lines=3 />)
+      failed=(fun m -> <p class_="error">(Yuka.text ("Could not load comments: " ^ m))</p>)>
       (fun comments ->
         <Yuka.Client>
           <Comments issue_id=i.id me=Store.me comments />
         </Yuka.Client>)
+    </Yuka.Await>
   in
   let props =
     <Yuka.Client loading=`Interaction>

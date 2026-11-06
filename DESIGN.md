@@ -31,12 +31,14 @@ recorded here first.
 
 ## Libraries
 
+Current layout (v0.4; earlier sections use the old names, see "v0.4"):
+
 | Library | Modes | Directory | Holds |
 |---|---|---|---|
-| `yuka` | native, melange | `src/` | State, Effect, elements, Event, Browser, JSON, Codec, Async, Client (islands), Action, HTML printer |
-| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lint, `let%client`, `[@@deriving codec]` |
-| `yuka.server` | native | `server/` | Dream handler, page render, streaming, action endpoint |
-| `yuka.client` | melange | `client/` | DOM create, hydrate, holes, events, keyed reconcile, island boot, action calls |
+| `yuka` | native, melange | `src/` | everything users call: State, Effect, elements, Json, Codec, Async, Action, `Yuka.Server`, `Yuka.Client` (islands and browser runtime), `Yuka.Router`, `Yuka.Await`; the virtual DOM module `Web` |
+| `yuka.js` | melange | `dom/js/` | the browser implementation of `Web` (a Melange entry lists it) |
+| `yuka.native` | native, melange | `dom/native/` | the default implementation of `Web` (raises "browser only") |
+| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `[%yuka.lazy]` |
 
 Platform functions (event fields, window listeners, fetch) are a record of
 functions in the core (`Internal.platform`). The client library installs
@@ -107,9 +109,10 @@ The server output and the client hydration must agree on this format.
 ## Async and streaming
 
 - `'a Yuka.Async.t` is a pure OCaml promise (pending, resolved, failed, with
-  callbacks), the same on both targets. The server bridges it to Lwt, the
+  callbacks), the same on both targets. The app bridges it to its own I/O (Lwt in the demo), the
   client to JS promises.
-- `Yuka.await ?failed async ~loading (fun v -> element)` makes the node
+- `Yuka.Await.make ~async ~loading ?failed ~children ()` (the component
+  `<Yuka.Await>`; `children` is the function from the value to the element) makes the node
   `Await { async; loading; failed; render }`. `failed` gets the error
   message; default: nothing.
 - Markers (the client hydrates `Await` as a hole over `Async.watch async`):
@@ -120,7 +123,7 @@ The server output and the client hydration must agree on this format.
   - Pending, streaming: `<!--[sN-->` `loading` `<!--]-->`. N counts from 1
     in one response. A comment whose text starts with `[` is a hole start
     for hydration, so `[s1` is one too.
-- Streaming (`Yuka_server.respond`, and `Yuka_server.stream build write`):
+- Streaming (`Yuka.Server.respond`, and `Yuka.Server.stream ~sleep ~write build`):
   1. One chunk: the document head (title, the inline script below, styles,
      module scripts) and `<body>`. Then one chunk: the shell (the tree with
      loading elements).
@@ -132,7 +135,7 @@ The server output and the client hydration must agree on this format.
   3. Each pending async prop, when it settles, one chunk:
      `<script type="application/json" data-yuka-async="aN">JSON</script>`,
      with JSON `{"ok": value}` or `{"error": message}`.
-  4. `</body></html>` when everything has settled. `Yuka_server.fill_script`
+  4. `</body></html>` when everything has settled. `Yuka.Server.fill_script`
      defines `window.__yukaFill(id)` in the head. It finds the comment
      `[id`, removes the nodes up to the matching `]` comment (nesting of
      `[...` and `]` comments is counted), inserts the template content
@@ -160,12 +163,12 @@ The server output and the client hydration must agree on this format.
 
 - Shared code declares an action:
   `let create_issue = Yuka.Action.declare ~name:"create_issue" ~input:Issue.input_codec ~output:Issue.codec`.
-- Server code implements it: `Yuka_server.Action.implement create_issue (fun input -> ...)`
-  (returns `Lwt.t`). Implementing a name twice raises `Invalid_argument`.
+- Server code implements it: `Yuka.Server.Action.implement create_issue (fun input -> ...)`
+  (returns `Async.t`). Implementing a name twice raises `Invalid_argument`.
 - `Yuka.Action.call create_issue input : Issue.t Async.t`. On the client it
   is a `POST /_yuka/action/create_issue` with JSON. On the server it calls
   the implementation directly (installed by the first `implement`).
-- Wire format of `Yuka_server.route` (`POST /_yuka/action/:name`): the body
+- Wire format of `Yuka.Server.handle_action` for `POST /_yuka/action/:name`: the body
   is the JSON input. The answer is JSON: `{"ok": output}` with 200, or
   `{"error": message}` with:
   - 403: an `Origin` header that does not match the request `Host`
@@ -177,7 +180,7 @@ The server output and the client hydration must agree on this format.
   - 400: the body is not JSON, or the input does not decode. The message
     says which.
   - 500: the implementation raised or its promise failed. The message is
-    always `action failed`; the exception goes to `Dream.error`.
+    always `action failed`; the failure goes to `Yuka.Server.log_error`.
   - 413: the body is over 1 MiB (checked by `Content-Length` first, then
     while reading). The message is `request too large`.
   Checks run in this order: origin, action name, content type, body size,
@@ -361,11 +364,10 @@ The user put these in scope: "all of this is on scope!".
 
 ### `yuka.router`
 
-- Three libraries in `router/`: `yuka.router` (native and melange, main
-  module `Yuka_router`), `yuka.router.server` (native, `Yuka_router_server`,
-  depends on dream) and `yuka.router.client` (melange,
-  `Yuka_router_client`, depends on `yuka.client`).
-- Route type: a GADT path `('a, 'r) Yuka_router.t`, in the style of a
+- Since v0.4 the router is `Yuka.Router` in `src/router.ml`, part of the one
+  library `yuka` (no separate `yuka.router*` libraries, no Dream). The
+  client part uses the router functions of the virtual `Web` module.
+- Route type: a GADT path `('a, 'r) Yuka.Router.t`, in the style of a
   Format string. `'a` is the function that takes the parameters, `'r` its
   result. One value serves both ways, so server and client cannot differ.
 
@@ -381,13 +383,15 @@ The user put these in scope: "all of this is on scope!".
   type 'r case
   val case : ('a, 'r) t -> 'a -> 'r case
   val dispatch : 'r case list -> string -> 'r option
+  val start : ?lazy_entries:Client.lazy_entry list -> Client.entry list -> unit
+  val navigate : string -> unit
   ```
 
-  `let issue = Yuka_router.(s "issue" / int)` has type
+  `let issue = Yuka.Router.(s "issue" / int)` has type
   `(int -> 'r, 'r) t`. `href issue 12` is `"/issue/12"`. `parse issue f
   "/issue/12?x=1"` is `Some (f 12)`.
-- Rules: parameters are percent-encoded by `href` and decoded by `parse`
-  (segments are split before decoding, so `%2F` stays in one segment). `int`
+- Rules: parameters and fixed segments are percent-encoded by `href` and decoded by `parse`
+  (a fixed segment is compared after decoding; segments are split before decoding, so `%2F` stays in one segment). `int`
   accepts an optional `-` and digits only. A trailing slash, an empty
   segment, the query and the fragment do not change the match. `dispatch`
   returns the result of the first case that matches. A wrong type, a
@@ -395,26 +399,26 @@ The user put these in scope: "all of this is on scope!".
   (for `parse`). `s` raises `Invalid_argument` on an empty text or a `/`.
   Query values are read with `query target` and are not part of the route
   type (the simplest design: the query stays untyped).
-- Server: `Yuka_router_server.handler ?not_found cases` is one Dream
-  handler. It matches `Dream.target` against the cases, with
-  `Dream.handler Yuka_router.case` values such as
-  `case issue (fun id req -> ...)`. A path with no case goes to `not_found`
-  (default: empty 404). Mount it with `Dream.get "/**" (handler cases)`.
-  A request with the header `Yuka-Navigate: 1` gets the page fully settled
-  (`render_settled` semantics: no fill scripts; async value scripts
-  included), so the client can parse it in one go. That part is in
-  `yuka.server`, not in the router.
-- Client: `Yuka_router_client.start ?lazy_entries entries` calls
-  `Yuka_client.start` and then intercepts clicks on same-origin `<a>`
+- Server: `dispatch cases target` returns the result of the first case that
+  matches `target` (a request target: path, query allowed), here the
+  handler, as `'r` is chosen by the app. The app maps that handler onto its
+  HTTP library and answers its own 404 when the result is `None`. With
+  Dream: `Dream.get "/**" (fun req -> match Yuka.Router.dispatch cases
+  (Dream.target req) with Some h -> h req | None -> Dream.empty `Not_Found)`.
+  Each page handler passes the request to the server render (the
+  `Yuka-Navigate: 1` rule is in `Yuka.Server`), so the client gets the
+  settled page in one go.
+- Client: `Yuka.Router.start ?lazy_entries entries` calls
+  `Yuka.Client.start` and then intercepts clicks on same-origin `<a>`
   links. A link is not intercepted when the event is already prevented, the
   button is not the left one, a modifier key is down, `target` is set (other
   than `_self`), `download` or `data-yuka-reload` is set, the origin differs,
   or only the fragment differs from the current URL. Otherwise the client
   fetches the URL with `Yuka-Navigate: 1`, then (in this order) calls
-  `Yuka_client.stop ()`, replaces `document.title` and the content of
+  `Yuka.Client.stop ()`, replaces `document.title` and the content of
   `<body>` with those of the response (`DOMParser`), pushes the history
   entry (the URL after redirects), scrolls to the fragment or to the top,
-  and calls `Yuka_client.start` again. Only title and body change; `<head>`
+  and calls `Yuka.Client.start` again. Only title and body change; `<head>`
   (styles, scripts) stays. History is pushed only after the page loaded.
   `popstate` loads the entry's URL without pushing, and restores the scroll
   saved when the user left that entry (kept in memory, by an entry key in
@@ -422,13 +426,16 @@ The user put these in scope: "all of this is on scope!".
   navigation started while another is loading aborts the first
   (`AbortController`); a late response of an aborted request is dropped.
   A network failure, or a redirect to another origin, ends with
-  `location.assign url` (full page load). A server error page (any status)
-  with a body is shown like any other page. `Yuka_router_client.navigate
+  `location.assign url` (full page load). After each `start`, `Yuka.Browser.navigate`
+  is `navigate` (the platform function is set again after every
+  `Client.start`). A response that is not 2xx, or whose
+  `Content-Type` is not `text/html`, also ends with a full page load, so the
+  browser shows it itself. `Yuka.Router.navigate
   url` does the same as a click; before `start` it is `location.assign`.
 - Cancel on navigation: stopping an island disposes its effects; action
   requests still in flight are aborted and their `Async` fails with
   "cancelled".
-- Client API needed from `yuka.client`: `Yuka_client.stop : unit -> unit`
+- Client API needed from `Yuka.Client`: `Yuka.Client.stop : unit -> unit`
   (dispose every started island and forget them) and `start` working again
   on a new body.
 
@@ -458,3 +465,65 @@ The user put these in scope: "all of this is on scope!".
   both), because its cost is mostly the effects, not the DOM. Creation
   jumps to each dynamic part by a path computed once per template id; a
   tree with a slot, an island or an empty text uses plain creation.
+
+## v0.4: one library, no Dream (decided by the user, 2026-11-06)
+
+The user: "Yuka as a single library. Yuka_server shouldn't depend on dream."
+And: "Yuka.Await should be a component not a function".
+
+### Old names in earlier sections
+
+`Yuka_server.x` is now `Yuka.Server.x`; `Yuka_client.x` is now
+`Yuka.Client.x`; `Yuka_router.x`, `Yuka_router_server.x` and
+`Yuka_router_client.x` are now `Yuka.Router.x` (the Dream handler and the
+Lwt bridges live in the app). `Yuka.await` is now `<Yuka.Await>`.
+
+### Layout
+
+- One library `yuka` (modes native melange) holds everything users call:
+  `Yuka.State`, `Effect`, elements, `Codec`, `Async`, `Action`,
+  `Yuka.Server` (was `Yuka_server`), `Yuka.Client` (island API plus the
+  browser runtime that was `Yuka_client`: `start`, `stop`, `lazy_entry`,
+  `render`, `hydrate`), `Yuka.Router` (was `Yuka_router`,
+  `Yuka_router_server`, `Yuka_router_client`), `Yuka.Await`.
+- The only target-specific part is the DOM bindings: a virtual module of
+  `yuka` (checked with dune 3.24 in a scratch project: a virtual library in
+  modes native and melange, a native default implementation, and a melange
+  implementation chosen by the `melange.emit`). Implementations:
+  `yuka.native` (default; each function raises "browser only") and
+  `yuka.js` (Melange externals). A Melange entry lists `yuka.js` in its
+  `libraries`; native code lists nothing extra.
+- Directories `server/`, `client/`, `router/` go away; their code moves
+  into `src/`. Each part is its own file in `src/`, and `yuka.ml(i)`
+  re-exports them, so parts can change without editing one big file.
+
+### Server without Dream
+
+- No Dream, no Lwt in Yuka. Server functions take plain callbacks and
+  return `Yuka.Async.t`:
+  - `Yuka.Server.stream ~write page` writes chunks through
+    `write : string -> unit Async.t`; the stream timeout uses a
+    `~sleep : float -> unit Async.t` given by the app.
+  - `Yuka.Server.to_string`, `page`, `render_settled` stay pure.
+  - Actions: `Yuka.Server.Action.implement` (implementation returns
+    `'o Async.t`), `reject`, and
+    `Yuka.Server.handle_action : name:string -> content_type:string option
+    -> origin:string option -> host:string option -> body:string ->
+    (int * string) Async.t` (status and JSON body, same rules and statuses
+    as before). The body size limit is checked from the body length.
+  - Navigation requests: the app tells `Yuka.Server` whether the request
+    had `Yuka-Navigate: 1`.
+- The demo holds the Dream glue (a few lines): the action route, the page
+  response, and Lwt <-> `Async` bridges.
+
+### `<Yuka.Await>`
+
+- `Yuka.Await` is a component: `<Yuka.Await async=comments loading=(<p>"…"</p>)
+  failed=(fun msg -> ...)>(fun comments -> <Comments comments />)</Yuka.Await>`.
+  `Yuka.Await.make ~async ~loading ?failed ~children ()` where `children`
+  is the function from the value to the element. The ppx passes the single
+  function child as `~children` (not wrapped in a fragment). The function
+  `Yuka.await` is removed.
+- mlx: an element used as a prop value always needs parentheses:
+  `loading=(<p>"…"</p>)` (without them it is a syntax error, checked with
+  mlx-pp).

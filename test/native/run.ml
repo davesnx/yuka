@@ -1,8 +1,81 @@
+module Server = Yuka.Server
+module Async = Yuka.Async
+
+let contains text part =
+  let n = String.length part in
+  let rec at i =
+    i + n <= String.length text && (String.sub text i n = part || at (i + 1))
+  in
+  at 0
+
+let get a =
+  match Async.status a with
+  | Async.Done v -> v
+  | Async.Failed m -> failwith ("failed: " ^ m)
+  | Async.Pending -> failwith "still pending"
+
+let is_pending a = match Async.status a with Async.Pending -> true | _ -> false
+
+let recorder () =
+  let chunks = ref [] in
+  ( (fun c ->
+      chunks := c :: !chunks;
+      Async.resolved ()),
+    fun () -> List.rev !chunks )
+
+let manual_sleep () =
+  let timers = ref [] in
+  let sleep seconds =
+    let a, resolve, _ = Async.make () in
+    timers := !timers @ [ (seconds, resolve) ];
+    a
+  in
+  let fire () =
+    let due = !timers in
+    timers := [];
+    List.iter (fun (_, resolve) -> resolve ()) due
+  in
+  (sleep, fire, fun () -> List.map fst !timers)
+
+let never_sleep _ =
+  let a, _, _ = Async.make () in
+  a
+
+let text_await ?failed a name =
+  Yuka.Await.make ?failed ~async:a ~loading:(Yuka.text ("L" ^ name))
+    ~children:(fun n -> Yuka.text (name ^ string_of_int n))
+    ()
+
+let fill id html =
+  Printf.sprintf
+    "<template data-yuka-fill=\"%s\">%s</template><script>__yukaFill(\"%s\")</script>"
+    id html id
+
+let island a =
+  Yuka.Client.island ~name:"I"
+    ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
+    (fun () -> Yuka.text "")
+
+let island_html id props =
+  Printf.sprintf
+    "<yuka-island data-name=\"I\" data-id=\"%s\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"%s\">%s</script>"
+    id id props
+
+let value_script id json =
+  Printf.sprintf
+    "<script type=\"application/json\" data-yuka-async=\"%s\">%s</script>" id
+    json
+
+let stream ?head ?early ?import_map ?timeout ?(sleep = never_sleep) ?title
+    ?styles ?scripts build write =
+  Server.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts
+    ~sleep ~write build
+
 let page_cases =
   let open Alcotest in
   let page () =
     let html =
-      Yuka_server.page ~title:"A & B" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
+      Server.page ~title:"A & B" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
         (fun () -> Yuka.lower "p" [] [ Yuka.text "hi" ])
     in
     check string "document"
@@ -11,19 +84,17 @@ let page_cases =
   in
   let to_string () =
     check string "element" "<p>a<!---->b</p>"
-      (Yuka_server.to_string
-         (fun () -> Yuka.lower "p" [] [ Yuka.text "a"; Yuka.text "b" ]))
+      (Server.to_string (fun () ->
+           Yuka.lower "p" [] [ Yuka.text "a"; Yuka.text "b" ]))
   in
   let respond () =
-    let res =
-      Lwt_main.run
-        (Yuka_server.respond ~status:`Not_Found (fun () -> Yuka.text "x"))
-    in
-    check int "status" 404 (Dream.status_to_int (Dream.status res));
+    let write, chunks = recorder () in
+    get
+      (Server.respond ~sleep:never_sleep ~write (fun () -> Yuka.text "x"));
     check string "body"
       ("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title></title>"
-      ^ Yuka_server.fill_script ^ "</head><body>x</body></html>")
-      (Lwt_main.run (Dream.body res))
+      ^ Server.fill_script ^ "</head><body>x</body></html>")
+      (String.concat "" (chunks ()))
   in
   let component_effect () =
     let runs = ref 0 in
@@ -31,50 +102,61 @@ let page_cases =
       Yuka.Effect.run (fun () -> incr runs);
       Yuka.lower "p" [] []
     in
-    check string "html" "<p></p>" (Yuka_server.to_string component);
+    check string "html" "<p></p>" (Server.to_string component);
     check int "effect not run" 0 !runs
   in
-  [ test_case "component effect" `Quick component_effect; test_case "page" `Quick page; test_case "to_string" `Quick to_string;
+  [ test_case "component effect" `Quick component_effect;
+    test_case "page" `Quick page;
+    test_case "to_string" `Quick to_string;
     test_case "respond" `Quick respond ]
 
 type issue = { title : string; n : int }
 
 let issue_codec : issue Yuka.Codec.t =
   {
-    encode =
-      (fun i -> `Assoc [ ("title", `String i.title); ("n", `Int i.n) ]);
+    encode = (fun i -> `Assoc [ ("title", `String i.title); ("n", `Int i.n) ]);
     decode =
       (function
       | `Assoc [ ("title", `String title); ("n", `Int n) ] -> Ok { title; n }
       | _ -> Error "bad issue");
   }
 
-let create =
-  Yuka.Action.declare ~name:"create" ~input:issue_codec ~output:issue_codec
-
-let broken =
-  Yuka.Action.declare ~name:"broken" ~input:Yuka.Codec.int
-    ~output:Yuka.Codec.int
-
-let failing =
-  Yuka.Action.declare ~name:"failing" ~input:Yuka.Codec.int
-    ~output:Yuka.Codec.int
+let declare name = Yuka.Action.declare ~name ~input:Yuka.Codec.int ~output:Yuka.Codec.int
+let create = Yuka.Action.declare ~name:"create" ~input:issue_codec ~output:issue_codec
+let broken = declare "broken"
+let failing = declare "failing"
+let rejecting = declare "rejecting"
+let rejecting_late = declare "rejecting_late"
+let rejecting_chain = declare "rejecting_chain"
+let late = declare "late"
+let late_gate, late_open, _ = Async.make ()
+let call_gate, call_open, _ = Async.make ()
 
 let () =
-  Yuka_server.Action.implement create (fun i ->
-      Lwt.return { i with n = i.n + 1 });
-  Yuka_server.Action.implement broken (fun _ -> failwith "secret detail");
-  Yuka_server.Action.implement failing (fun _ -> Lwt.fail_with "secret promise")
+  Server.Action.implement create (fun i ->
+      Async.resolved { i with n = i.n + 1 });
+  Server.Action.implement broken (fun _ -> failwith "secret detail");
+  Server.Action.implement failing (fun _ -> Async.failed "secret failure");
+  Server.Action.implement rejecting (fun _ -> Server.Action.reject "title is empty");
+  Server.Action.implement rejecting_late (fun _ ->
+      Async.bind late_gate (fun () -> Server.Action.rejected "too late"));
+  Server.Action.implement rejecting_chain (fun _ ->
+      Server.Action.rejected "from a chain");
+  Server.Action.implement late (fun n -> Async.map (fun () -> n) call_gate)
 
-let handler = Dream.router [ Yuka_server.route ]
+let json_type = Some "application/json"
 
-let post ?(headers = [ ("Content-Type", "application/json"); ("Host", "x.test") ])
+let post ?(content_type = json_type) ?(origin = None) ?(host = Some "x.test")
     name body =
-  let req =
-    Dream.request ~method_:`POST ~target:("/_yuka/action/" ^ name) ~headers body
-  in
-  let res = Dream.test handler req in
-  (Dream.status_to_int (Dream.status res), Lwt_main.run (Dream.body res))
+  get (Server.handle_action ~name ~content_type ~origin ~host ~body)
+
+let logged f =
+  let messages = ref [] in
+  let saved = !Server.log_error in
+  Server.log_error := (fun m -> messages := m :: !messages);
+  let result = (try f () with e -> Server.log_error := saved; raise e) in
+  Server.log_error := saved;
+  (result, List.rev !messages)
 
 let action_cases =
   let open Alcotest in
@@ -86,7 +168,8 @@ let action_cases =
   let bad_json () =
     let status, body = post "create" "{oops" in
     check int "status" 400 status;
-    check bool "says JSON" true (String.length body > 0 && String.sub body 0 18 = "{\"error\":\"invalid ")
+    check bool "says JSON" true
+      (String.length body > 18 && String.sub body 0 18 = "{\"error\":\"invalid ")
   in
   let bad_input () =
     let status, body = post "create" "{\"title\":1}" in
@@ -94,154 +177,152 @@ let action_cases =
     check string "message" "{\"error\":\"invalid input: bad issue\"}" body
   in
   let unknown () =
-    check reply "404" (404, "{\"error\":\"unknown action nope\"}") (post "nope" "1")
+    check reply "404" (404, "{\"error\":\"unknown action nope\"}")
+      (post "nope" "1")
   in
   let content_type () =
-    let status, _ = post ~headers:[ ("Content-Type", "text/plain") ] "broken" "1" in
-    check int "415" 415 status;
-    let status, _ = post ~headers:[] "broken" "1" in
-    check int "415 without header" 415 status;
-    let status, _ =
-      post ~headers:[ ("Content-Type", "Application/JSON; charset=utf-8") ] "create"
-        "{\"title\":\"a\",\"n\":1}"
-    in
-    check int "parameters allowed" 200 status
-  in
-  let origin () =
-    let h origin =
-      [ ("Content-Type", "application/json"); ("Host", "x.test"); ("Origin", origin) ]
-    in
-    let json = "{\"title\":\"a\",\"n\":1}" in
-    check int "other site" 403 (fst (post ~headers:(h "https://evil.test") "create" json));
-    check int "other port" 403 (fst (post ~headers:(h "http://x.test:81") "create" json));
-    check int "same" 200 (fst (post ~headers:(h "https://x.test") "create" json));
-    check int "no host" 403
+    check int "415" 415
+      (fst (post ~content_type:(Some "text/plain") "broken" "1"));
+    check int "415 without header" 415 (fst (post ~content_type:None "broken" "1"));
+    check int "parameters allowed" 200
       (fst
          (post
-            ~headers:[ ("Content-Type", "application/json"); ("Origin", "https://x.test") ]
-            "create" json))
+            ~content_type:(Some "Application/JSON; charset=utf-8")
+            "create" "{\"title\":\"a\",\"n\":1}"))
+  in
+  let origin () =
+    let json = "{\"title\":\"a\",\"n\":1}" in
+    let with_origin o = fst (post ~origin:(Some o) "create" json) in
+    check int "other site" 403 (with_origin "https://evil.test");
+    check int "other port" 403 (with_origin "http://x.test:81");
+    check int "same" 200 (with_origin "https://x.test");
+    check int "no host" 403
+      (fst (post ~origin:(Some "https://x.test") ~host:None "create" json))
+  in
+  let check_order () =
+    check int "origin before name" 403
+      (fst (post ~origin:(Some "https://evil.test") "nope" "1"));
+    check int "name before content type" 404
+      (fst (post ~content_type:None "nope" "1"));
+    check int "content type before size" 415
+      (fst (post ~content_type:None "create" (String.make 2_000_000 'x')))
   in
   let generic_500 () =
-    check reply "raised" (500, "{\"error\":\"action failed\"}") (post "broken" "1");
-    check reply "failed promise" (500, "{\"error\":\"action failed\"}") (post "failing" "1")
+    let (raised, failed), messages =
+      logged (fun () -> (post "broken" "1", post "failing" "1"))
+    in
+    check reply "raised" (500, "{\"error\":\"action failed\"}") raised;
+    check reply "failed async" (500, "{\"error\":\"action failed\"}") failed;
+    check bool "details are logged" true
+      (List.exists (fun m -> contains m "secret detail") messages
+      && List.exists (fun m -> contains m "secret failure") messages)
   in
   let twice () =
     check bool "raises" true
-      (match Yuka_server.Action.implement create (fun i -> Lwt.return i) with
+      (match Server.Action.implement create (fun i -> Async.resolved i) with
       | () -> false
       | exception Invalid_argument _ -> true)
   in
   let direct_call () =
-    let status = Yuka.Async.status (Yuka.Action.call create { title = "t"; n = 5 }) in
     check string "resolved" "t 6"
-      (match status with
-      | Yuka.Async.Done i -> i.title ^ " " ^ string_of_int i.n
-      | _ -> "other");
-    check string "implementation failure" "failed"
-      (match Yuka.Async.status (Yuka.Action.call broken 1) with
-      | Yuka.Async.Failed _ -> "failed"
-      | _ -> "other");
-    let late = Yuka.Action.declare ~name:"late" ~input:Yuka.Codec.int ~output:Yuka.Codec.int in
-    Yuka_server.Action.implement late (fun n -> Lwt.map (fun () -> n) (Lwt.pause ()));
-    let async = Yuka.Action.call late 3 in
-    check string "pending" "pending"
-      (match Yuka.Async.status async with Pending -> "pending" | _ -> "other");
-    Lwt_main.run (Lwt.pause ());
-    check string "settles" "3"
-      (match Yuka.Async.status async with Done n -> string_of_int n | _ -> "other")
+      (let i = get (Yuka.Action.call create { title = "t"; n = 5 }) in
+       i.title ^ " " ^ string_of_int i.n);
+    check bool "implementation failure" true
+      (match Async.status (Yuka.Action.call broken 1) with
+      | Async.Failed _ -> true
+      | _ -> false)
   in
-  [ test_case "happy path" `Quick happy; test_case "bad JSON" `Quick bad_json;
-    test_case "bad input" `Quick bad_input; test_case "unknown action" `Quick unknown;
-    test_case "content type" `Quick content_type; test_case "origin" `Quick origin;
+  let late_call () =
+    let call = Yuka.Action.call late 3 in
+    check bool "pending" true (is_pending call);
+    call_open ();
+    check int "settles" 3 (get call)
+  in
+  [ test_case "happy path" `Quick happy;
+    test_case "bad JSON" `Quick bad_json;
+    test_case "bad input" `Quick bad_input;
+    test_case "unknown action" `Quick unknown;
+    test_case "content type" `Quick content_type;
+    test_case "origin" `Quick origin;
+    test_case "order of checks" `Quick check_order;
     test_case "generic 500" `Quick generic_500;
     test_case "implement twice" `Quick twice;
-    test_case "server-side call" `Quick direct_call ]
+    test_case "server-side call" `Quick direct_call;
+    test_case "late call settles" `Quick late_call ]
 
-let contains text part =
-  let n = String.length part in
-  let rec at i =
-    i + n <= String.length text && (String.sub text i n = part || at (i + 1))
+let body_limit_cases =
+  let open Alcotest in
+  let limit = 1_048_576 in
+  let json_body size =
+    Printf.sprintf "{\"title\":\"%s\",\"n\":1}" (String.make (size - 18) 'x')
   in
-  at 0
-
-let recorder () =
-  let chunks = ref [] in
-  ((fun c -> chunks := c :: !chunks; Lwt.return_unit), fun () -> List.rev !chunks)
-
-let pause () = Lwt_main.run (Lwt.pause ())
-
-let text_await ?failed a name =
-  Yuka.await ?failed a ~loading:(Yuka.text ("L" ^ name)) (fun n ->
-      Yuka.text (name ^ string_of_int n))
-
-let fill id html =
-  Printf.sprintf
-    "<template data-yuka-fill=\"%s\">%s</template><script>__yukaFill(\"%s\")</script>"
-    id html id
+  let at_limit () =
+    check int "exactly the limit" 200 (fst (post "create" (json_body limit)))
+  in
+  let over () =
+    check (pair int string) "over the limit"
+      (413, "{\"error\":\"request too large\"}")
+      (post "create" (json_body (limit + 1)))
+  in
+  [ test_case "at the limit" `Quick at_limit;
+    test_case "over the limit" `Quick over ]
 
 let stream_cases =
   let open Alcotest in
   let list_of = list string in
-  let state p = match Lwt.state p with Lwt.Sleep -> "running" | _ -> "done" in
   let shell_and_order () =
-    let a, resolve_a, _ = Yuka.Async.make () in
-    let b, resolve_b, _ = Yuka.Async.make () in
+    let a, resolve_a, _ = Async.make () in
+    let b, resolve_b, _ = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Yuka_server.stream ~title:"T"
-        (fun () ->
-          Yuka.lower "div" [] [ text_await a "a"; text_await b "b" ])
+      stream ~title:"T"
+        (fun () -> Yuka.lower "div" [] [ text_await a "a"; text_await b "b" ])
         write
     in
-    pause ();
     (match chunks () with
     | [ head; shell ] ->
         check bool "head" true
           (String.length head > 15
           && String.sub head 0 15 = "<!DOCTYPE html>"
-          && contains head Yuka_server.fill_script);
+          && contains head Server.fill_script);
         check string "shell"
           "<div><!--[s1-->La<!--]--><!--[s2-->Lb<!--]--></div>" shell
     | l -> failf "expected 2 chunks, got %d" (List.length l));
-    check string "running" "running" (state p);
+    check bool "running" true (is_pending p);
     resolve_b 2;
-    pause ();
     check int "one fill" 3 (List.length (chunks ()));
-    check string "still running" "running" (state p);
+    check bool "still running" true (is_pending p);
     resolve_a 1;
-    Lwt_main.run p;
+    get p;
     check list_of "fills in settle order"
       [ fill "s2" "b2"; fill "s1" "a1"; "</body></html>" ]
       (List.filteri (fun i _ -> i >= 2) (chunks ()))
   in
   let settled_inline () =
     let write, chunks = recorder () in
-    Lwt_main.run
-      (Yuka_server.stream
-         (fun () -> text_await (Yuka.Async.resolved 7) "a")
-         write);
+    get (stream (fun () -> text_await (Async.resolved 7) "a") write);
     check list_of "no fill"
       [ "<!--[-->a7<!--]-->"; "</body></html>" ]
       (List.tl (chunks ()))
   in
   let nested () =
-    let outer, resolve_outer, _ = Yuka.Async.make () in
-    let inner, resolve_inner, _ = Yuka.Async.make () in
+    let outer, resolve_outer, _ = Async.make () in
+    let inner, resolve_inner, _ = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Yuka_server.stream
+      stream
         (fun () ->
-          Yuka.await outer ~loading:(Yuka.text "Lo") (fun n ->
+          Yuka.Await.make ~async:outer ~loading:(Yuka.text "Lo")
+            ~children:(fun n ->
               Yuka.lower "p" []
-                [ Yuka.text (string_of_int n); text_await inner "i" ]))
+                [ Yuka.text (string_of_int n); text_await inner "i" ])
+            ())
         write
     in
-    pause ();
     resolve_outer 1;
-    pause ();
-    check string "still running" "running" (state p);
+    check bool "still running" true (is_pending p);
     resolve_inner 2;
-    Lwt_main.run p;
+    get p;
     check list_of "chunks"
       [ "<!--[s1-->Lo<!--]-->";
         fill "s1" "<p>1<!--[s2-->Li<!--]--></p>";
@@ -250,11 +331,11 @@ let stream_cases =
       (List.tl (chunks ()))
   in
   let failure () =
-    let a, _, fail_a = Yuka.Async.make () in
-    let b, _, fail_b = Yuka.Async.make () in
+    let a, _, fail_a = Async.make () in
+    let b, _, fail_b = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Yuka_server.stream
+      stream
         (fun () ->
           Yuka.fragment
             [ text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) a "a";
@@ -263,7 +344,7 @@ let stream_cases =
     in
     fail_b "x";
     fail_a "boom";
-    Lwt_main.run p;
+    get p;
     check list_of "failure chunks"
       [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->";
         fill "s2" "";
@@ -271,108 +352,159 @@ let stream_cases =
         "</body></html>" ]
       (List.tl (chunks ()))
   in
-  let island a =
-    Yuka.Client.island ~name:"I"
-      ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
-      (fun () -> Yuka.text "")
-  in
   let async_prop () =
-    let a, resolve, _ = Yuka.Async.make () in
-    let b, _, fail_b = Yuka.Async.make () in
+    let a, resolve, _ = Async.make () in
+    let b, _, fail_b = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Yuka_server.stream
+      stream
         (fun () ->
           let ia = island a in
           let ib = island b in
           Yuka.fragment [ ia; ib ])
         write
     in
-    pause ();
     check string "shell"
-      "<yuka-island data-name=\"I\" data-id=\"i1\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"$async\":\"a1\"}</script><yuka-island data-name=\"I\" data-id=\"i2\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"$async\":\"a2\"}</script>"
+      (island_html "i1" "{\"$async\":\"a1\"}"
+      ^ island_html "i2" "{\"$async\":\"a2\"}")
       (List.nth (chunks ()) 1);
     fail_b "no";
     resolve 5;
-    Lwt_main.run p;
+    get p;
     check list_of "values"
-      [ "<script type=\"application/json\" data-yuka-async=\"a2\">{\"error\":\"no\"}</script>";
-        "<script type=\"application/json\" data-yuka-async=\"a1\">{\"ok\":5}</script>";
+      [ value_script "a2" "{\"error\":\"no\"}";
+        value_script "a1" "{\"ok\":5}";
         "</body></html>" ]
       (List.filteri (fun i _ -> i >= 2) (chunks ()))
   in
   let async_in_fill () =
-    let outer, resolve_outer, _ = Yuka.Async.make () in
-    let value, resolve_value, _ = Yuka.Async.make () in
+    let outer, resolve_outer, _ = Async.make () in
+    let value, resolve_value, _ = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Yuka_server.stream
+      stream
         (fun () ->
-          Yuka.await outer ~loading:Yuka.empty (fun _ -> island value))
+          Yuka.Await.make ~async:outer ~loading:Yuka.empty
+            ~children:(fun _ -> island value)
+            ())
         write
     in
     resolve_outer 0;
-    pause ();
     resolve_value 9;
-    Lwt_main.run p;
+    get p;
     check list_of "async registered in a fill"
-      [ fill "s1"
-          "<yuka-island data-name=\"I\" data-id=\"i1\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"$async\":\"a1\"}</script>";
-        "<script type=\"application/json\" data-yuka-async=\"a1\">{\"ok\":9}</script>";
+      [ fill "s1" (island_html "i1" "{\"$async\":\"a1\"}");
+        value_script "a1" "{\"ok\":9}";
         "</body></html>" ]
       (List.filteri (fun i _ -> i >= 2) (chunks ()))
   in
   let to_string_sync () =
-    let pending, _, _ = Yuka.Async.make () in
+    let pending, _, _ = Async.make () in
     check string "pending prints loading" "<!--[-->La<!--]-->"
-      (Yuka_server.to_string (fun () -> text_await pending "a"));
+      (Server.to_string (fun () -> text_await pending "a"));
     check string "settled prints value" "<!--[-->a1<!--]-->"
-      (Yuka_server.to_string (fun () -> text_await (Yuka.Async.resolved 1) "a"));
+      (Server.to_string (fun () -> text_await (Async.resolved 1) "a"));
     check string "failed prints nothing" "<!--[--><!--]-->"
-      (Yuka_server.to_string (fun () ->
-           text_await (Yuka.Async.failed "x") "a"));
-    let props el = Yuka_server.to_string el in
+      (Server.to_string (fun () -> text_await (Async.failed "x") "a"));
     check bool "settled prop inline" true
-      (contains (props (fun () -> island (Yuka.Async.resolved 3)))
+      (contains
+         (Server.to_string (fun () -> island (Async.resolved 3)))
          "{\"$async\":\"a1\",\"ok\":3}");
     check bool "pending prop is an error" true
-      (contains (props (fun () -> island pending))
+      (contains
+         (Server.to_string (fun () -> island pending))
          "{\"$async\":\"a1\",\"error\":\"pending at render\"}")
-  in
-  let await_node_kinds () =
-    check string "await in page" "<!--[-->L<!--]-->"
-      (Yuka_server.to_string (fun () ->
-           let a, _, _ = Yuka.Async.make () in
-           Yuka.await a ~loading:(Yuka.text "L") (fun () -> Yuka.text "x")))
   in
   let codec_async () =
     let codec = Yuka.Codec.async Yuka.Codec.int in
-    let decode j = match Yuka.Codec.decode codec j with Ok a -> Yuka.Async.status a | Error m -> Yuka.Async.Failed ("decode:" ^ m) in
-    let show = function Yuka.Async.Done n -> "done " ^ string_of_int n | Failed m -> "failed " ^ m | Pending -> "pending" in
+    let decode j =
+      match Yuka.Codec.decode codec j with
+      | Ok a -> Async.status a
+      | Error m -> Async.Failed ("decode:" ^ m)
+    in
+    let show = function
+      | Async.Done n -> "done " ^ string_of_int n
+      | Async.Failed m -> "failed " ^ m
+      | Async.Pending -> "pending"
+    in
     check string "ok" "done 4"
       (show (decode (`Assoc [ ("$async", `String "a1"); ("ok", `Int 4) ])));
     check string "error" "failed e"
       (show (decode (`Assoc [ ("$async", `String "a1"); ("error", `String "e") ])));
     check string "bad ok" "failed expected int, got \"x\""
       (show (decode (`Assoc [ ("$async", `String "a1"); ("ok", `String "x") ])));
-    check string "not a reference" "failed decode:expected async reference, got 1"
+    check string "not a reference"
+      "failed decode:expected async reference, got 1"
       (show (decode (`Int 1)));
     let saved = !Yuka.Internal.async_source in
-    let a, resolve, _ = Yuka.Async.make () in
-    Yuka.Internal.async_source := (fun id -> if id = "a9" then Yuka.Async.map (fun n -> `Int n) a else Yuka.Async.failed "unknown");
-    let r = decode (`Assoc [ ("$async", `String "a9") ]) in
-    check string "bare reference waits" "pending" (show r);
+    let a, resolve, _ = Async.make () in
+    Yuka.Internal.async_source :=
+      (fun id ->
+        if id = "a9" then Async.map (fun n -> `Int n) a else Async.failed "unknown");
+    let reference = `Assoc [ ("$async", `String "a9") ] in
+    check string "bare reference waits" "pending" (show (decode reference));
     resolve 4;
-    check string "bare reference resolves" "done 4" (show (Yuka.Async.status (match Yuka.Codec.decode codec (`Assoc [ ("$async", `String "a9") ]) with Ok a -> a | Error _ -> Yuka.Async.failed "x")));
+    check string "bare reference resolves" "done 4" (show (decode reference));
     Yuka.Internal.async_source := saved
   in
   let respond_streams () =
-    let a, resolve, _ = Yuka.Async.make () in
-    let res = Lwt_main.run (Yuka_server.respond (fun () -> text_await a "a")) in
-    ignore (Lwt.async (fun () -> Lwt.map (fun () -> resolve 1) (Lwt.pause ())));
-    let body = Lwt_main.run (Dream.body res) in
+    let a, resolve, _ = Async.make () in
+    let write, chunks = recorder () in
+    let p =
+      Server.respond ~sleep:never_sleep ~write (fun () -> text_await a "a")
+    in
+    resolve 1;
+    get p;
+    let body = String.concat "" (chunks ()) in
     check bool "has the fill" true (contains body (fill "s1" "a1"));
     check bool "ends" true (contains body "</body></html>")
+  in
+  let write_order () =
+    let gates = ref [] in
+    let written = ref [] in
+    let write chunk =
+      let a, resolve, _ = Async.make () in
+      gates := !gates @ [ resolve ];
+      Async.map (fun () -> written := chunk :: !written) a
+    in
+    let x, resolve_x, _ = Async.make () in
+    let y, resolve_y, _ = Async.make () in
+    let p =
+      stream
+        (fun () -> Yuka.fragment [ text_await x "x"; text_await y "y" ])
+        write
+    in
+    let release () =
+      match !gates with
+      | g :: rest ->
+          gates := rest;
+          g ()
+      | [] -> failwith "no write waiting"
+    in
+    release ();
+    release ();
+    resolve_y 2;
+    resolve_x 1;
+    check int "second chunk waits for the first write" 2 (List.length !written);
+    check int "one write in flight" 1 (List.length !gates);
+    release ();
+    release ();
+    release ();
+    get p;
+    check list_of "written in order"
+      [ fill "s2" "y2"; fill "s1" "x1"; "</body></html>" ]
+      (List.filteri (fun i _ -> i >= 2) (List.rev !written))
+  in
+  let write_failure () =
+    let write chunk =
+      if contains chunk "<template" then Async.failed "socket closed"
+      else Async.resolved ()
+    in
+    let a, resolve, _ = Async.make () in
+    let p = stream (fun () -> text_await a "a") write in
+    resolve 1;
+    check bool "the result fails although the last write works" true
+      (match Async.status p with Async.Failed _ -> true | _ -> false)
   in
   [ test_case "shell then fills in settle order" `Quick shell_and_order;
     test_case "settled value is inline" `Quick settled_inline;
@@ -381,41 +513,16 @@ let stream_cases =
     test_case "async props" `Quick async_prop;
     test_case "async prop inside a fill" `Quick async_in_fill;
     test_case "to_string" `Quick to_string_sync;
-    test_case "await prints a hole" `Quick await_node_kinds;
     test_case "Codec.async decode" `Quick codec_async;
-    test_case "respond streams" `Quick respond_streams ]
-
-let body_limit_cases =
-  let open Alcotest in
-  let limit = 1_048_576 in
-  let json_body size = Printf.sprintf "{\"title\":\"%s\",\"n\":1}" (String.make (size - 18) 'x') in
-  let headers = [ ("Content-Type", "application/json"); ("Host", "x.test") ] in
-  let at_limit () =
-    check int "exactly the limit" 200 (fst (post ~headers "create" (json_body limit)))
-  in
-  let over_without_length () =
-    check
-      (pair int string)
-      "over the limit" (413, "{\"error\":\"request too large\"}")
-      (post ~headers "create" (json_body (limit + 1)))
-  in
-  let over_with_length () =
-    check
-      (pair int string)
-      "declared length" (413, "{\"error\":\"request too large\"}")
-      (post
-         ~headers:(("Content-Length", string_of_int (limit + 1)) :: headers)
-         "create" "{}")
-  in
-  [ test_case "at the limit" `Quick at_limit;
-    test_case "over the limit" `Quick over_without_length;
-    test_case "over the limit by Content-Length" `Quick over_with_length ]
+    test_case "respond streams" `Quick respond_streams;
+    test_case "writes are sequenced" `Quick write_order;
+    test_case "a failed write fails the stream" `Quick write_failure ]
 
 let page_extra_cases =
   let open Alcotest in
   let page_head () =
     let html =
-      Yuka_server.page ~head:"<meta name=\"x\" content=\"y\">"
+      Server.page ~head:"<meta name=\"x\" content=\"y\">"
         ~import_map:[ ("yuka/", "/js/node_modules/yuka/"); ("m<", "/m") ]
         ~title:"T" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
         (fun () -> Yuka.text "x")
@@ -426,12 +533,12 @@ let page_extra_cases =
   in
   let no_import_map () =
     check bool "no importmap by default" false
-      (contains (Yuka_server.page (fun () -> Yuka.text "x")) "importmap")
+      (contains (Server.page (fun () -> Yuka.text "x")) "importmap")
   in
   let stream_head () =
     let write, chunks = recorder () in
-    Lwt_main.run
-      (Yuka_server.stream ~head:"<b></b>" ~import_map:[ ("p/", "/p/") ]
+    get
+      (stream ~head:"<b></b>" ~import_map:[ ("p/", "/p/") ]
          ~scripts:[ "/m.js" ]
          (fun () -> Yuka.text "x")
          write);
@@ -453,121 +560,143 @@ let page_extra_cases =
     check bool "raw head kept" true (index "<b></b>" >= 0)
   in
   let respond_head () =
-    let res =
-      Lwt_main.run
-        (Yuka_server.respond ~head:"<i></i>" ~import_map:[ ("p/", "/p/") ]
-           (fun () -> Yuka.text "x"))
-    in
-    let body = Lwt_main.run (Dream.body res) in
+    let write, chunks = recorder () in
+    get
+      (Server.respond ~head:"<i></i>" ~import_map:[ ("p/", "/p/") ]
+         ~sleep:never_sleep ~write
+         (fun () -> Yuka.text "x"));
+    let body = String.concat "" (chunks ()) in
     check bool "head and map" true
       (contains body "<i></i>" && contains body "\"p/\":\"/p/\"")
   in
-  let map_of_dir () =
-    let root = Filename.temp_file "yuka" "" in
-    Sys.remove root;
-    Sys.mkdir root 0o755;
-    let nm = Filename.concat root "node_modules" in
-    Sys.mkdir nm 0o755;
-    List.iter (fun d -> Sys.mkdir (Filename.concat nm d) 0o755)
-      [ "yuka.client"; "melange"; ".bin"; "@scope" ];
-    Sys.mkdir (Filename.concat (Filename.concat nm "@scope") "pkg") 0o755;
-    close_out (open_out (Filename.concat nm "file.txt"));
-    check (list (pair string string)) "packages"
+  let map_of_packages () =
+    check
+      (list (pair string string))
+      "packages"
       [ ("@scope/pkg/", "/static/js/node_modules/@scope/pkg/");
         ("melange/", "/static/js/node_modules/melange/");
-        ("yuka.client/", "/static/js/node_modules/yuka.client/") ]
-      (Yuka_server.import_map ~url:"/static/js/" ~dir:root);
-    check (list (pair string string)) "missing dir" []
-      (Yuka_server.import_map ~url:"/x" ~dir:(Filename.concat root "nope"))
+        ("yuka-client/", "/static/js/node_modules/yuka-client/") ]
+      (Server.import_map ~url:"/static/js/"
+         [ "@scope/pkg"; "melange"; "yuka-client" ]);
+    check
+      (list (pair string string))
+      "no trailing slash on the url" [ ("a/", "/x/node_modules/a/") ]
+      (Server.import_map ~url:"/x" [ "a" ]);
+    check
+      (list (pair string string))
+      "no packages" []
+      (Server.import_map ~url:"/x" [])
   in
   [ test_case "page head and import map" `Quick page_head;
     test_case "no import map by default" `Quick no_import_map;
     test_case "stream head order" `Quick stream_head;
     test_case "respond head" `Quick respond_head;
-    test_case "import_map of a directory" `Quick map_of_dir ]
+    test_case "import_map of a package list" `Quick map_of_packages ]
 
 let reject_cases =
   let open Alcotest in
-  let rejecting =
-    Yuka.Action.declare ~name:"rejecting" ~input:Yuka.Codec.int
-      ~output:Yuka.Codec.int
-  in
-  let rejecting_late =
-    Yuka.Action.declare ~name:"rejecting_late" ~input:Yuka.Codec.int
-      ~output:Yuka.Codec.int
-  in
-  Yuka_server.Action.implement rejecting (fun _ ->
-      Yuka_server.Action.reject "title is empty");
-  Yuka_server.Action.implement rejecting_late (fun _ ->
-      Lwt.bind (Lwt.pause ()) (fun () -> Yuka_server.Action.reject "too late"));
   let route () =
     check (pair int string) "400 with the message"
       (400, "{\"error\":\"title is empty\"}")
       (post "rejecting" "1");
-    check (pair int string) "after a wait"
+    check (pair int string) "after rejected in a chain"
+      (400, "{\"error\":\"from a chain\"}")
+      (post "rejecting_chain" "1")
+  in
+  let after_a_wait () =
+    let waiting =
+      Server.handle_action ~name:"rejecting_late" ~content_type:json_type
+        ~origin:None ~host:(Some "x.test") ~body:"1"
+    in
+    check bool "pending" true (is_pending waiting);
+    late_open ();
+    check (pair int string) "400 after the wait"
       (400, "{\"error\":\"too late\"}")
-      (post "rejecting_late" "1")
+      (get waiting)
   in
   let ordinary () =
-    let status, body = post "broken" "1" in
+    let (status, body), _ = logged (fun () -> post "broken" "1") in
     check int "500" 500 status;
     check bool "message not sent" false (contains body "secret detail");
     let _, body = post "rejecting" "1" in
     check bool "reject message sent" true (contains body "title is empty")
   in
+  let rejection_is_not_logged () =
+    let _, messages = logged (fun () -> post "rejecting" "1") in
+    check int "nothing logged" 0 (List.length messages)
+  in
   let direct () =
     let show = function
-      | Yuka.Async.Failed m -> "failed " ^ m
+      | Async.Failed m -> "failed " ^ m
       | _ -> "other"
     in
     check string "server-side call" "failed title is empty"
-      (show (Yuka.Async.status (Yuka.Action.call rejecting 1)))
+      (show (Async.status (Yuka.Action.call rejecting 1)));
+    check string "server-side call, chain" "failed from a chain"
+      (show (Async.status (Yuka.Action.call rejecting_chain 1)))
   in
   [ test_case "route answers 400" `Quick route;
+    test_case "rejection after a wait" `Quick after_a_wait;
     test_case "ordinary exceptions stay 500" `Quick ordinary;
+    test_case "a rejection is not logged" `Quick rejection_is_not_logged;
     test_case "server-side call fails" `Quick direct ]
 
 let timeout_cases =
   let open Alcotest in
   let list_of = list string in
-  let island a =
-    Yuka.Client.island ~name:"I"
-      ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
-      (fun () -> Yuka.text "")
-  in
   let never_settles () =
-    let a, _, _ = Yuka.Async.make () in
-    let b, _, _ = Yuka.Async.make () in
+    let a, _, _ = Async.make () in
+    let b, _, _ = Async.make () in
+    let sleep, fire, requested = manual_sleep () in
     let write, chunks = recorder () in
-    Lwt_main.run
-      (Yuka_server.stream ~timeout:0.05
-         (fun () ->
-           let prop = island b in
-           Yuka.fragment
-             [ prop;
-               text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) a "a" ])
-         write);
+    let p =
+      stream ~timeout:0.05 ~sleep
+        (fun () ->
+          let prop = island b in
+          Yuka.fragment
+            [ prop; text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) a "a" ])
+        write
+    in
+    check (list (float 0.)) "sleep asked for the timeout" [ 0.05 ] (requested ());
+    check bool "waits for the timer" true (is_pending p);
+    fire ();
+    get p;
     check list_of "timeout chunks"
-      [ "<yuka-island data-name=\"I\" data-id=\"i1\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"$async\":\"a1\"}</script><!--[s1-->La<!--]-->";
-        "<script type=\"application/json\" data-yuka-async=\"a1\">{\"error\":\"timeout\"}</script>";
+      [ island_html "i1" "{\"$async\":\"a1\"}" ^ "<!--[s1-->La<!--]-->";
+        value_script "a1" "{\"error\":\"timeout\"}";
         fill "s1" "E:timeout";
         "</body></html>" ]
       (List.tl (chunks ()))
   in
+  let default_timeout () =
+    let a, _, _ = Async.make () in
+    let sleep, _, requested = manual_sleep () in
+    let write, _ = recorder () in
+    ignore (stream ~sleep (fun () -> text_await a "a") write);
+    check (list (float 0.)) "ten seconds" [ 10. ] (requested ())
+  in
+  let no_timer_when_settled () =
+    let sleep, _, requested = manual_sleep () in
+    let write, _ = recorder () in
+    get (stream ~sleep (fun () -> text_await (Async.resolved 1) "a") write);
+    check int "no timer" 0 (List.length (requested ()))
+  in
   let nested_after_timeout () =
-    let outer, resolve, _ = Yuka.Async.make () in
-    let inner, _, _ = Yuka.Async.make () in
+    let outer, resolve, _ = Async.make () in
+    let inner, _, _ = Async.make () in
+    let sleep, fire, _ = manual_sleep () in
     let write, chunks = recorder () in
-    Lwt_main.run
-      (let p =
-         Yuka_server.stream ~timeout:0.05
-           (fun () ->
-             Yuka.await outer ~loading:(Yuka.text "Lo") (fun _ ->
-                 text_await inner "i"))
-           write
-       in
-       resolve 1;
-       p);
+    let p =
+      stream ~sleep
+        (fun () ->
+          Yuka.Await.make ~async:outer ~loading:(Yuka.text "Lo")
+            ~children:(fun _ -> text_await inner "i")
+            ())
+        write
+    in
+    resolve 1;
+    fire ();
+    get p;
     check list_of "inner times out too"
       [ "<!--[s1-->Lo<!--]-->";
         fill "s1" "<!--[s2-->Li<!--]-->";
@@ -576,17 +705,22 @@ let timeout_cases =
       (List.tl (chunks ()))
   in
   let failed_element_has_await () =
-    let outer, _, _ = Yuka.Async.make () in
-    let inner, _, _ = Yuka.Async.make () in
+    let outer, _, _ = Async.make () in
+    let inner, _, _ = Async.make () in
+    let sleep, fire, _ = manual_sleep () in
     let write, chunks = recorder () in
-    Lwt_main.run
-      (Yuka_server.stream ~timeout:0.05
-         (fun () ->
-           Yuka.await outer
-             ~failed:(fun _ -> text_await inner "i")
-             ~loading:(Yuka.text "Lo")
-             (fun _ -> Yuka.empty))
-         write);
+    let p =
+      stream ~sleep
+        (fun () ->
+          Yuka.Await.make ~async:outer
+            ~failed:(fun _ -> text_await inner "i")
+            ~loading:(Yuka.text "Lo")
+            ~children:(fun _ -> Yuka.empty)
+            ())
+        write
+    in
+    fire ();
+    get p;
     check list_of "await in the failed element is timed out too"
       [ "<!--[s1-->Lo<!--]-->";
         fill "s1" "<!--[s2-->Li<!--]-->";
@@ -595,181 +729,134 @@ let timeout_cases =
       (List.tl (chunks ()))
   in
   let late_value_ignored () =
-    let a, resolve, _ = Yuka.Async.make () in
+    let a, resolve, _ = Async.make () in
+    let sleep, fire, _ = manual_sleep () in
     let write, chunks = recorder () in
-    Lwt_main.run
-      (Yuka_server.stream ~timeout:0.02 (fun () -> text_await a "a") write);
+    let p = stream ~sleep (fun () -> text_await a "a") write in
+    fire ();
+    get p;
     resolve 1;
-    pause ();
     check int "nothing after the end" 4 (List.length (chunks ()))
   in
-  let settled_in_time () =
-    let a, resolve, _ = Yuka.Async.make () in
+  let timer_after_end () =
+    let a, resolve, _ = Async.make () in
+    let sleep, fire, _ = manual_sleep () in
     let write, chunks = recorder () in
-    let p = Yuka_server.stream ~timeout:5. (fun () -> text_await a "a") write in
+    let p = stream ~sleep (fun () -> text_await a "a") write in
     resolve 1;
-    Lwt_main.run p;
-    check list_of "no timeout fill"
+    get p;
+    fire ();
+    check list_of "the late timer does nothing"
       [ "<!--[s1-->La<!--]-->"; fill "s1" "a1"; "</body></html>" ]
       (List.tl (chunks ()))
   in
-  let script_in_core () =
-    check string "same script" Yuka.Internal.fill_script Yuka_server.fill_script;
-    check bool "is a script" true
-      (contains Yuka.Internal.fill_script "window.__yukaFill=")
-  in
   [ test_case "never-settling values time out" `Quick never_settles;
+    test_case "default timeout" `Quick default_timeout;
+    test_case "no timer when nothing is pending" `Quick no_timer_when_settled;
     test_case "nested await after a timeout" `Quick nested_after_timeout;
     test_case "await in a failed element" `Quick failed_element_has_await;
     test_case "late value is ignored" `Quick late_value_ignored;
-    test_case "value in time" `Quick settled_in_time;
-    test_case "fill script lives in the core" `Quick script_in_core ]
-
-let of_lwt_cases =
-  let open Alcotest in
-  let show = function
-    | Yuka.Async.Pending -> "pending"
-    | Yuka.Async.Done n -> "done " ^ string_of_int n
-    | Yuka.Async.Failed m -> "failed " ^ m
-  in
-  let captured f =
-    let messages = ref [] in
-    let reporter =
-      {
-        Logs.report =
-          (fun _ _ ~over k msgf ->
-            msgf (fun ?header:_ ?tags:_ fmt ->
-                Format.kasprintf
-                  (fun m ->
-                    messages := m :: !messages;
-                    over ();
-                    k ())
-                  fmt));
-      }
-    in
-    let saved = Logs.reporter () in
-    Logs.set_reporter reporter;
-    let result = (try f () with e -> Logs.set_reporter saved; raise e) in
-    Logs.set_reporter saved;
-    (result, List.rev !messages)
-  in
-  let resolved () =
-    check string "done" "done 3"
-      (show (Yuka.Async.status (Yuka_server.Async.of_lwt (Lwt.return 3))))
-  in
-  let later () =
-    let promise, wake = Lwt.wait () in
-    let a = Yuka_server.Async.of_lwt promise in
-    check string "pending" "pending" (show (Yuka.Async.status a));
-    Lwt.wakeup wake 4;
-    check string "done" "done 4" (show (Yuka.Async.status a))
-  in
-  let rejected () =
-    let status, messages =
-      captured (fun () ->
-          let promise, wake = Lwt.wait () in
-          let a = Yuka_server.Async.of_lwt promise in
-          Lwt.wakeup_exn wake (Failure "secret detail");
-          Yuka.Async.status a)
-    in
-    check string "generic message" "failed failed" (show status);
-    check bool "logged with the detail" true
-      (List.exists (fun m -> contains m "secret detail") messages);
-    let status, _ = captured (fun () -> Yuka.Async.status (Yuka_server.Async.of_lwt (Lwt.fail_with "other secret"))) in
-    check string "already rejected" "failed failed" (show status)
-  in
-  [ test_case "resolved" `Quick resolved;
-    test_case "resolved later" `Quick later;
-    test_case "rejected" `Quick rejected ]
+    test_case "timer after the end" `Quick timer_after_end;
+    test_case "fill script lives in the core" `Quick (fun () ->
+        check string "same script" Yuka.Internal.fill_script Server.fill_script) ]
 
 let settled_cases =
   let open Alcotest in
-  let later resolve v =
-    Lwt.async (fun () -> Lwt.map (fun () -> resolve v) (Lwt.pause ()))
+  let render ?timeout ?(sleep = never_sleep) build =
+    Server.render_settled ?timeout ~sleep build
   in
   let simple () =
-    let a, resolve_a, _ = Yuka.Async.make () in
-    let b, resolve_b, _ = Yuka.Async.make () in
-    later resolve_b 2;
-    later resolve_a 1;
+    let a, resolve_a, _ = Async.make () in
+    let b, resolve_b, _ = Async.make () in
+    let p =
+      render (fun () ->
+          Yuka.lower "div" [] [ text_await a "a"; text_await b "b" ])
+    in
+    resolve_b 2;
+    resolve_a 1;
     check string "values in place"
-      "<div><!--[-->a1<!--]--><!--[-->b2<!--]--></div>"
-      (Lwt_main.run
-         (Yuka_server.render_settled (fun () ->
-              Yuka.lower "div" [] [ text_await a "a"; text_await b "b" ])))
+      "<div><!--[-->a1<!--]--><!--[-->b2<!--]--></div>" (get p)
   in
   let nested () =
-    let outer, resolve_outer, _ = Yuka.Async.make () in
-    let inner, resolve_inner, _ = Yuka.Async.make () in
-    later resolve_outer 1;
-    later resolve_inner 2;
+    let outer, resolve_outer, _ = Async.make () in
+    let inner, resolve_inner, _ = Async.make () in
+    let p =
+      render (fun () ->
+          Yuka.Await.make ~async:outer ~loading:(Yuka.text "Lo")
+            ~children:(fun n ->
+              Yuka.lower "p" []
+                [ Yuka.text (string_of_int n); text_await inner "i" ])
+            ())
+    in
+    resolve_outer 1;
+    resolve_inner 2;
     check string "nested in place"
-      "<!--[--><p>1<!--[-->i2<!--]--></p><!--]-->"
-      (Lwt_main.run
-         (Yuka_server.render_settled (fun () ->
-              Yuka.await outer ~loading:(Yuka.text "Lo") (fun n ->
-                  Yuka.lower "p" []
-                    [ Yuka.text (string_of_int n); text_await inner "i" ]))))
+      "<!--[--><p>1<!--[-->i2<!--]--></p><!--]-->" (get p)
   in
   let loading_has_markers () =
-    let outer, resolve_outer, _ = Yuka.Async.make () in
-    let inner, _, _ = Yuka.Async.make () in
-    later resolve_outer 1;
-    check string "markers inside the replaced part are skipped" "<!--[-->o1<!--]-->"
-      (Lwt_main.run
-         (Yuka_server.render_settled ~timeout:0.1 (fun () ->
-              Yuka.await outer
-                ~loading:(Yuka.fragment [ text_await inner "i"; Yuka.text "x" ])
-                (fun n -> Yuka.text ("o" ^ string_of_int n)))))
+    let outer, resolve_outer, _ = Async.make () in
+    let inner, _, _ = Async.make () in
+    let sleep, fire, _ = manual_sleep () in
+    let p =
+      render ~sleep (fun () ->
+          Yuka.Await.make ~async:outer
+            ~loading:(Yuka.fragment [ text_await inner "i"; Yuka.text "x" ])
+            ~children:(fun n -> Yuka.text ("o" ^ string_of_int n))
+            ())
+    in
+    resolve_outer 1;
+    fire ();
+    check string "markers inside the replaced part are skipped"
+      "<!--[-->o1<!--]-->" (get p)
   in
   let async_prop () =
-    let value, resolve, _ = Yuka.Async.make () in
-    let failing, _, fail = Yuka.Async.make () in
-    later resolve 5;
-    later fail "no";
-    let island a =
-      Yuka.Client.island ~name:"I"
-        ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
-        (fun () -> Yuka.text "")
+    let value, resolve, _ = Async.make () in
+    let failing, _, fail = Async.make () in
+    let p =
+      render (fun () ->
+          let first = island value in
+          let second = island failing in
+          Yuka.fragment [ first; second ])
     in
+    resolve 5;
+    fail "no";
     check string "values after the document"
-      ("<yuka-island data-name=\"I\" data-id=\"i1\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"$async\":\"a1\"}</script>"
-      ^ "<yuka-island data-name=\"I\" data-id=\"i2\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"$async\":\"a2\"}</script>"
-      ^ "<script type=\"application/json\" data-yuka-async=\"a1\">{\"ok\":5}</script>"
-      ^ "<script type=\"application/json\" data-yuka-async=\"a2\">{\"error\":\"no\"}</script>")
-      (Lwt_main.run
-         (Yuka_server.render_settled (fun () ->
-              let first = island value in
-              let second = island failing in
-              Yuka.fragment [ first; second ])))
+      (island_html "i1" "{\"$async\":\"a1\"}"
+      ^ island_html "i2" "{\"$async\":\"a2\"}"
+      ^ value_script "a1" "{\"ok\":5}"
+      ^ value_script "a2" "{\"error\":\"no\"}")
+      (get p)
   in
   let nothing_pending () =
     check string "same as to_string" "<p>x</p>"
-      (Lwt_main.run
-         (Yuka_server.render_settled (fun () ->
-              Yuka.lower "p" [] [ Yuka.text "x" ])))
+      (get (render (fun () -> Yuka.lower "p" [] [ Yuka.text "x" ])))
   in
   let failure_and_timeout () =
-    let a, _, fail_a = Yuka.Async.make () in
-    let never, _, _ = Yuka.Async.make () in
-    later fail_a "x";
+    let a, _, fail_a = Async.make () in
+    let never, _, _ = Async.make () in
+    let sleep, fire, _ = manual_sleep () in
+    let p =
+      render ~sleep (fun () ->
+          let first = text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) a "a" in
+          let second =
+            text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) never "b"
+          in
+          Yuka.fragment [ first; second ])
+    in
+    fail_a "x";
+    fire ();
     check string "failed and timed out"
-      "<!--[-->E:x<!--]--><!--[-->E:timeout<!--]-->"
-      (Lwt_main.run
-         (Yuka_server.render_settled ~timeout:0.05 (fun () ->
-              let first = text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) a "a" in
-              let second = text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) never "b" in
-              Yuka.fragment [ first; second ])))
+      "<!--[-->E:x<!--]--><!--[-->E:timeout<!--]-->" (get p)
   in
   let text_inside_hole () =
-    let a, resolve, _ = Yuka.Async.make () in
-    later resolve 1;
+    let a, resolve, _ = Async.make () in
+    let p =
+      render (fun () ->
+          Yuka.lower "p" [] [ Yuka.text "t"; text_await a "a"; Yuka.text "u" ])
+    in
+    resolve 1;
     check string "text neighbours keep their separators"
-      "<p>t<!--[-->a1<!--]-->u</p>"
-      (Lwt_main.run
-         (Yuka_server.render_settled (fun () ->
-              Yuka.lower "p" []
-                [ Yuka.text "t"; text_await a "a"; Yuka.text "u" ])))
+      "<p>t<!--[-->a1<!--]-->u</p>" (get p)
   in
   [ test_case "values in place" `Quick simple;
     test_case "nested values" `Quick nested;
@@ -779,105 +866,186 @@ let settled_cases =
     test_case "failure and timeout" `Quick failure_and_timeout;
     test_case "text neighbours" `Quick text_inside_hole ]
 
-let early_and_navigation_cases =
+let navigation_cases =
   let open Alcotest in
   let early_head () =
-    let html =
-      Yuka_server.page ~early:true ~scripts:[ "/a.js"; "/b.js" ]
-        (fun () -> Yuka.text "x")
-    in
+    let html = Server.page ~early:true ~scripts:[ "/a.js"; "/b.js" ] (fun () -> Yuka.text "x") in
     check bool "async module scripts" true
       (contains html
          "<script type=\"module\" async src=\"/a.js\"></script><script type=\"module\" async src=\"/b.js\"></script>");
-    let plain = Yuka_server.page ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x") in
     check bool "not async by default" true
-      (contains plain "<script type=\"module\" src=\"/a.js\"></script>");
+      (contains
+         (Server.page ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
+         "<script type=\"module\" src=\"/a.js\"></script>");
     check bool "early false" false
-      (contains (Yuka_server.page ~early:false ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x")) "async");
+      (contains
+         (Server.page ~early:false ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
+         "async");
     let write, chunks = recorder () in
-    Lwt_main.run
-      (Yuka_server.stream ~early:true ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x") write);
+    get (stream ~early:true ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x") write);
     check bool "stream head" true
-      (contains (List.hd (chunks ())) "<script type=\"module\" async src=\"/a.js\"></script>");
-    let res =
-      Lwt_main.run
-        (Yuka_server.respond ~early:true ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
-    in
+      (contains (List.hd (chunks ()))
+         "<script type=\"module\" async src=\"/a.js\"></script>");
+    let write, chunks = recorder () in
+    get
+      (Server.respond ~early:true ~scripts:[ "/a.js" ] ~sleep:never_sleep ~write
+         (fun () -> Yuka.text "x"));
     check bool "respond head" true
-      (contains (Lwt_main.run (Dream.body res)) "async src=\"/a.js\"")
+      (contains (String.concat "" (chunks ())) "async src=\"/a.js\"")
   in
-  let request ?(headers = []) () = Dream.request ~method_:`GET ~target:"/" ~headers ""
-  in
-  let async_island a =
-    Yuka.Client.island ~name:"I"
-      ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
-      (fun () -> Yuka.text "")
-  in
-  let build resolve_later () =
-    let a, resolve, _ = Yuka.Async.make () in
-    let v, resolve_v, _ = Yuka.Async.make () in
-    resolve_later resolve resolve_v;
-    let island = async_island v in
-    Yuka.lower "main" [] [ text_await a "a"; island ]
-  in
-  let later resolve resolve_v =
-    Lwt.async (fun () ->
-        Lwt.map (fun () -> resolve 1; resolve_v 5) (Lwt.pause ()))
+  let build () =
+    let a, resolve, _ = Async.make () in
+    let v, resolve_v, _ = Async.make () in
+    ( (fun () ->
+        let prop = island v in
+        Yuka.lower "main" [] [ text_await a "a"; prop ]),
+      fun () ->
+        resolve 1;
+        resolve_v 5 )
   in
   let navigation () =
-    let req = request ~headers:[ ("Yuka-Navigate", "1") ] () in
-    let res =
-      Lwt_main.run
-        (Yuka_server.respond ~request:req ~title:"T" ~scripts:[ "/m.js" ] (build later))
+    let view, release = build () in
+    let write, chunks = recorder () in
+    let p =
+      Server.respond ~navigating:true ~title:"T" ~scripts:[ "/m.js" ]
+        ~sleep:never_sleep ~write view
     in
-    check int "status" 200 (Dream.status_to_int (Dream.status res));
-    check (option string) "vary" (Some "Yuka-Navigate") (Dream.header res "Vary");
-    let body = Lwt_main.run (Dream.body res) in
-    let settled =
-      Lwt_main.run (Yuka_server.render_settled (build later))
+    check bool "waits for the values" true (is_pending p);
+    check int "nothing written yet" 0 (List.length (chunks ()));
+    release ();
+    get p;
+    let body =
+      match chunks () with [ one ] -> one | l -> failf "%d writes" (List.length l)
     in
+    let view2, release2 = build () in
+    let settled = Server.render_settled ~sleep:never_sleep view2 in
+    release2 ();
     check string "document"
       ("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>T</title><script type=\"module\" src=\"/m.js\"></script></head><body>"
-      ^ settled ^ "</body></html>")
+      ^ get settled ^ "</body></html>")
       body;
-    check bool "values included" true (contains body "data-yuka-async=\"a1\">{\"ok\":5}</script>");
-    check bool "values filled in place" true (contains body "<main><!--[-->a1<!--]-->");
+    check bool "values included" true
+      (contains body "data-yuka-async=\"a1\">{\"ok\":5}</script>");
+    check bool "values filled in place" true
+      (contains body "<main><!--[-->a1<!--]-->");
     check bool "no fill script or template" false
       (contains body "__yukaFill" || contains body "<template")
   in
   let normal_request () =
-    let res =
-      Lwt_main.run
-        (Yuka_server.respond ~request:(request ()) (build later))
-    in
-    check (option string) "vary on normal pages too" (Some "Yuka-Navigate")
-      (Dream.header res "Vary");
-    let body = Lwt_main.run (Dream.body res) in
-    check bool "streamed with fills" true (contains body "<template data-yuka-fill=\"s1\">");
-    let other = request ~headers:[ ("Yuka-Navigate", "0") ] () in
-    let res = Lwt_main.run (Yuka_server.respond ~request:other (build later)) in
-    check bool "only 1 navigates" true
-      (contains (Lwt_main.run (Dream.body res)) "<template data-yuka-fill=")
+    let view, release = build () in
+    let write, chunks = recorder () in
+    let p = Server.respond ~sleep:never_sleep ~write view in
+    release ();
+    get p;
+    check bool "streamed with fills" true
+      (contains (String.concat "" (chunks ())) "<template data-yuka-fill=\"s1\">");
+    check bool "several writes" true (List.length (chunks ()) > 1);
+    let view, release = build () in
+    let write, chunks = recorder () in
+    let p = Server.respond ~navigating:false ~sleep:never_sleep ~write view in
+    release ();
+    get p;
+    check bool "navigating false streams" true
+      (contains (String.concat "" (chunks ())) "<template data-yuka-fill=")
   in
-  let navigation_failure () =
-    let req = request ~headers:[ ("Yuka-Navigate", "1") ] () in
-    let started = Unix.gettimeofday () in
-    let res =
-      Lwt_main.run
-        (Yuka_server.respond ~request:req ~status:`Not_Found ~timeout:0.05
-           (fun () ->
-             let never, _, _ = Yuka.Async.make () in
-             text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) never "a"))
+  let navigation_timeout () =
+    let never, _, _ = Async.make () in
+    let sleep, fire, requested = manual_sleep () in
+    let write, chunks = recorder () in
+    let p =
+      Server.respond ~navigating:true ~timeout:0.05 ~sleep ~write (fun () ->
+          text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) never "a")
     in
-    check bool "the given timeout is used" true (Unix.gettimeofday () -. started < 3.);
-    check int "status kept" 404 (Dream.status_to_int (Dream.status res));
+    check (list (float 0.)) "the given timeout is used" [ 0.05 ] (requested ());
+    fire ();
+    get p;
     check bool "timeout applies" true
-      (contains (Lwt_main.run (Dream.body res)) "<!--[-->E:timeout<!--]-->")
+      (contains (String.concat "" (chunks ())) "<!--[-->E:timeout<!--]-->")
   in
   [ test_case "early scripts" `Quick early_head;
     test_case "navigation request is settled" `Quick navigation;
     test_case "normal request streams" `Quick normal_request;
-    test_case "navigation keeps status and timeout" `Quick navigation_failure ]
+    test_case "navigation keeps the timeout" `Quick navigation_timeout ]
+
+let review_cases =
+  let open Alcotest in
+  let list_of = list string in
+  let sync_settle_during_shell () =
+    let a, resolve_a, _ = Async.make () in
+    let b, resolve_b, _ = Async.make () in
+    let written = ref [] in
+    let write chunk =
+      written := chunk :: !written;
+      if contains chunk "<!--[s1-->" then resolve_a 1;
+      Async.resolved ()
+    in
+    let p =
+      stream
+        (fun () -> Yuka.fragment [ text_await a "a"; text_await b "b" ])
+        write
+    in
+    check bool "waits for the second value" true (is_pending p);
+    resolve_b 2;
+    get p;
+    check list_of "both chunks are written"
+      [ fill "s1" "a1"; fill "s2" "b2"; "</body></html>" ]
+      (List.filteri (fun i _ -> i >= 2) (List.rev !written))
+  in
+  let sync_async_prop () =
+    let a, resolve_a, _ = Async.make () in
+    let b, resolve_b, _ = Async.make () in
+    let written = ref [] in
+    let write chunk =
+      written := chunk :: !written;
+      if contains chunk "data-yuka-props=\"i1\"" then resolve_a 1;
+      Async.resolved ()
+    in
+    let p =
+      stream
+        (fun () ->
+          let first = island a in
+          let second = island b in
+          Yuka.fragment [ first; second ])
+        write
+    in
+    resolve_b 2;
+    get p;
+    check list_of "both values are written"
+      [ value_script "a1" "{\"ok\":1}"; value_script "a2" "{\"ok\":2}"; "</body></html>" ]
+      (List.filteri (fun i _ -> i >= 2) (List.rev !written))
+  in
+  let timer_keeps_nothing () =
+    let sleep, _, _ = manual_sleep () in
+    let weak = Weak.create 1 in
+    let finished = ref false in
+    (let marker = Bytes.make 1000 'x' in
+     Weak.set weak 0 (Some marker);
+     let a, resolve, _ = Async.make () in
+     let write chunk =
+       ignore (Sys.opaque_identity (Bytes.length marker, chunk));
+       Async.resolved ()
+     in
+     let p = stream ~sleep (fun () -> text_await a "a") write in
+     resolve 1;
+     get p;
+     finished := true);
+    check bool "finished" true !finished;
+    Gc.full_major ();
+    Gc.full_major ();
+    check bool "the pending timer does not keep the render alive" false
+      (Weak.check weak 0);
+    ignore (Sys.opaque_identity (sleep 0.))
+  in
+  let deep_body () =
+    let body = String.make 100000 '[' ^ String.make 100000 ']' in
+    check int "400" 400 (fst (post "create" body));
+    check bool "message" true
+      (contains (snd (post "create" body)) "nesting too deep")
+  in
+  [ test_case "a value settling during registration" `Quick sync_settle_during_shell;
+    test_case "an async prop settling during registration" `Quick sync_async_prop;
+    test_case "the timer keeps nothing alive" `Quick timer_keeps_nothing;
+    test_case "deeply nested action body" `Quick deep_body ]
 
 let () =
   Alcotest.run "yuka"
@@ -893,7 +1061,7 @@ let () =
       ("page extras", page_extra_cases);
       ("reject", reject_cases);
       ("timeout", timeout_cases);
-      ("of_lwt", of_lwt_cases);
       ("render_settled", settled_cases);
-      ("early and navigation", early_and_navigation_cases);
+      ("early and navigation", navigation_cases);
+      ("review fixes", review_cases);
     ]

@@ -361,6 +361,44 @@ let rewrite_jsx self e =
             [%expr Yuka.lower [%e estring ~loc tag] [%e attributes_expr ~loc attrs] [%e list_expr ~loc kids]]
           in
           if wrap then [%expr Yuka.template [%e estring ~loc (template_id loc)] [%e r]] else r
+      | Ldot (Ldot (Lident "Yuka", "Await"), "createElement") ->
+          let find name =
+            List.find_opt (fun (l, _) -> l = Labelled name || l = Optional name) props
+          in
+          List.iter
+            (fun (l, _) ->
+              match l with
+              | Labelled ("async" | "loading" | "failed") | Optional "failed" -> ()
+              | _ ->
+                  Location.raise_errorf ~loc:fnloc
+                    "[yuka] Yuka.Await takes async, loading and failed")
+            props;
+          let required name =
+            match find name with
+            | Some (Labelled _, v) -> v
+            | _ ->
+                Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Await needs the prop '%s'" name
+          in
+          let async = required "async" and loading = required "loading" in
+          let failed =
+            match find "failed" with
+            | Some (l, v) -> [ (l, self#expression v) ]
+            | None -> []
+          in
+          let body =
+            match children with
+            | [ ({ pexp_desc = Pexp_function _; _ } as f) ] -> self#expression f
+            | _ ->
+                Location.raise_errorf ~loc:fnloc
+                  "[yuka] Yuka.Await needs exactly one child, a function such as (fun value -> ...)"
+          in
+          pexp_apply ~loc
+            (pexp_ident ~loc:fnloc
+               { txt = Ldot (Ldot (Lident "Yuka", "Await"), "make"); loc = fnloc })
+            ([ (Labelled "async", self#expression async);
+               (Labelled "loading", rewrite_child ~self loading) ]
+            @ failed
+            @ [ (Labelled "children", body); (Nolabel, [%expr ()]) ])
       | Ldot (Ldot (Lident "Yuka", "Client"), "createElement") ->
           let loading =
             List.map

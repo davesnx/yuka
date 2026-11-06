@@ -1,3 +1,3 @@
 (test
  (name run)
- (libraries alcotest cases yuka.server))
+ (libraries alcotest cases yuka))

@@ -535,18 +535,18 @@ let html_await () =
   let a, resolve, fail = Async.make () in
   let el =
     lower "p" []
-      [ await ~failed:(fun m -> text ("E" ^ m)) a ~loading:(text "L")
-          (fun n -> text (string_of_int n)) ]
+      [ Await.make ~failed:(fun m -> text ("E" ^ m)) ~async:a ~loading:(text "L")
+          ~children:(fun n -> text (string_of_int n)) () ]
   in
   check "pending" "<p><!--[-->L<!--]--></p>" (html el);
   resolve 3;
   check "settled" "<p><!--[-->3<!--]--></p>" (html el);
   let b, _, fail_b = Async.make () in
-  let el_b = await ~failed:(fun m -> text ("E" ^ m)) b ~loading:(text "L") (fun () -> text "x") in
+  let el_b = Await.make ~failed:(fun m -> text ("E" ^ m)) ~async:b ~loading:(text "L") ~children:(fun () -> text "x") () in
   fail_b "no";
   check "failed" "<!--[-->Eno<!--]-->" (html el_b);
   ignore fail;
-  let c = await (Async.failed "z") ~loading:(text "L") (fun () -> text "x") in
+  let c = Await.make ~async:(Async.failed "z") ~loading:(text "L") ~children:(fun () -> text "x") () in
   check "default failed is empty" "<!--[--><!--]-->" (html c)
 
 let html_streaming_session () =
@@ -557,9 +557,9 @@ let html_streaming_session () =
     Internal.print s (fun () ->
         Internal.node
           (lower "p" []
-             [ await a ~loading:(text "L") (fun n -> text (string_of_int n));
-               await (Async.resolved 1) ~loading:(text "no") (fun n -> text (string_of_int n));
-               await b ~loading:(text "M") (fun n -> text (string_of_int n)) ]))
+             [ Await.make ~async:a ~loading:(text "L") ~children:(fun n -> text (string_of_int n)) ();
+               Await.make ~async:(Async.resolved 1) ~loading:(text "no") ~children:(fun n -> text (string_of_int n)) ();
+               Await.make ~async:b ~loading:(text "M") ~children:(fun n -> text (string_of_int n)) () ]))
   in
   check "shell" "<p><!--[s1-->L<!--]--><!--[-->1<!--]--><!--[s2-->M<!--]--></p>" first;
   let pending = Internal.take_pending s in
@@ -893,7 +893,7 @@ let skeleton_shape () =
         each ~key:Fun.id (fun () -> [ "k" ]) text;
         slot (Slot.make (text "s"));
         lower "span" [] [ text "&<" ];
-        await (Async.resolved 1) ~loading:(text "L") (fun _ -> text "v");
+        Await.make ~async:(Async.resolved 1) ~loading:(text "L") ~children:(fun _ -> text "v") ();
         fragment [ text "c"; text "d" ] ]
   in
   check "shape" "<div id=\"d\">a<!---->b<br><!--[--><!--]--><!--[--><!--]--><!--[$--><!--]--><span>&amp;&lt;</span><!--[--><!--]-->c<!---->d</div>"
@@ -912,6 +912,87 @@ let skeleton_values () =
     (skeleton (lower "textarea" [ attr "value" "v &" ] []));
   check "dynamic textarea value is left out" "<textarea></textarea>"
     (skeleton (lower "textarea" [ hole_attr "value" (fun () -> Some "v") ] []))
+
+let await_component () =
+  let a, resolve, fail = Async.make () in
+  let el =
+    lower "p" []
+      [ Await.make ~async:a ~loading:(text "L")
+          ~failed:(fun m -> text ("E" ^ m))
+          ~children:(fun n -> text (string_of_int n))
+          () ]
+  in
+  check "pending" "<p><!--[-->L<!--]--></p>" (html el);
+  resolve 3;
+  check "settled" "<p><!--[-->3<!--]--></p>" (html el);
+  let b, _, fail_b = Async.make () in
+  let el_b = Await.make ~async:b ~loading:(text "L") ~failed:(fun m -> text ("E" ^ m)) ~children:(fun () -> text "x") () in
+  fail_b "no";
+  check "failed element" "<!--[-->Eno<!--]-->" (html el_b);
+  let c = Await.make ~async:(Async.failed "z") ~loading:(text "L") ~children:(fun () -> text "x") () in
+  check "default failed is empty" "<!--[--><!--]-->" (html c);
+  ignore fail
+
+let mount_raises_disposes () =
+  let add, read = log () in
+  let result =
+    match
+      mount (fun () ->
+          Effect.run ~cleanup:(fun () -> add "cleaned") (fun () -> add "ran");
+          failwith "boom")
+    with
+    | _ -> "no error"
+    | exception Failure m -> m
+  in
+  check "the exception is raised again" "boom" result;
+  check "effects of a failed mount are disposed" "ran cleaned" (read ());
+  let count = State.make 0 in
+  let runs = ref 0 in
+  (match
+     mount (fun () ->
+         Effect.run (fun () -> ignore (State.get count); incr runs);
+         failwith "again")
+   with
+  | _ -> ()
+  | exception Failure _ -> ());
+  State.set count 1;
+  check "a disposed effect does not run again" "1" (string_of_int !runs)
+
+let owned_raises_disposes () =
+  let add, read = log () in
+  let (), dispose_parent =
+    mount (fun () ->
+        (match
+           Internal.owned (fun () ->
+               Effect.run ~cleanup:(fun () -> add "cleaned") (fun () -> ());
+               failwith "boom")
+         with
+        | _ -> ()
+        | exception Failure _ -> ());
+        check "the failed child leaves no disposer" "0"
+          (string_of_int (Internal.owner_size ())))
+  in
+  check "the child was disposed" "cleaned" (read ());
+  dispose_parent ();
+  check "not disposed twice" "cleaned" (read ())
+
+let json_depth_limit () =
+  let deep n = String.make n '[' ^ String.make n ']' in
+  check "depth 100000 is an error" "error" (is_error (deep 100000));
+  check "deep objects are an error" "error"
+    (is_error (String.concat "" (List.init 100000 (fun _ -> "{\"a\":")) ^ "1"));
+  check "depth 512 is fine" "ok" (is_error (deep 512));
+  check "depth 513 is an error" "error" (is_error (deep 513));
+  check "the message says why" "error: nesting too deep"
+    (let m = parse (deep 513) in
+     if String.length m >= 23 then String.sub m 0 23 else m)
+
+let html_float_special () =
+  check "nan" "NaN" (html (float nan));
+  check "infinity" "Infinity" (html (float infinity));
+  check "negative infinity" "-Infinity" (html (float neg_infinity));
+  check "ordinary" "-0.5" (html (float (-0.5)));
+  check "whole" "3.0" (html (float 3.0))
 
 let all =
   [
@@ -973,4 +1054,9 @@ let all =
     ("html template", html_template);
     ("skeleton shape", skeleton_shape);
     ("skeleton values", skeleton_values);
+    ("Await component", await_component);
+    ("mount disposes when the function raises", mount_raises_disposes);
+    ("json depth limit", json_depth_limit);
+    ("html float special values", html_float_special);
+    ("owned disposes when the function raises", owned_raises_disposes);
   ]

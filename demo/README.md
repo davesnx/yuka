@@ -47,6 +47,6 @@ Use a fresh server for each run: the check creates an issue and a comment.
 one chunk per lazy island (`Issue_props`, `Related`, `Comments`). The server
 serves them from `/static/bundle/` and writes no import map.
 
-Routes are defined once in `shared/routes.ml` with `Yuka_router`. The server
-mounts them with `Yuka_router_server.handler`, and `client/main.ml` starts
-`Yuka_router_client`, so links navigate without a full page load.
+Routes are defined once in `shared/routes.ml` with `Yuka.Router`. The server
+maps `Yuka.Router.dispatch` onto Dream, and `client/main.ml` calls
+`Yuka.Router.start`, so links navigate without a full page load.

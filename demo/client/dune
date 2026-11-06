@@ -1,8 +1,8 @@
 (melange.emit
  (target out)
  (alias demo-client)
- (libraries demo_shared yuka.client yuka.router.client)
+ (libraries demo_shared yuka yuka.js)
  (preprocess
-  (pps melange.ppx))
+  (pps yuka.ppx melange.ppx))
  (module_systems
   (es6 js)))

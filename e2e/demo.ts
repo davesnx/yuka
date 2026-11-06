@@ -494,11 +494,22 @@ await step("7c. Issue_props status change", async () => {
   });
   await pg.locator(".props .property").first().hover();
   await select.selectOption({ value: target });
-  await pg.waitForFunction(
-    (t) => document.querySelector(".props .property svg")?.getAttribute("class")?.includes("status-" + t),
-    target,
-    { timeout: 700 },
-  );
+  try {
+    await pg.waitForFunction(
+      (t) => document.querySelector(".props .property svg")?.getAttribute("class")?.includes("status-" + t),
+      target,
+      { timeout: 700 },
+    );
+  } catch {
+    const dbg = await pg.evaluate(() => ({
+      icon: document.querySelector(".props .property svg")?.getAttribute("class"),
+      handler: !!(document.querySelector(".props select") as any)?.__yuka_change,
+      value: (document.querySelector('.props select[aria-label="Status"]') as HTMLSelectElement | null)?.value,
+    }));
+    check("7c.1 status icon updates at once", false, `target=${target} state=${JSON.stringify(dbg)} errors=${errors.join(" | ")}`);
+    await p.close();
+    return;
+  }
   check("7c.1 status icon updates at once", posts.length === 0, `${beforeStatus} -> ${target}, responses so far=${posts.length}`);
   await pg.waitForTimeout(1200);
   await pg.unroute("**/_yuka/action/**");

@@ -3,11 +3,11 @@ open Yuka
 external now : unit -> float = "now" [@@mel.scope "performance"]
 external log : string -> unit = "log" [@@mel.scope "console"]
 
-let make_container : unit -> Yuka_client.Dom.element =
+let make_container : unit -> Yuka.Client.container =
   [%mel.raw
     "function () { const c = document.createElement('div'); document.body.appendChild(c); return c }"]
 
-let remove_container : Yuka_client.Dom.element -> unit =
+let remove_container : Yuka.Client.container -> unit =
   [%mel.raw "function (c) { c.remove() }"]
 
 let row ~wrap i =
@@ -51,7 +51,7 @@ let once ?(static = false) wrap rows =
   let c = make_container () in
   let t0 = now () in
   let dispose =
-    Yuka_client.render c (fun () ->
+    Yuka.Client.render c (fun () ->
         lower "ul" []
           [
             each ~key:string_of_int

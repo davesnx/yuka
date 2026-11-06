@@ -1,5 +1,6 @@
 type node
-type event = Yuka.Event.t
+type event = Types.event
+type 'a promise = 'a Js.Promise.t
 
 let window () : node = [%mel.raw "window"]
 external owner_document : node -> node = "ownerDocument" [@@mel.get]
@@ -37,10 +38,6 @@ external meta_key : event -> bool = "metaKey" [@@mel.get]
 external ctrl_key : event -> bool = "ctrlKey" [@@mel.get]
 external prevent_default : event -> unit = "preventDefault" [@@mel.send]
 
-let insert parent n = function
-  | None -> append_child parent n
-  | Some before -> insert_before parent n before
-
 let document () : node = [%mel.raw "document"]
 
 external query_all : node -> string -> node array = "querySelectorAll" [@@mel.send]
@@ -75,11 +72,22 @@ let fetch_post :
   return function () { control.abort(); };
 }|}]
 
-let watch_document : (unit -> bool) -> unit -> unit =
+let watch_added : (node array -> bool) -> unit -> unit =
   [%mel.raw
     {|function (check) {
   const view = document.defaultView;
-  const observer = new view.MutationObserver(function () { if (check()) observer.disconnect(); });
+  const observer = new view.MutationObserver(function (records) {
+    const added = [];
+    for (const r of records) {
+      for (const n of r.addedNodes) if (n.nodeType === 1) added.push(n);
+      const t = r.target;
+      if (r.type === "characterData") {
+        const p = t.parentElement;
+        if (p && p.localName === "script") added.push(p);
+      } else if (t.localName === "script" && r.addedNodes.length) added.push(t);
+    }
+    if (added.length && check(added)) observer.disconnect();
+  });
   observer.observe(document, { childList: true, subtree: true, characterData: true });
   return function () { observer.disconnect(); };
 }|}]
@@ -130,8 +138,14 @@ let on_visible : node -> (unit -> unit) -> unit -> unit =
   return function () { observer.disconnect(); };
 }|}]
 
-let error_message : Js.Promise.error -> string =
-  [%mel.raw "function (e) { return String((e && e.message) || e) }"]
+let promise_map : ('a -> 'b) -> 'a promise -> 'b promise =
+  [%mel.raw "function (f, p) { return p.then(function (v) { return f(v) }) }"]
+
+let promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit =
+  [%mel.raw
+    {|function (ok, fail, p) {
+  p.then(function (v) { ok(v) }).catch(function (e) { fail(String((e && e.message) || e)) });
+}|}]
 
 let ready_state : unit -> string = [%mel.raw "function () { return document.readyState }"]
 
@@ -157,7 +171,10 @@ let record_events : node -> (unit -> unit) * (unit -> unit) =
   let queue = [];
   const listener = function (ev) {
     const owner = ev.target.closest ? ev.target.closest("yuka-island") : island;
-    if (owner === island) queue.push({ type: ev.type, target: ev.target, ev: ev });
+    if (owner !== island) return;
+    const t = ev.target;
+    const field = (ev.type === "input" || ev.type === "change") && t && "value" in t;
+    queue.push({ type: ev.type, target: t, ev: ev, field: field, value: field ? t.value : undefined, checked: field ? t.checked : undefined });
   };
   types.forEach(function (t) { island.addEventListener(t, listener, true); });
   const stop = function () { types.forEach(function (t) { island.removeEventListener(t, listener, true); }); };
@@ -170,6 +187,10 @@ let record_events : node -> (unit -> unit) * (unit -> unit) =
     items.forEach(function (item) {
       const type = item.type, target = item.target, ev = item.ev;
       if (!island.contains(target)) return;
+      if (item.field) {
+        target.value = item.value;
+        if (item.checked !== undefined) target.checked = item.checked;
+      }
       let copy;
       if (type === "click")
         copy = new w.MouseEvent(type, { bubbles: true, cancelable: true, clientX: ev.clientX, clientY: ev.clientY, button: ev.button, shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, metaKey: ev.metaKey });
@@ -185,4 +206,110 @@ let record_events : node -> (unit -> unit) * (unit -> unit) =
     });
   };
   return [drop, replay];
+}|}]
+
+type controller
+
+let location_assign : string -> unit =
+  [%mel.raw
+    "function (url) { window.location.assign(url) }"]
+
+let current_url : unit -> string =
+  [%mel.raw
+    "function () { const l = window.location; return l.pathname + l.search }"]
+
+let scroll_y : unit -> float =
+  [%mel.raw
+    "function () { return window.scrollY || 0 }"]
+
+let scroll_to : float -> unit =
+  [%mel.raw
+    "function (y) { window.scrollTo(0, y) }"]
+
+let scroll_to_hash : string -> unit =
+  [%mel.raw
+    {|function (hash) {
+  const el = hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  if (el) el.scrollIntoView(); else window.scrollTo(0, 0);
+}|}]
+
+let fresh_key : unit -> string =
+  [%mel.raw
+    "function () { globalThis.__yukaKeys = (globalThis.__yukaKeys || 0) + 1; return Date.now() + '-' + globalThis.__yukaKeys }"]
+
+let history_key : unit -> string =
+  [%mel.raw
+    "function () { const s = window.history.state; return s && typeof s.yukaKey === 'string' ? s.yukaKey : '' }"]
+
+let history_replace_key : string -> unit =
+  [%mel.raw
+    "function (k) { window.history.replaceState({ yukaKey: k }, '', window.location.href) }"]
+
+let history_push_key : string -> string -> unit =
+  [%mel.raw
+    "function (k, url) { window.history.pushState({ yukaKey: k }, '', url) }"]
+
+let manual_scroll : unit -> unit =
+  [%mel.raw
+    "function () { try { window.history.scrollRestoration = 'manual' } catch (e) {} }"]
+
+let new_controller : unit -> controller =
+  [%mel.raw
+    "function () { return new AbortController() }"]
+
+let abort : controller -> unit =
+  [%mel.raw
+    "function (c) { c.abort() }"]
+
+let click_href : event -> string =
+  [%mel.raw
+    {|function (e) {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return "";
+  const t = e.target;
+  const a = t && t.closest ? t.closest("a[href]") : null;
+  if (!a) return "";
+  const target = a.getAttribute("target");
+  if ((target && target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-yuka-reload")) return "";
+  const l = window.location;
+  if (a.origin !== l.origin) return "";
+  if (a.hash && a.pathname === l.pathname && a.search === l.search) return "";
+  return a.href;
+}|}]
+
+let fetch_page : string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit =
+  [%mel.raw
+    {|function (url, controller, ok, fail) {
+  const signal = controller.signal;
+  let request;
+  try {
+    request = fetch(url, { headers: { "Yuka-Navigate": "1" }, credentials: "same-origin", signal: signal });
+  } catch (e) {
+    fail();
+    return;
+  }
+  request
+    .then(function (r) {
+      return r.text().then(function (text) { return { r: r, text: text }; });
+    })
+    .then(
+      function (x) {
+        if (signal.aborted) return;
+        const status = x.r.status;
+        const type = x.r.headers && x.r.headers.get ? x.r.headers.get("content-type") || "" : "";
+        if (!(status >= 200 && status < 300) || type.toLowerCase().indexOf("text/html") < 0) { fail(); return; }
+        const base = window.location.href;
+        const target = new URL(typeof x.r.url === "string" && x.r.url ? x.r.url : url, base);
+        if (target.origin !== window.location.origin) { fail(); return; }
+        const hash = target.hash || new URL(url, base).hash;
+        ok(target.pathname + target.search + hash, x.text);
+      },
+      function () { if (!signal.aborted) fail(); });
+}|}]
+
+let swap_page : string -> unit =
+  [%mel.raw
+    {|function (text) {
+  const parsed = new document.defaultView.DOMParser().parseFromString(text, "text/html");
+  document.title = parsed.title;
+  document.body.innerHTML = parsed.body.innerHTML;
 }|}]

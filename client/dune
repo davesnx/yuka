@@ -1,7 +1,0 @@
-(library
- (name yuka_client)
- (public_name yuka.client)
- (modes melange)
- (libraries yuka)
- (preprocess
-  (pps melange.ppx)))

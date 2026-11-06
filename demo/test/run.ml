@@ -8,7 +8,7 @@ let has html needle =
 let lacks html needle =
   if Model.Issue.contains ~sub:needle html then Alcotest.failf "unexpected %S" needle
 
-let render = Yuka_server.to_string
+let render = Yuka.Server.to_string
 
 let index () =
   let html = render Pages.index in
@@ -33,7 +33,9 @@ let my_issues () =
 
 let issue_page () =
   let i = Option.get (Store.find "YUK-1") in
-  let html = Lwt_main.run (Yuka_server.render_settled (fun () -> Pages.issue i)) in
+  let html = Lwt_main.run
+      (Yuka_dream.to_lwt
+         (Yuka.Server.render_settled ~sleep:Yuka_dream.sleep (fun () -> Pages.issue i))) in
   has html "Hydration mismatch on nested holes";
   has html "Maya Chen";
   has html "Urgent";
@@ -58,9 +60,12 @@ let streaming () =
   let i = Option.get (Store.find "YUK-1") in
   let chunks = ref [] in
   Lwt_main.run
-    (Yuka_server.stream (fun () -> Pages.issue ~delay:0.05 i) (fun c ->
-         chunks := c :: !chunks;
-         Lwt.return_unit));
+    (Yuka_dream.to_lwt
+       (Yuka.Server.stream ~sleep:Yuka_dream.sleep
+          ~write:(fun c ->
+            chunks := c :: !chunks;
+            Yuka.Async.resolved ())
+          (fun () -> Pages.issue ~delay:0.05 i)));
   let chunks = List.rev !chunks in
   let index_of needle =
     let rec go n = function

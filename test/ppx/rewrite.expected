@@ -981,12 +981,39 @@ let nested_fixed =
           Yuka.lower "li" [] [Yuka.text "b"]];
        Yuka.lower "p" [] [Yuka.text "c"]])
 let lazy_entry =
-  Yuka_client.lazy_entry ~name:"Demo_shared.Issue_props"
+  Yuka.Client.lazy_entry ~name:"Demo_shared.Issue_props"
     ([%mel.raw
        {|function(){ return import("../shared/issue_props.js").then(function(m){ return m.register; }) }|}] : 
-    unit -> Yuka.Client.entry Js.Promise.t)
+    unit -> Yuka.Client.entry Yuka.Client.promise)
 let lazy_camel =
-  Yuka_client.lazy_entry ~name:"Lib.IssueProps"
+  Yuka.Client.lazy_entry ~name:"Lib.IssueProps"
     ([%mel.raw
        {|function(){ return import("./chunks/issue_props.js").then(function(m){ return m.register; }) }|}] : 
-    unit -> Yuka.Client.entry Js.Promise.t)
+    unit -> Yuka.Client.entry Yuka.Client.promise)
+module Awaiting =
+  struct
+    let basic =
+      Yuka.Await.make ~async:comments
+        ~loading:(Yuka.lower "p" [] [Yuka.text "loading"])
+        ~children:(fun items ->
+                     Yuka.template "rewrite:135:82"
+                       (Yuka.lower "ul" []
+                          [Yuka.lower "li" [] [Yuka.text "x"];
+                          Yuka.lower "li" []
+                            [Yuka.hole (fun () -> State.get n)]])) ()
+    let with_failed =
+      Yuka.Await.make ~async:comments ~loading:(Yuka.text "wait")
+        ~failed:(fun msg -> Yuka.lower "p" [] [Yuka.text msg])
+        ~children:(function
+                   | Some v -> Yuka.lower "b" [] [Yuka.text v]
+                   | None -> Yuka.empty) ()
+    let optional_failed =
+      Yuka.Await.make ~async:comments ~loading:(Yuka.text "wait") ?failed
+        ~children:(fun v -> Yuka.lower "b" [] [Yuka.text "x"]) ()
+    let inside_element =
+      Yuka.lower "div" [Yuka.attr "class" ("c" : string)]
+        [Yuka.Await.make ~async:comments ~loading:(Yuka.text "wait")
+           ~children:(fun v ->
+                        Yuka.lower "i" [] [Yuka.hole (fun () -> State.get n)])
+           ()]
+  end

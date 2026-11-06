@@ -26,8 +26,13 @@ let setup : string -> unit =
     const call = { url: url, init: init };
     globalThis.__calls.push(call);
     return new Promise(function (res, rej) {
-      call.resolve = function (text, finalUrl) {
-        res({ url: finalUrl, text: function () { return Promise.resolve(text); } });
+      call.resolve = function (text, finalUrl, status, type) {
+        res({
+          url: finalUrl,
+          status: status,
+          headers: { get: function (n) { return n.toLowerCase() === "content-type" ? type : null; } },
+          text: function () { return Promise.resolve(text); },
+        });
       };
       call.reject = rej;
       init.signal.addEventListener("abort", function () {
@@ -52,8 +57,28 @@ let call_header : int -> string =
 let call_aborted : int -> bool =
   [%mel.raw "function (i) { return globalThis.__calls[i].init.signal.aborted }"]
 
-let resolve_call : int -> string -> string -> unit =
-  [%mel.raw "function (i, text, url) { globalThis.__calls[i].resolve(text, url || undefined) }"]
+let resolve_with : int -> string -> string -> int -> string -> unit =
+  [%mel.raw "function (i, text, url, status, type) { globalThis.__calls[i].resolve(text, url || undefined, status, type) }"]
+
+let resolve_call i text url = resolve_with i text url 200 "text/html; charset=utf-8"
+
+let count_listeners : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const counts = globalThis.__listeners = { click: 0, popstate: 0 };
+  const wrap = function (target) {
+    const add = target.addEventListener;
+    target.addEventListener = function (name) {
+      if (name in counts) counts[name]++;
+      return add.apply(this, arguments);
+    };
+  };
+  wrap(window);
+  wrap(document);
+}|}]
+
+let listeners : unit -> string =
+  [%mel.raw "function () { return globalThis.__listeners.click + ',' + globalThis.__listeners.popstate }"]
 
 let reject_call : int -> unit =
   [%mel.raw "function (i) { globalThis.__calls[i].reject(new Error('down')) }"]
@@ -103,11 +128,11 @@ let ints = string_of_int
 let bools = string_of_bool
 let page body = "<main>" ^ body ^ "</main>"
 let doc title body = "<!doctype html><html><head><title>" ^ title ^ "</title></head><body>" ^ body ^ "</body></html>"
-let plain_start () = Yuka_router_client.start []
+let plain_start () = Router.start []
 
 let navigate_before_start finish =
   setup "";
-  Yuka_router_client.navigate "/early";
+  Router.navigate "/early";
   check "falls back to a page load" "assign" (log_read ());
   check "no fetch" "0" (ints (calls ()));
   finish ()
@@ -185,7 +210,7 @@ let island n =
 let stop_then_start finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 1));
-  Yuka_router_client.start [ probe_entry ];
+  Router.start [ probe_entry ];
   check "first island started" "g0/1" (log_g ());
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page (island 2))) "";
@@ -322,7 +347,7 @@ let redirect finish =
   tick (fun () ->
       check "history shows the final url" "/login?next=%2Fa" (location_ ());
       log_clear ();
-      Yuka_router_client.navigate "/b";
+      Router.navigate "/b";
       resolve_call 1 (doc "Away" (page "x")) "http://example.com/b";
       tick (fun () ->
           check "cross-origin redirect: full page load" "assign" (log_read ());
@@ -332,7 +357,7 @@ let redirect finish =
 let navigate_api finish =
   setup (page "<p>old</p>");
   plain_start ();
-  Yuka_router_client.navigate "/x?q=1";
+  Router.navigate "/x?q=1";
   check "fetch" "/x?q=1" (call_url 0);
   check "header" "1" (call_header 0);
   resolve_call 0 (doc "X" (page "<p>new</p>")) "";
@@ -367,6 +392,29 @@ let browser_navigate finish =
       check "no full load" "scroll:0" (log_read ());
       finish ())
 
+let start_twice_listeners finish =
+  setup (page "x");
+  count_listeners ();
+  plain_start ();
+  let first = listeners () in
+  plain_start ();
+  let second = listeners () in
+  check "second start adds no listener" first second;
+  check "popstate once" "1" (List.nth (String.split_on_char ',' second) 1);
+  finish ()
+
+let not_a_page status type_ finish =
+  setup (page {|<a id="a" href="/a">a</a>|});
+  plain_start ();
+  let before = body_html () in
+  ignore (click "#a" "");
+  resolve_with 0 (doc "Err" (page "<p>err</p>")) "" status type_;
+  tick (fun () ->
+      check "full page load" "assign" (log_read ());
+      check "body kept" before (body_html ());
+      check "not pushed" "/start?x=1" (location_ ());
+      finish ())
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -384,6 +432,12 @@ let all =
     ("navigate", navigate_api);
     ("start twice", start_twice);
     ("Browser.navigate", browser_navigate);
+    ("start twice adds listeners once", start_twice_listeners);
+    ("404 is a full load", not_a_page 404 "text/html");
+    ("500 is a full load", not_a_page 500 "text/html");
+    ("302 not followed is a full load", not_a_page 302 "text/html");
+    ("json is a full load", not_a_page 200 "application/json");
+    ("no content type is a full load", not_a_page 200 "");
   ]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]

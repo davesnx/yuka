@@ -1,5 +1,5 @@
 open Alcotest
-module R = Yuka_router
+module R = Yuka.Router
 
 let opt_string = option string
 
@@ -22,6 +22,9 @@ let href_cases =
     t "query" (fun () ->
         check string "query" "/issue/1?q=a%20b%26c&x=%3D"
           (R.href ~query:[ ("q", "a b&c"); ("x", "=") ] issue "1"));
+    t "encodes literals" (fun () ->
+        check string "literal" "/caf%C3%A9%20bar/1"
+          (R.href R.(s "caf\xc3\xa9 bar" / int) 1));
     t "bad segment" (fun () ->
         check bool "raises" true
           (match R.s "a/b" with exception Invalid_argument _ -> true | _ -> false);
@@ -62,6 +65,11 @@ let parse_cases =
         check opt_string "underscore" None (R.parse p string_of_int "/n/1_0");
         check opt_string "sign only" None (R.parse p string_of_int "/n/-");
         check opt_string "empty" None (R.parse p string_of_int "/n/"));
+    t "decodes literals" (fun () ->
+        let p = R.(s "caf\xc3\xa9 bar" / int) in
+        check opt_string "encoded" (Some "1") (R.parse p string_of_int "/caf%C3%A9%20bar/1");
+        check opt_string "raw" (Some "1") (R.parse p string_of_int "/caf\xc3\xa9 bar/1");
+        check opt_string "other" None (R.parse p string_of_int "/cafe%20bar/1"));
     t "two params in order" (fun () ->
         check opt_string "both" (Some "x:7")
           (R.parse R.(s "p" / string / int) (fun a b -> show "%s:%d" a b) "/p/x/7"));
@@ -103,42 +111,29 @@ let dispatch_cases =
         check opt_string "none" None (R.dispatch cases "/b"));
   ]
 
-let get target = Dream.request ~method_:`GET ~target ""
-
-let body_of res = Lwt_main.run (Dream.body res)
-let status_of res = Dream.status_to_int (Dream.status res)
-
-let server_cases =
+let handler_cases =
   let t name f = test_case name `Quick f in
-  let handler =
-    Yuka_router_server.handler
-      ~not_found:(fun _ -> Dream.respond ~status:`Not_Found "custom 404")
-      [
-        R.case R.root (fun _ -> Dream.respond "home");
-        R.case R.(s "issue" / int) (fun id req ->
-            Dream.respond (Printf.sprintf "issue %d at %s" id (Dream.target req)));
-        R.case R.(s "user" / string) (fun name _ -> Dream.respond ("user " ^ name));
-      ]
+  let cases =
+    [
+      R.case R.root (fun _ -> "home");
+      R.case R.(s "issue" / int) (fun id target ->
+          Printf.sprintf "issue %d at %s" id target);
+      R.case R.(s "user" / string) (fun name _ -> "user " ^ name);
+    ]
   in
-  let run target = Dream.test handler (get target) in
+  let run target =
+    match R.dispatch cases target with
+    | Some handler -> handler target
+    | None -> "not found"
+  in
   [
-    t "root" (fun () -> check string "body" "home" (body_of (run "/")));
+    t "root" (fun () -> check string "body" "home" (run "/"));
     t "typed int and the request" (fun () ->
-        check string "body" "issue 12 at /issue/12/?a=b"
-          (body_of (run "/issue/12/?a=b")));
+        check string "body" "issue 12 at /issue/12/?a=b" (run "/issue/12/?a=b"));
     t "decoded string" (fun () ->
-        check string "body" "user a b" (body_of (run "/user/a%20b")));
-    t "unknown path uses the caller 404" (fun () ->
-        let res = run "/nothing" in
-        check int "status" 404 (status_of res);
-        check string "body" "custom 404" (body_of res));
-    t "bad int is a 404" (fun () ->
-        check int "status" 404 (status_of (run "/issue/x")));
-    t "default 404" (fun () ->
-        let res =
-          Dream.test (Yuka_router_server.handler []) (get "/x")
-        in
-        check int "status" 404 (status_of res));
+        check string "body" "user a b" (run "/user/a%20b"));
+    t "unknown path" (fun () -> check string "body" "not found" (run "/nothing"));
+    t "bad int" (fun () -> check string "body" "not found" (run "/issue/x"));
   ]
 
 let () =
@@ -147,5 +142,5 @@ let () =
       ("href", href_cases);
       ("parse", parse_cases);
       ("dispatch", dispatch_cases);
-      ("server", server_cases);
+      ("handlers", handler_cases);
     ]

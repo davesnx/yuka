@@ -88,7 +88,7 @@ let today = "Nov 6"
 let after delay compute =
   if delay <= 0. then Yuka.Async.resolved (compute ())
   else
-    Yuka_server.Async.of_lwt (Lwt.map compute (Lwt_unix.sleep delay))
+    Yuka_dream.to_async (Lwt.map compute (Lwt_unix.sleep delay))
 
 let comments_async ~delay id = after delay (fun () -> comments_of id)
 

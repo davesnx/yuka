@@ -1,0 +1,11 @@
+let view (comments : string list Yuka.Async.t) : Yuka.server Yuka.element =
+  <div>
+    <Yuka.Await async=comments loading=(<p>"loading"</p>)>
+      (fun items -> <ul>(Yuka.fragment (List.map (fun c -> <li>(Yuka.text c)</li>) items))</ul>)
+    </Yuka.Await>
+  </div>
+
+let with_failed (comments : string list Yuka.Async.t) : Yuka.server Yuka.element =
+  <Yuka.Await async=comments loading="wait" failed=(fun msg -> <p>(Yuka.text msg)</p>)>
+    (fun items -> <b>(Yuka.text (String.concat "," items))</b>)
+  </Yuka.Await>

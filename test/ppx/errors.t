@@ -290,3 +290,75 @@ Lazy entry, file name that does not match the module:
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] [%yuka.lazy]: the file 'related.js' does not match the module 'Demo_shared.Issue_props' (expected 'issue_props.js')
   [1]
+
+Await without async:
+
+  $ cat > w0.mlx <<'X'
+  > let x = <Yuka.Await loading="l">(fun v -> <p />)</Yuka.Await>
+  > X
+  $ run w0
+  File "w0.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Await loading="l">(fun v -> <p />)</Yuka.Await>
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Await needs the prop 'async'
+  [1]
+
+Await without loading:
+
+  $ cat > w1.mlx <<'X'
+  > let x = <Yuka.Await async=a>(fun v -> <p />)</Yuka.Await>
+  > X
+  $ run w1
+  File "w1.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Await async=a>(fun v -> <p />)</Yuka.Await>
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Await needs the prop 'loading'
+  [1]
+
+Await with a child that is not a function:
+
+  $ cat > w2.mlx <<'X'
+  > let x = <Yuka.Await async=a loading="l"><p /></Yuka.Await>
+  > X
+  $ run w2
+  File "w2.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Await async=a loading="l"><p /></Yuka.Await>
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Await needs exactly one child, a function such as (fun value -> ...)
+  [1]
+
+Await without a child:
+
+  $ cat > w3.mlx <<'X'
+  > let x = <Yuka.Await async=a loading="l" />
+  > X
+  $ run w3
+  File "w3.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Await async=a loading="l" />
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Await needs exactly one child, a function such as (fun value -> ...)
+  [1]
+
+Await with two children:
+
+  $ cat > w4.mlx <<'X'
+  > let x = <Yuka.Await async=a loading="l">(fun v -> <p />) (fun v -> <p />)</Yuka.Await>
+  > X
+  $ run w4
+  File "w4.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Await async=a loading="l">(fun v -> <p />) (fun v -> <p />)</Yuka.Await>
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Await needs exactly one child, a function such as (fun value -> ...)
+  [1]
+
+Await with an unknown prop:
+
+  $ cat > w5.mlx <<'X'
+  > let x = <Yuka.Await async=a loading="l" other=1>(fun v -> <p />)</Yuka.Await>
+  > X
+  $ run w5
+  File "w5.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Await async=a loading="l" other=1>(fun v -> <p />)</Yuka.Await>
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Await takes async, loading and failed
+  [1]

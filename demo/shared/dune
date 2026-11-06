@@ -1,6 +1,6 @@
 (library
  (name demo_shared)
  (modes native melange)
- (libraries yuka yuka.router)
+ (libraries yuka)
  (preprocess
   (pps yuka.ppx)))

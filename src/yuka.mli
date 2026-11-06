@@ -71,7 +71,8 @@ module Json : sig
       element. Non-finite floats are written as [null]. *)
 
   val of_string : string -> (t, string) result
-  (** A number without ['.'], ['e'] or ['E'] that fits an [int] is [`Int]. *)
+  (** A number without ['.'], ['e'] or ['E'] that fits an [int] is [`Int].
+      Arrays and objects nested more than 512 levels are an error. *)
 end
 
 module Async : sig
@@ -161,7 +162,8 @@ end
 val text : string -> 'kind element
 val int : int -> 'kind element
 val float : float -> 'kind element
-(** Printed as JSON prints a float: [1.0], [2.5]. *)
+(** Printed as JSON prints a float: [1.0], [2.5]. Not-a-number and the
+    infinities are printed as [NaN], [Infinity] and [-Infinity]. *)
 
 val list : 'kind element list -> 'kind element
 (** The same as [fragment]. *)
@@ -195,15 +197,19 @@ module Slot : sig
   val make : server element -> slot
 end
 
-val await :
-  ?failed:(string -> 'k element) ->
-  'a Async.t ->
-  loading:'k element ->
-  ('a -> 'k element) ->
-  'k element
-(** Shows [loading] until the value is settled, then the rendered value, or
-    [failed message] (default: nothing). On the client it is a hole over
-    [Async.watch]. On the server it is printed as a hole; see DESIGN.md. *)
+module Await : sig
+  val make :
+    async:'a Async.t ->
+    loading:'k element ->
+    ?failed:(string -> 'k element) ->
+    children:('a -> 'k element) ->
+    unit ->
+    'k element
+  (** Shows [loading] until the value is settled, then [children] applied to
+      the value, or [failed message] (default: nothing). On the client it is
+      a hole over [Async.watch]. On the server it is printed as a hole; see
+      DESIGN.md. *)
+end
 
 val on : string -> (Event.t -> unit) -> client attribute
 (** [on "click" handler]. *)
@@ -236,6 +242,56 @@ module Client : sig
     entry
   (** What the browser knows about an island: it decodes the props and gives
       the function that builds the component. *)
+
+  type container
+  (** A DOM element that holds a rendered tree. In a Melange entry, get one
+      with an [external ... = "%identity"] binding of your own. *)
+
+  type 'a promise
+  (** A JavaScript promise, as made by a dynamic [import]. *)
+
+  val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
+
+  type lazy_entry
+
+  val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
+  (** [lazy_entry ~name load]: an island whose code is loaded on demand.
+      [load] is called, at most once, when the start strategy of an island
+      named [name] fires, for example with a dynamic import of the module
+      that defines the entry. If it fails, the island keeps its server HTML
+      and the error is logged. *)
+
+  val render : container -> (unit -> 'k element) -> unit -> unit
+  (** [render container f] clears [container], builds the DOM of [f ()] and
+      returns a function that stops all effects and handlers of this tree.
+      The DOM stays in place. Browser only. *)
+
+  val hydrate : container -> (unit -> 'k element) -> unit -> unit
+  (** [hydrate container f] adopts the server DOM in [container] (written
+      with the markers of DESIGN.md), attaches handlers and starts holes.
+      Where the DOM does not match, it creates the missing nodes. Returns a
+      function that stops all effects and handlers. Browser only. *)
+
+  val start : ?lazy_entries:lazy_entry list -> entry list -> unit
+  (** [start entries] installs the browser runtime and the action transport,
+      then hydrates every [yuka-island] element of the document with the
+      entry of the same name, following each island's start strategy. Props
+      come from the [script] element with the same [data-yuka-props] id. It
+      also watches the document, so islands that arrive later (streaming,
+      fills) start when their props script is complete. An island that
+      cannot start is logged with [console.error] and keeps its server HTML.
+      An island is not started twice.
+
+      The action transport sends [POST /_yuka/action/<name>] with the input
+      as a JSON body. The response is [{"ok": value}] or
+      [{"error": message}]. *)
+
+  val stop : unit -> unit
+  (** Stops every island that [start] started: effects, handlers and
+      document listeners are removed, start strategies that did not fire yet
+      are cancelled, and action requests in flight are aborted (their
+      [Async] fails with ["cancelled"]). The DOM stays. [start] works again
+      afterwards, for example on a new body. *)
 end
 
 module Action : sig
@@ -398,4 +454,190 @@ module Internal : sig
   val platform : platform ref
   (** The browser runtime installs its functions here. The default raises
       [Failure]. *)
+end
+
+module Router : sig
+  type ('a, 'r) t
+  (** A path. ['a] is the type of the function that takes the parameters of the
+      path, and ['r] is what that function returns. *)
+
+  val root : ('r, 'r) t
+  (** The path [/]. *)
+
+  val s : string -> ('r, 'r) t
+  (** A fixed segment. Raises [Invalid_argument] if the text is empty or holds
+      a [/]. *)
+
+  val string : (string -> 'r, 'r) t
+  (** A segment taken as a string parameter. *)
+
+  val int : (int -> 'r, 'r) t
+  (** A segment taken as an int parameter. It matches an optional [-] and
+      digits only. *)
+
+  val ( / ) : ('a, 'b) t -> ('b, 'c) t -> ('a, 'c) t
+  (** Joins two paths. [s "issue" / string] has type
+      [(string -> 'r, 'r) t]. *)
+
+  val href : ?query:(string * string) list -> ('a, string) t -> 'a
+  (** [href path] is a function that takes the parameters and returns the URL.
+      Parameters and query are percent-encoded. The URL starts with [/] and
+      has no trailing slash, except [/] itself. *)
+
+  val parse : ('a, 'r) t -> 'a -> string -> 'r option
+  (** [parse path f target] matches a request target (path, with an optional
+      query and fragment, which are ignored) against [path]. A trailing slash
+      is ignored. Segments are percent-decoded. On a match it returns [f]
+      applied to the parameters. *)
+
+  val query : string -> (string * string) list
+  (** The decoded query pairs of a request target ([+] is a space). *)
+
+  type 'r case
+  (** A path with the function that handles it. *)
+
+  val case : ('a, 'r) t -> 'a -> 'r case
+
+  val dispatch : 'r case list -> string -> 'r option
+  (** The result of the first case that matches the target. *)
+
+  val start : ?lazy_entries:Client.lazy_entry list -> Client.entry list -> unit
+  (** [start entries] starts the islands with [Client.start entries] and
+      takes over navigation:
+
+      - A left click on an [<a href>] goes through [navigate] unless: the
+        event is already prevented, a modifier key is down, the link has a
+        [target] other than [_self], a [download] attribute or a
+        [data-yuka-reload] attribute, the URL is on another origin, or the URL
+        differs from the current one only by its fragment.
+      - [popstate] loads the entry's URL without pushing history.
+
+      [Browser.navigate] does [navigate] after [start], also after each
+      navigation. Calling [start] again is safe: the listeners are not added
+      twice. Browser only. *)
+
+  val navigate : string -> unit
+  (** [navigate url] loads [url] with the header [Yuka-Navigate: 1], stops
+      the islands, replaces the content of [<body>] and [document.title] with
+      those of the response, starts the islands again, pushes a history entry
+      (after the page loaded) and scrolls to the fragment or to the top. A
+      navigation started while another one loads aborts the first. If the
+      request fails, the response is not 2xx or not [text/html], or it was
+      redirected to another origin, it does [location.assign url]. Before [start], it does
+      [location.assign url]. Browser only. *)
+end
+
+module Server : sig
+  val log_error : (string -> unit) ref
+  (** Where [handle_action] reports an action that failed (the client only
+      sees a generic message). Default: [prerr_endline]. *)
+
+  val to_string : (unit -> server element) -> string
+  (** The tree as HTML, with hydration markers. The function builds the tree
+      with effects off, so component bodies do not run effects. *)
+
+  val page :
+    ?head:string ->
+    ?early:bool ->
+    ?import_map:(string * string) list ->
+    ?title:string ->
+    ?styles:string list ->
+    ?scripts:string list ->
+    (unit -> server element) ->
+    string
+  (** A full HTML document. [styles] are stylesheet URLs, [scripts] are
+      module script URLs. [head] is raw HTML added inside the head.
+      [import_map] is written as an import map script before any other
+      script. With [early], module scripts get the [async] attribute, so
+      they run while the stream continues. *)
+
+  val import_map : url:string -> string list -> (string * string) list
+  (** [import_map ~url packages] maps ["pkg/"] to ["url/node_modules/pkg/"]
+      for each package name (scoped ones as [@scope/name]), in the given
+      order, for the [import_map] option of [page]. The app lists the
+      packages; this function does not read the file system. *)
+
+  val fill_script : string
+  (** [Internal.fill_script]. *)
+
+  val stream :
+    ?head:string ->
+    ?early:bool ->
+    ?import_map:(string * string) list ->
+    ?timeout:float ->
+    ?title:string ->
+    ?styles:string list ->
+    ?scripts:string list ->
+    sleep:(float -> unit Async.t) ->
+    write:(string -> unit Async.t) ->
+    (unit -> server element) ->
+    unit Async.t
+  (** Writes the document head and the shell at once. For each pending
+      [await] and each pending [Codec.async] value, it writes a chunk when
+      the value settles, in settle order, including parts that appear in
+      streamed content. It ends when all have settled, or after [timeout]
+      seconds (default 10, measured with [sleep]): then each pending await
+      is filled with its [failed] element for the message [timeout], each
+      pending async value gets [{error: timeout}], and the stream ends.
+      Writes are sequenced: a chunk is written after the previous write
+      finished. The result fails if a write fails. *)
+
+  val render_settled :
+    ?timeout:float ->
+    sleep:(float -> unit Async.t) ->
+    (unit -> server element) ->
+    string Async.t
+  (** Waits until every pending value settled (or [timeout]) and returns
+      the HTML as [to_string] would print it had the values been settled at
+      print time, followed by the scripts of the async props. *)
+
+  val respond :
+    ?navigating:bool ->
+    ?head:string ->
+    ?early:bool ->
+    ?import_map:(string * string) list ->
+    ?timeout:float ->
+    ?title:string ->
+    ?styles:string list ->
+    ?scripts:string list ->
+    sleep:(float -> unit Async.t) ->
+    write:(string -> unit Async.t) ->
+    (unit -> server element) ->
+    unit Async.t
+  (** [stream], or, when [navigating] (the request had [Yuka-Navigate: 1]),
+      the whole page settled in one [write]: a full document without the
+      fill script, whose body is [render_settled]. The app sets the status
+      and the header [Vary: Yuka-Navigate]. *)
+
+  module Action : sig
+    val implement : ('i, 'o) Action.t -> ('i -> 'o Async.t) -> unit
+    (** Registers the implementation of a declared action, and makes
+        [Action.call] run it directly on the server. Raises
+        [Invalid_argument] if the name is already implemented. *)
+
+    val reject : string -> 'a
+    (** Raised inside an implementation to refuse the input:
+        [handle_action] answers 400 [{"error": message}] and [Action.call]
+        on the server fails with the message. Any other exception or failed
+        [Async] is a 500 with a generic message. *)
+
+    val rejected : string -> 'a Async.t
+    (** Like [reject], for use after a wait (in an [Async] chain). *)
+  end
+
+  val handle_action :
+    name:string ->
+    content_type:string option ->
+    origin:string option ->
+    host:string option ->
+    body:string ->
+    (int * string) Async.t
+  (** Runs the action [name] for a request [POST /_yuka/action/:name] and
+      returns the status and the JSON body. [body] is the JSON input. The
+      answer is [{"ok": output}] (200) or [{"error": message}] with 403
+      (origin differs from host), 404 (unknown action), 415 (content type
+      is not application/json), 413 (body over 1 MiB), 400 (bad JSON, bad
+      input, or [reject]) or 500 (the implementation failed; the message is
+      generic and the failure goes to [log_error]). Checks run in this
+      order. *)
 end

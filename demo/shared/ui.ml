@@ -5,5 +5,3 @@ let typing e =
   match Yuka.Event.target_tag e with
   | "input" | "textarea" | "select" -> true
   | _ -> false
-
-let navigate : (string -> unit) ref = ref Yuka.Browser.navigate [@@yuka.shared]

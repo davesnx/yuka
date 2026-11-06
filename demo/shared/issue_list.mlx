@@ -75,7 +75,7 @@ let%client make ~(title : string) ~(issues : Model.Issue.t list) () =
       | "Escape" -> State.set menu None
       | "Enter" -> (
           match State.peek selected with
-          | Some id -> !Ui.navigate (Routes.issue_url id)
+          | Some id -> Browser.navigate (Routes.issue_url id)
           | None -> ())
       | _ -> ()
   in

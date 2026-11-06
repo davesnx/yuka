@@ -1,14 +1,15 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo-light.svg" alt="Yuka" width="280">
+    <img src="assets/logo-light.svg" alt="Yuka" width="140">
   </picture>
 </p>
 
 <p align="center">Web framework for OCaml. Server-rendered, with islands.</p>
 
-Yuka renders pages on the server with Dream and streams slow parts as they
-become ready. Parts that need interaction are islands: small components that
+Yuka renders pages on the server and streams slow parts as they become ready.
+It does not depend on a web server: you connect it to Dream, or any other, in a
+few lines. Parts that need interaction are islands: small components that
 Melange compiles to JavaScript and that hydrate in the browser. Components are
 written in mlx (JSX for OCaml) and use signals, so a component runs once and
 only the parts that read a signal update.
@@ -19,12 +20,14 @@ only the parts that read a signal update.
 - Render once: no virtual DOM. Only holes and keyed lists update.
 - mlx syntax through a ppx (`yuka.ppx`), with attribute checks.
 - Server rendering and hydration from one element tree, on native and Melange.
-- Streaming with `Yuka.await`: send the page shell first, fill in the rest later.
+- Streaming with `<Yuka.Await>`: send the page shell first, fill in the rest later.
 - Islands: `let%client` components with a start strategy (`Load`, `Idle`,
   `Visible`, `Interaction`) and optional lazy loading.
 - Codecs: `[@@deriving codec]` for props and action data.
 - Actions: declare once, call from the client, run on the server.
-- Router: typed paths shared by server and client (`yuka.router`).
+- Router: typed paths shared by server and client (`Yuka.Router`).
+- One library, `yuka`. A Melange entry also lists `yuka.js`, the browser
+  implementation of the DOM bindings.
 
 ## Examples
 
@@ -49,27 +52,49 @@ The server sends the page with the skeleton at once. When the comments are
 ready, it sends them and the browser puts them in place.
 
 ```ocaml
-let comments_async id =
-  Yuka_server.Async.of_lwt
-    (let%lwt () = Lwt_unix.sleep 0.6 in
-     Lwt.return (Store.comments id))
-
 let issue_page (i : Issue.t) : Yuka.server Yuka.element =
   <main>
     <h1>(Yuka.text i.title)</h1>
-    (Yuka.await (comments_async i.id)
-       ~loading:<p>"Loading comments..."</p>
-       ~failed:(fun msg -> <p>(Yuka.text ("Error: " ^ msg))</p>)
-       (fun comments ->
-         <ul>
-           (Yuka.list
-              (List.map (fun c -> <li>(Yuka.text c)</li>) comments))
-         </ul>))
+    <Yuka.Await async=(Store.comments_async i.id)
+      loading=(<p>"Loading comments..."</p>)
+      failed=(fun msg -> <p>(Yuka.text ("Error: " ^ msg))</p>)>
+      (fun comments ->
+        <ul>
+          (Yuka.list (List.map (fun c -> <li>(Yuka.text c)</li>) comments))
+        </ul>)
+    </Yuka.Await>
   </main>
+```
+
+`Yuka.Server.respond` writes the page through two functions that your web
+server gives: `write` sends a chunk, `sleep` waits (for the stream timeout).
+With Dream and Lwt (see `demo/server/yuka_dream.ml`):
+
+```ocaml
+let to_async p =
+  let async, resolve, fail = Yuka.Async.make () in
+  Lwt.on_any p resolve (fun e -> fail (Printexc.to_string e));
+  async
+
+let to_lwt async =
+  let p, w = Lwt.wait () in
+  Yuka.Async.on_result async (function
+    | Ok v -> Lwt.wakeup w v
+    | Error m -> Lwt.wakeup_exn w (Failure m));
+  p
 
 let handler request =
-  Yuka_server.respond ~request ~title:"Issue" (fun () -> issue_page issue)
+  let navigating = Dream.header request "Yuka-Navigate" = Some "1" in
+  Dream.stream ~headers:[ ("Vary", "Yuka-Navigate") ] (fun stream ->
+      let write s = to_async (Lwt.bind (Dream.write stream s) (fun () -> Dream.flush stream)) in
+      let sleep d = to_async (Lwt_unix.sleep d) in
+      to_lwt
+        (Yuka.Server.respond ~navigating ~title:"Issue" ~sleep ~write (fun () ->
+             issue_page issue)))
 ```
+
+Actions go through `Yuka.Server.handle_action`, which returns the status and
+the JSON body; mount it on `POST /_yuka/action/:name`.
 
 ### Island
 
@@ -94,14 +119,20 @@ let page () =
     <Greeting item=({ name = "Hello"; count = 0 }) />
   </Yuka.Client>
 
-(* client entry, compiled with Melange *)
-let () = Yuka_client.start [ Greeting.register ]
+(* client entry, compiled with Melange; its dune lists (libraries yuka yuka.js) *)
+let () = Yuka.Client.start [ Greeting.register ]
 ```
+
+With the router, the client entry calls `Yuka.Router.start` instead: links
+then navigate without a full page load. An island can load its code only when
+it starts: `[%yuka.lazy Lib.Greeting "../shared/greeting.js"]` in
+`~lazy_entries`.
 
 ## Getting started
 
 The demo is an issue tracker. It uses every feature above. It needs OCaml 5.4,
-dune 3.16+, Melange, mlx and Dream. From the repository root:
+dune 3.16+, Melange and mlx; the demo server also uses Dream. From the
+repository root:
 
 ```sh
 dune build @demo/all
@@ -120,7 +151,7 @@ DOM tests run under node with jsdom: run `npm install` first.
 
 ## Status
 
-v0.1, experimental. APIs change. `DESIGN.md` describes the current design.
+Experimental. APIs change. `DESIGN.md` describes the current design.
 
 ## Credits
 

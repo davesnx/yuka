@@ -39,7 +39,7 @@ external child_nodes : node -> node array = "childNodes" [@@mel.get]
 external node_type : node -> int = "nodeType" [@@mel.get]
 external namespace_uri : node -> string = "namespaceURI" [@@mel.get]
 external text_content : node -> string = "textContent" [@@mel.get]
-external as_element : node -> Yuka_client.Dom.element = "%identity"
+external as_element : node -> Yuka.Client.container = "%identity"
 
 let check = Cases.check
 let ints = string_of_int
@@ -63,7 +63,7 @@ let texts c sel =
 let create_tree () =
   let c = container "stale" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         div [ attr "class" "a" ] [ text "hello"; span [ text "x" ] ])
   in
   check "created html" {|<div class="a">hello<span>x</span></div>|} (html c);
@@ -88,7 +88,7 @@ let hydrate_adopts () =
   let root = first_child c in
   let button = query c "button" in
   let span_text = (child_nodes (query c "span")).(1) in
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   same "root kept" root (first_child c);
   same "button kept" button (query c "button");
   same "hole text kept" span_text (child_nodes (query c "span")).(1);
@@ -100,7 +100,7 @@ let hydrate_then_click () =
   let n, tree = counter () in
   let c = container (server (tree ())) in
   let span_text = (child_nodes (query c "span")).(1) in
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   click (query c "button");
   click (query c "button");
   check "state" "2" (ints (State.peek n));
@@ -111,7 +111,7 @@ let hydrate_then_click () =
 let render_then_click () =
   let n, tree = counter () in
   let c = container "" in
-  let dispose = Yuka_client.render (as_element c) tree in
+  let dispose = Yuka.Client.render (as_element c) tree in
   click (query c "button");
   check "state" "1" (ints (State.peek n));
   check "html"
@@ -121,7 +121,7 @@ let render_then_click () =
 let handler_removed_after_dispose () =
   let n, tree = counter () in
   let c = container "" in
-  let dispose = Yuka_client.render (as_element c) tree in
+  let dispose = Yuka.Client.render (as_element c) tree in
   click (query c "button");
   dispose ();
   click (query c "button");
@@ -134,7 +134,7 @@ let old_handler_removed_on_hole_rerun () =
   let calls = ref 0 in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         hole (fun () ->
             if State.get flag then
               lower "button" [ on "click" (fun _ -> incr calls) ] []
@@ -153,7 +153,7 @@ let direct_handler () =
   let calls = ref 0 in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "input" [ on "focus" (fun _ -> incr calls) ] [])
   in
   let input = query c "input" in
@@ -169,7 +169,7 @@ let each_item_reads_untracked () =
   let hole_runs = ref 0 in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         hole (fun () ->
             incr hole_runs;
             lower "ul" []
@@ -192,7 +192,7 @@ let text_hole_in_place () =
   let n = State.make "a" in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         div [] [ hole (fun () -> text (State.get n)) ])
   in
   let t = (child_nodes (first_child c)).(1) in
@@ -205,7 +205,7 @@ let hole_swaps_element () =
   let flag = State.make true in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         div []
           [
             hole (fun () ->
@@ -227,7 +227,7 @@ let nested_hole_disposed () =
   let inner_runs = ref 0 in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         hole (fun () ->
             ignore (State.get a);
             hole (fun () ->
@@ -248,7 +248,7 @@ let dynamic_attributes () =
   let on_ = State.make false in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "input"
           [
             hole_attr "value" (fun () -> Some (State.get v));
@@ -288,7 +288,7 @@ let keyed_list () =
   let log = ref [] in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "ul" []
           [ each ~key:fst (fun () -> State.get items) (item_view log) ])
   in
@@ -325,7 +325,7 @@ let keyed_list_shuffle () =
   let items = State.make ids in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "ul" []
           [
             each ~key:Fun.id
@@ -356,14 +356,14 @@ let adjacent_texts_hydrate () =
   let a = (child_nodes root).(0) in
   let b = (child_nodes root).(2) in
   let before = Array.length (child_nodes root) in
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   same "a adopted" a (child_nodes root).(0);
   same "b adopted" b (child_nodes root).(2);
   check "one empty text created" (ints (before + 1))
     (ints (Array.length (child_nodes root)));
   check "html" "<div>a<!---->b<!---->c<i></i></div>" (html c);
   let c2 = container "" in
-  let dispose2 = Yuka_client.render (as_element c2) tree in
+  let dispose2 = Yuka.Client.render (as_element c2) tree in
   check "render matches hydrate" (html c) (html c2);
   check "same node count"
     (ints (Array.length (child_nodes root)))
@@ -391,7 +391,7 @@ let hydrate_server_output () =
   let ul = query c "ul" in
   let li_a = query c "[data-key=a]" in
   let li_b = query c "[data-key=b]" in
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   check "html after hydrate" server_html (html c);
   same "root" root (first_child c);
   same "ul" ul (query c "ul");
@@ -410,7 +410,7 @@ let svg_el tag attrs children = lower tag attrs children
 let svg_render () =
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         div []
           [
             svg_el "svg" [ attr "viewBox" "0 0 1 1" ]
@@ -433,7 +433,7 @@ let svg_hole () =
   let big = State.make false in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         svg_el "svg" []
           [
             hole (fun () ->
@@ -454,7 +454,7 @@ let svg_hydrate () =
   let s = query c "svg" in
   let p = query c "path" in
   check "parsed ns" svg_ns (namespace_uri p);
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   same "svg adopted" s (query c "svg");
   same "path adopted" p (query c "path");
   check "one path" "1" (ints (Array.length (query_all c "path")));
@@ -464,15 +464,16 @@ let await_tree ?failed a =
   div []
     [
       text "a";
-      await ?failed a ~loading:(span [ text "wait" ]) (fun n ->
-          lower "b" [] [ text (ints n) ]);
+      Await.make ?failed ~async:a ~loading:(span [ text "wait" ])
+        ~children:(fun n -> lower "b" [] [ text (ints n) ])
+        ();
       text "b";
     ]
 
 let await_swaps () =
   let a, resolve, _ = Async.make () in
   let c = container "" in
-  let dispose = Yuka_client.render (as_element c) (fun () -> await_tree a) in
+  let dispose = Yuka.Client.render (as_element c) (fun () -> await_tree a) in
   check "loading" "<div>a<!--[--><span>wait</span><!--]-->b</div>" (html c);
   resolve 7;
   check "settled" "<div>a<!--[--><b>7</b><!--]-->b</div>" (html c);
@@ -482,7 +483,7 @@ let await_fails () =
   let a, _, fail = Async.make () in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         await_tree ~failed:(fun m -> lower "i" [] [ text m ]) a)
   in
   fail "boom";
@@ -490,7 +491,7 @@ let await_fails () =
   dispose ();
   let a2, _, fail2 = Async.make () in
   let c2 = container "" in
-  let dispose2 = Yuka_client.render (as_element c2) (fun () -> await_tree a2) in
+  let dispose2 = Yuka.Client.render (as_element c2) (fun () -> await_tree a2) in
   fail2 "x";
   check "no failed renderer" "<div>a<!--[--><!--]-->b</div>" (html c2);
   dispose2 ()
@@ -501,7 +502,7 @@ let await_hydrates_settled () =
   check "server html" "<div>a<!--[--><b>3</b><!--]-->b</div>" (html c);
   let root = first_child c in
   let b = query c "b" in
-  let dispose = Yuka_client.hydrate (as_element c) (fun () -> await_tree a) in
+  let dispose = Yuka.Client.hydrate (as_element c) (fun () -> await_tree a) in
   same "root adopted" root (first_child c);
   same "settled element adopted" b (query c "b");
   check "html" "<div>a<!--[--><b>3</b><!--]-->b</div>" (html c);
@@ -511,7 +512,7 @@ let await_hydrates_pending_then_settles () =
   let a, resolve, _ = Async.make () in
   let c = container (server (await_tree a)) in
   let loading = query c "span" in
-  let dispose = Yuka_client.hydrate (as_element c) (fun () -> await_tree a) in
+  let dispose = Yuka.Client.hydrate (as_element c) (fun () -> await_tree a) in
   same "loading adopted" loading (query c "span");
   resolve 9;
   check "settled" "<div>a<!--[--><b>9</b><!--]-->b</div>" (html c);
@@ -522,7 +523,7 @@ let stop_propagation_and_tag () =
   let add s = log := s :: !log in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         div [ on "click" (fun _ -> add "outer") ]
           [
             lower "button"
@@ -559,7 +560,7 @@ let modifiers () =
   let seen = ref "" in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "button"
           [
             on "click" (fun e ->
@@ -578,7 +579,7 @@ let modifiers () =
 let browser_functions () =
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         div []
           [
             lower "input" [ attr "id" "name" ] [];
@@ -615,7 +616,7 @@ let textarea_hydrate () =
   check "server html" "<div><textarea>fixed</textarea><textarea>one</textarea></div>" (html c);
   let areas = query_all c "textarea" in
   let texts = Array.map first_child areas in
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   check "static value" "fixed" (value areas.(0));
   check "hole value" "one" (value areas.(1));
   same "text node 1 kept" texts.(0) (first_child areas.(0));
@@ -640,7 +641,7 @@ let select_hydrate () =
     (html c);
   let select = query c "select" in
   let options = query_all c "option" in
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   same "select kept" select (query c "select");
   same "option kept" options.(1) (query_all c "option").(1);
   check "selected matches" "b" (value select);
@@ -654,7 +655,7 @@ let checked_property () =
   let on_ = State.make true in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "input"
           [
             attr "type" "checkbox";
@@ -680,7 +681,7 @@ let selected_property () =
   let on_ = State.make true in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "select" []
           [
             lower "option" [ attr "value" "a" ] [ text "A" ];
@@ -732,7 +733,7 @@ let template_same_output () =
     let c = container "" in
     let count = State.make 3 and title = State.make "t" in
     let dispose =
-      Yuka_client.render (as_element c) (fun () -> row ~wrap "same" count title)
+      Yuka.Client.render (as_element c) (fun () -> row ~wrap "same" count title)
     in
     let out = html c in
     dispose ();
@@ -747,7 +748,7 @@ let template_works () =
   let c = container "" in
   let count = State.make 0 and title = State.make "a" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () -> row "works" count title)
+    Yuka.Client.render (as_element c) (fun () -> row "works" count title)
   in
   let li = query c "li" in
   click li;
@@ -767,7 +768,7 @@ let template_cached () =
   let items = State.make [ 1; 2; 3 ] in
   let c = container "" in
   let dispose =
-    Yuka_client.render (as_element c) (fun () ->
+    Yuka.Client.render (as_element c) (fun () ->
         lower "ul" []
           [
             each ~key:ints
@@ -788,7 +789,7 @@ let template_in_hydrate () =
   let li = query c "li" in
   let b = query c "b" in
   count_templates ();
-  let dispose = Yuka_client.hydrate (as_element c) tree in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
   same "li adopted" li (query c "li");
   same "b adopted" b (query c "b");
   check "no template cloned when hydrating" "0" (ints (templates_created ()));
@@ -802,7 +803,7 @@ let template_timing () =
     let c = container "" in
     let t0 = now () in
     let dispose =
-      Yuka_client.render (as_element c) (fun () ->
+      Yuka.Client.render (as_element c) (fun () ->
           lower "ul" []
             [
               each ~key:ints
@@ -839,7 +840,7 @@ let template_with_slot () =
   let client =
     match Codec.decode Codec.slot `Null with Ok s -> s | Error m -> raise (Cases.Failed m)
   in
-  let dispose = Yuka_client.hydrate (as_element c) (fun () -> view client) in
+  let dispose = Yuka.Client.hydrate (as_element c) (fun () -> view client) in
   same "adopted" p (query c "p");
   State.set wrap false;
   same "moved into the new template" p (query c "p");

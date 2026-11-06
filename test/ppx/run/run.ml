@@ -139,4 +139,13 @@ let () =
          (Yuka.Internal.skeleton_html node
          = Yuka.Internal.to_html node)
    | _ -> ());
+  let settled = Yuka.Async.resolved [ "a"; "b" ] in
+  let await_html = Yuka.Internal.to_html (Yuka.Internal.node (Awaiting.view settled)) in
+  check ("await settled: " ^ await_html) (contains await_html "<ul><li>a</li><li>b</li></ul>");
+  check "await not loading" (not (contains await_html "loading"));
+  let failed_html =
+    Yuka.Internal.to_html
+      (Yuka.Internal.node (Awaiting.with_failed (Yuka.Async.failed "boom")))
+  in
+  check ("await failed: " ^ failed_html) (contains failed_html "<p>boom</p>");
   if !fails > 0 then exit 1 else print_endline "ok"

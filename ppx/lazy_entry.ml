@@ -28,9 +28,9 @@ let expand ~ctxt (lid : Longident.t) path =
       "function(){ return import(%S).then(function(m){ return m.register; }) }" path
   in
   [%expr
-    Yuka_client.lazy_entry ~name:[%e estring ~loc name]
+    Yuka.Client.lazy_entry ~name:[%e estring ~loc name]
       ([%mel.raw [%e pexp_constant ~loc (Pconst_string (js, loc, Some ""))]]
-        : unit -> Yuka.Client.entry Js.Promise.t)]
+        : unit -> Yuka.Client.entry Yuka.Client.promise)]
 
 let extension =
   Extension.V3.declare "yuka.lazy" Extension.Context.expression

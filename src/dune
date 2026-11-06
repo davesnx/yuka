@@ -1,4 +1,6 @@
 (library
  (name yuka)
  (public_name yuka)
- (modes native melange))
+ (modes native melange)
+ (virtual_modules web)
+ (default_implementation yuka.native))

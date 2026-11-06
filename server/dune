@@ -1,4 +1,0 @@
-(library
- (name yuka_server)
- (public_name yuka.server)
- (libraries yuka dream))
