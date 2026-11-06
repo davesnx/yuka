@@ -527,3 +527,190 @@ Lwt bridges live in the app). `Yuka.await` is now `<Yuka.Await>`.
 - mlx: an element used as a prop value always needs parentheses:
   `loading=(<p>"…"</p>)` (without them it is a syntax error, checked with
   mlx-pp).
+
+## v0.3 addendum: generated island registry and `Yuka.mount ()` (decided by the user, 2026-11-06)
+
+The user: users never write `M.register` or an island list, and the client
+entry is `Yuka.mount ()`, the whole client start. This section uses the v0.4
+names (one library `yuka`).
+
+```ocaml
+let () = Yuka.mount ()
+```
+
+### Why the islands need a reference
+
+Checked with dune 3.24.2 in a scratch project (melange.emit, one library of
+island modules, one entry):
+
+- `melange.emit` writes JS for every module of every library in `libraries`.
+  The entry JS imports only the modules its OCaml code names. An island module
+  that nothing names is emitted and never loaded. A top-level
+  self-registration in the island does not help: nothing imports the module,
+  and esbuild `--bundle` of the entry contained 0 islands.
+- A library that implements a virtual library chosen by the app (a registry
+  as a virtual module) fails: dune does not build private implementations of
+  public virtual libraries in `(modes melange)`. An app would need a public
+  package per library.
+- `(select)` only picks between whole libraries; it cannot list modules.
+- A generated module in the `melange.emit` directory works. When it names
+  `Demo_shared.Counter.register`, the emitted JS imports `../shared/counter.js`
+  and esbuild bundles it. A call of a plain
+  `external import : string -> m Js.Promise.t = "import"` with a string
+  literal emits `import("../shared/related.js")`, and esbuild makes a chunk.
+  Emitted paths are `<dir>/<file stem>.js` (a wrapped library has no prefix in
+  the file name), so the path from the generated module is the relative path
+  of the source directory.
+- `(deps (source_tree DIR))` puts only the source files of `DIR` in
+  `%{deps}` (no `.pp.ml` copies).
+
+### Design
+
+1. Generator `yuka-islands` (new executable, installed with package `yuka`,
+   directory `gen/`). `yuka-islands --library NAME DIR ...` (the pair can
+   repeat) scans the `.ml` and `.mlx` files under each `DIR` and prints a
+   module. A file has an island when a line starts with `let%client` (with an
+   optional `[@yuka.lazy]` after it). The module name is `Name` plus the
+   capitalised file stem, which is the island name of DESIGN "Islands".
+   Output:
+
+   ```ocaml
+   type m
+   type entry = Yuka.Client.entry
+   external import : string -> m Yuka.Client.promise = "import"
+   external register : m -> entry = "register" [@@mel.get]
+
+   let registry =
+     Yuka.Client.registry
+       ~lazy_entries:
+         [ Yuka.Client.lazy_entry ~name:"Demo_shared.Related" (fun () ->
+               Yuka.Client.promise_map register (import "../shared/related.js")) ]
+       [ Demo_shared.Counter.register; Demo_shared.Issue_list.register ]
+   ```
+
+   The app adds one rule next to its `melange.emit`:
+
+   ```
+   (rule
+    (targets yuka_islands.ml)
+    (deps (source_tree ../shared))
+    (action
+     (with-stdout-to yuka_islands.ml
+      (run %{bin:yuka-islands} --library demo_shared ../shared))))
+   ```
+
+   The `melange.emit` needs `melange.ppx` for `[@@mel.get]` (it has it
+   already, with `yuka.ppx`).
+2. The ppx rewrites `Yuka.mount ()` (the identifier applied to `()`, nothing
+   else) into `Yuka.mount ~islands:Yuka_islands.registry ()`. That reference
+   makes the linker keep the registry and, through it, every island. A
+   missing rule gives `Unbound module Yuka_islands`; the README says so.
+3. `let%client` is allowed only at the top level of a file (nested ones are a
+   compile error), so the module path equals the file. One `make` per file
+   already holds. A scan that misses an island is not silent: the client logs
+   "no entry for island X" (existing behaviour) and keeps the server HTML.
+   A scan that finds a file without an island is a compile error
+   (`Unbound value register`).
+
+### `Yuka.mount`
+
+```ocaml
+val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
+```
+
+- It lives in `src/yuka.ml(i)`. `Client` and `Router` are core parts, built
+  for native and Melange, and the browser functions come from `Web` and
+  `Internal.platform`, so it needs no other path. On native or without
+  `~islands` (the ppx did not run) it raises `Failure` with a message that
+  names `yuka.ppx`.
+- The old top-level `Yuka.mount : (unit -> 'a) -> 'a * (unit -> unit)` (the
+  owner root) has another type under the same name. It becomes
+  `Yuka.owner` (user choice, 2026-11-06). Its only user is
+  `test/cases/cases.ml`.
+- `Client.registry : ?lazy_entries:lazy_entry list -> entry list -> registry`
+  (abstract). `Client.start` keeps its two lists as the low-level function
+  (tests call it); `mount` calls it with the registry. User docs show only
+  `Yuka.mount ()`.
+
+### Dune version and one context
+
+The user asked whether the latest dune gives one library, built for native
+and Melange in one context, per-mode code, so `mount` could be Melange-only
+inside `yuka`.
+
+- The newest dune in the opam repository is 3.24.2 (released 2026-08-03),
+  which the switch already has (`opam show dune`). Its `CHANGES.md` has no
+  unreleased section. Nothing from 3.8 to 3.24.2 adds per-mode modules or a
+  per-mode `(modules)` field: Melange entries there are about virtual
+  libraries (3.15.0, 3.15.1, 3.17.2), several contexts for `melange.emit`
+  (3.15.0) and sandboxing. Dune issue 10362 (a project-wide setting that
+  separates native and Melange contexts) is a proposal, not released.
+- So no upgrade or `(lang dune X)` bump helps; `(lang dune 3.16)` stays. The
+  single context already works: `yuka` has `(modes native melange)` and
+  builds in the default context (`dune build` in the repository).
+- Per-mode code in `yuka` already has a mechanism: the virtual module `web`
+  (`yuka.native` default, `yuka.js` in a Melange entry). `mount` does not need
+  more, because `Client` and `Router` compile on both targets and call
+  `Web`. Melange-only code stays in `dom/js/`. This is why `mount` lives in
+  `src/yuka.ml`.
+
+### Lazy islands
+
+- `let%client[@yuka.lazy] make ...` marks an island lazy: the generator
+  emits a lazy entry (dynamic import, the path above) and does not name the
+  module statically. Default: eager.
+- Why per island: loading code late is a choice about the island's module
+  (its own chunk), not about one use. The same island can appear with
+  `Load` and `Visible`; the start strategy at the use site (`loading`)
+  stays separate and decides when the entry runs. A lazy island used with
+  `Load` loads right after `mount`. Eager by default keeps `Load` islands
+  free of an extra round trip and the dev server (no bundler) simple.
+- Trade-off: the generator finds the attribute by text. The ppx accepts it
+  and rejects an unknown `yuka.*` attribute on the binding.
+
+### Router
+
+- `Yuka.mount ()` does what `Router.start` did: it starts the islands and
+  takes over same-origin link clicks (rules in "yuka.router", unchanged).
+  `Yuka.mount ~navigation:false ()` starts only the islands (full page
+  loads). A link with `data-yuka-reload` still opts out one by one.
+- Default is on because it is the whole client start and the demo needs it;
+  the server side (`Yuka.Server`) already answers `Yuka-Navigate: 1`.
+- `Router.start` leaves `yuka.mli`. `Router.navigate`, the route type and
+  `dispatch` stay.
+
+### Several libraries and names
+
+- One `--library NAME DIR` pair per library, and one `source_tree` per
+  directory in the rule. Names stay `<Library>.<Module path>`; the library
+  prefix keeps modules of the same name apart.
+- `include_subdirs unqualified` works (the scan is recursive).
+  `include_subdirs qualified` and libraries installed without sources are not
+  supported: the generator exits with an error for the first.
+
+### Removed
+
+- `[%yuka.lazy]`, `ppx/lazy_entry.ml` and its test `test/ppx/melange`.
+- `Router.start` from `yuka.mli`; `M.register` from README and demo.
+  `M.register` stays a value of the island module, because the generated
+  module reaches it across libraries; its doc says "for generated code".
+  `Client.lazy_entry` stays for the same reason.
+- No compatibility layer: demo, README, tests and e2e change in the same
+  step.
+
+### Tests
+
+- ppx expect test (`test/ppx/rewrite.mlx`): `Yuka.mount ()` expands; other
+  uses of `mount` do not; `[@yuka.lazy]` accepted.
+- `test/ppx/errors.t`: nested `let%client`; unknown attribute.
+- Cram test for `yuka-islands`: eager, lazy, nested directory, two
+  libraries, a file with no island, `include_subdirs qualified` error.
+- Melange jsdom test (`test/melange`, with a generated registry): a document
+  with an island whose module no test code names; `Yuka.mount ()` hydrates
+  it (eager) and, for a lazy one, loads and hydrates it after its start
+  strategy fires.
+- Demo e2e (`e2e/run.sh`, also `BUNDLE=1`): all islands hydrate with
+  `demo/client/main.ml` equal to `let () = Yuka.mount ()`; the bundle has a
+  chunk for each lazy island.
+- README example "Island" and `demo/client/main.ml` become
+  `let () = Yuka.mount ()`.
