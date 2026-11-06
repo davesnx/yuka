@@ -48,5 +48,7 @@ one chunk per lazy island (`Issue_props`, `Related`, `Comments`). The server
 serves them from `/static/bundle/` and writes no import map.
 
 Routes are defined once in `shared/routes.ml` with `Yuka.Router`. The server
-maps `Yuka.Router.dispatch` onto Dream, and `client/main.ml` calls
-`Yuka.Router.start`, so links navigate without a full page load.
+maps `Yuka.Router.dispatch` onto Dream, and `client/main.ml` is
+`let () = Yuka.mount ()`, so links navigate without a full page load. The rule
+in `client/dune` generates `yuka_islands.ml`, the list of islands. `Issue_props`,
+`Related` and `Comments` are `let%client[@yuka.lazy]`.

@@ -1,0 +1,4 @@
+(executable
+ (name yuka_islands)
+ (public_name yuka-islands)
+ (package yuka))

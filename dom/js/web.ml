@@ -2,6 +2,8 @@ type node
 type event = Types.event
 type 'a promise = 'a Js.Promise.t
 
+let in_browser = true
+
 let window () : node = [%mel.raw "window"]
 external owner_document : node -> node = "ownerDocument" [@@mel.get]
 external create_element : node -> string -> node = "createElement" [@@mel.send]

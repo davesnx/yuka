@@ -42,7 +42,7 @@ let%client make ~(initial : int) () =
   let n = State.make initial in
   <button onClick=(fun _ -> State.update n succ)>
     "Clicks: "
-    (Yuka.text (string_of_int (State.get n)))
+    (Yuka.int (State.get n))
   </button>
 ```
 
@@ -110,7 +110,7 @@ end
 let%client make ~(item : Item.t) () =
   let n = State.make item.count in
   <button onClick=(fun _ -> State.update n succ)>
-    (Yuka.text (item.name ^ ": " ^ string_of_int (State.get n)))
+    (Yuka.format "%s: %d" item.name (State.get n))
   </button>
 
 (* server page *)
@@ -119,14 +119,39 @@ let page () =
     <Greeting item=({ name = "Hello"; count = 0 }) />
   </Yuka.Client>
 
-(* client entry, compiled with Melange; its dune lists (libraries yuka yuka.js) *)
-let () = Yuka.Client.start [ Greeting.register ]
+(* client entry, main.ml, compiled with Melange *)
+let () = Yuka.mount ()
 ```
 
-With the router, the client entry calls `Yuka.Router.start` instead: links
-then navigate without a full page load. An island can load its code only when
-it starts: `[%yuka.lazy Lib.Greeting "../shared/greeting.js"]` in
-`~lazy_entries`.
+`Yuka.mount ()` starts the islands and makes links navigate without a full
+page load. It finds the islands through a module that `yuka-islands`
+generates. Add this rule next to the `melange.emit` of the client (here the
+islands are in the library `demo_shared`, in `../shared`):
+
+```
+(melange.emit
+ (target out)
+ (libraries demo_shared yuka yuka.js)
+ (preprocess
+  (pps yuka.ppx melange.ppx))
+ (module_systems es6))
+
+(rule
+ (targets yuka_islands.ml)
+ (deps
+  (source_tree ../shared))
+ (action
+  (with-stdout-to
+   yuka_islands.ml
+   (run %{bin:yuka-islands} --library demo_shared ../shared))))
+```
+
+Without the rule, the build fails with `Unbound module Yuka_islands`.
+`let%client` must be at the top level of a file.
+
+To load pages with a full page load, write `Yuka.mount ~navigation:false ()`.
+To make an island load its code only when it starts, write
+`let%client[@yuka.lazy] make ...`.
 
 ## Getting started
 

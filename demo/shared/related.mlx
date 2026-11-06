@@ -1,6 +1,6 @@
 open Model
 
-let%client make ~(related : Model.Issue.t list Yuka.Async.t) () =
+let%client[@yuka.lazy] make ~(related : Model.Issue.t list Yuka.Async.t) () =
   <div class_="related">
     <h2 class_="section-title">"Related issues"</h2>
     <Yuka.Await async=related

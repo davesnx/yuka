@@ -145,3 +145,38 @@ let extension =
   Extension.V3.declare "client" Extension.Context.structure_item
     Ast_pattern.(pstr __)
     expand
+
+let check_attributes (attrs : attribute list) =
+  List.iter
+    (fun (a : attribute) ->
+      let n = a.attr_name.txt in
+      if String.starts_with ~prefix:"yuka." n && n <> "yuka.lazy" then
+        fail ~loc:a.attr_loc
+          "unknown attribute [@%s] on a let%%client binding (only [@yuka.lazy] is accepted)" n)
+    attrs
+
+let check_placement (top : structure) =
+  let checker =
+    object
+      inherit Ast_traverse.iter as super
+
+      method! structure_item i =
+        (match i.pstr_desc with
+         | Pstr_extension (({ txt = "client"; _ }, payload), attrs) ->
+             if not (List.memq i top) then
+               fail ~loc:i.pstr_loc
+                 "let%%client is allowed only at the top level of a file, not inside a module or a function";
+             check_attributes attrs;
+             (match payload with
+              | PStr [ { pstr_desc = Pstr_value (_, vbs); _ } ] ->
+                  List.iter
+                    (fun (vb : value_binding) ->
+                      check_attributes vb.pvb_attributes)
+                    vbs
+              | _ -> ())
+         | _ -> ());
+        super#structure_item i
+    end
+  in
+  checker#structure top;
+  top

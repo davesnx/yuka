@@ -52,15 +52,13 @@ module Derived = struct
   type refers = { s : status; p : point } [@@deriving codec]
 end
 
-module Client_component = struct
-  let%client make ~(a : int) ?(b : string option) ?(c : int = 1) () = <p>"hi"</p>
-end
+let%client make ~(a : int) ?(b : string option) ?(c : int = 1) () = <p>"hi"</p>
 
 module Async_codec = struct
   type r = { a : int list Yuka.Async.t; b : string Async.t } [@@deriving codec]
-
-  let%client make ~(items : int list Yuka.Async.t) () = <p />
 end
+
+let%client make ~(items : int list Yuka.Async.t) () = <p />
 
 module Recursive = struct
   type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree [@@deriving codec]
@@ -82,9 +80,8 @@ end
 let shared = State.make 0 [@@yuka.shared]
 let in_function () = State.make 0
 
-module Slotted = struct
-  let%client make ~(label : string) ~(children : Yuka.slot) () = <div>(Yuka.slot children)</div>
-end
+let%client make ~(label : string) ~(children : Yuka.slot) () = <div>(Yuka.slot children)</div>
+module Slotted = struct end
 
 let slot_one = <Yuka.Client><Slotted label="a"><p>"x"</p></Slotted></Yuka.Client>
 
@@ -128,8 +125,16 @@ end
 
 let nested_fixed = <div><ul><li>"a"</li><li>"b"</li></ul><p>"c"</p></div>
 
-let lazy_entry = [%yuka.lazy Demo_shared.Issue_props "../shared/issue_props.js"]
-let lazy_camel = [%yuka.lazy Lib.IssueProps "./chunks/issue_props.js"]
+let%client[@yuka.lazy] make ~(n : int) () = <p />
+
+let () = Yuka.mount ()
+let () = Yuka.mount ~navigation:false ()
+let () = Yuka.mount ?navigation:x ()
+let partial = Yuka.mount
+let partial_nav = Yuka.mount ~navigation:false
+let applied_once = Yuka.mount ~islands:other ()
+let () = Yuka.owner ()
+let () = mount ()
 
 module Awaiting = struct
   let basic = <Yuka.Await async=comments loading=(<p>"loading"</p>)>(fun items -> <ul><li>"x"</li><li>(State.get n)</li></ul>)</Yuka.Await>

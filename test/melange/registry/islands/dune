@@ -1,0 +1,6 @@
+(library
+ (name reg_islands)
+ (modes native melange)
+ (libraries yuka)
+ (preprocess
+  (pps yuka.ppx)))

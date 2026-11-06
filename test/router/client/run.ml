@@ -128,7 +128,7 @@ let ints = string_of_int
 let bools = string_of_bool
 let page body = "<main>" ^ body ^ "</main>"
 let doc title body = "<!doctype html><html><head><title>" ^ title ^ "</title></head><body>" ^ body ^ "</body></html>"
-let plain_start () = Router.start []
+let plain_start () = mount ~islands:(Client.registry []) ()
 
 let navigate_before_start finish =
   setup "";
@@ -210,7 +210,7 @@ let island n =
 let stop_then_start finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 1));
-  Router.start [ probe_entry ];
+  mount ~islands:(Client.registry [ probe_entry ]) ();
   check "first island started" "g0/1" (log_g ());
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page (island 2))) "";
@@ -403,6 +403,25 @@ let start_twice_listeners finish =
   check "popstate once" "1" (List.nth (String.split_on_char ',' second) 1);
   finish ()
 
+let mount_without_navigation finish =
+  State.set probe_runs 0;
+  setup (page ({|<a id="l" href="/two">x</a>|} ^ island 3));
+  mount ~islands:(Client.registry [ probe_entry ]) ~navigation:false ();
+  check "island started" "g0/3" (log_g ());
+  check "click not intercepted" "false" (bools (click "#l" ""));
+  check "no fetch" "0" (ints (calls ()));
+  check "page not swapped" "/start?x=1" (location_ ());
+  finish ()
+
+let mount_with_navigation finish =
+  State.set probe_runs 0;
+  setup (page ({|<a id="l" href="/two">x</a>|} ^ island 4));
+  mount ~islands:(Client.registry [ probe_entry ]) ();
+  check "island started" "g0/4" (log_g ());
+  check "click intercepted" "true" (bools (click "#l" ""));
+  check "one fetch" "1" (ints (calls ()));
+  finish ()
+
 let not_a_page status type_ finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -433,6 +452,8 @@ let all =
     ("start twice", start_twice);
     ("Browser.navigate", browser_navigate);
     ("start twice adds listeners once", start_twice_listeners);
+    ("mount starts islands, navigation off", mount_without_navigation);
+    ("mount starts islands, navigation on", mount_with_navigation);
     ("404 is a full load", not_a_page 404 "text/html");
     ("500 is a full load", not_a_page 500 "text/html");
     ("302 not followed is a full load", not_a_page 302 "text/html");

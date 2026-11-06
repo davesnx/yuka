@@ -6,3 +6,12 @@
   (pps yuka.ppx melange.ppx))
  (module_systems
   (es6 js)))
+
+(rule
+ (targets yuka_islands.ml)
+ (deps
+  (source_tree ../shared))
+ (action
+  (with-stdout-to
+   yuka_islands.ml
+   (run %{bin:yuka-islands} --library demo_shared ../shared))))

@@ -568,6 +568,111 @@ await step("7f. early start", async () => {
   await ctx.close();
 });
 
+await step("7g. generated island registry", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 260 } });
+  await ctx.addInitScript(installProbes);
+  const p = await ctx.newPage();
+  const errors: string[] = [];
+  p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  p.on("pageerror", (e) => errors.push(String(e)));
+  const islandModuleRe = /\/(counter|new_issue|issue_list|comments|issue_props|related)(-[^/]*)?\.js$/;
+  const seen: string[] = [];
+  p.on("request", (r) => {
+    const m = islandModuleRe.exec(new URL(r.url()).pathname);
+    if (m) seen.push(m[1]);
+  });
+  const lazyNames = () => ["comments", "issue_props", "related"].filter((n) => seen.includes(n)).join(",");
+  const has = (sel: string, ev: string) =>
+    p.evaluate(([s, e]) => !!(document.querySelector(s) as any)?.["__yuka_" + e], [sel, ev]);
+
+  await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
+  await p.waitForSelector(".related-list li");
+  await p.waitForTimeout(500);
+
+  check("7g.1 eager New_issue hydrated", await has(".new-issue-button", "click"));
+  check("7g.2 eager Counter (Idle) hydrated", await has(".counter-button", "click"));
+  check("7g.5 lazy Comments (Load) hydrated", await has(".comment-input", "input"));
+  check("7g.7 lazy Issue_props not started before interaction", !(await has(".props select", "change")));
+  check("7g.8 only the comments chunk is requested before interaction", lazyNames() === "comments", lazyNames());
+
+  if (!bundleMode) {
+    for (const n of ["counter", "new_issue", "issue_list"])
+      check(`7g.9 eager module ${n} is requested at load`, seen.includes(n), seen.join(","));
+  }
+
+  await p.locator(".props .property").first().hover();
+  await p.waitForTimeout(300);
+  check("7g.10 Issue_props live after hover", await has(".props select", "change"));
+  check("7g.11 issue_props chunk requested after hover, related not yet", lazyNames() === "comments,issue_props", lazyNames());
+  check(
+    "7g.12 Related not started below the fold",
+    (await p.evaluate(() => ((window as any).__ioFired as { cls: string }[]).filter((x) => /related/.test(x.cls)).length)) === 0,
+  );
+  await p.locator(".related").scrollIntoViewIfNeeded();
+  await p.waitForTimeout(400);
+  check("7g.13 related chunk requested after scroll", lazyNames() === "comments,issue_props,related", lazyNames());
+  const c0 = ((await p.locator(".counter-button").textContent()) ?? "").trim();
+  await p.locator(".counter-button").click();
+  await p.waitForTimeout(100);
+  check("7g.3 Counter is live: click changes the count", ((await p.locator(".counter-button").textContent()) ?? "").trim() !== c0);
+  await p.locator("body").click({ position: { x: 5, y: 5 } });
+  await p.keyboard.press("c");
+  await p.waitForSelector(".dialog", { timeout: 2000 });
+  check("7g.4 New_issue is live: c opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue");
+  await p.keyboard.press("Escape");
+  await p.locator(".comment-input").fill("probe");
+  check("7g.6 Comments is live: send enabled after typing", !(await p.locator(".comment-box button.primary").isDisabled()));
+
+  const requested = await p.evaluate(() =>
+    performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((u) => /\.js$/.test(u)),
+  );
+  for (const n of ["comments", "issue_props", "related"]) {
+    const hits = requested.filter((u) => new RegExp(`/${n}(-[^/]*)?\\.js$`).test(u));
+    check(`7g.14 ${n} has its own ${bundleMode ? "chunk" : "module"}, requested once`, hits.length === 1, hits.join(","));
+  }
+  if (bundleMode) {
+    const chunkFiles = requested.filter((u) => /\/(comments|issue_props|related)-[^/]*\.js$/.test(u));
+    check("7g.15 bundle: three distinct lazy chunks, not main.js", new Set(chunkFiles).size === 3 && !chunkFiles.some((u) => u.endsWith("/main.js")), chunkFiles.join(","));
+  }
+  check("7g.16 no 'no entry for island' or other errors", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+});
+
+await step("7h. client navigation with Yuka.mount ()", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const p = await ctx.newPage();
+  const errors: string[] = [];
+  p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  p.on("pageerror", (e) => errors.push(String(e)));
+  const docs: string[] = [];
+  const commentsReqs: string[] = [];
+  p.on("request", (r) => {
+    const path = new URL(r.url()).pathname;
+    if (r.resourceType() === "document") docs.push(path);
+    if (/\/comments(-[^/]*)?\.js$/.test(path)) commentsReqs.push(path);
+  });
+  await p.goto(base + "/", { waitUntil: "networkidle" });
+  await p.waitForSelector(".row");
+  await p.evaluate(() => ((window as any).__nav = "alive"));
+  check("7h.1 comments chunk not requested on /", commentsReqs.length === 0, commentsReqs.join(","));
+  await p.locator('.row[data-id="YUK-3"] .row-title').click();
+  await p.waitForURL("**/issue/YUK-3");
+  await p.waitForSelector(".comment-input");
+  await p.waitForTimeout(500);
+  check("7h.2 link click is not a document load", docs.length === 1 && docs[0] === "/" && (await p.evaluate(() => (window as any).__nav)) === "alive", docs.join(","));
+  check("7h.3 lazy island loaded by the navigated page", commentsReqs.length === 1, commentsReqs.join(","));
+  check("7h.4 Comments live after navigation", await p.evaluate(() => !!(document.querySelector(".comment-input") as any)?.__yuka_input));
+  await p.goBack();
+  await p.waitForSelector(".row");
+  await p.waitForTimeout(300);
+  const total = await p.locator(".row").count();
+  await p.fill(".filter", "keyboard");
+  await p.waitForTimeout(100);
+  check("7h.5 Issue_list live after navigating back", (await p.locator(".row").count()) < total);
+  check("7h.6 no errors", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+});
+
 await step("7d. script loading", async () => {
   const pg = await browser.newPage();
   await pg.goto(base + "/", { waitUntil: "networkidle" });

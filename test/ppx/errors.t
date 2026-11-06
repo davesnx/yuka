@@ -279,18 +279,6 @@ Template ids depend on the file name, line and column, not on the directory:
   template "t:1:8"
   template "t:2:8"
 
-Lazy entry, file name that does not match the module:
-
-  $ cat > l0.mlx <<'X'
-  > let e = [%yuka.lazy Demo_shared.Issue_props "../shared/related.js"]
-  > X
-  $ run l0
-  File "l0.mlx", line 1, characters 8-67:
-  1 | let e = [%yuka.lazy Demo_shared.Issue_props "../shared/related.js"]
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] [%yuka.lazy]: the file 'related.js' does not match the module 'Demo_shared.Issue_props' (expected 'issue_props.js')
-  [1]
-
 Await without async:
 
   $ cat > w0.mlx <<'X'
@@ -362,3 +350,64 @@ Await with an unknown prop:
               ^^^^^^^^^^^
   Error: [yuka] Yuka.Await takes async, loading and failed
   [1]
+
+Nested let%client in a module:
+
+  $ cat > n0.mlx <<'X'
+  > module M = struct
+  >   let%client make ~(a : int) () = <p />
+  > end
+  > X
+  $ run n0
+  File "n0.mlx", line 2, characters 2-39:
+  2 |   let%client make ~(a : int) () = <p />
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let%client is allowed only at the top level of a file, not inside a module or a function
+  [1]
+
+Nested let%client in a local module:
+
+  $ cat > n1.mlx <<'X'
+  > let f () =
+  >   let module M = struct
+  >     let%client make ~(a : int) () = <p />
+  >   end in
+  >   ()
+  > X
+  $ run n1
+  File "n1.mlx", line 3, characters 4-41:
+  3 |     let%client make ~(a : int) () = <p />
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let%client is allowed only at the top level of a file, not inside a module or a function
+  [1]
+
+Unknown yuka attribute on let%client:
+
+  $ cat > n2.mlx <<'X'
+  > let%client[@yuka.eager] make ~(a : int) () = <p />
+  > X
+  $ run n2
+  File "n2.mlx", line 1, characters 10-23:
+  1 | let%client[@yuka.eager] make ~(a : int) () = <p />
+                ^^^^^^^^^^^^^
+  Error: [yuka] unknown attribute [@yuka.eager] on a let%client binding (only [@yuka.lazy] is accepted)
+  [1]
+
+Unknown yuka attribute on the binding:
+
+  $ cat > n3.mlx <<'X'
+  > let%client make ~(a : int) () = <p /> [@@yuka.other]
+  > X
+  $ run n3
+  File "n3.mlx", line 1, characters 38-52:
+  1 | let%client make ~(a : int) () = <p /> [@@yuka.other]
+                                            ^^^^^^^^^^^^^^
+  Error: [yuka] unknown attribute [@yuka.other] on a let%client binding (only [@yuka.lazy] is accepted)
+  [1]
+
+Lazy attribute accepted:
+
+  $ cat > n4.mlx <<'X'
+  > let%client[@yuka.lazy] make ~(a : int) () = <p />
+  > X
+  $ run n4 > /dev/null

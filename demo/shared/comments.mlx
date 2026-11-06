@@ -1,7 +1,7 @@
 open Yuka
 open Model
 
-let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Comment.t list) () =
+let%client[@yuka.lazy] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Comment.t list) () =
   let comments = State.make comments in
   let draft = State.make "" in
   let error : string option State.t = State.make None in

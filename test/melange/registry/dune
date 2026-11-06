@@ -1,0 +1,23 @@
+(rule
+ (targets yuka_islands.ml)
+ (deps
+  (source_tree islands))
+ (action
+  (with-stdout-to
+   yuka_islands.ml
+   (run %{bin:yuka-islands} --library reg_islands islands))))
+
+(melange.emit
+ (target out)
+ (alias melange-registry)
+ (libraries reg_islands yuka yuka.js)
+ (preprocess
+  (pps yuka.ppx melange.ppx))
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (deps
+  (alias melange-registry))
+ (action
+  (run node %{dep:out/test/melange/registry/run.js})))

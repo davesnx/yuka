@@ -715,3 +715,20 @@ inside `yuka`.
   chunk for each lazy island.
 - README example "Island" and `demo/client/main.ml` become
   `let () = Yuka.mount ()`.
+
+### As built (v0.5, 2026-11-06)
+
+Changes from the design above, found in implementation and review:
+
+- The generator scans subdirectories only when the `dune` file in DIR has
+  `(include_subdirs unqualified)`, as dune does. A `(modules ...)` field is
+  an error (not supported).
+- It skips comments and strings. A file is lazy when `[@yuka.lazy]` or
+  `[@@yuka.lazy]` appears anywhere in it outside comments and strings, so the
+  attribute can be on the item or on the binding, as the ppx accepts.
+- A lazy path that does not start with `.` gets `./`, so the dynamic import
+  is relative and not a bare package name.
+- The ppx adds `~islands` to any `Yuka.mount ... ()` without an `islands`
+  argument, so `Yuka.mount ~navigation:false ()` works.
+- `Yuka.mount` checks `Web.in_browser` (`false` in `yuka.native`, `true` in
+  `yuka.js`).

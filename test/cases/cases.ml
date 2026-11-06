@@ -69,7 +69,7 @@ let mount_dispose () =
   let add, read = log () in
   let count = State.make 0 in
   let (), dispose =
-    mount (fun () ->
+    owner (fun () ->
         Effect.run
           ~cleanup:(fun () -> add "outer-clean")
           (fun () ->
@@ -291,7 +291,7 @@ let html_effect_skipped () =
    with Failure _ -> ());
   check "flag restored after exception" "false"
     (string_of_bool !Internal.server_rendering);
-  let (), dispose = mount (fun () -> ignore (component ())) in
+  let (), dispose = owner (fun () -> ignore (component ())) in
   dispose ();
   check "runs in mount" "1" (string_of_int !runs)
 
@@ -744,7 +744,7 @@ let memo_set_raises () =
 let disposal_order () =
   let add, read = log () in
   let (), dispose =
-    mount (fun () ->
+    owner (fun () ->
         Effect.run ~cleanup:(fun () -> add "first") (fun () -> ());
         Effect.run ~cleanup:(fun () -> add "second") (fun () -> ());
         Effect.run ~cleanup:(fun () -> add "third") (fun () -> ()))
@@ -755,7 +755,7 @@ let disposal_order () =
 let owned_removed_from_parent () =
   let add, read = log () in
   let (), dispose_parent =
-    mount (fun () ->
+    owner (fun () ->
         check "empty at first" "0" (string_of_int (Internal.owner_size ()));
         for i = 1 to 200 do
           let (), dispose =
@@ -937,7 +937,7 @@ let mount_raises_disposes () =
   let add, read = log () in
   let result =
     match
-      mount (fun () ->
+      owner (fun () ->
           Effect.run ~cleanup:(fun () -> add "cleaned") (fun () -> add "ran");
           failwith "boom")
     with
@@ -949,7 +949,7 @@ let mount_raises_disposes () =
   let count = State.make 0 in
   let runs = ref 0 in
   (match
-     mount (fun () ->
+     owner (fun () ->
          Effect.run (fun () -> ignore (State.get count); incr runs);
          failwith "again")
    with
@@ -961,7 +961,7 @@ let mount_raises_disposes () =
 let owned_raises_disposes () =
   let add, read = log () in
   let (), dispose_parent =
-    mount (fun () ->
+    owner (fun () ->
         (match
            Internal.owned (fun () ->
                Effect.run ~cleanup:(fun () -> add "cleaned") (fun () -> ());

@@ -868,6 +868,16 @@ let settled_cases =
 
 let navigation_cases =
   let open Alcotest in
+  let mount_needs_ppx () =
+    let raises_ppx f =
+      match f () with
+      | () -> false
+      | exception Failure m -> contains m "yuka.ppx"
+    in
+    check bool "no registry" true (raises_ppx (fun () -> Yuka.mount ()));
+    check bool "registry on native" true
+      (raises_ppx (fun () -> Yuka.mount ~islands:(Yuka.Client.registry []) ()))
+  in
   let early_head () =
     let html = Server.page ~early:true ~scripts:[ "/a.js"; "/b.js" ] (fun () -> Yuka.text "x") in
     check bool "async module scripts" true
@@ -965,7 +975,8 @@ let navigation_cases =
   [ test_case "early scripts" `Quick early_head;
     test_case "navigation request is settled" `Quick navigation;
     test_case "normal request streams" `Quick normal_request;
-    test_case "navigation keeps the timeout" `Quick navigation_timeout ]
+    test_case "navigation keeps the timeout" `Quick navigation_timeout;
+    test_case "mount needs the ppx" `Quick mount_needs_ppx ]
 
 let review_cases =
   let open Alcotest in

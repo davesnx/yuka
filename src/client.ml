@@ -821,3 +821,7 @@ let start ?(lazy_entries = []) entries =
           release ());
     Hashtbl.replace cleanups id release
   end
+
+type registry = { entries : Island.entry list; lazy_registry : lazy_entry list }
+
+let registry ?(lazy_entries = []) entries = { entries; lazy_registry = lazy_entries }

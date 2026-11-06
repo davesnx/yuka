@@ -1,5 +1,5 @@
-val mount : (unit -> 'a) -> 'a * (unit -> unit)
-(** [mount f] runs [f] in a new owner. Effects and memos created during [f]
+val owner : (unit -> 'a) -> 'a * (unit -> unit)
+(** [owner f] runs [f] in a new owner. Effects and memos created during [f]
     belong to it. The returned function disposes all of them: it stops the
     effects and runs their cleanups. *)
 
@@ -231,6 +231,12 @@ val each :
 
 module Client : sig
   type entry
+  (** Made by [entry]. The island modules expose it as [register], for
+      generated code only. *)
+
+  type registry
+
+  type lazy_entry
 
   val island :
     ?loading:loading ->
@@ -240,6 +246,10 @@ module Client : sig
     server element
   (** A client component placed in a server tree. The server prints its
       HTML and its props. *)
+
+  val registry : ?lazy_entries:lazy_entry list -> entry list -> registry
+  (** The islands of an app. For generated code: [yuka.ppx] and
+      [yuka-islands] build it. Pass it to [Yuka.mount]. *)
 
   val entry :
     name:string ->
@@ -256,8 +266,6 @@ module Client : sig
   (** A JavaScript promise, as made by a dynamic [import]. *)
 
   val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
-
-  type lazy_entry
 
   val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
   (** [lazy_entry ~name load]: an island whose code is loaded on demand.
@@ -506,21 +514,6 @@ module Router : sig
   val dispatch : 'r case list -> string -> 'r option
   (** The result of the first case that matches the target. *)
 
-  val start : ?lazy_entries:Client.lazy_entry list -> Client.entry list -> unit
-  (** [start entries] starts the islands with [Client.start entries] and
-      takes over navigation:
-
-      - A left click on an [<a href>] goes through [navigate] unless: the
-        event is already prevented, a modifier key is down, the link has a
-        [target] other than [_self], a [download] attribute or a
-        [data-yuka-reload] attribute, the URL is on another origin, or the URL
-        differs from the current one only by its fragment.
-      - [popstate] loads the entry's URL without pushing history.
-
-      [Browser.navigate] does [navigate] after [start], also after each
-      navigation. Calling [start] again is safe: the listeners are not added
-      twice. Browser only. *)
-
   val navigate : string -> unit
   (** [navigate url] loads [url] with the header [Yuka-Navigate: 1], stops
       the islands, replaces the content of [<body>] and [document.title] with
@@ -528,9 +521,26 @@ module Router : sig
       (after the page loaded) and scrolls to the fragment or to the top. A
       navigation started while another one loads aborts the first. If the
       request fails, the response is not 2xx or not [text/html], or it was
-      redirected to another origin, it does [location.assign url]. Before [start], it does
+      redirected to another origin, it does [location.assign url]. Before [Yuka.mount], it does
       [location.assign url]. Browser only. *)
 end
+
+val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
+(** [mount ()] is the whole client start. [yuka.ppx] rewrites it into
+    [mount ~islands:Yuka_islands.registry ()]. It starts the islands. When
+    [navigation] is true (default) it also takes over navigation:
+
+    - A left click on an [<a href>] goes through [Router.navigate] unless:
+      the event is already prevented, a modifier key is down, the link has a
+      [target] other than [_self], a [download] attribute or a
+      [data-yuka-reload] attribute, the URL is on another origin, or the URL
+      differs from the current one only by its fragment.
+    - [popstate] loads the entry's URL without pushing history.
+
+    With [~navigation:false] only the islands start and links load full
+    pages. Calling [mount] again is safe: the listeners are not added twice.
+    Raises [Failure], naming [yuka.ppx], without [~islands] (the ppx did not
+    run) or outside the browser. *)
 
 module Server : sig
   val log_error : (string -> unit) ref

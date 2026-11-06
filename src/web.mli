@@ -2,6 +2,7 @@ type node
 type event = Types.event
 type 'a promise
 
+val in_browser : bool
 val window : unit -> node
 val document : unit -> node
 val owner_document : node -> node

@@ -365,67 +365,59 @@ module Derived =
         let _ = refers_codec
       end[@@ocaml.doc "@inline"][@@merlin.hide ]
   end
-module Client_component =
+include
   struct
-    include
-      struct
-        let make ~a:(a : int) ?b:(b : string option) ?c:((c : int)= 1) () =
-          Yuka.lower "p" [] [Yuka.text "hi"]
-        let name = "Rewrite.Client_component"
-        let island ~a ?b ?c ?loading () =
-          (Yuka.Client.island ?loading ~name:"Rewrite.Client_component"
-             ~props:(`Assoc
-                       [("a", (Yuka.Codec.encode Yuka.Codec.int a));
-                       ("b",
-                         (Yuka.Codec.encode
-                            (Yuka.Codec.option Yuka.Codec.string) b));
-                       ("c",
-                         (Yuka.Codec.encode
-                            (Yuka.Codec.option Yuka.Codec.int) c))])
-             (fun () -> make ~a ?b ?c ()) : Yuka.server Yuka.element)
-        let register =
-          Yuka.Client.entry ~name:"Rewrite.Client_component"
-            (fun (j : Yuka.Json.t) ->
-               match j with
-               | `Assoc _yuka_fields ->
-                   (match Stdlib.List.assoc_opt "a" _yuka_fields with
-                    | Some _yuka_j0 ->
-                        (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
-                         | Stdlib.Ok _yuka_v0 ->
-                             let _yuka_j1 =
-                               match Stdlib.List.assoc_opt "b" _yuka_fields
+    let make ~a:(a : int) ?b:(b : string option) ?c:((c : int)= 1) () =
+      Yuka.lower "p" [] [Yuka.text "hi"]
+    let name = "Rewrite"
+    let island ~a ?b ?c ?loading () =
+      (Yuka.Client.island ?loading ~name:"Rewrite"
+         ~props:(`Assoc
+                   [("a", (Yuka.Codec.encode Yuka.Codec.int a));
+                   ("b",
+                     (Yuka.Codec.encode (Yuka.Codec.option Yuka.Codec.string)
+                        b));
+                   ("c",
+                     (Yuka.Codec.encode (Yuka.Codec.option Yuka.Codec.int) c))])
+         (fun () -> make ~a ?b ?c ()) : Yuka.server Yuka.element)
+    let register =
+      Yuka.Client.entry ~name:"Rewrite"
+        (fun (j : Yuka.Json.t) ->
+           match j with
+           | `Assoc _yuka_fields ->
+               (match Stdlib.List.assoc_opt "a" _yuka_fields with
+                | Some _yuka_j0 ->
+                    (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
+                     | Stdlib.Ok _yuka_v0 ->
+                         let _yuka_j1 =
+                           match Stdlib.List.assoc_opt "b" _yuka_fields with
+                           | Some j -> j
+                           | None -> `Null in
+                         (match Yuka.Codec.decode
+                                  (Yuka.Codec.option Yuka.Codec.string)
+                                  _yuka_j1
+                          with
+                          | Stdlib.Ok _yuka_v1 ->
+                              let _yuka_j2 =
+                                match Stdlib.List.assoc_opt "c" _yuka_fields
+                                with
+                                | Some j -> j
+                                | None -> `Null in
+                              (match Yuka.Codec.decode
+                                       (Yuka.Codec.option Yuka.Codec.int)
+                                       _yuka_j2
                                with
-                               | Some j -> j
-                               | None -> `Null in
-                             (match Yuka.Codec.decode
-                                      (Yuka.Codec.option Yuka.Codec.string)
-                                      _yuka_j1
-                              with
-                              | Stdlib.Ok _yuka_v1 ->
-                                  let _yuka_j2 =
-                                    match Stdlib.List.assoc_opt "c"
-                                            _yuka_fields
-                                    with
-                                    | Some j -> j
-                                    | None -> `Null in
-                                  (match Yuka.Codec.decode
-                                           (Yuka.Codec.option Yuka.Codec.int)
-                                           _yuka_j2
-                                   with
-                                   | Stdlib.Ok _yuka_v2 ->
-                                       let a = _yuka_v0 in
-                                       let b = _yuka_v1 in
-                                       let c = _yuka_v2 in
-                                       Stdlib.Ok
-                                         ((fun () -> make ~a ?b ?c ()))
-                                   | Stdlib.Error e ->
-                                       Stdlib.Error ("c" ^ (": " ^ e)))
-                              | Stdlib.Error e ->
-                                  Stdlib.Error ("b" ^ (": " ^ e)))
-                         | Stdlib.Error e -> Stdlib.Error ("a" ^ (": " ^ e)))
-                    | None -> Stdlib.Error "missing field a")
-               | _ -> Stdlib.Error "expected an object")
-      end
+                               | Stdlib.Ok _yuka_v2 ->
+                                   let a = _yuka_v0 in
+                                   let b = _yuka_v1 in
+                                   let c = _yuka_v2 in
+                                   Stdlib.Ok ((fun () -> make ~a ?b ?c ()))
+                               | Stdlib.Error e ->
+                                   Stdlib.Error ("c" ^ (": " ^ e)))
+                          | Stdlib.Error e -> Stdlib.Error ("b" ^ (": " ^ e)))
+                     | Stdlib.Error e -> Stdlib.Error ("a" ^ (": " ^ e)))
+                | None -> Stdlib.Error "missing field a")
+           | _ -> Stdlib.Error "expected an object")
   end
 module Async_codec =
   struct
@@ -479,39 +471,36 @@ module Async_codec =
           }
         let _ = r_codec
       end[@@ocaml.doc "@inline"][@@merlin.hide ]
-    include
-      struct
-        let make ~items:(items : int list Yuka.Async.t) () =
-          Yuka.lower "p" [] []
-        let name = "Rewrite.Async_codec"
-        let island ~items ?loading () =
-          (Yuka.Client.island ?loading ~name:"Rewrite.Async_codec"
-             ~props:(`Assoc
-                       [("items",
-                          (Yuka.Codec.encode
+  end
+include
+  struct
+    let make ~items:(items : int list Yuka.Async.t) () = Yuka.lower "p" [] []
+    let name = "Rewrite"
+    let island ~items ?loading () =
+      (Yuka.Client.island ?loading ~name:"Rewrite"
+         ~props:(`Assoc
+                   [("items",
+                      (Yuka.Codec.encode
+                         (Yuka.Codec.async (Yuka.Codec.list Yuka.Codec.int))
+                         items))]) (fun () -> make ~items ()) : Yuka.server
+                                                                  Yuka.element)
+    let register =
+      Yuka.Client.entry ~name:"Rewrite"
+        (fun (j : Yuka.Json.t) ->
+           match j with
+           | `Assoc _yuka_fields ->
+               (match Stdlib.List.assoc_opt "items" _yuka_fields with
+                | Some _yuka_j0 ->
+                    (match Yuka.Codec.decode
                              (Yuka.Codec.async
-                                (Yuka.Codec.list Yuka.Codec.int)) items))])
-             (fun () -> make ~items ()) : Yuka.server Yuka.element)
-        let register =
-          Yuka.Client.entry ~name:"Rewrite.Async_codec"
-            (fun (j : Yuka.Json.t) ->
-               match j with
-               | `Assoc _yuka_fields ->
-                   (match Stdlib.List.assoc_opt "items" _yuka_fields with
-                    | Some _yuka_j0 ->
-                        (match Yuka.Codec.decode
-                                 (Yuka.Codec.async
-                                    (Yuka.Codec.list Yuka.Codec.int))
-                                 _yuka_j0
-                         with
-                         | Stdlib.Ok _yuka_v0 ->
-                             let items = _yuka_v0 in
-                             Stdlib.Ok ((fun () -> make ~items ()))
-                         | Stdlib.Error e ->
-                             Stdlib.Error ("items" ^ (": " ^ e)))
-                    | None -> Stdlib.Error "missing field items")
-               | _ -> Stdlib.Error "expected an object")
-      end
+                                (Yuka.Codec.list Yuka.Codec.int)) _yuka_j0
+                     with
+                     | Stdlib.Ok _yuka_v0 ->
+                         let items = _yuka_v0 in
+                         Stdlib.Ok ((fun () -> make ~items ()))
+                     | Stdlib.Error e -> Stdlib.Error ("items" ^ (": " ^ e)))
+                | None -> Stdlib.Error "missing field items")
+           | _ -> Stdlib.Error "expected an object")
   end
 module Recursive =
   struct
@@ -836,52 +825,45 @@ module Sigs :
   end 
 let shared = State.make 0[@@yuka.shared ]
 let in_function () = State.make 0
-module Slotted =
+include
   struct
-    include
-      struct
-        let make ~label:(label : string) ~children:(children : Yuka.slot) ()
-          = Yuka.lower "div" [] [Yuka.slot children]
-        let name = "Rewrite.Slotted"
-        let island ~label ~children ?loading () =
-          (Yuka.Client.island ?loading ~name:"Rewrite.Slotted"
-             ~props:(`Assoc
-                       [("label",
-                          (Yuka.Codec.encode Yuka.Codec.string label));
-                       ("children",
-                         (Yuka.Codec.encode Yuka.Codec.slot children))])
-             (fun () -> make ~label ~children ()) : Yuka.server Yuka.element)
-        let register =
-          Yuka.Client.entry ~name:"Rewrite.Slotted"
-            (fun (j : Yuka.Json.t) ->
-               match j with
-               | `Assoc _yuka_fields ->
-                   (match Stdlib.List.assoc_opt "label" _yuka_fields with
-                    | Some _yuka_j0 ->
-                        (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0
-                         with
-                         | Stdlib.Ok _yuka_v0 ->
-                             (match Stdlib.List.assoc_opt "children"
-                                      _yuka_fields
-                              with
-                              | Some _yuka_j1 ->
-                                  (match Yuka.Codec.decode Yuka.Codec.slot
-                                           _yuka_j1
-                                   with
-                                   | Stdlib.Ok _yuka_v1 ->
-                                       let label = _yuka_v0 in
-                                       let children = _yuka_v1 in
-                                       Stdlib.Ok
-                                         ((fun () -> make ~label ~children ()))
-                                   | Stdlib.Error e ->
-                                       Stdlib.Error ("children" ^ (": " ^ e)))
-                              | None -> Stdlib.Error "missing field children")
-                         | Stdlib.Error e ->
-                             Stdlib.Error ("label" ^ (": " ^ e)))
-                    | None -> Stdlib.Error "missing field label")
-               | _ -> Stdlib.Error "expected an object")
-      end
+    let make ~label:(label : string) ~children:(children : Yuka.slot) () =
+      Yuka.lower "div" [] [Yuka.slot children]
+    let name = "Rewrite"
+    let island ~label ~children ?loading () =
+      (Yuka.Client.island ?loading ~name:"Rewrite"
+         ~props:(`Assoc
+                   [("label", (Yuka.Codec.encode Yuka.Codec.string label));
+                   ("children", (Yuka.Codec.encode Yuka.Codec.slot children))])
+         (fun () -> make ~label ~children ()) : Yuka.server Yuka.element)
+    let register =
+      Yuka.Client.entry ~name:"Rewrite"
+        (fun (j : Yuka.Json.t) ->
+           match j with
+           | `Assoc _yuka_fields ->
+               (match Stdlib.List.assoc_opt "label" _yuka_fields with
+                | Some _yuka_j0 ->
+                    (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0 with
+                     | Stdlib.Ok _yuka_v0 ->
+                         (match Stdlib.List.assoc_opt "children" _yuka_fields
+                          with
+                          | Some _yuka_j1 ->
+                              (match Yuka.Codec.decode Yuka.Codec.slot
+                                       _yuka_j1
+                               with
+                               | Stdlib.Ok _yuka_v1 ->
+                                   let label = _yuka_v0 in
+                                   let children = _yuka_v1 in
+                                   Stdlib.Ok
+                                     ((fun () -> make ~label ~children ()))
+                               | Stdlib.Error e ->
+                                   Stdlib.Error ("children" ^ (": " ^ e)))
+                          | None -> Stdlib.Error "missing field children")
+                     | Stdlib.Error e -> Stdlib.Error ("label" ^ (": " ^ e)))
+                | None -> Stdlib.Error "missing field label")
+           | _ -> Stdlib.Error "expected an object")
   end
+module Slotted = struct  end
 let slot_one =
   Slotted.island ~label:"a"
     ~children:(Yuka.Slot.make (Yuka.lower "p" [] [Yuka.text "x"])) ()
@@ -895,12 +877,12 @@ let slot_many =
 let loading = Slotted.island ~loading:`Visible ~label:"a" ()
 let loading_optional = Slotted.island ?loading ~label:"a" ()
 let select_value =
-  Yuka.template "rewrite:97:19"
+  Yuka.template "rewrite:94:19"
     (Yuka.lower "select" [Yuka.attr "value" ("a" : string)]
        [Yuka.lower "option" [Yuka.attr "value" ("a" : string)]
           [Yuka.text "A"]])
 let select_hole =
-  Yuka.template "rewrite:99:18"
+  Yuka.template "rewrite:96:18"
     (Yuka.lower "select"
        [Yuka.hole_attr "value" (fun () -> Some (State.get v : string))]
        [Yuka.lower "option" [Yuka.attr "value" ("a" : string)]
@@ -913,7 +895,7 @@ let textarea_hole =
 module Templates =
   struct
     let fixed =
-      Yuka.template "rewrite:106:14"
+      Yuka.template "rewrite:103:14"
         (Yuka.lower "ul"
            (Stdlib.List.filter_map Stdlib.Fun.id
               [Some (Yuka.attr "class" ("list" : string));
@@ -923,7 +905,7 @@ module Templates =
            Yuka.lower "li" [Yuka.on "click" (fun _ -> ())]
              [Yuka.hole (fun () -> State.get n)]])
     let fixed_hole_attr =
-      Yuka.template "rewrite:108:24"
+      Yuka.template "rewrite:105:24"
         (Yuka.lower "div"
            [Yuka.hole_attr "class" (fun () -> Some (State.get c : string))]
            [Yuka.lower "span" [] [Yuka.text "x"]])
@@ -948,55 +930,76 @@ module Templates =
       Yuka.lower "p" [] [Yuka.hole (fun () -> State.get n)]
     let fixed_inside_not_fixed =
       Yuka.lower "div" [Yuka.attr "class" (cls : string)]
-        [Yuka.template "rewrite:122:47"
+        [Yuka.template "rewrite:119:47"
            (Yuka.lower "ul" []
               [Yuka.lower "li" [] [Yuka.text "a"];
               Yuka.lower "li" [] [Yuka.text "b"]]);
         label]
     let hole_with_fixed_inside =
-      Yuka.template "rewrite:124:31"
+      Yuka.template "rewrite:121:31"
         (Yuka.lower "div" []
            [Yuka.lower "span" [] [Yuka.text "s"];
            Yuka.lower "b" [] [Yuka.hole (fun () -> State.get n)];
            Yuka.hole (fun () -> State.get m)])
     let template_in_hole =
-      Yuka.template "rewrite:126:25"
+      Yuka.template "rewrite:123:25"
         (Yuka.lower "div" []
            [Yuka.lower "p" [] [Yuka.text "a"];
            Yuka.hole
              (fun () ->
                 if State.get ok
                 then
-                  Yuka.template "rewrite:126:62"
+                  Yuka.template "rewrite:123:62"
                     (Yuka.lower "ul" []
                        [Yuka.lower "li" [] [Yuka.text "y"];
                        Yuka.lower "li" [] [Yuka.text "z"]])
                 else Yuka.empty)])
   end
 let nested_fixed =
-  Yuka.template "rewrite:129:19"
+  Yuka.template "rewrite:126:19"
     (Yuka.lower "div" []
        [Yuka.lower "ul" []
           [Yuka.lower "li" [] [Yuka.text "a"];
           Yuka.lower "li" [] [Yuka.text "b"]];
        Yuka.lower "p" [] [Yuka.text "c"]])
-let lazy_entry =
-  Yuka.Client.lazy_entry ~name:"Demo_shared.Issue_props"
-    ([%mel.raw
-       {|function(){ return import("../shared/issue_props.js").then(function(m){ return m.register; }) }|}] : 
-    unit -> Yuka.Client.entry Yuka.Client.promise)
-let lazy_camel =
-  Yuka.Client.lazy_entry ~name:"Lib.IssueProps"
-    ([%mel.raw
-       {|function(){ return import("./chunks/issue_props.js").then(function(m){ return m.register; }) }|}] : 
-    unit -> Yuka.Client.entry Yuka.Client.promise)
+include
+  struct
+    let make ~n:(n : int) () = Yuka.lower "p" [] [][@@yuka.lazy ]
+    let name = "Rewrite"
+    let island ~n ?loading () =
+      (Yuka.Client.island ?loading ~name:"Rewrite"
+         ~props:(`Assoc [("n", (Yuka.Codec.encode Yuka.Codec.int n))])
+         (fun () -> make ~n ()) : Yuka.server Yuka.element)
+    let register =
+      Yuka.Client.entry ~name:"Rewrite"
+        (fun (j : Yuka.Json.t) ->
+           match j with
+           | `Assoc _yuka_fields ->
+               (match Stdlib.List.assoc_opt "n" _yuka_fields with
+                | Some _yuka_j0 ->
+                    (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
+                     | Stdlib.Ok _yuka_v0 ->
+                         let n = _yuka_v0 in
+                         Stdlib.Ok ((fun () -> make ~n ()))
+                     | Stdlib.Error e -> Stdlib.Error ("n" ^ (": " ^ e)))
+                | None -> Stdlib.Error "missing field n")
+           | _ -> Stdlib.Error "expected an object")
+  end
+let () = Yuka.mount ~islands:Yuka_islands.registry ()
+let () = Yuka.mount ~navigation:false ~islands:Yuka_islands.registry ()
+let () = Yuka.mount ?navigation:x ~islands:Yuka_islands.registry ()
+let partial = Yuka.mount
+let partial_nav = Yuka.mount ~navigation:false
+let applied_once = Yuka.mount ~islands:other ()
+let () = Yuka.owner ()
+let () = mount ()
 module Awaiting =
   struct
     let basic =
       Yuka.Await.make ~async:comments
         ~loading:(Yuka.lower "p" [] [Yuka.text "loading"])
         ~children:(fun items ->
-                     Yuka.template "rewrite:135:82"
+                     Yuka.template "rewrite:140:82"
                        (Yuka.lower "ul" []
                           [Yuka.lower "li" [] [Yuka.text "x"];
                           Yuka.lower "li" []

@@ -447,6 +447,15 @@ let rewrite_jsx self e =
             (props @ [ (Labelled "children", list_expr ~loc kids); (Nolabel, [%expr ()]) ]))
   | _ -> e
 
+let is_unapplied_mount args =
+  match List.rev args with
+  | (Nolabel, { pexp_desc = Pexp_construct ({ txt = Lident "()"; _ }, None); _ }) :: rest ->
+      not
+        (List.exists
+           (fun (l, _) -> match l with Labelled "islands" | Optional "islands" -> true | _ -> false)
+           rest)
+  | _ -> false
+
 let mapper =
   object (self)
     inherit Ast_traverse.map as super
@@ -458,6 +467,21 @@ let mapper =
         | Pexp_open (o, _) ->
             check_open ~loc:e.pexp_loc o "a local open of Yuka.State";
             super#expression e
+        | Pexp_apply
+            ( ({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Yuka", "mount"); _ }; _ } as f),
+              args )
+          when is_unapplied_mount args ->
+            let loc = e.pexp_loc in
+            let args = List.map (fun (l, a) -> (l, self#expression a)) args in
+            let rev = List.rev args in
+            let unit_arg = List.hd rev in
+            let rest = List.rev (List.tl rev) in
+            { e with
+              pexp_desc =
+                Pexp_apply
+                  ( f,
+                    rest
+                    @ [ (Labelled "islands", [%expr Yuka_islands.registry]); unit_arg ] ) }
         | Pexp_letmodule (n, m, _) when n.txt <> Some "State" && is_yuka_state m ->
             lint_error ~loc:e.pexp_loc "a local alias of Yuka.State"
         | _ -> super#expression e
@@ -485,5 +509,6 @@ let mapper =
 let () =
   Codec_gen.register ();
   Driver.register_transformation "yuka"
-    ~rules:[ Context_free.Rule.extension Island.extension; Context_free.Rule.extension Lazy_entry.extension ]
+    ~preprocess_impl:Island.check_placement
+    ~rules:[ Context_free.Rule.extension Island.extension ]
     ~impl:mapper#structure ~intf:mapper#signature
