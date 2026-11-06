@@ -1,0 +1,11 @@
+(library
+ (name demo_app)
+ (modules store pages handlers)
+ (libraries demo_shared yuka yuka.server lwt lwt.unix)
+ (preprocess
+  (pps yuka.ppx)))
+
+(executable
+ (name demo_server)
+ (modules demo_server)
+ (libraries demo_app demo_shared yuka.router yuka.router.server yuka.server dream))

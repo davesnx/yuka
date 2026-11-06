@@ -1,0 +1,32 @@
+module Badge = struct
+  let make ~label ~children:(_ : _ Yuka.element) () : _ Yuka.element =
+    <span class_="badge">(Yuka.text label)</span>
+end
+
+module Card = struct
+  let make ~title ~children () : Yuka.client Yuka.element =
+    <section aria_label=title>(children)</section>
+end
+
+let count : int Yuka.State.t = Yuka.State.make 0 [@@yuka.shared]
+
+let static_view : Yuka.server Yuka.element =
+  <div class_="a" data_id="1" tabindex=2 hidden=false>
+    "static "
+    <a href="/x" ?title=(Some "t")>"link"</a>
+    <input type_=`text disabled=true ?placeholder=None />
+  </div>
+
+let client_view : Yuka.client Yuka.element =
+  <div class_=(if Yuka.State.get count > 0 then "pos" else "zero")>
+    <button onClick=(fun _ -> Yuka.State.update count succ)>"inc"</button>
+    <input onInput=(fun e -> ignore (Yuka.Event.target_value e)) />
+    "n"
+    (Yuka.hole (fun () -> Yuka.text (string_of_int (Yuka.State.get count))))
+  </div>
+
+let components : Yuka.client Yuka.element =
+  <Card title="t">
+    <Badge label="b"><b>"x"</b></Badge>
+    <p>"two"</p>
+  </Card>

@@ -1,0 +1,992 @@
+let static_attrs =
+  Yuka.lower "a"
+    [Yuka.attr "class" ("nav" : string);
+    Yuka.attr "href" ("/x" : string);
+    Yuka.attr "tabindex" (Stdlib.string_of_int (3 : int))] [Yuka.text "home"]
+let bool_and_optional =
+  Yuka.lower "input"
+    (Stdlib.List.filter_map Stdlib.Fun.id
+       [Some
+          (Yuka.attr "type"
+             (match (`text : [ `button  | `checkbox  | `color  | `date 
+                             | `datetime_local  | `email  | `file  | 
+                               `hidden 
+                             | `image  | `month  | `number  | `password 
+                             | `radio  | `range  | `reset  | `search 
+                             | `submit  | `tel  | `text  | `time  | `url 
+                             | `week ])
+              with
+              | `button -> "button"
+              | `checkbox -> "checkbox"
+              | `color -> "color"
+              | `date -> "date"
+              | `datetime_local -> "datetime-local"
+              | `email -> "email"
+              | `file -> "file"
+              | `hidden -> "hidden"
+              | `image -> "image"
+              | `month -> "month"
+              | `number -> "number"
+              | `password -> "password"
+              | `radio -> "radio"
+              | `range -> "range"
+              | `reset -> "reset"
+              | `search -> "search"
+              | `submit -> "submit"
+              | `tel -> "tel"
+              | `text -> "text"
+              | `time -> "time"
+              | `url -> "url"
+              | `week -> "week"));
+       Stdlib.Option.map (Yuka.attr "disabled")
+         (if (true : bool) then Some "" else None);
+       Stdlib.Option.map (Yuka.attr "hidden")
+         (if (flag : bool) then Some "" else None);
+       Stdlib.Option.map (Yuka.attr "placeholder")
+         (Stdlib.Option.map (fun v -> (v : string))
+            (placeholder : string option));
+       Stdlib.Option.map (Yuka.attr "autofocus")
+         (match (autofocus : bool option) with
+          | Some true -> Some ""
+          | _ -> None)]) []
+let data_and_aria =
+  Yuka.lower "div"
+    [Yuka.attr "data-user-id" ("7" : string);
+    Yuka.attr "aria-label" ("menu" : string)] []
+let handler =
+  Yuka.lower "button" [Yuka.on "click" (fun _ -> ())] [Yuka.text "go"]
+let optional_handler =
+  Yuka.lower "input"
+    (Stdlib.List.filter_map Stdlib.Fun.id
+       [Stdlib.Option.map (Yuka.on "input") onInput]) []
+let string_child = Yuka.lower "p" [] [Yuka.text "hello"]
+let hole_child = Yuka.lower "p" [] [Yuka.hole (fun () -> State.get count)]
+let qualified_hole_child =
+  Yuka.lower "p" [] [Yuka.hole (fun () -> Yuka.State.get count)]
+let get_inside_fun =
+  Yuka.lower "button"
+    [Yuka.on "click" (fun _ -> State.set c ((State.get c) + 1))] [label]
+let get_inside_fun_child =
+  Yuka.lower "ul" []
+    [Yuka.each ~key (fun () -> State.get items)
+       (fun i -> Yuka.lower "li" [] [Yuka.text "x"])]
+let hole_attribute =
+  Yuka.lower "div"
+    [Yuka.hole_attr "class"
+       (fun () -> Some (if State.get on then "a" else "b" : string));
+    Yuka.hole_attr "hidden"
+      (fun () -> if (State.get h : bool) then Some "" else None);
+    Yuka.hole_attr "tabindex"
+      (fun () -> Some (Stdlib.string_of_int (State.get n : int)))] []
+let component_plain = Ui.Badge.make ~tone:1 ~label:"x" ()
+let component_one_child =
+  Ui.Card.make ~title:"t" ~children:(Yuka.lower "p" [] [Yuka.text "body"]) ()
+let component_children =
+  Ui.Card.make ~title:"t"
+    ~children:(Yuka.fragment
+                 [Yuka.text "a";
+                 Yuka.hole (fun () -> State.get s);
+                 Yuka.lower "b" [] [Yuka.text "c"]]) ()
+let component_prop_no_hole = Ui.Card.make ~title:(State.get s) ()
+let nested =
+  Yuka.template "rewrite:31:13"
+    (Yuka.lower "ul" [Yuka.attr "class" ("list" : string)]
+       [Yuka.lower "li" [] [Yuka.text "one"];
+       Yuka.lower "li" []
+         [Yuka.lower "a" [Yuka.attr "href" ("/y" : string)]
+            [Yuka.hole (fun () -> State.get name)]]])
+let lowercase_function = Ui.button ~label:"l" ~children:[Yuka.text "txt"] ()
+let svg =
+  Yuka.template "rewrite:35:10"
+    (Yuka.lower "svg" [Yuka.attr "viewBox" ("0 0 10 10" : string)]
+       [Yuka.lower "circle"
+          [Yuka.attr "cx" ("5" : string);
+          Yuka.attr "cy" ("5" : string);
+          Yuka.attr "r" ("4" : string);
+          Yuka.attr "stroke-dasharray" ("2 2" : string);
+          Yuka.attr "stroke-width" ("1" : string);
+          Yuka.attr "fill-opacity" ("0.5" : string)] [];
+       Yuka.lower "use" [Yuka.attr "xlink:href" ("#a" : string)] []])
+let island = Issue_list.island ~items:1 ?filter ()
+module Derived =
+  struct
+    type status =
+      | Open 
+      | Closed [@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : status) -> ()
+        let status_codec : status Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (function | Open -> `String "Open" | Closed -> `String "Closed");
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `String "Open" -> Stdlib.Ok Open
+                 | `String "Closed" -> Stdlib.Ok Closed
+                 | _ -> Stdlib.Error "invalid status")
+          }
+        let _ = status_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type issue =
+      {
+      id: int ;
+      title: string ;
+      note: string option ;
+      tags: string list }[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : issue) -> ()
+        let issue_codec : issue Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (fun (_yuka_x : issue) ->
+                 `Assoc
+                   [("id", (Yuka.Codec.encode Yuka.Codec.int _yuka_x.id));
+                   ("title",
+                     (Yuka.Codec.encode Yuka.Codec.string _yuka_x.title));
+                   ("note",
+                     (Yuka.Codec.encode (Yuka.Codec.option Yuka.Codec.string)
+                        _yuka_x.note));
+                   ("tags",
+                     (Yuka.Codec.encode (Yuka.Codec.list Yuka.Codec.string)
+                        _yuka_x.tags))]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `Assoc _yuka_fields ->
+                     (match Stdlib.List.assoc_opt "id" _yuka_fields with
+                      | Some _yuka_j0 ->
+                          (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0
+                           with
+                           | Stdlib.Ok _yuka_v0 ->
+                               (match Stdlib.List.assoc_opt "title"
+                                        _yuka_fields
+                                with
+                                | Some _yuka_j1 ->
+                                    (match Yuka.Codec.decode
+                                             Yuka.Codec.string _yuka_j1
+                                     with
+                                     | Stdlib.Ok _yuka_v1 ->
+                                         let _yuka_j2 =
+                                           match Stdlib.List.assoc_opt "note"
+                                                   _yuka_fields
+                                           with
+                                           | Some j -> j
+                                           | None -> `Null in
+                                         (match Yuka.Codec.decode
+                                                  (Yuka.Codec.option
+                                                     Yuka.Codec.string)
+                                                  _yuka_j2
+                                          with
+                                          | Stdlib.Ok _yuka_v2 ->
+                                              (match Stdlib.List.assoc_opt
+                                                       "tags" _yuka_fields
+                                               with
+                                               | Some _yuka_j3 ->
+                                                   (match Yuka.Codec.decode
+                                                            (Yuka.Codec.list
+                                                               Yuka.Codec.string)
+                                                            _yuka_j3
+                                                    with
+                                                    | Stdlib.Ok _yuka_v3 ->
+                                                        Stdlib.Ok
+                                                          {
+                                                            id = _yuka_v0;
+                                                            title = _yuka_v1;
+                                                            note = _yuka_v2;
+                                                            tags = _yuka_v3
+                                                          }
+                                                    | Stdlib.Error e ->
+                                                        Stdlib.Error
+                                                          ("tags" ^
+                                                             (": " ^ e)))
+                                               | None ->
+                                                   Stdlib.Error
+                                                     "missing field tags")
+                                          | Stdlib.Error e ->
+                                              Stdlib.Error
+                                                ("note" ^ (": " ^ e)))
+                                     | Stdlib.Error e ->
+                                         Stdlib.Error ("title" ^ (": " ^ e)))
+                                | None -> Stdlib.Error "missing field title")
+                           | Stdlib.Error e ->
+                               Stdlib.Error ("id" ^ (": " ^ e)))
+                      | None -> Stdlib.Error "missing field id")
+                 | _ -> Stdlib.Error "expected an object for issue")
+          }
+        let _ = issue_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type shape =
+      | Dot 
+      | Pair of int * string 
+      | Box of {
+      w: int ;
+      h: int } [@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : shape) -> ()
+        let shape_codec : shape Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (function
+               | Dot -> `String "Dot"
+               | Pair (_yuka_x0, _yuka_x1) ->
+                   `List
+                     [`String "Pair";
+                     Yuka.Codec.encode Yuka.Codec.int _yuka_x0;
+                     Yuka.Codec.encode Yuka.Codec.string _yuka_x1]
+               | Box _yuka_r ->
+                   `List
+                     [`String "Box";
+                     `Assoc
+                       [("w", (Yuka.Codec.encode Yuka.Codec.int _yuka_r.w));
+                       ("h", (Yuka.Codec.encode Yuka.Codec.int _yuka_r.h))]]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `String "Dot" -> Stdlib.Ok Dot
+                 | `List ((`String "Pair")::_yuka_j0::_yuka_j1::[]) ->
+                     (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
+                      | Stdlib.Ok _yuka_v0 ->
+                          (match Yuka.Codec.decode Yuka.Codec.string _yuka_j1
+                           with
+                           | Stdlib.Ok _yuka_v1 ->
+                               Stdlib.Ok (Pair (_yuka_v0, _yuka_v1))
+                           | Stdlib.Error e -> Stdlib.Error e)
+                      | Stdlib.Error e -> Stdlib.Error e)
+                 | `List ((`String "Box")::(`Assoc _yuka_fields)::[]) ->
+                     (match Stdlib.List.assoc_opt "w" _yuka_fields with
+                      | Some _yuka_j0 ->
+                          (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0
+                           with
+                           | Stdlib.Ok _yuka_v0 ->
+                               (match Stdlib.List.assoc_opt "h" _yuka_fields
+                                with
+                                | Some _yuka_j1 ->
+                                    (match Yuka.Codec.decode Yuka.Codec.int
+                                             _yuka_j1
+                                     with
+                                     | Stdlib.Ok _yuka_v1 ->
+                                         Stdlib.Ok
+                                           (Box
+                                              { w = _yuka_v0; h = _yuka_v1 })
+                                     | Stdlib.Error e ->
+                                         Stdlib.Error ("h" ^ (": " ^ e)))
+                                | None -> Stdlib.Error "missing field h")
+                           | Stdlib.Error e ->
+                               Stdlib.Error ("w" ^ (": " ^ e)))
+                      | None -> Stdlib.Error "missing field w")
+                 | _ -> Stdlib.Error "invalid shape")
+          }
+        let _ = shape_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type point = (int * float)[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : point) -> ()
+        let point_codec : point Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (fun (_yuka_x0, _yuka_x1) ->
+                 `List
+                   [Yuka.Codec.encode Yuka.Codec.int _yuka_x0;
+                   Yuka.Codec.encode Yuka.Codec.float _yuka_x1]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `List (_yuka_j0::_yuka_j1::[]) ->
+                     (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
+                      | Stdlib.Ok _yuka_v0 ->
+                          (match Yuka.Codec.decode Yuka.Codec.float _yuka_j1
+                           with
+                           | Stdlib.Ok _yuka_v1 ->
+                               Stdlib.Ok (_yuka_v0, _yuka_v1)
+                           | Stdlib.Error e -> Stdlib.Error e)
+                      | Stdlib.Error e -> Stdlib.Error e)
+                 | _ -> Stdlib.Error "expected a list of 2 items")
+          }
+        let _ = point_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type alias = Other.t[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : alias) -> ()
+        let alias_codec : alias Yuka.Codec.t = Other.codec
+        let _ = alias_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type later = Other.foo list[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : later) -> ()
+        let later_codec : later Yuka.Codec.t =
+          Yuka.Codec.list Other.foo_codec
+        let _ = later_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type refers = {
+      s: status ;
+      p: point }[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : refers) -> ()
+        let refers_codec : refers Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (fun (_yuka_x : refers) ->
+                 `Assoc
+                   [("s", (Yuka.Codec.encode status_codec _yuka_x.s));
+                   ("p", (Yuka.Codec.encode point_codec _yuka_x.p))]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `Assoc _yuka_fields ->
+                     (match Stdlib.List.assoc_opt "s" _yuka_fields with
+                      | Some _yuka_j0 ->
+                          (match Yuka.Codec.decode status_codec _yuka_j0 with
+                           | Stdlib.Ok _yuka_v0 ->
+                               (match Stdlib.List.assoc_opt "p" _yuka_fields
+                                with
+                                | Some _yuka_j1 ->
+                                    (match Yuka.Codec.decode point_codec
+                                             _yuka_j1
+                                     with
+                                     | Stdlib.Ok _yuka_v1 ->
+                                         Stdlib.Ok
+                                           { s = _yuka_v0; p = _yuka_v1 }
+                                     | Stdlib.Error e ->
+                                         Stdlib.Error ("p" ^ (": " ^ e)))
+                                | None -> Stdlib.Error "missing field p")
+                           | Stdlib.Error e ->
+                               Stdlib.Error ("s" ^ (": " ^ e)))
+                      | None -> Stdlib.Error "missing field s")
+                 | _ -> Stdlib.Error "expected an object for refers")
+          }
+        let _ = refers_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+  end
+module Client_component =
+  struct
+    include
+      struct
+        let make ~a:(a : int) ?b:(b : string option) ?c:((c : int)= 1) () =
+          Yuka.lower "p" [] [Yuka.text "hi"]
+        let name = "Rewrite.Client_component"
+        let island ~a ?b ?c ?loading () =
+          (Yuka.Client.island ?loading ~name:"Rewrite.Client_component"
+             ~props:(`Assoc
+                       [("a", (Yuka.Codec.encode Yuka.Codec.int a));
+                       ("b",
+                         (Yuka.Codec.encode
+                            (Yuka.Codec.option Yuka.Codec.string) b));
+                       ("c",
+                         (Yuka.Codec.encode
+                            (Yuka.Codec.option Yuka.Codec.int) c))])
+             (fun () -> make ~a ?b ?c ()) : Yuka.server Yuka.element)
+        let register =
+          Yuka.Client.entry ~name:"Rewrite.Client_component"
+            (fun (j : Yuka.Json.t) ->
+               match j with
+               | `Assoc _yuka_fields ->
+                   (match Stdlib.List.assoc_opt "a" _yuka_fields with
+                    | Some _yuka_j0 ->
+                        (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
+                         | Stdlib.Ok _yuka_v0 ->
+                             let _yuka_j1 =
+                               match Stdlib.List.assoc_opt "b" _yuka_fields
+                               with
+                               | Some j -> j
+                               | None -> `Null in
+                             (match Yuka.Codec.decode
+                                      (Yuka.Codec.option Yuka.Codec.string)
+                                      _yuka_j1
+                              with
+                              | Stdlib.Ok _yuka_v1 ->
+                                  let _yuka_j2 =
+                                    match Stdlib.List.assoc_opt "c"
+                                            _yuka_fields
+                                    with
+                                    | Some j -> j
+                                    | None -> `Null in
+                                  (match Yuka.Codec.decode
+                                           (Yuka.Codec.option Yuka.Codec.int)
+                                           _yuka_j2
+                                   with
+                                   | Stdlib.Ok _yuka_v2 ->
+                                       let a = _yuka_v0 in
+                                       let b = _yuka_v1 in
+                                       let c = _yuka_v2 in
+                                       Stdlib.Ok
+                                         ((fun () -> make ~a ?b ?c ()))
+                                   | Stdlib.Error e ->
+                                       Stdlib.Error ("c" ^ (": " ^ e)))
+                              | Stdlib.Error e ->
+                                  Stdlib.Error ("b" ^ (": " ^ e)))
+                         | Stdlib.Error e -> Stdlib.Error ("a" ^ (": " ^ e)))
+                    | None -> Stdlib.Error "missing field a")
+               | _ -> Stdlib.Error "expected an object")
+      end
+  end
+module Async_codec =
+  struct
+    type r = {
+      a: int list Yuka.Async.t ;
+      b: string Async.t }[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : r) -> ()
+        let r_codec : r Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (fun (_yuka_x : r) ->
+                 `Assoc
+                   [("a",
+                      (Yuka.Codec.encode
+                         (Yuka.Codec.async (Yuka.Codec.list Yuka.Codec.int))
+                         _yuka_x.a));
+                   ("b",
+                     (Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.string)
+                        _yuka_x.b))]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `Assoc _yuka_fields ->
+                     (match Stdlib.List.assoc_opt "a" _yuka_fields with
+                      | Some _yuka_j0 ->
+                          (match Yuka.Codec.decode
+                                   (Yuka.Codec.async
+                                      (Yuka.Codec.list Yuka.Codec.int))
+                                   _yuka_j0
+                           with
+                           | Stdlib.Ok _yuka_v0 ->
+                               (match Stdlib.List.assoc_opt "b" _yuka_fields
+                                with
+                                | Some _yuka_j1 ->
+                                    (match Yuka.Codec.decode
+                                             (Yuka.Codec.async
+                                                Yuka.Codec.string) _yuka_j1
+                                     with
+                                     | Stdlib.Ok _yuka_v1 ->
+                                         Stdlib.Ok
+                                           { a = _yuka_v0; b = _yuka_v1 }
+                                     | Stdlib.Error e ->
+                                         Stdlib.Error ("b" ^ (": " ^ e)))
+                                | None -> Stdlib.Error "missing field b")
+                           | Stdlib.Error e ->
+                               Stdlib.Error ("a" ^ (": " ^ e)))
+                      | None -> Stdlib.Error "missing field a")
+                 | _ -> Stdlib.Error "expected an object for r")
+          }
+        let _ = r_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    include
+      struct
+        let make ~items:(items : int list Yuka.Async.t) () =
+          Yuka.lower "p" [] []
+        let name = "Rewrite.Async_codec"
+        let island ~items ?loading () =
+          (Yuka.Client.island ?loading ~name:"Rewrite.Async_codec"
+             ~props:(`Assoc
+                       [("items",
+                          (Yuka.Codec.encode
+                             (Yuka.Codec.async
+                                (Yuka.Codec.list Yuka.Codec.int)) items))])
+             (fun () -> make ~items ()) : Yuka.server Yuka.element)
+        let register =
+          Yuka.Client.entry ~name:"Rewrite.Async_codec"
+            (fun (j : Yuka.Json.t) ->
+               match j with
+               | `Assoc _yuka_fields ->
+                   (match Stdlib.List.assoc_opt "items" _yuka_fields with
+                    | Some _yuka_j0 ->
+                        (match Yuka.Codec.decode
+                                 (Yuka.Codec.async
+                                    (Yuka.Codec.list Yuka.Codec.int))
+                                 _yuka_j0
+                         with
+                         | Stdlib.Ok _yuka_v0 ->
+                             let items = _yuka_v0 in
+                             Stdlib.Ok ((fun () -> make ~items ()))
+                         | Stdlib.Error e ->
+                             Stdlib.Error ("items" ^ (": " ^ e)))
+                    | None -> Stdlib.Error "missing field items")
+               | _ -> Stdlib.Error "expected an object")
+      end
+  end
+module Recursive =
+  struct
+    type 'a tree =
+      | Leaf 
+      | Node of 'a tree * 'a * 'a tree [@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : 'a tree) -> ()
+        let rec tree_codec : 'a . 'a Yuka.Codec.t -> 'a tree Yuka.Codec.t =
+          fun _yuka_p_a ->
+            {
+              Yuka.Codec.encode =
+                ((function
+                  | Leaf -> `String "Leaf"
+                  | Node (_yuka_x0, _yuka_x1, _yuka_x2) ->
+                      `List
+                        [`String "Node";
+                        Yuka.Codec.encode (tree_codec _yuka_p_a) _yuka_x0;
+                        Yuka.Codec.encode _yuka_p_a _yuka_x1;
+                        Yuka.Codec.encode (tree_codec _yuka_p_a) _yuka_x2]));
+              decode =
+                (fun (j : Yuka.Json.t) ->
+                   match j with
+                   | `String "Leaf" -> Stdlib.Ok Leaf
+                   | `List
+                       ((`String "Node")::_yuka_j0::_yuka_j1::_yuka_j2::[])
+                       ->
+                       (match Yuka.Codec.decode (tree_codec _yuka_p_a)
+                                _yuka_j0
+                        with
+                        | Stdlib.Ok _yuka_v0 ->
+                            (match Yuka.Codec.decode _yuka_p_a _yuka_j1 with
+                             | Stdlib.Ok _yuka_v1 ->
+                                 (match Yuka.Codec.decode
+                                          (tree_codec _yuka_p_a) _yuka_j2
+                                  with
+                                  | Stdlib.Ok _yuka_v2 ->
+                                      Stdlib.Ok
+                                        (Node (_yuka_v0, _yuka_v1, _yuka_v2))
+                                  | Stdlib.Error e -> Stdlib.Error e)
+                             | Stdlib.Error e -> Stdlib.Error e)
+                        | Stdlib.Error e -> Stdlib.Error e)
+                   | _ -> Stdlib.Error "invalid tree")
+            }
+        let _ = tree_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type rose = {
+      label: string ;
+      kids: rose list }[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : rose) -> ()
+        let rec rose_codec : rose Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (fun (_yuka_x : rose) ->
+                 `Assoc
+                   [("label",
+                      (Yuka.Codec.encode Yuka.Codec.string _yuka_x.label));
+                   ("kids",
+                     (Yuka.Codec.encode (Yuka.Codec.list rose_codec)
+                        _yuka_x.kids))]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `Assoc _yuka_fields ->
+                     (match Stdlib.List.assoc_opt "label" _yuka_fields with
+                      | Some _yuka_j0 ->
+                          (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0
+                           with
+                           | Stdlib.Ok _yuka_v0 ->
+                               (match Stdlib.List.assoc_opt "kids"
+                                        _yuka_fields
+                                with
+                                | Some _yuka_j1 ->
+                                    (match Yuka.Codec.decode
+                                             (Yuka.Codec.list rose_codec)
+                                             _yuka_j1
+                                     with
+                                     | Stdlib.Ok _yuka_v1 ->
+                                         Stdlib.Ok
+                                           {
+                                             label = _yuka_v0;
+                                             kids = _yuka_v1
+                                           }
+                                     | Stdlib.Error e ->
+                                         Stdlib.Error ("kids" ^ (": " ^ e)))
+                                | None -> Stdlib.Error "missing field kids")
+                           | Stdlib.Error e ->
+                               Stdlib.Error ("label" ^ (": " ^ e)))
+                      | None -> Stdlib.Error "missing field label")
+                 | _ -> Stdlib.Error "expected an object for rose")
+          }
+        let _ = rose_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type expr =
+      | Num of int 
+      | Block of stmts 
+    and stmts = stmt list
+    and stmt =
+      | Do of expr 
+      | Let of {
+      name: string ;
+      value: expr } [@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : expr) -> ()
+        let _ = fun (_ : stmts) -> ()
+        let _ = fun (_ : stmt) -> ()
+        let rec expr_codec : expr Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (function
+               | Num _yuka_x0 ->
+                   `List
+                     [`String "Num";
+                     Yuka.Codec.encode Yuka.Codec.int _yuka_x0]
+               | Block _yuka_x0 ->
+                   `List
+                     [`String "Block";
+                     Yuka.Codec.encode stmts_codec _yuka_x0]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `List ((`String "Num")::_yuka_j0::[]) ->
+                     (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
+                      | Stdlib.Ok _yuka_v0 -> Stdlib.Ok (Num _yuka_v0)
+                      | Stdlib.Error e -> Stdlib.Error e)
+                 | `List ((`String "Block")::_yuka_j0::[]) ->
+                     (match Yuka.Codec.decode stmts_codec _yuka_j0 with
+                      | Stdlib.Ok _yuka_v0 -> Stdlib.Ok (Block _yuka_v0)
+                      | Stdlib.Error e -> Stdlib.Error e)
+                 | _ -> Stdlib.Error "invalid expr")
+          }
+        and stmts_codec : stmts Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (fun x -> Yuka.Codec.encode (Yuka.Codec.list stmt_codec) x);
+            decode =
+              (fun j -> Yuka.Codec.decode (Yuka.Codec.list stmt_codec) j)
+          }
+        and stmt_codec : stmt Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (function
+               | Do _yuka_x0 ->
+                   `List
+                     [`String "Do"; Yuka.Codec.encode expr_codec _yuka_x0]
+               | Let _yuka_r ->
+                   `List
+                     [`String "Let";
+                     `Assoc
+                       [("name",
+                          (Yuka.Codec.encode Yuka.Codec.string _yuka_r.name));
+                       ("value",
+                         (Yuka.Codec.encode expr_codec _yuka_r.value))]]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `List ((`String "Do")::_yuka_j0::[]) ->
+                     (match Yuka.Codec.decode expr_codec _yuka_j0 with
+                      | Stdlib.Ok _yuka_v0 -> Stdlib.Ok (Do _yuka_v0)
+                      | Stdlib.Error e -> Stdlib.Error e)
+                 | `List ((`String "Let")::(`Assoc _yuka_fields)::[]) ->
+                     (match Stdlib.List.assoc_opt "name" _yuka_fields with
+                      | Some _yuka_j0 ->
+                          (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0
+                           with
+                           | Stdlib.Ok _yuka_v0 ->
+                               (match Stdlib.List.assoc_opt "value"
+                                        _yuka_fields
+                                with
+                                | Some _yuka_j1 ->
+                                    (match Yuka.Codec.decode expr_codec
+                                             _yuka_j1
+                                     with
+                                     | Stdlib.Ok _yuka_v1 ->
+                                         Stdlib.Ok
+                                           (Let
+                                              {
+                                                name = _yuka_v0;
+                                                value = _yuka_v1
+                                              })
+                                     | Stdlib.Error e ->
+                                         Stdlib.Error ("value" ^ (": " ^ e)))
+                                | None -> Stdlib.Error "missing field value")
+                           | Stdlib.Error e ->
+                               Stdlib.Error ("name" ^ (": " ^ e)))
+                      | None -> Stdlib.Error "missing field name")
+                 | _ -> Stdlib.Error "invalid stmt")
+          }
+        let _ = expr_codec
+        and _ = stmts_codec
+        and _ = stmt_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type pair = (int tree * Other.t Other.foo)[@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : pair) -> ()
+        let pair_codec : pair Yuka.Codec.t =
+          {
+            Yuka.Codec.encode =
+              (fun (_yuka_x0, _yuka_x1) ->
+                 `List
+                   [Yuka.Codec.encode (tree_codec Yuka.Codec.int) _yuka_x0;
+                   Yuka.Codec.encode (Other.foo_codec Other.codec) _yuka_x1]);
+            decode =
+              (fun (j : Yuka.Json.t) ->
+                 match j with
+                 | `List (_yuka_j0::_yuka_j1::[]) ->
+                     (match Yuka.Codec.decode (tree_codec Yuka.Codec.int)
+                              _yuka_j0
+                      with
+                      | Stdlib.Ok _yuka_v0 ->
+                          (match Yuka.Codec.decode
+                                   (Other.foo_codec Other.codec) _yuka_j1
+                           with
+                           | Stdlib.Ok _yuka_v1 ->
+                               Stdlib.Ok (_yuka_v0, _yuka_v1)
+                           | Stdlib.Error e -> Stdlib.Error e)
+                      | Stdlib.Error e -> Stdlib.Error e)
+                 | _ -> Stdlib.Error "expected a list of 2 items")
+          }
+        let _ = pair_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+    type ('a, 'b) either =
+      | Left of 'a 
+      | Right of 'b [@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : ('a, 'b) either) -> ()
+        let either_codec :
+          'a 'b .
+            'a Yuka.Codec.t ->
+              'b Yuka.Codec.t -> ('a, 'b) either Yuka.Codec.t
+          =
+          fun _yuka_p_a _yuka_p_b ->
+            {
+              Yuka.Codec.encode =
+                ((function
+                  | Left _yuka_x0 ->
+                      `List
+                        [`String "Left";
+                        Yuka.Codec.encode _yuka_p_a _yuka_x0]
+                  | Right _yuka_x0 ->
+                      `List
+                        [`String "Right";
+                        Yuka.Codec.encode _yuka_p_b _yuka_x0]));
+              decode =
+                (fun (j : Yuka.Json.t) ->
+                   match j with
+                   | `List ((`String "Left")::_yuka_j0::[]) ->
+                       (match Yuka.Codec.decode _yuka_p_a _yuka_j0 with
+                        | Stdlib.Ok _yuka_v0 -> Stdlib.Ok (Left _yuka_v0)
+                        | Stdlib.Error e -> Stdlib.Error e)
+                   | `List ((`String "Right")::_yuka_j0::[]) ->
+                       (match Yuka.Codec.decode _yuka_p_b _yuka_j0 with
+                        | Stdlib.Ok _yuka_v0 -> Stdlib.Ok (Right _yuka_v0)
+                        | Stdlib.Error e -> Stdlib.Error e)
+                   | _ -> Stdlib.Error "invalid either")
+            }
+        let _ = either_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+  end
+module Sigs :
+  sig
+    type 'a tree =
+      | Leaf 
+      | Node of 'a tree * 'a * 'a tree [@@deriving codec]
+    include
+      sig
+        [@@@ocaml.warning "-32"]
+        val tree_codec : 'a Yuka.Codec.t -> 'a tree Yuka.Codec.t
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+  end =
+  struct
+    type 'a tree =
+      | Leaf 
+      | Node of 'a tree * 'a * 'a tree [@@deriving codec]
+    include
+      struct
+        let _ = fun (_ : 'a tree) -> ()
+        let rec tree_codec : 'a . 'a Yuka.Codec.t -> 'a tree Yuka.Codec.t =
+          fun _yuka_p_a ->
+            {
+              Yuka.Codec.encode =
+                ((function
+                  | Leaf -> `String "Leaf"
+                  | Node (_yuka_x0, _yuka_x1, _yuka_x2) ->
+                      `List
+                        [`String "Node";
+                        Yuka.Codec.encode (tree_codec _yuka_p_a) _yuka_x0;
+                        Yuka.Codec.encode _yuka_p_a _yuka_x1;
+                        Yuka.Codec.encode (tree_codec _yuka_p_a) _yuka_x2]));
+              decode =
+                (fun (j : Yuka.Json.t) ->
+                   match j with
+                   | `String "Leaf" -> Stdlib.Ok Leaf
+                   | `List
+                       ((`String "Node")::_yuka_j0::_yuka_j1::_yuka_j2::[])
+                       ->
+                       (match Yuka.Codec.decode (tree_codec _yuka_p_a)
+                                _yuka_j0
+                        with
+                        | Stdlib.Ok _yuka_v0 ->
+                            (match Yuka.Codec.decode _yuka_p_a _yuka_j1 with
+                             | Stdlib.Ok _yuka_v1 ->
+                                 (match Yuka.Codec.decode
+                                          (tree_codec _yuka_p_a) _yuka_j2
+                                  with
+                                  | Stdlib.Ok _yuka_v2 ->
+                                      Stdlib.Ok
+                                        (Node (_yuka_v0, _yuka_v1, _yuka_v2))
+                                  | Stdlib.Error e -> Stdlib.Error e)
+                             | Stdlib.Error e -> Stdlib.Error e)
+                        | Stdlib.Error e -> Stdlib.Error e)
+                   | _ -> Stdlib.Error "invalid tree")
+            }
+        let _ = tree_codec
+      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+  end 
+let shared = State.make 0[@@yuka.shared ]
+let in_function () = State.make 0
+module Slotted =
+  struct
+    include
+      struct
+        let make ~label:(label : string) ~children:(children : Yuka.slot) ()
+          = Yuka.lower "div" [] [Yuka.slot children]
+        let name = "Rewrite.Slotted"
+        let island ~label ~children ?loading () =
+          (Yuka.Client.island ?loading ~name:"Rewrite.Slotted"
+             ~props:(`Assoc
+                       [("label",
+                          (Yuka.Codec.encode Yuka.Codec.string label));
+                       ("children",
+                         (Yuka.Codec.encode Yuka.Codec.slot children))])
+             (fun () -> make ~label ~children ()) : Yuka.server Yuka.element)
+        let register =
+          Yuka.Client.entry ~name:"Rewrite.Slotted"
+            (fun (j : Yuka.Json.t) ->
+               match j with
+               | `Assoc _yuka_fields ->
+                   (match Stdlib.List.assoc_opt "label" _yuka_fields with
+                    | Some _yuka_j0 ->
+                        (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0
+                         with
+                         | Stdlib.Ok _yuka_v0 ->
+                             (match Stdlib.List.assoc_opt "children"
+                                      _yuka_fields
+                              with
+                              | Some _yuka_j1 ->
+                                  (match Yuka.Codec.decode Yuka.Codec.slot
+                                           _yuka_j1
+                                   with
+                                   | Stdlib.Ok _yuka_v1 ->
+                                       let label = _yuka_v0 in
+                                       let children = _yuka_v1 in
+                                       Stdlib.Ok
+                                         ((fun () -> make ~label ~children ()))
+                                   | Stdlib.Error e ->
+                                       Stdlib.Error ("children" ^ (": " ^ e)))
+                              | None -> Stdlib.Error "missing field children")
+                         | Stdlib.Error e ->
+                             Stdlib.Error ("label" ^ (": " ^ e)))
+                    | None -> Stdlib.Error "missing field label")
+               | _ -> Stdlib.Error "expected an object")
+      end
+  end
+let slot_one =
+  Slotted.island ~label:"a"
+    ~children:(Yuka.Slot.make (Yuka.lower "p" [] [Yuka.text "x"])) ()
+let slot_many =
+  Slotted.island ~label:"a"
+    ~children:(Yuka.Slot.make
+                 (Yuka.fragment
+                    [Yuka.text "text";
+                    Yuka.lower "b" [] [Yuka.text "y"];
+                    Slotted.island ~label:"in" ()])) ()
+let loading = Slotted.island ~loading:`Visible ~label:"a" ()
+let loading_optional = Slotted.island ?loading ~label:"a" ()
+let select_value =
+  Yuka.template "rewrite:97:19"
+    (Yuka.lower "select" [Yuka.attr "value" ("a" : string)]
+       [Yuka.lower "option" [Yuka.attr "value" ("a" : string)]
+          [Yuka.text "A"]])
+let select_hole =
+  Yuka.template "rewrite:99:18"
+    (Yuka.lower "select"
+       [Yuka.hole_attr "value" (fun () -> Some (State.get v : string))]
+       [Yuka.lower "option" [Yuka.attr "value" ("a" : string)]
+          [Yuka.text "A"]])
+let textarea_value =
+  Yuka.lower "textarea" [Yuka.attr "value" ("x" : string)] []
+let textarea_hole =
+  Yuka.lower "textarea"
+    [Yuka.hole_attr "value" (fun () -> Some (State.get t : string))] []
+module Templates =
+  struct
+    let fixed =
+      Yuka.template "rewrite:106:14"
+        (Yuka.lower "ul"
+           (Stdlib.List.filter_map Stdlib.Fun.id
+              [Some (Yuka.attr "class" ("list" : string));
+              Stdlib.Option.map (Yuka.attr "hidden")
+                (if (false : bool) then Some "" else None)])
+           [Yuka.lower "li" [] [Yuka.text "one"];
+           Yuka.lower "li" [Yuka.on "click" (fun _ -> ())]
+             [Yuka.hole (fun () -> State.get n)]])
+    let fixed_hole_attr =
+      Yuka.template "rewrite:108:24"
+        (Yuka.lower "div"
+           [Yuka.hole_attr "class" (fun () -> Some (State.get c : string))]
+           [Yuka.lower "span" [] [Yuka.text "x"]])
+    let variable_child =
+      Yuka.lower "ul" []
+        [Yuka.lower "li" [] [Yuka.text "one"]; Yuka.lower "li" [] [label]]
+    let component_child =
+      Yuka.lower "div" []
+        [Yuka.lower "span" [] [Yuka.text "a"]; Ui.Badge.make ~x:1 ()]
+    let non_literal_attribute =
+      Yuka.lower "div" [Yuka.attr "class" (cls : string)]
+        [Yuka.lower "span" [] [Yuka.text "a"]]
+    let optional_attribute =
+      Yuka.lower "div"
+        (Stdlib.List.filter_map Stdlib.Fun.id
+           [Stdlib.Option.map (Yuka.attr "title")
+              (Stdlib.Option.map (fun v -> (v : string))
+                 (title : string option))])
+        [Yuka.lower "span" [] [Yuka.text "a"]]
+    let single = Yuka.lower "p" [] [Yuka.text "only"]
+    let single_with_hole =
+      Yuka.lower "p" [] [Yuka.hole (fun () -> State.get n)]
+    let fixed_inside_not_fixed =
+      Yuka.lower "div" [Yuka.attr "class" (cls : string)]
+        [Yuka.template "rewrite:122:47"
+           (Yuka.lower "ul" []
+              [Yuka.lower "li" [] [Yuka.text "a"];
+              Yuka.lower "li" [] [Yuka.text "b"]]);
+        label]
+    let hole_with_fixed_inside =
+      Yuka.template "rewrite:124:31"
+        (Yuka.lower "div" []
+           [Yuka.lower "span" [] [Yuka.text "s"];
+           Yuka.lower "b" [] [Yuka.hole (fun () -> State.get n)];
+           Yuka.hole (fun () -> State.get m)])
+    let template_in_hole =
+      Yuka.template "rewrite:126:25"
+        (Yuka.lower "div" []
+           [Yuka.lower "p" [] [Yuka.text "a"];
+           Yuka.hole
+             (fun () ->
+                if State.get ok
+                then
+                  Yuka.template "rewrite:126:62"
+                    (Yuka.lower "ul" []
+                       [Yuka.lower "li" [] [Yuka.text "y"];
+                       Yuka.lower "li" [] [Yuka.text "z"]])
+                else Yuka.empty)])
+  end
+let nested_fixed =
+  Yuka.template "rewrite:129:19"
+    (Yuka.lower "div" []
+       [Yuka.lower "ul" []
+          [Yuka.lower "li" [] [Yuka.text "a"];
+          Yuka.lower "li" [] [Yuka.text "b"]];
+       Yuka.lower "p" [] [Yuka.text "c"]])
+let lazy_entry =
+  Yuka_client.lazy_entry ~name:"Demo_shared.Issue_props"
+    ([%mel.raw
+       {|function(){ return import("../shared/issue_props.js").then(function(m){ return m.register; }) }|}] : 
+    unit -> Yuka.Client.entry Js.Promise.t)
+let lazy_camel =
+  Yuka_client.lazy_entry ~name:"Lib.IssueProps"
+    ([%mel.raw
+       {|function(){ return import("./chunks/issue_props.js").then(function(m){ return m.register; }) }|}] : 
+    unit -> Yuka.Client.entry Js.Promise.t)

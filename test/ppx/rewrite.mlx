@@ -1,0 +1,132 @@
+let static_attrs = <a class_="nav" href="/x" tabindex=3>"home"</a>
+
+let bool_and_optional = <input type_=`text disabled=true hidden=flag ?placeholder ?autofocus />
+
+let data_and_aria = <div data_user_id="7" aria_label="menu" />
+
+let handler = <button onClick=(fun _ -> ())>"go"</button>
+
+let optional_handler = <input ?onInput />
+
+let string_child = <p>"hello"</p>
+
+let hole_child = <p>(State.get count)</p>
+
+let qualified_hole_child = <p>(Yuka.State.get count)</p>
+
+let get_inside_fun = <button onClick=(fun _ -> State.set c (State.get c + 1))>(label)</button>
+
+let get_inside_fun_child = <ul>(Yuka.each ~key (fun () -> State.get items) (fun i -> <li>"x"</li>))</ul>
+
+let hole_attribute = <div class_=(if State.get on then "a" else "b") hidden=(State.get h) tabindex=(State.get n) />
+
+let component_plain = <Ui.Badge tone=1 label="x" />
+
+let component_one_child = <Ui.Card title="t"><p>"body"</p></Ui.Card>
+
+let component_children = <Ui.Card title="t">"a" (State.get s) <b>"c"</b></Ui.Card>
+
+let component_prop_no_hole = <Ui.Card title=(State.get s) />
+
+let nested = <ul class_="list"><li>"one"</li><li><a href="/y">(State.get name)</a></li></ul>
+
+let lowercase_function = <Ui.button label="l">"txt"</Ui.button>
+
+let svg = <svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" strokeDasharray="2 2" strokeWidth="1" fillOpacity="0.5" /><use xlinkHref="#a" /></svg>
+
+let island = <Yuka.Client><Issue_list items=1 ?filter /></Yuka.Client>
+
+module Derived = struct
+  type status = Open | Closed
+  [@@deriving codec]
+
+  type issue = { id : int; title : string; note : string option; tags : string list }
+  [@@deriving codec]
+
+  type shape = Dot | Pair of int * string | Box of { w : int; h : int }
+  [@@deriving codec]
+
+  type point = int * float [@@deriving codec]
+  type alias = Other.t [@@deriving codec]
+  type later = Other.foo list [@@deriving codec]
+  type refers = { s : status; p : point } [@@deriving codec]
+end
+
+module Client_component = struct
+  let%client make ~(a : int) ?(b : string option) ?(c : int = 1) () = <p>"hi"</p>
+end
+
+module Async_codec = struct
+  type r = { a : int list Yuka.Async.t; b : string Async.t } [@@deriving codec]
+
+  let%client make ~(items : int list Yuka.Async.t) () = <p />
+end
+
+module Recursive = struct
+  type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree [@@deriving codec]
+  type rose = { label : string; kids : rose list } [@@deriving codec]
+  type expr = Num of int | Block of stmts
+  and stmts = stmt list
+  and stmt = Do of expr | Let of { name : string; value : expr }
+  [@@deriving codec]
+  type pair = int tree * Other.t Other.foo [@@deriving codec]
+  type ('a, 'b) either = Left of 'a | Right of 'b [@@deriving codec]
+end
+
+module Sigs : sig
+  type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree [@@deriving codec]
+end = struct
+  type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree [@@deriving codec]
+end
+
+let shared = State.make 0 [@@yuka.shared]
+let in_function () = State.make 0
+
+module Slotted = struct
+  let%client make ~(label : string) ~(children : Yuka.slot) () = <div>(Yuka.slot children)</div>
+end
+
+let slot_one = <Yuka.Client><Slotted label="a"><p>"x"</p></Slotted></Yuka.Client>
+
+let slot_many = <Yuka.Client><Slotted label="a">"text" <b>"y"</b> <Yuka.Client><Slotted label="in" /></Yuka.Client></Slotted></Yuka.Client>
+
+let loading = <Yuka.Client loading=`Visible><Slotted label="a" /></Yuka.Client>
+
+let loading_optional = <Yuka.Client ?loading><Slotted label="a" /></Yuka.Client>
+
+let select_value = <select value="a"><option value="a">"A"</option></select>
+
+let select_hole = <select value=(State.get v)><option value="a">"A"</option></select>
+
+let textarea_value = <textarea value="x" />
+
+let textarea_hole = <textarea value=(State.get t) />
+
+module Templates = struct
+  let fixed = <ul class_="list" hidden=false><li>"one"</li><li onClick=(fun _ -> ())>(State.get n)</li></ul>
+
+  let fixed_hole_attr = <div class_=(State.get c)><span>"x"</span></div>
+
+  let variable_child = <ul><li>"one"</li><li>(label)</li></ul>
+
+  let component_child = <div><span>"a"</span><Ui.Badge x=1 /></div>
+
+  let non_literal_attribute = <div class_=cls><span>"a"</span></div>
+
+  let optional_attribute = <div ?title><span>"a"</span></div>
+
+  let single = <p>"only"</p>
+
+  let single_with_hole = <p>(State.get n)</p>
+
+  let fixed_inside_not_fixed = <div class_=cls><ul><li>"a"</li><li>"b"</li></ul>(label)</div>
+
+  let hole_with_fixed_inside = <div><span>"s"</span><b>(State.get n)</b>(State.get m)</div>
+
+  let template_in_hole = <div><p>"a"</p>(if State.get ok then <ul><li>"y"</li><li>"z"</li></ul> else Yuka.empty)</div>
+end
+
+let nested_fixed = <div><ul><li>"a"</li><li>"b"</li></ul><p>"c"</p></div>
+
+let lazy_entry = [%yuka.lazy Demo_shared.Issue_props "../shared/issue_props.js"]
+let lazy_camel = [%yuka.lazy Lib.IssueProps "./chunks/issue_props.js"]

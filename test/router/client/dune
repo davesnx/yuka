@@ -1,0 +1,14 @@
+(melange.emit
+ (target out)
+ (alias melange-tests)
+ (libraries cases yuka.client yuka.router.client)
+ (preprocess
+  (pps melange.ppx))
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (deps
+  (alias melange-tests))
+ (action
+  (run node %{dep:out/test/router/client/run.js})))

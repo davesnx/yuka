@@ -1,0 +1,4 @@
+(library
+ (name yuka_router_server)
+ (public_name yuka.router.server)
+ (libraries yuka.router dream))

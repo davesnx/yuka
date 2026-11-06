@@ -1,0 +1,8 @@
+open Yuka
+
+let%client make ~(initial : int) () =
+  let n = State.make initial in
+  <button class_="counter-button" onClick=(fun _ -> State.update n succ)>
+    "Clicks: "
+    (Yuka.text (string_of_int (State.get n)))
+  </button>

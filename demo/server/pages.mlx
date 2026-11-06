@@ -1,0 +1,43 @@
+open Demo_shared
+
+let sidebar () : Yuka.server Yuka.element =
+  <div>
+    <Yuka.Client><New_issue /></Yuka.Client>
+    <Yuka.Client loading=`Idle><Counter initial=0 /></Yuka.Client>
+  </div>
+
+let shell ~active main : Yuka.server Yuka.element =
+  <Views.Shell workspace="Yuka" active sidebar=(sidebar ())>main</Views.Shell>
+
+let index () =
+  let issues = !Store.issues in
+  shell ~active:Views.Shell.Issues
+    <Yuka.Client><Issue_list title="All issues" issues /></Yuka.Client>
+
+let my_issues () =
+  let issues = Store.mine () in
+  shell ~active:Views.Shell.My_issues
+    <Yuka.Client><Issue_list title="My issues" issues /></Yuka.Client>
+
+let issue ?(delay = 0.6) (i : Model.Issue.t) =
+  let comments =
+    Yuka.await (Store.comments_async ~delay i.id)
+      ~loading:<Views.Skeleton lines=3 />
+      ~failed:(fun m -> <p class_="error">(Yuka.text ("Could not load comments: " ^ m))</p>)
+      (fun comments ->
+        <Yuka.Client>
+          <Comments issue_id=i.id me=Store.me comments />
+        </Yuka.Client>)
+  in
+  let props =
+    <Yuka.Client loading=`Interaction>
+      <Issue_props issue=i>
+        <Yuka.Client loading=`Visible>
+          <Related related=(Store.related_async ~delay:(delay *. 1.5) i) />
+        </Yuka.Client>
+      </Issue_props>
+    </Yuka.Client>
+  in
+  shell ~active:Views.Shell.Issues <Views.Issue_page issue=i comments props />
+
+let not_found id = shell ~active:Views.Shell.Issues <Views.Not_found id />

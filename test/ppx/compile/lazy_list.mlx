@@ -1,0 +1,3 @@
+let%client make ~(items : int list Yuka.Async.t) () =
+  let _ = items in
+  <ul></ul>

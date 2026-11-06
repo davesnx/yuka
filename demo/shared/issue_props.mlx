@@ -1,0 +1,59 @@
+open Yuka
+open Model
+
+let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
+  let current = State.make issue in
+  let error : string option State.t = State.make None in
+  let change ?status ?priority () =
+    let before = State.peek current in
+    State.set error None;
+    State.set current
+      {
+        before with
+        status = Option.value status ~default:before.status;
+        priority = Option.value priority ~default:before.priority;
+      };
+    Async.on_result
+      (Action.call Actions.update_issue { Actions.id = before.id; status; priority })
+      (function
+        | Ok i -> State.set current i
+        | Error _ ->
+            State.set current before;
+            State.set error (Some "Could not update the issue."))
+  in
+  let select label items slug to_label of_slug selected on_pick =
+    <select class_="select" aria_label=label value=(slug (State.get selected))
+      onChange=(fun e -> Option.iter on_pick (of_slug (Event.target_value e)))>
+      (Yuka.list
+         (List.map
+            (fun x ->
+              <option value=(slug x)>
+                (Yuka.text (to_label x))
+              </option>)
+            items))
+    </select>
+  in
+  let status = State.memo (fun () -> (State.get current).status) in
+  let priority = State.memo (fun () -> (State.get current).priority) in
+  <div class_="props">
+    <Views.Property name="Status">
+      (Views.Status_icon.make ~status:(State.get status) ())
+      (select "Status" Issue.all_statuses Issue.status_slug Issue.status_label
+         Issue.status_of_slug status (fun s -> change ~status:s ()))
+    </Views.Property>
+    <Views.Property name="Priority">
+      (Views.Priority_icon.make ~priority:(State.get priority) ())
+      (select "Priority" Issue.all_priorities Issue.priority_slug Issue.priority_label
+         Issue.priority_of_slug priority (fun p -> change ~priority:p ()))
+    </Views.Property>
+    <Views.Property name="Assignee">
+      <Views.Avatar user=issue.assignee />
+      (Yuka.text (match issue.assignee with Some u -> u.User.name | None -> "Unassigned"))
+    </Views.Property>
+    <Views.Property name="Labels"><Views.Labels labels=issue.labels /></Views.Property>
+    <Views.Property name="Created">(Yuka.text issue.created_at)</Views.Property>
+    (match State.get error with
+     | Some m -> <p class_="error">(Yuka.text m)</p>
+     | None -> Yuka.empty)
+    (Yuka.slot children)
+  </div>

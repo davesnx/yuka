@@ -1,0 +1,4 @@
+(library
+ (name yuka)
+ (public_name yuka)
+ (modes native melange))

@@ -1,0 +1,3 @@
+(test
+ (name run)
+ (libraries ppx_compile yuka))

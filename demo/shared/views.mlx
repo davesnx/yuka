@@ -1,0 +1,128 @@
+open Model
+
+module Status_icon = struct
+  let make ~status () : _ Yuka.element =
+    let mark =
+      match status with
+      | Issue.Backlog -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      | Todo -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      | In_progress -> <path d="M7 3.5 A3.5 3.5 0 0 1 7 10.5 Z" fill="currentColor" />
+      | Done -> <path d="M4.5 7.2 L6.4 9 L9.6 5.2" fill="none" stroke="#fff" strokeWidth="1.5" />
+      | Canceled -> <path d="M5 5 L9 9 M9 5 L5 9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    in
+    let ring =
+      match status with
+      | Issue.Done -> <circle cx="7" cy="7" r="6.5" fill="currentColor" />
+      | In_progress -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      | _ -> Yuka.empty
+    in
+    <svg class_=("icon status-" ^ Issue.status_slug status) viewBox="0 0 14 14" width="14" height="14">
+      ring
+      mark
+    </svg>
+end
+
+module Priority_icon = struct
+  let make ~priority () : _ Yuka.element =
+    let level = match priority with
+      | Issue.Urgent -> 4 | High -> 3 | Medium -> 2 | Low -> 1 | No_priority -> 0 in
+    let bar i =
+      let h = 3 + (i * 3) in
+      <rect x=(string_of_int ((i - 1) * 4 + 1)) y=(string_of_int (14 - h)) width="3" height=(string_of_int h) rx="1"
+        class_=(if i <= level then "bar on" else "bar") />
+    in
+    <svg class_=("icon priority-" ^ Issue.priority_slug priority) viewBox="0 0 14 14" width="14" height="14">
+      (Yuka.list (List.map bar [ 1; 2; 3 ]))
+    </svg>
+end
+
+module Avatar = struct
+  let make ~user () : _ Yuka.element =
+    match user with
+    | Some u -> <span class_="avatar" title=u.User.name>(Yuka.text (User.initials u))</span>
+    | None -> <span class_="avatar empty" title="Unassigned">"?"</span>
+end
+
+module Labels = struct
+  let make ~labels () : _ Yuka.element =
+    <span class_="labels">
+      (Yuka.list
+         (List.map (fun l -> <span class_=("label label-" ^ l)>(Yuka.text l)</span>) labels))
+    </span>
+end
+
+module Group_header = struct
+  let make ~status ~count () : _ Yuka.element =
+    <header class_="group-header">
+      <Status_icon status />
+      <span class_="group-name">(Yuka.text (Issue.status_label status))</span>
+      <span class_="group-count">(Yuka.int count)</span>
+    </header>
+end
+
+module Shell = struct
+  type nav = Issues | My_issues
+
+  let make ~workspace ~active ~sidebar ~children () : _ Yuka.element =
+    let link nav href label =
+      <a class_=(if nav = active then "nav-link active" else "nav-link") href>(Yuka.text label)</a>
+    in
+    <div class_="app">
+      <aside class_="sidebar">
+        <div class_="workspace">
+          <span class_="workspace-logo">(Yuka.text (String.sub workspace 0 1))</span>
+          <span class_="workspace-name">(Yuka.text workspace)</span>
+        </div>
+        <nav class_="nav">
+          (link Issues Routes.index_url "Issues")
+          (link My_issues Routes.my_url "My issues")
+        </nav>
+        <div class_="sidebar-extra">sidebar</div>
+      </aside>
+      <main class_="main">children</main>
+    </div>
+end
+
+module Skeleton = struct
+  let make ~lines () : _ Yuka.element =
+    <div class_="skeleton">
+      (Yuka.list (List.init lines (fun i -> <div class_=("skeleton-line w" ^ string_of_int (i mod 3)) />)))
+    </div>
+end
+
+module Property = struct
+  let make ~name ~children () : _ Yuka.element =
+    <div class_="property">
+      <span class_="property-name">(Yuka.text name)</span>
+      <span class_="property-value">children</span>
+    </div>
+end
+
+module Issue_page = struct
+  let make ~issue ~comments ~props () : _ Yuka.element =
+    <div class_="issue-page">
+      <header class_="page-header">
+        <a href=Routes.index_url class_="crumb">"Issues"</a>
+        <span class_="muted">"/"</span>
+        <span>(Yuka.text issue.Issue.id)</span>
+      </header>
+      <div class_="issue-layout">
+        <article class_="issue-main">
+          <h1 class_="issue-title">(Yuka.text issue.title)</h1>
+          <p class_="issue-description">(Yuka.text issue.description)</p>
+          <h2 class_="section-title">"Activity"</h2>
+          comments
+        </article>
+        <aside class_="properties">props</aside>
+      </div>
+    </div>
+end
+
+module Not_found = struct
+  let make ~id () : _ Yuka.element =
+    <div class_="not-found">
+      <h1>"Issue not found"</h1>
+      <p>(Yuka.text ("There is no issue " ^ id ^ "."))</p>
+      <a href=Routes.index_url>"Back to issues"</a>
+    </div>
+end

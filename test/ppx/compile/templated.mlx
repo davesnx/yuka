@@ -1,0 +1,23 @@
+let count : int Yuka.State.t = Yuka.State.make 0 [@@yuka.shared]
+
+let fixed : Yuka.client Yuka.element =
+  <ul class_="list">
+    <li>"one"</li>
+    <li onClick=(fun _ -> Yuka.State.update count succ)>(Yuka.text (string_of_int (Yuka.State.get count)))</li>
+  </ul>
+
+let by_hand : Yuka.client Yuka.element =
+  Yuka.lower "ul" [ Yuka.attr "class" "list" ]
+    [ Yuka.lower "li" [] [ Yuka.text "one" ];
+      Yuka.lower "li" [ Yuka.on "click" (fun _ -> Yuka.State.update count succ) ]
+        [ Yuka.hole (fun () -> Yuka.text (string_of_int (Yuka.State.get count))) ] ]
+
+let static_tree : Yuka.server Yuka.element =
+  <section id="s"><h1>"Title"</h1><p>"body"</p></section>
+
+let static_by_hand : Yuka.server Yuka.element =
+  Yuka.lower "section" [ Yuka.attr "id" "s" ]
+    [ Yuka.lower "h1" [] [ Yuka.text "Title" ]; Yuka.lower "p" [] [ Yuka.text "body" ] ]
+
+let not_fixed (label : string) : Yuka.server Yuka.element =
+  <ul><li>"a"</li><li>(Yuka.text label)</li></ul>

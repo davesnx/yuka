@@ -1,0 +1,4 @@
+(library
+ (name yuka_router)
+ (public_name yuka.router)
+ (modes native melange))

@@ -1,0 +1,61 @@
+open Yuka
+open Model
+
+let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Comment.t list) () =
+  let comments = State.make comments in
+  let draft = State.make "" in
+  let error : string option State.t = State.make None in
+  let pending = State.make 0 in
+  let submit () =
+    let body = String.trim (State.peek draft) in
+    if body <> "" then (
+      let n = State.peek pending + 1 in
+      let tmp : Comment.t = { id = "tmp-" ^ string_of_int n; author = me; body; created_at = "Just now" } in
+      State.set pending n;
+      State.set error None;
+      State.set draft "";
+      State.set comments (State.peek comments @ [ tmp ]);
+      let swap with_ =
+        State.set comments
+          (List.filter_map
+             (fun (c : Comment.t) ->
+               if c.id <> tmp.id then Some c else with_)
+             (State.peek comments))
+      in
+      Async.on_result
+        (Action.call Actions.add_comment { Actions.issue_id; body })
+        (function
+          | Ok c ->
+              State.set comments
+                (List.map (fun (x : Comment.t) -> if x.id = tmp.id then c else x) (State.peek comments))
+          | Error message ->
+              swap None;
+              State.set draft body;
+              State.set error (Some message)))
+  in
+  let comment (c : Comment.t) : client element =
+    <li class_="comment">
+      <Views.Avatar user=(Some c.author) />
+      <div class_="comment-body">
+        <div class_="comment-meta">
+          <b>(Yuka.text c.author.name)</b>
+          <span class_="muted">(Yuka.text c.created_at)</span>
+        </div>
+        <p>(Yuka.text c.body)</p>
+      </div>
+    </li>
+  in
+  <div class_="activity">
+    <ul class_="comments">
+      (Yuka.each ~key:(fun (c : Comment.t) -> c.id) (fun () -> State.get comments) comment)
+    </ul>
+    <div class_="comment-box">
+      <textarea class_="comment-input" placeholder="Leave a comment" rows=3
+        value=(State.get draft)
+        onInput=(fun e -> State.set draft (Event.target_value e)) />
+      (match State.get error with
+       | Some m -> <p class_="error">(Yuka.text m)</p>
+       | None -> Yuka.empty)
+      <button class_="button primary" disabled=(State.get draft = "") onClick=(fun _ -> submit ())>"Comment"</button>
+    </div>
+  </div>

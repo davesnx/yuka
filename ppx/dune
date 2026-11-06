@@ -1,0 +1,8 @@
+(library
+ (name yuka_ppx)
+ (public_name yuka.ppx)
+ (kind ppx_rewriter)
+ (libraries ppxlib)
+ (ppx_runtime_libraries yuka)
+ (preprocess
+  (pps ppxlib.metaquot)))

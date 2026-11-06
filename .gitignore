@@ -1,0 +1,17 @@
+_build*/
+node_modules/
+.claude/
+brain-dump/.claude/
+e2e/screenshots/
+.workplace/
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.mcp.json
+.profile
+.ripgreprc
+.zprofile
+.zshrc
+.idea
+.vscode

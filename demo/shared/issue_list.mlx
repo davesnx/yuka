@@ -1,0 +1,166 @@
+open Yuka
+open Model
+
+type menu = Status of string | Priority of string
+
+let index_of id items =
+  let rec go i = function
+    | [] -> None
+    | (x : Issue.t) :: rest -> if x.id = id then Some i else go (i + 1) rest
+  in
+  go 0 items
+
+let%client make ~(title : string) ~(issues : Model.Issue.t list) () =
+  let issues = State.make issues in
+  let filter = State.make "" in
+  let selected : string option State.t = State.make None in
+  let menu : menu option State.t = State.make None in
+  let toast : string option State.t = State.make None in
+  let visible =
+    State.memo ~equal:( = ) (fun () ->
+        let query = State.get filter in
+        List.filter (Issue.matches ~query) (State.get issues))
+  in
+  let groups = State.memo ~equal:( = ) (fun () -> Issue.group (State.get visible)) in
+  let ordered = State.memo ~equal:( = ) (fun () -> List.concat_map snd (State.get groups)) in
+  let replace (i : Issue.t) =
+    State.set issues
+      (List.map (fun (x : Issue.t) -> if x.id = i.id then i else x) (State.peek issues))
+  in
+  let change ~id ?status ?priority () =
+    State.set menu None;
+    match List.find_opt (fun (i : Issue.t) -> i.id = id) (State.peek issues) with
+    | None -> ()
+    | Some before ->
+        State.set toast None;
+        replace
+          {
+            before with
+            status = Option.value status ~default:before.status;
+            priority = Option.value priority ~default:before.priority;
+          };
+        Async.on_result
+          (Action.call Actions.update_issue { Actions.id; status; priority })
+          (function
+            | Ok i -> replace i
+            | Error _ ->
+                replace before;
+                State.set toast (Some ("Could not update " ^ id ^ ".")))
+  in
+  Effect.run (fun () ->
+      match State.get Ui.created with
+      | Some (i : Issue.t) ->
+          State.set issues
+            (i :: List.filter (fun (x : Issue.t) -> x.id <> i.id) (State.peek issues))
+      | None -> ());
+  let move step =
+    let items = State.peek ordered in
+    let n = List.length items in
+    if n > 0 then
+      let current =
+        match State.peek selected with
+        | None -> if step > 0 then -1 else n
+        | Some id -> Option.value (index_of id items) ~default:(if step > 0 then -1 else n)
+      in
+      let next = (List.nth items (max 0 (min (n - 1) (current + step)))).id in
+      State.set selected (Some next);
+      Browser.scroll_into_view ("row-" ^ next)
+  in
+  let on_key e =
+    if not (Ui.typing e || State.peek Ui.dialog_open || Event.ctrl_key e || Event.meta_key e)
+    then
+      match Event.key e with
+      | "j" -> move 1
+      | "k" -> move (-1)
+      | "Escape" -> State.set menu None
+      | "Enter" -> (
+          match State.peek selected with
+          | Some id -> !Ui.navigate (Routes.issue_url id)
+          | None -> ())
+      | _ -> ()
+  in
+  Effect.run (fun () -> Browser.on_window "keydown" on_key);
+  let popup items : client element =
+    Yuka.list
+      [
+        <div class_="backdrop" onClick=(fun _ -> State.set menu None) />;
+        <ul class_="menu">(Yuka.list items)</ul>;
+      ]
+  in
+  let status_menu (issue : Issue.t) =
+    popup
+      (List.map
+         (fun s ->
+           <li>
+             <button class_="menu-item" onClick=(fun _ -> change ~id:issue.id ~status:s ())>
+               <Views.Status_icon status=s />
+               (Yuka.text (Issue.status_label s))
+             </button>
+           </li>)
+         Issue.all_statuses)
+  in
+  let priority_menu (issue : Issue.t) =
+    popup
+      (List.map
+         (fun p ->
+           <li>
+             <button class_="menu-item" onClick=(fun _ -> change ~id:issue.id ~priority:p ())>
+               <Views.Priority_icon priority=p />
+               (Yuka.text (Issue.priority_label p))
+             </button>
+           </li>)
+         Issue.all_priorities)
+  in
+  let row (issue : Issue.t) : client element =
+    <div
+      id=("row-" ^ issue.id)
+      class_=(if State.get selected = Some issue.id then "row selected" else "row")
+      data_id=issue.id>
+      <span class_="status-wrap">
+        <button class_="icon-button" aria_label="Change priority"
+          onClick=(fun _ -> State.set menu (Some (Priority issue.id)))>
+          <Views.Priority_icon priority=issue.priority />
+        </button>
+        (if State.get menu = Some (Priority issue.id) then priority_menu issue else Yuka.empty)
+      </span>
+      <span class_="row-id">(Yuka.text issue.id)</span>
+      <span class_="status-wrap">
+        <button class_="icon-button" aria_label="Change status"
+          onClick=(fun _ -> State.set menu (Some (Status issue.id)))>
+          <Views.Status_icon status=issue.status />
+        </button>
+        (if State.get menu = Some (Status issue.id) then status_menu issue else Yuka.empty)
+      </span>
+      <a class_="row-title" href=(Routes.issue_url issue.id)>(Yuka.text issue.title)</a>
+      <Views.Labels labels=issue.labels />
+      <Views.Avatar user=issue.assignee />
+      <span class_="row-date">(Yuka.text issue.created_at)</span>
+    </div>
+  in
+  let group ((status, items) : Issue.status * Issue.t list) : client element =
+    <section class_="group">
+      <Views.Group_header status count=(List.length items) />
+      (Yuka.each ~key:(fun (i : Issue.t) -> i.id) (fun () -> items) row)
+    </section>
+  in
+  <div class_="issues">
+    <header class_="page-header">
+      <span>(Yuka.text title)</span>
+      <span class_="group-count">(Yuka.int (List.length (State.get issues)))</span>
+    </header>
+    <div class_="toolbar">
+      <input class_="filter" type_=`text placeholder="Filter issues (j/k to move, Enter to open)"
+        onInput=(fun e -> State.set filter (Event.target_value e)) />
+    </div>
+    (match State.get toast with
+     | Some message ->
+         <div class_="toast">
+           <span>(Yuka.text message)</span>
+           <button class_="icon-button" aria_label="Dismiss" onClick=(fun _ -> State.set toast None)>"x"</button>
+         </div>
+     | None -> Yuka.empty)
+    <div class_="list">
+      (Yuka.each ~key:(fun (s, _) -> Issue.status_slug s) (fun () -> State.get groups) group)
+    </div>
+    (if State.get visible = [] then <p class_="list-empty">"No issues match."</p> else Yuka.empty)
+  </div>

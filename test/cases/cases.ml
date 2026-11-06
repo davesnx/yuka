@@ -1,0 +1,976 @@
+open Yuka
+
+exception Failed of string
+
+let check name expected actual =
+  if expected <> actual then
+    raise (Failed (Printf.sprintf "%s: expected %S, got %S" name expected actual))
+
+let log () =
+  let entries = ref [] in
+  let add s = entries := s :: !entries in
+  let read () = String.concat " " (List.rev !entries) in
+  (add, read)
+
+let first_run () =
+  let add, read = log () in
+  let count = State.make 0 in
+  Effect.run (fun () -> add (string_of_int (State.get count)));
+  check "runs once at creation" "0" (read ())
+
+let rerun_on_change () =
+  let add, read = log () in
+  let count = State.make 0 in
+  Effect.run (fun () -> add (string_of_int (State.get count)));
+  State.set count 1;
+  State.update count (fun c -> c + 1);
+  check "runs again on each change" "0 1 2" (read ())
+
+let no_rerun_on_equal_write () =
+  let add, read = log () in
+  let count = State.make 0 in
+  let name = State.make ~equal:String.equal "a" in
+  Effect.run (fun () -> add (string_of_int (State.get count)));
+  Effect.run (fun () -> add (State.get name));
+  State.set count 0;
+  State.set name (String.make 1 'a');
+  check "no run for an equal write" "0 a" (read ())
+
+let cleanup_receives_previous_result () =
+  let add, read = log () in
+  let count = State.make 0 in
+  Effect.run
+    ~cleanup:(fun id -> add ("clear" ^ string_of_int id))
+    (fun () ->
+      let id = State.get count * 10 in
+      add ("start" ^ string_of_int id);
+      id);
+  State.set count 1;
+  State.set count 2;
+  check "cleanup gets the previous result" "start0 clear0 start10 clear10 start20"
+    (read ())
+
+let nested_disposed_on_rerun () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  let b = State.make 0 in
+  Effect.run (fun () ->
+      ignore (State.get a);
+      Effect.run (fun () ->
+          ignore (State.get b);
+          incr runs));
+  State.set a 1;
+  State.set a 2;
+  runs := 0;
+  State.set b 1;
+  check "one inner effect after two outer re-runs" "1" (string_of_int !runs)
+
+let mount_dispose () =
+  let add, read = log () in
+  let count = State.make 0 in
+  let (), dispose =
+    mount (fun () ->
+        Effect.run
+          ~cleanup:(fun () -> add "outer-clean")
+          (fun () ->
+            ignore (State.get count);
+            Effect.run
+              ~cleanup:(fun () -> add "inner-clean")
+              (fun () -> add ("inner" ^ string_of_int (State.get count)))))
+  in
+  dispose ();
+  State.set count 1;
+  check "dispose runs cleanups and stops effects" "inner0 inner-clean outer-clean"
+    (read ())
+
+let error_isolation () =
+  let add, read = log () in
+  let count = State.make 0 in
+  Effect.run (fun () -> if State.get count = 1 then failwith "boom");
+  Effect.run (fun () -> add (string_of_int (State.get count)));
+  let raised = try State.set count 1; "no" with Failure m -> m in
+  State.set count 2;
+  check "other effect still runs" "0 1 2" (read ());
+  check "first error raised after the flush" "boom" raised
+
+let on_change_prev_next () =
+  let add, read = log () in
+  let count = State.make ~equal:Int.equal 0 in
+  Effect.on_change count (fun ~prev ~next ->
+      add (string_of_int prev ^ "->" ^ string_of_int next));
+  State.set count 1;
+  State.set count 1;
+  State.set count 5;
+  check "prev and next, not on the first run" "0->1 1->5" (read ())
+
+let memo_recomputes_on_input_change () =
+  let computes = ref 0 in
+  let count = State.make 1 in
+  let other = State.make 0 in
+  let double =
+    State.memo (fun () ->
+        incr computes;
+        State.get count * 2)
+  in
+  let r1 = State.get double in
+  let r2 = State.get double in
+  State.set other 1;
+  let r3 = State.get double in
+  State.set count 5;
+  let r4 = State.get double in
+  check "memo values" "2 2 2 10"
+    (String.concat " " (List.map string_of_int [ r1; r2; r3; r4 ]));
+  check "memo computes" "2" (string_of_int !computes)
+
+let peek_does_not_track () =
+  let runs = ref 0 in
+  let count = State.make 0 in
+  Effect.run (fun () ->
+      ignore (State.peek count);
+      incr runs);
+  State.set count 1;
+  check "peek is not a dependency" "1" (string_of_int !runs)
+
+let outer_keeps_dependency_after_inner () =
+  let outer = ref 0 in
+  let count = State.make 0 in
+  let other = State.make 0 in
+  Effect.run (fun () ->
+      ignore (State.get other);
+      Effect.run (fun () -> ignore (State.get count));
+      ignore (State.get count);
+      incr outer);
+  State.set count 1;
+  State.set count 2;
+  check "outer effect still reads count" "3" (string_of_int !outer)
+
+let effect_sees_consistent_memo () =
+  let add, read = log () in
+  let count = State.make 1 in
+  let double = State.memo (fun () -> State.get count * 2) in
+  Effect.run (fun () ->
+      add (Printf.sprintf "%d/%d" (State.get count) (State.get double)));
+  State.set count 2;
+  check "one run per write, no stale memo" "1/2 2/4" (read ())
+
+let memo_equal_by_default () =
+  let add, read = log () in
+  let n = State.make 1 in
+  let parity = State.memo (fun () -> State.get n mod 2) in
+  Effect.run (fun () -> add (string_of_int (State.get parity)));
+  State.set n 3;
+  check "same memo value does not re-run effects" "1" (read ())
+
+let effect_writing_own_state_settles () =
+  let s = State.make 0 in
+  Effect.run (fun () ->
+      let v = State.get s in
+      if v < 3 then State.set s (v + 1));
+  check "a write that settles still works" "3" (string_of_int (State.peek s))
+
+let contains text part =
+  let n = String.length part in
+  let rec at i =
+    i + n <= String.length text && (String.sub text i n = part || at (i + 1))
+  in
+  at 0
+
+let effect_writing_own_state_stops () =
+  let s = State.make 0 in
+  let result =
+    match
+      Effect.run (fun () ->
+          let v = State.get s in
+          if v < 1000 then State.set s (v + 1))
+    with
+    | () -> "no error, value " ^ string_of_int (State.peek s)
+    | exception Failure m when contains m "keeps changing a State it reads" ->
+        "limit"
+  in
+  check "a write that does not settle stops with an error" "limit" result;
+  let after = State.make 0 in
+  let runs = ref 0 in
+  Effect.run (fun () ->
+      ignore (State.get after);
+      incr runs);
+  State.set after 1;
+  check "effects still run after the limit" "2" (string_of_int !runs)
+
+let html (el : server element) = Internal.to_html (Internal.node el)
+let chtml (el : client element) = Internal.to_html (Internal.node el)
+
+let html_escaping () =
+  check "text" "<p>a &amp; b &lt;c&gt; \"d\"</p>"
+    (html (lower "p" [] [ text "a & b <c> \"d\"" ]));
+  check "attribute" "<a href=\"x&amp;y&quot;&lt;>\"></a>"
+    (html (lower "a" [ attr "href" "x&y\"<>" ] []))
+
+let html_adjacent_texts () =
+  check "separator" "<p>a<!---->b<!---->c</p>"
+    (html (lower "p" [] [ text "a"; text "b"; text "c" ]));
+  check "across a fragment" "<p>a<!---->b</p>"
+    (html (lower "p" [] [ text "a"; fragment [ text "b" ] ]));
+  check "element between" "<p>a<b></b>b</p>"
+    (html (lower "p" [] [ text "a"; lower "b" [] []; text "b" ]))
+
+let html_empty_text () =
+  check "nothing" "<p></p>" (html (lower "p" [] [ text "" ]));
+  check "no separator for empty first" "<p>a</p>"
+    (html (lower "p" [] [ text ""; text "a" ]))
+
+let html_hole () =
+  let runs = ref 0 in
+  let s = State.make "x" in
+  let el =
+    lower "p" []
+      [ hole (fun () -> incr runs; text (State.get s)); text "t" ]
+  in
+  check "markers" "<p><!--[-->x<!--]-->t</p>" (chtml el);
+  check "function runs once" "1" (string_of_int !runs)
+
+let html_each () =
+  let el =
+    lower "ul" []
+      [
+        each ~key:string_of_int
+          (fun () -> [ 1; 2 ])
+          (fun n -> lower "li" [] [ text (string_of_int n) ]);
+      ]
+  in
+  check "items" "<ul><!--[--><!--[--><li>1</li><!--]--><!--[--><li>2</li><!--]--><!--]--></ul>"
+    (chtml el);
+  check "empty" "<!--[--><!--]-->"
+    (chtml (each ~key:string_of_int (fun () -> []) (fun _ -> empty)));
+  check "texts in items stay apart" "<!--[--><!--[-->a<!--]--><!--[-->b<!--]--><!--]-->"
+    (chtml (each ~key:Fun.id (fun () -> [ "a"; "b" ]) text))
+
+let html_dynamic_attribute () =
+  let s = State.make (Some "v") in
+  let el = lower "i" [ hole_attr "title" (fun () -> State.get s) ] [] in
+  check "Some" "<i title=\"v\"></i>" (chtml el);
+  State.set s None;
+  check "None" "<i></i>" (chtml el)
+
+let html_handler () =
+  check "not written" "<button id=\"b\">go</button>"
+    (chtml
+       (lower "button"
+          [ attr "id" "b"; on "click" (fun _ -> ()) ]
+          [ text "go" ]))
+
+let html_void () =
+  check "void" "<p>a<br>b<input type=\"text\"></p>"
+    (html
+       (lower "p" []
+          [ text "a"; lower "br" [] []; text "b";
+            lower "input" [ attr "type" "text" ] [ text "ignored" ] ]))
+
+let html_nested () =
+  check "nested" "<div class=\"c\"><ul><li>1</li></ul></div>"
+    (html
+       (lower "div" [ attr "class" "c" ]
+          [ lower "ul" [] [ lower "li" [] [ text "1" ] ] ]))
+
+let html_effect_skipped () =
+  let runs = ref 0 in
+  let component () =
+    Effect.run (fun () -> incr runs);
+    lower "p" [] []
+  in
+  let in_hole = lower "div" [] [ hole (fun () -> component () |> fun e -> (Internal.element (Internal.node e) : client element)) ] in
+  check "hole html" "<div><!--[--><p></p><!--]--></div>" (chtml in_hole);
+  check "hole body effect not run" "0" (string_of_int !runs);
+  check "build and print" "<p></p>"
+    (Internal.render_html (fun () -> Internal.node (component ())));
+  check "build effect not run" "0" (string_of_int !runs);
+  check "flag restored" "false" (string_of_bool !Internal.server_rendering);
+  (try
+     ignore
+       (Internal.to_html
+          (Internal.node (lower "p" [] [ hole (fun () -> failwith "x") ])))
+   with Failure _ -> ());
+  check "flag restored after exception" "false"
+    (string_of_bool !Internal.server_rendering);
+  let (), dispose = mount (fun () -> ignore (component ())) in
+  dispose ();
+  check "runs in mount" "1" (string_of_int !runs)
+
+let show_json = Json.to_string
+
+let parse s =
+  match Json.of_string s with Ok j -> show_json j | Error m -> "error: " ^ m
+
+let is_error s = match Json.of_string s with Error _ -> "error" | Ok _ -> "ok"
+
+let json_round_trip () =
+  let values : Json.t list =
+    [ `Null; `Bool true; `Bool false; `Int 0; `Int (-42); `Float 1.5;
+      `Float 1.0; `Float (-0.25); `Float 1e100; `String ""; `String "a\"b\\c\n\t\r";
+      `String "caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80"; `List [];
+      `Assoc []; `List [ `Int 1; `List [ `Null; `Assoc [ ("k", `String "v") ] ] ];
+      `Assoc [ ("a", `Int 1); ("b", `List [ `Float 2.5 ]) ] ]
+  in
+  List.iter
+    (fun v ->
+      match Json.of_string (show_json v) with
+      | Ok v' -> if v <> v' then raise (Failed ("round trip: " ^ show_json v))
+      | Error m -> raise (Failed ("round trip error: " ^ m)))
+    values
+
+let json_printing () =
+  check "compact" "{\"a\":[1,2.5,null,true],\"b\":\"x\"}"
+    (show_json (`Assoc [ ("a", `List [ `Int 1; `Float 2.5; `Null; `Bool true ]); ("b", `String "x") ]));
+  check "float keeps a dot" "1.0" (show_json (`Float 1.0));
+  check "control chars" "\"\\u0001\\b\\f\\n\"" (show_json (`String "\001\b\012\n"));
+  check "utf-8 kept" "\"caf\xc3\xa9\"" (show_json (`String "caf\xc3\xa9"));
+  check "nan" "null" (show_json (`Float nan))
+
+let json_script_safety () =
+  let s = show_json (`String "</script><!--") in
+  check "no less-than" "\"\\u003c/script>\\u003c!--\"" s;
+  check "reads back" "</script><!--"
+    (match Json.of_string s with Ok (`String x) -> x | _ -> "bad")
+
+let json_parser () =
+  check "escapes" "\"a\\n\\\"\\\\/\\b\""
+    (parse "\"a\\n\\\"\\\\\\/\\b\"");
+  check "unicode escape" "\"\xc3\xa9\xe2\x82\xac\"" (parse "\"\\u00e9\\u20AC\"");
+  check "surrogate pair" "\"\xf0\x9f\x98\x80\"" (parse "\"\\ud83d\\ude00\"");
+  check "whitespace" "{\"a\":[1,2]}" (parse " { \"a\" : [ 1 , 2 ] }\n");
+  check "int" "`Int" (match Json.of_string "123" with Ok (`Int 123) -> "`Int" | _ -> "other");
+  check "negative int" "`Int" (match Json.of_string "-7" with Ok (`Int (-7)) -> "`Int" | _ -> "other");
+  check "float dot" "`Float" (match Json.of_string "1.0" with Ok (`Float _) -> "`Float" | _ -> "other");
+  check "float exp" "`Float" (match Json.of_string "1e2" with Ok (`Float 100.) -> "`Float" | _ -> "other");
+  check "float neg exp" "`Float" (match Json.of_string "-2.5E-1" with Ok (`Float (-0.25)) -> "`Float" | _ -> "other");
+  check "empty containers" "[[],{}]" (parse "[[],{}]");
+  check "nested" "{\"a\":{\"b\":[{\"c\":null}]}}" (parse "{\"a\":{\"b\":[{\"c\":null}]}}")
+
+let json_invalid () =
+  List.iter
+    (fun s -> check ("invalid " ^ String.escaped s) "error" (is_error s))
+    [ ""; " "; "["; "[1,]"; "{\"a\"}"; "{\"a\":1,}"; "{a:1}"; "tru"; "nul";
+      "01"; "1."; ".5"; "-"; "1e"; "\"abc"; "\"\\x\""; "\"\\u12\""; "\"\\ud83d\"";
+      "\"\\ude00\""; "\"\\ud83d\\u0041\""; "1 2"; "[1] x"; "'a'"; "\"a\nb\"" ]
+
+let codec_ok c v = Codec.decode c (Codec.encode c v)
+
+let codec_round_trip () =
+  let open Codec in
+  check "int" "Ok 5" (match codec_ok int 5 with Ok n -> "Ok " ^ string_of_int n | Error m -> m);
+  check "string" "Ok a<b" (match codec_ok string "a<b" with Ok s -> "Ok " ^ s | Error m -> m);
+  check "bool" "true" (match codec_ok bool true with Ok b -> string_of_bool b | Error m -> m);
+  check "unit" "ok" (match codec_ok unit () with Ok () -> "ok" | Error m -> m);
+  check "float" "2.5" (match codec_ok float 2.5 with Ok f -> string_of_float f | Error m -> m);
+  check "list" "1,2,3"
+    (match codec_ok (list int) [ 1; 2; 3 ] with
+    | Ok l -> String.concat "," (List.map string_of_int l)
+    | Error m -> m);
+  check "array" "a,b"
+    (match codec_ok (array string) [| "a"; "b" |] with
+    | Ok a -> String.concat "," (Array.to_list a)
+    | Error m -> m);
+  check "option" "None Some 1"
+    (match (codec_ok (option int) None, codec_ok (option int) (Some 1)) with
+    | Ok None, Ok (Some 1) -> "None Some 1"
+    | _ -> "bad");
+  check "option encoding" "null" (show_json (Codec.encode (option int) None));
+  check "nested" "[[1],[]]"
+    (show_json (Codec.encode (list (list int)) [ [ 1 ]; [] ]))
+
+let codec_errors () =
+  let open Codec in
+  let is_err = function Error _ -> "error" | Ok _ -> "ok" in
+  check "int from string" "error" (is_err (decode int (`String "1")));
+  check "int from float" "error" (is_err (decode int (`Float 1.5)));
+  check "float from int" "ok" (is_err (decode float (`Int 1)));
+  check "float value" "3." (match decode float (`Int 3) with Ok f -> Printf.sprintf "%g." f | Error m -> m);
+  check "string from null" "error" (is_err (decode string `Null));
+  check "list bad item" "error" (is_err (decode (list int) (`List [ `Int 1; `String "x" ])));
+  check "list from int" "error" (is_err (decode (list int) (`Int 1)));
+  check "option bad inner" "error" (is_err (decode (option int) (`String "x")));
+  check "unit from int" "error" (is_err (decode unit (`Int 0)))
+
+let status_text f = function
+  | Async.Pending -> "pending"
+  | Async.Done v -> "done " ^ f v
+  | Async.Failed m -> "failed " ^ m
+
+let async_settle_once () =
+  let a, resolve, fail = Async.make () in
+  check "pending" "pending" (status_text string_of_int (Async.status a));
+  resolve 1;
+  resolve 2;
+  fail "late";
+  check "first wins" "done 1" (status_text string_of_int (Async.status a));
+  let b, resolve, fail = Async.make () in
+  fail "boom";
+  resolve 1;
+  check "failure wins" "failed boom" (status_text string_of_int (Async.status b));
+  check "resolved" "done 3" (status_text string_of_int (Async.status (Async.resolved 3)));
+  check "failed" "failed no" (status_text string_of_int (Async.status (Async.failed "no")))
+
+let async_on_settled () =
+  let add, read = log () in
+  let a, resolve, _ = Async.make () in
+  Async.on_settled a (fun st -> add ("first:" ^ status_text string_of_int st));
+  Async.on_settled a (fun st -> add ("second:" ^ status_text string_of_int st));
+  check "nothing before" "" (read ());
+  resolve 1;
+  check "order" "first:done 1 second:done 1" (read ());
+  Async.on_settled a (fun st -> add ("late:" ^ status_text string_of_int st));
+  check "now when settled" "first:done 1 second:done 1 late:done 1" (read ());
+  resolve 2;
+  check "callbacks run once" "first:done 1 second:done 1 late:done 1" (read ())
+
+let async_map_bind () =
+  let a, resolve, _ = Async.make () in
+  let m = Async.map (fun n -> n * 2) a in
+  check "map pending" "pending" (status_text string_of_int (Async.status m));
+  resolve 4;
+  check "map done" "done 8" (status_text string_of_int (Async.status m));
+  let inner, resolve_inner, _ = Async.make () in
+  let b = Async.bind (Async.resolved 1) (fun _ -> inner) in
+  check "bind waits for inner" "pending" (status_text string_of_int (Async.status b));
+  resolve_inner 9;
+  check "bind done" "done 9" (status_text string_of_int (Async.status b));
+  let f = Async.map succ (Async.failed "e1") in
+  check "map failure" "failed e1" (status_text string_of_int (Async.status f));
+  let g = Async.bind (Async.resolved 1) (fun _ -> (Async.failed "e2" : int Async.t)) in
+  check "bind inner failure" "failed e2" (status_text string_of_int (Async.status g));
+  let called = ref false in
+  let h = Async.bind (Async.failed "e3") (fun _ -> called := true; Async.resolved 1) in
+  check "bind skips on failure" "failed e3 false"
+    (status_text string_of_int (Async.status h) ^ " " ^ string_of_bool !called)
+
+let async_watch () =
+  let add, read = log () in
+  let a, resolve, _ = Async.make () in
+  let w = Async.watch a in
+  Effect.run (fun () -> add (status_text string_of_int (State.get w)));
+  resolve 7;
+  check "effect sees the update" "pending done 7" (read ());
+  let w2 = Async.watch (Async.resolved 1) in
+  check "already settled" "done 1" (status_text string_of_int (State.peek w2))
+
+let double =
+  Action.declare ~name:"double" ~input:Codec.int ~output:Codec.int
+
+let with_transport f body =
+  let saved = !Internal.call_action in
+  Internal.call_action := f;
+  match body () with
+  | v -> Internal.call_action := saved; v
+  | exception e -> Internal.call_action := saved; raise e
+
+let action_call () =
+  check "name" "double" (Action.name double);
+  let seen = ref "" in
+  let result =
+    with_transport
+      (fun name input ->
+        seen := name ^ " " ^ show_json input;
+        match input with
+        | `Int n -> Async.resolved (`Int (n * 2))
+        | _ -> Async.failed "bad")
+      (fun () -> Async.status (Action.call double 21))
+  in
+  check "transport got" "double 21" !seen;
+  check "decoded output" "done 42" (status_text string_of_int result);
+  let bad =
+    with_transport
+      (fun _ _ -> Async.resolved (`String "x"))
+      (fun () -> Async.status (Action.call double 1))
+  in
+  check "decode error is Failed" "failed"
+    (match bad with Async.Failed _ -> "failed" | _ -> "other");
+  let failing =
+    with_transport
+      (fun _ _ -> Async.failed "server down")
+      (fun () -> Async.status (Action.call double 1))
+  in
+  check "transport failure" "failed server down" (status_text string_of_int failing)
+
+let html_island () =
+  let item name =
+    Client.island ~name
+      ~props:(`Assoc [ ("t", `String "</script>") ])
+      (fun () ->
+        Effect.run (fun () -> failwith "effect ran on the server");
+        lower "b" [] [ hole (fun () -> text "") ])
+  in
+  check "island"
+    "<div><yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"><b><!--[--><!--]--></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"t\":\"\\u003c/script>\"}</script>t<yuka-island data-name=\"B\" data-id=\"i2\" style=\"display:contents\"><b><!--[--><!--]--></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"t\":\"\\u003c/script>\"}</script></div>"
+    (html (lower "div" [] [ item "A"; text "t"; item "B" ]));
+  check "counter restarts" "i1"
+    (let h = html (item "A") in
+     let key = "data-id=\"" in
+     let rec find i = if String.sub h i (String.length key) = key then i + String.length key else find (i + 1) in
+     let start = find 0 in
+     String.sub h start 2)
+
+let island_entry () =
+  let e =
+    Client.entry ~name:"Counter" (fun props ->
+        match Codec.decode Codec.int props with
+        | Ok n -> Ok (fun () -> lower "i" [] [ text (string_of_int n) ])
+        | Error m -> Error m)
+  in
+  check "name" "Counter" (Internal.entry_name e);
+  (match Internal.entry_decode e (`Int 3) with
+  | Ok build -> check "built" "<i>3</i>" (Internal.to_html (build ()))
+  | Error m -> raise (Failed m));
+  check "decode error" "error"
+    (match Internal.entry_decode e (`String "x") with Error _ -> "error" | Ok _ -> "ok")
+
+let untracked_no_dependency () =
+  let runs = ref 0 in
+  let s = State.make 0 in
+  Effect.run (fun () ->
+      ignore (Internal.untracked (fun () -> State.get s));
+      incr runs);
+  State.set s 1;
+  check "untracked read" "1" (string_of_int !runs)
+
+let html_await () =
+  let a, resolve, fail = Async.make () in
+  let el =
+    lower "p" []
+      [ await ~failed:(fun m -> text ("E" ^ m)) a ~loading:(text "L")
+          (fun n -> text (string_of_int n)) ]
+  in
+  check "pending" "<p><!--[-->L<!--]--></p>" (html el);
+  resolve 3;
+  check "settled" "<p><!--[-->3<!--]--></p>" (html el);
+  let b, _, fail_b = Async.make () in
+  let el_b = await ~failed:(fun m -> text ("E" ^ m)) b ~loading:(text "L") (fun () -> text "x") in
+  fail_b "no";
+  check "failed" "<!--[-->Eno<!--]-->" (html el_b);
+  ignore fail;
+  let c = await (Async.failed "z") ~loading:(text "L") (fun () -> text "x") in
+  check "default failed is empty" "<!--[--><!--]-->" (html c)
+
+let html_streaming_session () =
+  let a, resolve, _ = Async.make () in
+  let b, _, _ = Async.make () in
+  let s = Internal.session ~streaming:true in
+  let first =
+    Internal.print s (fun () ->
+        Internal.node
+          (lower "p" []
+             [ await a ~loading:(text "L") (fun n -> text (string_of_int n));
+               await (Async.resolved 1) ~loading:(text "no") (fun n -> text (string_of_int n));
+               await b ~loading:(text "M") (fun n -> text (string_of_int n)) ]))
+  in
+  check "shell" "<p><!--[s1-->L<!--]--><!--[-->1<!--]--><!--[s2-->M<!--]--></p>" first;
+  let pending = Internal.take_pending s in
+  check "pending ids in order" "s1 s2"
+    (String.concat " "
+       (List.map
+          (function Internal.Pending_await { id; _ } -> id | Internal.Pending_async { id; _ } -> id)
+          pending));
+  check "taken once" "0" (string_of_int (List.length (Internal.take_pending s)));
+  match pending with
+  | Internal.Pending_await { id; subscribe; fill; _ } :: _ ->
+      check "id" "s1" id;
+      let seen = ref false in
+      subscribe (fun () -> seen := true);
+      check "not yet" "false" (string_of_bool !seen);
+      resolve 5;
+      check "subscribe fires" "true" (string_of_bool !seen);
+      check "fill" "5" (fill ())
+  | _ -> raise (Failed "pending shape")
+
+let codec_async_inline () =
+  let codec = Codec.async Codec.int in
+  let show = function
+    | Ok a -> (match Async.status a with Async.Done n -> "done " ^ string_of_int n | Async.Failed m -> "failed " ^ m | Async.Pending -> "pending")
+    | Error m -> "error " ^ m
+  in
+  check "ok" "done 4" (show (Codec.decode codec (`Assoc [ ("$async", `String "a1"); ("ok", `Int 4) ])));
+  check "error" "failed e" (show (Codec.decode codec (`Assoc [ ("$async", `String "a1"); ("error", `String "e") ])));
+  check "garbage" "error" (match Codec.decode codec (`Int 1) with Error _ -> "error" | Ok _ -> "ok");
+  check "encode settled" "{\"$async\":\"a0\",\"ok\":2}"
+    (show_json (Codec.encode codec (Async.resolved 2)))
+
+let html_int_float_list () =
+  check "ints are two texts" "<p>-3<!---->2</p>"
+    (html (lower "p" [] [ int (-3); int 2 ]));
+  check "float" "2.5" (html (float 2.5));
+  check "whole float" "1.0" (html (float 1.0));
+  check "list" "<ul><li>a</li><li>b</li></ul>"
+    (html
+       (lower "ul" []
+          [ list [ lower "li" [] [ text "a" ]; lower "li" [] [ text "b" ] ] ]))
+
+let with_platform p body =
+  let saved = !Internal.platform in
+  Internal.platform := p;
+  match body () with
+  | () -> Internal.platform := saved
+  | exception e ->
+      Internal.platform := saved;
+      raise e
+
+let platform_delegation () =
+  let add, read = log () in
+  let event : Event.t = Obj.magic 0 in
+  let base = !Internal.platform in
+  with_platform
+    {
+      base with
+      stop_propagation = (fun _ -> add "stop");
+      target_tag = (fun _ -> "li");
+      shift_key = (fun _ -> true);
+      alt_key = (fun _ -> false);
+      navigate = (fun url -> add ("go:" ^ url));
+      focus = (fun id -> add ("focus:" ^ id));
+      scroll_into_view = (fun id -> add ("scroll:" ^ id));
+    }
+    (fun () ->
+      Event.stop_propagation event;
+      add (Event.target_tag event);
+      add (string_of_bool (Event.shift_key event));
+      add (string_of_bool (Event.alt_key event));
+      Browser.navigate "/a?b=1";
+      Browser.focus "box";
+      Browser.scroll_into_view "row-2");
+  check "calls reach the platform"
+    "stop li true false go:/a?b=1 focus:box scroll:row-2" (read ())
+
+let async_on_result () =
+  let add, read = log () in
+  let show = function Ok n -> "ok " ^ string_of_int n | Error m -> "error " ^ m in
+  let a, resolve, _ = Async.make () in
+  Async.on_result a (fun r -> add (show r));
+  Async.on_result a (fun r -> add ("again " ^ show r));
+  check "nothing while pending" "" (read ());
+  resolve 1;
+  resolve 2;
+  check "ok once, in order" "ok 1 again ok 1" (read ());
+  let b, _, fail = Async.make () in
+  Async.on_result b (fun r -> add (show r));
+  fail "boom";
+  Async.on_result (Async.resolved 5) (fun r -> add (show r));
+  check "error and already settled" "ok 1 again ok 1 error boom ok 5" (read ())
+
+let html_slot () =
+  let content = Slot.make (lower "p" [] [ text "x" ]) in
+  check "slot with content" "<div><!--[$--><p>x</p><!--]--></div>"
+    (chtml (lower "div" [] [ slot content ]));
+  let empty_slot = match Codec.decode Codec.slot `Null with Ok s -> s | Error m -> raise (Failed m) in
+  check "empty slot" "<!--[$--><!--]-->" (chtml (slot empty_slot));
+  check "text before and after" "<b>a<!--[$-->b<!--]-->c</b>"
+    (chtml
+       (lower "b" []
+          [ text "a"; slot (Slot.make (text "b")); text "c" ]));
+  check "slot codec encodes null" "null" (show_json (Codec.encode Codec.slot content));
+  check "content" "some"
+    (match Internal.slot_content content with Some _ -> "some" | None -> "none");
+  check "no content when decoded" "none"
+    (match Internal.slot_content empty_slot with Some _ -> "some" | None -> "none");
+  check "dom empty at first" "0" (string_of_int (List.length !(Internal.slot_dom content)));
+  Internal.slot_dom content := [ Obj.repr 1 ];
+  check "dom is shared" "1" (string_of_int (List.length !(Internal.slot_dom content)))
+
+let html_island_loading () =
+  let make loading =
+    html (Client.island ?loading ~name:"A" ~props:`Null (fun () -> text ""))
+  in
+  let prefix = "<yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"" in
+  let start loading = String.sub (make loading) (String.length prefix) 18 in
+  check "default" ("><" ^ "/yuka-island>") (String.sub (make None) (String.length prefix) 15);
+  check "load" "></yuka-island>" (String.sub (make (Some `Load)) (String.length prefix) 15);
+  check "idle" " data-start=\"idle\"" (String.sub (make (Some `Idle)) (String.length prefix) 18);
+  check "visible" " data-start=\"visible\"" (String.sub (make (Some `Visible)) (String.length prefix) 21);
+  check "interaction" " data-start=\"interaction\"" (String.sub (make (Some `Interaction)) (String.length prefix) 25);
+  ignore start
+
+type with_function = { f : int -> int; n : int }
+
+let default_equality () =
+  let runs name make set =
+    let count = ref 0 in
+    let s = State.make make in
+    Effect.run (fun () -> ignore (State.get s); incr count);
+    set s;
+    ignore name;
+    !count
+  in
+  check "equal string built at run time" "1"
+    (string_of_int
+       (runs "string" (String.make 2 'a') (fun s -> State.set s (String.make 2 'a'))));
+  check "different string" "2"
+    (string_of_int (runs "string" "a" (fun s -> State.set s "b")));
+  check "equal float built at run time" "1"
+    (string_of_int
+       (runs "float" (float_of_int 3 /. 2.) (fun s -> State.set s (float_of_int 3 /. 2.))));
+  check "equal list" "1"
+    (string_of_int
+       (runs "list" [ 1; 2 ] (fun s -> State.set s (List.map succ [ 0; 1 ]))));
+  let value = { f = (fun x -> x + 1); n = 1 } in
+  check "same record with a function is equal" "1"
+    (string_of_int (runs "fn" value (fun s -> State.set s value)));
+  check "record with another function is a change" "2"
+    (string_of_int
+       (runs "fn" value (fun s -> State.set s { f = (fun x -> x * 2); n = 1 })));
+  let memo_runs = ref 0 in
+  let n = State.make 1 in
+  let parity = State.memo (fun () -> [ State.get n mod 2 ]) in
+  Effect.run (fun () -> ignore (State.get parity); incr memo_runs);
+  State.set n 3;
+  check "memo with a structural value does not re-run" "1" (string_of_int !memo_runs);
+  let seen = ref 0 in
+  let s = State.make "a" in
+  Effect.on_change s (fun ~prev:_ ~next:_ -> incr seen);
+  State.set s (String.make 1 'a');
+  State.set s "b";
+  check "on_change uses the same equality" "1" (string_of_int !seen)
+
+let memo_set_raises () =
+  let n = State.make 1 in
+  let double = State.memo (fun () -> State.get n * 2) in
+  let message f = match f () with () -> "no error" | exception Invalid_argument m -> m in
+  check "set" "Yuka: State.set on a memo" (message (fun () -> State.set double 5));
+  check "update" "Yuka: State.set on a memo"
+    (message (fun () -> State.update double succ));
+  let called = ref false in
+  ignore (message (fun () -> State.update double (fun v -> called := true; v)));
+  check "update does not call the function" "false" (string_of_bool !called);
+  check "value unchanged" "2" (string_of_int (State.peek double));
+  State.set n 4;
+  check "still follows its input" "8" (string_of_int (State.peek double));
+  check "ordinary state is fine" "no error" (message (fun () -> State.set n 5))
+
+let disposal_order () =
+  let add, read = log () in
+  let (), dispose =
+    mount (fun () ->
+        Effect.run ~cleanup:(fun () -> add "first") (fun () -> ());
+        Effect.run ~cleanup:(fun () -> add "second") (fun () -> ());
+        Effect.run ~cleanup:(fun () -> add "third") (fun () -> ()))
+  in
+  dispose ();
+  check "last created is cleaned first" "third second first" (read ())
+
+let owned_removed_from_parent () =
+  let add, read = log () in
+  let (), dispose_parent =
+    mount (fun () ->
+        check "empty at first" "0" (string_of_int (Internal.owner_size ()));
+        for i = 1 to 200 do
+          let (), dispose =
+            Internal.owned (fun () ->
+                Effect.run ~cleanup:(fun () -> add ("gone" ^ string_of_int i)) (fun () -> ()))
+          in
+          dispose ()
+        done;
+        check "disposed children leave no disposer" "0"
+          (string_of_int (Internal.owner_size ()));
+        let (), dispose_a =
+          Internal.owned (fun () ->
+              Effect.run ~cleanup:(fun () -> add "a") (fun () -> ()))
+        in
+        let (), _dispose_b =
+          Internal.owned (fun () ->
+              Effect.run ~cleanup:(fun () -> add "b") (fun () -> ()))
+        in
+        check "two live children" "2" (string_of_int (Internal.owner_size ()));
+        dispose_a ();
+        dispose_a ();
+        check "one live child" "1" (string_of_int (Internal.owner_size ())))
+  in
+  let before = List.length (String.split_on_char ' ' (read ())) in
+  check "each disposed child cleaned once" "201" (string_of_int before);
+  dispose_parent ();
+  let log_text = read () in
+  let words = String.split_on_char ' ' log_text in
+  check "parent dispose cleans only the live child" "202" (string_of_int (List.length words));
+  check "the live one" "b" (List.nth words 201);
+  check "a only once" "1"
+    (string_of_int (List.length (List.filter (( = ) "a") words)))
+
+let opt v = lower "option" [ attr "value" v ] [ text (String.uppercase_ascii v) ]
+
+let html_select_value () =
+  check "static value" "<select><option value=\"a\">A</option><option value=\"b\" selected=\"\">B</option></select>"
+    (html (lower "select" [ attr "value" "b" ] [ opt "a"; opt "b" ]));
+  let current = State.make (Some "a") in
+  let dynamic = lower "select" [ hole_attr "value" (fun () -> State.get current) ] [ opt "a"; opt "b" ] in
+  check "dynamic value" "<select><option value=\"a\" selected=\"\">A</option><option value=\"b\">B</option></select>"
+    (chtml dynamic);
+  State.set current None;
+  check "no value, no selection" "<select><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+    (chtml dynamic);
+  check "no value attribute on the select" "<select><option value=\"a\">A</option></select>"
+    (html (lower "select" [] [ opt "a" ]));
+  check "optgroup, fragment, hole and each"
+    "<select><optgroup label=\"g\"><option value=\"b\" selected=\"\">B</option></optgroup><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><!--[--><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><!--]--><option value=\"c\">C</option></select>"
+    (chtml
+       (lower "select" [ attr "value" "b" ]
+          [ lower "optgroup" [ attr "label" "g" ] [ fragment [ opt "b" ] ];
+            hole (fun () -> opt "b");
+            each ~key:Fun.id (fun () -> [ "b" ]) opt;
+            opt "c" ]));
+  check "escaped values compare unescaped" "<select><option value=\"a&quot;&amp;\" selected=\"\">A\"&amp;</option></select>"
+    (html
+       (lower "select" [ attr "value" "a\"&" ]
+          [ lower "option" [ attr "value" "a\"&" ] [ text "A\"&" ] ]));
+  check "option without value is not selected (text is not compared)"
+    "<select><option>b</option></select>"
+    (html (lower "select" [ attr "value" "b" ] [ lower "option" [] [ text "b" ] ]));
+  check "own selected is not repeated" "<select><option value=\"b\" selected=\"\">B</option></select>"
+    (html
+       (lower "select" [ attr "value" "b" ]
+          [ lower "option" [ attr "value" "b"; attr "selected" "" ] [ text "B" ] ]));
+  check "an option outside a select is untouched" "<option value=\"b\">B</option>"
+    (html (opt "b"));
+  check "the selection ends with the select"
+    "<div><select><option value=\"a\" selected=\"\">A</option></select><option value=\"a\">A</option></div>"
+    (html (lower "div" [] [ lower "select" [ attr "value" "a" ] [ opt "a" ]; opt "a" ]));
+  check "next select is independent"
+    "<div><select><option value=\"a\" selected=\"\">A</option></select><select><option value=\"a\">A</option></select></div>"
+    (html
+       (lower "div" []
+          [ lower "select" [ attr "value" "a" ] [ opt "a" ];
+            lower "select" [] [ opt "a" ] ]))
+
+let html_textarea_value () =
+  check "static" "<textarea>a &amp; b &lt;c&gt;</textarea>"
+    (html (lower "textarea" [ attr "value" "a & b <c>" ] []));
+  check "children ignored" "<textarea>v</textarea>"
+    (html (lower "textarea" [ attr "value" "v" ] [ text "ignored" ]));
+  let v = State.make (Some "x") in
+  let el = lower "textarea" [ attr "rows" "3"; hole_attr "value" (fun () -> State.get v) ] [] in
+  check "dynamic keeps other attributes" "<textarea rows=\"3\">x</textarea>" (chtml el);
+  State.set v None;
+  check "dynamic none" "<textarea rows=\"3\"></textarea>" (chtml el);
+  check "without value the children stay" "<textarea>kept</textarea>"
+    (html (lower "textarea" [] [ text "kept" ]));
+  check "leading newline survives" "<textarea>\n\nx</textarea>"
+    (html (lower "textarea" [ attr "value" "\nx" ] []));
+  check "input keeps its value attribute" "<input value=\"v\">"
+    (html (lower "input" [ attr "value" "v" ] []))
+
+let codec_result () =
+  let c = Codec.result Codec.int Codec.string in
+  check "ok" "{\"ok\":1}" (show_json (Codec.encode c (Ok 1)));
+  check "error" "{\"error\":\"no\"}" (show_json (Codec.encode c (Error "no")));
+  let show = function Ok (Ok n) -> "ok " ^ string_of_int n | Ok (Error m) -> "error " ^ m | Error m -> "decode:" ^ m in
+  check "decode ok" "ok 2" (show (Codec.decode c (`Assoc [ ("ok", `Int 2) ])));
+  check "decode error" "error x" (show (Codec.decode c (`Assoc [ ("error", `String "x") ])));
+  check "ok payload type" "decode:expected int, got \"s\""
+    (show (Codec.decode c (`Assoc [ ("ok", `String "s") ])));
+  check "error payload type" "decode:expected string, got 1"
+    (show (Codec.decode c (`Assoc [ ("error", `Int 1) ])));
+  check "neither key" "decode:expected result, got {\"x\":1}"
+    (show (Codec.decode c (`Assoc [ ("x", `Int 1) ])));
+  check "both keys" "true"
+    (string_of_bool
+       (match Codec.decode c (`Assoc [ ("ok", `Int 1); ("error", `String "e") ]) with
+       | Error _ -> true
+       | Ok _ -> false));
+  let nested = Codec.result (Codec.list Codec.int) (Codec.option Codec.string) in
+  check "nested round trip" "ok 1,2"
+    (match Codec.decode nested (Codec.encode nested (Ok [ 1; 2 ])) with
+    | Ok (Ok l) -> "ok " ^ String.concat "," (List.map string_of_int l)
+    | _ -> "bad")
+
+let skeleton el = Internal.skeleton_html (Internal.node el)
+
+let html_template () =
+  let el = template "t1" (lower "p" [ attr "class" "c" ] [ text "a" ]) in
+  check "printed as its node" "<p class=\"c\">a</p>" (chtml el);
+  check "no marker around nested" "<div><p>a</p></div>"
+    (chtml (lower "div" [] [ template "t2" (lower "p" [] [ text "a" ]) ]))
+
+let skeleton_shape () =
+  let state = State.make "x" in
+  let el : client element =
+    lower "div" [ attr "id" "d"; hole_attr "title" (fun () -> Some "t"); on "click" (fun _ -> ()) ]
+      [ text "a"; text "b";
+        lower "br" [] [];
+        hole (fun () -> text (State.get state));
+        each ~key:Fun.id (fun () -> [ "k" ]) text;
+        slot (Slot.make (text "s"));
+        lower "span" [] [ text "&<" ];
+        await (Async.resolved 1) ~loading:(text "L") (fun _ -> text "v");
+        fragment [ text "c"; text "d" ] ]
+  in
+  check "shape" "<div id=\"d\">a<!---->b<br><!--[--><!--]--><!--[--><!--]--><!--[$--><!--]--><span>&amp;&lt;</span><!--[--><!--]-->c<!---->d</div>"
+    (skeleton el);
+  check "template inside" "<p>t</p>" (skeleton (template "x" (lower "p" [] [ text "t" ])));
+  check "island is a hole" "<!--[--><!--]-->"
+    (skeleton (Client.island ~name:"I" ~props:`Null (fun () -> text "x")))
+
+let skeleton_values () =
+  let opt v = lower "option" [ attr "value" v ] [ text v ] in
+  check "static select value" "<select><option value=\"a\">a</option><option value=\"b\" selected=\"\">b</option></select>"
+    (skeleton (lower "select" [ attr "value" "b" ] [ opt "a"; opt "b" ]));
+  check "dynamic select value is left out" "<select><option value=\"a\">a</option></select>"
+    (skeleton (lower "select" [ hole_attr "value" (fun () -> Some "a") ] [ opt "a" ]));
+  check "static textarea value" "<textarea>v &amp;</textarea>"
+    (skeleton (lower "textarea" [ attr "value" "v &" ] []));
+  check "dynamic textarea value is left out" "<textarea></textarea>"
+    (skeleton (lower "textarea" [ hole_attr "value" (fun () -> Some "v") ] []))
+
+let all =
+  [
+    ("first run", first_run);
+    ("re-run on change", rerun_on_change);
+    ("no re-run on an equal write", no_rerun_on_equal_write);
+    ("cleanup receives the previous result", cleanup_receives_previous_result);
+    ("nested effect disposed on owner re-run", nested_disposed_on_rerun);
+    ("mount dispose runs inner cleanups", mount_dispose);
+    ("error isolation", error_isolation);
+    ("on_change prev and next", on_change_prev_next);
+    ("memo recomputes only on input change", memo_recomputes_on_input_change);
+    ("peek does not track", peek_does_not_track);
+    ("outer effect keeps its dependency", outer_keeps_dependency_after_inner);
+    ("effect sees a consistent memo", effect_sees_consistent_memo);
+    ("memo uses the default equality", memo_equal_by_default);
+    ("effect writing its own State settles", effect_writing_own_state_settles);
+    ("effect writing its own State stops at a limit", effect_writing_own_state_stops);
+    ("html escaping", html_escaping);
+    ("html adjacent texts", html_adjacent_texts);
+    ("html empty text", html_empty_text);
+    ("html hole markers", html_hole);
+    ("html each markers", html_each);
+    ("html dynamic attribute", html_dynamic_attribute);
+    ("html handler not written", html_handler);
+    ("html void tag", html_void);
+    ("html nested", html_nested);
+    ("html skips effects", html_effect_skipped);
+    ("json round trip", json_round_trip);
+    ("json printing", json_printing);
+    ("json script safety", json_script_safety);
+    ("json parser", json_parser);
+    ("json invalid input", json_invalid);
+    ("codec round trip", codec_round_trip);
+    ("codec errors", codec_errors);
+    ("async settles once", async_settle_once);
+    ("async on_settled", async_on_settled);
+    ("async map and bind", async_map_bind);
+    ("async watch", async_watch);
+    ("action call", action_call);
+    ("html island", html_island);
+    ("island entry", island_entry);
+    ("untracked", untracked_no_dependency);
+    ("html await", html_await);
+    ("html streaming session", html_streaming_session);
+    ("codec async", codec_async_inline);
+    ("html int float list", html_int_float_list);
+    ("platform delegation", platform_delegation);
+    ("async on_result", async_on_result);
+    ("html slot", html_slot);
+    ("html island loading", html_island_loading);
+    ("default equality", default_equality);
+    ("memo set raises", memo_set_raises);
+    ("owned removed from its parent", owned_removed_from_parent);
+    ("disposal order", disposal_order);
+    ("html select value", html_select_value);
+    ("html textarea value", html_textarea_value);
+    ("codec result", codec_result);
+    ("html template", html_template);
+    ("skeleton shape", skeleton_shape);
+    ("skeleton values", skeleton_values);
+  ]

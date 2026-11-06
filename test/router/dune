@@ -1,0 +1,3 @@
+(test
+ (name run)
+ (libraries alcotest yuka.router yuka.router.server dream))

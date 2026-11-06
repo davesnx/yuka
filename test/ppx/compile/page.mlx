@@ -1,0 +1,16 @@
+let issue : Model.issue =
+  { id = 1; title = "t"; note = None; tags = [ "a" ]; status = Open;
+    priority = Range { lo = 1; hi = 2 }; at = (1, 2.5); scores = [| 1.0 |] }
+
+let view : Yuka.server Yuka.element =
+  <main>
+    <h1 class_="title">"Issues"</h1>
+    <Yuka.Client><Counter label="count" step=2 issue /></Yuka.Client>
+    <Yuka.Client loading=`Visible>
+      <Shell title="outer">
+        <p>"server content"</p>
+        <Yuka.Client><Counter label="inner" issue /></Yuka.Client>
+      </Shell>
+    </Yuka.Client>
+    <svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" strokeDasharray="1 1" /></svg>
+  </main>
