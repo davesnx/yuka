@@ -1058,6 +1058,240 @@ let review_cases =
     test_case "the timer keeps nothing alive" `Quick timer_keeps_nothing;
     test_case "deeply nested action body" `Quick deep_body ]
 
+let loading_cases =
+  let open Alcotest in
+  let isl ?loading name =
+    Yuka.Client.island ?loading ~name ~props:(`Int 1) (fun () -> Yuka.text "")
+  in
+  let link url = Printf.sprintf "<link rel=\"modulepreload\" href=\"%s\">" url in
+  let count text part =
+    let n = String.length part in
+    let rec go i acc =
+      if i + n > String.length text then acc
+      else go (i + 1) (if String.sub text i n = part then acc + 1 else acc)
+    in
+    go 0 0
+  in
+  let preload name = Some ("/js/" ^ name ^ ".js") in
+  let shell ?preload build =
+    let write, chunks = recorder () in
+    get (Server.stream ?preload ~sleep:never_sleep ~write build);
+    List.nth (chunks ()) 1
+  in
+  let data_start () =
+    let html loading = Yuka.Server.to_string (fun () -> isl ~loading "A") in
+    check bool "lazy visible" true
+      (contains (html (`Lazy `Visible)) "data-start=\"visible\"");
+    check bool "lazy idle" true
+      (contains (html (`Lazy `Idle)) "data-start=\"idle\"");
+    check bool "lazy interaction" true
+      (contains (html (`Lazy `Interaction)) "data-start=\"interaction\"");
+    check bool "load has none" false (contains (html `Load) "data-start")
+  in
+  let once () =
+    let out =
+      shell ~preload (fun () ->
+          Yuka.fragment [ isl "A"; isl ~loading:`Visible "A"; isl "B" ])
+    in
+    check int "A once" 1 (count out (link "/js/A.js"));
+    check int "B once" 1 (count out (link "/js/B.js"));
+    check bool "before the island" true
+      (contains out (link "/js/A.js" ^ "<yuka-island data-name=\"A\""))
+  in
+  let lazy_none () =
+    let out = shell ~preload (fun () -> isl ~loading:(`Lazy `Idle) "A") in
+    check bool "no link" false (contains out "modulepreload");
+    let out =
+      shell ~preload (fun () ->
+          Yuka.fragment [ isl ~loading:(`Lazy `Visible) "A"; isl "A" ])
+    in
+    check int "a later non-lazy use gets the link" 1
+      (count out (link "/js/A.js"))
+  in
+  let no_function () =
+    check bool "no link" false
+      (contains (shell (fun () -> isl "A")) "modulepreload")
+  in
+  let none_result () =
+    let out = shell ~preload:(fun _ -> None) (fun () -> isl "A") in
+    check bool "no url, no link" false (contains out "modulepreload")
+  in
+  let escaped () =
+    let out =
+      shell ~preload:(fun _ -> Some "/a\"b&c.js") (fun () -> isl "A")
+    in
+    check bool "escaped" true (contains out (link "/a&quot;b&amp;c.js"))
+  in
+  let streamed () =
+    let a, resolve, _ = Async.make () in
+    let write, chunks = recorder () in
+    let p =
+      Server.stream ~preload ~sleep:never_sleep ~write (fun () ->
+          Yuka.fragment
+            [ isl "A";
+              Yuka.Await.make ~async:a ~loading:Yuka.empty
+                ~children:(fun _ -> Yuka.fragment [ isl "A"; isl "B" ])
+                () ])
+    in
+    resolve 0;
+    get p;
+    let all = chunks () in
+    let shell = List.nth all 1 and fills = String.concat "" (List.tl (List.tl all)) in
+    check int "A in the shell" 1 (count shell (link "/js/A.js"));
+    check int "A not repeated in the part" 0 (count fills (link "/js/A.js"));
+    check int "B first appears in the part" 1 (count fills (link "/js/B.js"));
+    check bool "B not in the shell" false (contains shell "/js/B.js")
+  in
+  let respond_navigating () =
+    let write, chunks = recorder () in
+    get
+      (Server.respond ~navigating:true ~preload ~sleep:never_sleep ~write
+         (fun () -> isl "A"));
+    check int "link in the single write" 1
+      (count (String.concat "" (chunks ())) (link "/js/A.js"))
+  in
+  let outer_open = "<yuka-island data-name=\"Outer\"" in
+  let between out =
+    let find part from =
+      let n = String.length part in
+      let rec at i =
+        if i + n > String.length out then -1
+        else if String.sub out i n = part then i
+        else at (i + 1)
+      in
+      at from
+    in
+    let o = find outer_open 0 in
+    let c = find "</yuka-island>" (find "data-name=\"Inner\"" o) in
+    let c = find "</yuka-island>" (c + 1) in
+    (String.sub out o (c - o), String.sub out c (String.length out - c))
+  in
+  let outer_with child =
+    Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () -> child ())
+  in
+  let nested_in_render () =
+    let out =
+      shell ~preload (fun () ->
+          outer_with (fun () ->
+              Yuka.Internal.element
+                (Yuka.Internal.node (isl "Inner"))))
+    in
+    let inside, after = between out in
+    check bool "no link inside the outer island" false (contains inside "<link");
+    check bool "link right after the outer close, then its props" true
+      (contains after
+         ("</yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">1</script>"
+         ^ link "/js/Inner.js"));
+    check int "outer link before the outer island" 1 (count out (link "/js/Outer.js"));
+    check int "inner link once" 1 (count out (link "/js/Inner.js"))
+  in
+  let nested_in_slot () =
+    let out =
+      shell ~preload (fun () ->
+          let s = Yuka.Slot.make (isl "Inner") in
+          Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () -> Yuka.slot s))
+    in
+    let inside, after = between out in
+    check bool "no link inside the outer island" false (contains inside "<link");
+    check bool "link after the outer close" true (contains after (link "/js/Inner.js"));
+    check int "inner link once" 1 (count out (link "/js/Inner.js"))
+  in
+  let nested_dedup () =
+    let out =
+      shell ~preload (fun () ->
+          Yuka.fragment
+            [ outer_with (fun () ->
+                  Yuka.Internal.element (Yuka.Internal.node (isl "Inner")));
+              isl "Inner" ])
+    in
+    check int "once across nested and later use" 1 (count out (link "/js/Inner.js"))
+  in
+  let await_in_island () =
+    let a, resolve, _ = Async.make () in
+    let write, chunks = recorder () in
+    let p =
+      Server.stream ~preload ~sleep:never_sleep ~write (fun () ->
+          Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () ->
+              Yuka.Internal.element
+                (Yuka.Internal.node
+                   (Yuka.Await.make ~async:a ~loading:Yuka.empty
+                      ~children:(fun _ -> isl "Inner")
+                      ()))))
+    in
+    resolve 0;
+    get p;
+    let all = chunks () in
+    let fills = List.tl (List.tl all) in
+    let joined = String.concat "" fills in
+    check int "link once in the response" 1 (count joined (link "/js/Inner.js"));
+    let template_start =
+      let n = String.length "<template" in
+      let rec at i = if String.sub joined i n = "<template" then i else at (i + 1) in
+      at 0
+    in
+    let close = "</template>" in
+    let rec find i = if String.sub joined i (String.length close) = close then i else find (i + 1) in
+    let moved = String.sub joined template_start (find template_start - template_start) in
+    check bool "no link in the moved content" false (contains moved "<link");
+    check bool "link before the template" true
+      (contains joined (link "/js/Inner.js" ^ "<template"))
+  in
+  let manifest = {|{"Demo_shared.A":"./islands/a.js","Demo_shared.B":"demo/shared/b.js"}|} in
+  let urls () =
+    let f = Server.preload_urls ~manifest ~base:"/assets/" () in
+    check (option string) "leading ./ removed" (Some "/assets/islands/a.js")
+      (f "Demo_shared.A");
+    check (option string) "plain path" (Some "/assets/demo/shared/b.js")
+      (f "Demo_shared.B");
+    check (option string) "unknown" None (f "Nope")
+  in
+  let metafile =
+    {|{"inputs":{},"outputs":{"dist/a-3F2A.js":{"entryPoint":"islands/a.js","bytes":10},"dist/chunk-X.js":{"bytes":5},"dist/b-9.js":{"entryPoint":"app/demo/shared/b.js"}}}|}
+  in
+  let urls_metafile () =
+    let f = Server.preload_urls ~manifest ~base:"/" ~metafile () in
+    check (option string) "exact" (Some "/dist/a-3F2A.js") (f "Demo_shared.A");
+    check (option string) "suffix only is no match" None (f "Demo_shared.B");
+    let g =
+      Server.preload_urls ~manifest:{|{"X":"other.js"}|} ~base:"/" ~metafile ()
+    in
+    check (option string) "no output" None (g "X")
+  in
+  let urls_exact_wins () =
+    let metafile =
+      {|{"outputs":{"o/long.js":{"entryPoint":"x/islands/a.js"},"o/exact.js":{"entryPoint":"./islands/a.js"}}}|}
+    in
+    let f = Server.preload_urls ~manifest ~base:"" ~metafile () in
+    check (option string) "exact first" (Some "o/exact.js") (f "Demo_shared.A")
+  in
+  let urls_bad () =
+    let bad f = match f () with _ -> false | exception Invalid_argument _ -> true in
+    check bool "bad manifest" true
+      (bad (fun () -> Server.preload_urls ~manifest:"{" ~base:"" ()));
+    check bool "manifest not an object" true
+      (bad (fun () -> Server.preload_urls ~manifest:"[]" ~base:"" ()));
+    check bool "bad metafile" true
+      (bad (fun () -> Server.preload_urls ~manifest ~base:"" ~metafile:"x" ()));
+    check bool "metafile without outputs" true
+      (bad (fun () -> Server.preload_urls ~manifest ~base:"" ~metafile:"{}" ()))
+  in
+  [ test_case "data-start from the trigger" `Quick data_start;
+    test_case "preload once per island name" `Quick once;
+    test_case "no preload for lazy" `Quick lazy_none;
+    test_case "no preload without the function" `Quick no_function;
+    test_case "no preload without a url" `Quick none_result;
+    test_case "preload url is escaped" `Quick escaped;
+    test_case "preload in a streamed part" `Quick streamed;
+    test_case "no preload inside an island (render)" `Quick nested_in_render;
+    test_case "no preload inside an island (slot)" `Quick nested_in_slot;
+    test_case "nested preload once" `Quick nested_dedup;
+    test_case "no preload in a fill inside an island" `Quick await_in_island;
+    test_case "preload when navigating" `Quick respond_navigating;
+    test_case "preload_urls without metafile" `Quick urls;
+    test_case "preload_urls with metafile" `Quick urls_metafile;
+    test_case "preload_urls matches only equal paths" `Quick urls_exact_wins;
+    test_case "preload_urls bad input" `Quick urls_bad ]
+
 let () =
   Alcotest.run "yuka"
     [
@@ -1075,4 +1309,5 @@ let () =
       ("render_settled", settled_cases);
       ("early and navigation", navigation_cases);
       ("review fixes", review_cases);
+      ("island loading", loading_cases);
     ]

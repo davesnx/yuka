@@ -9,6 +9,7 @@ let owner = Base.mount
 type server = Types.server
 type client = Types.client
 type slot = Types.slot
+type trigger = Types.trigger
 type loading = Types.loading
 include Element
 module Client = Client

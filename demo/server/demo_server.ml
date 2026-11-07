@@ -9,31 +9,42 @@ let packages dir =
       Array.to_list names
   | exception Sys_error _ -> []
 
+let read_file path = In_channel.with_open_bin path In_channel.input_all
+
 let () =
   let here = Filename.dirname Sys.executable_name in
   let port = ref 8080 in
   let js_dir = ref (Filename.concat here "../client/out") in
   let static_dir = ref (Filename.concat here "../static") in
+  let manifest = ref (Filename.concat here "../client/yuka_islands.json") in
+  let metafile = ref (Filename.concat here "../client/meta.json") in
   let bundle = ref false in
-  let bundle_dir = ref (Filename.concat here "../client/bundle") in
+  let bundle_dir = ref (Filename.concat here "../client/out/demo/client/bundle") in
   Arg.parse
     [
       ("--port", Arg.Set_int port, "Port to listen on (default 8080)");
       ("--js-dir", Arg.Set_string js_dir, "Melange output directory");
       ("--bundle", Arg.Set bundle, "Serve the esbuild bundle instead of the module tree");
       ("--bundle-dir", Arg.Set_string bundle_dir, "Directory of the bundle (see demo/bundle.sh)");
+      ("--manifest", Arg.Set_string manifest, "Island manifest (yuka_islands.json)");
+      ("--metafile", Arg.Set_string metafile, "esbuild metafile, with --bundle");
       ("--static-dir", Arg.Set_string static_dir, "Directory of style.css");
     ]
     (fun _ -> ())
     "demo_server [--port N] [--js-dir DIR] [--static-dir DIR]";
-  let import_map, scripts =
-    if !bundle then (None, [ "/static/bundle/main.js" ])
+  let manifest = read_file !manifest in
+  let import_map, scripts, preload =
+    if !bundle then
+      ( None,
+        [ "/static/bundle/main.js" ],
+        Yuka.Server.preload_urls ~manifest ~base:"/static/" ~metafile:(read_file !metafile) () )
     else
       ( Some (Yuka.Server.import_map ~url:"/static/js" (packages !js_dir)),
-        [ "/static/js/demo/client/main.js" ] )
+        [ "/static/js/demo/client/main.js" ],
+        Yuka.Server.preload_urls ~manifest ~base:"/static/js/demo/client/" () )
   in
   let respond ?status ~request ~title view =
-    Demo_app.Yuka_dream.respond ?status ?import_map ~styles ~scripts ~request ~title view
+    Demo_app.Yuka_dream.respond ?status ?import_map ~styles ~scripts ~preload ~request ~title view
   in
   let pages =
     [

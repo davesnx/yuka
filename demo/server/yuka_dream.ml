@@ -15,7 +15,7 @@ let sleep d = to_async (Lwt_unix.sleep d)
 let () =
   Yuka.Server.log_error := fun message -> Dream.error (fun log -> log "%s" message)
 
-let respond ?status ?import_map ?scripts ?styles ~request ~title view =
+let respond ?status ?import_map ?scripts ?styles ?preload ~request ~title view =
   let navigating = Dream.header request "Yuka-Navigate" = Some "1" in
   Dream.stream ?status
     ~headers:[ ("Content-Type", "text/html; charset=utf-8"); ("Vary", "Yuka-Navigate") ]
@@ -24,7 +24,7 @@ let respond ?status ?import_map ?scripts ?styles ~request ~title view =
         to_async (Lwt.bind (Dream.write stream s) (fun () -> Dream.flush stream))
       in
       to_lwt
-        (Yuka.Server.respond ~navigating ~early:true ?import_map ~title ?styles ?scripts
+        (Yuka.Server.respond ~navigating ~early:true ?import_map ~title ?styles ?scripts ?preload
            ~sleep ~write view))
 
 let action_route =

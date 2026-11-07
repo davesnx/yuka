@@ -10,7 +10,8 @@ From the repository root:
     opam exec --switch=/home/me/workplace/davesnx/utopia -- dune build --build-dir _build_demo @demo/all
     _build_demo/default/demo/server/demo_server.exe --port 8080
 
-Flags: `--port`, `--js-dir` (Melange output), `--static-dir` (`style.css`).
+Flags: `--port`, `--js-dir` (Melange output), `--static-dir` (`style.css`),
+`--manifest`, `--metafile`, `--bundle`, `--bundle-dir`.
 Defaults are relative to the executable, so any build directory works.
 
 ## URLs
@@ -43,12 +44,16 @@ Use a fresh server for each run: the check creates an issue and a comment.
     BUILD_DIR=_build_demo demo/bundle.sh
     _build_demo/default/demo/server/demo_server.exe --bundle
 
-`bundle.sh` runs esbuild with `--splitting`: `main.js`, a shared chunk, and
-one chunk per lazy island (`Issue_props`, `Related`, `Comments`). The server
-serves them from `/static/bundle/` and writes no import map.
+`bundle.sh` runs esbuild with `--splitting` and `--metafile`: `main.js`, shared
+chunks, and one chunk per island. The server serves them from `/static/bundle/`
+and writes no import map. At start it reads `yuka_islands.json` (and
+`meta.json` with `--bundle`) and prints `<link rel="modulepreload">` for each
+island on the page, except those used with `` `Lazy _ ``. Comments, Issue props
+and Related are used with `` `Lazy `Idle ``, `` `Lazy `Interaction `` and
+`` `Lazy `Visible ``.
 
 Routes are defined once in `shared/routes.ml` with `Yuka.Router`. The server
 maps `Yuka.Router.dispatch` onto Dream, and `client/main.ml` is
-`let () = Yuka.mount ()`, so links navigate without a full page load. The rule
-in `client/dune` generates `yuka_islands.ml`, the list of islands. `Issue_props`,
-`Related` and `Comments` are `let%client[@yuka.lazy]`.
+`let () = Yuka.mount ()`, so links navigate without a full page load. The rules
+in `client/dune` generate `yuka_islands.ml` (the list of islands) and
+`yuka_islands.json` (the manifest for preload).

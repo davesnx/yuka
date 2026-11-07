@@ -1,7 +1,7 @@
 open Yuka
 open Model
 
-let%client[@yuka.lazy] make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
+let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
   let current = State.make issue in
   let error : string option State.t = State.make None in
   let change ?status ?priority () =

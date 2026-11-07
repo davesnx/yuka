@@ -22,8 +22,12 @@ let click : string -> unit =
 let text : string -> string =
   [%mel.raw "function (id) { return document.getElementById(id).textContent }"]
 
+let loaded : string -> bool =
+  [%mel.raw
+    {|function (stem) { return Object.keys(require.cache).some(function (k) { return k.endsWith("/islands/" + stem + ".js") }) }|}]
+
 let html =
-  {|<main><yuka-island data-name="Reg_islands.Eager" data-id="i1" style="display:contents"><div><span id="eager"><!--[-->5<!--]--></span><button id="eager-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i1">{"initial":5}</script><yuka-island data-name="Reg_islands.Lazy_one" data-id="i2" style="display:contents" data-start="idle"><div><span id="lazy"><!--[-->7<!--]--></span><button id="lazy-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i2">{"initial":7}</script></main>|}
+  {|<main><yuka-island data-name="Reg_islands.Load_island" data-id="i1" style="display:contents"><div><span id="load"><!--[-->5<!--]--></span><button id="load-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i1">{"initial":5}</script><yuka-island data-name="Reg_islands.Idle_island" data-id="i2" style="display:contents" data-start="idle"><div><span id="idle"><!--[-->7<!--]--></span><button id="idle-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i2">{"initial":7}</script></main>|}
 
 let failures = ref 0
 let total = ref 0
@@ -43,14 +47,24 @@ let finish () =
 let () =
   setup html;
   Yuka.mount ();
-  click "eager-add";
-  check "eager island hydrates" "6" (text "eager");
-  check "lazy island waits for its start strategy" "7" (text "lazy");
-  run_idle ();
+  click "load-add";
+  check "idle chunk is not imported before its trigger" "false" (string_of_bool (loaded "idle_island"));
+  check "click before the import resolves changes nothing yet" "5" (text "load");
   set_timeout
     (fun () ->
-      click "lazy-add";
-      check "lazy island loads its chunk and hydrates" "8" (text "lazy");
-      check "eager island is still live" "6" (text "eager");
-      finish ())
+      check "load island imported at mount" "true" (string_of_bool (loaded "load_island"));
+      check "click before the import is replayed" "6" (text "load");
+      click "load-add";
+      check "load island hydrates" "7" (text "load");
+      check "idle island waits for its trigger" "7" (text "idle");
+      check "idle chunk still not imported" "false" (string_of_bool (loaded "idle_island"));
+      run_idle ();
+      set_timeout
+        (fun () ->
+          check "idle chunk imported at the trigger" "true" (string_of_bool (loaded "idle_island"));
+          click "idle-add";
+          check "idle island hydrates" "8" (text "idle");
+          check "load island is still live" "7" (text "load");
+          finish ())
+        50)
     50

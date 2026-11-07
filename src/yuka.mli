@@ -51,9 +51,22 @@ type slot
 (** Server content passed to a client component. The server prints it; the
     client keeps its DOM nodes and can place them, never re-render them. *)
 
-type loading = [ `Load | `Idle | `Visible | `Interaction ]
-(** When the browser starts an island: at start (default), when idle, when
-    visible, or at the first interaction. *)
+type trigger = [ `Idle | `Visible | `Interaction ]
+(** An event that starts an island: the browser is idle, the island is
+    visible, or the first interaction with it. *)
+
+type loading = [ `Load | trigger | `Lazy of trigger ]
+(** When the browser downloads and starts an island.
+    - [`Load] (default): download and start when the page opens.
+    - A trigger: download when the page opens, start at the trigger.
+    - [`Lazy t]: download and start at the trigger [t]. Events before the
+      start are recorded and replayed. The server prints no preload link for
+      it.
+
+    The early download of a non-lazy island happens through the
+    [<link rel="modulepreload">] that the server prints when the app gives
+    [?preload] to [Server.respond] (see [Server.preload_urls]). Without it,
+    the island downloads when it starts. *)
 
 module Json : sig
   type t =
@@ -583,6 +596,7 @@ module Server : sig
     ?title:string ->
     ?styles:string list ->
     ?scripts:string list ->
+    ?preload:(string -> string option) ->
     sleep:(float -> unit Async.t) ->
     write:(string -> unit Async.t) ->
     (unit -> server element) ->
@@ -599,6 +613,7 @@ module Server : sig
 
   val render_settled :
     ?timeout:float ->
+    ?preload:(string -> string option) ->
     sleep:(float -> unit Async.t) ->
     (unit -> server element) ->
     string Async.t
@@ -615,6 +630,7 @@ module Server : sig
     ?title:string ->
     ?styles:string list ->
     ?scripts:string list ->
+    ?preload:(string -> string option) ->
     sleep:(float -> unit Async.t) ->
     write:(string -> unit Async.t) ->
     (unit -> server element) ->
@@ -623,6 +639,31 @@ module Server : sig
       the whole page settled in one [write]: a full document without the
       fill script, whose body is [render_settled]. The app sets the status
       and the header [Vary: Yuka-Navigate]. *)
+
+  val preload_urls :
+    manifest:string ->
+    base:string ->
+    ?metafile:string ->
+    unit ->
+    string ->
+    string option
+  (** [preload_urls ~manifest ~base ()] makes the [preload] function of
+      [stream], [render_settled] and [respond]. [manifest] is the JSON text
+      [{"<island name>": "<path>"}] that [yuka-islands --manifest] prints;
+      each path is relative to the emit directory, and a leading [./] is
+      removed. Without [metafile] the URL is [base ^ path]. With [metafile],
+      the esbuild metafile JSON text, the URL is [base ^ file] where [file]
+      is the key in its [outputs] whose [entryPoint] equals the path (a
+      leading [./] removed on both). There is no looser match: esbuild must
+      run from the directory the manifest paths are relative to. Output keys
+      keep their directory (for example [dist/lazy_one-3F2A.js]), so choose
+      [base] for that. An island with no path, or no matching output, has no
+      URL. Raises [Invalid_argument] when
+      the manifest or the metafile is not the expected JSON.
+
+      The server prints [<link rel="modulepreload" href="URL">] before the
+      first [<yuka-island>] of each island name whose [loading] is not
+      [`Lazy _], once per response. *)
 
   module Action : sig
     val implement : ('i, 'o) Action.t -> ('i -> 'o Async.t) -> unit

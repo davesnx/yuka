@@ -1,7 +1,8 @@
 type server
 type client
 type event
-type loading = [ `Load | `Idle | `Visible | `Interaction ]
+type trigger = [ `Idle | `Visible | `Interaction ]
+type loading = [ `Load | trigger | `Lazy of trigger ]
 
 
   type node =
@@ -71,6 +72,10 @@ type loading = [ `Load | `Idle | `Visible | `Interaction ]
     mutable asyncs : int;
     mutable awaits : int;
     mutable pending : pending list;
+    mutable preload : (string -> string option) option;
+    mutable preloaded : string list;
+    mutable depth : int;
+    mutable queued : string list;
   }
 
 let current_session : session option ref = ref None

@@ -20,4 +20,6 @@
  (deps
   (alias melange-registry))
  (action
-  (run node %{dep:out/test/melange/registry/run.js})))
+  (progn
+   (run node %{dep:out/test/melange/registry/run.js})
+   (run node %{dep:out/test/melange/registry/preload_run.js}))))

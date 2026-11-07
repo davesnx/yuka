@@ -15,3 +15,12 @@
   (with-stdout-to
    yuka_islands.ml
    (run %{bin:yuka-islands} --library demo_shared ../shared))))
+
+(rule
+ (targets yuka_islands.json)
+ (deps
+  (source_tree ../shared))
+ (action
+  (with-stdout-to
+   yuka_islands.json
+   (run %{bin:yuka-islands} --manifest --library demo_shared ../shared))))

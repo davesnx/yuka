@@ -595,10 +595,8 @@ await step("7g. generated island registry", async () => {
   check("7g.7 lazy Issue_props not started before interaction", !(await has(".props select", "change")));
   check("7g.8 only the comments chunk is requested before interaction", lazyNames() === "comments", lazyNames());
 
-  if (!bundleMode) {
-    for (const n of ["counter", "new_issue", "issue_list"])
-      check(`7g.9 eager module ${n} is requested at load`, seen.includes(n), seen.join(","));
-  }
+  check("7g.9 non-lazy Counter and New_issue modules requested at load", seen.includes("counter") && seen.includes("new_issue"), seen.join(","));
+  check("7g.9b Issue_list module not requested on a page without it", !seen.includes("issue_list"), seen.join(","));
 
   await p.locator(".props .property").first().hover();
   await p.waitForTimeout(300);
@@ -670,6 +668,78 @@ await step("7h. client navigation with Yuka.mount ()", async () => {
   await p.waitForTimeout(100);
   check("7h.5 Issue_list live after navigating back", (await p.locator(".row").count()) < total);
   check("7h.6 no errors", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+});
+
+await step("7i. modulepreload", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const p = await ctx.newPage();
+  const errors: string[] = [];
+  p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  p.on("pageerror", (e) => errors.push(String(e)));
+  const reqs: string[] = [];
+  p.on("request", (r) => reqs.push(new URL(r.url()).pathname));
+  const nameOf = (u: string) => /\/([a-z_]+)(-[^/]*)?\.js$/.exec(u)?.[1] ?? u;
+  const count = (n: string) => reqs.filter((u) => nameOf(u) === n).length;
+  const preloads = () =>
+    p.evaluate(() =>
+      [...document.querySelectorAll('link[rel="modulepreload"]')].map((l) => ({
+        raw: l.getAttribute("href") ?? "",
+        path: new URL((l as HTMLLinkElement).href).pathname,
+      })),
+    );
+  const lazyModules = ["comments", "issue_props", "related"];
+
+  await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
+  await p.waitForSelector(".related-list li");
+  await p.waitForTimeout(500);
+  const pre = await preloads();
+  const preNames = pre.map((l) => nameOf(l.path)).sort();
+  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "new_issue"]), JSON.stringify(pre));
+  check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
+  if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
+  else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/static\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
+  for (const l of pre) check(`7i.4 ${nameOf(l.path)} is requested once (preload and import share the request)`, reqs.filter((u) => u === l.path).length === 1, String(reqs.filter((u) => u === l.path).length));
+  check("7i.5 Issue_list is never requested on the issue page", count("issue_list") === 0, String(count("issue_list")));
+  check("7i.6 lazy modules requested at most once each", lazyModules.every((n) => count(n) <= 1), lazyModules.map((n) => `${n}=${count(n)}`).join(","));
+
+  const q = await ctx.newPage();
+  const qReqs: { name: string; t: number }[] = [];
+  q.on("request", (r) => {
+    const n = nameOf(new URL(r.url()).pathname);
+    if (lazyModules.includes(n)) qReqs.push({ name: n, t: Date.now() });
+  });
+  await q.setViewportSize({ width: 1280, height: 260 });
+  await q.goto(base + "/issue/YUK-2", { waitUntil: "commit" });
+  await q.waitForSelector(".related-list li", { timeout: 8000 });
+  const at = (n: string) => qReqs.filter((r) => r.name === n).length;
+  await q.waitForTimeout(500);
+  check("7i.7 Comments (Lazy Idle) requested after idle, others not yet", at("comments") === 1 && at("issue_props") === 0 && at("related") === 0, qReqs.map((r) => r.name).join(","));
+  await q.locator(".props .property").first().hover();
+  await q.waitForTimeout(300);
+  check("7i.8 Issue_props (Lazy Interaction) requested only after hover", at("issue_props") === 1 && at("related") === 0, qReqs.map((r) => r.name).join(","));
+  await q.locator(".related").scrollIntoViewIfNeeded();
+  await q.waitForTimeout(400);
+  check("7i.9 Related (Lazy Visible) requested only after scroll", at("related") === 1, qReqs.map((r) => r.name).join(","));
+  await q.close();
+
+  const r = await ctx.newPage();
+  const rReqs: string[] = [];
+  r.on("request", (x) => rReqs.push(nameOf(new URL(x.url()).pathname)));
+  await r.goto(base + "/issue/YUK-3", { waitUntil: "networkidle" });
+  await r.waitForSelector(".related-list li");
+  await r.evaluate(() => ((window as any).__nav = "alive"));
+  check("7i.10 Issue_list not loaded before navigation", !rReqs.includes("issue_list"));
+  await r.locator('a[href="/"]').first().click();
+  await r.waitForSelector(".row");
+  await r.waitForTimeout(500);
+  check("7i.11 navigation was client-side", (await r.evaluate(() => (window as any).__nav)) === "alive");
+  check("7i.12 new non-lazy island module requested once after navigation", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
+  const total = await r.locator(".row").count();
+  await r.fill(".filter", "keyboard");
+  await r.waitForTimeout(100);
+  check("7i.13 Issue_list hydrates after navigation", (await r.locator(".row").count()) < total, `${total} -> ${await r.locator(".row").count()}`);
+  check("7i.14 no errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
 });
 

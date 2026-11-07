@@ -1,4 +1,4 @@
-type island = { name : string; path : string; lazy_ : bool }
+type island = { name : string; path : string }
 
 exception Fail of string
 
@@ -9,15 +9,6 @@ let read_file path =
   Fun.protect
     ~finally:(fun () -> close_in ic)
     (fun () -> really_input_string ic (in_channel_length ic))
-
-let squeeze s =
-  let b = Buffer.create (String.length s) in
-  String.iter
-    (fun c ->
-      if not (c = ' ' || c = '\t' || c = '\n' || c = '\r') then
-        Buffer.add_char b c)
-    s;
-  Buffer.contents b
 
 let normalise s =
   let b = Buffer.create (String.length s) in
@@ -134,24 +125,20 @@ let code_only src =
   code 0;
   Bytes.to_string out
 
-let island_kind src =
+let has_island src =
   let code = code_only src in
   let keyword = "let%client" in
   let k = String.length keyword in
   let n = String.length code in
-  let rec has_island i =
+  let rec go i =
     match find_from ~sub:keyword code i with
     | None -> false
     | Some p ->
         let at_line_start = p = 0 || code.[p - 1] = '\n' in
         let whole = p + k >= n || not (is_ident_char code.[p + k]) in
-        (at_line_start && whole) || has_island (p + k)
+        (at_line_start && whole) || go (p + k)
   in
-  if not (has_island 0) then None
-  else
-    let squeezed = squeeze code in
-    let mem sub = find_from ~sub squeezed 0 <> None in
-    Some (mem "[@yuka.lazy]" || mem "[@@yuka.lazy]")
+  go 0
 
 let has_extension path =
   Filename.check_suffix path ".ml" || Filename.check_suffix path ".mlx"
@@ -219,39 +206,61 @@ let scan ~library dir =
     (fun f ->
       if not (has_extension f) then None
       else
-        match island_kind (read_file f) with
-        | None -> None
-        | Some lazy_ ->
+        if not (has_island (read_file f)) then None
+        else
             let stem = Filename.remove_extension (Filename.basename f) in
             let name =
               String.capitalize_ascii library ^ "." ^ String.capitalize_ascii stem
             in
             let path = Filename.concat (Filename.dirname f) stem ^ ".js" in
             let path = if path.[0] = '.' then path else "./" ^ path in
-            Some { name; path; lazy_ })
+            Some { name; path })
     (walk ~recursive:unqualified dir)
 
 let parse_args args =
-  let rec go acc = function
-    | [] -> List.rev acc
-    | "--library" :: lib :: dir :: rest -> go ((lib, dir) :: acc) rest
-    | arg :: _ -> fail "unexpected argument %S; expected --library NAME DIR" arg
+  let rec go manifest acc = function
+    | [] -> (manifest, List.rev acc)
+    | "--manifest" :: rest -> go true acc rest
+    | "--library" :: lib :: dir :: rest -> go manifest ((lib, dir) :: acc) rest
+    | arg :: _ ->
+        fail "unexpected argument %S; expected [--manifest] --library NAME DIR"
+          arg
   in
-  match go [] args with
-  | [] -> fail "usage: yuka-islands --library NAME DIR [--library NAME DIR ...]"
-  | pairs -> pairs
+  match go false [] args with
+  | _, [] ->
+      fail
+        "usage: yuka-islands [--manifest] --library NAME DIR [--library NAME \
+         DIR ...]"
+  | result -> result
+
+let sorted islands = List.sort (fun a b -> compare a.name b.name) islands
+
+let json_string s =
+  let b = Buffer.create (String.length s + 2) in
+  Buffer.add_char b '"';
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string b "\\\""
+      | '\\' -> Buffer.add_string b "\\\\"
+      | c when Char.code c < 0x20 ->
+          Buffer.add_string b (Printf.sprintf "\\u%04x" (Char.code c))
+      | c -> Buffer.add_char b c)
+    s;
+  Buffer.add_char b '"';
+  Buffer.contents b
+
+let render_manifest islands =
+  match sorted islands with
+  | [] -> "{}\n"
+  | islands ->
+      let lines =
+        List.map (fun i -> Printf.sprintf "  %s: %s" (json_string i.name) (json_string i.path)) islands
+      in
+      "{\n" ^ String.concat ",\n" lines ^ "\n}\n"
 
 let render islands =
-  let islands = List.sort (fun a b -> compare a.name b.name) islands in
-  let eager = List.filter (fun i -> not i.lazy_) islands in
-  let lazies = List.filter (fun i -> i.lazy_) islands in
-  let list_of ~indent items =
-    match items with
-    | [] -> "[]"
-    | first :: rest ->
-        let sep = "\n" ^ String.make indent ' ' ^ "; " in
-        "[ " ^ first ^ String.concat "" (List.map (fun s -> sep ^ s) rest) ^ " ]"
-  in
+  let lazies = sorted islands in
   let b = Buffer.create 512 in
   Buffer.add_string b
     "type m\n\
@@ -270,21 +279,22 @@ let render islands =
             i.name i.path)
         lazies
     in
-    Buffer.add_string b "    ~lazy_entries:\n      ";
-    Buffer.add_string b (list_of ~indent:6 items);
-    Buffer.add_char b '\n'
+    Buffer.add_string b "    ~lazy_entries:\n      [ ";
+    Buffer.add_string b (String.concat "\n      ; " items);
+    Buffer.add_string b " ]\n"
   end;
-  Buffer.add_string b "    ";
-  Buffer.add_string b (list_of ~indent:4 (List.map (fun i -> i.name ^ ".register") eager));
-  Buffer.add_char b '\n';
+  Buffer.add_string b "    []\n";
   Buffer.contents b
 
 let () =
   match
-    let pairs = parse_args (List.tl (Array.to_list Sys.argv)) in
-    List.concat_map (fun (library, dir) -> scan ~library dir) pairs
+    let manifest, pairs = parse_args (List.tl (Array.to_list Sys.argv)) in
+    ( manifest,
+      List.concat_map (fun (library, dir) -> scan ~library dir) pairs )
   with
-  | islands -> print_string (render islands)
+  | manifest, islands ->
+      print_string
+        (if manifest then render_manifest islands else render islands)
   | exception Fail msg ->
       prerr_endline ("yuka-islands: " ^ msg);
       exit 1

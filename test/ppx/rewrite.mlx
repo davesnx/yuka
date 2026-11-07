@@ -125,8 +125,6 @@ end
 
 let nested_fixed = <div><ul><li>"a"</li><li>"b"</li></ul><p>"c"</p></div>
 
-let%client[@yuka.lazy] make ~(n : int) () = <p />
-
 let () = Yuka.mount ()
 let () = Yuka.mount ~navigation:false ()
 let () = Yuka.mount ?navigation:x ()

@@ -22,7 +22,7 @@ only the parts that read a signal update.
 - Server rendering and hydration from one element tree, on native and Melange.
 - Streaming with `<Yuka.Await>`: send the page shell first, fill in the rest later.
 - Islands: `let%client` components with a start strategy (`Load`, `Idle`,
-  `Visible`, `Interaction`) and optional lazy loading.
+  `Visible`, `Interaction`) and lazy loading chosen where the island is used.
 - Codecs: `[@@deriving codec]` for props and action data.
 - Actions: declare once, call from the client, run on the server.
 - Router: typed paths shared by server and client (`Yuka.Router`).
@@ -89,9 +89,22 @@ let handler request =
       let write s = to_async (Lwt.bind (Dream.write stream s) (fun () -> Dream.flush stream)) in
       let sleep d = to_async (Lwt_unix.sleep d) in
       to_lwt
-        (Yuka.Server.respond ~navigating ~title:"Issue" ~sleep ~write (fun () ->
+        (Yuka.Server.respond ~navigating ~title:"Issue" ~preload ~sleep ~write (fun () ->
              issue_page issue)))
 ```
+
+`preload` makes the server print `<link rel="modulepreload">` for each island on
+the page, so the browser downloads its code early. Build it once at start from
+the manifest that `yuka-islands --manifest` writes (see "Island"):
+
+```ocaml
+let preload =
+  Yuka.Server.preload_urls ~manifest:(read_file "yuka_islands.json")
+    ~base:"/static/js/demo/client/" ()
+```
+
+With an esbuild `--metafile`, pass it as `~metafile:(read_file "meta.json")`:
+the links then point at the hashed chunks.
 
 Actions go through `Yuka.Server.handle_action`, which returns the status and
 the JSON body; mount it on `POST /_yuka/action/:name`.
@@ -149,9 +162,20 @@ islands are in the library `demo_shared`, in `../shared`):
 Without the rule, the build fails with `Unbound module Yuka_islands`.
 `let%client` must be at the top level of a file.
 
+To write the manifest for `~preload`, add a second rule that runs
+`yuka-islands --manifest --library demo_shared ../shared` into
+`yuka_islands.json`.
+
 To load pages with a full page load, write `Yuka.mount ~navigation:false ()`.
-To make an island load its code only when it starts, write
-`let%client[@yuka.lazy] make ...`.
+
+Every island is its own file, loaded with a dynamic `import`. Islands that
+are not on a page are never downloaded. An island loads at page open (`Load`,
+the default) or, with a trigger, starts later but still downloads at page
+open through the `modulepreload` link that `~preload` prints (without
+`~preload`, an island downloads when it starts). To download and start it
+only at the trigger, write
+``<Yuka.Client loading=(`Lazy `Visible)>``. Lazy is chosen where the island is
+used, not in the island.
 
 ## Getting started
 

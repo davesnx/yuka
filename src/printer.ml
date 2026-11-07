@@ -88,12 +88,18 @@ open Base
     Buffer.contents b
 
   let session ~streaming =
-    { streaming; islands = 0; asyncs = 0; awaits = 0; pending = [] }
+    { streaming; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
+      preloaded = []; depth = 0; queued = [] }
 
   let take_pending s =
     let p = List.rev s.pending in
     s.pending <- [];
     p
+
+  let take_links s =
+    let l = String.concat "" (List.rev s.queued) in
+    s.queued <- [];
+    l
 
   let rec print s build =
     let b = Buffer.create 256 in
@@ -123,6 +129,18 @@ open Base
           in
           match Async.status async with
           | Async.Pending when s.streaming ->
+              let inside = s.depth > 0 in
+              let held f =
+                let outer = s.depth in
+                s.depth <- (if inside then max outer 1 else outer);
+                match f () with
+                | r ->
+                    s.depth <- outer;
+                    r
+                | exception e ->
+                    s.depth <- outer;
+                    raise e
+              in
               s.awaits <- s.awaits + 1;
               let id = "s" ^ string_of_int s.awaits in
               s.pending <-
@@ -131,8 +149,9 @@ open Base
                     id;
                     subscribe =
                       (fun cb -> Async.on_settled async (fun _ -> cb ()));
-                    fill = (fun () -> print s body);
-                    fill_failed = (fun m -> print s (fun () -> failed m));
+                    fill = (fun () -> held (fun () -> print s body));
+                    fill_failed =
+                      (fun m -> held (fun () -> print s (fun () -> failed m)));
                   }
                 :: s.pending;
               marker ("<!--[" ^ id ^ "-->");
@@ -150,22 +169,50 @@ open Base
       | Island { name; props; render; loading } ->
           s.islands <- s.islands + 1;
           let id = "i" ^ string_of_int s.islands in
+          let link =
+            match (loading, s.preload) with
+            | `Lazy _, _ | _, None -> None
+            | _, Some f ->
+                if List.mem name s.preloaded then None
+                else begin
+                  s.preloaded <- name :: s.preloaded;
+                  Option.map
+                    (fun url ->
+                      Printf.sprintf "<link rel=\"modulepreload\" href=\"%s\">"
+                        (escape ~quote:true url))
+                    (f name)
+                end
+          in
+          (match link with
+          | Some l when s.depth = 0 -> Buffer.add_string b l
+          | Some l -> s.queued <- l :: s.queued
+          | None -> ());
           Buffer.add_string b
             (Printf.sprintf
                "<yuka-island data-name=\"%s\" data-id=\"%s\" style=\"display:contents\"%s>"
                (escape ~quote:true name) id
                (match loading with
                | `Load -> ""
-               | `Idle -> " data-start=\"idle\""
-               | `Visible -> " data-start=\"visible\""
-               | `Interaction -> " data-start=\"interaction\""));
+               | `Idle | `Lazy `Idle -> " data-start=\"idle\""
+               | `Visible | `Lazy `Visible -> " data-start=\"visible\""
+               | `Interaction | `Lazy `Interaction ->
+                   " data-start=\"interaction\""));
           after_text := false;
-          go (render ());
+          s.depth <- s.depth + 1;
+          (match go (render ()) with
+          | () -> s.depth <- s.depth - 1
+          | exception e ->
+              s.depth <- s.depth - 1;
+              raise e);
           Buffer.add_string b "</yuka-island>";
           Buffer.add_string b
             (Printf.sprintf
                "<script type=\"application/json\" data-yuka-props=\"%s\">%s</script>"
                id (Json.to_string props));
+          if s.depth = 0 then begin
+            List.iter (Buffer.add_string b) (List.rev s.queued);
+            s.queued <- []
+          end;
           after_text := false
       | Each { items; key = _; equal = _; render } ->
           marker "<!--[-->";

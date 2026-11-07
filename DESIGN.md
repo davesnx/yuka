@@ -38,7 +38,7 @@ Current layout (v0.4; earlier sections use the old names, see "v0.4"):
 | `yuka` | native, melange | `src/` | everything users call: State, Effect, elements, Json, Codec, Async, Action, `Yuka.Server`, `Yuka.Client` (islands and browser runtime), `Yuka.Router`, `Yuka.Await`; the virtual DOM module `Web` |
 | `yuka.js` | melange | `dom/js/` | the browser implementation of `Web` (a Melange entry lists it) |
 | `yuka.native` | native, melange | `dom/native/` | the default implementation of `Web` (raises "browser only") |
-| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `[%yuka.lazy]` |
+| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.mount ()` |
 
 Platform functions (event fields, window listeners, fetch) are a record of
 functions in the core (`Internal.platform`). The client library installs
@@ -655,7 +655,7 @@ inside `yuka`.
   `Web`. Melange-only code stays in `dom/js/`. This is why `mount` lives in
   `src/yuka.ml`.
 
-### Lazy islands
+### Lazy islands (replaced by "v1: lazy as a value of `loading`")
 
 - `let%client[@yuka.lazy] make ...` marks an island lazy: the generator
   emits a lazy entry (dynamic import, the path above) and does not name the
@@ -723,12 +723,50 @@ Changes from the design above, found in implementation and review:
 - The generator scans subdirectories only when the `dune` file in DIR has
   `(include_subdirs unqualified)`, as dune does. A `(modules ...)` field is
   an error (not supported).
-- It skips comments and strings. A file is lazy when `[@yuka.lazy]` or
-  `[@@yuka.lazy]` appears anywhere in it outside comments and strings, so the
-  attribute can be on the item or on the binding, as the ppx accepts.
+- It skips comments and strings. (The lazy attribute it read is gone: see
+  "v1: lazy as a value of `loading`".)
 - A lazy path that does not start with `.` gets `./`, so the dynamic import
   is relative and not a bare package name.
 - The ppx adds `~islands` to any `Yuka.mount ... ()` without an `islands`
   argument, so `Yuka.mount ~navigation:false ()` works.
 - `Yuka.mount` checks `Web.in_browser` (`false` in `yuka.native`, `true` in
   `yuka.js`).
+
+## v1: lazy as a value of `loading` (decided by the user, 2026-11-06)
+
+Replaces "Lazy islands" above and `let%client[@yuka.lazy]`. Source:
+`.workplace/plans/lazy-islands_PLAN.md` (measurement: all six demo islands
+together are about 3.4 KB gzip, 8% of the client; the runtime is the rest).
+
+```ocaml
+type trigger = [ `Idle | `Visible | `Interaction ]
+type loading = [ `Load | trigger | `Lazy of trigger ]
+```
+
+- `` `Load `` (default): download and start at page open.
+- A trigger: download at page open (through the `modulepreload` link; without
+  `?preload` the island downloads when it starts), start at the trigger.
+- `` `Lazy t ``: download and start at trigger `t`. Events before the start
+  are recorded and replayed (as today for lazy entries).
+- Lazy is decided where the island is used, not per island module. The
+  bundler cannot see use sites, so every island is its own file: the
+  generator makes every island a lazy entry (dynamic `import`), and the
+  client entry names no island module. Islands that are not on the page are
+  never downloaded.
+- The server prints `<link rel="modulepreload" href="URL">` before the first
+  `<yuka-island>` of each island name whose `loading` is not `` `Lazy _ ``
+  (`modulepreload` is allowed in `<body>`, so it works for streamed parts).
+  `data-start` is printed as before, from the trigger; the client needs no
+  other attribute: it always imports the island at its start, and the
+  preload makes that a cache hit.
+- The server needs the island URL. `Yuka.Server.respond ?preload` takes a
+  function from island name to URL; without it, no preload links. The app
+  builds it: `yuka-islands --manifest` prints JSON
+  `{ "<island name>": "<path relative to the emit directory>" }`, and
+  `Yuka.Server.preload_urls ~manifest ~base ?metafile ()` makes the function.
+  Without `metafile` the URL is `base ^ path` (dev, emitted modules). With an
+  esbuild metafile (`--metafile`), the URL is `base ^` the output file whose
+  `entryPoint` is that path (production, hashed chunk names).
+- Removed: `let%client[@yuka.lazy]` (the ppx rejects every `yuka.*`
+  attribute on `let%client` again), the eager list in the generated module.
+- Not now: prefetch triggers, `` `Media ``, a `data-lazy` attribute.

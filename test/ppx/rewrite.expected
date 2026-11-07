@@ -962,29 +962,6 @@ let nested_fixed =
           [Yuka.lower "li" [] [Yuka.text "a"];
           Yuka.lower "li" [] [Yuka.text "b"]];
        Yuka.lower "p" [] [Yuka.text "c"]])
-include
-  struct
-    let make ~n:(n : int) () = Yuka.lower "p" [] [][@@yuka.lazy ]
-    let name = "Rewrite"
-    let island ~n ?loading () =
-      (Yuka.Client.island ?loading ~name:"Rewrite"
-         ~props:(`Assoc [("n", (Yuka.Codec.encode Yuka.Codec.int n))])
-         (fun () -> make ~n ()) : Yuka.server Yuka.element)
-    let register =
-      Yuka.Client.entry ~name:"Rewrite"
-        (fun (j : Yuka.Json.t) ->
-           match j with
-           | `Assoc _yuka_fields ->
-               (match Stdlib.List.assoc_opt "n" _yuka_fields with
-                | Some _yuka_j0 ->
-                    (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
-                     | Stdlib.Ok _yuka_v0 ->
-                         let n = _yuka_v0 in
-                         Stdlib.Ok ((fun () -> make ~n ()))
-                     | Stdlib.Error e -> Stdlib.Error ("n" ^ (": " ^ e)))
-                | None -> Stdlib.Error "missing field n")
-           | _ -> Stdlib.Error "expected an object")
-  end
 let () = Yuka.mount ~islands:Yuka_islands.registry ()
 let () = Yuka.mount ~navigation:false ~islands:Yuka_islands.registry ()
 let () = Yuka.mount ?navigation:x ~islands:Yuka_islands.registry ()
@@ -999,7 +976,7 @@ module Awaiting =
       Yuka.Await.make ~async:comments
         ~loading:(Yuka.lower "p" [] [Yuka.text "loading"])
         ~children:(fun items ->
-                     Yuka.template "rewrite:140:82"
+                     Yuka.template "rewrite:138:82"
                        (Yuka.lower "ul" []
                           [Yuka.lower "li" [] [Yuka.text "x"];
                           Yuka.lower "li" []

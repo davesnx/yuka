@@ -1,8 +1,8 @@
-Eager island
+Every island is a lazy entry
 
-  $ mkdir eager
-  $ printf 'let%%client make () = ()\n' > eager/counter.ml
-  $ yuka-islands --library app eager
+  $ mkdir one
+  $ printf 'let%%client make () = ()\n' > one/counter.ml
+  $ yuka-islands --library app one
   type m
   type entry = Yuka.Client.entry
   external import : string -> m Yuka.Client.promise = "import"
@@ -10,12 +10,20 @@ Eager island
   
   let registry =
     Yuka.Client.registry
-      [ App.Counter.register ]
+      ~lazy_entries:
+        [ Yuka.Client.lazy_entry ~name:"App.Counter" (fun () ->
+                Yuka.Client.promise_map register (import "./one/counter.js")) ]
+      []
 
-Lazy island, path relative to the working directory
+  $ yuka-islands --manifest --library app one
+  {
+    "App.Counter": "./one/counter.js"
+  }
+
+Two islands, path relative to the working directory
 
   $ mkdir -p up/shared up/client
-  $ printf 'let%%client[@yuka.lazy] make () = ()\n' > up/shared/related.mlx
+  $ printf 'let%%client make () = ()\n' > up/shared/related.mlx
   $ printf 'let%%client make () = ()\n' > up/shared/counter.mlx
   $ cd up/client
   $ yuka-islands --library demo_shared ../shared
@@ -27,56 +35,63 @@ Lazy island, path relative to the working directory
   let registry =
     Yuka.Client.registry
       ~lazy_entries:
-        [ Yuka.Client.lazy_entry ~name:"Demo_shared.Related" (fun () ->
+        [ Yuka.Client.lazy_entry ~name:"Demo_shared.Counter" (fun () ->
+                Yuka.Client.promise_map register (import "../shared/counter.js"))
+        ; Yuka.Client.lazy_entry ~name:"Demo_shared.Related" (fun () ->
                 Yuka.Client.promise_map register (import "../shared/related.js")) ]
-      [ Demo_shared.Counter.register ]
+      []
+  $ yuka-islands --manifest --library demo_shared ../shared
+  {
+    "Demo_shared.Counter": "../shared/counter.js",
+    "Demo_shared.Related": "../shared/related.js"
+  }
   $ cd ../..
 
-Lazy attribute after a space, nested directory, file without island
+The manifest path is the import path of the same island
+
+  $ yuka-islands --library demo_shared up/shared | grep -o 'import "[^"]*"' | sed 's/import //' | sort > imports
+  $ yuka-islands --manifest --library demo_shared up/shared | grep -o '"[^"]*\.js"' | sort > paths
+  $ cat imports
+  "./up/shared/counter.js"
+  "./up/shared/related.js"
+  $ diff imports paths
+
+Nested directory with include_subdirs unqualified, file without island
 
   $ mkdir -p nested/deep
   $ printf '(include_subdirs unqualified)\n' > nested/dune
-  $ printf 'let%%client [@yuka.lazy] make () = ()\n' > nested/deep/map.ml
+  $ printf 'let%%client make () = ()\n' > nested/deep/map.ml
   $ printf 'let%%client make () = ()\n' > nested/zed.ml
   $ printf 'let make () = ()\n(* let%%client in a comment line is not at line start *)\n' > nested/plain.ml
   $ printf '  let%%client make () = ()\n' > nested/indented.ml
-  $ yuka-islands --library app nested
-  type m
-  type entry = Yuka.Client.entry
-  external import : string -> m Yuka.Client.promise = "import"
-  external register : m -> entry = "register" [@@mel.get]
-  
-  let registry =
-    Yuka.Client.registry
-      ~lazy_entries:
-        [ Yuka.Client.lazy_entry ~name:"App.Map" (fun () ->
-                Yuka.Client.promise_map register (import "./nested/deep/map.js")) ]
-      [ App.Zed.register ]
+  $ yuka-islands --manifest --library app nested
+  {
+    "App.Map": "./nested/deep/map.js",
+    "App.Zed": "./nested/zed.js"
+  }
 
 Two libraries, sorted output
 
   $ mkdir lib_b lib_a
   $ printf 'let%%client make () = ()\n' > lib_b/same.ml
   $ printf 'let%%client make () = ()\n' > lib_a/same.ml
-  $ yuka-islands --library b lib_b --library a lib_a
-  type m
-  type entry = Yuka.Client.entry
-  external import : string -> m Yuka.Client.promise = "import"
-  external register : m -> entry = "register" [@@mel.get]
-  
-  let registry =
-    Yuka.Client.registry
-      [ A.Same.register
-      ; B.Same.register ]
+  $ yuka-islands --manifest --library b lib_b --library a lib_a
+  {
+    "A.Same": "./lib_a/same.js",
+    "B.Same": "./lib_b/same.js"
+  }
+  $ yuka-islands --library b lib_b --library a lib_a | grep -c lazy_entry
+  2
 
 No island at all
 
   $ mkdir empty
   $ printf 'let x = 1\n' > empty/x.ml
-  $ yuka-islands --library e empty | tail -3
-  let registry =
+  $ yuka-islands --library e empty | tail -2
     Yuka.Client.registry
       []
+  $ yuka-islands --manifest --library e empty
+  {}
 
 include_subdirs qualified is rejected
 
@@ -84,6 +99,9 @@ include_subdirs qualified is rejected
   $ printf '(include_subdirs qualified)\n(library (name q))\n' > q/dune
   $ printf 'let%%client make () = ()\n' > q/sub/a.ml
   $ yuka-islands --library q q
+  yuka-islands: q/dune: include_subdirs qualified is not supported; use include_subdirs unqualified
+  [1]
+  $ yuka-islands --manifest --library q q
   yuka-islands: q/dune: include_subdirs qualified is not supported; use include_subdirs unqualified
   [1]
 
@@ -94,14 +112,6 @@ include_subdirs qualified is rejected
   yuka-islands: q2/sub/dune: include_subdirs qualified is not supported; use include_subdirs unqualified
   [1]
 
-include_subdirs unqualified is accepted
-
-  $ mkdir u
-  $ printf '(include_subdirs unqualified)\n' > u/dune
-  $ printf 'let%%client make () = ()\n' > u/a.ml
-  $ yuka-islands --library u u | tail -1
-      [ U.A.register ]
-
 Errors
 
   $ yuka-islands --library x missing
@@ -109,15 +119,19 @@ Errors
   [1]
 
   $ yuka-islands
-  yuka-islands: usage: yuka-islands --library NAME DIR [--library NAME DIR ...]
+  yuka-islands: usage: yuka-islands [--manifest] --library NAME DIR [--library NAME DIR ...]
+  [1]
+
+  $ yuka-islands --manifest
+  yuka-islands: usage: yuka-islands [--manifest] --library NAME DIR [--library NAME DIR ...]
   [1]
 
   $ yuka-islands --library x
-  yuka-islands: unexpected argument "--library"; expected --library NAME DIR
+  yuka-islands: unexpected argument "--library"; expected [--manifest] --library NAME DIR
   [1]
 
-  $ yuka-islands --library x eager stray
-  yuka-islands: unexpected argument "stray"; expected --library NAME DIR
+  $ yuka-islands --library x one stray
+  yuka-islands: unexpected argument "stray"; expected [--manifest] --library NAME DIR
   [1]
 
 A let%client inside a comment or string is not an island
@@ -150,50 +164,41 @@ A let%client inside a comment or string is not an island
   > (* c *) let x = "(*"
   > let%client make () = 1
   > EOT
-  $ yuka-islands --library t text | tail -3
-  let registry =
-    Yuka.Client.registry
-      [ T.Real.register ]
+  $ yuka-islands --manifest --library t text
+  {
+    "T.Real": "./text/real.js"
+  }
 
-The lazy attribute may sit on the binding or on the next line
+The lazy attribute means nothing
 
   $ mkdir attr
-  $ cat > attr/trailing.ml <<'EOT'
-  > let%client make () = 1 [@@yuka.lazy]
-  > EOT
-  $ cat > attr/nextline.ml <<'EOT'
-  > let%client
-  >   [@yuka.lazy]
-  >   make () = 1
-  > EOT
-  $ cat > attr/commented.ml <<'EOT'
-  > (* [@@yuka.lazy] *)
-  > let%client make () = 1
-  > EOT
-  $ yuka-islands --library a attr | tail -7
-    Yuka.Client.registry
-      ~lazy_entries:
-        [ Yuka.Client.lazy_entry ~name:"A.Nextline" (fun () ->
-                Yuka.Client.promise_map register (import "./attr/nextline.js"))
-        ; Yuka.Client.lazy_entry ~name:"A.Trailing" (fun () ->
-                Yuka.Client.promise_map register (import "./attr/trailing.js")) ]
-      [ A.Commented.register ]
+  $ printf 'let%%client[@yuka.lazy] make () = 1\n' > attr/a.ml
+  $ yuka-islands --manifest --library a attr
+  {
+    "A.A": "./attr/a.js"
+  }
 
 Subdirectories belong to the library only with include_subdirs unqualified
 
-  $ mkdir -p scope/own scope/sub
+  $ mkdir -p scope/sub
   $ printf '(library (name scope))\n' > scope/dune
   $ printf 'let%%client make () = 1\n' > scope/top.ml
   $ printf 'let%%client make () = 1\n' > scope/sub/other.ml
-  $ yuka-islands --library s scope | tail -1
-      [ S.Top.register ]
+  $ yuka-islands --manifest --library s scope
+  {
+    "S.Top": "./scope/top.js"
+  }
   $ printf '; (include_subdirs unqualified)\n(library (name scope))\n' > scope/dune
-  $ yuka-islands --library s scope | tail -1
-      [ S.Top.register ]
+  $ yuka-islands --manifest --library s scope
+  {
+    "S.Top": "./scope/top.js"
+  }
   $ printf '(include_subdirs unqualified)\n(library (name scope))\n' > scope/dune
-  $ yuka-islands --library s scope | tail -2
-      [ S.Other.register
-      ; S.Top.register ]
+  $ yuka-islands --manifest --library s scope
+  {
+    "S.Other": "./scope/sub/other.js",
+    "S.Top": "./scope/top.js"
+  }
 
 A modules field is rejected
 
@@ -204,5 +209,27 @@ A modules field is rejected
   yuka-islands: mods/dune: (modules ...) is not supported
   [1]
   $ printf '(library (name mods) (modules_without_implementation a))\n' > mods/dune
-  $ yuka-islands --library m mods | tail -1
-      [ M.A.register ]
+  $ yuka-islands --manifest --library m mods
+  {
+    "M.A": "./mods/a.js"
+  }
+
+The manifest is valid JSON for non-ASCII and space characters
+
+  $ mkdir "café dir"
+  $ printf 'let%%client make () = 1\n' > "café dir/uno.ml"
+  $ yuka-islands --manifest --library l "café dir"
+  {
+    "L.Uno": "./café dir/uno.js"
+  }
+  $ yuka-islands --manifest --library l "café dir" | node -e 'console.log(JSON.stringify(JSON.parse(require("fs").readFileSync(0,"utf8"))))'
+  {"L.Uno":"./café dir/uno.js"}
+
+  $ mkdir "$(printf 'a\tb\\c')"
+  $ printf 'let%%client make () = 1\n' > "$(printf 'a\tb\\c')/x.ml"
+  $ yuka-islands --manifest --library l "$(printf 'a\tb\\c')"
+  {
+    "L.X": "./a\u0009b\\c/x.js"
+  }
+  $ yuka-islands --manifest --library l "$(printf 'a\tb\\c')" | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8"))["L.X"] === "./a\tb\\c/x.js")'
+  true

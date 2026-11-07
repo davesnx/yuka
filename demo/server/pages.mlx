@@ -25,15 +25,15 @@ let issue ?(delay = 0.6) (i : Model.Issue.t) =
       loading=(<Views.Skeleton lines=3 />)
       failed=(fun m -> <p class_="error">(Yuka.text ("Could not load comments: " ^ m))</p>)>
       (fun comments ->
-        <Yuka.Client>
+        <Yuka.Client loading=(`Lazy `Idle)>
           <Comments issue_id=i.id me=Store.me comments />
         </Yuka.Client>)
     </Yuka.Await>
   in
   let props =
-    <Yuka.Client loading=`Interaction>
+    <Yuka.Client loading=(`Lazy `Interaction)>
       <Issue_props issue=i>
-        <Yuka.Client loading=`Visible>
+        <Yuka.Client loading=(`Lazy `Visible)>
           <Related related=(Store.related_async ~delay:(delay *. 1.5) i) />
         </Yuka.Client>
       </Issue_props>

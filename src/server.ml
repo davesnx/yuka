@@ -67,8 +67,9 @@ let fill_chunk id html =
 let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
 
-let drive ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
+let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
   let session = Printer.session ~streaming:true in
+  session.preload <- preload;
   let shell = Printer.print session (fun () -> build ()) in
   let result, resolve, fail = Async.make () in
   let chain = ref (on_shell shell) in
@@ -115,7 +116,8 @@ let drive ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
       match fill () with
       | html ->
           register ();
-          emit (fun () -> on_fill id html);
+          let links = Printer.take_links session in
+          emit (fun () -> on_fill id links html);
           check_done ()
       | exception exn -> abort exn
     end
@@ -142,7 +144,8 @@ let drive ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
             match fill_failed "timeout" with
             | html ->
                 register ();
-                emit (fun () -> on_fill id html);
+                let links = Printer.take_links session in
+                emit (fun () -> on_fill id links html);
                 expire ()
             | exception exn -> abort exn)
         | Types.Pending_async { id; _ } ->
@@ -165,16 +168,16 @@ let drive ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
   result
 
 let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
-    ?scripts ~sleep ~write build =
+    ?scripts ?preload ~sleep ~write build =
   let ( >>= ) = Async.bind in
-  drive ~timeout ~sleep
+  drive ?preload ~timeout ~sleep
     (fun () -> build ())
     ~on_shell:(fun shell ->
       write
         (head ~extra:fill_script ?head:head_html ?early ?import_map ?title
            ?styles ?scripts ())
       >>= fun () -> write shell)
-    ~on_fill:(fun id html -> write (fill_chunk id html))
+    ~on_fill:(fun id links html -> write (links ^ fill_chunk id html))
     ~on_value:(fun id json -> write (value_script id json))
   >>= fun () -> write "</body></html>"
 
@@ -210,34 +213,96 @@ let fill_marker doc id html =
       String.sub doc 0 start ^ "<!--[-->" ^ html
       ^ String.sub doc stop (String.length doc - stop)
 
-let render_settled ?(timeout = 10.) ~sleep build =
+let render_settled ?(timeout = 10.) ?preload ~sleep build =
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
     (fun () -> !document ^ Buffer.contents values)
-    (drive ~timeout ~sleep
+    (drive ?preload ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun shell ->
          document := shell;
          Async.resolved ())
-       ~on_fill:(fun id html ->
+       ~on_fill:(fun id links html ->
          document := fill_marker !document id html;
+         Buffer.add_string values links;
          Async.resolved ())
        ~on_value:(fun id json ->
          Buffer.add_string values (value_script id json);
          Async.resolved ()))
 
 let respond ?(navigating = false) ?head:head_html ?early ?import_map ?timeout
-    ?title ?styles ?scripts ~sleep ~write build =
+    ?title ?styles ?scripts ?preload ~sleep ~write build =
   if navigating then
-    Async.bind (render_settled ?timeout ~sleep build) (fun body ->
+    Async.bind (render_settled ?timeout ?preload ~sleep build) (fun body ->
         write
           (head ~extra:"" ?head:head_html ?early ?import_map ?title ?styles
              ?scripts ()
           ^ body ^ "</body></html>"))
   else
     stream ?head:head_html ?early ?import_map ?timeout ?title ?styles ?scripts
-      ~sleep ~write build
+      ?preload ~sleep ~write build
+
+let normalize path =
+  let rec go p =
+    if String.length p >= 2 && String.sub p 0 2 = "./" then
+      go (String.sub p 2 (String.length p - 2))
+    else p
+  in
+  go path
+
+let preload_urls ~manifest ~base ?metafile () =
+  let parse what text =
+    match Json.of_string text with
+    | Ok j -> j
+    | Error m ->
+        invalid_arg (Printf.sprintf "Yuka.Server.preload_urls: bad %s JSON: %s" what m)
+  in
+  let paths =
+    match parse "manifest" manifest with
+    | `Assoc fields ->
+        List.map
+          (fun (name, v) ->
+            match v with
+            | `String p -> (name, normalize p)
+            | _ ->
+                invalid_arg
+                  ("Yuka.Server.preload_urls: manifest entry " ^ name
+                 ^ " is not a string"))
+          fields
+    | _ -> invalid_arg "Yuka.Server.preload_urls: manifest is not an object"
+  in
+  let outputs =
+    match metafile with
+    | None -> None
+    | Some text -> (
+        match parse "metafile" text with
+        | `Assoc top -> (
+            match List.assoc_opt "outputs" top with
+            | Some (`Assoc outs) ->
+                Some
+                  (List.filter_map
+                     (fun (file, v) ->
+                       match v with
+                       | `Assoc o -> (
+                           match List.assoc_opt "entryPoint" o with
+                           | Some (`String e) -> Some (file, normalize e)
+                           | _ -> None)
+                       | _ -> None)
+                     outs)
+            | _ ->
+                invalid_arg
+                  "Yuka.Server.preload_urls: metafile has no outputs object")
+        | _ -> invalid_arg "Yuka.Server.preload_urls: metafile is not an object")
+  in
+  fun name ->
+    match List.assoc_opt name paths with
+    | None -> None
+    | Some path -> (
+        match outputs with
+        | None -> Some (base ^ path)
+        | Some outs -> (
+            match List.find_opt (fun (_, e) -> e = path) outs with Some (file, _) -> Some (base ^ file) | None -> None))
 
 module Action = struct
   exception Rejected of string
