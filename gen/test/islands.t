@@ -169,15 +169,6 @@ A let%client inside a comment or string is not an island
     "T.Real": "./text/real.js"
   }
 
-The lazy attribute means nothing
-
-  $ mkdir attr
-  $ printf 'let%%client[@yuka.lazy] make () = 1\n' > attr/a.ml
-  $ yuka-islands --manifest --library a attr
-  {
-    "A.A": "./attr/a.js"
-  }
-
 Subdirectories belong to the library only with include_subdirs unqualified
 
   $ mkdir -p scope/sub

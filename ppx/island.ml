@@ -150,10 +150,7 @@ let check_attributes (attrs : attribute list) =
   List.iter
     (fun (a : attribute) ->
       let n = a.attr_name.txt in
-      if n = "yuka.lazy" then
-        fail ~loc:a.attr_loc
-          "[@yuka.lazy] no longer exists: lazy is now a value of loading at the use site, <Yuka.Client loading=(`Lazy `Visible)>"
-      else if String.starts_with ~prefix:"yuka." n then
+      if String.starts_with ~prefix:"yuka." n then
         fail ~loc:a.attr_loc "unknown attribute [@%s] on a let%%client binding" n)
     attrs
 

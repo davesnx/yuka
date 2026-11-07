@@ -404,15 +404,3 @@ Unknown yuka attribute on the binding:
                                             ^^^^^^^^^^^^^^
   Error: [yuka] unknown attribute [@yuka.other] on a let%client binding
   [1]
-
-yuka.lazy on let%client:
-
-  $ cat > n4.mlx <<'X'
-  > let%client[@yuka.lazy] make ~(a : int) () = <p />
-  > X
-  $ run n4
-  File "n4.mlx", line 1, characters 10-22:
-  1 | let%client[@yuka.lazy] make ~(a : int) () = <p />
-                ^^^^^^^^^^^^
-  Error: [yuka] [@yuka.lazy] no longer exists: lazy is now a value of loading at the use site, <Yuka.Client loading=(`Lazy `Visible)>
-  [1]
