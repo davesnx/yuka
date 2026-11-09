@@ -11,6 +11,8 @@
 
 (maintainers "David Sancho Moreno")
 
+(license MIT)
+
 (dialect
  (name mlx)
  (implementation

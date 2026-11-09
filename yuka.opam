@@ -5,6 +5,7 @@ description:
   "Yuka renders pages on the server and streams slow parts as they become ready. It does not depend on a web server: you connect it to Dream, or any other, in a few lines. Parts that need interaction are islands: small components that Melange compiles to JavaScript and that hydrate in the browser. Components are written in mlx (JSX for OCaml) and use signals, so a component runs once and only the parts that read a signal update."
 maintainer: ["David Sancho Moreno"]
 authors: ["David Sancho Moreno"]
+license: "MIT"
 homepage: "https://github.com/davesnx/yuka"
 bug-reports: "https://github.com/davesnx/yuka/issues"
 depends: [

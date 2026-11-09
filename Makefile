@@ -92,3 +92,18 @@ install-npm: ## Install npm dependencies (esbuild, jsdom)
 
 .PHONY: init
 init: install-npm ## Set up the dev environment
+
+.PHONY: install
+install: ## Install the opam dependencies
+	opam update
+	opam install . --deps-only --with-test --with-doc -y
+
+.PHONY: pin-list
+pin-list: ## List pinned dependencies, one "<name> <url>" per line
+	@true
+
+.PHONY: pin
+pin: ## Pin dependencies
+	@$(MAKE) -s pin-list | while read -r name url; do \
+		opam pin add "$$name" "$$url" --yes --no-action || exit 1; \
+	done
