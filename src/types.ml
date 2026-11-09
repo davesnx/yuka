@@ -63,6 +63,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
         subscribe : (unit -> unit) -> unit;
         fill : unit -> string;
         fill_failed : string -> string;
+        inside_island : bool;
       }
     | Pending_async of { id : string; async : Json.t Async.t }
 
@@ -75,6 +76,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable preload : (string -> string option) option;
     mutable preloaded : string list;
     mutable depth : int;
+    islands_only : bool;
     mutable queued : string list;
   }
 

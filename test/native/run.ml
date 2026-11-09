@@ -56,6 +56,11 @@ let island a =
     ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
     (fun () -> Yuka.text "")
 
+let island_wrap id content =
+  Printf.sprintf
+    "<yuka-island data-name=\"I\" data-id=\"%s\" style=\"display:contents\">%s</yuka-island><script type=\"application/json\" data-yuka-props=\"%s\">null</script>"
+    id content id
+
 let island_html id props =
   Printf.sprintf
     "<yuka-island data-name=\"I\" data-id=\"%s\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"%s\">%s</script>"
@@ -83,9 +88,36 @@ let page_cases =
       html
   in
   let to_string () =
-    check string "element" "<p>a<!---->b</p>"
+    check string "element" "<p>ab</p>"
       (Server.to_string (fun () ->
            Yuka.lower "p" [] [ Yuka.text "a"; Yuka.text "b" ]))
+  in
+  let markers_only_in_islands () =
+    let pending, _, _ = Async.make () in
+    let content () =
+      Yuka.lower "p" []
+        [ Yuka.text "a";
+          Yuka.text "b";
+          Yuka.hole (fun () -> Yuka.text "h");
+          Yuka.each ~key:Fun.id (fun () -> [ "x"; "y" ]) Yuka.text;
+          text_await (Async.resolved 1) "s";
+          text_await pending "l" ]
+    in
+    let outside =
+      Server.to_string (fun () ->
+          Yuka.lower "p" []
+            [ Yuka.text "a";
+              Yuka.text "b";
+              text_await (Async.resolved 1) "s";
+              text_await pending "l" ])
+    in
+    check string "no markers outside an island" "<p>abs1Ll</p>" outside;
+    check string "markers inside an island"
+      (island_wrap
+         "i1"
+         "<p>a<!---->b<!--[-->h<!--]--><!--[--><!--[-->x<!--]--><!--[-->y<!--]--><!--]--><!--[-->s1<!--]--><!--[-->Ll<!--]--></p>")
+      (Server.to_string (fun () ->
+           Yuka.Client.island ~name:"I" ~props:`Null content))
   in
   let respond () =
     let write, chunks = recorder () in
@@ -108,6 +140,7 @@ let page_cases =
   [ test_case "component effect" `Quick component_effect;
     test_case "page" `Quick page;
     test_case "to_string" `Quick to_string;
+    test_case "markers only in islands" `Quick markers_only_in_islands;
     test_case "respond" `Quick respond ]
 
 type issue = { title : string; n : int }
@@ -302,7 +335,7 @@ let stream_cases =
     let write, chunks = recorder () in
     get (stream (fun () -> text_await (Async.resolved 7) "a") write);
     check list_of "no fill"
-      [ "<!--[-->a7<!--]-->"; "</body></html>" ]
+      [ "a7"; "</body></html>" ]
       (List.tl (chunks ()))
   in
   let nested () =
@@ -400,11 +433,11 @@ let stream_cases =
   in
   let to_string_sync () =
     let pending, _, _ = Async.make () in
-    check string "pending prints loading" "<!--[-->La<!--]-->"
+    check string "pending prints loading" "La"
       (Server.to_string (fun () -> text_await pending "a"));
-    check string "settled prints value" "<!--[-->a1<!--]-->"
+    check string "settled prints value" "a1"
       (Server.to_string (fun () -> text_await (Async.resolved 1) "a"));
-    check string "failed prints nothing" "<!--[--><!--]-->"
+    check string "failed prints nothing" ""
       (Server.to_string (fun () -> text_await (Async.failed "x") "a"));
     check bool "settled prop inline" true
       (contains
@@ -775,7 +808,28 @@ let settled_cases =
     resolve_b 2;
     resolve_a 1;
     check string "values in place"
-      "<div><!--[-->a1<!--]--><!--[-->b2<!--]--></div>" (get p)
+      "<div>a1b2</div>" (get p)
+  in
+  let inside_island () =
+    let outer, resolve_outer, _ = Async.make () in
+    let inner, _, _ = Async.make () in
+    let sleep, fire, _ = manual_sleep () in
+    let p =
+      render ~sleep (fun () ->
+          Yuka.Client.island ~name:"I" ~props:`Null (fun () ->
+              Yuka.lower "p" []
+                [ Yuka.text "t";
+                  Yuka.Await.make ~async:outer
+                    ~loading:(Yuka.fragment [ text_await inner "i"; Yuka.text "x" ])
+                    ~children:(fun n -> Yuka.text ("o" ^ string_of_int n))
+                    ();
+                  Yuka.text "u" ]))
+    in
+    resolve_outer 1;
+    fire ();
+    check string "a fill inside an island keeps its hole markers"
+      (island_wrap "i1" "<p>t<!--[-->o1<!--]-->u</p>")
+      (get p)
   in
   let nested () =
     let outer, resolve_outer, _ = Async.make () in
@@ -791,7 +845,7 @@ let settled_cases =
     resolve_outer 1;
     resolve_inner 2;
     check string "nested in place"
-      "<!--[--><p>1<!--[-->i2<!--]--></p><!--]-->" (get p)
+      "<p>1i2</p>" (get p)
   in
   let loading_has_markers () =
     let outer, resolve_outer, _ = Async.make () in
@@ -807,7 +861,7 @@ let settled_cases =
     resolve_outer 1;
     fire ();
     check string "markers inside the replaced part are skipped"
-      "<!--[-->o1<!--]-->" (get p)
+      "o1" (get p)
   in
   let async_prop () =
     let value, resolve, _ = Async.make () in
@@ -846,7 +900,7 @@ let settled_cases =
     fail_a "x";
     fire ();
     check string "failed and timed out"
-      "<!--[-->E:x<!--]--><!--[-->E:timeout<!--]-->" (get p)
+      "E:xE:timeout" (get p)
   in
   let text_inside_hole () =
     let a, resolve, _ = Async.make () in
@@ -856,10 +910,11 @@ let settled_cases =
     in
     resolve 1;
     check string "text neighbours keep their separators"
-      "<p>t<!--[-->a1<!--]-->u</p>" (get p)
+      "<p>ta1u</p>" (get p)
   in
   [ test_case "values in place" `Quick simple;
     test_case "nested values" `Quick nested;
+    test_case "fill inside an island" `Quick inside_island;
     test_case "markers in the loading part" `Quick loading_has_markers;
     test_case "async props" `Quick async_prop;
     test_case "nothing pending" `Quick nothing_pending;
@@ -937,7 +992,7 @@ let navigation_cases =
     check bool "values included" true
       (contains body "data-yuka-async=\"a1\">{\"ok\":5}</script>");
     check bool "values filled in place" true
-      (contains body "<main><!--[-->a1<!--]-->");
+      (contains body "<main>a1");
     check bool "no fill script or template" false
       (contains body "__yukaFill" || contains body "<template")
   in
@@ -970,7 +1025,7 @@ let navigation_cases =
     fire ();
     get p;
     check bool "timeout applies" true
-      (contains (String.concat "" (chunks ())) "<!--[-->E:timeout<!--]-->")
+      (contains (String.concat "" (chunks ())) "E:timeout")
   in
   [ test_case "early scripts" `Quick early_head;
     test_case "navigation request is settled" `Quick navigation;

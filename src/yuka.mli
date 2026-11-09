@@ -395,6 +395,7 @@ module Internal : sig
         subscribe : (unit -> unit) -> unit;
         fill : unit -> string;
         fill_failed : string -> string;
+        inside_island : bool;
       }
     | Pending_async of { id : string; async : Json.t Async.t }
 
@@ -412,7 +413,10 @@ module Internal : sig
       attributes and handlers are left out. Static [value] on [select] and
       [textarea] follows the rules of [to_html]. *)
 
-  val session : streaming:bool -> session
+  val session : streaming:bool -> islands_only:bool -> session
+  (** With [islands_only], [print] writes hydration markers only inside an
+      island. A pending streamed [Await] outside an island still writes
+      [<!--[sN-->] and [<!--]-->], which the fill needs. *)
 
   val print : session -> (unit -> node) -> string
   (** Builds and prints with [server_rendering] true. In a streaming
@@ -561,7 +565,8 @@ module Server : sig
       sees a generic message). Default: [prerr_endline]. *)
 
   val to_string : (unit -> server element) -> string
-  (** The tree as HTML, with hydration markers. The function builds the tree
+  (** The tree as HTML. Hydration markers are written only inside an island,
+      because the browser hydrates nothing else. The function builds the tree
       with effects off, so component bodies do not run effects. *)
 
   val page :

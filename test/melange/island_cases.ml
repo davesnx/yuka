@@ -267,7 +267,7 @@ let fill_view a =
 
 let streamed () =
   let a, resolve, _ = Async.make () in
-  let session = Internal.session ~streaming:true in
+  let session = Internal.session ~streaming:true ~islands_only:false in
   let shell = Internal.print session (fun () -> Internal.node (fill_view a)) in
   let pending = Internal.take_pending session in
   resolve 4;

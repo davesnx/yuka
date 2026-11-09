@@ -87,8 +87,8 @@ open Base
     go root;
     Buffer.contents b
 
-  let session ~streaming =
-    { streaming; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
+  let session ~streaming ~islands_only =
+    { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = [] }
 
   let take_pending s =
@@ -105,14 +105,15 @@ open Base
     let b = Buffer.create 256 in
     let after_text = ref false in
     let select_value = ref None in
+    let hydrating () = (not s.islands_only) || s.depth > 0 in
     let marker m =
-      Buffer.add_string b m;
+      if hydrating () then Buffer.add_string b m;
       after_text := false
     in
     let rec go = function
       | Text "" -> ()
       | Text t ->
-          if !after_text then Buffer.add_string b "<!---->";
+          if !after_text && hydrating () then Buffer.add_string b "<!---->";
           Buffer.add_string b (escape ~quote:false t);
           after_text := true
       | Fragment children -> List.iter go children
@@ -152,11 +153,14 @@ open Base
                     fill = (fun () -> held (fun () -> print s body));
                     fill_failed =
                       (fun m -> held (fun () -> print s (fun () -> failed m)));
+                    inside_island = inside;
                   }
                 :: s.pending;
-              marker ("<!--[" ^ id ^ "-->");
+              Buffer.add_string b ("<!--[" ^ id ^ "-->");
+              after_text := false;
               go loading;
-              marker "<!--]-->"
+              Buffer.add_string b "<!--]-->";
+              after_text := false
           | _ ->
               marker "<!--[-->";
               go (body ());
@@ -287,6 +291,6 @@ open Base
         raise e);
     Buffer.contents b
 
-  let render_html build = print (session ~streaming:false) build
+  let render_html build = print (session ~streaming:false ~islands_only:false) build
 
   let to_html root = render_html (fun () -> root)

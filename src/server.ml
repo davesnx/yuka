@@ -2,7 +2,10 @@ module Shared_action = Action
 
 let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)
 
-let to_string build = Printer.render_html (fun () -> build ())
+let to_string build =
+  Printer.print
+    (Printer.session ~streaming:false ~islands_only:true)
+    (fun () -> build ())
 
 let import_map_script = function
   | [] -> []
@@ -68,7 +71,7 @@ let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
 
 let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
-  let session = Printer.session ~streaming:true in
+  let session = Printer.session ~streaming:true ~islands_only:true in
   session.preload <- preload;
   let shell = Printer.print session (fun () -> build ()) in
   let result, resolve, fail = Async.make () in
@@ -104,20 +107,20 @@ let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
     List.iter
       (fun pending ->
         match pending with
-        | Types.Pending_await { id; subscribe; fill; _ } ->
-            subscribe (fun () -> settled_fill id fill)
+        | Types.Pending_await { id; subscribe; fill; inside_island; _ } ->
+            subscribe (fun () -> settled_fill id inside_island fill)
         | Types.Pending_async { id; async } ->
             Async.on_settled async (fun status -> settled_value id status))
       items
   and check_done () = if !outstanding = [] then conclude ()
-  and settled_fill id fill =
+  and settled_fill id inside fill =
     if (not !finished) && is_outstanding id then begin
       remove id;
       match fill () with
       | html ->
           register ();
           let links = Printer.take_links session in
-          emit (fun () -> on_fill id links html);
+          emit (fun () -> on_fill id inside links html);
           check_done ()
       | exception exn -> abort exn
     end
@@ -140,12 +143,12 @@ let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
     | pending :: _ -> (
         remove (pending_id pending);
         match pending with
-        | Types.Pending_await { id; fill_failed; _ } -> (
+        | Types.Pending_await { id; fill_failed; inside_island; _ } -> (
             match fill_failed "timeout" with
             | html ->
                 register ();
                 let links = Printer.take_links session in
-                emit (fun () -> on_fill id links html);
+                emit (fun () -> on_fill id inside_island links html);
                 expire ()
             | exception exn -> abort exn)
         | Types.Pending_async { id; _ } ->
@@ -177,7 +180,7 @@ let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
         (head ~extra:fill_script ?head:head_html ?early ?import_map ?title
            ?styles ?scripts ())
       >>= fun () -> write shell)
-    ~on_fill:(fun id links html -> write (links ^ fill_chunk id html))
+    ~on_fill:(fun id _ links html -> write (links ^ fill_chunk id html))
     ~on_value:(fun id json -> write (value_script id json))
   >>= fun () -> write "</body></html>"
 
@@ -190,7 +193,7 @@ let find_from text part from =
   in
   at from
 
-let fill_marker doc id html =
+let fill_marker doc id ~inside html =
   let start_marker = "<!--[" ^ id ^ "-->" in
   match find_from doc start_marker 0 with
   | None -> doc
@@ -210,8 +213,10 @@ let fill_marker doc id html =
             else close depth (i + 4)
       in
       let stop = close 1 content in
-      String.sub doc 0 start ^ "<!--[-->" ^ html
-      ^ String.sub doc stop (String.length doc - stop)
+      let opening = if inside then "<!--[-->" else "" in
+      let closing = if inside then 0 else min 8 (String.length doc - stop) in
+      String.sub doc 0 start ^ opening ^ html
+      ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
 let render_settled ?(timeout = 10.) ?preload ~sleep build =
   let document = ref "" in
@@ -223,8 +228,8 @@ let render_settled ?(timeout = 10.) ?preload ~sleep build =
        ~on_shell:(fun shell ->
          document := shell;
          Async.resolved ())
-       ~on_fill:(fun id links html ->
-         document := fill_marker !document id html;
+       ~on_fill:(fun id inside links html ->
+         document := fill_marker !document id ~inside html;
          Buffer.add_string values links;
          Async.resolved ())
        ~on_value:(fun id json ->

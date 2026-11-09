@@ -552,7 +552,7 @@ let html_await () =
 let html_streaming_session () =
   let a, resolve, _ = Async.make () in
   let b, _, _ = Async.make () in
-  let s = Internal.session ~streaming:true in
+  let s = Internal.session ~streaming:true ~islands_only:false in
   let first =
     Internal.print s (fun () ->
         Internal.node

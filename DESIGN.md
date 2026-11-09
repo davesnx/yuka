@@ -49,6 +49,15 @@ handlers, which never run on the server.
 
 The server output and the client hydration must agree on this format.
 
+The browser hydrates only `<yuka-island>` elements, so the page printer
+(`Yuka.Server.to_string`, `page`, `respond`, `stream`, `render_settled`)
+writes the markers below only inside an island. Outside an island it writes
+no `<!---->`, `<!--[-->` or `<!--]-->`. The one exception is a pending
+streamed `Await`, which keeps `<!--[sN-->` and `<!--]-->` because the fill
+finds them. `Internal.to_html`, `Internal.render_html` and
+`Internal.skeleton_html` write the markers everywhere: the client hydrates
+their output.
+
 - Text: escaped (`&`, `<`, `>`). Attribute values: escaped (`&`, `"`, `<`).
 - Two `Text` siblings in a row: the server writes `<!---->` between them, so
   the browser keeps them as two text nodes.
