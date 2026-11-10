@@ -3,7 +3,7 @@ let count : int Yuka.State.t = Yuka.State.make 0 [@@yuka.shared]
 let fixed : Yuka.client Yuka.element =
   <ul class_="list">
     <li>"one"</li>
-    <li onClick=(fun _ -> Yuka.State.update count succ)>(Yuka.text (string_of_int (Yuka.State.get count)))</li>
+    <li on_click=(fun _ -> Yuka.State.update count succ)>(Yuka.text (string_of_int (Yuka.State.get count)))</li>
   </ul>
 
 let by_hand : Yuka.client Yuka.element =

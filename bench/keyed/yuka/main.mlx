@@ -25,7 +25,7 @@ let build count =
 
 let button ~id ~label ~action =
   <div class_="col-sm-6 smallpad">
-    <button id class_="btn btn-primary btn-block" type_=`button onClick=(fun _ -> action ())>
+    <button id class_="btn btn-primary btn-block" type_=`button on_click=(fun _ -> action ())>
       (Yuka.text label)
     </button>
   </div>
@@ -57,10 +57,10 @@ let app () =
     <tr class_=(if State.get selected = r.id then "danger" else "")>
       <td class_="col-md-1">(Yuka.int r.id)</td>
       <td class_="col-md-4">
-        <a onClick=(fun _ -> State.set selected r.id)>(Yuka.text (State.get r.label))</a>
+        <a on_click=(fun _ -> State.set selected r.id)>(Yuka.text (State.get r.label))</a>
       </td>
       <td class_="col-md-1">
-        <a onClick=(fun _ -> remove r)>
+        <a on_click=(fun _ -> remove r)>
           <span class_="glyphicon glyphicon-remove" aria_hidden=true />
         </a>
       </td>

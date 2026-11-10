@@ -4,6 +4,7 @@
 
 ### yuka
 
+- Breaking: props on lowercase tags are snake_case: `on_click`, `on_mousedown`, `view_box`, `stroke_width`, `xlink_href`; a camelCase prop such as `onClick` is a compile error that gives the snake name (@davesnx)
 - Client navigation replaces only the content below the deepest shared layout: islands in shared layouts keep their state; `aria-current` follows the path; a new build id (`Yuka-Build`) makes a full page load (@davesnx)
 - Breaking: `Yuka.Server.modules` takes `~digest` (use `Yuka_dream.tree_digest dir`), so a deploy that changes client code changes the build id; `Yuka.Server.layer` has a `data` field, and a layout that takes a loader result is rendered again on each navigation (@davesnx)
 - Leaving a page stops the action calls of the islands it removes (@davesnx)

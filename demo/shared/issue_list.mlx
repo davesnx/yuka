@@ -80,7 +80,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
   let popup items : client element =
     Yuka.list
       [
-        <div class_="backdrop" onClick=(fun _ -> State.set menu None) />;
+        <div class_="backdrop" on_click=(fun _ -> State.set menu None) />;
         <ul class_="menu">(Yuka.list items)</ul>;
       ]
   in
@@ -89,7 +89,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
       (List.map
          (fun s ->
            <li>
-             <button class_="menu-item" onClick=(fun _ -> change ~id:issue.id ~status:s ())>
+             <button class_="menu-item" on_click=(fun _ -> change ~id:issue.id ~status:s ())>
                <Views.Status_icon status=s />
                (Yuka.text (Issue.status_label s))
              </button>
@@ -101,7 +101,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
       (List.map
          (fun p ->
            <li>
-             <button class_="menu-item" onClick=(fun _ -> change ~id:issue.id ~priority:p ())>
+             <button class_="menu-item" on_click=(fun _ -> change ~id:issue.id ~priority:p ())>
                <Views.Priority_icon priority=p />
                (Yuka.text (Issue.priority_label p))
              </button>
@@ -115,7 +115,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
       data_id=issue.id>
       <span class_="status-wrap">
         <button class_="icon-button" aria_label="Change priority"
-          onClick=(fun _ -> State.set menu (Some (Priority issue.id)))>
+          on_click=(fun _ -> State.set menu (Some (Priority issue.id)))>
           <Views.Priority_icon priority=issue.priority />
         </button>
         (if State.get menu = Some (Priority issue.id) then priority_menu issue else Yuka.empty)
@@ -123,7 +123,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
       <span class_="row-id">(Yuka.text issue.id)</span>
       <span class_="status-wrap">
         <button class_="icon-button" aria_label="Change status"
-          onClick=(fun _ -> State.set menu (Some (Status issue.id)))>
+          on_click=(fun _ -> State.set menu (Some (Status issue.id)))>
           <Views.Status_icon status=issue.status />
         </button>
         (if State.get menu = Some (Status issue.id) then status_menu issue else Yuka.empty)
@@ -151,7 +151,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
     </header>
     <div class_="toolbar">
       <input class_="filter" type_=`text placeholder="Filter issues (j/k to move, Enter to open)"
-        onInput=(fun e -> State.set filter (Event.target_value e)) />
+        on_input=(fun e -> State.set filter (Event.target_value e)) />
       (Yuka.hole (fun () ->
          match Remote.status labels with
          | Status.Ready { data; _ } | Status.Loading (Some data) ->
@@ -161,7 +161,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
                     <button
                       class_=(if State.get label = Some l.label then "chip on" else "chip")
                       data_label=l.label
-                      onClick=(fun _ ->
+                      on_click=(fun _ ->
                         State.set label (if State.peek label = Some l.label then None else Some l.label))>
                       (Yuka.text (l.label ^ " " ^ string_of_int l.open_))
                     </button>)
@@ -172,7 +172,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
      | Some message ->
          <div class_="toast">
            <span>(Yuka.text message)</span>
-           <button class_="icon-button" aria_label="Dismiss" onClick=(fun _ -> State.set toast None)>"x"</button>
+           <button class_="icon-button" aria_label="Dismiss" on_click=(fun _ -> State.set toast None)>"x"</button>
          </div>
      | None -> Yuka.empty)
     <div class_="list">

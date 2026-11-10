@@ -13,13 +13,13 @@ let cases : (string * (unit -> Yuka.client Yuka.element)) list =
         <p>"a" (Yuka.text "x") "b" (Yuka.text "y") (Yuka.text "z") "c" (Yuka.text "w")</p> );
     ( "attribute parts",
       fun () ->
-        <div id="d" class_=(if Yuka.State.get on then "on" else "off") onClick=(fun _ -> ())>
+        <div id="d" class_=(if Yuka.State.get on then "on" else "off") on_click=(fun _ -> ())>
           <span title=(Yuka.State.get label)>"s"</span>
         </div> );
     ( "svg",
       fun () ->
-        <svg viewBox="0 0 10 10" width="10">
-          <circle cx="5" cy="5" r="4" strokeWidth="1" />
+        <svg view_box="0 0 10 10" width="10">
+          <circle cx="5" cy="5" r="4" stroke_width="1" />
           <g class_=(Yuka.State.get label)>(Yuka.text "t")</g>
           <foreignObject><div>(Yuka.text "html")</div></foreignObject>
         </svg> );

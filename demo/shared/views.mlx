@@ -4,19 +4,19 @@ module Status_icon = struct
   let make ~status () : _ Yuka.element =
     let mark =
       match status with
-      | Issue.Backlog -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      | Todo -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      | Issue.Backlog -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke_width="1.5" />
+      | Todo -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke_width="1.5" />
       | In_progress -> <path d="M7 3.5 A3.5 3.5 0 0 1 7 10.5 Z" fill="currentColor" />
-      | Done -> <path d="M4.5 7.2 L6.4 9 L9.6 5.2" fill="none" stroke="#fff" strokeWidth="1.5" />
-      | Canceled -> <path d="M5 5 L9 9 M9 5 L5 9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      | Done -> <path d="M4.5 7.2 L6.4 9 L9.6 5.2" fill="none" stroke="#fff" stroke_width="1.5" />
+      | Canceled -> <path d="M5 5 L9 9 M9 5 L5 9" fill="none" stroke="currentColor" stroke_width="1.5" />
     in
     let ring =
       match status with
       | Issue.Done -> <circle cx="7" cy="7" r="6.5" fill="currentColor" />
-      | In_progress -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      | In_progress -> <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke_width="1.5" />
       | _ -> Yuka.empty
     in
-    <svg class_=("icon status-" ^ Issue.status_slug status) viewBox="0 0 14 14" width="14" height="14">
+    <svg class_=("icon status-" ^ Issue.status_slug status) view_box="0 0 14 14" width="14" height="14">
       ring
       mark
     </svg>
@@ -31,7 +31,7 @@ module Priority_icon = struct
       <rect x=(string_of_int ((i - 1) * 4 + 1)) y=(string_of_int (14 - h)) width="3" height=(string_of_int h) rx="1"
         class_=(if i <= level then "bar on" else "bar") />
     in
-    <svg class_=("icon priority-" ^ Issue.priority_slug priority) viewBox="0 0 14 14" width="14" height="14">
+    <svg class_=("icon priority-" ^ Issue.priority_slug priority) view_box="0 0 14 14" width="14" height="14">
       (Yuka.list (List.map bar [ 1; 2; 3 ]))
     </svg>
 end

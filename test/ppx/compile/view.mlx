@@ -19,8 +19,8 @@ let static_view : Yuka.server Yuka.element =
 
 let client_view : Yuka.client Yuka.element =
   <div class_=(if Yuka.State.get count > 0 then "pos" else "zero")>
-    <button onClick=(fun _ -> Yuka.State.update count succ)>"inc"</button>
-    <input onInput=(fun e -> ignore (Yuka.Event.target_value e)) />
+    <button on_click=(fun _ -> Yuka.State.update count succ)>"inc"</button>
+    <input on_input=(fun e -> ignore (Yuka.Event.target_value e)) />
     "n"
     (Yuka.hole (fun () -> Yuka.text (string_of_int (Yuka.State.get count))))
   </div>

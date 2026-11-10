@@ -85,7 +85,11 @@ markers everywhere: the client hydrates their output.
 - mlx gives `[@JSX] tag ~a:1 ~children:[...] ()`. The ppx turns a lowercase
   tag into `Yuka.lower "tag" [attributes] [children]`, with html_of_jsx's
   attribute checks as the baseline (valid attributes for the tag, plus
-  `data-*` and `aria-*`), and `onClick` style props into `Yuka.on "click"`.
+  `data-*` and `aria-*`), and `on_click` style props into `Yuka.on "click"`.
+  Props on a lowercase tag are snake_case: `on_` and the DOM event name
+  (`on_mousedown`), and the snake form of other names (`view_box`,
+  `stroke_width`, `accept_charset`). A prop with an uppercase letter is an
+  error that gives the snake name.
 - An uppercase tag `<M.Name a=1 />` becomes `M.Name.make ~a:1 ()`, with
   `~children` only when children are given.
 - A string literal child becomes `Yuka.text`. A child or an attribute value
