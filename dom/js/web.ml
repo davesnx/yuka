@@ -476,8 +476,13 @@ let parse_int : string -> int option =
 let add_stylesheet : string -> unit =
   [%mel.raw
     {|function (href) {
-  var links = document.querySelectorAll("link[data-yuka-css]");
-  for (var i = 0; i < links.length; i++) if (links[i].getAttribute("href") === href) return;
+  var seen = document.__yukaSheets;
+  if (!seen) {
+    seen = document.__yukaSheets = new Set();
+    document.querySelectorAll("link[data-yuka-css]").forEach(function (l) { seen.add(l.getAttribute("href")); });
+  }
+  if (seen.has(href)) return;
+  seen.add(href);
   var l = document.createElement("link");
   l.rel = "stylesheet";
   l.setAttribute("href", href);
@@ -488,10 +493,13 @@ let add_stylesheet : string -> unit =
 let adopt_stylesheets : unit -> unit =
   [%mel.raw
     {|function () {
-  var head = document.head, links = document.body.querySelectorAll("link[data-yuka-css]");
-  for (var i = 0; i < links.length; i++) {
-    var l = links[i], href = l.getAttribute("href"), have = head.querySelectorAll("link[data-yuka-css]"), found = false;
-    for (var j = 0; j < have.length; j++) if (have[j].getAttribute("href") === href) found = true;
-    if (found) l.remove(); else head.appendChild(l);
-  }
+  if (!document.body) return;
+  var head = document.head, seen = new Set();
+  head.querySelectorAll("link[data-yuka-css]").forEach(function (l) { seen.add(l.getAttribute("href")); });
+  document.body.querySelectorAll("link[data-yuka-css]").forEach(function (l) {
+    var href = l.getAttribute("href");
+    if (seen.has(href)) l.remove();
+    else { seen.add(href); head.appendChild(l); }
+  });
+  document.__yukaSheets = seen;
 }|}]

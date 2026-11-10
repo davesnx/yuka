@@ -1206,7 +1206,7 @@ let head_sheets : unit -> string =
 }|}]
 
 let clear_sheets : unit -> unit =
-  [%mel.raw {|function () { document.querySelectorAll("link[data-yuka-css]").forEach(function (l) { l.remove() }) }|}]
+  [%mel.raw {|function () { delete document.__yukaSheets; document.querySelectorAll("link[data-yuka-css]").forEach(function (l) { l.remove() }) }|}]
 
 let css_render () =
   clear_sheets ();
@@ -1220,13 +1220,86 @@ let css_render () =
   check "no link in the tree" "<div><span>a</span><span>b</span></div>" (html c);
   dispose ()
 
+let count_sheets : string -> int =
+  [%mel.raw {|function (href) { return Array.from(document.querySelectorAll("link[data-yuka-css]")).filter(function (l) { return l.getAttribute("href") === href }).length }|}]
+
 let css_present () =
   clear_sheets ();
-  let x = stylesheet "/_yuka/css/x.css" in
+  let x = stylesheet "/_yuka/css/x.css" and y = stylesheet "/_yuka/css/y.css" in
   let c = container {|<link rel="stylesheet" href="/_yuka/css/x.css" data-yuka-css><div id="t"></div>|} in
-  let dispose = Yuka.Client.render (as_element (query c "#t")) (fun () -> use_css x (span [ text "a" ])) in
-  check "the link of the server is enough" "" (head_sheets ());
+  let dispose =
+    Yuka.Client.render (as_element (query c "#t")) (fun () -> div [] [ use_css x (span [ text "a" ]); use_css y (span [ text "b" ]) ])
+  in
+  check "x: the link of the server is the only one" "1" (ints (count_sheets "/_yuka/css/x.css"));
+  check "y: added to the head" "/_yuka/css/y.css" (head_sheets ());
   dispose ()
+
+let count_queries : (unit -> unit) -> int =
+  [%mel.raw
+    {|function (f) {
+  var d = document, saved = d.querySelectorAll, n = 0;
+  d.querySelectorAll = function (s) { n++; return saved.call(d, s); };
+  try { f(); } finally { d.querySelectorAll = saved; }
+  return n;
+}|}]
+
+let css_no_scan () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let c = container "" in
+  let n =
+    count_queries (fun () ->
+        let dispose =
+          Yuka.Client.render (as_element c) (fun () ->
+              div [] (List.init 20 (fun i -> use_css x (span [ text (ints i) ]))))
+        in
+        dispose ())
+  in
+  check "the document is scanned once, not on each use" "1" (ints n)
+
+let apply_stream : string -> string -> string -> unit =
+  [%mel.raw
+    {|function (fill_script, shell, chunk) {
+  var code = fill_script.replace(/^<script>/, "").replace(/<\/script>$/, "");
+  new Function(code)();
+  document.__yukaFill = window.__yukaFill;
+  var host = document.createElement("div");
+  host.id = "stream";
+  host.innerHTML = shell;
+  document.body.appendChild(host);
+  var at = chunk.indexOf("<script>");
+  var t = document.createElement("div");
+  t.innerHTML = chunk.slice(0, at);
+  while (t.firstChild) document.body.appendChild(t.firstChild);
+  var id = /__yukaFill\("([^"]*)"\)/.exec(chunk)[1];
+  window.__yukaFill(id);
+}|}]
+
+let css_loading_fill () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let a, resolve, _ = Async.make () in
+  let chunks = ref [] in
+  let write c =
+    chunks := !chunks @ [ c ];
+    Async.return ()
+  in
+  let never _ =
+    let p, _, _ = Async.make () in
+    p
+  in
+  ignore
+    (Private.stream ~sleep:never ~write (fun () ->
+         div []
+           [ Await.make ~async:a ~loading:(use_css x (span [ text "L" ]))
+               ~children:(fun n -> use_css x (span [ text (ints n) ]))
+               () ]));
+  resolve 1;
+  let shell = List.nth !chunks 1 and fill = List.nth !chunks 2 in
+  apply_stream Private.fill_script shell fill;
+  check "filled" "1" (text_content (query (body ()) "#stream"));
+  check "the link survives the fill" "1" (ints (count_sheets "/_yuka/css/x.css"));
+  set_html (query (body ()) "#stream") ""
 
 let css_hydrate_rows () =
   clear_sheets ();
@@ -1270,6 +1343,8 @@ let all =
     ("css: two uses add one link", css_render);
     ("css: a link already in the document is kept", css_present);
     ("css: hydrate rows that use a sheet", css_hydrate_rows);
+    ("css: a link of a loading part survives the fill", css_loading_fill);
+    ("css: uses do not scan the document", css_no_scan);
     ("dom await swaps", await_swaps);
     ("dom await fails", await_fails);
     ("dom await hydrates settled", await_hydrates_settled);

@@ -572,6 +572,20 @@ let partial_css finish =
           check "the sheets stay after the next swap" "/_yuka/css/a.css,/_yuka/css/b.css" (sheets "head");
           finish ()))
 
+let first_load_css finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<nav><a id="two" href="/two">two</a></nav><yuka-outlet data-k="L0" style="display:contents">|}
+    ^ css_link "/_yuka/css/a.css" ^ {|<p class="a_1">in</p></yuka-outlet><p class="a_1">out</p>|});
+  plain_start ();
+  check "moved to the head at start" "/_yuka/css/a.css" (sheets "head");
+  ignore (click "#two" "");
+  resolve_headers 0 {|<p id="new">new</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "content outside the outlet keeps its sheet" "/_yuka/css/a.css" (sheets "");
+      finish ())
+
 let full_swap_css finish =
   setup (page {|<a id="l" href="/issue/1">go</a>|});
   plain_start ();
@@ -1216,6 +1230,7 @@ let all =
     ("click fetches and swaps", click_fetches);
     ("css: sheets of a partial navigation move to the head", partial_css);
     ("css: sheets of a full swap move to the head", full_swap_css);
+    ("css: sheets of the first page move to the head at start", first_load_css);
     ("links that are not intercepted", not_intercepted);
     ("stop then start", stop_then_start);
     ("history and popstate", history_and_popstate);

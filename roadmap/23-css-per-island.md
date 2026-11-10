@@ -25,4 +25,13 @@ Done (2026-11-10), option B built through A (`.workplace/docs/app-spec.md`, sect
 
 Tests: ppx cram `test/ppx/css.t`; native `css` cases; cycle; prerender (`yuka-dream`); jsdom (`dom_cases`, navigation); e2e 7j. Size: keyed app 10,026 B gzip (no change); demo 43,241 to 43,593 B gzip. `/about` still sends 0 bytes of JavaScript.
 
+Review fixes:
+- Links move to `<head>` at navigation start and before each swap.
+- A link of an `Await` loading part is printed before the fill region.
+- CSS escapes and quoted `url()` are handled, and `@scope` and `@supports selector()` are renamed.
+- `use_css` goes only into `make` functions that return an element.
+- `/_yuka/css` is decoded and limited to `GET`/`HEAD`, and names are validated.
+- `render_html` prints no links.
+- `yuka-css` reads the declarations from the sources.
+
 Not built: the sheets of other modules in an island's chunk are not printed with its `modulepreload`, so a part that only the client renders gets its sheet when it renders. No minifying of the sheets.

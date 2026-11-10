@@ -1585,16 +1585,22 @@ through A.
 - One sheet per file, declared by `module Css = [%yuka.css "file.css"]`
   (a whole-file pass of the ppx, after `let%client`). The ppx reads the
   file next to the source (dune `preprocessor_deps`), scans the selectors
-  (`ppx/css_scan.ml`: comments, strings and `url()` are skipped, a
-  segment is a selector when it ends with `{` and does not start with
-  `@`, `[...]` is skipped) and makes `Css.stylesheet` and one string per
-  class, `NAME_HASH`. The hash is the first 8 hex digits of the MD5 of the
+  (`ppx/css_scan.ml`: comments, strings and `url()` with a quoted or bare
+  argument are skipped; a segment is a selector when it ends with `{` and
+  does not start with `@`, except `@scope` (all of it) and `@supports`
+  (inside `selector()`); `[...]` is skipped; class names follow the CSS
+  identifier rules, with escapes and non-ASCII code points) and makes
+  `Css.stylesheet` and one string per class, the unescaped name and
+  `_HASH`. The OCaml name keeps letters, digits and `_`, other ASCII
+  becomes `_`, a leading digit gets `_`; a non-ASCII name is an error. The hash is the first 8 hex digits of the MD5 of the
   file text, for both the class names and the file name
   `BASE-HASH.css`: the ppx and the generator see the file under different
   paths, and the same text gives the same rules.
-- The ppx wraps the body of each function named `make` after the
-  declaration (top level, `let%client`, submodules) in
-  `Yuka.use_css Css.stylesheet`. On the server, `use_css` returns
+- The ppx wraps the body (or each case of a `function`) of each `make`
+  after the declaration that returns an element: a `let%client`, a body
+  in JSX (also through `let`, `match`, `if`), or an `element` type on the
+  binding or the result. Other functions named `make` (constructors) are
+  left alone; a `make` that is not a function gets a `ppwarning`. On the server, `use_css` returns
   `Fragment [<link data-yuka-css>; body]`; in the browser it adds the link
   to `<head>` if the document has none and returns the body. The client
   tree has no new node kind, so `mount_node` and the keyed benchmark do
@@ -1605,15 +1611,24 @@ through A.
   order). Where the output is hydrated (inside an island), it is held and
   written before the outermost island's `<yuka-island>`, after its
   `modulepreload`, by cutting the buffer at the island's start; held links
-  of a fill inside an island go before its `<template>`. `each` rows and
+  of a fill inside an island go before its `<template>`. A link used in
+  the `loading` part of a streamed `Await` goes before the region's
+  start marker (or to the island), since the fill replaces the region.
+  `Private.render_html` (whole-tree hydration) prints no links. `each` rows and
   the other places that look at a node's shape see the body, as the client
   does. A `Catch` that fails restores the printed set.
-- Navigation: after a swap, `Web.adopt_stylesheets` moves
-  `link[data-yuka-css]` from the body to the head, dropping one whose
-  `href` is there. Sheets are never removed.
+- Navigation: at start and before and after a swap,
+  `Web.adopt_stylesheets` moves `link[data-yuka-css]` from the body to
+  the head in one pass, dropping one whose `href` is there, so a swap
+  never deletes a sheet that content outside the outlet needs. Sheets are
+  never removed. `add_stylesheet` keeps the known `href`s in a `Set` on
+  the document, filled from the DOM once.
 - Cycle: `config ~css` holds the generated `(file, text)` list from
-  `yuka-css`, served at `/_yuka/css/FILE` with `Immutable`; any other
-  path there is a 404 `no-store`. `Server.css_files` gives them to a
+  `yuka-css` (which finds the `[%yuka.css]` declarations in the sources,
+  so a sheet cannot be missed by a glob; a missing file fails the build).
+  Names must be one path segment (`Invalid_argument`). Served at
+  `/_yuka/css/FILE` (decoded) with `Immutable` for `GET` and `HEAD`, 405
+  otherwise; any other path there is a 404 `no-store`. `Server.css_files` gives them to a
   prerender. The text lives only in the server executable; a client bundle
   has the URL and the class names.
 - `Yuka.stylesheet` is a top-level value: the generated code first used

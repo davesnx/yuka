@@ -175,6 +175,10 @@ type config = {
   prerendered : string option;
 }
 
+let valid_file_segment s =
+  s <> "" && s <> "." && s <> ".."
+  && not (String.exists (fun c -> c = '/' || c = '\\' || c = '\000') s)
+
 let public_prefix (prefix, dir) =
   match Router.split_path prefix with
   | [] ->
@@ -188,7 +192,12 @@ let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head
     assets;
     public = List.map public_prefix public;
     styles;
-    css;
+    css =
+      List.map
+        (fun (name, text) ->
+          if valid_file_segment name then (name, text)
+          else invalid_arg (Printf.sprintf "Yuka.Server.config: css file name %S is not one path segment" name))
+        css;
     head;
     timeout;
     prerendered;
@@ -440,10 +449,6 @@ let rule_cache (rules : rules) headers =
       headers @ [ ("cache-control", cache_control c) ]
   | _ -> headers
 
-let valid_file_segment s =
-  s <> "" && s <> "." && s <> ".."
-  && not (String.exists (fun c -> c = '/' || c = '\\' || c = '\000') s)
-
 let file_path raw =
   let parts = List.map (Router.decode ~plus:false) raw in
   if parts <> [] && List.for_all valid_file_segment parts then Some (String.concat "/" parts)
@@ -655,15 +660,20 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
     | "" :: "_yuka" :: _, _ -> (
         match List.tl raw with
         | "action" :: rest -> action r rest
-        | [ "css"; file ] when List.mem_assoc file config.css ->
-            reply
-              {
-                status = 200;
-                headers =
-                  [ ("content-type", "text/css; charset=utf-8"); ("cache-control", cache_control Immutable) ];
-                body = String (List.assoc file config.css);
-              }
-        | "css" :: _ when config.css <> [] -> reply (asset_miss ())
+        | "css" :: rest when config.css <> [] -> (
+            match r.meth with
+            | `GET | `HEAD -> (
+                match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
+                | Some text ->
+                    reply
+                      {
+                        status = 200;
+                        headers =
+                          [ ("content-type", "text/css; charset=utf-8"); ("cache-control", cache_control Immutable) ];
+                        body = String text;
+                      }
+                | None -> reply (asset_miss ()))
+            | _ -> reply (method_not_allowed "GET, HEAD"))
         | rest -> (
             match config.assets with
             | None -> reply (asset_miss ())

@@ -274,19 +274,25 @@ let%client make ~related () =
 ```
 
 `Css.related` is `"related_1084c5c6"`; a class that the file does not have
-is a compile error. Classes are found in selectors only (not in comments,
-strings, `url()` or attribute values); `-` becomes `_` in the OCaml name.
-Each function named `make` after `[%yuka.css]` calls
-`Yuka.use_css Css.stylesheet`; call it yourself in other functions. The
+is a compile error. Classes are found in selectors, also in `@scope` and
+`@supports selector()` (not in comments, strings, `url()` or attribute
+values), with CSS escapes (`.md\:flex` is `Css.md_flex`, `"md:flex_HASH"`);
+other characters become `_` in the OCaml name, and a non-ASCII class name
+is an error. After `[%yuka.css]`, each function named `make` that returns
+an element (JSX, an `element` type annotation, or a `let%client`) calls
+`Yuka.use_css Css.stylesheet`; a `make` that is not a function gets a
+warning. Call `use_css` yourself in other functions. The
 server prints `<link rel="stylesheet" data-yuka-css>` once per page, before
 the first element that uses it; the sheets an island uses are printed
 before its `<yuka-island>`, next to its `modulepreload`. In the browser, a
 sheet that the page does not have yet is added to `<head>`, and after a
-client navigation the new links move to `<head>`. A sheet is never removed.
+client navigation (and when it starts) the links move to `<head>`. A sheet is never removed.
 A page with no island still loads no JavaScript.
 
 The library needs the files at preprocessing time, and the server needs
-the rewritten sheets, which `yuka-css` writes as an OCaml module:
+the rewritten sheets. `yuka-css` reads the sources of the library, finds
+each `[%yuka.css]` and writes the sheets as an OCaml module; a declared
+file that is missing fails the build:
 
 ```dune
 ; shared/dune
@@ -294,8 +300,8 @@ the rewritten sheets, which `yuka-css` writes as an OCaml module:
  (preprocessor_deps (glob_files *.css)))
 
 ; server/dune
-(rule (targets yuka_css.ml) (deps (glob_files ../shared/*.css))
- (action (with-stdout-to yuka_css.ml (run %{bin:yuka-css} %{deps}))))
+(rule (targets yuka_css.ml) (deps (source_tree ../shared))
+ (action (with-stdout-to yuka_css.ml (run %{bin:yuka-css} ../shared))))
 ```
 
 ```ocaml

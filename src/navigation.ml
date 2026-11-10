@@ -65,6 +65,7 @@ let swap target final header text =
         Option.map (fun t -> try Web.decode_uri t with _ -> t) (header "yuka-title")
       in
       Client.stop_within el;
+      Web.adopt_stylesheets ();
       Web.set_inner_html el text;
       Web.adopt_stylesheets ();
       Option.iter Web.set_title title;
@@ -304,6 +305,7 @@ let start ?lazy_entries ?(prefetch = `Hover) ?(transitions = false) entries =
   Platform.acted := clear;
   clear ();
   Web.manual_scroll ();
+  Web.adopt_stylesheets ();
   current_key := Web.history_key ();
   if !current_key = "" then begin
     current_key := Web.fresh_key ();

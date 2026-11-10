@@ -193,6 +193,21 @@ let assets =
         Alcotest.(check (list string)) "no file asked" [] !file_calls;
         Alcotest.(check (list (pair string string)))
           "css_files" [ ("_yuka/css/a-1234.css", ".a_1234{}") ] (Server.css_files config) );
+    ( "css names are decoded, other methods are 405, bad names are refused",
+      fun () ->
+        let config = Server.config ~css:[ ("a b.css", "x") ] () in
+        let r = get ~config "/_yuka/css/a%20b.css" in
+        check_status r 200;
+        Alcotest.(check string) "body" "x" r.body;
+        let r = get ~config ~meth:`POST "/_yuka/css/a%20b.css" in
+        check_status r 405;
+        check_header r "allow" [ "GET, HEAD" ];
+        List.iter
+          (fun name ->
+            match Server.config ~css:[ (name, "x") ] () with
+            | _ -> Alcotest.failf "css name %S accepted" name
+            | exception Invalid_argument _ -> ())
+          [ "../../x.css"; "a/b.css"; ""; ".."; "a\\b.css" ] );
     ( "asset file with no-cache",
       fun () ->
         let r = get "/_yuka/app/main.js" in

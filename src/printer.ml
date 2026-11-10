@@ -63,10 +63,11 @@ open Base
       if hydrating () then Buffer.add_string b m;
       after_text := false
     in
+    let holding = ref 0 in
     let use_sheet href =
-      if not (List.mem href s.sheets) then begin
+      if s.islands_only && not (List.mem href s.sheets) then begin
         s.sheets <- href :: s.sheets;
-        if hydrating () then s.held <- sheet_link href :: s.held
+        if hydrating () || !holding > 0 then s.held <- sheet_link href :: s.held
         else Buffer.add_string b (sheet_link href)
       end
     in
@@ -129,11 +130,29 @@ open Base
                     inside_island = inside;
                   }
                 :: s.pending;
+              let start = Buffer.length b and outer_held = s.held in
+              s.held <- [];
+              incr holding;
               Buffer.add_string b ("<!--[" ^ id ^ "-->");
               after_text := false;
-              go loading;
+              (match go loading with
+              | () -> decr holding
+              | exception e ->
+                  decr holding;
+                  s.held <- outer_held;
+                  raise e);
               Buffer.add_string b "<!--]-->";
-              after_text := false
+              after_text := false;
+              let mine = s.held in
+              s.held <- outer_held;
+              if mine <> [] then
+                if hydrating () || !holding > 0 then s.held <- mine @ outer_held
+                else begin
+                  let region = Buffer.sub b start (Buffer.length b - start) in
+                  Buffer.truncate b start;
+                  Buffer.add_string b (String.concat "" (List.rev mine));
+                  Buffer.add_string b region
+                end
           | _ ->
               marker "<!--[-->";
               go (body ());
@@ -319,17 +338,11 @@ open Base
     | exception e ->
         restore ();
         raise e);
-    if s.held = [] then Buffer.contents b
-    else if s.in_fill then begin
+    if s.held <> [] then begin
       s.queued <- s.held @ s.queued;
-      s.held <- [];
-      Buffer.contents b
-    end
-    else if not s.islands_only then begin
-      s.held <- [];
-      Buffer.contents b
-    end
-    else take_held s ^ Buffer.contents b
+      s.held <- []
+    end;
+    Buffer.contents b
 
   let render_html build = print (session ~streaming:false ~islands_only:false) build
 

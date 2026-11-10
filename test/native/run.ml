@@ -1495,7 +1495,40 @@ let css_cases =
       (contains (fills island_chunks) (link "x" ^ "<template data-yuka-fill"));
     check int "one link in the island chunks" 1 (count (fills island_chunks) "x.css")
   in
+  let loading_fallback () =
+    let a, resolve, _ = Async.make () in
+    let await () =
+      Yuka.Await.make ~async:a
+        ~loading:(Yuka.use_css x (span "L"))
+        ~children:(fun n -> Yuka.use_css x (span (string_of_int n)))
+        ()
+    in
+    let p, chunks = shell (fun () -> Yuka.lower "div" [] [ await () ]) in
+    check string "the link of the loading part is before the region the fill replaces"
+      ("<div>" ^ link "x" ^ "<!--[s1--><span>L</span><!--]--></div>")
+      (List.nth (chunks ()) 1);
+    resolve 2;
+    get p;
+    let p, island_chunks =
+      shell (fun () -> Yuka.Client.island ~name:"A" ~props:`Null (fun () -> await ()))
+    in
+    get p;
+    check bool "inside an island, before the island" true
+      (contains (List.nth (island_chunks ()) 1) (link "x" ^ "<yuka-island"))
+  in
+  let render_html_none () =
+    let out =
+      Yuka.Private.render_html (fun () ->
+          Yuka.Private.node
+            (Yuka.fragment
+               [ Yuka.use_css x (span "a");
+                 Yuka.Client.island ~name:"A" ~props:`Null (fun () -> Yuka.use_css y (span "b")) ]))
+    in
+    check bool "no link in a whole-tree render" false (contains out "data-yuka-css")
+  in
   [ test_case "a link once, before the first use" `Quick first_use;
+    test_case "a link used in a loading part stays out of the fill region" `Quick loading_fallback;
+    test_case "render_html prints no link" `Quick render_html_none;
     test_case "no link for a sheet the page does not use" `Quick unused;
     test_case "a page without islands has links and no script" `Quick no_islands;
     test_case "island sheets before the island" `Quick island_sheets;
