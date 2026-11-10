@@ -8,7 +8,7 @@ mkdir -p "$site/yuka/dist" "$site/solid/dist" "$site/vanillajs/src"
 cp -R "$keyed/css" "$site/"
 
 "$root/node_modules/.bin/esbuild" "$root/$build/default/bench/keyed/yuka/out/bench/keyed/yuka/main.js" \
-  --bundle --format=iife --minify --log-level=warning --outfile="$site/yuka/dist/main.js"
+  --bundle --format=iife --minify --define:__YUKA_DEV__=false --log-level=warning --outfile="$site/yuka/dist/main.js"
 cp "$keyed/yuka/index.html" "$site/yuka/"
 
 if [ ! -d "$keyed/solid/node_modules" ]; then

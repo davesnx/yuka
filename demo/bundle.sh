@@ -6,4 +6,4 @@ out="$root/$build/default/demo/client"
 cd "$out/out/demo/client"
 rm -rf bundle "$out/meta.json"
 "$root/node_modules/.bin/esbuild" main.js \
-  --bundle --splitting --format=esm --minify --metafile="$out/meta.json" --outdir=bundle
+  --bundle --splitting --format=esm --minify --define:__YUKA_DEV__=false --metafile="$out/meta.json" --outdir=bundle

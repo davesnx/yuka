@@ -397,6 +397,30 @@ Unknown yuka attribute on let%client:
   Error: [yuka] unknown attribute [@yuka.eager] on a let%client binding
   [1]
 
+let%client in a .ml file:
+
+  $ cat > island.ml <<'X'
+  > let%client make ~(a : int) () = Yuka.text (string_of_int a)
+  > X
+  $ ./pp.exe --impl island.ml
+  File "island.ml", line 1, characters 0-59:
+  1 | let%client make ~(a : int) () = Yuka.text (string_of_int a)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let%client is allowed only in .mlx files: rename island.ml to island.mlx
+  [1]
+
+let%client in a file with another extension (OCaml syntax in a .re name):
+
+  $ cat > island.re <<'X'
+  > let%client make ~(a : int) () = Yuka.text (string_of_int a)
+  > X
+  $ ./pp.exe --impl island.re
+  File "island.re", line 1, characters 0-59:
+  1 | let%client make ~(a : int) () = Yuka.text (string_of_int a)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let%client is allowed only in .mlx files: rename island.re to island.mlx
+  [1]
+
 Unknown yuka attribute on the binding:
 
   $ cat > n3.mlx <<'X'

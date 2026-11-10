@@ -1,0 +1,6 @@
+let%client make ~(id : string) ~(initial : int) () =
+  let n = Yuka.State.make initial in
+  <div>
+    <span id>(Yuka.int (Yuka.State.get n))</span>
+    <button id=(id ^ "-add") onClick=(fun _ -> Yuka.State.update n succ)>"+"</button>
+  </div>

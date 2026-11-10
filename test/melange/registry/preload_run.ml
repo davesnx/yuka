@@ -43,12 +43,12 @@ let link name = Printf.sprintf {|<link rel="modulepreload" href="/js/Reg_islands
 
 let counter n id initial =
   Printf.sprintf
-    {|<yuka-island data-name="Reg_islands.Counter" data-id="i%d" style="display:contents"><div><span id="%s"><!--[-->%d<!--]--></span><button id="%s-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i%d">{"id":"%s","initial":%d}</script>|}
+    {|<yuka-island data-name="Reg_islands.Counter" data-id="i%d" style="display:contents"><div><span id="%s">%d</span><button id="%s-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i%d">{"id":"%s","initial":%d}</script>|}
     n id initial id n id initial
 
 let wrap ?(start = "") n id inner =
   Printf.sprintf
-    {|<yuka-island data-name="Reg_islands.Wrap" data-id="i%d" style="display:contents"%s><section><span id="%s"><!--[-->0<!--]--></span><button id="%s-add">+</button><!--[$-->%s<!--]--></section></yuka-island><script type="application/json" data-yuka-props="i%d">{"id":"%s","children":null}</script>|}
+    {|<yuka-island data-name="Reg_islands.Wrap" data-id="i%d" style="display:contents"%s><section><span id="%s">0</span><button id="%s-add">+</button><!--[$-->%s<!--]--></section></yuka-island><script type="application/json" data-yuka-props="i%d">{"id":"%s","children":null}</script>|}
     n start id id inner n id
 
 let top_level = link "Counter" ^ counter 1 "a" 1

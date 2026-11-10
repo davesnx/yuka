@@ -293,10 +293,9 @@ work", except the items listed as out of scope there.
 
 - Default equality of `State.make`, `memo` and `on_change`: replaced on
   2026-11-10 by identity; see "Equality and batch".
-- `State.set` and `State.update` on a `memo` raise
-  `Invalid_argument "Yuka: State.set on a memo"`. The user decided that
-  `memo` returns `'a State.t`, so the check is at run time. A type-level
-  split (a phantom permission) stays possible if wanted.
+- `State.set` and `State.update` on a `memo` raised
+  `Invalid_argument "Yuka: State.set on a memo"`: replaced on 2026-11-10 by
+  a type; see "Read-only memo".
 - `Internal.owned` removes itself from its parent when disposed.
 - `Yuka_server.render_settled : (unit -> server element) -> string Lwt.t`
   prints after every pending value settled (for tests).
@@ -582,7 +581,8 @@ island modules, one entry):
 
 1. Generator `yuka-islands` (new executable, installed with package `yuka`,
    directory `gen/`). `yuka-islands --library NAME DIR ...` (the pair can
-   repeat) scans the `.ml` and `.mlx` files under each `DIR` and prints a
+   repeat) scans the `.mlx` files under each `DIR` (`.ml` before "Only
+   `.mlx`" below) and prints a
    module. A file has an island when a line starts with `let%client` (with an
    optional `[@yuka.lazy]` after it). The module name is `Name` plus the
    capitalised file stem, which is the island name of DESIGN "Islands".
@@ -783,6 +783,94 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 - Removed: `let%client[@yuka.lazy]` (the ppx rejects every `yuka.*`
   attribute on `let%client` again), the eager list in the generated module.
 - Not now: prefetch triggers, `` `Media ``, a `data-lazy` attribute.
+
+## Only `.mlx` (2026-11-10)
+
+- Components and islands are written in `.mlx`. Plain logic modules
+  (model, store, actions without JSX) stay `.ml`.
+- `yuka-islands` scans only `.mlx` files: a `.ml` file is never an island.
+- The ppx rejects `let%client` in a file whose name does not end in `.mlx`
+  (`.ml`, `.re`, ...): "let%client is allowed only in .mlx files: rename
+  a.ml to a.mlx". Locations with no file (`""`, `_none_`) pass. The check
+  does not skip ghost locations: OCaml marks the item of `let%client` as
+  ghost. The check reads the file name of the location; `mlx-pp` keeps the `.mlx` name,
+  so preprocessed `.mlx` files pass. Without it, an island in a `.ml` file
+  would compile but never be in the registry, and the client would log "no
+  entry for island X" only at run time.
+- Tests: `test/ppx/errors.t` (the compile error for a `.ml` file, and for a
+  file named `.re`), `gen/test/islands.t` (a `.ml`
+  file with `let%client` is skipped).
+
+## Read-only memo (2026-11-10)
+
+- `State` has one abstract type with a phantom access parameter:
+  `('a, 'access) State.signal`. `'a State.t = ('a, [ `Write ]) signal` comes
+  from `make`; `'a State.read = ('a, [ `Read ]) signal` comes from `memo`
+  and `Async.watch`.
+- `get` and `peek` take `('a, _) signal`, so they read both. `set` and
+  `update` take `'a State.t`, so a write to a memo is a type error ("These
+  two variant types have no intersection"). The run-time check and its
+  `Invalid_argument` are gone.
+- A component or function that only reads takes `('a, _) State.signal` and
+  accepts both kinds with no conversion at the call site. `Effect.on_change`
+  does so.
+- The phantom costs nothing at run time: both types are `Signal.t`.
+- Test: `test/memo` compiles a file that reads a State and a memo through one
+  function, then writes the memo, and checks the compiler error; `update`
+  likewise.
+
+## Hydration mismatch log (2026-11-10)
+
+- In development, hydration logs one `console.warn` per mismatch:
+  `yuka: hydration mismatch in island NAME at PATH: expected X, found Y`.
+  Mismatches: a node is missing (`found nothing`), an element has another
+  tag, a text has another value, or nodes are left over at the end of an
+  element, a hole, a list or the island (`expected nothing`). A node that
+  was already reported as the found node of a missing one is not reported
+  again as left over. `PATH` is the parent element, from the island (or
+  `body`) down, with `:N` for the N-th element of the same tag; `root` is
+  the island itself. Values: `<tag>`, a quoted text (30 characters at most),
+  `<!--data-->`, `nothing`. The text inside a `textarea` is its value, not a
+  child, so it is not reported.
+- The app's bundler decides, not the build of `yuka`: an opam install
+  builds `yuka` with `dune build -p` (the release profile), so a flag fixed
+  when `yuka` compiles would be wrong for every installed app. `Dev` is a
+  second virtual module of `yuka` (next to `Web`). Its browser
+  implementation (`dom/js/dev.ml`) is two constants, the first statements of
+  `dev.js`, with no import before them:
+  `on = typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__` and
+  `mismatch = <same test> ? function ... : 0`. With
+  `--define:__YUKA_DEV__=false`, esbuild folds both to the primitives `false`
+  and `0` in that file, inlines them into `client.js` and removes their
+  declarations, so the message code is not in the bundle. With no define
+  (dev, no bundler, the jsdom tests), `on` is `true`. `yuka.native`
+  implements `Dev` with `on = false`.
+- Cost in a production bundle: esbuild inlines `false` only when it prints
+  the bundle, after its minifier has joined statements, so each check
+  leaves a few bytes (`!1,`). `make size`: keyed app 33376 B / 10997 B gzip,
+  42 B / 17 B gzip more than without the checks; demo chunks 116938 B /
+  36377 B gzip, 42 B / 7 B gzip more. `src/client.ml` writes the root check
+  of `start` as `if Dev.on then ... else ...`; other shapes left the whole
+  dev branch in the bundle.
+- Designs that cost no bytes need the condition to be known when
+  `client.ml` compiles: a constant from the dune profile of `yuka`
+  (rejected above), or a second implementation library that holds the
+  hydration code compiled twice, which the app chooses in its
+  `melange.emit` per profile. The second is a large split of `client.ml`
+  for about 17 B gzip; not done. A `mount ~dev:true` argument would keep the
+  whole message code in every bundle.
+- Checked against an installed `yuka`: built with `dune build -p yuka`,
+  installed with `dune install --prefix`, used by a small app; its esbuild
+  bundle has the message without the define and not with it.
+- `demo/bundle.sh`, `bench/keyed/build.sh` and `bench/size/size.ts` pass the
+  define. `make size` fails when a bundle contains "hydration mismatch".
+- The checks only report; hydration repairs the DOM as before (creates the
+  missing node, sets the text, removes extra nodes in holes and lists, keeps
+  extra nodes at the end of an element).
+- Tests: `test/melange/dom_cases.ml` "dom hydration mismatch log" (a match
+  logs nothing; each kind logs one line), the `make size` check (no message
+  in a production bundle), and e2e check 11b (no mismatch on the demo pages
+  with the unbundled modules).
 
 ## Owners and event handlers (2026-11-10)
 

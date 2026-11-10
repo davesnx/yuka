@@ -17,7 +17,7 @@ only the parts that read a signal update.
 ## Features
 
 - Signals: `State.make`, `State.get`, `State.set`, `State.memo`, `Effect`,
-  `Yuka.batch`. A write is a change unless the new value is the same as the
+  `Yuka.batch`. A memo is read-only: `State.set` on it does not compile. A write is a change unless the new value is the same as the
   old one (identity, as JavaScript `===`); pass `~equal:( = )` for structural
   equality.
 - Render once: no virtual DOM. Only holes and keyed lists update.
@@ -165,13 +165,23 @@ islands are in the library `demo_shared`, in `../shared`):
 ```
 
 Without the rule, the build fails with `Unbound module Yuka_islands`.
-`let%client` must be at the top level of a file.
+`let%client` must be at the top level of a `.mlx` file: in any other file
+(`.ml`, `.re`) it is a compile error, and `yuka-islands` scans only `.mlx` files.
 
 To write the manifest for `~preload`, add a second rule that runs
 `yuka-islands --manifest --library demo_shared ../shared` into
 `yuka_islands.json`.
 
 To load pages with a full page load, write `Yuka.mount ~navigation:false ()`.
+
+When the server HTML of an island does not match what the client renders,
+the browser console shows one warning per mismatch, for example
+`yuka: hydration mismatch in island Demo_shared.Counter at div > span:
+expected "1", found "0"`. Your bundler decides: for production, pass
+`--define:__YUKA_DEV__=false` to esbuild (or the same define to another
+bundler), and the log code is not in the bundle. Without the define, for
+example when the browser loads the Melange output with no bundler, the
+warnings are on.
 
 Every island is its own file, loaded with a dynamic `import`. Islands that
 are not on a page are never downloaded. An island loads at page open (`Load`,

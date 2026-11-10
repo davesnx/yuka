@@ -1,0 +1,21 @@
+(rule
+ (targets read_only.actual)
+ (deps
+  read_only.ml
+  update.ml
+  (glob_files ../../src/.yuka.objs/byte/*.cmi))
+ (action
+  (with-outputs-to
+   read_only.actual
+   (progn
+    (with-accepted-exit-codes
+     2
+     (run %{ocamlc} -c -I ../../src/.yuka.objs/byte read_only.ml))
+    (with-accepted-exit-codes
+     2
+     (run %{ocamlc} -c -I ../../src/.yuka.objs/byte update.ml))))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff read_only.expected read_only.actual)))

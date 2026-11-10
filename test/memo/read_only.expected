@@ -1,0 +1,16 @@
+File "read_only.ml", line 6, characters 24-30:
+6 | let () = Yuka.State.set double 5
+                            ^^^^^^
+Error: The value double has type
+         int Yuka.State.read = (int, [ `Read ]) Yuka.State.signal
+       but an expression was expected of type
+         int Yuka.State.t = (int, [ `Write ]) Yuka.State.signal
+       These two variant types have no intersection
+File "update.ml", line 2, characters 27-33:
+2 | let () = Yuka.State.update double succ
+                               ^^^^^^
+Error: The value double has type
+         int Yuka.State.read = (int, [ `Read ]) Yuka.State.signal
+       but an expression was expected of type
+         int Yuka.State.t = (int, [ `Write ]) Yuka.State.signal
+       These two variant types have no intersection

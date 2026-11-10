@@ -140,8 +140,6 @@ let has_island src =
   in
   go 0
 
-let has_extension path =
-  Filename.check_suffix path ".ml" || Filename.check_suffix path ".mlx"
 
 let strip_dune_comments text =
   String.split_on_char '\n' text
@@ -204,7 +202,7 @@ let scan ~library dir =
   let { unqualified } = read_dune dir in
   List.filter_map
     (fun f ->
-      if not (has_extension f) then None
+      if not (Filename.check_suffix f ".mlx") then None
       else
         if not (has_island (read_file f)) then None
         else

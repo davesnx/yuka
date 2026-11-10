@@ -4,7 +4,16 @@ val owner : (unit -> 'a) -> 'a * (unit -> unit)
     effects and runs their cleanups. *)
 
 module State : sig
-  type 'a t
+  type ('a, 'access) signal
+  (** A value that tracks its readers. ['access] is [[ `Write ]] for a State
+      made with {!make} and [[ `Read ]] for a {!memo}. A function that only
+      reads takes [('a, _) signal] and accepts both. *)
+
+  type 'a t = ('a, [ `Write ]) signal
+  (** A State that {!set} and {!update} can write. *)
+
+  type 'a read = ('a, [ `Read ]) signal
+  (** A read-only State: {!set} and {!update} on it do not compile. *)
 
   val make : ?equal:('a -> 'a -> bool) -> 'a -> 'a t
   (** [equal] decides whether a write is a change. Default: identity, as
@@ -17,19 +26,19 @@ module State : sig
       [x] is not a change there; on native it is. An exception raised by
       [equal] counts as a change. *)
 
-  val get : 'a t -> 'a
+  val get : ('a, _) signal -> 'a
   (** Reads the value. Inside an effect or a memo, the read is tracked. *)
 
-  val peek : 'a t -> 'a
+  val peek : ('a, _) signal -> 'a
   (** Reads the value without tracking. *)
 
   val set : 'a t -> 'a -> unit
-  (** Raises [Invalid_argument "Yuka: State.set on a memo"] on a memo. *)
+  (** Writes the value. *)
 
   val update : 'a t -> ('a -> 'a) -> unit
-  (** Like [set]. *)
+  (** Like [set], with a function of the current value. *)
 
-  val memo : ?equal:('a -> 'a -> bool) -> (unit -> 'a) -> 'a t
+  val memo : ?equal:('a -> 'a -> bool) -> (unit -> 'a) -> 'a read
   (** A derived value. It recomputes when a State it read changes. A
       recompute is a change only if [equal] says the new value differs.
       Default: the same equality as {!make}. *)
@@ -56,7 +65,7 @@ module Effect : sig
       raised. *)
 
   val on_change :
-    ?equal:('a -> 'a -> bool) -> 'a State.t -> (prev:'a -> next:'a -> unit) -> unit
+    ?equal:('a -> 'a -> bool) -> ('a, _) State.signal -> (prev:'a -> next:'a -> unit) -> unit
   (** Calls the function when the value changes, with the previous and the
       next value. Not called on the first run. Default [equal]: as in
       {!State.make}. *)
@@ -123,7 +132,7 @@ module Async : sig
 
   val map : ('a -> 'b) -> 'a t -> 'b t
   val bind : 'a t -> ('a -> 'b t) -> 'b t
-  val watch : 'a t -> 'a status State.t
+  val watch : 'a t -> 'a status State.read
   (** A State that follows the status. *)
 end
 
@@ -349,8 +358,11 @@ module Client : sig
   val hydrate : container -> (unit -> 'k element) -> unit -> unit
   (** [hydrate container f] adopts the server DOM in [container] (written
       with the markers of DESIGN.md), attaches handlers and starts holes.
-      Where the DOM does not match, it creates the missing nodes. Returns a
-      function that stops all effects and handlers. Browser only. *)
+      Where the DOM does not match, it creates the missing nodes. Unless the bundler
+      defines [__YUKA_DEV__] as [false], each mismatch (a missing node,
+      another tag, another text, an extra node) logs one [console.warn] with
+      the island name, the expected and the found node, and a short path. Returns a function
+      that stops all effects and handlers. Browser only. *)
 
 end
 

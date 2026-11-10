@@ -29,11 +29,13 @@ const browser = await chromium.launch({ headless: true });
 const page: Page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 const consoleErrors: string[] = [];
+const mismatches: string[] = [];
 const pageErrors: string[] = [];
 const failedRequests: string[] = [];
 let expectedFailures = 0;
 page.on("console", (m) => {
   if (m.type() === "error") consoleErrors.push(m.text());
+  if (m.text().includes("hydration mismatch")) mismatches.push(m.text());
 });
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url()} ${r.failure()?.errorText}`));
@@ -803,6 +805,7 @@ await step("9. screenshots", async () => {
 check("10 no page errors in whole run", pageErrors.length === 0, pageErrors.join(" | "));
 const lateConsole = consoleErrors.filter((e) => !/status of (500|404)/.test(e));
 check("11 no unexpected console errors in whole run", lateConsole.length === 0, lateConsole.join(" | "));
+check("11b no hydration mismatch in whole run", mismatches.length === 0, mismatches.join(" | "));
 check("12 no unexpected failed requests in whole run", failedRequests.length === 0, failedRequests.join(" | "));
 
 await browser.close();

@@ -32,6 +32,7 @@ external set_value : node -> string -> unit = "value" [@@mel.set]
 external set_selected : node -> bool -> unit = "selected" [@@mel.set]
 external selected : node -> bool = "selected" [@@mel.get]
 external checked : node -> bool = "checked" [@@mel.get]
+external set_attribute : node -> string -> string -> unit = "setAttribute" [@@mel.send]
 external get_attribute : node -> string -> string option = "getAttribute"
 [@@mel.send] [@@mel.return nullable]
 external first_child : node -> node = "firstChild" [@@mel.get]
@@ -1134,8 +1135,73 @@ let parser_changes () =
   check "style text content" "a > b {color:red}" (text_content (query c "style"));
   dispose ()
 
+let capture_warnings : unit -> unit =
+  [%mel.raw
+    {|function () { globalThis.__warnings = []; globalThis.__console_warn = console.warn; console.warn = function (m) { globalThis.__warnings.push(m); }; }|}]
+
+let warnings : unit -> string =
+  [%mel.raw
+    {|function () { console.warn = globalThis.__console_warn; return globalThis.__warnings.join("|"); }|}]
+
+let hydrate_logged server_html tree =
+  let island = create (document ()) "yuka-island" in
+  set_attribute island "data-name" "T.Island";
+  append (body ()) island;
+  set_html island server_html;
+  capture_warnings ();
+  let dispose = Yuka.Client.hydrate (as_element island) tree in
+  let logged = warnings () in
+  let after = html island in
+  dispose ();
+  (logged, after)
+
+let mismatch_log () =
+  let p children = lower "p" [] children in
+  let match_tree () =
+    div [] [ span [ text "a" ]; p [ hole (fun () -> text "b") ]; lower "i" [] [] ]
+  in
+  let logged, _ = hydrate_logged (server (match_tree ())) match_tree in
+  check "a match logs nothing" "" logged;
+  let logged, after =
+    hydrate_logged "<div><b>a</b></div>" (fun () -> div [] [ span [ text "a" ] ])
+  in
+  check "different tag"
+    "yuka: hydration mismatch in island T.Island at div: expected <span>, found <b>"
+    logged;
+  check "different tag: new node, the old one stays" "<div><span>a</span><b>a</b></div>" after;
+  let logged, after = hydrate_logged "<div>old</div>" (fun () -> div [] [ text "new" ]) in
+  check "different text"
+    {|yuka: hydration mismatch in island T.Island at div: expected "new", found "old"|}
+    logged;
+  check "different text repaired" "<div>new</div>" after;
+  let logged, _ = hydrate_logged "<div></div>" (fun () -> div [] [ span [] ]) in
+  check "missing node"
+    "yuka: hydration mismatch in island T.Island at div: expected <span>, found nothing"
+    logged;
+  let logged, _ =
+    hydrate_logged "<div><span></span><i></i><!--x--></div>" (fun () -> div [] [ span [] ])
+  in
+  check "extra nodes"
+    "yuka: hydration mismatch in island T.Island at div: expected nothing, found <i>|\
+     yuka: hydration mismatch in island T.Island at div: expected nothing, found <!--x-->"
+    logged;
+  let logged, _ =
+    hydrate_logged "<span></span><p></p>" (fun () -> span [])
+  in
+  check "extra node at the root"
+    "yuka: hydration mismatch in island T.Island at root: expected nothing, found <p>"
+    logged;
+  let logged, _ =
+    hydrate_logged "<section><div><p>x</p><p>y</p></div></section>" (fun () ->
+        lower "section" [] [ div [] [ p [ text "x" ]; p [ text "z" ] ] ])
+  in
+  check "short path"
+    {|yuka: hydration mismatch in island T.Island at section > div > p:2: expected "z", found "y"|}
+    logged
+
 let all =
   [
+    ("dom hydration mismatch log", mismatch_log);
     ("dom template select value", template_select_value);
     ("dom template parser changes", parser_changes);
     ("dom create", create_tree);

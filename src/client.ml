@@ -54,6 +54,8 @@ let comment_where pos matches data =
   match take pos 8 (fun n -> matches (Web.data n)) with
   | Some n -> n
   | None ->
+      if Dev.on then if pos.adopt then
+        Dev.mismatch pos.parent ("<!--" ^ data ^ "-->") pos.cur;
       let n = Web.create_comment pos.ctx.doc data in
       insert pos.parent n pos.cur;
       n
@@ -79,7 +81,11 @@ let walk_region pos visit =
   in
   go 0
 
-let drop_to_end pos = if pos.adopt then walk_region pos Web.remove
+let drop_to_end pos =
+  if Dev.on then if pos.adopt then
+    walk_region { pos with cur = pos.cur } (fun n ->
+        Dev.mismatch pos.parent "nothing" (Some n));
+  if pos.adopt then walk_region pos Web.remove
 
 let mount_slot pos slot =
   let dom = slot.dom in
@@ -90,6 +96,8 @@ let mount_slot pos slot =
       dom := List.rev !nodes;
       ignore (comment pos "]")
   | None ->
+      if Dev.on then if pos.adopt then
+        Dev.mismatch pos.parent "<!--[$-->" pos.cur;
       let start = Web.create_comment pos.ctx.doc "[$" in
       insert pos.parent start pos.cur;
       List.iter (fun n -> insert pos.parent (Obj.obj n) pos.cur) !dom;
@@ -98,9 +106,14 @@ let mount_slot pos slot =
 let text pos s =
   match if s = "" then None else take pos 3 (fun _ -> true) with
   | Some n ->
-      if Web.data n <> s then Web.set_data n s;
+      if Web.data n <> s then begin
+        if Dev.on then Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Some n);
+        Web.set_data n s
+      end;
       n
   | None ->
+      if Dev.on then if pos.adopt && s <> "" then
+        Dev.mismatch pos.parent ("\"" ^ s ^ "\"") pos.cur;
       let n = Web.create_text pos.ctx.doc s in
       insert pos.parent n pos.cur;
       n
@@ -308,6 +321,8 @@ let rec mount_node pos last n =
       last := false;
       let svg = pos.svg || tag = "svg" in
       let adopted = take pos 1 (fun n -> Web.local_name n = tag) in
+      if Dev.on then if pos.adopt && Option.is_none adopted then
+        Dev.mismatch pos.parent ("<" ^ tag ^ ">") pos.cur;
       let el =
         match adopted with
         | Some el -> el
@@ -322,6 +337,8 @@ let rec mount_node pos last n =
         | None -> { pos with parent = el; cur = None; adopt = false; svg = inner_svg }
       in
       mount_children inner children;
+      if Dev.on then if Option.is_some adopted && tag <> "textarea" then
+        walk_region inner (fun n -> Dev.mismatch el "nothing" (Some n));
       List.iter (mount_attr pos.ctx svg el (Option.is_some adopted)) attrs;
       if Option.is_none adopted then insert pos.parent el pos.cur
   | Hole f ->
@@ -561,9 +578,12 @@ let start ~adopt container f =
     Base.mount (fun () ->
         let n = f () in
         if not adopt then Web.clear container "";
-        mount_node
-          { ctx; parent = container; cur = Web.first_child container; adopt; svg = false }
-          (ref false) n)
+        let pos = { ctx; parent = container; cur = Web.first_child container; adopt; svg = false } in
+        if Dev.on then begin
+          mount_node pos (ref false) n;
+          if adopt then walk_region pos (fun x -> Dev.mismatch container "nothing" (Some x))
+        end
+        else mount_node pos (ref false) n)
   in
   dispose
 

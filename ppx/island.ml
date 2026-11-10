@@ -162,6 +162,15 @@ let check_placement (top : structure) =
       method! structure_item i =
         (match i.pstr_desc with
          | Pstr_extension (({ txt = "client"; _ }, payload), attrs) ->
+             let file = i.pstr_loc.loc_start.pos_fname in
+             if
+               file <> "" && file <> "_none_"
+               && not (Filename.check_suffix file ".mlx")
+             then
+               fail ~loc:i.pstr_loc
+                 "let%%client is allowed only in .mlx files: rename %s to %s.mlx"
+                 (Filename.basename file)
+                 (Filename.remove_extension (Filename.basename file));
              if not (List.memq i top) then
                fail ~loc:i.pstr_loc
                  "let%%client is allowed only at the top level of a file, not inside a module or a function";

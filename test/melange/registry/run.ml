@@ -27,7 +27,7 @@ let loaded : string -> bool =
     {|function (stem) { return Object.keys(require.cache).some(function (k) { return k.endsWith("/islands/" + stem + ".js") }) }|}]
 
 let html =
-  {|<main><yuka-island data-name="Reg_islands.Load_island" data-id="i1" style="display:contents"><div><span id="load"><!--[-->5<!--]--></span><button id="load-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i1">{"initial":5}</script><yuka-island data-name="Reg_islands.Idle_island" data-id="i2" style="display:contents" data-start="idle"><div><span id="idle"><!--[-->7<!--]--></span><button id="idle-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i2">{"initial":7}</script></main>|}
+  {|<main><yuka-island data-name="Reg_islands.Load_island" data-id="i1" style="display:contents"><div><span id="load">5</span><button id="load-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i1">{"initial":5}</script><yuka-island data-name="Reg_islands.Idle_island" data-id="i2" style="display:contents" data-start="idle"><div><span id="idle">7</span><button id="idle-add">+</button></div></yuka-island><script type="application/json" data-yuka-props="i2">{"initial":7}</script></main>|}
 
 let failures = ref 0
 let total = ref 0

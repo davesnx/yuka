@@ -41,7 +41,6 @@ let peek s =
   s.value
 
 let set s value =
-  if Core.is_computed s.node then invalid_arg "Yuka: State.set on a memo";
   if differs s.equal s.value value then begin
     s.value <- value;
     s.node.version <- s.node.version + 1;
@@ -49,9 +48,7 @@ let set s value =
     Scheduler.notify_subs s.node
   end
 
-let update s f =
-  if Core.is_computed s.node then invalid_arg "Yuka: State.set on a memo";
-  set s (f s.value)
+let update s f = set s (f s.value)
 
 let computed ?equal compute =
   let node = Core.make_computed_node ~defer_effects_until_recompute:true in

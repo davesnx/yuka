@@ -848,21 +848,6 @@ let batch_raises () =
   check "inner exception caught" "ok" nested;
   check "inner raise keeps the outer batch" "0 1 2 after-inner 4" (read ())
 
-let memo_set_raises () =
-  let n = State.make 1 in
-  let double = State.memo (fun () -> State.get n * 2) in
-  let message f = match f () with () -> "no error" | exception Invalid_argument m -> m in
-  check "set" "Yuka: State.set on a memo" (message (fun () -> State.set double 5));
-  check "update" "Yuka: State.set on a memo"
-    (message (fun () -> State.update double succ));
-  let called = ref false in
-  ignore (message (fun () -> State.update double (fun v -> called := true; v)));
-  check "update does not call the function" "false" (string_of_bool !called);
-  check "value unchanged" "2" (string_of_int (State.peek double));
-  State.set n 4;
-  check "still follows its input" "8" (string_of_int (State.peek double));
-  check "ordinary state is fine" "no error" (message (fun () -> State.set n 5))
-
 let disposal_order () =
   let add, read = log () in
   let (), dispose =
@@ -1261,7 +1246,6 @@ let all =
     ("batch delays effects", batch_delays);
     ("batch nests", batch_nests);
     ("batch with an exception", batch_raises);
-    ("memo set raises", memo_set_raises);
     ("owned removed from its parent", owned_removed_from_parent);
     ("disposal order", disposal_order);
     ("disposal order after removal", disposal_order_after_removal);

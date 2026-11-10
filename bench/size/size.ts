@@ -38,6 +38,7 @@ async function bundle(entry: string, out: string, esm: boolean): Promise<Chunk[]
     entryPoints: [entry],
     bundle: true,
     minify: true,
+    define: { __YUKA_DEV__: "false" },
     format: esm ? "esm" : "iife",
     splitting: esm,
     outdir: out,
@@ -97,6 +98,14 @@ if (app.gzip > budget.keyed_gzip) {
   console.error(
     `size: the keyed benchmark app is ${app.gzip} B gzip, over the budget of ${budget.keyed_gzip} B (${options.budget})`,
   );
+  process.exit(1);
+}
+const devOnly = [
+  ...keyed.map((c) => join(outDir, "keyed", c.name)),
+  ...demo.map((c) => join(outDir, "demo", c.name)),
+].filter((file) => readFileSync(file, "utf8").includes("hydration mismatch"));
+if (devOnly.length > 0) {
+  console.error(`size: the hydration mismatch log is in a release bundle: ${devOnly.join(", ")}`);
   process.exit(1);
 }
 console.log(`size: keyed benchmark app ${app.gzip} B gzip, budget ${budget.keyed_gzip} B`);

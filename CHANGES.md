@@ -12,4 +12,7 @@
 - Actions: declare once, call from the client, run on the server (@davesnx)
 - Router: typed paths shared by the server and the client (`Yuka.Router`) (@davesnx)
 - No web server dependency: `Yuka.Server.respond` writes through functions that your server gives, with a Dream example in the demo (@davesnx)
+- Components and islands are written in `.mlx`: `let%client` in any file that is not `.mlx` is a compile error, and `yuka-islands` scans only `.mlx` files (@davesnx)
+- A memo is read-only: `State.memo` returns `'a State.read`, and `State.set` or `State.update` on it is a compile error instead of an `Invalid_argument` at run time (@davesnx)
+- In a dev build, hydration logs one `console.warn` per mismatch between the server HTML and the client tree, with the island name, the expected and found node, and a short path; a production bundle built with `--define:__YUKA_DEV__=false` has no log code (@davesnx)
 - Small client bundles: an app contains only the features it uses, templates are compiled to HTML and paths by the ppx, and `make size` checks the keyed benchmark app against a budget (@davesnx)
