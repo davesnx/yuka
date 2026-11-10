@@ -129,6 +129,49 @@ let hand_written_template () =
   let t = template_of_shape Template.(element "iframe" [ fixed "srcdoc" "<script>alert(1)</script>" ] []) in
   check_html "a fixed srcdoc in a hand-written template" {|<iframe srcdoc=""></iframe>|} (Template.instance t [||])
 
+let bad_tags = [ "img src=x onerror=alert(1)"; "x><script>alert(1)</script"; "svg\x0c"; ""; "1a"; "-a"; "a_b"; "a:b" ]
+
+let tag_names () =
+  List.iter
+    (fun tag ->
+      let name = String.escaped tag in
+      raises ("lower: " ^ name) (fun () -> html (lower tag [] []));
+      raises ("nested: " ^ name) (fun () -> html (lower "div" [] [ lower tag [] [] ]));
+      raises ("client print: " ^ name) (fun () -> print_client (lower tag [] []));
+      raises ("raw text: " ^ name) (fun () -> html (lower "svg" [] [ lower tag [] [ text "x" ] ]));
+      raises ("template_of_shape: " ^ name) (fun () -> template_of_shape Template.(element "div" [] [ element tag [] [] ]));
+      let t =
+        Template.make (Template.element tag [ Template.fixed "class" "c" ] []) ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
+      in
+      raises ("template: " ^ name) (fun () -> html (Template.instance t [||])))
+    bad_tags;
+  check_html "valid tags" {|<my-widget-2></my-widget-2><svg><feColorMatrix></feColorMatrix></svg><H1></H1>|}
+    (fragment [ lower "my-widget-2" [] []; lower "svg" [] [ lower "feColorMatrix" [] [] ]; lower "H1" [] [] ])
+
+let event_names () =
+  List.iter
+    (fun name ->
+      raises ("printer: " ^ name) (fun () -> html (lower "img" [ attr name "alert(1)" ] []));
+      raises ("hole: " ^ name) (fun () -> print_client (lower "img" [ hole_attr name (fun () -> Some "alert(1)") ] []));
+      raises ("url_attr: " ^ name) (fun () -> html (lower "img" [ url_attr "img" name "alert(1)" ] []));
+      raises ("unchecked: " ^ name) (fun () -> attr_unchecked name "alert(1)");
+      raises ("hole unchecked: " ^ name) (fun () -> hole_attr_unchecked name (fun () -> None));
+      raises ("template: " ^ name) (fun () -> template_of_shape Template.(element "img" [ fixed name "alert(1)" ] [])))
+    [ "onfocus"; "onerror"; "ONCLICK"; "onbegin"; "On"; "one" ];
+  check_html "names that do not start with on" {|<p data-onclick="x" o="2" no="3"></p>|}
+    (lower "p" [ attr "data-onclick" "x"; attr "o" "2"; attr "no" "3" ] [])
+
+let base_href () =
+  let v = "https://evil.example/" in
+  check_html "a dynamic base href is empty" {|<base href="">|} (lower "base" [ attr "href" v ] []);
+  check_html "any case" {|<BASE HREF="">|} (lower "BASE" [ attr "HREF" v ] []);
+  check_client "a base href hole" {|<base href="">|} (lower "base" [ hole_attr "href" (fun () -> Some v) ] []);
+  check_html "mlx: a base href value" {|<base href="">|} <base href=v />;
+  check_html "mlx: a literal base href is kept" {|<base href="/app/">|} <base href="/app/" />;
+  check_html "a hand-written template" {|<base href="">|}
+    (Template.instance (template_of_shape Template.(element "base" [ fixed "href" "/app/" ] [])) [||]);
+  check_html "href on a link is a URL, not a base" {|<a href="https://evil.example/"></a>|} (lower "a" [ attr "href" v ] [])
+
 let mlx () =
   let url = "java\tscript:alert(1)" in
   check_html "a template part from mlx" {|<a href="about:blank#blocked" class="c">x</a>|} <a href=url class_="c">"x"</a>;
@@ -232,6 +275,9 @@ let () =
           Alcotest.test_case "srcdoc" `Quick srcdoc;
           Alcotest.test_case "values, to, from and by outside animations" `Quick animation_names;
           Alcotest.test_case "hand-written templates" `Quick hand_written_template;
+          Alcotest.test_case "tag names" `Quick tag_names;
+          Alcotest.test_case "event handler names" `Quick event_names;
+          Alcotest.test_case "base href" `Quick base_href;
         ] );
       ( "raw text",
         [

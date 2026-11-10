@@ -273,7 +273,9 @@ val fragment : 'kind element list -> 'kind element
 
 val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
 (** [lower tag attributes children]: an HTML element. The ppx makes it from
-    [<tag ...>]. A [script] or [style] element (any case) takes no child,
+    [<tag ...>]. [tag] is a letter followed by letters, digits and [-],
+    else [Invalid_argument] when the server prints it (the DOM refuses it in
+    the browser). A [script] or [style] element (any case) takes no child,
     one {!text} or one {!hole} that gives a text, else [Invalid_argument]
     (server and client); the ppx joins the texts of [<script>] and
     [<style>] into one. In HTML the server prints that text as written (no
@@ -299,18 +301,20 @@ val attr : string -> string -> 'kind attribute
     count as such). A [data:] image or media URL stays. The server logs the
     first block with {!Server.log_error}; a dev build logs the first one in
     the console. [data:] is also blocked on [src] of [script] and [href] of
-    [script]. [srcdoc] of [iframe] (or with no known element) becomes [""]
-    and is logged the same way; only a literal [srcdoc] in [.mlx] is kept.
-    A [name] that is empty or has a space, a control character, a quote,
-    [<], [>], [/] or [=] raises [Invalid_argument] (in the browser here, on
-    the server when printed). *)
+    [script]. [srcdoc] of [iframe] (or with no known element) and [href] of
+    [base] become [""] and are logged the same way; only a literal one in
+    [.mlx] is kept. A [name] that is empty, starts with [on] (any case:
+    use {!on}), or has a space, a control character, a quote, [<], [>], [/]
+    or [=] raises [Invalid_argument] (in the browser here, on the server
+    when printed). *)
 
 (**/**)
 
 val attr_unchecked : string -> string -> 'kind attribute
 val hole_attr_unchecked : string -> (unit -> string option) -> client attribute
 (** For the ppx, for names it proved are not URL attributes. They raise on a
-    URL attribute name, [srcdoc], or a name that {!attr} refuses. *)
+    URL attribute name, [srcdoc], or a name that {!attr} refuses (an [on]
+    name too). *)
 
 val url_attr : string -> string -> string -> 'kind attribute
 val url_hole_attr : string -> string -> (unit -> string option) -> client attribute
@@ -353,11 +357,14 @@ module Template : sig
   (** The child at this place is part [i], made with [child]. *)
 
   val fixed : string -> string -> attr
-  (** [fixed name value]: an attribute with a fixed value. *)
+  (** [fixed name value]: an attribute with a fixed value, checked by
+      {!Yuka.template_of_shape}. *)
 
   val part_attr : int -> attr
   (** The attribute at this place is part [i], made with [attribute] or
       [attribute_option]. *)
+
+  (**/**)
 
   val make :
     shape ->
@@ -367,10 +374,13 @@ module Template : sig
     attrs:int array ->
     values:(int * string) array ->
     t
-  (** [make shape ~html ~walk ~kids ~attrs ~values]: for the ppx, which
+  (** [make shape ~html ~walk ~kids ~attrs ~values]: for the ppx only, which
       computes all arguments but [shape] from [shape] at build time and
       checks the fixed attributes. The browser puts [html] in the page as
+      given and the server prints a fixed [srcdoc] or [base] [href] as
       given, so a template written by hand uses {!Yuka.template_of_shape}. *)
+
+  (**/**)
 
   val child : 'kind element -> 'kind part
   (** The value of a {!val-part}. *)
@@ -383,16 +393,15 @@ module Template : sig
 
   val instance : t -> 'kind part array -> 'kind element
   (** The tree of [t] with its parts filled in. It prints and hydrates as the
-      same tree made with [lower]. Fresh client creation parses [html] of
-      [make] once, clones it and goes to each part with the paths of
-      [make]. *)
+      same tree made with [lower]. Fresh client creation parses the HTML of
+      the template once, clones it and goes to each part with its paths. *)
 end
 
 val template_of_shape : Template.shape -> Template.t
-(** A template written by hand: checks the fixed attributes (names, and
-    URLs as {!attr} does, with the element known) and computes the HTML and
-    the paths that {!Template.make} takes. Raises [Invalid_argument] on a bad
-    attribute name. *)
+(** A template written by hand: checks the tag names and the fixed
+    attributes (names, and URLs, [srcdoc] and [base] [href] as {!attr} does,
+    with the element known) and computes its HTML and the paths to its
+    parts. Raises [Invalid_argument] on a bad tag or attribute name. *)
 
 module Slot : sig
   val make : server element -> slot

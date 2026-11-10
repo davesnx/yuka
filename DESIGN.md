@@ -1824,7 +1824,7 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
 
 ## Unsafe URLs and raw-text elements (2026-11-10)
 
-Ticket 33 and its two security reviews.
+Ticket 33 and its three security reviews.
 
 - Rule (`src/url.ml`, shared with the ppx; names and tags lowercased by the
   caller): a URL attribute is `href`, `src`, `action`, `formaction`,
@@ -1845,12 +1845,26 @@ Ticket 33 and its two security reviews.
   Vue do not check). `srcdoc` of `iframe` (or with no known element) is
   an HTML sink: `check` gives `""` and logs, as for a script URL. Only a
   literal `srcdoc` in `.mlx` is kept (`add_attr ~literal:true` for template
-  fixed attributes); React does not check it.
+  fixed attributes); React does not check it. `href` of `base` is handled
+  the same way (it moves every relative URL of the page); with no known
+  element (`Yuka.attr` in the browser) it cannot be told from a link and
+  is only checked as a URL. Only `Template.make`, hidden and for the ppx,
+  reaches `literal`: a hand-written template goes through
+  `template_of_shape`, which runs `Url.check` on its fixed attributes
+  first. `src` of `script` and `content` of a refresh `meta` are left to
+  the developer (README).
 - Attribute names (`Url.valid_name`): empty, or with a character up to
   space, DEL, `"`, `'`, `>`, `/`, `=` or `<`, is refused by the server
   printer, the browser constructors, the unchecked constructors,
   `template_of_shape` and the ppx (a located error). Such a name would end
-  the attribute or the tag early.
+  the attribute or the tag early. A name that starts with `on` (any case)
+  is refused too: it is an inline event handler. Handlers are `Yuka.on`
+  only; the ppx turns `onclick=f` into it and refuses a string literal.
+- Tag names (`Url.valid_tag`: a letter, then letters, digits and `-`):
+  the printer refuses another tag before it writes `<` (also in template
+  compilation), and so does `template_of_shape`. The browser's
+  `createElement` and `createElementNS` already throw on such a name, so
+  the client adds no check. The ppx takes only tags it knows.
 - Sinks (`Url.check ~tag ~log`): the server printer, for every attribute
   it prints, with the element (one check per print; `log_error` once per
   process); in the browser, `Yuka.attr` and each value of `Yuka.hole_attr`

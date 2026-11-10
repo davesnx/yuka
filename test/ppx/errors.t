@@ -626,3 +626,32 @@ A literal srcdoc is kept:
   > Y
   $ run srcdoc1 | grep -o 'srcdoc=[^ ]*'
   srcdoc=\"&lt;b>hi&lt;/b>\"></iframe>"
+
+An event handler takes a function, not a string; only names the ppx knows are tags:
+
+  $ cat > event1.mlx <<'Y'
+  > let x = <button onclick="alert(1)">"x"</button>
+  > Y
+  $ run event1
+  File "event1.mlx", line 1, characters 24-34:
+  1 | let x = <button onclick="alert(1)">"x"</button>
+                              ^^^^^^^^^^
+  Error: [yuka] onclick takes a function, not a string: write onclick=(fun event -> ...).
+  [1]
+  $ cat > tag1.mlx <<'Y'
+  > let x = <img_x />
+  > Y
+  $ run tag1
+  File "tag1.mlx", line 1, characters 8-14:
+  1 | let x = <img_x />
+              ^^^^^^
+  Error: [yuka] HTML tag 'img_x' does not exist.
+  [1]
+
+A literal base href is kept:
+
+  $ cat > base1.mlx <<'Y'
+  > let x = <base href="/app/" />
+  > Y
+  $ run base1 | grep -o 'href=[^ ]*'
+  href=\"/app/\">"

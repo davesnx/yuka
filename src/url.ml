@@ -8,7 +8,7 @@ let url_name = function
 
 let animation_name = function "values" | "to" | "from" | "by" -> true | _ -> false
 let animation_tag = function "animate" | "set" | "animatemotion" | "animatetransform" -> true | _ -> false
-let html_sink ~tag name = name = "srcdoc" && (tag = "iframe" || tag = "")
+let html_sink ~tag name = (name = "srcdoc" && (tag = "iframe" || tag = "")) || (name = "href" && tag = "base")
 
 let checked ~tag name =
   url_name name || html_sink ~tag name || (animation_name name && (tag = "" || animation_tag tag))
@@ -65,7 +65,13 @@ let check ~tag ~log name value =
 
 let valid_name name =
   name <> ""
+  && not (String.length name > 1 && Char.lowercase_ascii name.[0] = 'o' && Char.lowercase_ascii name.[1] = 'n')
   && not
        (String.exists
           (fun c -> c <= ' ' || c = '\127' || c = '"' || c = '\'' || c = '>' || c = '/' || c = '=' || c = '<')
           name)
+
+let valid_tag tag =
+  tag <> ""
+  && (match tag.[0] with 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false)
+  && String.for_all (function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' -> true | _ -> false) tag

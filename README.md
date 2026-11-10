@@ -59,14 +59,22 @@ Another server needs one small adapter.
   `data:` image or media URL is kept. A dev build logs the first block; a
   literal one in `.mlx` does not build. There is no way around it: use an
   event handler.
-- `srcdoc` of `iframe` is HTML: a value that is not a literal in `.mlx` is
-  printed and set as the empty string. Write the document in `.mlx`, or
-  point `src` at a page.
-- An attribute name that is empty or has a space, a control character,
-  `"`, `'`, `<`, `>`, `/` or `=` raises an exception; in `.mlx` it
-  does not build.
+- `srcdoc` of `iframe` is HTML, and `href` of `base` changes where every
+  relative URL of the page points: a value that is not a literal in `.mlx`
+  is printed and set as the empty string. Write them in `.mlx`, or point
+  `src` at a page.
+- `src` of `script` loads code: Yuka checks its scheme only. Never build it
+  from user input. The same goes for the `content` of
+  `<meta http-equiv="refresh">`: browsers do not follow a script URL there,
+  but it can send the page to any other site.
+- A tag name must be a letter followed by letters, digits and `-`;
+  anything else raises an exception (in the browser, the DOM refuses it).
+- An attribute name that is empty, starts with `on` (any case), or has a
+  space, a control character, `"`, `'`, `<`, `>`, `/` or `=` raises an
+  exception. Event handlers are functions: `onclick=(fun event -> ...)`
+  in `.mlx` or `Yuka.on`; a string handler in `.mlx` does not build.
 - Hand-written templates go through `Yuka.template_of_shape`, which checks
-  their fixed attributes as above.
+  their tags and fixed attributes as above.
 - `<script>` and `<style>` take one text (the ppx joins the texts and
   values you write inside them) and nothing else, in any case and in any
   namespace. In HTML their text is printed as written, not HTML-escaped:

@@ -203,6 +203,10 @@ let rewrite_attribute ~self ~loc tag (label, value) =
   let prop = find_prop ~loc:vloc tag name in
   match prop with
   | Event { jsxName; _ } ->
+      (match value.pexp_desc with
+      | Pexp_constant (Pconst_string _) ->
+          Location.raise_errorf ~loc:vloc "[yuka] %s takes a function, not a string: write %s=(fun event -> ...)." name name
+      | _ -> ());
       let ev = estring ~loc (event_name jsxName) in
       let value = self#expression value in
       if optional then Maybe [%expr Stdlib.Option.map (Yuka.on [%e ev]) [%e value]]

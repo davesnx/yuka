@@ -1467,6 +1467,44 @@ let client_hand_written_template () =
   check "srcdoc" {|<iframe srcdoc=""></iframe>|} (render_html (fun () -> Template.instance t [||]));
   refused "a bad name" (fun () -> template_of_shape Template.(element "a" [ fixed "x onclick=alert(1)" "" ] []))
 
+let client_tag_names () =
+  List.iter
+    (fun tag ->
+      refused ("render " ^ tag) (fun () -> render_html (fun () -> lower tag [] []));
+      refused ("render in svg " ^ tag) (fun () -> render_html (fun () -> lower "svg" [] [ lower tag [] [] ]));
+      refused ("template_of_shape " ^ tag) (fun () -> template_of_shape Template.(element "div" [] [ element tag [] [] ])))
+    [ "img src=x onerror=alert(1)"; "x><script>alert(1)</script"; "svg\x0c"; "" ];
+  check "valid tags" {|<my-widget-2></my-widget-2>|} (render_html (fun () -> lower "my-widget-2" [] []))
+
+let client_event_names () =
+  List.iter
+    (fun name ->
+      refused ("attr " ^ name) (fun () -> attr name "alert(1)");
+      refused ("url_attr " ^ name) (fun () -> url_attr "img" name "alert(1)");
+      refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun () -> None));
+      refused ("url_hole_attr " ^ name) (fun () -> url_hole_attr "img" name (fun () -> None));
+      refused ("attr_unchecked " ^ name) (fun () -> attr_unchecked name "alert(1)");
+      refused ("hole_attr_unchecked " ^ name) (fun () -> hole_attr_unchecked name (fun () -> None)))
+    [ "onfocus"; "onerror"; "ONCLICK"; "onbegin" ]
+
+let client_base_href () =
+  let v = State.make "https://evil.example/" in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div []
+          [
+            lower "base" [ url_attr "base" "href" "https://evil.example/" ] [];
+            lower "base" [ url_hole_attr "base" "HREF" (fun () -> Some (State.get v)) ] [];
+          ])
+  in
+  check "base href is empty" {|<div><base href=""><base href=""></div>|} (html c);
+  State.set v "/x/";
+  check "still empty" {|<div><base href=""><base href=""></div>|} (html c);
+  dispose ();
+  check "a hand-written template" {|<base href="">|}
+    (render_html (fun () -> Template.instance (template_of_shape Template.(element "base" [ fixed "href" "/app/" ] [])) [||]))
+
 let client_raw_text_namespaces () =
   List.iter
     (fun (name, tree) ->
@@ -1486,6 +1524,9 @@ let all =
     ("client: values, to, from and by outside animations", client_animation_names);
     ("client: hand-written templates are checked", client_hand_written_template);
     ("client: script and style take one text in every namespace", client_raw_text_namespaces);
+    ("client: tag names are refused", client_tag_names);
+    ("client: event handler names are refused", client_event_names);
+    ("client: base href is empty", client_base_href);
     ("client: URL attributes are checked", client_urls);
     ("client: style text", client_raw_text);
     ("client: URL names in any case; data: kept on images", client_url_case);

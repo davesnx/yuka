@@ -164,5 +164,5 @@ let refuse_url_name name =
   | "" | "href" | "src" | "action" | "formaction" | "xlink:href" | "xlinkhref" | "poster" | "cite" | "data"
   | "background" | "longdesc" | "manifest" | "codebase" | "icon" | "srcdoc" ->
       invalid_arg ("Yuka: refused attribute name " ^ name)
-  | _ when String.exists bad name -> invalid_arg ("Yuka: refused attribute name " ^ name)
+  | _ when String.exists bad name || String.starts_with ~prefix:"on" (String.lowercase_ascii name) -> invalid_arg ("Yuka: refused attribute name " ^ name)
   | _ -> ()

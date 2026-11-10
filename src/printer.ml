@@ -23,6 +23,11 @@ open Base
     add_escaped b ~quote:true value;
     Buffer.add_char b '"'
 
+  let open_tag b tag =
+    if not (Url.valid_tag tag) then invalid_arg ("Yuka: refused tag name " ^ String.escaped tag);
+    Buffer.add_char b '<';
+    Buffer.add_string b tag
+
   let javascript_type = function
     | None -> true
     | Some t -> (
@@ -144,6 +149,7 @@ open Base
       | Fixed_text t -> emit (Static_text (escape ~quote:false t))
       | Part i -> emit (if only then Only_part i else Child_part i)
       | Fixed_element { tag; attrs; children } as e -> (
+          if not (Url.valid_tag tag) then invalid_arg ("Yuka: refused tag name " ^ String.escaped tag);
           match String.lowercase_ascii tag with
           | "script" | "style" -> emit (Subtree e)
           | ("svg" | "math" | "foreignobject") as lt -> go_element ~only tag attrs children ~context:(Some lt)
@@ -429,8 +435,7 @@ open Base
                 | _ -> None)
               attrs
           in
-          Buffer.add_char b '<';
-          Buffer.add_string b tag;
+          open_tag b tag;
           List.iter
             (function
               | Static (name, v) -> add_attr b ~tag name v
@@ -445,8 +450,7 @@ open Base
           Buffer.add_char b '>';
           after_text := false
       | Element { tag; attrs; children } ->
-          Buffer.add_char b '<';
-          Buffer.add_string b tag;
+          open_tag b tag;
           let value =
             if needs_special tag then special tag attrs
             else begin

@@ -564,4 +564,4 @@ external lowercase : string -> string = "toLowerCase" [@@mel.send]
 
 let refuse_url_name : string -> unit =
   [%mel.raw
-    {|function (n) { if (n === "" || /[\s"'>\/=<\x00-\x1f\x7f]|^(href|src|action|formaction|xlink:?href|poster|cite|data|background|longdesc|manifest|codebase|icon|srcdoc)$/i.test(n)) throw new Error("Yuka: refused attribute name " + n) }|}]
+    {|function (n) { if (n === "" || /[\s"'>\/=<\x00-\x1f\x7f]|^on|^(href|src|action|formaction|xlink:?href|poster|cite|data|background|longdesc|manifest|codebase|icon|srcdoc)$/i.test(n)) throw new Error("Yuka: refused attribute name " + n) }|}]

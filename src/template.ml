@@ -23,6 +23,7 @@ let make shape ~html ~walk ~kids ~attrs ~values =
 
 let rec checked_shape = function
   | Fixed_element { tag; attrs; children } ->
+      if not (Url.valid_tag tag) then invalid_arg ("Yuka: refused tag name " ^ tag);
       let lt = String.lowercase_ascii tag in
       let attr = function
         | Fixed (n, v) ->
