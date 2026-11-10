@@ -211,21 +211,24 @@ let rewrite_attribute ~self ~loc tag (label, value) =
       let dom_e = estring ~loc dom in
       let hole = reads_state value in
       let value = self#expression value in
+      let url = Url.is_url_attribute dom in
+      let attr = if url then [%expr Yuka.attr] else [%expr Yuka.attr_unchecked] in
+      let hole_attr = if url then [%expr Yuka.hole_attr] else [%expr Yuka.hole_attr_unchecked] in
       if hole then
         Plain
           [%expr
-            Yuka.hole_attr [%e dom_e]
+            [%e hole_attr] [%e dom_e]
               (fun () -> [%e option_string ~loc ~optional kind value])]
       else if optional || kind = Bool then
         Maybe
           [%expr
-            Stdlib.Option.map (Yuka.attr [%e dom_e])
+            Stdlib.Option.map ([%e attr] [%e dom_e])
               [%e option_string ~loc ~optional kind value]]
       else
         let ty = value_type ~loc kind in
         Plain
           [%expr
-            Yuka.attr [%e dom_e]
+            [%e attr] [%e dom_e]
               [%e to_string ~loc kind [%expr ([%e value] : [%t ty])]]]
 
 let attributes_expr ~loc props =
@@ -294,6 +297,13 @@ let split_args args =
     args;
   (!props, !children)
 
+let raw_text_element = function "script" | "style" -> true | _ -> false
+
+let lower_element ~self ~loc ~fnloc tag args =
+  let props, children = split_args args in
+  let attrs = attributes_expr ~loc (List.map (rewrite_attribute ~self ~loc:fnloc tag) props) in
+  [%expr Yuka.lower [%e estring ~loc tag] [%e attrs] [%e list_expr ~loc (List.map (rewrite_child ~self) children)]]
+
 let rec template_element ~self ~parts ~loc ~fnloc tag args =
   if not (Html.is_html_element tag || Html.is_svg_element tag) then
     Location.raise_errorf ~loc:fnloc "[yuka] HTML tag '%s' does not exist." tag;
@@ -304,6 +314,7 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
     i
   in
   let attr ((label, value) as prop) =
+    let value_loc = value.pexp_loc in
     let fixed =
       match label with
       | Labelled name when not (reads_state value) -> (
@@ -314,6 +325,9 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
       | _ -> None
     in
     match fixed with
+    | Some (Some (dom, v)) when Url.is_url_attribute dom && Url.unsafe v ->
+        Location.raise_errorf ~loc:value_loc
+          "[yuka] %s=%S has a script URL; Yuka would print %s instead. Use an event handler." dom v Url.blocked
     | Some (Some (dom, v)) ->
         Some
           ( [%expr Yuka.Template.fixed [%e estring ~loc dom] [%e estring ~loc v]],
@@ -334,8 +348,11 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
     | Pexp_constant (Pconst_string (s, _, _)) when (not (is_jsx c)) && s <> "" ->
         ([%expr Yuka.Template.text [%e estring ~loc s]], Template_build.Fixed_text s)
     | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; loc = fnloc }; _ }, args)
-      when is_jsx c ->
+      when is_jsx c && not (raw_text_element tag) ->
         template_element ~self ~parts ~loc:c.pexp_loc ~fnloc tag args
+    | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; loc = fnloc }; _ }, args) when is_jsx c ->
+        let i = add_part [%expr Yuka.Template.child [%e lower_element ~self ~loc:c.pexp_loc ~fnloc tag args]] in
+        ([%expr Yuka.Template.part [%e eint ~loc i]], Template_build.Part i)
     | _ ->
         let e = rewrite_child ~self c in
         let i = add_part [%expr Yuka.Template.child [%e e]] in
@@ -387,6 +404,9 @@ let rewrite_jsx self e =
   | Pexp_apply ({ pexp_desc = Pexp_ident { txt = fn; loc = fnloc }; _ }, args) -> (
       let props, children = split_args args in
       match fn with
+      | Lident tag when raw_text_element tag ->
+          if not (Html.is_html_element tag) then Location.raise_errorf ~loc:fnloc "[yuka] HTML tag '%s' does not exist." tag;
+          lower_element ~self ~loc ~fnloc tag args
       | Lident tag -> template ~self ~loc ~fnloc tag args
       | Ldot (Ldot (Lident "Yuka", ("Await" | "Show" as m)), "createElement") ->
           let first, takes = if m = "Await" then ("async", "async, loading and failed") else ("status", "status, loading and failed") in

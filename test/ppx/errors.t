@@ -543,3 +543,21 @@ String.t, Int.t, Float.t and Bool.t are the base kinds, not custom modules:
   Yuka.Form.put
   Yuka.Form.string
   Yuka.Form.t
+
+A literal script URL in a URL attribute is refused at build time:
+
+  $ cat > url1.mlx <<'X'
+  > let x = <a href=" JavaScript:alert(1)">"x"</a>
+  > X
+  $ run url1
+  File "url1.mlx", line 1, characters 16-38:
+  1 | let x = <a href=" JavaScript:alert(1)">"x"</a>
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] href=" JavaScript:alert(1)" has a script URL; Yuka would print about:blank#blocked instead. Use an event handler.
+  [1]
+  $ cat > url2.mlx <<'X'
+  > let x = <a href="https://example.com" title="javascript:x">"x"</a>
+  > X
+  $ run url2 | grep -c 'about:blank'
+  0
+  [1]

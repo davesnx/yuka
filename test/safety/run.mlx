@@ -1,0 +1,97 @@
+open Yuka
+
+let html node = Server.to_string (fun () -> node)
+let check_html msg expected node = Alcotest.(check string) msg expected (html node)
+
+let check_client msg expected node =
+  Alcotest.(check string) msg expected
+    (Private.print (Private.session ~streaming:false ~islands_only:true) (fun () -> Private.node node))
+
+let unsafe =
+  [
+    "javascript:alert(1)";
+    " JaVaScRiPt:alert(1)";
+    "java\tscript:alert(1)";
+    "java\nscr\ript:alert(1)";
+    "\x00javascript:alert(1)";
+    "\x01\x1f javascript:alert(1)";
+    "vbscript:msgbox(1)";
+    "data:text/html,<script>alert(1)</script>";
+    "DATA:text/html;base64,PHNjcmlwdD4=";
+    "data:image/svg+xml,<svg onload=alert(1)>";
+  ]
+
+let safe =
+  [ "https://example.com/a"; "/issue/1"; "#top"; "mailto:a@b.c"; "data:image/png;base64,iVBORw0KGgo="; "javascript"; "./javascript:x" ]
+
+let urls () =
+  List.iter
+    (fun v ->
+      check_html ("blocked: " ^ String.escaped v) {|<a href="about:blank#blocked">x</a>|}
+        (lower "a" [ attr "href" v ] [ text "x" ]))
+    unsafe;
+  List.iter
+    (fun v ->
+      check_html ("kept: " ^ v)
+        ({|<a href="|} ^ String.concat "&amp;" (String.split_on_char '&' v) ^ {|">x</a>|})
+        (lower "a" [ attr "href" v ] [ text "x" ]))
+    safe;
+  check_html "not a URL attribute" {|<a title="javascript:alert(1)">x</a>|}
+    (lower "a" [ attr "title" "javascript:alert(1)" ] [ text "x" ]);
+  List.iter
+    (fun name ->
+      check_html name ({|<img |} ^ name ^ {|="about:blank#blocked">|}) (lower "img" [ attr name "javascript:x" ] []))
+    [ "src"; "action"; "formaction"; "xlink:href"; "poster"; "cite"; "data"; "background"; "longdesc"; "manifest"; "codebase"; "icon" ]
+
+let printer_paths () =
+  check_html "an unchecked attribute is checked by the printer" {|<a href="about:blank#blocked">x</a>|}
+    (lower "a" [ attr_unchecked "href" "javascript:alert(1)" ] [ text "x" ]);
+  check_client "a dynamic attribute" {|<a href="about:blank#blocked">x</a>|}
+    (lower "a" [ hole_attr_unchecked "href" (fun () -> Some " javascript:x") ] [ text "x" ]);
+  let t =
+    Template.make
+      (Template.element "form" [ Template.fixed "action" "javascript:alert(1)"; Template.part_attr 0 ] [])
+      ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
+  in
+  check_html "a template: fixed and part" {|<form action="about:blank#blocked" formaction="about:blank#blocked"></form>|}
+    (Template.instance t [| Template.attribute (attr_unchecked "formaction" "vbscript:x") |])
+
+let mlx () =
+  let url = "java\tscript:alert(1)" in
+  check_html "a template part from mlx" {|<a href="about:blank#blocked" class="c">x</a>|}
+    <a href=url class_="c">"x"</a>;
+  let state = State.make url in
+  check_client "a hole from mlx" {|<a href="about:blank#blocked">x</a>|} <a href=(State.get state)>"x"</a>
+
+let raw_text () =
+  check_html "script text is not HTML-escaped, its end tag and <!-- are made safe"
+    {|<script>if (a < b && c > d) { s = "<\/script><b>"; t = '<\/SCRIPT '; } <\!-- x</script>|}
+    (lower "script" [] [ text {|if (a < b && c > d) { s = "</script><b>"; t = '</SCRIPT '; } <!-- x|} ]);
+  check_html "style text"
+    {|<style>a > b { content: "<\/style>"; } <!-- kept</style>|}
+    (lower "style" [] [ text {|a > b { content: "</style>"; } <!-- kept|} ]);
+  check_client "two texts and a hole: no markers inside"
+    {|<script>a && bc</script>|}
+    (lower "script" [] [ text "a && "; text "b"; hole (fun () -> text "c") ]);
+  check_html "mlx script and style"
+    {|<div><script>x = 1 < 2 && "<\/script>"</script><style>p > a {}</style></div>|}
+    <div><script>{|x = 1 < 2 && "</script>"|}</script><style>"p > a {}"</style></div>;
+  let t =
+    Template.make
+      (Template.element "script" [] [ Template.text "a < b && c" ])
+      ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
+  in
+  check_html "a template with script text" {|<script>a < b && c</script>|} (Template.instance t [||]);
+  check_html "text outside script is still escaped" {|<p>a &lt; b &amp;&amp; c</p>|} (lower "p" [] [ text "a < b && c" ])
+
+let () =
+  Alcotest.run "safety"
+    [
+      ( "urls",
+        [
+          Alcotest.test_case "script URLs are blocked after normalisation" `Quick urls;
+          Alcotest.test_case "printer: unchecked, dynamic and template attributes" `Quick printer_paths;
+          Alcotest.test_case "mlx attributes and holes" `Quick mlx;
+        ] );
+      ("raw text", [ Alcotest.test_case "script and style" `Quick raw_text ]);
+    ]

@@ -1821,3 +1821,37 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
   expansion of a shape (`Template.expand_shape`, used by `expand` and by
   the printer for `select`, `option` and `textarea`), one test of the tags
   that need the resolved attributes (`needs_special`).
+
+## Unsafe URLs and raw-text elements (2026-11-10)
+
+Ticket 33.
+
+- URL attributes (`src/url.ml`, shared with the ppx): `href`, `src`,
+  `action`, `formaction`, `xlink:href` (and the ppx's `xlinkHref`),
+  `poster`, `cite`, `data`, `background`, `longdesc`, `manifest`,
+  `codebase`, `icon`. A value is unsafe when, after the URL parser's
+  clean-up (leading characters up to space dropped, tab, newline and CR
+  dropped anywhere, lower case), it starts with `javascript:`,
+  `vbscript:` or `data:` other than `data:image/{png,gif,jpeg,jpg,webp,avif,bmp}`
+  followed by `;` or `,`. Entities need no decoding: the server escapes `&`,
+  and `setAttribute` takes the value as is.
+- Rule, as React: the value becomes `about:blank#blocked`; the attribute
+  stays. React blocks only `javascript:` and has no escape hatch; Angular
+  also checks `data:` and has `bypassSecurityTrustUrl`; Svelte, Solid and
+  Vue do not check. Yuka blocks the three schemes and has no escape hatch.
+- Where: `Yuka.attr` and `Yuka.hole_attr` check URL attributes (each value
+  of a hole); the printer checks every attribute it prints (also
+  `Template.fixed`, unchecked parts) and logs the first block per process
+  with `log_error`; a dev client logs the first block with
+  `console.error`. The ppx emits `Yuka.attr` and `Yuka.hole_attr` only for
+  URL attributes, and `attr_unchecked` / `hole_attr_unchecked` (hidden in
+  the mli) for the others, so a bundle with no URL attribute has no check
+  (the keyed app). A literal unsafe URL in `.mlx` is a ppx error.
+- Raw text: a `script` or `style` element is never a compiled template (the
+  ppx makes it with `Yuka.lower`; the printer's template compiler sends
+  one to the generic path). Its text is printed with `add_raw`: no HTML
+  escaping; `</script` or `</style` (case-insensitive) and, in a script,
+  `<!--` get `\` after `<`. In JavaScript strings, regular expressions and
+  template literals `<\/` and `<\!` mean the same as before; in CSS
+  strings too. `<!--` is escaped because it can make the HTML parser treat a
+  later `</script>` as text. No hydration markers inside.

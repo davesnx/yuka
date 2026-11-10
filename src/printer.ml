@@ -5,12 +5,40 @@ open Base
 
   let add_escaped = Template_build.add_escaped
 
+  let blocked_logged = ref false
+
   let add_attr b name value =
+    let value =
+      if Url.is_url_attribute name && Url.unsafe value then begin
+        if not !blocked_logged then begin
+          blocked_logged := true;
+          !log_error ("yuka: printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name)
+        end;
+        Url.blocked
+      end
+      else value
+    in
     Buffer.add_char b ' ';
     Buffer.add_string b name;
     Buffer.add_string b "=\"";
     add_escaped b ~quote:true value;
     Buffer.add_char b '"'
+
+  let add_raw b tag text =
+    let n = String.length text in
+    let at i part =
+      let k = String.length part in
+      i + k <= n && String.lowercase_ascii (String.sub text i k) = part
+    in
+    let start = ref 0 in
+    for i = 0 to n - 1 do
+      if text.[i] = '<' && (at i ("</" ^ tag) || (tag = "script" && at i "<!--")) then begin
+        Buffer.add_substring b text !start (i - !start);
+        Buffer.add_string b "<\\";
+        start := i + 1
+      end
+    done;
+    Buffer.add_substring b text !start (n - !start)
 
   let fill_script =
     "<script>window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};</script>"
@@ -82,6 +110,7 @@ open Base
       | Fixed_text "" -> ()
       | Fixed_text t -> emit (Static_text (escape ~quote:false t))
       | Part i -> emit (if only then Only_part i else Child_part i)
+      | Fixed_element { tag = "script" | "style"; _ } as e -> emit (Subtree e)
       | Fixed_element { tag; _ } as e when needs_special tag && tag <> "a" -> emit (Subtree e)
       | Fixed_element { tag; attrs; children } ->
           let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
@@ -124,8 +153,9 @@ open Base
     in
     let after_text = ref false in
     let hydrating () = (not s.islands_only) || s.depth > 0 in
+    let raw = ref None in
     let marker m =
-      if hydrating () then Buffer.add_string b m;
+      if hydrating () && !raw = None then Buffer.add_string b m;
       after_text := false
     in
     let holding = ref 0 in
@@ -146,10 +176,13 @@ open Base
     let rec go n =
       match unwrap n with
       | Text "" -> ()
-      | Text t ->
-          if !after_text && hydrating () then Buffer.add_string b "<!---->";
-          add_escaped b ~quote:false t;
-          after_text := true
+      | Text t -> (
+          match !raw with
+          | Some tag -> add_raw b tag t
+          | None ->
+              if !after_text && hydrating () then Buffer.add_string b "<!---->";
+              add_escaped b ~quote:false t;
+              after_text := true)
       | Fragment children -> List.iter go children
       | Hole f ->
           marker "<!--[-->";
@@ -222,6 +255,7 @@ open Base
               marker "<!--[-->";
               go (body ());
               marker "<!--]-->")
+      | Template { template; parts } when !raw <> None -> go (Template.expand template parts)
       | Template { template; parts } ->
           Array.iter
             (function
@@ -371,6 +405,11 @@ open Base
                 s.select_value <- value;
                 contents children;
                 s.select_value <- outer
+            | ("script" | "style"), _ ->
+                let outer = !raw in
+                raw := Some tag;
+                contents children;
+                raw := outer
             | _ -> contents children);
             Buffer.add_string b "</";
             Buffer.add_string b tag;

@@ -46,6 +46,20 @@ opam install yuka yuka-dream mlx
 `yuka-dream` runs an app on [Dream](https://github.com/camlworks/dream).
 Another server needs one small adapter.
 
+## Security
+
+- Text and attribute values are HTML-escaped on the server.
+- A URL attribute (`href`, `src`, `action`, `formaction`, `poster` and the
+  like) whose value is a `javascript:`, `vbscript:` or non-image `data:` URL,
+  after the browser's own clean-up (case, leading spaces and control
+  characters, tabs and newlines), is printed and set as
+  `about:blank#blocked`, like React does; a dev build logs the first one. A
+  literal one in `.mlx` does not build. There is no way around it: use an
+  event handler.
+- The text of `<script>` and `<style>` is printed as written, not
+  HTML-escaped; `</script`, `</style` (any case) and, in a script, `<!--`
+  get a backslash after the `<` so the element cannot end early.
+
 ## Learn more
 
 - [`demo/`](demo/README.md): an issue tracker that uses every feature.

@@ -273,11 +273,30 @@ val fragment : 'kind element list -> 'kind element
 
 val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
 (** [lower tag attributes children]: an HTML element. The ppx makes it from
-    [<tag ...>]. *)
+    [<tag ...>]. The server prints the text of a [script] or [style] element
+    as written (no HTML escaping), with [</script], [</style] (any case) and,
+    in a script, [<!--] printed as [<\/script], [<\/style] and [<\!--]. Inside
+    them, holes print no hydration markers. *)
 
 val attr : string -> string -> 'kind attribute
 (** [attr name value]: an attribute with a fixed value. The server escapes
-    the value. *)
+    the value. A URL attribute ([href], [src], [action], [formaction],
+    [xlink:href], [poster], [cite], [data], [background], [longdesc],
+    [manifest], [codebase], [icon]) whose value starts with a [javascript:]
+    or [vbscript:] scheme, or [data:] other than a PNG, GIF, JPEG, WebP,
+    AVIF or BMP image, after the browser's own clean-up (leading spaces and
+    control characters, tabs and newlines anywhere, any case), gets
+    ["about:blank#blocked"] instead; a dev build logs the first one. *)
+
+(**/**)
+
+val attr_unchecked : string -> string -> 'kind attribute
+val hole_attr_unchecked : string -> (unit -> string option) -> client attribute
+(** {!attr} and {!hole_attr} with no URL check. The ppx uses them for
+    attributes that are not URL attributes, so a bundle with no URL
+    attribute has no URL check. *)
+
+(**/**)
 
 val hole : (unit -> client element) -> client element
 (** A part that changes after the first render. The function runs once; it
@@ -286,7 +305,8 @@ val hole : (unit -> client element) -> client element
 
 val hole_attr : string -> (unit -> string option) -> client attribute
 (** An attribute whose value changes. [None] removes the attribute. On the
-    client, [value], [checked] and [selected] are set as properties. *)
+    client, [value], [checked] and [selected] are set as properties. A URL
+    attribute gets the check of {!attr} on each value. *)
 
 val slot : slot -> client element
 (** Puts a slot where the content goes. *)

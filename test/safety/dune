@@ -1,0 +1,6 @@
+(test
+ (name run)
+ (package yuka)
+ (libraries alcotest yuka)
+ (preprocess
+  (pps yuka.ppx)))

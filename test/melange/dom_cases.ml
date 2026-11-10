@@ -1316,8 +1316,43 @@ let css_hydrate_rows () =
   check "the client adds the link" "/_yuka/css/x.css" (head_sheets ());
   dispose ()
 
+let client_urls () =
+  let url = State.make "/ok" in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div []
+          [
+            lower "a" [ hole_attr "href" (fun () -> Some (State.get url)) ] [ text "a" ];
+            lower "iframe" [ attr "src" "java\tscript:alert(1)" ] [];
+            lower "a" [ attr "title" "javascript:x" ] [ text "b" ];
+          ])
+  in
+  let first = html c in
+  State.set url " JaVaScRiPt:alert(1)";
+  let second = html c in
+  State.set url "\000javascript:alert(1)";
+  let third = html c in
+  State.set url "https://example.com/";
+  let fourth = html c in
+  check "safe first" {|<div><a href="/ok">a</a><iframe src="about:blank#blocked"></iframe><a title="javascript:x">b</a></div>|} first;
+  check "blocked in a hole" {|<div><a href="about:blank#blocked">a</a><iframe src="about:blank#blocked"></iframe><a title="javascript:x">b</a></div>|} second;
+  check "control character" {|<div><a href="about:blank#blocked">a</a><iframe src="about:blank#blocked"></iframe><a title="javascript:x">b</a></div>|} third;
+  check "safe again" {|<div><a href="https://example.com/">a</a><iframe src="about:blank#blocked"></iframe><a title="javascript:x">b</a></div>|} fourth;
+  dispose ()
+
+let client_raw_text () =
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () -> lower "style" [] [ text "a > b { color: red }" ])
+  in
+  check "style text node is raw" "a > b { color: red }" (text_content (query c "style"));
+  dispose ()
+
 let all =
   [
+    ("client: URL attributes are checked", client_urls);
+    ("client: style text", client_raw_text);
     ("dom hydration mismatch log", mismatch_log);
     ("dom template select value", template_select_value);
     ("dom template parser changes", parser_changes);

@@ -20,10 +20,10 @@ let __yuka_template_rewrite_1 =
 let bool_and_optional =
   Yuka.Template.instance __yuka_template_rewrite_1
     [|(Yuka.Template.attribute_option
-         (Stdlib.Option.map (Yuka.attr "hidden")
+         (Stdlib.Option.map (Yuka.attr_unchecked "hidden")
             (if (flag : bool) then Some "" else None)));(Yuka.Template.attribute_option
                                                            (Stdlib.Option.map
-                                                              (Yuka.attr
+                                                              (Yuka.attr_unchecked
                                                                  "placeholder")
                                                               (Stdlib.Option.map
                                                                  (fun v ->
@@ -33,7 +33,7 @@ let bool_and_optional =
                                                                  string
                                                                    option))));(
       Yuka.Template.attribute_option
-        (Stdlib.Option.map (Yuka.attr "autofocus")
+        (Stdlib.Option.map (Yuka.attr_unchecked "autofocus")
            (match (autofocus : bool option) with
             | Some true -> Some ""
             | _ -> None)))|]
@@ -112,13 +112,13 @@ let __yuka_template_rewrite_11 =
 let hole_attribute =
   Yuka.Template.instance __yuka_template_rewrite_11
     [|(Yuka.Template.attribute
-         (Yuka.hole_attr "class"
+         (Yuka.hole_attr_unchecked "class"
             (fun () -> Some (if State.get on then "a" else "b" : string))));(
       Yuka.Template.attribute
-        (Yuka.hole_attr "hidden"
+        (Yuka.hole_attr_unchecked "hidden"
            (fun () -> if (State.get h : bool) then Some "" else None)));(
       Yuka.Template.attribute
-        (Yuka.hole_attr "tabindex"
+        (Yuka.hole_attr_unchecked "tabindex"
            (fun () -> Some (Stdlib.string_of_int (State.get n : int)))))|]
 let component_plain = Ui.Badge.make ~tone:1 ~label:"x" ()
 let __yuka_template_rewrite_12 =
@@ -973,7 +973,8 @@ let __yuka_template_rewrite_22 =
 let select_hole =
   Yuka.Template.instance __yuka_template_rewrite_22
     [|(Yuka.Template.attribute
-         (Yuka.hole_attr "value" (fun () -> Some (State.get v : string))))|]
+         (Yuka.hole_attr_unchecked "value"
+            (fun () -> Some (State.get v : string))))|]
 let __yuka_template_rewrite_23 =
   Yuka.Template.make
     (Yuka.Template.element "textarea" [Yuka.Template.fixed "value" "x"] [])
@@ -988,7 +989,8 @@ let __yuka_template_rewrite_24 =
 let textarea_hole =
   Yuka.Template.instance __yuka_template_rewrite_24
     [|(Yuka.Template.attribute
-         (Yuka.hole_attr "value" (fun () -> Some (State.get t : string))))|]
+         (Yuka.hole_attr_unchecked "value"
+            (fun () -> Some (State.get t : string))))|]
 module Templates =
   struct
     let __yuka_template_rewrite_25 =
@@ -1012,7 +1014,8 @@ module Templates =
     let fixed_hole_attr =
       Yuka.Template.instance __yuka_template_rewrite_26
         [|(Yuka.Template.attribute
-             (Yuka.hole_attr "class" (fun () -> Some (State.get c : string))))|]
+             (Yuka.hole_attr_unchecked "class"
+                (fun () -> Some (State.get c : string))))|]
     let __yuka_template_rewrite_27 =
       Yuka.Template.make
         (Yuka.Template.element "ul" []
@@ -1040,7 +1043,8 @@ module Templates =
         ~attrs:[|0;0;2|] ~values:[||]
     let non_literal_attribute =
       Yuka.Template.instance __yuka_template_rewrite_29
-        [|(Yuka.Template.attribute (Yuka.attr "class" (cls : string)))|]
+        [|(Yuka.Template.attribute
+             (Yuka.attr_unchecked "class" (cls : string)))|]
     let __yuka_template_rewrite_30 =
       Yuka.Template.make
         (Yuka.Template.element "div" [Yuka.Template.part_attr 0]
@@ -1050,7 +1054,7 @@ module Templates =
     let optional_attribute =
       Yuka.Template.instance __yuka_template_rewrite_30
         [|(Yuka.Template.attribute_option
-             (Stdlib.Option.map (Yuka.attr "title")
+             (Stdlib.Option.map (Yuka.attr_unchecked "title")
                 (Stdlib.Option.map (fun v -> (v : string))
                    (title : string option))))|]
     let __yuka_template_rewrite_31 =
@@ -1077,8 +1081,9 @@ module Templates =
         ~kids:[|1;0;(-1);18;0|] ~attrs:[|0;0;2|] ~values:[||]
     let fixed_inside_not_fixed =
       Yuka.Template.instance __yuka_template_rewrite_33
-        [|(Yuka.Template.attribute (Yuka.attr "class" (cls : string)));(
-          Yuka.Template.child label)|]
+        [|(Yuka.Template.attribute
+             (Yuka.attr_unchecked "class" (cls : string)));(Yuka.Template.child
+                                                              label)|]
     let __yuka_template_rewrite_34 =
       Yuka.Template.make
         (Yuka.Template.element "div" []
@@ -1295,5 +1300,30 @@ let signup_form_view =
     ~children:(fun form ->
                  Yuka.Template.instance __yuka_template_rewrite_47
                    [|(Yuka.Template.attribute
-                        (Yuka.attr "value"
+                        (Yuka.attr_unchecked "value"
                            (Yuka.Form.value form Name : string)))|]) ()
+let __yuka_template_rewrite_48 =
+  Yuka.Template.make
+    (Yuka.Template.element "a"
+       [Yuka.Template.part_attr 0; Yuka.Template.part_attr 1]
+       [Yuka.Template.text "x"]) ~html:"<a>x</a>" ~walk:[||] ~kids:[||]
+    ~attrs:[|0;0;2;0;1;2|] ~values:[||]
+let url_attrs u =
+  Yuka.Template.instance __yuka_template_rewrite_48
+    [|(Yuka.Template.attribute (Yuka.attr "href" (u : string)));(Yuka.Template.attribute
+                                                                   (Yuka.attr_unchecked
+                                                                    "title"
+                                                                    (u : 
+                                                                    string)))|]
+let __yuka_template_rewrite_49 =
+  Yuka.Template.make
+    (Yuka.Template.element "div" []
+       [Yuka.Template.part 0; Yuka.Template.part 1]) ~html:"<div></div>"
+    ~walk:[||] ~kids:[|0;0;(-1);18;0;1;0;(-1);16;0|] ~attrs:[||] ~values:
+    [||]
+let script_text =
+  Yuka.Template.instance __yuka_template_rewrite_49
+    [|(Yuka.Template.child
+         (Yuka.lower "script" [] [Yuka.text {|a < b && "</script>"|}]));(
+      Yuka.Template.child (Yuka.lower "style" [] [Yuka.text "p > a {}"]))|]
+let script_root = Yuka.lower "script" [] [Yuka.text "x < 1"]

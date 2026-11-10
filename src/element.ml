@@ -16,7 +16,20 @@ let list children = Fragment children
 let array children = Fragment (Array.to_list children)
 let fragment children = Fragment children
 let lower tag attrs children = Element { tag; attrs; children }
-let attr name value = Static (name, value)
+let warned = ref false
+
+let checked name value =
+  if Url.is_url_attribute name && Url.unsafe value then begin
+    if Dev.on && not !warned then begin
+      warned := true;
+      Web.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
+    end;
+    Url.blocked
+  end
+  else value
+
+let attr name value = Static (name, checked name value)
+let attr_unchecked name value = Static (name, value)
 let hole f = Hole f
 let slot s = Slot s
 
@@ -41,7 +54,11 @@ let use_css href body =
     body
   end
 
-let hole_attr name f = Dynamic (name, f)
+let hole_attr_unchecked name f = Dynamic (name, f)
+
+let hole_attr name f =
+  if Url.is_url_attribute name then Dynamic (name, fun () -> Option.map (checked name) (f ()))
+  else Dynamic (name, f)
 let on name handler = Handler (name, handler)
 
 let each ?(equal = Signal.same) ~key items render =
