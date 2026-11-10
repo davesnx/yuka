@@ -71,10 +71,10 @@ let () =
      let n = String.length sub in
      let rec go i = i + n <= String.length page && (String.sub page i n = sub || go (i + 1)) in
      go 0);
-  let items = Yuka.Async.resolved [ 1; 2 ] in
+  let items = Yuka.Async.return [ 1; 2 ] in
   let direct = Yuka.Codec.encode (Yuka.Codec.async (Yuka.Codec.list Yuka.Codec.int)) items in
   check "async direct" (direct <> `Null);
-  (match Yuka.Codec.encode Model.loaded_codec { items; other = Yuka.Async.resolved "x" } with
+  (match Yuka.Codec.encode Model.loaded_codec { items; other = Yuka.Async.return "x" } with
    | `Assoc [ ("items", j); _ ] -> check "async field" (j = direct)
    | _ -> check "async field shape" false);
   let island_html = Yuka.Private.to_html (Yuka.Private.node (Lazy_list.island ~items ())) in
@@ -155,7 +155,7 @@ let () =
     (Yuka.Private.to_html (Yuka.Private.node Capture_main.view_let_open) = "<i>main</i>");
   check "the other module keeps its template"
     (Yuka.Private.to_html (Yuka.Private.node Capture_ui.badge) = "<b>ui</b>");
-  let settled = Yuka.Async.resolved [ "a"; "b" ] in
+  let settled = Yuka.Async.return [ "a"; "b" ] in
   let await_html = Yuka.Private.to_html (Yuka.Private.node (Awaiting.view settled)) in
   check ("await settled: " ^ await_html) (contains await_html "<ul><li>a</li><li>b</li></ul>");
   check "await not loading" (not (contains await_html "loading"));

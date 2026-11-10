@@ -258,14 +258,14 @@ let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ~sleep bu
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
          document := shell;
-         Async.resolved ())
+         Async.return ())
        ~on_fill:(fun id inside links html ->
          document := fill_marker !document id ~inside html;
          Buffer.add_string values links;
-         Async.resolved ())
+         Async.return ())
        ~on_value:(fun html ->
          Buffer.add_string values html;
-         Async.resolved ()))
+         Async.return ()))
 
 let normalize path =
   let rec go p =
@@ -393,7 +393,7 @@ let register action f encode =
     ( name,
       fun json ->
         match Codec.decode input json with
-        | Error m -> Async.resolved (Bad_input m)
+        | Error m -> Async.return (Bad_input m)
         | Ok v ->
             let run =
               match f v with
@@ -432,7 +432,7 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _)
   register action f encode;
   let run values =
     match Form_core.decode t values with
-    | Error e -> Async.resolved (Unprocessable (Form_core.named t e))
+    | Error e -> Async.return (Unprocessable (Form_core.named t e))
     | Ok input ->
         let answer =
           match f input with
@@ -497,7 +497,7 @@ let accept_action ~name header =
 
 let answer_action ~name handler body =
   match Json.of_string body with
-  | Error m -> Async.resolved (action_error 400 ("invalid JSON: " ^ m))
+  | Error m -> Async.return (action_error 400 ("invalid JSON: " ^ m))
   | Ok json ->
       let result, resolve, _ = Async.make () in
       Async.on_settled (handler json) (function
@@ -514,5 +514,5 @@ let answer_action ~name handler body =
 
 let handle_action ~name ~header ~body =
   match accept_action ~name header with
-  | Error e -> Async.resolved e
+  | Error e -> Async.return e
   | Ok handler -> answer_action ~name handler body

@@ -20,7 +20,7 @@ let recorder () =
   let chunks = ref [] in
   ( (fun c ->
       chunks := c :: !chunks;
-      Async.resolved ()),
+      Async.return ()),
     fun () -> List.rev !chunks )
 
 let manual_sleep () =
@@ -100,7 +100,7 @@ let page_cases =
           Yuka.text "b";
           Yuka.hole (fun () -> Yuka.text "h");
           Yuka.each ~key:Fun.id (fun () -> [ "x"; "y" ]) Yuka.text;
-          text_await (Async.resolved 1) "s";
+          text_await (Async.return 1) "s";
           text_await pending "l" ]
     in
     let outside =
@@ -108,7 +108,7 @@ let page_cases =
           Yuka.lower "p" []
             [ Yuka.text "a";
               Yuka.text "b";
-              text_await (Async.resolved 1) "s";
+              text_await (Async.return 1) "s";
               text_await pending "l" ])
     in
     check string "no markers outside an island" "<p>abs1Ll</p>" outside;
@@ -166,7 +166,7 @@ let call_gate, call_open, _ = Async.make ()
 
 let () =
   Server.Action.implement create (fun i ->
-      Async.resolved { i with n = i.n + 1 });
+      Async.return { i with n = i.n + 1 });
   Server.Action.implement broken (fun _ -> failwith "secret detail");
   Server.Action.implement failing (fun _ -> Async.failed "secret failure");
   Server.Action.implement rejecting (fun _ -> Server.Action.reject "title is empty");
@@ -265,7 +265,7 @@ let action_cases =
   in
   let twice () =
     check bool "raises" true
-      (match Server.Action.implement create (fun i -> Async.resolved i) with
+      (match Server.Action.implement create (fun i -> Async.return i) with
       | () -> false
       | exception Invalid_argument _ -> true)
   in
@@ -329,7 +329,7 @@ let stream_cases =
   in
   let settled_inline () =
     let write, chunks = recorder () in
-    get (stream (fun () -> text_await (Async.resolved 7) "a") write);
+    get (stream (fun () -> text_await (Async.return 7) "a") write);
     check list_of "no fill"
       [ "a7"; "</body></html>" ]
       (List.tl (chunks ()))
@@ -468,12 +468,12 @@ let stream_cases =
     check string "pending prints loading" "La"
       (Server.to_string (fun () -> text_await pending "a"));
     check string "settled prints value" "a1"
-      (Server.to_string (fun () -> text_await (Async.resolved 1) "a"));
+      (Server.to_string (fun () -> text_await (Async.return 1) "a"));
     check string "failed prints nothing" ""
       (Server.to_string (fun () -> text_await (Async.failed "x") "a"));
     check bool "settled prop inline" true
       (contains
-         (Server.to_string (fun () -> island (Async.resolved 3)))
+         (Server.to_string (fun () -> island (Async.return 3)))
          "{\"$async\":\"a1\",\"ok\":3}");
     check bool "pending prop is an error" true
       (contains
@@ -563,7 +563,7 @@ let stream_cases =
   let write_failure () =
     let write chunk =
       if contains chunk "<template" then Async.failed "socket closed"
-      else Async.resolved ()
+      else Async.return ()
     in
     let a, resolve, _ = Async.make () in
     let p = stream (fun () -> text_await a "a") write in
@@ -748,7 +748,7 @@ let timeout_cases =
   let no_timer_when_settled () =
     let sleep, _, requested = manual_sleep () in
     let write, _ = recorder () in
-    get (stream ~sleep (fun () -> text_await (Async.resolved 1) "a") write);
+    get (stream ~sleep (fun () -> text_await (Async.return 1) "a") write);
     check int "no timer" 0 (List.length (requested ()))
   in
   let nested_after_timeout () =
@@ -1049,7 +1049,7 @@ let review_cases =
     let write chunk =
       written := chunk :: !written;
       if contains chunk "<!--[s1-->" then resolve_a 1;
-      Async.resolved ()
+      Async.return ()
     in
     let p =
       stream
@@ -1070,7 +1070,7 @@ let review_cases =
     let write chunk =
       written := chunk :: !written;
       if contains chunk "data-yuka-props=\"i1\"" then resolve_a 1;
-      Async.resolved ()
+      Async.return ()
     in
     let p =
       stream
@@ -1095,7 +1095,7 @@ let review_cases =
      let a, resolve, _ = Async.make () in
      let write chunk =
        ignore (Sys.opaque_identity (Bytes.length marker, chunk));
-       Async.resolved ()
+       Async.return ()
      in
      let p = stream ~sleep (fun () -> text_await a "a") write in
      resolve 1;

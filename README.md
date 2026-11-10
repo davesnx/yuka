@@ -270,8 +270,8 @@ let () =
   Yuka.Server.Form.implement create_issue
     ~redirect:(fun i -> Routes.href (Issue { id = i.id }))
     (fun input ->
-      if String.trim input.title = "" then Async.resolved (Error [ (Some Title, "Required") ])
-      else Async.resolved (Ok (Store.create input)))
+      if String.trim input.title = "" then Async.return (Error [ (Some Title, "Required") ])
+      else Async.return (Ok (Store.create input)))
 ```
 
 ```ocaml

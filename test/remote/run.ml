@@ -58,7 +58,7 @@ let broken = Action.query ~name:"broken" ~input:Codec.int ~output:Codec.string
 let counted = ref 0
 
 let () =
-  Server.Action.implement echo (fun s -> Async.resolved ("echo " ^ s));
+  Server.Action.implement echo (fun s -> Async.return ("echo " ^ s));
   Server.Action.implement rejecting (fun _ ->
       incr counted;
       Server.Action.reject "no way");
@@ -194,7 +194,7 @@ let answers =
         let chunks = ref [] in
         let write c =
           chunks := c :: !chunks;
-          Async.resolved ()
+          Async.return ()
         in
         let never _ =
           let a, _, _ = Async.make () in
@@ -216,7 +216,7 @@ let answers =
         let chunks = ref [] in
         let write c =
           chunks := c :: !chunks;
-          Async.resolved ()
+          Async.return ()
         in
         let fire = ref ignore in
         let sleep _ =
@@ -253,7 +253,7 @@ let fill_and_rollback =
         let chunks = ref [] in
         let write c =
           chunks := c :: !chunks;
-          Async.resolved ()
+          Async.return ()
         in
         let never _ =
           let a, _, _ = Async.make () in

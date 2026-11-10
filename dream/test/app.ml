@@ -24,7 +24,7 @@ let home () =
 let docs () = Yuka.Server.page ~title:"Docs" (fun () -> el "p" [ Yuka.text "docs" ])
 
 let post (_ : Dream.request) ~slug =
-  Yuka.Async.resolved
+  Yuka.Async.return
     (match slug with "hello" | "world" -> Ok slug | _ -> Error Yuka.Server.Not_found)
 
 let post_page ~slug ~post () =

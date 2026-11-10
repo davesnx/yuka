@@ -17,5 +17,5 @@
   let call a i =
     Async.bind (!transport a.name (a.input.encode i)) (fun j ->
         match a.output.decode j with
-        | Ok v -> Async.resolved v
+        | Ok v -> Async.return v
         | Error e -> Async.failed e)

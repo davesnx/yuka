@@ -14,6 +14,7 @@
 - Forms: `[@@deriving form]`, `Form.action`, `Server.Form.implement` and `<Yuka.Form>`; a form posts to the page URL with no JavaScript (303 on success, 422 with the sent values and errors), and inside an island it submits through `Action.call` with a pending state and the same decoder (@davesnx)
 - Breaking: the action call (`POST /_yuka/action/<name>`) and `Action` routes refuse (403) a request with no `Origin` unless it has `Sec-Fetch-Site: same-origin`; the action call checks the origin, the name and the content type before it reads the body (@davesnx)
 - Prefetch, navigation cache and view transitions: links are prefetched on hover, focus or pointer down (`Yuka.mount ~prefetch`, `data-yuka-prefetch="visible"` or `"off"`, header `Yuka-Prefetch: 1`); answers are reused by their `Cache-Control` (`max-age`, or once within 10 s for a `no-store` prefetch); a successful action call empties the cache; `~transitions:true` runs each client navigation in a view transition with `data-yuka-nav` on `<html>` (@davesnx)
+- Breaking: `Yuka.Async.resolved` is now `Yuka.Async.return` (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

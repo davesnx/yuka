@@ -127,7 +127,7 @@ let tree_digest () =
   check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
 
 let echo = Yuka.Action.declare ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
-let () = Yuka.Server.Action.implement echo (fun s -> Yuka.Async.resolved (String.length s))
+let () = Yuka.Server.Action.implement echo (fun s -> Yuka.Async.return (String.length s))
 
 let body_limit () =
   let handler = Yuka_dream.handler config Routes_server.app in

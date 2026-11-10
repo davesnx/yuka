@@ -45,7 +45,7 @@ type body = String of string | Stream of ((string -> unit Async.t) -> unit Async
 type response = { status : int; headers : (string * string) list; body : body }
 
 let with_type kind ?(status = 200) ?(headers = []) text =
-  Async.resolved
+  Async.return
     { status; headers = merge_headers [ [ ("content-type", kind) ]; headers ]; body = String text }
 
 let text ?status ?headers s = with_type "text/plain; charset=utf-8" ?status ?headers s
@@ -53,7 +53,7 @@ let html ?status ?headers s = with_type "text/html; charset=utf-8" ?status ?head
 let json ?status ?headers j = with_type "application/json" ?status ?headers (Json.to_string j)
 
 let see_other location =
-  Async.resolved { status = 303; headers = [ ("location", location) ]; body = String "" }
+  Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
 
 type fallback = { layers : layer list; not_found : string -> page; error : int -> page }
 
@@ -99,7 +99,7 @@ let settle a =
     | Async.Pending -> ());
   r
 
-let protect f = match f () with a -> settle a | exception e -> Async.resolved (Error (failure e))
+let protect f = match f () with a -> settle a | exception e -> Async.return (Error (failure e))
 
 let loaded a k =
   let r, resolve, _ = Async.make () in
@@ -242,7 +242,7 @@ let plain status message headers =
   }
 
 let method_not_allowed allowed = plain 405 "Method Not Allowed" [ ("allow", allowed) ]
-let reply r = Async.resolved (Respond r)
+let reply r = Async.return (Respond r)
 let empty status headers = { status; headers; body = String "" }
 
 type env = {
@@ -334,7 +334,7 @@ let render env ~status ~headers layers (page : page) =
     let writer =
       ref (fun text ->
           Buffer.add_string early text;
-          Async.resolved ())
+          Async.return ())
     in
     let write text = !writer text in
     let finished =
@@ -358,7 +358,7 @@ let render env ~status ~headers layers (page : page) =
         | Async.Pending -> ());
       result
     in
-    Async.resolved { status; headers; body = Stream stream }
+    Async.return { status; headers; body = Stream stream }
 
 let internal_error () = plain 500 "Internal Server Error" []
 let log_quietly m = try !Server.log_error m with _ -> ()
@@ -388,9 +388,9 @@ let error_page env (fallback : fallback) =
   let headers = html_headers env.root_headers [ no_store ] in
   let give_up m =
     !Server.log_error m;
-    Async.resolved (internal_error ())
+    Async.return (internal_error ())
   in
-  if env.head_only then Async.resolved (empty 500 headers)
+  if env.head_only then Async.return (empty 500 headers)
   else
     match render env ~status:500 ~headers fallback.layers (fallback.error 500) with
     | a -> recover a give_up
@@ -401,7 +401,7 @@ let fail_page env fallback message =
   error_page env fallback
 
 let show env ~status ~headers ~fallback layers (page : unit -> page) =
-  if env.head_only then Async.resolved (empty status headers)
+  if env.head_only then Async.return (empty status headers)
   else
     match render env ~status ~headers layers (page ()) with
     | a -> recover a (fail_page env fallback)
@@ -419,16 +419,16 @@ let stopped env fallback target = function
       else if String.exists (fun c -> c = '\r' || c = '\n') location then
         fail_page env fallback "redirect location holds CR or LF"
       else
-        Async.resolved
+        Async.return
           (empty status (merge_headers [ env.root_headers; [ ("location", location); no_store ] ]))
   | Fail m -> fail_page env fallback m
 
 let rec run_guards = function
-  | [] -> Async.resolved (Ok ())
+  | [] -> Async.return (Ok ())
   | g :: rest ->
       Async.bind (protect g) (function
         | Ok () -> run_guards rest
-        | Error _ as e -> Async.resolved e)
+        | Error _ as e -> Async.return e)
 
 let rule_cache (rules : rules) headers =
   match rules.cache with
@@ -470,7 +470,7 @@ let serve_file meth ~root ~headers raw =
   match meth with
   | `GET | `HEAD -> (
       match file_path raw with
-      | Some path -> Async.resolved (File { root; path; headers })
+      | Some path -> Async.return (File { root; path; headers })
       | None -> reply (asset_miss ()))
   | _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "GET, HEAD") ])
 
@@ -482,10 +482,10 @@ let action (r : request) raw =
       in
       let name = Router.decode ~plus:false name in
       match Server.accept_action ~name r.header with
-      | Error e -> Async.resolved (json e)
+      | Error e -> Async.return (json e)
       | Ok handler ->
           Async.bind (r.body ~limit:Server.max_body) (function
-            | None -> Async.resolved (json (Server.action_error 413 "request too large"))
+            | None -> Async.return (json (Server.action_error 413 "request too large"))
             | Some body -> Async.map json (Server.answer_action ~name handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
@@ -507,7 +507,7 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
         let headers = rule_cache rules (html_headers rules.headers []) in
         let headers = if status = 200 then headers else set_header no_store headers in
         match prerendered_file env rules r ~path ~query with
-        | Some (root, file) -> Async.resolved (File { root; path = file; headers })
+        | Some (root, file) -> Async.return (File { root; path = file; headers })
         | None ->
             page_or_error
               (Async.bind (protect load) (function
@@ -596,12 +596,12 @@ let route env (App a) req (r : request) ~path ~raw ~query =
               | Ok () ->
                   if
                     same_origin && not (Server.trusted_origin r.header)
-                  then Async.resolved (plain 403 "Forbidden" [])
+                  then Async.return (plain 403 "Forbidden" [])
                   else
                     let ran =
                       match run () with
                       | resp -> Async.map (fun x -> Ok x) resp
-                      | exception e -> Async.resolved (Error (Web.exn_to_string e))
+                      | exception e -> Async.return (Error (Web.exn_to_string e))
                     in
                     recover
                       (Async.bind ran (function
@@ -615,7 +615,7 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                                 else set_header no_store merged
                               else rule_cache rules merged
                             in
-                            Async.resolved { resp with headers }))
+                            Async.return { resp with headers }))
                       (fail_page env a.missing))))
 
 let handle config (App a as app) ~sleep ~exists req (r : request) =
@@ -689,7 +689,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
             reply (internal_error ()))
     | exception e ->
         log_quietly (Web.exn_to_string e);
-        Async.resolved (last ())
+        Async.return (last ())
   in
   Async.map bodyless answer
 

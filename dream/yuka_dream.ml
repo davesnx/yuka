@@ -121,14 +121,14 @@ let is_html response =
 
 let drain (r : Yuka.Server.http_response) =
   match r.body with
-  | Yuka.Server.String text -> Yuka.Async.resolved text
+  | Yuka.Server.String text -> Yuka.Async.return text
   | Yuka.Server.Stream f ->
       let b = Buffer.create 4096 in
       Yuka.Async.map
         (fun () -> Buffer.contents b)
         (f (fun text ->
              Buffer.add_string b text;
-             Yuka.Async.resolved ()))
+             Yuka.Async.return ()))
 
 let absolute path =
   let path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
