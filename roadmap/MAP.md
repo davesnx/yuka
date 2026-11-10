@@ -26,6 +26,8 @@ Yuka v1 is tagged when it matches SolidJS on measured numbers and has the featur
 ## Decisions so far
 
 - Route format: one `Routes.mlx` route tree, in the style of server-reason-react router-gen. Not file-system routes.
+- Nitro (nitro.build) is the model for the server layer, not for the page router: route rules as props on route nodes, method nodes, a generated matcher, a fixed request order, prerender. See tickets 09 and 11.
+- Yuka does not depend on melange-tiny: the client uses a JS `Map` and no `sprintf`.
 - Server: Dream only for now, as a first-party adapter; Yuka owns routes, data loading, actions, assets and headers on top of it.
 - Data kinds: signal functions that return a `Status` value; no shared client cache at first (as silica chose).
 - Client stdlib: replace Printf/Format, Int64, MD5, Hashtbl and Random on the client path with small implementations, usable outside Yuka.
