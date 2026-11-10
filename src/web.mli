@@ -57,6 +57,9 @@ val import_node : node -> node -> bool -> node
 val console_error : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
+val decode_uri : string -> string
+val contains : node -> node -> bool
+val set_title : string -> unit
 val fetch_post :
   string ->
   string ->
@@ -70,6 +73,8 @@ val focus : string -> unit
 val scroll_into_view : string -> unit
 val has_intersection_observer : node -> bool
 val on_idle : (unit -> unit) -> unit -> unit
+val set_timeout : int -> (unit -> unit) -> unit -> unit
+val form_values : event -> (string * string) array
 val on_visible : node -> (unit -> unit) -> unit -> unit
 val ready_state : unit -> string
 val on_dom_ready : (unit -> unit) -> unit -> unit
@@ -91,10 +96,25 @@ val history_push_key : string -> string -> unit
 val manual_scroll : unit -> unit
 val new_controller : unit -> controller
 val abort : controller -> unit
-val click_href : event -> string
+val plain_click : event -> bool
+val link_href : bool -> node -> string
 val fetch_page :
-  string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit
+  string ->
+  string ->
+  bool ->
+  controller ->
+  (string -> int -> (string -> string option) -> string -> unit) ->
+  (unit -> unit) ->
+  unit
 val swap_page : string -> unit
+val absolute : string -> string
+val max_age : string -> int
+val key_before : string -> string -> bool
+val now : unit -> float
+val after : int -> (unit -> unit) -> unit -> unit
+val save_data : unit -> bool
+val observe : node array -> (node -> unit) -> unit -> unit
+val transition : string -> (unit -> unit) -> unit
 
 type 'a table
 

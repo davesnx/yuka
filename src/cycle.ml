@@ -9,7 +9,7 @@ type page = { title : string; head : string; body : unit -> node }
 
 let page ?(title = "") ?(head = "") body = { title; head; body }
 
-type layer = { key : string; wrap : node -> node }
+type layer = { key : string; data : bool; wrap : node -> node }
 type plan = { layers : layer list; page : page }
 
 type cache =
@@ -45,7 +45,7 @@ type body = String of string | Stream of ((string -> unit Async.t) -> unit Async
 type response = { status : int; headers : (string * string) list; body : body }
 
 let with_type kind ?(status = 200) ?(headers = []) text =
-  Async.resolved
+  Async.return
     { status; headers = merge_headers [ [ ("content-type", kind) ]; headers ]; body = String text }
 
 let text ?status ?headers s = with_type "text/plain; charset=utf-8" ?status ?headers s
@@ -53,7 +53,7 @@ let html ?status ?headers s = with_type "text/html; charset=utf-8" ?status ?head
 let json ?status ?headers j = with_type "application/json" ?status ?headers (Json.to_string j)
 
 let see_other location =
-  Async.resolved { status = 303; headers = [ ("location", location) ]; body = String "" }
+  Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
 
 type fallback = { layers : layer list; not_found : string -> page; error : int -> page }
 
@@ -89,8 +89,6 @@ type 'req app =
 let app ~build ~headers ~prerender ~find ~resolve ~missing =
   App { build; headers = merge_headers [ headers ]; prerender; find; resolve; missing }
 
-let build_id (App a) = a.build
-
 let failure e = Fail (Web.exn_to_string e)
 
 let settle a =
@@ -101,7 +99,7 @@ let settle a =
     | Async.Pending -> ());
   r
 
-let protect f = match f () with a -> settle a | exception e -> Async.resolved (Error (failure e))
+let protect f = match f () with a -> settle a | exception e -> Async.return (Error (failure e))
 
 let loaded a k =
   let r, resolve, _ = Async.make () in
@@ -118,12 +116,19 @@ let loaded a k =
 type assets = {
   dir : string;
   entry : string;
+  digest : string;
   import_map : (string * string) list;
   preload : string -> string option;
   immutable : string -> bool;
 }
 
-let modules ~dir ~entry ~manifest ~packages =
+let fingerprint text =
+  let hash seed =
+    String.fold_left (fun h c -> (h lxor Char.code c) * 0x01000193 land 0xffffffff) seed text
+  in
+  Printf.sprintf "%08x%08x" (hash 0x811c9dc5) (hash 0x050c5d1f)
+
+let modules ~dir ~entry ~manifest ~packages ~digest =
   let entry = Server.normalize entry in
   let base =
     match String.rindex_opt entry '/' with
@@ -133,6 +138,7 @@ let modules ~dir ~entry ~manifest ~packages =
   {
     dir;
     entry;
+    digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
     import_map = Server.import_map ~url:"/_yuka" packages;
     preload = Server.preload_urls ~manifest ~base ();
     immutable = (fun _ -> false);
@@ -153,6 +159,7 @@ let bundle ~dir ~entry ~manifest ~metafile =
   {
     dir;
     entry;
+    digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
     import_map = [];
     preload = Server.preload_urls ~manifest ~base:"/_yuka/" ~metafile ();
     immutable = (fun path -> List.exists (String.equal path) hashed);
@@ -185,6 +192,11 @@ let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(head = "") ?(tim
     prerendered;
   }
 
+let build_id config (App a) =
+  match config.assets with
+  | None -> a.build
+  | Some assets -> a.build ^ assets.digest
+
 let served_dirs config =
   Option.to_list (Option.map (fun (a : assets) -> ("/_yuka", a.dir)) config.assets)
   @ List.map (fun (prefix, dir) -> ("/" ^ String.concat "/" prefix, dir)) config.public
@@ -193,7 +205,7 @@ type request = {
   meth : Router.meth;
   target : string;
   header : string -> string option;
-  body : unit -> string Async.t;
+  body : limit:int -> string option Async.t;
 }
 
 type outcome =
@@ -230,17 +242,19 @@ let plain status message headers =
   }
 
 let method_not_allowed allowed = plain 405 "Method Not Allowed" [ ("allow", allowed) ]
-let reply r = Async.resolved (Respond r)
+let reply r = Async.return (Respond r)
 let empty status headers = { status; headers; body = String "" }
 
 type env = {
   config : config;
   sleep : float -> unit Async.t;
   head_only : bool;
-  navigating : bool;
+  navigate : string list option;
+  build : string;
   current : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
+  form : (string * string * (string * string) list * (string option * string) list) option;
 }
 
 let outlet key inner =
@@ -272,6 +286,11 @@ let html_headers rule_headers extra =
   add_vary "Yuka-Navigate"
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
+let rec shared sent (layers : layer list) =
+  match (sent, layers) with
+  | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
+  | _ -> 0
+
 let render env ~status ~headers layers (page : page) =
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
@@ -285,28 +304,44 @@ let render env ~status ~headers layers (page : page) =
   in
   let import_map = match assets with Some a -> a.import_map | None -> [] in
   let head extra =
-    Server.head ~extra ~head:(env.config.head ^ page.head) ~import_map ~title:page.title
-      ~styles:env.config.styles ()
+    Server.head
+      ~extra:("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">" ^ extra)
+      ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
   let build = nest layers page.body in
   let timeout = env.config.timeout and current = env.current in
-  if env.navigating then
-    Async.map
-      (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
-      (Server.settled ?preload ?entry ~current ~timeout ~sleep:env.sleep build)
-  else
+  match env.navigate with
+  | Some sent -> (
+      let headers = set_header ("yuka-build", env.build) headers in
+      let keys = List.map (fun (l : layer) -> l.key) layers in
+      match shared sent layers with
+      | 0 ->
+          Async.map
+            (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
+            (Server.settled ?preload ?entry ?form:env.form ~current ~timeout ~sleep:env.sleep build)
+      | n ->
+          let outlet = List.nth keys (n - 1) in
+          let headers =
+            merge_headers
+              [ headers; [ ("yuka-outlet", outlet); ("yuka-title", Router.encode page.title) ] ]
+          in
+          Async.map
+            (fun body -> { status; headers; body = String body })
+            (Server.settled ?preload ?form:env.form ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+               (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
+  | None ->
     let early = Buffer.create 4096 in
     let writer =
       ref (fun text ->
           Buffer.add_string early text;
-          Async.resolved ())
+          Async.return ())
     in
     let write text = !writer text in
     let finished =
-      Server.drive ?preload ?entry ~current ~timeout ~sleep:env.sleep build
+      Server.drive ?preload ?entry ?form:env.form ~current ~timeout ~sleep:env.sleep build
         ~on_shell:(fun ~fills shell -> write (head (if fills then Server.fill_script else "") ^ shell))
         ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
-        ~on_value:(fun id json -> write (Server.value_script id json))
+        ~on_value:write
     in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
@@ -323,7 +358,7 @@ let render env ~status ~headers layers (page : page) =
         | Async.Pending -> ());
       result
     in
-    Async.resolved { status; headers; body = Stream stream }
+    Async.return { status; headers; body = Stream stream }
 
 let internal_error () = plain 500 "Internal Server Error" []
 let log_quietly m = try !Server.log_error m with _ -> ()
@@ -353,9 +388,9 @@ let error_page env (fallback : fallback) =
   let headers = html_headers env.root_headers [ no_store ] in
   let give_up m =
     !Server.log_error m;
-    Async.resolved (internal_error ())
+    Async.return (internal_error ())
   in
-  if env.head_only then Async.resolved (empty 500 headers)
+  if env.head_only then Async.return (empty 500 headers)
   else
     match render env ~status:500 ~headers fallback.layers (fallback.error 500) with
     | a -> recover a give_up
@@ -366,7 +401,7 @@ let fail_page env fallback message =
   error_page env fallback
 
 let show env ~status ~headers ~fallback layers (page : unit -> page) =
-  if env.head_only then Async.resolved (empty status headers)
+  if env.head_only then Async.return (empty status headers)
   else
     match render env ~status ~headers layers (page ()) with
     | a -> recover a (fail_page env fallback)
@@ -384,16 +419,16 @@ let stopped env fallback target = function
       else if String.exists (fun c -> c = '\r' || c = '\n') location then
         fail_page env fallback "redirect location holds CR or LF"
       else
-        Async.resolved
+        Async.return
           (empty status (merge_headers [ env.root_headers; [ ("location", location); no_store ] ]))
   | Fail m -> fail_page env fallback m
 
 let rec run_guards = function
-  | [] -> Async.resolved (Ok ())
+  | [] -> Async.return (Ok ())
   | g :: rest ->
       Async.bind (protect g) (function
         | Ok () -> run_guards rest
-        | Error _ as e -> Async.resolved e)
+        | Error _ as e -> Async.return e)
 
 let rule_cache (rules : rules) headers =
   match rules.cache with
@@ -425,7 +460,7 @@ let prerender_file target =
 
 let prerendered_file env (rules : rules) (r : request) ~path ~query =
   match (env.config.prerendered, r.meth, query) with
-  | Some root, (`GET | `HEAD), (None | Some "") when rules.prerender && not env.navigating -> (
+  | Some root, (`GET | `HEAD), (None | Some "") when rules.prerender && env.navigate = None -> (
       match prerender_file path with
       | Some file when env.exists ~root ~path:file -> Some (root, file)
       | _ -> None)
@@ -435,25 +470,23 @@ let serve_file meth ~root ~headers raw =
   match meth with
   | `GET | `HEAD -> (
       match file_path raw with
-      | Some path -> Async.resolved (File { root; path; headers })
+      | Some path -> Async.return (File { root; path; headers })
       | None -> reply (asset_miss ()))
   | _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "GET, HEAD") ])
 
 let action (r : request) raw =
   match (raw, r.meth) with
-  | [ name ], `POST ->
-      Async.bind (r.body ()) (fun body ->
-          Async.map
-            (fun (status, json) ->
-              Respond
-                {
-                  status;
-                  headers = [ ("content-type", "application/json"); no_store ];
-                  body = String json;
-                })
-            (Server.handle_action ~name:(Router.decode ~plus:false name)
-               ~content_type:(r.header "content-type") ~origin:(r.header "origin")
-               ~host:(r.header "host") ~body))
+  | [ name ], `POST -> (
+      let json (status, body) =
+        Respond { status; headers = [ ("content-type", "application/json"); no_store ]; body = String body }
+      in
+      let name = Router.decode ~plus:false name in
+      match Server.accept_action ~name r.header with
+      | Error e -> Async.return (json e)
+      | Ok handler ->
+          Async.bind (r.body ~limit:Server.max_body) (function
+            | None -> Async.return (json (Server.action_error 413 "request too large"))
+            | Some body -> Async.map json (Server.answer_action ~name handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
 
@@ -463,9 +496,83 @@ let rec strip_prefix prefix parts =
   | p :: prefix, x :: rest when String.equal p x -> strip_prefix prefix rest
   | _ -> None
 
+let query_suffix = function Some q when q <> "" -> "?" ^ q | _ -> ""
+
+let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
+    ~(load : unit -> (plan, stop) result Async.t) ~(fallback : fallback) =
+  let page_or_error a = Async.map (fun resp -> Respond resp) a in
+  Async.bind (run_guards guards) (function
+    | Error stop -> page_or_error (stopped env fallback path stop)
+    | Ok () -> (
+        let headers = rule_cache rules (html_headers rules.headers []) in
+        let headers = if status = 200 then headers else set_header no_store headers in
+        match prerendered_file env rules r ~path ~query with
+        | Some (root, file) -> Async.return (File { root; path = file; headers })
+        | None ->
+            page_or_error
+              (Async.bind (protect load) (function
+                | Error stop -> stopped env fallback path stop
+                | Ok plan -> show env ~status ~headers ~fallback plan.layers (fun () -> plan.page)))))
+
+let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
+
+let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
+  let page_or_error a = Async.map (fun resp -> Respond resp) a in
+  match a.find `GET segments (Router.query r.target) with
+  | Router.Found found -> (
+      match a.resolve req found with
+      | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
+      | Handler _ -> reply (method_not_allowed allowed)
+      | Page { rules; guards; load; fallback } ->
+          let plain status message = plain status message rules.headers in
+          if not (Server.trusted_origin r.header) then reply (plain 403 "Forbidden")
+          else
+            Async.bind (run_guards guards) (function
+              | Error stop -> page_or_error (stopped env fallback path stop)
+              | Ok () ->
+                  Async.bind (r.body ~limit:Server.max_body) (function
+                    | None -> reply (plain 413 "Request Too Large")
+                    | Some body -> (
+                        let fields = Router.query ("?" ^ body) in
+                        match List.assoc_opt "_yuka_action" fields with
+                        | None -> reply (method_not_allowed allowed)
+                        | Some name -> (
+                            match Server.find_form name with
+                            | None -> reply (plain 404 "Not Found")
+                            | Some run ->
+                                let key = Option.value (List.assoc_opt "_yuka_key" fields) ~default:"" in
+                                let values =
+                                  List.filter (fun (k, _) -> k <> "_yuka_action" && k <> "_yuka_key") fields
+                                in
+                                let unprocessable errors =
+                                  serve_page { env with form = Some (name, key, values, errors) } r ~path ~query
+                                    ~status:422 ~rules ~guards:[] ~load ~fallback
+                                in
+                                let answer =
+                                  match run values with a -> a | exception e -> Async.failed (Web.exn_to_string e)
+                                in
+                                recover_with ~last:(fun () -> Respond (internal_error ()))
+                                  (Async.bind answer (function
+                                    | Server.Saved location ->
+                                        let location = Option.value location ~default:(path ^ query_suffix query) in
+                                        if Server.local_location ~host:(r.header "host") location then
+                                          reply
+                                            (empty 303
+                                               (merge_headers [ rules.headers; [ ("location", location); no_store ] ]))
+                                        else
+                                          page_or_error
+                                            (fail_page env a.missing ("form " ^ name ^ " redirect to " ^ String.escaped location
+                                               ^ " is not a path on this site"))
+                                    | Server.Unprocessable errors -> unprocessable errors))
+                                  (fun m ->
+                                    match Server.rejection m with
+                                    | Some shown -> unprocessable [ (None, shown) ]
+                                    | None -> page_or_error (fail_page env a.missing m)))))))
+  | _ -> reply (method_not_allowed allowed)
+
 let route env (App a) req (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
-  let suffix = match query with Some q when q <> "" -> "?" ^ q | _ -> "" in
+  let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
   match a.find r.meth segments (Router.query r.target) with
   | Router.Redirect { permanent; location } ->
@@ -474,38 +581,27 @@ let route env (App a) req (r : request) ~path ~raw ~query =
   | Router.Wrong_method ms -> (
       match r.meth with
       | `OPTIONS -> reply (empty 204 [ ("allow", allow ms) ])
+      | `POST when List.mem `GET ms && is_form (r.header "content-type") ->
+          form_post env (App a) req r ~path ~segments ~query ~allowed:(allow ms)
       | _ -> reply (method_not_allowed (allow ms)))
   | Router.Found found -> (
       match a.resolve req found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
       | Page { rules; guards; load; fallback } ->
-          Async.bind (run_guards guards) (function
-            | Error stop -> page_or_error (stopped env fallback path stop)
-            | Ok () -> (
-                let headers = rule_cache rules (html_headers rules.headers []) in
-                match prerendered_file env rules r ~path ~query with
-                | Some (root, file) -> Async.resolved (File { root; path = file; headers })
-                | None ->
-                    page_or_error
-                      (Async.bind (protect load) (function
-                        | Error stop -> stopped env fallback path stop
-                        | Ok plan ->
-                            show env ~status:200 ~headers ~fallback plan.layers (fun () -> plan.page)))))
+          serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
       | Handler { rules; same_origin; guards; run } ->
           page_or_error
             (Async.bind (run_guards guards) (function
               | Error stop -> stopped env a.missing path stop
               | Ok () ->
                   if
-                    same_origin
-                    && not
-                         (Server.same_origin ~origin:(r.header "origin") ~host:(r.header "host"))
-                  then Async.resolved (plain 403 "Forbidden" [])
+                    same_origin && not (Server.trusted_origin r.header)
+                  then Async.return (plain 403 "Forbidden" [])
                   else
                     let ran =
                       match run () with
                       | resp -> Async.map (fun x -> Ok x) resp
-                      | exception e -> Async.resolved (Error (Web.exn_to_string e))
+                      | exception e -> Async.return (Error (Web.exn_to_string e))
                     in
                     recover
                       (Async.bind ran (function
@@ -519,7 +615,7 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                                 else set_header no_store merged
                               else rule_cache rules merged
                             in
-                            Async.resolved { resp with headers }))
+                            Async.return { resp with headers }))
                       (fail_page env a.missing))))
 
 let handle config (App a as app) ~sleep ~exists req (r : request) =
@@ -529,10 +625,15 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
       config;
       sleep;
       head_only = (match r.meth with `HEAD -> true | _ -> false);
-      navigating = Option.is_some (r.header "yuka-navigate");
+      navigate =
+        Option.map
+          (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
+          (r.header "yuka-navigate");
+      build = build_id config (App a);
       current = path;
       root_headers = a.headers;
       exists;
+      form = None;
     }
   in
   let parts = String.split_on_char '/' path in
@@ -567,7 +668,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
         let canonical = "/" ^ String.concat "/" raw in
         let trailing = List.exists (fun s -> s = "") rest && rest <> [ "" ] in
         if trailing then
-          let suffix = match query with Some q when q <> "" -> "?" ^ q | _ -> "" in
+          let suffix = query_suffix query in
           reply (empty 308 [ ("location", canonical ^ suffix) ])
         else route env app req r ~path ~raw ~query
     | _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
@@ -588,7 +689,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
             reply (internal_error ()))
     | exception e ->
         log_quietly (Web.exn_to_string e);
-        Async.resolved (last ())
+        Async.return (last ())
   in
   Async.map bodyless answer
 
@@ -602,7 +703,7 @@ module type ADAPTER = sig
   val meth : request -> Router.meth
   val target : request -> string
   val header : request -> string -> string option
-  val body : request -> string Async.t
+  val body : request -> limit:int -> string option Async.t
   val respond : http_response -> response io
   val file : request -> root:string -> path:string -> headers:(string * string) list -> response io
   val exists : root:string -> path:string -> bool
@@ -618,7 +719,7 @@ module Make (A : ADAPTER) = struct
         meth = A.meth req;
         target = A.target req;
         header = A.header req;
-        body = (fun () -> A.body req);
+        body = (fun ~limit -> A.body req ~limit);
       }
     in
     A.bind (A.of_async (handle config app ~sleep:A.sleep ~exists:A.exists req view)) (function
@@ -712,10 +813,12 @@ let missing_page config (App a) ~sleep =
       config;
       sleep;
       head_only = false;
-      navigating = false;
+      navigate = None;
+      build = build_id config (App a);
       current = "";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
+      form = None;
     }
   in
   not_found_page env a.missing "/404.html"

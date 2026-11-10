@@ -110,6 +110,44 @@ let out_inside_a_served_dir () =
     [ Filename.concat dir "site"; dir; Filename.concat dir "a/../site" ];
   Alcotest.(check (list string)) "nothing written" [ "s.css" ] (List.map fst (files dir ""))
 
+let tree_digest () =
+  let dir = Filename.temp_dir "yuka_tree" "" in
+  let write name text =
+    Out_channel.with_open_bin (Filename.concat dir name) (fun oc -> output_string oc text)
+  in
+  Sys.mkdir (Filename.concat dir "a") 0o755;
+  write "a/x.js" "one";
+  write "y.js" "two";
+  let first = Yuka_dream.tree_digest dir in
+  Alcotest.(check string) "stable" first (Yuka_dream.tree_digest dir);
+  write "a/x.js" "ONE";
+  let changed = Yuka_dream.tree_digest dir in
+  check_true "content changes it" (changed <> first);
+  write "z.js" "";
+  check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
+
+let echo = Yuka.Action.declare ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
+let () = Yuka.Server.Action.implement echo (fun s -> Yuka.Async.return (String.length s))
+
+let body_limit () =
+  let handler = Yuka_dream.handler config Routes_server.app in
+  let post ?length body =
+    let headers =
+      [ ("Content-Type", "application/json"); ("Origin", "http://app.test"); ("Host", "app.test") ]
+      @ match length with Some n -> [ ("Content-Length", string_of_int n) ] | None -> []
+    in
+    let response = Dream.test handler (Dream.request ~method_:`POST ~target:"/_yuka/action/echo" ~headers body) in
+    (Dream.status_to_int (Dream.status response), Lwt_main.run (Dream.body response))
+  in
+  let quoted size = "\"" ^ String.make (size - 2) 'x' ^ "\"" in
+  Alcotest.(check int) "at the limit" 200 (fst (post (quoted 1_048_576)));
+  Alcotest.(check (pair int string)) "over the limit"
+    (413, {|{"error":"request too large"}|})
+    (post (quoted 1_048_577));
+  Alcotest.(check int) "a declared length over the limit is refused before reading" 413
+    (fst (post ~length:2_000_000 (quoted 4)));
+  Alcotest.(check (pair int string)) "a small declared length" (200, {|{"ok":2}|}) (post ~length:4 (quoted 4))
+
 let () =
   Alcotest.run "yuka-dream"
     [
@@ -119,5 +157,7 @@ let () =
           Alcotest.test_case "twice gives the same files" `Quick twice;
           Alcotest.test_case "the handler serves prerendered files" `Quick serve;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
+          Alcotest.test_case "tree digest follows file contents" `Quick tree_digest;
         ] );
+      ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
     ]

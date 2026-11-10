@@ -73,6 +73,8 @@ markers everywhere: the client hydrates their output.
 - `Template`: printed as the tree that `Private.expand` gives, so it has the
   same HTML as the same tree made with `lower`.
 - `Fragment`: no marker; the children are inline.
+- `Catch`: as a `Hole`. When the children raised on the server, the hole
+  holds the fallback and its start marker is `<!--[!-->`.
 - `Static` attribute: written. `Dynamic`: written with its current value;
   `None` is not written. `Handler`: not written.
 - Void tags (`area base br col embed hr img input link meta source track
@@ -188,9 +190,10 @@ markers everywhere: the client hydrates their output.
   cycle answers it; `Yuka.Private.handle_action` in tests): the body
   is the JSON input. The answer is JSON: `{"ok": output}` with 200, or
   `{"error": message}` with:
-  - 403: an `Origin` header that does not match the request `Host`
-    (scheme ignored). No `Origin` is allowed; `Origin` without `Host` is
-    refused.
+  - 403: an `Origin` whose authority is not the request `Host` (scheme
+    ignored), or no `Origin` and no `Sec-Fetch-Site: same-origin`.
+    `Origin` without `Host` is refused. Form posts and `Action` routes use
+    the same rule (`Server.trusted_origin`).
   - 404: unknown action.
   - 415: `Content-Type` is not `application/json` (parameters such as
     `charset` are allowed).
@@ -198,10 +201,10 @@ markers everywhere: the client hydrates their output.
     says which.
   - 500: the implementation raised or its promise failed. The message is
     always `action failed`; the failure goes to `Yuka.Server.log_error`.
-  - 413: the body is over 1 MiB (checked by `Content-Length` first, then
-    while reading). The message is `request too large`.
-  Checks run in this order: origin, action name, content type, body size,
-  body.
+  - 413: the body is over 1 MiB (`ADAPTER.body`: `Content-Length` first,
+    then while reading). The message is `request too large`.
+  Checks run in this order: origin, action name, content type (all from
+  the headers, no body read), body size, body.
 - A ppx form (`let%action`) can come later; this form needs no target
   switch in the ppx.
 
@@ -846,8 +849,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   builds `yuka` with `dune build -p` (the release profile), so a flag fixed
   when `yuka` compiles would be wrong for every installed app. `Dev` is a
   second virtual module of `yuka` (next to `Web`). Its browser
-  implementation (`dom/js/dev.ml`) is `mismatch = <same test> ? function
-  ... : 0`. Each check in `dom/js/client.ml` is the raw test
+  implementation (`dom/js/dev.ml`) is `on = <the test below>` and
+  `mismatch = <same test> ? function ... : 0`. Each check in `dom/js/client.ml` is the raw test
   `typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__` in place. With
   `--define:__YUKA_DEV__=false`, esbuild folds it to `false` when it parses
   the file, before tree shaking, so the dev branches and everything only
@@ -855,7 +858,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   bundle. With no define (dev, no bundler, the jsdom tests), the test is
   `true`. A shared constant `Dev.on` in another file is folded only when
   esbuild prints the bundle, after tree shaking: it left 392 B of `Curry._3`
-  in the keyed app. `yuka.native` implements `Dev.mismatch` as a no-op.
+  in the keyed app; `Dev.on` stays for code in `src/` (`Form`). `yuka.native`
+  implements `Dev` with `on = false` and a no-op `mismatch`.
 - Checked against an installed `yuka`: built with `dune build -p yuka`,
   installed with `dune install --prefix`, used by a small app; its esbuild
   bundle has the message without the define and not with it.
@@ -1321,3 +1325,254 @@ Spec: `.workplace/docs/routes-spec.md`, increment 3 (tickets 09, 11 and
   `out` inside a served directory. `not_found` and `error` pages get the
   params of their node's path (the demo shows the decoded issue id).
   `links` decodes numeric character references.
+
+## Navigation protocol (2026-11-10)
+
+Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
+(ticket 10); its section 8 lists what changed.
+
+- Request: `Yuka-Navigate: L0 L2/YUK-1`, the `data-k` of every
+  `<yuka-outlet>` in document order. The cycle compares them with the
+  layer keys of the target (or of the fallback for a 404 or 500). A common
+  prefix of `n >= 1` keys gives a partial: the settled content of outlet
+  `n` with ids prefixed `KEY-`, no entry script, and the headers
+  `Yuka-Outlet`, `Yuka-Title` (percent-encoded), `Yuka-Build`, the page's
+  status and rule headers. Otherwise the settled full document with
+  `Yuka-Build`.
+- Build id (`Server.build_id config app`): two 32-bit FNV-1a hashes of the
+  route digest and the asset description (entry, manifest, packages or
+  metafile). `Digest` was the first choice, but it put melange
+  `digest.js` and `Printf` into every client bundle (keyed app 11005 B ->
+  22603 B gzip). Every full document has `<meta name="yuka-build">`.
+- Client (`src/navigation.ml`): reads the keys, fetches, compares
+  `Yuka-Build` with the meta (differs: `location.assign`), accepts 2xx and
+  4xx/5xx as pages (1xx/3xx and non-HTML: `location.assign`), then with a
+  known `Yuka-Outlet` runs `Client.stop_within` on that outlet, sets its
+  `innerHTML` and the title, and sets or removes `aria-current="page"` on
+  links outside the outlet and outside islands (only the value `page` is
+  removed); without one, the old body swap. Then history, scroll and the
+  island scan as before. `Client.stop_within` runs the cleanup stored on
+  each live island inside the element (`__yuka_cleanup`).
+- `Web`: `fetch_page` takes the keys and gives the callback the status and
+  a header lookup; new `decode_uri`, `contains`, `set_title`.
+- Size: keyed app 11001 -> 11005 B gzip; demo chunks 35833 -> 36364 B gzip
+  (+531 B). `/about` still loads 0 bytes of JavaScript.
+- Tests: `test/cycle` "navigation" (partial headers and body, deepest
+  shared outlet, full document for unknown, empty or old keys, prefixed
+  ids, 404 partial, `Yuka-Title` UTF-8, build meta, build id follows the
+  assets); `test/navigation` (keys sent, partial swap keeps islands outside
+  the outlet and stops those inside, title, `aria-current` outside the
+  outlet and islands, build mismatch, unknown outlet, 404/500 in place);
+  `e2e/demo.ts` 3c (sidebar counter and `New_issue` survive, title,
+  `aria-current`, back, `Yuka-Build` mismatch through a rewritten
+  response header) and 3d (no script on `/about`).
+- Review fixes (2026-11-10): a layout that takes a loader result
+  (`layer.data`) is never shared, so it is rendered again with fresh data;
+  `Server.modules ~digest` (`Yuka_dream.tree_digest`) puts the module
+  contents into the build id, computed once; the client sends `-` when the
+  page has no outlet, does a full load when the answered outlet is not on
+  the page, decodes the title before changing the DOM, leaves an existing
+  `aria-current` alone, and `stop_within` aborts the action calls of the
+  islands it stops (the event handler's owner is the acting owner).
+
+## Remote data (2026-11-10)
+
+Spec: `.workplace/docs/data-spec.md`, sections 1 and 2, increments R1 to
+R3 (ticket 12); its "Changes during build" section lists the differences.
+
+- `Status` (`src/status.ml`): `Idle`, `Loading last`, `Ready`, `Failed
+  { error; last }`, with a typed `error` (`Rejected`, `Forbidden`,
+  `Not_found`, `Server`, `Network`, `Protocol`) and a JSON codec for it.
+- Queries: `Action.query` is `Action.declare` with the kind `[ `Query ]`
+  (a phantom third parameter of `Action.t`); `Remote.use` accepts only that
+  kind. Same registry, endpoint and wire format.
+- Transport: `Remote.server_send` gives `(Json.t, Status.error) result` and
+  returns an abort. The server sets it with `implement` (the
+  implementation, `Server` logged); in the browser `Remote` maps the status
+  of `fetch_post` itself (400 `Rejected` with the message, 403, 404, 413 and
+  415, 5xx, network). `Action.call` keeps its string transport and its
+  messages.
+- `Remote.use` (`src/remote.ml`): an effect computes the key (query name
+  and input JSON); a new key aborts the request and bumps a generation, and
+  only the current generation writes the status. Retries use
+  `Web.set_timeout`. The owner's disposal aborts and leaves the
+  `invalidate` table (a `Web.table` from query name to mounted uses,
+  created on first use).
+- Answers (`src/answers.ml`): in a server render, a use inside an island
+  writes `<script type="application/json" data-yuka-answer="r:NAME JSON">`
+  with `{"ok":v}` or `{"error":ERROR}` after `</yuka-island>` and before the
+  props script. A use that is still pending writes a `data-pending`
+  element and a `Pending_answer`; `Server.drive` writes the full element
+  when it settles (or a network timeout error). The client reads an answer
+  on the first run only; a pending one is awaited with the DOM watch until
+  the document ends, then fetched. `Server.drive`'s `on_value` now takes the
+  HTML of the chunk.
+- `Optimistic` (`src/optimistic.ml`): pending changes with ids, applied
+  oldest first over a base kept elsewhere. `Remote.mutate` adds a change,
+  runs the call, and on success removes it and writes `commit result base`
+  (default `change base`); on failure removes it.
+- Size: `make size` fails when the keyed app contains `remote.js`,
+  `answers.js`, `optimistic.js` or `status.js`, or when any client chunk
+  contains `printer.js`; keyed app 10460 -> 10462 B gzip. The demo client
+  grows 35961 -> 38882 B gzip (it uses Remote).
+- Review fixes: answers made in an `Await` fill go out before the fill
+  chunk; a raising island rolls back its answers; embedded `Network` and
+  `Server` errors are retried after hydration; `mutate` keeps the base's
+  kind and asks again when it commits during a request; the typed server
+  transport ref is `Remote.server_send`.
+
+## Error boundaries (2026-11-10)
+
+Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.
+
+- An owner has `catch : (exn -> unit) option`. A new owner takes the catch
+  of the current owner. The owner type is in `Scheduler`, so a node can
+  hold its owner. `Base.fail o e` (`Scheduler.catch`) calls it, or raises `e` when there
+  is none, so code outside a boundary and outside an island behaves as
+  before.
+- Routing: an effect's first run that raises calls the catch of the
+  effect's owner. A later run that raises, and a dependency check that
+  raises (a memo the effect reads), reach `Scheduler.flush`, which calls
+  the catch of `node.owner` (set by `Effect.run`). The delegated listener
+  wraps each handler in `try`, calls the catch of the handler's owner and
+  marks the event stopped, so ancestor handlers do not run, as after an
+  uncaught error; a non-bubbling handler is wrapped when it is attached.
+  Memos are not routed themselves: their readers are. A cleanup that
+  raises while its owner is disposed is routed only when the disposal
+  runs inside an effect or a handler.
+- `Catch` is a node with the server parts (`children`, `fallback`) and a
+  `client` function that returns a `Hole`. The hole's body sets the catch
+  of the hole's owner to a handler that writes an error State, so all
+  effects and handlers made under it inherit it. On error the hole runs
+  again: its owner is disposed (effects stop, cleanups run) and the
+  fallback is rendered with the catch of the owner above, so an error in
+  the fallback goes up. A synchronous error in `children ()` disposes the
+  owner and shows the fallback in the same run.
+- `mount_hole` writes its stop marker in its first run, also when placing
+  the content raises, so a hole that runs again before `Effect.run`
+  returns has its range. `Show` and `Catch` call their children untracked.
+- Islands: `boot` hydrates under an owner whose catch logs
+  disposes the island, then logs `yuka island ID (NAME): message` with
+  `console.error` and calls `Client.on_error` (set by `mount ~on_error`);
+  an exception from `on_error` is dropped. The DOM stays as it is.
+- Server: the printer remembers the buffer length and a copy of the
+  session (`Types.snapshot`: every mutable field, with the `select` value),
+  prints the children, and on an exception restores them (`Types.restore`), calls `log_error`, and
+  prints the fallback with `~error:"server error"` between `<!--[!-->`
+  and `<!--]-->`. The client reads `[!` on the start comment and starts
+  with the fallback.
+- Size: the routing is in every client app (about 180 B gzip on the keyed
+  benchmark); `Catch`, `Show` and `Status` are top-level values, dropped
+  when unused.
+
+## Forms (2026-11-10)
+
+Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
+"20: changes during build" lists the differences.
+
+- `[@@deriving form]` (`ppx/form_gen.ml`) on a record writes `type
+  <t>_field` (one constant constructor per label), `<t>_field_name` and
+  `<t>_form : (<t>, <t>_field) Yuka.Form.t`. The generated decoder calls
+  `Yuka.Form.field` for each label with a kind (`string`, `int`, `float`,
+  `bool`, `option`, `list`, `custom M.of_string M.to_string`), collects
+  every error in field order, and builds the record with `Form.finish`.
+- `Form.action ~name ~fields ~output` is an `Action.t` whose input is sent
+  as the encoded fields (`[[name, value], ...]`) and whose answer is
+  `{"value": o, "redirect": "/..."}` or `{"errors": [[name|null, message]]}`.
+  `Action.t` has a `form` field (raw fields to input JSON or errors JSON),
+  set only by `Form.action`, so the cycle can decode a raw post without
+  knowing the types.
+- Request cycle: a `POST` to a page path (the route has `GET`) with
+  `application/x-www-form-urlencoded` and a `_yuka_action` field is a form
+  post. It checks the origin (`Origin` equal to `Host`, or no `Origin` and
+  `Sec-Fetch-Site: same-origin`, else 403), the 1 MiB limit (413), and the
+  action (404); it decodes, runs the JSON handler of the action, and answers
+  303 to `redirect` or the page URL, or renders the page as for `GET`
+  (guards and loaders run) with status 422 and `no-store`. The printer
+  session holds `form = (action, fields, errors)`; `<Yuka.Form>` of that
+  action prints the sent values and errors, and `data-yuka-sent` on the
+  `<form>` so an island hydrates with them. Any other `POST` to a page is
+  405 as before.
+- `<Yuka.Form>` (`src/form.ml`): `<form method="post"
+  data-yuka-action="NAME">` with the hidden `_yuka_action` input. In an
+  island its `submit` handler reads `FormData` (`Web.form_values`), decodes,
+  and calls the action; `pending` and the errors are States. A read of
+  `Form.pending` outside a hole renders the enclosing component again (the
+  demo's submit button is in a hole).
+- Size: keyed app 10648 -> 10664 B gzip (it has no `form.js`; `make size`
+  checks it); demo client 39764 -> 41400 B gzip.
+- Demo: `/new` (server-only form, works with JavaScript off) and the new
+  issue dialog (`<Yuka.Form>` in the `New_issue` island) share
+  `Views.Issue_form`.
+- Review fixes: `ADAPTER.body` takes `~limit` and gives `None` over it
+  (`yuka-dream` reads the body stream and stops), used by the form post and
+  the action call. The form post checks the origin from the headers first,
+  then runs the page's guards, then reads the bounded body. `Action.t.form`
+  is a GADT that holds the `Form.t`, so the cycle and `<Yuka.Form>` decode
+  once with the typed decoder, and field names come from the `Form.t`.
+  The redirect is read from each answer (no shared ref). The posted form
+  is told by `?key` (`_yuka_key`); the 422 state goes to that form only,
+  and an island keeps the state of `data-yuka-sent` until a submit in the
+  browser removes the attribute. The browser adds
+  the submitter's `name`/`value` to the fields. With no `on_ok` and no
+  redirect, an island submit navigates to the page URL. The deriver
+  refuses type parameters and labels that start with `_`, and reads
+  `String.t`, `Int.t`, `Float.t`, `Bool.t` as the base kinds.
+- Second review fixes: the action call checks origin, name and content
+  type from the headers before it reads the body. `yuka-dream` refuses a
+  `Content-Length` over the limit with no read and closes the body stream
+  over the limit. The form 303 goes only to a path or a URL of the request
+  `Host` with no control character (below space, or DEL: browsers drop
+  TAB, CR and LF from a URL, so `/\t/evil.com` is `//evil.com`); else the
+  500 page and a log. One origin rule,
+  `Server.trusted_origin`, for form posts, the action call and `Action`
+  routes. Unknown field names in errors from the server are form errors;
+  a `data-yuka-sent` that does not parse is ignored (a console message in
+  a dev build). A form post with a content type other than
+  `application/x-www-form-urlencoded` is 405 before the guards run.
+
+
+## Prefetch, navigation cache and view transitions (2026-11-10)
+
+Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
+
+- One cache in `Navigation`: a `Web.table` from `absolute URL without
+  fragment ^ " " ^ outlet keys` to an entry (answer or in-flight fetch,
+  waiters, time, prefetched). The keys are part of the key because the
+  answer depends on `Yuka-Navigate` (`Vary`). At most 30 entries; the
+  oldest goes first (`Map` keeps insertion order).
+- Lifetime from the answer's own `Cache-Control` (`Web.max_age`):
+  `max-age=N` without `no-store` or `no-cache` keeps it N seconds, also
+  for back and forward; otherwise only a prefetched answer is kept, used
+  once, within 10 s. A navigation fetch is stored only when `max-age` is
+  above 0 and no `clear` happened since it started (`era`).
+- Dropping entries (`clear`, eviction of the oldest when a new key comes
+  in) aborts an in-flight prefetch unless a navigation waits for it; that
+  navigation still gets the answer. `unmount` aborts every fetch, and it
+  and a `popstate` to the shown page bump the navigation counter, so a
+  waiting navigation does nothing.
+- A navigation finds an answer (used at once, no fetch), an in-flight
+  prefetch (it waits), or nothing (it fetches as before). A counter drops
+  the answer of a navigation that a newer one replaced; a prefetch is never
+  aborted by a navigation, only by `unmount`.
+- Prefetch: delegated `pointerover`/`focusin` start a 50 ms timer,
+  `pointerout`/`focusout` and any navigation cancel it; `touchstart` and a
+  `pointerdown` that would be a plain click prefetch at once. Links are the ones a click
+  would navigate (`Web.link_href`), minus `data-yuka-prefetch="off"`.
+  `IntersectionObserver` watches visible links after start and after each
+  navigation. A prefetch sends `Yuka-Prefetch: 1` and `cache: "no-store"`:
+  with the default cache mode, Chrome's HTTP cache lock made a same-URL
+  page load in a new tab (ctrl-click) wait for the end of a streamed
+  prefetch.
+- Actions: `Platform.acted` is called by the action transport on an `ok`
+  answer; navigation sets it to empty the cache. Anything that calls an
+  action through the transport (later `Remote.mutate`) empties it too.
+- Transitions: the history push and `loaded` change first; the DOM update
+  (swap, scroll, island start) is one function. With `~transitions:true`,
+  `Web.transition` runs it in `document.startViewTransition`, rethrows an
+  exception from it in a task (an uncaught error, not a rejected promise),
+  ignores the rejected `ready` of a skipped transition, and removes
+  `data-yuka-nav` when the last started transition finishes. The direction of `popstate` compares the history keys
+  (`time-counter`, made in order).
+- Size: about 1.4 KB gzip in an app that mounts navigation (demo +1381 B); 0 in
+  the keyed benchmark, which does not.

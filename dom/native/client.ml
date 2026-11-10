@@ -17,3 +17,5 @@ let render _ _ = browser_only ()
 let hydrate _ _ = browser_only ()
 let start ?lazy_entries:_ _ = browser_only ()
 let stop () = ()
+let stop_within _ = ()
+let on_error : (string -> unit) ref = ref ignore

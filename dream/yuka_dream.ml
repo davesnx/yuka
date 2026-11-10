@@ -30,7 +30,20 @@ module Adapter = struct
 
   let target = Dream.target
   let header = Dream.header
-  let body request = to_async (Dream.body request)
+  let body request ~limit =
+    let stream = Dream.body_stream request in
+    let refuse () = Lwt.map (fun () -> None) (Dream.close stream) in
+    let buffer = Buffer.create 1024 in
+    let rec read () =
+      Lwt.bind (Dream.read stream) (function
+        | None -> Lwt.return_some (Buffer.contents buffer)
+        | Some chunk ->
+            Buffer.add_string buffer chunk;
+            if Buffer.length buffer > limit then refuse () else read ())
+    in
+    match Option.bind (Dream.header request "Content-Length") int_of_string_opt with
+    | Some n when n > limit -> to_async (refuse ())
+    | _ -> to_async (read ())
 
   let respond ({ status; headers; body } : Yuka.Server.http_response) =
     match body with
@@ -67,6 +80,16 @@ module Fresh = Yuka.Server.Make (struct
   let exists ~root:_ ~path:_ = false
 end)
 
+let tree_digest dir =
+  let rec files rel =
+    let path = if rel = "" then dir else Filename.concat dir rel in
+    if Sys.is_directory path then
+      Sys.readdir path |> Array.to_list |> List.sort compare
+      |> List.concat_map (fun name -> files (if rel = "" then name else Filename.concat rel name))
+    else [ rel ^ "\000" ^ Digest.to_hex (Digest.file path) ]
+  in
+  Digest.to_hex (Digest.string (String.concat "\n" (files "")))
+
 let log_to_dream () =
   Yuka.Server.log_error := fun message -> Dream.error (fun log -> log "%s" message)
 
@@ -98,14 +121,14 @@ let is_html response =
 
 let drain (r : Yuka.Server.http_response) =
   match r.body with
-  | Yuka.Server.String text -> Yuka.Async.resolved text
+  | Yuka.Server.String text -> Yuka.Async.return text
   | Yuka.Server.Stream f ->
       let b = Buffer.create 4096 in
       Yuka.Async.map
         (fun () -> Buffer.contents b)
         (f (fun text ->
              Buffer.add_string b text;
-             Yuka.Async.resolved ()))
+             Yuka.Async.return ()))
 
 let absolute path =
   let path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in

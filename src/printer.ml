@@ -9,7 +9,26 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false }
+      current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None }
+
+  let answer_script key json =
+    "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
+    ^ Json.to_string json ^ "</script>"
+
+  let pending_answer_script key =
+    "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key
+    ^ "\" data-pending></script>"
+
+  let answers_html answers =
+    String.concat ""
+      (List.rev_map
+         (function key, Some json -> answer_script key json | key, None -> pending_answer_script key)
+         answers)
+
+  let take_answers s =
+    let html = answers_html s.answers in
+    s.answers <- [];
+    html
 
   let take_pending s =
     let p = List.rev s.pending in
@@ -24,7 +43,6 @@ open Base
   let rec print s build =
     let b = Buffer.create 256 in
     let after_text = ref false in
-    let select_value = ref None in
     let hydrating () = (not s.islands_only) || s.depth > 0 in
     let marker m =
       if hydrating () then Buffer.add_string b m;
@@ -91,6 +109,20 @@ open Base
               go (body ());
               marker "<!--]-->")
       | Template { template; parts } -> go (Template.expand template parts)
+      | Catch { children; fallback; _ } -> (
+          let length = Buffer.length b and text = !after_text and saved = snapshot s in
+          try
+            marker "<!--[-->";
+            go (children ());
+            marker "<!--]-->"
+          with e ->
+            Buffer.truncate b length;
+            after_text := text;
+            restore s saved;
+            !log_error ("Yuka.Catch: " ^ Web.exn_to_string e);
+            marker "<!--[!-->";
+            go (fallback ~error:"server error" ~reset:ignore);
+            marker "<!--]-->")
       | Slot { content; _ } ->
           marker "<!--[$-->";
           Option.iter go content;
@@ -133,13 +165,22 @@ open Base
                    " data-start=\"interaction\"")
            ^ ">");
           after_text := false;
+          let saved = snapshot s in
           s.depth <- s.depth + 1;
-          (match go (render ()) with
-          | () -> s.depth <- s.depth - 1
-          | exception e ->
-              s.depth <- s.depth - 1;
-              raise e);
+          s.answers <- [];
+          let mine =
+            match go (render ()) with
+            | () ->
+                s.depth <- s.depth - 1;
+                let mine = s.answers in
+                s.answers <- saved.answers;
+                mine
+            | exception e ->
+                restore s saved;
+                raise e
+          in
           Buffer.add_string b "</yuka-island>";
+          Buffer.add_string b (answers_html mine);
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
             ^ Json.to_string props ^ "</script>");
@@ -166,7 +207,7 @@ open Base
             if tag = "select" || tag = "textarea" then
               List.filter (fun (name, _) -> name <> "value") resolved
             else if
-              tag = "option" && value <> None && !select_value = value
+              tag = "option" && value <> None && s.select_value = value
               && not (List.mem_assoc "selected" resolved)
             then resolved @ [ ("selected", "") ]
             else resolved
@@ -201,10 +242,10 @@ open Base
                   Buffer.add_char b '\n';
                 Buffer.add_string b (escape ~quote:false v)
             | "select", _ ->
-                let outer = !select_value in
-                select_value := value;
+                let outer = s.select_value in
+                s.select_value <- value;
                 contents children;
-                select_value := outer
+                s.select_value <- outer
             | _ -> contents children);
             Buffer.add_string b "</";
             Buffer.add_string b tag;

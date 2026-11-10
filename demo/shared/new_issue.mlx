@@ -1,47 +1,10 @@
 open Yuka
-open Model
-
-let describe : Actions.create_error -> string = function
-  | Empty_title -> "Title is required"
-  | Title_too_long n -> "Title is too long (at most " ^ string_of_int n ^ " characters)"
-  | Duplicate_title id -> "An issue with this title already exists: " ^ id
 
 let%client make () =
-  let title = State.make "" in
-  let description = State.make "" in
-  let status = State.make Issue.Todo in
-  let priority = State.make Issue.No_priority in
-  let error : string option State.t = State.make None in
-  let busy = State.make false in
   let close () = State.set Ui.dialog_open false in
   let open_ () =
-    State.set error None;
     State.set Ui.dialog_open true;
     Browser.focus "dialog-title"
-  in
-  let submit () =
-    let t = String.trim (State.peek title) in
-    if not (State.peek busy) then (
-      State.set busy true;
-      State.set error None;
-      Async.on_result
-        (Action.call Actions.create_issue
-           {
-             Actions.title = t;
-             description = State.peek description;
-             status = State.peek status;
-             priority = State.peek priority;
-           })
-        (fun result ->
-          State.set busy false;
-          match result with
-          | Ok (Ok i) ->
-              State.set Ui.created (Some i);
-              State.set title "";
-              State.set description "";
-              close ()
-          | Ok (Error e) -> State.set error (Some (describe e))
-          | Error message -> State.set error (Some message)))
   in
   Effect.run (fun () ->
       Browser.on_window "keydown" (fun e ->
@@ -61,45 +24,20 @@ let%client make () =
          <div class_="backdrop dim" onClick=(fun _ -> close ()) />
          <div class_="dialog">
            <h2>"New issue"</h2>
-           <input class_="dialog-title" type_=`text id="dialog-title" placeholder="Issue title" autofocus=true
-             value=(State.get title)
-             onInput=(fun e -> State.set title (Event.target_value e))
-             onKeyDown=(fun e -> if Event.key e = "Enter" then submit ()) />
-           <textarea class_="dialog-description" placeholder="Description" rows=4
-             value=(State.get description)
-             onInput=(fun e -> State.set description (Event.target_value e)) />
-           <div class_="dialog-row">
-             <select class_="select" aria_label="Status"
-               onChange=(fun e ->
-                 Option.iter (State.set status) (Issue.status_of_slug (Event.target_value e)))>
-               (Yuka.list
-                  (List.map
-                     (fun s ->
-                       <option value=(Issue.status_slug s) selected=(s = Issue.Todo)>
-                         (Yuka.text (Issue.status_label s))
-                       </option>)
-                     Issue.all_statuses))
-             </select>
-             <select class_="select" aria_label="Priority"
-               onChange=(fun e ->
-                 Option.iter (State.set priority) (Issue.priority_of_slug (Event.target_value e)))>
-               (Yuka.list
-                  (List.map
-                     (fun p ->
-                       <option value=(Issue.priority_slug p) selected=(p = Issue.No_priority)>
-                         (Yuka.text (Issue.priority_label p))
-                       </option>)
-                     Issue.all_priorities))
-             </select>
-           </div>
-           (match State.get error with
-            | Some m -> <p class_="error">(Yuka.text m)</p>
-            | None -> Yuka.empty)
-           <div class_="dialog-actions">
-             <button class_="button" onClick=(fun _ -> close ())>"Cancel"</button>
-             <button class_="button primary" disabled=(State.get busy)
-               onClick=(fun _ -> submit ())>"Create issue"</button>
-           </div>
+           <Yuka.Form action=Actions.create_issue
+             on_ok=(fun _ ->
+               Remote.invalidate Queries.issues;
+               close ())>
+             (fun form ->
+               <div>
+                 <Views.Issue_form form />
+                 <div class_="dialog-actions">
+                   <button class_="button" type_=`button onClick=(fun _ -> close ())>"Cancel"</button>
+                   (Yuka.hole (fun () ->
+                      <button class_="button primary" type_=`submit disabled=(Form.pending form)>"Create issue"</button>))
+                 </div>
+               </div>)
+           </Yuka.Form>
          </div>
        </div>
      else Yuka.empty)

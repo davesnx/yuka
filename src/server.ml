@@ -66,19 +66,26 @@ let fill_chunk id html =
 let reject_prefix = Types.reject_prefix
 let rejection = Types.rejection
 
+let timeout_answer () : Json.t =
+  `Assoc [ ("error", Status.error_codec.encode (Status.Network "timeout")) ]
+
 let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
+  | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_shell
+let drive ?preload ?entry ?current ?(id_prefix = "") ?form ~timeout ~sleep build ~on_shell
     ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
+  session.form <- form;
   session.preload <- preload;
   session.entry <- entry;
   session.current <- current;
   session.id_prefix <- id_prefix;
   let shell = Printer.print session (fun () -> build ()) in
   let fills =
-    List.exists (function Types.Pending_await _ -> true | Types.Pending_async _ -> false) session.pending
+    List.exists
+      (function Types.Pending_await _ -> true | Types.Pending_async _ | Types.Pending_answer _ -> false)
+      session.pending
   in
   let result, resolve, fail = Async.make () in
   let chain = ref (on_shell ~fills shell) in
@@ -117,7 +124,9 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
         | Types.Pending_await { id; subscribe; fill; inside_island; _ } ->
             subscribe (fun () -> settled_fill id inside_island fill)
         | Types.Pending_async { id; async } ->
-            Async.on_settled async (fun status -> settled_value id status))
+            Async.on_settled async (fun status -> settled_value id status)
+        | Types.Pending_answer { key; answer } ->
+            Async.on_settled answer (fun status -> settled_answer key status))
       items
   and check_done () = if !outstanding = [] then conclude ()
   and settled_fill id inside fill =
@@ -126,7 +135,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
       match fill () with
       | html ->
           register ();
-          let links = Printer.take_links session in
+          let links = Printer.take_answers session ^ Printer.take_links session in
           emit (fun () -> on_fill id inside links html);
           check_done ()
       | exception exn -> abort exn
@@ -140,7 +149,19 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
         | Async.Failed m -> `Assoc [ ("error", `String (Types.async_error id m)) ]
         | Async.Pending -> `Assoc [ ("error", `String "pending") ]
       in
-      emit (fun () -> on_value id json);
+      emit (fun () -> on_value (value_script id json));
+      check_done ()
+    end
+  and settled_answer key status =
+    let id = "answer:" ^ key in
+    if (not !finished) && is_outstanding id then begin
+      remove id;
+      let json : Json.t =
+        match status with
+        | Async.Done j -> j
+        | Async.Failed _ | Async.Pending -> timeout_answer ()
+      in
+      emit (fun () -> on_value (Printer.answer_script key json));
       check_done ()
     end
   in
@@ -154,13 +175,16 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
             match fill_failed "timeout" with
             | html ->
                 register ();
-                let links = Printer.take_links session in
+                let links = Printer.take_answers session ^ Printer.take_links session in
                 emit (fun () -> on_fill id inside_island links html);
                 expire ()
             | exception exn -> abort exn)
         | Types.Pending_async { id; _ } ->
             emit (fun () ->
-                on_value id (`Assoc [ ("error", `String "timeout") ]));
+                on_value (value_script id (`Assoc [ ("error", `String "timeout") ])));
+            expire ()
+        | Types.Pending_answer { key; _ } ->
+            emit (fun () -> on_value (Printer.answer_script key (timeout_answer ())));
             expire ())
   in
   register ();
@@ -188,7 +212,7 @@ let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
            ?styles ?scripts ())
       >>= fun () -> write shell)
     ~on_fill:(fun id _ links html -> write (links ^ fill_chunk id html))
-    ~on_value:(fun id json -> write (value_script id json))
+    ~on_value:write
   >>= fun () -> write "</body></html>"
 
 let find_from text part from =
@@ -225,23 +249,23 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ~sleep build =
+let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ~sleep build =
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
     (fun () -> !document ^ Buffer.contents values)
-    (drive ?preload ?entry ?current ?id_prefix ~timeout ~sleep
+    (drive ?preload ?entry ?current ?id_prefix ?form ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
          document := shell;
-         Async.resolved ())
+         Async.return ())
        ~on_fill:(fun id inside links html ->
          document := fill_marker !document id ~inside html;
          Buffer.add_string values links;
-         Async.resolved ())
-       ~on_value:(fun id json ->
-         Buffer.add_string values (value_script id json);
-         Async.resolved ()))
+         Async.return ())
+       ~on_value:(fun html ->
+         Buffer.add_string values html;
+         Async.return ()))
 
 let normalize path =
   let rec go p =
@@ -317,29 +341,59 @@ let find_action name =
   Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
 
 
-let transport name input =
-  match find_action name with
-  | None -> Async.failed ("unknown action " ^ name)
-  | Some handler ->
-      let settled, resolve, fail = Async.make () in
-      Async.on_settled (handler input) (function
-        | Async.Done (Output j) -> resolve j
-        | Async.Done (Bad_input m) -> fail m
-        | Async.Failed m -> fail (Option.value (rejection m) ~default:m)
-        | Async.Pending -> ());
-      settled
+type failure = Unknown | Bad of string | Refused of string | Broke of string
 
-let implement action f =
+let run name input k =
+  match find_action name with
+  | None ->
+      k (Error Unknown);
+      ignore
+  | Some handler ->
+      let live = ref true in
+      Async.on_settled (handler input) (fun st ->
+          if !live then
+            match st with
+            | Async.Done (Output j) -> k (Ok j)
+            | Async.Done (Bad_input m) -> k (Error (Bad m))
+            | Async.Failed m -> (
+                match rejection m with
+                | Some message -> k (Error (Refused message))
+                | None -> k (Error (Broke m)))
+            | Async.Pending -> ());
+      fun () -> live := false
+
+let transport name input =
+  let settled, resolve, fail = Async.make () in
+  let (_ : unit -> unit) =
+    run name input (function
+      | Ok j -> resolve j
+      | Error Unknown -> fail ("unknown action " ^ name)
+      | Error (Bad m | Refused m | Broke m) -> fail m)
+  in
+  settled
+
+let send name input k =
+  run name input (fun r ->
+      k
+        (match r with
+        | Ok j -> Ok j
+        | Error Unknown -> Error Status.Not_found
+        | Error (Bad m) -> Error (Status.Rejected ("invalid input: " ^ m))
+        | Error (Refused m) -> Error (Status.Rejected m)
+        | Error (Broke m) ->
+            !log_error ("action " ^ name ^ " failed: " ^ m);
+            Error Status.Server))
+
+let register action f encode =
   let name = Action.name action in
   if Option.is_some (find_action name) then
     invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
-  let input = action.Action.input
-  and output = action.Action.output in
+  let input = action.Action.input in
   registry :=
     ( name,
       fun json ->
         match Codec.decode input json with
-        | Error m -> Async.resolved (Bad_input m)
+        | Error m -> Async.return (Bad_input m)
         | Ok v ->
             let run =
               match f v with
@@ -347,66 +401,118 @@ let implement action f =
               | exception Rejected m -> rejected m
               | exception exn -> Async.failed (Web.exn_to_string exn)
             in
-            Async.map (fun o -> Output (Codec.encode output o)) run )
+            Async.map (fun o -> Output (encode o)) run )
     :: !registry;
-  Action.transport := transport
+  Action.transport := transport;
+  Remote.server_send := send
+
+let implement action f = register action f (Codec.encode action.Action.output)
+
+type form_outcome = Saved of string option | Unprocessable of (string option * string) list
+
+let forms : (string * ((string * string) list -> form_outcome Async.t)) list ref = ref []
+let find_form name = List.assoc_opt name !forms
+
+let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _) Action.t) ?redirect
+    (f : i -> (o, f Form_core.errors) result Async.t) =
+  let t : (i, f) Form_core.t =
+    match action.Action.form with
+    | Some (Action.Form (t, _)) -> t
+    | None -> invalid_arg ("Yuka.Server.Form.implement: " ^ Action.name action ^ " is not a form action")
+  in
+  let output = action.Action.output in
+  let encode result =
+    match (result, Codec.encode output result) with
+    | Ok o, `Assoc fields -> (
+        match redirect with
+        | Some r -> `Assoc (fields @ [ ("redirect", `String (r o)) ])
+        | None -> `Assoc fields)
+    | _, j -> j
+  in
+  register action f encode;
+  let run values =
+    match Form_core.decode t values with
+    | Error e -> Async.return (Unprocessable (Form_core.named t e))
+    | Ok input ->
+        let answer =
+          match f input with
+          | a -> a
+          | exception Rejected m -> rejected m
+          | exception exn -> Async.failed (Web.exn_to_string exn)
+        in
+        Async.map
+          (function
+            | Ok o -> Saved (Option.map (fun r -> r o) redirect)
+            | Error e -> Unprocessable (Form_core.named t e))
+          answer
+  in
+  forms := (Action.name action, run) :: !forms
 
 let max_body = 1_048_576
 
-let same_origin ~origin ~host =
-  match origin with
-  | None -> true
-  | Some origin -> (
-      let origin_host =
-        match String.index_opt origin ':' with
-        | Some i when i + 3 <= String.length origin ->
-            String.sub origin (i + 3) (String.length origin - i - 3)
-        | _ -> origin
+let authority url =
+  match String.index_opt url ':' with
+  | Some i when i + 3 <= String.length url && String.sub url (i + 1) 2 = "//" ->
+      let rest = String.sub url (i + 3) (String.length url - i - 3) in
+      let stop =
+        Option.value ~default:(String.length rest)
+          (String.index_opt (String.map (function '?' | '#' -> '/' | c -> c) rest) '/')
       in
-      match host with
-      | Some h ->
-          String.equal (String.lowercase_ascii h)
-            (String.lowercase_ascii origin_host)
-      | None -> false)
+      Some (String.sub rest 0 stop)
+  | _ -> None
 
-let is_json = function
-  | None -> false
-  | Some ct ->
-      let media = List.hd (String.split_on_char ';' ct) in
-      String.equal
-        (String.lowercase_ascii (String.trim media))
-        "application/json"
+let same_origin ~origin ~host =
+  match (authority origin, host) with
+  | Some a, Some h -> String.equal (String.lowercase_ascii a) (String.lowercase_ascii h)
+  | _ -> false
 
-let handle_action ~name ~content_type ~origin ~host ~body =
-  let error_body message =
-    Json.to_string (`Assoc [ ("error", `String message) ])
-  in
-  let error status message = Async.resolved (status, error_body message) in
-  if not (same_origin ~origin ~host) then error 403 "origin mismatch"
+let trusted_origin header =
+  match header "origin" with
+  | Some origin -> same_origin ~origin ~host:(header "host")
+  | None -> header "sec-fetch-site" = Some "same-origin"
+
+let local_location ~host location =
+  (not (String.exists (fun c -> c < ' ' || c = '\127') location))
+  &&
+  match location with
+  | "" -> false
+  | l when l.[0] = '/' -> not (String.length l > 1 && (l.[1] = '/' || l.[1] = '\\'))
+  | l -> same_origin ~origin:l ~host
+
+let media_type = function
+  | None -> None
+  | Some ct -> Some (String.lowercase_ascii (String.trim (List.hd (String.split_on_char ';' ct))))
+
+let is_json ct = media_type ct = Some "application/json"
+let action_error status message = (status, Json.to_string (`Assoc [ ("error", `String message) ]))
+
+let accept_action ~name header =
+  if not (trusted_origin header) then Error (action_error 403 "origin mismatch")
   else
     match find_action name with
-    | None -> error 404 ("unknown action " ^ name)
+    | None -> Error (action_error 404 ("unknown action " ^ name))
     | Some handler ->
-        if not (is_json content_type) then
-          error 415 "content type must be application/json"
-        else if String.length body > max_body then
-          error 413 "request too large"
-        else (
-          match Json.of_string body with
-          | Error m -> error 400 ("invalid JSON: " ^ m)
-          | Ok json ->
-              let result, resolve, _ = Async.make () in
-              Async.on_settled (handler json) (function
-                | Async.Done (Bad_input m) ->
-                    resolve (400, error_body ("invalid input: " ^ m))
-                | Async.Done (Output j) ->
-                    resolve (200, Json.to_string (`Assoc [ ("ok", j) ]))
-                | Async.Failed m -> (
-                    match rejection m with
-                    | Some message -> resolve (400, error_body message)
-                    | None ->
-                        !log_error
-                          ("action " ^ name ^ " failed: " ^ m);
-                        resolve (500, error_body "action failed"))
-                | Async.Pending -> ());
-              result)
+        if is_json (header "content-type") then Ok handler
+        else Error (action_error 415 "content type must be application/json")
+
+let answer_action ~name handler body =
+  match Json.of_string body with
+  | Error m -> Async.return (action_error 400 ("invalid JSON: " ^ m))
+  | Ok json ->
+      let result, resolve, _ = Async.make () in
+      Async.on_settled (handler json) (function
+        | Async.Done (Bad_input m) -> resolve (action_error 400 ("invalid input: " ^ m))
+        | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc [ ("ok", j) ]))
+        | Async.Failed m -> (
+            match rejection m with
+            | Some message -> resolve (action_error 400 message)
+            | None ->
+                !log_error ("action " ^ name ^ " failed: " ^ m);
+                resolve (action_error 500 "action failed"))
+        | Async.Pending -> ());
+      result
+
+let handle_action ~name ~header ~body =
+  match accept_action ~name header with
+  | Error e -> Async.return e
+  | Ok handler -> answer_action ~name handler body

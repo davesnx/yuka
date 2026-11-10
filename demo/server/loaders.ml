@@ -1,3 +1,3 @@
 let issue (_ : Dream.request) ~id =
-  Yuka.Async.resolved
+  Yuka.Async.return
     (match Store.find id with Some i -> Ok i | None -> Error Yuka.Server.Not_found)

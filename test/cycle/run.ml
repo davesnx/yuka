@@ -6,6 +6,7 @@ type reply = { status : int; headers : (string * string) list; body : string }
 
 let files = [ ("pre/plain/index.html", "prerendered plain"); ("js/app/main.js", "main"); ("pub/s.css", "css"); ("b/bundle/chunk-X1.js", "c"); ("b/bundle/main.js", "m") ]
 let file_calls = ref []
+let body_read = ref 0
 
 module Test_adapter = struct
   type request = App.req
@@ -15,25 +16,34 @@ module Test_adapter = struct
   let meth (r : request) = r.meth
   let target (r : request) = r.target
   let header = App.header
-  let body (r : request) = Async.resolved r.body
+  let body (r : request) ~limit =
+    let n = String.length r.body in
+    let rec read at =
+      if at >= n then Some r.body
+      else
+        let chunk = min 4096 (n - at) in
+        body_read := !body_read + chunk;
+        if at + chunk > limit then None else read (at + chunk)
+    in
+    Async.return (read 0)
 
   let respond (r : Server.http_response) =
     match r.body with
-    | Server.String s -> Async.resolved { status = r.status; headers = r.headers; body = s }
+    | Server.String s -> Async.return { status = r.status; headers = r.headers; body = s }
     | Server.Stream f ->
         let b = Buffer.create 64 in
         Async.map
           (fun () -> { status = r.status; headers = r.headers; body = Buffer.contents b })
           (f (fun s ->
                Buffer.add_string b s;
-               Async.resolved ()))
+               Async.return ()))
 
   let exists ~root ~path = List.mem_assoc (root ^ "/" ^ path) files
 
   let file _ ~root ~path ~headers =
     let name = root ^ "/" ^ path in
     file_calls := name :: !file_calls;
-    Async.resolved
+    Async.return
       (match List.assoc_opt name files with
       | Some body -> { status = 200; headers; body }
       | None -> { status = 404; headers = [ ("cache-control", "no-store") ]; body = "" })
@@ -60,8 +70,8 @@ module Held_adapter = struct
   let respond (r : Server.http_response) =
     match r.body with
     | Server.String s ->
-        Async.resolved
-          { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.resolved () }
+        Async.return
+          { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.return () }
     | Server.Stream f ->
         let ended =
           f (fun s ->
@@ -71,7 +81,7 @@ module Held_adapter = struct
               a)
         in
         Async.on_settled ended (fun _ -> stream_ended := true);
-        Async.resolved { reply = { status = r.status; headers = r.headers; body = "" }; ended }
+        Async.return { reply = { status = r.status; headers = r.headers; body = "" }; ended }
 
   let file _ ~root:_ ~path:_ ~headers:_ = assert false
 end
@@ -79,7 +89,7 @@ end
 module Held = Server.Make (Held_adapter)
 
 let modules =
-  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./a.js"}|}
+  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./a.js"}|} ~digest:"d1"
     ~packages:[ "pkg" ]
 
 let config =
@@ -216,8 +226,9 @@ let assets =
         check_status r 405;
         check_header r "allow" [ "POST" ];
         let r =
-          get ~meth:`POST ~headers:[ ("content-type", "application/json") ] ~body:"1"
-            "/_yuka/action/x"
+          get ~meth:`POST
+            ~headers:[ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ]
+            ~body:"1" "/_yuka/action/x"
         in
         check_status r 404;
         Alcotest.(check string) "body" {|{"error":"unknown action x"}|} r.body );
@@ -444,7 +455,7 @@ let head_and_rules =
         check_header r "vary" [ "Yuka-Navigate" ] );
     ( "an Action is always no-store",
       fun () ->
-        let r = get ~meth:`DELETE "/feed.xml" in
+        let r = get ~meth:`DELETE ~headers:[ ("sec-fetch-site", "same-origin") ] "/feed.xml" in
         check_status r 200;
         check_header r "cache-control" [ "no-store" ];
         let r = get ~meth:`POST "/team/a/rename" in
@@ -474,6 +485,12 @@ let guards =
         check_header r "cache-control" [ "no-store" ];
         check_header r "x-frame-options" [ "DENY" ];
         check_events [ "outer" ] );
+    ( "a prefetch gets the same answer as a navigation",
+      fun () ->
+        let plain = get ~headers:[ ("yuka-navigate", "-") ] "/team/a/1" in
+        let pre = get ~headers:[ ("yuka-navigate", "-"); ("yuka-prefetch", "1") ] "/team/a/1" in
+        check_status pre plain.status;
+        Alcotest.(check string) "same body" plain.body pre.body );
     ( "a stop Redirect needs a redirect status and a clean location",
       fun () ->
         List.iter
@@ -510,6 +527,8 @@ let guards =
         check_status r 200;
         check_events [ "outer"; "rename" ];
         let r = get ~meth:`POST "/team/a/rename" in
+        check_status r 403;
+        let r = get ~meth:`POST ~headers:[ ("Sec-Fetch-Site", "same-origin") ] "/team/a/rename" in
         check_status r 200 );
     ( "Endpoint skips the origin check",
       fun () ->
@@ -661,6 +680,16 @@ let render =
         check_true "before the island" (script < index r.body "<yuka-island");
         check_true "after the content before it" (script > index r.body "before");
         check_true "preload" (contains r.body {|<link rel="modulepreload" href="/_yuka/app/a.js">|}) );
+    ( "the module script stays when a Catch drops the first island",
+      fun () ->
+        let req = request "/islands" in
+        App.fail_first := true;
+        let r = match Async.status (call req) with Async.Done v -> v | _ -> Alcotest.fail "pending" in
+        check_true "fallback" (contains r.body "lost server error");
+        check_true "island A dropped" (not (contains r.body {|data-name="A"|}));
+        Alcotest.(check int) "one module script" 1 (count r.body "<script type=\"module\"");
+        check_true "before the island" (index r.body "<script type=\"module\"" < index r.body "<yuka-island");
+        Alcotest.(check int) "logged" 1 (List.length !logged) );
     ( "outlets nest in layer order",
       fun () ->
         let r = get "/team/a/1" in
@@ -713,9 +742,9 @@ let render =
       fun () ->
         let a =
           Server.handle config Cycle_server.Routes_server.app
-            ~sleep:(fun _ -> Async.resolved ())
+            ~sleep:(fun _ -> Async.return ())
             ~exists:Test_adapter.exists (request "/slow")
-            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun () -> Async.resolved "") }
+            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return (Some "")) }
         in
         match Async.status a with
         | Async.Done (Server.Respond r) ->
@@ -743,6 +772,248 @@ let render =
         | _ -> Alcotest.fail "not done" );
   ]
 
+let navigation =
+  let nav keys target = get ~headers:[ ("Yuka-Navigate", keys) ] target in
+  let build = Server.build_id config Cycle_server.Routes_server.app in
+  [
+    ( "shared root layout: partial with the page body",
+      fun () ->
+        let r = nav "L0" "/plain" in
+        check_status r 200;
+        check_header r "yuka-outlet" [ "L0" ];
+        check_header r "yuka-build" [ build ];
+        check_header r "yuka-title" [ "Plain" ];
+        check_header r "content-type" [ "text/html; charset=utf-8" ];
+        check_header r "vary" [ "Yuka-Navigate" ];
+        check_header r "x-frame-options" [ "DENY" ];
+        Alcotest.(check string) "body" "<p>plain</p>" r.body );
+    ( "the deepest shared layout is the outlet",
+      fun () ->
+        let r = nav "L0 L2/acme" "/org/acme/x/2" in
+        check_header r "yuka-outlet" [ "L2/acme" ];
+        check_true "no org layout" (not (contains r.body {|class="org"|}));
+        check_true "page" (contains r.body "acme 2 item") );
+    ( "a layout that takes a loader result is rendered again",
+      fun () ->
+        let r = nav "L0 L1/a" "/team/a/2" in
+        check_header r "yuka-outlet" [ "L0" ];
+        check_true "team layout with fresh data" (contains r.body {|<section class="team">squad of a|});
+        check_true "page" (contains r.body "a 2 of a");
+        let r = nav "L0 L1/a" "/team/b/1" in
+        check_header r "yuka-outlet" [ "L0" ];
+        check_true "team layout again" (contains r.body {|<yuka-outlet data-k="L1/b" style="display:contents">|}) );
+    ( "unknown, empty or old keys give a full document with the build",
+      fun () ->
+        List.iter
+          (fun keys ->
+            let r = nav keys "/plain" in
+            check_header r "yuka-outlet" [];
+            check_header r "yuka-build" [ build ];
+            check_true "document" (String.starts_with ~prefix:"<!DOCTYPE html>" r.body);
+            check_true "meta" (contains r.body ({|<meta name="yuka-build" content="|} ^ build ^ {|">|})))
+          [ "X0"; ""; "-"; "1"; "L1/a" ] );
+    ( "ids in a partial start with the outlet key",
+      fun () ->
+        let r = nav "L0" "/islands" in
+        check_true "island id" (contains r.body {|data-id="L0-i1"|});
+        check_true "props id" (contains r.body {|data-yuka-props="L0-i2"|});
+        check_true "no module script" (not (contains r.body "<script type=\"module\""));
+        check_true "no bare id" (not (contains r.body {|data-id="i1"|})) );
+    ( "a 404 partial keeps its status",
+      fun () ->
+        let r = nav "L0" "/nowhere" in
+        check_status r 404;
+        check_header r "yuka-outlet" [ "L0" ];
+        check_header r "cache-control" [ "no-store" ];
+        check_true "page" (contains r.body "missing /nowhere") );
+    ( "the title header is percent-encoded UTF-8",
+      fun () ->
+        let r = nav "L0" "/find" in
+        check_header r "yuka-title" [ "Caf%C3%A9%20%E2%9C%93" ] );
+    ( "a streamed document has the build meta",
+      fun () ->
+        let r = get "/plain" in
+        check_true "meta" (contains r.body ({|<meta name="yuka-build" content="|} ^ build ^ {|">|}));
+        check_header r "yuka-build" [] );
+    ( "the build id follows the assets",
+      fun () ->
+        let app = Cycle_server.Routes_server.app in
+        let with_assets ~manifest ~digest =
+          Server.config
+            ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest)
+            ()
+        in
+        let other = with_assets ~manifest:{|{"A":"./b.js"}|} ~digest:"d1" in
+        check_true "differs" (Server.build_id other app <> build);
+        let new_code = with_assets ~manifest:{|{"A":"./a.js"}|} ~digest:"d2" in
+        check_true "new file content, new id" (Server.build_id new_code app <> build);
+        check_true "stable" (Server.build_id config app = build) );
+  ]
+
+let forms =
+  let form_type = ("content-type", "application/x-www-form-urlencoded") in
+  let json_headers = [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ] in
+  let post ?(headers = [ form_type; ("origin", "http://app.example"); ("host", "app.example") ]) ?(target = "/entry") body =
+    App.saved := [];
+    get ~meth:`POST ~headers ~body target
+  in
+  [
+    ( "a valid post is 303 to the redirect",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=hello+there&count=2&level=low" in
+        check_status r 303;
+        check_header r "location" [ "/entry?saved=hello there" ];
+        check_header r "cache-control" [ "no-store" ];
+        Alcotest.(check (list string)) "called" [ "hello there" ] !App.saved );
+    ( "without a redirect it is 303 to the page URL",
+      fun () ->
+        let r = post ~target:"/entry?x=1" "_yuka_action=jot&body=hi" in
+        check_status r 303;
+        check_header r "location" [ "/entry?x=1" ] );
+    ( "a bad field is 422 with the values and errors, and no call",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=keep+me&count=abc&level=low" in
+        check_status r 422;
+        check_header r "cache-control" [ "no-store" ];
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        check_true "value kept" (contains r.body {|name="title" value="keep me"|});
+        check_true "bad value kept" (contains r.body {|name="count" value="abc"|});
+        check_true "error" (contains r.body "count error: Not a whole number");
+        check_true "the jot forms are empty" (contains r.body {|name="body" value=""|});
+        check_true "no JavaScript" (not (contains r.body "<script type=\"module\"" || contains r.body "__yukaFill")) );
+    ( "Error and reject show their messages",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=taken&count=1&level=low" in
+        check_status r 422;
+        check_true "field error" (contains r.body "title error: Taken");
+        let r = post "_yuka_action=save_entry&title=nope&count=1&level=low" in
+        check_status r 422;
+        check_true "form error" (contains r.body "form error: Refused") );
+    ( "a failure is the 500 page",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=boom&count=1&level=low" in
+        check_status r 500;
+        check_true "no detail" (not (contains r.body "secret boom")) );
+    ( "origin checks",
+      fun () ->
+        let r = post ~headers:[ form_type; ("origin", "https://evil.example"); ("host", "app.example") ] "_yuka_action=jot&body=x" in
+        check_status r 403;
+        let r = post ~headers:[ form_type; ("host", "app.example") ] "_yuka_action=jot&body=x" in
+        check_status r 403;
+        let r = post ~headers:[ form_type; ("sec-fetch-site", "same-origin") ] "_yuka_action=jot&body=y" in
+        check_status r 303 );
+    ( "a foreign origin is refused without reading the body",
+      fun () ->
+        body_read := 0;
+        let r =
+          post ~headers:[ form_type; ("origin", "https://evil.example"); ("host", "app.example") ] (String.make 10_000 'a')
+        in
+        check_status r 403;
+        Alcotest.(check int) "body not read" 0 !body_read;
+        check_header r "x-frame-options" [ "DENY" ] );
+    ( "an oversize body is 413 without reading past the limit",
+      fun () ->
+        body_read := 0;
+        let r = post ("_yuka_action=jot&body=" ^ String.make (3 * 1024 * 1024) 'a') in
+        check_status r 413;
+        check_true "stopped near the limit" (!body_read <= (1024 * 1024) + 4096) );
+    ( "the action RPC reads a bounded body too",
+      fun () ->
+        body_read := 0;
+        let r =
+          get ~meth:`POST ~headers:json_headers ~body:(String.make (3 * 1024 * 1024) ' ') "/_yuka/action/jot"
+        in
+        check_status r 413;
+        check_true "stopped near the limit" (!body_read <= (1024 * 1024) + 4096);
+        let r = get ~meth:`POST ~headers:json_headers ~body:{|[["body","hello"]]|} "/_yuka/action/jot" in
+        check_status r 200;
+        Alcotest.(check string) "answer" {|{"ok":{"value":5}}|} r.body );
+    ( "foreign origin to the action endpoint reads 0 bytes",
+      fun () ->
+        let refused name headers status =
+          body_read := 0;
+          let r = get ~meth:`POST ~headers ~body:(String.make 10_000 ' ') ("/_yuka/action/" ^ name) in
+          check_status r status;
+          Alcotest.(check int) (name ^ " body not read") 0 !body_read
+        in
+        refused "jot" [ ("content-type", "application/json"); ("origin", "https://evil.example"); ("host", "app.example") ] 403;
+        refused "jot" [ ("content-type", "application/json"); ("host", "app.example") ] 403;
+        refused "nobody" json_headers 404;
+        refused "jot" [ form_type; ("origin", "http://app.example"); ("host", "app.example") ] 415 );
+    ( "a redirect that is not a path on this site is 500 and logged",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=http%3A%2F%2Fapp.example%2Fdone&count=1&level=low" in
+        check_status r 303;
+        check_header r "location" [ "http://app.example/done" ];
+        List.iter
+          (fun title ->
+            let r = post ("_yuka_action=save_entry&count=1&level=low&title=" ^ title) in
+            check_status r 500;
+            check_true "no location" (not (List.mem_assoc "location" r.headers));
+            Alcotest.(check int) "logged" 1 (List.length !logged))
+          [
+            "a%0D%0ASet-Cookie%3A+x%3D1";
+            "https%3A%2F%2Fevil.example%2Fx";
+            "http%3A%2F%2Fapp.example.evil%2F";
+            "%2F%09%2Fevil.com";
+            "%2F%0A%2Fevil.com";
+            "%2F%0D%2Fevil.com";
+            "%2F%7F%2Fevil.com";
+            "%2Fok%00";
+            "%09%2F%2Fevil.com";
+          ] );
+    ( "page guards run before the action",
+      fun () ->
+        let r = post ~target:"/team/nobody/form" "_yuka_action=jot&body=hi" in
+        check_status r 404;
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        let r = post ~target:"/team/away/form" "_yuka_action=jot&body=hi" in
+        check_status r 303;
+        check_header r "location" [ "/" ];
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        let r = post ~target:"/team/a/form" "_yuka_action=jot&body=hi" in
+        check_status r 303;
+        check_header r "location" [ "/team/a/form" ];
+        Alcotest.(check (list string)) "called" [ "jot hi" ] !App.saved );
+    ( "the rule headers are on the 303",
+      fun () ->
+        let r = post "_yuka_action=jot&body=hi" in
+        check_header r "x-frame-options" [ "DENY" ];
+        check_header r "x-a" [ "root" ] );
+    ( "only the posted form gets the 422 state",
+      fun () ->
+        let r = post "_yuka_action=jot&_yuka_key=two&body=x" in
+        check_status r 422;
+        check_true "form two" (contains r.body "jot two error: Too short");
+        check_true "form two value" (contains r.body {|value="x"|});
+        check_true "not form one" (not (contains r.body "jot one error")) );
+    ( "unknown form action is 404",
+      fun () ->
+        let r = post "_yuka_action=nobody&x=1" in
+        check_status r 404 );
+    ( "a post that is not a form post stays 405",
+      fun () ->
+        let r = post "title=x" in
+        check_status r 405;
+        check_header r "allow" [ "GET, HEAD, OPTIONS" ];
+        let r = post ~headers:[ ("content-type", "application/json") ] "{}" in
+        check_status r 405;
+        let r = post ~target:"/team/nobody/form" ~headers:[ ("content-type", "text/plain") ] "_yuka_action=jot&body=x" in
+        check_status r 405;
+        check_events [];
+        let r = post ~target:"/feed.xml" "_yuka_action=jot&body=x" in
+        check_status r 405 );
+    ( "GET and HEAD of the form page are unchanged",
+      fun () ->
+        let r = get "/entry" in
+        check_status r 200;
+        check_true "form" (contains r.body {|<form method="post" data-yuka-action="save_entry" data-yuka-key=""><input type="hidden" name="_yuka_action" value="save_entry">|});
+        check_true "no action attribute" (not (contains r.body "<form action"));
+        let h = get ~meth:`HEAD "/entry" in
+        check_status h 200;
+        Alcotest.(check string) "no body" "" h.body );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -756,4 +1027,6 @@ let () =
       ("guards", cases guards);
       ("loaders", cases loaders);
       ("render", cases render);
+      ("navigation", cases navigation);
+      ("forms", cases forms);
     ]

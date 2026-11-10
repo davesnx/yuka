@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias melange-tests)
- (libraries cases yuka yuka.js)
+ (libraries cases forms_shared yuka yuka.js)
  (preprocess
   (pps melange.ppx))
  (module_systems commonjs))
@@ -9,6 +9,8 @@
 (rule
  (alias runtest)
  (package yuka)
+ (enabled_if
+  (<> %{profile} release))
  (deps
   (alias melange-tests))
  (action

@@ -35,7 +35,7 @@ let stream_app issues : Dream.request Yuka.Server.app =
       | _, [ "stream" ] -> Yuka.Router.Wrong_method [ `GET ]
       | _ -> Yuka.Router.Missing)
     ~resolve:(fun _ () ->
-      Yuka.Server.Page { rules; guards = []; fallback; load = (fun () -> Yuka.Async.resolved (Ok plan)) })
+      Yuka.Server.Page { rules; guards = []; fallback; load = (fun () -> Yuka.Async.return (Ok plan)) })
     ~missing:fallback
 
 let () =

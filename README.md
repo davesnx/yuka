@@ -26,10 +26,16 @@ only the parts that read a signal update.
   the browser parses once and clones for each use.
 - Server rendering and hydration from one element tree, on native and Melange.
 - Streaming with `<Yuka.Await>`: send the page shell first, fill in the rest later.
+- Error boundaries with `<Yuka.Catch>` and loading states with `<Yuka.Show>`.
+- Client navigation with prefetch on hover, a cache that follows each page's
+  `Cache-Control`, and optional view transitions.
 - Islands: `let%client` components with a start strategy (`Load`, `Idle`,
   `Visible`, `Interaction`) and lazy loading chosen where the island is used.
 - Codecs: `[@@deriving codec]` for props and action data.
 - Actions: declare once, call from the client, run on the server.
+- Remote data: `Remote.use` reads a query as a `Status.t` signal, with
+  retry, abort and `Remote.mutate` for optimistic changes. The server render
+  embeds the answers, so hydration sends no request.
 - Routes: one `Routes.mlx` tree. The `yuka-routes` generator turns it into a
   `Routes` module shared by server and client (the route type, a typed
   `href` and the matcher), and a server module that the request cycle runs:
@@ -159,6 +165,147 @@ only at the trigger, write
 ``<Yuka.Client loading=(`Lazy `Visible)>``. Lazy is chosen where the island is
 used, not in the island.
 
+### Remote data
+
+A query is an action that only reads (`Action.query`). An island reads it
+with `Remote.use`:
+
+```ocaml
+let issues =
+  Yuka.Action.query ~name:"issues" ~input:view_codec ~output:(Yuka.Codec.list Issue.codec)
+
+let%client make ~(view : view) () =
+  let source = Remote.use Queries.issues (fun () -> view) in
+  match Remote.status source with
+  | Status.Ready { data; _ } -> Yuka.int (List.length data)
+  | Status.Loading _ -> Yuka.text "Loading"
+  | Status.Failed { error; _ } -> Yuka.text (Status.error_to_string error)
+  | Status.Idle -> Yuka.empty
+```
+
+The query runs again when a State read by the input function changes; the
+request in flight is aborted. `Network` and `Server` errors are tried two
+more times. The server render runs the implementation and writes its answer
+after the island (`<script data-yuka-answer>`), so the browser starts with
+the same data and sends no request; a slow answer is streamed. After a
+change on the server, `Remote.invalidate query` fetches every mounted use
+again. `Remote.mutate source change run` shows `change` at once, calls
+`run`, keeps the change on success (or applies `~commit` with the result)
+and removes it on failure. An app that does not call `Remote` gets none of
+its code.
+
+### Prefetch, cache and transitions
+
+With navigation on, a link is prefetched 50 ms after the pointer or the
+focus enters it, or at once on pointer down; the click then uses that
+answer. A page whose rule gives `max-age=N` is kept for N seconds (also for
+back and forward); a `no-store` page is used once, from a prefetch less than
+10 s old. A successful action call empties the cache.
+
+```ocaml
+let () = Yuka.mount ~prefetch:`Hover ~transitions:true ()
+```
+
+```ocaml
+<a href=(Routes.href (Issue { id })) data_yuka_prefetch="visible">...</a>
+<a href="/export.csv" data_yuka_prefetch="off">...</a>
+```
+
+`~prefetch:`Visible` prefetches every link when it becomes visible, and
+`~prefetch:`Off` turns prefetch off. With `~transitions:true` each client
+navigation runs in a view transition, and `<html>` has
+`data-yuka-nav="push"`, `"back"` or `"forward"` for CSS. A page with no
+island has no client navigation; this CSS rule gives it cross-document
+transitions with no JavaScript:
+
+```css
+@view-transition { navigation: auto; }
+```
+
+### Errors and loading states
+
+`<Yuka.Catch>` shows a fallback when its children raise: while they render,
+in an effect, a memo or a hole that runs again, or in an event handler.
+`reset ()` renders the children again from their first state.
+
+```ocaml
+<Yuka.Catch fallback=(fun ~error ~reset ->
+    <div class_="crash">
+      <p>(Yuka.text error)</p>
+      <button onClick=(fun _ -> reset ())>"Try again"</button>
+    </div>)>
+  <Issue_props issue />
+</Yuka.Catch>
+```
+
+On the server, an exception in the children prints the fallback with the
+error `"server error"`, and the detail goes to `Server.log_error`. In an
+island, the client hydrates that fallback. An island with no `Catch` stops
+at its first exception and keeps its DOM; `Yuka.mount ~on_error ()` gets the
+message. A failed `Async` or `Status.Failed` is data, not an exception.
+
+`<Yuka.Show>` shows a `Status.t`: data while it loads again, `loading` only
+when there is no data yet.
+
+```ocaml
+<Yuka.Show status=(fun () -> State.get labels) loading=(<p>"Loading"</p>)
+  failed=(fun e -> <p>(Yuka.text (Status.error_to_string e))</p>)>
+  (fun labels -> <Chips labels />)
+</Yuka.Show>
+```
+
+### Forms
+
+A record with `[@@deriving form]` gets a field type and a decoder that runs
+on the server and in the browser:
+
+```ocaml
+type new_issue = { title : string; priority : Priority.t } [@@deriving form]
+(* type new_issue_field = Title | Priority, val new_issue_form *)
+
+let create_issue =
+  Yuka.Form.action ~name:"create_issue" ~fields:new_issue_form ~output:Issue.codec
+
+let () =
+  Yuka.Server.Form.implement create_issue
+    ~redirect:(fun i -> Routes.href (Issue { id = i.id }))
+    (fun input ->
+      if String.trim input.title = "" then Async.return (Error [ (Some Title, "Required") ])
+      else Async.return (Ok (Store.create input)))
+```
+
+```ocaml
+<Yuka.Form action=create_issue>
+  (fun form ->
+    <div>
+      <input name="title" value=(Yuka.Form.value form Title) />
+      (Yuka.Form.error_view form Title (fun m -> <p class_="error">(Yuka.text m)</p>))
+      <button type_=`submit>"Create"</button>
+    </div>)
+</Yuka.Form>
+```
+
+`<Yuka.Form>` prints `<form method="post">` with a hidden `_yuka_action`
+field and no `action` attribute, so it posts to the page URL and works with
+no JavaScript: the request cycle decodes the fields, runs the
+implementation, and answers 303 to `redirect` (or the page URL), or renders
+the page again with status 422, the sent values and the errors. The post
+must come from the same origin (`Origin`, or `Sec-Fetch-Site: same-origin`; the
+action call from an island and `Action` routes use the same rule);
+the page's guards run before the action, and the body is read up to 1 MiB.
+Two forms of one action on a page need different `key`s, so a 422 shows
+the sent values in the form that was posted.
+Field types are `string`, `int`, `float`, `bool` (a checkbox), `option`,
+`list` and `M.t` with `M.of_string` and `M.to_string`.
+
+Inside an island, a submit is handled in the browser: the same decoder runs
+first (its errors show with no request), then `Action.call` (or `~run`, for
+example with `Remote.mutate`), with `Form.pending` true until the answer;
+on success `~on_ok` runs, or the page follows `redirect` (or reloads its
+URL), as a post with no JavaScript would. The submit button's `name` and
+`value` are part of the fields in both cases. A page whose forms
+are not in an island loads no JavaScript.
+
 ### Routes
 
 `Routes.mlx` holds the route tree. It is read by the generator, not compiled:
@@ -223,11 +370,14 @@ gets the params, the search fields and the loader results (labelled with the
 loader's name: `loader=Loaders.issue` gives `~issue`). The loaders of one
 route start together. A `not_found` page gets the params of the
 path of its node and `~target` (the request path); an `error` page gets
-them and `~status`.
+them and `~status`. So no param of that path can be named `target` (with a
+`not_found`) or `status` (with an `error`): the build fails.
 
 Loaders, guards and handlers that ignore the request must still name its
 type (`(_ : Dream.request)`) when no other function of the tree fixes it;
-otherwise `Routes_server.app` has a weak type variable.
+otherwise `Routes_server.app` has a weak type variable. A tree where no
+function takes the request needs `routes_server.mli` with
+`val app : Dream.request Yuka.Server.app` (see "Getting started").
 
 `Yuka.Server.handle config app` answers one request in a fixed order:
 `/_yuka/` (actions, client JavaScript) and public files, a 308 for a
@@ -238,6 +388,13 @@ shell is sent. Each layout's children are inside
 `<yuka-outlet data-k="KEY" style="display:contents">`, and a link to the
 current path gets `aria-current="page"` (not inside an island).
 
+A client navigation sends the outlet keys of the page. When the new page
+shares layouts with it, the server sends only what goes inside the deepest
+shared outlet, and the client replaces only that: islands in shared layouts
+keep their state. The `display:contents` element adds one level to CSS
+child selectors (`.main > .x`). When the server's build id (route tree and
+client files) differs from the page's, the client loads the page in full.
+
 ### With Dream
 
 The `yuka-dream` package runs the cycle on Dream:
@@ -246,7 +403,9 @@ The `yuka-dream` package runs the cycle on Dream:
 let () =
   let assets =
     Yuka.Server.modules ~dir:"client/out" ~entry:"demo/client/main.js"
-      ~manifest:(read_file "client/yuka_islands.json") ~packages:[ "melange"; "yuka" ]
+      ~manifest:(read_file "client/yuka_islands.json")
+      ~packages:[ "melange"; "melange.js"; "yuka"; "yuka.js" ]
+      ~digest:(Yuka_dream.tree_digest "client/out")
   in
   let config =
     Yuka.Server.config ~assets ~public:[ ("/static", "static") ]
@@ -281,9 +440,175 @@ prerendered pages with `demo_server.exe --prerender DIR`.
 
 ## Getting started
 
-The demo is an issue tracker. It uses every feature above. It needs OCaml 5.4,
-dune 3.16+, Melange and mlx; the demo server also uses Dream (through
-`yuka-dream`). From the repository root:
+You need OCaml 5.4 and opam. Install Yuka, the Dream adapter and mlx (it
+gives `mlx-pp`, which reads `.mlx` files):
+
+```sh
+opam install yuka yuka-dream mlx
+```
+
+This app has one page with one island, a counter. Create these files in an
+empty directory.
+
+`dune-project`:
+
+```
+(lang dune 3.16)
+
+(using melange 0.1)
+
+(dialect
+ (name mlx)
+ (implementation
+  (extension mlx)
+  (merlin_reader mlx)
+  (preprocess
+   (run mlx-pp %{input-file}))))
+```
+
+`Routes.mlx`, the route tree:
+
+```ocaml
+let routes =
+  <Router>
+    <Route name=Home path="/" page=Pages.home />
+  </Router>
+```
+
+`dune`, which parses the route tree once for the two generators:
+
+```
+(rule
+ (targets routes.ast)
+ (deps Routes.mlx)
+ (action
+  (with-stdout-to routes.ast (run %{bin:mlx-pp} %{deps}))))
+```
+
+`shared/dune`, the code of both server and browser, with the shared
+`Routes` module:
+
+```
+(library
+ (name shared)
+ (modes native melange)
+ (libraries yuka)
+ (preprocess (pps yuka.ppx)))
+
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to routes.ml
+   (run %{bin:yuka-routes} --shared %{dep:../routes.ast}))))
+```
+
+`shared/counter.mlx`, the island:
+
+```ocaml
+open Yuka
+
+let%client make ~(initial : int) () =
+  let n = State.make initial in
+  <button onClick=(fun _ -> State.update n succ)>
+    "Clicks: "
+    (Yuka.int (State.get n))
+  </button>
+```
+
+`server/dune`:
+
+```
+(executable
+ (name main)
+ (libraries shared yuka yuka-dream dream)
+ (preprocess (pps yuka.ppx)))
+
+(rule
+ (targets routes_server.ml)
+ (action
+  (with-stdout-to routes_server.ml
+   (run %{bin:yuka-routes} --server --shared-module Shared.Routes
+    %{dep:../routes.ast}))))
+```
+
+`server/routes_server.mli`. No function of this route tree takes the
+request, so the interface gives its type:
+
+```ocaml
+val app : Dream.request Yuka.Server.app
+```
+
+`server/pages.mlx`, the page that `Routes.mlx` names:
+
+```ocaml
+let home () =
+  Yuka.Server.page ~title:"Hello" (fun () ->
+      <main>
+        <h1>"Hello from Yuka"</h1>
+        <Yuka.Client><Shared.Counter initial=0 /></Yuka.Client>
+      </main>)
+```
+
+`server/main.ml`:
+
+```ocaml
+let read_file path = In_channel.with_open_bin path In_channel.input_all
+
+let () =
+  let assets =
+    Yuka.Server.modules ~dir:"_build/default/client/out" ~entry:"client/main.js"
+      ~manifest:(read_file "_build/default/client/yuka_islands.json")
+      ~packages:[ "melange"; "melange.js"; "yuka"; "yuka.js" ]
+      ~digest:(Yuka_dream.tree_digest "_build/default/client/out")
+  in
+  let config = Yuka.Server.config ~assets () in
+  Dream.run @@ Dream.logger @@ Yuka_dream.handler config Routes_server.app
+```
+
+`client/dune`, the browser code and the island list:
+
+```
+(melange.emit
+ (target out)
+ (libraries shared yuka yuka.js)
+ (preprocess (pps yuka.ppx melange.ppx))
+ (module_systems es6))
+
+(rule
+ (targets yuka_islands.ml)
+ (deps (source_tree ../shared))
+ (action
+  (with-stdout-to yuka_islands.ml
+   (run %{bin:yuka-islands} --library shared ../shared))))
+
+(rule
+ (targets yuka_islands.json)
+ (deps (source_tree ../shared))
+ (action
+  (with-stdout-to yuka_islands.json
+   (run %{bin:yuka-islands} --manifest --library shared ../shared))))
+```
+
+`client/main.ml`:
+
+```ocaml
+let () = Yuka.mount ()
+```
+
+Build and run it from the directory of `dune-project`:
+
+```sh
+dune build
+dune exec ./server/main.exe
+```
+
+Open `http://localhost:8080/` and click the button. The sections above
+describe each part.
+
+### The demo
+
+The demo is an issue tracker. It uses every feature above. From the
+repository root:
 
 ```sh
 dune build @demo/all

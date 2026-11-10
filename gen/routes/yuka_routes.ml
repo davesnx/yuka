@@ -791,8 +791,8 @@ let loader_labels levels =
   List.filter_map (fun l -> Option.map loader_label (prop "loader" l)) levels
 
 let layer_text ~loaders level =
-  sprintf "{ Yuka.Server.key = %s; wrap = (fun children -> %s%s ~children ()) }"
-    (key_text level)
+  sprintf "{ Yuka.Server.key = %s; data = %b; wrap = (fun children -> %s%s ~children ()) }"
+    (key_text level) (loaders <> [])
     (expr (Option.get (prop "layout" level)))
     (args loaders)
 
@@ -963,7 +963,7 @@ let server_arm ~shared ~rule ~fallback n =
               (args (labels @ List.map fst loaders))
           in
           let plan =
-            [ "Yuka.Async.resolved"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.layers =" ]
+            [ "Yuka.Async.return"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.layers =" ]
             @ indent 9 (layers_lines n.levels)
             @ [
                 sprintf "       page = %s;" page;

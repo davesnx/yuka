@@ -71,10 +71,10 @@ let () =
      let n = String.length sub in
      let rec go i = i + n <= String.length page && (String.sub page i n = sub || go (i + 1)) in
      go 0);
-  let items = Yuka.Async.resolved [ 1; 2 ] in
+  let items = Yuka.Async.return [ 1; 2 ] in
   let direct = Yuka.Codec.encode (Yuka.Codec.async (Yuka.Codec.list Yuka.Codec.int)) items in
   check "async direct" (direct <> `Null);
-  (match Yuka.Codec.encode Model.loaded_codec { items; other = Yuka.Async.resolved "x" } with
+  (match Yuka.Codec.encode Model.loaded_codec { items; other = Yuka.Async.return "x" } with
    | `Assoc [ ("items", j); _ ] -> check "async field" (j = direct)
    | _ -> check "async field shape" false);
   let island_html = Yuka.Private.to_html (Yuka.Private.node (Lazy_list.island ~items ())) in
@@ -155,7 +155,7 @@ let () =
     (Yuka.Private.to_html (Yuka.Private.node Capture_main.view_let_open) = "<i>main</i>");
   check "the other module keeps its template"
     (Yuka.Private.to_html (Yuka.Private.node Capture_ui.badge) = "<b>ui</b>");
-  let settled = Yuka.Async.resolved [ "a"; "b" ] in
+  let settled = Yuka.Async.return [ "a"; "b" ] in
   let await_html = Yuka.Private.to_html (Yuka.Private.node (Awaiting.view settled)) in
   check ("await settled: " ^ await_html) (contains await_html "<ul><li>a</li><li>b</li></ul>");
   check "await not loading" (not (contains await_html "loading"));
@@ -164,4 +164,15 @@ let () =
       (Yuka.Private.node (Awaiting.with_failed (Yuka.Async.failed "boom")))
   in
   check ("await failed: " ^ failed_html) (contains failed_html "<p>boom</p>");
+  let html e = Yuka.Private.to_html (Yuka.Private.node e) in
+  let saved = !Yuka.Server.log_error in
+  Yuka.Server.log_error := ignore;
+  check "catch children" (html (Catching.view ~fail:false) = "<div><!--[--><span>before</span><b>ok</b><!--]--></div>");
+  check "catch fallback" (html (Catching.view ~fail:true) = "<div><!--[!--><p>server error</p><!--]--></div>");
+  Yuka.Server.log_error := saved;
+  check "show loading" (html (Catching.status (Yuka.Status.Loading None)) = "<!--[-->wait<!--]-->");
+  check "show data" (html (Catching.status (Yuka.Status.Loading (Some "d"))) = "<!--[--><b>d</b><!--]-->");
+  check "show failed"
+    (html (Catching.status (Yuka.Status.Failed { error = Yuka.Status.Not_found; last = None }))
+    = "<!--[--><p>not found</p><!--]-->");
   if !fails > 0 then exit 1 else print_endline "ok"

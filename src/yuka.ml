@@ -1,5 +1,6 @@
 module Json = Json
 module Async = Async
+module Status = Status
 module Codec = Codec
 module State = struct include State end
 module Effect = Base.Effect
@@ -16,6 +17,9 @@ include Element
 module Template = struct include Template end
 module Client = Client
 module Action = Action
+module Optimistic = Optimistic
+module Remote = Remote
+module Form = Form
 module Event = Platform.Event
 module Browser = Platform.Browser
 module Router = Router
@@ -29,13 +33,18 @@ module Server = struct
     let reject = Server.reject
     let rejected = Server.rejected
   end
+
+  module Form = struct
+    let implement = Server.implement_form
+  end
 end
 
-let mount ?islands ?(navigation = true) () =
+let mount ?islands ?(navigation = true) ?prefetch ?transitions ?on_error () =
   match islands with
   | Some r when Web.in_browser ->
+      Option.iter (fun f -> Client.on_error := f) on_error;
       let { Client.entries; lazy_registry } = r in
-      if navigation then Navigation.start ~lazy_entries:lazy_registry entries
+      if navigation then Navigation.start ~lazy_entries:lazy_registry ?prefetch ?transitions entries
       else Client.start ~lazy_entries:lazy_registry entries
   | _ ->
       failwith
@@ -51,6 +60,7 @@ module Private = struct
   let stream = Server.stream
   let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep build
   let import_map = Server.import_map
+  let set_form (s : session) f = s.form <- Some f
   let query = Router.query
   let preload_urls = Server.preload_urls
   let handle_action = Server.handle_action
@@ -103,5 +113,5 @@ module Private = struct
   let slot_dom (s : slot) = s.dom
   let call_action = Action.transport
   let async_source = Types.async_source
-  let action_codecs (a : (_, _) Action.t) = (a.input, a.output)
+  let action_codecs (a : (_, _, _) Action.t) = (a.input, a.output)
 end

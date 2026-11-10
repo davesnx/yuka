@@ -283,6 +283,54 @@ Templates are values at the top of the module; their names carry the module name
   __yuka_template_t_1
   __yuka_template_t_1
 
+Catch without fallback:
+
+  $ cat > c0.mlx <<'X'
+  > let x = <Yuka.Catch><p /></Yuka.Catch>
+  > X
+  $ run c0
+  File "c0.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Catch><p /></Yuka.Catch>
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Catch takes one prop, fallback
+  [1]
+
+Catch without children:
+
+  $ cat > c1.mlx <<'X'
+  > let x = <Yuka.Catch fallback=f />
+  > X
+  $ run c1
+  File "c1.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Catch fallback=f />
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Catch needs children
+  [1]
+
+Show without status:
+
+  $ cat > s0.mlx <<'X'
+  > let x = <Yuka.Show loading="l">(fun v -> <p />)</Yuka.Show>
+  > X
+  $ run s0
+  File "s0.mlx", line 1, characters 8-18:
+  1 | let x = <Yuka.Show loading="l">(fun v -> <p />)</Yuka.Show>
+              ^^^^^^^^^^
+  Error: [yuka] Yuka.Show needs the prop 'status'
+  [1]
+
+Show with async:
+
+  $ cat > s1.mlx <<'X'
+  > let x = <Yuka.Show async=a status=s loading="l">(fun v -> <p />)</Yuka.Show>
+  > X
+  $ run s1
+  File "s1.mlx", line 1, characters 8-18:
+  1 | let x = <Yuka.Show async=a status=s loading="l">(fun v -> <p />)</Yuka.Show>
+              ^^^^^^^^^^
+  Error: [yuka] Yuka.Show takes status, loading and failed
+  [1]
+
 Await without async:
 
   $ cat > w0.mlx <<'X'
@@ -432,3 +480,66 @@ Unknown yuka attribute on the binding:
                                             ^^^^^^^^^^^^^^
   Error: [yuka] unknown attribute [@yuka.other] on a let%client binding
   [1]
+
+deriving form needs a record:
+
+  $ cat > form1.mlx <<'X'
+  > type t = A | B [@@deriving form]
+  > X
+  $ run form1
+  File "form1.mlx", line 1, characters 0-32:
+  1 | type t = A | B [@@deriving form]
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] [@@deriving form] needs a record type
+  [1]
+
+deriving form refuses a field type it cannot read:
+
+  $ cat > form2.mlx <<'X'
+  > type t = { at : int * int } [@@deriving form]
+  > X
+  $ run form2
+  File "form2.mlx", line 1, characters 16-25:
+  1 | type t = { at : int * int } [@@deriving form]
+                      ^^^^^^^^^
+  Error: [yuka] a form field must be string, int, float, bool, an option or list of those, or M.t with M.of_string and M.to_string
+  [1]
+
+deriving form refuses type parameters and labels that start with an underscore:
+
+  $ cat > form3.mlx <<'X'
+  > type 'a t = { x : string } [@@deriving form]
+  > X
+  $ run form3
+  File "form3.mlx", line 1, characters 5-7:
+  1 | type 'a t = { x : string } [@@deriving form]
+           ^^
+  Error: [yuka] [@@deriving form] needs a type with no parameter
+  [1]
+
+  $ cat > form4.mlx <<'X'
+  > type t = { _hidden : string } [@@deriving form]
+  > X
+  $ run form4
+  File "form4.mlx", line 1, characters 11-18:
+  1 | type t = { _hidden : string } [@@deriving form]
+                 ^^^^^^^
+  Error: [yuka] a form field name cannot start with '_' (the form uses _yuka_ fields)
+  [1]
+
+String.t, Int.t, Float.t and Bool.t are the base kinds, not custom modules:
+
+  $ cat > form5.mlx <<'X'
+  > type t = { a : String.t; b : Int.t; c : Float.t; d : Bool.t } [@@deriving form]
+  > X
+  $ run form5 | grep -o 'Yuka.Form.[a-z]*' | sort -u
+  Yuka.Form.bool
+  Yuka.Form.field
+  Yuka.Form.fields
+  Yuka.Form.finish
+  Yuka.Form.float
+  Yuka.Form.get
+  Yuka.Form.int
+  Yuka.Form.put
+  Yuka.Form.string
+  Yuka.Form.t

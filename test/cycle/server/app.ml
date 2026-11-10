@@ -42,7 +42,10 @@ let finish_second v =
   let _, resolve, _ = !second_state in
   resolve v
 
+let fail_first = ref false
+
 let reset () =
+  fail_first := false;
   events := [];
   waiting := [];
   slow_state := Async.make ();
@@ -73,7 +76,40 @@ module Layouts = struct
     el "section" ~attrs:[ ("class", "team") ] [ text ("squad " ^ squad); children ]
 end
 
+let jot_form key =
+  let open Forms_shared.Entry in
+  Yuka.Form.make ~action:jot ~key
+    ~children:(fun form ->
+      el "div"
+        [
+          el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form Body) ] [];
+          Yuka.Form.error_view form Body (fun m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
+        ])
+    ()
+
 module Pages = struct
+  let team_form ~team:_ ~squad:_ () = Server.page ~title:"Team form" (fun () -> jot_form "team")
+
+  let entry () =
+    let open Forms_shared.Entry in
+    Server.page ~title:"Entry" (fun () ->
+        el "main"
+          [
+            Yuka.Form.make ~action:save
+              ~children:(fun form ->
+                el "div"
+                  [
+                    el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form Title) ] [];
+                    el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form Count) ] [];
+                    Yuka.Form.error_view form Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
+                    Yuka.Form.error_view form Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
+                    Yuka.Form.form_error_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
+                  ])
+              ();
+            jot_form "one";
+            jot_form "two";
+          ])
+
   let home () =
     Server.page ~title:"Home" (fun () ->
         note "home body";
@@ -82,7 +118,7 @@ module Pages = struct
   let plain () = Server.page ~title:"Plain" (fun () -> el "p" [ text "plain" ])
 
   let find ~q ~tag () =
-    Server.page (fun () ->
+    Server.page ~title:"Caf\xc3\xa9 \xe2\x9c\x93" (fun () ->
         text (Option.value q ~default:"-" ^ "|" ^ String.concat "," tag))
 
   let island name =
@@ -91,7 +127,17 @@ module Pages = struct
 
   let islands () =
     Server.page ~title:"Islands" (fun () ->
-        el "main" [ el "p" [ text "before" ]; island "A"; island "B" ])
+        el "main"
+          [ el "p" [ text "before" ];
+            Yuka.Catch.make
+              ~fallback:(fun ~error ~reset:_ -> text ("lost " ^ error))
+              ~children:(fun () ->
+                if !fail_first then
+                  Yuka.fragment
+                    [ island "A"; Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "A")) ]
+                else island "A")
+              ();
+            island "B" ])
 
   let slow () =
     Server.page ~title:"Slow" (fun () ->
@@ -137,18 +183,18 @@ module Loaders = struct
     note "squad start";
     match Params.Team.to_string team with
     | "wait" -> later ()
-    | t -> Async.resolved (Ok ("of " ^ t))
+    | t -> Async.return (Ok ("of " ^ t))
 
   let profile req ~team ~user =
     note "profile start";
     match (Params.Team.to_string team, user) with
     | "wait", _ -> later ()
-    | _, 404 -> Async.resolved (Error Server.Not_found)
+    | _, 404 -> Async.return (Error Server.Not_found)
     | _, 500 -> Async.failed "loader secret"
-    | _ -> Async.resolved (Ok (Option.value (header req "x-user") ~default:"anonymous"))
+    | _ -> Async.return (Ok (Option.value (header req "x-user") ~default:"anonymous"))
 
   let org_item _req ~org:_ ~n =
-    Async.resolved (if n = 404 then Error Server.Not_found else Ok "item")
+    Async.return (if n = 404 then Error Server.Not_found else Ok "item")
 
   let exploding _req : (string, Server.stop) result Async.t = failwith "loader secret"
 end
@@ -156,7 +202,7 @@ end
 module Guards = struct
   let outer _req ~team =
     note "outer";
-    Async.resolved
+    Async.return
       (match Params.Team.to_string team with
       | "nobody" -> Error Server.Not_found
       | "away" -> Error (Server.Redirect { status = 303; location = "/" })
@@ -166,7 +212,7 @@ module Guards = struct
 
   let inner _req ~team:_ ~user =
     note "inner";
-    Async.resolved (if user = 0 then Error (Server.Fail "guard secret") else Ok ())
+    Async.return (if user = 0 then Error (Server.Fail "guard secret") else Ok ())
 end
 
 module Api = struct
@@ -196,3 +242,23 @@ module Api = struct
   let clear _req = Server.text "cleared"
   let asset _req = Server.text "asset"
 end
+
+let saved = ref []
+
+let () =
+  let open Forms_shared.Entry in
+  Server.Form.implement save
+    ~redirect:(fun o ->
+      if String.exists (fun c -> c = ':' || c < ' ' || c = '\127') o || String.starts_with ~prefix:"/" o then o
+      else "/entry?saved=" ^ o)
+    (fun e ->
+      saved := e.title :: !saved;
+      match e.title with
+      | "taken" -> Async.return (Error [ (Some Title, "Taken") ])
+      | "nope" -> Server.Action.reject "Refused"
+      | "boom" -> failwith "secret boom"
+      | t -> Async.return (Ok t));
+  Server.Form.implement jot (fun n ->
+      saved := ("jot " ^ n.body) :: !saved;
+      if n.body = "x" then Async.return (Error [ (Some Body, "Too short") ])
+      else Async.return (Ok (String.length n.body)))

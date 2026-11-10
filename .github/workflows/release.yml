@@ -1,9 +1,6 @@
 name: Release
 
 on:
-  push:
-    tags:
-    - '*'
   workflow_run:
     workflows: ["CI"]
     types:
@@ -28,7 +25,6 @@ jobs:
     name: Release
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
@@ -95,12 +91,15 @@ jobs:
 
       - name: Run dune-release
         uses: davesnx/dune-release-action@v0.4.0
+        env:
+          TEST_OVERRIDE_GITHUB_REF: refs/tags/${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
         with:
-          packages: 'yuka'
+          packages: 'yuka,yuka-dream'
           changelog: './CHANGES.md'
           github-token: ${{ secrets.GH_TOKEN }}
           to-opam-repository: true
           to-github-releases: true
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
       - name: Save cache
         uses: actions/cache/save@v3

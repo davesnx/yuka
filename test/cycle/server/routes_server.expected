@@ -20,7 +20,7 @@ let rules_5 =
   Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:(Immutable) ~prerender:false ()
 
 let layer_0 : Yuka.Server.layer =
-  { Yuka.Server.key = "L0"; wrap = (fun children -> Layouts.root ~children ()) }
+  { Yuka.Server.key = "L0"; data = false; wrap = (fun children -> Layouts.root ~children ()) }
 
 let fallback_0 : Yuka.Server.fallback =
   {
@@ -42,7 +42,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -60,7 +60,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -68,6 +68,24 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
                          layer_0;
                        ];
                      page = Pages.plain ();
+                   }));
+        }
+  | Cycle_shared.Routes.Entry ->
+      Yuka.Server.Page
+        {
+          rules = rules_0;
+          guards = [];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.layers =
+                       [
+                         layer_0;
+                       ];
+                     page = Pages.entry ();
                    }));
         }
   | Cycle_shared.Routes.Find { q; tag } ->
@@ -78,7 +96,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -96,7 +114,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -114,7 +132,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -132,7 +150,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -150,7 +168,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -170,7 +188,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
             (fun () ->
               let exploding = Loaders.exploding req in
               Yuka.Server.loaded exploding (fun exploding ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -192,16 +210,37 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
               let profile = Loaders.profile req ~team ~user in
               Yuka.Server.loaded squad (fun squad ->
               Yuka.Server.loaded profile (fun profile ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
                        [
                          layer_0;
-                         { Yuka.Server.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; wrap = (fun children -> Layouts.team ~squad ~children ()) };
+                         { Yuka.Server.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; data = true; wrap = (fun children -> Layouts.team ~squad ~children ()) };
                        ];
                      page = Pages.member ~team ~user ~squad ~profile ();
                    }))));
+        }
+  | Cycle_shared.Routes.Team_form { team } ->
+      Yuka.Server.Page
+        {
+          rules = rules_2;
+          guards = [ (fun () -> Guards.outer req ~team) ];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let squad = Loaders.squad req ~team in
+              Yuka.Server.loaded squad (fun squad ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.layers =
+                       [
+                         layer_0;
+                         { Yuka.Server.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; data = true; wrap = (fun children -> Layouts.team ~squad ~children ()) };
+                       ];
+                     page = Pages.team_form ~team ~squad ();
+                   })));
         }
   | Cycle_shared.Routes.Team_json { team } ->
       Yuka.Server.Handler
@@ -227,7 +266,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           fallback = fallback_0;
           load =
             (fun () ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -246,7 +285,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           run = (fun () -> Api.asset req);
         }
   | Cycle_shared.Routes.Org_item { org; n } ->
-      let layer_2 = { Yuka.Server.key = Stdlib.String.concat "/" [ "L2"; Yuka.Router.encode org ]; wrap = (fun children -> Layouts.org ~children ()) } in
+      let layer_2 = { Yuka.Server.key = Stdlib.String.concat "/" [ "L2"; Yuka.Router.encode org ]; data = false; wrap = (fun children -> Layouts.org ~children ()) } in
       Yuka.Server.Page
         {
           rules = rules_0;
@@ -264,7 +303,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
             (fun () ->
               let org_item = Loaders.org_item req ~org ~n in
               Yuka.Server.loaded org_item (fun org_item ->
-              Yuka.Async.resolved
+              Yuka.Async.return
                 (Stdlib.Ok
                    {
                      Yuka.Server.layers =
@@ -301,7 +340,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
         }
 
 let app =
-  Yuka.Server.app ~build:"8c34531656abd7379d8db7e3414c8d2d"
+  Yuka.Server.app ~build:"ea298a6cac414d8d60720141bcd02608"
     ~headers:([("x-frame-options", "DENY"); ("x-a", "root")])
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

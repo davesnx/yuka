@@ -58,8 +58,13 @@ module Effect : sig
   (** Runs the body now, and again when a State it read with [State.get]
       changes. Before each re-run and when its owner is disposed, [cleanup]
       receives the result of the previous run, and effects created inside the
-      previous run are disposed. An exception in one effect does not stop
-      other effects; the first one is raised again after all pending effects
+      previous run are disposed. Inside a {!Catch} or an island, an exception
+      in the body, or in a cleanup that runs during a State change or an
+      event handler, goes to that boundary. A cleanup that raises when its
+      owner is disposed by a direct call (the function returned by {!owner},
+      {!Client.render} or {!Client.hydrate}, or {!unmount}) raises to that
+      caller. Elsewhere, an exception in one effect does not stop other
+      effects; the first one is raised again after all pending effects
       ran. If effects and memos keep changing States they read for more than
       100 update rounds, the pending work is dropped and [Failure] is
       raised. *)
@@ -120,9 +125,14 @@ module Async : sig
   (** A pending value and its resolve and fail functions. It settles once;
       later calls are ignored. *)
 
-  val resolved : 'a -> 'a t
+  val return : 'a -> 'a t
+  (** A value that is already [Done]. *)
+
   val failed : string -> 'a t
+  (** A value that is already [Failed] with this message. *)
+
   val status : 'a t -> 'a status
+  (** The status now. *)
 
   val on_settled : 'a t -> ('a status -> unit) -> unit
   (** Callbacks run in registration order; now, if already settled. *)
@@ -131,7 +141,12 @@ module Async : sig
   (** Like [on_settled], without the [Pending] case. *)
 
   val map : ('a -> 'b) -> 'a t -> 'b t
+  (** Applies the function to the value when it is [Done]. A failure stays a
+      failure with the same message. *)
+
   val bind : 'a t -> ('a -> 'b t) -> 'b t
+  (** Like [map], with a function that gives an [Async]. *)
+
   val watch : 'a t -> 'a status State.read
   (** A State that follows the status. *)
 end
@@ -140,14 +155,26 @@ module Codec : sig
   type 'a t = { encode : 'a -> Json.t; decode : Json.t -> ('a, string) result }
 
   val int : int t
+  (** [`Int]. *)
+
   val float : float t
   (** Decoding accepts [`Int] too. *)
 
   val string : string t
+  (** [`String]. *)
+
   val bool : bool t
+  (** [`Bool]. *)
+
   val unit : unit t
+  (** [`Null]. *)
+
   val list : 'a t -> 'a list t
+  (** [`List]. Decoding stops at the first element that fails. *)
+
   val array : 'a t -> 'a array t
+  (** As [list]. *)
+
   val option : 'a t -> 'a option t
   (** [None] is [`Null]. *)
 
@@ -170,7 +197,11 @@ module Codec : sig
       [Async]. *)
 
   val encode : 'a t -> 'a -> Json.t
+  (** [encode c v] is [c.encode v]. *)
+
   val decode : 'a t -> Json.t -> ('a, string) result
+  (** [decode c j] is [c.decode j]. The error names the expected kind and
+      the start of the JSON text. *)
 end
 
 type server
@@ -187,21 +218,43 @@ module Event : sig
   type t
 
   val target_value : t -> string
+  (** The [value] property of the event target. *)
+
   val target_checked : t -> bool
+  (** The [checked] property of the event target. *)
+
   val key : t -> string
+  (** The [key] of a keyboard event. *)
+
   val meta_key : t -> bool
+  (** Whether the Meta key was down. *)
+
   val ctrl_key : t -> bool
+  (** Whether the Control key was down. *)
+
   val prevent_default : t -> unit
+  (** Calls [preventDefault] on the event. *)
+
   val stop_propagation : t -> unit
+  (** Stops the event: no other Yuka handler of an outer element receives
+      it, and it does not propagate in the DOM. *)
+
   val target_tag : t -> string
   (** The lowercase tag name of the event target. *)
 
   val shift_key : t -> bool
+  (** Whether the Shift key was down. *)
+
   val alt_key : t -> bool
+  (** Whether the Alt key was down. *)
 end
 
 val text : string -> 'kind element
+(** A text node. The server escapes it. *)
+
 val int : int -> 'kind element
+(** The text of [string_of_int]. *)
+
 val float : float -> 'kind element
 (** Printed as JSON prints a float: [1.0], [2.5]. Not-a-number and the
     infinities are printed as [NaN], [Infinity] and [-Infinity]. *)
@@ -210,15 +263,21 @@ val list : 'kind element list -> 'kind element
 (** The same as [fragment]. *)
 
 val array : 'kind element array -> 'kind element
+(** Like [list], for an array. *)
 
 val empty : 'kind element
+(** Nothing. *)
+
 val fragment : 'kind element list -> 'kind element
+(** The elements one after another, with no wrapper element. *)
 
 val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
 (** [lower tag attributes children]: an HTML element. The ppx makes it from
     [<tag ...>]. *)
 
 val attr : string -> string -> 'kind attribute
+(** [attr name value]: an attribute with a fixed value. The server escapes
+    the value. *)
 
 val hole : (unit -> client element) -> client element
 (** A part that changes after the first render. The function runs once; it
@@ -244,11 +303,17 @@ module Template : sig
   type 'kind part
 
   val text : string -> shape
+  (** A fixed text. *)
+
   val element : string -> attr list -> shape list -> shape
+  (** [element tag attrs children]: an HTML element. *)
+
   val part : int -> shape
   (** The child at this place is part [i], made with [child]. *)
 
   val fixed : string -> string -> attr
+  (** [fixed name value]: an attribute with a fixed value. *)
+
   val part_attr : int -> attr
   (** The attribute at this place is part [i], made with [attribute] or
       [attribute_option]. *)
@@ -267,8 +332,13 @@ module Template : sig
       template root to its parts. The ppx writes this call. *)
 
   val child : 'kind element -> 'kind part
+  (** The value of a {!val-part}. *)
+
   val attribute : 'kind attribute -> 'kind part
+  (** The value of a {!part_attr}. *)
+
   val attribute_option : 'kind attribute option -> 'kind part
+  (** The value of a {!part_attr}; [None] writes no attribute. *)
 
   val instance : t -> 'kind part array -> 'kind element
   (** The tree of [t] with its parts filled in. It prints and hydrates as the
@@ -279,6 +349,7 @@ end
 
 module Slot : sig
   val make : server element -> slot
+  (** A slot with this server content. *)
 end
 
 module Await : sig
@@ -293,6 +364,86 @@ module Await : sig
       the value, or [failed message] (default: nothing). On the client it is
       a hole over [Async.watch]. On the server it is printed as a hole; see
       DESIGN.md. *)
+end
+
+module Catch : sig
+  val make :
+    fallback:(error:string -> reset:(unit -> unit) -> 'k element) ->
+    children:(unit -> 'k element) ->
+    unit ->
+    'k element
+  (** An error boundary. In mlx:
+      [<Yuka.Catch fallback=(fun ~error ~reset -> ...)> children </Yuka.Catch>];
+      the ppx passes the children as a function.
+
+      The children run in a new owner. An exception raised while they
+      render, in an effect or a hole that runs again (or its cleanup), in a
+      memo that one of them reads, or in an event handler attached in them,
+      disposes that owner (effects stop, cleanups run) and shows
+      [fallback ~error ~reset] in place of the children. [error] is the
+      exception as text. [reset ()] disposes the fallback and renders the
+      children again from their first state; State made outside the
+      boundary keeps its value. An exception in the fallback goes to the
+      boundary above. A failed {!Async} or a {!Status.Failed} is a value,
+      not an exception: show it with [Await] or [Show].
+
+      In an island with no [Catch] above, the island is the boundary: it
+      stops, its DOM stays as it is, and the error goes to [console.error]
+      and to the [on_error] of {!mount}.
+
+      On the server, an exception in the children prints the fallback with
+      [~error:"server error"] and sends the exception to
+      {!Server.log_error}; the HTML never has the detail. In an island, the
+      client then hydrates the fallback, and [reset] renders the children in
+      the browser. *)
+end
+
+module Status : sig
+  (** Why a remote call failed. *)
+  type error =
+    | Rejected of string
+        (** The server refused the input ({!Server.Action.reject}, bad
+            input). The message is for the user. *)
+    | Forbidden  (** The origin check failed. *)
+    | Not_found  (** Unknown action. *)
+    | Server  (** The implementation raised or failed; the detail is in the server log. *)
+    | Network of string  (** No answer: offline, aborted, timeout. *)
+    | Protocol of string  (** The answer did not decode. *)
+
+  (** The state of data that loads. [Loading (Some x)]: a new load runs and
+      [x] is the last good data. *)
+  type 'a t =
+    | Idle  (** Not enabled. *)
+    | Loading of 'a option  (** A request runs; the option is the last good data. *)
+    | Ready of { data : 'a; stale : bool }  (** [stale] is [false] for remote data. *)
+    | Failed of { error : error; last : 'a option }
+
+  val data : 'a t -> 'a option
+  (** [data] of [Ready], [last] of [Failed], the option of [Loading]. *)
+
+  val map : ('a -> 'b) -> 'a t -> 'b t
+
+  val error_to_string : error -> string
+  (** [Rejected m] is [m]; the others are short English text. *)
+
+  val error_codec : error Codec.t
+  (** [{"kind": "rejected", "message": m}], [{"kind": "server"}], ... *)
+end
+
+module Show : sig
+  val make :
+    status:(unit -> 'a Status.t) ->
+    loading:'k element ->
+    ?failed:(Status.error -> 'k element) ->
+    children:('a -> 'k element) ->
+    unit ->
+    'k element
+  (** [<Yuka.Show status loading failed> (fun data -> ...) </Yuka.Show>]: a
+      hole over [status ()]. [Ready] and [Loading (Some data)] show
+      [children data], so data stays on screen while it loads again; [Idle]
+      and [Loading None] show [loading]; [Failed] shows [failed error]
+      (default: nothing). The children render again only when the data
+      changes ([==]). *)
 end
 
 val on : string -> (Event.t -> unit) -> client attribute
@@ -345,6 +496,7 @@ module Client : sig
   (** A JavaScript promise, as made by a dynamic [import]. *)
 
   val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
+  (** [then] of a JavaScript promise. For the code of [yuka-islands]. *)
 
   val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
   (** [lazy_entry ~name load]: an island whose code is loaded on demand.
@@ -369,18 +521,214 @@ module Client : sig
 
 end
 
+module Optimistic : sig
+  (** Pending changes over a base value that lives elsewhere (a State, the
+      data of a {!Status.t}). *)
+
+  type 'c t
+  (** The pending changes, in the order they were added. *)
+
+  type id
+
+  val empty : 'c t
+  val add : 'c t -> 'c -> 'c t * id
+  val remove : 'c t -> id -> 'c t
+  (** After the change succeeded or failed. *)
+
+  val apply : ('a -> 'c -> 'a) -> 'c t -> 'a -> 'a
+  (** The base with every pending change applied, oldest first. *)
+
+  val is_empty : 'c t -> bool
+end
+
 module Action : sig
-  type ('i, 'o) t
+  type ('i, 'o, 'kind) t
+  (** ['kind] is [[ `Mutation ]] for {!declare} and [[ `Query ]] for
+      {!query}. *)
 
   val declare :
-    name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o) t
+    name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Mutation ]) t
+  (** An action named [name]: the server and the client must declare it with
+      the same name and codecs. The server runs it after
+      {!Server.Action.implement}. *)
 
-  val name : ('i, 'o) t -> string
+  val query :
+    name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Query ]) t
+  (** Like {!declare}, for a read with no side effect: a server render may
+      run it and {!Remote.use} may retry it. Same endpoint and wire format. *)
 
-  val call : ('i, 'o) t -> 'i -> 'o Async.t
+  val name : (_, _, _) t -> string
+  (** The name given to [declare]. *)
+
+  val call : ('i, 'o, _) t -> 'i -> 'o Async.t
   (** Encodes the input, sends it to the server (in the browser after
       [mount], as [POST /_yuka/action/<name>]; on the server, to the
       implementation), decodes the output. A decode error is [Failed]. *)
+end
+
+module Remote : sig
+  (** Server data read through a query ({!Action.query}). *)
+
+  type 'o t
+
+  type retry = { attempts : int; delay_ms : int -> int }
+  (** [attempts] more tries after the first; [delay_ms n] waits before try
+      [n + 1]. *)
+
+  val default_retry : retry
+  (** Two more tries, after 500 ms and 1500 ms. *)
+
+  val no_retry : retry
+
+  val use :
+    ?retry:retry -> ?enabled:(unit -> bool) -> ('i, 'o, [ `Query ]) Action.t -> (unit -> 'i) -> 'o t
+  (** Runs the query for the input that the function returns, and again
+      when a State that the function or [enabled] reads changes. Call it in
+      a component body: when its owner is disposed, the request in flight
+      is aborted.
+
+      - The key of a request is the query name and the JSON of the input;
+        the query runs again only when the key changes. A new key,
+        {!refetch} or {!invalidate} aborts the request in flight, and only
+        the latest request writes the status.
+      - [enabled ()] false gives [Idle] and aborts the request.
+      - [Network] and [Server] errors are tried again by [retry] (default
+        {!default_retry}); the others fail at once.
+      - In a server render it runs the implementation once. If it settles
+        during the render, the status is [Ready] or [Failed]; else
+        [Loading None]. Inside an island the answer is written in the page
+        ([<script data-yuka-answer>], after the island), and the client
+        reads it on the first run instead of sending a request; a pending
+        answer is streamed later.
+      - Outside the browser and outside a render (tests), it calls the
+        implementation directly. *)
+
+  val status : 'o t -> 'o Status.t
+  (** Tracked read, with the pending {!mutate} changes applied to the data. *)
+
+  val refetch : 'o t -> unit
+  (** Sends the request again (the manual retry after [Failed]). *)
+
+  val invalidate : (_, _, [ `Query ]) Action.t -> unit
+  (** {!refetch} every mounted use of this query, for every input. *)
+
+  val mutate : 'o t -> ('o -> 'o) -> ?commit:('r -> 'o -> 'o) -> (unit -> 'r Async.t) -> 'r Async.t
+  (** [mutate r change run] shows [change] on the data at once, then calls
+      [run ()]. When it succeeds the change is removed and the data becomes
+      [commit result data] (default [change data]); when it fails the
+      change is removed (rollback). A new answer while the change is pending
+      gets the change on top. The result is the [Async] of [run ()]. *)
+end
+
+module Form : sig
+  (** Forms that post with no JavaScript and submit through {!Action.call}
+      in an island. [[@@deriving form]] on a record writes the field type,
+      the field names and a [('i, 'f) t]; the same decoder runs on the
+      server and in the browser. *)
+
+  type 'f errors = ('f option * string) list
+  (** [None] is an error for the whole form. *)
+
+  type 'a kind
+  (** How one field reads from the posted strings and writes back. *)
+
+  val string : string kind
+  (** The first value; ["Missing"] when the field is absent. *)
+
+  val int : int kind
+  (** ["Not a whole number"] when it does not parse. *)
+
+  val float : float kind
+  val bool : bool kind
+  (** A checkbox: present is [true], absent is [false]. *)
+
+  val option : 'a kind -> 'a option kind
+  (** Absent or empty is [None]. *)
+
+  val list : 'a kind -> 'a list kind
+  (** Every value of the field, in order. *)
+
+  val custom : (string -> 'a option) -> ('a -> string) -> 'a kind
+  (** ["Not valid"] when [of_string] gives [None]. *)
+
+  type ('i, 'f) t
+  (** The fields of a form: decode, encode and names. *)
+
+  type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
+
+  type 'f decoding
+
+  val fields :
+    names:('f * string) list ->
+    decode:('f decoding -> ('i, 'f errors) result) ->
+    encode:('i -> (string * string) list) ->
+    ('i, 'f) t
+  (** Used by the code that [[@@deriving form]] writes. *)
+
+  val field : 'f decoding -> 'f -> string -> 'a kind -> 'a option
+  val get : 'a option -> 'a
+  val finish : 'f decoding -> (unit -> 'i) -> ('i, 'f errors) result
+  val put : string -> 'a kind -> 'a -> (string * string) list
+
+  val decode : ('i, 'f) t -> (string * string) list -> ('i, 'f errors) result
+  (** Every field error, in field order. *)
+
+  val encode : ('i, 'f) t -> 'i -> (string * string) list
+  val name : ('i, 'f) t -> 'f -> string
+
+  val action :
+    name:string ->
+    fields:('i, 'f) t ->
+    output:'o Codec.t ->
+    ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
+  (** An action whose input is a form: {!Action.call} sends the encoded
+      fields; the answer is [Ok o] or the field errors. *)
+
+  type ('o, 'f) form
+  (** What the children of {!make} get. *)
+
+  val value : ('o, 'f) form -> 'f -> string
+  (** The value sent for the field when the page answers a failed post
+      (422), else [""]. *)
+
+  val error : ('o, 'f) form -> 'f -> string option
+  (** Tracked read of the first error of the field. *)
+
+  val error_view : ('o, 'f) form -> 'f -> (string -> 'k element) -> 'k element
+  (** A hole: the view of the field's error, or nothing. *)
+
+  val form_errors : ('o, 'f) form -> string list
+  val form_error_view : ('o, 'f) form -> (string -> 'k element) -> 'k element
+  (** The errors for the whole form. *)
+
+  val pending : ('o, 'f) form -> bool
+  (** Tracked: true while an island submit waits for its answer. Read it in
+      a hole ([Yuka.hole]); read in the children directly, it renders the
+      enclosing component again, with a new form. *)
+
+  val make :
+    action:('i, ('o, 'f errors) result, [ `Mutation ]) Action.t ->
+    ?key:string ->
+    ?run:('i -> ('o, 'f errors) result Async.t) ->
+    ?on_ok:('o -> unit) ->
+    children:(('o, 'f) form -> 'k element) ->
+    unit ->
+    'k element
+  (** [<Yuka.Form action>(fun form -> ...)</Yuka.Form>]: a
+      [<form method="post">] with no [action] attribute (it posts to the
+      page URL) and a hidden [_yuka_action] field, so it works with no
+      JavaScript. Give [key] to tell apart two forms of one action on a
+      page: after a failed post (422) only the form with the posted key
+      shows the sent values and errors. In an island, they stay for the
+      life of that [<form>] element (a new render of the form shows them
+      again) until a submit in the browser. In an island, a submit is handled
+      in the browser: the fields (with the submit button's [name] and
+      [value]) are decoded first (an error shows at once, with no request),
+      then [run input] (default: the action call) runs while [pending] is
+      true; field errors show, and on [Ok o] [on_ok o] runs, or else the page
+      follows the server's [redirect] (with [run], the page URL) with a
+      client navigation, as a post with no JavaScript does. Raises
+      [Invalid_argument] when [action] is not from {!val-action}. *)
 end
 
 module Browser : sig
@@ -430,6 +778,11 @@ module Private : sig
         render : 'a -> node;
       }
         -> node
+    | Catch of {
+        children : unit -> node;
+        fallback : error:string -> reset:(unit -> unit) -> node;
+        client : Obj.t option -> node;
+      }
 
   and attr =
     | Static of string * string
@@ -478,6 +831,7 @@ module Private : sig
         inside_island : bool;
       }
     | Pending_async of { id : string; async : Json.t Async.t }
+    | Pending_answer of { key : string; answer : Json.t Async.t }
 
   val fill_script : string
   (** The inline script that streaming writes in the head. It defines
@@ -526,7 +880,7 @@ module Private : sig
   val entry_name : Client.entry -> string
   val entry_decode : Client.entry -> Json.t -> (unit -> node, string) result
 
-  val action_codecs : ('i, 'o) Action.t -> 'i Codec.t * 'o Codec.t
+  val action_codecs : ('i, 'o, _) Action.t -> 'i Codec.t * 'o Codec.t
 
   val slot_content : slot -> node option
   (** The server element of the slot, if it has one. *)
@@ -596,6 +950,11 @@ module Private : sig
 
   val import_map : url:string -> string list -> (string * string) list
 
+  val set_form :
+    session -> string * string * (string * string) list * (string option * string) list -> unit
+  (** The form state of a failed post: action name, form key, sent fields,
+      errors by field name. *)
+
   val query : string -> (string * string) list
   (** The decoded query pairs of a request target, as the cycle reads them
       ([+] is a space). *)
@@ -604,12 +963,7 @@ module Private : sig
     manifest:string -> base:string -> ?metafile:string -> unit -> string -> string option
 
   val handle_action :
-    name:string ->
-    content_type:string option ->
-    origin:string option ->
-    host:string option ->
-    body:string ->
-    (int * string) Async.t
+    name:string -> header:(string -> string option) -> body:string -> (int * string) Async.t
 end
 
 (**/**)
@@ -643,6 +997,7 @@ module Router : sig
     (** [None] means the path does not match. *)
 
     val to_string : t -> string
+    (** The inverse of [of_string]. [href] encodes the result. *)
   end
 
   val encode : string -> string
@@ -670,7 +1025,14 @@ module Router : sig
       in order. *)
 end
 
-val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
+val mount :
+  ?islands:Client.registry ->
+  ?navigation:bool ->
+  ?prefetch:[ `Hover | `Visible | `Off ] ->
+  ?transitions:bool ->
+  ?on_error:(string -> unit) ->
+  unit ->
+  unit
 (** [mount ()] is the whole client start. [yuka.ppx] rewrites it into
     [mount ~islands:Yuka_islands.registry ()].
 
@@ -681,7 +1043,11 @@ val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
     document, so islands that arrive later (streaming, fills) start when
     their props script is complete. An island that cannot start is logged
     with [console.error] and keeps its server HTML. An island is not started
-    twice. The action transport sends [POST /_yuka/action/<name>] with the
+    twice. An exception that no {!Catch} in the island catches stops the
+    island and keeps its DOM as it is; the message
+    ["yuka island ID (NAME): ..."] goes to [console.error] and to
+    [on_error], for example to send it to an error reporting service. The
+    other islands keep working. The action transport sends [POST /_yuka/action/<name>] with the
     input as a JSON body. The response is [{"ok": value}] or
     [{"error": message}].
 
@@ -695,13 +1061,53 @@ val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
     - [popstate] loads the entry's URL without pushing history.
     - {!Browser.navigate} is a client navigation.
 
-    A client navigation loads the URL with the header [Yuka-Navigate: 1],
-    stops the islands, replaces the content of [<body>] and [document.title]
-    with those of the response, starts the islands again, pushes a history
-    entry (after the page loaded) and scrolls to the fragment or to the top.
-    A navigation started while another one loads aborts the first. If the
-    request fails, the response is not 2xx or not [text/html], or it was
-    redirected to another origin, it does [location.assign url].
+    A client navigation loads the URL with the header [Yuka-Navigate] set
+    to the [data-k] keys of the [<yuka-outlet>] elements of the page, in
+    document order, separated by spaces ([-] when there is none). With a
+    [Yuka-Outlet: KEY] answer it stops only the islands inside that outlet
+    (and aborts their action calls), replaces its content, sets
+    [document.title] from [Yuka-Title] (the raw value if it does not
+    decode), and sets [aria-current="page"] on the links outside the outlet
+    and outside islands whose [href] is the new path and that have no
+    [aria-current], removing it from the others that have [page]; islands
+    outside the outlet keep running. If that outlet is not on the page, it
+    does [location.assign]. Without [Yuka-Outlet] it stops every island and
+    replaces [<body>] and [document.title] with those of the response. Then it starts
+    the new islands, pushes a history entry (after the page loaded) and
+    scrolls to the fragment or to the top. A navigation started while
+    another one loads aborts the first. Any 2xx or 4xx/5xx status is shown
+    in place. If the request fails, the status is 1xx or 3xx, the response
+    is not [text/html], its [Yuka-Build] differs from the
+    [<meta name="yuka-build">] of the page, or it was redirected to another
+    origin, it does [location.assign url].
+
+    Prefetch ([prefetch], default [`Hover]): 50 ms after the pointer or the
+    focus enters a link that a click would navigate, or at once on
+    [touchstart] or a [pointerdown] of the main button with no modifier
+    key, the page is loaded with the navigation headers and
+    [Yuka-Prefetch: 1]. The server answers it as any navigation, so the
+    guards and loaders of a [GET] page must be safe to run for a link the
+    user may never click: no side effects. [`Visible] also prefetches every such link
+    when it becomes visible; with [`Hover], only links with
+    [data-yuka-prefetch="visible"] do. [data-yuka-prefetch="off"] on a link
+    and [`Off] turn it off, and so does [navigator.connection.saveData].
+    A navigation to a URL whose prefetch is in flight waits for it.
+
+    Answers are kept by URL and outlet keys, at most 30, by the
+    [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or
+    [no-cache]) for N seconds, also for back and forward; otherwise a
+    prefetched answer is used once, within 10 s, and a visited page is not
+    kept. An action call that succeeds empties the cache, and an answer
+    requested before it is not kept. [mount] and {!unmount} empty it and
+    abort the prefetches nobody waits for; after {!unmount} no navigation
+    updates the page.
+
+    With [~transitions:true], where [document.startViewTransition] exists,
+    the page update runs inside a view transition, and [<html>] has
+    [data-yuka-nav="push"], ["back"] or ["forward"] until the last one
+    ends. The URL, history and navigation state change before the
+    transition starts; an exception in the update is thrown again in a
+    task, as an uncaught error.
 
     With [~navigation:false] only the islands start and links load full
     pages. Calling [mount] again is safe: the listeners are not added twice.
@@ -753,7 +1159,7 @@ module Server : sig
       streamed chunk. *)
 
   module Action : sig
-    val implement : ('i, 'o) Action.t -> ('i -> 'o Async.t) -> unit
+    val implement : ('i, 'o, _) Action.t -> ('i -> 'o Async.t) -> unit
     (** Registers the implementation of a declared action, and makes
         [Action.call] run it directly on the server. Raises
         [Invalid_argument] if the name is already implemented. *)
@@ -766,6 +1172,31 @@ module Server : sig
 
     val rejected : string -> 'a Async.t
     (** Like [reject], for use after a wait (in an [Async] chain). *)
+  end
+
+  module Form : sig
+    val implement :
+      ('i, 'o, 'f) Form.action ->
+      ?redirect:('o -> string) ->
+      ('i -> ('o, 'f Form.errors) result Async.t) ->
+      unit
+    (** Registers a form action (see {!Yuka.Form}). It answers the island
+        path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
+        with [redirect o] in the answer, and the form post of a page. The
+        request cycle checks the origin as for {!handle} (403), runs the
+        page's guards (a
+        refusal answers as for [GET] and the function does not run), reads
+        at most 1 MiB of body (413), decodes the posted fields, calls the
+        function, and answers 303 to [redirect o] (default: the page URL)
+        on [Ok o], or renders the page again with status 422 and the sent
+        values and errors on [Error], a decode error or {!Action.reject}.
+        The 303, 403 and 413 carry the page's rule headers. A [redirect o]
+        that is not a path ([/x], not [//x]) or a URL of the request [Host],
+        or that holds a control character (below space, or DEL; a browser
+        drops TAB from a URL, so [/\t/x] would go to [//x]), gives the 500
+        page and a
+        {!log_error} message instead of a 303. Raises
+        [Invalid_argument] when the action is not from {!Yuka.Form.val-action}. *)
   end
 
   (** {2 Request cycle}
@@ -792,9 +1223,11 @@ module Server : sig
   (** [page ~title body]. The cycle calls [body] only when it renders: never
       for [HEAD]. [head] is raw HTML added to the document head. *)
 
-  type layer = { key : string; wrap : server element -> server element }
-  (** A layout on the path of a route. [key] names its outlet; [wrap] puts
-      the layout around its children. *)
+  type layer = { key : string; data : bool; wrap : server element -> server element }
+  (** A layout on the path of a route. [key] names its outlet; [data] is
+      true when the layout takes a loader result, so a client navigation
+      renders it again instead of keeping it; [wrap] puts the layout around
+      its children. *)
 
   type plan = { layers : layer list; page : page }
   (** What a page route renders. [layers] are outermost first. *)
@@ -858,7 +1291,7 @@ module Server : sig
       }
     | Handler of {
         rules : rules;
-        same_origin : bool;  (** True for an [Action]: 403 for a foreign [Origin]. *)
+        same_origin : bool;  (** True for an [Action]: 403 when the origin check of {!handle} fails. *)
         guards : (unit -> (unit, stop) result Async.t) list;
         run : unit -> response Async.t;
       }
@@ -886,18 +1319,18 @@ module Server : sig
       {!prerender_seeds} starts. [missing] gives the page when no route
       matches. *)
 
-  val build_id : 'req app -> string
-
   type assets
   (** Where the client JavaScript is. The cycle serves it under [/_yuka/]. *)
 
   val modules :
-    dir:string -> entry:string -> manifest:string -> packages:string list -> assets
+    dir:string -> entry:string -> manifest:string -> packages:string list -> digest:string -> assets
   (** The Melange module tree. [dir] is the emit directory, [entry] the path
       of the entry module in it (served as [/_yuka/<entry>]), [manifest] the
       JSON text that [yuka-islands --manifest] prints (paths relative to the
       directory of [entry]), and [packages] the npm packages under
-      [dir/node_modules] for the import map. Files get
+      [dir/node_modules] for the import map. [digest] stands for the content
+      of the files (for example [Yuka_dream.tree_digest dir]): it goes into
+      {!build_id}, so new JavaScript gives a new build id. Files get
       [cache-control: no-cache]. *)
 
   val bundle :
@@ -930,6 +1363,13 @@ module Server : sig
       of every page. [timeout] (default 10 seconds) bounds a streamed
       render. *)
 
+  val build_id : config -> 'req app -> string
+  (** The build id: a digest of the route tree and, with [assets], of the
+      entry, the manifest and the packages or the metafile. Every full
+      document has [<meta name="yuka-build" content="ID">], and a response to
+      [Yuka-Navigate] has the header [Yuka-Build: ID]; the client loads the
+      page in full when the two differ. *)
+
   val served_dirs : config -> (string * string) list
   (** The URL prefixes and directories that the cycle serves files from:
       [("/_yuka", dir)] of [assets], then each [public] prefix. A
@@ -939,7 +1379,7 @@ module Server : sig
     meth : Router.meth;
     target : string;  (** Path and query, as sent. *)
     header : string -> string option;  (** Case-insensitive. *)
-    body : unit -> string Async.t;
+    body : limit:int -> string option Async.t;  (** [None] over [limit] bytes. *)
   }
   (** What the cycle reads from a request. *)
 
@@ -962,7 +1402,13 @@ module Server : sig
       ({!ADAPTER.exists}). Steps, in this order:
 
       + [/_yuka/action/<name>]: the action call ([POST] with a JSON body;
-        answers as described for {!Action.reject}), else 405.
+        answers as described for {!Action.reject}), else 405. From the
+        headers first: the origin (403), the action name (404) and the
+        content type (415); then at most 1 MiB of body (413). The origin
+        check passes when [Origin] has the authority of [Host], or when
+        there is no [Origin] and [Sec-Fetch-Site] is [same-origin]; a
+        request with neither (an old browser, a client that is not a
+        browser) is refused.
         [/_yuka/<file>]: the file of [assets] for [GET] and [HEAD], else
         405; a [.] or [..] segment, or no [assets], gives a plain 404 with
         [no-store]. A path under a [public] prefix: the file of its
@@ -975,7 +1421,8 @@ module Server : sig
         [allow] (the methods, [HEAD] after [GET], then [OPTIONS]); for
         [OPTIONS], 204 with the same [allow].
       + Guards, one after another. A {!stop} skips the rest.
-      + A handler with [same_origin]: 403 when [Origin] differs from [Host].
+      + A handler with [same_origin]: 403 when the origin check of the
+        action call fails.
       + A handler: its response, after the rule headers (the handler's win)
         and the rule [cache-control] unless it set one. [HEAD]: no body.
       + A page: the prerendered file when [config] has [prerendered] and
@@ -988,8 +1435,14 @@ module Server : sig
         {!fill_script} only when the shell has a pending [await], so a page
         without islands or pending [await] loads no JavaScript. An [<a>] whose [href] is the
         request path gets [aria-current="page"], except inside an island,
-        whose markup must match the client render. With a [Yuka-Navigate]
-        header, the settled document in one string.
+        whose markup must match the client render.
+      + With a [Yuka-Navigate] header (the outlet keys of the page): let [n]
+        be the length of the common prefix of the sent keys and the layer
+        keys of the page (or of the fallback, for a 404 or 500). [n = 0]: the
+        settled document in one string. [n >= 1]: only what goes inside
+        outlet [n], settled, with the headers [Yuka-Outlet] (its key) and
+        [Yuka-Title] (percent-encoded); island, await and async ids get the
+        prefix [KEY-]. Both have [Yuka-Build] ({!build_id}).
 
       A 404 or 500 page has the root [headers] and [no-store]. A failure
       before the response is returned (shell, or a fill that already
@@ -1017,11 +1470,20 @@ module Server : sig
     type 'a io
 
     val meth : request -> Router.meth
+    (** The request method. *)
+
     val target : request -> string
+    (** The path and query, as sent. *)
+
     val header : request -> string -> string option
     (** Case-insensitive. *)
 
-    val body : request -> string Async.t
+    val body : request -> limit:int -> string option Async.t
+    (** The request body, or [None] when it is longer than [limit] bytes.
+        Give [None] with no read when a [Content-Length] is over [limit];
+        else stop reading past [limit + 1] bytes. With [None], close the
+        request body so the server drops the rest. *)
+
     val respond : http_response -> response io
     (** Sends the status, the headers and the body; a [Stream] body is
         written as it comes. *)
@@ -1035,12 +1497,20 @@ module Server : sig
         file. *)
 
     val of_async : 'a Async.t -> 'a io
+    (** Converts an [Async] to the promise type of the server. *)
+
     val bind : 'a io -> ('a -> 'b io) -> 'b io
+    (** Chains two promises of the server. *)
+
     val sleep : float -> unit Async.t
+    (** Resolves after this many seconds. The cycle uses it for [timeout]. *)
   end
 
+  (** A request handler for the server of [A]. *)
   module Make (A : ADAPTER) : sig
     val handler : config -> A.request app -> A.request -> A.response A.io
+    (** Answers one request with {!handle}, then sends the outcome with
+        [A.respond] or [A.file]. *)
   end
 
   (** {2 Prerender}

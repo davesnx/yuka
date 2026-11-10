@@ -410,7 +410,7 @@ let async_settle_once () =
   fail "boom";
   resolve 1;
   check "failure wins" "failed boom" (status_text string_of_int (Async.status b));
-  check "resolved" "done 3" (status_text string_of_int (Async.status (Async.resolved 3)));
+  check "return" "done 3" (status_text string_of_int (Async.status (Async.return 3)));
   check "failed" "failed no" (status_text string_of_int (Async.status (Async.failed "no")))
 
 let async_on_settled () =
@@ -433,16 +433,16 @@ let async_map_bind () =
   resolve 4;
   check "map done" "done 8" (status_text string_of_int (Async.status m));
   let inner, resolve_inner, _ = Async.make () in
-  let b = Async.bind (Async.resolved 1) (fun _ -> inner) in
+  let b = Async.bind (Async.return 1) (fun _ -> inner) in
   check "bind waits for inner" "pending" (status_text string_of_int (Async.status b));
   resolve_inner 9;
   check "bind done" "done 9" (status_text string_of_int (Async.status b));
   let f = Async.map succ (Async.failed "e1") in
   check "map failure" "failed e1" (status_text string_of_int (Async.status f));
-  let g = Async.bind (Async.resolved 1) (fun _ -> (Async.failed "e2" : int Async.t)) in
+  let g = Async.bind (Async.return 1) (fun _ -> (Async.failed "e2" : int Async.t)) in
   check "bind inner failure" "failed e2" (status_text string_of_int (Async.status g));
   let called = ref false in
-  let h = Async.bind (Async.failed "e3") (fun _ -> called := true; Async.resolved 1) in
+  let h = Async.bind (Async.failed "e3") (fun _ -> called := true; Async.return 1) in
   check "bind skips on failure" "failed e3 false"
     (status_text string_of_int (Async.status h) ^ " " ^ string_of_bool !called)
 
@@ -453,7 +453,7 @@ let async_watch () =
   Effect.run (fun () -> add (status_text string_of_int (State.get w)));
   resolve 7;
   check "effect sees the update" "pending done 7" (read ());
-  let w2 = Async.watch (Async.resolved 1) in
+  let w2 = Async.watch (Async.return 1) in
   check "already settled" "done 1" (status_text string_of_int (State.peek w2))
 
 let double =
@@ -474,7 +474,7 @@ let action_call () =
       (fun name input ->
         seen := name ^ " " ^ show_json input;
         match input with
-        | `Int n -> Async.resolved (`Int (n * 2))
+        | `Int n -> Async.return (`Int (n * 2))
         | _ -> Async.failed "bad")
       (fun () -> Async.status (Action.call double 21))
   in
@@ -482,7 +482,7 @@ let action_call () =
   check "decoded output" "done 42" (status_text string_of_int result);
   let bad =
     with_transport
-      (fun _ _ -> Async.resolved (`String "x"))
+      (fun _ _ -> Async.return (`String "x"))
       (fun () -> Async.status (Action.call double 1))
   in
   check "decode error is Failed" "failed"
@@ -562,7 +562,7 @@ let html_streaming_session () =
         Private.node
           (lower "p" []
              [ Await.make ~async:a ~loading:(text "L") ~children:(fun n -> text (string_of_int n)) ();
-               Await.make ~async:(Async.resolved 1) ~loading:(text "no") ~children:(fun n -> text (string_of_int n)) ();
+               Await.make ~async:(Async.return 1) ~loading:(text "no") ~children:(fun n -> text (string_of_int n)) ();
                Await.make ~async:b ~loading:(text "M") ~children:(fun n -> text (string_of_int n)) () ]))
   in
   check "shell" "<p><!--[s1-->L<!--]--><!--[-->1<!--]--><!--[s2-->M<!--]--></p>" first;
@@ -570,7 +570,9 @@ let html_streaming_session () =
   check "pending ids in order" "s1 s2"
     (String.concat " "
        (List.map
-          (function Private.Pending_await { id; _ } -> id | Private.Pending_async { id; _ } -> id)
+          (function
+          | Private.Pending_await { id; _ } | Private.Pending_async { id; _ } -> id
+          | Private.Pending_answer { key; _ } -> key)
           pending));
   check "taken once" "0" (string_of_int (List.length (Private.take_pending s)));
   match pending with
@@ -594,7 +596,7 @@ let codec_async_inline () =
   check "error" "failed e" (show (Codec.decode codec (`Assoc [ ("$async", `String "a1"); ("error", `String "e") ])));
   check "garbage" "error" (match Codec.decode codec (`Int 1) with Error _ -> "error" | Ok _ -> "ok");
   check "encode settled" "{\"$async\":\"a0\",\"ok\":2}"
-    (show_json (Codec.encode codec (Async.resolved 2)))
+    (show_json (Codec.encode codec (Async.return 2)))
 
 let html_int_float_list () =
   check "ints are two texts" "<p>-3<!---->2</p>"
@@ -654,7 +656,7 @@ let async_on_result () =
   let b, _, fail = Async.make () in
   Async.on_result b (fun r -> add (show r));
   fail "boom";
-  Async.on_result (Async.resolved 5) (fun r -> add (show r));
+  Async.on_result (Async.return 5) (fun r -> add (show r));
   check "error and already settled" "ok 1 again ok 1 error boom ok 5" (read ())
 
 let html_slot () =
@@ -1359,8 +1361,159 @@ let batch_in_first_run () =
   check "a batch in an effect runs pending effects when the effect ends"
     "e0 end e1" (read ())
 
+let boom () : _ element = failwith "secret detail"
+let late () : _ element = Private.element (Private.Hole (fun () -> failwith "secret detail"))
+
+let fallback ~error ~reset:_ = lower "p" [] [ text ("caught " ^ error) ]
+
+let logged f =
+  let saved = !Server.log_error and messages = ref [] in
+  Server.log_error := (fun m -> messages := m :: !messages);
+  let result = Fun.protect ~finally:(fun () -> Server.log_error := saved) f in
+  (result, List.rev !messages)
+
+let in_island tree =
+  Private.print
+    (Private.session ~streaming:false ~islands_only:true)
+    (fun () -> Private.node (Client.island ~name:"I" ~props:(`Int 0) (fun () -> tree ())))
+
+let page_html tree =
+  Private.print (Private.session ~streaming:false ~islands_only:true) (fun () -> Private.node (tree ()))
+
+let contains text part =
+  let n = String.length part in
+  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
+  at 0
+
+let catch_server_fallback () =
+  let html, messages =
+    logged (fun () ->
+        in_island (fun () ->
+            lower "div" []
+              [ text "a";
+                Catch.make ~fallback
+                  ~children:(fun () -> lower "span" [] [ text "partial"; late () ])
+                  ();
+                text "b" ]))
+  in
+  check "fallback with the marker"
+    {|<yuka-island data-name="I" data-id="i1" style="display:contents"><div>a<!--[!--><p>caught server error</p><!--]-->b</div></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
+    html;
+  check "no detail in the HTML" "false" (string_of_bool (contains html "secret"));
+  check "one log" "1" (string_of_int (List.length messages));
+  check "log has the detail" "true"
+    (string_of_bool (contains (String.concat "" messages) "secret detail"))
+
+let catch_server_children () =
+  let html, messages =
+    logged (fun () ->
+        in_island (fun () ->
+            Catch.make ~fallback ~children:(fun () -> lower "span" [] [ text "ok" ]) ()))
+  in
+  check "children in a plain hole"
+    {|<yuka-island data-name="I" data-id="i1" style="display:contents"><!--[--><span>ok</span><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
+    html;
+  check "no log" "0" (string_of_int (List.length messages))
+
+let catch_server_outside_island () =
+  let html, _ =
+    logged (fun () ->
+        page_html (fun () ->
+            lower "main" []
+              [ Catch.make ~fallback ~children:(fun () -> lower "span" [] [ text "x"; boom () ]) () ]))
+  in
+  check "no marker outside an island" "<main><p>caught server error</p></main>" html
+
+let catch_server_nested () =
+  let html, messages =
+    logged (fun () ->
+        page_html (fun () ->
+            Catch.make ~fallback
+              ~children:(fun () ->
+                lower "div" []
+                  [ text "outer";
+                    Catch.make
+                      ~fallback:(fun ~error:_ ~reset:_ -> failwith "fallback failed")
+                      ~children:boom () ])
+              ()))
+  in
+  check "an error in the fallback goes to the boundary above"
+    "<p>caught server error</p>" html;
+  check "both logged" "2" (string_of_int (List.length messages))
+
+let catch_server_keeps_islands () =
+  let html, _ =
+    logged (fun () ->
+        page_html (fun () ->
+            lower "main" []
+              [ Catch.make ~fallback
+                  ~children:(fun () ->
+                    lower "div" []
+                      [ Client.island ~name:"Lost" ~props:(`Int 1) (fun () -> text "l"); late () ])
+                  ();
+                Client.island ~name:"Kept" ~props:(`Int 2) (fun () -> text "k") ]))
+  in
+  check "the island of the failed children is gone" "false" (string_of_bool (contains html "Lost"));
+  check "the island after it is printed" "true" (string_of_bool (contains html {|data-name="Kept"|}))
+
+let catch_server_drops_pending () =
+  let s = Private.session ~streaming:true ~islands_only:true in
+  let pending, _, _ = Async.make () in
+  let html, _ =
+    logged (fun () ->
+        Private.print s (fun () ->
+            Private.node
+              (Catch.make ~fallback
+                 ~children:(fun () ->
+                   lower "div" []
+                     [ Await.make ~async:pending ~loading:(text "wait") ~children:text ();
+                       late () ])
+                 ())))
+  in
+  check "fallback" "<p>caught server error</p>" html;
+  check "no fill for the dropped Await" "0" (string_of_int (List.length (Private.take_pending s)))
+
+let catch_server_select () =
+  let html, _ =
+    logged (fun () ->
+        page_html (fun () ->
+            lower "main" []
+              [ Catch.make ~fallback
+                  ~children:(fun () ->
+                    lower "select" [ attr "value" "x" ] [ lower "option" [ attr "value" "x" ] []; late () ])
+                  ();
+                lower "datalist" [] [ lower "option" [ attr "value" "x" ] [] ] ]))
+  in
+  check "the select value of the dropped children does not leak"
+    {|<main><p>caught server error</p><datalist><option value="x"></option></datalist></main>|} html
+
+let show_view status =
+  Show.make
+    ~status:(fun () -> status)
+    ~loading:(text "loading")
+    ~failed:(fun e -> text ("failed " ^ Status.error_to_string e))
+    ~children:(fun d -> lower "b" [] [ text d ])
+    ()
+
+let show_server () =
+  let print st = Private.to_html (Private.node (show_view st)) in
+  check "idle" "<!--[-->loading<!--]-->" (print Status.Idle);
+  check "loading" "<!--[-->loading<!--]-->" (print (Status.Loading None));
+  check "loading with data" "<!--[--><b>d</b><!--]-->" (print (Status.Loading (Some "d")));
+  check "ready" "<!--[--><b>d</b><!--]-->" (print (Status.Ready { data = "d"; stale = false }));
+  check "failed" "<!--[-->failed server error<!--]-->"
+    (print (Status.Failed { error = Status.Server; last = Some "d" }))
+
 let all =
   [
+    ("catch: server fallback", catch_server_fallback);
+    ("catch: server children", catch_server_children);
+    ("catch: server outside an island", catch_server_outside_island);
+    ("catch: server nested", catch_server_nested);
+    ("catch: server drops the islands of failed children", catch_server_keeps_islands);
+    ("catch: server drops the fills of failed children", catch_server_drops_pending);
+    ("show: server states", show_server);
+    ("catch: server select value", catch_server_select);
     ("memo is lazy without readers", memo_lazy_without_readers);
     ("memo diamond", memo_diamond);
     ("dynamic dependencies", dynamic_dependencies);

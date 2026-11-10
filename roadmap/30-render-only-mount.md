@@ -11,13 +11,13 @@ Build: a render-only app does not carry hydration and slot code, and the `Curry`
 
 ## Resolution
 
-Partly done (2026-11-10). The keyed benchmark app went from 30,578 B, 10,388 B gzip, to 27,296 B, 9,748 B gzip (Solid: 5,006 B gzip). The demo, all chunks, went from 35,264 B to 35,186 B gzip. The budget in `bench/size/budget.json` is 10,040 B gzip.
+Partly done (2026-11-10). The keyed benchmark app went from 30,578 B, 10,388 B gzip, to 27,296 B, 9,748 B gzip (Solid: 5,006 B gzip). The demo, all chunks, went from 35,264 B to 35,186 B gzip. After the merge with main (navigation, error boundaries, remote data, prefetch, forms), the keyed app is 28,124 B, 10,028 B gzip, and the demo, all chunks, is 43,241 B gzip; those features add about 900 B minified to the keyed app. The budget in `bench/size/budget.json` is 10,040 B gzip.
 
 What changed:
 
 - `Client` is a virtual module: `src/client.mli`, the browser code in `dom/js/client.ml`, and a native stub in `dom/native/client.ml`. The browser code compiles next to `web.ml`, so its DOM calls have known arity and most are inlined. Before, 108 `Curry._1` calls in the client went through `Curry`.
 - The mount path uses JavaScript `null`, arrays and `Map` in place of OCaml options and lists. `List`, `Option` and `caml_option` helpers are no longer on the client path of the library. The `List`, `Array` and `Stdlib` code that is left in the keyed app is called by the app itself.
-- Each dev check is the raw `__YUKA_DEV__` test in place, so esbuild drops the dev branches before tree shaking. This removes `Curry._3` (392 B). `Dev.on` is removed.
+- Each dev check is the raw `__YUKA_DEV__` test in place, so esbuild drops the dev branches before tree shaking. This removes `Curry._3` (392 B). The client no longer reads `Dev.on`.
 
 Steps (`make size`, keyed app, gzip): virtual `Client` 10,250 B; JS mount path 10,087 B; no `List`/`Option` in the core and templates 9,991 B; handler and `each` lookups without options 9,932 B; dev checks 9,828 B; delegation without options 9,748 B.
 

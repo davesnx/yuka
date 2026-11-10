@@ -57,6 +57,11 @@ let exn_to_string : exn -> string =
     }|}]
 
 external encode_uri : string -> string = "encodeURIComponent"
+external decode_uri : string -> string = "decodeURIComponent"
+
+let contains : node -> node -> bool = [%mel.raw "function (a, b) { return a.contains(b) }"]
+
+let set_title : string -> unit = [%mel.raw "function (t) { document.title = t }"]
 
 let fetch_post :
     string ->
@@ -125,6 +130,23 @@ external first_element_child : node -> node option = "firstElementChild"
 
 let has_intersection_observer : node -> bool =
   [%mel.raw "function (el) { return typeof el.ownerDocument.defaultView.IntersectionObserver === 'function' }"]
+
+let form_values : event -> (string * string) array =
+  [%mel.raw
+    {|function (ev) {
+  const el = ev.target, out = [];
+  new el.ownerDocument.defaultView.FormData(el).forEach(function (v, k) { if (typeof v === "string") out.push([k, v]); });
+  const s = ev.submitter;
+  if (s && s.name) out.push([s.name, s.value]);
+  return out;
+}|}]
+
+let set_timeout : int -> (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (ms, f) {
+  const id = setTimeout(function () { f() }, ms);
+  return function () { clearTimeout(id); };
+}|}]
 
 let on_idle : (unit -> unit) -> unit -> unit =
   [%mel.raw
@@ -300,28 +322,34 @@ let abort : controller -> unit =
   [%mel.raw
     "function (c) { c.abort() }"]
 
-let click_href : event -> string =
+let plain_click : event -> bool =
   [%mel.raw
-    {|function (e) {
-  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return "";
-  const t = e.target;
+    "function (e) { return !(e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) }"]
+
+let link_href : bool -> node -> string =
+  [%mel.raw
+    {|function (prefetch, t) {
   const a = t && t.closest ? t.closest("a[href]") : null;
   if (!a) return "";
   const target = a.getAttribute("target");
   if ((target && target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-yuka-reload")) return "";
+  if (prefetch && a.getAttribute("data-yuka-prefetch") === "off") return "";
   const l = window.location;
   if (a.origin !== l.origin) return "";
   if (a.hash && a.pathname === l.pathname && a.search === l.search) return "";
   return a.href;
 }|}]
 
-let fetch_page : string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit =
+let fetch_page :
+    string -> string -> bool -> controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
   [%mel.raw
-    {|function (url, controller, ok, fail) {
+    {|function (url, keys, prefetch, controller, ok, fail) {
   const signal = controller.signal;
+  const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
+  if (prefetch) { init.headers["Yuka-Prefetch"] = "1"; init.cache = "no-store"; }
   let request;
   try {
-    request = fetch(url, { headers: { "Yuka-Navigate": "1" }, credentials: "same-origin", signal: signal });
+    request = fetch(url, init);
   } catch (e) {
     fail();
     return;
@@ -333,16 +361,62 @@ let fetch_page : string -> controller -> (string -> string -> unit) -> (unit -> 
     .then(
       function (x) {
         if (signal.aborted) return;
-        const status = x.r.status;
-        const type = x.r.headers && x.r.headers.get ? x.r.headers.get("content-type") || "" : "";
-        if (!(status >= 200 && status < 300) || type.toLowerCase().indexOf("text/html") < 0) { fail(); return; }
         const base = window.location.href;
         const target = new URL(typeof x.r.url === "string" && x.r.url ? x.r.url : url, base);
         if (target.origin !== window.location.origin) { fail(); return; }
         const hash = target.hash || new URL(url, base).hash;
-        ok(target.pathname + target.search + hash, x.text);
+        ok(target.pathname + target.search + hash, x.r.status, function (name) { const v = x.r.headers && x.r.headers.get ? x.r.headers.get(name) : null; return v === null ? undefined : v; }, x.text);
       },
       function () { if (!signal.aborted) fail(); });
+}|}]
+
+let absolute : string -> string =
+  [%mel.raw "function (u) { const x = new URL(u, window.location.href); x.hash = ''; return x.href }"]
+
+let max_age : string -> int =
+  [%mel.raw
+    {|function (v) { const m = /(?:^|,)\s*max-age=(\d+)/.exec(v); return /(?:^|,)\s*no-(?:store|cache)\s*(?:,|$)/.test(v) || !m ? 0 : +m[1] }|}]
+
+let key_before : string -> string -> bool =
+  [%mel.raw
+    {|function (a, b) { const x = a.split("-"), y = b.split("-"); return +x[0] < +y[0] || (+x[0] === +y[0] && +x[1] < +y[1]) }|}]
+
+let now : unit -> float = [%mel.raw "function () { return Date.now() }"]
+
+let after : int -> (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    "function (ms, f) { const id = setTimeout(function () { f() }, ms); return function () { clearTimeout(id) } }"]
+
+let save_data : unit -> bool =
+  [%mel.raw
+    "function () { const c = window.navigator.connection; return !!(c && c.saveData) }"]
+
+let observe : node array -> (node -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (els, f) {
+  const O = window.IntersectionObserver;
+  if (typeof O !== "function") return function () {};
+  const observer = new O(function (entries) {
+    for (const e of entries) if (e.isIntersecting) { observer.unobserve(e.target); f(e.target); }
+  });
+  for (const el of els) observer.observe(el);
+  return function () { observer.disconnect(); };
+}|}]
+
+let transition : string -> (unit -> unit) -> unit =
+  [%mel.raw
+    {|function (dir, f) {
+  const d = document;
+  if (typeof d.startViewTransition !== "function") { f(); return; }
+  const h = d.documentElement;
+  const id = (globalThis.__yukaTransition = (globalThis.__yukaTransition || 0) + 1);
+  h.setAttribute("data-yuka-nav", dir);
+  const done = function () { if (globalThis.__yukaTransition === id) h.removeAttribute("data-yuka-nav"); };
+  const t = d.startViewTransition(function () {
+    try { f(); } catch (e) { d.defaultView.setTimeout(function () { throw e; }); }
+  });
+  t.ready.then(null, function () {});
+  t.finished.then(done, done);
 }|}]
 
 let swap_page : string -> unit =

@@ -24,6 +24,10 @@ external flag : Web.event -> string -> bool Js.undefined = "" [@@mel.get_index]
 external find : 'a Web.table -> string -> 'a Js.undefined = "get" [@@mel.send]
 external defined : 'a Js.undefined -> 'a = "%identity"
 
+(* Melange represents [Some x] as [x] when [x] is neither undefined nor an
+   option; a DOM node is neither. *)
+external present : Web.node -> Obj.t option = "%identity"
+
 let get = Array.unsafe_get
 let set = Array.unsafe_set
 let some n : cur = Js.Null.return n
@@ -214,6 +218,16 @@ let stopped_key = Platform.stopped_key
 type handler = { run : Web.event -> unit; owner : Base.owner; gen : int }
 
 let live h = h.owner.gen = h.gen
+let acting : Base.owner option ref = ref None
+
+let acting_as owner f ev =
+  let prev = !acting in
+  acting := owner;
+  match f ev with
+  | () -> acting := prev
+  | exception e ->
+      acting := prev;
+      raise e
 
 let dispatch event ev =
   let key = handlers_key event in
@@ -223,7 +237,11 @@ let dispatch event ev =
       let hs = defined hs in
       for i = 0 to Array.length hs - 1 do
         let h = get hs i in
-        if live h then h.run ev
+        if live h then
+          try acting_as (Some h.owner) h.run ev
+          with e ->
+            Base.fail h.owner e;
+            Web.set_flag ev stopped_key true
       done
     end;
     if flag ev stopped_key != Js.Undefined.return true then begin
@@ -240,17 +258,19 @@ let delegate doc event =
     Web.add_listener doc event (dispatch event)
   end
 
-let unowned : Base.owner = { last = None; gen = 0 }
+let unowned : Base.owner = { last = None; gen = 0; catch = None }
 
 let add_handler doc el event handler =
+  let owner = match !Base.current_owner with Some o -> o | None -> unowned in
   if non_bubbling event then begin
+    let handler = acting_as !Base.current_owner handler in
+    let handler ev = try handler ev with e -> Base.fail owner e in
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
   end
   else begin
     delegate doc event;
     let key = handlers_key event in
-    let owner = match !Base.current_owner with Some o -> o | None -> unowned in
     let h = { run = handler; owner; gen = owner.gen } in
     let hs = prop el key in
     if hs == Js.undefined then Web.set_prop el key [| h |]
@@ -379,6 +399,8 @@ let rec mount_node pos last n =
           instantiate pos template c parts
       | None -> mount_node pos last (Template.expand template parts))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
+  | Catch { client; _ } ->
+      mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
   | Each { items; key; equal; render } ->
       last := false;
       mount_each pos false items key equal render
@@ -467,8 +489,15 @@ and mount_hole pos owned f =
       let n = f () in
       if not !mounted then begin
         mounted := true;
-        place pos n;
-        drop_to_end pos
+        let close () =
+          drop_to_end pos;
+          if not owned then stop := some (comment pos "]")
+        in
+        (try place pos n
+         with e ->
+           close ();
+           raise e);
+        close ()
       end
       else
         match n with
@@ -483,8 +512,7 @@ and mount_hole pos owned f =
             else begin
               remove_between (node_of start) (node_of !stop);
               place { pos with cur = !stop; adopt = false } n
-            end);
-  if not owned then stop := some (comment pos "]")
+            end)
 
 and mount_each :
     type a.
@@ -628,6 +656,7 @@ let start ~adopt container f =
 
 let render container f = start ~adopt:false container f
 let hydrate container f = start ~adopt:true container f
+let on_error : (string -> unit) ref = ref ignore
 
 let cleanup_table : (unit -> unit) Web.table option ref = ref None
 
@@ -667,7 +696,9 @@ let transport name input =
       match Json.of_string body with
       | Ok (`Assoc fields) -> (
           match (field "ok" fields, field "error" fields) with
-          | Some value, _ -> resolve value
+          | Some value, _ ->
+              !Platform.acted ();
+              resolve value
           | None, Some (`String message) -> fail message
           | None, _ ->
               fail
@@ -682,7 +713,14 @@ let transport name input =
       if cancelled then fail "cancelled"
       else fail ("action " ^ name ^ ": network error: " ^ message))
   in
-  if Web.table_has (cleanups ()) (string_of_int id) then set_cleanup id abort;
+  if Web.table_has (cleanups ()) (string_of_int id) then begin
+    set_cleanup id abort;
+    match (match !acting with Some o -> Some o | None -> !Base.current_owner) with
+    | Some owner ->
+        let disposer = Base.add_disposer owner abort in
+        Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
+    | None -> ()
+  end;
   result
 
 let async_value id =
@@ -763,9 +801,33 @@ let boot entries props island =
           match entry.decode json with
           | Error message -> fail ("cannot decode props: " ^ message)
           | Ok build -> (
-              try
-                Some (hydrate island build)
-              with e -> fail (Web.exn_to_string e))))
+              let failed = ref false and dispose = ref ignore in
+              let report e =
+                let m = "yuka island " ^ id ^ " (" ^ name ^ "): " ^ Web.exn_to_string e in
+                Web.console_error m;
+                try !on_error m with _ -> ()
+              in
+              let stop d = try d () with e -> report e in
+              let catch e =
+                if not !failed then begin
+                  failed := true;
+                  let late = try !dispose (); None with d -> Some d in
+                  report e;
+                  Option.iter report late
+                end
+              in
+              let o = Base.new_owner () in
+              o.catch <- Some catch;
+              match Base.with_owner o (fun () -> hydrate island build) with
+              | d when !failed ->
+                  stop d;
+                  None
+              | d ->
+                  dispose := d;
+                  Some d
+              | exception e ->
+                  catch e;
+                  None)))
 
 let schedule strategy island run =
   match strategy with
@@ -801,6 +863,25 @@ let stop () =
   List.iter (fun island -> Web.set_bool island started_key false) !live_islands;
   live_islands := []
 
+let cleanup_key = "__yuka_cleanup"
+
+let stop_within el =
+  let inside, outside = List.partition (fun island -> Web.contains el island) !live_islands in
+  live_islands := outside;
+  List.iter
+    (fun island ->
+      (match (Web.get_prop island cleanup_key : int option) with
+      | Some id -> (
+          let key = string_of_int id in
+          match Web.table_get (cleanups ()) key with
+          | Some f ->
+              Web.table_delete (cleanups ()) key;
+              f ()
+          | None -> ())
+      | None -> ());
+      Web.set_bool island started_key false)
+    inside
+
 let load_lazy lazies name =
   match List.find_opt (fun l -> l.lazy_name = name) lazies with
   | None -> None
@@ -814,6 +895,7 @@ let start_island entries lazy_entries props island =
   Web.set_bool island started_key true;
   live_islands := island :: !live_islands;
   let id = register ignore in
+  Web.set_prop island cleanup_key id;
   let fired = ref false in
   let name = Option.value (Web.get_attribute island "data-name") ~default:"" in
   let known = List.exists (fun e -> e.name = name) entries in

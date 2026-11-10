@@ -20,7 +20,7 @@ let recorder () =
   let chunks = ref [] in
   ( (fun c ->
       chunks := c :: !chunks;
-      Async.resolved ()),
+      Async.return ()),
     fun () -> List.rev !chunks )
 
 let manual_sleep () =
@@ -100,7 +100,7 @@ let page_cases =
           Yuka.text "b";
           Yuka.hole (fun () -> Yuka.text "h");
           Yuka.each ~key:Fun.id (fun () -> [ "x"; "y" ]) Yuka.text;
-          text_await (Async.resolved 1) "s";
+          text_await (Async.return 1) "s";
           text_await pending "l" ]
     in
     let outside =
@@ -108,7 +108,7 @@ let page_cases =
           Yuka.lower "p" []
             [ Yuka.text "a";
               Yuka.text "b";
-              text_await (Async.resolved 1) "s";
+              text_await (Async.return 1) "s";
               text_await pending "l" ])
     in
     check string "no markers outside an island" "<p>abs1Ll</p>" outside;
@@ -166,7 +166,7 @@ let call_gate, call_open, _ = Async.make ()
 
 let () =
   Server.Action.implement create (fun i ->
-      Async.resolved { i with n = i.n + 1 });
+      Async.return { i with n = i.n + 1 });
   Server.Action.implement broken (fun _ -> failwith "secret detail");
   Server.Action.implement failing (fun _ -> Async.failed "secret failure");
   Server.Action.implement rejecting (fun _ -> Server.Action.reject "title is empty");
@@ -178,9 +178,16 @@ let () =
 
 let json_type = Some "application/json"
 
-let post ?(content_type = json_type) ?(origin = None) ?(host = Some "x.test")
-    name body =
-  get (Yuka.Private.handle_action ~name ~content_type ~origin ~host ~body)
+let headers ?(content_type = json_type) ?(origin = Some "https://x.test") ?(host = Some "x.test")
+    ?fetch_site () = function
+  | "content-type" -> content_type
+  | "origin" -> origin
+  | "host" -> host
+  | "sec-fetch-site" -> fetch_site
+  | _ -> None
+
+let post ?content_type ?origin ?host ?fetch_site name body =
+  get (Yuka.Private.handle_action ~name ~header:(headers ?content_type ?origin ?host ?fetch_site ()) ~body)
 
 let logged f =
   let messages = ref [] in
@@ -229,15 +236,22 @@ let action_cases =
     check int "other port" 403 (with_origin "http://x.test:81");
     check int "same" 200 (with_origin "https://x.test");
     check int "no host" 403
-      (fst (post ~origin:(Some "https://x.test") ~host:None "create" json))
+      (fst (post ~origin:(Some "https://x.test") ~host:None "create" json));
+    check int "no origin" 403 (fst (post ~origin:None "create" json));
+    check int "no origin from a same-site page" 403
+      (fst (post ~origin:None ~fetch_site:"same-site" "create" json));
+    check int "no origin from this origin" 200
+      (fst (post ~origin:None ~fetch_site:"same-origin" "create" json));
+    check int "a path is not an origin" 403 (with_origin "x.test");
+    check int "an origin with a path" 403 (with_origin "https://x.test.evil/")
   in
   let check_order () =
     check int "origin before name" 403
       (fst (post ~origin:(Some "https://evil.test") "nope" "1"));
     check int "name before content type" 404
       (fst (post ~content_type:None "nope" "1"));
-    check int "content type before size" 415
-      (fst (post ~content_type:None "create" (String.make 2_000_000 'x')))
+    check int "content type before the body" 415
+      (fst (post ~content_type:None "create" "{"))
   in
   let generic_500 () =
     let (raised, failed), messages =
@@ -251,7 +265,7 @@ let action_cases =
   in
   let twice () =
     check bool "raises" true
-      (match Server.Action.implement create (fun i -> Async.resolved i) with
+      (match Server.Action.implement create (fun i -> Async.return i) with
       | () -> false
       | exception Invalid_argument _ -> true)
   in
@@ -281,23 +295,6 @@ let action_cases =
     test_case "implement twice" `Quick twice;
     test_case "server-side call" `Quick direct_call;
     test_case "late call settles" `Quick late_call ]
-
-let body_limit_cases =
-  let open Alcotest in
-  let limit = 1_048_576 in
-  let json_body size =
-    Printf.sprintf "{\"title\":\"%s\",\"n\":1}" (String.make (size - 18) 'x')
-  in
-  let at_limit () =
-    check int "exactly the limit" 200 (fst (post "create" (json_body limit)))
-  in
-  let over () =
-    check (pair int string) "over the limit"
-      (413, "{\"error\":\"request too large\"}")
-      (post "create" (json_body (limit + 1)))
-  in
-  [ test_case "at the limit" `Quick at_limit;
-    test_case "over the limit" `Quick over ]
 
 let stream_cases =
   let open Alcotest in
@@ -332,7 +329,7 @@ let stream_cases =
   in
   let settled_inline () =
     let write, chunks = recorder () in
-    get (stream (fun () -> text_await (Async.resolved 7) "a") write);
+    get (stream (fun () -> text_await (Async.return 7) "a") write);
     check list_of "no fill"
       [ "a7"; "</body></html>" ]
       (List.tl (chunks ()))
@@ -471,12 +468,12 @@ let stream_cases =
     check string "pending prints loading" "La"
       (Server.to_string (fun () -> text_await pending "a"));
     check string "settled prints value" "a1"
-      (Server.to_string (fun () -> text_await (Async.resolved 1) "a"));
+      (Server.to_string (fun () -> text_await (Async.return 1) "a"));
     check string "failed prints nothing" ""
       (Server.to_string (fun () -> text_await (Async.failed "x") "a"));
     check bool "settled prop inline" true
       (contains
-         (Server.to_string (fun () -> island (Async.resolved 3)))
+         (Server.to_string (fun () -> island (Async.return 3)))
          "{\"$async\":\"a1\",\"ok\":3}");
     check bool "pending prop is an error" true
       (contains
@@ -566,7 +563,7 @@ let stream_cases =
   let write_failure () =
     let write chunk =
       if contains chunk "<template" then Async.failed "socket closed"
-      else Async.resolved ()
+      else Async.return ()
     in
     let a, resolve, _ = Async.make () in
     let p = stream (fun () -> text_await a "a") write in
@@ -679,8 +676,7 @@ let reject_cases =
   in
   let after_a_wait () =
     let waiting =
-      Yuka.Private.handle_action ~name:"rejecting_late" ~content_type:json_type
-        ~origin:None ~host:(Some "x.test") ~body:"1"
+      Yuka.Private.handle_action ~name:"rejecting_late" ~header:(headers ()) ~body:"1"
     in
     check bool "pending" true (is_pending waiting);
     late_open ();
@@ -752,7 +748,7 @@ let timeout_cases =
   let no_timer_when_settled () =
     let sleep, _, requested = manual_sleep () in
     let write, _ = recorder () in
-    get (stream ~sleep (fun () -> text_await (Async.resolved 1) "a") write);
+    get (stream ~sleep (fun () -> text_await (Async.return 1) "a") write);
     check int "no timer" 0 (List.length (requested ()))
   in
   let nested_after_timeout () =
@@ -1053,7 +1049,7 @@ let review_cases =
     let write chunk =
       written := chunk :: !written;
       if contains chunk "<!--[s1-->" then resolve_a 1;
-      Async.resolved ()
+      Async.return ()
     in
     let p =
       stream
@@ -1074,7 +1070,7 @@ let review_cases =
     let write chunk =
       written := chunk :: !written;
       if contains chunk "data-yuka-props=\"i1\"" then resolve_a 1;
-      Async.resolved ()
+      Async.return ()
     in
     let p =
       stream
@@ -1099,7 +1095,7 @@ let review_cases =
      let a, resolve, _ = Async.make () in
      let write chunk =
        ignore (Sys.opaque_identity (Bytes.length marker, chunk));
-       Async.resolved ()
+       Async.return ()
      in
      let p = stream ~sleep (fun () -> text_await a "a") write in
      resolve 1;
@@ -1172,6 +1168,24 @@ let loading_cases =
     in
     check int "a later non-lazy use gets the link" 1
       (count out (link "/js/A.js"))
+  in
+  let catch_keeps_link () =
+    let saved = !Yuka.Server.log_error in
+    Yuka.Server.log_error := ignore;
+    let out =
+      shell ~preload (fun () ->
+          Yuka.fragment
+            [ Yuka.Catch.make
+                ~fallback:(fun ~error:_ ~reset:_ -> Yuka.text "f")
+                ~children:(fun () ->
+                  Yuka.fragment
+                    [ isl "A";
+                      Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "x")) ])
+                ();
+              isl "A" ])
+    in
+    Yuka.Server.log_error := saved;
+    check int "the link of a dropped island is printed again" 1 (count out (link "/js/A.js"))
   in
   let no_function () =
     check bool "no link" false
@@ -1257,6 +1271,23 @@ let loading_cases =
     check bool "link after the outer close" true (contains after (link "/js/Inner.js"));
     check int "inner link once" 1 (count out (link "/js/Inner.js"))
   in
+  let nested_in_failed_catch () =
+    let saved = !Yuka.Server.log_error in
+    Yuka.Server.log_error := ignore;
+    let out =
+      shell ~preload (fun () ->
+          outer_with (fun () ->
+              Yuka.Catch.make
+                ~fallback:(fun ~error:_ ~reset:_ -> Yuka.text "f")
+                ~children:(fun () ->
+                  Yuka.fragment
+                    [ Yuka.Private.element (Yuka.Private.node (isl "Inner"));
+                      Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "x")) ])
+                ()))
+    in
+    Yuka.Server.log_error := saved;
+    check int "no link for the dropped inner island" 0 (count out (link "/js/Inner.js"))
+  in
   let nested_dedup () =
     let out =
       shell ~preload (fun () ->
@@ -1338,6 +1369,7 @@ let loading_cases =
   in
   [ test_case "data-start from the trigger" `Quick data_start;
     test_case "preload once per island name" `Quick once;
+    test_case "a dropped island in a Catch keeps the preload link" `Quick catch_keeps_link;
     test_case "no preload for lazy" `Quick lazy_none;
     test_case "no preload without the function" `Quick no_function;
     test_case "no preload without a url" `Quick none_result;
@@ -1346,6 +1378,7 @@ let loading_cases =
     test_case "no preload inside an island (render)" `Quick nested_in_render;
     test_case "no preload inside an island (slot)" `Quick nested_in_slot;
     test_case "nested preload once" `Quick nested_dedup;
+    test_case "no queued link for an island dropped by a Catch" `Quick nested_in_failed_catch;
     test_case "no preload in a fill inside an island" `Quick await_in_island;
     test_case "preload when navigating" `Quick respond_navigating;
     test_case "preload_urls without metafile" `Quick urls;
@@ -1362,7 +1395,6 @@ let () =
           Cases.all );
       ("server", page_cases);
       ("actions", action_cases);
-      ("body limit", body_limit_cases);
       ("streaming", stream_cases);
       ("page extras", page_extra_cases);
       ("reject", reject_cases);

@@ -28,3 +28,5 @@ val render : container -> (unit -> Types.node) -> unit -> unit
 val hydrate : container -> (unit -> Types.node) -> unit -> unit
 val start : ?lazy_entries:lazy_entry list -> entry list -> unit
 val stop : unit -> unit
+val stop_within : Web.node -> unit
+val on_error : (string -> unit) ref

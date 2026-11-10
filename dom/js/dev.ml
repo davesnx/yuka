@@ -1,3 +1,5 @@
+let on : bool = [%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]
+
 let report : (Web.node -> string -> Web.node option -> unit[@u]) =
   [%mel.raw
     {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function (parent, expected, found) {

@@ -1,14 +1,23 @@
-type cell = {
+type cell = Scheduler.cell = {
   mutable dispose : unit -> unit;
   mutable prev : cell option;
   mutable next : cell option;
   mutable live : bool;
 }
 
-type owner = { mutable last : cell option; mutable gen : int }
+type owner = Scheduler.owner = {
+  mutable last : cell option;
+  mutable gen : int;
+  mutable catch : (exn -> unit) option;
+}
 
 let current_owner : owner option ref = ref None
-let new_owner () = { last = None; gen = 0 }
+
+let new_owner () =
+  { last = None; gen = 0;
+    catch = (match !current_owner with Some o -> o.catch | None -> None) }
+
+let fail = Scheduler.catch
 
 let add_disposer o dispose =
   let c = { dispose; prev = o.last; next = None; live = true } in
@@ -95,12 +104,25 @@ module Effect = struct
       Scheduler.dispose node;
       teardown ()
     in
-    (match Scheduler.start node with
-    | () -> ()
-    | exception e ->
-        stop ();
-        raise e);
-    own stop
+    node.owner <- Some child;
+    let first = ref None in
+    let later =
+      match Scheduler.batch (fun () -> try Scheduler.run node with e -> first := Some e) with
+      | () -> None
+      | exception e -> Some e
+    in
+    match !first with
+    | Some e -> (
+        match child.catch with
+        | Some _ ->
+            fail child e;
+            own stop
+        | None ->
+            stop ();
+            raise e)
+    | None -> (
+        own stop;
+        match later with Some e -> raise e | None -> ())
 
   let on_change ?equal state f =
     let prev = ref (Signal.peek state) in
