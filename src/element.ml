@@ -89,7 +89,7 @@ module Show = struct
     Hole
       (fun () ->
         match State.get view with
-        | `Data d -> children d
+        | `Data d -> Scheduler.untrack (fun () -> children d)
         | `Loading -> loading
-        | `Failed e -> failed e)
+        | `Failed e -> Scheduler.untrack (fun () -> failed e))
 end

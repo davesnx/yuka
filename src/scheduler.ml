@@ -1,6 +1,21 @@
 (* Adapted from Solid (solid-js/src/reactive/signal.ts, version 1.9).
    Copyright (c) 2016-2023 Ryan Carniato. MIT licence: see LICENSE.solid. *)
 
+type cell = {
+  mutable dispose : unit -> unit;
+  mutable prev : cell option;
+  mutable next : cell option;
+  mutable live : bool;
+}
+
+type owner = {
+  mutable last : cell option;
+  mutable gen : int;
+  mutable catch : (exn -> unit) option;
+}
+
+let catch o e = match o.catch with Some h -> h e | None -> raise e
+
 type node = {
   mutable first : link option;
   mutable last : link option;
@@ -11,7 +26,7 @@ type node = {
   mutable fn : unit -> bool;
   mutable level : int;
   mutable runs : int;
-  mutable catch : exn -> unit;
+  mutable owner : owner option;
   depth : int;
   id : int;
   eff : bool;
@@ -32,7 +47,6 @@ let listener = ref None
 let queue = ref []
 let depth = ref 0
 let never () = false
-let rethrow e = raise e
 
 let make eff fn =
   incr ids;
@@ -46,7 +60,7 @@ let make eff fn =
     fn;
     level = 0;
     runs = 0;
-    catch = rethrow;
+    owner = None;
     depth = !stack;
     id = !ids;
     eff;
@@ -232,7 +246,12 @@ let flush () =
             else begin
               incr rounds;
               List.iter
-                (fun n -> try fresh n with e -> try n.catch e with e -> fail e)
+                (fun n ->
+                  try fresh n
+                  with e -> (
+                    match n.owner with
+                    | Some o -> ( try catch o e with e -> fail e)
+                    | None -> fail e))
                 (if sorted q then q else sort q)
             end;
             loop ()

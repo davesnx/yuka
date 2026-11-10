@@ -1471,6 +1471,20 @@ let catch_server_drops_pending () =
   check "fallback" "<p>caught server error</p>" html;
   check "no fill for the dropped Await" "0" (string_of_int (List.length (Private.take_pending s)))
 
+let catch_server_select () =
+  let html, _ =
+    logged (fun () ->
+        page_html (fun () ->
+            lower "main" []
+              [ Catch.make ~fallback
+                  ~children:(fun () ->
+                    lower "select" [ attr "value" "x" ] [ lower "option" [ attr "value" "x" ] []; late () ])
+                  ();
+                lower "datalist" [] [ lower "option" [ attr "value" "x" ] [] ] ]))
+  in
+  check "the select value of the dropped children does not leak"
+    {|<main><p>caught server error</p><datalist><option value="x"></option></datalist></main>|} html
+
 let show_view status =
   Show.make
     ~status:(fun () -> status)
@@ -1497,6 +1511,7 @@ let all =
     ("catch: server drops the islands of failed children", catch_server_keeps_islands);
     ("catch: server drops the fills of failed children", catch_server_drops_pending);
     ("show: server states", show_server);
+    ("catch: server select value", catch_server_select);
     ("memo is lazy without readers", memo_lazy_without_readers);
     ("memo diamond", memo_diamond);
     ("dynamic dependencies", dynamic_dependencies);

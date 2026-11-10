@@ -59,9 +59,13 @@ module Effect : sig
       changes. Before each re-run and when its owner is disposed, [cleanup]
       receives the result of the previous run, and effects created inside the
       previous run are disposed. Inside a {!Catch} or an island, an exception
-      in the body or the cleanup goes to that boundary. Elsewhere, an
-      exception in one effect does not stop other effects; the first one is
-      raised again after all pending effects ran. If effects and memos keep changing States they read for more than
+      in the body, or in a cleanup that runs during a State change or an
+      event handler, goes to that boundary. A cleanup that raises when its
+      owner is disposed by a direct call (the function returned by {!owner},
+      {!Client.render} or {!Client.hydrate}, or {!unmount}) raises to that
+      caller. Elsewhere, an exception in one effect does not stop other
+      effects; the first one is raised again after all pending effects
+      ran. If effects and memos keep changing States they read for more than
       100 update rounds, the pending work is dropped and [Failure] is
       raised. *)
 

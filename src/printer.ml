@@ -9,7 +9,7 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false }
+      current = None; in_fill = false; select_value = None }
 
   let take_pending s =
     let p = List.rev s.pending in
@@ -24,7 +24,6 @@ open Base
   let rec print s build =
     let b = Buffer.create 256 in
     let after_text = ref false in
-    let select_value = ref None in
     let hydrating () = (not s.islands_only) || s.depth > 0 in
     let marker m =
       if hydrating () then Buffer.add_string b m;
@@ -92,9 +91,7 @@ open Base
               marker "<!--]-->")
       | Template { template; parts } -> go (Template.expand template parts)
       | Catch { children; fallback; _ } -> (
-          let length = Buffer.length b and text = !after_text
-          and pending = s.pending and queued = s.queued and entry = s.entry
-          and preloaded = s.preloaded in
+          let length = Buffer.length b and text = !after_text and saved = snapshot s in
           try
             marker "<!--[-->";
             go (children ());
@@ -102,10 +99,7 @@ open Base
           with e ->
             Buffer.truncate b length;
             after_text := text;
-            s.pending <- pending;
-            s.queued <- queued;
-            s.entry <- entry;
-            s.preloaded <- preloaded;
+            restore s saved;
             !log_error ("Yuka.Catch: " ^ Web.exn_to_string e);
             marker "<!--[!-->";
             go (fallback ~error:"server error" ~reset:ignore);
@@ -185,7 +179,7 @@ open Base
             if tag = "select" || tag = "textarea" then
               List.filter (fun (name, _) -> name <> "value") resolved
             else if
-              tag = "option" && value <> None && !select_value = value
+              tag = "option" && value <> None && s.select_value = value
               && not (List.mem_assoc "selected" resolved)
             then resolved @ [ ("selected", "") ]
             else resolved
@@ -220,10 +214,10 @@ open Base
                   Buffer.add_char b '\n';
                 Buffer.add_string b (escape ~quote:false v)
             | "select", _ ->
-                let outer = !select_value in
-                select_value := value;
+                let outer = s.select_value in
+                s.select_value <- value;
                 contents children;
-                select_value := outer
+                s.select_value <- outer
             | _ -> contents children);
             Buffer.add_string b "</";
             Buffer.add_string b tag;

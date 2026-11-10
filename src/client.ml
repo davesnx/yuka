@@ -209,7 +209,10 @@ let dispatch event ev =
             List.iter
               (fun h ->
                 if live h then
-                  try acting_as (Some h.owner) h.run ev with e -> Base.fail h.owner e)
+                  try acting_as (Some h.owner) h.run ev
+                  with e ->
+                    Base.fail h.owner e;
+                    Web.set_flag ev stopped_key true)
               hs
         | None -> ());
         match Web.get_flag ev stopped_key with
@@ -460,9 +463,15 @@ and mount_hole pos owned f =
       let n = f () in
       if not !mounted then begin
         mounted := true;
-        place pos n;
-        drop_to_end pos;
-        if not owned then stop := Some (comment pos "]")
+        let close () =
+          drop_to_end pos;
+          if not owned then stop := Some (comment pos "]")
+        in
+        (try place pos n
+         with e ->
+           close ();
+           raise e);
+        close ()
       end
       else
         match (n, !text_node) with
@@ -755,10 +764,10 @@ let boot entries props island =
               let catch e =
                 if not !failed then begin
                   failed := true;
+                  !dispose ();
                   let m = "yuka island " ^ id ^ " (" ^ name ^ "): " ^ Web.exn_to_string e in
                   Web.console_error m;
-                  !on_error m;
-                  !dispose ()
+                  try !on_error m with _ -> ()
                 end
               in
               let o = Base.new_owner () in

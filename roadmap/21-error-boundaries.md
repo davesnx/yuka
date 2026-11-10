@@ -31,5 +31,5 @@ Built (option A with `Show`, every recommended answer).
 - `<Yuka.Show status loading failed>` shows a `Status.t`; `Yuka.Status`
   is added (type, `data`, `error_to_string`).
 - Failed `Async` and `Status.Failed` stay data.
-- Size: +166 B gzip on the keyed benchmark (the routing in the core).
+- Size: +177 B gzip on the keyed benchmark against main b8c02c8 (the routing in the core).
 - Deviations: `.workplace/docs/app-spec.md`, "21: changes during build".

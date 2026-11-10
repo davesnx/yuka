@@ -314,6 +314,94 @@ let island_boot_error () =
   check "logged" {|yuka island i1 (Bad): Failure(boot)|} (I.errors ());
   check "server html kept" "server" (I.spans c)
 
+let bad_rows () =
+  D.div [] [ each ~key:Fun.id (fun () -> [ "a"; "bad" ])
+               (fun s -> if s = "bad" then failwith "row" else D.span [ text s ]) ]
+
+let catch_each_first_render () =
+  let c, dispose = render (fun () -> D.div [] [ text "a"; boundary bad_rows; text "b" ]) in
+  check "a row that raises at first render" {|acaught Failure(row)b|} (shown c);
+  dispose ()
+
+let catch_each_first_hydrate () =
+  let ok = ref true in
+  let tree () = D.div [] [ boundary (fun () -> if !ok then D.span [ text "ok" ] else bad_rows ()) ] in
+  let html = D.server (tree ()) in
+  ok := false;
+  let island = D.create (D.document ()) "yuka-island" in
+  D.append (D.body ()) island;
+  D.set_html island html;
+  D.capture_warnings ();
+  let dispose = Client.hydrate (D.as_element island) tree in
+  ignore (D.warnings ());
+  check "a row that raises during hydration"
+    "<div><!--[--><p class=\"fallback\">caught Failure(row)</p><!--]--></div>" (D.html island);
+  dispose ()
+
+let show_untracks_children () =
+  let st = State.make (Status.Ready { data = "a"; stale = false }) and other = State.make "x" in
+  let c, dispose =
+    render (fun () ->
+        Show.make
+          ~status:(fun () -> State.get st)
+          ~loading:(text "loading")
+          ~children:(fun d -> lower "b" [] [ text (d ^ State.get other) ])
+          ())
+  in
+  let b = D.query c "b" in
+  State.set other "y";
+  D.same "a read in the children does not render Show again" b (D.query c "b");
+  check "text" "ax" (shown c);
+  dispose ()
+
+let handler_error_stops_event () =
+  let outer = ref 0 in
+  let c, dispose =
+    render (fun () ->
+        lower "div"
+          [ on "click" (fun _ -> incr outer) ]
+          [ boundary (fun () -> lower "button" [ on "click" (fun _ -> failwith "click") ] []) ])
+  in
+  batch (fun () -> D.click (D.query c "button"));
+  check "fallback" {|caught Failure(click)|} (shown c);
+  check "ancestor handlers do not run" "0" (ints !outer);
+  dispose ()
+
+let cleanup_on_dispose () =
+  let items = State.make [ "a" ] and cleaned = ref 0 in
+  let row _ =
+    Effect.run ~cleanup:(fun () -> incr cleaned) ignore;
+    Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
+    D.span [ text "r" ]
+  in
+  let c, dispose =
+    render (fun () ->
+        D.div [] [ boundary (fun () -> D.div [] [ each ~key:Fun.id (fun () -> State.get items) row ]) ])
+  in
+  State.set items [];
+  check "fallback" {|caught Failure(cleanup)|} (shown c);
+  check "the other cleanups of the owner ran" "1" (ints !cleaned);
+  dispose ()
+
+let on_error_raises () =
+  let c =
+    I.setup_page
+      (I.page [ Client.island ~name:"Bad" ~props:(`Int 0) click_view; I.counter_island 10 ])
+  in
+  I.capture_errors ();
+  Yuka.mount
+    ~islands:(Client.registry [ Client.entry ~name:"Bad" (fun _ -> Ok click_view); I.counter_entry ])
+    ~navigation:false
+    ~on_error:(fun _ -> failwith "reporter down")
+    ();
+  let button i = (D.query_all c "button").(i) in
+  D.click (button 0);
+  D.click (button 0);
+  ignore (I.errors ());
+  check "the island stopped although on_error raised" "1,10" (I.spans c);
+  D.click (button 1);
+  check "the other island works" "1,11" (I.spans c)
+
 let all =
   [
     ("catch: render", catch_render);
@@ -326,6 +414,12 @@ let all =
     ("catch: event handler", catch_click);
     ("catch: non-bubbling handler", catch_focus);
     ("catch: reset", catch_reset);
+    ("catch: each row that raises at first render", catch_each_first_render);
+    ("catch: each row that raises during hydration", catch_each_first_hydrate);
+    ("show: children are untracked", show_untracks_children);
+    ("catch: a handler error stops the event", handler_error_stops_event);
+    ("catch: a cleanup that raises on dispose", cleanup_on_dispose);
+    ("island: on_error that raises", on_error_raises);
     ("catch: nested", catch_nested);
     ("catch: error in the fallback", catch_fallback_error);
     ("catch: hydrate a server fallback", catch_hydrate_fallback);

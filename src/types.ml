@@ -108,7 +108,27 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable entry : string option;
     mutable current : string option;
     mutable in_fill : bool;
+    mutable select_value : string option;
   }
+
+  let snapshot s = { s with streaming = s.streaming }
+
+  let restore s
+      { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
+        preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value } =
+    s.islands <- islands;
+    s.asyncs <- asyncs;
+    s.awaits <- awaits;
+    s.pending <- pending;
+    s.preload <- preload;
+    s.preloaded <- preloaded;
+    s.depth <- depth;
+    s.queued <- queued;
+    s.id_prefix <- id_prefix;
+    s.entry <- entry;
+    s.current <- current;
+    s.in_fill <- in_fill;
+    s.select_value <- select_value
 
 let current_session : session option ref = ref None
 let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)

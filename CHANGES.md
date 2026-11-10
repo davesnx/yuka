@@ -7,6 +7,8 @@
 - Client navigation replaces only the content below the deepest shared layout: islands in shared layouts keep their state; `aria-current` follows the path; a new build id (`Yuka-Build`) makes a full page load (@davesnx)
 - Breaking: `Yuka.Server.modules` takes `~digest` (use `Yuka_dream.tree_digest dir`), so a deploy that changes client code changes the build id; `Yuka.Server.layer` has a `data` field, and a layout that takes a loader result is rendered again on each navigation (@davesnx)
 - Leaving a page stops the action calls of the islands it removes (@davesnx)
+- Error boundaries and loading states: `<Yuka.Catch fallback=(fun ~error ~reset -> ...)>` catches exceptions in its children (render, effects, memos, holes, event handlers), also during server rendering; `<Yuka.Show>` shows a `Yuka.Status.t`; `Yuka.mount ~on_error` gets the errors that no `Catch` caught (@davesnx)
+- Breaking: an island with no `Catch` now stops at its first exception after it started and keeps its DOM; the error goes to `console.error` and `on_error` (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 
