@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
-import { chromium } from "/home/me/workplace/davesnx/sancho.dev/node_modules/playwright-core/index.mjs";
+import { chromium } from "playwright-core";
 
 const out: string = process.argv[2] ?? "_build_c/default/bench/out";
 const packages: string[] = readdirSync(join(out, "node_modules"));

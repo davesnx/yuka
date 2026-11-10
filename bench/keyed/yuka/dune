@@ -1,0 +1,8 @@
+(melange.emit
+ (target out)
+ (alias bench-keyed)
+ (libraries yuka yuka.js)
+ (preprocess
+  (pps yuka.ppx melange.ppx))
+ (module_systems
+  (es6 js)))

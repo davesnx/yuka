@@ -1,0 +1,93 @@
+open Yuka
+
+external random : unit -> float = "random" [@@mel.scope "Math"]
+external round : float -> float = "round" [@@mel.scope "Math"]
+
+external get_element_by_id : string -> Client.container = "getElementById"
+[@@mel.scope "document"]
+
+let adjectives = [| "pretty"; "large"; "big"; "small"; "tall"; "short"; "long"; "handsome"; "plain"; "quaint"; "clean"; "elegant"; "easy"; "angry"; "crazy"; "helpful"; "mushy"; "odd"; "unsightly"; "adorable"; "important"; "inexpensive"; "cheap"; "expensive"; "fancy" |]
+let colors = [| "red"; "yellow"; "blue"; "green"; "pink"; "brown"; "purple"; "brown"; "white"; "black"; "orange" |]
+let nouns = [| "table"; "chair"; "house"; "bbq"; "desk"; "car"; "pony"; "cookie"; "sandwich"; "burger"; "pizza"; "mouse"; "keyboard" |]
+
+let pick words =
+  words.(int_of_float (round (random () *. 1000.)) mod Array.length words)
+
+type row = { id : int; label : string State.t }
+
+let next_id = ref 1
+
+let build count =
+  List.init count (fun _ ->
+      let id = !next_id in
+      incr next_id;
+      { id; label = State.make (pick adjectives ^ " " ^ pick colors ^ " " ^ pick nouns) })
+
+let button ~id ~label ~action =
+  <div class_="col-sm-6 smallpad">
+    <button id class_="btn btn-primary btn-block" type_=`button onClick=(fun _ -> action ())>
+      (Yuka.text label)
+    </button>
+  </div>
+
+let app () =
+  let rows = State.make ~equal:( == ) [] in
+  let selected = State.make 0 in
+  let run () = State.set rows (build 1_000) in
+  let run_lots () = State.set rows (build 10_000) in
+  let add () = State.set rows (State.peek rows @ build 1_000) in
+  let update () =
+    List.iteri
+      (fun i r -> if i mod 10 = 0 then State.update r.label (fun l -> l ^ " !!!"))
+      (State.peek rows)
+  in
+  let clear () = State.set rows [] in
+  let swap_rows () =
+    let a = Array.of_list (State.peek rows) in
+    if Array.length a > 998 then begin
+      let item = a.(1) in
+      a.(1) <- a.(998);
+      a.(998) <- item;
+      State.set rows (Array.to_list a)
+    end
+  in
+  let remove row = State.set rows (List.filter (fun r -> r != row) (State.peek rows)) in
+  let row r : client element =
+    <tr class_=(if State.get selected = r.id then "danger" else "")>
+      <td class_="col-md-1">(Yuka.int r.id)</td>
+      <td class_="col-md-4">
+        <a onClick=(fun _ -> State.set selected r.id)>(Yuka.text (State.get r.label))</a>
+      </td>
+      <td class_="col-md-1">
+        <a onClick=(fun _ -> remove r)>
+          <span class_="glyphicon glyphicon-remove" aria_hidden=true />
+        </a>
+      </td>
+      <td class_="col-md-6" />
+    </tr>
+  in
+  <div class_="container">
+    <div class_="jumbotron">
+      <div class_="row">
+        <div class_="col-md-6"><h1>"Yuka"</h1></div>
+        <div class_="col-md-6">
+          <div class_="row">
+            (button ~id:"run" ~label:"Create 1,000 rows" ~action:run)
+            (button ~id:"runlots" ~label:"Create 10,000 rows" ~action:run_lots)
+            (button ~id:"add" ~label:"Append 1,000 rows" ~action:add)
+            (button ~id:"update" ~label:"Update every 10th row" ~action:update)
+            (button ~id:"clear" ~label:"Clear" ~action:clear)
+            (button ~id:"swaprows" ~label:"Swap Rows" ~action:swap_rows)
+          </div>
+        </div>
+      </div>
+    </div>
+    <table class_="table table-hover table-striped test-data">
+      <tbody>
+        (Yuka.each ~equal:( == ) ~key:(fun r -> string_of_int r.id) (fun () -> State.get rows) row)
+      </tbody>
+    </table>
+    <span class_="preloadicon glyphicon glyphicon-remove" aria_hidden=true />
+  </div>
+
+let (_dispose : unit -> unit) = Client.render (get_element_by_id "main") app

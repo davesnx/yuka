@@ -86,6 +86,15 @@ bench: ## Build and run the browser benchmark
 	$(DUNE) build --profile=release @bench/bench
 	node bench/run.ts $(BUILD_DIR)/default/bench/out
 
+BENCH_RUNS ?= 10
+BENCH_OUT ?= $(BUILD_DIR)/bench-keyed/result.json
+
+.PHONY: bench-keyed
+bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUNS, BENCH_OUT, CHROME_PATH)
+	$(DUNE) build --profile=release @bench/keyed/bench-keyed
+	BUILD_DIR=$(BUILD_DIR) bench/keyed/build.sh
+	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --out $(BENCH_OUT)
+
 .PHONY: install-npm
 install-npm: ## Install npm dependencies (esbuild, jsdom)
 	npm install
