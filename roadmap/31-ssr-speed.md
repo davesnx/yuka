@@ -15,4 +15,4 @@ Done (2026-11-10). On `make bench-ssr` (100 rows, one process, `wrk -t4 -c32 -d1
 
 What changed, in order of gain (in process, 100 rows: 225 -> 69 us and 67k -> 17k words per page through the cycle): escaping straight into the output buffer, attributes printed without a resolved list, a reused output buffer, templates compiled once on the server into static chunks and part slots, and one string instead of a stream when nothing is pending. The HTML is byte for byte the same: `bench/ssr/ocaml/golden.expected` and `demo/test/pages.expected` were written before the change and are compared on `dune build @runtest`. Profile and numbers per step: `.workplace/docs/31-ssr-profile.md`. `bench/ssr/run.ts` has `--interleave` and `--baseline-build-dir`.
 
-The keyed client app grew by 10 B gzip (a field on templates), to 10,036 B of its 10,040 B budget.
+The keyed client app is 10,024 B gzip (budget 10,040): the template field costs a few bytes, and the shared escape got smaller. Review fixes: the buffer pool is behind a `Mutex` (`test/threads`), a buffer that grew past 256 KB is not kept, and `HEAD` sends the `GET` length (it renders the page and drops the body).

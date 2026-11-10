@@ -106,6 +106,8 @@ let request ?(meth = `GET) ?(headers = []) ?(body = "") target =
   Server.log_error := (fun m -> logged := m :: !logged);
   { App.meth; target; headers; body }
 
+let fst3 (a, _, _) = a
+
 let call ?(config = config) r = H.handler config Cycle_server.Routes_server.app r
 
 let get ?config ?meth ?headers ?body target =
@@ -454,15 +456,16 @@ let matching =
 
 let head_and_rules =
   [
-    ( "HEAD on a page: GET status and headers, no body, body not built",
+    ( "HEAD on a page: GET status and headers with the GET length, no body",
       fun () ->
         let g = get "/" in
         check_events [ "home body" ];
         let h = get ~meth:`HEAD "/" in
         check_status h g.status;
-        Alcotest.(check (list (pair string string))) "headers" g.headers h.headers;
+        Alcotest.(check (list (pair string string)))
+          "headers" (g.headers @ [ ("content-length", string_of_int (String.length g.body)) ]) h.headers;
         Alcotest.(check string) "no body" "" h.body;
-        check_events [] );
+        check_events [ "home body" ] );
     ( "HEAD on an endpoint has no body",
       fun () ->
         let h = get ~meth:`HEAD "/feed.xml" in
@@ -786,6 +789,25 @@ let render =
             check_true "no end" (not (String.ends_with ~suffix:"</body></html>" r.body));
             Alcotest.(check int) "one log" 1 (List.length !logged)
         | _ -> Alcotest.fail "not done" );
+    ( "a settled page is one string, a page with a pending Await streams",
+      fun () ->
+        let kind target =
+          let r = request target in
+          let view =
+            { Server.meth = `GET; target; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return (Some "")); csrf_token = (fun () -> "t") }
+          in
+          match
+            Async.status
+              (Server.handle config Cycle_server.Routes_server.app ~sleep:(fun _ -> fst3 (Async.make ()))
+                 ~exists:Test_adapter.exists r view)
+          with
+          | Async.Done (Server.Respond { body = Server.String text; status; _ }) ->
+              Printf.sprintf "string %d %b" status (String.ends_with ~suffix:"</body></html>" text)
+          | Async.Done (Server.Respond { body = Server.Stream _; status; _ }) -> Printf.sprintf "stream %d" status
+          | _ -> "other"
+        in
+        Alcotest.(check string) "settled" "string 200 true" (kind "/plain");
+        Alcotest.(check string) "pending" "stream 200" (kind "/slow") );
     ( "a render failure before the shell is written is the 500 page",
       fun () ->
         let a =

@@ -443,8 +443,6 @@ let error_page env (fallback : fallback) =
     !Server.log_error m;
     Async.return (internal_error ())
   in
-  if env.head_only then Async.return (empty 500 headers)
-  else
     match render env ~status:500 ~headers fallback.layers (fallback.error 500) with
     | a -> recover a give_up
     | exception e -> give_up (Web.exn_to_string e)
@@ -454,8 +452,6 @@ let fail_page env fallback message =
   error_page env fallback
 
 let show env ~status ~headers ~fallback layers (page : unit -> page) =
-  if env.head_only then Async.return (empty status headers)
-  else
     match render env ~status ~headers layers (page ()) with
     | a -> recover a (fail_page env fallback)
     | exception e -> fail_page env fallback (Web.exn_to_string e)
@@ -787,7 +783,14 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
     | _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
   in
   let bodyless = function
-    | Respond r when env.head_only -> Respond { r with body = String "" }
+    | Respond ({ body = String text; _ } as r) when env.head_only ->
+        let headers =
+          if has_header "content-length" r.headers then r.headers
+          else r.headers @ [ ("content-length", string_of_int (String.length text)) ]
+        in
+        Respond { r with headers; body = String "" }
+    | Respond ({ body = Stream _; _ } as r) when env.head_only ->
+        Respond { r with body = Stream (fun _ -> Async.return ()) }
     | File { root; path; headers } when env.head_only ->
         if exists ~root ~path then Respond (empty 200 headers)
         else Respond { (asset_miss ()) with body = String "" }

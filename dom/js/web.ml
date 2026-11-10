@@ -550,4 +550,12 @@ let adopt_stylesheets : unit -> unit =
 let read_file (_ : string) : string option = None
 
 let buffers : Buffer.t list ref = ref []
-let buffer_pool () = buffers
+
+let take_buffer () =
+  match !buffers with
+  | b :: rest ->
+      buffers := rest;
+      Some b
+  | [] -> None
+
+let give_buffer b = buffers := b :: !buffers

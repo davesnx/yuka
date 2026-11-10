@@ -3,23 +3,7 @@ open Base
 
   let escape = Template_build.escape
 
-  let add_escaped b ~quote s =
-    let n = String.length s in
-    let start = ref 0 in
-    let put i entity =
-      Buffer.add_substring b s !start (i - !start);
-      Buffer.add_string b entity;
-      start := i + 1
-    in
-    for i = 0 to n - 1 do
-      match String.unsafe_get s i with
-      | '&' -> put i "&amp;"
-      | '<' -> put i "&lt;"
-      | '>' when not quote -> put i "&gt;"
-      | '"' when quote -> put i "&quot;"
-      | _ -> ()
-    done;
-    Buffer.add_substring b s !start (n - !start)
+  let add_escaped = Template_build.add_escaped
 
   let add_attr b name value =
     Buffer.add_char b ' ';
@@ -80,6 +64,8 @@ open Base
     s.queued <- [];
     l
 
+  let needs_special = function "select" | "textarea" | "option" | "a" -> true | _ -> false
+
   let compile shape =
     let ops = ref [] and raw = Buffer.create 64 in
     let flush () =
@@ -96,10 +82,10 @@ open Base
       | Fixed_text "" -> ()
       | Fixed_text t -> emit (Static_text (escape ~quote:false t))
       | Part i -> emit (if only then Only_part i else Child_part i)
-      | Fixed_element { tag = "select" | "option" | "textarea"; _ } as e -> emit (Subtree e)
+      | Fixed_element { tag; _ } as e when needs_special tag && tag <> "a" -> emit (Subtree e)
       | Fixed_element { tag; attrs; children } ->
           let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
-          if tag <> "a" && List.length fixed = List.length attrs then begin
+          if (not (needs_special tag)) && List.length fixed = List.length attrs then begin
             Buffer.add_char raw '<';
             Buffer.add_string raw tag;
             List.iter (fun (n, v) -> add_attr raw n v) fixed;
@@ -121,33 +107,19 @@ open Base
     if Array.length t.ops = 0 then t.ops <- compile t.shape;
     t.ops
 
-  let rec expand_shape parts = function
-    | Fixed_text s -> Text s
-    | Part i -> ( match parts.(i) with Child n -> n | Attribute _ | No_attribute -> Fragment [])
-    | Fixed_element { tag; attrs; children } ->
-        Element { tag; attrs = attributes parts attrs; children = List.map (expand_shape parts) children }
-
-  and attributes parts attrs =
-    List.filter_map
-      (function
-        | Fixed (n, v) -> Some (Static (n, v))
-        | Part_attr i -> ( match parts.(i) with Attribute a -> Some a | Child _ | No_attribute -> None))
-      attrs
+  let kept_buffer = 262_144
 
   let rec print s build =
-    let b =
-      let pool = Web.buffer_pool () in
-      match !pool with
-      | b :: rest ->
-          pool := rest;
-          b
-      | [] -> Buffer.create 4096
+    let b = match Web.take_buffer () with Some b -> b | None -> Buffer.create 4096 in
+    let peak = ref 0 in
+    let cut n =
+      peak := max !peak (Buffer.length b);
+      Buffer.truncate b n
     in
     let release () =
-      if Buffer.length b <= 1_048_576 then begin
+      if max !peak (Buffer.length b) <= kept_buffer then begin
         Buffer.clear b;
-        let pool = Web.buffer_pool () in
-        pool := b :: !pool
+        Web.give_buffer b
       end
     in
     let after_text = ref false in
@@ -242,7 +214,7 @@ open Base
                 if hydrating () || !holding > 0 then s.held <- mine @ outer_held
                 else begin
                   let region = Buffer.sub b start (Buffer.length b - start) in
-                  Buffer.truncate b start;
+                  cut start;
                   Buffer.add_string b (String.concat "" (List.rev mine));
                   Buffer.add_string b region
                 end
@@ -265,7 +237,7 @@ open Base
               | Open (tag, attrs) ->
                   Buffer.add_char b '<';
                   Buffer.add_string b tag;
-                  (if tag = "a" then ignore (special tag (attributes parts attrs))
+                  (if needs_special tag then ignore (special tag (Template.expand_attrs parts attrs))
                    else
                      List.iter
                        (function
@@ -278,7 +250,7 @@ open Base
                        attrs);
                   Buffer.add_char b '>';
                   after_text := false
-              | Subtree shape -> go (expand_shape parts shape))
+              | Subtree shape -> go (Template.expand_shape parts shape))
             (ops template)
       | Catch { children; fallback; _ } -> (
           let length = Buffer.length b and text = !after_text and saved = snapshot s in
@@ -287,7 +259,7 @@ open Base
             go (children ());
             marker "<!--]-->"
           with e ->
-            Buffer.truncate b length;
+            cut length;
             after_text := text;
             restore s saved;
             !log_error ("Yuka.Catch: " ^ Web.exn_to_string e);
@@ -354,7 +326,7 @@ open Base
           Buffer.add_string b "</yuka-island>";
           if outermost && s.held <> [] then begin
             let island = Buffer.sub b start (Buffer.length b - start) in
-            Buffer.truncate b start;
+            cut start;
             Buffer.add_string b (take_held s);
             Buffer.add_string b island
           end;
@@ -375,9 +347,8 @@ open Base
           Buffer.add_char b '<';
           Buffer.add_string b tag;
           let value =
-            match tag with
-            | "select" | "textarea" | "option" | "a" -> special tag attrs
-            | _ ->
+            if needs_special tag then special tag attrs
+            else begin
                 List.iter
                   (function
                     | Static (name, v) -> add_attr b name v
@@ -385,6 +356,7 @@ open Base
                     | Handler _ -> ())
                   attrs;
                 None
+            end
           in
           Buffer.add_char b '>';
           after_text := false;

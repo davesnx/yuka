@@ -20,16 +20,27 @@ let kid_svg_in_svg = 16
 let attr_svg_in_html = 1
 let attr_svg_in_svg = 2
 
+let add_escaped b ~quote s =
+  let n = String.length s in
+  let start = ref 0 in
+  let put i entity =
+    Buffer.add_substring b s !start (i - !start);
+    Buffer.add_string b entity;
+    start := i + 1
+  in
+  for i = 0 to n - 1 do
+    match String.unsafe_get s i with
+    | '&' -> put i "&amp;"
+    | '<' -> put i "&lt;"
+    | '>' when not quote -> put i "&gt;"
+    | '"' when quote -> put i "&quot;"
+    | _ -> ()
+  done;
+  Buffer.add_substring b s !start (n - !start)
+
 let escape ~quote s =
   let b = Buffer.create (String.length s) in
-  String.iter
-    (function
-      | '&' -> Buffer.add_string b "&amp;"
-      | '<' -> Buffer.add_string b "&lt;"
-      | '>' when not quote -> Buffer.add_string b "&gt;"
-      | '"' when quote -> Buffer.add_string b "&quot;"
-      | c -> Buffer.add_char b c)
-    s;
+  add_escaped b ~quote s;
   Buffer.contents b
 
 let is_void = function

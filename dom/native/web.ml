@@ -145,5 +145,15 @@ let add_stylesheet : string -> unit = fun _ -> browser_only ()
 let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()
 let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None
 
-let buffers : Buffer.t list ref Domain.DLS.key = Domain.DLS.new_key (fun () -> ref [])
-let buffer_pool () = Domain.DLS.get buffers
+let buffers : Buffer.t list ref = ref []
+let buffers_lock = Mutex.create ()
+
+let take_buffer () =
+  Mutex.protect buffers_lock (fun () ->
+      match !buffers with
+      | b :: rest ->
+          buffers := rest;
+          Some b
+      | [] -> None)
+
+let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)

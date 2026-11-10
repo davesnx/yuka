@@ -30,27 +30,26 @@ let attribute a = Attribute a
 let attribute_option = function Some a -> Attribute a | None -> No_attribute
 let instance template parts = Template { template; parts }
 
-let expand template parts =
-  let rec go = function
-    | Fixed_text s -> Text s
-    | Part i -> (
-        match parts.(i) with Child n -> n | Attribute _ | No_attribute -> Fragment [])
-    | Fixed_element { tag; attrs; children } ->
-        Element
-          {
-            tag;
-            attrs = go_attrs attrs;
-            children = go_list children;
-          }
-  and go_list = function [] -> [] | n :: rest -> let n = go n in n :: go_list rest
-  and go_attrs = function
-    | [] -> []
-    | Fixed (name, value) :: rest -> Static (name, value) :: go_attrs rest
-    | Part_attr i :: rest -> (
-        match parts.(i) with
-        | Attribute a -> a :: go_attrs rest
-        | Child _ | No_attribute -> go_attrs rest)
-  in
-  go template.shape
+let rec expand_shape parts = function
+  | Fixed_text s -> Text s
+  | Part i -> ( match parts.(i) with Child n -> n | Attribute _ | No_attribute -> Fragment [])
+  | Fixed_element { tag; attrs; children } ->
+      Element { tag; attrs = expand_attrs parts attrs; children = expand_list parts children }
+
+and expand_list parts = function
+  | [] -> []
+  | n :: rest ->
+      let n = expand_shape parts n in
+      n :: expand_list parts rest
+
+and expand_attrs parts = function
+  | [] -> []
+  | Fixed (name, value) :: rest -> Static (name, value) :: expand_attrs parts rest
+  | Part_attr i :: rest -> (
+      match parts.(i) with
+      | Attribute a -> a :: expand_attrs parts rest
+      | Child _ | No_attribute -> expand_attrs parts rest)
+
+let expand template parts = expand_shape parts template.shape
 
 let single_element = function Element _ | Template _ -> true | _ -> false

@@ -1416,8 +1416,9 @@ module Server : sig
   (** What a page function returns: a title, extra head HTML and the body. *)
 
   val page : ?title:string -> ?head:string -> (unit -> server element) -> page
-  (** [page ~title body]. The cycle calls [body] only when it renders: never
-      for [HEAD]. [head] is raw HTML added to the document head. *)
+  (** [page ~title body]. The cycle calls [body] when it renders, for
+      [HEAD] too (to send the length of the [GET] answer). [head] is raw
+      HTML added to the document head. *)
 
   type layer = { key : string; data : bool; wrap : server element -> server element }
   (** A layout on the path of a route. [key] names its outlet; [data] is
@@ -1649,7 +1650,7 @@ module Server : sig
       + A page: the prerendered file when [config] has [prerendered] and
         it applies; else [load], then status 200 with the rule headers,
         [content-type], [vary: Yuka-Navigate] and the rule
-        [cache-control]. [HEAD] stops here, with no body.
+        [cache-control].
       + The document, streamed. Each layer's children are inside
         [<yuka-outlet data-k="KEY" style="display:contents">]. The entry
         module script is written once, before the first island, and
@@ -1672,7 +1673,9 @@ module Server : sig
       and the [Stream] function's [Async] succeeds once the writes already
       started have finished, so the adapter ends the response normally.
       When the error page itself fails, the answer is a plain-text 500.
-      Every answer to [HEAD] has an empty body: for a file, the cycle
+      Every answer to [HEAD] has an empty body. A [HEAD] on a page renders
+      it as for [GET]: when the [GET] answer is one string, [HEAD] has its
+      [content-length]; when [GET] streams, so does [HEAD], with no body. For a file, the cycle
       answers 200 with the headers it knows (no [content-type] for a client
       or public file) when [exists] says so, else the plain 404.
 

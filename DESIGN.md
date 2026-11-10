@@ -1190,8 +1190,8 @@ what changed from the spec. `yuka-dream` and the demo migration are in
   actions; handler (rule headers, then the handler's, then the rule
   `cache-control` unless set; `HEAD` drops the body) or loaders, headers
   (`content-type`, `vary: Yuka-Navigate`, rule headers and
-  `cache-control`), `HEAD` stops without calling the page body, then the
-  streamed document.
+  `cache-control`), then the streamed document (`HEAD` renders it too and
+  drops the body; see "Server rendering speed").
 - Errors: a stop or an exception before the first write gives the
   fallback page (404 or 500, root headers, `no-store`, the message only in
   `log_error`). The shell is printed before `handle` returns, and a render
@@ -1251,7 +1251,7 @@ what changed from the spec. `yuka-dream` and the demo migration are in
   the three dune rules, diffs the server output against
   `routes_server.expected`, and runs 60 cases through `Make` with a test
   adapter (record request, `Async.t` as `io`, a fake file table): each
-  step and status code above. Breaking a step (no 308, `HEAD` renders, no
+  step and status code above. Breaking a step (no 308, `HEAD` with another length, no
   `HEAD` in `Allow`, guards reversed, dot segments allowed, no log, no
   `OPTIONS` 204, no entry script, `aria-current` on every link, no
   outlets, no rule cache, no origin check, loaders started one after
@@ -1795,11 +1795,14 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
 - An element prints its attributes from its attribute list. Only `a`
   (`aria-current`), `option` (`selected`), `select` and `textarea`
   (`value`) build the resolved list.
-- The output buffer is reused between renders: `Web.buffer_pool` gives
-  one pool per domain on the server (`Domain.DLS`) and a plain list in the
-  browser. `printer.ml` uses no `Domain` itself: a module with a top-level
-  side effect reached from `yuka.js` would pull `Domain` and `Printf` into
-  every client bundle.
+- The output buffer is reused between renders: `Web.take_buffer` and
+  `Web.give_buffer`, behind a `Mutex` on the server (system threads of one
+  domain, and several domains, share the pool; `test/threads` renders on 16
+  threads) and a plain list in the browser. A buffer that grew past
+  256 KB during a render (even if truncated later) is not kept.
+  `printer.ml` uses no `Mutex` or `Domain` itself: a module with a
+  top-level side effect reached from `yuka.js` would pull them and
+  `Printf` into every client bundle.
 - A template has an `ops` field: on the server, the first instance compiles
   the shape into static HTML chunks (tags with fixed attributes, escaped
   fixed text) and slots for its parts; later instances print the chunks
@@ -1807,8 +1810,14 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
   dynamic: a fixed text (the `<!---->` rule between texts), an element
   with a part attribute, `a`, and the whole subtree of `select`, `option`
   and `textarea`. A part that is the only child of its element is printed
-  as `contents` prints it (a hole there has no markers). The field costs
-  10 B gzip in the keyed client app.
+  as `contents` prints it (a hole there has no markers).
 - The cycle keeps the head and the shell as a list of strings. When
   nothing is pending after the shell, the page is answered as one string
-  (with `Content-Length`); otherwise it streams as before.
+  (with `Content-Length`); otherwise it streams as before. A `HEAD` renders
+  the page like `GET` and sends the same headers with no body: the length
+  of the string, or a stream with no content. Before, a `HEAD` did not
+  call the page body and sent `Content-Length: 0`.
+- One escape (`Template_build.add_escaped`, and `escape` built on it), one
+  expansion of a shape (`Template.expand_shape`, used by `expand` and by
+  the printer for `select`, `option` and `textarea`), one test of the tags
+  that need the resolved attributes (`needs_special`).
