@@ -205,7 +205,7 @@ type request = {
   meth : Router.meth;
   target : string;
   header : string -> string option;
-  body : unit -> string Async.t;
+  body : limit:int -> string option Async.t;
 }
 
 type outcome =
@@ -254,7 +254,7 @@ type env = {
   current : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
-  form : (string * (string * string) list * Json.t) option;
+  form : (string * string * (string * string) list * (string option * string) list) option;
 }
 
 let outlet key inner =
@@ -477,18 +477,17 @@ let serve_file meth ~root ~headers raw =
 let action (r : request) raw =
   match (raw, r.meth) with
   | [ name ], `POST ->
-      Async.bind (r.body ()) (fun body ->
-          Async.map
-            (fun (status, json) ->
-              Respond
-                {
-                  status;
-                  headers = [ ("content-type", "application/json"); no_store ];
-                  body = String json;
-                })
-            (Server.handle_action ~name:(Router.decode ~plus:false name)
-               ~content_type:(r.header "content-type") ~origin:(r.header "origin")
-               ~host:(r.header "host") ~body))
+      let json status body =
+        Respond { status; headers = [ ("content-type", "application/json"); no_store ]; body = String body }
+      in
+      Async.bind (r.body ~limit:Server.max_body) (function
+        | None -> Async.resolved (json 413 (Json.to_string (`Assoc [ ("error", `String "request too large") ])))
+        | Some body ->
+            Async.map
+              (fun (status, body) -> json status body)
+              (Server.handle_action ~name:(Router.decode ~plus:false name)
+                 ~content_type:(r.header "content-type") ~origin:(r.header "origin")
+                 ~host:(r.header "host") ~body))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
 
@@ -497,6 +496,8 @@ let rec strip_prefix prefix parts =
   | [], rest -> Some rest
   | p :: prefix, x :: rest when String.equal p x -> strip_prefix prefix rest
   | _ -> None
+
+let query_suffix = function Some q when q <> "" -> "?" ^ q | _ -> ""
 
 let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
     ~(load : unit -> (plan, stop) result Async.t) ~(fallback : fallback) =
@@ -514,65 +515,64 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
                 | Error stop -> stopped env fallback path stop
                 | Ok plan -> show env ~status ~headers ~fallback plan.layers (fun () -> plan.page)))))
 
-let is_form = function
-  | Some ct ->
-      String.equal
-        (String.lowercase_ascii (String.trim (List.hd (String.split_on_char ';' ct))))
-        "application/x-www-form-urlencoded"
-  | None -> false
+let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
 
 let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
-  let suffix = match query with Some q when q <> "" -> "?" ^ q | _ -> "" in
-  let origin_ok =
-    match r.header "origin" with
-    | Some _ -> Server.same_origin ~origin:(r.header "origin") ~host:(r.header "host")
-    | None -> r.header "sec-fetch-site" = Some "same-origin"
-  in
-  Async.bind (r.body ()) (fun body ->
-      let fields = Router.query ("?" ^ body) in
-      match (List.assoc_opt "_yuka_action" fields, a.find `GET segments (Router.query r.target)) with
-      | Some name, Router.Found found -> (
-          match a.resolve req found with
-          | exception e -> Async.map (fun x -> Respond x) (fail_page env a.missing (Web.exn_to_string e))
-          | Handler _ -> reply (method_not_allowed allowed)
-          | Page { rules; guards; load; fallback } -> (
-              if not origin_ok then reply (plain 403 "Forbidden" [])
-              else if String.length body > Server.max_body then reply (plain 413 "Request Too Large" [])
-              else
-                match (Server.find_form name, Server.find_action name) with
-                | Some decode, Some handler -> (
-                    let values = List.filter (fun (k, _) -> k <> "_yuka_action") fields in
-                    let unprocessable errors =
-                      serve_page { env with form = Some (name, values, errors) } r ~path ~query ~status:422
-                        ~rules ~guards ~load ~fallback
-                    in
-                    let message m : Json.t = `List [ `List [ `Null; `String m ] ] in
-                    match decode values with
-                    | Error errors -> unprocessable errors
-                    | Ok json ->
-                        let answer = match handler json with a -> a | exception e -> Async.failed (Web.exn_to_string e) in
-                        recover_with ~last:(fun () -> Respond (internal_error ()))
-                          (Async.bind answer (function
-                            | Server.Output (`Assoc fields) when List.mem_assoc "value" fields ->
-                                let location =
-                                  match List.assoc_opt "redirect" fields with
-                                  | Some (`String l) -> l
-                                  | _ -> path ^ suffix
+  let page_or_error a = Async.map (fun resp -> Respond resp) a in
+  match a.find `GET segments (Router.query r.target) with
+  | Router.Found found -> (
+      match a.resolve req found with
+      | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
+      | Handler _ -> reply (method_not_allowed allowed)
+      | Page { rules; guards; load; fallback } ->
+          let plain status message = plain status message rules.headers in
+          let origin_ok =
+            match r.header "origin" with
+            | Some _ -> Server.same_origin ~origin:(r.header "origin") ~host:(r.header "host")
+            | None -> r.header "sec-fetch-site" = Some "same-origin"
+          in
+          if not origin_ok then reply (plain 403 "Forbidden")
+          else
+            Async.bind (run_guards guards) (function
+              | Error stop -> page_or_error (stopped env fallback path stop)
+              | Ok () ->
+                  Async.bind (r.body ~limit:Server.max_body) (function
+                    | None -> reply (plain 413 "Request Too Large")
+                    | Some body -> (
+                        let fields = Router.query ("?" ^ body) in
+                        match List.assoc_opt "_yuka_action" fields with
+                        | None -> reply (method_not_allowed allowed)
+                        | Some name -> (
+                            match Server.find_form name with
+                            | None -> reply (plain 404 "Not Found")
+                            | Some run ->
+                                let key = Option.value (List.assoc_opt "_yuka_key" fields) ~default:"" in
+                                let values =
+                                  List.filter (fun (k, _) -> k <> "_yuka_action" && k <> "_yuka_key") fields
                                 in
-                                reply (empty 303 [ ("location", location); no_store ])
-                            | Server.Output (`Assoc [ ("errors", errors) ]) -> unprocessable errors
-                            | Server.Output _ -> unprocessable (message "unexpected answer")
-                            | Server.Bad_input m -> unprocessable (message m)))
-                          (fun m ->
-                            match Server.rejection m with
-                            | Some shown -> unprocessable (message shown)
-                            | None -> Async.map (fun x -> Respond x) (fail_page env a.missing m)))
-                | _ -> reply (plain 404 "Not Found" [])))
-      | _ -> reply (method_not_allowed allowed))
+                                let unprocessable errors =
+                                  serve_page { env with form = Some (name, key, values, errors) } r ~path ~query
+                                    ~status:422 ~rules ~guards:[] ~load ~fallback
+                                in
+                                let answer =
+                                  match run values with a -> a | exception e -> Async.failed (Web.exn_to_string e)
+                                in
+                                recover_with ~last:(fun () -> Respond (internal_error ()))
+                                  (Async.bind answer (function
+                                    | Server.Saved location ->
+                                        let location = Option.value location ~default:(path ^ query_suffix query) in
+                                        reply
+                                          (empty 303 (merge_headers [ rules.headers; [ ("location", location); no_store ] ]))
+                                    | Server.Unprocessable errors -> unprocessable errors))
+                                  (fun m ->
+                                    match Server.rejection m with
+                                    | Some shown -> unprocessable [ (None, shown) ]
+                                    | None -> page_or_error (fail_page env a.missing m)))))))
+  | _ -> reply (method_not_allowed allowed)
 
 let route env (App a) req (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
-  let suffix = match query with Some q when q <> "" -> "?" ^ q | _ -> "" in
+  let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
   match a.find r.meth segments (Router.query r.target) with
   | Router.Redirect { permanent; location } ->
@@ -670,7 +670,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
         let canonical = "/" ^ String.concat "/" raw in
         let trailing = List.exists (fun s -> s = "") rest && rest <> [ "" ] in
         if trailing then
-          let suffix = match query with Some q when q <> "" -> "?" ^ q | _ -> "" in
+          let suffix = query_suffix query in
           reply (empty 308 [ ("location", canonical ^ suffix) ])
         else route env app req r ~path ~raw ~query
     | _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
@@ -705,7 +705,7 @@ module type ADAPTER = sig
   val meth : request -> Router.meth
   val target : request -> string
   val header : request -> string -> string option
-  val body : request -> string Async.t
+  val body : request -> limit:int -> string option Async.t
   val respond : http_response -> response io
   val file : request -> root:string -> path:string -> headers:(string * string) list -> response io
   val exists : root:string -> path:string -> bool
@@ -721,7 +721,7 @@ module Make (A : ADAPTER) = struct
         meth = A.meth req;
         target = A.target req;
         header = A.header req;
-        body = (fun () -> A.body req);
+        body = (fun ~limit -> A.body req ~limit);
       }
     in
     A.bind (A.of_async (handle config app ~sleep:A.sleep ~exists:A.exists req view)) (function

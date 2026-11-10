@@ -260,14 +260,19 @@ field and no `action` attribute, so it posts to the page URL and works with
 no JavaScript: the request cycle decodes the fields, runs the
 implementation, and answers 303 to `redirect` (or the page URL), or renders
 the page again with status 422, the sent values and the errors. The post
-must come from the same origin (`Origin`, or `Sec-Fetch-Site: same-origin`).
+must come from the same origin (`Origin`, or `Sec-Fetch-Site: same-origin`);
+the page's guards run before the action, and the body is read up to 1 MiB.
+Two forms of one action on a page need different `key`s, so a 422 shows
+the sent values in the form that was posted.
 Field types are `string`, `int`, `float`, `bool` (a checkbox), `option`,
 `list` and `M.t` with `M.of_string` and `M.to_string`.
 
 Inside an island, a submit is handled in the browser: the same decoder runs
 first (its errors show with no request), then `Action.call` (or `~run`, for
 example with `Remote.mutate`), with `Form.pending` true until the answer;
-on success `~on_ok` runs, or the page follows `redirect`. A page whose forms
+on success `~on_ok` runs, or the page follows `redirect` (or reloads its
+URL), as a post with no JavaScript would. The submit button's `name` and
+`value` are part of the fields in both cases. A page whose forms
 are not in an island loads no JavaScript.
 
 ### Routes

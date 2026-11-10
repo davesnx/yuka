@@ -6,6 +6,7 @@ type reply = { status : int; headers : (string * string) list; body : string }
 
 let files = [ ("pre/plain/index.html", "prerendered plain"); ("js/app/main.js", "main"); ("pub/s.css", "css"); ("b/bundle/chunk-X1.js", "c"); ("b/bundle/main.js", "m") ]
 let file_calls = ref []
+let body_read = ref 0
 
 module Test_adapter = struct
   type request = App.req
@@ -15,7 +16,16 @@ module Test_adapter = struct
   let meth (r : request) = r.meth
   let target (r : request) = r.target
   let header = App.header
-  let body (r : request) = Async.resolved r.body
+  let body (r : request) ~limit =
+    let n = String.length r.body in
+    let rec read at =
+      if at >= n then Some r.body
+      else
+        let chunk = min 4096 (n - at) in
+        body_read := !body_read + chunk;
+        if at + chunk > limit then None else read (at + chunk)
+    in
+    Async.resolved (read 0)
 
   let respond (r : Server.http_response) =
     match r.body with
@@ -725,7 +735,7 @@ let render =
           Server.handle config Cycle_server.Routes_server.app
             ~sleep:(fun _ -> Async.resolved ())
             ~exists:Test_adapter.exists (request "/slow")
-            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun () -> Async.resolved "") }
+            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun ~limit:_ -> Async.resolved (Some "")) }
         in
         match Async.status a with
         | Async.Done (Server.Respond r) ->
@@ -859,7 +869,7 @@ let forms =
         check_true "value kept" (contains r.body {|name="title" value="keep me"|});
         check_true "bad value kept" (contains r.body {|name="count" value="abc"|});
         check_true "error" (contains r.body "count error: Not a whole number");
-        check_true "the other form is empty" (contains r.body {|name="body" value=""|});
+        check_true "the jot forms are empty" (contains r.body {|name="body" value=""|});
         check_true "no JavaScript" (not (contains r.body "<script type=\"module\"" || contains r.body "__yukaFill")) );
     ( "Error and reject show their messages",
       fun () ->
@@ -880,8 +890,57 @@ let forms =
         check_status r 403;
         let r = post ~headers:[ form_type; ("host", "app.example") ] "_yuka_action=jot&body=x" in
         check_status r 403;
-        let r = post ~headers:[ form_type; ("sec-fetch-site", "same-origin") ] "_yuka_action=jot&body=x" in
+        let r = post ~headers:[ form_type; ("sec-fetch-site", "same-origin") ] "_yuka_action=jot&body=y" in
         check_status r 303 );
+    ( "a foreign origin is refused without reading the body",
+      fun () ->
+        body_read := 0;
+        let r =
+          post ~headers:[ form_type; ("origin", "https://evil.example"); ("host", "app.example") ] (String.make 10_000 'a')
+        in
+        check_status r 403;
+        Alcotest.(check int) "body not read" 0 !body_read;
+        check_header r "x-frame-options" [ "DENY" ] );
+    ( "an oversize body is 413 without reading past the limit",
+      fun () ->
+        body_read := 0;
+        let r = post ("_yuka_action=jot&body=" ^ String.make (3 * 1024 * 1024) 'a') in
+        check_status r 413;
+        check_true "stopped near the limit" (!body_read <= (1024 * 1024) + 4096) );
+    ( "the action RPC reads a bounded body too",
+      fun () ->
+        body_read := 0;
+        let r =
+          get ~meth:`POST ~headers:[ ("content-type", "application/json") ] ~body:(String.make (3 * 1024 * 1024) ' ')
+            "/_yuka/action/x"
+        in
+        check_status r 413;
+        check_true "stopped near the limit" (!body_read <= (1024 * 1024) + 4096) );
+    ( "page guards run before the action",
+      fun () ->
+        let r = post ~target:"/team/nobody/form" "_yuka_action=jot&body=hi" in
+        check_status r 404;
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        let r = post ~target:"/team/away/form" "_yuka_action=jot&body=hi" in
+        check_status r 303;
+        check_header r "location" [ "/" ];
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        let r = post ~target:"/team/a/form" "_yuka_action=jot&body=hi" in
+        check_status r 303;
+        check_header r "location" [ "/team/a/form" ];
+        Alcotest.(check (list string)) "called" [ "jot hi" ] !App.saved );
+    ( "the rule headers are on the 303",
+      fun () ->
+        let r = post "_yuka_action=jot&body=hi" in
+        check_header r "x-frame-options" [ "DENY" ];
+        check_header r "x-a" [ "root" ] );
+    ( "only the posted form gets the 422 state",
+      fun () ->
+        let r = post "_yuka_action=jot&_yuka_key=two&body=x" in
+        check_status r 422;
+        check_true "form two" (contains r.body "jot two error: Too short");
+        check_true "form two value" (contains r.body {|value="x"|});
+        check_true "not form one" (not (contains r.body "jot one error")) );
     ( "unknown form action is 404",
       fun () ->
         let r = post "_yuka_action=nobody&x=1" in
@@ -899,7 +958,7 @@ let forms =
       fun () ->
         let r = get "/entry" in
         check_status r 200;
-        check_true "form" (contains r.body {|<form method="post" data-yuka-action="save_entry"><input type="hidden" name="_yuka_action" value="save_entry">|});
+        check_true "form" (contains r.body {|<form method="post" data-yuka-action="save_entry" data-yuka-key=""><input type="hidden" name="_yuka_action" value="save_entry">|});
         check_true "no action attribute" (not (contains r.body "<form action"));
         let h = get ~meth:`HEAD "/entry" in
         check_status h 200;

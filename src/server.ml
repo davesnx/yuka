@@ -408,10 +408,18 @@ let register action f encode =
 
 let implement action f = register action f (Codec.encode action.Action.output)
 
-let forms : (string * ((string * string) list -> (Json.t, Json.t) result)) list ref = ref []
+type form_outcome = Saved of string option | Unprocessable of (string option * string) list
+
+let forms : (string * ((string * string) list -> form_outcome Async.t)) list ref = ref []
 let find_form name = List.assoc_opt name !forms
 
-let implement_form action ?redirect f =
+let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _) Action.t) ?redirect
+    (f : i -> (o, f Form_core.errors) result Async.t) =
+  let t : (i, f) Form_core.t =
+    match action.Action.form with
+    | Some (Action.Form t) -> t
+    | None -> invalid_arg ("Yuka.Server.Form.implement: " ^ Action.name action ^ " is not a form action")
+  in
   let output = action.Action.output in
   let encode result =
     match (result, Codec.encode output result) with
@@ -422,7 +430,23 @@ let implement_form action ?redirect f =
     | _, j -> j
   in
   register action f encode;
-  Option.iter (fun decode -> forms := (Action.name action, decode) :: !forms) action.Action.form
+  let run values =
+    match Form_core.decode t values with
+    | Error e -> Async.resolved (Unprocessable (Form_core.named t e))
+    | Ok input ->
+        let answer =
+          match f input with
+          | a -> a
+          | exception Rejected m -> rejected m
+          | exception exn -> Async.failed (Web.exn_to_string exn)
+        in
+        Async.map
+          (function
+            | Ok o -> Saved (Option.map (fun r -> r o) redirect)
+            | Error e -> Unprocessable (Form_core.named t e))
+          answer
+  in
+  forms := (Action.name action, run) :: !forms
 
 let max_body = 1_048_576
 
@@ -442,13 +466,11 @@ let same_origin ~origin ~host =
             (String.lowercase_ascii origin_host)
       | None -> false)
 
-let is_json = function
-  | None -> false
-  | Some ct ->
-      let media = List.hd (String.split_on_char ';' ct) in
-      String.equal
-        (String.lowercase_ascii (String.trim media))
-        "application/json"
+let media_type = function
+  | None -> None
+  | Some ct -> Some (String.lowercase_ascii (String.trim (List.hd (String.split_on_char ';' ct))))
+
+let is_json ct = media_type ct = Some "application/json"
 
 let handle_action ~name ~content_type ~origin ~host ~body =
   let error_body message =

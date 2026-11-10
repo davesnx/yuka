@@ -17,6 +17,7 @@ let routes =
       loader=Loaders.squad headers=[ ("X-A", "team") ] cache=(Private { max_age = 5 })>
       <Route name=Member path="/:user<int>" page=Pages.member loader=Loaders.profile
         guard=Guards.inner />
+      <Route name=Team_form path="/form" page=Pages.team_form />
       <Endpoint name=Team_json path="/json" method_=`GET handler=Api.team
         cache=(Public { max_age = 60; s_max_age = Some 600 }) />
       <Action name=Rename path="/rename" method_=`POST handler=Api.rename />

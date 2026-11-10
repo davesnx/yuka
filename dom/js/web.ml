@@ -131,11 +131,13 @@ external first_element_child : node -> node option = "firstElementChild"
 let has_intersection_observer : node -> bool =
   [%mel.raw "function (el) { return typeof el.ownerDocument.defaultView.IntersectionObserver === 'function' }"]
 
-let form_values : node -> (string * string) array =
+let form_values : event -> (string * string) array =
   [%mel.raw
-    {|function (el) {
-  const out = [];
+    {|function (ev) {
+  const el = ev.target, out = [];
   new el.ownerDocument.defaultView.FormData(el).forEach(function (v, k) { if (typeof v === "string") out.push([k, v]); });
+  const s = ev.submitter;
+  if (s && s.name) out.push([s.name, s.value]);
   return out;
 }|}]
 

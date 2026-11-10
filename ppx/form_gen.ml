@@ -7,10 +7,10 @@ let suffixed n s = if n = "t" then s else n ^ "_" ^ s
 let rec kind (t : core_type) =
   let loc = t.ptyp_loc in
   match t.ptyp_desc with
-  | Ptyp_constr ({ txt = Lident "string"; _ }, []) -> [%expr Yuka.Form.string]
-  | Ptyp_constr ({ txt = Lident "int"; _ }, []) -> [%expr Yuka.Form.int]
-  | Ptyp_constr ({ txt = Lident "float"; _ }, []) -> [%expr Yuka.Form.float]
-  | Ptyp_constr ({ txt = Lident "bool"; _ }, []) -> [%expr Yuka.Form.bool]
+  | Ptyp_constr ({ txt = Lident "string" | Ldot (Lident "String", "t"); _ }, []) -> [%expr Yuka.Form.string]
+  | Ptyp_constr ({ txt = Lident "int" | Ldot (Lident "Int", "t"); _ }, []) -> [%expr Yuka.Form.int]
+  | Ptyp_constr ({ txt = Lident "float" | Ldot (Lident "Float", "t"); _ }, []) -> [%expr Yuka.Form.float]
+  | Ptyp_constr ({ txt = Lident "bool" | Ldot (Lident "Bool", "t"); _ }, []) -> [%expr Yuka.Form.bool]
   | Ptyp_constr ({ txt = Lident "option"; _ }, [ a ]) -> [%expr Yuka.Form.option [%e kind a]]
   | Ptyp_constr ({ txt = Lident "list"; _ }, [ a ]) -> [%expr Yuka.Form.list [%e kind a]]
   | Ptyp_constr ({ txt = Ldot (m, "t"); _ }, []) ->
@@ -22,8 +22,17 @@ let rec kind (t : core_type) =
         "a form field must be string, int, float, bool, an option or list of those, or M.t with M.of_string and M.to_string"
 
 let labels (td : type_declaration) =
+  (match td.ptype_params with
+  | [] -> ()
+  | (p, _) :: _ -> fail ~loc:p.ptyp_loc "[@@deriving form] needs a type with no parameter");
   match td.ptype_kind with
-  | Ptype_record labels -> labels
+  | Ptype_record labels ->
+      List.iter
+        (fun l ->
+          if String.length l.pld_name.txt > 0 && l.pld_name.txt.[0] = '_' then
+            fail ~loc:l.pld_name.loc "a form field name cannot start with '_' (the form uses _yuka_ fields)")
+        labels;
+      labels
   | _ -> fail ~loc:td.ptype_loc "[@@deriving form] needs a record type"
 
 let constructor (l : label_declaration) = String.capitalize_ascii l.pld_name.txt

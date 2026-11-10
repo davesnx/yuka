@@ -76,7 +76,20 @@ module Layouts = struct
     el "section" ~attrs:[ ("class", "team") ] [ text ("squad " ^ squad); children ]
 end
 
+let jot_form key =
+  let open Forms_shared.Entry in
+  Yuka.Form.make ~action:jot ~key
+    ~children:(fun form ->
+      el "div"
+        [
+          el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form Body) ] [];
+          Yuka.Form.error_view form Body (fun m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
+        ])
+    ()
+
 module Pages = struct
+  let team_form ~team:_ ~squad:_ () = Server.page ~title:"Team form" (fun () -> jot_form "team")
+
   let entry () =
     let open Forms_shared.Entry in
     Server.page ~title:"Entry" (fun () ->
@@ -93,9 +106,8 @@ module Pages = struct
                     Yuka.Form.form_error_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
                   ])
               ();
-            Yuka.Form.make ~action:jot
-              ~children:(fun form -> el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form Body) ] [])
-              ();
+            jot_form "one";
+            jot_form "two";
           ])
 
   let home () =
@@ -244,4 +256,7 @@ let () =
       | "nope" -> Server.Action.reject "Refused"
       | "boom" -> failwith "secret boom"
       | t -> Async.resolved (Ok t));
-  Server.Form.implement jot (fun n -> Async.resolved (Ok (String.length n.body)))
+  Server.Form.implement jot (fun n ->
+      saved := ("jot " ^ n.body) :: !saved;
+      if n.body = "x" then Async.resolved (Error [ (Some Body, "Too short") ])
+      else Async.resolved (Ok (String.length n.body)))

@@ -708,6 +708,7 @@ module Form : sig
 
   val make :
     action:('i, ('o, 'f errors) result, [ `Mutation ]) Action.t ->
+    ?key:string ->
     ?run:('i -> ('o, 'f errors) result Async.t) ->
     ?on_ok:('o -> unit) ->
     children:(('o, 'f) form -> 'k element) ->
@@ -716,11 +717,16 @@ module Form : sig
   (** [<Yuka.Form action>(fun form -> ...)</Yuka.Form>]: a
       [<form method="post">] with no [action] attribute (it posts to the
       page URL) and a hidden [_yuka_action] field, so it works with no
-      JavaScript. In an island, a submit is handled in the browser: the
-      fields are decoded first (an error shows at once, with no request),
-      then [run input] (default {!Action.call}) runs while [pending] is
-      true; field errors show, and on [Ok o] [on_ok o] runs, or the page
-      follows the server's [redirect] with a client navigation. *)
+      JavaScript. Give [key] to tell apart two forms of one action on a
+      page: after a failed post (422) only the form with the posted key
+      shows the sent values and errors. In an island, a submit is handled
+      in the browser: the fields (with the submit button's [name] and
+      [value]) are decoded first (an error shows at once, with no request),
+      then [run input] (default: the action call) runs while [pending] is
+      true; field errors show, and on [Ok o] [on_ok o] runs, or else the page
+      follows the server's [redirect] (with [run], the page URL) with a
+      client navigation, as a post with no JavaScript does. Raises
+      [Invalid_argument] when [action] is not from {!val-action}. *)
 end
 
 module Browser : sig
@@ -942,8 +948,10 @@ module Private : sig
 
   val import_map : url:string -> string list -> (string * string) list
 
-  val set_form : session -> string * (string * string) list * Json.t -> unit
-  (** The form state of a failed post (action name, sent fields, errors JSON). *)
+  val set_form :
+    session -> string * string * (string * string) list * (string option * string) list -> unit
+  (** The form state of a failed post: action name, form key, sent fields,
+      errors by field name. *)
 
   val query : string -> (string * string) list
   (** The decoded query pairs of a request target, as the cycle reads them
@@ -1147,11 +1155,15 @@ module Server : sig
       unit
     (** Registers a form action (see {!Yuka.Form}). It answers the island
         path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
-        with [redirect o] in the answer, and the form post of a page: the
-        request cycle decodes the posted fields, calls the function, and
-        answers 303 to [redirect o] (default: the page URL) on [Ok o], or
-        renders the page again with status 422 and the sent values and
-        errors on [Error], a decode error or {!Action.reject}. *)
+        with [redirect o] in the answer, and the form post of a page. The
+        request cycle checks the origin (403), runs the page's guards (a
+        refusal answers as for [GET] and the function does not run), reads
+        at most 1 MiB of body (413), decodes the posted fields, calls the
+        function, and answers 303 to [redirect o] (default: the page URL)
+        on [Ok o], or renders the page again with status 422 and the sent
+        values and errors on [Error], a decode error or {!Action.reject}.
+        The 303, 403 and 413 carry the page's rule headers. Raises
+        [Invalid_argument] when the action is not from {!Yuka.Form.val-action}. *)
   end
 
   (** {2 Request cycle}
@@ -1334,7 +1346,7 @@ module Server : sig
     meth : Router.meth;
     target : string;  (** Path and query, as sent. *)
     header : string -> string option;  (** Case-insensitive. *)
-    body : unit -> string Async.t;
+    body : limit:int -> string option Async.t;  (** [None] over [limit] bytes. *)
   }
   (** What the cycle reads from a request. *)
 
@@ -1426,8 +1438,9 @@ module Server : sig
     val header : request -> string -> string option
     (** Case-insensitive. *)
 
-    val body : request -> string Async.t
-    (** The whole request body. *)
+    val body : request -> limit:int -> string option Async.t
+    (** The request body, or [None] when it is longer than [limit] bytes.
+        Stop reading past [limit + 1] bytes. *)
 
     val respond : http_response -> response io
     (** Sends the status, the headers and the body; a [Stream] body is

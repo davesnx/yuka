@@ -221,6 +221,27 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
                      page = Pages.member ~team ~user ~squad ~profile ();
                    }))));
         }
+  | Cycle_shared.Routes.Team_form { team } ->
+      Yuka.Server.Page
+        {
+          rules = rules_2;
+          guards = [ (fun () -> Guards.outer req ~team) ];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let squad = Loaders.squad req ~team in
+              Yuka.Server.loaded squad (fun squad ->
+              Yuka.Async.resolved
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.layers =
+                       [
+                         layer_0;
+                         { Yuka.Server.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; data = true; wrap = (fun children -> Layouts.team ~squad ~children ()) };
+                       ];
+                     page = Pages.team_form ~team ~squad ();
+                   })));
+        }
   | Cycle_shared.Routes.Team_json { team } ->
       Yuka.Server.Handler
         {
@@ -319,7 +340,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
         }
 
 let app =
-  Yuka.Server.app ~build:"fb627433f340695fbc29bae8a88d5fcb"
+  Yuka.Server.app ~build:"ea298a6cac414d8d60720141bcd02608"
     ~headers:([("x-frame-options", "DENY"); ("x-a", "root")])
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

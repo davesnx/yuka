@@ -30,7 +30,17 @@ module Adapter = struct
 
   let target = Dream.target
   let header = Dream.header
-  let body request = to_async (Dream.body request)
+  let body request ~limit =
+    let stream = Dream.body_stream request in
+    let buffer = Buffer.create 1024 in
+    let rec read () =
+      Lwt.bind (Dream.read stream) (function
+        | None -> Lwt.return_some (Buffer.contents buffer)
+        | Some chunk ->
+            Buffer.add_string buffer chunk;
+            if Buffer.length buffer > limit then Lwt.return_none else read ())
+    in
+    to_async (read ())
 
   let respond ({ status; headers; body } : Yuka.Server.http_response) =
     match body with

@@ -1507,4 +1507,17 @@ Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
 - Demo: `/new` (server-only form, works with JavaScript off) and the new
   issue dialog (`<Yuka.Form>` in the `New_issue` island) share
   `Views.Issue_form`.
+- Review fixes: `ADAPTER.body` takes `~limit` and gives `None` over it
+  (`yuka-dream` reads the body stream and stops), used by the form post and
+  the action call. The form post checks the origin from the headers first,
+  then runs the page's guards, then reads the bounded body. `Action.t.form`
+  is a GADT that holds the `Form.t`, so the cycle and `<Yuka.Form>` decode
+  once with the typed decoder, and field names come from the `Form.t`.
+  The redirect is read from each answer (no shared ref). The posted form
+  is told by `?key` (`_yuka_key`); the 422 state goes to that form only,
+  and an island reads `data-yuka-sent` once per element. The browser adds
+  the submitter's `name`/`value` to the fields. With no `on_ok` and no
+  redirect, an island submit navigates to the page URL. The deriver
+  refuses type parameters and labels that start with `_`, and reads
+  `String.t`, `Int.t`, `Float.t`, `Bool.t` as the base kinds.
 

@@ -1,8 +1,11 @@
+  type ('i, 'o) form =
+    | Form : ('i, 'f) Form_core.t -> ('i, ('x, ('f option * string) list) result) form
+
   type ('i, 'o, 'kind) t = {
     name : string;
     input : 'i Codec.t;
     output : 'o Codec.t;
-    form : ((string * string) list -> (Json.t, Json.t) result) option;
+    form : ('i, 'o) form option;
   }
 
   let declare ~name ~input ~output : (_, _, [ `Mutation ]) t = { name; input; output; form = None }

@@ -504,3 +504,42 @@ deriving form refuses a field type it cannot read:
                       ^^^^^^^^^
   Error: [yuka] a form field must be string, int, float, bool, an option or list of those, or M.t with M.of_string and M.to_string
   [1]
+
+deriving form refuses type parameters and labels that start with an underscore:
+
+  $ cat > form3.mlx <<'X'
+  > type 'a t = { x : string } [@@deriving form]
+  > X
+  $ run form3
+  File "form3.mlx", line 1, characters 5-7:
+  1 | type 'a t = { x : string } [@@deriving form]
+           ^^
+  Error: [yuka] [@deriving form] needs a type with no parameter
+  [1]
+
+  $ cat > form4.mlx <<'X'
+  > type t = { _hidden : string } [@@deriving form]
+  > X
+  $ run form4
+  File "form4.mlx", line 1, characters 11-18:
+  1 | type t = { _hidden : string } [@@deriving form]
+                 ^^^^^^^
+  Error: [yuka] a form field name cannot start with '_' (the form uses _yuka_ fields)
+  [1]
+
+String.t, Int.t, Float.t and Bool.t are the base kinds, not custom modules:
+
+  $ cat > form5.mlx <<'X'
+  > type t = { a : String.t; b : Int.t; c : Float.t; d : Bool.t } [@@deriving form]
+  > X
+  $ run form5 | grep -o 'Yuka.Form.[a-z]*' | sort -u
+  Yuka.Form.bool
+  Yuka.Form.field
+  Yuka.Form.fields
+  Yuka.Form.finish
+  Yuka.Form.float
+  Yuka.Form.get
+  Yuka.Form.int
+  Yuka.Form.put
+  Yuka.Form.string
+  Yuka.Form.t

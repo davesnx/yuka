@@ -112,7 +112,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable answers : (string * Json.t option) list;
     mutable answered : string list;
     mutable select_value : string option;
-    mutable form : (string * (string * string) list * Json.t) option;
+    mutable form : (string * string * (string * string) list * (string option * string) list) option;
   }
 
   let snapshot s = { s with streaming = s.streaming }
