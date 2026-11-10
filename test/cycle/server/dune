@@ -1,6 +1,6 @@
 (library
  (name cycle_server)
- (libraries yuka cycle_shared))
+ (libraries yuka cycle_shared forms_shared))
 
 (rule
  (targets routes_server.ml)

@@ -562,6 +562,7 @@ let mapper =
 
 let () =
   Codec_gen.register ();
+  Form_gen.register ();
   Driver.register_transformation "yuka"
     ~preprocess_impl:Island.check_placement
     ~rules:[ Context_free.Rule.extension Island.extension ]

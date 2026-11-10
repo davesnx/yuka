@@ -11,6 +11,7 @@
 - Breaking: `Action.t` has a third type parameter, the kind (`[ `Mutation ]` for `declare`, `[ `Query ]` for `query`) (@davesnx)
 - Error boundaries and loading states: `<Yuka.Catch fallback=(fun ~error ~reset -> ...)>` catches exceptions in its children (render, effects, memos, holes, event handlers), also during server rendering; `<Yuka.Show>` shows a `Yuka.Status.t`; `Yuka.mount ~on_error` gets the errors that no `Catch` caught (@davesnx)
 - Breaking: an island with no `Catch` now stops at its first exception after it started and keeps its DOM; the error goes to `console.error` and `on_error` (@davesnx)
+- Forms: `[@@deriving form]`, `Form.action`, `Server.Form.implement` and `<Yuka.Form>`; a form posts to the page URL with no JavaScript (303 on success, 422 with the sent values and errors), and inside an island it submits through `Action.call` with a pending state and the same decoder (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

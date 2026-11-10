@@ -7,19 +7,27 @@ type update_input = {
 }
 [@@deriving codec]
 
-type create_input = {
+module Status_field = struct
+  type t = Issue.status
+
+  let of_string = Issue.status_of_slug
+  let to_string = Issue.status_slug
+end
+
+module Priority_field = struct
+  type t = Issue.priority
+
+  let of_string = Issue.priority_of_slug
+  let to_string = Issue.priority_slug
+end
+
+type new_issue = {
   title : string;
   description : string;
-  status : Issue.status;
-  priority : Issue.priority;
+  status : Status_field.t;
+  priority : Priority_field.t;
 }
-[@@deriving codec]
-
-type create_error =
-  | Empty_title
-  | Title_too_long of int
-  | Duplicate_title of string
-[@@deriving codec]
+[@@deriving form]
 
 type comment_input = { issue_id : string; body : string } [@@deriving codec]
 
@@ -27,9 +35,7 @@ let update_issue =
   Yuka.Action.declare ~name:"update_issue" ~input:update_input_codec
     ~output:Issue.codec
 
-let create_issue =
-  Yuka.Action.declare ~name:"create_issue" ~input:create_input_codec
-    ~output:(Yuka.Codec.result Issue.codec create_error_codec)
+let create_issue = Yuka.Form.action ~name:"create_issue" ~fields:new_issue_form ~output:Issue.codec
 
 let add_comment =
   Yuka.Action.declare ~name:"add_comment" ~input:comment_input_codec

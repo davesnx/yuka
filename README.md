@@ -224,6 +224,52 @@ when there is no data yet.
 </Yuka.Show>
 ```
 
+### Forms
+
+A record with `[@@deriving form]` gets a field type and a decoder that runs
+on the server and in the browser:
+
+```ocaml
+type new_issue = { title : string; priority : Priority.t } [@@deriving form]
+(* type new_issue_field = Title | Priority, val new_issue_form *)
+
+let create_issue =
+  Yuka.Form.action ~name:"create_issue" ~fields:new_issue_form ~output:Issue.codec
+
+let () =
+  Yuka.Server.Form.implement create_issue
+    ~redirect:(fun i -> Routes.href (Issue { id = i.id }))
+    (fun input ->
+      if String.trim input.title = "" then Async.resolved (Error [ (Some Title, "Required") ])
+      else Async.resolved (Ok (Store.create input)))
+```
+
+```ocaml
+<Yuka.Form action=create_issue>
+  (fun form ->
+    <div>
+      <input name="title" value=(Yuka.Form.value form Title) />
+      (Yuka.Form.error_view form Title (fun m -> <p class_="error">(Yuka.text m)</p>))
+      <button type_=`submit>"Create"</button>
+    </div>)
+</Yuka.Form>
+```
+
+`<Yuka.Form>` prints `<form method="post">` with a hidden `_yuka_action`
+field and no `action` attribute, so it posts to the page URL and works with
+no JavaScript: the request cycle decodes the fields, runs the
+implementation, and answers 303 to `redirect` (or the page URL), or renders
+the page again with status 422, the sent values and the errors. The post
+must come from the same origin (`Origin`, or `Sec-Fetch-Site: same-origin`).
+Field types are `string`, `int`, `float`, `bool` (a checkbox), `option`,
+`list` and `M.t` with `M.of_string` and `M.to_string`.
+
+Inside an island, a submit is handled in the browser: the same decoder runs
+first (its errors show with no request), then `Action.call` (or `~run`, for
+example with `Remote.mutate`), with `Form.pending` true until the answer;
+on success `~on_ok` runs, or the page follows `redirect`. A page whose forms
+are not in an island loads no JavaScript.
+
 ### Routes
 
 `Routes.mlx` holds the route tree. It is read by the generator, not compiled:

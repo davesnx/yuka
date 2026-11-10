@@ -831,6 +831,81 @@ let navigation =
         check_true "stable" (Server.build_id config app = build) );
   ]
 
+let forms =
+  let form_type = ("content-type", "application/x-www-form-urlencoded") in
+  let post ?(headers = [ form_type; ("origin", "http://app.example"); ("host", "app.example") ]) ?(target = "/entry") body =
+    App.saved := [];
+    get ~meth:`POST ~headers ~body target
+  in
+  [
+    ( "a valid post is 303 to the redirect",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=hello+there&count=2&level=low" in
+        check_status r 303;
+        check_header r "location" [ "/entry?saved=hello there" ];
+        check_header r "cache-control" [ "no-store" ];
+        Alcotest.(check (list string)) "called" [ "hello there" ] !App.saved );
+    ( "without a redirect it is 303 to the page URL",
+      fun () ->
+        let r = post ~target:"/entry?x=1" "_yuka_action=jot&body=hi" in
+        check_status r 303;
+        check_header r "location" [ "/entry?x=1" ] );
+    ( "a bad field is 422 with the values and errors, and no call",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=keep+me&count=abc&level=low" in
+        check_status r 422;
+        check_header r "cache-control" [ "no-store" ];
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        check_true "value kept" (contains r.body {|name="title" value="keep me"|});
+        check_true "bad value kept" (contains r.body {|name="count" value="abc"|});
+        check_true "error" (contains r.body "count error: Not a whole number");
+        check_true "the other form is empty" (contains r.body {|name="body" value=""|});
+        check_true "no JavaScript" (not (contains r.body "<script type=\"module\"" || contains r.body "__yukaFill")) );
+    ( "Error and reject show their messages",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=taken&count=1&level=low" in
+        check_status r 422;
+        check_true "field error" (contains r.body "title error: Taken");
+        let r = post "_yuka_action=save_entry&title=nope&count=1&level=low" in
+        check_status r 422;
+        check_true "form error" (contains r.body "form error: Refused") );
+    ( "a failure is the 500 page",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=boom&count=1&level=low" in
+        check_status r 500;
+        check_true "no detail" (not (contains r.body "secret boom")) );
+    ( "origin checks",
+      fun () ->
+        let r = post ~headers:[ form_type; ("origin", "https://evil.example"); ("host", "app.example") ] "_yuka_action=jot&body=x" in
+        check_status r 403;
+        let r = post ~headers:[ form_type; ("host", "app.example") ] "_yuka_action=jot&body=x" in
+        check_status r 403;
+        let r = post ~headers:[ form_type; ("sec-fetch-site", "same-origin") ] "_yuka_action=jot&body=x" in
+        check_status r 303 );
+    ( "unknown form action is 404",
+      fun () ->
+        let r = post "_yuka_action=nobody&x=1" in
+        check_status r 404 );
+    ( "a post that is not a form post stays 405",
+      fun () ->
+        let r = post "title=x" in
+        check_status r 405;
+        check_header r "allow" [ "GET, HEAD, OPTIONS" ];
+        let r = post ~headers:[ ("content-type", "application/json") ] "{}" in
+        check_status r 405;
+        let r = post ~target:"/feed.xml" "_yuka_action=jot&body=x" in
+        check_status r 405 );
+    ( "GET and HEAD of the form page are unchanged",
+      fun () ->
+        let r = get "/entry" in
+        check_status r 200;
+        check_true "form" (contains r.body {|<form method="post" data-yuka-action="save_entry"><input type="hidden" name="_yuka_action" value="save_entry">|});
+        check_true "no action attribute" (not (contains r.body "<form action"));
+        let h = get ~meth:`HEAD "/entry" in
+        check_status h 200;
+        Alcotest.(check string) "no body" "" h.body );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -845,4 +920,5 @@ let () =
       ("loaders", cases loaders);
       ("render", cases render);
       ("navigation", cases navigation);
+      ("forms", cases forms);
     ]

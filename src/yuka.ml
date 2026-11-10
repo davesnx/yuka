@@ -19,6 +19,7 @@ module Client = Client
 module Action = Action
 module Optimistic = Optimistic
 module Remote = Remote
+module Form = Form
 module Event = Platform.Event
 module Browser = Platform.Browser
 module Router = Router
@@ -31,6 +32,10 @@ module Server = struct
     let implement = Server.implement
     let reject = Server.reject
     let rejected = Server.rejected
+  end
+
+  module Form = struct
+    let implement = Server.implement_form
   end
 end
 
@@ -55,6 +60,7 @@ module Private = struct
   let stream = Server.stream
   let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep build
   let import_map = Server.import_map
+  let set_form (s : session) f = s.form <- Some f
   let query = Router.query
   let preload_urls = Server.preload_urls
   let handle_action = Server.handle_action

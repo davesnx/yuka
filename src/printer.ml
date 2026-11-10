@@ -9,7 +9,7 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false; answers = []; answered = []; select_value = None }
+      current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"

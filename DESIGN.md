@@ -1468,3 +1468,43 @@ Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.
   benchmark); `Catch`, `Show` and `Status` are top-level values, dropped
   when unused.
 
+## Forms (2026-11-10)
+
+Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
+"20: changes during build" lists the differences.
+
+- `[@@deriving form]` (`ppx/form_gen.ml`) on a record writes `type
+  <t>_field` (one constant constructor per label), `<t>_field_name` and
+  `<t>_form : (<t>, <t>_field) Yuka.Form.t`. The generated decoder calls
+  `Yuka.Form.field` for each label with a kind (`string`, `int`, `float`,
+  `bool`, `option`, `list`, `custom M.of_string M.to_string`), collects
+  every error in field order, and builds the record with `Form.finish`.
+- `Form.action ~name ~fields ~output` is an `Action.t` whose input is sent
+  as the encoded fields (`[[name, value], ...]`) and whose answer is
+  `{"value": o, "redirect": "/..."}` or `{"errors": [[name|null, message]]}`.
+  `Action.t` has a `form` field (raw fields to input JSON or errors JSON),
+  set only by `Form.action`, so the cycle can decode a raw post without
+  knowing the types.
+- Request cycle: a `POST` to a page path (the route has `GET`) with
+  `application/x-www-form-urlencoded` and a `_yuka_action` field is a form
+  post. It checks the origin (`Origin` equal to `Host`, or no `Origin` and
+  `Sec-Fetch-Site: same-origin`, else 403), the 1 MiB limit (413), and the
+  action (404); it decodes, runs the JSON handler of the action, and answers
+  303 to `redirect` or the page URL, or renders the page as for `GET`
+  (guards and loaders run) with status 422 and `no-store`. The printer
+  session holds `form = (action, fields, errors)`; `<Yuka.Form>` of that
+  action prints the sent values and errors, and `data-yuka-sent` on the
+  `<form>` so an island hydrates with them. Any other `POST` to a page is
+  405 as before.
+- `<Yuka.Form>` (`src/form.ml`): `<form method="post"
+  data-yuka-action="NAME">` with the hidden `_yuka_action` input. In an
+  island its `submit` handler reads `FormData` (`Web.form_values`), decodes,
+  and calls the action; `pending` and the errors are States. A read of
+  `Form.pending` outside a hole renders the enclosing component again (the
+  demo's submit button is in a hole).
+- Size: keyed app 10648 -> 10664 B gzip (it has no `form.js`; `make size`
+  checks it); demo client 39764 -> 41400 B gzip.
+- Demo: `/new` (server-only form, works with JavaScript off) and the new
+  issue dialog (`<Yuka.Form>` in the `New_issue` island) share
+  `Views.Issue_form`.
+

@@ -77,6 +77,27 @@ module Layouts = struct
 end
 
 module Pages = struct
+  let entry () =
+    let open Forms_shared.Entry in
+    Server.page ~title:"Entry" (fun () ->
+        el "main"
+          [
+            Yuka.Form.make ~action:save
+              ~children:(fun form ->
+                el "div"
+                  [
+                    el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form Title) ] [];
+                    el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form Count) ] [];
+                    Yuka.Form.error_view form Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
+                    Yuka.Form.error_view form Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
+                    Yuka.Form.form_error_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
+                  ])
+              ();
+            Yuka.Form.make ~action:jot
+              ~children:(fun form -> el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form Body) ] [])
+              ();
+          ])
+
   let home () =
     Server.page ~title:"Home" (fun () ->
         note "home body";
@@ -209,3 +230,18 @@ module Api = struct
   let clear _req = Server.text "cleared"
   let asset _req = Server.text "asset"
 end
+
+let saved = ref []
+
+let () =
+  let open Forms_shared.Entry in
+  Server.Form.implement save
+    ~redirect:(fun o -> "/entry?saved=" ^ o)
+    (fun e ->
+      saved := e.title :: !saved;
+      match e.title with
+      | "taken" -> Async.resolved (Error [ (Some Title, "Taken") ])
+      | "nope" -> Server.Action.reject "Refused"
+      | "boom" -> failwith "secret boom"
+      | t -> Async.resolved (Ok t));
+  Server.Form.implement jot (fun n -> Async.resolved (Ok (String.length n.body)))

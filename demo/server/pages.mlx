@@ -66,3 +66,16 @@ let about () =
         <p>"A mini Linear built with Yuka. This page has no island."</p>
         <a href=(Routes.href Issues)>"Back to issues"</a>
       </main>)
+
+let create () =
+  Yuka.Server.page ~title:"New issue" (fun () ->
+      <main class_="new-issue-page">
+        <h1>"New issue"</h1>
+        <Yuka.Form action=Actions.create_issue>
+          (fun form ->
+            <div>
+              <Views.Issue_form form />
+              <button class_="button primary" type_=`submit>"Create issue"</button>
+            </div>)
+        </Yuka.Form>
+      </main>)

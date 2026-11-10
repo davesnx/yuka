@@ -431,6 +431,27 @@ await step("6. new issue dialog", async () => {
 });
 
 const issuePath = "/issue/YUK-1";
+await step("6f. new issue form with JavaScript off", async () => {
+  const ctx = await browser.newContext({ javaScriptEnabled: false });
+  const pg = await ctx.newPage();
+  const statuses: number[] = [];
+  pg.on("response", (r) => { if (r.request().method() === "POST") statuses.push(r.status()); });
+  await pg.goto(base + "/new", { waitUntil: "load" });
+  await pg.fill('input[name="title"]', "");
+  await pg.fill('textarea[name="description"]', "kept by the server");
+  await pg.locator('button[type="submit"]').click();
+  await pg.waitForLoadState("load");
+  check("6f.1 empty title: 422 page with the error", statuses.includes(422) && (await pg.locator(".error").first().textContent()) === "Title is required", JSON.stringify(statuses));
+  check("6f.2 the sent description is kept", (await pg.inputValue('textarea[name="description"]')) === "kept by the server");
+  check("6f.3 the address stays /new", new URL(pg.url()).pathname === "/new", pg.url());
+  const title = `No-JS issue ${run}`;
+  await pg.fill('input[name="title"]', title);
+  await pg.locator('button[type="submit"]').click();
+  await pg.waitForURL("**/issue/YUK-*");
+  check("6f.4 created: 303 to the issue page", statuses.includes(303) && (await pg.locator(".issue-title").textContent()) === title, `${statuses} ${pg.url()}`);
+  await ctx.close();
+});
+
 await step("7a. streaming", async () => {
   const early = await browser.newPage();
   const earlyErrors: string[] = [];

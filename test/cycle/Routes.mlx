@@ -6,6 +6,7 @@ let routes =
     headers=[ ("x-frame-options", "DENY"); ("x-a", "root") ] cache=No_store>
     <Route name=Home path="/" page=Pages.home />
     <Route name=Plain path="/plain" page=Pages.plain prerender=true />
+    <Route name=Entry path="/entry" page=Pages.entry />
     <Route name=Find path="/find" page=Pages.find search={ q = optional string; tag = many string } />
     <Route name=Islands path="/islands" page=Pages.islands />
     <Route name=Slow path="/slow" page=Pages.slow />

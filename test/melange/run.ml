@@ -11,7 +11,7 @@ let report name = function
       print_endline ("FAIL " ^ name ^ ": " ^ Printexc.to_string e)
 
 let sync_cases = Cases.all @ Dom_cases.all @ Island_cases.all @ Catch_cases.all
-let async_cases = Island_cases.async @ Remote_cases.async
+let async_cases = Island_cases.async @ Remote_cases.async @ Form_cases.async
 let total = List.length sync_cases + List.length async_cases
 let finished = ref false
 

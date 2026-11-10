@@ -114,6 +114,23 @@ let about () =
   lacks html "__yukaFill";
   lacks html "modulepreload"
 
+let form_post () =
+  let headers = [ ("Content-Type", "application/x-www-form-urlencoded"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
+  let status, _, html =
+    call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&title=&description=kept+text&status=done&priority=high" "/new"
+  in
+  Alcotest.(check int) "422" 422 status;
+  has html "Title is required";
+  has html "kept text";
+  has html {|<option value="done" selected="">|};
+  let status, response, _ =
+    call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&title=From+a+form&description=&status=todo&priority=low" "/new"
+  in
+  Alcotest.(check int) "303" 303 status;
+  let location = Option.value (header response "location") ~default:"" in
+  Alcotest.(check bool) "to the new issue" true (String.length location > 11 && String.sub location 0 11 = "/issue/YUK-");
+  has (get location) "From a form"
+
 let prerendered () =
   let out = Filename.temp_dir "yuka_demo" "" in
   Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ()) Routes_server.app);
@@ -180,8 +197,8 @@ let actions () =
        (Yuka.Action.call Actions.create_issue
           { Actions.title = " "; description = ""; status = Model.Issue.Todo; priority = Model.Issue.Low })
    with
-  | Ok (Error Actions.Empty_title) -> ()
-  | _ -> Alcotest.fail "expected Empty_title");
+  | Ok (Error [ (Some Actions.Title, "Title is required") ]) -> ()
+  | _ -> Alcotest.fail "expected Title is required");
   (match
      settle
        (Yuka.Action.call Actions.create_issue
@@ -192,8 +209,8 @@ let actions () =
             priority = Model.Issue.Low;
           })
    with
-  | Ok (Error (Actions.Title_too_long 80)) -> ()
-  | _ -> Alcotest.fail "expected Title_too_long");
+  | Ok (Error [ (Some Actions.Title, "Title is too long (at most 80 characters)") ]) -> ()
+  | _ -> Alcotest.fail "expected Title is too long");
   (match
      settle
        (Yuka.Action.call Actions.create_issue
@@ -204,8 +221,8 @@ let actions () =
             priority = Model.Issue.Low;
           })
    with
-  | Ok (Error (Actions.Duplicate_title "YUK-25")) -> ()
-  | _ -> Alcotest.fail "expected Duplicate_title");
+  | Ok (Error [ (Some Actions.Title, "An issue with this title already exists: YUK-25") ]) -> ()
+  | _ -> Alcotest.fail "expected a duplicate title");
   (match
      settle
        (Yuka.Action.call Actions.update_issue
@@ -224,7 +241,7 @@ let actions () =
           })
    with
   | Ok (Ok (i : Model.Issue.t)) ->
-      Alcotest.(check string) "id" "YUK-26" i.id;
+      Alcotest.(check bool) "id" true (String.length i.id > 4 && String.sub i.id 0 4 = "YUK-");
       has (get "/") "Brand new"
   | _ -> Alcotest.fail "create failed");
   match
@@ -252,6 +269,7 @@ let () =
           Alcotest.test_case "about has no JavaScript" `Quick about;
           Alcotest.test_case "redirect, 405, HEAD, endpoint, assets" `Quick rules;
           Alcotest.test_case "prerendered /about, GET and HEAD" `Quick prerendered;
+          Alcotest.test_case "the new issue form posts with no JavaScript" `Quick form_post;
           Alcotest.test_case "action route" `Quick action_route;
         ] );
       ("actions", [ Alcotest.test_case "store through actions" `Quick actions ]);

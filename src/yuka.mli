@@ -620,6 +620,109 @@ module Remote : sig
       gets the change on top. The result is the [Async] of [run ()]. *)
 end
 
+module Form : sig
+  (** Forms that post with no JavaScript and submit through {!Action.call}
+      in an island. [[@@deriving form]] on a record writes the field type,
+      the field names and a [('i, 'f) t]; the same decoder runs on the
+      server and in the browser. *)
+
+  type 'f errors = ('f option * string) list
+  (** [None] is an error for the whole form. *)
+
+  type 'a kind
+  (** How one field reads from the posted strings and writes back. *)
+
+  val string : string kind
+  (** The first value; ["Missing"] when the field is absent. *)
+
+  val int : int kind
+  (** ["Not a whole number"] when it does not parse. *)
+
+  val float : float kind
+  val bool : bool kind
+  (** A checkbox: present is [true], absent is [false]. *)
+
+  val option : 'a kind -> 'a option kind
+  (** Absent or empty is [None]. *)
+
+  val list : 'a kind -> 'a list kind
+  (** Every value of the field, in order. *)
+
+  val custom : (string -> 'a option) -> ('a -> string) -> 'a kind
+  (** ["Not valid"] when [of_string] gives [None]. *)
+
+  type ('i, 'f) t
+  (** The fields of a form: decode, encode and names. *)
+
+  type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
+
+  type 'f decoding
+
+  val fields :
+    names:('f * string) list ->
+    decode:('f decoding -> ('i, 'f errors) result) ->
+    encode:('i -> (string * string) list) ->
+    ('i, 'f) t
+  (** Used by the code that [[@@deriving form]] writes. *)
+
+  val field : 'f decoding -> 'f -> string -> 'a kind -> 'a option
+  val get : 'a option -> 'a
+  val finish : 'f decoding -> (unit -> 'i) -> ('i, 'f errors) result
+  val put : string -> 'a kind -> 'a -> (string * string) list
+
+  val decode : ('i, 'f) t -> (string * string) list -> ('i, 'f errors) result
+  (** Every field error, in field order. *)
+
+  val encode : ('i, 'f) t -> 'i -> (string * string) list
+  val name : ('i, 'f) t -> 'f -> string
+
+  val action :
+    name:string ->
+    fields:('i, 'f) t ->
+    output:'o Codec.t ->
+    ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
+  (** An action whose input is a form: {!Action.call} sends the encoded
+      fields; the answer is [Ok o] or the field errors. *)
+
+  type ('o, 'f) form
+  (** What the children of {!make} get. *)
+
+  val value : ('o, 'f) form -> 'f -> string
+  (** The value sent for the field when the page answers a failed post
+      (422), else [""]. *)
+
+  val error : ('o, 'f) form -> 'f -> string option
+  (** Tracked read of the first error of the field. *)
+
+  val error_view : ('o, 'f) form -> 'f -> (string -> 'k element) -> 'k element
+  (** A hole: the view of the field's error, or nothing. *)
+
+  val form_errors : ('o, 'f) form -> string list
+  val form_error_view : ('o, 'f) form -> (string -> 'k element) -> 'k element
+  (** The errors for the whole form. *)
+
+  val pending : ('o, 'f) form -> bool
+  (** Tracked: true while an island submit waits for its answer. Read it in
+      a hole ([Yuka.hole]); read in the children directly, it renders the
+      enclosing component again, with a new form. *)
+
+  val make :
+    action:('i, ('o, 'f errors) result, [ `Mutation ]) Action.t ->
+    ?run:('i -> ('o, 'f errors) result Async.t) ->
+    ?on_ok:('o -> unit) ->
+    children:(('o, 'f) form -> 'k element) ->
+    unit ->
+    'k element
+  (** [<Yuka.Form action>(fun form -> ...)</Yuka.Form>]: a
+      [<form method="post">] with no [action] attribute (it posts to the
+      page URL) and a hidden [_yuka_action] field, so it works with no
+      JavaScript. In an island, a submit is handled in the browser: the
+      fields are decoded first (an error shows at once, with no request),
+      then [run input] (default {!Action.call}) runs while [pending] is
+      true; field errors show, and on [Ok o] [on_ok o] runs, or the page
+      follows the server's [redirect] with a client navigation. *)
+end
+
 module Browser : sig
   val on_window : string -> (Event.t -> unit) -> unit
   (** Listens on [window] until the current owner is disposed. Browser only:
@@ -839,6 +942,9 @@ module Private : sig
 
   val import_map : url:string -> string list -> (string * string) list
 
+  val set_form : session -> string * (string * string) list * Json.t -> unit
+  (** The form state of a failed post (action name, sent fields, errors JSON). *)
+
   val query : string -> (string * string) list
   (** The decoded query pairs of a request target, as the cycle reads them
       ([+] is a space). *)
@@ -1031,6 +1137,21 @@ module Server : sig
 
     val rejected : string -> 'a Async.t
     (** Like [reject], for use after a wait (in an [Async] chain). *)
+  end
+
+  module Form : sig
+    val implement :
+      ('i, 'o, 'f) Form.action ->
+      ?redirect:('o -> string) ->
+      ('i -> ('o, 'f Form.errors) result Async.t) ->
+      unit
+    (** Registers a form action (see {!Yuka.Form}). It answers the island
+        path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
+        with [redirect o] in the answer, and the form post of a page: the
+        request cycle decodes the posted fields, calls the function, and
+        answers 303 to [redirect o] (default: the page URL) on [Ok o], or
+        renders the page again with status 422 and the sent values and
+        errors on [Error], a decode error or {!Action.reject}. *)
   end
 
   (** {2 Request cycle}

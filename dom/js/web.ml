@@ -131,6 +131,14 @@ external first_element_child : node -> node option = "firstElementChild"
 let has_intersection_observer : node -> bool =
   [%mel.raw "function (el) { return typeof el.ownerDocument.defaultView.IntersectionObserver === 'function' }"]
 
+let form_values : node -> (string * string) array =
+  [%mel.raw
+    {|function (el) {
+  const out = [];
+  new el.ownerDocument.defaultView.FormData(el).forEach(function (v, k) { if (typeof v === "string") out.push([k, v]); });
+  return out;
+}|}]
+
 let set_timeout : int -> (unit -> unit) -> unit -> unit =
   [%mel.raw
     {|function (ms, f) {

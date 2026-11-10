@@ -9,16 +9,17 @@ let register () =
       match Store.update ~id ?status ?priority () with
       | Some i -> Yuka.Async.resolved i
       | None -> Yuka.Server.Action.rejected ("No issue " ^ id));
-  Yuka.Server.Action.implement Actions.create_issue
+  Yuka.Server.Form.implement Actions.create_issue
+    ~redirect:(fun (i : Model.Issue.t) -> Routes.href (Issue { id = i.id }))
     (fun { title; description; status; priority } ->
       let title = String.trim title in
-      Yuka.Async.resolved
-        (if title = "" then Error Actions.Empty_title
-         else if String.length title > 80 then Error (Actions.Title_too_long 80)
-         else
-           match Store.find_title title with
-           | Some (i : Model.Issue.t) -> Error (Actions.Duplicate_title i.id)
-           | None -> Ok (Store.create ~title ~description ~status ~priority)));
+      let title_error m = Yuka.Async.resolved (Error [ (Some Actions.Title, m) ]) in
+      if title = "" then title_error "Title is required"
+      else if String.length title > 80 then title_error "Title is too long (at most 80 characters)"
+      else
+        match Store.find_title title with
+        | Some (i : Model.Issue.t) -> title_error ("An issue with this title already exists: " ^ i.id)
+        | None -> Yuka.Async.resolved (Ok (Store.create ~title ~description ~status ~priority)));
   Yuka.Server.Action.implement Actions.add_comment
     (fun { issue_id; body } ->
       match Store.find issue_id with

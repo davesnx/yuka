@@ -73,9 +73,10 @@ let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
   | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_shell
+let drive ?preload ?entry ?current ?(id_prefix = "") ?form ~timeout ~sleep build ~on_shell
     ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
+  session.form <- form;
   session.preload <- preload;
   session.entry <- entry;
   session.current <- current;
@@ -248,12 +249,12 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ~sleep build =
+let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ~sleep build =
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
     (fun () -> !document ^ Buffer.contents values)
-    (drive ?preload ?entry ?current ?id_prefix ~timeout ~sleep
+    (drive ?preload ?entry ?current ?id_prefix ?form ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
          document := shell;
@@ -383,12 +384,11 @@ let send name input k =
             !log_error ("action " ^ name ^ " failed: " ^ m);
             Error Status.Server))
 
-let implement action f =
+let register action f encode =
   let name = Action.name action in
   if Option.is_some (find_action name) then
     invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
-  let input = action.Action.input
-  and output = action.Action.output in
+  let input = action.Action.input in
   registry :=
     ( name,
       fun json ->
@@ -401,10 +401,28 @@ let implement action f =
               | exception Rejected m -> rejected m
               | exception exn -> Async.failed (Web.exn_to_string exn)
             in
-            Async.map (fun o -> Output (Codec.encode output o)) run )
+            Async.map (fun o -> Output (encode o)) run )
     :: !registry;
   Action.transport := transport;
   Remote.server_send := send
+
+let implement action f = register action f (Codec.encode action.Action.output)
+
+let forms : (string * ((string * string) list -> (Json.t, Json.t) result)) list ref = ref []
+let find_form name = List.assoc_opt name !forms
+
+let implement_form action ?redirect f =
+  let output = action.Action.output in
+  let encode result =
+    match (result, Codec.encode output result) with
+    | Ok o, `Assoc fields -> (
+        match redirect with
+        | Some r -> `Assoc (fields @ [ ("redirect", `String (r o)) ])
+        | None -> `Assoc fields)
+    | _, j -> j
+  in
+  register action f encode;
+  Option.iter (fun decode -> forms := (Action.name action, decode) :: !forms) action.Action.form
 
 let max_body = 1_048_576
 

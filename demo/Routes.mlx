@@ -5,6 +5,7 @@ let routes =
     <Group path="/" layout=Pages.shell not_found=Pages.not_found error=Pages.error>
       <Route name=Issues path="/" page=Pages.index />
       <Route name=My_issues path="/my" page=Pages.my_issues />
+      <Route name=Create path="/new" page=Pages.create />
       <Group path="/issue/:id<string>" loader=Loaders.issue not_found=Pages.issue_not_found>
         <Route name=Issue path="/" page=Pages.issue />
       </Group>

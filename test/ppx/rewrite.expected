@@ -1219,3 +1219,81 @@ let shown =
     ~children:(fun d ->
                  Yuka.Template.instance __yuka_template_rewrite_46
                    [|(Yuka.Template.child (Yuka.text d))|]) ()
+type signup =
+  {
+  name: string ;
+  age: int ;
+  plan: Plan.t ;
+  news: bool ;
+  tags: string list }[@@deriving form]
+include
+  struct
+    let _ = fun (_ : signup) -> ()
+    type signup_field =
+      | Name 
+      | Age 
+      | Plan 
+      | News 
+      | Tags 
+    let signup_field_name =
+      function
+      | Name -> "name"
+      | Age -> "age"
+      | Plan -> "plan"
+      | News -> "news"
+      | Tags -> "tags"
+    let _ = signup_field_name
+    let signup_form : (signup, signup_field) Yuka.Form.t =
+      Yuka.Form.fields
+        ~names:[(Name, "name");
+               (Age, "age");
+               (Plan, "plan");
+               (News, "news");
+               (Tags, "tags")]
+        ~decode:(fun _yuka_d ->
+                   let _yuka_f0 =
+                     Yuka.Form.field _yuka_d Name "name" Yuka.Form.string in
+                   let _yuka_f1 =
+                     Yuka.Form.field _yuka_d Age "age" Yuka.Form.int in
+                   let _yuka_f2 =
+                     Yuka.Form.field _yuka_d Plan "plan"
+                       (Yuka.Form.custom Plan.of_string Plan.to_string) in
+                   let _yuka_f3 =
+                     Yuka.Form.field _yuka_d News "news" Yuka.Form.bool in
+                   let _yuka_f4 =
+                     Yuka.Form.field _yuka_d Tags "tags"
+                       (Yuka.Form.list Yuka.Form.string) in
+                   Yuka.Form.finish _yuka_d
+                     (fun () ->
+                        {
+                          name = (Yuka.Form.get _yuka_f0);
+                          age = (Yuka.Form.get _yuka_f1);
+                          plan = (Yuka.Form.get _yuka_f2);
+                          news = (Yuka.Form.get _yuka_f3);
+                          tags = (Yuka.Form.get _yuka_f4)
+                        }))
+        ~encode:(fun (_yuka_v : signup) ->
+                   Stdlib.List.concat
+                     [Yuka.Form.put "name" Yuka.Form.string _yuka_v.name;
+                     Yuka.Form.put "age" Yuka.Form.int _yuka_v.age;
+                     Yuka.Form.put "plan"
+                       (Yuka.Form.custom Plan.of_string Plan.to_string)
+                       _yuka_v.plan;
+                     Yuka.Form.put "news" Yuka.Form.bool _yuka_v.news;
+                     Yuka.Form.put "tags" (Yuka.Form.list Yuka.Form.string)
+                       _yuka_v.tags])
+    let _ = signup_form
+  end[@@ocaml.doc "@inline"][@@merlin.hide ]
+let __yuka_template_rewrite_47 =
+  Yuka.Template.make
+    (Yuka.Template.element "input"
+       [Yuka.Template.fixed "name" "name"; Yuka.Template.part_attr 0] [])
+    ~html:"<input name=\"name\">" ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|]
+    ~values:[||]
+let signup_form_view =
+  Yuka.Form.make ~action:signup_action
+    ~children:(fun form ->
+                 Yuka.Template.instance __yuka_template_rewrite_47
+                   [|(Yuka.Template.attribute
+                        (Yuka.attr "value"
+                           (Yuka.Form.value form Name : string)))|]) ()

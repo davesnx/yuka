@@ -480,3 +480,27 @@ Unknown yuka attribute on the binding:
                                             ^^^^^^^^^^^^^^
   Error: [yuka] unknown attribute [@yuka.other] on a let%client binding
   [1]
+
+deriving form needs a record:
+
+  $ cat > form1.mlx <<'X'
+  > type t = A | B [@@deriving form]
+  > X
+  $ run form1
+  File "form1.mlx", line 1, characters 0-32:
+  1 | type t = A | B [@@deriving form]
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] [@deriving form] needs a record type
+  [1]
+
+deriving form refuses a field type it cannot read:
+
+  $ cat > form2.mlx <<'X'
+  > type t = { at : int * int } [@@deriving form]
+  > X
+  $ run form2
+  File "form2.mlx", line 1, characters 16-25:
+  1 | type t = { at : int * int } [@@deriving form]
+                      ^^^^^^^^^
+  Error: [yuka] a form field must be string, int, float, bool, an option or list of those, or M.t with M.of_string and M.to_string
+  [1]
