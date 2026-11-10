@@ -129,6 +129,32 @@ let handler_removed_after_dispose () =
   State.set n 5;
   check "hole stopped" "1" (text_content (query c "span"))
 
+let hydrate_again_after_dispose () =
+  let n, tree = counter () in
+  let c = container (server (tree ())) in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  dispose ();
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  click (query c "button");
+  check "one call per click" "1" (ints (State.peek n));
+  dispose ()
+
+let two_handlers_in_order () =
+  let calls = ref [] in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        lower "button"
+          [
+            on "click" (fun _ -> calls := "a" :: !calls);
+            on "click" (fun _ -> calls := "b" :: !calls);
+          ]
+          [])
+  in
+  click (query c "button");
+  check "both, in order" "a,b" (String.concat "," (List.rev !calls));
+  dispose ()
+
 let old_handler_removed_on_hole_rerun () =
   let flag = State.make true in
   let calls = ref 0 in
@@ -856,6 +882,8 @@ let all =
     ("dom click after hydrate", hydrate_then_click);
     ("dom click after render", render_then_click);
     ("dom handler removed after dispose", handler_removed_after_dispose);
+    ("dom hydrate again after dispose", hydrate_again_after_dispose);
+    ("dom two handlers in order", two_handlers_in_order);
     ("dom old handler removed on hole rerun", old_handler_removed_on_hole_rerun);
     ("dom direct handler", direct_handler);
     ("dom each item reads are untracked", each_item_reads_untracked);

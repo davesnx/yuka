@@ -1,5 +1,3 @@
-open Tiny_hashtbl
-
 module Json = Json
 module Async = Async
 module Codec = Codec
@@ -47,9 +45,7 @@ module Internal = struct
         (fun p -> (p, Base.add_disposer p (fun () -> Base.dispose_owner o)))
         parent
     in
-    let forget () =
-      Option.iter (fun (p, id) -> Hashtbl.remove p.Base.disposers id) id
-    in
+    let forget () = Option.iter (fun (p, c) -> Base.remove_disposer p c) id in
     match Base.with_owner o f with
     | result ->
         ( result,
@@ -69,7 +65,7 @@ module Internal = struct
 
   let owner_size () =
     match !Base.current_owner with
-    | Some o -> Hashtbl.length o.Base.disposers
+    | Some o -> Base.owner_size o
     | None -> 0
 
   let slot_content (s : slot) = s.content

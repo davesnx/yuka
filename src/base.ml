@@ -1,14 +1,28 @@
-open Tiny_hashtbl
+type cell = {
+  mutable dispose : unit -> unit;
+  mutable prev : cell option;
+  mutable next : cell option;
+  mutable live : bool;
+}
 
-type owner = { mutable next : int; disposers : (int, unit -> unit) Hashtbl.t }
+type owner = { mutable last : cell option; mutable gen : int }
 
 let current_owner : owner option ref = ref None
-let new_owner () = { next = 0; disposers = Hashtbl.create 8 }
+let new_owner () = { last = None; gen = 0 }
 
 let add_disposer o dispose =
-  o.next <- o.next + 1;
-  Hashtbl.replace o.disposers o.next dispose;
-  o.next
+  let c = { dispose; prev = o.last; next = None; live = true } in
+  (match o.last with Some l -> l.next <- Some c | None -> ());
+  o.last <- Some c;
+  c
+
+let remove_disposer o c =
+  if c.live then begin
+    c.live <- false;
+    c.dispose <- ignore;
+    (match c.prev with Some p -> p.next <- c.next | None -> ());
+    match c.next with Some n -> n.prev <- c.prev | None -> o.last <- c.prev
+  end
 
 let own dispose =
   match !current_owner with
@@ -27,11 +41,23 @@ let with_owner o f =
       raise e
 
 let dispose_owner o =
-  let all = Hashtbl.fold (fun id dispose acc -> (id, dispose) :: acc) o.disposers [] in
-  Hashtbl.reset o.disposers;
-  List.iter
-    (fun (_, dispose) -> dispose ())
-    (List.sort (fun (a, _) (b, _) -> compare b a) all)
+  o.gen <- o.gen + 1;
+  let rec go = function
+    | None -> ()
+    | Some c ->
+        let prev = c.prev in
+        if c.live then begin
+          let dispose = c.dispose in
+          remove_disposer o c;
+          dispose ()
+        end;
+        go prev
+  in
+  go o.last
+
+let owner_size o =
+  let rec count n = function None -> n | Some c -> count (n + 1) c.prev in
+  count 0 o.last
 
 let mount f =
   let o = new_owner () in

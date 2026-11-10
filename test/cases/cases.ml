@@ -752,6 +752,46 @@ let disposal_order () =
   dispose ();
   check "last created is cleaned first" "third second first" (read ())
 
+let effect_run_order () =
+  let add, read = log () in
+  let count = State.make 0 in
+  let double = State.memo (fun () -> State.get count * 2) in
+  Effect.run (fun () -> add ("m" ^ string_of_int (State.get double)));
+  Effect.run (fun () -> add ("a" ^ string_of_int (State.get count)));
+  Effect.run (fun () -> add ("b" ^ string_of_int (State.get count)));
+  State.set count 1;
+  State.set count 2;
+  check "lower level first, then the last created first"
+    "m0 a0 b0 b1 a1 m2 b2 a2 m4" (read ())
+
+let disposal_order_after_removal () =
+  let add, read = log () in
+  let (), dispose =
+    owner (fun () ->
+        Effect.run ~cleanup:(fun () -> add "a") (fun () -> ());
+        let (), dispose_b =
+          Internal.owned (fun () ->
+              Effect.run ~cleanup:(fun () -> add "b1") (fun () -> ());
+              Effect.run ~cleanup:(fun () -> add "b2") (fun () -> ()))
+        in
+        Effect.run ~cleanup:(fun () -> add "c") (fun () -> ());
+        let (), dispose_d =
+          Internal.owned (fun () -> Effect.run ~cleanup:(fun () -> add "d") (fun () -> ()))
+        in
+        Effect.run ~cleanup:(fun () -> add "e") (fun () -> ());
+        dispose_d ();
+        Effect.run
+          ~cleanup:(fun () ->
+            add "f";
+            dispose_b ())
+          (fun () -> ()))
+  in
+  dispose ();
+  check "removed child first, then last created first; a cleanup that disposes a sibling"
+    "d f b2 b1 e c a" (read ());
+  dispose ();
+  check "second dispose does nothing" "d f b2 b1 e c a" (read ())
+
 let owned_removed_from_parent () =
   let add, read = log () in
   let (), dispose_parent =
@@ -1052,6 +1092,8 @@ let all =
     ("memo set raises", memo_set_raises);
     ("owned removed from its parent", owned_removed_from_parent);
     ("disposal order", disposal_order);
+    ("disposal order after removal", disposal_order_after_removal);
+    ("effect run order", effect_run_order);
     ("html select value", html_select_value);
     ("html textarea value", html_textarea_value);
     ("codec result", codec_result);

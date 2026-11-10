@@ -145,10 +145,14 @@ let retrack_effect node =
   clear_dirty node;
   if old_level = 0 then node.level <- compute_level node
 
-let by_level a b = compare a.level b.level
+let by_level a b = Int.compare a.level b.level
+
+let rec sorted = function
+  | a :: (b :: _ as rest) -> a.level <= b.level && sorted rest
+  | _ -> true
 
 let run_batch first_error retrack queue =
-  let batch = List.sort by_level !queue in
+  let batch = if sorted !queue then !queue else List.sort by_level !queue in
   queue := [];
   List.iter
     (fun node ->

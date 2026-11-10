@@ -34,10 +34,12 @@ type 'a row = {
 
 let svg_ns = "http://www.w3.org/2000/svg"
 
-let on_dispose cleanup = Base.Effect.run ~cleanup (fun () -> ())
+let on_dispose = Base.own
 
-let non_bubbling =
-  [ "focus"; "blur"; "mouseenter"; "mouseleave"; "load"; "error"; "scroll" ]
+let non_bubbling = function
+  | "focus" | "blur" | "mouseenter" | "mouseleave" | "load" | "error" | "scroll" ->
+      true
+  | _ -> false
 
 let handlers_key event = "__yuka_" ^ event
 
@@ -167,7 +169,9 @@ let set_attr svg el name value =
 
 let stopped_key = "__yuka_stopped"
 
-type delegation = { mutable count : int; listener : Web.event -> unit }
+type handler = { run : Web.event -> unit; owner : Base.owner; gen : int }
+
+let live h = h.owner.gen = h.gen
 
 let dispatch event ev =
   let key = handlers_key event in
@@ -175,44 +179,35 @@ let dispatch event ev =
     | None -> ()
     | Some n ->
         (match Web.get_prop n key with
-        | Some hs -> List.iter (fun h -> h ev) hs
+        | Some hs -> List.iter (fun h -> if live h then h.run ev) hs
         | None -> ());
         if Web.get_flag ev stopped_key <> Some true then go (Web.parent_node n)
   in
   go (Some (Web.target ev))
 
-let delegation_key event = "__yuka_delegation_" ^ event
-
-let delegation ctx event =
-  let key = delegation_key event in
+let delegate ctx event =
+  let key = "__yuka_delegation_" ^ event in
   match Web.get_prop ctx.doc key with
-  | Some (d : delegation) -> d
+  | Some (_ : bool) -> ()
   | None ->
-      let d = { count = 0; listener = dispatch event } in
-      Web.set_prop ctx.doc key d;
-      d
+      Web.set_prop ctx.doc key true;
+      Web.add_listener ctx.doc event (dispatch event)
+
+let unowned = Base.new_owner ()
 
 let add_handler ctx el event handler =
-  if List.mem event non_bubbling then begin
+  if non_bubbling event then begin
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
   end
   else begin
-    let d = delegation ctx event in
-    d.count <- d.count + 1;
-    if d.count = 1 then Web.add_listener ctx.doc event d.listener;
+    delegate ctx event;
+    let owner = Option.value !Base.current_owner ~default:unowned in
+    let h = { run = handler; owner; gen = owner.gen } in
     let key = handlers_key event in
-    let current = Option.value (Web.get_prop el key) ~default:[] in
-    Web.set_prop el key (current @ [ handler ]);
-    on_dispose (fun () ->
-        let rest =
-          List.filter
-            (fun h -> h != handler)
-            (Option.value (Web.get_prop el key) ~default:[])
-        in
-        Web.set_prop el key rest;
-        d.count <- d.count - 1;
-        if d.count = 0 then Web.remove_listener ctx.doc event d.listener)
+    match Web.get_prop el key with
+    | None -> Web.set_prop el key [ h ]
+    | Some hs -> Web.set_prop el key (List.filter live hs @ [ h ])
   end
 
 type compiled = { template : Web.node; paths : int array array }

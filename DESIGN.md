@@ -779,3 +779,23 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 - Removed: `let%client[@yuka.lazy]` (the ppx rejects every `yuka.*`
   attribute on `let%client` again), the eager list in the generated module.
 - Not now: prefetch triggers, `` `Media ``, a `data-lazy` attribute.
+
+## Owners and event handlers (2026-11-10)
+
+- An owner is a small record: a doubly linked list of disposers and a
+  generation counter. No hash table, no sort. `Yuka.owner`'s dispose runs the
+  disposers from the last created to the first (the same order as before),
+  in time proportional to their number. A disposer added while the owner is
+  disposed stays for the next dispose. `Internal.owned` removes its disposer
+  from the parent in constant time.
+- Each dispose adds 1 to the owner's generation.
+- Delegated handlers (every event except `focus`, `blur`, `mouseenter`,
+  `mouseleave`, `load`, `error`, `scroll`) need no effect and no disposer.
+  The element keeps a list of handlers per event; each handler records its
+  owner and the owner's generation. The document listener calls a handler
+  only while that generation is current, so a disposed owner (or a re-run
+  hole) turns its handlers off. Adding a handler drops the dead ones on that
+  element. The document listener is added once per event name and stays.
+- The other events get a direct listener, removed by a disposer.
+- An effect flush sorts pending effects by level only when they are not
+  already in order; the order of effects does not change.
