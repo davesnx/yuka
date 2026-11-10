@@ -18,6 +18,7 @@ let make shape ~html ~walk ~kids ~attrs ~values =
     plan = { walk; kids; attrs; values };
     in_html = Empty;
     in_svg = Empty;
+    ops = [||];
   }
 
 let of_shape shape =

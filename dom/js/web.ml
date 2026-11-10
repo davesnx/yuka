@@ -548,3 +548,6 @@ let adopt_stylesheets : unit -> unit =
 }|}]
 
 let read_file (_ : string) : string option = None
+
+let buffers : Buffer.t list ref = ref []
+let buffer_pool () = buffers

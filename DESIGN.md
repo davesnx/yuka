@@ -1784,3 +1784,31 @@ Ticket 24; `.workplace/docs/app-spec.md` section 24, option A, level 1.
   - A prerender uses `Server.prerender_config` (`YUKA_DEV` ignored), and
     with `YUKA_DEV` prerendered routes render live.
 
+
+## Server rendering speed (2026-11-10)
+
+Ticket 31. The printer and the request cycle changed; the HTML is byte for
+byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
+
+- Text and attribute values are escaped straight into the output buffer;
+  a value with nothing to escape is copied once.
+- An element prints its attributes from its attribute list. Only `a`
+  (`aria-current`), `option` (`selected`), `select` and `textarea`
+  (`value`) build the resolved list.
+- The output buffer is reused between renders: `Web.buffer_pool` gives
+  one pool per domain on the server (`Domain.DLS`) and a plain list in the
+  browser. `printer.ml` uses no `Domain` itself: a module with a top-level
+  side effect reached from `yuka.js` would pull `Domain` and `Printf` into
+  every client bundle.
+- A template has an `ops` field: on the server, the first instance compiles
+  the shape into static HTML chunks (tags with fixed attributes, escaped
+  fixed text) and slots for its parts; later instances print the chunks
+  and the parts with no `Element` tree. Parts that need state stay
+  dynamic: a fixed text (the `<!---->` rule between texts), an element
+  with a part attribute, `a`, and the whole subtree of `select`, `option`
+  and `textarea`. A part that is the only child of its element is printed
+  as `contents` prints it (a hole there has no markers). The field costs
+  10 B gzip in the keyed client app.
+- The cycle keeps the head and the shell as a list of strings. When
+  nothing is pending after the shell, the page is answered as one string
+  (with `Content-Length`); otherwise it streams as before.

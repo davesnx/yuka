@@ -378,24 +378,29 @@ let render env ~status ~headers layers (page : page) =
             (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
   | None ->
-    let early = Buffer.create 4096 in
+    let early = ref [] in
     let writer =
       ref (fun text ->
-          Buffer.add_string early text;
+          early := text :: !early;
           Async.return ())
     in
     let write text = !writer text in
     let finished =
       Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~current ~timeout ~sleep:env.sleep build
-        ~on_shell:(fun ~fills shell -> write (head (if fills then Server.fill_script else "") ^ shell))
+        ~on_shell:(fun ~fills shell ->
+          Async.bind (write (head (if fills then Server.fill_script else ""))) (fun () -> write shell))
         ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
         ~on_value:write
     in
+    let written () = String.concat "" (List.rev !early) in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
-    | _ ->
+    | Async.Done () ->
+        early := "</body></html>" :: !early;
+        Async.return { status; headers; body = String (written ()) }
+    | Async.Pending ->
     let stream w =
-      let flushed = w (Buffer.contents early) in
+      let flushed = w (written ()) in
       writer := (fun text -> Async.bind flushed (fun () -> w text));
       let result, resolve, _ = Async.make () in
       Async.on_settled finished (function

@@ -144,3 +144,6 @@ let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
 let add_stylesheet : string -> unit = fun _ -> browser_only ()
 let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()
 let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None
+
+let buffers : Buffer.t list ref Domain.DLS.key = Domain.DLS.new_key (fun () -> ref [])
+let buffer_pool () = Domain.DLS.get buffers

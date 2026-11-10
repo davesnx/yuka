@@ -3,6 +3,31 @@ open Base
 
   let escape = Template_build.escape
 
+  let add_escaped b ~quote s =
+    let n = String.length s in
+    let start = ref 0 in
+    let put i entity =
+      Buffer.add_substring b s !start (i - !start);
+      Buffer.add_string b entity;
+      start := i + 1
+    in
+    for i = 0 to n - 1 do
+      match String.unsafe_get s i with
+      | '&' -> put i "&amp;"
+      | '<' -> put i "&lt;"
+      | '>' when not quote -> put i "&gt;"
+      | '"' when quote -> put i "&quot;"
+      | _ -> ()
+    done;
+    Buffer.add_substring b s !start (n - !start)
+
+  let add_attr b name value =
+    Buffer.add_char b ' ';
+    Buffer.add_string b name;
+    Buffer.add_string b "=\"";
+    add_escaped b ~quote:true value;
+    Buffer.add_char b '"'
+
   let fill_script =
     "<script>window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};</script>"
 
@@ -55,8 +80,76 @@ open Base
     s.queued <- [];
     l
 
+  let compile shape =
+    let ops = ref [] and raw = Buffer.create 64 in
+    let flush () =
+      if Buffer.length raw > 0 then begin
+        ops := Raw (Buffer.contents raw) :: !ops;
+        Buffer.clear raw
+      end
+    in
+    let emit op =
+      flush ();
+      ops := op :: !ops
+    in
+    let rec go ~only = function
+      | Fixed_text "" -> ()
+      | Fixed_text t -> emit (Static_text (escape ~quote:false t))
+      | Part i -> emit (if only then Only_part i else Child_part i)
+      | Fixed_element { tag = "select" | "option" | "textarea"; _ } as e -> emit (Subtree e)
+      | Fixed_element { tag; attrs; children } ->
+          let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
+          if tag <> "a" && List.length fixed = List.length attrs then begin
+            Buffer.add_char raw '<';
+            Buffer.add_string raw tag;
+            List.iter (fun (n, v) -> add_attr raw n v) fixed;
+            Buffer.add_char raw '>'
+          end
+          else emit (Open (tag, attrs));
+          if not (Template_build.is_void tag) then begin
+            (match children with [ c ] -> go ~only:true c | cs -> List.iter (go ~only:false) cs);
+            Buffer.add_string raw "</";
+            Buffer.add_string raw tag;
+            Buffer.add_char raw '>'
+          end
+    in
+    go ~only:false shape;
+    flush ();
+    Array.of_list (List.rev !ops)
+
+  let ops (t : template) =
+    if Array.length t.ops = 0 then t.ops <- compile t.shape;
+    t.ops
+
+  let rec expand_shape parts = function
+    | Fixed_text s -> Text s
+    | Part i -> ( match parts.(i) with Child n -> n | Attribute _ | No_attribute -> Fragment [])
+    | Fixed_element { tag; attrs; children } ->
+        Element { tag; attrs = attributes parts attrs; children = List.map (expand_shape parts) children }
+
+  and attributes parts attrs =
+    List.filter_map
+      (function
+        | Fixed (n, v) -> Some (Static (n, v))
+        | Part_attr i -> ( match parts.(i) with Attribute a -> Some a | Child _ | No_attribute -> None))
+      attrs
+
   let rec print s build =
-    let b = Buffer.create 256 in
+    let b =
+      let pool = Web.buffer_pool () in
+      match !pool with
+      | b :: rest ->
+          pool := rest;
+          b
+      | [] -> Buffer.create 4096
+    in
+    let release () =
+      if Buffer.length b <= 1_048_576 then begin
+        Buffer.clear b;
+        let pool = Web.buffer_pool () in
+        pool := b :: !pool
+      end
+    in
     let after_text = ref false in
     let hydrating () = (not s.islands_only) || s.depth > 0 in
     let marker m =
@@ -83,7 +176,7 @@ open Base
       | Text "" -> ()
       | Text t ->
           if !after_text && hydrating () then Buffer.add_string b "<!---->";
-          Buffer.add_string b (escape ~quote:false t);
+          add_escaped b ~quote:false t;
           after_text := true
       | Fragment children -> List.iter go children
       | Hole f ->
@@ -157,7 +250,36 @@ open Base
               marker "<!--[-->";
               go (body ());
               marker "<!--]-->")
-      | Template { template; parts } -> go (Template.expand template parts)
+      | Template { template; parts } ->
+          Array.iter
+            (function
+              | Raw r ->
+                  Buffer.add_string b r;
+                  after_text := false
+              | Static_text t ->
+                  if !after_text && hydrating () then Buffer.add_string b "<!---->";
+                  Buffer.add_string b t;
+                  after_text := true
+              | Child_part i -> ( match parts.(i) with Child n -> go n | Attribute _ | No_attribute -> ())
+              | Only_part i -> ( match parts.(i) with Child n -> contents [ n ] | Attribute _ | No_attribute -> ())
+              | Open (tag, attrs) ->
+                  Buffer.add_char b '<';
+                  Buffer.add_string b tag;
+                  (if tag = "a" then ignore (special tag (attributes parts attrs))
+                   else
+                     List.iter
+                       (function
+                         | Fixed (n, v) -> add_attr b n v
+                         | Part_attr i -> (
+                             match parts.(i) with
+                             | Attribute (Static (n, v)) -> add_attr b n v
+                             | Attribute (Dynamic (n, f)) -> Option.iter (add_attr b n) (f ())
+                             | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                       attrs);
+                  Buffer.add_char b '>';
+                  after_text := false
+              | Subtree shape -> go (expand_shape parts shape))
+            (ops template)
       | Catch { children; fallback; _ } -> (
           let length = Buffer.length b and text = !after_text and saved = snapshot s in
           try
@@ -250,45 +372,20 @@ open Base
           rows items render;
           marker "<!--]-->"
       | Element { tag; attrs; children } ->
-          let resolved =
-            List.filter_map
-              (function
-                | Static (name, value) -> Some (name, value)
-                | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f ())
-                | Handler _ -> None)
-              attrs
-          in
-          let value = List.assoc_opt "value" resolved in
-          let resolved =
-            if tag = "select" || tag = "textarea" then
-              List.filter (fun (name, _) -> name <> "value") resolved
-            else if
-              tag = "option" && value <> None && s.select_value = value
-              && not (List.mem_assoc "selected" resolved)
-            then resolved @ [ ("selected", "") ]
-            else resolved
-          in
-          let resolved =
-            match (tag, s.current) with
-            | "a", Some path
-              when (not (hydrating ()))
-                   && (match List.assoc_opt "href" resolved with
-                   | Some href -> String.equal href path
-                   | None -> false)
-                   && not (List.mem_assoc "aria-current" resolved) ->
-                resolved @ [ ("aria-current", "page") ]
-            | _ -> resolved
-          in
           Buffer.add_char b '<';
           Buffer.add_string b tag;
-          List.iter
-            (fun (name, v) ->
-              Buffer.add_char b ' ';
-              Buffer.add_string b name;
-              Buffer.add_string b "=\"";
-              Buffer.add_string b (escape ~quote:true v);
-              Buffer.add_char b '"')
-            resolved;
+          let value =
+            match tag with
+            | "select" | "textarea" | "option" | "a" -> special tag attrs
+            | _ ->
+                List.iter
+                  (function
+                    | Static (name, v) -> add_attr b name v
+                    | Dynamic (name, f) -> Option.iter (add_attr b name) (f ())
+                    | Handler _ -> ())
+                  attrs;
+                None
+          in
           Buffer.add_char b '>';
           after_text := false;
           if not (Template_build.is_void tag) then begin
@@ -296,7 +393,7 @@ open Base
             | "textarea", Some v ->
                 if String.length v > 0 && v.[0] = '\n' then
                   Buffer.add_char b '\n';
-                Buffer.add_string b (escape ~quote:false v)
+                add_escaped b ~quote:false v
             | "select", _ ->
                 let outer = s.select_value in
                 s.select_value <- value;
@@ -308,6 +405,35 @@ open Base
             Buffer.add_char b '>';
             after_text := false
           end
+    and special tag attrs =
+      let resolved =
+        List.filter_map
+          (function
+            | Static (name, value) -> Some (name, value)
+            | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f ())
+            | Handler _ -> None)
+          attrs
+      in
+      let value = List.assoc_opt "value" resolved in
+      let resolved =
+        if tag = "select" || tag = "textarea" then List.filter (fun (name, _) -> name <> "value") resolved
+        else if tag = "option" && value <> None && s.select_value = value && not (List.mem_assoc "selected" resolved)
+        then resolved @ [ ("selected", "") ]
+        else resolved
+      in
+      let resolved =
+        match (tag, s.current) with
+        | "a", Some path
+          when (not (hydrating ()))
+               && (match List.assoc_opt "href" resolved with
+                  | Some href -> String.equal href path
+                  | None -> false)
+               && not (List.mem_assoc "aria-current" resolved) ->
+            resolved @ [ ("aria-current", "page") ]
+        | _ -> resolved
+      in
+      List.iter (fun (name, v) -> add_attr b name v) resolved;
+      value
     and contents = function
       | [ Hole f ] -> go (f ())
       | [ Each { items; key = _; equal = _; render } ] -> rows items render
@@ -337,12 +463,15 @@ open Base
     | () -> restore ()
     | exception e ->
         restore ();
+        release ();
         raise e);
     if s.held <> [] then begin
       s.queued <- s.held @ s.queued;
       s.held <- []
     end;
-    Buffer.contents b
+    let html = Buffer.contents b in
+    release ();
+    html
 
   let render_html build = print (session ~streaming:false ~islands_only:false) build
 

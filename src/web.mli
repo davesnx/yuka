@@ -144,3 +144,4 @@ val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val adopt_stylesheets : unit -> unit
 val read_file : string -> string option
+val buffer_pool : unit -> Buffer.t list ref

@@ -46,7 +46,16 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     plan : Template_build.plan;
     mutable in_html : cache;
     mutable in_svg : cache;
+    mutable ops : op array;
   }
+
+  and op =
+    | Raw of string
+    | Static_text of string
+    | Child_part of int
+    | Only_part of int
+    | Open of string * fixed_attr list
+    | Subtree of shape
 
   and shape = Template_build.shape =
     | Fixed_text of string

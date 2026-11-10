@@ -16,6 +16,8 @@ const { values: options } = parseArgs({
     rounds: { type: "string", default: "3" },
     port: { type: "string", default: "8210" },
     only: { type: "string", default: "" },
+    interleave: { type: "boolean", default: false },
+    "baseline-build-dir": { type: "string" },
     out: { type: "string" },
   },
 });
@@ -42,6 +44,14 @@ const candidates: Candidate[] = [
   { name: "server-reason-react", command: join(ocaml, "srr.exe"), args: [], path: "/" },
   { name: "react-node", ...node("react.js"), path: "/" },
   { name: "solid-node", ...node("solid.js"), path: "/" },
+  ...(options["baseline-build-dir"] === undefined
+    ? []
+    : ["page", "stream"].map((kind) => ({
+        name: `yuka-${kind}-baseline`,
+        command: join(resolve(options["baseline-build-dir"]!), "default/bench/ssr/ocaml/yuka_ssr.exe"),
+        args: [],
+        path: kind === "page" ? "/" : "/stream",
+      }))),
 ].filter((c) => options.only === "" || options.only.split(",").includes(c.name));
 
 interface Round {
@@ -94,42 +104,50 @@ async function start(c: Candidate): Promise<{ child: ChildProcess; bytes: number
 
 const results: { name: string; bytes: number; rps: number; p50: number; p99: number; rounds: Round[] }[] = [];
 const skipped: string[] = [];
-for (const c of candidates) {
-  if (!existsSync(c.command)) {
-    skipped.push(c.name);
-    console.error(`${c.name}: skipped, ${c.command} not found`);
-    continue;
-  }
+const present = candidates.filter((c) => {
+  if (existsSync(c.command)) return true;
+  skipped.push(c.name);
+  console.error(`${c.name}: skipped, ${c.command} not found`);
+  return false;
+});
+const samples = new Map<string, { bytes: number; rounds: Round[] }>();
+const measure = async (c: Candidate, count: number) => {
   const { child, bytes } = await start(c);
   try {
     wrk(base + c.path, options.warmup);
-    const samples: Round[] = [];
-    for (let i = 0; i < rounds; i++) samples.push(wrk(base + c.path, options.duration));
-    results.push({
-      name: c.name,
-      bytes,
-      rps: median(samples.map((s) => s.rps)),
-      p50: median(samples.map((s) => s.p50)),
-      p99: median(samples.map((s) => s.p99)),
-      rounds: samples,
-    });
-    console.error(`${c.name}: ${samples.map((s) => s.rps.toFixed(0)).join(", ")} req/s`);
+    const entry = samples.get(c.name) ?? { bytes, rounds: [] };
+    for (let i = 0; i < count; i++) entry.rounds.push(wrk(base + c.path, options.duration));
+    samples.set(c.name, entry);
   } finally {
     child.kill();
     await wait(300);
   }
+};
+if (options.interleave) for (let i = 0; i < rounds; i++) for (const c of present) await measure(c, 1);
+else for (const c of present) await measure(c, rounds);
+for (const c of present) {
+  const { bytes, rounds: taken } = samples.get(c.name)!;
+  results.push({
+    name: c.name,
+    bytes,
+    rps: median(taken.map((s) => s.rps)),
+    p50: median(taken.map((s) => s.p50)),
+    p99: median(taken.map((s) => s.p99)),
+    rounds: taken,
+  });
+  console.error(`${c.name}: ${taken.map((s) => s.rps.toFixed(0)).join(", ")} req/s`);
 }
 
 const floor = results.find((r) => r.name === "dream-concat")?.rps;
 const row = (cols: string[]) => cols.map((c, i) => (i === 0 ? c.padEnd(22) : c.padStart(11))).join("");
 const lines = [
-  `${rows} rows, wrk -t${options.threads} -c${options.connections} -d${options.duration}s, ${rounds} rounds, median; load average 1 min per round in the JSON`,
+  `${rows} rows, wrk -t${options.threads} -c${options.connections} -d${options.duration}s, ${rounds} rounds${options.interleave ? " interleaved" : ""}, median; load average 1 min per round in the JSON`,
   "",
-  row(["candidate", "bytes", "req/s", "p50 ms", "p99 ms", "vs floor", "rps spread"]),
+  row(["candidate", "bytes", "req/s", "min", "max", "p50 ms", "p99 ms", "vs floor", "rps spread"]),
   ...results.map((r) => {
     const rps = r.rounds.map((s) => s.rps);
     const spread = (Math.max(...rps) - Math.min(...rps)) / r.rps;
-    return row([r.name, String(r.bytes), r.rps.toFixed(0), r.p50.toFixed(2), r.p99.toFixed(2), floor === undefined ? "" : (r.rps / floor).toFixed(2), `${(spread * 100).toFixed(0)}%`]);
+    return row([r.name, String(r.bytes), r.rps.toFixed(0), Math.min(...rps).toFixed(0), Math.max(...rps).toFixed(0), r.p50.toFixed(2), r.p99.toFixed(2), floor === undefined ? "" : (r.rps / floor).toFixed(2), `${(spread * 100).toFixed(0)}%`]);
   }),
   ...(skipped.length > 0 ? ["", `skipped: ${skipped.join(", ")}`] : []),
 ];
