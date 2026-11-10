@@ -273,28 +273,44 @@ val fragment : 'kind element list -> 'kind element
 
 val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
 (** [lower tag attributes children]: an HTML element. The ppx makes it from
-    [<tag ...>]. The server prints the text of a [script] or [style] element
-    as written (no HTML escaping), with [</script], [</style] (any case) and,
-    in a script, [<!--] printed as [<\/script], [<\/style] and [<\!--]. Inside
-    them, holes print no hydration markers. *)
+    [<tag ...>]. A [script] or [style] element (in HTML, not inside [svg]
+    or [math]) takes no child, one {!text} or one {!hole} that gives a
+    text, else [Invalid_argument] (server and client); the ppx joins the
+    texts of [<script>] and [<style>] into one. The server prints that text
+    as written (no HTML escaping), with [</script], [</style] (any case)
+    and, in a JavaScript [script], [<!--] printed as [<\/script], [<\/style]
+    and [<\!--]; in a [script] of another [type] (JSON, import map,
+    template), every [<] is printed as [\u003c]. Inside [svg] and [math]
+    they are ordinary elements and their text is escaped. *)
 
 val attr : string -> string -> 'kind attribute
 (** [attr name value]: an attribute with a fixed value. The server escapes
-    the value. A URL attribute ([href], [src], [action], [formaction],
-    [xlink:href], [poster], [cite], [data], [background], [longdesc],
-    [manifest], [codebase], [icon]) whose value starts with a [javascript:]
-    or [vbscript:] scheme, or [data:] other than a PNG, GIF, JPEG, WebP,
-    AVIF or BMP image, after the browser's own clean-up (leading spaces and
-    control characters, tabs and newlines anywhere, any case), gets
-    ["about:blank#blocked"] instead; a dev build logs the first one. *)
+    the value. URL check, in the browser here and for every attribute the
+    server prints: the value of a URL attribute ([href], [src], [action],
+    [formaction], [xlink:href], [poster], [cite], [data], [background],
+    [longdesc], [manifest], [codebase], [icon], any case; [values], [to],
+    [from], [by] of SVG animations) is read as the browser does (leading
+    spaces and control characters dropped, tabs and newlines dropped, any
+    case). A [javascript:] or [vbscript:] URL becomes
+    ["about:blank#blocked"]; so does a [data:] URL where it would load or
+    open a document ([href] of [a], [area] and [use], [action],
+    [formaction], [xlink:href], [src] of [iframe], [frame], [embed] and
+    [object], [data] of [object]; with no known element, [href] and [data]
+    count as such). A [data:] image or media URL stays. The server logs the
+    first block with {!Server.log_error}; a dev build logs the first one in
+    the console. *)
 
 (**/**)
 
 val attr_unchecked : string -> string -> 'kind attribute
 val hole_attr_unchecked : string -> (unit -> string option) -> client attribute
-(** {!attr} and {!hole_attr} with no URL check. The ppx uses them for
-    attributes that are not URL attributes, so a bundle with no URL
-    attribute has no URL check. *)
+(** For the ppx, for names it proved are not URL attributes. Given a URL
+    attribute name, they act as {!attr} and {!hole_attr}. *)
+
+val url_attr : string -> string -> string -> 'kind attribute
+val url_hole_attr : string -> string -> (unit -> string option) -> client attribute
+(** For the ppx: [url_attr tag name value] is {!attr} that knows the
+    element. *)
 
 (**/**)
 

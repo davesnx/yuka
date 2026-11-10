@@ -561,3 +561,38 @@ A literal script URL in a URL attribute is refused at build time:
   $ run url2 | grep -c 'about:blank'
   0
   [1]
+
+Attribute names are read in any case, and data: is refused only where it loads a document:
+
+  $ cat > url3.mlx <<'X'
+  > let x = <a href="data:text/html,x">"x"</a>
+  > X
+  $ run url3 2>&1 | grep -o 'has a script URL'
+  has a script URL
+  $ cat > url4.mlx <<'X'
+  > let x = <img src="data:image/png;base64,iVBORw0KGgo=" />
+  > X
+  $ run url4 | grep -c 'about:blank'
+  0
+  [1]
+
+<script> and <style> take only text:
+
+  $ cat > raw1.mlx <<'X'
+  > let x = <style>"a{}"<b>"x"</b></style>
+  > X
+  $ run raw1
+  File "raw1.mlx", line 1, characters 20-30:
+  1 | let x = <style>"a{}"<b>"x"</b></style>
+                          ^^^^^^^^^^
+  Error: [yuka] <style> takes only text: a string or (Yuka.text e), not an element, a component or an island.
+  [1]
+  $ cat > raw2.mlx <<'X'
+  > let x = <script>(Yuka.text "a")(Comp.make ())</script>
+  > X
+  $ run raw2
+  File "raw2.mlx", line 1, characters 31-45:
+  1 | let x = <script>(Yuka.text "a")(Comp.make ())</script>
+                                     ^^^^^^^^^^^^^^
+  Error: [yuka] <script> takes only text: a string or (Yuka.text e), not an element, a component or an island.
+  [1]

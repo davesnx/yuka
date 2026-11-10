@@ -137,7 +137,9 @@ let text pos s =
   if n != Js.null then begin
     let n = node_of n in
     if Web.data n <> s then begin
-      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Some n);
+      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then
+        if not (List.mem (Web.local_name pos.parent) [ "script"; "style" ]) then
+          Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Some n);
       Web.set_data n s
     end;
     n
@@ -357,6 +359,10 @@ let rec mount_node pos last n =
   | Element { tag; attrs; children } ->
       last := false;
       let svg = pos.svg || tag = "svg" in
+      if (not svg) && (tag = "script" || tag = "style") then (
+        match children with
+        | [] | [ Text _ ] | [ Hole _ ] -> ()
+        | _ -> invalid_arg "Yuka: <script> and <style> take one text or one hole");
       let adopted = take pos 1 (fun n -> Web.local_name n = tag) in
       let is_adopted = adopted != Js.null in
       if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt && not is_adopted then

@@ -56,6 +56,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     | Only_part of int
     | Open of string * fixed_attr list
     | Subtree of shape
+    | Push_context of bool
+    | Pop_context
 
   and shape = Template_build.shape =
     | Fixed_text of string

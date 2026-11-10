@@ -11,8 +11,9 @@ Build: (1) URL attributes (href, src, action, formaction, xlink:href and the lik
 
 ## Resolution
 
-Done (2026-11-10).
+Done (2026-11-10), with the security review's fixes.
 
-- URL attributes with a `javascript:`, `vbscript:` or non-image `data:` URL, after the browser's own clean-up (case, leading spaces and control characters, tabs and newlines anywhere), are printed by the server and set by the client as `about:blank#blocked` (React's rule, with `vbscript:` and `data:` as Angular checks; no escape hatch, as React). `Yuka.attr` and `Yuka.hole_attr` check URL attributes; the printer checks every attribute it prints, template ones included; a literal unsafe URL in `.mlx` is a build error. The ppx uses unchecked constructors for other attributes, so the keyed app has no URL check (10,034 B gzip, budget 10,040).
-- `<script>` and `<style>` text is printed raw, with `</script`, `</style` (any case) and `<!--` in a script made safe (`<\`); the ppx never compiles them into templates. The bench and demo goldens did not change: no page there has script or style text.
-- Tests: `test/safety` (normalisation tricks, every URL attribute, printer paths, mlx parts and holes, raw text), `test/melange/dom_cases.ml` (client holes and attributes), `test/ppx` (literal refused, checked constructors only for URL attributes, script and style as `Yuka.lower`).
+- URL attributes (any case; also `values`, `to`, `from`, `by` of SVG animations) with a `javascript:` or `vbscript:` URL, or a `data:` URL where it opens or loads a document, after the browser's own clean-up, are printed by the server and set by the client as `about:blank#blocked` (React's rule, no escape hatch). `data:` images and media stay. The server printer checks every attribute with its element; in the browser, `Yuka.attr`, `Yuka.hole_attr` and the ppx's tag-aware constructors check; the ppx's unchecked constructors refuse URL names; a literal unsafe URL in `.mlx` is a build error. `srcdoc` is documented as an unchecked HTML sink.
+- `<script>` and `<style>` take one text. In HTML it is printed raw with the end tag and `<!--` made safe (`\u003c` for every `<` in non-JavaScript scripts); in `svg` and `math` it is escaped. The ppx joins texts into one and refuses other children; the printer and the client raise on them.
+- Keyed app: 10,262 B gzip (+228 B for the client guards; budget raised to that). The bench and demo goldens did not change.
+- Tests: `test/safety`, `test/melange/dom_cases.ml`, `test/ppx` (errors and rewrite).

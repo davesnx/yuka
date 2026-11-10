@@ -7,38 +7,63 @@ open Base
 
   let blocked_logged = ref false
 
-  let add_attr b name value =
-    let value =
-      if Url.is_url_attribute name && Url.unsafe value then begin
-        if not !blocked_logged then begin
-          blocked_logged := true;
-          !log_error ("yuka: printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name)
-        end;
-        Url.blocked
-      end
-      else value
-    in
+  let log_blocked name value =
+    if not !blocked_logged then begin
+      blocked_logged := true;
+      !log_error ("yuka: printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name ^ ": " ^ String.escaped value)
+    end
+
+  let add_attr b ~tag name value =
     Buffer.add_char b ' ';
     Buffer.add_string b name;
     Buffer.add_string b "=\"";
-    add_escaped b ~quote:true value;
+    add_escaped b ~quote:true
+      (Url.check ~tag:(String.lowercase_ascii tag) ~log:log_blocked (String.lowercase_ascii name) value);
     Buffer.add_char b '"'
 
-  let add_raw b tag text =
+  let javascript_type = function
+    | None -> true
+    | Some t -> (
+        match String.lowercase_ascii (String.trim t) with
+        | "" | "module" | "application/ecmascript" | "application/javascript" | "application/x-ecmascript"
+        | "application/x-javascript" | "text/ecmascript" | "text/javascript" | "text/javascript1.0"
+        | "text/javascript1.1" | "text/javascript1.2" | "text/javascript1.3" | "text/javascript1.4"
+        | "text/javascript1.5" | "text/jscript" | "text/livescript" | "text/x-ecmascript" | "text/x-javascript" ->
+            true
+        | _ -> false)
+
+  let add_raw b ~tag ~type_ text =
     let n = String.length text in
     let at i part =
       let k = String.length part in
       i + k <= n && String.lowercase_ascii (String.sub text i k) = part
     in
+    let data_block = tag = "script" && not (javascript_type type_) in
     let start = ref 0 in
     for i = 0 to n - 1 do
-      if text.[i] = '<' && (at i ("</" ^ tag) || (tag = "script" && at i "<!--")) then begin
-        Buffer.add_substring b text !start (i - !start);
-        Buffer.add_string b "<\\";
-        start := i + 1
-      end
+      if text.[i] = '<' then
+        if data_block then begin
+          Buffer.add_substring b text !start (i - !start);
+          Buffer.add_string b "\\u003c";
+          start := i + 1
+        end
+        else if at i ("</" ^ tag) || (tag = "script" && at i "<!--") then begin
+          Buffer.add_substring b text !start (i - !start);
+          Buffer.add_string b "<\\";
+          start := i + 1
+        end
     done;
     Buffer.add_substring b text !start (n - !start)
+
+  let raw_text_children tag children =
+    let refuse () =
+      invalid_arg ("Yuka: <" ^ tag ^ "> takes one text or one hole that gives a text")
+    in
+    match children with
+    | [] -> ""
+    | [ Text t ] -> t
+    | [ Hole f ] -> ( match f () with Text t -> t | Fragment [] -> "" | _ -> refuse ())
+    | _ -> refuse ()
 
   let fill_script =
     "<script>window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};</script>"
@@ -111,22 +136,27 @@ open Base
       | Fixed_text t -> emit (Static_text (escape ~quote:false t))
       | Part i -> emit (if only then Only_part i else Child_part i)
       | Fixed_element { tag = "script" | "style"; _ } as e -> emit (Subtree e)
+      | Fixed_element { tag = ("svg" | "math" | "foreignObject") as tag; attrs; children } ->
+          go_element ~only tag attrs children ~context:(Some (tag <> "foreignObject"))
       | Fixed_element { tag; _ } as e when needs_special tag && tag <> "a" -> emit (Subtree e)
-      | Fixed_element { tag; attrs; children } ->
-          let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
-          if (not (needs_special tag)) && List.length fixed = List.length attrs then begin
-            Buffer.add_char raw '<';
-            Buffer.add_string raw tag;
-            List.iter (fun (n, v) -> add_attr raw n v) fixed;
-            Buffer.add_char raw '>'
-          end
-          else emit (Open (tag, attrs));
-          if not (Template_build.is_void tag) then begin
-            (match children with [ c ] -> go ~only:true c | cs -> List.iter (go ~only:false) cs);
-            Buffer.add_string raw "</";
-            Buffer.add_string raw tag;
-            Buffer.add_char raw '>'
-          end
+      | Fixed_element { tag; attrs; children } -> go_element ~only tag attrs children ~context:None
+    and go_element ~only:_ tag attrs children ~context =
+      let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
+      if (not (needs_special tag)) && List.length fixed = List.length attrs then begin
+        Buffer.add_char raw '<';
+        Buffer.add_string raw tag;
+        List.iter (fun (n, v) -> add_attr raw ~tag n v) fixed;
+        Buffer.add_char raw '>'
+      end
+      else emit (Open (tag, attrs));
+      if not (Template_build.is_void tag) then begin
+        Option.iter (fun foreign -> emit (Push_context foreign)) context;
+        (match children with [ c ] -> go ~only:true c | cs -> List.iter (go ~only:false) cs);
+        if context <> None then emit Pop_context;
+        Buffer.add_string raw "</";
+        Buffer.add_string raw tag;
+        Buffer.add_char raw '>'
+      end
     in
     go ~only:false shape;
     flush ();
@@ -153,9 +183,10 @@ open Base
     in
     let after_text = ref false in
     let hydrating () = (not s.islands_only) || s.depth > 0 in
-    let raw = ref None in
+    let foreign = ref [] in
+    let in_foreign () = match !foreign with f :: _ -> f | [] -> false in
     let marker m =
-      if hydrating () && !raw = None then Buffer.add_string b m;
+      if hydrating () then Buffer.add_string b m;
       after_text := false
     in
     let holding = ref 0 in
@@ -176,13 +207,10 @@ open Base
     let rec go n =
       match unwrap n with
       | Text "" -> ()
-      | Text t -> (
-          match !raw with
-          | Some tag -> add_raw b tag t
-          | None ->
-              if !after_text && hydrating () then Buffer.add_string b "<!---->";
-              add_escaped b ~quote:false t;
-              after_text := true)
+      | Text t ->
+          if !after_text && hydrating () then Buffer.add_string b "<!---->";
+          add_escaped b ~quote:false t;
+          after_text := true
       | Fragment children -> List.iter go children
       | Hole f ->
           marker "<!--[-->";
@@ -255,7 +283,6 @@ open Base
               marker "<!--[-->";
               go (body ());
               marker "<!--]-->")
-      | Template { template; parts } when !raw <> None -> go (Template.expand template parts)
       | Template { template; parts } ->
           Array.iter
             (function
@@ -275,19 +302,21 @@ open Base
                    else
                      List.iter
                        (function
-                         | Fixed (n, v) -> add_attr b n v
+                         | Fixed (n, v) -> add_attr b ~tag n v
                          | Part_attr i -> (
                              match parts.(i) with
-                             | Attribute (Static (n, v)) -> add_attr b n v
-                             | Attribute (Dynamic (n, f)) -> Option.iter (add_attr b n) (f ())
+                             | Attribute (Static (n, v)) -> add_attr b ~tag n v
+                             | Attribute (Dynamic (n, f)) -> Option.iter (add_attr b ~tag n) (f ())
                              | Attribute (Handler _) | Child _ | No_attribute -> ()))
                        attrs);
                   Buffer.add_char b '>';
                   after_text := false
-              | Subtree shape -> go (Template.expand_shape parts shape))
+              | Subtree shape -> go (Template.expand_shape parts shape)
+              | Push_context f -> foreign := f :: !foreign
+              | Pop_context -> foreign := List.tl !foreign)
             (ops template)
       | Catch { children; fallback; _ } -> (
-          let length = Buffer.length b and text = !after_text and saved = snapshot s in
+          let length = Buffer.length b and text = !after_text and saved = snapshot s and context = !foreign in
           try
             marker "<!--[-->";
             go (children ());
@@ -295,6 +324,7 @@ open Base
           with e ->
             cut length;
             after_text := text;
+            foreign := context;
             restore s saved;
             !log_error ("Yuka.Catch: " ^ Web.exn_to_string e);
             marker "<!--[!-->";
@@ -377,6 +407,30 @@ open Base
           marker "<!--[-->";
           rows items render;
           marker "<!--]-->"
+      | Element { tag = ("script" | "style") as tag; attrs; children } when not (in_foreign ()) ->
+          let text = raw_text_children tag children in
+          let type_ =
+            List.find_map
+              (function
+                | Static (n, v) when String.lowercase_ascii n = "type" -> Some (Some v)
+                | Dynamic (n, f) when String.lowercase_ascii n = "type" -> Some (f ())
+                | _ -> None)
+              attrs
+          in
+          Buffer.add_char b '<';
+          Buffer.add_string b tag;
+          List.iter
+            (function
+              | Static (name, v) -> add_attr b ~tag name v
+              | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
+              | Handler _ -> ())
+            attrs;
+          Buffer.add_char b '>';
+          add_raw b ~tag ~type_:(Option.join type_) text;
+          Buffer.add_string b "</";
+          Buffer.add_string b tag;
+          Buffer.add_char b '>';
+          after_text := false
       | Element { tag; attrs; children } ->
           Buffer.add_char b '<';
           Buffer.add_string b tag;
@@ -385,8 +439,8 @@ open Base
             else begin
                 List.iter
                   (function
-                    | Static (name, v) -> add_attr b name v
-                    | Dynamic (name, f) -> Option.iter (add_attr b name) (f ())
+                    | Static (name, v) -> add_attr b ~tag name v
+                    | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
                     | Handler _ -> ())
                   attrs;
                 None
@@ -405,11 +459,13 @@ open Base
                 s.select_value <- value;
                 contents children;
                 s.select_value <- outer
-            | ("script" | "style"), _ ->
-                let outer = !raw in
-                raw := Some tag;
-                contents children;
-                raw := outer
+            | ("svg" | "math" | "foreignObject"), _ ->
+                foreign := (tag <> "foreignObject") :: !foreign;
+                (match contents children with
+                | () -> foreign := List.tl !foreign
+                | exception e ->
+                    foreign := List.tl !foreign;
+                    raise e)
             | _ -> contents children);
             Buffer.add_string b "</";
             Buffer.add_string b tag;
@@ -443,7 +499,7 @@ open Base
             resolved @ [ ("aria-current", "page") ]
         | _ -> resolved
       in
-      List.iter (fun (name, v) -> add_attr b name v) resolved;
+      List.iter (fun (name, v) -> add_attr b ~tag name v) resolved;
       value
     and contents = function
       | [ Hole f ] -> go (f ())

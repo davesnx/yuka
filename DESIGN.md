@@ -1824,34 +1824,47 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
 
 ## Unsafe URLs and raw-text elements (2026-11-10)
 
-Ticket 33.
+Ticket 33 and its security review.
 
-- URL attributes (`src/url.ml`, shared with the ppx): `href`, `src`,
-  `action`, `formaction`, `xlink:href` (and the ppx's `xlinkHref`),
-  `poster`, `cite`, `data`, `background`, `longdesc`, `manifest`,
-  `codebase`, `icon`. A value is unsafe when, after the URL parser's
-  clean-up (leading characters up to space dropped, tab, newline and CR
-  dropped anywhere, lower case), it starts with `javascript:`,
-  `vbscript:` or `data:` other than `data:image/{png,gif,jpeg,jpg,webp,avif,bmp}`
-  followed by `;` or `,`. Entities need no decoding: the server escapes `&`,
-  and `setAttribute` takes the value as is.
-- Rule, as React: the value becomes `about:blank#blocked`; the attribute
-  stays. React blocks only `javascript:` and has no escape hatch; Angular
-  also checks `data:` and has `bypassSecurityTrustUrl`; Svelte, Solid and
-  Vue do not check. Yuka blocks the three schemes and has no escape hatch.
-- Where: `Yuka.attr` and `Yuka.hole_attr` check URL attributes (each value
-  of a hole); the printer checks every attribute it prints (also
-  `Template.fixed`, unchecked parts) and logs the first block per process
-  with `log_error`; a dev client logs the first block with
-  `console.error`. The ppx emits `Yuka.attr` and `Yuka.hole_attr` only for
-  URL attributes, and `attr_unchecked` / `hole_attr_unchecked` (hidden in
-  the mli) for the others, so a bundle with no URL attribute has no check
-  (the keyed app). A literal unsafe URL in `.mlx` is a ppx error.
-- Raw text: a `script` or `style` element is never a compiled template (the
-  ppx makes it with `Yuka.lower`; the printer's template compiler sends
-  one to the generic path). Its text is printed with `add_raw`: no HTML
-  escaping; `</script` or `</style` (case-insensitive) and, in a script,
-  `<!--` get `\` after `<`. In JavaScript strings, regular expressions and
-  template literals `<\/` and `<\!` mean the same as before; in CSS
-  strings too. `<!--` is escaped because it can make the HTML parser treat a
-  later `</script>` as text. No hydration markers inside.
+- Rule (`src/url.ml`, shared with the ppx; names and tags lowercased by the
+  caller): a URL attribute is `href`, `src`, `action`, `formaction`,
+  `xlink:href`/`xlinkhref`, `poster`, `cite`, `data`, `background`,
+  `longdesc`, `manifest`, `codebase`, `icon`, and `values`, `to`, `from`,
+  `by` on `animate`, `set`, `animateMotion`, `animateTransform` (each
+  `;`-separated item of `values`). The value is read as the URL parser
+  does: leading characters up to space dropped, tab, newline and CR dropped
+  anywhere, any case. `javascript:` and `vbscript:` are blocked on every
+  URL attribute. `data:` is blocked only where it opens or loads a
+  document: `href` of `a`, `area`, `use`; `action`; `formaction`;
+  `xlink:href`; `src` of `iframe`, `frame`, `embed`, `object`; `data` of
+  `object`. With no known element (`Yuka.attr` in the browser), `href` and
+  `data` count as such and `src` does not. A blocked value becomes
+  `about:blank#blocked` (React's rule; React blocks only `javascript:` and
+  has no escape hatch, Angular checks `data:` and has one, Svelte, Solid and
+  Vue do not check). `srcdoc` is an HTML sink and is not checked (React
+  neither).
+- Sinks (`Url.check ~tag ~log`): the server printer, for every attribute
+  it prints, with the element (one check per print; `log_error` once per
+  process); in the browser, `Yuka.attr` and each value of `Yuka.hole_attr`
+  (no element), and the ppx's `Yuka.url_attr tag` and `url_hole_attr tag`
+  (with the element). Constructors do not check on the server.
+- The ppx emits `url_attr`/`url_hole_attr` for checked names and
+  `attr_unchecked`/`hole_attr_unchecked` for the others. The unchecked ones
+  refuse a URL name at run time (`Web.refuse_url_name`, a regular
+  expression in the browser), so they cannot set an unchecked URL. That
+  guard and the client guard below cost the keyed app 228 B gzip
+  (10,034 -> 10,262; budget raised to 10,262).
+- Raw text: in HTML (not under `svg` or `math`; `foreignObject` is HTML
+  again), `script` and `style` take no child, one `Text` or one `Hole`
+  that gives a `Text`; anything else raises `Invalid_argument` before
+  anything of the element is printed (server) or built (client). The ppx
+  joins the strings and `(Yuka.text e)` children into one text (a hole if
+  one reads a State) and refuses other children with a located error. The
+  text is printed by `add_raw`: in a JavaScript script (no `type`,
+  `module`, or a JavaScript MIME type) `</script` and `<!--` get `\` after
+  `<`; in a style, `</style`; in a script of another type every `<` becomes
+  `\u003c`. Foreign context is a stack in the printer, also pushed and
+  popped by template ops (`Push_context`, `Pop_context`) around the
+  children of `svg`, `math` and `foreignObject`, since a template prints
+  their tags as static chunks. A dev client does not log a text mismatch
+  inside `script` or `style` (the server text has the escapes).

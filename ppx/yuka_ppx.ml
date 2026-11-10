@@ -211,9 +211,10 @@ let rewrite_attribute ~self ~loc tag (label, value) =
       let dom_e = estring ~loc dom in
       let hole = reads_state value in
       let value = self#expression value in
-      let url = Url.is_url_attribute dom in
-      let attr = if url then [%expr Yuka.attr] else [%expr Yuka.attr_unchecked] in
-      let hole_attr = if url then [%expr Yuka.hole_attr] else [%expr Yuka.hole_attr_unchecked] in
+      let url = Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) in
+      let tag_e = estring ~loc tag in
+      let attr = if url then [%expr Yuka.url_attr [%e tag_e]] else [%expr Yuka.attr_unchecked] in
+      let hole_attr = if url then [%expr Yuka.url_hole_attr [%e tag_e]] else [%expr Yuka.hole_attr_unchecked] in
       if hole then
         Plain
           [%expr
@@ -302,7 +303,27 @@ let raw_text_element = function "script" | "style" -> true | _ -> false
 let lower_element ~self ~loc ~fnloc tag args =
   let props, children = split_args args in
   let attrs = attributes_expr ~loc (List.map (rewrite_attribute ~self ~loc:fnloc tag) props) in
-  [%expr Yuka.lower [%e estring ~loc tag] [%e attrs] [%e list_expr ~loc (List.map (rewrite_child ~self) children)]]
+  let text c =
+    match c.pexp_desc with
+    | Pexp_constant (Pconst_string _) when not (is_jsx c) -> c
+    | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Yuka", "text") | Lident "text"; _ }; _ }, [ (Nolabel, e) ])
+      when not (is_jsx c) ->
+        self#expression e
+    | _ ->
+        Location.raise_errorf ~loc:c.pexp_loc
+          "[yuka] <%s> takes only text: a string or (Yuka.text e), not an element, a component or an island." tag
+  in
+  let parts = List.map text children in
+  let content =
+    match parts with
+    | [] -> [%expr []]
+    | [ p ] when not (List.exists reads_state children) -> [%expr [ Yuka.text [%e p] ]]
+    | _ ->
+        let joined = [%expr Stdlib.String.concat "" [%e list_expr ~loc parts]] in
+        if List.exists reads_state children then [%expr [ Yuka.hole (fun () -> Yuka.text [%e joined]) ]]
+        else [%expr [ Yuka.text [%e joined] ]]
+  in
+  [%expr Yuka.lower [%e estring ~loc tag] [%e attrs] [%e content]]
 
 let rec template_element ~self ~parts ~loc ~fnloc tag args =
   if not (Html.is_html_element tag || Html.is_svg_element tag) then
@@ -325,7 +346,7 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
       | _ -> None
     in
     match fixed with
-    | Some (Some (dom, v)) when Url.is_url_attribute dom && Url.unsafe v ->
+    | Some (Some (dom, v)) when Url.unsafe ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) v ->
         Location.raise_errorf ~loc:value_loc
           "[yuka] %s=%S has a script URL; Yuka would print %s instead. Use an event handler." dom v Url.blocked
     | Some (Some (dom, v)) ->

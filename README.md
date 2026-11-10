@@ -49,16 +49,24 @@ Another server needs one small adapter.
 ## Security
 
 - Text and attribute values are HTML-escaped on the server.
-- A URL attribute (`href`, `src`, `action`, `formaction`, `poster` and the
-  like) whose value is a `javascript:`, `vbscript:` or non-image `data:` URL,
-  after the browser's own clean-up (case, leading spaces and control
-  characters, tabs and newlines), is printed and set as
-  `about:blank#blocked`, like React does; a dev build logs the first one. A
-  literal one in `.mlx` does not build. There is no way around it: use an
-  event handler.
-- The text of `<script>` and `<style>` is printed as written, not
-  HTML-escaped; `</script`, `</style` (any case) and, in a script, `<!--`
-  get a backslash after the `<` so the element cannot end early.
+- URL attributes (`href`, `src`, `action`, `formaction`, `poster`,
+  `xlink:href` and the like, in any case, and `values`, `to`, `from`, `by`
+  of SVG animations) are read as the browser reads them (case, leading
+  spaces and control characters, tabs and newlines). A `javascript:` or
+  `vbscript:` URL is printed and set as `about:blank#blocked`, like React
+  does; so is a `data:` URL where it would open or load a document (links,
+  forms, frames, `object`, `embed`, SVG `use`). A `data:` image or media URL
+  is kept. A dev build logs the first block; a literal one in `.mlx` does
+  not build. There is no way around it: use an event handler.
+- `srcdoc` of `iframe` is HTML and is not checked, like in React: never
+  put user input in it.
+- `<script>` and `<style>` take one text (the ppx joins the texts and
+  values you write inside them) and nothing else. In HTML their text is
+  printed as written, not HTML-escaped: in a JavaScript script `</script`
+  and `<!--` get a backslash after the `<`; in a style, `</style`; in a
+  script of another type (JSON, import map), every `<` becomes `\u003c`.
+  Inside `<svg>` and `<math>` they are ordinary elements and their text is
+  escaped.
 
 ## Learn more
 

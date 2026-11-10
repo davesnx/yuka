@@ -1310,11 +1310,8 @@ let __yuka_template_rewrite_48 =
     ~attrs:[|0;0;2;0;1;2|] ~values:[||]
 let url_attrs u =
   Yuka.Template.instance __yuka_template_rewrite_48
-    [|(Yuka.Template.attribute (Yuka.attr "href" (u : string)));(Yuka.Template.attribute
-                                                                   (Yuka.attr_unchecked
-                                                                    "title"
-                                                                    (u : 
-                                                                    string)))|]
+    [|(Yuka.Template.attribute ((Yuka.url_attr "a") "href" (u : string)));(
+      Yuka.Template.attribute (Yuka.attr_unchecked "title" (u : string)))|]
 let __yuka_template_rewrite_49 =
   Yuka.Template.make
     (Yuka.Template.element "div" []
@@ -1327,3 +1324,24 @@ let script_text =
          (Yuka.lower "script" [] [Yuka.text {|a < b && "</script>"|}]));(
       Yuka.Template.child (Yuka.lower "style" [] [Yuka.text "p > a {}"]))|]
 let script_root = Yuka.lower "script" [] [Yuka.text "x < 1"]
+let __yuka_template_rewrite_50 =
+  Yuka.Template.make
+    (Yuka.Template.element "svg" []
+       [Yuka.Template.element "animate"
+          [Yuka.Template.part_attr 0; Yuka.Template.part_attr 1] []])
+    ~html:"<svg><animate></animate></svg>" ~walk:[|0;0|] ~kids:[||]
+    ~attrs:[|1;0;3;1;1;3|] ~values:[||]
+let animate_values u =
+  Yuka.Template.instance __yuka_template_rewrite_50
+    [|(Yuka.Template.attribute
+         ((Yuka.url_attr "animate") "values" (u : string)));(Yuka.Template.attribute
+                                                               ((Yuka.url_attr
+                                                                   "animate")
+                                                                  "from"
+                                                                  (u : 
+                                                                  string)))|]
+let style_parts c =
+  Yuka.lower "style" []
+    [Yuka.hole
+       (fun () ->
+          Yuka.text (Stdlib.String.concat "" ["a{color:"; State.get c; "}"]))]

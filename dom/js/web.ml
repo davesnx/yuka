@@ -559,3 +559,9 @@ let take_buffer () =
   | [] -> None
 
 let give_buffer b = buffers := b :: !buffers
+
+external lowercase : string -> string = "toLowerCase" [@@mel.send]
+
+let refuse_url_name : string -> unit =
+  [%mel.raw
+    {|function (n) { if (/^(href|src|action|formaction|xlink:?href|poster|cite|data|background|longdesc|manifest|codebase|icon|values|to|from|by)$/i.test(n)) throw new Error("Yuka: " + n + " is a URL attribute") }|}]

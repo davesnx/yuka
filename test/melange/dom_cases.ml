@@ -1341,6 +1341,47 @@ let client_urls () =
   check "safe again" {|<div><a href="https://example.com/">a</a><iframe src="about:blank#blocked"></iframe><a title="javascript:x">b</a></div>|} fourth;
   dispose ()
 
+let style_hole_hydrates () =
+  let c = State.make "red" in
+  let tree () = div [] [ lower "style" [] [ hole (fun () -> text ("a{color:" ^ State.get c ^ "}</style>")) ] ] in
+  let box = container (server (tree ())) in
+  let before = html box in
+  let text_node = (child_nodes (query box "style")).(0) in
+  capture_warnings ();
+  let dispose = Yuka.Client.hydrate (as_element box) tree in
+  check "no hydration mismatch" "" (warnings ());
+  same "text node kept" text_node (child_nodes (query box "style")).(0);
+  State.set c "blue";
+  check "server html" {|<div><style>a{color:red}<\/style></style></div>|} before;
+  check "one text node" "1" (ints (Array.length (child_nodes (query box "style"))));
+  check "updated" "a{color:blue}</style>" (text_content (query box "style"));
+  dispose ()
+
+let client_script_children () =
+  let box = container "" in
+  match Yuka.Client.render (as_element box) (fun () -> lower "script" [] [ text "a"; text "b" ]) with
+  | dispose ->
+      dispose ();
+      raise (Cases.Failed "two texts in a script were accepted")
+  | exception Invalid_argument _ -> ()
+
+let client_url_case () =
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div []
+          [
+            lower "a" [ attr "HREF" "javascript:alert(1)" ] [];
+            lower "img" [ attr "Src" "data:image/png;base64,iVBORw0KGgo=" ] [];
+            lower "iframe" [ url_attr "iframe" "SRC" "data:text/html,x" ] [];
+          ])
+  in
+  check "case and data" {|<div><a href="about:blank#blocked"></a><img src="data:image/png;base64,iVBORw0KGgo="><iframe src="about:blank#blocked"></iframe></div>|} (html c);
+  dispose ();
+  match attr_unchecked "FormAction" "/x" with
+  | _ -> raise (Cases.Failed "attr_unchecked took a URL name")
+  | exception Js.Exn.Error _ -> ()
+
 let client_raw_text () =
   let c = container "" in
   let dispose =
@@ -1353,6 +1394,9 @@ let all =
   [
     ("client: URL attributes are checked", client_urls);
     ("client: style text", client_raw_text);
+    ("client: URL names in any case; data: kept on images", client_url_case);
+    ("client: a style hole hydrates as one text node and updates", style_hole_hydrates);
+    ("client: script takes one text or one hole", client_script_children);
     ("dom hydration mismatch log", mismatch_log);
     ("dom template select value", template_select_value);
     ("dom template parser changes", parser_changes);

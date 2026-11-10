@@ -153,3 +153,6 @@ let signup_form_view = <Yuka.Form action=signup_action>(fun form -> <input name=
 let url_attrs u = <a href=u title=u>"x"</a>
 let script_text = <div><script>{|a < b && "</script>"|}</script><style>"p > a {}"</style></div>
 let script_root = <script>"x < 1"</script>
+
+let animate_values u = <svg><animate values=u from=u /></svg>
+let style_parts c = <style>"a{color:"(Yuka.text (State.get c))"}"</style>

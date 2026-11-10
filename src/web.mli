@@ -146,3 +146,5 @@ val adopt_stylesheets : unit -> unit
 val read_file : string -> string option
 val take_buffer : unit -> Buffer.t option
 val give_buffer : Buffer.t -> unit
+val lowercase : string -> string
+val refuse_url_name : string -> unit

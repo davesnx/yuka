@@ -18,18 +18,20 @@ let fragment children = Fragment children
 let lower tag attrs children = Element { tag; attrs; children }
 let warned = ref false
 
-let checked name value =
-  if Url.is_url_attribute name && Url.unsafe value then begin
-    if Dev.on && not !warned then begin
-      warned := true;
-      Web.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
-    end;
-    Url.blocked
+let log name value =
+  if Dev.on && not !warned then begin
+    warned := true;
+    Web.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
   end
-  else value
 
-let attr name value = Static (name, checked name value)
-let attr_unchecked name value = Static (name, value)
+let client_check ~tag name value =
+  if Web.in_browser then Url.check ~tag:(Web.lowercase tag) ~log (Web.lowercase name) value else value
+let url_attr tag name value = Static (name, client_check ~tag name value)
+let attr name value = url_attr "" name value
+
+let attr_unchecked name value =
+  Web.refuse_url_name name;
+  Static (name, value)
 let hole f = Hole f
 let slot s = Slot s
 
@@ -54,11 +56,14 @@ let use_css href body =
     body
   end
 
-let hole_attr_unchecked name f = Dynamic (name, f)
-
-let hole_attr name f =
-  if Url.is_url_attribute name then Dynamic (name, fun () -> Option.map (checked name) (f ()))
+let url_hole_attr tag name f =
+  if Web.in_browser && Url.checked ~tag:(Web.lowercase tag) (Web.lowercase name) then Dynamic (name, fun () -> Option.map (client_check ~tag name) (f ()))
   else Dynamic (name, f)
+
+let hole_attr name f = url_hole_attr "" name f
+let hole_attr_unchecked name f =
+  Web.refuse_url_name name;
+  Dynamic (name, f)
 let on name handler = Handler (name, handler)
 
 let each ?(equal = Signal.same) ~key items render =
