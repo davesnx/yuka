@@ -34,3 +34,62 @@ module Await = struct
   let make ~async ~loading ?(failed = fun _ -> Fragment []) ~children () =
     Await { async; loading; failed; render = children }
 end
+
+module Catch = struct
+  let make ~fallback ~children () =
+    let client at =
+      let outer = Option.bind !Base.current_owner (fun o -> o.catch) in
+      let failed =
+        match at with
+        | Some n ->
+            let n : Web.node = Obj.obj n in
+            Web.node_type n = 8 && Web.data n = "[!"
+        | None -> false
+      in
+      let error = State.make (if failed then Some "server error" else None) in
+      let reset () = State.set error None in
+      let show (o : Base.owner) m =
+        o.catch <- outer;
+        fallback ~error:m ~reset
+      in
+      Hole
+        (fun () ->
+          let o = Option.get !Base.current_owner in
+          match State.get error with
+          | Some m -> show o m
+          | None -> (
+              o.catch <- Some (fun e -> State.set error (Some (Web.exn_to_string e)));
+              match Scheduler.untrack children with
+              | n -> n
+              | exception e ->
+                  let m = Web.exn_to_string e in
+                  Base.dispose_owner o;
+                  error.value <- Some m;
+                  show o m))
+    in
+    Catch { children; fallback; client }
+end
+
+module Show = struct
+  let make ~status ~loading ?(failed = fun _ -> Fragment []) ~children () =
+    let view =
+      State.memo
+        ~equal:(fun a b ->
+          match (a, b) with
+          | `Data x, `Data y -> Signal.same x y
+          | `Loading, `Loading -> true
+          | `Failed x, `Failed y -> x = y
+          | _ -> false)
+        (fun () ->
+          match status () with
+          | Status.Ready { data; _ } | Loading (Some data) -> `Data data
+          | Idle | Loading None -> `Loading
+          | Failed { error; _ } -> `Failed error)
+    in
+    Hole
+      (fun () ->
+        match State.get view with
+        | `Data d -> children d
+        | `Loading -> loading
+        | `Failed e -> failed e)
+end

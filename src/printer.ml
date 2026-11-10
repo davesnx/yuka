@@ -91,6 +91,25 @@ open Base
               go (body ());
               marker "<!--]-->")
       | Template { template; parts } -> go (Template.expand template parts)
+      | Catch { children; fallback; _ } -> (
+          let length = Buffer.length b and text = !after_text
+          and pending = s.pending and queued = s.queued and entry = s.entry
+          and preloaded = s.preloaded in
+          try
+            marker "<!--[-->";
+            go (children ());
+            marker "<!--]-->"
+          with e ->
+            Buffer.truncate b length;
+            after_text := text;
+            s.pending <- pending;
+            s.queued <- queued;
+            s.entry <- entry;
+            s.preloaded <- preloaded;
+            !log_error ("Yuka.Catch: " ^ Web.exn_to_string e);
+            marker "<!--[!-->";
+            go (fallback ~error:"server error" ~reset:ignore);
+            marker "<!--]-->")
       | Slot { content; _ } ->
           marker "<!--[$-->";
           Option.iter go content;

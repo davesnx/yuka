@@ -164,4 +164,15 @@ let () =
       (Yuka.Private.node (Awaiting.with_failed (Yuka.Async.failed "boom")))
   in
   check ("await failed: " ^ failed_html) (contains failed_html "<p>boom</p>");
+  let html e = Yuka.Private.to_html (Yuka.Private.node e) in
+  let saved = !Yuka.Server.log_error in
+  Yuka.Server.log_error := ignore;
+  check "catch children" (html (Catching.view ~fail:false) = "<div><!--[--><span>before</span><b>ok</b><!--]--></div>");
+  check "catch fallback" (html (Catching.view ~fail:true) = "<div><!--[!--><p>server error</p><!--]--></div>");
+  Yuka.Server.log_error := saved;
+  check "show loading" (html (Catching.status (Yuka.Status.Loading None)) = "<!--[-->wait<!--]-->");
+  check "show data" (html (Catching.status (Yuka.Status.Loading (Some "d"))) = "<!--[--><b>d</b><!--]-->");
+  check "show failed"
+    (html (Catching.status (Yuka.Status.Failed { error = Yuka.Status.Not_found; last = None }))
+    = "<!--[--><p>not found</p><!--]-->");
   if !fails > 0 then exit 1 else print_endline "ok"

@@ -205,7 +205,12 @@ let dispatch event ev =
     | None -> ()
     | Some n ->
         (match Web.get_prop n key with
-        | Some hs -> List.iter (fun h -> if live h then acting_as (Some h.owner) h.run ev) hs
+        | Some hs ->
+            List.iter
+              (fun h ->
+                if live h then
+                  try acting_as (Some h.owner) h.run ev with e -> Base.fail h.owner e)
+              hs
         | None -> ());
         match Web.get_flag ev stopped_key with
         | Some true -> ()
@@ -229,17 +234,18 @@ let delegate ctx event =
       delegated := (ctx.doc, event, key) :: !delegated;
       key
 
-let unowned : Base.owner = { last = None; gen = 0 }
+let unowned : Base.owner = { last = None; gen = 0; catch = None }
 
 let add_handler ctx el event handler =
+  let owner = Option.value !Base.current_owner ~default:unowned in
   if non_bubbling event then begin
     let handler = acting_as !Base.current_owner handler in
+    let handler ev = try handler ev with e -> Base.fail owner e in
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
   end
   else begin
     let key = delegate ctx event in
-    let owner = Option.value !Base.current_owner ~default:unowned in
     let h = { run = handler; owner; gen = owner.gen } in
     match Web.get_prop el key with
     | None -> Web.set_prop el key [ h ]
@@ -375,6 +381,8 @@ let rec mount_node pos last n =
           instantiate pos template c parts
       | None -> mount_node pos last (Template.expand template parts))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
+  | Catch { client; _ } ->
+      mount_node pos last (client (if pos.adopt then Option.map Obj.repr pos.cur else None))
   | Each { items; key; equal; render } ->
       last := false;
       mount_each pos false items key equal render
@@ -453,7 +461,8 @@ and mount_hole pos owned f =
       if not !mounted then begin
         mounted := true;
         place pos n;
-        drop_to_end pos
+        drop_to_end pos;
+        if not owned then stop := Some (comment pos "]")
       end
       else
         match (n, !text_node) with
@@ -465,8 +474,7 @@ and mount_hole pos owned f =
                 place { pos with cur = None; adopt = false } n
             | Some start ->
                 remove_between start (Option.get !stop);
-                place { pos with cur = !stop; adopt = false } n));
-  if not owned then stop := Some (comment pos "]")
+                place { pos with cur = !stop; adopt = false } n))
 
 and mount_each :
     type a.
@@ -600,6 +608,7 @@ let start ~adopt container f =
 
 let render container f = start ~adopt:false container f
 let hydrate container f = start ~adopt:true container f
+let on_error : (string -> unit) ref = ref ignore
 
 let cleanup_table : (unit -> unit) Web.table option ref = ref None
 
@@ -742,9 +751,28 @@ let boot entries props island =
           match entry.decode json with
           | Error message -> fail ("cannot decode props: " ^ message)
           | Ok build -> (
-              try
-                Some (hydrate island build)
-              with e -> fail (Web.exn_to_string e))))
+              let failed = ref false and dispose = ref ignore in
+              let catch e =
+                if not !failed then begin
+                  failed := true;
+                  let m = "yuka island " ^ id ^ " (" ^ name ^ "): " ^ Web.exn_to_string e in
+                  Web.console_error m;
+                  !on_error m;
+                  !dispose ()
+                end
+              in
+              let o = Base.new_owner () in
+              o.catch <- Some catch;
+              match Base.with_owner o (fun () -> hydrate island build) with
+              | d when !failed ->
+                  d ();
+                  None
+              | d ->
+                  dispose := d;
+                  Some d
+              | exception e ->
+                  catch e;
+                  None)))
 
 let schedule strategy island run =
   match strategy with

@@ -73,6 +73,8 @@ markers everywhere: the client hydrates their output.
 - `Template`: printed as the tree that `Private.expand` gives, so it has the
   same HTML as the same tree made with `lower`.
 - `Fragment`: no marker; the children are inline.
+- `Catch`: as a `Hole`. When the children raised on the server, the hole
+  holds the fallback and its start marker is `<!--[!-->`.
 - `Static` attribute: written. `Dynamic`: written with its current value;
   `None` is not written. `Handler`: not written.
 - Void tags (`area base br col embed hr img input link meta source track
@@ -1375,4 +1377,44 @@ Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
   the page, decodes the title before changing the DOM, leaves an existing
   `aria-current` alone, and `stop_within` aborts the action calls of the
   islands it stops (the event handler's owner is the acting owner).
+
+
+## Error boundaries (2026-11-10)
+
+Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.
+
+- An owner has `catch : (exn -> unit) option`. A new owner takes the catch
+  of the current owner. `Base.fail o e` calls it, or raises `e` when there
+  is none, so code outside a boundary and outside an island behaves as
+  before.
+- Routing: an effect's first run that raises calls the catch of the
+  effect's owner. A later run that raises, and a dependency check that
+  raises (a memo the effect reads), reach `Scheduler.flush`, which calls
+  `node.catch` (set by `Effect.run` to `fail` on the effect's owner). The
+  delegated listener wraps each handler in `try` and calls the catch of
+  the handler's owner; a non-bubbling handler is wrapped when it is
+  attached. Memos are not routed themselves: their readers are.
+- `Catch` is a node with the server parts (`children`, `fallback`) and a
+  `client` function that returns a `Hole`. The hole's body sets the catch
+  of the hole's owner to a handler that writes an error State, so all
+  effects and handlers made under it inherit it. On error the hole runs
+  again: its owner is disposed (effects stop, cleanups run) and the
+  fallback is rendered with the catch of the owner above, so an error in
+  the fallback goes up. A synchronous error in `children ()` disposes the
+  owner and shows the fallback in the same run.
+- `mount_hole` writes its stop marker in its first run, so a hole that
+  runs again before `Effect.run` returns has its range.
+- Islands: `boot` hydrates under an owner whose catch logs
+  `yuka island ID (NAME): message` with `console.error`, calls
+  `Client.on_error` (set by `mount ~on_error`) and disposes the island.
+  The DOM stays as it is.
+- Server: the printer remembers the buffer length and the session lists
+  (pending fills, queued links, entry tag, preloaded names), prints the
+  children, and on an exception restores them, calls `log_error`, and
+  prints the fallback with `~error:"server error"` between `<!--[!-->`
+  and `<!--]-->`. The client reads `[!` on the start comment and starts
+  with the fallback.
+- Size: the routing is in every client app (about 170 B gzip on the keyed
+  benchmark); `Catch`, `Show` and `Status` are top-level values, dropped
+  when unused.
 

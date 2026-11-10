@@ -1173,6 +1173,24 @@ let loading_cases =
     check int "a later non-lazy use gets the link" 1
       (count out (link "/js/A.js"))
   in
+  let catch_keeps_link () =
+    let saved = !Yuka.Server.log_error in
+    Yuka.Server.log_error := ignore;
+    let out =
+      shell ~preload (fun () ->
+          Yuka.fragment
+            [ Yuka.Catch.make
+                ~fallback:(fun ~error:_ ~reset:_ -> Yuka.text "f")
+                ~children:(fun () ->
+                  Yuka.fragment
+                    [ isl "A";
+                      Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "x")) ])
+                ();
+              isl "A" ])
+    in
+    Yuka.Server.log_error := saved;
+    check int "the link of a dropped island is printed again" 1 (count out (link "/js/A.js"))
+  in
   let no_function () =
     check bool "no link" false
       (contains (shell (fun () -> isl "A")) "modulepreload")
@@ -1257,6 +1275,23 @@ let loading_cases =
     check bool "link after the outer close" true (contains after (link "/js/Inner.js"));
     check int "inner link once" 1 (count out (link "/js/Inner.js"))
   in
+  let nested_in_failed_catch () =
+    let saved = !Yuka.Server.log_error in
+    Yuka.Server.log_error := ignore;
+    let out =
+      shell ~preload (fun () ->
+          outer_with (fun () ->
+              Yuka.Catch.make
+                ~fallback:(fun ~error:_ ~reset:_ -> Yuka.text "f")
+                ~children:(fun () ->
+                  Yuka.fragment
+                    [ Yuka.Private.element (Yuka.Private.node (isl "Inner"));
+                      Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "x")) ])
+                ()))
+    in
+    Yuka.Server.log_error := saved;
+    check int "no link for the dropped inner island" 0 (count out (link "/js/Inner.js"))
+  in
   let nested_dedup () =
     let out =
       shell ~preload (fun () ->
@@ -1338,6 +1373,7 @@ let loading_cases =
   in
   [ test_case "data-start from the trigger" `Quick data_start;
     test_case "preload once per island name" `Quick once;
+    test_case "a dropped island in a Catch keeps the preload link" `Quick catch_keeps_link;
     test_case "no preload for lazy" `Quick lazy_none;
     test_case "no preload without the function" `Quick no_function;
     test_case "no preload without a url" `Quick none_result;
@@ -1346,6 +1382,7 @@ let loading_cases =
     test_case "no preload inside an island (render)" `Quick nested_in_render;
     test_case "no preload inside an island (slot)" `Quick nested_in_slot;
     test_case "nested preload once" `Quick nested_dedup;
+    test_case "no queued link for an island dropped by a Catch" `Quick nested_in_failed_catch;
     test_case "no preload in a fill inside an island" `Quick await_in_island;
     test_case "preload when navigating" `Quick respond_navigating;
     test_case "preload_urls without metafile" `Quick urls;

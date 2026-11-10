@@ -26,6 +26,7 @@ only the parts that read a signal update.
   the browser parses once and clones for each use.
 - Server rendering and hydration from one element tree, on native and Melange.
 - Streaming with `<Yuka.Await>`: send the page shell first, fill in the rest later.
+- Error boundaries with `<Yuka.Catch>` and loading states with `<Yuka.Show>`.
 - Islands: `let%client` components with a start strategy (`Load`, `Idle`,
   `Visible`, `Interaction`) and lazy loading chosen where the island is used.
 - Codecs: `[@@deriving codec]` for props and action data.
@@ -158,6 +159,38 @@ manifest (without a manifest entry, an island downloads when it starts). To down
 only at the trigger, write
 ``<Yuka.Client loading=(`Lazy `Visible)>``. Lazy is chosen where the island is
 used, not in the island.
+
+### Errors and loading states
+
+`<Yuka.Catch>` shows a fallback when its children raise: while they render,
+in an effect, a memo or a hole that runs again, or in an event handler.
+`reset ()` renders the children again from their first state.
+
+```ocaml
+<Yuka.Catch fallback=(fun ~error ~reset ->
+    <div class_="crash">
+      <p>(Yuka.text error)</p>
+      <button onClick=(fun _ -> reset ())>"Try again"</button>
+    </div>)>
+  <Issue_props issue />
+</Yuka.Catch>
+```
+
+On the server, an exception in the children prints the fallback with the
+error `"server error"`, and the detail goes to `Server.log_error`. In an
+island, the client hydrates that fallback. An island with no `Catch` stops
+at its first exception and keeps its DOM; `Yuka.mount ~on_error ()` gets the
+message. A failed `Async` or `Status.Failed` is data, not an exception.
+
+`<Yuka.Show>` shows a `Status.t`: data while it loads again, `loading` only
+when there is no data yet.
+
+```ocaml
+<Yuka.Show status=(fun () -> State.get labels) loading=(<p>"Loading"</p>)
+  failed=(fun e -> <p>(Yuka.text (Status.error_to_string e))</p>)>
+  (fun labels -> <Chips labels />)
+</Yuka.Show>
+```
 
 ### Routes
 

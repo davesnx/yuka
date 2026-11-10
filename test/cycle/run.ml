@@ -661,6 +661,16 @@ let render =
         check_true "before the island" (script < index r.body "<yuka-island");
         check_true "after the content before it" (script > index r.body "before");
         check_true "preload" (contains r.body {|<link rel="modulepreload" href="/_yuka/app/a.js">|}) );
+    ( "the module script stays when a Catch drops the first island",
+      fun () ->
+        let req = request "/islands" in
+        App.fail_first := true;
+        let r = match Async.status (call req) with Async.Done v -> v | _ -> Alcotest.fail "pending" in
+        check_true "fallback" (contains r.body "lost server error");
+        check_true "island A dropped" (not (contains r.body {|data-name="A"|}));
+        Alcotest.(check int) "one module script" 1 (count r.body "<script type=\"module\"");
+        check_true "before the island" (index r.body "<script type=\"module\"" < index r.body "<yuka-island");
+        Alcotest.(check int) "logged" 1 (List.length !logged) );
     ( "outlets nest in layer order",
       fun () ->
         let r = get "/team/a/1" in

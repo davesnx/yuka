@@ -32,6 +32,11 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
         render : 'a -> node;
       }
         -> node
+    | Catch of {
+        children : unit -> node;
+        fallback : error:string -> reset:(unit -> unit) -> node;
+        client : Obj.t option -> node;
+      }
 
   and slot = { content : node option; dom : Obj.t list ref }
 

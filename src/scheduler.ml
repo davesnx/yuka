@@ -11,6 +11,7 @@ type node = {
   mutable fn : unit -> bool;
   mutable level : int;
   mutable runs : int;
+  mutable catch : exn -> unit;
   depth : int;
   id : int;
   eff : bool;
@@ -31,6 +32,7 @@ let listener = ref None
 let queue = ref []
 let depth = ref 0
 let never () = false
+let rethrow e = raise e
 
 let make eff fn =
   incr ids;
@@ -44,6 +46,7 @@ let make eff fn =
     fn;
     level = 0;
     runs = 0;
+    catch = rethrow;
     depth = !stack;
     id = !ids;
     eff;
@@ -229,7 +232,7 @@ let flush () =
             else begin
               incr rounds;
               List.iter
-                (fun n -> try fresh n with e -> fail e)
+                (fun n -> try fresh n with e -> try n.catch e with e -> fail e)
                 (if sorted q then q else sort q)
             end;
             loop ()

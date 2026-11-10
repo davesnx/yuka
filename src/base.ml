@@ -5,10 +5,19 @@ type cell = {
   mutable live : bool;
 }
 
-type owner = { mutable last : cell option; mutable gen : int }
+type owner = {
+  mutable last : cell option;
+  mutable gen : int;
+  mutable catch : (exn -> unit) option;
+}
 
 let current_owner : owner option ref = ref None
-let new_owner () = { last = None; gen = 0 }
+
+let new_owner () =
+  { last = None; gen = 0;
+    catch = (match !current_owner with Some o -> o.catch | None -> None) }
+
+let fail o e = match o.catch with Some h -> h e | None -> raise e
 
 let add_disposer o dispose =
   let c = { dispose; prev = o.last; next = None; live = true } in
@@ -92,8 +101,10 @@ module Effect = struct
       Scheduler.dispose node;
       teardown ()
     in
+    node.catch <- fail child;
     (match Scheduler.start node with
     | () -> ()
+    | exception e when Option.is_some child.catch -> fail child e
     | exception e ->
         stop ();
         raise e);
