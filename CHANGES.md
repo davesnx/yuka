@@ -7,6 +7,8 @@
 - Client navigation replaces only the content below the deepest shared layout: islands in shared layouts keep their state; `aria-current` follows the path; a new build id (`Yuka-Build`) makes a full page load (@davesnx)
 - Breaking: `Yuka.Server.modules` takes `~digest` (use `Yuka_dream.tree_digest dir`), so a deploy that changes client code changes the build id; `Yuka.Server.layer` has a `data` field, and a layout that takes a loader result is rendered again on each navigation (@davesnx)
 - Leaving a page stops the action calls of the islands it removes (@davesnx)
+- Remote data: `Action.query`, `Remote.use` (a `Status.t` signal with retry, abort and `enabled`), `Remote.refetch`, `Remote.invalidate`, `Remote.mutate` with `Optimistic`; server renders embed the answers so hydration sends no request (@davesnx)
+- Breaking: `Action.t` has a third type parameter, the kind (`[ `Mutation ]` for `declare`, `[ `Query ]` for `query`) (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

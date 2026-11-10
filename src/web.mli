@@ -73,6 +73,7 @@ val focus : string -> unit
 val scroll_into_view : string -> unit
 val has_intersection_observer : node -> bool
 val on_idle : (unit -> unit) -> unit -> unit
+val set_timeout : int -> (unit -> unit) -> unit -> unit
 val on_visible : node -> (unit -> unit) -> unit -> unit
 val ready_state : unit -> string
 val on_dom_ready : (unit -> unit) -> unit -> unit

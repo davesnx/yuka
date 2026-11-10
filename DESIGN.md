@@ -1376,3 +1376,43 @@ Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
   `aria-current` alone, and `stop_within` aborts the action calls of the
   islands it stops (the event handler's owner is the acting owner).
 
+## Remote data (2026-11-10)
+
+Spec: `.workplace/docs/data-spec.md`, sections 1 and 2, increments R1 to
+R3 (ticket 12); its "Changes during build" section lists the differences.
+
+- `Status` (`src/status.ml`): `Idle`, `Loading last`, `Ready`, `Failed
+  { error; last }`, with a typed `error` (`Rejected`, `Forbidden`,
+  `Not_found`, `Server`, `Network`, `Protocol`) and a JSON codec for it.
+- Queries: `Action.query` is `Action.declare` with the kind `[ `Query ]`
+  (a phantom third parameter of `Action.t`); `Remote.use` accepts only that
+  kind. Same registry, endpoint and wire format.
+- Transport: `Action.send` gives `(Json.t, Status.error) result` and
+  returns an abort. The server sets it with `implement` (the
+  implementation, `Server` logged); in the browser `Remote` maps the status
+  of `fetch_post` itself (400 `Rejected` with the message, 403, 404, 413 and
+  415, 5xx, network). `Action.call` keeps its string transport and its
+  messages.
+- `Remote.use` (`src/remote.ml`): an effect computes the key (query name
+  and input JSON); a new key aborts the request and bumps a generation, and
+  only the current generation writes the status. Retries use
+  `Web.set_timeout`. The owner's disposal aborts and leaves the
+  `invalidate` table (a `Web.table` from query name to mounted uses,
+  created on first use).
+- Answers (`src/answers.ml`): in a server render, a use inside an island
+  writes `<script type="application/json" data-yuka-answer="r:NAME JSON">`
+  with `{"ok":v}` or `{"error":ERROR}` after `</yuka-island>` and before the
+  props script. A use that is still pending writes a `data-pending`
+  element and a `Pending_answer`; `Server.drive` writes the full element
+  when it settles (or a network timeout error). The client reads an answer
+  on the first run only; a pending one is awaited with the DOM watch until
+  the document ends, then fetched. `Server.drive`'s `on_value` now takes the
+  HTML of the chunk.
+- `Optimistic` (`src/optimistic.ml`): pending changes with ids, applied
+  oldest first over a base kept elsewhere. `Remote.mutate` adds a change,
+  runs the call, and on success removes it and writes `commit result base`
+  (default `change base`); on failure removes it.
+- Size: `make size` fails when the keyed app contains `remote.js`,
+  `answers.js`, `optimistic.js` or `status.js`; keyed app 10460 -> 10457 B
+  gzip. The demo client grows 35961 -> 38766 B gzip (it uses Remote).
+

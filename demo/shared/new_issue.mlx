@@ -35,8 +35,8 @@ let%client make () =
         (fun result ->
           State.set busy false;
           match result with
-          | Ok (Ok i) ->
-              State.set Ui.created (Some i);
+          | Ok (Ok _) ->
+              Remote.invalidate Queries.issues;
               State.set title "";
               State.set description "";
               close ()

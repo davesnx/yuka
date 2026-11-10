@@ -131,6 +131,13 @@ external first_element_child : node -> node option = "firstElementChild"
 let has_intersection_observer : node -> bool =
   [%mel.raw "function (el) { return typeof el.ownerDocument.defaultView.IntersectionObserver === 'function' }"]
 
+let set_timeout : int -> (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (ms, f) {
+  const id = setTimeout(function () { f() }, ms);
+  return function () { clearTimeout(id); };
+}|}]
+
 let on_idle : (unit -> unit) -> unit -> unit =
   [%mel.raw
     {|function (f) {

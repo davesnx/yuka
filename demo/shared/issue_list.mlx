@@ -10,8 +10,11 @@ let index_of id items =
   in
   go 0 items
 
-let%client make ~(title : string) ~(issues : Model.Issue.t list) () =
-  let issues = State.make issues in
+let%client make ~(title : string) ~(view : Queries.view) () =
+  let source = Remote.use Queries.issues (fun () -> view) in
+  let issues =
+    State.memo (fun () -> Option.value (Status.data (Remote.status source)) ~default:[])
+  in
   let filter = State.make "" in
   let selected : string option State.t = State.make None in
   let menu : menu option State.t = State.make None in
@@ -23,36 +26,28 @@ let%client make ~(title : string) ~(issues : Model.Issue.t list) () =
   in
   let groups = State.memo ~equal:( = ) (fun () -> Issue.group (State.get visible)) in
   let ordered = State.memo ~equal:( = ) (fun () -> List.concat_map snd (State.get groups)) in
-  let replace (i : Issue.t) =
-    State.set issues
-      (List.map (fun (x : Issue.t) -> if x.id = i.id then i else x) (State.peek issues))
-  in
   let change ~id ?status ?priority () =
     State.set menu None;
-    match List.find_opt (fun (i : Issue.t) -> i.id = id) (State.peek issues) with
-    | None -> ()
-    | Some before ->
-        State.set toast None;
-        replace
-          {
-            before with
-            status = Option.value status ~default:before.status;
-            priority = Option.value priority ~default:before.priority;
-          };
-        Async.on_result
-          (Action.call Actions.update_issue { Actions.id; status; priority })
-          (function
-            | Ok i -> replace i
-            | Error _ ->
-                replace before;
-                State.set toast (Some ("Could not update " ^ id ^ ".")))
+    State.set toast None;
+    let edit (i : Issue.t) =
+      if i.id <> id then i
+      else
+        {
+          i with
+          status = Option.value status ~default:i.status;
+          priority = Option.value priority ~default:i.priority;
+        }
+    in
+    let commit (updated : Issue.t) =
+      List.map (fun (i : Issue.t) -> if i.id = updated.id then updated else i)
+    in
+    Async.on_result
+      (Remote.mutate source (List.map edit) ~commit (fun () ->
+           Action.call Actions.update_issue { Actions.id; status; priority }))
+      (function
+        | Ok _ -> ()
+        | Error _ -> State.set toast (Some ("Could not update " ^ id ^ ".")))
   in
-  Effect.run (fun () ->
-      match State.get Ui.created with
-      | Some (i : Issue.t) ->
-          State.set issues
-            (i :: List.filter (fun (x : Issue.t) -> x.id <> i.id) (State.peek issues))
-      | None -> ());
   let move step =
     let items = State.peek ordered in
     let n = List.length items in

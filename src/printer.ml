@@ -9,7 +9,15 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false }
+      current = None; in_fill = false; answers = []; answered = [] }
+
+  let answer_script key json =
+    "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
+    ^ Json.to_string json ^ "</script>"
+
+  let pending_answer_script key =
+    "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key
+    ^ "\" data-pending></script>"
 
   let take_pending s =
     let p = List.rev s.pending in
@@ -134,12 +142,23 @@ open Base
            ^ ">");
           after_text := false;
           s.depth <- s.depth + 1;
-          (match go (render ()) with
-          | () -> s.depth <- s.depth - 1
-          | exception e ->
-              s.depth <- s.depth - 1;
-              raise e);
+          let outer_answers = s.answers in
+          s.answers <- [];
+          let restore () =
+            s.depth <- s.depth - 1;
+            let mine = s.answers in
+            s.answers <- outer_answers;
+            mine
+          in
+          let mine =
+            match go (render ()) with
+            | () -> restore ()
+            | exception e ->
+                ignore (restore ());
+                raise e
+          in
           Buffer.add_string b "</yuka-island>";
+          List.iter (Buffer.add_string b) (List.rev mine);
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
             ^ Json.to_string props ^ "</script>");

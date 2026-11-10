@@ -87,6 +87,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
         inside_island : bool;
       }
     | Pending_async of { id : string; async : Json.t Async.t }
+    | Pending_answer of { key : string; answer : Json.t Async.t }
 
   type session = {
     streaming : bool;
@@ -103,6 +104,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable entry : string option;
     mutable current : string option;
     mutable in_fill : bool;
+    mutable answers : string list;
+    mutable answered : string list;
   }
 
 let current_session : session option ref = ref None

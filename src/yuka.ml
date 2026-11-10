@@ -16,6 +16,9 @@ include Element
 module Template = struct include Template end
 module Client = Client
 module Action = Action
+module Status = Status
+module Optimistic = Optimistic
+module Remote = Remote
 module Event = Platform.Event
 module Browser = Platform.Browser
 module Router = Router
@@ -103,5 +106,5 @@ module Private = struct
   let slot_dom (s : slot) = s.dom
   let call_action = Action.transport
   let async_source = Types.async_source
-  let action_codecs (a : (_, _) Action.t) = (a.input, a.output)
+  let action_codecs (a : (_, _, _) Action.t) = (a.input, a.output)
 end

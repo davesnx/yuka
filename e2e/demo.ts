@@ -297,6 +297,22 @@ await step("3d. a page with no island loads no script", async () => {
   await pg.close();
 });
 
+await step("3e. remote data is embedded", async () => {
+  const pg = await browser.newPage();
+  const posts: string[] = [];
+  pg.on("request", (r) => { if (r.method() === "POST") posts.push(new URL(r.url()).pathname); });
+  const res = await pg.goto(base + "/", { waitUntil: "networkidle" });
+  const html = (await res?.text()) ?? "";
+  await pg.waitForSelector(".row");
+  check("3e.1 the list and its answer are in the server HTML", html.includes('class="row-title"') && html.includes('data-yuka-answer="r:issues'), String(html.length));
+  check("3e.2 no issues request at load", !posts.some((p) => p.endsWith("/issues")), posts.join(","));
+  await pg.locator('.nav-link[href="/my"]').click();
+  await pg.waitForURL("**/my");
+  await pg.waitForSelector(".row");
+  check("3e.3 no issues request after a client navigation", !posts.some((p) => p.endsWith("/issues")), posts.join(","));
+  await pg.close();
+});
+
 await step("4. status change", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
