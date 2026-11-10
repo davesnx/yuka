@@ -149,7 +149,7 @@ let stop o server =
         | 0, _ ->
             log "the server did not stop after %g s, killing it" o.kill_after;
             (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-            ignore (waitpid [] pid)
+            (try ignore (waitpid [] pid) with Unix.Unix_error (Unix.ECHILD, _, _) -> ())
         | _ -> ()
         | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
       in
@@ -198,9 +198,16 @@ let run o =
   let finish code =
     if not !finishing then begin
       finishing := true;
-      stop o server;
-      (try Unix.kill dune_pid Sys.sigterm with Unix.Unix_error _ -> ());
-      exit code
+      let failed = ref false in
+      let step name f =
+        try f () with e ->
+          failed := true;
+          log "%s: %s" name (Printexc.to_string e)
+      in
+      step "stopping the server" (fun () -> stop o server);
+      step "stopping dune" (fun () ->
+          try Unix.kill dune_pid Sys.sigterm with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+      exit (if !failed then 1 else code)
     end
   in
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> finish 130));

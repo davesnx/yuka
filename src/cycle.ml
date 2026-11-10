@@ -661,10 +661,14 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                             Async.return { resp with headers }))
                       (fail_page env a.missing))))
 
-let dev_events dev ~sleep write =
+let dev_events ~state ~sleep write =
   let result, resolve, _ = Async.make () in
   let rec step last idle =
-    let now = dev.state () in
+    match state () with
+    | exception e ->
+        log_quietly ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e);
+        resolve ()
+    | now ->
     let message =
       if not (String.equal now last) then Some ("data: " ^ now ^ "\n\n")
       else if idle >= 60 then Some ": ping\n\n"
@@ -718,7 +722,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
         | [ "dev" ], Some dev -> (
             let headers = [ ("content-type", "text/event-stream"); ("cache-control", "no-store") ] in
             match r.meth with
-            | `GET -> reply { status = 200; headers; body = Stream (dev_events dev ~sleep) }
+            | `GET -> reply { status = 200; headers; body = Stream (dev_events ~state:dev.state ~sleep) }
             | `HEAD -> reply { status = 200; headers; body = String "" }
             | _ -> reply (method_not_allowed "GET, HEAD"))
         | raw, _ ->

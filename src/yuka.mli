@@ -834,6 +834,10 @@ module Private : sig
 
   val node : 'kind element -> node
 
+  val dev_events :
+    state:(unit -> string) -> sleep:(float -> unit Async.t) -> (string -> unit Async.t) -> unit Async.t
+  (** The body of [/_yuka/dev] for a state function (tests). *)
+
   val dev_script : string -> string
   (** The script that a page gets with [YUKA_DEV=1], for the state JSON
       given (tests). *)

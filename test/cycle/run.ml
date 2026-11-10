@@ -1132,6 +1132,22 @@ let dev =
             Alcotest.(check (option string)) "HEAD type" (Some "text/event-stream") (List.assoc_opt "content-type" headers);
             Alcotest.(check (list string)) "HEAD body" [ "" ] !body;
             Alcotest.(check int) "HEAD starts no loop" 0 (List.length !timers)) );
+    ( "the dev stream ends when the state cannot be read",
+      fun () ->
+        timers := [];
+        let calls = ref 0 in
+        let state () =
+          incr calls;
+          if !calls = 1 then {|{"build":1}|} else failwith "state gone"
+        in
+        let saved = !Server.log_error and logged = ref [] in
+        Server.log_error := (fun m -> logged := m :: !logged);
+        let ended = Yuka.Private.dev_events ~state ~sleep (fun _ -> Async.return ()) in
+        (try tick () with _ -> ());
+        Server.log_error := saved;
+        check_true "ended" (Async.status ended = Async.Done ());
+        Alcotest.(check int) "logged once" 1 (List.length !logged);
+        Alcotest.(check int) "no timer left" 0 (List.length !timers) );
     ( "with YUKA_DEV=1: prerendered pages render live; a prerender gets no script",
       fun () ->
         with_dev
