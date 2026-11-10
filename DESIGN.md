@@ -1378,6 +1378,51 @@ Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
   `aria-current` alone, and `stop_within` aborts the action calls of the
   islands it stops (the event handler's owner is the acting owner).
 
+## Remote data (2026-11-10)
+
+Spec: `.workplace/docs/data-spec.md`, sections 1 and 2, increments R1 to
+R3 (ticket 12); its "Changes during build" section lists the differences.
+
+- `Status` (`src/status.ml`): `Idle`, `Loading last`, `Ready`, `Failed
+  { error; last }`, with a typed `error` (`Rejected`, `Forbidden`,
+  `Not_found`, `Server`, `Network`, `Protocol`) and a JSON codec for it.
+- Queries: `Action.query` is `Action.declare` with the kind `[ `Query ]`
+  (a phantom third parameter of `Action.t`); `Remote.use` accepts only that
+  kind. Same registry, endpoint and wire format.
+- Transport: `Remote.server_send` gives `(Json.t, Status.error) result` and
+  returns an abort. The server sets it with `implement` (the
+  implementation, `Server` logged); in the browser `Remote` maps the status
+  of `fetch_post` itself (400 `Rejected` with the message, 403, 404, 413 and
+  415, 5xx, network). `Action.call` keeps its string transport and its
+  messages.
+- `Remote.use` (`src/remote.ml`): an effect computes the key (query name
+  and input JSON); a new key aborts the request and bumps a generation, and
+  only the current generation writes the status. Retries use
+  `Web.set_timeout`. The owner's disposal aborts and leaves the
+  `invalidate` table (a `Web.table` from query name to mounted uses,
+  created on first use).
+- Answers (`src/answers.ml`): in a server render, a use inside an island
+  writes `<script type="application/json" data-yuka-answer="r:NAME JSON">`
+  with `{"ok":v}` or `{"error":ERROR}` after `</yuka-island>` and before the
+  props script. A use that is still pending writes a `data-pending`
+  element and a `Pending_answer`; `Server.drive` writes the full element
+  when it settles (or a network timeout error). The client reads an answer
+  on the first run only; a pending one is awaited with the DOM watch until
+  the document ends, then fetched. `Server.drive`'s `on_value` now takes the
+  HTML of the chunk.
+- `Optimistic` (`src/optimistic.ml`): pending changes with ids, applied
+  oldest first over a base kept elsewhere. `Remote.mutate` adds a change,
+  runs the call, and on success removes it and writes `commit result base`
+  (default `change base`); on failure removes it.
+- Size: `make size` fails when the keyed app contains `remote.js`,
+  `answers.js`, `optimistic.js` or `status.js`, or when any client chunk
+  contains `printer.js`; keyed app 10460 -> 10462 B gzip. The demo client
+  grows 35961 -> 38882 B gzip (it uses Remote).
+- Review fixes: answers made in an `Await` fill go out before the fill
+  chunk; a raising island rolls back its answers; embedded `Network` and
+  `Server` errors are retried after hydration; `mutate` keeps the base's
+  kind and asks again when it commits during a request; the typed server
+  transport ref is `Remote.server_send`.
 
 ## Error boundaries (2026-11-10)
 
@@ -1434,16 +1479,22 @@ Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
   answer depends on `Yuka-Navigate` (`Vary`). At most 30 entries; the
   oldest goes first (`Map` keeps insertion order).
 - Lifetime from the answer's own `Cache-Control` (`Web.max_age`):
-  `max-age=N` without `no-store` keeps it N seconds, also for back and
-  forward; otherwise only a prefetched answer is kept, used once, within
-  10 s. A navigation fetch is stored only when `max-age` is above 0.
+  `max-age=N` without `no-store` or `no-cache` keeps it N seconds, also
+  for back and forward; otherwise only a prefetched answer is kept, used
+  once, within 10 s. A navigation fetch is stored only when `max-age` is
+  above 0 and no `clear` happened since it started (`era`).
+- Dropping entries (`clear`, eviction of the oldest when a new key comes
+  in) aborts an in-flight prefetch unless a navigation waits for it; that
+  navigation still gets the answer. `unmount` aborts every fetch, and it
+  and a `popstate` to the shown page bump the navigation counter, so a
+  waiting navigation does nothing.
 - A navigation finds an answer (used at once, no fetch), an in-flight
   prefetch (it waits), or nothing (it fetches as before). A counter drops
   the answer of a navigation that a newer one replaced; a prefetch is never
   aborted by a navigation, only by `unmount`.
 - Prefetch: delegated `pointerover`/`focusin` start a 50 ms timer,
-  `pointerout`/`focusout` and any navigation cancel it,
-  `pointerdown`/`touchstart` prefetch at once. Links are the ones a click
+  `pointerout`/`focusout` and any navigation cancel it; `touchstart` and a
+  `pointerdown` that would be a plain click prefetch at once. Links are the ones a click
   would navigate (`Web.link_href`), minus `data-yuka-prefetch="off"`.
   `IntersectionObserver` watches visible links after start and after each
   navigation. A prefetch sends `Yuka-Prefetch: 1` and `cache: "no-store"`:
@@ -1453,10 +1504,12 @@ Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
 - Actions: `Platform.acted` is called by the action transport on an `ok`
   answer; navigation sets it to empty the cache. Anything that calls an
   action through the transport (later `Remote.mutate`) empties it too.
-- Transitions: the page update (swap, history push, scroll, island start)
-  is one function; with `~transitions:true`, `Web.transition` runs it in
-  `document.startViewTransition` and sets `data-yuka-nav` until
-  `finished`. The direction of `popstate` compares the history keys
+- Transitions: the history push and `loaded` change first; the DOM update
+  (swap, scroll, island start) is one function. With `~transitions:true`,
+  `Web.transition` runs it in `document.startViewTransition`, rethrows an
+  exception from it in a task (an uncaught error, not a rejected promise),
+  ignores the rejected `ready` of a skipped transition, and removes
+  `data-yuka-nav` when the last started transition finishes. The direction of `popstate` compares the history keys
   (`time-counter`, made in order).
 - Size: about 1.4 KB gzip in an app that mounts navigation (demo +1381 B); 0 in
   the keyed benchmark, which does not.

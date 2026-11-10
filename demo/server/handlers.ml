@@ -1,6 +1,9 @@
 open Demo_shared
 
+let view_issues = function Queries.All -> !Store.issues | Queries.Mine -> Store.mine ()
+
 let register () =
+  Yuka.Server.Action.implement Queries.issues (fun view -> Yuka.Async.resolved (view_issues view));
   Yuka.Server.Action.implement Actions.update_issue
     (fun ({ id; status; priority } : Actions.update_input) ->
       match Store.update ~id ?status ?priority () with

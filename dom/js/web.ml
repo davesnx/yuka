@@ -131,6 +131,13 @@ external first_element_child : node -> node option = "firstElementChild"
 let has_intersection_observer : node -> bool =
   [%mel.raw "function (el) { return typeof el.ownerDocument.defaultView.IntersectionObserver === 'function' }"]
 
+let set_timeout : int -> (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (ms, f) {
+  const id = setTimeout(function () { f() }, ms);
+  return function () { clearTimeout(id); };
+}|}]
+
 let on_idle : (unit -> unit) -> unit -> unit =
   [%mel.raw
     {|function (f) {
@@ -358,7 +365,7 @@ let absolute : string -> string =
 
 let max_age : string -> int =
   [%mel.raw
-    {|function (v) { const m = /(?:^|,)\s*max-age=(\d+)/.exec(v); return /(?:^|,)\s*no-store\s*(?:,|$)/.test(v) || !m ? 0 : +m[1] }|}]
+    {|function (v) { const m = /(?:^|,)\s*max-age=(\d+)/.exec(v); return /(?:^|,)\s*no-(?:store|cache)\s*(?:,|$)/.test(v) || !m ? 0 : +m[1] }|}]
 
 let key_before : string -> string -> bool =
   [%mel.raw
@@ -392,9 +399,12 @@ let transition : string -> (unit -> unit) -> unit =
   const d = document;
   if (typeof d.startViewTransition !== "function") { f(); return; }
   const h = d.documentElement;
+  const id = (globalThis.__yukaTransition = (globalThis.__yukaTransition || 0) + 1);
   h.setAttribute("data-yuka-nav", dir);
-  const done = function () { h.removeAttribute("data-yuka-nav"); };
-  const t = d.startViewTransition(function () { f(); });
+  const done = function () { if (globalThis.__yukaTransition === id) h.removeAttribute("data-yuka-nav"); };
+  const t = d.startViewTransition(function () {
+    try { f(); } catch (e) { d.defaultView.setTimeout(function () { throw e; }); }
+  });
   t.ready.then(null, function () {});
   t.finished.then(done, done);
 }|}]

@@ -11,6 +11,7 @@ let setup : string -> unit =
   globalThis.__ignoreAbort = false;
   globalThis.__failSync = false;
   globalThis.__now = 1000000;
+  globalThis.__scrollThrows = false;
   Date.now = function () { return globalThis.__now; };
   const vc = new VirtualConsole();
   vc.on("jsdomError", function (e) {
@@ -21,7 +22,7 @@ let setup : string -> unit =
   globalThis.window = w;
   globalThis.document = w.document;
   Object.defineProperty(w, "scrollY", { value: 0, writable: true, configurable: true });
-  w.scrollTo = function (x, y) { log.push("scroll:" + y); };
+  w.scrollTo = function (x, y) { if (globalThis.__scrollThrows) throw new Error("scroll failed"); log.push("scroll:" + y); };
   w.Element.prototype.scrollIntoView = function () { log.push("into:" + this.id); };
   globalThis.fetch = function (url, init) {
     if (globalThis.__failSync) throw new Error("sync");
@@ -623,7 +624,7 @@ let not_a_page status type_ finish =
 
 let fire : string -> string -> unit =
   [%mel.raw
-    "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
+    "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.MouseEvent(name, { bubbles: true })) }"]
 
 let prefetch_header : int -> string =
   [%mel.raw "function (i) { return String(globalThis.__calls[i].init.headers['Yuka-Prefetch']) }"]
@@ -745,6 +746,8 @@ let visible finish =
   check "only marked links observed" "v" (observed ());
   intersect "v";
   check "a visible link prefetches" "1" (ints (calls ()));
+  intersect "v";
+  check "a link in flight is not prefetched again" "1" (ints (calls ()));
   setup (page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
   stub_observer ();
   mount ~islands:(Client.registry []) ~prefetch:`Visible ();
@@ -931,6 +934,219 @@ let down_cancels_hover finish =
       check "no second prefetch after the click" "1" (ints (calls ()));
       finish ())
 
+let lookup_q = Action.query ~name:"lookup" ~input:Codec.string ~output:Codec.string
+
+let remote_mutate_clears finish =
+  setup links;
+  plain_start ();
+  ignore (click "#l" "");
+  let text, headers = cached (doc "Two" (page {|<a id="m" href="/three">three</a><a id="l" href="/two">two</a>|})) 60 in
+  resolve_headers 0 text 200 headers;
+  tick (fun () ->
+      ignore (click "#m" "");
+      resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
+      tick (fun () ->
+          let r, dispose = Yuka.owner (fun () -> Remote.use lookup_q (fun () -> "a")) in
+          check "the query is sent" "3" (ints (calls ()));
+          resolve_with 2 {|{"ok":"base"}|} "" 200 "application/json";
+          tick (fun () ->
+              fire "#l" "pointerdown";
+              check "a query read keeps the cache" "3" (ints (calls ()));
+              let failed = Remote.mutate r (fun d -> d ^ "!") (fun () -> Action.call act "x") in
+              resolve_with 3 {|{"error":"no"}|} "" 400 "application/json";
+              tick (fun () ->
+                  check "mutate failed" "true" (bools (match Async.status failed with Async.Failed _ -> true | _ -> false));
+                  fire "#l" "pointerdown";
+                  check "a failed mutate keeps the cache" "4" (ints (calls ()));
+                  let ok = Remote.mutate r (fun d -> d ^ "!") (fun () -> Action.call act "y") in
+                  resolve_with 4 {|{"ok":"y"}|} "" 200 "application/json";
+                  tick (fun () ->
+                      check "mutate done" "true" (bools (Async.status ok = Async.Done "y"));
+                      fire "#l" "pointerdown";
+                      check "a successful mutate empties the cache" "6" (ints (calls ()));
+                      dispose ();
+                      finish ())))))
+
+let fire_mouse : string -> string -> int -> bool -> unit =
+  [%mel.raw
+    "function (sel, name, button, ctrl) { document.querySelector(sel).dispatchEvent(new window.MouseEvent(name, { bubbles: true, cancelable: true, button: button, ctrlKey: ctrl })) }"]
+
+let deferred_transitions : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const t = globalThis.__transitions = [];
+  document.startViewTransition = function (cb) {
+    let finish;
+    const finished = new Promise(function (r) { finish = r; });
+    t.push({ cb: cb, finish: finish });
+    return { ready: Promise.resolve(), finished: finished };
+  };
+}|}]
+
+let run_transition : int -> unit = [%mel.raw "function (i) { globalThis.__transitions[i].cb() }"]
+let finish_transition : int -> unit = [%mel.raw "function (i) { globalThis.__transitions[i].finish() }"]
+let transitions_count : unit -> int = [%mel.raw "function () { return globalThis.__transitions.length }"]
+let scroll_throws : unit -> unit = [%mel.raw "function () { globalThis.__scrollThrows = true }"]
+
+let raising_transition : unit -> unit =
+  [%mel.raw
+    {|function () {
+  document.startViewTransition = function (cb) {
+    try { cb(); } catch (e) { globalThis.__log.push("escaped:" + e.message); }
+    return { ready: Promise.resolve(), finished: Promise.resolve() };
+  };
+}|}]
+
+let action_after_navigation_started finish =
+  setup links;
+  plain_start ();
+  ignore (click "#l" "");
+  let _ = Action.call act "x" in
+  resolve_with 1 {|{"ok":"y"}|} "" 200 "application/json";
+  tick (fun () ->
+      let text, headers = cached (doc "Two" (page {|<a id="m" href="/three">three</a><a id="l" href="/two">two</a>|})) 60 in
+      resolve_headers 0 text 200 headers;
+      tick (fun () ->
+          check "shown" "/two" (location_ ());
+          ignore (click "#m" "");
+          resolve_call 2 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
+          tick (fun () ->
+              ignore (click "#l" "");
+              check "an answer requested before the action is not kept" "4" (ints (calls ()));
+              finish ())))
+
+let clear_aborts_prefetch finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  let _ = Action.call act "x" in
+  resolve_with 1 {|{"ok":"y"}|} "" 200 "application/json";
+  tick (fun () ->
+      check "the dropped prefetch is aborted" "true" (bools (call_aborted 0));
+      finish ())
+
+let waiter_after_unmount finish =
+  setup links;
+  plain_start ();
+  ignore_abort ();
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  let _ = Action.call act "x" in
+  resolve_with 1 {|{"ok":"y"}|} "" 200 "application/json";
+  tick (fun () ->
+      unmount ();
+      resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          check "no swap after unmount" links (body_html ());
+          check "no push" "/start?x=1" (location_ ());
+          finish ()))
+
+let popstate_cancels_waiter finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  popstate_to "/start?x=1";
+  resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+  tick (fun () ->
+      check "a popstate to the shown page cancels the waiting navigation" links (body_html ());
+      finish ())
+
+let transition_token finish =
+  setup links;
+  deferred_transitions ();
+  mount ~islands:(Client.registry []) ~transitions:true ();
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page {|<a id="m" href="/three">three</a>|})) "";
+  tick (fun () ->
+      check "state is updated before the transition runs" "/two" (location_ ());
+      check "the DOM waits for the callback" links (body_html ());
+      run_transition 0;
+      check "swapped in the callback" (page {|<a id="m" href="/three">three</a>|}) (body_html ());
+      ignore (click "#m" "");
+      resolve_call 1 (doc "Three" (page "<p>3</p>")) "";
+      tick (fun () ->
+          check "two transitions" "2" (ints (transitions_count ()));
+          run_transition 1;
+          finish_transition 0;
+          tick (fun () ->
+              check "an older transition does not remove the attribute" "push" (nav_attr ());
+              finish_transition 1;
+              tick (fun () ->
+                  check "removed by the last one" "null" (nav_attr ());
+                  finish ()))))
+
+let transition_error finish =
+  setup links;
+  raising_transition ();
+  mount ~islands:(Client.registry []) ~transitions:true ();
+  ignore (click "#l" "");
+  scroll_throws ();
+  resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+  tick (fun () ->
+      wait 20 (fun () ->
+          check "the error does not escape into the transition, it is reported"
+            "jsdom:Uncaught [Error: scroll failed]" (log_read ());
+          finish ()))
+
+let eviction finish =
+  let ids = List.init 31 (fun i -> "p" ^ ints i) in
+  setup (page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  plain_start ();
+  List.iter (fun id -> fire ("#" ^ id) "pointerdown") ids;
+  check "an evicted prefetch in flight is aborted" "true" (bools (call_aborted 0));
+  check "the others are not" "false" (bools (call_aborted 1));
+  finish ()
+
+let replace_keeps_others finish =
+  let ids = List.init 29 (fun i -> "p" ^ ints i) in
+  setup (page ({|<a id="x" href="/x">x</a>|} ^ String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  plain_start ();
+  List.iter (fun id -> fire ("#" ^ id) "pointerdown") ids;
+  Browser.navigate "/x";
+  fire "#x" "pointerdown";
+  check "30 entries" "31" (ints (calls ()));
+  let text, headers = cached (doc "X" (page "<p>x</p>")) 60 in
+  resolve_headers 29 text 200 headers;
+  tick (fun () ->
+      Browser.navigate "/p0";
+      check "replacing an entry evicts nothing: the oldest is still used" "31" (ints (calls ()));
+      finish ())
+
+let pointer_buttons finish =
+  setup links;
+  plain_start ();
+  fire_mouse "#l" "pointerdown" 1 false;
+  fire_mouse "#l" "pointerdown" 0 true;
+  check "middle button or a modifier: no prefetch" "0" (ints (calls ()));
+  fire "#l" "touchstart";
+  check "touch prefetches" "1" (ints (calls ()));
+  fire_mouse "#m" "pointerdown" 0 false;
+  check "primary button prefetches" "2" (ints (calls ()));
+  finish ()
+
+let not_cacheable finish =
+  let rec go = function
+    | [] -> finish ()
+    | (name, value, expected) :: rest ->
+        setup links;
+        plain_start ();
+        ignore (click "#l" "");
+        resolve_headers 0 (doc "Two" (page {|<a id="m" href="/three">three</a><a id="l" href="/two">two</a>|})) 200
+          [| ("cache-control", value) |];
+        tick (fun () ->
+            ignore (click "#m" "");
+            resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
+            tick (fun () ->
+                ignore (click "#l" "");
+                check name expected (ints (calls ()));
+                go rest))
+  in
+  go
+    [ ("no-cache is not kept", "private, no-cache, max-age=60", "3");
+      ("no-store is not kept", "no-store, max-age=60", "3");
+      ("must-revalidate is kept within max-age", "max-age=60, must-revalidate", "2") ]
+
 let thirty_entries finish =
   let ids = List.init 31 (fun i -> "p" ^ ints i) in
   setup (page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
@@ -1005,6 +1221,17 @@ let all =
     ("unmount aborts prefetches and clears the cache", unmount_clears);
     ("a navigation cancels the hover timer", down_cancels_hover);
     ("at most 30 entries, the oldest goes first", thirty_entries);
+    ("Remote.mutate empties the cache when it succeeds", remote_mutate_clears);
+    ("an answer requested before an action is not kept", action_after_navigation_started);
+    ("emptying the cache aborts its prefetches", clear_aborts_prefetch);
+    ("a waiting navigation does not swap after unmount", waiter_after_unmount);
+    ("a popstate to the shown page cancels a waiting navigation", popstate_cancels_waiter);
+    ("transitions: state first, one attribute owner", transition_token);
+    ("transitions: an error in the update is reported", transition_error);
+    ("an evicted prefetch is aborted", eviction);
+    ("replacing an entry evicts nothing", replace_keeps_others);
+    ("pointer down prefetches only for the primary button", pointer_buttons);
+    ("no-cache and no-store are not kept", not_cacheable);
   ]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]

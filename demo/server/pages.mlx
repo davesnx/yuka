@@ -10,14 +10,12 @@ let shell ~children () : Yuka.server Yuka.element =
   <Views.Shell workspace="Yuka" sidebar=(sidebar ())>children</Views.Shell>
 
 let index () =
-  let issues = !Store.issues in
   Yuka.Server.page ~title:"Issues" (fun () ->
-      <Yuka.Client><Issue_list title="All issues" issues /></Yuka.Client>)
+      <Yuka.Client><Issue_list title="All issues" view=Queries.All /></Yuka.Client>)
 
 let my_issues () =
-  let issues = Store.mine () in
   Yuka.Server.page ~title:"My issues" (fun () ->
-      <Yuka.Client><Issue_list title="My issues" issues /></Yuka.Client>)
+      <Yuka.Client><Issue_list title="My issues" view=Queries.Mine /></Yuka.Client>)
 
 let issue_view ?(delay = 0.6) (i : Model.Issue.t) : Yuka.server Yuka.element =
   let comments =

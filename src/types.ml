@@ -92,6 +92,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
         inside_island : bool;
       }
     | Pending_async of { id : string; async : Json.t Async.t }
+    | Pending_answer of { key : string; answer : Json.t Async.t }
 
   type session = {
     streaming : bool;
@@ -108,6 +109,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable entry : string option;
     mutable current : string option;
     mutable in_fill : bool;
+    mutable answers : (string * Json.t option) list;
+    mutable answered : string list;
     mutable select_value : string option;
   }
 
@@ -115,7 +118,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
-        preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value } =
+        preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -128,7 +131,9 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     s.entry <- entry;
     s.current <- current;
     s.in_fill <- in_fill;
-    s.select_value <- select_value
+    s.select_value <- select_value;
+    s.answers <- answers;
+    s.answered <- answered
 
 let current_session : session option ref = ref None
 let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)

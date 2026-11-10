@@ -154,7 +154,6 @@ module Loaders = struct
 
   let profile req ~team ~user =
     note "profile start";
-    if header req "yuka-prefetch" = Some "1" then note "prefetch";
     match (Params.Team.to_string team, user) with
     | "wait", _ -> later ()
     | _, 404 -> Async.resolved (Error Server.Not_found)

@@ -9,7 +9,26 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false; select_value = None }
+      current = None; in_fill = false; answers = []; answered = []; select_value = None }
+
+  let answer_script key json =
+    "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
+    ^ Json.to_string json ^ "</script>"
+
+  let pending_answer_script key =
+    "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key
+    ^ "\" data-pending></script>"
+
+  let answers_html answers =
+    String.concat ""
+      (List.rev_map
+         (function key, Some json -> answer_script key json | key, None -> pending_answer_script key)
+         answers)
+
+  let take_answers s =
+    let html = answers_html s.answers in
+    s.answers <- [];
+    html
 
   let take_pending s =
     let p = List.rev s.pending in
@@ -146,13 +165,22 @@ open Base
                    " data-start=\"interaction\"")
            ^ ">");
           after_text := false;
+          let saved = snapshot s in
           s.depth <- s.depth + 1;
-          (match go (render ()) with
-          | () -> s.depth <- s.depth - 1
-          | exception e ->
-              s.depth <- s.depth - 1;
-              raise e);
+          s.answers <- [];
+          let mine =
+            match go (render ()) with
+            | () ->
+                s.depth <- s.depth - 1;
+                let mine = s.answers in
+                s.answers <- saved.answers;
+                mine
+            | exception e ->
+                restore s saved;
+                raise e
+          in
           Buffer.add_string b "</yuka-island>";
+          Buffer.add_string b (answers_html mine);
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
             ^ Json.to_string props ^ "</script>");

@@ -399,26 +399,35 @@ module Catch : sig
 end
 
 module Status : sig
+  (** Why a remote call failed. *)
   type error =
     | Rejected of string
-    | Forbidden
-    | Not_found
-    | Server
-    | Network of string
-    | Protocol of string
+        (** The server refused the input ({!Server.Action.reject}, bad
+            input). The message is for the user. *)
+    | Forbidden  (** The origin check failed. *)
+    | Not_found  (** Unknown action. *)
+    | Server  (** The implementation raised or failed; the detail is in the server log. *)
+    | Network of string  (** No answer: offline, aborted, timeout. *)
+    | Protocol of string  (** The answer did not decode. *)
 
-  type 'a t =
-    | Idle
-    | Loading of 'a option
-    | Ready of { data : 'a; stale : bool }
-    | Failed of { error : error; last : 'a option }
   (** The state of data that loads. [Loading (Some x)]: a new load runs and
       [x] is the last good data. *)
+  type 'a t =
+    | Idle  (** Not enabled. *)
+    | Loading of 'a option  (** A request runs; the option is the last good data. *)
+    | Ready of { data : 'a; stale : bool }  (** [stale] is [false] for remote data. *)
+    | Failed of { error : error; last : 'a option }
 
   val data : 'a t -> 'a option
   (** [data] of [Ready], [last] of [Failed], the option of [Loading]. *)
 
+  val map : ('a -> 'b) -> 'a t -> 'b t
+
   val error_to_string : error -> string
+  (** [Rejected m] is [m]; the others are short English text. *)
+
+  val error_codec : error Codec.t
+  (** [{"kind": "rejected", "message": m}], [{"kind": "server"}], ... *)
 end
 
 module Show : sig
@@ -512,22 +521,103 @@ module Client : sig
 
 end
 
+module Optimistic : sig
+  (** Pending changes over a base value that lives elsewhere (a State, the
+      data of a {!Status.t}). *)
+
+  type 'c t
+  (** The pending changes, in the order they were added. *)
+
+  type id
+
+  val empty : 'c t
+  val add : 'c t -> 'c -> 'c t * id
+  val remove : 'c t -> id -> 'c t
+  (** After the change succeeded or failed. *)
+
+  val apply : ('a -> 'c -> 'a) -> 'c t -> 'a -> 'a
+  (** The base with every pending change applied, oldest first. *)
+
+  val is_empty : 'c t -> bool
+end
+
 module Action : sig
-  type ('i, 'o) t
+  type ('i, 'o, 'kind) t
+  (** ['kind] is [[ `Mutation ]] for {!declare} and [[ `Query ]] for
+      {!query}. *)
 
   val declare :
-    name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o) t
+    name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Mutation ]) t
   (** An action named [name]: the server and the client must declare it with
       the same name and codecs. The server runs it after
       {!Server.Action.implement}. *)
 
-  val name : ('i, 'o) t -> string
+  val query :
+    name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Query ]) t
+  (** Like {!declare}, for a read with no side effect: a server render may
+      run it and {!Remote.use} may retry it. Same endpoint and wire format. *)
+
+  val name : (_, _, _) t -> string
   (** The name given to [declare]. *)
 
-  val call : ('i, 'o) t -> 'i -> 'o Async.t
+  val call : ('i, 'o, _) t -> 'i -> 'o Async.t
   (** Encodes the input, sends it to the server (in the browser after
       [mount], as [POST /_yuka/action/<name>]; on the server, to the
       implementation), decodes the output. A decode error is [Failed]. *)
+end
+
+module Remote : sig
+  (** Server data read through a query ({!Action.query}). *)
+
+  type 'o t
+
+  type retry = { attempts : int; delay_ms : int -> int }
+  (** [attempts] more tries after the first; [delay_ms n] waits before try
+      [n + 1]. *)
+
+  val default_retry : retry
+  (** Two more tries, after 500 ms and 1500 ms. *)
+
+  val no_retry : retry
+
+  val use :
+    ?retry:retry -> ?enabled:(unit -> bool) -> ('i, 'o, [ `Query ]) Action.t -> (unit -> 'i) -> 'o t
+  (** Runs the query for the input that the function returns, and again
+      when a State that the function or [enabled] reads changes. Call it in
+      a component body: when its owner is disposed, the request in flight
+      is aborted.
+
+      - The key of a request is the query name and the JSON of the input;
+        the query runs again only when the key changes. A new key,
+        {!refetch} or {!invalidate} aborts the request in flight, and only
+        the latest request writes the status.
+      - [enabled ()] false gives [Idle] and aborts the request.
+      - [Network] and [Server] errors are tried again by [retry] (default
+        {!default_retry}); the others fail at once.
+      - In a server render it runs the implementation once. If it settles
+        during the render, the status is [Ready] or [Failed]; else
+        [Loading None]. Inside an island the answer is written in the page
+        ([<script data-yuka-answer>], after the island), and the client
+        reads it on the first run instead of sending a request; a pending
+        answer is streamed later.
+      - Outside the browser and outside a render (tests), it calls the
+        implementation directly. *)
+
+  val status : 'o t -> 'o Status.t
+  (** Tracked read, with the pending {!mutate} changes applied to the data. *)
+
+  val refetch : 'o t -> unit
+  (** Sends the request again (the manual retry after [Failed]). *)
+
+  val invalidate : (_, _, [ `Query ]) Action.t -> unit
+  (** {!refetch} every mounted use of this query, for every input. *)
+
+  val mutate : 'o t -> ('o -> 'o) -> ?commit:('r -> 'o -> 'o) -> (unit -> 'r Async.t) -> 'r Async.t
+  (** [mutate r change run] shows [change] on the data at once, then calls
+      [run ()]. When it succeeds the change is removed and the data becomes
+      [commit result data] (default [change data]); when it fails the
+      change is removed (rollback). A new answer while the change is pending
+      gets the change on top. The result is the [Async] of [run ()]. *)
 end
 
 module Browser : sig
@@ -630,6 +720,7 @@ module Private : sig
         inside_island : bool;
       }
     | Pending_async of { id : string; async : Json.t Async.t }
+    | Pending_answer of { key : string; answer : Json.t Async.t }
 
   val fill_script : string
   (** The inline script that streaming writes in the head. It defines
@@ -678,7 +769,7 @@ module Private : sig
   val entry_name : Client.entry -> string
   val entry_decode : Client.entry -> Json.t -> (unit -> node, string) result
 
-  val action_codecs : ('i, 'o) Action.t -> 'i Codec.t * 'o Codec.t
+  val action_codecs : ('i, 'o, _) Action.t -> 'i Codec.t * 'o Codec.t
 
   val slot_content : slot -> node option
   (** The server element of the slot, if it has one. *)
@@ -881,23 +972,31 @@ val mount :
 
     Prefetch ([prefetch], default [`Hover]): 50 ms after the pointer or the
     focus enters a link that a click would navigate, or at once on
-    [pointerdown] or [touchstart], the page is loaded with the navigation
-    headers and [Yuka-Prefetch: 1] (loaders can read it from the request;
-    the answer is the same). [`Visible] also prefetches every such link
+    [touchstart] or a [pointerdown] of the main button with no modifier
+    key, the page is loaded with the navigation headers and
+    [Yuka-Prefetch: 1]. The server answers it as any navigation, so the
+    guards and loaders of a [GET] page must be safe to run for a link the
+    user may never click: no side effects. [`Visible] also prefetches every such link
     when it becomes visible; with [`Hover], only links with
     [data-yuka-prefetch="visible"] do. [data-yuka-prefetch="off"] on a link
     and [`Off] turn it off, and so does [navigator.connection.saveData].
     A navigation to a URL whose prefetch is in flight waits for it.
 
     Answers are kept by URL and outlet keys, at most 30, by the
-    [Cache-Control] of the answer: with [max-age=N] (and no [no-store])
-    for N seconds, also for back and forward; otherwise a prefetched answer
-    is used once, within 10 s, and a visited page is not kept. An action
-    call that succeeds empties the cache. [mount] and {!unmount} empty it.
+    [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or
+    [no-cache]) for N seconds, also for back and forward; otherwise a
+    prefetched answer is used once, within 10 s, and a visited page is not
+    kept. An action call that succeeds empties the cache, and an answer
+    requested before it is not kept. [mount] and {!unmount} empty it and
+    abort the prefetches nobody waits for; after {!unmount} no navigation
+    updates the page.
 
     With [~transitions:true], where [document.startViewTransition] exists,
     the page update runs inside a view transition, and [<html>] has
-    [data-yuka-nav="push"], ["back"] or ["forward"] until it ends.
+    [data-yuka-nav="push"], ["back"] or ["forward"] until the last one
+    ends. The URL, history and navigation state change before the
+    transition starts; an exception in the update is thrown again in a
+    task, as an uncaught error.
 
     With [~navigation:false] only the islands start and links load full
     pages. Calling [mount] again is safe: the listeners are not added twice.
@@ -949,7 +1048,7 @@ module Server : sig
       streamed chunk. *)
 
   module Action : sig
-    val implement : ('i, 'o) Action.t -> ('i -> 'o Async.t) -> unit
+    val implement : ('i, 'o, _) Action.t -> ('i -> 'o Async.t) -> unit
     (** Registers the implementation of a declared action, and makes
         [Action.call] run it directly on the server. Raises
         [Invalid_argument] if the name is already implemented. *)

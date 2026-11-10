@@ -33,6 +33,9 @@ only the parts that read a signal update.
   `Visible`, `Interaction`) and lazy loading chosen where the island is used.
 - Codecs: `[@@deriving codec]` for props and action data.
 - Actions: declare once, call from the client, run on the server.
+- Remote data: `Remote.use` reads a query as a `Status.t` signal, with
+  retry, abort and `Remote.mutate` for optimistic changes. The server render
+  embeds the answers, so hydration sends no request.
 - Routes: one `Routes.mlx` tree. The `yuka-routes` generator turns it into a
   `Routes` module shared by server and client (the route type, a typed
   `href` and the matcher), and a server module that the request cycle runs:
@@ -161,6 +164,35 @@ manifest (without a manifest entry, an island downloads when it starts). To down
 only at the trigger, write
 ``<Yuka.Client loading=(`Lazy `Visible)>``. Lazy is chosen where the island is
 used, not in the island.
+
+### Remote data
+
+A query is an action that only reads (`Action.query`). An island reads it
+with `Remote.use`:
+
+```ocaml
+let issues =
+  Yuka.Action.query ~name:"issues" ~input:view_codec ~output:(Yuka.Codec.list Issue.codec)
+
+let%client make ~(view : view) () =
+  let source = Remote.use Queries.issues (fun () -> view) in
+  match Remote.status source with
+  | Status.Ready { data; _ } -> Yuka.int (List.length data)
+  | Status.Loading _ -> Yuka.text "Loading"
+  | Status.Failed { error; _ } -> Yuka.text (Status.error_to_string error)
+  | Status.Idle -> Yuka.empty
+```
+
+The query runs again when a State read by the input function changes; the
+request in flight is aborted. `Network` and `Server` errors are tried two
+more times. The server render runs the implementation and writes its answer
+after the island (`<script data-yuka-answer>`), so the browser starts with
+the same data and sends no request; a slow answer is streamed. After a
+change on the server, `Remote.invalidate query` fetches every mounted use
+again. `Remote.mutate source change run` shows `change` at once, calls
+`run`, keeps the change on success (or applies `~commit` with the result)
+and removes it on failure. An app that does not call `Remote` gets none of
+its code.
 
 ### Prefetch, cache and transitions
 

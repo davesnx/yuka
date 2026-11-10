@@ -340,7 +340,7 @@ let render env ~status ~headers layers (page : page) =
       Server.drive ?preload ?entry ~current ~timeout ~sleep:env.sleep build
         ~on_shell:(fun ~fills shell -> write (head (if fills then Server.fill_script else "") ^ shell))
         ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
-        ~on_value:(fun id json -> write (Server.value_script id json))
+        ~on_value:write
     in
     match Async.status finished with
     | Async.Failed m -> Async.failed m

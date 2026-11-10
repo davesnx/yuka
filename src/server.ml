@@ -66,8 +66,12 @@ let fill_chunk id html =
 let reject_prefix = Types.reject_prefix
 let rejection = Types.rejection
 
+let timeout_answer () : Json.t =
+  `Assoc [ ("error", Status.error_codec.encode (Status.Network "timeout")) ]
+
 let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
+  | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
 let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_shell
     ~on_fill ~on_value =
@@ -78,7 +82,9 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
   session.id_prefix <- id_prefix;
   let shell = Printer.print session (fun () -> build ()) in
   let fills =
-    List.exists (function Types.Pending_await _ -> true | Types.Pending_async _ -> false) session.pending
+    List.exists
+      (function Types.Pending_await _ -> true | Types.Pending_async _ | Types.Pending_answer _ -> false)
+      session.pending
   in
   let result, resolve, fail = Async.make () in
   let chain = ref (on_shell ~fills shell) in
@@ -117,7 +123,9 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
         | Types.Pending_await { id; subscribe; fill; inside_island; _ } ->
             subscribe (fun () -> settled_fill id inside_island fill)
         | Types.Pending_async { id; async } ->
-            Async.on_settled async (fun status -> settled_value id status))
+            Async.on_settled async (fun status -> settled_value id status)
+        | Types.Pending_answer { key; answer } ->
+            Async.on_settled answer (fun status -> settled_answer key status))
       items
   and check_done () = if !outstanding = [] then conclude ()
   and settled_fill id inside fill =
@@ -126,7 +134,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
       match fill () with
       | html ->
           register ();
-          let links = Printer.take_links session in
+          let links = Printer.take_answers session ^ Printer.take_links session in
           emit (fun () -> on_fill id inside links html);
           check_done ()
       | exception exn -> abort exn
@@ -140,7 +148,19 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
         | Async.Failed m -> `Assoc [ ("error", `String (Types.async_error id m)) ]
         | Async.Pending -> `Assoc [ ("error", `String "pending") ]
       in
-      emit (fun () -> on_value id json);
+      emit (fun () -> on_value (value_script id json));
+      check_done ()
+    end
+  and settled_answer key status =
+    let id = "answer:" ^ key in
+    if (not !finished) && is_outstanding id then begin
+      remove id;
+      let json : Json.t =
+        match status with
+        | Async.Done j -> j
+        | Async.Failed _ | Async.Pending -> timeout_answer ()
+      in
+      emit (fun () -> on_value (Printer.answer_script key json));
       check_done ()
     end
   in
@@ -154,13 +174,16 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
             match fill_failed "timeout" with
             | html ->
                 register ();
-                let links = Printer.take_links session in
+                let links = Printer.take_answers session ^ Printer.take_links session in
                 emit (fun () -> on_fill id inside_island links html);
                 expire ()
             | exception exn -> abort exn)
         | Types.Pending_async { id; _ } ->
             emit (fun () ->
-                on_value id (`Assoc [ ("error", `String "timeout") ]));
+                on_value (value_script id (`Assoc [ ("error", `String "timeout") ])));
+            expire ()
+        | Types.Pending_answer { key; _ } ->
+            emit (fun () -> on_value (Printer.answer_script key (timeout_answer ())));
             expire ())
   in
   register ();
@@ -188,7 +211,7 @@ let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
            ?styles ?scripts ())
       >>= fun () -> write shell)
     ~on_fill:(fun id _ links html -> write (links ^ fill_chunk id html))
-    ~on_value:(fun id json -> write (value_script id json))
+    ~on_value:write
   >>= fun () -> write "</body></html>"
 
 let find_from text part from =
@@ -239,8 +262,8 @@ let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ~sleep build =
          document := fill_marker !document id ~inside html;
          Buffer.add_string values links;
          Async.resolved ())
-       ~on_value:(fun id json ->
-         Buffer.add_string values (value_script id json);
+       ~on_value:(fun html ->
+         Buffer.add_string values html;
          Async.resolved ()))
 
 let normalize path =
@@ -317,17 +340,48 @@ let find_action name =
   Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
 
 
-let transport name input =
+type failure = Unknown | Bad of string | Refused of string | Broke of string
+
+let run name input k =
   match find_action name with
-  | None -> Async.failed ("unknown action " ^ name)
+  | None ->
+      k (Error Unknown);
+      ignore
   | Some handler ->
-      let settled, resolve, fail = Async.make () in
-      Async.on_settled (handler input) (function
-        | Async.Done (Output j) -> resolve j
-        | Async.Done (Bad_input m) -> fail m
-        | Async.Failed m -> fail (Option.value (rejection m) ~default:m)
-        | Async.Pending -> ());
-      settled
+      let live = ref true in
+      Async.on_settled (handler input) (fun st ->
+          if !live then
+            match st with
+            | Async.Done (Output j) -> k (Ok j)
+            | Async.Done (Bad_input m) -> k (Error (Bad m))
+            | Async.Failed m -> (
+                match rejection m with
+                | Some message -> k (Error (Refused message))
+                | None -> k (Error (Broke m)))
+            | Async.Pending -> ());
+      fun () -> live := false
+
+let transport name input =
+  let settled, resolve, fail = Async.make () in
+  let (_ : unit -> unit) =
+    run name input (function
+      | Ok j -> resolve j
+      | Error Unknown -> fail ("unknown action " ^ name)
+      | Error (Bad m | Refused m | Broke m) -> fail m)
+  in
+  settled
+
+let send name input k =
+  run name input (fun r ->
+      k
+        (match r with
+        | Ok j -> Ok j
+        | Error Unknown -> Error Status.Not_found
+        | Error (Bad m) -> Error (Status.Rejected ("invalid input: " ^ m))
+        | Error (Refused m) -> Error (Status.Rejected m)
+        | Error (Broke m) ->
+            !log_error ("action " ^ name ^ " failed: " ^ m);
+            Error Status.Server))
 
 let implement action f =
   let name = Action.name action in
@@ -349,7 +403,8 @@ let implement action f =
             in
             Async.map (fun o -> Output (Codec.encode output o)) run )
     :: !registry;
-  Action.transport := transport
+  Action.transport := transport;
+  Remote.server_send := send
 
 let max_body = 1_048_576
 

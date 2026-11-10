@@ -22,7 +22,8 @@ Built (option A, every recommended answer).
   `data-yuka-prefetch="visible"` or `"off"` (the ppx writes `data_*` as
   `data-*`).
 - Prefetch after 50 ms of hover or focus, at once on pointer down, on
-  visibility; `Yuka-Prefetch: 1` reaches loaders through the request.
+  visibility, with `Yuka-Prefetch: 1`; the server answers it as any
+  navigation, so `GET` loaders must have no side effects.
 - Navigation cache by URL and outlet keys, lifetime from the answer's
   `Cache-Control`; a `no-store` prefetch is used once within 10 s; at most
   30 entries; a successful action call empties it.

@@ -297,7 +297,23 @@ await step("3d. a page with no island loads no script", async () => {
   await pg.close();
 });
 
-await step("3e. prefetch and the navigation cache", async () => {
+await step("3e. remote data is embedded", async () => {
+  const pg = await browser.newPage();
+  const posts: string[] = [];
+  pg.on("request", (r) => { if (r.method() === "POST") posts.push(new URL(r.url()).pathname); });
+  const res = await pg.goto(base + "/", { waitUntil: "networkidle" });
+  const html = (await res?.text()) ?? "";
+  await pg.waitForSelector(".row");
+  check("3e.1 the list and its answer are in the server HTML", html.includes('class="row-title"') && html.includes('data-yuka-answer="r:issues'), String(html.length));
+  check("3e.2 no issues request at load", !posts.some((p) => p.endsWith("/issues")), posts.join(","));
+  await pg.locator('.nav-link[href="/my"]').click();
+  await pg.waitForURL("**/my");
+  await pg.waitForSelector(".row");
+  check("3e.3 no issues request after a client navigation", !posts.some((p) => p.endsWith("/issues")), posts.join(","));
+  await pg.close();
+});
+
+await step("3f. prefetch and the navigation cache", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
   const requestsTo = (from: number, path: string) => allRequests.slice(from).filter((r) => new URL(r.url).pathname === path);
@@ -306,7 +322,7 @@ await step("3e. prefetch and the navigation cache", async () => {
   await link("YUK-5").hover();
   await page.waitForTimeout(300);
   const pre = requestsTo(from, "/issue/YUK-5");
-  check("3e.1 hover sends one prefetch", pre.length === 1 && pre[0].prefetch && pre[0].navigate, JSON.stringify(pre));
+  check("3f.1 hover sends one prefetch", pre.length === 1 && pre[0].prefetch && pre[0].navigate, JSON.stringify(pre));
   await page.evaluate(() => {
     const w = window as any;
     w.__vt = [];
@@ -320,12 +336,12 @@ await step("3e. prefetch and the navigation cache", async () => {
   await page.waitForURL("**/issue/YUK-5");
   await page.waitForSelector(".comment-input");
   const vt = await page.evaluate(() => (window as any).__vt);
-  check("3e.2a the navigation runs in a view transition (demo enables them)", JSON.stringify(vt) === '["push"]', JSON.stringify(vt));
+  check("3f.2a the navigation runs in a view transition (demo enables them)", JSON.stringify(vt) === '["push"]', JSON.stringify(vt));
   const removed = await page
     .waitForFunction(() => document.documentElement.getAttribute("data-yuka-nav") === null, null, { timeout: 3000 })
     .then(() => true, () => false);
-  check("3e.2b data-yuka-nav is removed after the transition", removed);
-  check("3e.2 the click uses the prefetch", requestsTo(from, "/issue/YUK-5").length === 1, String(requestsTo(from, "/issue/YUK-5").length));
+  check("3f.2b data-yuka-nav is removed after the transition", removed);
+  check("3f.2 the click uses the prefetch", requestsTo(from, "/issue/YUK-5").length === 1, String(requestsTo(from, "/issue/YUK-5").length));
   await page.goBack();
   await page.waitForSelector(".row");
   await page.mouse.move(1, 1);
@@ -334,15 +350,16 @@ await step("3e. prefetch and the navigation cache", async () => {
   await page.waitForURL("**/issue/YUK-5");
   await page.waitForSelector(".comment-input");
   const again = requestsTo(from, "/issue/YUK-5");
-  check("3e.3 a no-store page is fetched again", again.length === 1, JSON.stringify(again));
+  check("3f.3 a no-store page is fetched again", again.length === 1, JSON.stringify(again));
   await page.goBack();
   await page.waitForSelector(".row");
   await page.mouse.move(1, 1);
   from = allRequests.length;
   await link("YUK-6").hover();
   await page.waitForTimeout(300);
-  check("3e.4 prefetched before the action", requestsTo(from, "/issue/YUK-6").length === 1);
+  check("3f.4 prefetched before the action", requestsTo(from, "/issue/YUK-6").length === 1);
   const posts = actionPosts.length;
+  const failedBefore = failedRequests.length;
   const before = statusSlug(await statusOf("YUK-6"));
   const label = before === "done" ? "Todo" : "Done";
   await page.locator('.row[data-id="YUK-6"] button[aria-label="Change status"]').click();
@@ -353,7 +370,11 @@ await step("3e. prefetch and the navigation cache", async () => {
   await link("YUK-6").click();
   await page.waitForURL("**/issue/YUK-6");
   await page.waitForSelector(".comment-input");
-  check("3e.5 a successful action clears the cache (the click fetches again)", actionPosts.length === posts + 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
+  const dropped = (f: string) => f === `GET ${base}/issue/YUK-6 net::ERR_ABORTED`;
+  const aborted = failedRequests.slice(failedBefore).filter(dropped).length;
+  failedRequests.splice(failedBefore, failedRequests.length - failedBefore, ...failedRequests.slice(failedBefore).filter((f) => !dropped(f)));
+  check("3f.6 emptying the cache aborts at most the one prefetch in flight", aborted <= 1, String(aborted));
+  check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.length === posts + 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
   await page.goto(base + "/", { waitUntil: "networkidle" });
 });
 

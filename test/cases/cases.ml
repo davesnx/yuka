@@ -570,7 +570,9 @@ let html_streaming_session () =
   check "pending ids in order" "s1 s2"
     (String.concat " "
        (List.map
-          (function Private.Pending_await { id; _ } -> id | Private.Pending_async { id; _ } -> id)
+          (function
+          | Private.Pending_await { id; _ } | Private.Pending_async { id; _ } -> id
+          | Private.Pending_answer { key; _ } -> key)
           pending));
   check "taken once" "0" (string_of_int (List.length (Private.take_pending s)));
   match pending with

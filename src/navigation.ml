@@ -105,6 +105,12 @@ let drop e =
   | Some x when x == e -> Web.table_delete (cache ()) e.key
   | _ -> ()
 
+let discard e =
+  drop e;
+  match (e.answer, e.waiters) with None, [] -> Web.abort e.controller | _ -> ()
+
+let era = ref 0
+
 let lookup key =
   match Web.table_get (cache ()) key with
   | Some e -> (
@@ -122,7 +128,7 @@ let lookup key =
 
 let add e =
   let t = cache () in
-  if Web.table_size t >= 30 then Web.table_delete t (Web.table_values t).(0).key;
+  if Web.table_size t >= 30 && not (Web.table_has t e.key) then discard (Web.table_values t).(0);
   Web.table_set t e.key e
 
 let page_key url = Web.absolute url ^ " " ^ keys ()
@@ -170,14 +176,14 @@ let show ~dir ~push ~restore url a =
   | Some None -> Web.location_assign final
   | _ when stale || (not shown) || not (html a.header) -> Web.location_assign final
   | target ->
+      if push then begin
+        let key = Web.fresh_key () in
+        Web.history_push_key key final;
+        current_key := key
+      end;
+      loaded := Web.current_url ();
       let apply () =
         swap (Option.join target) final a.header a.text;
-        if push then begin
-          let key = Web.fresh_key () in
-          Web.history_push_key key final;
-          current_key := key
-        end;
-        loaded := Web.current_url ();
         (match restore with
         | Some y -> Web.scroll_to y
         | None -> Web.scroll_to_hash (hash_of final));
@@ -210,12 +216,13 @@ let load ~dir ~push ~restore url =
         | None -> e.waiters <- use :: e.waiters)
     | None ->
         let controller = Web.new_controller () in
+        let asked = !era in
         pending := Some controller;
         Web.fetch_page url (keys ()) false controller
           (fun final status header text ->
             pending := None;
             let a = { final; status; header; text } in
-            if max_age header > 0 then
+            if max_age header > 0 && asked = !era then
               add { key; answer = Some a; waiters = []; controller; at = Web.now (); prefetched = false };
             apply (Some a))
           (fun () ->
@@ -246,8 +253,10 @@ let on_out _ =
   !hover ();
   hover := ignore
 
-let on_down e =
+let on_touch e =
   match Web.link_href true (Web.target e) with "" -> () | href -> prefetch href
+
+let on_down e = if Web.plain_click e then on_touch e
 
 let unwatch = ref ignore
 
@@ -263,11 +272,14 @@ let watch () =
            (match mode with `Visible -> "a[href]" | _ -> "a[data-yuka-prefetch=visible]"))
         (fun a -> match Web.link_href true a with "" -> () | href -> prefetch href)
 
-let clear () = Web.table_clear (cache ())
+let clear () =
+  incr era;
+  Array.iter discard (Web.table_values (cache ()));
+  Web.table_clear (cache ())
 
 let prefetch_events =
   [ ("pointerover", on_over); ("focusin", on_over); ("pointerout", on_out); ("focusout", on_out);
-    ("pointerdown", on_down); ("touchstart", on_down) ]
+    ("pointerdown", on_down); ("touchstart", on_touch) ]
 
 let on_popstate _ =
   save_scroll ();
@@ -277,6 +289,7 @@ let on_popstate _ =
   let y = Option.value (Web.table_get (scrolls ()) !current_key) ~default:0. in
   if Web.current_url () = !loaded then begin
     cancel_pending ();
+    incr nav;
     Web.scroll_to y
   end
   else load ~dir ~push:false ~restore:(Some y) (Web.current_url ())
@@ -324,6 +337,7 @@ let stop () =
   on_out ();
   !unwatch ();
   unwatch := ignore;
+  incr nav;
   Array.iter (fun e -> if Option.is_none e.answer then Web.abort e.controller) (Web.table_values (cache ()));
   clear ();
   Platform.acted := ignore;
