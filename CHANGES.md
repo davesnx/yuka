@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2 (YYYY-MM-DD)
+
+First release on opam.
+
+### yuka
+
 - Signals: `State.make`, `State.get`, `State.set`, `State.memo` and `Effect`; a component runs once and only the parts that read a signal update (@davesnx)
 - No virtual DOM: only holes and keyed lists update (@davesnx)
 - mlx syntax through the `yuka.ppx` ppx, with attribute checks (@davesnx)
@@ -15,9 +21,14 @@
 - A page loads no JavaScript unless it has an island or a pending `Await`: the module script is written before the first island, and the fill script only when an `Await` is still pending after the shell (@davesnx)
 - `Yuka.Server.page` is now the page value of a route; the full HTML document function is `Yuka.Server.document` (@davesnx)
 - No web server dependency in `yuka`; the `yuka-dream` package runs an app on Dream (`Yuka_dream.handler`), and another server implements `Yuka.Server.ADAPTER` (@davesnx)
-- Prerender: `Yuka_dream.prerender` writes the pages marked `prerender=true` and the pages they link to, `404.html` and the client and public files; `Yuka.Server.config ~prerendered` serves them (@davesnx)
 - Removed: the typed path GADT of `Yuka.Router` (use `Routes.mlx`), and `Yuka.Server.respond`, `stream`, `render_settled`, `handle_action`, `preload_urls` and `import_map` (the request cycle does their work) (@davesnx)
 - Components and islands are written in `.mlx`: `let%client` in any file that is not `.mlx` is a compile error, and `yuka-islands` scans only `.mlx` files (@davesnx)
 - A memo is read-only: `State.memo` returns `'a State.read`, and `State.set` or `State.update` on it is a compile error instead of an `Invalid_argument` at run time (@davesnx)
 - In a dev build, hydration logs one `console.warn` per mismatch between the server HTML and the client tree, with the island name, the expected and found node, and a short path; a production bundle built with `--define:__YUKA_DEV__=false` has no log code (@davesnx)
 - Small client bundles: an app contains only the features it uses, templates are compiled to HTML and paths by the ppx, and `make size` checks the keyed benchmark app against a budget (@davesnx)
+- Breaking: a `not_found` page gets the params of the path of the node that declares it and `~target`, and an `error` page gets them and `~status`; an existing `not_found` or `error` page under a route with params must take those params, and a param named `target` or `status` (for the page that takes it) fails the build (@davesnx)
+
+### yuka-dream
+
+- `Yuka_dream.handler` runs the request cycle of `yuka` on Dream; `Yuka_dream.to_async` and `to_lwt` convert between `Lwt.t` and `Yuka.Async.t` (@davesnx)
+- Prerender: `Yuka_dream.prerender` writes the pages marked `prerender=true` and the pages they link to, `404.html` and the client and public files; `Yuka.Server.config ~prerendered` serves them (@davesnx)

@@ -9,6 +9,8 @@
 (rule
  (alias runtest)
  (package yuka)
+ (enabled_if
+  (<> %{profile} release))
  (deps
   (alias melange-tests))
  (action

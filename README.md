@@ -223,11 +223,14 @@ gets the params, the search fields and the loader results (labelled with the
 loader's name: `loader=Loaders.issue` gives `~issue`). The loaders of one
 route start together. A `not_found` page gets the params of the
 path of its node and `~target` (the request path); an `error` page gets
-them and `~status`.
+them and `~status`. So no param of that path can be named `target` (with a
+`not_found`) or `status` (with an `error`): the build fails.
 
 Loaders, guards and handlers that ignore the request must still name its
 type (`(_ : Dream.request)`) when no other function of the tree fixes it;
-otherwise `Routes_server.app` has a weak type variable.
+otherwise `Routes_server.app` has a weak type variable. A tree where no
+function takes the request needs `routes_server.mli` with
+`val app : Dream.request Yuka.Server.app` (see "Getting started").
 
 `Yuka.Server.handle config app` answers one request in a fixed order:
 `/_yuka/` (actions, client JavaScript) and public files, a 308 for a
@@ -246,7 +249,8 @@ The `yuka-dream` package runs the cycle on Dream:
 let () =
   let assets =
     Yuka.Server.modules ~dir:"client/out" ~entry:"demo/client/main.js"
-      ~manifest:(read_file "client/yuka_islands.json") ~packages:[ "melange"; "yuka" ]
+      ~manifest:(read_file "client/yuka_islands.json")
+      ~packages:[ "melange"; "melange.js"; "yuka"; "yuka.js" ]
   in
   let config =
     Yuka.Server.config ~assets ~public:[ ("/static", "static") ]
@@ -281,9 +285,174 @@ prerendered pages with `demo_server.exe --prerender DIR`.
 
 ## Getting started
 
-The demo is an issue tracker. It uses every feature above. It needs OCaml 5.4,
-dune 3.16+, Melange and mlx; the demo server also uses Dream (through
-`yuka-dream`). From the repository root:
+You need OCaml 5.4 and opam. Install Yuka, the Dream adapter and mlx (it
+gives `mlx-pp`, which reads `.mlx` files):
+
+```sh
+opam install yuka yuka-dream mlx
+```
+
+This app has one page with one island, a counter. Create these files in an
+empty directory.
+
+`dune-project`:
+
+```
+(lang dune 3.16)
+
+(using melange 0.1)
+
+(dialect
+ (name mlx)
+ (implementation
+  (extension mlx)
+  (merlin_reader mlx)
+  (preprocess
+   (run mlx-pp %{input-file}))))
+```
+
+`Routes.mlx`, the route tree:
+
+```ocaml
+let routes =
+  <Router>
+    <Route name=Home path="/" page=Pages.home />
+  </Router>
+```
+
+`dune`, which parses the route tree once for the two generators:
+
+```
+(rule
+ (targets routes.ast)
+ (deps Routes.mlx)
+ (action
+  (with-stdout-to routes.ast (run %{bin:mlx-pp} %{deps}))))
+```
+
+`shared/dune`, the code of both server and browser, with the shared
+`Routes` module:
+
+```
+(library
+ (name shared)
+ (modes native melange)
+ (libraries yuka)
+ (preprocess (pps yuka.ppx)))
+
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to routes.ml
+   (run %{bin:yuka-routes} --shared %{dep:../routes.ast}))))
+```
+
+`shared/counter.mlx`, the island:
+
+```ocaml
+open Yuka
+
+let%client make ~(initial : int) () =
+  let n = State.make initial in
+  <button onClick=(fun _ -> State.update n succ)>
+    "Clicks: "
+    (Yuka.int (State.get n))
+  </button>
+```
+
+`server/dune`:
+
+```
+(executable
+ (name main)
+ (libraries shared yuka yuka-dream dream)
+ (preprocess (pps yuka.ppx)))
+
+(rule
+ (targets routes_server.ml)
+ (action
+  (with-stdout-to routes_server.ml
+   (run %{bin:yuka-routes} --server --shared-module Shared.Routes
+    %{dep:../routes.ast}))))
+```
+
+`server/routes_server.mli`. No function of this route tree takes the
+request, so the interface gives its type:
+
+```ocaml
+val app : Dream.request Yuka.Server.app
+```
+
+`server/pages.mlx`, the page that `Routes.mlx` names:
+
+```ocaml
+let home () =
+  Yuka.Server.page ~title:"Hello" (fun () ->
+      <main>
+        <h1>"Hello from Yuka"</h1>
+        <Yuka.Client><Shared.Counter initial=0 /></Yuka.Client>
+      </main>)
+```
+
+`server/main.ml`:
+
+```ocaml
+let read_file path = In_channel.with_open_bin path In_channel.input_all
+
+let () =
+  let assets =
+    Yuka.Server.modules ~dir:"_build/default/client/out" ~entry:"client/main.js"
+      ~manifest:(read_file "_build/default/client/yuka_islands.json")
+      ~packages:[ "melange"; "melange.js"; "yuka"; "yuka.js" ]
+  in
+  let config = Yuka.Server.config ~assets () in
+  Dream.run @@ Dream.logger @@ Yuka_dream.handler config Routes_server.app
+```
+
+`client/dune`, the browser code and the island list:
+
+```
+(melange.emit
+ (target out)
+ (libraries shared yuka yuka.js)
+ (preprocess (pps yuka.ppx melange.ppx))
+ (module_systems es6))
+
+(rule
+ (targets yuka_islands.ml)
+ (deps (source_tree ../shared))
+ (action
+  (with-stdout-to yuka_islands.ml
+   (run %{bin:yuka-islands} --library shared ../shared))))
+
+(rule
+ (targets yuka_islands.json)
+ (deps (source_tree ../shared))
+ (action
+  (with-stdout-to yuka_islands.json
+   (run %{bin:yuka-islands} --manifest --library shared ../shared))))
+```
+
+`client/main.ml`:
+
+```ocaml
+let () = Yuka.mount ()
+```
+
+Build and run it from the directory of `dune-project`:
+
+```sh
+dune build
+dune exec ./server/main.exe
+```
+
+Open `http://localhost:8080/` and click the button. The sections above
+describe each part.
+
+### The demo
+
+The demo is an issue tracker. It uses every feature above. From the
+repository root:
 
 ```sh
 dune build @demo/all

@@ -121,8 +121,13 @@ module Async : sig
       later calls are ignored. *)
 
   val resolved : 'a -> 'a t
+  (** A value that is already [Done]. *)
+
   val failed : string -> 'a t
+  (** A value that is already [Failed] with this message. *)
+
   val status : 'a t -> 'a status
+  (** The status now. *)
 
   val on_settled : 'a t -> ('a status -> unit) -> unit
   (** Callbacks run in registration order; now, if already settled. *)
@@ -131,7 +136,12 @@ module Async : sig
   (** Like [on_settled], without the [Pending] case. *)
 
   val map : ('a -> 'b) -> 'a t -> 'b t
+  (** Applies the function to the value when it is [Done]. A failure stays a
+      failure with the same message. *)
+
   val bind : 'a t -> ('a -> 'b t) -> 'b t
+  (** Like [map], with a function that gives an [Async]. *)
+
   val watch : 'a t -> 'a status State.read
   (** A State that follows the status. *)
 end
@@ -140,14 +150,26 @@ module Codec : sig
   type 'a t = { encode : 'a -> Json.t; decode : Json.t -> ('a, string) result }
 
   val int : int t
+  (** [`Int]. *)
+
   val float : float t
   (** Decoding accepts [`Int] too. *)
 
   val string : string t
+  (** [`String]. *)
+
   val bool : bool t
+  (** [`Bool]. *)
+
   val unit : unit t
+  (** [`Null]. *)
+
   val list : 'a t -> 'a list t
+  (** [`List]. Decoding stops at the first element that fails. *)
+
   val array : 'a t -> 'a array t
+  (** As [list]. *)
+
   val option : 'a t -> 'a option t
   (** [None] is [`Null]. *)
 
@@ -170,7 +192,11 @@ module Codec : sig
       [Async]. *)
 
   val encode : 'a t -> 'a -> Json.t
+  (** [encode c v] is [c.encode v]. *)
+
   val decode : 'a t -> Json.t -> ('a, string) result
+  (** [decode c j] is [c.decode j]. The error names the expected kind and
+      the start of the JSON text. *)
 end
 
 type server
@@ -187,21 +213,43 @@ module Event : sig
   type t
 
   val target_value : t -> string
+  (** The [value] property of the event target. *)
+
   val target_checked : t -> bool
+  (** The [checked] property of the event target. *)
+
   val key : t -> string
+  (** The [key] of a keyboard event. *)
+
   val meta_key : t -> bool
+  (** Whether the Meta key was down. *)
+
   val ctrl_key : t -> bool
+  (** Whether the Control key was down. *)
+
   val prevent_default : t -> unit
+  (** Calls [preventDefault] on the event. *)
+
   val stop_propagation : t -> unit
+  (** Stops the event: no other Yuka handler of an outer element receives
+      it, and it does not propagate in the DOM. *)
+
   val target_tag : t -> string
   (** The lowercase tag name of the event target. *)
 
   val shift_key : t -> bool
+  (** Whether the Shift key was down. *)
+
   val alt_key : t -> bool
+  (** Whether the Alt key was down. *)
 end
 
 val text : string -> 'kind element
+(** A text node. The server escapes it. *)
+
 val int : int -> 'kind element
+(** The text of [string_of_int]. *)
+
 val float : float -> 'kind element
 (** Printed as JSON prints a float: [1.0], [2.5]. Not-a-number and the
     infinities are printed as [NaN], [Infinity] and [-Infinity]. *)
@@ -210,15 +258,21 @@ val list : 'kind element list -> 'kind element
 (** The same as [fragment]. *)
 
 val array : 'kind element array -> 'kind element
+(** Like [list], for an array. *)
 
 val empty : 'kind element
+(** Nothing. *)
+
 val fragment : 'kind element list -> 'kind element
+(** The elements one after another, with no wrapper element. *)
 
 val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
 (** [lower tag attributes children]: an HTML element. The ppx makes it from
     [<tag ...>]. *)
 
 val attr : string -> string -> 'kind attribute
+(** [attr name value]: an attribute with a fixed value. The server escapes
+    the value. *)
 
 val hole : (unit -> client element) -> client element
 (** A part that changes after the first render. The function runs once; it
@@ -244,11 +298,17 @@ module Template : sig
   type 'kind part
 
   val text : string -> shape
+  (** A fixed text. *)
+
   val element : string -> attr list -> shape list -> shape
+  (** [element tag attrs children]: an HTML element. *)
+
   val part : int -> shape
   (** The child at this place is part [i], made with [child]. *)
 
   val fixed : string -> string -> attr
+  (** [fixed name value]: an attribute with a fixed value. *)
+
   val part_attr : int -> attr
   (** The attribute at this place is part [i], made with [attribute] or
       [attribute_option]. *)
@@ -267,8 +327,13 @@ module Template : sig
       template root to its parts. The ppx writes this call. *)
 
   val child : 'kind element -> 'kind part
+  (** The value of a {!val-part}. *)
+
   val attribute : 'kind attribute -> 'kind part
+  (** The value of a {!part_attr}. *)
+
   val attribute_option : 'kind attribute option -> 'kind part
+  (** The value of a {!part_attr}; [None] writes no attribute. *)
 
   val instance : t -> 'kind part array -> 'kind element
   (** The tree of [t] with its parts filled in. It prints and hydrates as the
@@ -279,6 +344,7 @@ end
 
 module Slot : sig
   val make : server element -> slot
+  (** A slot with this server content. *)
 end
 
 module Await : sig
@@ -345,6 +411,7 @@ module Client : sig
   (** A JavaScript promise, as made by a dynamic [import]. *)
 
   val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
+  (** [then] of a JavaScript promise. For the code of [yuka-islands]. *)
 
   val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
   (** [lazy_entry ~name load]: an island whose code is loaded on demand.
@@ -374,8 +441,12 @@ module Action : sig
 
   val declare :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o) t
+  (** An action named [name]: the server and the client must declare it with
+      the same name and codecs. The server runs it after
+      {!Server.Action.implement}. *)
 
   val name : ('i, 'o) t -> string
+  (** The name given to [declare]. *)
 
   val call : ('i, 'o) t -> 'i -> 'o Async.t
   (** Encodes the input, sends it to the server (in the browser after
@@ -643,6 +714,7 @@ module Router : sig
     (** [None] means the path does not match. *)
 
     val to_string : t -> string
+    (** The inverse of [of_string]. [href] encodes the result. *)
   end
 
   val encode : string -> string
@@ -887,6 +959,7 @@ module Server : sig
       matches. *)
 
   val build_id : 'req app -> string
+  (** The [build] given to {!val-app}. *)
 
   type assets
   (** Where the client JavaScript is. The cycle serves it under [/_yuka/]. *)
@@ -1017,11 +1090,17 @@ module Server : sig
     type 'a io
 
     val meth : request -> Router.meth
+    (** The request method. *)
+
     val target : request -> string
+    (** The path and query, as sent. *)
+
     val header : request -> string -> string option
     (** Case-insensitive. *)
 
     val body : request -> string Async.t
+    (** The whole request body. *)
+
     val respond : http_response -> response io
     (** Sends the status, the headers and the body; a [Stream] body is
         written as it comes. *)
@@ -1035,12 +1114,20 @@ module Server : sig
         file. *)
 
     val of_async : 'a Async.t -> 'a io
+    (** Converts an [Async] to the promise type of the server. *)
+
     val bind : 'a io -> ('a -> 'b io) -> 'b io
+    (** Chains two promises of the server. *)
+
     val sleep : float -> unit Async.t
+    (** Resolves after this many seconds. The cycle uses it for [timeout]. *)
   end
 
+  (** A request handler for the server of [A]. *)
   module Make (A : ADAPTER) : sig
     val handler : config -> A.request app -> A.request -> A.response A.io
+    (** Answers one request with {!handle}, then sends the outcome with
+        [A.respond] or [A.file]. *)
   end
 
   (** {2 Prerender}
