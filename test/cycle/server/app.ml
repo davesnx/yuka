@@ -42,7 +42,10 @@ let finish_second v =
   let _, resolve, _ = !second_state in
   resolve v
 
+let fail_first = ref false
+
 let reset () =
+  fail_first := false;
   events := [];
   waiting := [];
   slow_state := Async.make ();
@@ -91,7 +94,17 @@ module Pages = struct
 
   let islands () =
     Server.page ~title:"Islands" (fun () ->
-        el "main" [ el "p" [ text "before" ]; island "A"; island "B" ])
+        el "main"
+          [ el "p" [ text "before" ];
+            Yuka.Catch.make
+              ~fallback:(fun ~error ~reset:_ -> text ("lost " ^ error))
+              ~children:(fun () ->
+                if !fail_first then
+                  Yuka.fragment
+                    [ island "A"; Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "A")) ]
+                else island "A")
+              ();
+            island "B" ])
 
   let slow () =
     Server.page ~title:"Slow" (fun () ->

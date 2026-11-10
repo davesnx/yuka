@@ -6,11 +6,15 @@ type error =
   | Network of string
   | Protocol of string
 
-type 'a t = Idle | Loading of 'a option | Ready of { data : 'a; stale : bool } | Failed of { error : error; last : 'a option }
+type 'a t =
+  | Idle
+  | Loading of 'a option
+  | Ready of { data : 'a; stale : bool }
+  | Failed of { error : error; last : 'a option }
 
 let data = function
-  | Idle | Loading None -> None
-  | Loading (Some d) -> Some d
+  | Idle -> None
+  | Loading d -> d
   | Ready { data; _ } -> Some data
   | Failed { last; _ } -> last
 

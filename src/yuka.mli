@@ -58,8 +58,13 @@ module Effect : sig
   (** Runs the body now, and again when a State it read with [State.get]
       changes. Before each re-run and when its owner is disposed, [cleanup]
       receives the result of the previous run, and effects created inside the
-      previous run are disposed. An exception in one effect does not stop
-      other effects; the first one is raised again after all pending effects
+      previous run are disposed. Inside a {!Catch} or an island, an exception
+      in the body, or in a cleanup that runs during a State change or an
+      event handler, goes to that boundary. A cleanup that raises when its
+      owner is disposed by a direct call (the function returned by {!owner},
+      {!Client.render} or {!Client.hydrate}, or {!unmount}) raises to that
+      caller. Elsewhere, an exception in one effect does not stop other
+      effects; the first one is raised again after all pending effects
       ran. If effects and memos keep changing States they read for more than
       100 update rounds, the pending work is dropped and [Failure] is
       raised. *)
@@ -361,6 +366,86 @@ module Await : sig
       DESIGN.md. *)
 end
 
+module Catch : sig
+  val make :
+    fallback:(error:string -> reset:(unit -> unit) -> 'k element) ->
+    children:(unit -> 'k element) ->
+    unit ->
+    'k element
+  (** An error boundary. In mlx:
+      [<Yuka.Catch fallback=(fun ~error ~reset -> ...)> children </Yuka.Catch>];
+      the ppx passes the children as a function.
+
+      The children run in a new owner. An exception raised while they
+      render, in an effect or a hole that runs again (or its cleanup), in a
+      memo that one of them reads, or in an event handler attached in them,
+      disposes that owner (effects stop, cleanups run) and shows
+      [fallback ~error ~reset] in place of the children. [error] is the
+      exception as text. [reset ()] disposes the fallback and renders the
+      children again from their first state; State made outside the
+      boundary keeps its value. An exception in the fallback goes to the
+      boundary above. A failed {!Async} or a {!Status.Failed} is a value,
+      not an exception: show it with [Await] or [Show].
+
+      In an island with no [Catch] above, the island is the boundary: it
+      stops, its DOM stays as it is, and the error goes to [console.error]
+      and to the [on_error] of {!mount}.
+
+      On the server, an exception in the children prints the fallback with
+      [~error:"server error"] and sends the exception to
+      {!Server.log_error}; the HTML never has the detail. In an island, the
+      client then hydrates the fallback, and [reset] renders the children in
+      the browser. *)
+end
+
+module Status : sig
+  (** Why a remote call failed. *)
+  type error =
+    | Rejected of string
+        (** The server refused the input ({!Server.Action.reject}, bad
+            input). The message is for the user. *)
+    | Forbidden  (** The origin check failed. *)
+    | Not_found  (** Unknown action. *)
+    | Server  (** The implementation raised or failed; the detail is in the server log. *)
+    | Network of string  (** No answer: offline, aborted, timeout. *)
+    | Protocol of string  (** The answer did not decode. *)
+
+  (** The state of data that loads. [Loading (Some x)]: a new load runs and
+      [x] is the last good data. *)
+  type 'a t =
+    | Idle  (** Not enabled. *)
+    | Loading of 'a option  (** A request runs; the option is the last good data. *)
+    | Ready of { data : 'a; stale : bool }  (** [stale] is [false] for remote data. *)
+    | Failed of { error : error; last : 'a option }
+
+  val data : 'a t -> 'a option
+  (** [data] of [Ready], [last] of [Failed], the option of [Loading]. *)
+
+  val map : ('a -> 'b) -> 'a t -> 'b t
+
+  val error_to_string : error -> string
+  (** [Rejected m] is [m]; the others are short English text. *)
+
+  val error_codec : error Codec.t
+  (** [{"kind": "rejected", "message": m}], [{"kind": "server"}], ... *)
+end
+
+module Show : sig
+  val make :
+    status:(unit -> 'a Status.t) ->
+    loading:'k element ->
+    ?failed:(Status.error -> 'k element) ->
+    children:('a -> 'k element) ->
+    unit ->
+    'k element
+  (** [<Yuka.Show status loading failed> (fun data -> ...) </Yuka.Show>]: a
+      hole over [status ()]. [Ready] and [Loading (Some data)] show
+      [children data], so data stays on screen while it loads again; [Idle]
+      and [Loading None] show [loading]; [Failed] shows [failed error]
+      (default: nothing). The children render again only when the data
+      changes ([==]). *)
+end
+
 val on : string -> (Event.t -> unit) -> client attribute
 (** [on "click" handler]. *)
 
@@ -434,37 +519,6 @@ module Client : sig
       the island name, the expected and the found node, and a short path. Returns a function
       that stops all effects and handlers. Browser only. *)
 
-end
-
-module Status : sig
-  (** Why a remote call failed. *)
-  type error =
-    | Rejected of string
-        (** The server refused the input ({!Server.Action.reject}, bad
-            input). The message is for the user. *)
-    | Forbidden  (** The origin check failed. *)
-    | Not_found  (** Unknown action. *)
-    | Server  (** The implementation raised or failed; the detail is in the server log. *)
-    | Network of string  (** No answer: offline, aborted, timeout. *)
-    | Protocol of string  (** The answer did not decode. *)
-
-  (** The state of remote data. *)
-  type 'a t =
-    | Idle  (** Not enabled. *)
-    | Loading of 'a option  (** A request runs; the option is the last good data. *)
-    | Ready of { data : 'a; stale : bool }  (** [stale] is [false] for remote data. *)
-    | Failed of { error : error; last : 'a option }
-
-  val data : 'a t -> 'a option
-  (** [data] of [Ready], [last] of [Failed], the option of [Loading]. *)
-
-  val map : ('a -> 'b) -> 'a t -> 'b t
-
-  val error_to_string : error -> string
-  (** [Rejected m] is [m]; the others are short English text. *)
-
-  val error_codec : error Codec.t
-  (** [{"kind": "rejected", "message": m}], [{"kind": "server"}], ... *)
 end
 
 module Optimistic : sig
@@ -613,6 +667,11 @@ module Private : sig
         render : 'a -> node;
       }
         -> node
+    | Catch of {
+        children : unit -> node;
+        fallback : error:string -> reset:(unit -> unit) -> node;
+        client : Obj.t option -> node;
+      }
 
   and attr =
     | Static of string * string
@@ -855,7 +914,12 @@ module Router : sig
       in order. *)
 end
 
-val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
+val mount :
+  ?islands:Client.registry ->
+  ?navigation:bool ->
+  ?on_error:(string -> unit) ->
+  unit ->
+  unit
 (** [mount ()] is the whole client start. [yuka.ppx] rewrites it into
     [mount ~islands:Yuka_islands.registry ()].
 
@@ -866,7 +930,11 @@ val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
     document, so islands that arrive later (streaming, fills) start when
     their props script is complete. An island that cannot start is logged
     with [console.error] and keeps its server HTML. An island is not started
-    twice. The action transport sends [POST /_yuka/action/<name>] with the
+    twice. An exception that no {!Catch} in the island catches stops the
+    island and keeps its DOM as it is; the message
+    ["yuka island ID (NAME): ..."] goes to [console.error] and to
+    [on_error], for example to send it to an error reporting service. The
+    other islands keep working. The action transport sends [POST /_yuka/action/<name>] with the
     input as a JSON body. The response is [{"ok": value}] or
     [{"error": message}].
 

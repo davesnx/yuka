@@ -1361,8 +1361,159 @@ let batch_in_first_run () =
   check "a batch in an effect runs pending effects when the effect ends"
     "e0 end e1" (read ())
 
+let boom () : _ element = failwith "secret detail"
+let late () : _ element = Private.element (Private.Hole (fun () -> failwith "secret detail"))
+
+let fallback ~error ~reset:_ = lower "p" [] [ text ("caught " ^ error) ]
+
+let logged f =
+  let saved = !Server.log_error and messages = ref [] in
+  Server.log_error := (fun m -> messages := m :: !messages);
+  let result = Fun.protect ~finally:(fun () -> Server.log_error := saved) f in
+  (result, List.rev !messages)
+
+let in_island tree =
+  Private.print
+    (Private.session ~streaming:false ~islands_only:true)
+    (fun () -> Private.node (Client.island ~name:"I" ~props:(`Int 0) (fun () -> tree ())))
+
+let page_html tree =
+  Private.print (Private.session ~streaming:false ~islands_only:true) (fun () -> Private.node (tree ()))
+
+let contains text part =
+  let n = String.length part in
+  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
+  at 0
+
+let catch_server_fallback () =
+  let html, messages =
+    logged (fun () ->
+        in_island (fun () ->
+            lower "div" []
+              [ text "a";
+                Catch.make ~fallback
+                  ~children:(fun () -> lower "span" [] [ text "partial"; late () ])
+                  ();
+                text "b" ]))
+  in
+  check "fallback with the marker"
+    {|<yuka-island data-name="I" data-id="i1" style="display:contents"><div>a<!--[!--><p>caught server error</p><!--]-->b</div></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
+    html;
+  check "no detail in the HTML" "false" (string_of_bool (contains html "secret"));
+  check "one log" "1" (string_of_int (List.length messages));
+  check "log has the detail" "true"
+    (string_of_bool (contains (String.concat "" messages) "secret detail"))
+
+let catch_server_children () =
+  let html, messages =
+    logged (fun () ->
+        in_island (fun () ->
+            Catch.make ~fallback ~children:(fun () -> lower "span" [] [ text "ok" ]) ()))
+  in
+  check "children in a plain hole"
+    {|<yuka-island data-name="I" data-id="i1" style="display:contents"><!--[--><span>ok</span><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
+    html;
+  check "no log" "0" (string_of_int (List.length messages))
+
+let catch_server_outside_island () =
+  let html, _ =
+    logged (fun () ->
+        page_html (fun () ->
+            lower "main" []
+              [ Catch.make ~fallback ~children:(fun () -> lower "span" [] [ text "x"; boom () ]) () ]))
+  in
+  check "no marker outside an island" "<main><p>caught server error</p></main>" html
+
+let catch_server_nested () =
+  let html, messages =
+    logged (fun () ->
+        page_html (fun () ->
+            Catch.make ~fallback
+              ~children:(fun () ->
+                lower "div" []
+                  [ text "outer";
+                    Catch.make
+                      ~fallback:(fun ~error:_ ~reset:_ -> failwith "fallback failed")
+                      ~children:boom () ])
+              ()))
+  in
+  check "an error in the fallback goes to the boundary above"
+    "<p>caught server error</p>" html;
+  check "both logged" "2" (string_of_int (List.length messages))
+
+let catch_server_keeps_islands () =
+  let html, _ =
+    logged (fun () ->
+        page_html (fun () ->
+            lower "main" []
+              [ Catch.make ~fallback
+                  ~children:(fun () ->
+                    lower "div" []
+                      [ Client.island ~name:"Lost" ~props:(`Int 1) (fun () -> text "l"); late () ])
+                  ();
+                Client.island ~name:"Kept" ~props:(`Int 2) (fun () -> text "k") ]))
+  in
+  check "the island of the failed children is gone" "false" (string_of_bool (contains html "Lost"));
+  check "the island after it is printed" "true" (string_of_bool (contains html {|data-name="Kept"|}))
+
+let catch_server_drops_pending () =
+  let s = Private.session ~streaming:true ~islands_only:true in
+  let pending, _, _ = Async.make () in
+  let html, _ =
+    logged (fun () ->
+        Private.print s (fun () ->
+            Private.node
+              (Catch.make ~fallback
+                 ~children:(fun () ->
+                   lower "div" []
+                     [ Await.make ~async:pending ~loading:(text "wait") ~children:text ();
+                       late () ])
+                 ())))
+  in
+  check "fallback" "<p>caught server error</p>" html;
+  check "no fill for the dropped Await" "0" (string_of_int (List.length (Private.take_pending s)))
+
+let catch_server_select () =
+  let html, _ =
+    logged (fun () ->
+        page_html (fun () ->
+            lower "main" []
+              [ Catch.make ~fallback
+                  ~children:(fun () ->
+                    lower "select" [ attr "value" "x" ] [ lower "option" [ attr "value" "x" ] []; late () ])
+                  ();
+                lower "datalist" [] [ lower "option" [ attr "value" "x" ] [] ] ]))
+  in
+  check "the select value of the dropped children does not leak"
+    {|<main><p>caught server error</p><datalist><option value="x"></option></datalist></main>|} html
+
+let show_view status =
+  Show.make
+    ~status:(fun () -> status)
+    ~loading:(text "loading")
+    ~failed:(fun e -> text ("failed " ^ Status.error_to_string e))
+    ~children:(fun d -> lower "b" [] [ text d ])
+    ()
+
+let show_server () =
+  let print st = Private.to_html (Private.node (show_view st)) in
+  check "idle" "<!--[-->loading<!--]-->" (print Status.Idle);
+  check "loading" "<!--[-->loading<!--]-->" (print (Status.Loading None));
+  check "loading with data" "<!--[--><b>d</b><!--]-->" (print (Status.Loading (Some "d")));
+  check "ready" "<!--[--><b>d</b><!--]-->" (print (Status.Ready { data = "d"; stale = false }));
+  check "failed" "<!--[-->failed server error<!--]-->"
+    (print (Status.Failed { error = Status.Server; last = Some "d" }))
+
 let all =
   [
+    ("catch: server fallback", catch_server_fallback);
+    ("catch: server children", catch_server_children);
+    ("catch: server outside an island", catch_server_outside_island);
+    ("catch: server nested", catch_server_nested);
+    ("catch: server drops the islands of failed children", catch_server_keeps_islands);
+    ("catch: server drops the fills of failed children", catch_server_drops_pending);
+    ("show: server states", show_server);
+    ("catch: server select value", catch_server_select);
     ("memo is lazy without readers", memo_lazy_without_readers);
     ("memo diamond", memo_diamond);
     ("dynamic dependencies", dynamic_dependencies);

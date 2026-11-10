@@ -1,0 +1,14 @@
+let broken () : Yuka.server Yuka.element = failwith "broken"
+
+let view ~fail : Yuka.server Yuka.element =
+  <div>
+    <Yuka.Catch fallback=(fun ~error ~reset:_ -> <p>(Yuka.text error)</p>)>
+      <span>"before"</span>
+      (if fail then broken () else <b>"ok"</b>)
+    </Yuka.Catch>
+  </div>
+
+let status (s : string Yuka.Status.t) : Yuka.server Yuka.element =
+  <Yuka.Show status=(fun () -> s) loading="wait" failed=(fun e -> <p>(Yuka.text (Yuka.Status.error_to_string e))</p>)>
+    (fun d -> <b>(Yuka.text d)</b>)
+  </Yuka.Show>

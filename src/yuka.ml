@@ -1,5 +1,6 @@
 module Json = Json
 module Async = Async
+module Status = Status
 module Codec = Codec
 module State = struct include State end
 module Effect = Base.Effect
@@ -16,7 +17,6 @@ include Element
 module Template = struct include Template end
 module Client = Client
 module Action = Action
-module Status = Status
 module Optimistic = Optimistic
 module Remote = Remote
 module Event = Platform.Event
@@ -34,9 +34,10 @@ module Server = struct
   end
 end
 
-let mount ?islands ?(navigation = true) () =
+let mount ?islands ?(navigation = true) ?on_error () =
   match islands with
   | Some r when Web.in_browser ->
+      Option.iter (fun f -> Client.on_error := f) on_error;
       let { Client.entries; lazy_registry } = r in
       if navigation then Navigation.start ~lazy_entries:lazy_registry entries
       else Client.start ~lazy_entries:lazy_registry entries

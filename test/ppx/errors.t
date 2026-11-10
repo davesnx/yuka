@@ -283,6 +283,54 @@ Templates are values at the top of the module; their names carry the module name
   __yuka_template_t_1
   __yuka_template_t_1
 
+Catch without fallback:
+
+  $ cat > c0.mlx <<'X'
+  > let x = <Yuka.Catch><p /></Yuka.Catch>
+  > X
+  $ run c0
+  File "c0.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Catch><p /></Yuka.Catch>
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Catch takes one prop, fallback
+  [1]
+
+Catch without children:
+
+  $ cat > c1.mlx <<'X'
+  > let x = <Yuka.Catch fallback=f />
+  > X
+  $ run c1
+  File "c1.mlx", line 1, characters 8-19:
+  1 | let x = <Yuka.Catch fallback=f />
+              ^^^^^^^^^^^
+  Error: [yuka] Yuka.Catch needs children
+  [1]
+
+Show without status:
+
+  $ cat > s0.mlx <<'X'
+  > let x = <Yuka.Show loading="l">(fun v -> <p />)</Yuka.Show>
+  > X
+  $ run s0
+  File "s0.mlx", line 1, characters 8-18:
+  1 | let x = <Yuka.Show loading="l">(fun v -> <p />)</Yuka.Show>
+              ^^^^^^^^^^
+  Error: [yuka] Yuka.Show needs the prop 'status'
+  [1]
+
+Show with async:
+
+  $ cat > s1.mlx <<'X'
+  > let x = <Yuka.Show async=a status=s loading="l">(fun v -> <p />)</Yuka.Show>
+  > X
+  $ run s1
+  File "s1.mlx", line 1, characters 8-18:
+  1 | let x = <Yuka.Show async=a status=s loading="l">(fun v -> <p />)</Yuka.Show>
+              ^^^^^^^^^^
+  Error: [yuka] Yuka.Show takes status, loading and failed
+  [1]
+
 Await without async:
 
   $ cat > w0.mlx <<'X'

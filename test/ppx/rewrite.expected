@@ -1200,3 +1200,22 @@ module Awaiting =
                                     (Yuka.hole (fun () -> State.get n)))|])
                 ()))|]
   end
+let __yuka_template_rewrite_45 =
+  Yuka.Template.make (Yuka.Template.element "p" [] [Yuka.Template.part 0])
+    ~html:"<p></p>" ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||]
+    ~values:[||]
+let caught =
+  Yuka.Catch.make
+    ~fallback:(fun ~error ~reset:_ ->
+                 Yuka.Template.instance __yuka_template_rewrite_45
+                   [|(Yuka.Template.child (Yuka.text error))|])
+    ~children:(fun () -> Panel.make ()) ()
+let __yuka_template_rewrite_46 =
+  Yuka.Template.make (Yuka.Template.element "b" [] [Yuka.Template.part 0])
+    ~html:"<b></b>" ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||]
+    ~values:[||]
+let shown =
+  Yuka.Show.make ~status:s ~loading:(Yuka.text "l")
+    ~children:(fun d ->
+                 Yuka.Template.instance __yuka_template_rewrite_46
+                   [|(Yuka.Template.child (Yuka.text d))|]) ()

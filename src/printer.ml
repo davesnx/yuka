@@ -9,7 +9,7 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false; answers = []; answered = [] }
+      current = None; in_fill = false; answers = []; answered = []; select_value = None }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -43,7 +43,6 @@ open Base
   let rec print s build =
     let b = Buffer.create 256 in
     let after_text = ref false in
-    let select_value = ref None in
     let hydrating () = (not s.islands_only) || s.depth > 0 in
     let marker m =
       if hydrating () then Buffer.add_string b m;
@@ -110,6 +109,20 @@ open Base
               go (body ());
               marker "<!--]-->")
       | Template { template; parts } -> go (Template.expand template parts)
+      | Catch { children; fallback; _ } -> (
+          let length = Buffer.length b and text = !after_text and saved = snapshot s in
+          try
+            marker "<!--[-->";
+            go (children ());
+            marker "<!--]-->"
+          with e ->
+            Buffer.truncate b length;
+            after_text := text;
+            restore s saved;
+            !log_error ("Yuka.Catch: " ^ Web.exn_to_string e);
+            marker "<!--[!-->";
+            go (fallback ~error:"server error" ~reset:ignore);
+            marker "<!--]-->")
       | Slot { content; _ } ->
           marker "<!--[$-->";
           Option.iter go content;
@@ -152,22 +165,18 @@ open Base
                    " data-start=\"interaction\"")
            ^ ">");
           after_text := false;
+          let saved = snapshot s in
           s.depth <- s.depth + 1;
-          let outer_answers = s.answers and answered = s.answered and pending = s.pending in
           s.answers <- [];
-          let restore () =
-            s.depth <- s.depth - 1;
-            let mine = s.answers in
-            s.answers <- outer_answers;
-            mine
-          in
           let mine =
             match go (render ()) with
-            | () -> restore ()
+            | () ->
+                s.depth <- s.depth - 1;
+                let mine = s.answers in
+                s.answers <- saved.answers;
+                mine
             | exception e ->
-                ignore (restore ());
-                s.answered <- answered;
-                s.pending <- pending;
+                restore s saved;
                 raise e
           in
           Buffer.add_string b "</yuka-island>";
@@ -198,7 +207,7 @@ open Base
             if tag = "select" || tag = "textarea" then
               List.filter (fun (name, _) -> name <> "value") resolved
             else if
-              tag = "option" && value <> None && !select_value = value
+              tag = "option" && value <> None && s.select_value = value
               && not (List.mem_assoc "selected" resolved)
             then resolved @ [ ("selected", "") ]
             else resolved
@@ -233,10 +242,10 @@ open Base
                   Buffer.add_char b '\n';
                 Buffer.add_string b (escape ~quote:false v)
             | "select", _ ->
-                let outer = !select_value in
-                select_value := value;
+                let outer = s.select_value in
+                s.select_value <- value;
                 contents children;
-                select_value := outer
+                s.select_value <- outer
             | _ -> contents children);
             Buffer.add_string b "</";
             Buffer.add_string b tag;

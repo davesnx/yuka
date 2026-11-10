@@ -290,6 +290,26 @@ let fill_and_rollback =
         let html = Private.print s (fun () -> Private.node (island echo "r")) in
         Alcotest.(check bool) "answer written by the next island" true
           (contains html {|data-yuka-answer="r:echo &quot;r&quot;">|}) );
+    ( "a Catch around an island that raises takes its answers back",
+      fun () ->
+        reset ();
+        let html =
+          Server.to_string (fun () ->
+              lower "div" []
+                [
+                  Catch.make
+                    ~fallback:(fun ~error:_ ~reset:_ -> text "caught")
+                    ~children:(fun () ->
+                      Client.island ~name:"B" ~props:`Null (fun () ->
+                          ignore (Remote.use echo (fun () -> "c"));
+                          failwith "island broke"))
+                    ();
+                  island echo "c";
+                ])
+        in
+        Alcotest.(check bool) "fallback" true (contains html "caught");
+        Alcotest.(check bool) "answer written" true
+          (contains html {|data-yuka-answer="r:echo &quot;c&quot;">|}) );
   ]
 
 let edit = Action.declare ~name:"edit" ~input:Codec.string ~output:Codec.string

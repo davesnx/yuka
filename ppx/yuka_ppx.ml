@@ -388,25 +388,26 @@ let rewrite_jsx self e =
       let props, children = split_args args in
       match fn with
       | Lident tag -> template ~self ~loc ~fnloc tag args
-      | Ldot (Ldot (Lident "Yuka", "Await"), "createElement") ->
+      | Ldot (Ldot (Lident "Yuka", ("Await" | "Show" as m)), "createElement") ->
+          let first, takes = if m = "Await" then ("async", "async, loading and failed") else ("status", "status, loading and failed") in
           let find name =
             List.find_opt (fun (l, _) -> l = Labelled name || l = Optional name) props
           in
           List.iter
             (fun (l, _) ->
               match l with
-              | Labelled ("async" | "loading" | "failed") | Optional "failed" -> ()
+              | Labelled ("loading" | "failed") | Optional "failed" -> ()
+              | Labelled n when n = first -> ()
               | _ ->
-                  Location.raise_errorf ~loc:fnloc
-                    "[yuka] Yuka.Await takes async, loading and failed")
+                  Location.raise_errorf ~loc:fnloc "[yuka] Yuka.%s takes %s" m takes)
             props;
           let required name =
             match find name with
             | Some (Labelled _, v) -> v
             | _ ->
-                Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Await needs the prop '%s'" name
+                Location.raise_errorf ~loc:fnloc "[yuka] Yuka.%s needs the prop '%s'" m name
           in
-          let async = required "async" and loading = required "loading" in
+          let source = required first and loading = required "loading" in
           let failed =
             match find "failed" with
             | Some (l, v) -> [ (l, self#expression v) ]
@@ -417,15 +418,28 @@ let rewrite_jsx self e =
             | [ ({ pexp_desc = Pexp_function _; _ } as f) ] -> self#expression f
             | _ ->
                 Location.raise_errorf ~loc:fnloc
-                  "[yuka] Yuka.Await needs exactly one child, a function such as (fun value -> ...)"
+                  "[yuka] Yuka.%s needs exactly one child, a function such as (fun value -> ...)" m
           in
           pexp_apply ~loc
             (pexp_ident ~loc:fnloc
-               { txt = Ldot (Ldot (Lident "Yuka", "Await"), "make"); loc = fnloc })
-            ([ (Labelled "async", self#expression async);
+               { txt = Ldot (Ldot (Lident "Yuka", m), "make"); loc = fnloc })
+            ([ (Labelled first, self#expression source);
                (Labelled "loading", rewrite_child ~self loading) ]
             @ failed
             @ [ (Labelled "children", body); (Nolabel, [%expr ()]) ])
+      | Ldot (Ldot (Lident "Yuka", "Catch"), "createElement") ->
+          let fallback =
+            match props with
+            | [ (Labelled "fallback", v) ] -> self#expression v
+            | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Catch takes one prop, fallback"
+          in
+          let kids =
+            match List.map (rewrite_child ~self) children with
+            | [] -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Catch needs children"
+            | [ k ] -> k
+            | ks -> [%expr Yuka.fragment [%e list_expr ~loc ks]]
+          in
+          [%expr Yuka.Catch.make ~fallback:[%e fallback] ~children:(fun () -> [%e kids]) ()]
       | Ldot (Ldot (Lident "Yuka", "Client"), "createElement") ->
           let loading =
             List.map

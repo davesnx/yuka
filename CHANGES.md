@@ -9,6 +9,8 @@
 - Leaving a page stops the action calls of the islands it removes (@davesnx)
 - Remote data: `Action.query`, `Remote.use` (a `Status.t` signal with retry, abort and `enabled`), `Remote.refetch`, `Remote.invalidate`, `Remote.mutate` with `Optimistic`; server renders embed the answers so hydration sends no request (@davesnx)
 - Breaking: `Action.t` has a third type parameter, the kind (`[ `Mutation ]` for `declare`, `[ `Query ]` for `query`) (@davesnx)
+- Error boundaries and loading states: `<Yuka.Catch fallback=(fun ~error ~reset -> ...)>` catches exceptions in its children (render, effects, memos, holes, event handlers), also during server rendering; `<Yuka.Show>` shows a `Yuka.Status.t`; `Yuka.mount ~on_error` gets the errors that no `Catch` caught (@davesnx)
+- Breaking: an island with no `Catch` now stops at its first exception after it started and keeps its DOM; the error goes to `console.error` and `on_error` (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 
