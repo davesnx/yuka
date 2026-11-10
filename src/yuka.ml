@@ -19,6 +19,8 @@ module Client = Client
 module Action = Action
 module Optimistic = Optimistic
 module Remote = Remote
+module Topic = Topic
+module Live = Live
 module Form = Form
 module Event = Platform.Event
 module Browser = Platform.Browser
@@ -37,6 +39,8 @@ module Server = struct
   module Form = struct
     let implement = Server.implement_form
   end
+
+  module Live = Live_server
 end
 
 let mount ?islands ?(navigation = true) ?prefetch ?transitions ?on_error () =
@@ -61,10 +65,14 @@ module Private = struct
   let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep build
   let import_map = Server.import_map
   let set_form (s : session) f = s.form <- Some f
+  let set_csrf (s : session) f = s.csrf <- Some f
+  let reset_live () = Live.manager := None
   let query = Router.query
   let preload_urls = Server.preload_urls
   let handle_action = Server.handle_action
 
+  let dev_script = Cycle.dev_script
+  let dev_events = Cycle.dev_events
   let node n = n
   let template_shape (t : template) = t.shape
   let template = Template.of_shape

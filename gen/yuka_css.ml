@@ -9,11 +9,16 @@ let rec sources dir =
          let path = Filename.concat dir name in
          if Sys.is_directory path then
            if name = "_build" || name.[0] = '.' then [] else sources path
-         else if Filename.check_suffix name ".ml" || Filename.check_suffix name ".mlx" then [ path ]
+         else if
+           (Filename.check_suffix name ".ml" || Filename.check_suffix name ".mlx")
+           && not (Filename.check_suffix name ".pp.ml")
+         then [ path ]
          else [])
 
 let declared src =
-  let text = read src in
+  match read src with
+  | exception Sys_error _ -> []
+  | text ->
   let code = Source_text.code_only text in
   let key = "[%yuka.css" in
   let k = String.length key and n = String.length text in

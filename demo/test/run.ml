@@ -14,7 +14,7 @@ let config =
     ~public:[ ("/static", "static") ]
     ~styles:[ "/static/style.css" ] ()
 
-let handler = Yuka_dream.handler config Routes_server.app
+let handler = Dream.set_secret "test" @@ Dream.cookie_sessions @@ Yuka_dream.handler config Routes_server.app
 
 let call ?(meth = `GET) ?(headers = []) ?(body = "") target =
   let response = Dream.test handler (Dream.request ~method_:meth ~target ~headers body) in
@@ -174,6 +174,15 @@ let action_route () =
   let status, _, _ = call "/_yuka/action/add_comment" in
   Alcotest.(check int) "GET" 405 status
 
+let fst3 (a, _, _) = a
+
+module Yojson_like = struct
+  let id text =
+    match Yuka.Json.of_string text with
+    | Ok (`Assoc f) -> ( match List.assoc_opt "id" f with Some (`Int i) -> Some i | _ -> None)
+    | _ -> None
+end
+
 let settle async =
   Lwt_main.run (Lwt.pause ());
   match Yuka.Async.status async with
@@ -254,6 +263,56 @@ let actions () =
       Alcotest.(check int) "stored" 2 (List.length (Store.comments_of "YUK-3"))
   | Error m -> Alcotest.failf "comment failed: %s" m
 
+let live_answers () =
+  let html = get "/" in
+  has html {|data-yuka-answer="l:issues &quot;All&quot;">{"ok":[{"id":"YUK-|};
+  has html {|data-yuka-answer="l:csrf">{"ok":"|};
+  has html "<a class=\"row-title\" href=\"/issue/YUK-1\">";
+  let html = get "/issue/YUK-2" in
+  has html {|data-yuka-answer="l:issue &quot;YUK-2&quot;">|};
+  lacks (get "/about") "l:csrf"
+
+let live_publish () =
+  let out = ref [] in
+  let connection : Yuka.Server.Live.connection =
+    let pending = ref [ {|{"t":"hello","v":1,"csrf":""}|}; {|{"t":"sub","id":1,"topic":"issues","key":"All"}|};
+                        {|{"t":"sub","id":2,"topic":"issues","key":"Mine"}|}; {|{"t":"sub","id":3,"topic":"issue","key":"YUK-5"}|} ] in
+    {
+      send = (fun t -> out := t :: !out; Yuka.Async.return ());
+      receive =
+        (fun () ->
+          match !pending with
+          | x :: rest ->
+              pending := rest;
+              Yuka.Async.return (Some x)
+          | [] -> fst3 (Yuka.Async.make ()));
+      close = (fun _ -> Yuka.Async.return ());
+    }
+  in
+  let _ =
+    Yuka.Server.Live.run ~sleep:(fun _ -> fst3 (Yuka.Async.make ()))
+      { Yuka.Server.Live.session = "s"; header = (fun _ -> None) }
+      ~verify_csrf:(fun _ -> Yuka.Async.return true) ~token:(fun () -> "t") connection
+  in
+  out := [];
+  (match
+     settle
+       (Yuka.Action.call Actions.update_issue
+          { Actions.id = "YUK-5"; status = Some Model.Issue.Canceled; priority = None })
+   with
+  | Ok _ -> ()
+  | Error m -> Alcotest.failf "update failed: %s" m);
+  let ids =
+    List.sort compare
+      (List.filter_map
+         (fun t ->
+           match Yojson_like.id t with Some id when Model.Issue.contains ~sub:{|"t":"state"|} t -> Some id | _ -> None)
+         !out)
+  in
+  Alcotest.(check (list int)) "published to both views and the issue" [ 1; 2; 3 ] ids;
+  Alcotest.(check bool) "the new status" true
+    (List.exists (fun t -> Yojson_like.id t = Some 3 && Model.Issue.contains ~sub:"Canceled" t) !out)
+
 let () =
   Handlers.register ();
   Alcotest.run "demo"
@@ -273,4 +332,9 @@ let () =
           Alcotest.test_case "action route" `Quick action_route;
         ] );
       ("actions", [ Alcotest.test_case "store through actions" `Quick actions ]);
+      ( "live",
+        [
+          Alcotest.test_case "pages embed the live state and a token" `Quick live_answers;
+          Alcotest.test_case "update_issue publishes to both views and the issue" `Quick live_publish;
+        ] );
     ]

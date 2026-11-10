@@ -36,14 +36,20 @@ let find_added key nodes =
          @ Array.to_list (Web.query_all n "script[data-yuka-answer]"))
        (Array.to_list nodes))
 
-let record key (result : (Json.t, Status.error) result option) settled =
+let slot key =
   match !Types.current_session with
-  | Some s when s.depth > 0 && not (List.mem key s.answered) -> (
+  | Some s when s.depth > 0 && not (List.mem key s.answered) ->
       s.answered <- key :: s.answered;
-      match result with
-      | Some r -> s.answers <- (key, Some (to_json r)) :: s.answers
-      | None when s.streaming ->
-          s.answers <- (key, None) :: s.answers;
-          s.pending <- Types.Pending_answer { key; answer = Async.map to_json settled } :: s.pending
-      | None -> ())
+      Some s
+  | _ -> None
+
+let record key (result : (Json.t, Status.error) result option) settled =
+  match (slot key, result) with
+  | Some s, Some r -> s.answers <- (key, Some (to_json r)) :: s.answers
+  | Some s, None when s.streaming ->
+      s.answers <- (key, None) :: s.answers;
+      s.pending <- Types.Pending_answer { key; answer = Async.map to_json settled } :: s.pending
   | _ -> ()
+
+let record_value key value =
+  match slot key with Some s -> s.answers <- (key, Some (to_json (value ()))) :: s.answers | None -> ()

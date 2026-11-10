@@ -1,42 +1,5 @@
 open Ssr_data.Data
-
-module Row = struct
-  let make ~issue:i () : Yuka.server Yuka.element =
-    <li class_="issue">
-      <a class_="row" href=("/issue/" ^ i.id)>
-        <span class_="id">(Yuka.text i.id)</span>
-        <span class_="title">(Yuka.text i.title)</span>
-        <span class_=("status status-" ^ slug i.status)>(Yuka.text i.status)</span>
-        <span class_="priority">(Yuka.text i.priority)</span>
-        <span class_="assignee">(Yuka.text (Option.value i.assignee ~default:"Unassigned"))</span>
-        <span class_="labels">
-          (Yuka.list (List.map (fun l -> <span class_="label">(Yuka.text l)</span>) i.labels))
-        </span>
-      </a>
-    </li>
-end
-
-let view issues () : Yuka.server Yuka.element =
-  <main>
-    <h1>"All issues"</h1>
-    <ul class_="issues">(Yuka.list (List.map (fun issue -> <Row issue />) issues))</ul>
-  </main>
-
-let stream_app issues : Dream.request Yuka.Server.app =
-  let fallback : Yuka.Server.fallback =
-    { layers = []; not_found = Yuka.Server.default_not_found; error = Yuka.Server.default_error }
-  in
-  let rules = Yuka.Server.rules ~headers:[] ~prerender:false () in
-  let plan : Yuka.Server.plan = { layers = []; page = Yuka.Server.page ~title:"Issues" (view issues) } in
-  Yuka.Server.app ~build:"ssr" ~headers:[] ~prerender:[]
-    ~find:(fun meth segments _ ->
-      match (meth, segments) with
-      | (`GET | `HEAD), [ "stream" ] -> Yuka.Router.Found ()
-      | _, [ "stream" ] -> Yuka.Router.Wrong_method [ `GET ]
-      | _ -> Yuka.Router.Missing)
-    ~resolve:(fun _ () ->
-      Yuka.Server.Page { rules; guards = []; fallback; load = (fun () -> Yuka.Async.return (Ok plan)) })
-    ~missing:fallback
+open Ssr_view
 
 let () =
   let port, issues = args () in

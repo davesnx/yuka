@@ -128,5 +128,32 @@ let shortest_float f =
 
 let parse_float = float_of_string
 let parse_int = int_of_string_opt
+
+type socket = unit
+
+let socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket =
+ fun _ _ _ _ -> browser_only ()
+
+let socket_send : socket -> string -> unit = fun _ _ -> browser_only ()
+let socket_close : socket -> int -> unit = fun _ _ -> browser_only ()
+let live_url : unit -> string = fun _ -> browser_only ()
+let online : unit -> bool = fun _ -> browser_only ()
+let on_online : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
+let random : unit -> float = fun () -> Random.float 1.
+let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit = fun _ _ _ -> browser_only ()
 let add_stylesheet : string -> unit = fun _ -> browser_only ()
 let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()
+let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None
+
+let buffers : Buffer.t list ref = ref []
+let buffers_lock = Mutex.create ()
+
+let take_buffer () =
+  Mutex.protect buffers_lock (fun () ->
+      match !buffers with
+      | b :: rest ->
+          buffers := rest;
+          Some b
+      | [] -> None)
+
+let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)

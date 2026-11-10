@@ -73,10 +73,11 @@ let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
   | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ?form ~timeout ~sleep build ~on_shell
+let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ~timeout ~sleep build ~on_shell
     ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.form <- form;
+  session.csrf <- csrf;
   session.preload <- preload;
   session.entry <- entry;
   session.current <- current;
@@ -249,12 +250,12 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ~sleep build =
+let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ~sleep build =
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
     (fun () -> !document ^ Buffer.contents values)
-    (drive ?preload ?entry ?current ?id_prefix ?form ~timeout ~sleep
+    (drive ?preload ?entry ?current ?id_prefix ?form ?csrf ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
          document := shell;
@@ -332,6 +333,7 @@ exception Rejected of string
 
 let reject message = raise (Rejected message)
 let rejected message = Async.failed (reject_prefix ^ message)
+let guarded f x = Async.guard (fun x -> match f x with a -> a | exception Rejected m -> rejected m) x
 
 type answer = Output of Json.t | Bad_input of string
 
@@ -395,13 +397,7 @@ let register action f encode =
         match Codec.decode input json with
         | Error m -> Async.return (Bad_input m)
         | Ok v ->
-            let run =
-              match f v with
-              | async -> async
-              | exception Rejected m -> rejected m
-              | exception exn -> Async.failed (Web.exn_to_string exn)
-            in
-            Async.map (fun o -> Output (encode o)) run )
+            Async.map (fun o -> Output (encode o)) (guarded f v) )
     :: !registry;
   Action.transport := transport;
   Remote.server_send := send
@@ -434,17 +430,11 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _)
     match Form_core.decode t values with
     | Error e -> Async.return (Unprocessable (Form_core.named t e))
     | Ok input ->
-        let answer =
-          match f input with
-          | a -> a
-          | exception Rejected m -> rejected m
-          | exception exn -> Async.failed (Web.exn_to_string exn)
-        in
         Async.map
           (function
             | Ok o -> Saved (Option.map (fun r -> r o) redirect)
             | Error e -> Unprocessable (Form_core.named t e))
-          answer
+          (guarded f input)
   in
   forms := (Action.name action, run) :: !forms
 

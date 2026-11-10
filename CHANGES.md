@@ -12,11 +12,19 @@
 - Error boundaries and loading states: `<Yuka.Catch fallback=(fun ~error ~reset -> ...)>` catches exceptions in its children (render, effects, memos, holes, event handlers), also during server rendering; `<Yuka.Show>` shows a `Yuka.Status.t`; `Yuka.mount ~on_error` gets the errors that no `Catch` caught (@davesnx)
 - Breaking: an island with no `Catch` now stops at its first exception after it started and keeps its DOM; the error goes to `console.error` and `on_error` (@davesnx)
 - Forms: `[@@deriving form]`, `Form.action`, `Server.Form.implement` and `<Yuka.Form>`; a form posts to the page URL with no JavaScript (303 on success, 422 with the sent values and errors), and inside an island it submits through `Action.call` with a pending state and the same decoder (@davesnx)
+- Live data: `Topic.declare`, `Live.use` (a `Status.t` signal with `stale` while the socket reconnects), `Live.mutate`, and `Server.Live.serve` and `publish`; one WebSocket per page (`GET /_yuka/live`), full state on each change, reconnect with backoff, origin and CSRF checks with token renewal (`GET /_yuka/csrf`), `Server.Live.revoke` and connection limits; server renders embed the state (@davesnx)
+- Breaking: `Yuka.Server.ADAPTER` has `csrf_token`, and `Yuka.Server.request` a `csrf_token` field; it is called only when a page renders a `Live.use` (@davesnx)
 - Breaking: the action call (`POST /_yuka/action/<name>`) and `Action` routes refuse (403) a request with no `Origin` unless it has `Sec-Fetch-Site: same-origin`; the action call checks the origin, the name and the content type before it reads the body (@davesnx)
 - Prefetch, navigation cache and view transitions: links are prefetched on hover, focus or pointer down (`Yuka.mount ~prefetch`, `data-yuka-prefetch="visible"` or `"off"`, header `Yuka-Prefetch: 1`); answers are reused by their `Cache-Control` (`max-age`, or once within 10 s for a `no-store` prefetch); a successful action call empties the cache; `~transitions:true` runs each client navigation in a view transition with `data-yuka-nav` on `<html>` (@davesnx)
 - Breaking: `Yuka.Async.resolved` is now `Yuka.Async.return` (@davesnx)
 - Breaking: the route tree is `Routes.ml`, one OCaml expression `Router.make [ Router.route Home ~path:"/" ~page:Pages.home; ... ]` with no `open` or `let`, instead of `Routes.mlx`; `yuka-routes` reads it from stdin with `--source FILE` (no `mlx-pp` step), and attachments must be value paths (@davesnx)
+- Faster server rendering, with the same HTML: about three times the requests per second on `make bench-ssr`, ahead of Solid and server-reason-react on the benchmark machine. A page with nothing pending after its shell is sent as one response with `Content-Length` instead of a stream; a `HEAD` on a page renders it and sends the same headers as `GET` (before: no page body call and `Content-Length: 0`) (@davesnx)
+- `yuka dev`: runs `dune build --watch`, restarts the server when its executable changes and reloads the browser keeping the scroll position, swaps changed stylesheets with no reload, and shows build errors in an overlay; the cycle serves `/_yuka/dev` and the dev script only with `YUKA_DEV=1` (@davesnx)
 - CSS per module: `module Css = [%yuka.css "file.css"]` gives one scoped class name per class of the file; the server prints each sheet once, before its first use (an island's sheets before the island), the browser adds missing sheets to `<head>` and moves new ones there after a client navigation; `yuka-css` writes the sheets for `Yuka.Server.config ~css`, served at `/_yuka/css/` and written by a prerender (@davesnx)
+
+### yuka-dream
+
+- `Yuka_dream.handler` serves `GET /_yuka/live` (live data); it needs Dream sessions that every server process shares and that survive a restart (`Dream.cookie_sessions` with `Dream.set_secret`) (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

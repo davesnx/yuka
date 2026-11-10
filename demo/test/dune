@@ -1,4 +1,26 @@
 (test
  (name run)
+ (modules run)
  (package yuka-dream)
  (libraries alcotest demo_app demo_shared yuka yuka-dream dream lwt lwt.unix))
+
+(executable
+ (name pages)
+ (modules pages)
+ (libraries demo_app yuka yuka-dream dream lwt lwt.unix))
+
+(rule
+ (enabled_if
+  (<> %{profile} release))
+ (action
+  (with-stdout-to
+   pages.out
+   (run %{exe:pages.exe}))))
+
+(rule
+ (alias runtest)
+ (package yuka-dream)
+ (enabled_if
+  (<> %{profile} release))
+ (action
+  (diff pages.expected pages.out)))

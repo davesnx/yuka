@@ -165,7 +165,32 @@ let bundle ~dir ~entry ~manifest ~metafile =
     immutable = (fun path -> List.exists (String.equal path) hashed);
   }
 
+type dev = { state : unit -> string }
+
+let dev_default = {|{"session":"","build":0,"page":0,"error":null}|}
+
+let dev_of_env () =
+  match Sys.getenv_opt "YUKA_DEV" with
+  | Some "1" ->
+      let file = Sys.getenv_opt "YUKA_DEV_FILE" in
+      let state () =
+        match file with
+        | None -> dev_default
+        | Some f -> (
+            match Option.map String.trim (Web.read_file f) with
+            | None | Some "" -> dev_default
+            | Some text -> String.concat " " (String.split_on_char '\n' text))
+      in
+      Some { state }
+  | _ -> None
+
+let dev_script state =
+  let json = String.concat "\\u003c" (String.split_on_char '<' state) in
+  "<script>(function(){var s=" ^ json
+  ^ {|,b=s.build,p=s.page,k="yuka-dev-scroll",o=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){try{sessionStorage.setItem(k,String(scrollY))}catch(x){}s.session=d.session;p=d.page;location.reload();return}if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
+
 type config = {
+  dev : dev option;
   assets : assets option;
   public : (string list * string) list;
   styles : string list;
@@ -189,6 +214,7 @@ let public_prefix (prefix, dir) =
 
 let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.) () =
   {
+    dev = dev_of_env ();
     assets;
     public = List.map public_prefix public;
     styles;
@@ -208,6 +234,8 @@ let build_id config (App a) =
   | None -> a.build
   | Some assets -> a.build ^ assets.digest
 
+let prerender_config config = { config with dev = None }
+
 let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
 let served_dirs config =
@@ -219,6 +247,7 @@ type request = {
   target : string;
   header : string -> string option;
   body : limit:int -> string option Async.t;
+  csrf_token : unit -> string;
 }
 
 type outcome =
@@ -268,6 +297,7 @@ type env = {
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
+  csrf : (unit -> string) option;
 }
 
 let outlet key inner =
@@ -318,7 +348,12 @@ let render env ~status ~headers layers (page : page) =
   let import_map = match assets with Some a -> a.import_map | None -> [] in
   let head extra =
     Server.head
-      ~extra:("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">" ^ extra)
+      ~extra:
+        ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
+        ^ (match (env.config.dev, env.navigate) with
+          | Some dev, None -> dev_script (dev.state ())
+          | _ -> "")
+        ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
   let build = nest layers page.body in
@@ -331,7 +366,7 @@ let render env ~status ~headers layers (page : page) =
       | 0 ->
           Async.map
             (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
-            (Server.settled ?preload ?entry ?form:env.form ~current ~timeout ~sleep:env.sleep build)
+            (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~current ~timeout ~sleep:env.sleep build)
       | n ->
           let outlet = List.nth keys (n - 1) in
           let headers =
@@ -340,27 +375,32 @@ let render env ~status ~headers layers (page : page) =
           in
           Async.map
             (fun body -> { status; headers; body = String body })
-            (Server.settled ?preload ?form:env.form ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
   | None ->
-    let early = Buffer.create 4096 in
+    let early = ref [] in
     let writer =
       ref (fun text ->
-          Buffer.add_string early text;
+          early := text :: !early;
           Async.return ())
     in
     let write text = !writer text in
     let finished =
-      Server.drive ?preload ?entry ?form:env.form ~current ~timeout ~sleep:env.sleep build
-        ~on_shell:(fun ~fills shell -> write (head (if fills then Server.fill_script else "") ^ shell))
+      Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~current ~timeout ~sleep:env.sleep build
+        ~on_shell:(fun ~fills shell ->
+          Async.bind (write (head (if fills then Server.fill_script else ""))) (fun () -> write shell))
         ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
         ~on_value:write
     in
+    let written () = String.concat "" (List.rev !early) in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
-    | _ ->
+    | Async.Done () ->
+        early := "</body></html>" :: !early;
+        Async.return { status; headers; body = String (written ()) }
+    | Async.Pending ->
     let stream w =
-      let flushed = w (Buffer.contents early) in
+      let flushed = w (written ()) in
       writer := (fun text -> Async.bind flushed (fun () -> w text));
       let result, resolve, _ = Async.make () in
       Async.on_settled finished (function
@@ -403,8 +443,6 @@ let error_page env (fallback : fallback) =
     !Server.log_error m;
     Async.return (internal_error ())
   in
-  if env.head_only then Async.return (empty 500 headers)
-  else
     match render env ~status:500 ~headers fallback.layers (fallback.error 500) with
     | a -> recover a give_up
     | exception e -> give_up (Web.exn_to_string e)
@@ -414,8 +452,6 @@ let fail_page env fallback message =
   error_page env fallback
 
 let show env ~status ~headers ~fallback layers (page : unit -> page) =
-  if env.head_only then Async.return (empty status headers)
-  else
     match render env ~status ~headers layers (page ()) with
     | a -> recover a (fail_page env fallback)
     | exception e -> fail_page env fallback (Web.exn_to_string e)
@@ -469,7 +505,8 @@ let prerender_file target =
 
 let prerendered_file env (rules : rules) (r : request) ~path ~query =
   match (env.config.prerendered, r.meth, query) with
-  | Some root, (`GET | `HEAD), (None | Some "") when rules.prerender && env.navigate = None -> (
+  | Some root, (`GET | `HEAD), (None | Some "")
+    when rules.prerender && env.navigate = None && Option.is_none env.config.dev -> (
       match prerender_file path with
       | Some file when env.exists ~root ~path:file -> Some (root, file)
       | _ -> None)
@@ -482,6 +519,19 @@ let serve_file meth ~root ~headers raw =
       | Some path -> Async.return (File { root; path; headers })
       | None -> reply (asset_miss ()))
   | _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "GET, HEAD") ])
+
+let csrf_answer (r : request) =
+  match r.meth with
+  | `GET | `HEAD ->
+      if Server.trusted_origin r.header then
+        reply
+          {
+            status = 200;
+            headers = [ ("content-type", "application/json"); no_store ];
+            body = String (Json.to_string (`Assoc [ ("csrf", `String (r.csrf_token ())) ]));
+          }
+      else reply (plain 403 "Forbidden" [])
+  | _ -> reply (method_not_allowed "GET, HEAD")
 
 let action (r : request) raw =
   match (raw, r.meth) with
@@ -627,6 +677,32 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                             Async.return { resp with headers }))
                       (fail_page env a.missing))))
 
+let dev_events ~state ~sleep write =
+  let result, resolve, _ = Async.make () in
+  let rec step last idle =
+    match state () with
+    | exception e ->
+        log_quietly ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e);
+        resolve ()
+    | now ->
+    let message =
+      if not (String.equal now last) then Some ("data: " ^ now ^ "\n\n")
+      else if idle >= 60 then Some ": ping\n\n"
+      else None
+    in
+    match message with
+    | None -> wait now (idle + 1)
+    | Some m -> (
+        match write m with
+        | sent ->
+            Async.on_settled sent (function
+              | Async.Done () -> wait now 1
+              | Async.Failed _ | Async.Pending -> resolve ())
+        | exception _ -> resolve ())
+  and wait last idle = Async.on_settled (sleep 0.25) (fun _ -> step last idle) in
+  step "" 0;
+  result
+
 let handle config (App a as app) ~sleep ~exists req (r : request) =
   let path, query = Router.split_target r.target in
   let env =
@@ -643,6 +719,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
       root_headers = a.headers;
       exists;
       form = None;
+      csrf = Some r.csrf_token;
     }
   in
   let parts = String.split_on_char '/' path in
@@ -658,8 +735,17 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
   let run () =
     match (parts, public) with
     | "" :: "_yuka" :: _, _ -> (
-        match List.tl raw with
+        match (List.tl raw, config.dev) with
+        | [ "dev" ], Some dev -> (
+            let headers = [ ("content-type", "text/event-stream"); ("cache-control", "no-store") ] in
+            match r.meth with
+            | `GET -> reply { status = 200; headers; body = Stream (dev_events ~state:dev.state ~sleep) }
+            | `HEAD -> reply { status = 200; headers; body = String "" }
+            | _ -> reply (method_not_allowed "GET, HEAD"))
+        | raw, _ ->
+        match raw with
         | "action" :: rest -> action r rest
+        | [ "csrf" ] -> csrf_answer r
         | "css" :: rest when config.css <> [] -> (
             match r.meth with
             | `GET | `HEAD -> (
@@ -697,7 +783,14 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
     | _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
   in
   let bodyless = function
-    | Respond r when env.head_only -> Respond { r with body = String "" }
+    | Respond ({ body = String text; _ } as r) when env.head_only ->
+        let headers =
+          if has_header "content-length" r.headers then r.headers
+          else r.headers @ [ ("content-length", string_of_int (String.length text)) ]
+        in
+        Respond { r with headers; body = String "" }
+    | Respond ({ body = Stream _; _ } as r) when env.head_only ->
+        Respond { r with body = Stream (fun _ -> Async.return ()) }
     | File { root; path; headers } when env.head_only ->
         if exists ~root ~path then Respond (empty 200 headers)
         else Respond { (asset_miss ()) with body = String "" }
@@ -727,6 +820,7 @@ module type ADAPTER = sig
   val target : request -> string
   val header : request -> string -> string option
   val body : request -> limit:int -> string option Async.t
+  val csrf_token : request -> string
   val respond : http_response -> response io
   val file : request -> root:string -> path:string -> headers:(string * string) list -> response io
   val exists : root:string -> path:string -> bool
@@ -743,6 +837,7 @@ module Make (A : ADAPTER) = struct
         target = A.target req;
         header = A.header req;
         body = (fun ~limit -> A.body req ~limit);
+        csrf_token = (fun () -> A.csrf_token req);
       }
     in
     A.bind (A.of_async (handle config app ~sleep:A.sleep ~exists:A.exists req view)) (function
@@ -842,6 +937,7 @@ let missing_page config (App a) ~sleep =
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
       form = None;
+      csrf = None;
     }
   in
   not_found_page env a.missing "/404.html"

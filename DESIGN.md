@@ -1194,8 +1194,8 @@ what changed from the spec. `yuka-dream` and the demo migration are in
   actions; handler (rule headers, then the handler's, then the rule
   `cache-control` unless set; `HEAD` drops the body) or loaders, headers
   (`content-type`, `vary: Yuka-Navigate`, rule headers and
-  `cache-control`), `HEAD` stops without calling the page body, then the
-  streamed document.
+  `cache-control`), then the streamed document (`HEAD` renders it too and
+  drops the body; see "Server rendering speed").
 - Errors: a stop or an exception before the first write gives the
   fallback page (404 or 500, root headers, `no-store`, the message only in
   `log_error`). The shell is printed before `handle` returns, and a render
@@ -1255,7 +1255,7 @@ what changed from the spec. `yuka-dream` and the demo migration are in
   the three dune rules, diffs the server output against
   `routes_server.expected`, and runs 60 cases through `Make` with a test
   adapter (record request, `Async.t` as `io`, a fake file table): each
-  step and status code above. Breaking a step (no 308, `HEAD` renders, no
+  step and status code above. Breaking a step (no 308, `HEAD` with another length, no
   `HEAD` in `Allow`, guards reversed, dot segments allowed, no log, no
   `OPTIONS` 204, no entry script, `aria-current` on every link, no
   outlets, no rule cache, no origin check, loaders started one after
@@ -1424,6 +1424,93 @@ R3 (ticket 12); its "Changes during build" section lists the differences.
   `Server` errors are retried after hydration; `mutate` keeps the base's
   kind and asks again when it commits during a request; the typed server
   transport ref is `Remote.server_send`.
+
+## Live data (2026-11-10)
+
+Spec: `.workplace/docs/data-spec.md` section 3 (ticket 13).
+
+- `Topic.declare ~name ~key ~state`; the wire key is the JSON of the key.
+- Server (`src/live_server.ml`, `Yuka.Server.Live`): `serve ?allow topic
+  load`, `publish topic key state`, `run` (the protocol on one socket),
+  `SOCKET` and `Handle`. Entries per `(topic, key)` exist while they have a
+  subscriber; the last unsubscribe removes the entry, and the next
+  subscribe runs the loader again. `seq` comes from one process counter. A
+  publish while the loader runs wins over the loaded state. Each socket
+  sends in order; a state that waits to be sent is replaced by a newer one
+  of the same subscription.
+- Protocol v1 (JSON text frames): client `hello` (version and token), `sub`,
+  `unsub`, `sync`, `ping`; server `hello` (with a fresh token), `state`,
+  `error`, `synced`, `pong`. Close codes: 4400 bad message, 4403 token
+  refused, 4426 other version, 1009 message over 64 KiB, 4408 no message
+  for 60 s. At most 64 subscriptions per socket.
+- Settle rule of `Live.mutate`: on `Ok` the client sends `sync` for the
+  subscription; the server answers `synced` behind the latest state of the
+  subscription on that socket. The action publishes before it answers, so
+  that state holds the change, in whatever order the HTTP answer and the
+  socket message arrive. While the socket is down, `sync` follows the next
+  `sub`.
+- Token: `Server.ADAPTER.csrf_token`; the first `Live.use` of a render
+  writes it as the answer `l:csrf`, so a page with no live use asks no
+  token. The server `hello` carries a fresh token for the next `hello`.
+  Sessions and the secret must be shared by every node and survive a
+  restart (`cookie_sessions` and `set_secret` in the demo).
+- Client (`src/live.ml`): one socket per page, opened by the first use and
+  closed 2 s after the last; reconnect after 250, 500, 1000, 2000, 4000,
+  then 5000 ms (half to all of each, at random), reset by a server `hello`.
+  While `navigator.onLine` is false it waits for the `online` event or
+  5 s, whichever comes first (a headless Chrome in a sandbox reports
+  offline with a working network). Ping every 25 s; 10 s of silence after
+  a ping closes the socket. The client does not wait for the server's
+  close reply when it closes the socket itself: `yuka-dream` does not
+  answer a client close frame (see below), so the browser would stay in
+  `CLOSING` until its own timeout.
+- `yuka-dream`: `Yuka_dream.handler` answers `GET /_yuka/live` before the
+  request cycle. Calling `Dream.close_websocket` after the connection is
+  gone spins at 100% CPU (dream issue #467; in httpun-ws 0.2.0,
+  `Wsd.report_result` on `Closed` closes the writer without draining it).
+  So the socket is created with `~close:false` and `run` closes only a
+  live connection: never after `receive` gave `None` (the client closed),
+  and not after a timeout (4408) or a failed send or receive (1011). With
+  `~close:false` and no `close_websocket` call, Dream sends no close reply
+  to a client close frame (measured with a raw client against the demo,
+  dream 1.0.0~alpha8; with a call while the connection is alive the reply
+  `1000` is sent). Remaining risk until httpun-ws is fixed upstream (a PR
+  for camlworks/dream#467): a publish written to a client that reset its
+  connection just before can freeze the server at 100% CPU. README and
+  `yuka_dream.mli` say so.
+- Demo: the issue list on `Topics.issues` (key `All` or `Mine`) and the
+  properties panel on `Topics.issue`, both with `Live.mutate`;
+  `update_issue` and `create_issue` publish. The label chips above the list
+  read the query `Queries.labels` (remote data), which the list and the new
+  issue dialog invalidate.
+- Review fixes:
+  - Token renewal: each `pong` carries a fresh token; a first `Live.use`
+    takes the token of its page; on 4403 the client asks
+    `GET /_yuka/csrf` (request cycle, origin rule of the action call) once
+    and connects again. A refusal after that is final only for the uses of
+    that socket: a new use (after a navigation) connects again.
+  - Bounds: at most 256 replies wait on a slow socket (else close 1008);
+    `synced R` answers every `sync` up to `R`, so the server keeps one ref
+    per subscription. No `hello` within 10 s, or no message for 60 to 120 s,
+    closes 4408, with one timer per socket. `Server.Live.set_limits`
+    (default 16 sockets per session, 10,000 per process) closes 1013 over a
+    limit.
+  - A failed send or receive ends the socket and its subscriptions (1011).
+    The socket is closed once, by the protocol code, and never after the
+    client closed it.
+  - The entry key is the key decoded and encoded again
+    (`Topic.wire_key`), so `{"b":2,"a":1}` and `{"a":1,"b":2}` are one
+    entry.
+  - `allow` runs on each subscribe of each connection; a reconnect checks
+    again. `Server.Live.revoke` closes matching sockets with 4401 (logout,
+    permission change); until then a subscriber gets every publish.
+  - One exception guard (`Async.guard`; `Server.guarded` adds the app's
+    `reject`), one failure mapping, and `Answers.record_value` for the
+    token answer.
+- Measured (`dune build --profile=release @bench/live/bench-live`, one
+  machine under load): 25 issues 6 KB per message, publish to 100 sockets
+  under 1 ms; 500 issues 122 KB, 14 ms; 5000 issues 1.2 MB (over the 1 MiB
+  warning), encode 7 ms, publish to 100 sockets 142 ms.
 
 ## Error boundaries (2026-11-10)
 
@@ -1668,3 +1755,103 @@ router-gen: the manifest is a plain OCaml file, not mlx.
   in the server library as written (`test/cycle` writes `App.Pages.home`).
 - The build id (`~build` of `Routes_server.app`) is a digest of the
   printed expression, so it changes with the format.
+
+## Dev server (2026-11-10)
+
+Ticket 24; `.workplace/docs/app-spec.md` section 24, option A, level 1.
+
+- `yuka dev` is the native executable `yuka` (package `yuka`, library
+  `unix`, no Dream): the spec puts it in `yuka`, and it talks only to dune
+  and a child process, so `yuka-dream` users and other adapters get it.
+- It runs `dune build --watch TARGETS` with stdout and stderr in one pipe,
+  echoes every line, and reads the status lines: `Success, waiting for
+  filesystem changes...` and `Had N errors, waiting...` (the lines in
+  between, after `NEW BUILD`, are the error text). No dune RPC: the line
+  is enough, and RPC needs the `dune-rpc` library.
+- State: a file (`--state`, default `_build/.yuka-dev`), one JSON line
+  `{"build":B,"page":P,"error":E}`, written by rename. `build` counts the
+  builds that changed something, `page` is the last that needs a reload.
+  On success: the server executable's stamp (mtime and size) changed, the
+  server exited, or the first build: stop and start the server,
+  `page = build`; else files under `--assets` changed: `build + 1`, and
+  `page = build` unless all are `.css`. On failure: the same numbers with
+  the error. The server is started with `YUKA_DEV=1` and
+  `YUKA_DEV_FILE=<state>`; the spec's `YUKA_DEV_BUILD` is not needed,
+  since the server reads the file.
+- Server: `config` reads `YUKA_DEV` (so nothing changes in the app).
+  `/_yuka/dev` is a `Stream` that sends the file's line (newlines joined)
+  when it differs from the last one, checking every 0.25 s with the
+  adapter's `sleep`; a closed connection ends it through the failed
+  write. Full pages (not navigation answers) get the script in the head,
+  with the state at render time, `<` escaped.
+- Browser script (inline, about 1.2 KB, only in dev pages): an
+  `EventSource`; `page` above the page's: save `scrollY` in
+  `sessionStorage` and reload (restored on `load`); `build` above: add
+  `?v=build` to each `link rel=stylesheet` that is not a `[%yuka.css]`
+  sheet (those change their class names, so they come with a page build);
+  `error`: a fixed `<pre id="yuka-dev-error">`, removed by the next state
+  without one. A restarted server makes `EventSource` reconnect; the first
+  event then carries the new numbers.
+- Production: no route, no script, no client module; `make size` and
+  `make measure-pages` do not change.
+- Review fixes:
+  - A change under `--assets` restarts the server, unless only `.css`
+    files changed; the server reads the manifest, the metafile and the
+    build id at start.
+  - `/_yuka/dev` is a callback loop with no growing chain. It sends
+    `: ping` after 15 s without a change, ends on the first failed
+    write, and answers `HEAD` with headers only.
+  - The state has a random `session` per `yuka dev` run; a page that sees
+    another session reloads.
+  - The CSS swap keeps other origins as they are and writes `u.href`.
+  - The watched executable is looked up in `PATH`, or named with
+    `--watch-exe`.
+  - Any exception in the loop stops the server and dune. The state
+    directory is made with all its parents.
+  - `stop` keeps the pid until the process is reaped and retries
+    `waitpid` on `EINTR`. A signal during a restart then stops the old
+    server (also after `SIGKILL`) and starts no second one.
+  - Deleted asset files count as changes.
+  - `json_string` is shared in `gen/source_text.ml`.
+  - The state file is read through `Web.read_file`, which is native only,
+    so the cycle has no channel primitives for Melange.
+  - A prerender uses `Server.prerender_config` (`YUKA_DEV` ignored), and
+    with `YUKA_DEV` prerendered routes render live.
+
+
+## Server rendering speed (2026-11-10)
+
+Ticket 31. The printer and the request cycle changed; the HTML is byte for
+byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
+
+- Text and attribute values are escaped straight into the output buffer;
+  a value with nothing to escape is copied once.
+- An element prints its attributes from its attribute list. Only `a`
+  (`aria-current`), `option` (`selected`), `select` and `textarea`
+  (`value`) build the resolved list.
+- The output buffer is reused between renders: `Web.take_buffer` and
+  `Web.give_buffer`, behind a `Mutex` on the server (system threads of one
+  domain, and several domains, share the pool; `test/threads` renders on 16
+  threads) and a plain list in the browser. A buffer that grew past
+  256 KB during a render (even if truncated later) is not kept.
+  `printer.ml` uses no `Mutex` or `Domain` itself: a module with a
+  top-level side effect reached from `yuka.js` would pull them and
+  `Printf` into every client bundle.
+- A template has an `ops` field: on the server, the first instance compiles
+  the shape into static HTML chunks (tags with fixed attributes, escaped
+  fixed text) and slots for its parts; later instances print the chunks
+  and the parts with no `Element` tree. Parts that need state stay
+  dynamic: a fixed text (the `<!---->` rule between texts), an element
+  with a part attribute, `a`, and the whole subtree of `select`, `option`
+  and `textarea`. A part that is the only child of its element is printed
+  as `contents` prints it (a hole there has no markers).
+- The cycle keeps the head and the shell as a list of strings. When
+  nothing is pending after the shell, the page is answered as one string
+  (with `Content-Length`); otherwise it streams as before. A `HEAD` renders
+  the page like `GET` and sends the same headers with no body: the length
+  of the string, or a stream with no content. Before, a `HEAD` did not
+  call the page body and sent `Content-Length: 0`.
+- One escape (`Template_build.add_escaped`, and `escape` built on it), one
+  expansion of a shape (`Template.expand_shape`, used by `expand` and by
+  the printer for `select`, `option` and `textarea`), one test of the tags
+  that need the resolved attributes (`needs_special`).

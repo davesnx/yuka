@@ -130,5 +130,19 @@ val table_clear : 'a table -> unit
 val shortest_float : float -> string
 val parse_float : string -> float
 val parse_int : string -> int option
+
+type socket
+
+val socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket
+val socket_send : socket -> string -> unit
+val socket_close : socket -> int -> unit
+val live_url : unit -> string
+val online : unit -> bool
+val on_online : (unit -> unit) -> unit -> unit
+val random : unit -> float
+val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val adopt_stylesheets : unit -> unit
+val read_file : string -> string option
+val take_buffer : unit -> Buffer.t option
+val give_buffer : Buffer.t -> unit

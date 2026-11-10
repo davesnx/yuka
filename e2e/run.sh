@@ -12,13 +12,15 @@ if [ "${BUNDLE:-}" = 1 ]; then
   mode=bundle
   flags=--bundle
 fi
+pidfile="${TMPDIR:-/tmp}/yuka_e2e_server.pid"
 "$root/$build/default/demo/server/demo_server.exe" --port "$port" $flags >"${TMPDIR:-/tmp}/yuka_e2e_server.log" 2>&1 &
-server=$!
-trap 'kill $server 2>/dev/null' EXIT INT TERM
+echo $! >"$pidfile"
+trap 'kill $(cat "$pidfile") 2>/dev/null' EXIT INT TERM
 i=0
 until curl -s -o /dev/null "http://127.0.0.1:$port/"; do
   i=$((i + 1))
   [ $i -gt 50 ] && { echo "server did not start"; exit 2; }
   sleep 0.1
 done
-node "$root/e2e/demo.ts" "http://127.0.0.1:$port" "$mode"
+YUKA_E2E_SERVER="$root/$build/default/demo/server/demo_server.exe --port $port $flags" YUKA_E2E_PIDFILE="$pidfile" \
+  node "$root/e2e/demo.ts" "http://127.0.0.1:$port" "$mode"

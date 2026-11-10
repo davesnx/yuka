@@ -46,7 +46,16 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     plan : Template_build.plan;
     mutable in_html : cache;
     mutable in_svg : cache;
+    mutable ops : op array;
   }
+
+  and op =
+    | Raw of string
+    | Static_text of string
+    | Child_part of int
+    | Only_part of int
+    | Open of string * fixed_attr list
+    | Subtree of shape
 
   and shape = Template_build.shape =
     | Fixed_text of string
@@ -113,6 +122,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable answered : string list;
     mutable select_value : string option;
     mutable form : (string * string * (string * string) list * (string option * string) list) option;
+    mutable csrf : (unit -> string) option;
     mutable sheets : string list;
     mutable held : string list;
   }
@@ -122,7 +132,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        sheets; held } =
+        csrf; sheets; held } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -139,6 +149,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     s.answers <- answers;
     s.answered <- answered;
     s.form <- form;
+    s.csrf <- csrf;
     s.sheets <- sheets;
     s.held <- held
 

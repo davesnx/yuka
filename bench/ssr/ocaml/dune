@@ -2,13 +2,35 @@
  (name ssr_data)
  (modules data))
 
+(library
+ (name ssr_view)
+ (modules ssr_view)
+ (libraries ssr_data yuka dream)
+ (preprocess
+  (pps yuka.ppx)))
+
 (executables
- (names yuka_ssr dream_concat)
- (modules yuka_ssr dream_concat)
- (libraries ssr_data yuka yuka-dream dream lwt lwt.unix)
+ (names yuka_ssr dream_concat golden render)
+ (modules yuka_ssr dream_concat golden render)
+ (libraries ssr_data ssr_view yuka yuka-dream dream lwt lwt.unix unix)
  (preprocess
   (per_module
    ((pps yuka.ppx) yuka_ssr))))
+
+(rule
+ (enabled_if
+  (<> %{profile} release))
+ (action
+  (with-stdout-to
+   golden.out
+   (run %{exe:golden.exe}))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (<> %{profile} release))
+ (action
+  (diff golden.expected golden.out)))
 
 (executable
  (name srr)

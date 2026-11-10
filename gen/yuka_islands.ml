@@ -145,20 +145,7 @@ let parse_args args =
 
 let sorted islands = List.sort (fun a b -> compare a.name b.name) islands
 
-let json_string s =
-  let b = Buffer.create (String.length s + 2) in
-  Buffer.add_char b '"';
-  String.iter
-    (fun c ->
-      match c with
-      | '"' -> Buffer.add_string b "\\\""
-      | '\\' -> Buffer.add_string b "\\\\"
-      | c when Char.code c < 0x20 ->
-          Buffer.add_string b (Printf.sprintf "\\u%04x" (Char.code c))
-      | c -> Buffer.add_char b c)
-    s;
-  Buffer.add_char b '"';
-  Buffer.contents b
+let json_string = Source_text.json_string
 
 let render_manifest islands =
   match sorted islands with

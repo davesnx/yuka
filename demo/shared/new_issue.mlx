@@ -26,7 +26,7 @@ let%client make () =
            <h2>"New issue"</h2>
            <Yuka.Form action=Actions.create_issue
              on_ok=(fun _ ->
-               Remote.invalidate Queries.issues;
+               Remote.invalidate Queries.labels;
                close ())>
              (fun form ->
                <div>

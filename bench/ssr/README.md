@@ -33,9 +33,18 @@ It builds `ocaml/` with `--profile=release`, runs `npm ci` in `node/` once,
 then `node bench/ssr/run.ts`. For each candidate: start the server, 5 s of
 `wrk` warm-up, 3 rounds of `wrk -t4 -c32 -d10s --latency`, report the median.
 Options of `run.ts`: `--rows`, `--connections`, `--threads`, `--duration`,
-`--warmup`, `--rounds`, `--only <names>`, `--out`. Make variables: `SSR_ROWS`,
-`SSR_CONNECTIONS`. The JSON goes to `$(BUILD_DIR)/bench-ssr/result.json`,
-with each round and the load average at its end.
+`--warmup`, `--rounds`, `--only <names>`, `--out`, `--interleave` (each round
+runs every candidate once, so load changes hit all of them; the table gives
+the median, min and max), `--baseline-build-dir <dir>` (adds
+`yuka-page-baseline` and `yuka-stream-baseline` from another build, for
+before/after). Make variables: `SSR_ROWS`, `SSR_CONNECTIONS`. The JSON goes to
+`$(BUILD_DIR)/bench-ssr/result.json`, with each round and the load average
+at its end.
+
+`ocaml/golden.expected` is the full HTML of the page (document and request
+cycle); `dune build @runtest` compares it, so a speed change cannot change
+the bytes. `ocaml/render.exe [N]` times N renders in process, with no HTTP,
+and prints microseconds and words allocated per page.
 
 Needs `wrk` on the `PATH`. `server-reason-react` is skipped when the opam
 switch does not have it.
@@ -60,3 +69,21 @@ from 77 to 45 during the run, and the candidates ran one after the other, so
 a difference under about 10% between two candidates is not a result. A
 second run 10 minutes later (load average 62 -> 43) gave req/s within 4% of
 these for each candidate: 13631, 3885, 4157, 6575, 3262, 7967.
+
+## After ticket 31
+
+2026-11-10, same machine, load average 45 -> 54. `run.ts --interleave
+--rounds 5 --warmup 3`, 100 rows, `wrk -t4 -c32 -d10s`; `*-baseline` is
+main before ticket 31 (dbabadd).
+
+| candidate | median req/s | min | max |
+| --- | ---: | ---: | ---: |
+| dream-concat | 14144 | 13546 | 14587 |
+| yuka-page | 10484 | 10312 | 10569 |
+| yuka-stream | 11429 | 11178 | 11466 |
+| server-reason-react | 6493 | 6399 | 6567 |
+| solid-node | 7545 | 7245 | 7708 |
+| yuka-page-baseline | 3951 | 3883 | 3994 |
+| yuka-stream-baseline | 3548 | 3537 | 3630 |
+
+Profile and steps: `.workplace/docs/31-ssr-profile.md` (local notes).

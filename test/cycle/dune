@@ -2,4 +2,4 @@
  (name run)
  (package yuka)
  (modules run)
- (libraries alcotest yuka cycle_shared cycle_server))
+ (libraries alcotest unix yuka cycle_shared cycle_server))
