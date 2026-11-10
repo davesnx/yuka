@@ -31,6 +31,9 @@ only the parts that read a signal update.
 - Codecs: `[@@deriving codec]` for props and action data.
 - Actions: declare once, call from the client, run on the server.
 - Router: typed paths shared by server and client (`Yuka.Router`).
+- Routes: one `Routes.mlx` tree. The `yuka-routes` generator turns it into a
+  `Routes` module with the route type, a typed `href` and the matcher
+  (in progress: the request cycle does not use it yet).
 - One library, `yuka`. A Melange entry also lists `yuka.js`, the browser
   implementation of the DOM bindings.
 
@@ -191,6 +194,48 @@ open through the `modulepreload` link that `~preload` prints (without
 only at the trigger, write
 ``<Yuka.Client loading=(`Lazy `Visible)>``. Lazy is chosen where the island is
 used, not in the island.
+
+### Routes
+
+`Routes.mlx` holds the route tree. It is read by the generator, not compiled:
+
+```ocaml
+let routes =
+  <Router>
+    <Route name=Home path="/" page=Pages.home />
+    <Group path="/issue/:id<Issue_id>" loader=Loaders.issue>
+      <Route name=Issue path="/" page=Pages.issue search={ tab = optional Tab } />
+      <Action name=Close path="/close" method_=`POST handler=Actions.close />
+    </Group>
+    <Route name=Doc path="/docs/:parts<string...>" page=Pages.doc />
+    <Route path="/i/:id<Issue_id>" redirect=(Permanent "/issue/:id") />
+  </Router>
+```
+
+Two dune rules in the shared library (native and Melange) write `routes.ml`:
+
+```
+(rule
+ (targets routes.ast)
+ (deps ../Routes.mlx)
+ (action (with-stdout-to routes.ast (run %{bin:mlx-pp} %{deps}))))
+
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to routes.ml
+   (run %{bin:yuka-routes} --shared %{dep:routes.ast}))))
+```
+
+The module has `type t = Home | Issue of { id : Issue_id.t; tab : Tab.t option } | ...`,
+`href : t -> string` and `find : Yuka.Router.meth -> string list -> (string * string) list -> t Yuka.Router.lookup`.
+A param type is `int`, `string`, `string...` (catch-all, last segment) or a
+module with `of_string` and `to_string` (`Yuka.Router.PARAM`). Search fields
+are `optional T`, `default T value` or `many T`. Two nodes with the same path
+shape and a common method fail the build with a location in `Routes.mlx`.
+Otherwise the more specific path wins: a static segment before a param, a
+param before a catch-all. A client that calls only `href` does not contain
+`find`.
 
 ## Getting started
 

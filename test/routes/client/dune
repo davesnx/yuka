@@ -1,0 +1,18 @@
+(melange.emit
+ (target out)
+ (alias routes-client)
+ (libraries routes_fixture yuka yuka.js)
+ (module_systems
+  (es6 js)))
+
+(rule
+ (alias runtest)
+ (deps
+  (alias routes-client)
+  check.mts)
+ (action
+  (run
+   node
+   check.mts
+   out/test/routes/client/href_only.js
+   out/test/routes/client/find_entry.js)))

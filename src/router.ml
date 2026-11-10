@@ -81,6 +81,27 @@ let is_int text =
   String.iteri (fun i c -> if i >= start && (c < '0' || c > '9') then ok := false) text;
   !ok
 
+let int_param text = if is_int text then int_of_string_opt text else None
+
+let search (query : (string * string) list) (key : string) =
+  List.filter_map (fun (k, v) -> if k = key then Some v else None) query
+
+type meth =
+  [ `GET | `HEAD | `POST | `PUT | `PATCH | `DELETE | `OPTIONS | `Other of string ]
+
+type 'r lookup =
+  | Found of 'r
+  | Wrong_method of meth list
+  | Redirect of { permanent : bool; location : string }
+  | Missing
+
+module type PARAM = sig
+  type t
+
+  val of_string : string -> t option
+  val to_string : t -> string
+end
+
 let rec walk : type a r. (a, r) t -> string list -> a -> (string list * r) option =
  fun path segs f ->
   match path with

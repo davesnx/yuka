@@ -1096,3 +1096,53 @@ the budget in `bench/size/budget.json`.
   sorts by level with a small stable merge sort, and uses two lists as its
   queue.
 
+## Routes.mlx generator (2026-11-10)
+
+Spec: `.workplace/docs/routes-spec.md`. Built: increment 1, the generator
+and the shared module. The request cycle, `yuka-dream`, the demo migration
+and navigation come later. The GADT `Yuka.Router` stays until then.
+
+- `gen/routes/yuka_routes.ml` (`yuka-routes`, package `yuka`, library
+  `ppxlib`) reads the binary AST that `mlx-pp` writes, finds
+  `let routes = <Router>...</Router>` and prints the module `Routes` as
+  text. Copied expressions (`default` values) go through `Pprintast`.
+  Only `--shared` exists; `--server` comes with the request cycle.
+- Output: `type t` (one constructor per named node, file order; fields are
+  params in path order, then search fields), `with_query` (only when a
+  route has search fields), `href` and `find`.
+- `href`: static segments are encoded when the generator runs; params with
+  `Yuka.Router.encode` (`int` with `string_of_int`, a custom type through
+  `M.to_string`); a catch-all adds `/` and one encoded segment per element,
+  so `[]` gives the path without it. Search fields at their absent value
+  (`None`, the default, `[]`) are left out; the others follow as
+  `?k=v&...` in field order.
+- `find meth path query`: one `match` on the decoded segment list. Nodes
+  with the same path shape share one case and a `match meth`; `` `GET ``
+  also takes `` `HEAD ``; other methods give `Wrong_method` with the
+  methods of the path in file order. Cases are sorted by segment kind
+  (static, param, catch-all) at the first position where they differ, so
+  OCaml's first match is the most specific path. `int` and custom params
+  decode inside the case; `None` gives `Missing`, with no fall-through to
+  a less specific case. A redirect node matches every method and returns
+  `Redirect` with its params substituted and encoded.
+- Build errors, all with a location in `Routes.mlx`: two nodes with one
+  path shape and a common method (a redirect has every method); a name used
+  twice; a label used twice in a branch (params, search fields and loader
+  results are one set); an unknown redirect param; an `Action` with
+  `` `GET ``; a bad path (no leading `/`, empty, `.` or `..` segment,
+  `% ? #` in a static segment, unknown param type, catch-all not last or in
+  a `Group`); unknown node or prop; a missing prop; children on a leaf; a
+  `prerender` that is not `true` or `false`.
+- New in `Yuka.Router`: `meth`, `lookup`, `PARAM`, `encode`, `int_param`,
+  `search`.
+- Size: `find` is a top-level function that a client which calls only
+  `href` does not name, so esbuild drops it (checked by
+  `test/routes/client/check.mts`). `Yuka.Router` is a JavaScript object, so
+  `href` keeps all of `router.js` (about 2.5 KB minified, most of it the
+  GADT) until the GADT goes. `Router.search` compares keys as strings, so it
+  does not pull `caml_obj`.
+- Tests: `test/routes/fixture` builds a fixture `Routes.mlx` with every
+  segment, search and node kind through the dune rules; a `diff` rule
+  checks the generated code; `test/routes/run.ml` checks `href`, `find`
+  and the round trip `find (href r) = Found r`; `gen/routes/test/errors.t`
+  has one case per build error.

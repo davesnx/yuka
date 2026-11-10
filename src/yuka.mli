@@ -613,6 +613,46 @@ module Router : sig
 
   val dispatch : 'r case list -> string -> 'r option
   (** The result of the first case that matches the target. *)
+
+  (** {2 Members used by the code that [yuka-routes] generates} *)
+
+  type meth =
+    [ `GET | `HEAD | `POST | `PUT | `PATCH | `DELETE | `OPTIONS | `Other of string ]
+  (** A request method. *)
+
+  (** The result of the generated [Routes.find]. *)
+  type 'r lookup =
+    | Found of 'r  (** A node matches the path and the method. *)
+    | Wrong_method of meth list
+        (** A node matches the path but not the method. The list holds the
+            methods of the path, in file order. [`GET] stands for [`HEAD]
+            too. *)
+    | Redirect of { permanent : bool; location : string }
+        (** A redirect node matches the path. [location] has its params
+            substituted and encoded. *)
+    | Missing  (** No node matches, or a param does not decode. *)
+
+  (** A custom param or search type, written [:id<M>] in a path. *)
+  module type PARAM = sig
+    type t
+
+    val of_string : string -> t option
+    (** [None] means the path does not match. *)
+
+    val to_string : t -> string
+  end
+
+  val encode : string -> string
+  (** Percent-encodes one path segment or one query part. Only
+      [A-Z a-z 0-9 - . _ ~] stay as they are. *)
+
+  val int_param : string -> int option
+  (** Decodes an [int] param: an optional [-] and digits only, within the
+      range of [int]. *)
+
+  val search : (string * string) list -> string -> string list
+  (** [search query key] is every value of [key] in the decoded query pairs,
+      in order. *)
 end
 
 val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit

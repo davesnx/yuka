@@ -1,0 +1,232 @@
+open Alcotest
+open Routes_fixture
+module R = Yuka.Router
+
+let meth_name : R.meth -> string = function
+  | `GET -> "GET"
+  | `HEAD -> "HEAD"
+  | `POST -> "POST"
+  | `PUT -> "PUT"
+  | `PATCH -> "PATCH"
+  | `DELETE -> "DELETE"
+  | `OPTIONS -> "OPTIONS"
+  | `Other m -> m
+
+let pp_lookup ppf = function
+  | R.Found r -> Format.fprintf ppf "Found %s" (Routes.href r)
+  | R.Wrong_method ms ->
+      Format.fprintf ppf "Wrong_method [%s]" (String.concat "; " (List.map meth_name ms))
+  | R.Redirect { permanent; location } ->
+      Format.fprintf ppf "Redirect %b %s" permanent location
+  | R.Missing -> Format.fprintf ppf "Missing"
+
+let lookup = testable pp_lookup ( = )
+
+let hex c =
+  match c with
+  | '0' .. '9' -> Char.code c - 48
+  | 'A' .. 'F' -> Char.code c - 55
+  | 'a' .. 'f' -> Char.code c - 87
+  | _ -> failwith "hex"
+
+let decode s =
+  let b = Buffer.create (String.length s) in
+  let i = ref 0 in
+  while !i < String.length s do
+    if s.[!i] = '%' then begin
+      Buffer.add_char b (Char.chr ((hex s.[!i + 1] * 16) + hex s.[!i + 2]));
+      i := !i + 3
+    end
+    else begin
+      Buffer.add_char b s.[!i];
+      incr i
+    end
+  done;
+  Buffer.contents b
+
+let find ?(meth = `GET) target =
+  let path = match String.index_opt target '?' with Some i -> String.sub target 0 i | None -> target in
+  let segments =
+    String.split_on_char '/' path |> List.filter (fun s -> s <> "") |> List.map decode
+  in
+  Routes.find meth segments (R.query target)
+
+let t name f = test_case name `Quick f
+
+let blog = Routes.Blog { lang = None; tag = None; page = 1; label = []; draft = false }
+
+let issue =
+  Routes.Issue { id = 12; tab = None; seen = []; view = Params.Tab.Overview }
+
+let samples : (R.meth * Routes.t) list =
+  [
+    (`GET, Home);
+    (`GET, blog);
+    ( `GET,
+      Blog
+        { lang = Some "fr"; tag = Some "a b&c=d"; page = -3; label = [ "x"; "y/z" ]; draft = true }
+    );
+    (`GET, New_post { lang = None });
+    (`GET, New_post { lang = Some "en" });
+    (`GET, Post { slug = "a/b c?#\xc3\xa9"; lang = None });
+    (`GET, Post { slug = "news"; lang = Some "de" });
+    (`GET, issue);
+    (`GET, Issue { id = 7; tab = Some Activity; seen = [ 1; -2 ]; view = Activity });
+    (`POST, Close_issue { id = 3 });
+    (`GET, Issue_json { id = 3 });
+    (`PUT, Update_issue { id = 3 });
+    (`GET, Page_n { n = 0 });
+    (`GET, Page_n { n = -5 });
+    (`GET, Cafe);
+    (`GET, Doc { parts = [ "a b"; "c"; "%" ] });
+    (`GET, Feed);
+    (`DELETE, Clear_feed);
+  ]
+
+let href_cases =
+  let check_href name expected route = check string name expected (Routes.href route) in
+  [
+    t "static and root" (fun () ->
+        check_href "root" "/" Home;
+        check_href "endpoint" "/feed.xml" Feed;
+        check_href "action on the same path" "/feed.xml" Clear_feed);
+    t "params are encoded" (fun () ->
+        check_href "string" "/blog/a%2Fb%20c%3F%23%C3%A9"
+          (Post { slug = "a/b c?#\xc3\xa9"; lang = None });
+        check_href "int" "/page/-5" (Page_n { n = -5 });
+        check_href "custom" "/issue/YUK-3/close" (Close_issue { id = 3 }));
+    t "static segment is encoded" (fun () -> check_href "cafe" "/caf%C3%A9" Cafe);
+    t "catch-all" (fun () ->
+        check_href "parts" "/docs/a%20b/c%2Fd" (Doc { parts = [ "a b"; "c/d" ] });
+        check_href "empty" "/docs" (Doc { parts = [] }));
+    t "search at its absent value is left out" (fun () ->
+        check_href "blog" "/blog" blog;
+        check_href "issue" "/issue/YUK-12" issue);
+    t "search in field order, encoded" (fun () ->
+        check_href "blog" "/blog?lang=fr&tag=a%20b%26c&page=2&label=x&label=y%2Fz&draft=true"
+          (Blog
+             { lang = Some "fr"; tag = Some "a b&c"; page = 2; label = [ "x"; "y/z" ]; draft = true });
+        check_href "custom types"
+          "/issue/YUK-12?tab=activity&seen=1&seen=-2&view=activity"
+          (Issue { id = 12; tab = Some Activity; seen = [ 1; -2 ]; view = Activity }));
+    t "group search on every route below" (fun () ->
+        check_href "new" "/blog/new?lang=en" (New_post { lang = Some "en" });
+        check_href "post" "/blog/x?lang=en" (Post { slug = "x"; lang = Some "en" }));
+  ]
+
+let round_trip =
+  [
+    t "find (href r) is r for every sample" (fun () ->
+        List.iter
+          (fun (meth, r) ->
+            let target = Routes.href r in
+            check lookup (meth_name meth ^ " " ^ target) (R.Found r) (find ~meth target))
+          samples);
+    t "every constructor has a sample" (fun () ->
+        let name : Routes.t -> string = function
+          | Home -> "Home"
+          | Blog _ -> "Blog"
+          | New_post _ -> "New_post"
+          | Post _ -> "Post"
+          | Issue _ -> "Issue"
+          | Close_issue _ -> "Close_issue"
+          | Issue_json _ -> "Issue_json"
+          | Update_issue _ -> "Update_issue"
+          | Page_n _ -> "Page_n"
+          | Cafe -> "Cafe"
+          | Doc _ -> "Doc"
+          | Feed -> "Feed"
+          | Clear_feed -> "Clear_feed"
+        in
+        let names = List.sort_uniq compare (List.map (fun (_, r) -> name r) samples) in
+        check int "constructors" 13 (List.length names));
+  ]
+
+let found (r : Routes.t) = R.Found r
+
+let find_cases =
+  [
+    t "static before param" (fun () ->
+        check lookup "new" (found (New_post { lang = None })) (find "/blog/new");
+        check lookup "news" (found (Post { slug = "news"; lang = None })) (find "/blog/news"));
+    t "catch-all needs one segment" (fun () ->
+        check lookup "none" R.Missing (find "/docs");
+        check lookup "one" (found (Doc { parts = [ "a" ] })) (find "/docs/a");
+        check lookup "decoded" (found (Doc { parts = [ "a/b"; "c" ] })) (find "/docs/a%2Fb/c"));
+    t "int is strict" (fun () ->
+        List.iter
+          (fun s -> check lookup s R.Missing (find ("/page/" ^ s)))
+          [ "1a"; "-"; "+5"; "0x10"; "1.0"; "99999999999999999999999" ];
+        check lookup "-5" (found (Page_n { n = -5 })) (find "/page/-5");
+        check lookup "007" (found (Page_n { n = 7 })) (find "/page/007"));
+    t "custom param None is Missing" (fun () ->
+        check lookup "abc" R.Missing (find "/issue/abc");
+        check lookup "zero" R.Missing (find "/issue/YUK-0");
+        check lookup "action" R.Missing (find ~meth:`POST "/issue/abc/close"));
+    t "wrong method lists the methods of the path" (fun () ->
+        check lookup "page" (R.Wrong_method [ `GET ]) (find ~meth:`POST "/");
+        check lookup "two" (R.Wrong_method [ `GET; `DELETE ]) (find ~meth:`PUT "/feed.xml");
+        check lookup "group" (R.Wrong_method [ `GET; `PUT ]) (find ~meth:`DELETE "/issue/YUK-1/json");
+        check lookup "action" (R.Wrong_method [ `POST ]) (find "/issue/YUK-1/close");
+        check lookup "other" (R.Wrong_method [ `GET ]) (find ~meth:(`Other "TRACE") "/page/1"));
+    t "HEAD answers like GET" (fun () ->
+        check lookup "page" (found Home) (find ~meth:`HEAD "/");
+        check lookup "endpoint" (found Feed) (find ~meth:`HEAD "/feed.xml"));
+    t "redirects substitute and encode params, for every method" (fun () ->
+        let moved = R.Redirect { permanent = true; location = "/issue/YUK-7" } in
+        check lookup "GET" moved (find "/i/YUK-7");
+        check lookup "POST" moved (find ~meth:`POST "/i/YUK-7");
+        check lookup "bad param" R.Missing (find "/i/x");
+        check lookup "catch-all"
+          (R.Redirect { permanent = false; location = "/docs/a%20b/c" })
+          (find "/old-docs/a%20b/c");
+        check lookup "static"
+          (R.Redirect { permanent = false; location = "/blog" })
+          (find ~meth:`DELETE "/legacy-blog"));
+    t "search decoding" (fun () ->
+        let blog ?(tag = None) ?(page = 1) ?(label = []) ?(draft = false) () =
+          found (Blog { lang = None; tag; page; label; draft })
+        in
+        check lookup "bad int is the default" (blog ()) (find "/blog?page=x");
+        check lookup "first value" (blog ~page:3 ()) (find "/blog?page=3&page=4");
+        check lookup "bad bool is the default" (blog ()) (find "/blog?draft=yes");
+        check lookup "bool" (blog ~draft:true ()) (find "/blog?draft=true");
+        check lookup "empty string is a value" (blog ~tag:(Some "") ()) (find "/blog?tag=");
+        check lookup "many, unknown keys ignored"
+          (blog ~label:[ "a"; "b c" ] ())
+          (find "/blog?label=a&x=1&label=b+c");
+        check lookup "custom optional bad, many skips bad, default bad"
+          (found (Routes.Issue { id = 1; tab = None; seen = [ 1; 3 ]; view = Overview }))
+          (find "/issue/YUK-1?tab=nope&seen=1&seen=x&seen=3&view=bad");
+        check lookup "group search"
+          (found (New_post { lang = Some "fr" }))
+          (find "/blog/new?lang=fr"));
+    t "no match" (fun () ->
+        check lookup "unknown" R.Missing (find "/nope");
+        check lookup "too long" R.Missing (find "/blog/a/b");
+        check lookup "prefix only" R.Missing (find "/issue"));
+  ]
+
+let router_cases =
+  [
+    t "encode" (fun () ->
+        check string "reserved" "a%2Fb%20c%3F%23%C3%A9%26%3D%2B" (R.encode "a/b c?#\xc3\xa9&=+");
+        check string "unreserved" "AZaz09-._~" (R.encode "AZaz09-._~"));
+    t "int_param" (fun () ->
+        check (option int) "neg" (Some (-12)) (R.int_param "-12");
+        check (option int) "empty" None (R.int_param "");
+        check (option int) "space" None (R.int_param " 1"));
+    t "search" (fun () ->
+        check (list string) "all values" [ "1"; "3" ]
+          (R.search [ ("a", "1"); ("b", "2"); ("a", "3") ] "a");
+        check (list string) "absent" [] (R.search [ ("a", "1") ] "z"));
+  ]
+
+let () =
+  run "routes"
+    [
+      ("href", href_cases);
+      ("round trip", round_trip);
+      ("find", find_cases);
+      ("Yuka.Router", router_cases);
+    ]

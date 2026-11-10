@@ -1,0 +1,2 @@
+(cram
+ (deps %{bin:yuka-routes} %{bin:mlx-pp}))

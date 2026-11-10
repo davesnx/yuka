@@ -1,0 +1,5 @@
+(executable
+ (name yuka_routes)
+ (public_name yuka-routes)
+ (package yuka)
+ (libraries ppxlib))
