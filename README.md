@@ -27,6 +27,8 @@ only the parts that read a signal update.
 - Server rendering and hydration from one element tree, on native and Melange.
 - Streaming with `<Yuka.Await>`: send the page shell first, fill in the rest later.
 - Error boundaries with `<Yuka.Catch>` and loading states with `<Yuka.Show>`.
+- Client navigation with prefetch on hover, a cache that follows each page's
+  `Cache-Control`, and optional view transitions.
 - Islands: `let%client` components with a start strategy (`Load`, `Idle`,
   `Visible`, `Interaction`) and lazy loading chosen where the island is used.
 - Codecs: `[@@deriving codec]` for props and action data.
@@ -159,6 +161,34 @@ manifest (without a manifest entry, an island downloads when it starts). To down
 only at the trigger, write
 ``<Yuka.Client loading=(`Lazy `Visible)>``. Lazy is chosen where the island is
 used, not in the island.
+
+### Prefetch, cache and transitions
+
+With navigation on, a link is prefetched 50 ms after the pointer or the
+focus enters it, or at once on pointer down; the click then uses that
+answer. A page whose rule gives `max-age=N` is kept for N seconds (also for
+back and forward); a `no-store` page is used once, from a prefetch less than
+10 s old. A successful action call empties the cache.
+
+```ocaml
+let () = Yuka.mount ~prefetch:`Hover ~transitions:true ()
+```
+
+```ocaml
+<a href=(Routes.href (Issue { id })) data_yuka_prefetch="visible">...</a>
+<a href="/export.csv" data_yuka_prefetch="off">...</a>
+```
+
+`~prefetch:`Visible` prefetches every link when it becomes visible, and
+`~prefetch:`Off` turns prefetch off. With `~transitions:true` each client
+navigation runs in a view transition, and `<html>` has
+`data-yuka-nav="push"`, `"back"` or `"forward"` for CSS. A page with no
+island has no client navigation; this CSS rule gives it cross-document
+transitions with no JavaScript:
+
+```css
+@view-transition { navigation: auto; }
+```
 
 ### Errors and loading states
 

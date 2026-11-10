@@ -1,1 +1,1 @@
-let () = Yuka.mount ()
+let () = Yuka.mount ~transitions:true ()

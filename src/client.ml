@@ -657,7 +657,9 @@ let transport name input =
       match Json.of_string body with
       | Ok (`Assoc fields) -> (
           match (field "ok" fields, field "error" fields) with
-          | Some value, _ -> resolve value
+          | Some value, _ ->
+              !Platform.acted ();
+              resolve value
           | None, Some (`String message) -> fail message
           | None, _ ->
               fail

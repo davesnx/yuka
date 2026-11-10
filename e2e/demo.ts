@@ -44,9 +44,9 @@ page.on("response", (r) => {
   responses.push(r);
   if (r.status() >= 400 && r.status() !== expectedFailures) failedRequests.push(`${r.status()} ${r.url()}`);
 });
-const allRequests: { url: string; t: number; navigate: boolean; keys?: string }[] = [];
+const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch: boolean }[] = [];
 page.on("request", (r) =>
-  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"] }),
+  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"], prefetch: r.headers()["yuka-prefetch"] === "1" }),
 );
 const chunkRe = /\/(issue_props|related|comments)(-[^/]*)?\.js$/;
 const chunkRequests = (from: number) =>
@@ -272,14 +272,14 @@ await step("3c. partial navigation", async () => {
   check("3c.9 counter still kept", (await counter.textContent()) === "Clicks: 2");
   const y0 = await page.evaluate(() => Math.round(window.scrollY));
   check("3c.10 a new page starts at the top", y0 === 0, String(y0));
-  await page.goBack();
-  await page.waitForURL("**/issue/YUK-3");
-  await page.waitForSelector(".comment-input");
-  check("3c.11 back is partial too (counter kept)", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive");
   await page.route("**/my", async (route) => {
     const real = await route.fetch();
     await route.fulfill({ response: real, headers: { ...real.headers(), "yuka-build": "changed" } });
   });
+  await page.goBack();
+  await page.waitForURL("**/issue/YUK-3");
+  await page.waitForSelector(".comment-input");
+  check("3c.11 back is partial too (counter kept)", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive");
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
@@ -295,6 +295,66 @@ await step("3d. a page with no island loads no script", async () => {
   const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap").length);
   check("3d.1 /about requests no script and has no inline script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
   await pg.close();
+});
+
+await step("3e. prefetch and the navigation cache", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  const requestsTo = (from: number, path: string) => allRequests.slice(from).filter((r) => new URL(r.url).pathname === path);
+  const link = (id: string) => page.locator(`.row[data-id="${id}"] .row-title`);
+  let from = allRequests.length;
+  await link("YUK-5").hover();
+  await page.waitForTimeout(300);
+  const pre = requestsTo(from, "/issue/YUK-5");
+  check("3e.1 hover sends one prefetch", pre.length === 1 && pre[0].prefetch && pre[0].navigate, JSON.stringify(pre));
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__vt = [];
+    const real = (document as any).startViewTransition?.bind(document);
+    (document as any).startViewTransition = (f: () => void) => {
+      w.__vt.push(document.documentElement.getAttribute("data-yuka-nav"));
+      return real ? real(f) : (f(), { ready: Promise.resolve(), finished: Promise.resolve() });
+    };
+  });
+  await link("YUK-5").click();
+  await page.waitForURL("**/issue/YUK-5");
+  await page.waitForSelector(".comment-input");
+  const vt = await page.evaluate(() => (window as any).__vt);
+  check("3e.2a the navigation runs in a view transition (demo enables them)", JSON.stringify(vt) === '["push"]', JSON.stringify(vt));
+  const removed = await page
+    .waitForFunction(() => document.documentElement.getAttribute("data-yuka-nav") === null, null, { timeout: 3000 })
+    .then(() => true, () => false);
+  check("3e.2b data-yuka-nav is removed after the transition", removed);
+  check("3e.2 the click uses the prefetch", requestsTo(from, "/issue/YUK-5").length === 1, String(requestsTo(from, "/issue/YUK-5").length));
+  await page.goBack();
+  await page.waitForSelector(".row");
+  await page.mouse.move(1, 1);
+  from = allRequests.length;
+  await link("YUK-5").click();
+  await page.waitForURL("**/issue/YUK-5");
+  await page.waitForSelector(".comment-input");
+  const again = requestsTo(from, "/issue/YUK-5");
+  check("3e.3 a no-store page is fetched again", again.length === 1, JSON.stringify(again));
+  await page.goBack();
+  await page.waitForSelector(".row");
+  await page.mouse.move(1, 1);
+  from = allRequests.length;
+  await link("YUK-6").hover();
+  await page.waitForTimeout(300);
+  check("3e.4 prefetched before the action", requestsTo(from, "/issue/YUK-6").length === 1);
+  const posts = actionPosts.length;
+  const before = statusSlug(await statusOf("YUK-6"));
+  const label = before === "done" ? "Todo" : "Done";
+  await page.locator('.row[data-id="YUK-6"] button[aria-label="Change status"]').click();
+  await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
+  const deadline = Date.now() + 5000;
+  while (actionPosts.length === posts && Date.now() < deadline) await page.waitForTimeout(50);
+  await page.waitForTimeout(100);
+  await link("YUK-6").click();
+  await page.waitForURL("**/issue/YUK-6");
+  await page.waitForSelector(".comment-input");
+  check("3e.5 a successful action clears the cache (the click fetches again)", actionPosts.length === posts + 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
+  await page.goto(base + "/", { waitUntil: "networkidle" });
 });
 
 await step("4. status change", async () => {

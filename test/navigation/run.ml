@@ -10,6 +10,8 @@ let setup : string -> unit =
   globalThis.__calls = [];
   globalThis.__ignoreAbort = false;
   globalThis.__failSync = false;
+  globalThis.__now = 1000000;
+  Date.now = function () { return globalThis.__now; };
   const vc = new VirtualConsole();
   vc.on("jsdomError", function (e) {
     log.push(e.message.indexOf("navigation") >= 0 ? "assign" : "jsdom:" + e.message);
@@ -619,6 +621,341 @@ let not_a_page status type_ finish =
       check "not pushed" "/start?x=1" (location_ ());
       finish ())
 
+let fire : string -> string -> unit =
+  [%mel.raw
+    "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
+
+let prefetch_header : int -> string =
+  [%mel.raw "function (i) { return String(globalThis.__calls[i].init.headers['Yuka-Prefetch']) }"]
+
+let advance : int -> unit = [%mel.raw "function (ms) { globalThis.__now += ms }"]
+
+let save_data : unit -> unit =
+  [%mel.raw "function () { Object.defineProperty(window.navigator, 'connection', { value: { saveData: true }, configurable: true }) }"]
+
+let stub_observer : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const seen = globalThis.__observed = [];
+  window.IntersectionObserver = function (cb) {
+    this.cb = cb;
+    this.observe = function (el) { seen.push({ el: el, cb: cb, o: this }); };
+    this.unobserve = function () {};
+    this.disconnect = function () { seen.length = 0; };
+  };
+}|}]
+
+let observed : unit -> string =
+  [%mel.raw "function () { return globalThis.__observed.map(function (x) { return x.el.id }).join(',') }"]
+
+let intersect : string -> unit =
+  [%mel.raw
+    {|function (id) {
+  const x = globalThis.__observed.find(function (x) { return x.el.id === id; });
+  x.cb([{ isIntersecting: true, target: x.el }]);
+}|}]
+
+let stub_transition : unit -> unit =
+  [%mel.raw
+    {|function () {
+  document.startViewTransition = function (cb) {
+    globalThis.__log.push("vt:" + document.documentElement.getAttribute("data-yuka-nav"));
+    cb();
+    return { ready: Promise.reject(new Error("Transition was skipped")), finished: Promise.resolve() };
+  };
+}|}]
+
+let nav_attr : unit -> string =
+  [%mel.raw "function () { return String(document.documentElement.getAttribute('data-yuka-nav')) }"]
+
+let prefetch_cache : int -> string =
+  [%mel.raw "function (i) { return String(globalThis.__calls[i].init.cache) }"]
+
+let wait ms f = set_timeout (fun () -> try f () with e -> !fail_hook e) ms
+let links = page {|<a id="l" href="/two">two</a><a id="m" href="/three">three</a>|}
+let cached text max_age = (text, [| ("cache-control", "private, max-age=" ^ ints max_age) |])
+
+let hover_prefetch finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerover";
+  wait 10 (fun () ->
+      check "no fetch before 50 ms" "0" (ints (calls ()));
+      wait 60 (fun () ->
+          check "one prefetch" "1" (ints (calls ()));
+          check "prefetch header" "1" (prefetch_header 0);
+          check "a prefetch skips the HTTP cache" "no-store" (prefetch_cache 0);
+          check "outlet keys" "-" (call_header 0);
+          check "click is intercepted" "true" (bools (click "#l" ""));
+          check "the click uses the prefetch" "1" (ints (calls ()));
+          resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+          tick (fun () ->
+              check "page shown" (page "<p>two</p>") (body_html ());
+              check "pushed" "/two" (location_ ());
+              check "a navigation has no prefetch header" "1" (ints (calls ()));
+              finish ())))
+
+let hover_out finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerover";
+  wait 20 (fun () ->
+      fire "#l" "pointerout";
+      wait 80 (fun () ->
+          check "no prefetch after leaving" "0" (ints (calls ()));
+          fire "#l" "focusin";
+          wait 80 (fun () ->
+              check "focus prefetches" "1" (ints (calls ()));
+              finish ())))
+
+let not_prefetched finish =
+  List.iter
+    (fun (name, link) ->
+      setup (page link);
+      plain_start ();
+      fire "#l" "pointerdown";
+      check (name ^ ": no prefetch") "0" (ints (calls ())))
+    [ ("off", {|<a id="l" href="/a" data-yuka-prefetch="off">x</a>|});
+      ("download", {|<a id="l" href="/a" download>x</a>|});
+      ("other origin", {|<a id="l" href="http://example.com/a">x</a>|});
+      ("target blank", {|<a id="l" href="/a" target="_blank">x</a>|});
+      ("reload", {|<a id="l" href="/a" data-yuka-reload>x</a>|}) ];
+  setup links;
+  save_data ();
+  plain_start ();
+  fire "#l" "pointerdown";
+  check "save data: no prefetch" "0" (ints (calls ()));
+  setup links;
+  mount ~islands:(Client.registry []) ~prefetch:`Off ();
+  fire "#l" "pointerdown";
+  check "prefetch off: no prefetch" "0" (ints (calls ()));
+  check "prefetch off: click still navigates" "true" (bools (click "#l" ""));
+  check "one navigation" "1" (ints (calls ()));
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  fire "#l" "touchstart";
+  check "pointer down prefetches at once, once" "1" (ints (calls ()));
+  finish ()
+
+let visible finish =
+  setup (page {|<a id="v" href="/two" data-yuka-prefetch="visible">v</a><a id="h" href="/three">h</a>|});
+  stub_observer ();
+  plain_start ();
+  check "only marked links observed" "v" (observed ());
+  intersect "v";
+  check "a visible link prefetches" "1" (ints (calls ()));
+  setup (page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
+  stub_observer ();
+  mount ~islands:(Client.registry []) ~prefetch:`Visible ();
+  check "visible mode observes every link" "v,o" (observed ());
+  intersect "o";
+  check "off still wins" "0" (ints (calls ()));
+  finish ()
+
+let max_age_cache finish =
+  setup links;
+  plain_start ();
+  ignore (click "#l" "");
+  let text, headers = cached (doc "Two" (page {|<a id="m" href="/three">three</a><a id="l" href="/two">two</a>|})) 60 in
+  resolve_headers 0 text 200 headers;
+  tick (fun () ->
+      ignore (click "#m" "");
+      resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
+      tick (fun () ->
+          advance 59000;
+          ignore (click "#l" "");
+          check "within max-age: no fetch" "2" (ints (calls ()));
+          check "shown from the cache" "/two" (location_ ());
+          check "title from the cache" "Two" (title ());
+          ignore (click "#m" "");
+          resolve_call 2 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
+          tick (fun () ->
+              advance 2000;
+              ignore (click "#l" "");
+              check "after max-age: one fetch" "4" (ints (calls ()));
+              finish ())))
+
+let back_forward_cache finish =
+  setup links;
+  plain_start ();
+  ignore (click "#l" "");
+  let text, headers = cached (doc "Two" (page "<p>two</p>")) 60 in
+  resolve_headers 0 text 200 headers;
+  tick (fun () ->
+      back ();
+      tick (fun () ->
+          check "the start page is fetched" "2" (ints (calls ()));
+          resolve_call 1 (doc "start" links) "";
+          tick (fun () ->
+              forward ();
+              tick (fun () ->
+                  check "forward uses the cache" "2" (ints (calls ()));
+                  check "shown" (page "<p>two</p>") (body_html ());
+                  finish ()))))
+
+let no_store_once finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_call 0 (doc "Two" (page {|<a id="m" href="/three">three</a><a id="l" href="/two">two</a>|})) "";
+  tick (fun () ->
+      advance 9000;
+      ignore (click "#l" "");
+      check "a prefetch is used within 10 s" "1" (ints (calls ()));
+      ignore (click "#m" "");
+      resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
+      tick (fun () ->
+          ignore (click "#l" "");
+          check "used once only" "3" (ints (calls ()));
+          setup links;
+          plain_start ();
+          fire "#l" "pointerdown";
+          resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+          tick (fun () ->
+              advance 11000;
+              ignore (click "#l" "");
+              check "an old prefetch is not used" "2" (ints (calls ()));
+              finish ())))
+
+let set_outlet_key : string -> unit =
+  [%mel.raw "function (k) { document.querySelector('yuka-outlet').setAttribute('data-k', k) }"]
+
+let keys_miss finish =
+  setup (page {|<a id="l" href="/two">two</a><yuka-outlet data-k="L0"><p>x</p></yuka-outlet>|});
+  plain_start ();
+  fire "#l" "pointerdown";
+  check "prefetch keys" "L0" (call_header 0);
+  set_outlet_key "L1";
+  ignore (click "#l" "");
+  check "other keys: a new fetch" "2" (ints (calls ()));
+  check "new keys" "L1" (call_header 1);
+  finish ()
+
+let cached_stale_build finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_headers 0 "<p>new</p>" 200 [| ("yuka-build", "b2") |];
+  tick (fun () ->
+      log_clear ();
+      ignore (click "#l" "");
+      check "no new fetch" "1" (ints (calls ()));
+      tick (fun () ->
+          check "another build is a full load" "assign" (log_read ());
+          finish ()))
+
+let action_clears finish =
+  setup links;
+  plain_start ();
+  ignore (click "#l" "");
+  let text, headers = cached (doc "Two" (page {|<a id="m" href="/three">three</a><a id="l" href="/two">two</a>|})) 60 in
+  resolve_headers 0 text 200 headers;
+  tick (fun () ->
+      ignore (click "#m" "");
+      resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
+      tick (fun () ->
+          let failed = Action.call act "x" in
+          resolve_with 2 {|{"error":"no"}|} "" 200 "application/json";
+          tick (fun () ->
+              check "failed action" "true" (bools (Async.status failed = Async.Failed "no"));
+              fire "#l" "pointerdown";
+              check "a failed action keeps the cache" "3" (ints (calls ()));
+              let ok = Action.call act "x" in
+              resolve_with 3 {|{"ok":"y"}|} "" 200 "application/json";
+              tick (fun () ->
+                  check "action done" "true" (bools (Async.status ok = Async.Done "y"));
+                  ignore (click "#l" "");
+                  check "a successful action clears the cache" "5" (ints (calls ()));
+                  finish ()))))
+
+let waits_for_prefetch finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  ignore (click "#m" "");
+  check "a newer navigation fetches" "2" (ints (calls ()));
+  check "the prefetch is not aborted" "false" (bools (call_aborted 0));
+  resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+  tick (fun () ->
+      check "the superseded navigation shows nothing" links (body_html ());
+      resolve_call 1 (doc "Three" (page "<p>three</p>")) "";
+      tick (fun () ->
+          check "the last navigation wins" (page "<p>three</p>") (body_html ());
+          finish ()))
+
+let transitions_on finish =
+  setup links;
+  stub_transition ();
+  mount ~islands:(Client.registry []) ~transitions:true ();
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+  tick (fun () ->
+      check "one transition, push" "vt:push|scroll:0" (log_read ());
+      check "shown" (page "<p>two</p>") (body_html ());
+      back ();
+      tick (fun () ->
+          resolve_call 1 (doc "start" links) "";
+          tick (fun () ->
+              check "back" "vt:push|scroll:0|vt:back|scroll:0" (log_read ());
+              check "attribute removed" "null" (nav_attr ());
+              finish ())))
+
+let transitions_off finish =
+  setup links;
+  stub_transition ();
+  plain_start ();
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+  tick (fun () ->
+      check "no transition by default" "scroll:0" (log_read ());
+      setup links;
+      mount ~islands:(Client.registry []) ~transitions:true ();
+      ignore (click "#l" "");
+      resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          check "no API: plain swap" (page "<p>two</p>") (body_html ());
+          finish ()))
+
+let down_cancels_hover finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerover";
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page {|<a id="l" href="/two">two</a>|})) "";
+  wait 80 (fun () ->
+      check "no second prefetch after the click" "1" (ints (calls ()));
+      finish ())
+
+let thirty_entries finish =
+  let ids = List.init 31 (fun i -> "p" ^ ints i) in
+  setup (page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  plain_start ();
+  List.iter (fun id -> fire ("#" ^ id) "pointerdown") ids;
+  check "31 prefetches" "31" (ints (calls ()));
+  List.iteri (fun i _ -> resolve_call i (doc "P" (page "<p>p</p>")) "") ids;
+  tick (fun () ->
+      ignore (click "#p0" "");
+      check "the oldest was dropped" "32" (ints (calls ()));
+      Browser.navigate "/p1";
+      check "the next one is kept" "32" (ints (calls ()));
+      finish ())
+
+let unmount_clears finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  unmount ();
+  check "prefetch aborted" "true" (bools (call_aborted 0));
+  plain_start ();
+  ignore (click "#l" "");
+  check "a new fetch after unmount" "2" (ints (calls ()));
+  finish ()
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -652,6 +989,22 @@ let all =
     ("302 not followed is a full load", not_a_page 302 "text/html");
     ("json is a full load", not_a_page 200 "application/json");
     ("no content type is a full load", not_a_page 200 "");
+    ("prefetch on hover, the click uses it", hover_prefetch);
+    ("leaving before 50 ms sends nothing; focus prefetches", hover_out);
+    ("links and settings that do not prefetch", not_prefetched);
+    ("visible links prefetch", visible);
+    ("max-age reuses a page", max_age_cache);
+    ("back and forward use the cache", back_forward_cache);
+    ("no-store: a prefetch is used once within 10 s", no_store_once);
+    ("other outlet keys miss", keys_miss);
+    ("a cached answer of another build is a full load", cached_stale_build);
+    ("a successful action clears the cache", action_clears);
+    ("a navigation waits for the prefetch in flight", waits_for_prefetch);
+    ("view transitions when enabled", transitions_on);
+    ("no view transition by default or without the API", transitions_off);
+    ("unmount aborts prefetches and clears the cache", unmount_clears);
+    ("a navigation cancels the hover timer", down_cancels_hover);
+    ("at most 30 entries, the oldest goes first", thirty_entries);
   ]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]

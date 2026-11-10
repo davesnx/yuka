@@ -1423,3 +1423,40 @@ Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.
   benchmark); `Catch`, `Show` and `Status` are top-level values, dropped
   when unused.
 
+
+## Prefetch, navigation cache and view transitions (2026-11-10)
+
+Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
+
+- One cache in `Navigation`: a `Web.table` from `absolute URL without
+  fragment ^ " " ^ outlet keys` to an entry (answer or in-flight fetch,
+  waiters, time, prefetched). The keys are part of the key because the
+  answer depends on `Yuka-Navigate` (`Vary`). At most 30 entries; the
+  oldest goes first (`Map` keeps insertion order).
+- Lifetime from the answer's own `Cache-Control` (`Web.max_age`):
+  `max-age=N` without `no-store` keeps it N seconds, also for back and
+  forward; otherwise only a prefetched answer is kept, used once, within
+  10 s. A navigation fetch is stored only when `max-age` is above 0.
+- A navigation finds an answer (used at once, no fetch), an in-flight
+  prefetch (it waits), or nothing (it fetches as before). A counter drops
+  the answer of a navigation that a newer one replaced; a prefetch is never
+  aborted by a navigation, only by `unmount`.
+- Prefetch: delegated `pointerover`/`focusin` start a 50 ms timer,
+  `pointerout`/`focusout` and any navigation cancel it,
+  `pointerdown`/`touchstart` prefetch at once. Links are the ones a click
+  would navigate (`Web.link_href`), minus `data-yuka-prefetch="off"`.
+  `IntersectionObserver` watches visible links after start and after each
+  navigation. A prefetch sends `Yuka-Prefetch: 1` and `cache: "no-store"`:
+  with the default cache mode, Chrome's HTTP cache lock made a same-URL
+  page load in a new tab (ctrl-click) wait for the end of a streamed
+  prefetch.
+- Actions: `Platform.acted` is called by the action transport on an `ok`
+  answer; navigation sets it to empty the cache. Anything that calls an
+  action through the transport (later `Remote.mutate`) empties it too.
+- Transitions: the page update (swap, history push, scroll, island start)
+  is one function; with `~transitions:true`, `Web.transition` runs it in
+  `document.startViewTransition` and sets `data-yuka-nav` until
+  `finished`. The direction of `popstate` compares the history keys
+  (`time-counter`, made in order).
+- Size: about 1.4 KB gzip in an app that mounts navigation (demo +1381 B); 0 in
+  the keyed benchmark, which does not.

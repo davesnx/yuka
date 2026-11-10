@@ -826,6 +826,8 @@ end
 val mount :
   ?islands:Client.registry ->
   ?navigation:bool ->
+  ?prefetch:[ `Hover | `Visible | `Off ] ->
+  ?transitions:bool ->
   ?on_error:(string -> unit) ->
   unit ->
   unit
@@ -876,6 +878,26 @@ val mount :
     is not [text/html], its [Yuka-Build] differs from the
     [<meta name="yuka-build">] of the page, or it was redirected to another
     origin, it does [location.assign url].
+
+    Prefetch ([prefetch], default [`Hover]): 50 ms after the pointer or the
+    focus enters a link that a click would navigate, or at once on
+    [pointerdown] or [touchstart], the page is loaded with the navigation
+    headers and [Yuka-Prefetch: 1] (loaders can read it from the request;
+    the answer is the same). [`Visible] also prefetches every such link
+    when it becomes visible; with [`Hover], only links with
+    [data-yuka-prefetch="visible"] do. [data-yuka-prefetch="off"] on a link
+    and [`Off] turn it off, and so does [navigator.connection.saveData].
+    A navigation to a URL whose prefetch is in flight waits for it.
+
+    Answers are kept by URL and outlet keys, at most 30, by the
+    [Cache-Control] of the answer: with [max-age=N] (and no [no-store])
+    for N seconds, also for back and forward; otherwise a prefetched answer
+    is used once, within 10 s, and a visited page is not kept. An action
+    call that succeeds empties the cache. [mount] and {!unmount} empty it.
+
+    With [~transitions:true], where [document.startViewTransition] exists,
+    the page update runs inside a view transition, and [<html>] has
+    [data-yuka-nav="push"], ["back"] or ["forward"] until it ends.
 
     With [~navigation:false] only the islands start and links load full
     pages. Calling [mount] again is safe: the listeners are not added twice.
