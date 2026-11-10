@@ -1,0 +1,17 @@
+(library
+ (name ssr_data)
+ (modules data))
+
+(executables
+ (names yuka_ssr dream_concat)
+ (modules yuka_ssr dream_concat)
+ (libraries ssr_data yuka dream lwt lwt.unix)
+ (preprocess
+  (per_module
+   ((pps yuka.ppx) yuka_ssr))))
+
+(executable
+ (name srr)
+ (modules srr)
+ (optional)
+ (libraries ssr_data dream server-reason-react.react server-reason-react.reactDom))

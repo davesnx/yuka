@@ -100,6 +100,22 @@ size: ## Bundle the keyed benchmark app and the demo, print raw and gzip bytes, 
 	$(DUNE) build --profile=release @bench/keyed/bench-keyed @demo/client/demo-client
 	node bench/size/size.ts --build-dir $(BUILD_DIR)
 
+SSR_ROWS ?= 100
+SSR_CONNECTIONS ?= 32
+
+.PHONY: bench-ssr
+bench-ssr: ## SSR throughput of the same issue list page: yuka, dream, server-reason-react, react, solid (SSR_ROWS, SSR_CONNECTIONS)
+	$(DUNE) build --profile=release @bench/ssr/ocaml/all
+	[ -d bench/ssr/node/node_modules ] || npm ci --prefix bench/ssr/node --no-audit --no-fund
+	node bench/ssr/run.ts --build-dir $(BUILD_DIR) --rows $(SSR_ROWS) --connections $(SSR_CONNECTIONS)
+
+PAGES_RUNS ?= 5
+PAGES_THROTTLE ?= 4
+
+.PHONY: measure-pages
+measure-pages: demo-bundle ## Measure JS bytes, TBT and LCP of each demo page, and LCP as plain HTML (PAGES_RUNS, PAGES_THROTTLE, CHROME_PATH)
+	node bench/pages/measure.ts --build-dir $(BUILD_DIR) --runs $(PAGES_RUNS) --throttle $(PAGES_THROTTLE)
+
 .PHONY: install-npm
 install-npm: ## Install npm dependencies (esbuild, jsdom)
 	npm install

@@ -42,3 +42,10 @@ let issue ?(delay = 0.6) (i : Model.Issue.t) =
   shell ~active:Views.Shell.Issues <Views.Issue_page issue=i comments props />
 
 let not_found id = shell ~active:Views.Shell.Issues <Views.Not_found id />
+
+let about () : Yuka.server Yuka.element =
+  <main class_="about">
+    <h1>"About"</h1>
+    <p>"A mini Linear built with Yuka. This page has no island."</p>
+    <a href=Routes.index_url>"Back to issues"</a>
+  </main>

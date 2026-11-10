@@ -20,6 +20,8 @@ Defaults are relative to the executable, so any build directory works.
 - `http://localhost:8080/my`: issues assigned to the current user.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
   issues stream in after a delay.
+- `http://localhost:8080/about`: a page with no island, for the
+  0 bytes of JavaScript check of `make measure-pages`.
 
 Keys: `j` and `k` move, Enter opens, `c` opens the new issue dialog,
 Escape closes menus and the dialog.

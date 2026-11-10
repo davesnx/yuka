@@ -1,0 +1,51 @@
+open Ssr_data.Data
+
+module Row = struct
+  let make ~issue:i () : Yuka.server Yuka.element =
+    <li class_="issue">
+      <a class_="row" href=("/issue/" ^ i.id)>
+        <span class_="id">(Yuka.text i.id)</span>
+        <span class_="title">(Yuka.text i.title)</span>
+        <span class_=("status status-" ^ slug i.status)>(Yuka.text i.status)</span>
+        <span class_="priority">(Yuka.text i.priority)</span>
+        <span class_="assignee">(Yuka.text (Option.value i.assignee ~default:"Unassigned"))</span>
+        <span class_="labels">
+          (Yuka.list (List.map (fun l -> <span class_="label">(Yuka.text l)</span>) i.labels))
+        </span>
+      </a>
+    </li>
+end
+
+let view issues () : Yuka.server Yuka.element =
+  <main>
+    <h1>"All issues"</h1>
+    <ul class_="issues">(Yuka.list (List.map (fun issue -> <Row issue />) issues))</ul>
+  </main>
+
+let to_async p =
+  let async, resolve, fail = Yuka.Async.make () in
+  Lwt.on_any p resolve (fun e -> fail (Printexc.to_string e));
+  async
+
+let to_lwt async =
+  let p, w = Lwt.wait () in
+  Yuka.Async.on_result async (function Ok v -> Lwt.wakeup w v | Error m -> Lwt.wakeup_exn w (Failure m));
+  p
+
+let () =
+  let port, issues = args () in
+  let styles = [ "/static/style.css" ] in
+  Dream.run ~interface:"127.0.0.1" ~port
+  @@ Dream.router
+       [
+         Dream.get "/" (fun _ -> Dream.html (Yuka.Server.page ~title:"Issues" ~styles (view issues)));
+         Dream.get "/stream" (fun _ ->
+             Dream.stream
+               ~headers:[ ("Content-Type", "text/html; charset=utf-8") ]
+               (fun stream ->
+                 to_lwt
+                   (Yuka.Server.stream ~title:"Issues" ~styles
+                      ~sleep:(fun d -> to_async (Lwt_unix.sleep d))
+                      ~write:(fun s -> to_async (Lwt.bind (Dream.write stream s) (fun () -> Dream.flush stream)))
+                      (view issues))));
+       ]

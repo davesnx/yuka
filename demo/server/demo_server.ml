@@ -52,6 +52,8 @@ let () =
           respond ~request ~title:"Issues" Demo_app.Pages.index);
       Yuka.Router.case (Routes.my ()) (fun request ->
           respond ~request ~title:"My issues" Demo_app.Pages.my_issues);
+      Yuka.Router.case (Yuka.Router.s "about") (fun request ->
+          respond ~request ~title:"About" Demo_app.Pages.about);
       Yuka.Router.case (Routes.issue ()) (fun id request ->
           match Demo_app.Store.find id with
           | Some i -> respond ~request ~title:id (fun () -> Demo_app.Pages.issue i)

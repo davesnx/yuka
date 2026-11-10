@@ -1,0 +1,11 @@
+{
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@babel/core": "^7.26.0",
+    "babel-preset-solid": "^1.9.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "solid-js": "^1.9.3"
+  }
+}
