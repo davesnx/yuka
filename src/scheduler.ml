@@ -1,312 +1,197 @@
-(* Adapted from reativa (https://github.com/brnrdog/reativa, commit c6d6e5f).
-   Copyright (c) 2025-2026 Bernardo Gurgel. MIT licence: see LICENSE.reativa. *)
+(* The graph follows Solid's signal core (solid-js/src/reactive/signal.ts,
+   MIT): a write marks its readers dirty and their readers to check; reads
+   and the flush pull a node up to date before it runs. *)
 
-open Core
+type node = {
+  mutable deps : link list;
+  mutable old : link list;
+  mutable first : link option;
+  mutable last : link option;
+  mutable state : int;
+  mutable fn : unit -> bool;
+  mutable level : int;
+  id : int;
+  eff : bool;
+}
 
-let current_target : node option ref = ref None
-let current_tracking_version = ref 0
-let current_dep_cursor : link option ref = ref None
-let pending_effects : node list ref = ref []
-let pending_computeds : node list ref = ref []
-let flushing = ref false
-let batch_depth = ref 0
+and link = {
+  src : node;
+  dst : node;
+  mutable prev : link option;
+  mutable next : link option;
+}
 
-let add_effect_to_pending node =
-  if not (is_pending node) then begin
-    set_pending node;
-    pending_effects := node :: !pending_effects
-  end
+let ids = ref 0
+let listener = ref None
+let queue = ref []
+let depth = ref 0
 
-let add_computed_to_pending node =
-  if not (is_pending node) then begin
-    set_pending node;
-    pending_computeds := node :: !pending_computeds
-  end
+let never () = false
 
-let new_link target source version =
-  let link = make_link ~source ~target in
-  link.last_tracked_version <- version;
-  link_to_deps target link;
-  link_to_subs source link;
-  current_dep_cursor := Some link
+let make eff fn =
+  incr ids;
+  { deps = []; old = []; first = None; last = None; state = 0; fn; level = 0; id = !ids; eff }
 
-let track_dep_into target source =
-  let version = !current_tracking_version in
-  match target.first_dep with
-  | None -> new_link target source version
-  | Some _ ->
-      let fast =
-        match !current_dep_cursor with
-        | Some cursor when cursor.source == source ->
-            cursor.last_tracked_version <- version;
-            true
-        | Some cursor -> (
-            match cursor.next_dep with
-            | Some next when next.source == source ->
-                next.last_tracked_version <- version;
-                current_dep_cursor := Some next;
-                true
-            | _ -> false)
-        | None -> false
-      in
-      if not fast then
-        let rec scan = function
-          | Some l when l.source == source ->
-              l.last_tracked_version <- version;
-              current_dep_cursor := Some l
-          | Some l -> scan l.next_dep
-          | None -> new_link target source version
-        in
-        scan target.first_dep
+let unlink l =
+  let s = l.src in
+  (match l.prev with Some p -> p.next <- l.next | None -> s.first <- l.next);
+  match l.next with Some n -> n.prev <- l.prev | None -> s.last <- l.prev
 
-let track_dep source =
-  match !current_target with
-  | Some target -> track_dep_into target source
+let dispose n =
+  List.iter unlink n.deps;
+  List.iter unlink n.old;
+  n.deps <- [];
+  n.old <- [];
+  n.fn <- never
+
+let track src =
+  match !listener with
+  | Some dst -> (
+      match (dst.old, src.last) with
+      | l :: old, _ when l.src == src ->
+          dst.old <- old;
+          dst.deps <- l :: dst.deps
+      | _, Some l when l.dst == dst && not (List.memq l dst.old) -> ()
+      | _, last ->
+          let l = { src; dst; prev = last; next = None } in
+          (match last with Some p -> p.next <- Some l | None -> src.first <- Some l);
+          src.last <- Some l;
+          dst.deps <- l :: dst.deps)
   | None -> ()
 
-let compute_level node =
-  let max_level = ref 0 in
-  let rec loop = function
-    | None -> ()
-    | Some l ->
-        if is_computed l.source && l.source.level > !max_level then
-          max_level := l.source.level;
-        loop l.next_dep
-  in
-  loop node.first_dep;
-  !max_level + 1
-
-let prune_stale_deps node =
-  let version = !current_tracking_version in
-  let rec loop = function
-    | None -> ()
-    | Some l ->
-        let next = l.next_dep in
-        if l.last_tracked_version <> version then begin
-          unlink_from_subs l;
-          unlink_from_deps l
-        end;
-        loop next
-  in
-  loop node.first_dep
-
-let with_tracking node body =
-  let prev_version = !current_tracking_version in
-  let prev_target = !current_target in
-  let prev_cursor = !current_dep_cursor in
-  incr tracking_version;
-  current_tracking_version := !tracking_version;
-  current_target := Some node;
-  current_dep_cursor := node.first_dep;
-  let finish () =
-    current_target := prev_target;
-    current_dep_cursor := prev_cursor;
-    current_tracking_version := prev_version
-  in
-  match body () with
-  | result ->
-      prune_stale_deps node;
-      finish ();
-      result
+let with_listener n f =
+  let prev = !listener in
+  listener := n;
+  match f () with
+  | v ->
+      listener := prev;
+      v
   | exception e ->
-      finish ();
+      listener := prev;
       raise e
 
-let run_body f = match f with Some f -> f () | None -> ()
+let untrack f = with_listener None f
 
-let run_computed_cycle node ~should_clear_pending =
-  let previous_version = node.version in
-  if should_clear_pending then clear_pending node;
-  with_tracking node (fun () -> run_body node.compute);
-  clear_dirty node;
-  node.last_global_version <- !global_version;
-  if node.version <> previous_version then
-    let rec loop = function
-      | None -> ()
-      | Some (l : link) ->
-          let sub = l.target in
-          (if is_computed sub then set_dirty sub
-           else
-             match !current_target with
-             | Some cur when cur == sub -> ()
-             | _ -> add_effect_to_pending sub);
-          loop l.next_sub
-    in
-    loop node.first_sub
+let set_level n =
+  n.level <-
+    1 + List.fold_left (fun m l -> if l.src.level > m then l.src.level else m) 0 n.deps
 
-let retrack_computed node =
-  let old_level = node.level in
-  run_computed_cycle node ~should_clear_pending:true;
-  if old_level = 0 then node.level <- compute_level node
+let rec mark skip n state =
+  let rec go = function
+    | Some l ->
+        let o = l.dst in
+        if o.state < state && o != skip then begin
+          let was = o.state in
+          o.state <- state;
+          if was = 0 then if o.eff then queue := o :: !queue else mark skip o 1
+        end;
+        go l.next
+    | None -> ()
+  in
+  go n.first
 
-let retrack_effect node =
-  let old_level = node.level in
-  clear_pending node;
-  with_tracking node (fun () -> run_body node.run);
-  clear_dirty node;
-  if old_level = 0 then node.level <- compute_level node
+let drop n =
+  List.iter unlink n.old;
+  n.old <- []
+
+let run n =
+  n.old <- List.rev n.deps;
+  n.deps <- [];
+  n.state <- 0;
+  let changed =
+    match with_listener (Some n) n.fn with
+    | c ->
+        drop n;
+        c
+    | exception e ->
+        drop n;
+        raise e
+  in
+  if n.level = 0 then set_level n;
+  if changed then mark (Option.value !listener ~default:n) n 2
+
+let rec fresh n =
+  if n.state > 0 then
+    try
+      if n.state = 1 then begin
+        List.iter (fun l -> if n.state = 1 then fresh l.src) (List.rev n.deps);
+        if n.state = 1 then n.state <- 0
+      end;
+      if n.state = 2 then run n
+    with e ->
+      n.state <- (if n.eff then 0 else 2);
+      raise e
+
+let before a b = a.level < b.level || (a.level = b.level && a.id > b.id)
+
+let rec merge acc a b =
+  match (a, b) with
+  | [], l | l, [] -> List.rev_append acc l
+  | x :: a', y :: b' ->
+      if before y x then merge (y :: acc) a b' else merge (x :: acc) a' b
 
 let rec sorted = function
-  | a :: (b :: _ as rest) -> a.level <= b.level && sorted rest
+  | a :: (b :: _ as r) -> before a b && sorted r
   | _ -> true
 
-let by_level l =
-  let rec merge acc a b =
-    match (a, b) with
-    | [], l | l, [] -> List.rev_append acc l
-    | x :: a', y :: b' ->
-        if x.level <= y.level then merge (x :: acc) a' b else merge (y :: acc) a b'
-  in
-  let rec take n acc l =
-    match l with
-    | x :: rest when n > 0 -> take (n - 1) (x :: acc) rest
-    | _ -> (List.rev acc, l)
-  in
-  let rec sort l =
-    match l with
-    | [] | [ _ ] -> l
-    | _ ->
-        let a, b = take (List.length l / 2) [] l in
-        merge [] (sort a) (sort b)
-  in
-  sort l
-
-let run_batch first_error retrack queue =
-  let batch = if sorted !queue then !queue else by_level !queue in
-  queue := [];
-  List.iter
-    (fun node ->
-      try retrack node
-      with e -> if Option.is_none !first_error then first_error := Some e)
-    batch
-
-let max_rounds = 100
-
-let loop_error () =
-  Failure
-    "Yuka: an effect or a memo keeps changing a State it reads (more than 100 \
-     update rounds in one flush)"
-
-let has = function [] -> false | _ :: _ -> true
-
-let drop queue =
-  List.iter clear_pending !queue;
-  queue := []
+let rec sort = function
+  | ([] | [ _ ]) as l -> l
+  | l ->
+      let rec split a b = function [] -> (a, b) | x :: r -> split b (x :: a) r in
+      let a, b = split [] [] l in
+      merge [] (sort a) (sort b)
 
 let flush () =
-  flushing := true;
-  let first_error = ref None in
-  let rounds = ref 0 in
-  while has !pending_computeds || has !pending_effects do
-    if !rounds >= max_rounds then begin
-      drop pending_computeds;
-      drop pending_effects;
-      if Option.is_none !first_error then first_error := Some (loop_error ())
-    end
-    else begin
-      incr rounds;
-      if has !pending_computeds then
-        run_batch first_error retrack_computed pending_computeds;
-      if has !pending_effects then
-        run_batch first_error retrack_effect pending_effects
-    end
-  done;
-  flushing := false;
-  Option.iter raise !first_error
+  match !queue with
+  | [] -> ()
+  | _ ->
+      depth := 1;
+      let error = ref None and rounds = ref 0 in
+      let fail e = if Option.is_none !error then error := Some e in
+      let rec loop () =
+        match !queue with
+        | [] -> ()
+        | q ->
+            queue := [];
+            if !rounds >= 100 then begin
+              List.iter (fun n -> n.state <- 0) q;
+              fail
+                (Failure
+                   "Yuka: an effect or a memo keeps changing a State it reads \
+                    (more than 100 update rounds in one flush)")
+            end
+            else begin
+              incr rounds;
+              List.iter (fun n -> try fresh n with e -> fail e) (if sorted q then q else sort q)
+            end;
+            loop ()
+      in
+      loop ();
+      depth := 0;
+      Option.iter raise !error
 
-let notify_subs source =
-  (match source.first_sub with
-  | None -> ()
-  | Some _
-    when (not (is_computed source)) && source.computed_subscriber_count = 0 ->
-      let rec loop = function
-        | None -> ()
-        | Some (l : link) ->
-            add_effect_to_pending l.target;
-            loop l.next_sub
-      in
-      loop source.first_sub
-  | Some _ ->
-      let front = ref [ source ] and back = ref [] in
-      let push n = back := n :: !back in
-      let rec pop () =
-        match !front with
-        | s :: rest ->
-            front := rest;
-            Some s
-        | [] -> (
-            match !back with
-            | [] -> None
-            | b ->
-                front := List.rev b;
-                back := [];
-                pop ())
-      in
-      let continue = ref true in
-      while !continue do
-        match pop () with
-        | None -> continue := false
-        | Some s ->
-        let rec loop = function
-          | None -> ()
-          | Some (l : link) ->
-              let target = l.target in
-              if is_computed target then begin
-                if not (is_dirty target) then begin
-                  set_dirty target;
-                  push target
-                end
-              end
-              else if is_computed s && s.defer_effects_until_recompute then
-                add_computed_to_pending s
-              else add_effect_to_pending target;
-              loop l.next_sub
-        in
-        loop s.first_sub
-      done);
-  if
-    (has !pending_effects || has !pending_computeds)
-    && (not !flushing) && !batch_depth = 0
-  then flush ()
+let changed n =
+  mark n n 2;
+  if !depth = 0 then flush ()
+
+let finish () =
+  decr depth;
+  if !depth = 0 then flush ()
 
 let batch f =
-  incr batch_depth;
-  let finish () =
-    decr batch_depth;
-    if
-      !batch_depth = 0 && (not !flushing)
-      && (has !pending_effects || has !pending_computeds)
-    then flush ()
-  in
+  incr depth;
   match f () with
-  | result ->
+  | v ->
       finish ();
-      result
+      v
   | exception e ->
       (try finish () with _ -> ());
       raise e
 
-let ensure_computed_fresh node =
-  if is_computed node && is_dirty node then
-    if node.last_global_version = !global_version then clear_dirty node
-    else
-      let old_level = node.level in
-      run_computed_cycle node ~should_clear_pending:false;
-      if old_level = 0 then node.level <- compute_level node
-
-let untrack fn =
-  let prev_target = !current_target in
-  let prev_cursor = !current_dep_cursor in
-  current_target := None;
-  current_dep_cursor := None;
-  let restore () =
-    current_target := prev_target;
-    current_dep_cursor := prev_cursor
-  in
-  match fn () with
-  | result ->
-      restore ();
-      result
+let start n =
+  incr depth;
+  match run n with
+  | () -> finish ()
   | exception e ->
-      restore ();
+      (try finish () with _ -> ());
       raise e

@@ -1190,8 +1190,104 @@ let html_array () =
   check "array" "a<!---->b" (html (array [| text "a"; text "b" |]));
   check "empty array" "" (html (array [||]))
 
+let memo_lazy_without_readers () =
+  let computes = ref 0 in
+  let n = State.make 0 in
+  let m =
+    State.memo (fun () ->
+        incr computes;
+        State.get n + 1)
+  in
+  State.set n 1;
+  State.set n 2;
+  check "no recompute without a reader" "1" (string_of_int !computes);
+  check "fresh on read" "3" (string_of_int (State.peek m));
+  check "one recompute on read" "2" (string_of_int !computes)
+
+let memo_diamond () =
+  let add, read = log () in
+  let n = State.make 1 in
+  let a = State.memo (fun () -> State.get n * 2) in
+  let b = State.memo (fun () -> State.get n * 3) in
+  let sum = State.memo (fun () -> State.get a + State.get b) in
+  let parity = State.memo (fun () -> State.get sum mod 2) in
+  Effect.run (fun () ->
+      add (Printf.sprintf "%d=%d+%d" (State.get sum) (State.get a) (State.get b)));
+  Effect.run (fun () -> add ("p" ^ string_of_int (State.get parity)));
+  State.set n 2;
+  State.set n 4;
+  check "one consistent run per write; an unchanged memo stops the update"
+    "5=2+3 p1 10=4+6 p0 20=8+12" (read ())
+
+let dynamic_dependencies () =
+  let runs = ref 0 in
+  let cond = State.make true in
+  let a = State.make 0 in
+  let b = State.make 0 in
+  Effect.run (fun () ->
+      incr runs;
+      ignore (if State.get cond then State.get a else State.get b));
+  State.set b 1;
+  State.set cond false;
+  State.set a 1;
+  State.set b 2;
+  check "only the States read in the last run" "3" (string_of_int !runs)
+
+let dependency_order_changes () =
+  let runs = ref 0 in
+  let flip = State.make false in
+  let a = State.make 0 in
+  let b = State.make 0 in
+  Effect.run (fun () ->
+      incr runs;
+      if State.get flip then (ignore (State.get b); ignore (State.get a))
+      else (ignore (State.get a); ignore (State.get b)));
+  State.set flip true;
+  State.set b 1;
+  State.set a 1;
+  check "both States tracked after the read order changes" "4" (string_of_int !runs)
+
+let disposed_while_pending () =
+  let add, read = log () in
+  let s = State.make 0 in
+  let (), dispose =
+    owner (fun () -> Effect.run (fun () -> add ("b" ^ string_of_int (State.get s))))
+  in
+  Effect.run (fun () -> if State.get s = 1 then dispose ());
+  State.set s 1;
+  check "a pending effect disposed in the same flush does not run" "b0" (read ())
+
+let memo_raises () =
+  let n = State.make 0 in
+  let m =
+    State.memo (fun () -> if State.get n = 1 then failwith "bad" else State.get n)
+  in
+  let read () = try string_of_int (State.peek m) with Failure e -> e in
+  State.set n 1;
+  check "the read raises" "bad" (read ());
+  check "the next read computes again" "bad" (read ());
+  State.set n 2;
+  check "a later change recovers" "2" (read ())
+
+let batch_in_first_run () =
+  let add, read = log () in
+  let s = State.make 0 in
+  Effect.run (fun () -> add ("e" ^ string_of_int (State.get s)));
+  Effect.run (fun () ->
+      batch (fun () -> State.set s 1);
+      add "end");
+  check "a batch in an effect runs pending effects when the effect ends"
+    "e0 end e1" (read ())
+
 let all =
   [
+    ("memo is lazy without readers", memo_lazy_without_readers);
+    ("memo diamond", memo_diamond);
+    ("dynamic dependencies", dynamic_dependencies);
+    ("dependency order changes", dependency_order_changes);
+    ("disposed while pending", disposed_while_pending);
+    ("memo that raises", memo_raises);
+    ("batch in the first run of an effect", batch_in_first_run);
     ("first run", first_run);
     ("re-run on change", rerun_on_change);
     ("no re-run on an equal write", no_rerun_on_equal_write);

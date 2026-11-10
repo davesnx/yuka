@@ -83,22 +83,20 @@ module Effect = struct
           Option.iter (fun cleanup -> cleanup result) cleanup
     in
     let node =
-      Core.make_effect_node (fun () ->
+      Scheduler.make true (fun () ->
           teardown ();
-          last := Some (with_owner child body))
+          last := Some (with_owner child body);
+          false)
     in
     let stop () =
-      node.run <- None;
-      teardown ();
-      Core.clear_deps node
+      Scheduler.dispose node;
+      teardown ()
     in
-    (match Scheduler.with_tracking node (fun () -> Scheduler.run_body node.run) with
+    (match Scheduler.start node with
     | () -> ()
     | exception e ->
         stop ();
         raise e);
-    Core.clear_dirty node;
-    node.level <- Scheduler.compute_level node;
     own stop
 
   let on_change ?equal state f =
