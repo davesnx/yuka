@@ -130,3 +130,13 @@ val table_clear : 'a table -> unit
 val shortest_float : float -> string
 val parse_float : string -> float
 val parse_int : string -> int option
+
+type socket
+
+val socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket
+val socket_send : socket -> string -> unit
+val socket_close : socket -> int -> unit
+val live_url : unit -> string
+val online : unit -> bool
+val on_online : (unit -> unit) -> unit -> unit
+val random : unit -> float

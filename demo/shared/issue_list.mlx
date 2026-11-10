@@ -11,18 +11,23 @@ let index_of id items =
   go 0 items
 
 let%client make ~(title : string) ~(view : Queries.view) () =
-  let source = Remote.use Queries.issues (fun () -> view) in
+  let source = Live.use Topics.issues (fun () -> view) in
   let issues =
-    State.memo (fun () -> Option.value (Status.data (Remote.status source)) ~default:[])
+    State.memo (fun () -> Option.value (Status.data (Live.status source)) ~default:[])
   in
+  let labels = Remote.use Queries.labels (fun () -> ()) in
   let filter = State.make "" in
+  let label : string option State.t = State.make None in
   let selected : string option State.t = State.make None in
   let menu : menu option State.t = State.make None in
   let toast : string option State.t = State.make None in
   let visible =
     State.memo ~equal:( = ) (fun () ->
-        let query = State.get filter in
-        List.filter (Issue.matches ~query) (State.get issues))
+        let query = State.get filter and only = State.get label in
+        List.filter
+          (fun (i : Issue.t) ->
+            Issue.matches ~query i && match only with Some l -> List.mem l i.labels | None -> true)
+          (State.get issues))
   in
   let groups = State.memo ~equal:( = ) (fun () -> Issue.group (State.get visible)) in
   let ordered = State.memo ~equal:( = ) (fun () -> List.concat_map snd (State.get groups)) in
@@ -38,14 +43,11 @@ let%client make ~(title : string) ~(view : Queries.view) () =
           priority = Option.value priority ~default:i.priority;
         }
     in
-    let commit (updated : Issue.t) =
-      List.map (fun (i : Issue.t) -> if i.id = updated.id then updated else i)
-    in
     Async.on_result
-      (Remote.mutate source (List.map edit) ~commit (fun () ->
+      (Live.mutate source (List.map edit) (fun () ->
            Action.call Actions.update_issue { Actions.id; status; priority }))
       (function
-        | Ok _ -> ()
+        | Ok _ -> if status <> None then Remote.invalidate Queries.labels
         | Error _ -> State.set toast (Some ("Could not update " ^ id ^ ".")))
   in
   let move step =
@@ -142,10 +144,29 @@ let%client make ~(title : string) ~(view : Queries.view) () =
     <header class_="page-header">
       <span>(Yuka.text title)</span>
       <span class_="group-count">(Yuka.int (List.length (State.get issues)))</span>
+      (Yuka.hole (fun () ->
+         match Live.status source with
+         | Status.Ready { stale = true; _ } -> <span class_="offline">"Offline, reconnecting"</span>
+         | _ -> Yuka.empty))
     </header>
     <div class_="toolbar">
       <input class_="filter" type_=`text placeholder="Filter issues (j/k to move, Enter to open)"
         onInput=(fun e -> State.set filter (Event.target_value e)) />
+      (Yuka.hole (fun () ->
+         match Remote.status labels with
+         | Status.Ready { data; _ } | Status.Loading (Some data) ->
+             Yuka.list
+               (List.map
+                  (fun (l : Queries.label_count) ->
+                    <button
+                      class_=(if State.get label = Some l.label then "chip on" else "chip")
+                      data_label=l.label
+                      onClick=(fun _ ->
+                        State.set label (if State.peek label = Some l.label then None else Some l.label))>
+                      (Yuka.text (l.label ^ " " ^ string_of_int l.open_))
+                    </button>)
+                  data)
+         | _ -> Yuka.empty))
     </div>
     (match State.get toast with
      | Some message ->
@@ -157,16 +178,16 @@ let%client make ~(title : string) ~(view : Queries.view) () =
     <div class_="list">
       (Yuka.each ~equal:( = ) ~key:(fun (s, _) -> Issue.status_slug s) (fun () -> State.get groups) group)
     </div>
-    <Yuka.Show status=(fun () -> Remote.status source)
+    <Yuka.Show status=(fun () -> Live.status source)
       loading=(<p class_="list-empty">"Loading issues..."</p>)
       failed=(fun error ->
         <p class_="list-empty error">
           (Yuka.text ("Could not load the issues: " ^ Status.error_to_string error ^ ". "))
-          <button class_="button retry" onClick=(fun _ -> Remote.refetch source)>"Retry"</button>
+          <a class_="button retry" href="">"Reload"</a>
         </p>)>
       (fun _ -> Yuka.empty)
     </Yuka.Show>
-    (if State.get visible = [] && Option.is_some (Status.data (Remote.status source)) then
+    (if State.get visible = [] && Option.is_some (Status.data (Live.status source)) then
        <p class_="list-empty">"No issues match."</p>
      else Yuka.empty)
   </div>

@@ -128,3 +128,15 @@ let shortest_float f =
 
 let parse_float = float_of_string
 let parse_int = int_of_string_opt
+
+type socket = unit
+
+let socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket =
+ fun _ _ _ _ -> browser_only ()
+
+let socket_send : socket -> string -> unit = fun _ _ -> browser_only ()
+let socket_close : socket -> int -> unit = fun _ _ -> browser_only ()
+let live_url : unit -> string = fun _ -> browser_only ()
+let online : unit -> bool = fun _ -> browser_only ()
+let on_online : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
+let random : unit -> float = fun () -> Random.float 1.

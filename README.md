@@ -171,16 +171,17 @@ A query is an action that only reads (`Action.query`). An island reads it
 with `Remote.use`:
 
 ```ocaml
-let issues =
-  Yuka.Action.query ~name:"issues" ~input:view_codec ~output:(Yuka.Codec.list Issue.codec)
+let labels =
+  Yuka.Action.query ~name:"labels" ~input:Yuka.Codec.unit ~output:(Yuka.Codec.list label_count_codec)
 
-let%client make ~(view : view) () =
-  let source = Remote.use Queries.issues (fun () -> view) in
-  match Remote.status source with
-  | Status.Ready { data; _ } -> Yuka.int (List.length data)
-  | Status.Loading _ -> Yuka.text "Loading"
-  | Status.Failed { error; _ } -> Yuka.text (Status.error_to_string error)
-  | Status.Idle -> Yuka.empty
+let%client make () =
+  let source = Remote.use Queries.labels (fun () -> ()) in
+  Yuka.hole (fun () ->
+      match Remote.status source with
+      | Status.Ready { data; _ } -> Yuka.int (List.length data)
+      | Status.Loading _ -> Yuka.text "Loading"
+      | Status.Failed { error; _ } -> Yuka.text (Status.error_to_string error)
+      | Status.Idle -> Yuka.empty)
 ```
 
 The query runs again when a State read by the input function changes; the
@@ -193,6 +194,62 @@ again. `Remote.mutate source change run` shows `change` at once, calls
 `run`, keeps the change on success (or applies `~commit` with the result)
 and removes it on failure. An app that does not call `Remote` gets none of
 its code.
+
+### Live data
+
+A topic is server state that the server pushes to the page when it changes.
+Declare it once, in code that the server and the client share:
+
+```ocaml
+let issues =
+  Yuka.Topic.declare ~name:"issues" ~key:view_codec ~state:(Yuka.Codec.list Issue.codec)
+```
+
+The server serves it and publishes the new full state after a change:
+
+```ocaml
+Yuka.Server.Live.serve Topics.issues (fun view -> Yuka.Async.return (Store.issues view));
+
+Yuka.Server.Action.implement Actions.update_issue (fun input ->
+    let issue = Store.update input in
+    Yuka.Server.Live.publish Topics.issues All (Store.issues All);
+    Yuka.Async.return issue)
+```
+
+An island subscribes with `Live.use`, and `Live.mutate` shows a change at
+once while the action runs:
+
+```ocaml
+let%client make ~(view : view) () =
+  let source = Live.use Topics.issues (fun () -> view) in
+  let rename id title =
+    Live.mutate source (List.map (rename_one id title)) (fun () ->
+        Action.call Actions.rename { id; title })
+  in
+  ...
+```
+
+The server render writes the current state after the island, so the page
+starts with it. In the browser one WebSocket (`GET /_yuka/live`) serves
+every live use of the page. When it drops, the status is
+`Ready { stale = true }` and the client reconnects with growing delays and
+gets the full state again. A change from `Live.mutate` stays until the server
+has sent the state that holds it, then the server state is shown.
+
+The socket checks the origin like an action, and a CSRF token from the
+session. `Yuka_dream.handler` serves `/_yuka/live`; the app needs Dream
+sessions that every server process shares and that survive a restart:
+
+```ocaml
+Dream.run @@ Dream.set_secret secret @@ Dream.cookie_sessions @@ Yuka_dream.handler config app
+```
+
+With `Dream.memory_sessions`, or with no `Dream.set_secret` (a random secret
+per process), a reconnect after a restart is refused and the page needs a
+reload. A page with a live use holds a per-session token, so its route must
+not use a shared cache (`Public` or `Immutable`). One server process only:
+`publish` reaches the sockets of its process. An app that does not call
+`Live` gets none of its code.
 
 ### Prefetch, cache and transitions
 

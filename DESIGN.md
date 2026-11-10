@@ -1421,6 +1421,58 @@ R3 (ticket 12); its "Changes during build" section lists the differences.
   kind and asks again when it commits during a request; the typed server
   transport ref is `Remote.server_send`.
 
+## Live data (2026-11-10)
+
+Spec: `.workplace/docs/data-spec.md` section 3 (ticket 13).
+
+- `Topic.declare ~name ~key ~state`; the wire key is the JSON of the key.
+- Server (`src/live_server.ml`, `Yuka.Server.Live`): `serve ?allow topic
+  load`, `publish topic key state`, `run` (the protocol on one socket),
+  `SOCKET` and `Handle`. Entries per `(topic, key)` exist while they have a
+  subscriber; the last unsubscribe removes the entry, and the next
+  subscribe runs the loader again. `seq` comes from one process counter. A
+  publish while the loader runs wins over the loaded state. Each socket
+  sends in order; a state that waits to be sent is replaced by a newer one
+  of the same subscription.
+- Protocol v1 (JSON text frames): client `hello` (version and token), `sub`,
+  `unsub`, `sync`, `ping`; server `hello` (with a fresh token), `state`,
+  `error`, `synced`, `pong`. Close codes: 4400 bad message, 4403 token
+  refused, 4426 other version, 1009 message over 64 KiB, 4408 no message
+  for 60 s. At most 64 subscriptions per socket.
+- Settle rule of `Live.mutate`: on `Ok` the client sends `sync` for the
+  subscription; the server answers `synced` behind the latest state of the
+  subscription on that socket. The action publishes before it answers, so
+  that state holds the change, in whatever order the HTTP answer and the
+  socket message arrive. While the socket is down, `sync` follows the next
+  `sub`.
+- Token: `Server.ADAPTER.csrf_token`; the first `Live.use` of a render
+  writes it as the answer `l:csrf`, so a page with no live use asks no
+  token. The server `hello` carries a fresh token for the next `hello`.
+  Sessions and the secret must be shared by every node and survive a
+  restart (`cookie_sessions` and `set_secret` in the demo).
+- Client (`src/live.ml`): one socket per page, opened by the first use and
+  closed 2 s after the last; reconnect after 250, 500, 1000, 2000, 4000,
+  then 5000 ms (half to all of each, at random), reset by a server `hello`.
+  While `navigator.onLine` is false it waits for the `online` event or
+  5 s, whichever comes first (a headless Chrome in a sandbox reports
+  offline with a working network). Ping every 25 s; 10 s of silence after
+  a ping closes the socket. The client does not wait for the server's
+  close reply when it closes the socket itself.
+- `yuka-dream`: `Yuka_dream.handler` answers `GET /_yuka/live` before the
+  request cycle. Dream does not answer a close frame from the client, and
+  closing a socket that the client closed spins at 100% CPU (dream
+  1.0.0~alpha8, gluten 0.5.2), so the socket is created with
+  `~close:false` and only `run` closes it, when it ends the protocol.
+- Demo: the issue list on `Topics.issues` (key `All` or `Mine`) and the
+  properties panel on `Topics.issue`, both with `Live.mutate`;
+  `update_issue` and `create_issue` publish. The label chips above the list
+  read the query `Queries.labels` (remote data), which the list and the new
+  issue dialog invalidate.
+- Measured (`dune build --profile=release @bench/live/bench-live`, one
+  machine under load): 25 issues 6 KB per message, publish to 100 sockets
+  under 1 ms; 500 issues 122 KB, 14 ms; 5000 issues 1.2 MB (over the 1 MiB
+  warning), encode 7 ms, publish to 100 sockets 142 ms.
+
 ## Error boundaries (2026-11-10)
 
 Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.

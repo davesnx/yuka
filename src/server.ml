@@ -73,10 +73,11 @@ let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
   | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ?form ~timeout ~sleep build ~on_shell
+let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ~timeout ~sleep build ~on_shell
     ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.form <- form;
+  session.csrf <- csrf;
   session.preload <- preload;
   session.entry <- entry;
   session.current <- current;
@@ -249,12 +250,12 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ~sleep build =
+let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ~sleep build =
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
     (fun () -> !document ^ Buffer.contents values)
-    (drive ?preload ?entry ?current ?id_prefix ?form ~timeout ~sleep
+    (drive ?preload ?entry ?current ?id_prefix ?form ?csrf ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
          document := shell;

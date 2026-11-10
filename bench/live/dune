@@ -1,0 +1,8 @@
+(executable
+ (name publish)
+ (libraries demo_app demo_shared yuka unix))
+
+(rule
+ (alias bench-live)
+ (action
+  (run %{exe:publish.exe})))

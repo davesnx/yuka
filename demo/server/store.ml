@@ -153,3 +153,11 @@ let mine () =
     (fun (i : Issue.t) ->
       match i.assignee with Some u -> u.id = me.id | None -> false)
     !issues
+
+let label_counts () =
+  let open_ (i : Issue.t) = match i.status with Issue.Done | Issue.Canceled -> false | _ -> true in
+  let labels = List.sort_uniq compare (List.concat_map (fun (i : Issue.t) -> i.labels) !issues) in
+  List.map
+    (fun label ->
+      { Demo_shared.Queries.label; open_ = List.length (List.filter (fun i -> open_ i && List.mem label i.Issue.labels) !issues) })
+    labels

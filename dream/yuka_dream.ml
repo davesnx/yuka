@@ -45,6 +45,8 @@ module Adapter = struct
     | Some n when n > limit -> to_async (refuse ())
     | _ -> to_async (read ())
 
+  let csrf_token request = Dream.csrf_token request
+
   let respond ({ status; headers; body } : Yuka.Server.http_response) =
     match body with
     | Yuka.Server.String text -> Dream.respond ~code:status ~headers text
@@ -93,9 +95,44 @@ let tree_digest dir =
 let log_to_dream () =
   Yuka.Server.log_error := fun message -> Dream.error (fun log -> log "%s" message)
 
+module Socket = struct
+  type request = Dream.request
+  type response = Dream.response
+
+  let header = Dream.header
+  let session = Dream.session_id
+  let csrf_token request = Dream.csrf_token request
+
+  let verify_csrf request token =
+    to_async (Lwt.map (function `Ok -> true | _ -> false) (Dream.verify_csrf_token request token))
+
+  let refuse ~status message = to_async (Dream.respond ~code:status message)
+
+  let upgrade _request run =
+    (* dream 1.0.0~alpha8 with gluten 0.5.2 spins at 100% CPU in its write
+       loop when it closes a WebSocket that the client has already closed;
+       [run] closes the socket itself when it ends it. *)
+    to_async
+      (Dream.websocket ~close:false (fun ws ->
+           to_lwt
+             (run
+                {
+                  Yuka.Server.Live.send = (fun text -> to_async (Dream.send ws text));
+                  receive = (fun () -> to_async (Dream.receive ws));
+                  close = (fun code -> to_async (Dream.close_websocket ~code ws));
+                })))
+
+  let sleep = Adapter.sleep
+end
+
+module Sockets = Yuka.Server.Live.Handle (Socket)
+
 let handler config app =
   log_to_dream ();
-  Live.handler config app
+  fun request ->
+    match String.split_on_char '?' (Dream.target request) with
+    | "/_yuka/live" :: _ -> to_lwt (Sockets.live request)
+    | _ -> Live.handler config app request
 
 let rec make_dirs dir =
   if not (Sys.file_exists dir) then begin

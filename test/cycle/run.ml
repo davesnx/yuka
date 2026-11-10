@@ -27,6 +27,8 @@ module Test_adapter = struct
     in
     Async.return (read 0)
 
+  let csrf_token (_ : request) = "cycle-token"
+
   let respond (r : Server.http_response) =
     match r.body with
     | Server.String s -> Async.return { status = r.status; headers = r.headers; body = s }
@@ -744,7 +746,7 @@ let render =
           Server.handle config Cycle_server.Routes_server.app
             ~sleep:(fun _ -> Async.return ())
             ~exists:Test_adapter.exists (request "/slow")
-            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return (Some "")) }
+            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return (Some "")); csrf_token = (fun () -> "t") }
         in
         match Async.status a with
         | Async.Done (Server.Respond r) ->

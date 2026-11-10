@@ -620,6 +620,63 @@ module Remote : sig
       gets the change on top. The result is the [Async] of [run ()]. *)
 end
 
+module Topic : sig
+  (** A kind of live state ({!Live}): a name, the codec of its key and the
+      codec of its state. One topic has one state per key. *)
+
+  type ('k, 's) t
+
+  val declare : name:string -> key:'k Codec.t -> state:'s Codec.t -> ('k, 's) t
+  (** The server and the client must declare it with the same name and
+      codecs. *)
+
+  val name : (_, _) t -> string
+end
+
+module Live : sig
+  (** Server state that the server pushes to the page over one WebSocket
+      ([GET /_yuka/live]) when it changes. Each message is the full state of
+      one key. The server side is {!Server.Live}. *)
+
+  type 's t
+
+  val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
+  (** Subscribes to the state of the key that the function returns, and
+      again when a State that the function reads changes the key. Call it
+      in a component body; the subscription ends when its owner is disposed.
+
+      - In a server render it reads the state (the current one, else the
+        topic's loader) and, inside an island, writes it in the page with
+        a CSRF token for the socket; the client starts from it with no
+        wait. A page that has such a use holds a per-session token, so its
+        route must not use a shared cache.
+      - In the browser, one socket serves every use of the page. It opens
+        on the first use and closes 2 s after the last one ends.
+      - The status is [Loading None] until the first state, then [Ready].
+        When the socket closes it is [Ready { stale = true }] (or
+        [Loading None] with no data) while the client reconnects, after
+        250 ms, 500 ms, 1 s, 2 s, 4 s, then every 5 s (half to all of each
+        delay, at random), or when the browser comes back online. Each
+        reconnect gets the full state again.
+      - [Failed]: the server refused the key ([Forbidden], [Not_found],
+        [Rejected] from the loader, [Server]); this use does not subscribe
+        again. A refused CSRF token gives [Forbidden] to every use, and an
+        unsupported protocol [Protocol]; the page then needs a reload. *)
+
+  val status : 's t -> 's Status.t
+  (** Tracked read, with the pending {!mutate} changes applied. *)
+
+  val mutate : 's t -> ('s -> 's) -> (unit -> 'r Async.t) -> 'r Async.t
+  (** [mutate t change run] shows [change] at once and calls [run ()],
+      which should call an action that publishes the new state. When it
+      fails, the change is removed. When it succeeds, the change stays until
+      the server confirms, on the socket, that every state it had for this
+      subscription when the answer arrived was sent: the published state
+      then holds the change, in whatever order the HTTP answer and the
+      socket message arrived. While the socket is down, the confirmation
+      comes after the reconnect. *)
+end
+
 module Form : sig
   (** Forms that post with no JavaScript and submit through {!Action.call}
       in an island. [[@@deriving form]] on a record writes the field type,
@@ -950,6 +1007,9 @@ module Private : sig
 
   val import_map : url:string -> string list -> (string * string) list
 
+  val set_csrf : session -> (unit -> string) -> unit
+  val reset_live : unit -> unit
+
   val set_form :
     session -> string * string * (string * string) list * (string option * string) list -> unit
   (** The form state of a failed post: action name, form key, sent fields,
@@ -1174,6 +1234,90 @@ module Server : sig
     (** Like [reject], for use after a wait (in an [Async] chain). *)
   end
 
+  module Live : sig
+    (** The server side of {!Yuka.Live}. One process: a publish reaches the
+        sockets of this process only. Sessions and the secret must be the
+        same on every node and across restarts (Dream: [cookie_sessions] or
+        SQL sessions, and [Dream.set_secret]); with memory sessions or a
+        random secret, every [hello] after a restart, or on another node,
+        is refused and the page needs a reload. *)
+
+    type peer = { session : string; header : string -> string option }
+    (** Who subscribes: the session id and the headers of the upgrade
+        request. *)
+
+    val serve : ?allow:(peer -> 'k -> bool) -> ('k, 's) Topic.t -> ('k -> 's Async.t) -> unit
+    (** Registers the loader of a topic: the full state of a key, run when
+        a key that has no current state gets a subscriber, and by a server
+        render. [allow] (default: always) runs on each subscribe; false
+        refuses it ([Forbidden]). A loader that raises or fails with
+        {!Action.reject} gives [Rejected]; any other failure gives [Server]
+        and a {!log_error} message. Raises [Invalid_argument] when the topic
+        is already served. *)
+
+    val publish : ('k, 's) Topic.t -> 'k -> 's -> unit
+    (** The new full state of a key, sent to each subscriber of the key. It
+        does nothing when the key has no subscriber. A publish while the
+        loader runs wins over the loaded state. *)
+
+    type connection = {
+      send : string -> unit Async.t;
+      receive : unit -> string option Async.t;  (** [None]: closed. *)
+      close : int -> unit Async.t;  (** Close with this code. *)
+    }
+    (** One open WebSocket, text frames. *)
+
+    val run :
+      sleep:(float -> unit Async.t) ->
+      peer ->
+      verify_csrf:(string -> bool Async.t) ->
+      token:(unit -> string) ->
+      connection ->
+      unit Async.t
+    (** Runs the live protocol on one socket until it closes:
+
+        - The first message is [{"t":"hello","v":1,"csrf":T}]; another
+          version closes with 4426, a token that [verify_csrf] refuses with
+          4403, any other first message with 4400. The answer
+          [{"t":"hello","v":1,"csrf":T'}] carries [token ()] for the next
+          [hello] of the page.
+        - [sub] ([id], [topic], [key]), [unsub] ([id]), [sync] ([id],
+          [ref]) and [ping]. A subscription gets [state] messages ([id],
+          [seq], [state]), or one [error] ([id], [code]: [unknown_topic],
+          [bad_key], [forbidden], [rejected] with [message], [server],
+          [limit]). [sync] is answered by [synced] after the latest state
+          of the subscription.
+        - On a slow socket, a newer state replaces a state that still waits
+          to be sent.
+        - Limits: a message over 64 KiB closes with 1009; more than 64
+          subscriptions gives [limit]; a message out over 1 MiB is sent and
+          logged. No message for 60 s closes with 4408. *)
+
+    module type SOCKET = sig
+      type request
+      type response
+
+      val header : request -> string -> string option
+      val session : request -> string
+      val csrf_token : request -> string
+      val verify_csrf : request -> string -> bool Async.t
+      val refuse : status:int -> string -> response Async.t
+      val upgrade : request -> (connection -> unit Async.t) -> response Async.t
+      (** Answers 101 and runs the function on the open socket. The
+          function closes the socket when it ends the protocol; when the
+          client closed it, nothing closes it again. *)
+
+      val sleep : float -> unit Async.t
+    end
+    (** What a server gives for [GET /_yuka/live]. *)
+
+    module Handle (S : SOCKET) : sig
+      val live : S.request -> S.response Async.t
+      (** The origin rule of the action call ({!handle}), else
+          [refuse ~status:403]; then [upgrade] with {!run}. *)
+    end
+  end
+
   module Form : sig
     val implement :
       ('i, 'o, 'f) Form.action ->
@@ -1380,6 +1524,9 @@ module Server : sig
     target : string;  (** Path and query, as sent. *)
     header : string -> string option;  (** Case-insensitive. *)
     body : limit:int -> string option Async.t;  (** [None] over [limit] bytes. *)
+    csrf_token : unit -> string;
+        (** A token for the live [hello] ({!Yuka.Live}); called once by the
+            first {!Yuka.Live.use} of a render, never otherwise. *)
   }
   (** What the cycle reads from a request. *)
 
@@ -1483,6 +1630,11 @@ module Server : sig
         Give [None] with no read when a [Content-Length] is over [limit];
         else stop reading past [limit + 1] bytes. With [None], close the
         request body so the server drops the rest. *)
+
+    val csrf_token : request -> string
+    (** A CSRF token bound to the session of the request (Dream:
+        [Dream.csrf_token]). It is written in a page only when the page
+        has a {!Yuka.Live.use}; raise when the request has no session. *)
 
     val respond : http_response -> response io
     (** Sends the status, the headers and the body; a [Stream] body is

@@ -1,6 +1,9 @@
 import type { Page, Response } from "/home/me/workplace/davesnx/sancho.dev/node_modules/playwright-core/index.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { request } from "node:http";
+import { spawn } from "node:child_process";
+import { readFileSync, writeFileSync, openSync } from "node:fs";
 
 const playwrightPath =
   process.env.PLAYWRIGHT_CORE ??
@@ -297,19 +300,25 @@ await step("3d. a page with no island loads no script", async () => {
   await pg.close();
 });
 
-await step("3e. remote data is embedded", async () => {
+await step("3e. live data is embedded", async () => {
   const pg = await browser.newPage();
   const posts: string[] = [];
   pg.on("request", (r) => { if (r.method() === "POST") posts.push(new URL(r.url()).pathname); });
   const res = await pg.goto(base + "/", { waitUntil: "networkidle" });
   const html = (await res?.text()) ?? "";
   await pg.waitForSelector(".row");
-  check("3e.1 the list and its answer are in the server HTML", html.includes('class="row-title"') && html.includes('data-yuka-answer="r:issues'), String(html.length));
-  check("3e.2 no issues request at load", !posts.some((p) => p.endsWith("/issues")), posts.join(","));
+  check("3e.1 the list, its live answer and the token are in the server HTML", html.includes('class="row-title"') && html.includes('data-yuka-answer="l:issues') && html.includes('data-yuka-answer="l:csrf"'), String(html.length));
+  check("3e.2 no labels request at load, the chips are in the server HTML", html.includes('data-yuka-answer="r:labels') && html.includes('class="chip"') && !posts.some((p) => p.endsWith("/labels")), posts.join(","));
+  const all = await pg.locator(".row").count();
+  await pg.locator(".chip", { hasText: /^client / }).click();
+  const only = await pg.locator(".row").count();
+  const labelled = await pg.locator(".row").evaluateAll((rows) => rows.every((r) => !!r.querySelector(".label-client")));
+  check("3e.4 a label chip filters the list", only > 0 && only < all && labelled, `${all} -> ${only}`);
+  await pg.locator(".chip.on").click();
   await pg.locator('.nav-link[href="/my"]').click();
   await pg.waitForURL("**/my");
   await pg.waitForSelector(".row");
-  check("3e.3 no issues request after a client navigation", !posts.some((p) => p.endsWith("/issues")), posts.join(","));
+  check("3e.3 no labels request after a client navigation", !posts.some((p) => p.endsWith("/labels")), posts.join(","));
   await pg.close();
 });
 
@@ -374,8 +383,136 @@ await step("3f. prefetch and the navigation cache", async () => {
   const aborted = failedRequests.slice(failedBefore).filter(dropped).length;
   failedRequests.splice(failedBefore, failedRequests.length - failedBefore, ...failedRequests.slice(failedBefore).filter((f) => !dropped(f)));
   check("3f.6 emptying the cache aborts at most the one prefetch in flight", aborted <= 1, String(aborted));
-  check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.length === posts + 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
+  check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.slice(posts).filter((p) => p.url.endsWith("/update_issue")).length === 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
   await page.goto(base + "/", { waitUntil: "networkidle" });
+});
+
+
+const recordSockets = () => {
+  if (!navigator.onLine) Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: () => true });
+  const W = window.WebSocket;
+  (window as any).__sockets = [];
+  (window as any).WebSocket = class extends W {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols);
+      (window as any).__sockets.push(this);
+    }
+  };
+};
+const liveOpen = (p: Page) =>
+  p.waitForFunction(() => {
+    const s = (window as any).__sockets as WebSocket[];
+    return s.length > 0 && s[s.length - 1].readyState === 1;
+  }, null, { timeout: 5000 });
+const livePage = async (path: string) => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await ctx.addInitScript(recordSockets);
+  const routes: { close: (o?: { code?: number; reason?: string }) => Promise<void> }[] = [];
+  await ctx.routeWebSocket(/\/_yuka\/live$/, (ws) => {
+    ws.connectToServer();
+    routes.push(ws);
+  });
+  const p = await ctx.newPage();
+  const errors: string[] = [];
+  p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  p.on("pageerror", (e) => errors.push(String(e)));
+  await p.goto(base + path, { waitUntil: "networkidle" });
+  await p.waitForSelector(".row");
+  await liveOpen(p);
+  return { ctx, p, errors, routes };
+};
+const statusIn = async (p: Page, id: string) =>
+  statusSlug(await p.locator(`.row[data-id="${id}"] button[aria-label="Change status"] svg`).first().getAttribute("class"));
+const pickStatus = async (p: Page, id: string, label: string) => {
+  await p.locator(`.row[data-id="${id}"] button[aria-label="Change status"]`).click();
+  await p.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
+};
+const handshake = (origin: string) =>
+  new Promise<number>((resolve, reject) => {
+    const u = new URL(base);
+    const req = request({
+      host: u.hostname,
+      port: u.port,
+      path: "/_yuka/live",
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        Origin: origin,
+      },
+    });
+    req.on("response", (r) => {
+      r.resume();
+      resolve(r.statusCode ?? 0);
+    });
+    req.on("upgrade", (_r, socket) => {
+      socket.destroy();
+      resolve(101);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+
+await step("3g. live data", async () => {
+  const A = await livePage("/");
+  const B = await livePage("/my");
+  const id = (await B.p.locator(".row").first().getAttribute("data-id")) ?? "";
+  const before = await statusIn(B.p, id);
+  const target = before === "done" ? "todo" : "done";
+  const label = target === "done" ? "Done" : "Todo";
+  const t0 = Date.now();
+  await pickStatus(A.p, id, label);
+  const seen = await B.p
+    .waitForFunction(
+      ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
+      [id, target],
+      { timeout: 1000 },
+    )
+    .then(() => Date.now() - t0, () => -1);
+  check("3g.1 a status change in page A (/) shows in page B (/my) within 1 s", seen >= 0, `${id} ${before} -> ${target} after ${seen} ms`);
+
+  await B.p.goto(base + "/", { waitUntil: "networkidle" });
+  await B.p.waitForSelector(".row");
+  await liveOpen(B.p);
+  const title = `Live issue ${run}`;
+  await A.p.locator("body").click({ position: { x: 5, y: 5 } });
+  await A.p.keyboard.press("c");
+  await A.p.waitForSelector(".dialog");
+  await A.p.fill(".dialog-title", title);
+  await A.p.locator(".dialog .button.primary").click();
+  const created = await B.p.locator(".row", { hasText: title }).waitFor({ timeout: 2000 }).then(() => true, () => false);
+  check("3g.2 an issue created in page A shows in page B", created);
+
+  await B.routes[B.routes.length - 1].close({ code: 4001, reason: "dropped by the test" });
+  const offline = await B.p.waitForSelector(".offline", { timeout: 1000 }).then(() => true, () => false);
+  const back = await B.p.waitForSelector(".offline", { state: "detached", timeout: 5000 }).then(() => true, () => false);
+  check("3g.3 a closed socket shows Offline, then the page reconnects", offline && back, `offline=${offline} back=${back}`);
+  await liveOpen(B.p);
+
+  const before2 = await statusIn(B.p, id);
+  const target2 = before2 === "done" ? "todo" : "done";
+  await A.p.route("**/_yuka/action/**", async (route) => {
+    await new Promise((r) => setTimeout(r, 300));
+    await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"action failed"}' });
+  });
+  await pickStatus(A.p, id, target2 === "done" ? "Done" : "Todo");
+  const shownInA = await statusIn(A.p, id);
+  let seenInB = false;
+  for (let i = 0; i < 12; i++) {
+    if ((await statusIn(B.p, id)) === target2) seenInB = true;
+    await B.p.waitForTimeout(100);
+  }
+  await A.p.unroute("**/_yuka/action/**");
+  check("3g.4 a forced 500 rolls back in page A and page B never shows the change", shownInA === target2 && (await statusIn(A.p, id)) === before2 && !seenInB, `A ${before2} -> ${shownInA} -> ${await statusIn(A.p, id)}, B saw it: ${seenInB}`);
+
+  const foreign = await handshake("http://evil.example");
+  const same = await handshake(base);
+  check("3g.5 a WebSocket handshake from another origin gets 403", foreign === 403 && same === 101, `foreign=${foreign} same=${same}`);
+  const unexpected = [...A.errors, ...B.errors].filter((e) => !/status of 500/.test(e));
+  check("3g.6 no unexpected console errors in the live pages", unexpected.length === 0, unexpected.join(" | "));
+  await A.ctx.close();
+  await B.ctx.close();
 });
 
 await step("4. status change", async () => {
@@ -387,9 +524,12 @@ await step("4. status change", async () => {
   const label = target === "done" ? "Done" : "Todo";
   await page.route("**/_yuka/action/**", async (route) => {
     await new Promise((r) => setTimeout(r, 800));
-    await route.continue();
+    await route.continue().catch(() => {});
   });
   actionPosts.length = 0;
+  const labelsAgain = page
+    .waitForResponse((r) => r.url().endsWith("/_yuka/action/labels") && r.status() === 200, { timeout: 5000 })
+    .then(() => true, () => false);
   await page.locator(`.row[data-id="${id}"] button[aria-label="Change status"]`).click();
   await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
   const start = Date.now();
@@ -402,11 +542,13 @@ await step("4. status change", async () => {
   check("4a row updates at once (before response)", actionPosts.length === 0 && quick < 700, `after ${quick}ms, responses so far=${actionPosts.length}`);
   await page.waitForTimeout(1200);
   await page.unroute("**/_yuka/action/**");
+  const updates = actionPosts.filter((p) => p.url.endsWith("/update_issue"));
   check(
-    "4b POST /_yuka/action/... returned 200",
-    actionPosts.length === 1 && actionPosts[0].status === 200,
+    "4b POST /_yuka/action/update_issue returned 200",
+    updates.length === 1 && updates[0].status === 200,
     JSON.stringify(actionPosts),
   );
+  check("4e the label counts are fetched again after a status change", await labelsAgain);
   check("4c row keeps new status after response", statusSlug(await statusOf(id)) === target);
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector(".row");
@@ -946,6 +1088,51 @@ await step("8. 404", async () => {
   expectedFailures = 0;
   check("8a status 404", res?.status() === 404, String(res?.status()));
   check("8b not found page", (await page.locator(".not-found h1").textContent()) === "Issue not found");
+});
+
+
+await step("8c. live pages after a server restart", async () => {
+  const command = process.env.YUKA_E2E_SERVER;
+  const pidfile = process.env.YUKA_E2E_PIDFILE;
+  if (!command || !pidfile) {
+    console.log("SKIP  8c no YUKA_E2E_SERVER (run through e2e/run.sh)");
+    return;
+  }
+  const A = await livePage("/");
+  const B = await livePage("/my");
+  await A.p.evaluate(() => ((window as any).__marker = "alive"));
+  await B.p.evaluate(() => ((window as any).__marker = "alive"));
+  process.kill(Number(readFileSync(pidfile, "utf8").trim()));
+  const offA = await A.p.waitForSelector(".offline", { timeout: 3000 }).then(() => true, () => false);
+  const offB = await B.p.waitForSelector(".offline", { timeout: 3000 }).then(() => true, () => false);
+  check("8c.1 both pages show Offline", offA && offB, `A=${offA} B=${offB}`);
+  const [exe, ...args] = command.split(" ").filter((x) => x !== "");
+  const log = openSync(join(process.env.TMPDIR ?? "/tmp", "yuka_e2e_server.log"), "a");
+  const server = spawn(exe, args, { detached: true, stdio: ["ignore", log, log] });
+  server.unref();
+  writeFileSync(pidfile, String(server.pid));
+  const backA = await A.p.waitForSelector(".offline", { state: "detached", timeout: 15000 }).then(() => true, () => false);
+  const backB = await B.p.waitForSelector(".offline", { state: "detached", timeout: 15000 }).then(() => true, () => false);
+  const rows = await A.p.locator(".row").count();
+  const markers = [await A.p.evaluate(() => (window as any).__marker), await B.p.evaluate(() => (window as any).__marker)];
+  check("8c.2 both pages reconnect and show the current list, with no reload", backA && backB && rows > 0 && markers.every((m) => m === "alive"), `A=${backA} B=${backB} rows=${rows} markers=${markers}`);
+  const id = (await B.p.locator(".row").first().getAttribute("data-id")) ?? "";
+  const before = await statusIn(B.p, id);
+  const target = before === "done" ? "todo" : "done";
+  await pickStatus(A.p, id, target === "done" ? "Done" : "Todo");
+  const live = await B.p
+    .waitForFunction(
+      ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
+      [id, target],
+      { timeout: 3000 },
+    )
+    .then(() => true, () => false);
+  const failed = await B.p.locator(".list-empty.error").count();
+  check("8c.4 after the restart a change in page A still shows in page B (the CSRF check passes)", live && failed === 0, `${id} ${before} -> ${target} live=${live} error shown=${failed}`);
+  const unexpected = [...A.errors, ...B.errors].filter((e) => !/WebSocket connection to .* failed/.test(e));
+  check("8c.3 no console error but the expected socket failures", unexpected.length === 0, unexpected.join(" | "));
+  await A.ctx.close();
+  await B.ctx.close();
 });
 
 await step("9. screenshots", async () => {

@@ -472,3 +472,38 @@ external parse_float : string -> float = "Number"
 
 let parse_int : string -> int option =
   [%mel.raw "function (t) { const n = Number(t); return (n | 0) === n ? n | 0 : undefined }"]
+
+type socket
+
+let socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket =
+  [%mel.raw
+    {|function (url, opened, message, closed) {
+  const s = new WebSocket(url);
+  s.onopen = function () { opened() };
+  s.onmessage = function (e) { if (typeof e.data === "string") message(e.data) };
+  s.onclose = function (e) { closed(e.code) };
+  return s;
+}|}]
+
+let socket_send : socket -> string -> unit =
+  [%mel.raw "function (s, text) { if (s.readyState === 1) s.send(text) }"]
+
+let socket_close : socket -> int -> unit =
+  [%mel.raw "function (s, code) { s.onopen = s.onmessage = s.onclose = null; s.close(code) }"]
+
+let live_url : unit -> string =
+  [%mel.raw
+    {|function () { const l = window.location; return (l.protocol === "https:" ? "wss://" : "ws://") + l.host + "/_yuka/live" }|}]
+
+let online : unit -> bool =
+  [%mel.raw "function () { const n = window.navigator; return !n || n.onLine !== false }"]
+
+let on_online : (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (f) {
+  const handler = function () { f() };
+  window.addEventListener("online", handler);
+  return function () { window.removeEventListener("online", handler) };
+}|}]
+
+let random : unit -> float = [%mel.raw "function () { return Math.random() }"]

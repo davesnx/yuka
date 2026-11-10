@@ -2,24 +2,24 @@ open Yuka
 open Model
 
 let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
-  let current = State.make issue in
+  let live = Live.use Topics.issue (fun () -> issue.id) in
+  let current =
+    State.memo (fun () -> Option.value (Status.data (Live.status live)) ~default:issue)
+  in
   let error : string option State.t = State.make None in
   let change ?status ?priority () =
-    let before = State.peek current in
     State.set error None;
-    State.set current
+    let edit (i : Issue.t) =
       {
-        before with
-        status = Option.value status ~default:before.status;
-        priority = Option.value priority ~default:before.priority;
-      };
+        i with
+        status = Option.value status ~default:i.status;
+        priority = Option.value priority ~default:i.priority;
+      }
+    in
     Async.on_result
-      (Action.call Actions.update_issue { Actions.id = before.id; status; priority })
-      (function
-        | Ok i -> State.set current i
-        | Error _ ->
-            State.set current before;
-            State.set error (Some "Could not update the issue."))
+      (Live.mutate live edit (fun () ->
+           Action.call Actions.update_issue { Actions.id = issue.id; status; priority }))
+      (function Ok _ -> () | Error _ -> State.set error (Some "Could not update the issue."))
   in
   let select label items slug to_label of_slug selected on_pick =
     <select class_="select" aria_label=label value=(slug (State.get selected))
@@ -60,6 +60,10 @@ let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
       (match State.get error with
        | Some m -> <p class_="error">(Yuka.text m)</p>
        | None -> Yuka.empty)
+      (Yuka.hole (fun () ->
+         match Live.status live with
+         | Status.Ready { stale = true; _ } -> <p class_="offline">"Offline"</p>
+         | _ -> Yuka.empty))
       (Yuka.slot children)
     </div>
   </Yuka.Catch>

@@ -94,10 +94,21 @@ console.log(`  ${"all demo chunks".padEnd(28)} ${String(total).padStart(8)} B  $
 
 const budget: Budget = JSON.parse(readFileSync(resolve(root, options.budget!), "utf8"));
 const app = keyed[0]!;
-const remoteOnly = ["yuka/remote.js", "yuka/answers.js", "yuka/optimistic.js", "yuka/status.js", "yuka/form.js"];
+const remoteOnly = [
+  "yuka/remote.js",
+  "yuka/answers.js",
+  "yuka/optimistic.js",
+  "yuka/status.js",
+  "yuka/form.js",
+  "yuka/live.js",
+  "yuka/live_server.js",
+  "yuka/topic.js",
+];
 const leaked = remoteOnly.filter((m) => keyed.some((c) => m in c.inputs));
+if (keyed.some((c) => readFileSync(join(outDir, "keyed", c.name), "utf8").includes("WebSocket")))
+  leaked.push("WebSocket");
 if (leaked.length > 0) {
-  console.error(`size: the keyed app uses neither remote data nor forms but contains ${leaked.join(", ")}`);
+  console.error(`size: the keyed app uses neither remote data, live data nor forms but contains ${leaked.join(", ")}`);
   process.exit(1);
 }
 const serverOnly = [...keyed, ...demo].filter((c) => "yuka/printer.js" in c.inputs).map((c) => c.name);

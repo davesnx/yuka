@@ -2,12 +2,21 @@ open Demo_shared
 
 let view_issues = function Queries.All -> !Store.issues | Queries.Mine -> Store.mine ()
 
+let publish_issue (i : Model.Issue.t) =
+  Yuka.Server.Live.publish Topics.issue i.id i;
+  List.iter (fun v -> Yuka.Server.Live.publish Topics.issues v (view_issues v)) [ Queries.All; Queries.Mine ]
+
 let register () =
-  Yuka.Server.Action.implement Queries.issues (fun view -> Yuka.Async.return (view_issues view));
+  Yuka.Server.Action.implement Queries.labels (fun () -> Yuka.Async.return (Store.label_counts ()));
+  Yuka.Server.Live.serve Topics.issues (fun view -> Yuka.Async.return (view_issues view));
+  Yuka.Server.Live.serve Topics.issue (fun id ->
+      match Store.find id with Some i -> Yuka.Async.return i | None -> Yuka.Server.Action.rejected ("No issue " ^ id));
   Yuka.Server.Action.implement Actions.update_issue
     (fun ({ id; status; priority } : Actions.update_input) ->
       match Store.update ~id ?status ?priority () with
-      | Some i -> Yuka.Async.return i
+      | Some i ->
+          publish_issue i;
+          Yuka.Async.return i
       | None -> Yuka.Server.Action.rejected ("No issue " ^ id));
   Yuka.Server.Form.implement Actions.create_issue
     ~redirect:(fun (i : Model.Issue.t) -> Routes.href (Issue { id = i.id }))
@@ -19,7 +28,10 @@ let register () =
       else
         match Store.find_title title with
         | Some (i : Model.Issue.t) -> title_error ("An issue with this title already exists: " ^ i.id)
-        | None -> Yuka.Async.return (Ok (Store.create ~title ~description ~status ~priority)));
+        | None ->
+            let i = Store.create ~title ~description ~status ~priority in
+            publish_issue i;
+            Yuka.Async.return (Ok i));
   Yuka.Server.Action.implement Actions.add_comment
     (fun { issue_id; body } ->
       match Store.find issue_id with

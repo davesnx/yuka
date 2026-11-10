@@ -206,6 +206,7 @@ type request = {
   target : string;
   header : string -> string option;
   body : limit:int -> string option Async.t;
+  csrf_token : unit -> string;
 }
 
 type outcome =
@@ -255,6 +256,7 @@ type env = {
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
+  csrf : (unit -> string) option;
 }
 
 let outlet key inner =
@@ -318,7 +320,7 @@ let render env ~status ~headers layers (page : page) =
       | 0 ->
           Async.map
             (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
-            (Server.settled ?preload ?entry ?form:env.form ~current ~timeout ~sleep:env.sleep build)
+            (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~current ~timeout ~sleep:env.sleep build)
       | n ->
           let outlet = List.nth keys (n - 1) in
           let headers =
@@ -327,7 +329,7 @@ let render env ~status ~headers layers (page : page) =
           in
           Async.map
             (fun body -> { status; headers; body = String body })
-            (Server.settled ?preload ?form:env.form ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
   | None ->
     let early = Buffer.create 4096 in
@@ -338,7 +340,7 @@ let render env ~status ~headers layers (page : page) =
     in
     let write text = !writer text in
     let finished =
-      Server.drive ?preload ?entry ?form:env.form ~current ~timeout ~sleep:env.sleep build
+      Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~current ~timeout ~sleep:env.sleep build
         ~on_shell:(fun ~fills shell -> write (head (if fills then Server.fill_script else "") ^ shell))
         ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
         ~on_value:write
@@ -634,6 +636,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
       root_headers = a.headers;
       exists;
       form = None;
+      csrf = Some r.csrf_token;
     }
   in
   let parts = String.split_on_char '/' path in
@@ -704,6 +707,7 @@ module type ADAPTER = sig
   val target : request -> string
   val header : request -> string -> string option
   val body : request -> limit:int -> string option Async.t
+  val csrf_token : request -> string
   val respond : http_response -> response io
   val file : request -> root:string -> path:string -> headers:(string * string) list -> response io
   val exists : root:string -> path:string -> bool
@@ -720,6 +724,7 @@ module Make (A : ADAPTER) = struct
         target = A.target req;
         header = A.header req;
         body = (fun ~limit -> A.body req ~limit);
+        csrf_token = (fun () -> A.csrf_token req);
       }
     in
     A.bind (A.of_async (handle config app ~sleep:A.sleep ~exists:A.exists req view)) (function
@@ -819,6 +824,7 @@ let missing_page config (App a) ~sleep =
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
       form = None;
+      csrf = None;
     }
   in
   not_found_page env a.missing "/404.html"

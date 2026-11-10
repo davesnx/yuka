@@ -113,13 +113,14 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable answered : string list;
     mutable select_value : string option;
     mutable form : (string * string * (string * string) list * (string option * string) list) option;
+    mutable csrf : (unit -> string) option;
   }
 
   let snapshot s = { s with streaming = s.streaming }
 
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
-        preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form } =
+        preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form; csrf } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -135,7 +136,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     s.select_value <- select_value;
     s.answers <- answers;
     s.answered <- answered;
-    s.form <- form
+    s.form <- form;
+    s.csrf <- csrf
 
 let current_session : session option ref = ref None
 let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)
