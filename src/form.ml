@@ -73,7 +73,7 @@ let action ~name ~fields:t ~(output : 'o Codec.t) : ('i, 'o, 'f) action =
             (read_answer output j));
     }
   in
-  { Action.name; input; output = result; form = Some (Action.Form t) }
+  { Action.name; input; output = result; form = Some (Action.Form (t, output)) }
 
 type ('o, 'f) form = {
   sent : (string * string) list;
@@ -93,30 +93,29 @@ let form_errors form = List.filter_map (fun (g, m) -> match g with None -> Some 
 let error_view form f view = Hole (fun () -> match error form f with Some m -> view m | None -> Fragment [])
 let form_error_view form view = Hole (fun () -> Fragment (List.map view (form_errors form)))
 let pending form = State.get form.busy
-let read_key = "__yuka_sent_read"
+let parse_sent sent =
+  match Json.of_string sent with
+  | Ok (`Assoc fields) -> (
+      match
+        ( Option.bind (List.assoc_opt "fields" fields) pairs_of_json,
+          Option.map names_of_json (List.assoc_opt "errors" fields) )
+      with
+      | Some values, Some (Ok errors) -> Some (values, errors)
+      | _ -> None)
+  | _ -> None
 
 let read_sent name key =
   List.find_map
     (fun el ->
-      let read : bool option = Web.get_prop el read_key in
-      if
-        read = Some true
-        || Web.get_attribute el "data-yuka-action" <> Some name
-        || Web.get_attribute el "data-yuka-key" <> Some key
+      if Web.get_attribute el "data-yuka-action" <> Some name || Web.get_attribute el "data-yuka-key" <> Some key
       then None
       else
         let sent = Option.value (Web.get_attribute el "data-yuka-sent") ~default:"" in
-        match Json.of_string sent with
-        | Ok (`Assoc fields) -> (
-            match
-              ( Option.bind (List.assoc_opt "fields" fields) pairs_of_json,
-                Option.map names_of_json (List.assoc_opt "errors" fields) )
-            with
-            | Some values, Some (Ok errors) ->
-                Web.set_bool el read_key true;
-                Some (values, errors)
-            | _ -> invalid_arg ("Yuka.Form: bad data-yuka-sent " ^ sent))
-        | _ -> invalid_arg ("Yuka.Form: bad data-yuka-sent " ^ sent))
+        match parse_sent sent with
+        | Some state -> Some state
+        | None ->
+            if Dev.on then Web.console_error ("yuka: ignored a bad data-yuka-sent on form " ^ name ^ ": " ^ sent);
+            None)
     (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-sent]"))
 
 let sent_state name key =
@@ -130,9 +129,9 @@ let sent_state name key =
 
 let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action.t) ?(key = "") ?run ?on_ok
     ~(children : (o, f) form -> 'k) () =
-  let t : (i, f) Form_core.t =
+  let t, output =
     match action.form with
-    | Some (Action.Form t) -> t
+    | Some (Action.Form (t, output)) -> ((t : (i, f) Form_core.t), (output : o Codec.t))
     | None -> invalid_arg ("Yuka.Form.make: " ^ action.name ^ " is not a form action")
   in
   let sent = sent_state action.name key in
@@ -160,18 +159,13 @@ let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action
     Async.on_result (!Action.transport action.name json) (function
       | Error m -> finish (Error m) None
       | Ok j -> (
-          let redirect =
-            match j with
-            | `Assoc fields -> (
-                match List.assoc_opt "redirect" fields with Some (`String l) -> Some l | _ -> None)
-            | _ -> None
-          in
-          match action.output.decode j with
-          | Ok r -> finish (Ok r) redirect
+          match read_answer output j with
+          | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
           | Error m -> finish (Error m) None))
   in
   let submit ev =
     Web.prevent_default ev;
+    Web.remove_attribute (Web.target ev) "data-yuka-sent";
     match decode t (Array.to_list (Web.form_values ev)) with
     | Error e -> State.set form.failed e
     | Ok input -> (

@@ -1,5 +1,5 @@
   type ('i, 'o) form =
-    | Form : ('i, 'f) Form_core.t -> ('i, ('x, ('f option * string) list) result) form
+    | Form : ('i, 'f) Form_core.t * 'x Codec.t -> ('i, ('x, ('f option * string) list) result) form
 
   type ('i, 'o, 'kind) t = {
     name : string;

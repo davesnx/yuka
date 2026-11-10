@@ -490,7 +490,7 @@ deriving form needs a record:
   File "form1.mlx", line 1, characters 0-32:
   1 | type t = A | B [@@deriving form]
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] [@deriving form] needs a record type
+  Error: [yuka] [@@deriving form] needs a record type
   [1]
 
 deriving form refuses a field type it cannot read:
@@ -514,7 +514,7 @@ deriving form refuses type parameters and labels that start with an underscore:
   File "form3.mlx", line 1, characters 5-7:
   1 | type 'a t = { x : string } [@@deriving form]
            ^^
-  Error: [yuka] [@deriving form] needs a type with no parameter
+  Error: [yuka] [@@deriving form] needs a type with no parameter
   [1]
 
   $ cat > form4.mlx <<'X'

@@ -417,7 +417,7 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _)
     (f : i -> (o, f Form_core.errors) result Async.t) =
   let t : (i, f) Form_core.t =
     match action.Action.form with
-    | Some (Action.Form t) -> t
+    | Some (Action.Form (t, _)) -> t
     | None -> invalid_arg ("Yuka.Server.Form.implement: " ^ Action.name action ^ " is not a form action")
   in
   let output = action.Action.output in
@@ -450,58 +450,69 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _)
 
 let max_body = 1_048_576
 
-let same_origin ~origin ~host =
-  match origin with
-  | None -> true
-  | Some origin -> (
-      let origin_host =
-        match String.index_opt origin ':' with
-        | Some i when i + 3 <= String.length origin ->
-            String.sub origin (i + 3) (String.length origin - i - 3)
-        | _ -> origin
+let authority url =
+  match String.index_opt url ':' with
+  | Some i when i + 3 <= String.length url && String.sub url (i + 1) 2 = "//" ->
+      let rest = String.sub url (i + 3) (String.length url - i - 3) in
+      let stop =
+        Option.value ~default:(String.length rest)
+          (String.index_opt (String.map (function '?' | '#' -> '/' | c -> c) rest) '/')
       in
-      match host with
-      | Some h ->
-          String.equal (String.lowercase_ascii h)
-            (String.lowercase_ascii origin_host)
-      | None -> false)
+      Some (String.sub rest 0 stop)
+  | _ -> None
+
+let same_origin ~origin ~host =
+  match (authority origin, host) with
+  | Some a, Some h -> String.equal (String.lowercase_ascii a) (String.lowercase_ascii h)
+  | _ -> false
+
+let trusted_origin header =
+  match header "origin" with
+  | Some origin -> same_origin ~origin ~host:(header "host")
+  | None -> header "sec-fetch-site" = Some "same-origin"
+
+let local_location ~host location =
+  (not (String.exists (fun c -> c = '\r' || c = '\n') location))
+  &&
+  match location with
+  | "" -> false
+  | l when l.[0] = '/' -> not (String.length l > 1 && (l.[1] = '/' || l.[1] = '\\'))
+  | l -> same_origin ~origin:l ~host
 
 let media_type = function
   | None -> None
   | Some ct -> Some (String.lowercase_ascii (String.trim (List.hd (String.split_on_char ';' ct))))
 
 let is_json ct = media_type ct = Some "application/json"
+let action_error status message = (status, Json.to_string (`Assoc [ ("error", `String message) ]))
 
-let handle_action ~name ~content_type ~origin ~host ~body =
-  let error_body message =
-    Json.to_string (`Assoc [ ("error", `String message) ])
-  in
-  let error status message = Async.resolved (status, error_body message) in
-  if not (same_origin ~origin ~host) then error 403 "origin mismatch"
+let accept_action ~name header =
+  if not (trusted_origin header) then Error (action_error 403 "origin mismatch")
   else
     match find_action name with
-    | None -> error 404 ("unknown action " ^ name)
+    | None -> Error (action_error 404 ("unknown action " ^ name))
     | Some handler ->
-        if not (is_json content_type) then
-          error 415 "content type must be application/json"
-        else if String.length body > max_body then
-          error 413 "request too large"
-        else (
-          match Json.of_string body with
-          | Error m -> error 400 ("invalid JSON: " ^ m)
-          | Ok json ->
-              let result, resolve, _ = Async.make () in
-              Async.on_settled (handler json) (function
-                | Async.Done (Bad_input m) ->
-                    resolve (400, error_body ("invalid input: " ^ m))
-                | Async.Done (Output j) ->
-                    resolve (200, Json.to_string (`Assoc [ ("ok", j) ]))
-                | Async.Failed m -> (
-                    match rejection m with
-                    | Some message -> resolve (400, error_body message)
-                    | None ->
-                        !log_error
-                          ("action " ^ name ^ " failed: " ^ m);
-                        resolve (500, error_body "action failed"))
-                | Async.Pending -> ());
-              result)
+        if is_json (header "content-type") then Ok handler
+        else Error (action_error 415 "content type must be application/json")
+
+let answer_action ~name handler body =
+  match Json.of_string body with
+  | Error m -> Async.resolved (action_error 400 ("invalid JSON: " ^ m))
+  | Ok json ->
+      let result, resolve, _ = Async.make () in
+      Async.on_settled (handler json) (function
+        | Async.Done (Bad_input m) -> resolve (action_error 400 ("invalid input: " ^ m))
+        | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc [ ("ok", j) ]))
+        | Async.Failed m -> (
+            match rejection m with
+            | Some message -> resolve (action_error 400 message)
+            | None ->
+                !log_error ("action " ^ name ^ " failed: " ^ m);
+                resolve (action_error 500 "action failed"))
+        | Async.Pending -> ());
+      result
+
+let handle_action ~name ~header ~body =
+  match accept_action ~name header with
+  | Error e -> Async.resolved e
+  | Ok handler -> answer_action ~name handler body

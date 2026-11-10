@@ -476,18 +476,17 @@ let serve_file meth ~root ~headers raw =
 
 let action (r : request) raw =
   match (raw, r.meth) with
-  | [ name ], `POST ->
-      let json status body =
+  | [ name ], `POST -> (
+      let json (status, body) =
         Respond { status; headers = [ ("content-type", "application/json"); no_store ]; body = String body }
       in
-      Async.bind (r.body ~limit:Server.max_body) (function
-        | None -> Async.resolved (json 413 (Json.to_string (`Assoc [ ("error", `String "request too large") ])))
-        | Some body ->
-            Async.map
-              (fun (status, body) -> json status body)
-              (Server.handle_action ~name:(Router.decode ~plus:false name)
-                 ~content_type:(r.header "content-type") ~origin:(r.header "origin")
-                 ~host:(r.header "host") ~body))
+      let name = Router.decode ~plus:false name in
+      match Server.accept_action ~name r.header with
+      | Error e -> Async.resolved (json e)
+      | Ok handler ->
+          Async.bind (r.body ~limit:Server.max_body) (function
+            | None -> Async.resolved (json (Server.action_error 413 "request too large"))
+            | Some body -> Async.map json (Server.answer_action ~name handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
 
@@ -526,12 +525,7 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
       | Handler _ -> reply (method_not_allowed allowed)
       | Page { rules; guards; load; fallback } ->
           let plain status message = plain status message rules.headers in
-          let origin_ok =
-            match r.header "origin" with
-            | Some _ -> Server.same_origin ~origin:(r.header "origin") ~host:(r.header "host")
-            | None -> r.header "sec-fetch-site" = Some "same-origin"
-          in
-          if not origin_ok then reply (plain 403 "Forbidden")
+          if not (Server.trusted_origin r.header) then reply (plain 403 "Forbidden")
           else
             Async.bind (run_guards guards) (function
               | Error stop -> page_or_error (stopped env fallback path stop)
@@ -561,8 +555,14 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
                                   (Async.bind answer (function
                                     | Server.Saved location ->
                                         let location = Option.value location ~default:(path ^ query_suffix query) in
-                                        reply
-                                          (empty 303 (merge_headers [ rules.headers; [ ("location", location); no_store ] ]))
+                                        if Server.local_location ~host:(r.header "host") location then
+                                          reply
+                                            (empty 303
+                                               (merge_headers [ rules.headers; [ ("location", location); no_store ] ]))
+                                        else
+                                          page_or_error
+                                            (fail_page env a.missing ("form " ^ name ^ " redirect to " ^ String.escaped location
+                                               ^ " is not a path on this site"))
                                     | Server.Unprocessable errors -> unprocessable errors))
                                   (fun m ->
                                     match Server.rejection m with
@@ -595,9 +595,7 @@ let route env (App a) req (r : request) ~path ~raw ~query =
               | Error stop -> stopped env a.missing path stop
               | Ok () ->
                   if
-                    same_origin
-                    && not
-                         (Server.same_origin ~origin:(r.header "origin") ~host:(r.header "host"))
+                    same_origin && not (Server.trusted_origin r.header)
                   then Async.resolved (plain 403 "Forbidden" [])
                   else
                     let ran =

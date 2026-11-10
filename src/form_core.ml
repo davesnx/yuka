@@ -72,8 +72,5 @@ let named t (errors : _ errors) = List.map (fun (f, m) -> (Option.map (name t) f
 let unnamed t errors =
   List.map
     (fun (n, m) ->
-      match Option.map (fun n -> (n, of_name t n)) n with
-      | None -> (None, m)
-      | Some (_, Some f) -> (Some f, m)
-      | Some (n, None) -> invalid_arg ("Yuka.Form: no field " ^ n))
+      match Option.bind n (of_name t) with Some f -> (Some f, m) | None -> (None, m))
     errors

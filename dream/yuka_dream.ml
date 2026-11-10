@@ -32,15 +32,18 @@ module Adapter = struct
   let header = Dream.header
   let body request ~limit =
     let stream = Dream.body_stream request in
+    let refuse () = Lwt.map (fun () -> None) (Dream.close stream) in
     let buffer = Buffer.create 1024 in
     let rec read () =
       Lwt.bind (Dream.read stream) (function
         | None -> Lwt.return_some (Buffer.contents buffer)
         | Some chunk ->
             Buffer.add_string buffer chunk;
-            if Buffer.length buffer > limit then Lwt.return_none else read ())
+            if Buffer.length buffer > limit then refuse () else read ())
     in
-    to_async (read ())
+    match Option.bind (Dream.header request "Content-Length") int_of_string_opt with
+    | Some n when n > limit -> to_async (refuse ())
+    | _ -> to_async (read ())
 
   let respond ({ status; headers; body } : Yuka.Server.http_response) =
     match body with

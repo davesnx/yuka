@@ -190,9 +190,10 @@ markers everywhere: the client hydrates their output.
   cycle answers it; `Yuka.Private.handle_action` in tests): the body
   is the JSON input. The answer is JSON: `{"ok": output}` with 200, or
   `{"error": message}` with:
-  - 403: an `Origin` header that does not match the request `Host`
-    (scheme ignored). No `Origin` is allowed; `Origin` without `Host` is
-    refused.
+  - 403: an `Origin` whose authority is not the request `Host` (scheme
+    ignored), or no `Origin` and no `Sec-Fetch-Site: same-origin`.
+    `Origin` without `Host` is refused. Form posts and `Action` routes use
+    the same rule (`Server.trusted_origin`).
   - 404: unknown action.
   - 415: `Content-Type` is not `application/json` (parameters such as
     `charset` are allowed).
@@ -200,10 +201,10 @@ markers everywhere: the client hydrates their output.
     says which.
   - 500: the implementation raised or its promise failed. The message is
     always `action failed`; the failure goes to `Yuka.Server.log_error`.
-  - 413: the body is over 1 MiB (checked by `Content-Length` first, then
-    while reading). The message is `request too large`.
-  Checks run in this order: origin, action name, content type, body size,
-  body.
+  - 413: the body is over 1 MiB (`ADAPTER.body`: `Content-Length` first,
+    then while reading). The message is `request too large`.
+  Checks run in this order: origin, action name, content type (all from
+  the headers, no body read), body size, body.
 - A ppx form (`let%action`) can come later; this form needs no target
   switch in the ppx.
 
@@ -1515,9 +1516,20 @@ Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
   once with the typed decoder, and field names come from the `Form.t`.
   The redirect is read from each answer (no shared ref). The posted form
   is told by `?key` (`_yuka_key`); the 422 state goes to that form only,
-  and an island reads `data-yuka-sent` once per element. The browser adds
+  and an island keeps the state of `data-yuka-sent` until a submit in the
+  browser removes the attribute. The browser adds
   the submitter's `name`/`value` to the fields. With no `on_ok` and no
   redirect, an island submit navigates to the page URL. The deriver
   refuses type parameters and labels that start with `_`, and reads
   `String.t`, `Int.t`, `Float.t`, `Bool.t` as the base kinds.
+- Second review fixes: the action call checks origin, name and content
+  type from the headers before it reads the body. `yuka-dream` refuses a
+  `Content-Length` over the limit with no read and closes the body stream
+  over the limit. The form 303 goes only to a path or a URL of the request
+  `Host` with no CR or LF; else the 500 page and a log. One origin rule,
+  `Server.trusted_origin`, for form posts, the action call and `Action`
+  routes. Unknown field names in errors from the server are form errors;
+  a `data-yuka-sent` that does not parse is ignored (a console message in
+  a dev build). A form post with a content type other than
+  `application/x-www-form-urlencoded` is 405 before the guards run.
 

@@ -166,7 +166,7 @@ let rules () =
 
 let action_route () =
   let status, _, body =
-    call ~meth:`POST ~headers:[ ("Content-Type", "application/json") ]
+    call ~meth:`POST ~headers:[ ("Content-Type", "application/json"); ("Origin", "http://demo.test"); ("Host", "demo.test") ]
       ~body:{|{"issue_id":"YUK-2","body":"From the test"}|} "/_yuka/action/add_comment"
   in
   Alcotest.(check int) "status" 200 status;

@@ -719,7 +719,9 @@ module Form : sig
       page URL) and a hidden [_yuka_action] field, so it works with no
       JavaScript. Give [key] to tell apart two forms of one action on a
       page: after a failed post (422) only the form with the posted key
-      shows the sent values and errors. In an island, a submit is handled
+      shows the sent values and errors. In an island, they stay for the
+      life of that [<form>] element (a new render of the form shows them
+      again) until a submit in the browser. In an island, a submit is handled
       in the browser: the fields (with the submit button's [name] and
       [value]) are decoded first (an error shows at once, with no request),
       then [run input] (default: the action call) runs while [pending] is
@@ -961,12 +963,7 @@ module Private : sig
     manifest:string -> base:string -> ?metafile:string -> unit -> string -> string option
 
   val handle_action :
-    name:string ->
-    content_type:string option ->
-    origin:string option ->
-    host:string option ->
-    body:string ->
-    (int * string) Async.t
+    name:string -> header:(string -> string option) -> body:string -> (int * string) Async.t
 end
 
 (**/**)
@@ -1156,13 +1153,17 @@ module Server : sig
     (** Registers a form action (see {!Yuka.Form}). It answers the island
         path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
         with [redirect o] in the answer, and the form post of a page. The
-        request cycle checks the origin (403), runs the page's guards (a
+        request cycle checks the origin as for {!handle} (403), runs the
+        page's guards (a
         refusal answers as for [GET] and the function does not run), reads
         at most 1 MiB of body (413), decodes the posted fields, calls the
         function, and answers 303 to [redirect o] (default: the page URL)
         on [Ok o], or renders the page again with status 422 and the sent
         values and errors on [Error], a decode error or {!Action.reject}.
-        The 303, 403 and 413 carry the page's rule headers. Raises
+        The 303, 403 and 413 carry the page's rule headers. A [redirect o]
+        that is not a path ([/x], not [//x]) or a URL of the request [Host],
+        or that holds CR or LF, gives the 500 page and a
+        {!log_error} message instead of a 303. Raises
         [Invalid_argument] when the action is not from {!Yuka.Form.val-action}. *)
   end
 
@@ -1258,7 +1259,7 @@ module Server : sig
       }
     | Handler of {
         rules : rules;
-        same_origin : bool;  (** True for an [Action]: 403 for a foreign [Origin]. *)
+        same_origin : bool;  (** True for an [Action]: 403 when the origin check of {!handle} fails. *)
         guards : (unit -> (unit, stop) result Async.t) list;
         run : unit -> response Async.t;
       }
@@ -1369,7 +1370,13 @@ module Server : sig
       ({!ADAPTER.exists}). Steps, in this order:
 
       + [/_yuka/action/<name>]: the action call ([POST] with a JSON body;
-        answers as described for {!Action.reject}), else 405.
+        answers as described for {!Action.reject}), else 405. From the
+        headers first: the origin (403), the action name (404) and the
+        content type (415); then at most 1 MiB of body (413). The origin
+        check passes when [Origin] has the authority of [Host], or when
+        there is no [Origin] and [Sec-Fetch-Site] is [same-origin]; a
+        request with neither (an old browser, a client that is not a
+        browser) is refused.
         [/_yuka/<file>]: the file of [assets] for [GET] and [HEAD], else
         405; a [.] or [..] segment, or no [assets], gives a plain 404 with
         [no-store]. A path under a [public] prefix: the file of its
@@ -1382,7 +1389,8 @@ module Server : sig
         [allow] (the methods, [HEAD] after [GET], then [OPTIONS]); for
         [OPTIONS], 204 with the same [allow].
       + Guards, one after another. A {!stop} skips the rest.
-      + A handler with [same_origin]: 403 when [Origin] differs from [Host].
+      + A handler with [same_origin]: 403 when the origin check of the
+        action call fails.
       + A handler: its response, after the rule headers (the handler's win)
         and the rule [cache-control] unless it set one. [HEAD]: no body.
       + A page: the prerendered file when [config] has [prerendered] and
@@ -1440,7 +1448,9 @@ module Server : sig
 
     val body : request -> limit:int -> string option Async.t
     (** The request body, or [None] when it is longer than [limit] bytes.
-        Stop reading past [limit + 1] bytes. *)
+        Give [None] with no read when a [Content-Length] is over [limit];
+        else stop reading past [limit + 1] bytes. With [None], close the
+        request body so the server drops the rest. *)
 
     val respond : http_response -> response io
     (** Sends the status, the headers and the body; a [Stream] body is

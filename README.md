@@ -260,7 +260,8 @@ field and no `action` attribute, so it posts to the page URL and works with
 no JavaScript: the request cycle decodes the fields, runs the
 implementation, and answers 303 to `redirect` (or the page URL), or renders
 the page again with status 422, the sent values and the errors. The post
-must come from the same origin (`Origin`, or `Sec-Fetch-Site: same-origin`);
+must come from the same origin (`Origin`, or `Sec-Fetch-Site: same-origin`; the
+action call from an island and `Action` routes use the same rule);
 the page's guards run before the action, and the body is read up to 1 MiB.
 Two forms of one action on a page need different `key`s, so a 422 shows
 the sent values in the form that was posted.

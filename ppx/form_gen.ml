@@ -24,7 +24,7 @@ let rec kind (t : core_type) =
 let labels (td : type_declaration) =
   (match td.ptype_params with
   | [] -> ()
-  | (p, _) :: _ -> fail ~loc:p.ptyp_loc "[@@deriving form] needs a type with no parameter");
+  | (p, _) :: _ -> fail ~loc:p.ptyp_loc "[@@@@deriving form] needs a type with no parameter");
   match td.ptype_kind with
   | Ptype_record labels ->
       List.iter
@@ -33,7 +33,7 @@ let labels (td : type_declaration) =
             fail ~loc:l.pld_name.loc "a form field name cannot start with '_' (the form uses _yuka_ fields)")
         labels;
       labels
-  | _ -> fail ~loc:td.ptype_loc "[@@deriving form] needs a record type"
+  | _ -> fail ~loc:td.ptype_loc "[@@@@deriving form] needs a record type"
 
 let constructor (l : label_declaration) = String.capitalize_ascii l.pld_name.txt
 

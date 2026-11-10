@@ -226,8 +226,9 @@ let assets =
         check_status r 405;
         check_header r "allow" [ "POST" ];
         let r =
-          get ~meth:`POST ~headers:[ ("content-type", "application/json") ] ~body:"1"
-            "/_yuka/action/x"
+          get ~meth:`POST
+            ~headers:[ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ]
+            ~body:"1" "/_yuka/action/x"
         in
         check_status r 404;
         Alcotest.(check string) "body" {|{"error":"unknown action x"}|} r.body );
@@ -454,7 +455,7 @@ let head_and_rules =
         check_header r "vary" [ "Yuka-Navigate" ] );
     ( "an Action is always no-store",
       fun () ->
-        let r = get ~meth:`DELETE "/feed.xml" in
+        let r = get ~meth:`DELETE ~headers:[ ("sec-fetch-site", "same-origin") ] "/feed.xml" in
         check_status r 200;
         check_header r "cache-control" [ "no-store" ];
         let r = get ~meth:`POST "/team/a/rename" in
@@ -520,6 +521,8 @@ let guards =
         check_status r 200;
         check_events [ "outer"; "rename" ];
         let r = get ~meth:`POST "/team/a/rename" in
+        check_status r 403;
+        let r = get ~meth:`POST ~headers:[ ("Sec-Fetch-Site", "same-origin") ] "/team/a/rename" in
         check_status r 200 );
     ( "Endpoint skips the origin check",
       fun () ->
@@ -843,6 +846,7 @@ let navigation =
 
 let forms =
   let form_type = ("content-type", "application/x-www-form-urlencoded") in
+  let json_headers = [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ] in
   let post ?(headers = [ form_type; ("origin", "http://app.example"); ("host", "app.example") ]) ?(target = "/entry") body =
     App.saved := [];
     get ~meth:`POST ~headers ~body target
@@ -911,11 +915,37 @@ let forms =
       fun () ->
         body_read := 0;
         let r =
-          get ~meth:`POST ~headers:[ ("content-type", "application/json") ] ~body:(String.make (3 * 1024 * 1024) ' ')
-            "/_yuka/action/x"
+          get ~meth:`POST ~headers:json_headers ~body:(String.make (3 * 1024 * 1024) ' ') "/_yuka/action/jot"
         in
         check_status r 413;
-        check_true "stopped near the limit" (!body_read <= (1024 * 1024) + 4096) );
+        check_true "stopped near the limit" (!body_read <= (1024 * 1024) + 4096);
+        let r = get ~meth:`POST ~headers:json_headers ~body:{|[["body","hello"]]|} "/_yuka/action/jot" in
+        check_status r 200;
+        Alcotest.(check string) "answer" {|{"ok":{"value":5}}|} r.body );
+    ( "foreign origin to the action endpoint reads 0 bytes",
+      fun () ->
+        let refused name headers status =
+          body_read := 0;
+          let r = get ~meth:`POST ~headers ~body:(String.make 10_000 ' ') ("/_yuka/action/" ^ name) in
+          check_status r status;
+          Alcotest.(check int) (name ^ " body not read") 0 !body_read
+        in
+        refused "jot" [ ("content-type", "application/json"); ("origin", "https://evil.example"); ("host", "app.example") ] 403;
+        refused "jot" [ ("content-type", "application/json"); ("host", "app.example") ] 403;
+        refused "nobody" json_headers 404;
+        refused "jot" [ form_type; ("origin", "http://app.example"); ("host", "app.example") ] 415 );
+    ( "a redirect that is not a path on this site is 500 and logged",
+      fun () ->
+        let r = post "_yuka_action=save_entry&title=http%3A%2F%2Fapp.example%2Fdone&count=1&level=low" in
+        check_status r 303;
+        check_header r "location" [ "http://app.example/done" ];
+        List.iter
+          (fun title ->
+            let r = post ("_yuka_action=save_entry&count=1&level=low&title=" ^ title) in
+            check_status r 500;
+            check_true "no location" (not (List.mem_assoc "location" r.headers));
+            Alcotest.(check int) "logged" 1 (List.length !logged))
+          [ "a%0D%0ASet-Cookie%3A+x%3D1"; "https%3A%2F%2Fevil.example%2Fx"; "http%3A%2F%2Fapp.example.evil%2F" ] );
     ( "page guards run before the action",
       fun () ->
         let r = post ~target:"/team/nobody/form" "_yuka_action=jot&body=hi" in
@@ -952,6 +982,9 @@ let forms =
         check_header r "allow" [ "GET, HEAD, OPTIONS" ];
         let r = post ~headers:[ ("content-type", "application/json") ] "{}" in
         check_status r 405;
+        let r = post ~target:"/team/nobody/form" ~headers:[ ("content-type", "text/plain") ] "_yuka_action=jot&body=x" in
+        check_status r 405;
+        check_events [];
         let r = post ~target:"/feed.xml" "_yuka_action=jot&body=x" in
         check_status r 405 );
     ( "GET and HEAD of the form page are unchanged",

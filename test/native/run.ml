@@ -178,9 +178,16 @@ let () =
 
 let json_type = Some "application/json"
 
-let post ?(content_type = json_type) ?(origin = None) ?(host = Some "x.test")
-    name body =
-  get (Yuka.Private.handle_action ~name ~content_type ~origin ~host ~body)
+let headers ?(content_type = json_type) ?(origin = Some "https://x.test") ?(host = Some "x.test")
+    ?fetch_site () = function
+  | "content-type" -> content_type
+  | "origin" -> origin
+  | "host" -> host
+  | "sec-fetch-site" -> fetch_site
+  | _ -> None
+
+let post ?content_type ?origin ?host ?fetch_site name body =
+  get (Yuka.Private.handle_action ~name ~header:(headers ?content_type ?origin ?host ?fetch_site ()) ~body)
 
 let logged f =
   let messages = ref [] in
@@ -229,15 +236,22 @@ let action_cases =
     check int "other port" 403 (with_origin "http://x.test:81");
     check int "same" 200 (with_origin "https://x.test");
     check int "no host" 403
-      (fst (post ~origin:(Some "https://x.test") ~host:None "create" json))
+      (fst (post ~origin:(Some "https://x.test") ~host:None "create" json));
+    check int "no origin" 403 (fst (post ~origin:None "create" json));
+    check int "no origin from a same-site page" 403
+      (fst (post ~origin:None ~fetch_site:"same-site" "create" json));
+    check int "no origin from this origin" 200
+      (fst (post ~origin:None ~fetch_site:"same-origin" "create" json));
+    check int "a path is not an origin" 403 (with_origin "x.test");
+    check int "an origin with a path" 403 (with_origin "https://x.test.evil/")
   in
   let check_order () =
     check int "origin before name" 403
       (fst (post ~origin:(Some "https://evil.test") "nope" "1"));
     check int "name before content type" 404
       (fst (post ~content_type:None "nope" "1"));
-    check int "content type before size" 415
-      (fst (post ~content_type:None "create" (String.make 2_000_000 'x')))
+    check int "content type before the body" 415
+      (fst (post ~content_type:None "create" "{"))
   in
   let generic_500 () =
     let (raised, failed), messages =
@@ -281,23 +295,6 @@ let action_cases =
     test_case "implement twice" `Quick twice;
     test_case "server-side call" `Quick direct_call;
     test_case "late call settles" `Quick late_call ]
-
-let body_limit_cases =
-  let open Alcotest in
-  let limit = 1_048_576 in
-  let json_body size =
-    Printf.sprintf "{\"title\":\"%s\",\"n\":1}" (String.make (size - 18) 'x')
-  in
-  let at_limit () =
-    check int "exactly the limit" 200 (fst (post "create" (json_body limit)))
-  in
-  let over () =
-    check (pair int string) "over the limit"
-      (413, "{\"error\":\"request too large\"}")
-      (post "create" (json_body (limit + 1)))
-  in
-  [ test_case "at the limit" `Quick at_limit;
-    test_case "over the limit" `Quick over ]
 
 let stream_cases =
   let open Alcotest in
@@ -679,8 +676,7 @@ let reject_cases =
   in
   let after_a_wait () =
     let waiting =
-      Yuka.Private.handle_action ~name:"rejecting_late" ~content_type:json_type
-        ~origin:None ~host:(Some "x.test") ~body:"1"
+      Yuka.Private.handle_action ~name:"rejecting_late" ~header:(headers ()) ~body:"1"
     in
     check bool "pending" true (is_pending waiting);
     late_open ();
@@ -1399,7 +1395,6 @@ let () =
           Cases.all );
       ("server", page_cases);
       ("actions", action_cases);
-      ("body limit", body_limit_cases);
       ("streaming", stream_cases);
       ("page extras", page_extra_cases);
       ("reject", reject_cases);

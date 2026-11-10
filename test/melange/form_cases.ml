@@ -221,7 +221,7 @@ let async =
         finish (fun () ->
             check "posted" {|[["body","from-button"]]|} (if fetches () > 0 then fetch_body 0 else "none");
             Yuka.unmount ()) );
-    ( "form: a 422 state is read once",
+    ( "form: a 422 state lasts until a client submit on that form",
       fun finish ->
         let html =
           Private.print
@@ -233,9 +233,48 @@ let async =
         start html;
         let first = text_of "b" in
         State.update tick succ;
+        let remounted = (text_of "b", input_value "body") in
+        set_input "body" "longer";
+        ignore (submit ());
+        State.update tick succ;
         finish (fun () ->
             check "shown at hydration" "Too short" first;
-            check "not again after a new render" "none" (text_of "b");
+            check "kept after a new render" "Too short" (fst remounted);
+            check "value kept after a new render" "sent" (snd remounted);
+            check "gone after a client submit" "none" (text_of "b");
+            check "value gone after a client submit" "" (input_value "body");
+            Yuka.unmount ()) );
+    ( "form: unknown field names from the server are form errors",
+      fun finish ->
+        start (Server.to_string island);
+        set_input "body" "x";
+        ignore (submit ());
+        respond 0 200 {|{"ok":{"errors":[["nope","Bad"]]}}|};
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "form error" "Bad" (text_of "u");
+                check "idle" "idle" (text_of "i");
+                Yuka.unmount ())) );
+    ( "form: a bad data-yuka-sent is ignored",
+      fun finish ->
+        let html =
+          Private.print
+            (let s = Private.session ~streaming:false ~islands_only:true in
+             Private.set_form s ("jot", "", [ ("body", "sent") ], [ (Some "body", "Too short") ]);
+             s)
+            (fun () -> Private.node (island ()))
+        in
+        let marker = "data-yuka-sent=\"" in
+        let at = Js.String.indexOf ~search:marker html + String.length marker in
+        let stop = Js.String.indexOf ~search:"\"" ~start:at html in
+        start (String.sub html 0 at ^ "{bad" ^ String.sub html stop (String.length html - stop));
+        set_input "body" "hello";
+        ignore (submit ());
+        let during = text_of "i" in
+        finish (fun () ->
+            check "no error shown" "none" (text_of "b");
+            check "the form still sends" "1" (string_of_int (fetches ()));
+            check "pending" "pending" during;
             Yuka.unmount ()) );
     ( "form: a 422 page hydrates with the sent values and errors",
       fun finish ->
