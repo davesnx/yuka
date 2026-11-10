@@ -36,12 +36,12 @@ only the parts that read a signal update.
 - Remote data: `Remote.use` reads a query as a `Status.t` signal, with
   retry, abort and `Remote.mutate` for optimistic changes. The server render
   embeds the answers, so hydration sends no request.
-- Routes: one `Routes.mlx` tree. The `yuka-routes` generator turns it into a
+- Routes: one `Routes.ml` tree. The `yuka-routes` generator turns it into a
   `Routes` module shared by server and client (the route type, a typed
   `href` and the matcher), and a server module that the request cycle runs:
   assets, redirects, 405 and `OPTIONS`, guards, loaders, route headers and
   the streamed page.
-- Prerender: pages marked `prerender=true` are written to a directory,
+- Prerender: pages marked `~prerender:true` are written to a directory,
   following links.
 - Two packages: `yuka` (a Melange entry also lists `yuka.js`, the browser
   implementation of the DOM bindings) and `yuka-dream`, the Dream adapter.
@@ -366,35 +366,49 @@ are not in an island loads no JavaScript.
 
 ### Routes
 
-`Routes.mlx` holds the route tree. It is read by the generator, not compiled:
+`Routes.ml` holds the route tree: one OCaml expression, `Router.make ...`,
+and nothing else (no `open`, no `let`). The generator reads it as source
+text; it is not compiled, so `Router` needs no definition:
 
 ```ocaml
-let routes =
-  <Router>
-    <Route name=Home path="/" page=Pages.home />
-    <Group path="/issue/:id<Issue_id>" loader=Loaders.issue>
-      <Route name=Issue path="/" page=Pages.issue search={ tab = optional Tab } />
-      <Action name=Close path="/close" method_=`POST handler=Actions.close />
-    </Group>
-    <Route name=Doc path="/docs/:parts<string...>" page=Pages.doc />
-    <Route path="/i/:id<Issue_id>" redirect=(Permanent "/issue/:id") />
-  </Router>
+Router.make
+  [
+    Router.route Home ~path:"/" ~page:Pages.home;
+    Router.group ~path:"/issue/:id<Issue_id>" ~loader:Loaders.issue
+      [
+        Router.route Issue ~path:"/" ~page:Pages.issue
+          ~search:{ tab = optional Tab };
+        Router.action Close ~path:"/close" ~method_:`POST
+          ~handler:Actions.close;
+      ];
+    Router.route Doc ~path:"/docs/:parts<string...>" ~page:Pages.doc;
+    Router.redirect ~path:"/i/:id<Issue_id>" ~to_:(Permanent "/issue/:id");
+  ]
 ```
 
-Two dune rules in the shared library (native and Melange) write `routes.ml`:
+The nodes are `Router.make` (the root), `Router.group`, `Router.route`,
+`Router.endpoint`, `Router.action` and `Router.redirect`. The first
+unlabelled argument of a route, endpoint or action is its name; the
+unlabelled list of `Router.make` and `Router.group` holds the child nodes.
+Pages, layouts, loaders, guards, handlers, `not_found` and `error` are
+value paths such as `Pages.home`. The server module calls them, so each
+path must resolve in the server library. A param type that is a module
+(`Issue_id`) is named in both modules, so it must resolve in both libraries
+(for example with `(flags (:standard -open Shared))` in the server
+library).
+
+A dune rule in the shared library (native and Melange) writes `routes.ml`:
 
 ```
-(rule
- (targets routes.ast)
- (deps ../Routes.mlx)
- (action (with-stdout-to routes.ast (run %{bin:mlx-pp} %{deps}))))
-
 (rule
  (targets routes.ml)
  (action
   (with-stdout-to routes.ml
-   (run %{bin:yuka-routes} --shared %{dep:routes.ast}))))
+   (with-stdin-from %{dep:../Routes.ml}
+    (run %{bin:yuka-routes} --shared --source %{dep:../Routes.ml})))))
 ```
+
+`--source` names the file in error locations.
 
 The module has `type t = Home | Issue of { id : Issue_id.t; tab : Tab.t option } | ...`,
 `href : t -> string` and `find : Yuka.Router.meth -> string list -> (string * string) list -> t Yuka.Router.lookup`.
@@ -405,7 +419,7 @@ and browsers resolve dot segments.
 A param type is `int`, `string`, `string...` (catch-all, last segment) or a
 module with `of_string` and `to_string` (`Yuka.Router.PARAM`). Search fields
 are `optional T`, `default T value` or `many T`. Two nodes with the same path
-shape and a common method fail the build with a location in `Routes.mlx`.
+shape and a common method fail the build with a location in `Routes.ml`.
 Otherwise the more specific path wins: a static segment before a param, a
 param before a catch-all. A client that calls only `href` does not contain
 `find`.
@@ -417,15 +431,16 @@ A third rule writes the server module, in the server library:
  (targets routes_server.ml)
  (action
   (with-stdout-to routes_server.ml
-   (run %{bin:yuka-routes} --server --shared-module Demo_shared.Routes
-    %{dep:../shared/routes.ast}))))
+   (with-stdin-from %{dep:../Routes.ml}
+    (run %{bin:yuka-routes} --server --shared-module Demo_shared.Routes
+     --source %{dep:../Routes.ml})))))
 ```
 
 `Routes_server.app` is a `Yuka.Server.app`. Loaders, guards and handlers take
 the server's request first (`Dream.request` with Dream), then the params by
 label. A page function returns `Yuka.Server.page ~title (fun () -> ...)`; it
 gets the params, the search fields and the loader results (labelled with the
-loader's name: `loader=Loaders.issue` gives `~issue`). The loaders of one
+loader's name: `~loader:Loaders.issue` gives `~issue`). The loaders of one
 route start together. A `not_found` page gets the params of the
 path of its node and `~target` (the request path); an `error` page gets
 them and `~status`. So no param of that path can be named `target` (with a
@@ -485,7 +500,7 @@ Another server implements `Yuka.Server.ADAPTER` (request fields, `respond`,
 
 ### Prerender
 
-`prerender=true` on a node marks its pages for prerendering.
+`~prerender:true` on a node marks its pages for prerendering.
 `Yuka_dream.prerender ~out config app` renders each such page with no param,
 then follows the links of each page to other prerender pages (links to
 another origin are not followed), and writes the files: `/` to
@@ -524,23 +539,10 @@ empty directory.
    (run mlx-pp %{input-file}))))
 ```
 
-`Routes.mlx`, the route tree:
+`Routes.ml`, the route tree:
 
 ```ocaml
-let routes =
-  <Router>
-    <Route name=Home path="/" page=Pages.home />
-  </Router>
-```
-
-`dune`, which parses the route tree once for the two generators:
-
-```
-(rule
- (targets routes.ast)
- (deps Routes.mlx)
- (action
-  (with-stdout-to routes.ast (run %{bin:mlx-pp} %{deps}))))
+Router.make [ Router.route Home ~path:"/" ~page:Pages.home ]
 ```
 
 `shared/dune`, the code of both server and browser, with the shared
@@ -557,7 +559,8 @@ let routes =
  (targets routes.ml)
  (action
   (with-stdout-to routes.ml
-   (run %{bin:yuka-routes} --shared %{dep:../routes.ast}))))
+   (with-stdin-from %{dep:../Routes.ml}
+    (run %{bin:yuka-routes} --shared --source %{dep:../Routes.ml})))))
 ```
 
 `shared/counter.mlx`, the island:
@@ -585,8 +588,9 @@ let%client make ~(initial : int) () =
  (targets routes_server.ml)
  (action
   (with-stdout-to routes_server.ml
-   (run %{bin:yuka-routes} --server --shared-module Shared.Routes
-    %{dep:../routes.ast}))))
+   (with-stdin-from %{dep:../Routes.ml}
+    (run %{bin:yuka-routes} --server --shared-module Shared.Routes
+     --source %{dep:../Routes.ml})))))
 ```
 
 `server/routes_server.mli`. No function of this route tree takes the
@@ -596,7 +600,7 @@ request, so the interface gives its type:
 val app : Dream.request Yuka.Server.app
 ```
 
-`server/pages.mlx`, the page that `Routes.mlx` names:
+`server/pages.mlx`, the page that `Routes.ml` names:
 
 ```ocaml
 let home () =

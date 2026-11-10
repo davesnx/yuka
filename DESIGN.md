@@ -211,8 +211,9 @@ markers everywhere: the client hydrates their output.
 ## Router
 
 - Pages are server routes (a multi-page app). Since 2026-11-10 they come
-  from `Routes.mlx` through `yuka-routes` and the request cycle; see
-  "Routes.mlx generator", "Request cycle" and "yuka-dream". The typed
+  from `Routes.ml` through `yuka-routes` and the request cycle; see
+  "Routes.mlx generator", "Request cycle", "yuka-dream" and "Routes.ml:
+  one OCaml expression". The typed
   path GADT of `Yuka.Router` is gone.
 
 ## Demo: mini Linear
@@ -1106,6 +1107,9 @@ the budget in `bench/size/budget.json`.
 
 ## Routes.mlx generator (2026-11-10)
 
+The input format and the reader changed later; see "Routes.ml: one OCaml
+expression".
+
 Spec: `.workplace/docs/routes-spec.md`. Built: increment 1, the generator
 and the shared module. The request cycle, `yuka-dream`, the demo migration
 and navigation come later. The GADT `Yuka.Router` stays until then.
@@ -1635,3 +1639,32 @@ through A.
   `Yuka.Private.stylesheet`, and the `Private` record kept the server
   printer in the demo client chunk (`make size` caught it).
 
+## Routes.ml: one OCaml expression (2026-11-10)
+
+Plan: `.workplace/plans/routes-async_PLAN.md`. As server-reason-react
+router-gen: the manifest is a plain OCaml file, not mlx.
+
+- `Routes.ml` holds exactly one top-level item, the expression
+  `Router.make ...`. An `open`, a `let`, a second expression or an empty
+  file is an error with a location. The file is never compiled.
+- Nodes: `Router.make`, `Router.group`, `Router.route Name`,
+  `Router.endpoint Name`, `Router.action Name` and
+  `Router.redirect ~path ~to_:(Permanent "/")`. The name is the one
+  unlabelled argument of a route, endpoint or action; the child nodes are
+  the one unlabelled list of `Router.make` and `Router.group`. Each former
+  prop is a labelled argument with the same name and meaning; a redirect
+  is its own node with `~to_` instead of a `Route` with `redirect`.
+- Attachments (`page`, `layout`, `loader`, `guard`, `handler`,
+  `not_found`, `error`) must be value paths (`Pexp_ident`). They are
+  called as before.
+- `yuka-routes --shared --source FILE` and `yuka-routes --server
+  --shared-module M --source FILE` read the source text from stdin and
+  parse it with `Parse.implementation`; `--source` names the file in
+  locations. Dune rules use `with-stdin-from %{dep:../Routes.ml}`. The
+  `mlx-pp` step and `routes.ast` are gone; syntax errors are reported by
+  the OCaml parser.
+- The prelude is dropped: the server output no longer starts with the
+  `open`s written before `let routes`. Paths in `Routes.ml` must resolve
+  in the server library as written (`test/cycle` writes `App.Pages.home`).
+- The build id (`~build` of `Routes_server.app`) is a digest of the
+  printed expression, so it changes with the format.

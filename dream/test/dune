@@ -3,14 +3,24 @@
  (action
   (with-stdout-to
    routes.ml
-   (run %{bin:yuka-routes} --shared %{dep:tree/routes.ast}))))
+   (with-stdin-from
+    %{dep:tree/Routes.ml}
+    (run %{bin:yuka-routes} --shared --source %{dep:tree/Routes.ml})))))
 
 (rule
  (targets routes_server.ml)
  (action
   (with-stdout-to
    routes_server.ml
-   (run %{bin:yuka-routes} --server --shared-module Routes %{dep:tree/routes.ast}))))
+   (with-stdin-from
+    %{dep:tree/Routes.ml}
+    (run
+     %{bin:yuka-routes}
+     --server
+     --shared-module
+     Routes
+     --source
+     %{dep:tree/Routes.ml})))))
 
 (test
  (name run)

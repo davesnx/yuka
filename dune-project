@@ -41,7 +41,7 @@
  (name yuka-dream)
  (synopsis "Run a Yuka app on the Dream web server")
  (description
-  "The request cycle of Yuka on Dream: one handler that serves the routes of Routes.mlx, the client JavaScript and public files, and a prerender that writes the pages marked prerender=true to a directory.")
+  "The request cycle of Yuka on Dream: one handler that serves the routes of Routes.ml, the client JavaScript and public files, and a prerender that writes the pages marked ~prerender:true to a directory.")
  (depends
   (ocaml
    (>= 5.4))

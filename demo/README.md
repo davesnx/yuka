@@ -23,7 +23,7 @@ Defaults are relative to the executable, so any build directory works.
   issues stream in after a delay.
 - `http://localhost:8080/about`: a page with no island, outside the shell
   layout, for the 0 bytes of JavaScript check of `make measure-pages`. It
-  is the one `prerender=true` page.
+  is the one `~prerender:true` page.
 - `http://localhost:8080/issues.json`: the issues as JSON (an endpoint).
 - `http://localhost:8080/issues`: a permanent redirect to `/`.
 
@@ -58,7 +58,7 @@ island on the page, except those used with `` `Lazy _ ``. Comments, Issue props
 and Related are used with `` `Lazy `Idle ``, `` `Lazy `Interaction `` and
 `` `Lazy `Visible ``.
 
-Routes are defined once in `Routes.mlx`. `yuka-routes` writes the shared
+Routes are defined once in `Routes.ml`. `yuka-routes` writes the shared
 `Routes` module (in `shared/`, for `Routes.href` in islands) and
 `Routes_server` (in `server/`); `server/demo_server.ml` gives
 `Routes_server.app` to `Yuka_dream.handler`. `client/main.ml` is

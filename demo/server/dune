@@ -10,12 +10,15 @@
  (action
   (with-stdout-to
    routes_server.ml
-   (run
-    %{bin:yuka-routes}
-    --server
-    --shared-module
-    Demo_shared.Routes
-    %{dep:../routes.ast}))))
+   (with-stdin-from
+    %{dep:../Routes.ml}
+    (run
+     %{bin:yuka-routes}
+     --server
+     --shared-module
+     Demo_shared.Routes
+     --source
+     %{dep:../Routes.ml})))))
 
 (executable
  (name demo_server)
