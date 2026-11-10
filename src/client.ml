@@ -762,6 +762,25 @@ let stop () =
   List.iter (fun island -> Web.set_bool island started_key false) !live_islands;
   live_islands := []
 
+let cleanup_key = "__yuka_cleanup"
+
+let stop_within el =
+  let inside, outside = List.partition (fun island -> Web.contains el island) !live_islands in
+  live_islands := outside;
+  List.iter
+    (fun island ->
+      (match (Web.get_prop island cleanup_key : int option) with
+      | Some id -> (
+          let key = string_of_int id in
+          match Web.table_get (cleanups ()) key with
+          | Some f ->
+              Web.table_delete (cleanups ()) key;
+              f ()
+          | None -> ())
+      | None -> ());
+      Web.set_bool island started_key false)
+    inside
+
 let load_lazy lazies name =
   match List.find_opt (fun l -> l.lazy_name = name) lazies with
   | None -> None
@@ -775,6 +794,7 @@ let start_island entries lazy_entries props island =
   Web.set_bool island started_key true;
   live_islands := island :: !live_islands;
   let id = register ignore in
+  Web.set_prop island cleanup_key id;
   let fired = ref false in
   let name = Option.value (Web.get_attribute island "data-name") ~default:"" in
   let known = List.exists (fun e -> e.name = name) entries in

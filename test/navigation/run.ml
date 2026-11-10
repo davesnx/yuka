@@ -26,11 +26,11 @@ let setup : string -> unit =
     const call = { url: url, init: init };
     globalThis.__calls.push(call);
     return new Promise(function (res, rej) {
-      call.resolve = function (text, finalUrl, status, type) {
+      call.resolve = function (text, finalUrl, status, type, extra) {
         res({
           url: finalUrl,
           status: status,
-          headers: { get: function (n) { return n.toLowerCase() === "content-type" ? type : null; } },
+          headers: { get: function (n) { n = n.toLowerCase(); return n === "content-type" ? type : (extra && n in extra ? extra[n] : null); } },
           text: function () { return Promise.resolve(text); },
         });
       };
@@ -61,6 +61,14 @@ let resolve_with : int -> string -> string -> int -> string -> unit =
   [%mel.raw "function (i, text, url, status, type) { globalThis.__calls[i].resolve(text, url || undefined, status, type) }"]
 
 let resolve_call i text url = resolve_with i text url 200 "text/html; charset=utf-8"
+
+let resolve_headers : int -> string -> int -> (string * string) array -> unit =
+  [%mel.raw
+    {|function (i, text, status, pairs) {
+  const extra = {};
+  pairs.forEach(function (p) { extra[p[0]] = p[1]; });
+  globalThis.__calls[i].resolve(text, undefined, status, "text/html; charset=utf-8", extra);
+}|}]
 
 let count_listeners : unit -> unit =
   [%mel.raw
@@ -143,7 +151,7 @@ let click_fetches finish =
   check "click on a child is intercepted" "true" (bools (click "#in" ""));
   check "one fetch" "1" (ints (calls ()));
   check "fetched url" "http://localhost/issue/1" (call_url 0);
-  check "header" "1" (call_header 0);
+  check "header" "" (call_header 0);
   check "not pushed before the page loaded" "/start?x=1" (location_ ());
   check "body unchanged while loading" (page {|<a id="l" href="/issue/1"><span id="in">go</span></a>|}) (body_html ());
   resolve_call 0 (doc "Issue 1" (page "<p>one</p>")) "";
@@ -238,7 +246,7 @@ let history_and_popstate finish =
           tick (fun () ->
               check "back fetches a" "3" (ints (calls ()));
               check "relative url" "/a" (call_url 2);
-              check "header on back" "1" (call_header 2);
+              check "header on back" "" (call_header 2);
               check "location is a" "/a" (location_ ());
               resolve_call 2 (doc "A again" (page "<p>ay</p>")) "";
               tick (fun () ->
@@ -359,7 +367,7 @@ let navigate_api finish =
   plain_start ();
   Browser.navigate "/x?q=1";
   check "fetch" "/x?q=1" (call_url 0);
-  check "header" "1" (call_header 0);
+  check "header" "" (call_header 0);
   resolve_call 0 (doc "X" (page "<p>new</p>")) "";
   tick (fun () ->
       check "body" (page "<p>new</p>") (body_html ());
@@ -383,7 +391,7 @@ let browser_navigate finish =
   plain_start ();
   Browser.navigate "/x";
   check "client navigation: fetch" "/x" (call_url 0);
-  check "header" "1" (call_header 0);
+  check "header" "" (call_header 0);
   resolve_call 0 (doc "X" (page "<p>x</p>")) "";
   tick (fun () ->
       check "body" (page "<p>x</p>") (body_html ());
@@ -474,6 +482,86 @@ let mount_after_unmount finish =
   check "listeners added once per mount" "2,2" (listeners ());
   finish ()
 
+let shown_in_place status finish =
+  setup (page {|<a id="a" href="/a">a</a>|});
+  plain_start ();
+  ignore (click "#a" "");
+  resolve_with 0 (doc "Err" (page "<p>err</p>")) "" status "text/html";
+  tick (fun () ->
+      check "no full load" "scroll:0" (log_read ());
+      check "page shown" (page "<p>err</p>") (body_html ());
+      check "pushed" "/a" (location_ ());
+      finish ())
+
+let island_at id n =
+  {|<yuka-island data-name="Probe" data-id="|} ^ id
+  ^ {|" style="display:contents"><span>p</span></yuka-island><script type="application/json" data-yuka-props="|}
+  ^ id ^ "\">" ^ ints n ^ "</script>"
+
+let set_body : string -> unit = [%mel.raw "function (h) { document.body.innerHTML = h }"]
+let set_head : string -> unit = [%mel.raw "function (h) { document.head.innerHTML = h }"]
+let attr : string -> string -> string =
+  [%mel.raw "function (sel, name) { const e = document.querySelector(sel); return e ? String(e.getAttribute(name)) : 'none' }"]
+
+let outlet_page () =
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  (set_body
+       ({|<nav><a id="home" href="/start" aria-current="page">home</a><a id="two" href="/two">two</a><a id="step" href="/x" aria-current="step">x</a></nav>|}
+       ^ island_at "i1" 1
+       ^ {|<yuka-island data-name="Probe" data-id="i9" data-start="interaction" style="display:contents"><a id="isl" href="/two">i</a></yuka-island><script type="application/json" data-yuka-props="i9">9</script>|}
+       ^ {|<yuka-outlet data-k="L0" style="display:contents"><p id="old">old</p>|}
+       ^ island_at "i2" 2 ^ "</yuka-outlet>"))
+
+let partial finish =
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  mount ~islands:(Client.registry [ probe_entry ]) ();
+  check "both islands started" "g0/1|g0/2" (log_g ());
+  ignore (click "#two" "");
+  check "keys sent" "L0" (call_header 0);
+  resolve_headers 0
+    ({|<p id="new">new</p><a id="inner" href="/two">two</a>|} ^ island_at "L0-i1" 3)
+    200
+    [| ("yuka-outlet", "L0"); ("yuka-title", "Caf%C3%A9"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "outlet replaced" "none" (attr "#old" "id");
+      check "new content" "new" (attr "#new" "id");
+      check "layout kept" "/two" (attr "#two" "href");
+      check "title" {js|Café|js} (title ());
+      check "pushed" "/two" (location_ ());
+      check "link of the new path marked" "page" (attr "#two" "aria-current");
+      check "old mark removed" "null" (attr "#home" "aria-current");
+      check "other value kept" "step" (attr "#step" "aria-current");
+      check "links inside an island untouched" "null" (attr "#isl" "aria-current");
+      check "new island started, outer not again" "g0/1|g0/2|g0/3" (log_g ());
+      log_clear ();
+      State.set probe_runs 1;
+      check "outer kept, inner stopped, new running" "g1/3|g1/1" (log_g ());
+      finish ())
+
+let stale_build finish =
+  setup "";
+  outlet_page ();
+  plain_start ();
+  ignore (click "#two" "");
+  resolve_headers 0 "<p>new</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b2") |];
+  tick (fun () ->
+      check "full page load" "assign" (log_read ());
+      check "outlet kept" "old" (attr "#old" "id");
+      finish ())
+
+let unknown_outlet finish =
+  setup "";
+  outlet_page ();
+  plain_start ();
+  ignore (click "#two" "");
+  resolve_headers 0 (doc "Two" (page "<p>whole</p>")) 200 [| ("yuka-outlet", "L9"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "body swapped" (page "<p>whole</p>") (body_html ());
+      check "title" "Two" (title ());
+      finish ())
+
 let not_a_page status type_ finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -509,8 +597,11 @@ let all =
     ("unmount stops navigation", unmount_stops_navigation);
     ("unmount cancels a navigation in flight", unmount_cancels_in_flight);
     ("mount after unmount", mount_after_unmount);
-    ("404 is a full load", not_a_page 404 "text/html");
-    ("500 is a full load", not_a_page 500 "text/html");
+    ("404 is shown in place", shown_in_place 404);
+    ("500 is shown in place", shown_in_place 500);
+    ("partial response replaces the outlet", partial);
+    ("another build is a full load", stale_build);
+    ("unknown outlet swaps the body", unknown_outlet);
     ("302 not followed is a full load", not_a_page 302 "text/html");
     ("json is a full load", not_a_page 200 "application/json");
     ("no content type is a full load", not_a_page 200 "");

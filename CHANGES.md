@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### yuka
+
+- Client navigation replaces only the content below the deepest shared layout: islands in shared layouts keep their state; `aria-current` follows the path; a new build id (`Yuka-Build`) makes a full page load (@davesnx)
+
 ## 0.2 (YYYY-MM-DD)
 
 First release on opam.

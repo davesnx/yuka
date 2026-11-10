@@ -57,6 +57,9 @@ val import_node : node -> node -> bool -> node
 val console_error : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
+val decode_uri : string -> string
+val contains : node -> node -> bool
+val set_title : string -> unit
 val fetch_post :
   string ->
   string ->
@@ -93,7 +96,12 @@ val new_controller : unit -> controller
 val abort : controller -> unit
 val click_href : event -> string
 val fetch_page :
-  string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit
+  string ->
+  string ->
+  controller ->
+  (string -> int -> (string -> string option) -> string -> unit) ->
+  (unit -> unit) ->
+  unit
 val swap_page : string -> unit
 
 type 'a table

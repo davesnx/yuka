@@ -57,6 +57,11 @@ let exn_to_string : exn -> string =
     }|}]
 
 external encode_uri : string -> string = "encodeURIComponent"
+external decode_uri : string -> string = "decodeURIComponent"
+
+let contains : node -> node -> bool = [%mel.raw "function (a, b) { return a.contains(b) }"]
+
+let set_title : string -> unit = [%mel.raw "function (t) { document.title = t }"]
 
 let fetch_post :
     string ->
@@ -315,13 +320,14 @@ let click_href : event -> string =
   return a.href;
 }|}]
 
-let fetch_page : string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit =
+let fetch_page :
+    string -> string -> controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
   [%mel.raw
-    {|function (url, controller, ok, fail) {
+    {|function (url, keys, controller, ok, fail) {
   const signal = controller.signal;
   let request;
   try {
-    request = fetch(url, { headers: { "Yuka-Navigate": "1" }, credentials: "same-origin", signal: signal });
+    request = fetch(url, { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal });
   } catch (e) {
     fail();
     return;
@@ -333,14 +339,11 @@ let fetch_page : string -> controller -> (string -> string -> unit) -> (unit -> 
     .then(
       function (x) {
         if (signal.aborted) return;
-        const status = x.r.status;
-        const type = x.r.headers && x.r.headers.get ? x.r.headers.get("content-type") || "" : "";
-        if (!(status >= 200 && status < 300) || type.toLowerCase().indexOf("text/html") < 0) { fail(); return; }
         const base = window.location.href;
         const target = new URL(typeof x.r.url === "string" && x.r.url ? x.r.url : url, base);
         if (target.origin !== window.location.origin) { fail(); return; }
         const hash = target.hash || new URL(url, base).hash;
-        ok(target.pathname + target.search + hash, x.text);
+        ok(target.pathname + target.search + hash, x.r.status, function (name) { const v = x.r.headers && x.r.headers.get ? x.r.headers.get(name) : null; return v === null ? undefined : v; }, x.text);
       },
       function () { if (!signal.aborted) fail(); });
 }|}]

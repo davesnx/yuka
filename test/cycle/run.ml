@@ -743,6 +743,75 @@ let render =
         | _ -> Alcotest.fail "not done" );
   ]
 
+let navigation =
+  let nav keys target = get ~headers:[ ("Yuka-Navigate", keys) ] target in
+  let build = Server.build_id config Cycle_server.Routes_server.app in
+  [
+    ( "shared root layout: partial with the page body",
+      fun () ->
+        let r = nav "L0" "/plain" in
+        check_status r 200;
+        check_header r "yuka-outlet" [ "L0" ];
+        check_header r "yuka-build" [ build ];
+        check_header r "yuka-title" [ "Plain" ];
+        check_header r "content-type" [ "text/html; charset=utf-8" ];
+        check_header r "vary" [ "Yuka-Navigate" ];
+        check_header r "x-frame-options" [ "DENY" ];
+        Alcotest.(check string) "body" "<p>plain</p>" r.body );
+    ( "the deepest shared layout is the outlet",
+      fun () ->
+        let r = nav "L0 L1/a" "/team/a/2" in
+        check_header r "yuka-outlet" [ "L1/a" ];
+        check_true "no team layout" (not (contains r.body {|class="team"|}));
+        check_true "page" (contains r.body "a 2 of a");
+        let r = nav "L0 L1/a" "/team/b/1" in
+        check_header r "yuka-outlet" [ "L0" ];
+        check_true "team layout again" (contains r.body {|<yuka-outlet data-k="L1/b" style="display:contents">|}) );
+    ( "unknown, empty or old keys give a full document with the build",
+      fun () ->
+        List.iter
+          (fun keys ->
+            let r = nav keys "/plain" in
+            check_header r "yuka-outlet" [];
+            check_header r "yuka-build" [ build ];
+            check_true "document" (String.starts_with ~prefix:"<!DOCTYPE html>" r.body);
+            check_true "meta" (contains r.body ({|<meta name="yuka-build" content="|} ^ build ^ {|">|})))
+          [ "X0"; ""; "1"; "L1/a" ] );
+    ( "ids in a partial start with the outlet key",
+      fun () ->
+        let r = nav "L0" "/islands" in
+        check_true "island id" (contains r.body {|data-id="L0-i1"|});
+        check_true "props id" (contains r.body {|data-yuka-props="L0-i2"|});
+        check_true "no module script" (not (contains r.body "<script type=\"module\""));
+        check_true "no bare id" (not (contains r.body {|data-id="i1"|})) );
+    ( "a 404 partial keeps its status",
+      fun () ->
+        let r = nav "L0" "/nowhere" in
+        check_status r 404;
+        check_header r "yuka-outlet" [ "L0" ];
+        check_header r "cache-control" [ "no-store" ];
+        check_true "page" (contains r.body "missing /nowhere") );
+    ( "the title header is percent-encoded UTF-8",
+      fun () ->
+        let r = nav "L0" "/find" in
+        check_header r "yuka-title" [ "Caf%C3%A9%20%E2%9C%93" ] );
+    ( "a streamed document has the build meta",
+      fun () ->
+        let r = get "/plain" in
+        check_true "meta" (contains r.body ({|<meta name="yuka-build" content="|} ^ build ^ {|">|}));
+        check_header r "yuka-build" [] );
+    ( "the build id follows the assets",
+      fun () ->
+        let app = Cycle_server.Routes_server.app in
+        let other =
+          Server.config
+            ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./b.js"}|} ~packages:[ "pkg" ])
+            ()
+        in
+        check_true "differs" (Server.build_id other app <> build);
+        check_true "stable" (Server.build_id config app = build) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -756,4 +825,5 @@ let () =
       ("guards", cases guards);
       ("loaders", cases loaders);
       ("render", cases render);
+      ("navigation", cases navigation);
     ]

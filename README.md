@@ -241,6 +241,13 @@ shell is sent. Each layout's children are inside
 `<yuka-outlet data-k="KEY" style="display:contents">`, and a link to the
 current path gets `aria-current="page"` (not inside an island).
 
+A client navigation sends the outlet keys of the page. When the new page
+shares layouts with it, the server sends only what goes inside the deepest
+shared outlet, and the client replaces only that: islands in shared layouts
+keep their state. The `display:contents` element adds one level to CSS
+child selectors (`.main > .x`). When the server's build id (route tree and
+client files) differs from the page's, the client loads the page in full.
+
 ### With Dream
 
 The `yuka-dream` package runs the cycle on Dream:

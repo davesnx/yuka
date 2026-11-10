@@ -767,13 +767,22 @@ val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
     - [popstate] loads the entry's URL without pushing history.
     - {!Browser.navigate} is a client navigation.
 
-    A client navigation loads the URL with the header [Yuka-Navigate: 1],
-    stops the islands, replaces the content of [<body>] and [document.title]
-    with those of the response, starts the islands again, pushes a history
-    entry (after the page loaded) and scrolls to the fragment or to the top.
-    A navigation started while another one loads aborts the first. If the
-    request fails, the response is not 2xx or not [text/html], or it was
-    redirected to another origin, it does [location.assign url].
+    A client navigation loads the URL with the header [Yuka-Navigate] set
+    to the [data-k] keys of the [<yuka-outlet>] elements of the page, in
+    document order, separated by spaces. With a [Yuka-Outlet: KEY] answer
+    and that outlet on the page, it stops only the islands inside the
+    outlet, replaces its content, sets [document.title] from [Yuka-Title],
+    and moves [aria-current="page"] to the links outside the outlet (and
+    outside islands) whose [href] is the new path; islands outside the
+    outlet keep running. Otherwise it stops every island and replaces
+    [<body>] and [document.title] with those of the response. Then it starts
+    the new islands, pushes a history entry (after the page loaded) and
+    scrolls to the fragment or to the top. A navigation started while
+    another one loads aborts the first. Any 2xx or 4xx/5xx status is shown
+    in place. If the request fails, the status is 1xx or 3xx, the response
+    is not [text/html], its [Yuka-Build] differs from the
+    [<meta name="yuka-build">] of the page, or it was redirected to another
+    origin, it does [location.assign url].
 
     With [~navigation:false] only the islands start and links load full
     pages. Calling [mount] again is safe: the listeners are not added twice.
@@ -958,9 +967,6 @@ module Server : sig
       {!prerender_seeds} starts. [missing] gives the page when no route
       matches. *)
 
-  val build_id : 'req app -> string
-  (** The [build] given to {!val-app}. *)
-
   type assets
   (** Where the client JavaScript is. The cycle serves it under [/_yuka/]. *)
 
@@ -1002,6 +1008,13 @@ module Server : sig
       loaders. [styles] are stylesheet URLs and [head] raw HTML for the head
       of every page. [timeout] (default 10 seconds) bounds a streamed
       render. *)
+
+  val build_id : config -> 'req app -> string
+  (** The build id: a digest of the route tree and, with [assets], of the
+      entry, the manifest and the packages or the metafile. Every full
+      document has [<meta name="yuka-build" content="ID">], and a response to
+      [Yuka-Navigate] has the header [Yuka-Build: ID]; the client loads the
+      page in full when the two differ. *)
 
   val served_dirs : config -> (string * string) list
   (** The URL prefixes and directories that the cycle serves files from:
@@ -1061,8 +1074,14 @@ module Server : sig
         {!fill_script} only when the shell has a pending [await], so a page
         without islands or pending [await] loads no JavaScript. An [<a>] whose [href] is the
         request path gets [aria-current="page"], except inside an island,
-        whose markup must match the client render. With a [Yuka-Navigate]
-        header, the settled document in one string.
+        whose markup must match the client render.
+      + With a [Yuka-Navigate] header (the outlet keys of the page): let [n]
+        be the length of the common prefix of the sent keys and the layer
+        keys of the page (or of the fallback, for a 404 or 500). [n = 0]: the
+        settled document in one string. [n >= 1]: only what goes inside
+        outlet [n], settled, with the headers [Yuka-Outlet] (its key) and
+        [Yuka-Title] (percent-encoded); island, await and async ids get the
+        prefix [KEY-]. Both have [Yuka-Build] ({!build_id}).
 
       A 404 or 500 page has the root [headers] and [no-store]. A failure
       before the response is returned (shell, or a fill that already

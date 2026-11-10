@@ -44,9 +44,9 @@ page.on("response", (r) => {
   responses.push(r);
   if (r.status() >= 400 && r.status() !== expectedFailures) failedRequests.push(`${r.status()} ${r.url()}`);
 });
-const allRequests: { url: string; t: number; navigate: boolean }[] = [];
+const allRequests: { url: string; t: number; navigate: boolean; keys?: string }[] = [];
 page.on("request", (r) =>
-  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] === "1" }),
+  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"] }),
 );
 const chunkRe = /\/(issue_props|related|comments)(-[^/]*)?\.js$/;
 const chunkRequests = (from: number) =>
@@ -189,7 +189,7 @@ await step("3b. router", async () => {
   await page.waitForSelector(".comment-input");
   const navReq = allRequests.slice(mark).filter((r) => r.url.endsWith("/issue/YUK-8"));
   check("3b.1 click is a client navigation (marker survives)", (await marker()) === "alive", String(await marker()));
-  check("3b.2 request has Yuka-Navigate: 1", navReq.length >= 1 && navReq.every((r) => r.navigate), JSON.stringify(navReq.map((r) => r.navigate)));
+  check("3b.2 request has Yuka-Navigate with the outlet keys", navReq.length >= 1 && navReq.every((r) => r.keys === "L0"), JSON.stringify(navReq.map((r) => r.keys)));
   const titleAfter = await page.title();
   check("3b.3 URL and title changed", page.url().endsWith("/issue/YUK-8") && titleAfter !== titleBefore, `"${titleBefore}" -> "${titleAfter}"`);
   await page.locator(".props .property").first().hover();
@@ -238,6 +238,63 @@ await step("3b. router", async () => {
   await popup.close();
   const reloadLinks = await page.locator("a[data-yuka-reload]").count();
   console.log(`SKIP  3b.11 data-yuka-reload: the demo has no such link (${reloadLinks} found)`);
+});
+
+await step("3c. partial navigation", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  await page.evaluate(() => ((window as any).__marker = "alive"));
+  const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
+  const counter = page.locator(".counter-button");
+  await page.waitForFunction(() => !!(document.querySelector(".counter-button") as any)?.__yuka_click, null, { timeout: 5000 });
+  await counter.click();
+  await counter.click();
+  check("3c.1 counter counts", (await counter.textContent()) === "Clicks: 2", String(await counter.textContent()));
+  const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
+  check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null", await current());
+  const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
+  await page.locator('.row[data-id="YUK-3"] .row-title').click();
+  const response = await outlet;
+  await page.waitForURL("**/issue/YUK-3");
+  await page.waitForSelector(".comment-input");
+  check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
+  check("3c.4 sidebar counter kept its state", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive", String(await counter.textContent()));
+  check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
+  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null", await current());
+  await page.locator(".new-issue-button").click();
+  await page.waitForSelector(".dialog", { timeout: 2000 });
+  check("3c.7 New_issue in the kept sidebar still opens", (await page.locator(".dialog").count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.locator('.nav-link[href="/my"]').click();
+  await page.waitForURL("**/my");
+  await page.waitForSelector(".row");
+  check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page", await current());
+  check("3c.9 counter still kept", (await counter.textContent()) === "Clicks: 2");
+  const y0 = await page.evaluate(() => Math.round(window.scrollY));
+  check("3c.10 a new page starts at the top", y0 === 0, String(y0));
+  await page.goBack();
+  await page.waitForURL("**/issue/YUK-3");
+  await page.waitForSelector(".comment-input");
+  check("3c.11 back is partial too (counter kept)", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive");
+  await page.route("**/my", async (route) => {
+    const real = await route.fetch();
+    await route.fulfill({ response: real, headers: { ...real.headers(), "yuka-build": "changed" } });
+  });
+  await page.locator('.nav-link[href="/my"]').click();
+  await page.waitForURL("**/my");
+  await page.waitForSelector(".row");
+  await page.unroute("**/my");
+  check("3c.12 another Yuka-Build is a full page load", (await marker()) === undefined && (await counter.textContent()) === "Clicks: 0", `marker=${await marker()} ${await counter.textContent()}`);
+});
+
+await step("3d. a page with no island loads no script", async () => {
+  const pg = await browser.newPage();
+  const scripts: string[] = [];
+  pg.on("request", (r) => { if (r.resourceType() === "script") scripts.push(r.url()); });
+  await pg.goto(base + "/about", { waitUntil: "networkidle" });
+  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap").length);
+  check("3d.1 /about requests no script and has no inline script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
+  await pg.close();
 });
 
 await step("4. status change", async () => {

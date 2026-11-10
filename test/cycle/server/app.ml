@@ -82,7 +82,7 @@ module Pages = struct
   let plain () = Server.page ~title:"Plain" (fun () -> el "p" [ text "plain" ])
 
   let find ~q ~tag () =
-    Server.page (fun () ->
+    Server.page ~title:"Caf\xc3\xa9 \xe2\x9c\x93" (fun () ->
         text (Option.value q ~default:"-" ^ "|" ^ String.concat "," tag))
 
   let island name =

@@ -60,6 +60,9 @@ let import_node : node -> node -> bool -> node = fun _ _ _ -> browser_only ()
 let console_error : string -> unit = fun _ -> browser_only ()
 let exn_to_string = Printexc.to_string
 let encode_uri : string -> string = fun _ -> browser_only ()
+let decode_uri : string -> string = fun _ -> browser_only ()
+let contains : node -> node -> bool = fun _ _ -> browser_only ()
+let set_title : string -> unit = fun _ -> browser_only ()
 let fetch_post : string -> string -> (int -> string -> unit) -> (bool -> string -> unit) -> unit -> unit = fun _ _ _ _ _ -> browser_only ()
 let watch_added : (node array -> bool) -> unit -> unit = fun _ _ -> browser_only ()
 let navigate : string -> unit = fun _ -> browser_only ()
@@ -89,7 +92,9 @@ let manual_scroll : unit -> unit = fun _ -> browser_only ()
 let new_controller : unit -> controller = fun _ -> browser_only ()
 let abort : controller -> unit = fun _ -> browser_only ()
 let click_href : event -> string = fun _ -> browser_only ()
-let fetch_page : string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit = fun _ _ _ _ -> browser_only ()
+let fetch_page :
+    string -> string -> controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+ fun _ _ _ _ _ -> browser_only ()
 let swap_page : string -> unit = fun _ -> browser_only ()
 
 type 'a table = (string, 'a) Hashtbl.t

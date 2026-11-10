@@ -1326,3 +1326,45 @@ Spec: `.workplace/docs/routes-spec.md`, increment 3 (tickets 09, 11 and
   `out` inside a served directory. `not_found` and `error` pages get the
   params of their node's path (the demo shows the decoded issue id).
   `links` decodes numeric character references.
+
+## Navigation protocol (2026-11-10)
+
+Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
+(ticket 10); its section 8 lists what changed.
+
+- Request: `Yuka-Navigate: L0 L2/YUK-1`, the `data-k` of every
+  `<yuka-outlet>` in document order. The cycle compares them with the
+  layer keys of the target (or of the fallback for a 404 or 500). A common
+  prefix of `n >= 1` keys gives a partial: the settled content of outlet
+  `n` with ids prefixed `KEY-`, no entry script, and the headers
+  `Yuka-Outlet`, `Yuka-Title` (percent-encoded), `Yuka-Build`, the page's
+  status and rule headers. Otherwise the settled full document with
+  `Yuka-Build`.
+- Build id (`Server.build_id config app`): two 32-bit FNV-1a hashes of the
+  route digest and the asset description (entry, manifest, packages or
+  metafile). `Digest` was the first choice, but it put melange
+  `digest.js` and `Printf` into every client bundle (keyed app 11005 B ->
+  22603 B gzip). Every full document has `<meta name="yuka-build">`.
+- Client (`src/navigation.ml`): reads the keys, fetches, compares
+  `Yuka-Build` with the meta (differs: `location.assign`), accepts 2xx and
+  4xx/5xx as pages (1xx/3xx and non-HTML: `location.assign`), then with a
+  known `Yuka-Outlet` runs `Client.stop_within` on that outlet, sets its
+  `innerHTML` and the title, and sets or removes `aria-current="page"` on
+  links outside the outlet and outside islands (only the value `page` is
+  removed); without one, the old body swap. Then history, scroll and the
+  island scan as before. `Client.stop_within` runs the cleanup stored on
+  each live island inside the element (`__yuka_cleanup`).
+- `Web`: `fetch_page` takes the keys and gives the callback the status and
+  a header lookup; new `decode_uri`, `contains`, `set_title`.
+- Size: keyed app 11001 -> 11005 B gzip; demo chunks 35833 -> 36364 B gzip
+  (+531 B). `/about` still loads 0 bytes of JavaScript.
+- Tests: `test/cycle` "navigation" (partial headers and body, deepest
+  shared outlet, full document for unknown, empty or old keys, prefixed
+  ids, 404 partial, `Yuka-Title` UTF-8, build meta, build id follows the
+  assets); `test/navigation` (keys sent, partial swap keeps islands outside
+  the outlet and stops those inside, title, `aria-current` outside the
+  outlet and islands, build mismatch, unknown outlet, 404/500 in place);
+  `e2e/demo.ts` 3c (sidebar counter and `New_issue` survive, title,
+  `aria-current`, back, `Yuka-Build` mismatch through a rewritten
+  response header) and 3d (no script on `/about`).
+

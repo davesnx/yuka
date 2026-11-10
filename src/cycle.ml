@@ -89,8 +89,6 @@ type 'req app =
 let app ~build ~headers ~prerender ~find ~resolve ~missing =
   App { build; headers = merge_headers [ headers ]; prerender; find; resolve; missing }
 
-let build_id (App a) = a.build
-
 let failure e = Fail (Web.exn_to_string e)
 
 let settle a =
@@ -118,6 +116,7 @@ let loaded a k =
 type assets = {
   dir : string;
   entry : string;
+  digest : string;
   import_map : (string * string) list;
   preload : string -> string option;
   immutable : string -> bool;
@@ -133,6 +132,7 @@ let modules ~dir ~entry ~manifest ~packages =
   {
     dir;
     entry;
+    digest = String.concat "\n" (entry :: manifest :: packages);
     import_map = Server.import_map ~url:"/_yuka" packages;
     preload = Server.preload_urls ~manifest ~base ();
     immutable = (fun _ -> false);
@@ -153,6 +153,7 @@ let bundle ~dir ~entry ~manifest ~metafile =
   {
     dir;
     entry;
+    digest = String.concat "\n" [ entry; manifest; metafile ];
     import_map = [];
     preload = Server.preload_urls ~manifest ~base:"/_yuka/" ~metafile ();
     immutable = (fun path -> List.exists (String.equal path) hashed);
@@ -184,6 +185,17 @@ let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(head = "") ?(tim
     timeout;
     prerendered;
   }
+
+let fingerprint text =
+  let hash seed =
+    String.fold_left (fun h c -> (h lxor Char.code c) * 0x01000193 land 0xffffffff) seed text
+  in
+  Printf.sprintf "%08x%08x" (hash 0x811c9dc5) (hash 0x050c5d1f)
+
+let build_id config (App a) =
+  match config.assets with
+  | None -> a.build
+  | Some assets -> fingerprint (a.build ^ "\n" ^ assets.digest)
 
 let served_dirs config =
   Option.to_list (Option.map (fun (a : assets) -> ("/_yuka", a.dir)) config.assets)
@@ -237,7 +249,8 @@ type env = {
   config : config;
   sleep : float -> unit Async.t;
   head_only : bool;
-  navigating : bool;
+  navigate : string list option;
+  build : string;
   current : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
@@ -272,6 +285,11 @@ let html_headers rule_headers extra =
   add_vary "Yuka-Navigate"
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
+let rec shared sent keys =
+  match (sent, keys) with
+  | s :: sent, k :: keys when String.equal s k -> 1 + shared sent keys
+  | _ -> 0
+
 let render env ~status ~headers layers (page : page) =
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
@@ -285,16 +303,32 @@ let render env ~status ~headers layers (page : page) =
   in
   let import_map = match assets with Some a -> a.import_map | None -> [] in
   let head extra =
-    Server.head ~extra ~head:(env.config.head ^ page.head) ~import_map ~title:page.title
-      ~styles:env.config.styles ()
+    Server.head
+      ~extra:("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">" ^ extra)
+      ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
   let build = nest layers page.body in
   let timeout = env.config.timeout and current = env.current in
-  if env.navigating then
-    Async.map
-      (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
-      (Server.settled ?preload ?entry ~current ~timeout ~sleep:env.sleep build)
-  else
+  match env.navigate with
+  | Some sent -> (
+      let headers = set_header ("yuka-build", env.build) headers in
+      let keys = List.map (fun (l : layer) -> l.key) layers in
+      match shared sent keys with
+      | 0 ->
+          Async.map
+            (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
+            (Server.settled ?preload ?entry ~current ~timeout ~sleep:env.sleep build)
+      | n ->
+          let outlet = List.nth keys (n - 1) in
+          let headers =
+            merge_headers
+              [ headers; [ ("yuka-outlet", outlet); ("yuka-title", Router.encode page.title) ] ]
+          in
+          Async.map
+            (fun body -> { status; headers; body = String body })
+            (Server.settled ?preload ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+               (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
+  | None ->
     let early = Buffer.create 4096 in
     let writer =
       ref (fun text ->
@@ -425,7 +459,7 @@ let prerender_file target =
 
 let prerendered_file env (rules : rules) (r : request) ~path ~query =
   match (env.config.prerendered, r.meth, query) with
-  | Some root, (`GET | `HEAD), (None | Some "") when rules.prerender && not env.navigating -> (
+  | Some root, (`GET | `HEAD), (None | Some "") when rules.prerender && env.navigate = None -> (
       match prerender_file path with
       | Some file when env.exists ~root ~path:file -> Some (root, file)
       | _ -> None)
@@ -529,7 +563,11 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
       config;
       sleep;
       head_only = (match r.meth with `HEAD -> true | _ -> false);
-      navigating = Option.is_some (r.header "yuka-navigate");
+      navigate =
+        Option.map
+          (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
+          (r.header "yuka-navigate");
+      build = build_id config (App a);
       current = path;
       root_headers = a.headers;
       exists;
@@ -712,7 +750,8 @@ let missing_page config (App a) ~sleep =
       config;
       sleep;
       head_only = false;
-      navigating = false;
+      navigate = None;
+      build = build_id config (App a);
       current = "";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
