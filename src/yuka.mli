@@ -1401,6 +1401,10 @@ module Server : sig
       [Yuka-Navigate] has the header [Yuka-Build: ID]; the client loads the
       page in full when the two differ. *)
 
+  val prerender_config : config -> config
+  (** [config] with [YUKA_DEV] ignored. A prerender uses it, so a static
+      page never gets the dev script. *)
+
   val css_files : config -> (string * string) list
   (** The sheets of [css] as paths relative to the site root
       ([_yuka/css/FILE]) and text. A prerender writes them. *)

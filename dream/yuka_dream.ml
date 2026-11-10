@@ -158,6 +158,7 @@ let check_out out config =
     (Yuka.Server.served_dirs config)
 
 let prerender ~out config app =
+  let config = Yuka.Server.prerender_config config in
   check_out out config;
   let ( let* ) = Lwt.bind in
   let request path = Dream.request ~method_:`GET ~target:path "" in

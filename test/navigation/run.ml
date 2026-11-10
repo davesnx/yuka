@@ -623,34 +623,42 @@ let session : string -> string =
 let dev_page () =
   setup "";
   set_head
-    ({|<link rel="stylesheet" href="/static/s.css"><link rel="stylesheet" href="/_yuka/css/a-1.css" data-yuka-css>|});
+    ({|<link rel="stylesheet" href="/static/s.css"><link rel="stylesheet" href="/_yuka/css/a-1.css" data-yuka-css>|}
+    ^ {|<link rel="stylesheet" href="https://cdn.example/x.css">|});
   set_body "<p>x</p>";
-  run_dev (Private.dev_script {|{"build":2,"page":1,"error":null}|})
+  run_dev (Private.dev_script {|{"session":"a","build":2,"page":1,"error":null}|})
 
 let dev_reload finish =
   dev_page ();
   check "listens on /_yuka/dev" "/_yuka/dev" (dev_url ());
-  dev_send {|{"build":2,"page":1,"error":null}|};
+  dev_send {|{"session":"a","build":2,"page":1,"error":null}|};
   check "same build: nothing" "" (log_read ());
-  dev_send {|{"build":3,"page":3,"error":null}|};
+  dev_send {|{"session":"a","build":3,"page":3,"error":null}|};
   check "a new page build reloads" "assign" (log_read ());
   check "the scroll is kept for the next page" "0" (session "yuka-dev-scroll");
   finish ()
 
+let dev_session finish =
+  dev_page ();
+  dev_send {|{"session":"b","build":1,"page":1,"error":null}|};
+  check "a new yuka dev session reloads, also with lower numbers" "assign" (log_read ());
+  finish ()
+
 let dev_css finish =
   dev_page ();
-  dev_send {|{"build":3,"page":1,"error":null}|};
+  dev_send {|{"session":"a","build":3,"page":1,"error":null}|};
   check "no reload" "" (log_read ());
-  check "the stylesheet gets the build" "/static/s.css?v=3" (attr {|link[href^="/static"]|} "href");
+  check "the stylesheet gets the build" "http://localhost/static/s.css?v=3" (attr {|link[href*="/static/"]|} "href");
+  check "another origin is left alone" "https://cdn.example/x.css" (attr {|link[href*="cdn"]|} "href");
   check "a /_yuka/css sheet is left alone" "/_yuka/css/a-1.css" (attr "link[data-yuka-css]" "href");
   finish ()
 
 let dev_error finish =
   dev_page ();
-  dev_send {|{"build":2,"page":1,"error":"File a.ml: Error"}|};
+  dev_send {|{"session":"a","build":2,"page":1,"error":"File a.ml: Error"}|};
   check "the overlay shows the error" "File a.ml: Error" (attr_text "#yuka-dev-error");
   check "no reload" "" (log_read ());
-  dev_send {|{"build":3,"page":3,"error":null}|};
+  dev_send {|{"session":"a","build":3,"page":3,"error":null}|};
   check "the overlay goes away" "none" (attr_text "#yuka-dev-error");
   check "then the reload" "assign" (log_read ());
   finish ()
@@ -658,7 +666,7 @@ let dev_error finish =
 let after_scroll finish =
   setup "";
   document_session_set "yuka-dev-scroll" "250";
-  run_dev (Private.dev_script {|{"build":1,"page":1,"error":null}|});
+  run_dev (Private.dev_script {|{"session":"a","build":1,"page":1,"error":null}|});
   fire_load ();
   check "the scroll position is restored on load" "scroll:250" (log_read ());
   check "and forgotten" "null" (session "yuka-dev-scroll");
@@ -1298,6 +1306,7 @@ let all =
     ("click fetches and swaps", click_fetches);
     ("dev: a new page build reloads and keeps the scroll", dev_reload);
     ("dev: a css build swaps the stylesheets", dev_css);
+    ("dev: a new session reloads", dev_session);
     ("dev: a build error shows an overlay", dev_error);
     ("dev: the scroll position comes back after the reload", after_scroll);
     ("css: sheets of a partial navigation move to the head", partial_css);

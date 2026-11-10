@@ -1673,4 +1673,27 @@ Ticket 24; `.workplace/docs/app-spec.md` section 24, option A, level 1.
   event then carries the new numbers.
 - Production: no route, no script, no client module; `make size` and
   `make measure-pages` do not change.
+- Review fixes:
+  - A change under `--assets` restarts the server, unless only `.css`
+    files changed; the server reads the manifest, the metafile and the
+    build id at start.
+  - `/_yuka/dev` is a callback loop with no growing chain. It sends
+    `: ping` after 15 s without a change, ends on the first failed
+    write, and answers `HEAD` with headers only.
+  - The state has a random `session` per `yuka dev` run; a page that sees
+    another session reloads.
+  - The CSS swap keeps other origins as they are and writes `u.href`.
+  - The watched executable is looked up in `PATH`, or named with
+    `--watch-exe`.
+  - Any exception in the loop stops the server and dune. The state
+    directory is made with all its parents.
+  - `stop` keeps the pid until the process is reaped and retries
+    `waitpid` on `EINTR`. A signal during a restart then stops the old
+    server (also after `SIGKILL`) and starts no second one.
+  - Deleted asset files count as changes.
+  - `json_string` is shared in `gen/source_text.ml`.
+  - The state file is read through `Web.read_file`, which is native only,
+    so the cycle has no channel primitives for Melange.
+  - A prerender uses `Server.prerender_config` (`YUKA_DEV` ignored), and
+    with `YUKA_DEV` prerendered routes render live.
 

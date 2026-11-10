@@ -1049,10 +1049,10 @@ let forms =
   ]
 
 let dev =
-  let with_dev ?file f =
+  let with_dev ?file ?(make = fun () -> Server.config ()) f =
     Unix.putenv "YUKA_DEV" "1";
     Unix.putenv "YUKA_DEV_FILE" (Option.value file ~default:"/nonexistent/yuka-dev");
-    Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> f (Server.config ()))
+    Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> f (make ()))
   in
   let state_file text =
     let f = Filename.temp_file "yuka_dev" "" in
@@ -1070,8 +1070,8 @@ let dev =
     timers := [];
     List.iter (fun resolve -> resolve ()) due
   in
-  let stream config target =
-    let view = { Server.meth = `GET; target; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return None) } in
+  let stream ?(meth = `GET) ?(write = fun _ -> Async.return ()) config target =
+    let view = { Server.meth; target; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return None) } in
     match
       Async.status
         (Server.handle config Cycle_server.Routes_server.app ~sleep ~exists:(fun ~root:_ ~path:_ -> false)
@@ -1079,9 +1079,9 @@ let dev =
     with
     | Async.Done (Server.Respond { status; headers; body = Server.Stream f }) ->
         let written = ref [] in
-        ignore (f (fun s -> written := !written @ [ s ]; Async.return ()));
+        ignore (f (fun s -> written := !written @ [ s ]; write s));
         (status, headers, written)
-    | Async.Done (Server.Respond { status; _ }) -> (status, [], ref [])
+    | Async.Done (Server.Respond { status; headers; body = Server.String s }) -> (status, headers, ref [ s ])
     | _ -> Alcotest.fail "no response"
   in
   [
@@ -1111,6 +1111,39 @@ let dev =
             Alcotest.(check string) "error, on one line" ({|data: {"build":2,"page":1, "error":"boom"}|} ^ "\n\n") (List.nth !written 2);
             let r = get ~config ~meth:`POST "/_yuka/dev" in
             check_status r 405) );
+    ( "with YUKA_DEV=1: a heartbeat, an end on a failed write, HEAD without a loop",
+      fun () ->
+        let file = state_file {|{"build":1}|} in
+        with_dev ~file (fun config ->
+            timers := [];
+            let _, _, written = stream config "/_yuka/dev" in
+            for _ = 1 to 60 do tick () done;
+            Alcotest.(check (list string)) "a comment after 15 s without a change"
+              [ {|data: {"build":1}|} ^ "\n\n"; ": ping\n\n" ] !written;
+            timers := [];
+            let failing, _, fail = Async.make () in
+            let _, _, written = stream ~write:(fun _ -> failing) config "/_yuka/dev" in
+            Alcotest.(check int) "one write in flight" 1 (List.length !written);
+            fail "closed";
+            Alcotest.(check int) "no timer after a failed write" 0 (List.length !timers);
+            timers := [];
+            let status, headers, body = stream ~meth:`HEAD config "/_yuka/dev" in
+            Alcotest.(check int) "HEAD status" 200 status;
+            Alcotest.(check (option string)) "HEAD type" (Some "text/event-stream") (List.assoc_opt "content-type" headers);
+            Alcotest.(check (list string)) "HEAD body" [ "" ] !body;
+            Alcotest.(check int) "HEAD starts no loop" 0 (List.length !timers)) );
+    ( "with YUKA_DEV=1: prerendered pages render live; a prerender gets no script",
+      fun () ->
+        with_dev
+          ~make:(fun () -> Server.config ~assets:modules ~prerendered:"pre" ())
+          (fun config ->
+            let r = get ~config "/plain" in
+            check_true "rendered, not the file" (not (String.equal r.body "prerendered plain"));
+            check_true "with the script" (contains r.body "EventSource");
+            let r = get ~config:(Server.prerender_config config) "/plain" in
+            check_true "a prerender config: the file" (String.equal r.body "prerendered plain");
+            let r = get ~config:(Server.prerender_config (Server.config ())) "/plain" in
+            check_true "a prerender config renders no script" (not (contains r.body "EventSource"))) );
     ( "with YUKA_DEV=1: the script in full pages only",
       fun () ->
         let file = state_file {|{"build":3,"page":2,"error":"<\/script>"}|} in

@@ -28,4 +28,15 @@ Done (2026-11-10): option A, level 1 (`.workplace/docs/app-spec.md`, section 24;
 - Tests: cram `gen/test/dev.t` (arguments; restart loop with a fake dune and a fake server; `SIGKILL` after `--kill-after`); cycle `dev` cases; jsdom dev cases in `test/navigation`.
 - Production: no change in `make size` or `make measure-pages`.
 
+Review fixes:
+- Asset changes other than only CSS restart the server.
+- Each `yuka dev` run has a session, and a new session reloads open tabs.
+- The CSS swap is same-origin only.
+- `--watch-exe` names the binary, and a bare command is looked up in `PATH`.
+- Children are stopped on any exit, and the state directory is made with its parents.
+- A signal during a restart is safe.
+- Deleted asset files count as changes.
+- The SSE loop has a heartbeat and ends on a failed write, and `HEAD` starts no loop.
+- A prerender never writes the dev script, and with `YUKA_DEV` prerendered routes render live.
+
 Not built: level 2 (island remount without reload), dune RPC, and an e2e that edits files.

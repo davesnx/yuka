@@ -4,12 +4,13 @@ type options = {
   assets : string list;
   state : string;
   kill_after : float;
+  watch_exe : string option;
   server : string list;
 }
 
 let usage =
-  "usage: yuka dev [--build TARGET]... [--assets DIR]... [--state FILE] [--dune CMD] [--kill-after SECONDS] -- \
-   SERVER [ARG]..."
+  "usage: yuka dev [--build TARGET]... [--assets DIR]... [--state FILE] [--dune CMD] [--kill-after SECONDS] \
+   [--watch-exe FILE] -- SERVER [ARG]..."
 
 exception Usage of string
 
@@ -21,11 +22,12 @@ let parse args =
     | "--assets" :: d :: rest -> go { o with assets = o.assets @ [ d ] } rest
     | "--state" :: f :: rest -> go { o with state = f } rest
     | "--dune" :: d :: rest -> go { o with dune = d } rest
+    | "--watch-exe" :: f :: rest -> go { o with watch_exe = Some f } rest
     | "--kill-after" :: s :: rest -> (
         match float_of_string_opt s with
         | Some f when f >= 0. -> go { o with kill_after = f } rest
         | _ -> raise (Usage ("--kill-after takes a number of seconds, not " ^ s)))
-    | [ ("--build" | "--assets" | "--state" | "--dune" | "--kill-after") as flag ] ->
+    | [ ("--build" | "--assets" | "--state" | "--dune" | "--kill-after" | "--watch-exe") as flag ] ->
         raise (Usage (flag ^ " needs a value"))
     | arg :: _ -> raise (Usage ("unknown argument " ^ arg))
     | [] -> raise (Usage "no server command; give it after --")
@@ -34,7 +36,7 @@ let parse args =
   | "dev" :: rest ->
       let o =
         go
-          { dune = "dune"; targets = []; assets = []; state = "_build/.yuka-dev"; kill_after = 2.; server = [] }
+          { dune = "dune"; targets = []; assets = []; state = "_build/.yuka-dev"; kill_after = 2.; watch_exe = None; server = [] }
           rest
       in
       { o with targets = (if o.targets = [] then [ "@@default" ] else o.targets) }
@@ -43,28 +45,37 @@ let parse args =
 
 let log fmt = Printf.ksprintf (fun s -> prerr_endline ("yuka dev: " ^ s)) fmt
 
-let json_string s =
-  let b = Buffer.create (String.length s + 2) in
-  Buffer.add_char b '"';
-  String.iter
-    (function
-      | '"' -> Buffer.add_string b "\\\""
-      | '\\' -> Buffer.add_string b "\\\\"
-      | '\n' -> Buffer.add_string b "\\n"
-      | c when Char.code c < 0x20 -> Buffer.add_string b (Printf.sprintf "\\u%04x" (Char.code c))
-      | c -> Buffer.add_char b c)
-    s;
-  Buffer.add_char b '"';
-  Buffer.contents b
-
-let write_state file ~build ~page ~error =
+let write_state file ~session ~build ~page ~error =
   let text =
-    Printf.sprintf {|{"build":%d,"page":%d,"error":%s}|} build page
-      (match error with None -> "null" | Some e -> json_string e)
+    Printf.sprintf {|{"session":%s,"build":%d,"page":%d,"error":%s}|} (Source_text.json_string session) build page
+      (match error with None -> "null" | Some e -> Source_text.json_string e)
   in
   let tmp = file ^ ".tmp" in
   Out_channel.with_open_bin tmp (fun oc -> output_string oc text);
   Sys.rename tmp file
+
+let rec mkdir_p dir =
+  if dir <> "" && dir <> "." && dir <> "/" && not (Sys.file_exists dir) then begin
+    mkdir_p (Filename.dirname dir);
+    try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let executable o =
+  match o.watch_exe with
+  | Some f -> f
+  | None ->
+      let prog = List.hd o.server in
+      if String.contains prog '/' then prog
+      else
+        let dirs = String.split_on_char ':' (Option.value (Sys.getenv_opt "PATH") ~default:"") in
+        let found =
+          List.find_opt
+            (fun d ->
+              let p = Filename.concat (if d = "" then "." else d) prog in
+              Sys.file_exists p && not (Sys.is_directory p))
+            dirs
+        in
+        Option.fold ~none:prog ~some:(fun d -> Filename.concat (if d = "" then "." else d) prog) found
 
 let strip_ansi s =
   let b = Buffer.create (String.length s) in
@@ -98,17 +109,24 @@ let rec files dir =
 let snapshot dirs = List.concat_map files dirs |> List.map (fun p -> (p, stamp p))
 
 let changed before after =
-  List.filter_map
-    (fun (p, s) -> match List.assoc_opt p before with Some s' when s' = s -> None | _ -> Some p)
-    after
+  let differs (p, s) other = match List.assoc_opt p other with Some s' -> s' <> s | None -> true in
+  List.filter_map (fun (p, s) -> if differs (p, s) before then Some p else None) after
+  @ List.filter_map (fun (p, _) -> if List.mem_assoc p after then None else Some p) before
+
+let plain_css p = Filename.check_suffix p ".css"
 
 type server = { mutable pid : int option }
+
+let rec waitpid flags pid =
+  match Unix.waitpid flags pid with
+  | r -> r
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> waitpid flags pid
 
 let running server =
   match server.pid with
   | None -> false
   | Some pid -> (
-      match Unix.waitpid [ Unix.WNOHANG ] pid with
+      match waitpid [ Unix.WNOHANG ] pid with
       | 0, _ -> true
       | _ ->
           server.pid <- None;
@@ -121,22 +139,22 @@ let stop o server =
   match server.pid with
   | None -> ()
   | Some pid ->
-      server.pid <- None;
       (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
       let deadline = Unix.gettimeofday () +. o.kill_after in
       let rec wait () =
-        match Unix.waitpid [ Unix.WNOHANG ] pid with
+        match waitpid [ Unix.WNOHANG ] pid with
         | 0, _ when Unix.gettimeofday () < deadline ->
-            Unix.sleepf 0.02;
+            (try Unix.sleepf 0.02 with Unix.Unix_error (Unix.EINTR, _, _) -> ());
             wait ()
         | 0, _ ->
             log "the server did not stop after %g s, killing it" o.kill_after;
             (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-            ignore (Unix.waitpid [] pid)
+            ignore (waitpid [] pid)
         | _ -> ()
-        | exception Unix.Unix_error _ -> ()
+        | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
       in
-      wait ()
+      wait ();
+      server.pid <- None
 
 let start o server =
   let env = Array.append [| "YUKA_DEV=1"; "YUKA_DEV_FILE=" ^ o.state |] (Unix.environment ()) in
@@ -156,12 +174,19 @@ let status line =
     if String.starts_with ~prefix:"Success" (String.trim line) then `Success else `Failed
   else `Line line
 
+let session_id () =
+  Random.self_init ();
+  Printf.sprintf "%08x%08x" (Random.bits ()) (Random.bits ())
+
 let run o =
+  let session = session_id () in
   let server = { pid = None } in
   let build = ref 0 and page = ref 0 in
   let exe = ref None and assets = ref [] in
   let output = Buffer.create 1024 in
-  (try Unix.mkdir (Filename.dirname o.state) 0o755 with Unix.Unix_error _ -> ());
+  let watched = executable o in
+  mkdir_p (Filename.dirname o.state);
+  let write ~error = write_state o.state ~session ~build:!build ~page:!page ~error in
   let r, w = Unix.pipe ~cloexec:true () in
   let dune_pid =
     Unix.create_process o.dune
@@ -169,35 +194,41 @@ let run o =
       Unix.stdin w w
   in
   Unix.close w;
+  let finishing = ref false in
   let finish code =
-    stop o server;
-    (try Unix.kill dune_pid Sys.sigterm with Unix.Unix_error _ -> ());
-    exit code
+    if not !finishing then begin
+      finishing := true;
+      stop o server;
+      (try Unix.kill dune_pid Sys.sigterm with Unix.Unix_error _ -> ());
+      exit code
+    end
   in
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> finish 130));
   Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> finish 143));
   let input = Unix.in_channel_of_descr r in
   let success () =
-    let now_exe = stamp (List.hd o.server) and now_assets = snapshot o.assets in
+    let now_exe = stamp watched and now_assets = snapshot o.assets in
     let first = !build = 0 in
-    let restart = first || now_exe = None || now_exe <> !exe || not (running server) in
     let moved = if first then [] else changed !assets now_assets in
+    let restart =
+      first || now_exe = None || now_exe <> !exe || not (running server)
+      || not (List.for_all plain_css moved)
+    in
     exe := now_exe;
     assets := now_assets;
     if restart then begin
       incr build;
       page := !build;
-      write_state o.state ~build:!build ~page:!page ~error:None;
+      write ~error:None;
       if server.pid <> None then log "restarting the server";
       stop o server;
       start o server
     end
     else if moved <> [] then begin
       incr build;
-      if not (List.for_all (fun p -> Filename.check_suffix p ".css") moved) then page := !build;
-      write_state o.state ~build:!build ~page:!page ~error:None
+      write ~error:None
     end
-    else write_state o.state ~build:!build ~page:!page ~error:None
+    else write ~error:None
   in
   let rec loop () =
     match input_line input with
@@ -208,7 +239,7 @@ let run o =
             Buffer.clear output;
             success ()
         | `Failed ->
-            write_state o.state ~build:!build ~page:!page ~error:(Some (String.trim (Buffer.contents output)));
+            write ~error:(Some (String.trim (Buffer.contents output)));
             Buffer.clear output
         | `Line l when String.length l > 0 && String.trim l = "" -> ()
         | `Line l when String.starts_with ~prefix:"********** NEW BUILD" l -> Buffer.clear output
@@ -217,10 +248,14 @@ let run o =
             Buffer.add_char output '\n');
         loop ()
     | exception End_of_file ->
-        let code = match Unix.waitpid [] dune_pid with _, Unix.WEXITED c -> c | _ -> 1 in
+        let code = match waitpid [] dune_pid with _, Unix.WEXITED c -> c | _ -> 1 in
         finish code
   in
-  loop ()
+  match loop () with
+  | () -> ()
+  | exception e ->
+      log "%s" (Printexc.to_string e);
+      finish 1
 
 let () =
   match parse (List.tl (Array.to_list Sys.argv)) with

@@ -675,20 +675,29 @@ yuka dev --build @all --assets _build/default/static -- ./_build/default/server/
 It runs `dune build --watch` on the `--build` targets (default `@@default`)
 and reads dune's results. After each successful build:
 
-- the server executable changed (or the server stopped): it stops the
-  server (`SIGTERM`, then `SIGKILL` after `--kill-after`, default 2 s),
-  starts it again, and the browser reloads, keeping the scroll position;
-- only files under an `--assets` directory changed: `.css` files only are
-  swapped in the page with no reload (`link` gets `?v=N`); other files
-  reload it.
+- the server executable changed, the server stopped, or files under an
+  `--assets` directory changed (other than only `.css` files): it stops
+  the server (`SIGTERM`, then `SIGKILL` after `--kill-after`, default
+  2 s), starts it again (it reads the manifest and the build id at
+  start), and the browser reloads, keeping the scroll position;
+- only `.css` files under `--assets` changed: the page's stylesheets of
+  the same origin are swapped with no reload (`link` gets `?v=N`).
+
+The server executable is the first word of the command, looked up in
+`PATH` if it has no `/`; when the command is a wrapper (`dune exec`, a
+shell script), name the binary to watch with `--watch-exe FILE`. Each
+`yuka dev` run has its own session, so open tabs reload after a restart
+of `yuka dev`.
 
 A failed build keeps the old server and shows dune's errors in an overlay
 in the page, and in the terminal. Island state is lost on a reload.
 
 The server needs no change: `yuka dev` starts it with `YUKA_DEV=1`, and
-then the cycle answers `GET /_yuka/dev` (Server-Sent Events) and puts a
-small script in the head of each page. Without `YUKA_DEV=1` there is
-neither, so production pages send no byte of it. Sheets of
+then the cycle answers `GET /_yuka/dev` (Server-Sent Events, with a
+comment every 15 s) and puts a small script in the head of each page, and
+renders prerendered pages live. Without `YUKA_DEV=1` there is neither, so
+production pages send no byte of it; a prerender never writes the
+script. Sheets of
 `[%yuka.css]` change their class names with their text, so editing one
 reloads the page. `make demo-dev` runs the demo this way.
 

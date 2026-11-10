@@ -16,6 +16,6 @@
 (executable
  (name yuka_cli)
  (public_name yuka)
- (modules yuka_cli)
+ (modules yuka_cli source_text)
  (libraries unix)
  (package yuka))

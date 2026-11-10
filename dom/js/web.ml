@@ -503,3 +503,5 @@ let adopt_stylesheets : unit -> unit =
   });
   document.__yukaSheets = seen;
 }|}]
+
+let read_file (_ : string) : string option = None
