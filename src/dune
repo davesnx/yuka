@@ -2,5 +2,5 @@
  (name yuka)
  (public_name yuka)
  (modes native melange)
- (virtual_modules web dev)
+ (virtual_modules web dev client)
  (default_implementation yuka.native))

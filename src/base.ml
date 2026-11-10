@@ -78,14 +78,17 @@ module Effect = struct
       dispose_owner child;
       match !last with
       | None -> ()
-      | Some result ->
+      | Some finish ->
           last := None;
-          Option.iter (fun cleanup -> cleanup result) cleanup
+          finish ()
     in
     let node =
       Scheduler.make true (fun () ->
           teardown ();
-          last := Some (with_owner child body);
+          let result = with_owner child body in
+          (match cleanup with
+          | Some cleanup -> last := Some (fun () -> cleanup result)
+          | None -> ());
           false)
     in
     let stop () =

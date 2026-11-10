@@ -1,6 +1,4 @@
-let on : bool = [%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]
-
-let mismatch : Web.node -> string -> Web.node option -> unit =
+let report : (Web.node -> string -> Web.node option -> unit[@u]) =
   [%mel.raw
     {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function (parent, expected, found) {
       if (found != null) {
@@ -24,3 +22,5 @@ let mismatch : Web.node -> string -> Web.node option -> unit =
       }
       console.warn("yuka: hydration mismatch in island " + (island || "?") + " at " + (path.join(" > ") || "root") + ": expected " + expected + ", found " + describe(found));
     } : 0|}]
+
+let mismatch parent expected found = report parent expected found [@u]

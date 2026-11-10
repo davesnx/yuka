@@ -146,7 +146,7 @@ let run n =
         raise e
   in
   if n.level = 0 then set_level n;
-  if changed then mark (Option.value !listener ~default:n) n 2
+  if changed then mark (match !listener with Some l -> l | None -> n) n 2
 
 let rec fresh n =
   if n.state <> 0 && n.state <> 3 then
@@ -184,9 +184,11 @@ let before a b =
   || a.depth = b.depth
      && (a.level < b.level || (a.level = b.level && a.id > b.id))
 
+let rec rev_onto acc l = match acc with [] -> l | x :: r -> rev_onto r (x :: l)
+
 let rec merge acc a b =
   match (a, b) with
-  | [], l | l, [] -> List.rev_append acc l
+  | [], l | l, [] -> rev_onto acc l
   | x :: a', y :: b' ->
       if before y x then merge (y :: acc) a b' else merge (x :: acc) a' b
 
@@ -207,20 +209,23 @@ let flush () =
   | _ ->
       depth := 1;
       let error = ref None and rounds = ref 0 in
-      let fail e = if Option.is_none !error then error := Some e in
+      let fail e = match !error with None -> error := Some e | Some _ -> () in
       let rec loop () =
         match !queue with
         | [] -> ()
         | q ->
             queue := [];
             if !rounds >= 100 then begin
-              List.iter
-                (fun n ->
-                  if n.state <> 3 then begin
-                    n.state <- 0;
-                    stale n
-                  end)
-                q;
+              let rec drop = function
+                | [] -> ()
+                | n :: rest ->
+                    if n.state <> 3 then begin
+                      n.state <- 0;
+                      stale n
+                    end;
+                    drop rest
+              in
+              drop q;
               fail
                 (Failure
                    "Yuka: an effect or a memo keeps changing a State it reads \
@@ -228,15 +233,19 @@ let flush () =
             end
             else begin
               incr rounds;
-              List.iter
-                (fun n -> try fresh n with e -> fail e)
-                (if sorted q then q else sort q)
+              let rec run_all = function
+                | [] -> ()
+                | n :: rest ->
+                    (try fresh n with e -> fail e);
+                    run_all rest
+              in
+              run_all (if sorted q then q else sort q)
             end;
             loop ()
       in
       loop ();
       depth := 0;
-      Option.iter raise !error
+      match !error with Some e -> raise e | None -> ()
 
 let changed n =
   mark n n 2;

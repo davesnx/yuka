@@ -671,11 +671,11 @@ inside `yuka`.
 - So no upgrade or `(lang dune X)` bump helps; `(lang dune 3.16)` stays. The
   single context already works: `yuka` has `(modes native melange)` and
   builds in the default context (`dune build` in the repository).
-- Per-mode code in `yuka` already has a mechanism: the virtual module `web`
-  (`yuka.native` default, `yuka.js` in a Melange entry). `mount` does not need
-  more, because `Client` and `Router` compile on both targets and call
-  `Web`. Melange-only code stays in `dom/js/`. This is why `mount` lives in
-  `src/yuka.ml`.
+- Per-mode code in `yuka` already has a mechanism: the virtual modules `web`,
+  `dev` and `client` (`yuka.native` default, `yuka.js` in a Melange entry).
+  `mount` does not need more, because `Router` compiles on both targets and
+  calls `Web`, and `Client` has a native stub. Melange-only code stays in
+  `dom/js/`. This is why `mount` lives in `src/yuka.ml`.
 
 ### Lazy islands (replaced by "v1: lazy as a value of `loading`")
 
@@ -846,29 +846,16 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   builds `yuka` with `dune build -p` (the release profile), so a flag fixed
   when `yuka` compiles would be wrong for every installed app. `Dev` is a
   second virtual module of `yuka` (next to `Web`). Its browser
-  implementation (`dom/js/dev.ml`) is two constants, the first statements of
-  `dev.js`, with no import before them:
-  `on = typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__` and
-  `mismatch = <same test> ? function ... : 0`. With
-  `--define:__YUKA_DEV__=false`, esbuild folds both to the primitives `false`
-  and `0` in that file, inlines them into `client.js` and removes their
-  declarations, so the message code is not in the bundle. With no define
-  (dev, no bundler, the jsdom tests), `on` is `true`. `yuka.native`
-  implements `Dev` with `on = false`.
-- Cost in a production bundle: esbuild inlines `false` only when it prints
-  the bundle, after its minifier has joined statements, so each check
-  leaves a few bytes (`!1,`). `make size`: keyed app 33376 B / 10997 B gzip,
-  42 B / 17 B gzip more than without the checks; demo chunks 116938 B /
-  36377 B gzip, 42 B / 7 B gzip more. `src/client.ml` writes the root check
-  of `start` as `if Dev.on then ... else ...`; other shapes left the whole
-  dev branch in the bundle.
-- Designs that cost no bytes need the condition to be known when
-  `client.ml` compiles: a constant from the dune profile of `yuka`
-  (rejected above), or a second implementation library that holds the
-  hydration code compiled twice, which the app chooses in its
-  `melange.emit` per profile. The second is a large split of `client.ml`
-  for about 17 B gzip; not done. A `mount ~dev:true` argument would keep the
-  whole message code in every bundle.
+  implementation (`dom/js/dev.ml`) is `mismatch = <same test> ? function
+  ... : 0`. Each check in `dom/js/client.ml` is the raw test
+  `typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__` in place. With
+  `--define:__YUKA_DEV__=false`, esbuild folds it to `false` when it parses
+  the file, before tree shaking, so the dev branches and everything only
+  they call (`Dev.mismatch`, option conversions, `Curry._3`) are not in the
+  bundle. With no define (dev, no bundler, the jsdom tests), the test is
+  `true`. A shared constant `Dev.on` in another file is folded only when
+  esbuild prints the bundle, after tree shaking: it left 392 B of `Curry._3`
+  in the keyed app. `yuka.native` implements `Dev.mismatch` as a no-op.
 - Checked against an installed `yuka`: built with `dune build -p yuka`,
   installed with `dune install --prefix`, used by a small app; its esbuild
   bundle has the message without the define and not with it.
@@ -1019,13 +1006,21 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   `Template` are now their own files, and `yuka.ml` binds them with
   `module X = struct include X end`, which Melange compiles with known
   arity. The keyed benchmark entry went from 90 `Curry._` call sites to 1.
-- Calls from the runtime into the virtual module `Web` still go through
-  `Curry` (161 sites in the runtime): the runtime is compiled against
-  `web.mli` only. Known arity there needs `external` or `[@u]` in
-  `web.mli`. Both need `melange.ppx` on the shared library, which also runs
-  for native: it turns a `[@u]` type into a `Js.Fn` type and a
-  `[@@mel.send]` external into an encoded primitive, and native has neither
-  (an external would need a C stub per DOM primitive). Not done.
+- Calls from `src/` into the virtual module `Web` go through `Curry`: they
+  are compiled against `web.mli` only. Known arity there needs `external`
+  or `[@u]` in `web.mli`. Both need `melange.ppx` on the shared library,
+  which also runs for native: it turns a `[@u]` type into a `Js.Fn` type
+  and a `[@@mel.send]` external into an encoded primitive, and native has
+  neither (an external would need a C stub per DOM primitive).
+- `Client`, the module with the most DOM calls, is therefore a virtual
+  module: `src/client.mli`, the browser implementation in
+  `dom/js/client.ml` (compiled next to `web.ml`, with `melange.ppx`) and a
+  native stub in `dom/native/client.ml` (island values work; `render`,
+  `hydrate` and `start` raise "browser only", as they did through the native
+  `Web`). Its calls into `Web` have known arity and most are inlined, and it
+  uses JavaScript `null`, arrays and `Map` instead of OCaml options and
+  lists on the mount path. The rest of `src/` still calls `Web` through
+  `Curry` (`Navigation`, `Platform`, `Async`).
 
 ## Small client bundles (2026-11-10)
 

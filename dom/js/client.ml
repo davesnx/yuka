@@ -6,18 +6,32 @@ type 'a promise = 'a Web.promise
 
 let promise_map = Web.promise_map
 
-let insert parent n = function
-  | None -> Web.append_child parent n
-  | Some before -> Web.insert_before parent n before
+type cur = Web.node Js.null
 
-type ctx = {
-  doc : Web.node;
-}
+external next_sibling : Web.node -> cur = "nextSibling" [@@mel.get]
+external first_child : Web.node -> cur = "firstChild" [@@mel.get]
+external previous_sibling : Web.node -> Web.node = "previousSibling" [@@mel.get]
+external last_child : Web.node -> Web.node = "lastChild" [@@mel.get]
+external insert : Web.node -> Web.node -> cur -> unit = "insertBefore" [@@mel.send]
+external node_of : cur -> Web.node = "%identity"
+external alloc : int -> 'a array = "Array" [@@mel.new]
+external fill : 'a array -> 'a -> 'a array = "fill" [@@mel.send]
+external push : 'a array -> 'a -> unit = "push" [@@mel.send]
+external filter : 'a array -> ('a -> bool) -> 'a array = "filter" [@@mel.send]
+external parent : Web.node -> cur = "parentNode" [@@mel.get]
+external prop : Web.node -> string -> 'a Js.undefined = "" [@@mel.get_index]
+external flag : Web.event -> string -> bool Js.undefined = "" [@@mel.get_index]
+external find : 'a Web.table -> string -> 'a Js.undefined = "get" [@@mel.send]
+external defined : 'a Js.undefined -> 'a = "%identity"
+
+let get = Array.unsafe_get
+let set = Array.unsafe_set
+let some n : cur = Js.Null.return n
 
 type pos = {
-  ctx : ctx;
+  doc : Web.node;
   parent : Web.node;
-  mutable cur : Web.node option;
+  mutable cur : cur;
   adopt : bool;
   svg : bool;
 }
@@ -41,89 +55,103 @@ let non_bubbling = function
 
 let handlers_key event = "__yuka_" ^ event
 
-let skip pos n = pos.cur <- Web.next_sibling n
+let skip pos n = pos.cur <- next_sibling n
 
-let take pos kind matches =
-  match pos.cur with
-  | Some n when pos.adopt && Web.node_type n = kind && matches n ->
-      skip pos n;
-      Some n
-  | _ -> None
+let take pos kind matches : cur =
+  let c = pos.cur in
+  if pos.adopt && c != Js.null && Web.node_type (node_of c) = kind && matches (node_of c)
+  then begin
+    skip pos (node_of c);
+    c
+  end
+  else Js.null
 
 let comment_where pos matches data =
-  match take pos 8 (fun n -> matches (Web.data n)) with
-  | Some n -> n
-  | None ->
-      if Dev.on then if pos.adopt then
-        Dev.mismatch pos.parent ("<!--" ^ data ^ "-->") pos.cur;
-      let n = Web.create_comment pos.ctx.doc data in
-      insert pos.parent n pos.cur;
-      n
+  let n = take pos 8 (fun n -> matches (Web.data n)) in
+  if n != Js.null then node_of n
+  else begin
+    if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
+      Dev.mismatch pos.parent ("<!--" ^ data ^ "-->") (Js.Null.toOption pos.cur);
+    let n = Web.create_comment pos.doc data in
+    insert pos.parent n pos.cur;
+    n
+  end
 
 let comment pos data = comment_where pos (String.equal data) data
 
-let hole_start pos =
-  comment_where pos (fun d -> String.length d > 0 && d.[0] = '[') "["
+let opens d = String.length d > 0 && String.unsafe_get d 0 = '['
+
+let hole_start pos = comment_where pos opens "["
 
 let walk_region pos visit =
   let rec go depth =
-    match pos.cur with
-    | None -> ()
-    | Some n ->
-        let d = if Web.node_type n = 8 then Web.data n else "" in
-        let opens = String.length d > 0 && d.[0] = '[' in
-        if d = "]" && depth = 0 then ()
-        else begin
-          skip pos n;
-          visit n;
-          go (if opens then depth + 1 else if d = "]" then depth - 1 else depth)
-        end
+    let c = pos.cur in
+    if c != Js.null then begin
+      let n = node_of c in
+      let d = if Web.node_type n = 8 then Web.data n else "" in
+      if not (d = "]" && depth = 0) then begin
+        skip pos n;
+        visit n;
+        go (if opens d then depth + 1 else if d = "]" then depth - 1 else depth)
+      end
+    end
   in
   go 0
 
 let drop_to_end pos =
-  if Dev.on then if pos.adopt then
+  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
     walk_region { pos with cur = pos.cur } (fun n ->
         Dev.mismatch pos.parent "nothing" (Some n));
   if pos.adopt then walk_region pos Web.remove
 
 let mount_slot pos slot =
   let dom = slot.dom in
-  match take pos 8 (fun n -> Web.data n = "[$") with
-  | Some _ ->
-      let nodes = ref [] in
-      walk_region pos (fun n -> nodes := Obj.repr n :: !nodes);
-      dom := List.rev !nodes;
-      ignore (comment pos "]")
-  | None ->
-      if Dev.on then if pos.adopt then
-        Dev.mismatch pos.parent "<!--[$-->" pos.cur;
-      let start = Web.create_comment pos.ctx.doc "[$" in
-      insert pos.parent start pos.cur;
-      List.iter (fun n -> insert pos.parent (Obj.obj n) pos.cur) !dom;
-      ignore (comment pos "]")
+  if take pos 8 (fun n -> Web.data n = "[$") != Js.null then begin
+    let nodes = ref [] in
+    walk_region pos (fun n -> nodes := Obj.repr n :: !nodes);
+    let rec rev acc = function [] -> acc | n :: rest -> rev (n :: acc) rest in
+    dom := rev [] !nodes;
+    ignore (comment pos "]")
+  end
+  else begin
+    if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
+      Dev.mismatch pos.parent "<!--[$-->" (Js.Null.toOption pos.cur);
+    let start = Web.create_comment pos.doc "[$" in
+    insert pos.parent start pos.cur;
+    let rec place = function
+      | [] -> ()
+      | n :: rest ->
+          insert pos.parent (Obj.obj n) pos.cur;
+          place rest
+    in
+    place !dom;
+    ignore (comment pos "]")
+  end
 
 let text pos s =
-  match if s = "" then None else take pos 3 (fun _ -> true) with
-  | Some n ->
-      if Web.data n <> s then begin
-        if Dev.on then Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Some n);
-        Web.set_data n s
-      end;
-      n
-  | None ->
-      if Dev.on then if pos.adopt && s <> "" then
-        Dev.mismatch pos.parent ("\"" ^ s ^ "\"") pos.cur;
-      let n = Web.create_text pos.ctx.doc s in
-      insert pos.parent n pos.cur;
-      n
+  let n = if s = "" then Js.null else take pos 3 (fun _ -> true) in
+  if n != Js.null then begin
+    let n = node_of n in
+    if Web.data n <> s then begin
+      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Some n);
+      Web.set_data n s
+    end;
+    n
+  end
+  else begin
+    if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt && s <> "" then
+      Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Js.Null.toOption pos.cur);
+    let n = Web.create_text pos.doc s in
+    insert pos.parent n pos.cur;
+    n
+  end
 
 let rec remove_between start stop =
-  match Web.next_sibling start with
-  | Some n when n != stop ->
-      Web.remove n;
-      remove_between start stop
-  | _ -> ()
+  let n = next_sibling start in
+  if n != Js.null && node_of n != stop then begin
+    Web.remove (node_of n);
+    remove_between start stop
+  end
 
 let remove_range first last =
   if first != last then remove_between first last;
@@ -132,39 +160,37 @@ let remove_range first last =
 
 let move_range parent first last anchor =
   let rec go n =
-    let next = Web.next_sibling n in
+    let next = next_sibling n in
     insert parent n anchor;
-    if n != last then Option.iter go next
+    if n != last && next != Js.null then go (node_of next)
   in
   go first
 
 let before pos =
-  match pos.cur with
-  | Some n -> Option.get (Web.previous_sibling n)
-  | None -> Option.get (Web.last_child pos.parent)
+  if pos.cur == Js.null then last_child pos.parent else previous_sibling (node_of pos.cur)
 
 let lis a =
   let n = Array.length a in
-  let tails = Array.make n 0 in
-  let prev = Array.make n (-1) in
+  let tails = fill (alloc n) 0 in
+  let prev = fill (alloc n) (-1) in
   let len = ref 0 in
   for i = 0 to n - 1 do
-    if a.(i) >= 0 then begin
+    if get a i >= 0 then begin
       let lo = ref 0 and hi = ref !len in
       while !lo < !hi do
         let mid = (!lo + !hi) / 2 in
-        if a.(tails.(mid)) < a.(i) then lo := mid + 1 else hi := mid
+        if get a (get tails mid) < get a i then lo := mid + 1 else hi := mid
       done;
-      if !lo > 0 then prev.(i) <- tails.(!lo - 1);
-      tails.(!lo) <- i;
+      if !lo > 0 then set prev i (get tails (!lo - 1));
+      set tails !lo i;
       if !lo = !len then incr len
     end
   done;
-  let keep = Array.make n false in
-  let k = ref (if !len > 0 then tails.(!len - 1) else -1) in
+  let keep = fill (alloc n) false in
+  let k = ref (if !len > 0 then get tails (!len - 1) else -1) in
   while !k >= 0 do
-    keep.(!k) <- true;
-    k := prev.(!k)
+    set keep !k true;
+    k := get prev !k
   done;
   keep
 
@@ -174,7 +200,7 @@ let set_attr svg el name value =
       match value with
       | Some v -> Web.set_attribute el name v
       | None -> Web.remove_attribute el name)
-  | "value" -> Web.set_string el "value" (Option.value value ~default:"")
+  | "value" -> Web.set_string el "value" (match value with Some v -> v | None -> "")
   | "checked" | "selected" ->
       Web.set_bool el name
         (match value with None | Some "false" -> false | Some _ -> true)
@@ -191,48 +217,48 @@ let live h = h.owner.gen = h.gen
 
 let dispatch event ev =
   let key = handlers_key event in
-  let rec go = function
-    | None -> ()
-    | Some n ->
-        (match Web.get_prop n key with
-        | Some hs -> List.iter (fun h -> if live h then h.run ev) hs
-        | None -> ());
-        match Web.get_flag ev stopped_key with
-        | Some true -> ()
-        | Some false | None -> go (Web.parent_node n)
+  let rec go n =
+    let hs = prop n key in
+    if hs != Js.undefined then begin
+      let hs = defined hs in
+      for i = 0 to Array.length hs - 1 do
+        let h = get hs i in
+        if live h then h.run ev
+      done
+    end;
+    if flag ev stopped_key != Js.Undefined.return true then begin
+      let p = parent n in
+      if p != Js.null then go (node_of p)
+    end
   in
-  go (Some (Web.target ev))
+  go (Web.target ev)
 
-let delegated : (Web.node * string * string) list ref = ref []
-
-let delegate ctx event =
-  match List.find_opt (fun (d, e, _) -> d == ctx.doc && e = event) !delegated with
-  | Some (_, _, key) -> key
-  | None ->
-      let mark = "__yuka_delegation_" ^ event in
-      (match Web.get_prop ctx.doc mark with
-      | Some (_ : bool) -> ()
-      | None ->
-          Web.set_prop ctx.doc mark true;
-          Web.add_listener ctx.doc event (dispatch event));
-      let key = handlers_key event in
-      delegated := (ctx.doc, event, key) :: !delegated;
-      key
+let delegate doc event =
+  let mark = "__yuka_delegation_" ^ event in
+  if (prop doc mark : bool Js.undefined) == Js.undefined then begin
+    Web.set_prop doc mark true;
+    Web.add_listener doc event (dispatch event)
+  end
 
 let unowned : Base.owner = { last = None; gen = 0 }
 
-let add_handler ctx el event handler =
+let add_handler doc el event handler =
   if non_bubbling event then begin
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
   end
   else begin
-    let key = delegate ctx event in
-    let owner = Option.value !Base.current_owner ~default:unowned in
+    delegate doc event;
+    let key = handlers_key event in
+    let owner = match !Base.current_owner with Some o -> o | None -> unowned in
     let h = { run = handler; owner; gen = owner.gen } in
-    match Web.get_prop el key with
-    | None -> Web.set_prop el key [ h ]
-    | Some hs -> Web.set_prop el key (List.rev_append (List.rev (List.filter live hs)) [ h ])
+    let hs = prop el key in
+    if hs == Js.undefined then Web.set_prop el key [| h |]
+    else begin
+      let hs = filter (defined hs) live in
+      push hs h;
+      Web.set_prop el key hs
+    end
   end
 
 type compiled = { root : Web.node; kid_svg : int; attr_svg : int }
@@ -244,29 +270,28 @@ let rec same_tree shape n =
   | Fixed_element { tag; attrs; children } ->
       Web.node_type n = 1
       && Web.local_name n = tag
-      && (Template_build.void_or_value tag attrs || same_children children (Web.first_child n))
+      && (Template_build.void_or_value tag attrs || same_children children (first_child n))
   | Fixed_text _ | Part _ -> false
 
 and same_children children cur =
   let rec go after_text cur = function
-    | [] -> Option.is_none cur
+    | [] -> cur == Js.null
     | (Part _ | Fixed_text "") :: rest -> go after_text cur rest
-    | Fixed_text t :: rest -> (
+    | Fixed_text t :: rest ->
         let cur =
           if not after_text then cur
-          else
-            match cur with
-            | Some c when Web.node_type c = 8 -> Web.next_sibling c
-            | _ -> None
+          else if cur != Js.null && Web.node_type (node_of cur) = 8 then
+            next_sibling (node_of cur)
+          else Js.null
         in
-        match cur with
-        | Some c when Web.node_type c = 3 && Web.data c = t ->
-            go true (Web.next_sibling c) rest
-        | _ -> false)
-    | (Fixed_element _ as e) :: rest -> (
-        match cur with
-        | Some c when same_tree e c -> go false (Web.next_sibling c) rest
-        | _ -> false)
+        cur != Js.null
+        && Web.node_type (node_of cur) = 3
+        && Web.data (node_of cur) = t
+        && go true (next_sibling (node_of cur)) rest
+    | (Fixed_element _ as e) :: rest ->
+        cur != Js.null
+        && same_tree e (node_of cur)
+        && go false (next_sibling (node_of cur)) rest
   in
   go false cur children
 
@@ -274,28 +299,20 @@ let compile doc svg (template : template) =
   let t = Web.create_element doc "template" in
   Web.set_inner_html t
     (if svg then "<svg>" ^ template.markup ^ "</svg>" else template.markup);
-  let only n =
-    match n with
-    | Some n when Option.is_none (Web.next_sibling n) -> Some n
-    | _ -> None
-  in
-  let parsed =
-    match only (Web.first_child (Web.content t)) with
-    | Some top when svg -> only (Web.first_child top)
-    | top -> top
-  in
-  match parsed with
-  | Some n when same_tree template.shape n ->
-      Some
-        {
-          root = Web.import_node doc n true;
-          kid_svg =
-            (if svg then Template_build.kid_svg_in_svg else Template_build.kid_svg_in_html);
-          attr_svg =
-            (if svg then Template_build.attr_svg_in_svg
-             else Template_build.attr_svg_in_html);
-        }
-  | _ -> None
+  let only c = if c != Js.null && next_sibling (node_of c) == Js.null then c else Js.null in
+  let top = only (first_child (Web.content t)) in
+  let parsed = if svg && top != Js.null then only (first_child (node_of top)) else top in
+  if parsed != Js.null && same_tree template.shape (node_of parsed) then
+    Some
+      {
+        root = Web.import_node doc (node_of parsed) true;
+        kid_svg =
+          (if svg then Template_build.kid_svg_in_svg else Template_build.kid_svg_in_html);
+        attr_svg =
+          (if svg then Template_build.attr_svg_in_svg
+           else Template_build.attr_svg_in_html);
+      }
+  else None
 
 let compiled doc svg (template : template) =
   match if svg then template.in_svg else template.in_html with
@@ -316,31 +333,29 @@ let rec mount_node pos last n =
       if !last then ignore (comment pos "");
       ignore (text pos s);
       last := true
-  | Fragment children -> List.iter (mount_node pos last) children
+  | Fragment children -> mount_list pos last children
   | Element { tag; attrs; children } ->
       last := false;
       let svg = pos.svg || tag = "svg" in
       let adopted = take pos 1 (fun n -> Web.local_name n = tag) in
-      if Dev.on then if pos.adopt && Option.is_none adopted then
-        Dev.mismatch pos.parent ("<" ^ tag ^ ">") pos.cur;
+      let is_adopted = adopted != Js.null in
+      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt && not is_adopted then
+        Dev.mismatch pos.parent ("<" ^ tag ^ ">") (Js.Null.toOption pos.cur);
       let el =
-        match adopted with
-        | Some el -> el
-        | None when svg -> Web.create_element_ns pos.ctx.doc svg_ns tag
-        | None -> Web.create_element pos.ctx.doc tag
+        if is_adopted then node_of adopted
+        else if svg then Web.create_element_ns pos.doc svg_ns tag
+        else Web.create_element pos.doc tag
       in
       let inner_svg = svg && tag <> "foreignObject" in
       let inner =
-        match adopted with
-        | Some _ ->
-            { pos with parent = el; cur = Web.first_child el; svg = inner_svg }
-        | None -> { pos with parent = el; cur = None; adopt = false; svg = inner_svg }
+        if is_adopted then { pos with parent = el; cur = first_child el; svg = inner_svg }
+        else { pos with parent = el; cur = Js.null; adopt = false; svg = inner_svg }
       in
       mount_children inner children;
-      if Dev.on then if Option.is_some adopted && tag <> "textarea" then
+      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if is_adopted && tag <> "textarea" then
         walk_region inner (fun n -> Dev.mismatch el "nothing" (Some n));
-      List.iter (mount_attr pos.ctx svg el (Option.is_some adopted)) attrs;
-      if Option.is_none adopted then insert pos.parent el pos.cur
+      mount_attrs pos.doc svg el is_adopted attrs;
+      if not is_adopted then insert pos.parent el pos.cur
   | Hole f ->
       last := false;
       mount_hole pos false f
@@ -358,7 +373,7 @@ let rec mount_node pos last n =
   | Template { template; parts } when pos.adopt || not (fixed_root template) ->
       mount_node pos last (Template.expand template parts)
   | Template { template; parts } -> (
-      match compiled pos.ctx.doc pos.svg template with
+      match compiled pos.doc pos.svg template with
       | Some c ->
           last := false;
           instantiate pos template c parts
@@ -368,30 +383,39 @@ let rec mount_node pos last n =
       last := false;
       mount_each pos false items key equal render
 
+and mount_list pos last = function
+  | [] -> ()
+  | n :: rest ->
+      mount_node pos last n;
+      mount_list pos last rest
+
+and mount_attrs doc svg el adopted = function
+  | [] -> ()
+  | a :: rest ->
+      mount_attr doc svg el adopted a;
+      mount_attrs doc svg el adopted rest
+
 and mount_children pos = function
   | [ Hole f ] -> mount_hole pos true f
   | [ Each { items; key; equal; render } ] -> mount_each pos true items key equal render
-  | children ->
-      let last = ref false in
-      List.iter (mount_node pos last) children
+  | children -> mount_list pos (ref false) children
 
 and instantiate pos (template : template) c parts =
-  let doc = pos.ctx.doc in
+  let doc = pos.doc in
   let { Template_build.walk; kids; attrs; values } = template.plan in
   let root = Web.clone_node c.root true in
   let nodes = Web.walk root walk in
   let last = ref false in
-  let get = Array.unsafe_get in
   let k = ref 0 in
   while !k < Array.length kids do
     let i = !k in
     k := i + 5;
-    match parts.(get kids i) with
-    | Child n -> (
+    match get parts (get kids i) with
+    | Child n ->
         let anchor = get kids (i + 2) and flags = get kids (i + 3) in
-        let anchor = if anchor < 0 then None else Some (get nodes anchor) in
+        let anchor = if anchor < 0 then Js.null else some (get nodes anchor) in
         let inner =
-          { ctx = pos.ctx; parent = get nodes (get kids (i + 1)); cur = anchor;
+          { doc; parent = get nodes (get kids (i + 1)); cur = anchor;
             adopt = false; svg = flags land c.kid_svg <> 0 }
         in
         if flags land Template_build.kid_only <> 0 then mount_children inner [ n ]
@@ -399,42 +423,44 @@ and instantiate pos (template : template) c parts =
           if flags land Template_build.kid_first_of_run <> 0 then
             last := flags land Template_build.kid_text_before <> 0;
           mount_node inner last n;
-          match (get kids (i + 4), anchor) with
-          | 1, Some sep -> if not !last then Web.remove sep
-          | 2, Some next ->
-              if !last then Web.insert_before inner.parent (Web.create_comment doc "") next
-          | _ -> ()
-        end)
+          if anchor != Js.null then
+            match get kids (i + 4) with
+            | 1 -> if not !last then Web.remove (node_of anchor)
+            | 2 -> if !last then insert inner.parent (Web.create_comment doc "") anchor
+            | _ -> ()
+        end
     | Attribute _ | No_attribute -> ()
   done;
-  Array.iter (fun (i, v) -> set_attr false (get nodes i) "value" (Some v)) values;
+  for j = 0 to Array.length values - 1 do
+    let i, v = get values j in
+    set_attr false (get nodes i) "value" (Some v)
+  done;
   let k = ref 0 in
   while !k < Array.length attrs do
     let i = !k in
     k := i + 3;
-    match parts.(get attrs (i + 1)) with
+    match get parts (get attrs (i + 1)) with
     | Attribute a ->
-        mount_attr pos.ctx (get attrs (i + 2) land c.attr_svg <> 0) (get nodes (get attrs i)) false a
+        mount_attr doc (get attrs (i + 2) land c.attr_svg <> 0) (get nodes (get attrs i)) false a
     | Child _ | No_attribute -> ()
   done;
   insert pos.parent root pos.cur
 
-and mount_attr ctx svg el adopted = function
+and mount_attr doc svg el adopted = function
   | Static (name, value) -> if not adopted then set_attr svg el name (Some value)
   | Dynamic (name, f) -> Base.Effect.run (fun () -> set_attr svg el name (f ()))
-  | Handler (event, handler) -> add_handler ctx el event handler
+  | Handler (event, handler) -> add_handler doc el event handler
 
 and mount_hole pos owned f =
-  let start = if owned then None else Some (hole_start pos) in
-  let stop = ref None in
+  let start = if owned then Js.null else some (hole_start pos) in
+  let stop = ref Js.null in
   let mounted = ref false in
-  let text_node = ref None in
+  let text_node = ref Js.null in
   let place pos n =
     match n with
-    | Text s ->
-        text_node := Some (text pos s)
+    | Text s -> text_node := some (text pos s)
     | _ ->
-        text_node := None;
+        text_node := Js.null;
         mount_node pos (ref false) n
   in
   Base.Effect.run (fun () ->
@@ -445,17 +471,20 @@ and mount_hole pos owned f =
         drop_to_end pos
       end
       else
-        match (n, !text_node) with
-        | Text s, Some t -> if Web.data t <> s then Web.set_data t s
-        | _ -> (
-            match start with
-            | None ->
-                Web.clear pos.parent "";
-                place { pos with cur = None; adopt = false } n
-            | Some start ->
-                remove_between start (Option.get !stop);
-                place { pos with cur = !stop; adopt = false } n));
-  if not owned then stop := Some (comment pos "]")
+        match n with
+        | Text s when !text_node != Js.null ->
+            let t = node_of !text_node in
+            if Web.data t <> s then Web.set_data t s
+        | _ ->
+            if start == Js.null then begin
+              Web.clear pos.parent "";
+              place { pos with cur = Js.null; adopt = false } n
+            end
+            else begin
+              remove_between (node_of start) (node_of !stop);
+              place { pos with cur = !stop; adopt = false } n
+            end);
+  if not owned then stop := some (comment pos "]")
 
 and mount_each :
     type a.
@@ -467,7 +496,7 @@ and mount_each :
     (a -> node) ->
     unit =
  fun pos owned items key equal render ->
-  let start = if owned then None else Some (comment pos "[") in
+  let start = if owned then Js.null else some (comment pos "[") in
   let source = State.memo ~equal:(fun _ _ -> false) items in
   let mount_row pos v =
     let first = ref pos.parent and last = ref pos.parent in
@@ -492,94 +521,104 @@ and mount_each :
     let first, last, dispose = mount_row pos v in
     { key = k; value = v; first; last; dispose }
   in
-  let entries =
-    ref
-      (Array.of_list
-         (List.map (fun v -> make_entry pos (key v) v) (State.peek source)))
+  let entries = ref [||] in
+  let rec initial = function
+    | [] -> ()
+    | v :: rest ->
+        push !entries (make_entry pos (key v) v);
+        initial rest
   in
-  let stop = if owned then (drop_to_end pos; None) else Some (comment pos "]") in
+  initial (State.peek source);
+  let stop = if owned then (drop_to_end pos; Js.null) else some (comment pos "]") in
   let clear_all () =
-    match start with
-    | None -> Web.clear pos.parent ""
-    | Some start -> Web.delete_between pos.parent start (Option.get stop)
+    if start == Js.null then Web.clear pos.parent ""
+    else Web.delete_between pos.parent (node_of start) (node_of stop)
+  in
+  let dispose_all es =
+    for i = 0 to Array.length es - 1 do
+      (get es i).dispose ()
+    done
   in
   let reconcile list =
-    let items = Array.of_list list in
-    let n = Array.length items in
-    let keys = Array.map key items in
+    let items = [||] and keys = [||] in
     let wanted = Web.table () in
-    Array.iter
-      (fun k ->
-        if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
-        Web.table_set wanted k true)
-      keys;
+    let rec collect = function
+      | [] -> ()
+      | v :: rest ->
+          let k = key v in
+          if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
+          Web.table_set wanted k true;
+          push items v;
+          push keys k;
+          collect rest
+    in
+    collect list;
+    let n = Array.length items in
+    let es = !entries in
     let old = Web.table () in
-    let removed = ref [] in
-    Array.iteri
-      (fun i e ->
-        if Web.table_has wanted e.key then Web.table_set old e.key (i, e)
-        else removed := e :: !removed)
-      !entries;
-    if Web.table_size old = 0 && Array.length !entries > 0 then begin
-      Array.iter (fun e -> e.dispose ()) !entries;
+    let removed = [||] in
+    for i = 0 to Array.length es - 1 do
+      let e = get es i in
+      if Web.table_has wanted e.key then Web.table_set old e.key (i, e) else push removed e
+    done;
+    if Web.table_size old = 0 && Array.length es > 0 then begin
+      dispose_all es;
       clear_all ()
     end
     else
-      List.iter
-        (fun e ->
-          e.dispose ();
-          remove_range e.first e.last)
-        (List.rev !removed);
-    let keep =
-      lis
-        (Array.map
-           (fun k ->
-             match Web.table_get old k with Some (i, _) -> i | None -> -1)
-           keys)
-    in
+      for i = 0 to Array.length removed - 1 do
+        let e = get removed i in
+        e.dispose ();
+        remove_range e.first e.last
+      done;
+    let order = alloc n in
+    for j = 0 to n - 1 do
+      let o = find old (get keys j) in
+      set order j (if o == Js.undefined then -1 else fst (defined o))
+    done;
+    let keep = lis order in
     let fresh anchor = { pos with cur = anchor; adopt = false } in
     let anchor = ref stop in
-    let next = ref [] in
+    let next = alloc n in
     for j = n - 1 downto 0 do
+      let item = get items j in
+      let o = find old (get keys j) in
       let e =
-        match Web.table_get old keys.(j) with
-        | Some (_, e) ->
-            if not (equal e.value items.(j)) then begin
+        if o != Js.undefined then begin
+          let e = snd (defined o) in
+            if not (equal e.value item) then begin
               e.dispose ();
-              let first, last, dispose = mount_row (fresh (Some e.first)) items.(j) in
+              let first, last, dispose = mount_row (fresh (some e.first)) item in
               remove_range e.first e.last;
               e.first <- first;
               e.last <- last;
               e.dispose <- dispose;
-              e.value <- items.(j)
+              e.value <- item
             end;
-            if not keep.(j) then move_range pos.parent e.first e.last !anchor;
+            if not (get keep j) then move_range pos.parent e.first e.last !anchor;
             e
-        | None -> make_entry (fresh !anchor) keys.(j) items.(j)
+        end
+        else make_entry (fresh !anchor) (get keys j) item
       in
-      next := e :: !next;
-      anchor := Some e.first
+      set next j e;
+      anchor := some e.first
     done;
-    entries := Array.of_list !next
+    entries := next
   in
   Base.Effect.on_change
     ~equal:(fun _ _ -> false)
     source
     (fun ~prev:_ ~next -> reconcile next);
-  on_dispose (fun () -> Array.iter (fun e -> e.dispose ()) !entries)
+  on_dispose (fun () -> dispose_all !entries)
 
 let start ~adopt container f =
-  let ctx =
-    {
-      doc = Web.owner_document container;
-    }
-  in
+  let doc = Web.owner_document container in
   let (), dispose =
     Base.mount (fun () ->
         let n = f () in
         if not adopt then Web.clear container "";
-        let pos = { ctx; parent = container; cur = Web.first_child container; adopt; svg = false } in
-        if Dev.on then begin
+        let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
+        if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then begin
           mount_node pos (ref false) n;
           if adopt then walk_region pos (fun x -> Dev.mismatch container "nothing" (Some x))
         end

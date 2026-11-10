@@ -38,17 +38,17 @@ let expand template parts =
         Element
           {
             tag;
-            attrs =
-              List.filter_map
-                (function
-                  | Fixed (name, value) -> Some (Static (name, value))
-                  | Part_attr i -> (
-                      match parts.(i) with
-                      | Attribute a -> Some a
-                      | Child _ | No_attribute -> None))
-                attrs;
-            children = List.map go children;
+            attrs = go_attrs attrs;
+            children = go_list children;
           }
+  and go_list = function [] -> [] | n :: rest -> let n = go n in n :: go_list rest
+  and go_attrs = function
+    | [] -> []
+    | Fixed (name, value) :: rest -> Static (name, value) :: go_attrs rest
+    | Part_attr i :: rest -> (
+        match parts.(i) with
+        | Attribute a -> a :: go_attrs rest
+        | Child _ | No_attribute -> go_attrs rest)
   in
   go template.shape
 

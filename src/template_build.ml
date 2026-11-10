@@ -41,7 +41,12 @@ let is_void = function
 let void_or_value tag attrs =
   is_void tag
   || (tag = "textarea"
-     && List.exists (function Fixed ("value", _) -> true | _ -> false) attrs)
+     && let rec has = function
+          | [] -> false
+          | Fixed ("value", _) :: _ -> true
+          | _ :: rest -> has rest
+        in
+        has attrs)
 
 let select_value tag attrs =
   if tag = "select" then
