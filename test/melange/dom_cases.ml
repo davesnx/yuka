@@ -53,7 +53,7 @@ let container initial =
   set_html c initial;
   c
 
-let server tree = Internal.render_html (fun () -> Internal.node tree)
+let server tree = Private.render_html (fun () -> Private.node tree)
 let div attrs children = lower "div" attrs children
 let span children = lower "span" [] children
 let li key children = lower "li" [ attr "data-key" key ] children
@@ -773,7 +773,7 @@ let row_shape =
       [ fixed "class" "r"; part_attr 0; part_attr 1 ]
       [ element "span" [] [ part 2 ]; element "b" [] [ text "x"; text "y" ] ])
 
-let row_template = Internal.template row_shape
+let row_template = Private.template row_shape
 
 let row ?(wrap = true) ?(template = row_template) count title =
   let title_attr = hole_attr "title" (fun () -> Some (State.get title)) in
@@ -823,7 +823,7 @@ let template_works () =
 
 let template_cached () =
   count_templates ();
-  let template = Internal.template row_shape in
+  let template = Private.template row_shape in
   let items = State.make [ 1; 2; 3 ] in
   let c = container "" in
   let dispose =
@@ -882,8 +882,8 @@ let template_timing () =
   Printf.printf "timing: %d rows, best of 5: plain %.1f ms, template %.1f ms\n" rows without_t with_t;
   check "same output" (snd (run false)) (snd (run true))
 
-let slot_a = Internal.template Template.(element "div" [] [ element "i" [] []; part 0 ])
-let slot_b = Internal.template Template.(element "section" [] [ element "i" [] []; part 0 ])
+let slot_a = Private.template Template.(element "div" [] [ element "i" [] []; part 0 ])
+let slot_b = Private.template Template.(element "section" [] [ element "i" [] []; part 0 ])
 
 let template_with_slot () =
   let content = Slot.make (lower "p" [] [ text "x" ]) in
@@ -920,7 +920,7 @@ let render_html tree =
 
 let template_clone_same_dom () =
   let t =
-    Internal.template
+    Private.template
       Template.(
         (element "p" []
            [ text "a"; part 0; text "b"; part 1; text "c"; part 2; part 3; text "d";
@@ -957,7 +957,7 @@ let template_clone_same_dom () =
     cases
 
 let svg_template () =
-  let t = Internal.template Template.(element "circle" [ fixed "r" "1"; part_attr 0 ] []) in
+  let t = Private.template Template.(element "circle" [ fixed "r" "1"; part_attr 0 ] []) in
   let c = container "" in
   let dispose =
     Yuka.Client.render (as_element c) (fun () ->
@@ -1057,7 +1057,7 @@ external select_value : node -> string = "value" [@@mel.get]
 
 let template_select_value () =
   let t =
-    Internal.template Template.(element "select" [ fixed "value" "b" ] [ part 0 ])
+    Private.template Template.(element "select" [ fixed "value" "b" ] [ part 0 ])
   in
   let opt v = lower "option" [ attr "value" v ] [ text v ] in
   let c = container "" in
@@ -1113,14 +1113,14 @@ let parser_changes () =
   let check name expected got = if expected <> got then wrong := name :: !wrong in
   List.iter
     (fun (name, shape, kids, by_hand) ->
-      let t = Internal.template shape in
+      let t = Private.template shape in
       let expected = render_html (fun () -> by_hand (kids ())) in
       let got =
         try render_html (fun () -> Template.instance t (Array.of_list (List.map Template.child (kids ()))))
         with e -> "raised " ^ Printexc.to_string e
       in
       check ("parser: " ^ name) expected got;
-      let t2 = Internal.template shape in
+      let t2 = Private.template shape in
       ignore (try render_html (fun () -> Template.instance t2 (Array.of_list (List.map Template.child (kids ())))) with _ -> "");
       check ("parser, second use: " ^ name) expected
         (try render_html (fun () -> Template.instance t2 (Array.of_list (List.map Template.child (kids ()))))
@@ -1130,7 +1130,7 @@ let parser_changes () =
   let c = container "" in
   let dispose =
     Yuka.Client.render (as_element c) (fun () ->
-        Template.instance (Internal.template Template.(element "style" [] [ text "a > b {color:red}" ])) [||])
+        Template.instance (Private.template Template.(element "style" [] [ text "a > b {color:red}" ])) [||])
   in
   check "style text content" "a > b {color:red}" (text_content (query c "style"));
   dispose ()

@@ -21,12 +21,13 @@ recorded here first.
 - Signals, render once (this answers Decision 1 in `SYNTHESIS.md`). A
   component is a function that runs one time. Only holes and keyed lists
   run again. There is no virtual DOM diff, except the keyed list reconcile.
-- One element tree type (`Yuka.Internal.node`, in `src/yuka.mli`) in the
+- One element tree type (`Yuka.Private.node`, in `src/yuka.mli`, hidden
+  from the docs with `(**/**)`; only tests and the benchmark use `Private`) in the
   shared core. The server prints it to HTML. The client creates DOM from it
   or adopts the server DOM (hydration).
 - Templates with holes (melact) are not in v0.1: the client walks the tree.
   They come later as a speed step for client-only creation.
-- Effects do nothing while the server renders (`Internal.server_rendering`).
+- Effects do nothing while the server renders (`Private.server_rendering`).
 - Server entry points take a function that builds the tree, so component bodies run with effects off.
 
 ## Libraries
@@ -41,7 +42,7 @@ Current layout (v0.4; earlier sections use the old names, see "v0.4"):
 | `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.mount ()` |
 
 Platform functions (event fields, window listeners, navigation) are a record
-of functions in the core (`Internal.platform`). Their defaults call `Web`, so
+of functions in the core (`Private.platform`). Their defaults call `Web`, so
 in the browser they work without a boot step, and on native they raise; they
 are only called inside effects and handlers, which never run on the server.
 `Yuka.mount` with navigation replaces `navigate`.
@@ -55,7 +56,7 @@ The browser hydrates only `<yuka-island>` elements, so the page printer
 writes the markers below only inside an island. Outside an island it writes
 no `<!---->`, `<!--[-->` or `<!--]-->`. The one exception is a pending
 streamed `Await`, which keeps `<!--[sN-->` and `<!--]-->` because the fill
-finds them. `Internal.to_html` and `Internal.render_html` write the
+finds them. `Private.to_html` and `Private.render_html` write the
 markers everywhere: the client hydrates their output.
 
 - Text: escaped (`&`, `<`, `>`). Attribute values: escaped (`&`, `"`, `<`).
@@ -69,7 +70,7 @@ markers everywhere: the client hydrates their output.
   and `<!--]-->` of its own: it owns all the content of the element.
 - An `Each` item that renders one element (`Element` or `Template`) has no
   item markers: the element is the item.
-- `Template`: printed as the tree that `Internal.expand` gives, so it has the
+- `Template`: printed as the tree that `Private.expand` gives, so it has the
   same HTML as the same tree made with `lower`.
 - `Fragment`: no marker; the children are inline.
 - `Static` attribute: written. `Dynamic`: written with its current value;
@@ -164,7 +165,7 @@ markers everywhere: the client hydrates their output.
   - Ids `aN` count from 1 in one response. Encoding must run inside the
     function given to `to_string`, `page`, `stream` or `respond`; outside
     a render the id is `a0` and a pending value is an error.
-  - Decoding `{"$async":"aN"}` calls `Internal.async_source "aN"`, which
+  - Decoding `{"$async":"aN"}` calls `Private.async_source "aN"`, which
     the browser runtime installs: it returns an `Async.t` of the JSON from
     the script `data-yuka-async="aN"` (already in the page, or on arrival).
 - Module scripts run after the document is parsed. With streaming, they run
@@ -263,7 +264,7 @@ work", except the items listed as out of scope there.
   place and move them, never inspect or re-render them (Leptos's rule).
 - Core: `type slot`, `val slot : slot -> client element` (the user writes
   `(Yuka.slot children)` where the content goes), `Slot.make : server element
-  -> slot`, `Codec.slot : slot Codec.t`, node `Internal.Slot of slot`.
+  -> slot`, `Codec.slot : slot Codec.t`, node `Private.Slot of slot`.
 - `let%client make ~(children : Yuka.slot) () = ...` is allowed. 
   `<Yuka.Client><M a=1><p>"x"</p></M></Yuka.Client>` becomes
   `M.island ~a:1 ~children:(Yuka.Slot.make (Yuka.fragment [...])) ()`.
@@ -296,7 +297,7 @@ work", except the items listed as out of scope there.
 - `State.set` and `State.update` on a `memo` raised
   `Invalid_argument "Yuka: State.set on a memo"`: replaced on 2026-11-10 by
   a type; see "Read-only memo".
-- `Internal.owned` removes itself from its parent when disposed.
+- `Private.owned` removes itself from its parent when disposed.
 - `Yuka_server.render_settled : (unit -> server element) -> string Lwt.t`
   prints after every pending value settled (for tests).
 - Codecs: recursive types and type parameters are supported
@@ -336,8 +337,8 @@ Replaced by "Compiled templates and fewer markers (2026-11-10)" below.
   fixed-shape lowercase tag, or a hole; every attribute value is a literal,
   a hole attribute or a handler. Only trees with at least 2 elements are
   wrapped. `<id>` is unique per call site (file, line, column).
-- Core: node `Internal.Template of { id : string; node : node }`; the server
-  prints `node` as usual (no marker). `Internal.skeleton_html : node ->
+- Core: node `Private.Template of { id : string; node : node }`; the server
+  prints `node` as usual (no marker). `Private.skeleton_html : node ->
   string` prints the fixed shape: holes as empty `<!--[--><!--]-->`, no
   dynamic attributes, no handlers.
 - Client: hydration walks `node` as before. Fresh creation clones a cached
@@ -634,7 +635,7 @@ val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
 
 - It lives in `src/yuka.ml(i)`. `Client` and `Router` are core parts, built
   for native and Melange, and the browser functions come from `Web` and
-  `Internal.platform`, so it needs no other path. On native or without
+  `Private.platform`, so it needs no other path. On native or without
   `~islands` (the ppx did not run) it raises `Failure` with a message that
   names `yuka.ppx`.
 - The old top-level `Yuka.mount : (unit -> 'a) -> 'a * (unit -> unit)` (the
@@ -878,7 +879,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   generation counter. No hash table, no sort. `Yuka.owner`'s dispose runs the
   disposers from the last created to the first (the same order as before),
   in time proportional to their number. A disposer added while the owner is
-  disposed stays for the next dispose. `Internal.owned` removes its disposer
+  disposed stays for the next dispose. `Private.owned` removes its disposer
   from the parent in constant time.
 - Each dispose adds 1 to the owner's generation.
 - Delegated handlers (every event except `focus`, `blur`, `mouseenter`,
@@ -910,7 +911,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 - Parts: every other child (`Part`, an element: components, holes, lists,
   `Yuka.text e`, the empty string literal) and every other attribute
   (`Part_attr`: computed values, holes, handlers, optional attributes).
-- The server and hydration use `Internal.expand`, the tree as `lower` makes
+- The server and hydration use `Private.expand`, the tree as `lower` makes
   it. So the HTML and the hydration walk do not change.
 - Fresh client creation: the ppx computes, at build time, the HTML of the
   shape (`~html`, parts write nothing) and the paths (`~walk`, `~kids`,
@@ -1074,8 +1075,8 @@ the budget in `bench/size/budget.json`.
   did. `attrs`: three ints per attribute part (node, part, flags: 1 SVG in
   an HTML context, 2 SVG in an SVG context). `values`: a fixed `select`
   value per node.
-- Hand-written templates use `Internal.template shape`, which computes the
-  same arguments at run time. `Internal.recompile` does it for a ppx
+- Hand-written templates use `Private.template shape`, which computes the
+  same arguments at run time. `Private.recompile` does it for a ppx
   template; the tests in `test/templates` compare the ppx output with it,
   and the ppx HTML with the server HTML of the shape.
 

@@ -469,16 +469,16 @@ let stream_cases =
     check string "not a reference"
       "failed decode:expected async reference, got 1"
       (show (decode (`Int 1)));
-    let saved = !Yuka.Internal.async_source in
+    let saved = !Yuka.Private.async_source in
     let a, resolve, _ = Async.make () in
-    Yuka.Internal.async_source :=
+    Yuka.Private.async_source :=
       (fun id ->
         if id = "a9" then Async.map (fun n -> `Int n) a else Async.failed "unknown");
     let reference = `Assoc [ ("$async", `String "a9") ] in
     check string "bare reference waits" "pending" (show (decode reference));
     resolve 4;
     check string "bare reference resolves" "done 4" (show (decode reference));
-    Yuka.Internal.async_source := saved
+    Yuka.Private.async_source := saved
   in
   let respond_streams () =
     let a, resolve, _ = Async.make () in
@@ -791,7 +791,7 @@ let timeout_cases =
     test_case "late value is ignored" `Quick late_value_ignored;
     test_case "timer after the end" `Quick timer_after_end;
     test_case "fill script lives in the core" `Quick (fun () ->
-        check string "same script" Yuka.Internal.fill_script Server.fill_script) ]
+        check string "same script" Yuka.Private.fill_script Server.fill_script) ]
 
 let settled_cases =
   let open Alcotest in
@@ -1228,8 +1228,8 @@ let loading_cases =
     let out =
       shell ~preload (fun () ->
           outer_with (fun () ->
-              Yuka.Internal.element
-                (Yuka.Internal.node (isl "Inner"))))
+              Yuka.Private.element
+                (Yuka.Private.node (isl "Inner"))))
     in
     let inside, after = between out in
     check bool "no link inside the outer island" false (contains inside "<link");
@@ -1256,7 +1256,7 @@ let loading_cases =
       shell ~preload (fun () ->
           Yuka.fragment
             [ outer_with (fun () ->
-                  Yuka.Internal.element (Yuka.Internal.node (isl "Inner")));
+                  Yuka.Private.element (Yuka.Private.node (isl "Inner")));
               isl "Inner" ])
     in
     check int "once across nested and later use" 1 (count out (link "/js/Inner.js"))
@@ -1267,8 +1267,8 @@ let loading_cases =
     let p =
       Server.stream ~preload ~sleep:never_sleep ~write (fun () ->
           Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () ->
-              Yuka.Internal.element
-                (Yuka.Internal.node
+              Yuka.Private.element
+                (Yuka.Private.node
                    (Yuka.Await.make ~async:a ~loading:Yuka.empty
                       ~children:(fun _ -> isl "Inner")
                       ()))))

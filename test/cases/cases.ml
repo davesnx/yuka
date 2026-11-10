@@ -196,8 +196,8 @@ let effect_writing_own_state_stops () =
   State.set after 1;
   check "effects still run after the limit" "2" (string_of_int !runs)
 
-let html (el : server element) = Internal.to_html (Internal.node el)
-let chtml (el : client element) = Internal.to_html (Internal.node el)
+let html (el : server element) = Private.to_html (Private.node el)
+let chtml (el : client element) = Private.to_html (Private.node el)
 
 let html_escaping () =
   check "text" "<p>a &amp; b &lt;c&gt; \"d\"</p>"
@@ -277,20 +277,20 @@ let html_effect_skipped () =
     Effect.run (fun () -> incr runs);
     lower "p" [] []
   in
-  let in_hole = lower "div" [] [ hole (fun () -> component () |> fun e -> (Internal.element (Internal.node e) : client element)) ] in
+  let in_hole = lower "div" [] [ hole (fun () -> component () |> fun e -> (Private.element (Private.node e) : client element)) ] in
   check "hole html" "<div><p></p></div>" (chtml in_hole);
   check "hole body effect not run" "0" (string_of_int !runs);
   check "build and print" "<p></p>"
-    (Internal.render_html (fun () -> Internal.node (component ())));
+    (Private.render_html (fun () -> Private.node (component ())));
   check "build effect not run" "0" (string_of_int !runs);
-  check "flag restored" "false" (string_of_bool !Internal.server_rendering);
+  check "flag restored" "false" (string_of_bool !Private.server_rendering);
   (try
      ignore
-       (Internal.to_html
-          (Internal.node (lower "p" [] [ hole (fun () -> failwith "x") ])))
+       (Private.to_html
+          (Private.node (lower "p" [] [ hole (fun () -> failwith "x") ])))
    with Failure _ -> ());
   check "flag restored after exception" "false"
-    (string_of_bool !Internal.server_rendering);
+    (string_of_bool !Private.server_rendering);
   let (), dispose = owner (fun () -> ignore (component ())) in
   dispose ();
   check "runs in mount" "1" (string_of_int !runs)
@@ -460,11 +460,11 @@ let double =
   Action.declare ~name:"double" ~input:Codec.int ~output:Codec.int
 
 let with_transport f body =
-  let saved = !Internal.call_action in
-  Internal.call_action := f;
+  let saved = !Private.call_action in
+  Private.call_action := f;
   match body () with
-  | v -> Internal.call_action := saved; v
-  | exception e -> Internal.call_action := saved; raise e
+  | v -> Private.call_action := saved; v
+  | exception e -> Private.call_action := saved; raise e
 
 let action_call () =
   check "name" "double" (Action.name double);
@@ -519,18 +519,18 @@ let island_entry () =
         | Ok n -> Ok (fun () -> lower "i" [] [ text (string_of_int n) ])
         | Error m -> Error m)
   in
-  check "name" "Counter" (Internal.entry_name e);
-  (match Internal.entry_decode e (`Int 3) with
-  | Ok build -> check "built" "<i>3</i>" (Internal.to_html (build ()))
+  check "name" "Counter" (Private.entry_name e);
+  (match Private.entry_decode e (`Int 3) with
+  | Ok build -> check "built" "<i>3</i>" (Private.to_html (build ()))
   | Error m -> raise (Failed m));
   check "decode error" "error"
-    (match Internal.entry_decode e (`String "x") with Error _ -> "error" | Ok _ -> "ok")
+    (match Private.entry_decode e (`String "x") with Error _ -> "error" | Ok _ -> "ok")
 
 let untracked_no_dependency () =
   let runs = ref 0 in
   let s = State.make 0 in
   Effect.run (fun () ->
-      ignore (Internal.untracked (fun () -> State.get s));
+      ignore (Private.untracked (fun () -> State.get s));
       incr runs);
   State.set s 1;
   check "untracked read" "1" (string_of_int !runs)
@@ -556,25 +556,25 @@ let html_await () =
 let html_streaming_session () =
   let a, resolve, _ = Async.make () in
   let b, _, _ = Async.make () in
-  let s = Internal.session ~streaming:true ~islands_only:false in
+  let s = Private.session ~streaming:true ~islands_only:false in
   let first =
-    Internal.print s (fun () ->
-        Internal.node
+    Private.print s (fun () ->
+        Private.node
           (lower "p" []
              [ Await.make ~async:a ~loading:(text "L") ~children:(fun n -> text (string_of_int n)) ();
                Await.make ~async:(Async.resolved 1) ~loading:(text "no") ~children:(fun n -> text (string_of_int n)) ();
                Await.make ~async:b ~loading:(text "M") ~children:(fun n -> text (string_of_int n)) () ]))
   in
   check "shell" "<p><!--[s1-->L<!--]--><!--[-->1<!--]--><!--[s2-->M<!--]--></p>" first;
-  let pending = Internal.take_pending s in
+  let pending = Private.take_pending s in
   check "pending ids in order" "s1 s2"
     (String.concat " "
        (List.map
-          (function Internal.Pending_await { id; _ } -> id | Internal.Pending_async { id; _ } -> id)
+          (function Private.Pending_await { id; _ } -> id | Private.Pending_async { id; _ } -> id)
           pending));
-  check "taken once" "0" (string_of_int (List.length (Internal.take_pending s)));
+  check "taken once" "0" (string_of_int (List.length (Private.take_pending s)));
   match pending with
-  | Internal.Pending_await { id; subscribe; fill; _ } :: _ ->
+  | Private.Pending_await { id; subscribe; fill; _ } :: _ ->
       check "id" "s1" id;
       let seen = ref false in
       subscribe (fun () -> seen := true);
@@ -607,18 +607,18 @@ let html_int_float_list () =
           [ list [ lower "li" [] [ text "a" ]; lower "li" [] [ text "b" ] ] ]))
 
 let with_platform p body =
-  let saved = !Internal.platform in
-  Internal.platform := p;
+  let saved = !Private.platform in
+  Private.platform := p;
   match body () with
-  | () -> Internal.platform := saved
+  | () -> Private.platform := saved
   | exception e ->
-      Internal.platform := saved;
+      Private.platform := saved;
       raise e
 
 let platform_delegation () =
   let add, read = log () in
   let event : Event.t = Obj.magic 0 in
-  let base = !Internal.platform in
+  let base = !Private.platform in
   with_platform
     {
       base with
@@ -669,12 +669,12 @@ let html_slot () =
           [ text "a"; slot (Slot.make (text "b")); text "c" ]));
   check "slot codec encodes null" "null" (show_json (Codec.encode Codec.slot content));
   check "content" "some"
-    (match Internal.slot_content content with Some _ -> "some" | None -> "none");
+    (match Private.slot_content content with Some _ -> "some" | None -> "none");
   check "no content when decoded" "none"
-    (match Internal.slot_content empty_slot with Some _ -> "some" | None -> "none");
-  check "dom empty at first" "0" (string_of_int (List.length !(Internal.slot_dom content)));
-  Internal.slot_dom content := [ Obj.repr 1 ];
-  check "dom is shared" "1" (string_of_int (List.length !(Internal.slot_dom content)))
+    (match Private.slot_content empty_slot with Some _ -> "some" | None -> "none");
+  check "dom empty at first" "0" (string_of_int (List.length !(Private.slot_dom content)));
+  Private.slot_dom content := [ Obj.repr 1 ];
+  check "dom is shared" "1" (string_of_int (List.length !(Private.slot_dom content)))
 
 let html_island_loading () =
   let make loading =
@@ -877,13 +877,13 @@ let disposal_order_after_removal () =
     owner (fun () ->
         Effect.run ~cleanup:(fun () -> add "a") (fun () -> ());
         let (), dispose_b =
-          Internal.owned (fun () ->
+          Private.owned (fun () ->
               Effect.run ~cleanup:(fun () -> add "b1") (fun () -> ());
               Effect.run ~cleanup:(fun () -> add "b2") (fun () -> ()))
         in
         Effect.run ~cleanup:(fun () -> add "c") (fun () -> ());
         let (), dispose_d =
-          Internal.owned (fun () -> Effect.run ~cleanup:(fun () -> add "d") (fun () -> ()))
+          Private.owned (fun () -> Effect.run ~cleanup:(fun () -> add "d") (fun () -> ()))
         in
         Effect.run ~cleanup:(fun () -> add "e") (fun () -> ());
         dispose_d ();
@@ -903,28 +903,28 @@ let owned_removed_from_parent () =
   let add, read = log () in
   let (), dispose_parent =
     owner (fun () ->
-        check "empty at first" "0" (string_of_int (Internal.owner_size ()));
+        check "empty at first" "0" (string_of_int (Private.owner_size ()));
         for i = 1 to 200 do
           let (), dispose =
-            Internal.owned (fun () ->
+            Private.owned (fun () ->
                 Effect.run ~cleanup:(fun () -> add ("gone" ^ string_of_int i)) (fun () -> ()))
           in
           dispose ()
         done;
         check "disposed children leave no disposer" "0"
-          (string_of_int (Internal.owner_size ()));
+          (string_of_int (Private.owner_size ()));
         let (), dispose_a =
-          Internal.owned (fun () ->
+          Private.owned (fun () ->
               Effect.run ~cleanup:(fun () -> add "a") (fun () -> ()))
         in
         let (), _dispose_b =
-          Internal.owned (fun () ->
+          Private.owned (fun () ->
               Effect.run ~cleanup:(fun () -> add "b") (fun () -> ()))
         in
-        check "two live children" "2" (string_of_int (Internal.owner_size ()));
+        check "two live children" "2" (string_of_int (Private.owner_size ()));
         dispose_a ();
         dispose_a ();
-        check "one live child" "1" (string_of_int (Internal.owner_size ())))
+        check "one live child" "1" (string_of_int (Private.owner_size ())))
   in
   let before = List.length (String.split_on_char ' ' (read ())) in
   check "each disposed child cleaned once" "201" (string_of_int before);
@@ -1022,10 +1022,10 @@ let codec_result () =
     | Ok (Ok l) -> "ok " ^ String.concat "," (List.map string_of_int l)
     | _ -> "bad")
 
-let shape_html shape = Internal.template_html (Internal.template shape)
+let shape_html shape = Private.template_html (Private.template shape)
 
 let html_template () =
-  let p = Internal.template Template.(element "p" [ fixed "class" "c" ] [ text "a" ]) in
+  let p = Private.template Template.(element "p" [ fixed "class" "c" ] [ text "a" ]) in
   check "printed as its tree" "<p class=\"c\">a</p>" (chtml (Template.instance p [||]));
   check "no marker around nested" "<div><p class=\"c\">a</p></div>"
     (chtml (lower "div" [] [ Template.instance p [||] ]))
@@ -1033,7 +1033,7 @@ let html_template () =
 let template_parts_print () =
   let state = State.make "x" in
   let t =
-    Internal.template
+    Private.template
       Template.(
         (element "div"
            [ fixed "id" "d"; part_attr 0; part_attr 1; part_attr 2 ]
@@ -1102,7 +1102,7 @@ let only_child_markers () =
     (chtml
        (lower "ul" []
           [ each ~key:Fun.id (fun () -> [ "a" ])
-              (fun v -> Template.instance (Internal.template Template.(element "li" [] [ part 0 ])) Template.[| child (Yuka.text v) |]);
+              (fun v -> Template.instance (Private.template Template.(element "li" [] [ part 0 ])) Template.[| child (Yuka.text v) |]);
             lower "i" [] [] ]))
 
 let await_component () =
@@ -1155,14 +1155,14 @@ let owned_raises_disposes () =
   let (), dispose_parent =
     owner (fun () ->
         (match
-           Internal.owned (fun () ->
+           Private.owned (fun () ->
                Effect.run ~cleanup:(fun () -> add "cleaned") (fun () -> ());
                failwith "boom")
          with
         | _ -> ()
         | exception Failure _ -> ());
         check "the failed child leaves no disposer" "0"
-          (string_of_int (Internal.owner_size ())))
+          (string_of_int (Private.owner_size ())))
   in
   check "the child was disposed" "cleaned" (read ());
   dispose_parent ();

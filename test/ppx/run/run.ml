@@ -45,27 +45,27 @@ let () =
   (match Yuka.Codec.decode Model.status_codec (`String "Nope") with
    | Error _ -> ()
    | Ok _ -> check "bad constructor" false);
-  check "name" (Yuka.Internal.entry_name Counter.register = "Ppx_compile.Counter");
+  check "name" (Yuka.Private.entry_name Counter.register = "Ppx_compile.Counter");
   let props =
     `Assoc
       [ ("label", `String "L"); ("step", `Int 2);
         ("issue", Yuka.Codec.encode Model.issue_codec issue) ]
   in
-  (match Yuka.Internal.entry_decode Counter.register props with
+  (match Yuka.Private.entry_decode Counter.register props with
    | Ok build ->
-       let html = Yuka.Internal.to_html (build ()) in
+       let html = Yuka.Private.to_html (build ()) in
        check ("register html: " ^ html) (String.length html > 0)
    | Error e -> check ("register: " ^ e) false);
   (match
-     Yuka.Internal.entry_decode Counter.register
+     Yuka.Private.entry_decode Counter.register
        (`Assoc [ ("issue", Yuka.Codec.encode Model.issue_codec issue); ("label", `String "L") ])
    with
    | Ok _ -> ()
    | Error e -> check ("register without step: " ^ e) false);
-  (match Yuka.Internal.entry_decode Counter.register (`Assoc [ ("label", `String "L") ]) with
+  (match Yuka.Private.entry_decode Counter.register (`Assoc [ ("label", `String "L") ]) with
    | Error _ -> ()
    | Ok _ -> check "register missing issue" false);
-  let page = Yuka.Internal.to_html (Yuka.Internal.node Page.view) in
+  let page = Yuka.Private.to_html (Yuka.Private.node Page.view) in
   check ("page has island: " ^ page)
     (let sub = "yuka-island" in
      let n = String.length sub in
@@ -77,7 +77,7 @@ let () =
   (match Yuka.Codec.encode Model.loaded_codec { items; other = Yuka.Async.resolved "x" } with
    | `Assoc [ ("items", j); _ ] -> check "async field" (j = direct)
    | _ -> check "async field shape" false);
-  let island_html = Yuka.Internal.to_html (Yuka.Internal.node (Lazy_list.island ~items ())) in
+  let island_html = Yuka.Private.to_html (Yuka.Private.node (Lazy_list.island ~items ())) in
   let contains s sub =
     let n = String.length sub in
     let rec go i = i + n <= String.length s && (String.sub s i n = sub || go (i + 1)) in
@@ -120,48 +120,48 @@ let () =
   check "result json"
     (Yuka.Codec.encode Model.outcome2_codec (Error Open) = `Assoc [ ("error", `String "Open") ]);
   let is_template (e : _ Yuka.element) =
-    match Yuka.Internal.node e with Yuka.Internal.Template _ -> true | _ -> false
+    match Yuka.Private.node e with Yuka.Private.Template _ -> true | _ -> false
   in
   check "static is a template" (is_template Templated.static_tree);
   check "fixed is a template" (is_template Templated.fixed);
   check "by hand is not" (not (is_template Templated.static_by_hand));
   check "a tree with a computed child is a template" (is_template (Templated.not_fixed "x"));
   check "computed child html same"
-    (Yuka.Internal.to_html (Yuka.Internal.node (Templated.not_fixed "x"))
+    (Yuka.Private.to_html (Yuka.Private.node (Templated.not_fixed "x"))
     = "<ul><li>a</li><li>x</li></ul>");
   check "static html same"
-    (Yuka.Internal.to_html (Yuka.Internal.node Templated.static_tree)
-    = Yuka.Internal.to_html (Yuka.Internal.node Templated.static_by_hand));
+    (Yuka.Private.to_html (Yuka.Private.node Templated.static_tree)
+    = Yuka.Private.to_html (Yuka.Private.node Templated.static_by_hand));
   check "fixed html same"
-    (Yuka.Internal.to_html (Yuka.Internal.node Templated.fixed)
-    = Yuka.Internal.to_html (Yuka.Internal.node Templated.by_hand));
-  (match Yuka.Internal.node Templated.static_tree with
-   | Yuka.Internal.Template { template; parts } ->
+    (Yuka.Private.to_html (Yuka.Private.node Templated.fixed)
+    = Yuka.Private.to_html (Yuka.Private.node Templated.by_hand));
+  (match Yuka.Private.node Templated.static_tree with
+   | Yuka.Private.Template { template; parts } ->
        check "static tree has no parts" (Array.length parts = 0);
        check "template html is the html"
-         (Yuka.Internal.template_html template
-         = Yuka.Internal.to_html (Yuka.Internal.node Templated.static_tree))
+         (Yuka.Private.template_html template
+         = Yuka.Private.to_html (Yuka.Private.node Templated.static_tree))
    | _ -> ());
   (match
-     ( Yuka.Internal.node (Templated.not_fixed "x"),
-       Yuka.Internal.node (Templated.not_fixed "y") )
+     ( Yuka.Private.node (Templated.not_fixed "x"),
+       Yuka.Private.node (Templated.not_fixed "y") )
    with
-   | Yuka.Internal.Template { template = a; _ }, Yuka.Internal.Template { template = b; _ } ->
+   | Yuka.Private.Template { template = a; _ }, Yuka.Private.Template { template = b; _ } ->
        check "one template per call site" (a == b)
    | _ -> check "one template per call site" false);
   check "template under a local open of another module"
-    (Yuka.Internal.to_html (Yuka.Internal.node Capture_main.view) = "<i>main</i>");
+    (Yuka.Private.to_html (Yuka.Private.node Capture_main.view) = "<i>main</i>");
   check "template under let open of another module"
-    (Yuka.Internal.to_html (Yuka.Internal.node Capture_main.view_let_open) = "<i>main</i>");
+    (Yuka.Private.to_html (Yuka.Private.node Capture_main.view_let_open) = "<i>main</i>");
   check "the other module keeps its template"
-    (Yuka.Internal.to_html (Yuka.Internal.node Capture_ui.badge) = "<b>ui</b>");
+    (Yuka.Private.to_html (Yuka.Private.node Capture_ui.badge) = "<b>ui</b>");
   let settled = Yuka.Async.resolved [ "a"; "b" ] in
-  let await_html = Yuka.Internal.to_html (Yuka.Internal.node (Awaiting.view settled)) in
+  let await_html = Yuka.Private.to_html (Yuka.Private.node (Awaiting.view settled)) in
   check ("await settled: " ^ await_html) (contains await_html "<ul><li>a</li><li>b</li></ul>");
   check "await not loading" (not (contains await_html "loading"));
   let failed_html =
-    Yuka.Internal.to_html
-      (Yuka.Internal.node (Awaiting.with_failed (Yuka.Async.failed "boom")))
+    Yuka.Private.to_html
+      (Yuka.Private.node (Awaiting.with_failed (Yuka.Async.failed "boom")))
   in
   check ("await failed: " ^ failed_html) (contains failed_html "<p>boom</p>");
   if !fails > 0 then exit 1 else print_endline "ok"

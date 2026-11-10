@@ -163,7 +163,9 @@ module Codec : sig
       render, a pending value is written as [{"$async":"aN"}] and the stream
       writes its value later. Outside a streaming render, a pending value is
       written as [{"$async":"aN","error":"pending at render"}]. Decoding a
-      bare reference asks [Internal.async_source]. *)
+      bare reference gives, after [mount], the value that the page writes
+      for that id; before [mount] or outside the browser, a failed
+      [Async]. *)
 
   val encode : 'a t -> 'a -> Json.t
   val decode : 'a t -> Json.t -> ('a, string) result
@@ -260,8 +262,7 @@ module Template : sig
   (** [make shape ~html ~walk ~kids ~attrs ~values]: the ppx computes all
       arguments but [shape] from [shape] at build time. [html] is the HTML of
       the shape without its parts; the other arguments are the paths from the
-      template root to its parts. Hand-written code uses [Internal.template]
-      instead. *)
+      template root to its parts. The ppx writes this call. *)
 
   val child : 'kind element -> 'kind part
   val attribute : 'kind attribute -> 'kind part
@@ -375,8 +376,9 @@ module Action : sig
   val name : ('i, 'o) t -> string
 
   val call : ('i, 'o) t -> 'i -> 'o Async.t
-  (** Encodes the input, sends it with [Internal.call_action], decodes the
-      output. A decode error is [Failed]. *)
+  (** Encodes the input, sends it to the server (in the browser after
+      [mount], as [POST /_yuka/action/<name>]; on the server, to the
+      implementation), decodes the output. A decode error is [Failed]. *)
 end
 
 module Browser : sig
@@ -396,7 +398,9 @@ module Browser : sig
   (** Scrolls the element with this id into view. *)
 end
 
-module Internal : sig
+(**/**)
+
+module Private : sig
   type node =
     | Text of string
     | Element of { tag : string; attrs : attr list; children : node list }
@@ -563,6 +567,8 @@ module Internal : sig
       [Failure]. *)
 end
 
+(**/**)
+
 module Router : sig
   type ('a, 'r) t
   (** A path. ['a] is the type of the function that takes the parameters of the
@@ -656,9 +662,8 @@ val unmount : unit -> unit
     cancelled, and action requests in flight are aborted (their [Async]
     fails with ["cancelled"]). It also stops navigation: the [click] and
     [popstate] listeners are removed, a navigation in flight is aborted, and
-    {!Browser.navigate} does [location.assign] again (unless the app
-    replaced [Internal.platform.navigate]). The DOM stays. [mount] works
-    again afterwards, for example on a new body. *)
+    {!Browser.navigate} does [location.assign] again. The DOM stays.
+    [mount] works again afterwards, for example on a new body. *)
 
 module Server : sig
   val log_error : (string -> unit) ref
@@ -692,7 +697,9 @@ module Server : sig
       packages; this function does not read the file system. *)
 
   val fill_script : string
-  (** [Internal.fill_script]. *)
+  (** The inline script that [stream] writes in the head. It defines
+      [window.__yukaFill(id)], which replaces the loading content between
+      the markers of [id] with the streamed chunk. *)
 
   val stream :
     ?head:string ->

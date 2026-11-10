@@ -43,7 +43,7 @@ let mount ?islands ?(navigation = true) () =
 
 let unmount = Navigation.stop
 
-module Internal = struct
+module Private = struct
   include Types
   include Printer
 

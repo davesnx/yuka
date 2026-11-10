@@ -261,7 +261,7 @@ let eval_in : D.node -> string -> unit =
 let doc_body : D.node -> D.node = [%mel.raw "function (doc) { return doc.body }"]
 
 let fill_js =
-  let s = Internal.fill_script in
+  let s = Private.fill_script in
   String.sub s 8 (String.length s - 8 - 9)
 
 let fill_view a =
@@ -284,13 +284,13 @@ let fill_view a =
 
 let streamed () =
   let a, resolve, _ = Async.make () in
-  let session = Internal.session ~streaming:true ~islands_only:false in
-  let shell = Internal.print session (fun () -> Internal.node (fill_view a)) in
-  let pending = Internal.take_pending session in
+  let session = Private.session ~streaming:true ~islands_only:false in
+  let shell = Private.print session (fun () -> Private.node (fill_view a)) in
+  let pending = Private.take_pending session in
   resolve 4;
   let chunk =
     match pending with
-    | [ Internal.Pending_await { id; fill; _ } ] -> (id, fill ())
+    | [ Private.Pending_await { id; fill; _ } ] -> (id, fill ())
     | _ -> raise (Cases.Failed "expected one pending await")
   in
   (a, shell, chunk)
@@ -324,7 +324,7 @@ let run_scripts : D.node -> string -> unit =
 let fill_script_removed () =
   let _, shell, (id, chunk) = streamed () in
   let doc = fresh_doc "dangerously" in
-  run_scripts doc Internal.fill_script;
+  run_scripts doc Private.fill_script;
   D.set_html (doc_body doc) shell;
   run_scripts doc
     ({|<template data-yuka-fill="|} ^ id ^ {|">|} ^ chunk ^ {|</template><script>__yukaFill("|} ^ id ^ {|")</script>|});
@@ -381,7 +381,7 @@ let slot_adopted () =
         lower "div" [] [ text "a"; Yuka.slot client ])
   in
   same "slot node adopted" p (slot_node c);
-  check "captured" "1" (ints (List.length !(Internal.slot_dom client)));
+  check "captured" "1" (ints (List.length !(Private.slot_dom client)));
   check "html unchanged" server_html (D.html c);
   dispose ()
 
@@ -777,8 +777,8 @@ let platform_override_survives () =
   navigations := [];
   let c = D.container (D.server (page [ select_island () ])) in
   start_islands [ select_entry ];
-  Internal.platform :=
-    { !Internal.platform with navigate = (fun url -> navigations := url :: !navigations) };
+  Private.platform :=
+    { !Private.platform with navigate = (fun url -> navigations := url :: !navigations) };
   fire (D.query c "select") "pointerover";
   Browser.navigate "/next";
   check "the override is still installed after an island started" "/next"
@@ -939,7 +939,7 @@ let async =
         ignore value;
         let c = D.container (D.server (page [ Counter_island.island 0 ])) in
         ignore c;
-        let pending = !Internal.async_source "a1" in
+        let pending = !Private.async_source "a1" in
         count_queries ();
         append_html "<p>other</p>";
         tick (fun () ->

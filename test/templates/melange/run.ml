@@ -49,7 +49,7 @@ let render tree = fst (render_with_value tree)
 
 let hydrate tree =
   let c = container () in
-  set_html c (Internal.render_html (fun () -> Internal.node (tree ())));
+  set_html c (Private.render_html (fun () -> Private.node (tree ())));
   let parsed = html c in
   let dispose = Client.hydrate (as_container c) tree in
   let out = html c in
@@ -59,19 +59,19 @@ let hydrate tree =
 let () =
   List.iter
     (fun (name, tree) ->
-      match Internal.node (tree ()) with
-      | Internal.Template { template; parts = _ } ->
-          let again = Internal.recompile template in
+      match Private.node (tree ()) with
+      | Private.Template { template; parts = _ } ->
+          let again = Private.recompile template in
           check (name ^ ": ppx html is the run-time html")
-            (Internal.template_html again) (Internal.template_html template);
+            (Private.template_html again) (Private.template_html template);
           check (name ^ ": ppx paths are the run-time paths")
-            (Js.Json.stringify (Obj.magic (Internal.template_plan again)))
-            (Js.Json.stringify (Obj.magic (Internal.template_plan template)));
+            (Js.Json.stringify (Obj.magic (Private.template_plan again)))
+            (Js.Json.stringify (Obj.magic (Private.template_plan template)));
           let by_tree () =
-            match Internal.node (tree ()) with
-            | Internal.Template { template; parts } ->
-                Internal.element (Internal.expand template parts)
-            | n -> Internal.element n
+            match Private.node (tree ()) with
+            | Private.Template { template; parts } ->
+                Private.element (Private.expand template parts)
+            | n -> Private.element n
           in
           let before = templates_created () in
           let cloned = render tree in
@@ -88,7 +88,7 @@ let () =
             check (name ^ ": clone is the node tree") tree_html cloned;
           if List.mem name Template_cases.parser_changes then
             check (name ^ ": fallback prints the server html")
-              (Internal.to_html (Internal.node (tree ())))
+              (Private.to_html (Private.node (tree ())))
               cloned
           else begin
             let parsed, hydrated = hydrate tree in
