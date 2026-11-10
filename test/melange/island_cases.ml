@@ -400,13 +400,13 @@ let slot_moves_with_hole () =
   same "adopted" p (slot_node c);
   State.set wrap false;
   check "moved into section"
-    "<main><!--[--><section><!--[$--><p>x</p><!--]--></section><!--]--></main>"
+    "<main><section><!--[$--><p>x</p><!--]--></section></main>"
     (D.html c);
   same "same node after move" p (slot_node c);
   State.set wrap true;
   same "same node after second move" p (slot_node c);
   check "back"
-    "<main><!--[--><div><!--[$--><p>x</p><!--]--></div><!--]--></main>"
+    "<main><div><!--[$--><p>x</p><!--]--></div></main>"
     (D.html c);
   dispose ()
 

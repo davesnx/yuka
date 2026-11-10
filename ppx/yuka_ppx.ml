@@ -247,73 +247,30 @@ let rec list_items e =
       x :: list_items rest
   | _ -> Location.raise_errorf ~loc:e.pexp_loc "[yuka] Unexpected children."
 
-let inside_template = ref false
+let hoisted : value_binding list ref = ref []
+let template_count = ref 0
 
-let outside_template f =
-  let saved = !inside_template in
-  inside_template := false;
-  let r = f () in
-  inside_template := saved;
-  r
-
-let rec is_literal e =
-  match e.pexp_desc with
-  | Pexp_constant _ -> true
-  | Pexp_construct ({ txt = Lident ("true" | "false" | "()"); _ }, None) -> true
-  | Pexp_variant (_, None) -> true
-  | Pexp_constraint (e, _) -> is_literal e
-  | _ -> false
-
-let is_event_label tag label =
-  String.length label > 2
-  && String.sub label 0 2 = "on"
-  && match Html.findByName tag (String.lowercase_ascii label) with
-     | Ok (Html_attributes.Event _) -> true
-     | _ -> false
-
-let rec fixed_elements e =
-  match e.pexp_desc with
-  | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; _ }; _ }, args)
-    when Html.is_html_element tag || Html.is_svg_element tag -> (
-      let attrs_ok =
-        List.for_all
-          (fun (l, v) ->
-            match l with
-            | Nolabel -> true
-            | Labelled "children" -> true
-            | Labelled name ->
-                is_literal v || reads_state v || is_event_label tag name
-            | Optional _ -> false)
-          args
-      in
-      if not attrs_ok then None
-      else
-        let children =
-          List.concat_map (function Labelled "children", c -> [ c ] | _ -> []) args
-        in
-        match children with
-        | [ c ] -> (
-            let kids = try list_items c with _ -> [] in
-            let counts =
-              List.map
-                (fun k ->
-                  match k.pexp_desc with
-                  | Pexp_constant (Pconst_string _) when not (is_jsx k) -> Some 0
-                  | _ when is_jsx k -> fixed_elements k
-                  | _ -> if reads_state k then Some 0 else None)
-                kids
-            in
-            if List.mem None counts then None
-            else Some (1 + List.fold_left (fun a c -> a + Option.value c ~default:0) 0 counts))
-        | _ -> None)
+let literal_value (kind : Html_attributes.kind) e =
+  let bool_literal () =
+    match e.pexp_desc with
+    | Pexp_construct ({ txt = Lident "true"; _ }, None) -> Some true
+    | Pexp_construct ({ txt = Lident "false"; _ }, None) -> Some false
+    | _ -> None
+  in
+  match (kind, e.pexp_desc) with
+  | String, Pexp_constant (Pconst_string (s, _, _)) -> Some (Some s)
+  | Int, Pexp_constant (Pconst_integer (s, None)) -> (
+      match int_of_string_opt s with
+      | Some n when n >= -0x4000_0000 && n < 0x4000_0000 -> Some (Some (string_of_int n))
+      | _ -> None)
+  | Bool, _ -> Option.map (fun b -> if b then Some "" else None) (bool_literal ())
+  | BooleanishString, _ -> Option.map (fun b -> Some (string_of_bool b)) (bool_literal ())
+  | Polyvariant options, Pexp_variant (t, None) ->
+      List.find_map
+        (fun (o : Html_attributes.polyvariant) ->
+          if o.type_ = t then Some (Some o.jsxName) else None)
+        options
   | _ -> None
-
-let template_id (loc : Location.t) =
-  let file = Filename.basename loc.loc_start.pos_fname in
-  let file = match String.index_opt file '.' with Some i -> String.sub file 0 i | None -> file in
-  let lib = match !Island.library with Some l -> l ^ "/" | None -> "" in
-  Printf.sprintf "%s%s:%d:%d" lib file loc.loc_start.pos_lnum
-    (loc.loc_start.pos_cnum - loc.loc_start.pos_bol)
 
 let rewrite_child ~self child =
   let loc = child.pexp_loc in
@@ -323,7 +280,7 @@ let rewrite_child ~self child =
   | _ when is_jsx child -> self#expression child
   | _ ->
       let hole = reads_state child in
-      let child = outside_template (fun () -> self#expression child) in
+      let child = self#expression child in
       if hole then [%expr Yuka.hole (fun () -> [%e child])] else child
 
 let split_args args =
@@ -337,30 +294,80 @@ let split_args args =
     args;
   (!props, !children)
 
+let rec template_element ~self ~parts ~loc ~fnloc tag args =
+  if not (Html.is_html_element tag || Html.is_svg_element tag) then
+    Location.raise_errorf ~loc:fnloc "[yuka] HTML tag '%s' does not exist." tag;
+  let props, children = split_args args in
+  let add_part e =
+    let i = List.length !parts in
+    parts := e :: !parts;
+    eint ~loc i
+  in
+  let attr ((label, value) as prop) =
+    let fixed =
+      match label with
+      | Labelled name when not (reads_state value) -> (
+          match find_prop ~loc:value.pexp_loc tag name with
+          | Attribute { type_; name = dom; _ } | Rich_attribute { type_; name = dom; _ } ->
+              Option.map (Option.map (fun v -> (dom, v))) (literal_value type_ value)
+          | Event _ -> None)
+      | _ -> None
+    in
+    match fixed with
+    | Some (Some (dom, v)) ->
+        Some [%expr Yuka.Template.fixed [%e estring ~loc dom] [%e estring ~loc v]]
+    | Some None -> None
+    | None ->
+        let part =
+          match rewrite_attribute ~self ~loc:fnloc tag prop with
+          | Plain e -> [%expr Yuka.Template.attribute [%e e]]
+          | Maybe e -> [%expr Yuka.Template.attribute_option [%e e]]
+        in
+        Some [%expr Yuka.Template.part_attr [%e add_part part]]
+  in
+  let attrs = List.filter_map attr props in
+  let child c =
+    match c.pexp_desc with
+    | Pexp_constant (Pconst_string (s, _, _)) when (not (is_jsx c)) && s <> "" ->
+        [%expr Yuka.Template.text [%e estring ~loc s]]
+    | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; loc = fnloc }; _ }, args)
+      when is_jsx c ->
+        template_element ~self ~parts ~loc:c.pexp_loc ~fnloc tag args
+    | _ ->
+        let e = rewrite_child ~self c in
+        [%expr Yuka.Template.part [%e add_part [%expr Yuka.Template.child [%e e]]]]
+  in
+  let kids = List.map child children in
+  [%expr
+    Yuka.Template.element [%e estring ~loc tag] [%e list_expr ~loc attrs]
+      [%e list_expr ~loc kids]]
+
+let template_prefix (loc : Location.t) =
+  let file = Filename.basename loc.loc_start.pos_fname in
+  let file = match String.index_opt file '.' with Some i -> String.sub file 0 i | None -> file in
+  let lib = match !Island.library with Some l -> l ^ "_" | None -> "" in
+  String.map
+    (fun c -> match c with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> c | _ -> '_')
+    (String.lowercase_ascii (lib ^ file ^ "_"))
+
+let template ~self ~loc ~fnloc tag args =
+  let parts = ref [] in
+  let shape = template_element ~self ~parts ~loc ~fnloc tag args in
+  let name = "__yuka_template_" ^ template_prefix loc ^ string_of_int !template_count in
+  incr template_count;
+  hoisted :=
+    value_binding ~loc ~pat:(pvar ~loc name) ~expr:[%expr Yuka.Template.make [%e shape]]
+    :: !hoisted;
+  [%expr Yuka.Template.instance [%e evar ~loc name] [%e pexp_array ~loc (List.rev !parts)]]
+
 let rewrite_jsx self e =
   let loc = e.pexp_loc in
-  let fixed = match fixed_elements e with Some n when n >= 2 -> true | _ -> false in
   let e = strip_jsx e in
   match e.pexp_desc with
   | Pexp_apply ({ pexp_desc = Pexp_ident { txt = fn; loc = fnloc }; _ }, args) -> (
       let props, children = split_args args in
       match fn with
-      | Lident tag ->
-          if not (Html.is_html_element tag || Html.is_svg_element tag) then
-            Location.raise_errorf ~loc:fnloc "[yuka] HTML tag '%s' does not exist." tag;
-          let wrap = fixed && not !inside_template in
-          let attrs =
-            outside_template (fun () ->
-                List.map (rewrite_attribute ~self ~loc:fnloc tag) props)
-          in
-          let saved = !inside_template in
-          inside_template := saved || wrap;
-          let kids = List.map (rewrite_child ~self) children in
-          inside_template := saved;
-          let r =
-            [%expr Yuka.lower [%e estring ~loc tag] [%e attributes_expr ~loc attrs] [%e list_expr ~loc kids]]
-          in
-          if wrap then [%expr Yuka.template [%e estring ~loc (template_id loc)] [%e r]] else r
+      | Lident tag -> template ~self ~loc ~fnloc tag args
       | Ldot (Ldot (Lident "Yuka", "Await"), "createElement") ->
           let find name =
             List.find_opt (fun (l, _) -> l = Labelled name || l = Optional name) props
@@ -485,6 +492,19 @@ let mapper =
         | Pexp_letmodule (n, m, _) when n.txt <> Some "State" && is_yuka_state m ->
             lint_error ~loc:e.pexp_loc "a local alias of Yuka.State"
         | _ -> super#expression e
+
+    method! structure items =
+      List.concat_map
+        (fun item ->
+          let saved = !hoisted in
+          hoisted := [];
+          let item = self#structure_item item in
+          let found = List.rev !hoisted in
+          hoisted := saved;
+          match found with
+          | [] -> [ item ]
+          | _ -> [ pstr_value ~loc:item.pstr_loc Nonrecursive found; item ])
+        items
 
     method! structure_item i =
       (match i.pstr_desc with

@@ -24,7 +24,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
       }
         -> node
     | Slot of slot
-    | Template of { id : string; node : node }
+    | Template of { template : template; parts : part array }
     | Each : {
         items : unit -> 'a list;
         key : 'a -> string;
@@ -35,10 +35,25 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 
   and slot = { content : node option; dom : Obj.t list ref }
 
+  and template = { shape : shape; mutable html : cache; mutable svg : cache }
+
+  and shape =
+    | Fixed_text of string
+    | Fixed_element of { tag : string; attrs : fixed_attr list; children : shape list }
+    | Part of int
+
+  and fixed_attr = Fixed of string * string | Part_attr of int
+
+  and part = Child of node | Attribute of attr | No_attribute
+
+  and cache = ..
+
   and attr =
     | Static of string * string
     | Dynamic of string * (unit -> string option)
     | Handler of string * (event -> unit)
+
+  type cache += Empty
 
   type platform = {
     target_value : event -> string;

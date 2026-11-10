@@ -237,7 +237,7 @@ let html_each () =
           (fun n -> lower "li" [] [ text (string_of_int n) ]);
       ]
   in
-  check "items" "<ul><!--[--><!--[--><li>1</li><!--]--><!--[--><li>2</li><!--]--><!--]--></ul>"
+  check "items" "<ul><li>1</li><li>2</li></ul>"
     (chtml el);
   check "empty" "<!--[--><!--]-->"
     (chtml (each ~key:string_of_int (fun () -> []) (fun _ -> empty)));
@@ -278,7 +278,7 @@ let html_effect_skipped () =
     lower "p" [] []
   in
   let in_hole = lower "div" [] [ hole (fun () -> component () |> fun e -> (Internal.element (Internal.node e) : client element)) ] in
-  check "hole html" "<div><!--[--><p></p><!--]--></div>" (chtml in_hole);
+  check "hole html" "<div><p></p></div>" (chtml in_hole);
   check "hole body effect not run" "0" (string_of_int !runs);
   check "build and print" "<p></p>"
     (Internal.render_html (fun () -> Internal.node (component ())));
@@ -499,7 +499,7 @@ let html_island () =
         lower "b" [] [ hole (fun () -> text "") ])
   in
   check "island"
-    "<div><yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"><b><!--[--><!--]--></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"t\":\"\\u003c/script>\"}</script>t<yuka-island data-name=\"B\" data-id=\"i2\" style=\"display:contents\"><b><!--[--><!--]--></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"t\":\"\\u003c/script>\"}</script></div>"
+    "<div><yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"t\":\"\\u003c/script>\"}</script>t<yuka-island data-name=\"B\" data-id=\"i2\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"t\":\"\\u003c/script>\"}</script></div>"
     (html (lower "div" [] [ item "A"; text "t"; item "B" ]));
   check "counter restarts" "i1"
     (let h = html (item "A") in
@@ -844,7 +844,7 @@ let html_select_value () =
   check "no value attribute on the select" "<select><option value=\"a\">A</option></select>"
     (html (lower "select" [] [ opt "a" ]));
   check "optgroup, fragment, hole and each"
-    "<select><optgroup label=\"g\"><option value=\"b\" selected=\"\">B</option></optgroup><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><!--[--><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><!--]--><option value=\"c\">C</option></select>"
+    "<select><optgroup label=\"g\"><option value=\"b\" selected=\"\">B</option></optgroup><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><option value=\"c\">C</option></select>"
     (chtml
        (lower "select" [ attr "value" "b" ]
           [ lower "optgroup" [ attr "label" "g" ] [ fragment [ opt "b" ] ];
@@ -915,43 +915,88 @@ let codec_result () =
     | Ok (Ok l) -> "ok " ^ String.concat "," (List.map string_of_int l)
     | _ -> "bad")
 
-let skeleton el = Internal.skeleton_html (Internal.node el)
+let shape_html shape = Internal.template_html (Template.make shape)
 
 let html_template () =
-  let el = template "t1" (lower "p" [ attr "class" "c" ] [ text "a" ]) in
-  check "printed as its node" "<p class=\"c\">a</p>" (chtml el);
-  check "no marker around nested" "<div><p>a</p></div>"
-    (chtml (lower "div" [] [ template "t2" (lower "p" [] [ text "a" ]) ]))
+  let p = Template.(make (element "p" [ fixed "class" "c" ] [ text "a" ])) in
+  check "printed as its tree" "<p class=\"c\">a</p>" (chtml (Template.instance p [||]));
+  check "no marker around nested" "<div><p class=\"c\">a</p></div>"
+    (chtml (lower "div" [] [ Template.instance p [||] ]))
 
-let skeleton_shape () =
+let template_parts_print () =
   let state = State.make "x" in
-  let el : client element =
-    lower "div" [ attr "id" "d"; hole_attr "title" (fun () -> Some "t"); on "click" (fun _ -> ()) ]
-      [ text "a"; text "b";
-        lower "br" [] [];
-        hole (fun () -> text (State.get state));
-        each ~key:Fun.id (fun () -> [ "k" ]) text;
-        slot (Slot.make (text "s"));
-        lower "span" [] [ text "&<" ];
-        Await.make ~async:(Async.resolved 1) ~loading:(text "L") ~children:(fun _ -> text "v") ();
-        fragment [ text "c"; text "d" ] ]
+  let t =
+    Template.(
+      make
+        (element "div"
+           [ fixed "id" "d"; part_attr 0; part_attr 1; part_attr 2 ]
+           [ text "a"; part 3; element "span" [] [ part 4 ]; text "b" ]))
   in
-  check "shape" "<div id=\"d\">a<!---->b<br><!--[--><!--]--><!--[--><!--]--><!--[$--><!--]--><span>&amp;&lt;</span><!--[--><!--]-->c<!---->d</div>"
-    (skeleton el);
-  check "template inside" "<p>t</p>" (skeleton (template "x" (lower "p" [] [ text "t" ])));
-  check "island is a hole" "<!--[--><!--]-->"
-    (skeleton (Client.island ~name:"I" ~props:`Null (fun () -> text "x")))
+  let parts : client Template.part array =
+    Template.
+      [|
+        attribute (hole_attr "title" (fun () -> Some (State.get state)));
+        attribute_option None;
+        attribute (on "click" (fun _ -> ()));
+        child (Yuka.text "t");
+        child (hole (fun () -> Yuka.text (State.get state)));
+      |]
+  in
+  let by_hand : client element =
+    lower "div"
+      [ attr "id" "d"; hole_attr "title" (fun () -> Some (State.get state)); on "click" (fun _ -> ()) ]
+      [ text "a"; text "t"; lower "span" [] [ hole (fun () -> text (State.get state)) ]; text "b" ]
+  in
+  check "same html as lower" (chtml by_hand) (chtml (Template.instance t parts));
+  check "html" "<div id=\"d\" title=\"x\">a<!---->t<span>x</span>b</div>"
+    (chtml (Template.instance t parts))
 
-let skeleton_values () =
-  let opt v = lower "option" [ attr "value" v ] [ text v ] in
-  check "static select value" "<select><option value=\"a\">a</option><option value=\"b\" selected=\"\">b</option></select>"
-    (skeleton (lower "select" [ attr "value" "b" ] [ opt "a"; opt "b" ]));
-  check "dynamic select value is left out" "<select><option value=\"a\">a</option></select>"
-    (skeleton (lower "select" [ hole_attr "value" (fun () -> Some "a") ] [ opt "a" ]));
+let template_shape_html () =
+  check "shape"
+    "<div id=\"d\">a<!---->b<br><span>&amp;&lt;</span>c<!---->d<i></i>e</div>"
+    (shape_html
+       Template.(
+         element "div" [ fixed "id" "d"; part_attr 0 ]
+           [ text "a"; text "b"; element "br" [] []; part 1;
+             element "span" [] [ text "&<" ]; text "c"; part 2; text "d";
+             element "i" [] []; part 3; text "e" ]))
+
+let template_values () =
+  let opt v = Template.(element "option" [ fixed "value" v ] [ text v ]) in
+  check "static select value"
+    "<select><option value=\"a\">a</option><option value=\"b\" selected=\"\">b</option></select>"
+    (shape_html Template.(element "select" [ fixed "value" "b" ] [ opt "a"; opt "b" ]));
+  check "part select value is left out" "<select><option value=\"a\">a</option></select>"
+    (shape_html Template.(element "select" [ part_attr 0 ] [ opt "a" ]));
   check "static textarea value" "<textarea>v &amp;</textarea>"
-    (skeleton (lower "textarea" [ attr "value" "v &" ] []));
-  check "dynamic textarea value is left out" "<textarea></textarea>"
-    (skeleton (lower "textarea" [ hole_attr "value" (fun () -> Some "v") ] []))
+    (shape_html Template.(element "textarea" [ fixed "value" "v &" ] []));
+  check "part textarea value is left out" "<textarea></textarea>"
+    (shape_html Template.(element "textarea" [ part_attr 0 ] []))
+
+let only_child_markers () =
+  let s = State.make "x" in
+  check "hole as the only child has no markers" "<p>x</p>"
+    (chtml (lower "p" [] [ hole (fun () -> text (State.get s)) ]));
+  check "hole with a sibling keeps markers" "<p><!--[-->x<!--]-->!</p>"
+    (chtml (lower "p" [] [ hole (fun () -> text (State.get s)); text "!" ]));
+  check "hole at the root keeps markers" "<!--[-->x<!--]-->"
+    (chtml (hole (fun () -> text (State.get s))));
+  check "hole inside a fragment keeps markers" "<p><!--[-->x<!--]--></p>"
+    (chtml (lower "p" [] [ fragment [ hole (fun () -> text (State.get s)) ] ]));
+  check "list as the only child, element rows: no markers"
+    "<ul><li>a</li><li>b</li></ul>"
+    (chtml (lower "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun v -> lower "li" [] [ text v ]) ]));
+  check "list with a sibling, text rows: all markers"
+    "<ul><!--[--><!--[-->a<!--]--><!--[-->b<!--]--><!--]--><li></li></ul>"
+    (chtml
+       (lower "ul" []
+          [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) text; lower "li" [] [] ]));
+  check "template rows: no row markers" "<ul><!--[--><li>a</li><!--]--><i></i></ul>"
+    (chtml
+       (lower "ul" []
+          [ each ~key:Fun.id (fun () -> [ "a" ])
+              (fun v -> Template.(instance (make (element "li" [] [ part 0 ])) [| child (Yuka.text v) |]));
+            lower "i" [] [] ]))
 
 let await_component () =
   let a, resolve, fail = Async.make () in
@@ -1098,8 +1143,10 @@ let all =
     ("html textarea value", html_textarea_value);
     ("codec result", codec_result);
     ("html template", html_template);
-    ("skeleton shape", skeleton_shape);
-    ("skeleton values", skeleton_values);
+    ("template parts print", template_parts_print);
+    ("template shape html", template_shape_html);
+    ("template values", template_values);
+    ("only child markers", only_child_markers);
     ("Await component", await_component);
     ("mount disposes when the function raises", mount_raises_disposes);
     ("json depth limit", json_depth_limit);

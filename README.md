@@ -19,6 +19,8 @@ only the parts that read a signal update.
 - Signals: `State.make`, `State.get`, `State.set`, `State.memo`, `Effect`.
 - Render once: no virtual DOM. Only holes and keyed lists update.
 - mlx syntax through a ppx (`yuka.ppx`), with attribute checks.
+- Compiled templates: the ppx turns each JSX tree into one HTML template that
+  the browser parses once and clones for each use.
 - Server rendering and hydration from one element tree, on native and Melange.
 - Streaming with `<Yuka.Await>`: send the page shell first, fill in the rest later.
 - Islands: `let%client` components with a start strategy (`Load`, `Idle`,

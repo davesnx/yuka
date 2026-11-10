@@ -1,112 +1,146 @@
-let static_attrs =
-  Yuka.lower "a"
-    [Yuka.attr "class" ("nav" : string);
-    Yuka.attr "href" ("/x" : string);
-    Yuka.attr "tabindex" (Stdlib.string_of_int (3 : int))] [Yuka.text "home"]
+let __yuka_template_rewrite_0 =
+  Yuka.Template.make
+    (Yuka.Template.element "a"
+       [Yuka.Template.fixed "class" "nav";
+       Yuka.Template.fixed "href" "/x";
+       Yuka.Template.fixed "tabindex" "3"] [Yuka.Template.text "home"])
+let static_attrs = Yuka.Template.instance __yuka_template_rewrite_0 [||]
+let __yuka_template_rewrite_1 =
+  Yuka.Template.make
+    (Yuka.Template.element "input"
+       [Yuka.Template.fixed "type" "text";
+       Yuka.Template.fixed "disabled" "";
+       Yuka.Template.part_attr 0;
+       Yuka.Template.part_attr 1;
+       Yuka.Template.part_attr 2] [])
 let bool_and_optional =
-  Yuka.lower "input"
-    (Stdlib.List.filter_map (fun x -> x)
-       [Some
-          (Yuka.attr "type"
-             (match (`text : [ `button  | `checkbox  | `color  | `date 
-                             | `datetime_local  | `email  | `file  | 
-                               `hidden 
-                             | `image  | `month  | `number  | `password 
-                             | `radio  | `range  | `reset  | `search 
-                             | `submit  | `tel  | `text  | `time  | `url 
-                             | `week ])
-              with
-              | `button -> "button"
-              | `checkbox -> "checkbox"
-              | `color -> "color"
-              | `date -> "date"
-              | `datetime_local -> "datetime-local"
-              | `email -> "email"
-              | `file -> "file"
-              | `hidden -> "hidden"
-              | `image -> "image"
-              | `month -> "month"
-              | `number -> "number"
-              | `password -> "password"
-              | `radio -> "radio"
-              | `range -> "range"
-              | `reset -> "reset"
-              | `search -> "search"
-              | `submit -> "submit"
-              | `tel -> "tel"
-              | `text -> "text"
-              | `time -> "time"
-              | `url -> "url"
-              | `week -> "week"));
-       Stdlib.Option.map (Yuka.attr "disabled")
-         (if (true : bool) then Some "" else None);
-       Stdlib.Option.map (Yuka.attr "hidden")
-         (if (flag : bool) then Some "" else None);
-       Stdlib.Option.map (Yuka.attr "placeholder")
-         (Stdlib.Option.map (fun v -> (v : string))
-            (placeholder : string option));
-       Stdlib.Option.map (Yuka.attr "autofocus")
-         (match (autofocus : bool option) with
-          | Some true -> Some ""
-          | _ -> None)]) []
-let data_and_aria =
-  Yuka.lower "div"
-    [Yuka.attr "data-user-id" ("7" : string);
-    Yuka.attr "aria-label" ("menu" : string)] []
+  Yuka.Template.instance __yuka_template_rewrite_1
+    [|(Yuka.Template.attribute_option
+         (Stdlib.Option.map (Yuka.attr "hidden")
+            (if (flag : bool) then Some "" else None)));(Yuka.Template.attribute_option
+                                                           (Stdlib.Option.map
+                                                              (Yuka.attr
+                                                                 "placeholder")
+                                                              (Stdlib.Option.map
+                                                                 (fun v ->
+                                                                    (v : 
+                                                                    string))
+                                                                 (placeholder : 
+                                                                 string
+                                                                   option))));(
+      Yuka.Template.attribute_option
+        (Stdlib.Option.map (Yuka.attr "autofocus")
+           (match (autofocus : bool option) with
+            | Some true -> Some ""
+            | _ -> None)))|]
+let __yuka_template_rewrite_2 =
+  Yuka.Template.make
+    (Yuka.Template.element "div"
+       [Yuka.Template.fixed "data-user-id" "7";
+       Yuka.Template.fixed "aria-label" "menu"] [])
+let data_and_aria = Yuka.Template.instance __yuka_template_rewrite_2 [||]
+let __yuka_template_rewrite_3 =
+  Yuka.Template.make
+    (Yuka.Template.element "button" [Yuka.Template.part_attr 0]
+       [Yuka.Template.text "go"])
 let handler =
-  Yuka.lower "button" [Yuka.on "click" (fun _ -> ())] [Yuka.text "go"]
+  Yuka.Template.instance __yuka_template_rewrite_3
+    [|(Yuka.Template.attribute (Yuka.on "click" (fun _ -> ())))|]
+let __yuka_template_rewrite_4 =
+  Yuka.Template.make
+    (Yuka.Template.element "input" [Yuka.Template.part_attr 0] [])
 let optional_handler =
-  Yuka.lower "input"
-    (Stdlib.List.filter_map (fun x -> x)
-       [Stdlib.Option.map (Yuka.on "input") onInput]) []
-let string_child = Yuka.lower "p" [] [Yuka.text "hello"]
-let hole_child = Yuka.lower "p" [] [Yuka.hole (fun () -> State.get count)]
+  Yuka.Template.instance __yuka_template_rewrite_4
+    [|(Yuka.Template.attribute_option
+         (Stdlib.Option.map (Yuka.on "input") onInput))|]
+let __yuka_template_rewrite_5 =
+  Yuka.Template.make
+    (Yuka.Template.element "p" [] [Yuka.Template.text "hello"])
+let string_child = Yuka.Template.instance __yuka_template_rewrite_5 [||]
+let __yuka_template_rewrite_6 =
+  Yuka.Template.make (Yuka.Template.element "p" [] [Yuka.Template.part 0])
+let hole_child =
+  Yuka.Template.instance __yuka_template_rewrite_6
+    [|(Yuka.Template.child (Yuka.hole (fun () -> State.get count)))|]
+let __yuka_template_rewrite_7 =
+  Yuka.Template.make (Yuka.Template.element "p" [] [Yuka.Template.part 0])
 let qualified_hole_child =
-  Yuka.lower "p" [] [Yuka.hole (fun () -> Yuka.State.get count)]
+  Yuka.Template.instance __yuka_template_rewrite_7
+    [|(Yuka.Template.child (Yuka.hole (fun () -> Yuka.State.get count)))|]
+let __yuka_template_rewrite_8 =
+  Yuka.Template.make
+    (Yuka.Template.element "button" [Yuka.Template.part_attr 0]
+       [Yuka.Template.part 1])
 let get_inside_fun =
-  Yuka.lower "button"
-    [Yuka.on "click" (fun _ -> State.set c ((State.get c) + 1))] [label]
+  Yuka.Template.instance __yuka_template_rewrite_8
+    [|(Yuka.Template.attribute
+         (Yuka.on "click" (fun _ -> State.set c ((State.get c) + 1))));(
+      Yuka.Template.child label)|]
+let __yuka_template_rewrite_9 =
+  Yuka.Template.make (Yuka.Template.element "li" [] [Yuka.Template.text "x"])
+and __yuka_template_rewrite_10 =
+  Yuka.Template.make (Yuka.Template.element "ul" [] [Yuka.Template.part 0])
 let get_inside_fun_child =
-  Yuka.lower "ul" []
-    [Yuka.each ~key (fun () -> State.get items)
-       (fun i -> Yuka.lower "li" [] [Yuka.text "x"])]
+  Yuka.Template.instance __yuka_template_rewrite_10
+    [|(Yuka.Template.child
+         (Yuka.each ~key (fun () -> State.get items)
+            (fun i -> Yuka.Template.instance __yuka_template_rewrite_9 [||])))|]
+let __yuka_template_rewrite_11 =
+  Yuka.Template.make
+    (Yuka.Template.element "div"
+       [Yuka.Template.part_attr 0;
+       Yuka.Template.part_attr 1;
+       Yuka.Template.part_attr 2] [])
 let hole_attribute =
-  Yuka.lower "div"
-    [Yuka.hole_attr "class"
-       (fun () -> Some (if State.get on then "a" else "b" : string));
-    Yuka.hole_attr "hidden"
-      (fun () -> if (State.get h : bool) then Some "" else None);
-    Yuka.hole_attr "tabindex"
-      (fun () -> Some (Stdlib.string_of_int (State.get n : int)))] []
+  Yuka.Template.instance __yuka_template_rewrite_11
+    [|(Yuka.Template.attribute
+         (Yuka.hole_attr "class"
+            (fun () -> Some (if State.get on then "a" else "b" : string))));(
+      Yuka.Template.attribute
+        (Yuka.hole_attr "hidden"
+           (fun () -> if (State.get h : bool) then Some "" else None)));(
+      Yuka.Template.attribute
+        (Yuka.hole_attr "tabindex"
+           (fun () -> Some (Stdlib.string_of_int (State.get n : int)))))|]
 let component_plain = Ui.Badge.make ~tone:1 ~label:"x" ()
+let __yuka_template_rewrite_12 =
+  Yuka.Template.make
+    (Yuka.Template.element "p" [] [Yuka.Template.text "body"])
 let component_one_child =
-  Ui.Card.make ~title:"t" ~children:(Yuka.lower "p" [] [Yuka.text "body"]) ()
+  Ui.Card.make ~title:"t"
+    ~children:(Yuka.Template.instance __yuka_template_rewrite_12 [||]) ()
+let __yuka_template_rewrite_13 =
+  Yuka.Template.make (Yuka.Template.element "b" [] [Yuka.Template.text "c"])
 let component_children =
   Ui.Card.make ~title:"t"
     ~children:(Yuka.fragment
                  [Yuka.text "a";
                  Yuka.hole (fun () -> State.get s);
-                 Yuka.lower "b" [] [Yuka.text "c"]]) ()
+                 Yuka.Template.instance __yuka_template_rewrite_13 [||]]) ()
 let component_prop_no_hole = Ui.Card.make ~title:(State.get s) ()
+let __yuka_template_rewrite_14 =
+  Yuka.Template.make
+    (Yuka.Template.element "ul" [Yuka.Template.fixed "class" "list"]
+       [Yuka.Template.element "li" [] [Yuka.Template.text "one"];
+       Yuka.Template.element "li" []
+         [Yuka.Template.element "a" [Yuka.Template.fixed "href" "/y"]
+            [Yuka.Template.part 0]]])
 let nested =
-  Yuka.template "rewrite:31:13"
-    (Yuka.lower "ul" [Yuka.attr "class" ("list" : string)]
-       [Yuka.lower "li" [] [Yuka.text "one"];
-       Yuka.lower "li" []
-         [Yuka.lower "a" [Yuka.attr "href" ("/y" : string)]
-            [Yuka.hole (fun () -> State.get name)]]])
+  Yuka.Template.instance __yuka_template_rewrite_14
+    [|(Yuka.Template.child (Yuka.hole (fun () -> State.get name)))|]
 let lowercase_function = Ui.button ~label:"l" ~children:[Yuka.text "txt"] ()
-let svg =
-  Yuka.template "rewrite:35:10"
-    (Yuka.lower "svg" [Yuka.attr "viewBox" ("0 0 10 10" : string)]
-       [Yuka.lower "circle"
-          [Yuka.attr "cx" ("5" : string);
-          Yuka.attr "cy" ("5" : string);
-          Yuka.attr "r" ("4" : string);
-          Yuka.attr "stroke-dasharray" ("2 2" : string);
-          Yuka.attr "stroke-width" ("1" : string);
-          Yuka.attr "fill-opacity" ("0.5" : string)] [];
-       Yuka.lower "use" [Yuka.attr "xlink:href" ("#a" : string)] []])
+let __yuka_template_rewrite_15 =
+  Yuka.Template.make
+    (Yuka.Template.element "svg" [Yuka.Template.fixed "viewBox" "0 0 10 10"]
+       [Yuka.Template.element "circle"
+          [Yuka.Template.fixed "cx" "5";
+          Yuka.Template.fixed "cy" "5";
+          Yuka.Template.fixed "r" "4";
+          Yuka.Template.fixed "stroke-dasharray" "2 2";
+          Yuka.Template.fixed "stroke-width" "1";
+          Yuka.Template.fixed "fill-opacity" "0.5"] [];
+       Yuka.Template.element "use" [Yuka.Template.fixed "xlink:href" "#a"] []])
+let svg = Yuka.Template.instance __yuka_template_rewrite_15 [||]
 let island = Issue_list.island ~items:1 ?filter ()
 module Derived =
   struct
@@ -367,8 +401,11 @@ module Derived =
   end
 include
   struct
+    let __yuka_template_rewrite_16 =
+      Yuka.Template.make
+        (Yuka.Template.element "p" [] [Yuka.Template.text "hi"])
     let make ~a:(a : int) ?b:(b : string option) ?c:((c : int)= 1) () =
-      Yuka.lower "p" [] [Yuka.text "hi"]
+      Yuka.Template.instance __yuka_template_rewrite_16 [||]
     let name = "Rewrite"
     let island ~a ?b ?c ?loading () =
       (Yuka.Client.island ?loading ~name:"Rewrite"
@@ -474,7 +511,10 @@ module Async_codec =
   end
 include
   struct
-    let make ~items:(items : int list Yuka.Async.t) () = Yuka.lower "p" [] []
+    let __yuka_template_rewrite_17 =
+      Yuka.Template.make (Yuka.Template.element "p" [] [])
+    let make ~items:(items : int list Yuka.Async.t) () =
+      Yuka.Template.instance __yuka_template_rewrite_17 [||]
     let name = "Rewrite"
     let island ~items ?loading () =
       (Yuka.Client.island ?loading ~name:"Rewrite"
@@ -827,8 +867,12 @@ let shared = State.make 0[@@yuka.shared ]
 let in_function () = State.make 0
 include
   struct
+    let __yuka_template_rewrite_18 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" [] [Yuka.Template.part 0])
     let make ~label:(label : string) ~children:(children : Yuka.slot) () =
-      Yuka.lower "div" [] [Yuka.slot children]
+      Yuka.Template.instance __yuka_template_rewrite_18
+        [|(Yuka.Template.child (Yuka.slot children))|]
     let name = "Rewrite"
     let island ~label ~children ?loading () =
       (Yuka.Client.island ?loading ~name:"Rewrite"
@@ -864,104 +908,161 @@ include
            | _ -> Stdlib.Error "expected an object")
   end
 module Slotted = struct  end
+let __yuka_template_rewrite_19 =
+  Yuka.Template.make (Yuka.Template.element "p" [] [Yuka.Template.text "x"])
 let slot_one =
   Slotted.island ~label:"a"
-    ~children:(Yuka.Slot.make (Yuka.lower "p" [] [Yuka.text "x"])) ()
+    ~children:(Yuka.Slot.make
+                 (Yuka.Template.instance __yuka_template_rewrite_19 [||])) ()
+let __yuka_template_rewrite_20 =
+  Yuka.Template.make (Yuka.Template.element "b" [] [Yuka.Template.text "y"])
 let slot_many =
   Slotted.island ~label:"a"
     ~children:(Yuka.Slot.make
                  (Yuka.fragment
                     [Yuka.text "text";
-                    Yuka.lower "b" [] [Yuka.text "y"];
+                    Yuka.Template.instance __yuka_template_rewrite_20 [||];
                     Slotted.island ~label:"in" ()])) ()
 let loading = Slotted.island ~loading:`Visible ~label:"a" ()
 let loading_optional = Slotted.island ?loading ~label:"a" ()
-let select_value =
-  Yuka.template "rewrite:94:19"
-    (Yuka.lower "select" [Yuka.attr "value" ("a" : string)]
-       [Yuka.lower "option" [Yuka.attr "value" ("a" : string)]
-          [Yuka.text "A"]])
+let __yuka_template_rewrite_21 =
+  Yuka.Template.make
+    (Yuka.Template.element "select" [Yuka.Template.fixed "value" "a"]
+       [Yuka.Template.element "option" [Yuka.Template.fixed "value" "a"]
+          [Yuka.Template.text "A"]])
+let select_value = Yuka.Template.instance __yuka_template_rewrite_21 [||]
+let __yuka_template_rewrite_22 =
+  Yuka.Template.make
+    (Yuka.Template.element "select" [Yuka.Template.part_attr 0]
+       [Yuka.Template.element "option" [Yuka.Template.fixed "value" "a"]
+          [Yuka.Template.text "A"]])
 let select_hole =
-  Yuka.template "rewrite:96:18"
-    (Yuka.lower "select"
-       [Yuka.hole_attr "value" (fun () -> Some (State.get v : string))]
-       [Yuka.lower "option" [Yuka.attr "value" ("a" : string)]
-          [Yuka.text "A"]])
-let textarea_value =
-  Yuka.lower "textarea" [Yuka.attr "value" ("x" : string)] []
+  Yuka.Template.instance __yuka_template_rewrite_22
+    [|(Yuka.Template.attribute
+         (Yuka.hole_attr "value" (fun () -> Some (State.get v : string))))|]
+let __yuka_template_rewrite_23 =
+  Yuka.Template.make
+    (Yuka.Template.element "textarea" [Yuka.Template.fixed "value" "x"] [])
+let textarea_value = Yuka.Template.instance __yuka_template_rewrite_23 [||]
+let __yuka_template_rewrite_24 =
+  Yuka.Template.make
+    (Yuka.Template.element "textarea" [Yuka.Template.part_attr 0] [])
 let textarea_hole =
-  Yuka.lower "textarea"
-    [Yuka.hole_attr "value" (fun () -> Some (State.get t : string))] []
+  Yuka.Template.instance __yuka_template_rewrite_24
+    [|(Yuka.Template.attribute
+         (Yuka.hole_attr "value" (fun () -> Some (State.get t : string))))|]
 module Templates =
   struct
+    let __yuka_template_rewrite_25 =
+      Yuka.Template.make
+        (Yuka.Template.element "ul" [Yuka.Template.fixed "class" "list"]
+           [Yuka.Template.element "li" [] [Yuka.Template.text "one"];
+           Yuka.Template.element "li" [Yuka.Template.part_attr 0]
+             [Yuka.Template.part 1]])
     let fixed =
-      Yuka.template "rewrite:103:14"
-        (Yuka.lower "ul"
-           (Stdlib.List.filter_map (fun x -> x)
-              [Some (Yuka.attr "class" ("list" : string));
-              Stdlib.Option.map (Yuka.attr "hidden")
-                (if (false : bool) then Some "" else None)])
-           [Yuka.lower "li" [] [Yuka.text "one"];
-           Yuka.lower "li" [Yuka.on "click" (fun _ -> ())]
-             [Yuka.hole (fun () -> State.get n)]])
+      Yuka.Template.instance __yuka_template_rewrite_25
+        [|(Yuka.Template.attribute (Yuka.on "click" (fun _ -> ())));(
+          Yuka.Template.child (Yuka.hole (fun () -> State.get n)))|]
+    let __yuka_template_rewrite_26 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" [Yuka.Template.part_attr 0]
+           [Yuka.Template.element "span" [] [Yuka.Template.text "x"]])
     let fixed_hole_attr =
-      Yuka.template "rewrite:105:24"
-        (Yuka.lower "div"
-           [Yuka.hole_attr "class" (fun () -> Some (State.get c : string))]
-           [Yuka.lower "span" [] [Yuka.text "x"]])
+      Yuka.Template.instance __yuka_template_rewrite_26
+        [|(Yuka.Template.attribute
+             (Yuka.hole_attr "class" (fun () -> Some (State.get c : string))))|]
+    let __yuka_template_rewrite_27 =
+      Yuka.Template.make
+        (Yuka.Template.element "ul" []
+           [Yuka.Template.element "li" [] [Yuka.Template.text "one"];
+           Yuka.Template.element "li" [] [Yuka.Template.part 0]])
     let variable_child =
-      Yuka.lower "ul" []
-        [Yuka.lower "li" [] [Yuka.text "one"]; Yuka.lower "li" [] [label]]
+      Yuka.Template.instance __yuka_template_rewrite_27
+        [|(Yuka.Template.child label)|]
+    let __yuka_template_rewrite_28 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" []
+           [Yuka.Template.element "span" [] [Yuka.Template.text "a"];
+           Yuka.Template.part 0])
     let component_child =
-      Yuka.lower "div" []
-        [Yuka.lower "span" [] [Yuka.text "a"]; Ui.Badge.make ~x:1 ()]
+      Yuka.Template.instance __yuka_template_rewrite_28
+        [|(Yuka.Template.child (Ui.Badge.make ~x:1 ()))|]
+    let __yuka_template_rewrite_29 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" [Yuka.Template.part_attr 0]
+           [Yuka.Template.element "span" [] [Yuka.Template.text "a"]])
     let non_literal_attribute =
-      Yuka.lower "div" [Yuka.attr "class" (cls : string)]
-        [Yuka.lower "span" [] [Yuka.text "a"]]
+      Yuka.Template.instance __yuka_template_rewrite_29
+        [|(Yuka.Template.attribute (Yuka.attr "class" (cls : string)))|]
+    let __yuka_template_rewrite_30 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" [Yuka.Template.part_attr 0]
+           [Yuka.Template.element "span" [] [Yuka.Template.text "a"]])
     let optional_attribute =
-      Yuka.lower "div"
-        (Stdlib.List.filter_map (fun x -> x)
-           [Stdlib.Option.map (Yuka.attr "title")
-              (Stdlib.Option.map (fun v -> (v : string))
-                 (title : string option))])
-        [Yuka.lower "span" [] [Yuka.text "a"]]
-    let single = Yuka.lower "p" [] [Yuka.text "only"]
+      Yuka.Template.instance __yuka_template_rewrite_30
+        [|(Yuka.Template.attribute_option
+             (Stdlib.Option.map (Yuka.attr "title")
+                (Stdlib.Option.map (fun v -> (v : string))
+                   (title : string option))))|]
+    let __yuka_template_rewrite_31 =
+      Yuka.Template.make
+        (Yuka.Template.element "p" [] [Yuka.Template.text "only"])
+    let single = Yuka.Template.instance __yuka_template_rewrite_31 [||]
+    let __yuka_template_rewrite_32 =
+      Yuka.Template.make
+        (Yuka.Template.element "p" [] [Yuka.Template.part 0])
     let single_with_hole =
-      Yuka.lower "p" [] [Yuka.hole (fun () -> State.get n)]
+      Yuka.Template.instance __yuka_template_rewrite_32
+        [|(Yuka.Template.child (Yuka.hole (fun () -> State.get n)))|]
+    let __yuka_template_rewrite_33 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" [Yuka.Template.part_attr 0]
+           [Yuka.Template.element "ul" []
+              [Yuka.Template.element "li" [] [Yuka.Template.text "a"];
+              Yuka.Template.element "li" [] [Yuka.Template.text "b"]];
+           Yuka.Template.part 1])
     let fixed_inside_not_fixed =
-      Yuka.lower "div" [Yuka.attr "class" (cls : string)]
-        [Yuka.template "rewrite:119:47"
-           (Yuka.lower "ul" []
-              [Yuka.lower "li" [] [Yuka.text "a"];
-              Yuka.lower "li" [] [Yuka.text "b"]]);
-        label]
+      Yuka.Template.instance __yuka_template_rewrite_33
+        [|(Yuka.Template.attribute (Yuka.attr "class" (cls : string)));(
+          Yuka.Template.child label)|]
+    let __yuka_template_rewrite_34 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" []
+           [Yuka.Template.element "span" [] [Yuka.Template.text "s"];
+           Yuka.Template.element "b" [] [Yuka.Template.part 0];
+           Yuka.Template.part 1])
     let hole_with_fixed_inside =
-      Yuka.template "rewrite:121:31"
-        (Yuka.lower "div" []
-           [Yuka.lower "span" [] [Yuka.text "s"];
-           Yuka.lower "b" [] [Yuka.hole (fun () -> State.get n)];
-           Yuka.hole (fun () -> State.get m)])
+      Yuka.Template.instance __yuka_template_rewrite_34
+        [|(Yuka.Template.child (Yuka.hole (fun () -> State.get n)));(
+          Yuka.Template.child (Yuka.hole (fun () -> State.get m)))|]
+    let __yuka_template_rewrite_35 =
+      Yuka.Template.make
+        (Yuka.Template.element "ul" []
+           [Yuka.Template.element "li" [] [Yuka.Template.text "y"];
+           Yuka.Template.element "li" [] [Yuka.Template.text "z"]])
+    and __yuka_template_rewrite_36 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" []
+           [Yuka.Template.element "p" [] [Yuka.Template.text "a"];
+           Yuka.Template.part 0])
     let template_in_hole =
-      Yuka.template "rewrite:123:25"
-        (Yuka.lower "div" []
-           [Yuka.lower "p" [] [Yuka.text "a"];
-           Yuka.hole
-             (fun () ->
-                if State.get ok
-                then
-                  Yuka.template "rewrite:123:62"
-                    (Yuka.lower "ul" []
-                       [Yuka.lower "li" [] [Yuka.text "y"];
-                       Yuka.lower "li" [] [Yuka.text "z"]])
-                else Yuka.empty)])
+      Yuka.Template.instance __yuka_template_rewrite_36
+        [|(Yuka.Template.child
+             (Yuka.hole
+                (fun () ->
+                   if State.get ok
+                   then
+                     Yuka.Template.instance __yuka_template_rewrite_35 [||]
+                   else Yuka.empty)))|]
   end
-let nested_fixed =
-  Yuka.template "rewrite:126:19"
-    (Yuka.lower "div" []
-       [Yuka.lower "ul" []
-          [Yuka.lower "li" [] [Yuka.text "a"];
-          Yuka.lower "li" [] [Yuka.text "b"]];
-       Yuka.lower "p" [] [Yuka.text "c"]])
+let __yuka_template_rewrite_37 =
+  Yuka.Template.make
+    (Yuka.Template.element "div" []
+       [Yuka.Template.element "ul" []
+          [Yuka.Template.element "li" [] [Yuka.Template.text "a"];
+          Yuka.Template.element "li" [] [Yuka.Template.text "b"]];
+       Yuka.Template.element "p" [] [Yuka.Template.text "c"]])
+let nested_fixed = Yuka.Template.instance __yuka_template_rewrite_37 [||]
 let () = Yuka.mount ~islands:Yuka_islands.registry ()
 let () = Yuka.mount ~navigation:false ~islands:Yuka_islands.registry ()
 let () = Yuka.mount ?navigation:x ~islands:Yuka_islands.registry ()
@@ -972,28 +1073,60 @@ let () = Yuka.owner ()
 let () = mount ()
 module Awaiting =
   struct
+    let __yuka_template_rewrite_38 =
+      Yuka.Template.make
+        (Yuka.Template.element "ul" []
+           [Yuka.Template.element "li" [] [Yuka.Template.text "x"];
+           Yuka.Template.element "li" [] [Yuka.Template.part 0]])
+    and __yuka_template_rewrite_39 =
+      Yuka.Template.make
+        (Yuka.Template.element "p" [] [Yuka.Template.text "loading"])
     let basic =
       Yuka.Await.make ~async:comments
-        ~loading:(Yuka.lower "p" [] [Yuka.text "loading"])
+        ~loading:(Yuka.Template.instance __yuka_template_rewrite_39 [||])
         ~children:(fun items ->
-                     Yuka.template "rewrite:138:82"
-                       (Yuka.lower "ul" []
-                          [Yuka.lower "li" [] [Yuka.text "x"];
-                          Yuka.lower "li" []
-                            [Yuka.hole (fun () -> State.get n)]])) ()
+                     Yuka.Template.instance __yuka_template_rewrite_38
+                       [|(Yuka.Template.child
+                            (Yuka.hole (fun () -> State.get n)))|]) ()
+    let __yuka_template_rewrite_40 =
+      Yuka.Template.make
+        (Yuka.Template.element "p" [] [Yuka.Template.part 0])
+    and __yuka_template_rewrite_41 =
+      Yuka.Template.make
+        (Yuka.Template.element "b" [] [Yuka.Template.part 0])
     let with_failed =
       Yuka.Await.make ~async:comments ~loading:(Yuka.text "wait")
-        ~failed:(fun msg -> Yuka.lower "p" [] [Yuka.text msg])
+        ~failed:(fun msg ->
+                   Yuka.Template.instance __yuka_template_rewrite_40
+                     [|(Yuka.Template.child (Yuka.text msg))|])
         ~children:(function
-                   | Some v -> Yuka.lower "b" [] [Yuka.text v]
+                   | Some v ->
+                       Yuka.Template.instance __yuka_template_rewrite_41
+                         [|(Yuka.Template.child (Yuka.text v))|]
                    | None -> Yuka.empty) ()
+    let __yuka_template_rewrite_42 =
+      Yuka.Template.make
+        (Yuka.Template.element "b" [] [Yuka.Template.text "x"])
     let optional_failed =
       Yuka.Await.make ~async:comments ~loading:(Yuka.text "wait") ?failed
-        ~children:(fun v -> Yuka.lower "b" [] [Yuka.text "x"]) ()
+        ~children:(fun v ->
+                     Yuka.Template.instance __yuka_template_rewrite_42 [||])
+        ()
+    let __yuka_template_rewrite_43 =
+      Yuka.Template.make
+        (Yuka.Template.element "i" [] [Yuka.Template.part 0])
+    and __yuka_template_rewrite_44 =
+      Yuka.Template.make
+        (Yuka.Template.element "div" [Yuka.Template.fixed "class" "c"]
+           [Yuka.Template.part 0])
     let inside_element =
-      Yuka.lower "div" [Yuka.attr "class" ("c" : string)]
-        [Yuka.Await.make ~async:comments ~loading:(Yuka.text "wait")
-           ~children:(fun v ->
-                        Yuka.lower "i" [] [Yuka.hole (fun () -> State.get n)])
-           ()]
+      Yuka.Template.instance __yuka_template_rewrite_44
+        [|(Yuka.Template.child
+             (Yuka.Await.make ~async:comments ~loading:(Yuka.text "wait")
+                ~children:(fun v ->
+                             Yuka.Template.instance
+                               __yuka_template_rewrite_43
+                               [|(Yuka.Template.child
+                                    (Yuka.hole (fun () -> State.get n)))|])
+                ()))|]
   end

@@ -1,0 +1,6 @@
+let view = Capture_ui.(ignore badge; <i>"main"</i>)
+
+let view_let_open =
+  let open Capture_ui in
+  ignore tag;
+  <i>"main"</i>

@@ -266,18 +266,22 @@ SVG attribute on a tag that is not SVG:
   Error: [yuka] The attribute 'strokeDasharray' is not valid on a 'div' element.
   [1]
 
-Template ids depend on the file name, line and column, not on the directory:
+Templates are values at the top of the module; their names carry the module name, not the directory:
 
   $ mkdir d1 d2
   $ printf 'let x = <ul><li>"a"</li><li>"b"</li></ul>\nlet y = <ol><li>"a"</li><li>"b"</li></ol>\n' > d1/t.mlx
   $ cp d1/t.mlx d2/t.mlx
-  $ ids() { mlx-pp $1/t.mlx > $1/t.ml && ./pp.exe --impl $1/t.ml | grep -o 'template "[^"]*"'; }
+  $ ids() { mlx-pp $1/t.mlx > $1/t.ml && ./pp.exe --impl $1/t.ml | grep -o '__yuka_template_[a-z0-9_]*'; }
   $ ids d1
-  template "t:1:8"
-  template "t:2:8"
+  __yuka_template_t_0
+  __yuka_template_t_0
+  __yuka_template_t_1
+  __yuka_template_t_1
   $ ids d2
-  template "t:1:8"
-  template "t:2:8"
+  __yuka_template_t_0
+  __yuka_template_t_0
+  __yuka_template_t_1
+  __yuka_template_t_1
 
 Await without async:
 

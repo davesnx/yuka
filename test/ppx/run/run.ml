@@ -125,7 +125,10 @@ let () =
   check "static is a template" (is_template Templated.static_tree);
   check "fixed is a template" (is_template Templated.fixed);
   check "by hand is not" (not (is_template Templated.static_by_hand));
-  check "not fixed is not" (not (is_template (Templated.not_fixed "x")));
+  check "a tree with a computed child is a template" (is_template (Templated.not_fixed "x"));
+  check "computed child html same"
+    (Yuka.Internal.to_html (Yuka.Internal.node (Templated.not_fixed "x"))
+    = "<ul><li>a</li><li>x</li></ul>");
   check "static html same"
     (Yuka.Internal.to_html (Yuka.Internal.node Templated.static_tree)
     = Yuka.Internal.to_html (Yuka.Internal.node Templated.static_by_hand));
@@ -133,12 +136,25 @@ let () =
     (Yuka.Internal.to_html (Yuka.Internal.node Templated.fixed)
     = Yuka.Internal.to_html (Yuka.Internal.node Templated.by_hand));
   (match Yuka.Internal.node Templated.static_tree with
-   | Yuka.Internal.Template { node; id } ->
-       check ("template id " ^ id) (id = "ppx_compile/templated:16:2");
-       check "skeleton"
-         (Yuka.Internal.skeleton_html node
-         = Yuka.Internal.to_html node)
+   | Yuka.Internal.Template { template; parts } ->
+       check "static tree has no parts" (Array.length parts = 0);
+       check "template html is the html"
+         (Yuka.Internal.template_html template
+         = Yuka.Internal.to_html (Yuka.Internal.node Templated.static_tree))
    | _ -> ());
+  (match
+     ( Yuka.Internal.node (Templated.not_fixed "x"),
+       Yuka.Internal.node (Templated.not_fixed "y") )
+   with
+   | Yuka.Internal.Template { template = a; _ }, Yuka.Internal.Template { template = b; _ } ->
+       check "one template per call site" (a == b)
+   | _ -> check "one template per call site" false);
+  check "template under a local open of another module"
+    (Yuka.Internal.to_html (Yuka.Internal.node Capture_main.view) = "<i>main</i>");
+  check "template under let open of another module"
+    (Yuka.Internal.to_html (Yuka.Internal.node Capture_main.view_let_open) = "<i>main</i>");
+  check "the other module keeps its template"
+    (Yuka.Internal.to_html (Yuka.Internal.node Capture_ui.badge) = "<b>ui</b>");
   let settled = Yuka.Async.resolved [ "a"; "b" ] in
   let await_html = Yuka.Internal.to_html (Yuka.Internal.node (Awaiting.view settled)) in
   check ("await settled: " ^ await_html) (contains await_html "<ul><li>a</li><li>b</li></ul>");

@@ -204,9 +204,37 @@ val hole_attr : string -> (unit -> string option) -> client attribute
 val slot : slot -> client element
 (** Puts a slot where the content goes. *)
 
-val template : string -> 'kind element -> 'kind element
-(** [template id e] is [e], marked as a tree of fixed shape. The ppx inserts
-    it; [id] is unique per call site. The server prints [e] as usual. *)
+module Template : sig
+  (** A compiled element tree. The ppx makes one [t] per lowercase JSX tree
+      (at the top of the module) and one [instance] per evaluation. Part
+      numbers count from 0 in the order of [parts]. See "Templates" in
+      DESIGN.md. *)
+
+  type t
+  type shape
+  type attr
+  type 'kind part
+
+  val text : string -> shape
+  val element : string -> attr list -> shape list -> shape
+  val part : int -> shape
+  (** The child at this place is part [i], made with [child]. *)
+
+  val fixed : string -> string -> attr
+  val part_attr : int -> attr
+  (** The attribute at this place is part [i], made with [attribute] or
+      [attribute_option]. *)
+
+  val make : shape -> t
+  val child : 'kind element -> 'kind part
+  val attribute : 'kind attribute -> 'kind part
+  val attribute_option : 'kind attribute option -> 'kind part
+
+  val instance : t -> 'kind part array -> 'kind element
+  (** The tree of [t] with its parts filled in. It prints and hydrates as the
+      same tree made with [lower]. Fresh client creation clones the parsed
+      template and goes to each part with a fixed path. *)
+end
 
 module Slot : sig
   val make : server element -> slot
@@ -365,7 +393,7 @@ module Internal : sig
       }
         -> node
     | Slot of slot
-    | Template of { id : string; node : node }
+    | Template of { template : template; parts : part array }
     | Each : {
         items : unit -> 'a list;
         key : 'a -> string;
@@ -378,6 +406,18 @@ module Internal : sig
     | Static of string * string
     | Dynamic of string * (unit -> string option)
     | Handler of string * (Event.t -> unit)
+
+  and template = Template.t
+  and part = Child of node | Attribute of attr | No_attribute
+
+  type shape =
+    | Fixed_text of string
+    | Fixed_element of { tag : string; attrs : fixed_attr list; children : shape list }
+    | Part of int
+
+  and fixed_attr = Fixed of string * string | Part_attr of int
+
+  val template_shape : template -> shape
 
   val node : 'kind element -> node
   val element : node -> 'kind element
@@ -403,12 +443,14 @@ module Internal : sig
   type session
   (** One server render. Counts ids and collects pending parts. *)
 
-  val skeleton_html : node -> string
-  (** The fixed shape of a tree: elements, static attributes and texts as
-      [to_html] prints them. Each [Hole], [Await], [Each] and [Island]
-      is [<!--[--><!--]-->] and each [Slot] is [<!--[$--><!--]-->]. Dynamic
-      attributes and handlers are left out. Static [value] on [select] and
-      [textarea] follows the rules of [to_html]. *)
+  val template_html : template -> string
+  (** The HTML of a template without its parts: elements, fixed attributes
+      and texts as [to_html] prints them. A part writes nothing. Two texts
+      with only parts between them get [<!---->]. Static [value] on
+      [select] and [textarea] follows the rules of [to_html]. *)
+
+  val expand : template -> part array -> node
+  (** The tree of a template instance, as [lower] would make it. *)
 
   val session : streaming:bool -> islands_only:bool -> session
   (** With [islands_only], [print] writes hydration markers only inside an

@@ -35,6 +35,7 @@ module Internal = struct
   include Printer
 
   let node n = n
+  let template_shape (t : template) = t.shape
   let element n = n
 
   let owned f =

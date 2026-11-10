@@ -54,9 +54,8 @@ The browser hydrates only `<yuka-island>` elements, so the page printer
 writes the markers below only inside an island. Outside an island it writes
 no `<!---->`, `<!--[-->` or `<!--]-->`. The one exception is a pending
 streamed `Await`, which keeps `<!--[sN-->` and `<!--]-->` because the fill
-finds them. `Internal.to_html`, `Internal.render_html` and
-`Internal.skeleton_html` write the markers everywhere: the client hydrates
-their output.
+finds them. `Internal.to_html` and `Internal.render_html` write the
+markers everywhere: the client hydrates their output.
 
 - Text: escaped (`&`, `<`, `>`). Attribute values: escaped (`&`, `"`, `<`).
 - Two `Text` siblings in a row: the server writes `<!---->` between them, so
@@ -65,6 +64,12 @@ their output.
 - `Hole`: `<!--[-->` content `<!--]-->`.
 - `Each`: `<!--[-->`, then each item as `<!--[-->` item `<!--]-->`, then
   `<!--]-->`.
+- A `Hole` or `Each` that is the only child of an element has no `<!--[-->`
+  and `<!--]-->` of its own: it owns all the content of the element.
+- An `Each` item that renders one element (`Element` or `Template`) has no
+  item markers: the element is the item.
+- `Template`: printed as the tree that `Internal.expand` gives, so it has the
+  same HTML as the same tree made with `lower`.
 - `Fragment`: no marker; the children are inline.
 - `Static` attribute: written. `Dynamic`: written with its current value;
   `None` is not written. `Handler`: not written.
@@ -327,6 +332,8 @@ The user put these in scope: "all of this is on scope!".
   to it.
 
 ### Templates (melact)
+
+Replaced by "Compiled templates and fewer markers (2026-11-10)" below.
 
 - The ppx wraps a lowercase JSX tree whose shape is fixed per call site in
   `Yuka.template "<id>" e`. Fixed shape: every child is a string literal, a
@@ -799,3 +806,73 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 - The other events get a direct listener, removed by a disposer.
 - An effect flush sorts pending effects by level only when they are not
   already in order; the order of effects does not change.
+
+## Compiled templates and fewer markers (2026-11-10)
+
+### Template format
+
+- The ppx turns each lowercase JSX tree into a `Yuka.Template.t`, made once
+  at the top of the module (`let __yuka_template_<module>_N =
+  Yuka.Template.make shape`), and an `instance` call with an array of parts at the place of the
+  JSX. Nested lowercase tags are part of the same template. The ppx adds the
+  bindings before the structure item that contains the JSX.
+- A shape is `Fixed_text`, `Fixed_element { tag; attrs; children }` or
+  `Part i`. An attribute is `Fixed (name, value)` or `Part_attr i`.
+- Fixed: a string literal child, and an attribute whose value is a literal of
+  the attribute's type (string, int in 31 bits, `true`/`false`, a
+  polymorphic variant of the attribute). The ppx writes the HTML string of
+  the value; `false` on a boolean attribute writes nothing.
+- Parts: every other child (`Part`, an element: components, holes, lists,
+  `Yuka.text e`, the empty string literal) and every other attribute
+  (`Part_attr`: computed values, holes, handlers, optional attributes).
+- The server and hydration use `Internal.expand`, the tree as `lower` makes
+  it. So the HTML and the hydration walk do not change.
+- Fresh client creation: on first use, per template and per context (HTML or
+  inside SVG), the client prints the shape with `Internal.template_html`
+  (parts write nothing), parses it in a `<template>` (inside `<svg>` for the
+  SVG context), imports the root, and computes a walk: for each node it
+  needs, the index of a node already found, then "first child" or "next
+  sibling", then a number of "next sibling" steps. Each instance is
+  `cloneNode(true)` and one run of the walk. Then child parts are mounted at
+  their place, then attribute parts are set.
+- A child part is placed before the next fixed sibling (or at the end of the
+  parent). Text separators: in the template, two fixed texts with only parts
+  between them get `<!---->`. After the parts that follow a fixed text, the
+  client removes that `<!---->` when the parts did not end with a text, or
+  adds one before the next fixed text when they did. The result is the DOM
+  that hydration of the server HTML gives.
+- After the first parse, the client checks once that the parsed DOM has the
+  shape of the template: one root, the same element names and the same
+  number of children along the whole tree, and the same static texts. The
+  HTML parser can change a tree (a `tbody` added in a `table`, a `p` closed
+  by a block, `template` children moved to `.content`, a leading newline
+  dropped in `pre` and `textarea`, `html`/`head`/`body` dropped, `\r\n`
+  read as `\n`, entities kept literal in `style` and `script`). When the
+  check fails, that template is not cloned: its instances are created from
+  the expanded tree, element by element.
+- A fixed `value` on a `select` is set as the property after the child parts
+  are mounted, as `lower` does.
+- The hoisted name carries the library and the file's module name
+  (`__yuka_template_<library>_<module>_N`), so a local open of another
+  module cannot capture it.
+
+### Marker rules
+
+- A `Hole` or `Each` that is the only child of an element writes no
+  markers. The client uses the element as the range: a hole replaces its
+  content (`textContent = ""`, then mount; a text stays one text node whose
+  `data` changes); a list appends rows at the end.
+- An `Each` item that renders one element has no item markers. Other items
+  keep `<!--[-->` and `<!--]-->`. A row is a range from its first to its last
+  node; for one element both are the element.
+- Kept: markers of a hole or list next to siblings, at the root, or in a
+  fragment; `Await` and `Slot` markers; `<!---->` between texts.
+
+### Removal
+
+- A row of one element is removed with one `remove` call.
+- When no row of a list stays (clear or replace), the client disposes every
+  row, then removes all rows in one call: `textContent = ""` when the list
+  owns its parent, otherwise a `Range` from the start marker to the stop
+  marker.
+

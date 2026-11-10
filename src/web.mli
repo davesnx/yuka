@@ -19,6 +19,11 @@ val next_sibling : node -> node option
 val parent_node : node -> node option
 val first_element_child : node -> node option
 val child_at : node -> int -> node
+val previous_sibling : node -> node option
+val last_child : node -> node option
+val clone_node : node -> bool -> node
+val walk : node -> int array -> node array
+val delete_between : node -> node -> node -> unit
 val append_child : node -> node -> unit
 val insert_before : node -> node -> node -> unit
 val remove : node -> unit

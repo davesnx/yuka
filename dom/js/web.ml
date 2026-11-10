@@ -175,6 +175,34 @@ external import_node : node -> node -> bool -> node = "importNode" [@@mel.send]
 let child_at : node -> int -> node =
   [%mel.raw "function (n, i) { return n.childNodes[i] }"]
 
+external previous_sibling : node -> node option = "previousSibling"
+[@@mel.get] [@@mel.return nullable]
+external last_child : node -> node option = "lastChild"
+[@@mel.get] [@@mel.return nullable]
+external clone_node : node -> bool -> node = "cloneNode" [@@mel.send]
+
+let walk : node -> int array -> node array =
+  [%mel.raw
+    {|function (root, w) {
+  const out = [root];
+  for (let i = 0; i < w.length; i += 2) {
+    let n = out[w[i] >> 1];
+    if ((w[i] & 1) === 0) n = n.firstChild;
+    for (let k = w[i + 1]; k > 0; k--) n = n.nextSibling;
+    out.push(n);
+  }
+  return out;
+}|}]
+
+let delete_between : node -> node -> node -> unit =
+  [%mel.raw
+    {|function (parent, start, stop) {
+  const r = parent.ownerDocument.createRange();
+  r.setStartAfter(start);
+  r.setEndBefore(stop);
+  r.deleteContents();
+}|}]
+
 let record_events : node -> (unit -> unit) * (unit -> unit) =
   [%mel.raw
     {|function (island) {

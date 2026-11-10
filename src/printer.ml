@@ -20,28 +20,43 @@ open Base
   let fill_script =
     "<script>window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};</script>"
 
-  let skeleton_html root =
+  let expand template parts =
+    let rec go = function
+      | Fixed_text s -> Text s
+      | Part i -> ( match parts.(i) with Child n -> n | Attribute _ | No_attribute -> Fragment [])
+      | Fixed_element { tag; attrs; children } ->
+          Element
+            {
+              tag;
+              attrs =
+                List.filter_map
+                  (function
+                    | Fixed (name, value) -> Some (Static (name, value))
+                    | Part_attr i -> (
+                        match parts.(i) with Attribute a -> Some a | Child _ | No_attribute -> None))
+                  attrs;
+              children = List.map go children;
+            }
+    in
+    go template.shape
+
+  let single_element = function Element _ | Template _ -> true | _ -> false
+
+  let template_html template =
     let b = Buffer.create 256 in
     let after_text = ref false in
     let select_value = ref None in
-    let marker m =
-      Buffer.add_string b m;
-      after_text := false
-    in
     let rec go = function
-      | Text "" -> ()
-      | Text t ->
+      | Fixed_text "" -> ()
+      | Fixed_text t ->
           if !after_text then Buffer.add_string b "<!---->";
           Buffer.add_string b (escape ~quote:false t);
           after_text := true
-      | Fragment children -> List.iter go children
-      | Template { node; _ } -> go node
-      | Hole _ | Await _ | Each _ | Island _ -> marker "<!--[--><!--]-->"
-      | Slot _ -> marker "<!--[$--><!--]-->"
-      | Element { tag; attrs; children } ->
+      | Part _ -> ()
+      | Fixed_element { tag; attrs; children } ->
           let resolved =
             List.filter_map
-              (function Static (name, value) -> Some (name, value) | _ -> None)
+              (function Fixed (name, value) -> Some (name, value) | Part_attr _ -> None)
               attrs
           in
           let value = List.assoc_opt "value" resolved in
@@ -84,7 +99,7 @@ open Base
             after_text := false
           end
     in
-    go root;
+    go template.shape;
     Buffer.contents b
 
   let session ~streaming ~islands_only =
@@ -165,7 +180,7 @@ open Base
               marker "<!--[-->";
               go (body ());
               marker "<!--]-->")
-      | Template { node; _ } -> go node
+      | Template { template; parts } -> go (expand template parts)
       | Slot { content; _ } ->
           marker "<!--[$-->";
           Option.iter go content;
@@ -219,12 +234,7 @@ open Base
           after_text := false
       | Each { items; key = _; equal = _; render } ->
           marker "<!--[-->";
-          List.iter
-            (fun item ->
-              marker "<!--[-->";
-              go (render item);
-              marker "<!--]-->")
-            (items ());
+          rows items render;
           marker "<!--]-->"
       | Element { tag; attrs; children } ->
           let resolved =
@@ -266,14 +276,30 @@ open Base
             | "select", _ ->
                 let outer = !select_value in
                 select_value := value;
-                List.iter go children;
+                contents children;
                 select_value := outer
-            | _ -> List.iter go children);
+            | _ -> contents children);
             Buffer.add_string b "</";
             Buffer.add_string b tag;
             Buffer.add_char b '>';
             after_text := false
           end
+    and contents = function
+      | [ Hole f ] -> go (f ())
+      | [ Each { items; key = _; equal = _; render } ] -> rows items render
+      | children -> List.iter go children
+    and rows : type a. (unit -> a list) -> (a -> node) -> unit =
+     fun items render ->
+      List.iter
+        (fun item ->
+          let n = render item in
+          if single_element n then go n
+          else begin
+            marker "<!--[-->";
+            go n;
+            marker "<!--]-->"
+          end)
+        (items ())
     in
     let previous = !server_rendering in
     let previous_session = !current_session in
