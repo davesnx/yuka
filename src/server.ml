@@ -243,21 +243,6 @@ let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ~sleep build =
          Buffer.add_string values (value_script id json);
          Async.resolved ()))
 
-let render_settled ?timeout ?preload ~sleep build =
-  settled ?timeout ?preload ~sleep build
-
-let respond ?(navigating = false) ?head:head_html ?early ?import_map ?timeout
-    ?title ?styles ?scripts ?preload ~sleep ~write build =
-  if navigating then
-    Async.bind (render_settled ?timeout ?preload ~sleep build) (fun body ->
-        write
-          (head ~extra:"" ?head:head_html ?early ?import_map ?title ?styles
-             ?scripts ()
-          ^ body ^ "</body></html>"))
-  else
-    stream ?head:head_html ?early ?import_map ?timeout ?title ?styles ?scripts
-      ?preload ~sleep ~write build
-
 let normalize path =
   let rec go p =
     if String.length p >= 2 && String.sub p 0 2 = "./" then

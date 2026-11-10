@@ -8,7 +8,8 @@
 
 (rule
  (alias runtest)
+ (package yuka)
  (deps
   (alias melange-tests))
  (action
-  (run node %{dep:out/test/router/client/run.js})))
+  (run node %{dep:out/test/navigation/run.js})))

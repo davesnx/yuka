@@ -1,0 +1,11 @@
+let routes =
+  <Router layout=App.root not_found=App.not_found headers=[ ("x-site", "test") ]>
+    <Route name=Home path="/" page=App.home prerender=true />
+    <Route name=Docs path="/docs" page=App.docs prerender=true />
+    <Group path="/post/:slug<string>" loader=App.post prerender=true>
+      <Route name=Post path="/" page=App.post_page />
+    </Group>
+    <Route name=Secret path="/secret" page=App.secret />
+    <Route name=Page path="/:parts<string...>" page=App.page prerender=true />
+    <Endpoint name=Feed path="/feed.xml" method_=`GET handler=App.feed prerender=true />
+  </Router>

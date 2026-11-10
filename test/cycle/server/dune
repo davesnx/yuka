@@ -16,5 +16,6 @@
 
 (rule
  (alias runtest)
+ (package yuka)
  (action
   (diff routes_server.expected routes_server.ml)))

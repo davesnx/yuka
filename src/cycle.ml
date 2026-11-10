@@ -79,14 +79,15 @@ type 'req app =
   | App : {
       build : string;
       headers : (string * string) list;
+      prerender : string list;
       find : Router.meth -> string list -> (string * string) list -> 'r Router.lookup;
       resolve : 'req -> 'r -> target;
       missing : fallback;
     }
       -> 'req app
 
-let app ~build ~headers ~find ~resolve ~missing =
-  App { build; headers = merge_headers [ headers ]; find; resolve; missing }
+let app ~build ~headers ~prerender ~find ~resolve ~missing =
+  App { build; headers = merge_headers [ headers ]; prerender; find; resolve; missing }
 
 let build_id (App a) = a.build
 
@@ -163,6 +164,7 @@ type config = {
   styles : string list;
   head : string;
   timeout : float;
+  prerendered : string option;
 }
 
 let public_prefix (prefix, dir) =
@@ -173,14 +175,19 @@ let public_prefix (prefix, dir) =
        ^ " has no segment; it would hide every route")
   | segments -> (segments, dir)
 
-let config ?assets ?(public = []) ?(styles = []) ?(head = "") ?(timeout = 10.) () =
+let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(head = "") ?(timeout = 10.) () =
   {
     assets;
     public = List.map public_prefix public;
     styles;
     head;
     timeout;
+    prerendered;
   }
+
+let served_dirs config =
+  Option.to_list (Option.map (fun (a : assets) -> ("/_yuka", a.dir)) config.assets)
+  @ List.map (fun (prefix, dir) -> ("/" ^ String.concat "/" prefix, dir)) config.public
 
 type request = {
   meth : Router.meth;
@@ -233,6 +240,7 @@ type env = {
   navigating : bool;
   current : string;
   root_headers : (string * string) list;
+  exists : root:string -> path:string -> bool;
 }
 
 let outlet key inner =
@@ -404,6 +412,25 @@ let file_path raw =
 
 let asset_miss () = plain 404 "Not Found" []
 
+let prerender_file target =
+  let path, _ = Router.split_target target in
+  let parts = Router.split_path path in
+  let decoded = List.map (Router.decode ~plus:false) parts in
+  if not (List.for_all valid_file_segment decoded) then None
+  else
+    match List.rev decoded with
+    | [] -> Some "index.html"
+    | last :: _ when String.contains last '.' -> Some (String.concat "/" decoded)
+    | _ -> Some (String.concat "/" (decoded @ [ "index.html" ]))
+
+let prerendered_file env (rules : rules) (r : request) ~path ~query =
+  match (env.config.prerendered, r.meth, query) with
+  | Some root, (`GET | `HEAD), (None | Some "") when rules.prerender && not env.navigating -> (
+      match prerender_file path with
+      | Some file when env.exists ~root ~path:file -> Some (root, file)
+      | _ -> None)
+  | _ -> None
+
 let serve_file meth ~root ~headers raw =
   match meth with
   | `GET | `HEAD -> (
@@ -452,15 +479,18 @@ let route env (App a) req (r : request) ~path ~raw ~query =
       match a.resolve req found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
       | Page { rules; guards; load; fallback } ->
-          page_or_error
-            (Async.bind (run_guards guards) (function
-              | Error stop -> stopped env fallback path stop
-              | Ok () ->
-                  Async.bind (protect load) (function
-                    | Error stop -> stopped env fallback path stop
-                    | Ok plan ->
-                        let headers = rule_cache rules (html_headers rules.headers []) in
-                        show env ~status:200 ~headers ~fallback plan.layers (fun () -> plan.page))))
+          Async.bind (run_guards guards) (function
+            | Error stop -> page_or_error (stopped env fallback path stop)
+            | Ok () -> (
+                let headers = rule_cache rules (html_headers rules.headers []) in
+                match prerendered_file env rules r ~path ~query with
+                | Some (root, file) -> Async.resolved (File { root; path = file; headers })
+                | None ->
+                    page_or_error
+                      (Async.bind (protect load) (function
+                        | Error stop -> stopped env fallback path stop
+                        | Ok plan ->
+                            show env ~status:200 ~headers ~fallback plan.layers (fun () -> plan.page)))))
       | Handler { rules; same_origin; guards; run } ->
           page_or_error
             (Async.bind (run_guards guards) (function
@@ -492,7 +522,7 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                             Async.resolved { resp with headers }))
                       (fail_page env a.missing))))
 
-let handle config (App a as app) ~sleep req (r : request) =
+let handle config (App a as app) ~sleep ~exists req (r : request) =
   let path, query = Router.split_target r.target in
   let env =
     {
@@ -502,6 +532,7 @@ let handle config (App a as app) ~sleep req (r : request) =
       navigating = Option.is_some (r.header "yuka-navigate");
       current = path;
       root_headers = a.headers;
+      exists;
     }
   in
   let parts = String.split_on_char '/' path in
@@ -543,6 +574,9 @@ let handle config (App a as app) ~sleep req (r : request) =
   in
   let bodyless = function
     | Respond r when env.head_only -> Respond { r with body = String "" }
+    | File { root; path; headers } when env.head_only ->
+        if exists ~root ~path then Respond (empty 200 headers)
+        else Respond { (asset_miss ()) with body = String "" }
     | outcome -> outcome
   in
   let last () = Respond (internal_error ()) in
@@ -571,6 +605,7 @@ module type ADAPTER = sig
   val body : request -> string Async.t
   val respond : http_response -> response io
   val file : request -> root:string -> path:string -> headers:(string * string) list -> response io
+  val exists : root:string -> path:string -> bool
   val of_async : 'a Async.t -> 'a io
   val bind : 'a io -> ('a -> 'b io) -> 'b io
   val sleep : float -> unit Async.t
@@ -586,7 +621,101 @@ module Make (A : ADAPTER) = struct
         body = (fun () -> A.body req);
       }
     in
-    A.bind (A.of_async (handle config app ~sleep:A.sleep req view)) (function
+    A.bind (A.of_async (handle config app ~sleep:A.sleep ~exists:A.exists req view)) (function
       | Respond r -> A.respond r
       | File { root; path; headers } -> A.file req ~root ~path ~headers)
 end
+
+let prerender_seeds (App a) = a.prerender
+
+let prerenderable config (App a) req target =
+  let path, _ = Router.split_target target in
+  let raw = Router.split_path path in
+  let served =
+    (match raw with "_yuka" :: _ -> true | _ -> false)
+    || List.exists (fun (prefix, _) -> Option.is_some (strip_prefix prefix raw)) config.public
+  in
+  (not served)
+  &&
+  match a.find `GET (List.map (Router.decode ~plus:false) raw) [] with
+  | Router.Found found -> (
+      match a.resolve req found with
+      | Page { rules; _ } | Handler { rules; _ } -> rules.prerender
+      | exception _ -> false)
+  | _ -> false
+
+let char_ref name =
+  match name with
+  | "amp" -> Some 38
+  | "lt" -> Some 60
+  | "gt" -> Some 62
+  | "quot" -> Some 34
+  | "apos" -> Some 39
+  | _ when String.length name > 2 && name.[0] = '#' && (name.[1] = 'x' || name.[1] = 'X') ->
+      int_of_string_opt ("0x" ^ String.sub name 2 (String.length name - 2))
+  | _ when String.length name > 1 && name.[0] = '#' ->
+      let digits = String.sub name 1 (String.length name - 1) in
+      if String.for_all (fun c -> c >= '0' && c <= '9') digits then int_of_string_opt digits else None
+  | _ -> None
+
+let entity text =
+  let n = String.length text in
+  let b = Buffer.create n in
+  let rec go i =
+    if i < n then
+      let next =
+        if text.[i] <> '&' then None
+        else
+          match String.index_from_opt text i ';' with
+          | Some j -> (
+              match char_ref (String.sub text (i + 1) (j - i - 1)) with
+              | Some code when Uchar.is_valid code -> Some (Uchar.of_int code, j + 1)
+              | _ -> None)
+          | None -> None
+      in
+      match next with
+      | Some (u, after) ->
+          Buffer.add_utf_8_uchar b u;
+          go after
+      | None ->
+          Buffer.add_char b text.[i];
+          go (i + 1)
+  in
+  go 0;
+  Buffer.contents b
+
+let links html =
+  let marker = "href=\"" in
+  let n = String.length marker in
+  let rec scan from acc =
+    match Server.find_from html marker from with
+    | None -> List.rev acc
+    | Some i -> (
+        let start = i + n in
+        match String.index_from_opt html start '"' with
+        | None -> List.rev acc
+        | Some stop ->
+            let raw = entity (String.sub html start (stop - start)) in
+            let path, _ = Router.split_target raw in
+            let local =
+              String.length path > 0 && path.[0] = '/'
+              && not (String.length path > 1 && (path.[1] = '/' || path.[1] = '\\'))
+            in
+            let acc = if local && not (List.mem path acc) then path :: acc else acc in
+            scan (stop + 1) acc)
+  in
+  scan 0 []
+
+let missing_page config (App a) ~sleep =
+  let env =
+    {
+      config;
+      sleep;
+      head_only = false;
+      navigating = false;
+      current = "";
+      root_headers = a.headers;
+      exists = (fun ~root:_ ~path:_ -> false);
+    }
+  in
+  not_found_page env a.missing "/404.html"

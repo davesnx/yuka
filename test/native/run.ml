@@ -73,7 +73,7 @@ let value_script id json =
 
 let stream ?head ?early ?import_map ?timeout ?(sleep = never_sleep) ?title
     ?styles ?scripts build write =
-  Server.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts
+  Yuka.Private.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts
     ~sleep ~write build
 
 let page_cases =
@@ -122,7 +122,7 @@ let page_cases =
   let respond () =
     let write, chunks = recorder () in
     get
-      (Server.respond ~sleep:never_sleep ~write (fun () -> Yuka.text "x"));
+      (Yuka.Private.stream ~sleep:never_sleep ~write (fun () -> Yuka.text "x"));
     check string "body"
       "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title></title></head><body>x</body></html>"
       (String.concat "" (chunks ()))
@@ -180,7 +180,7 @@ let json_type = Some "application/json"
 
 let post ?(content_type = json_type) ?(origin = None) ?(host = Some "x.test")
     name body =
-  get (Server.handle_action ~name ~content_type ~origin ~host ~body)
+  get (Yuka.Private.handle_action ~name ~content_type ~origin ~host ~body)
 
 let logged f =
   let messages = ref [] in
@@ -519,7 +519,7 @@ let stream_cases =
     let a, resolve, _ = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Server.respond ~sleep:never_sleep ~write (fun () -> text_await a "a")
+      Yuka.Private.stream ~sleep:never_sleep ~write (fun () -> text_await a "a")
     in
     resolve 1;
     get p;
@@ -636,7 +636,7 @@ let page_extra_cases =
   let respond_head () =
     let write, chunks = recorder () in
     get
-      (Server.respond ~head:"<i></i>" ~import_map:[ ("p/", "/p/") ]
+      (Yuka.Private.stream ~head:"<i></i>" ~import_map:[ ("p/", "/p/") ]
          ~sleep:never_sleep ~write
          (fun () -> Yuka.text "x"));
     let body = String.concat "" (chunks ()) in
@@ -650,16 +650,16 @@ let page_extra_cases =
       [ ("@scope/pkg/", "/static/js/node_modules/@scope/pkg/");
         ("melange/", "/static/js/node_modules/melange/");
         ("yuka-client/", "/static/js/node_modules/yuka-client/") ]
-      (Server.import_map ~url:"/static/js/"
+      (Yuka.Private.import_map ~url:"/static/js/"
          [ "@scope/pkg"; "melange"; "yuka-client" ]);
     check
       (list (pair string string))
       "no trailing slash on the url" [ ("a/", "/x/node_modules/a/") ]
-      (Server.import_map ~url:"/x" [ "a" ]);
+      (Yuka.Private.import_map ~url:"/x" [ "a" ]);
     check
       (list (pair string string))
       "no packages" []
-      (Server.import_map ~url:"/x" [])
+      (Yuka.Private.import_map ~url:"/x" [])
   in
   [ test_case "page head and import map" `Quick page_head;
     test_case "no import map by default" `Quick no_import_map;
@@ -679,7 +679,7 @@ let reject_cases =
   in
   let after_a_wait () =
     let waiting =
-      Server.handle_action ~name:"rejecting_late" ~content_type:json_type
+      Yuka.Private.handle_action ~name:"rejecting_late" ~content_type:json_type
         ~origin:None ~host:(Some "x.test") ~body:"1"
     in
     check bool "pending" true (is_pending waiting);
@@ -837,7 +837,7 @@ let timeout_cases =
 let settled_cases =
   let open Alcotest in
   let render ?timeout ?(sleep = never_sleep) build =
-    Server.render_settled ?timeout ~sleep build
+    Yuka.Private.settled ?timeout ~sleep build
   in
   let simple () =
     let a, resolve_a, _ = Async.make () in
@@ -992,12 +992,6 @@ let navigation_cases =
     check bool "stream head" true
       (contains (List.hd (chunks ()))
          "<script type=\"module\" async src=\"/a.js\"></script>");
-    let write, chunks = recorder () in
-    get
-      (Server.respond ~early:true ~scripts:[ "/a.js" ] ~sleep:never_sleep ~write
-         (fun () -> Yuka.text "x"));
-    check bool "respond head" true
-      (contains (String.concat "" (chunks ())) "async src=\"/a.js\"")
   in
   let build () =
     let a, resolve, _ = Async.make () in
@@ -1011,25 +1005,10 @@ let navigation_cases =
   in
   let navigation () =
     let view, release = build () in
-    let write, chunks = recorder () in
-    let p =
-      Server.respond ~navigating:true ~title:"T" ~scripts:[ "/m.js" ]
-        ~sleep:never_sleep ~write view
-    in
+    let p = Yuka.Private.settled ~sleep:never_sleep view in
     check bool "waits for the values" true (is_pending p);
-    check int "nothing written yet" 0 (List.length (chunks ()));
     release ();
-    get p;
-    let body =
-      match chunks () with [ one ] -> one | l -> failf "%d writes" (List.length l)
-    in
-    let view2, release2 = build () in
-    let settled = Server.render_settled ~sleep:never_sleep view2 in
-    release2 ();
-    check string "document"
-      ("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>T</title><script type=\"module\" src=\"/m.js\"></script></head><body>"
-      ^ get settled ^ "</body></html>")
-      body;
+    let body = get p in
     check bool "values included" true
       (contains body "data-yuka-async=\"a1\">{\"ok\":5}</script>");
     check bool "values filled in place" true
@@ -1040,33 +1019,23 @@ let navigation_cases =
   let normal_request () =
     let view, release = build () in
     let write, chunks = recorder () in
-    let p = Server.respond ~sleep:never_sleep ~write view in
+    let p = Yuka.Private.stream ~sleep:never_sleep ~write view in
     release ();
     get p;
     check bool "streamed with fills" true
       (contains (String.concat "" (chunks ())) "<template data-yuka-fill=\"s1\">");
-    check bool "several writes" true (List.length (chunks ()) > 1);
-    let view, release = build () in
-    let write, chunks = recorder () in
-    let p = Server.respond ~navigating:false ~sleep:never_sleep ~write view in
-    release ();
-    get p;
-    check bool "navigating false streams" true
-      (contains (String.concat "" (chunks ())) "<template data-yuka-fill=")
+    check bool "several writes" true (List.length (chunks ()) > 1)
   in
   let navigation_timeout () =
     let never, _, _ = Async.make () in
     let sleep, fire, requested = manual_sleep () in
-    let write, chunks = recorder () in
     let p =
-      Server.respond ~navigating:true ~timeout:0.05 ~sleep ~write (fun () ->
+      Yuka.Private.settled ~timeout:0.05 ~sleep (fun () ->
           text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) never "a")
     in
     check (list (float 0.)) "the given timeout is used" [ 0.05 ] (requested ());
     fire ();
-    get p;
-    check bool "timeout applies" true
-      (contains (String.concat "" (chunks ())) "E:timeout")
+    check bool "timeout applies" true (contains (get p) "E:timeout")
   in
   [ test_case "early scripts" `Quick early_head;
     test_case "navigation request is settled" `Quick navigation;
@@ -1171,7 +1140,7 @@ let loading_cases =
   let preload name = Some ("/js/" ^ name ^ ".js") in
   let shell ?preload build =
     let write, chunks = recorder () in
-    get (Server.stream ?preload ~sleep:never_sleep ~write build);
+    get (Yuka.Private.stream ?preload ~sleep:never_sleep ~write build);
     List.nth (chunks ()) 1
   in
   let data_start () =
@@ -1222,7 +1191,7 @@ let loading_cases =
     let a, resolve, _ = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Server.stream ~preload ~sleep:never_sleep ~write (fun () ->
+      Yuka.Private.stream ~preload ~sleep:never_sleep ~write (fun () ->
           Yuka.fragment
             [ isl "A";
               Yuka.Await.make ~async:a ~loading:Yuka.empty
@@ -1239,12 +1208,8 @@ let loading_cases =
     check bool "B not in the shell" false (contains shell "/js/B.js")
   in
   let respond_navigating () =
-    let write, chunks = recorder () in
-    get
-      (Server.respond ~navigating:true ~preload ~sleep:never_sleep ~write
-         (fun () -> isl "A"));
-    check int "link in the single write" 1
-      (count (String.concat "" (chunks ())) (link "/js/A.js"))
+    check int "link in the settled body" 1
+      (count (get (Yuka.Private.settled ~preload ~sleep:never_sleep (fun () -> isl "A"))) (link "/js/A.js"))
   in
   let outer_open = "<yuka-island data-name=\"Outer\"" in
   let between out =
@@ -1306,7 +1271,7 @@ let loading_cases =
     let a, resolve, _ = Async.make () in
     let write, chunks = recorder () in
     let p =
-      Server.stream ~preload ~sleep:never_sleep ~write (fun () ->
+      Yuka.Private.stream ~preload ~sleep:never_sleep ~write (fun () ->
           Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () ->
               Yuka.Private.element
                 (Yuka.Private.node
@@ -1334,7 +1299,7 @@ let loading_cases =
   in
   let manifest = {|{"Demo_shared.A":"./islands/a.js","Demo_shared.B":"demo/shared/b.js"}|} in
   let urls () =
-    let f = Server.preload_urls ~manifest ~base:"/assets/" () in
+    let f = Yuka.Private.preload_urls ~manifest ~base:"/assets/" () in
     check (option string) "leading ./ removed" (Some "/assets/islands/a.js")
       (f "Demo_shared.A");
     check (option string) "plain path" (Some "/assets/demo/shared/b.js")
@@ -1345,11 +1310,11 @@ let loading_cases =
     {|{"inputs":{},"outputs":{"dist/a-3F2A.js":{"entryPoint":"islands/a.js","bytes":10},"dist/chunk-X.js":{"bytes":5},"dist/b-9.js":{"entryPoint":"app/demo/shared/b.js"}}}|}
   in
   let urls_metafile () =
-    let f = Server.preload_urls ~manifest ~base:"/" ~metafile () in
+    let f = Yuka.Private.preload_urls ~manifest ~base:"/" ~metafile () in
     check (option string) "exact" (Some "/dist/a-3F2A.js") (f "Demo_shared.A");
     check (option string) "suffix only is no match" None (f "Demo_shared.B");
     let g =
-      Server.preload_urls ~manifest:{|{"X":"other.js"}|} ~base:"/" ~metafile ()
+      Yuka.Private.preload_urls ~manifest:{|{"X":"other.js"}|} ~base:"/" ~metafile ()
     in
     check (option string) "no output" None (g "X")
   in
@@ -1357,19 +1322,19 @@ let loading_cases =
     let metafile =
       {|{"outputs":{"o/long.js":{"entryPoint":"x/islands/a.js"},"o/exact.js":{"entryPoint":"./islands/a.js"}}}|}
     in
-    let f = Server.preload_urls ~manifest ~base:"" ~metafile () in
+    let f = Yuka.Private.preload_urls ~manifest ~base:"" ~metafile () in
     check (option string) "exact first" (Some "o/exact.js") (f "Demo_shared.A")
   in
   let urls_bad () =
     let bad f = match f () with _ -> false | exception Invalid_argument _ -> true in
     check bool "bad manifest" true
-      (bad (fun () -> Server.preload_urls ~manifest:"{" ~base:"" ()));
+      (bad (fun () -> Yuka.Private.preload_urls ~manifest:"{" ~base:"" ()));
     check bool "manifest not an object" true
-      (bad (fun () -> Server.preload_urls ~manifest:"[]" ~base:"" ()));
+      (bad (fun () -> Yuka.Private.preload_urls ~manifest:"[]" ~base:"" ()));
     check bool "bad metafile" true
-      (bad (fun () -> Server.preload_urls ~manifest ~base:"" ~metafile:"x" ()));
+      (bad (fun () -> Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"x" ()));
     check bool "metafile without outputs" true
-      (bad (fun () -> Server.preload_urls ~manifest ~base:"" ~metafile:"{}" ()))
+      (bad (fun () -> Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"{}" ()))
   in
   [ test_case "data-start from the trigger" `Quick data_start;
     test_case "preload once per island name" `Quick once;

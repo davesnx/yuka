@@ -8,6 +8,7 @@
 
 (rule
  (alias runtest)
+ (package yuka)
  (deps
   (alias melange-templates))
  (action

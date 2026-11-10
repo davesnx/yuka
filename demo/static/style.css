@@ -54,7 +54,7 @@ h1, h2, p { margin: 0; }
 .nav { display: flex; flex-direction: column; gap: 1px; }
 .nav-link { padding: 5px 8px; border-radius: 5px; color: var(--muted); }
 .nav-link:hover { background: var(--bg-hover); color: var(--text); }
-.nav-link.active { background: var(--bg-selected); color: var(--text); }
+.nav-link[aria-current=page] { background: var(--bg-selected); color: var(--text); }
 
 .sidebar-extra { margin-top: auto; padding: 4px 8px; }
 .counter-button {

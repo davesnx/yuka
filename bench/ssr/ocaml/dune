@@ -5,7 +5,7 @@
 (executables
  (names yuka_ssr dream_concat)
  (modules yuka_ssr dream_concat)
- (libraries ssr_data yuka dream lwt lwt.unix)
+ (libraries ssr_data yuka yuka-dream dream lwt lwt.unix)
  (preprocess
   (per_module
    ((pps yuka.ppx) yuka_ssr))))

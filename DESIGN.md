@@ -139,7 +139,7 @@ markers everywhere: the client hydrates their output.
   - Pending, streaming: `<!--[sN-->` `loading` `<!--]-->`. N counts from 1
     in one response. A comment whose text starts with `[` is a hole start
     for hydration, so `[s1` is one too.
-- Streaming (`Yuka.Server.respond`, and `Yuka.Server.stream ~sleep ~write build`):
+- Streaming (the request cycle sends it; tests call `Yuka.Private.stream`):
   1. One chunk: the document head (title, the inline script below when
      the shell has a pending `Await`, styles, module scripts) and `<body>`. Then one chunk: the shell (the tree with
      loading elements).
@@ -184,7 +184,8 @@ markers everywhere: the client hydrates their output.
 - `Yuka.Action.call create_issue input : Issue.t Async.t`. On the client it
   is a `POST /_yuka/action/create_issue` with JSON. On the server it calls
   the implementation directly (installed by the first `implement`).
-- Wire format of `Yuka.Server.handle_action` for `POST /_yuka/action/:name`: the body
+- Wire format of the action call `POST /_yuka/action/:name` (the request
+  cycle answers it; `Yuka.Private.handle_action` in tests): the body
   is the JSON input. The answer is JSON: `{"ok": output}` with 200, or
   `{"error": message}` with:
   - 403: an `Origin` header that does not match the request `Host`
@@ -206,8 +207,10 @@ markers everywhere: the client hydrates their output.
 
 ## Router
 
-- Pages are server routes in Dream (a multi-page app). `yuka.router` stays
-  out of v0.1 (decided 2026-11-05).
+- Pages are server routes (a multi-page app). Since 2026-11-10 they come
+  from `Routes.mlx` through `yuka-routes` and the request cycle; see
+  "Routes.mlx generator", "Request cycle" and "yuka-dream". The typed
+  path GADT of `Yuka.Router` is gone.
 
 ## Demo: mini Linear
 
@@ -530,6 +533,10 @@ Lwt bridges live in the app). `Yuka.await` is now `<Yuka.Await>`.
     had `Yuka-Navigate: 1`.
 - The demo holds the Dream glue (a few lines): the action route, the page
   response, and Lwt <-> `Async` bridges.
+- 2026-11-10: replaced by the request cycle (`Yuka.Server.handle`, `Make`)
+  and the `yuka-dream` package. `stream`, `render_settled`, `respond`,
+  `handle_action`, `preload_urls` and `import_map` left the public
+  `Yuka.Server`; tests reach the first ones through `Yuka.Private`.
 
 ### `<Yuka.Await>`
 
@@ -774,7 +781,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   `data-start` is printed as before, from the trigger; the client needs no
   other attribute: it always imports the island at its start, and the
   preload makes that a cache hit.
-- The server needs the island URL. `Yuka.Server.respond ?preload` takes a
+- The server needs the island URL (since 2026-11-10, `Yuka.Server.modules`
+  and `bundle` build the function from the manifest). `Yuka.Server.respond ?preload` took a
   function from island name to URL; without it, no preload links. The app
   builds it: `yuka-islands --manifest` prints JSON
   `{ "<island name>": "<path relative to the emit directory>" }`, and
@@ -1165,9 +1173,8 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
 ## Request cycle (2026-11-10)
 
 Spec: `.workplace/docs/routes-spec.md`, increment 2; its section 8 lists
-what changed from the spec. `yuka-dream`, the demo migration and the
-navigation protocol come later; the GADT `Yuka.Router` and
-`Server.respond` stay until then.
+what changed from the spec. `yuka-dream` and the demo migration are in
+"yuka-dream"; the navigation protocol comes later.
 
 - `src/cycle.ml`, included in `Yuka.Server`: the types the generated code
   names (`stop`, `page`, `layer`, `plan`, `cache`, `rules`, `response`,
@@ -1254,3 +1261,68 @@ navigation protocol come later; the GADT `Yuka.Router` and
   server output with `-open Shadow` (`List`, `String`, `Ok`, `Error`, `^`,
   `=` and others hidden), so it names the standard library only through
   `Stdlib`.
+
+## yuka-dream, demo on Routes.mlx, prerender (2026-11-10)
+
+Spec: `.workplace/docs/routes-spec.md`, increment 3 (tickets 09, 11 and
+19); its section 8 lists what changed from the spec.
+
+- Package `yuka-dream` (`dream/`, library `yuka_dream`): `handler`,
+  `prerender`, `to_async`, `to_lwt`. `yuka` has no Dream dependency.
+  `handler` sets `Yuka.Server.log_error` to `Dream.error`. A `Stream` body
+  is a `Dream.stream` that flushes each chunk; a file is
+  `Dream.from_filesystem` with the cycle's headers (a 404 gets
+  `no-store`).
+- Removed from `yuka`: the path GADT of `Yuka.Router` (`t`, `root`, `s`,
+  `string`, `int`, `/`, `href`, `parse`, `query`, `case`, `dispatch`) and,
+  from `Yuka.Server`, `respond`, `stream`, `render_settled`,
+  `handle_action`, `preload_urls`, `import_map`. `Yuka.Private` keeps
+  `stream`, `settled`, `handle_action`, `preload_urls` and `import_map`
+  for tests. `Router` keeps `decode`, `split_target`, `split_path` and
+  `query` inside the library for the cycle.
+- Prerender. The pure parts are in `Yuka.Server`: `prerender_seeds` (the
+  generated `~prerender` list: `GET` nodes with no param and
+  `prerender=true`), `prerenderable` (find, then the rules of the target),
+  `links`, `prerender_file`, `missing_page` (the `404.html`) and
+  `served_dirs`. `Yuka_dream.prerender` runs each path through the cycle
+  with a second adapter whose `exists` is always false (so it never reads
+  an earlier output), writes 2xx answers, warns on stderr for others,
+  follows links of HTML answers, then writes `404.html` and copies the
+  served directories.
+- Serving prerendered files: `config ~prerendered:dir`. For a page whose
+  rules say `prerender`, a `GET` or `HEAD` with no query and no
+  `Yuka-Navigate` is answered with its file after the guards, instead of
+  the loaders, with the page headers. A missing file renders the page.
+  `ADAPTER` has `exists ~root ~path` for this.
+- Demo: `demo/Routes.mlx`; the shell layout is on a `Group path="/"`, so
+  `/about` (prerender) is outside it and has no island. Generated
+  `Routes` in `demo_shared` and `Routes_server` in `demo_app`;
+  `Pages.not_found` shows "Issue not found" for `/issue/:id`, else "Page
+  not found". `Shell` lost `~active`; the CSS styles
+  `.nav-link[aria-current=page]`. `demo_server.ml` builds `config` and calls
+  `Yuka_dream.handler`, or `Yuka_dream.prerender` with `--prerender DIR`;
+  `--prerendered DIR` serves the files. Client files moved from
+  `/static/js/` and `/static/bundle/` to `/_yuka/`.
+- A tree whose functions never fix the request type gives
+  `Routes_server.app` a weak type variable; the demo writes
+  `(_ : Dream.request)` in `Loaders.issue` and `Handlers.issues_json`.
+- Bench `bench/ssr`: `yuka-stream` is now `Yuka_dream.handler` with a
+  hand-built `Yuka.Server.app` (the page has no `Await`, so no fill
+  script).
+- Size: `make size`: keyed app 11003 B gzip (budget 11345 B), demo chunks
+  35834 B gzip (36608 B before; the GADT is gone). `make measure-pages`:
+  `/about` loads 0 bytes of JavaScript.
+- Tests: `dream/test` (prerender: seeds, crawled links, a 404 link
+  skipped with a warning, links to another origin and to pages without
+  `prerender` not followed, `404.html`, copied public files, two runs give
+  the same files; `handler ~prerendered` serves files), `demo/test`
+  through `Dream.test` (the requests of the spec), `test/cycle` (prerender
+  helpers, prerendered files, query decoding). `test/router` (GADT) is
+  removed; its client navigation tests moved to `test/navigation`.
+- Review fixes (2026-11-10): each test and `runtest` rule names its
+  package, so `dune build -p yuka @runtest` and `-p yuka-dream @runtest`
+  each run alone. `HEAD` on a file answers from `exists`, without the file.
+  `prerenderable` skips `/_yuka/` and public paths. `prerender` refuses an
+  `out` inside a served directory. `not_found` and `error` pages get the
+  params of their node's path (the demo shows the decoded issue id).
+  `links` decodes numeric character references.

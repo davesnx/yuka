@@ -4,7 +4,7 @@ module App = Cycle_server.App
 
 type reply = { status : int; headers : (string * string) list; body : string }
 
-let files = [ ("js/app/main.js", "main"); ("pub/s.css", "css"); ("b/bundle/chunk-X1.js", "c"); ("b/bundle/main.js", "m") ]
+let files = [ ("pre/plain/index.html", "prerendered plain"); ("js/app/main.js", "main"); ("pub/s.css", "css"); ("b/bundle/chunk-X1.js", "c"); ("b/bundle/main.js", "m") ]
 let file_calls = ref []
 
 module Test_adapter = struct
@@ -27,6 +27,8 @@ module Test_adapter = struct
           (f (fun s ->
                Buffer.add_string b s;
                Async.resolved ()))
+
+  let exists ~root ~path = List.mem_assoc (root ^ "/" ^ path) files
 
   let file _ ~root ~path ~headers =
     let name = root ^ "/" ^ path in
@@ -221,6 +223,82 @@ let assets =
         Alcotest.(check string) "body" {|{"error":"unknown action x"}|} r.body );
   ]
 
+let prerender =
+  let prerendered = Server.config ~assets:modules ~public:[ ("/static", "pub") ] ~prerendered:"pre" () in
+  let app = Cycle_server.Routes_server.app in
+  [
+    ( "a prerendered page is its file, after the guards",
+      fun () ->
+        let r = get ~config:prerendered "/plain" in
+        check_status r 200;
+        Alcotest.(check string) "file" "prerendered plain" r.body;
+        check_header r "content-type" [ "text/html; charset=utf-8" ];
+        check_header r "x-frame-options" [ "DENY" ];
+        check_header r "cache-control" [ "no-store" ];
+        Alcotest.(check (list string)) "asked" [ "pre/plain/index.html" ] !file_calls );
+    ( "HEAD on a file has no body",
+      fun () ->
+        List.iter
+          (fun (config, target, status) ->
+            let r = get ~config ~meth:`HEAD target in
+            check_status r status;
+            Alcotest.(check string) ("no body for " ^ target) "" r.body)
+          [ (prerendered, "/plain", 200); (config, "/_yuka/app/main.js", 200);
+            (config, "/static/s.css", 200); (config, "/_yuka/nope.js", 404) ];
+        let r = get ~config:prerendered ~meth:`HEAD "/plain" in
+        check_header r "content-type" [ "text/html; charset=utf-8" ] );
+    ( "a prerendered page is rendered with a query, Yuka-Navigate or no file",
+      fun () ->
+        let rendered r = check_true "rendered" (contains r.body "<p>plain</p>") in
+        rendered (get ~config:prerendered "/plain?x=1");
+        rendered (get ~config:prerendered ~headers:[ ("Yuka-Navigate", "1") ] "/plain");
+        rendered (get "/plain");
+        Alcotest.(check (list string)) "no file" [] !file_calls;
+        let r = get ~config:prerendered "/feed.xml" in
+        Alcotest.(check string) "endpoints are not served from files" "feed" r.body );
+    ( "seeds and prerenderable paths",
+      fun () ->
+        Alcotest.(check (list string)) "seeds" [ "/plain"; "/feed.xml" ] (Server.prerender_seeds app);
+        let req = request "/" in
+        List.iter
+          (fun (path, expected) -> Alcotest.(check bool) path expected (Server.prerenderable config app req path))
+          [ ("/plain", true); ("/plain?x=1#y", true); ("/feed.xml", true); ("/", false); ("/nowhere", false);
+            ("/team/a/1", false); ("/_yuka/app/main.js", false); ("/static/s.css", false) ] );
+    ( "links of a page",
+      fun () ->
+        Alcotest.(check (list string)) "links"
+          [ "/a"; "/b&c"; "/"; "/caf%C3%A9"; "/c/d"; "/eA"; "/f\xc3\xa9&bogus;&amp" ]
+          (Server.links
+             {|<a href="/a?x=1#y"></a><a href="//evil.com/x"></a><a href="https://e.com/"></a><a href="/b&amp;c"></a><link href="/"><a href="/a"><a href="#top"><a href="/caf%C3%A9"><a href="&#x2F;c&#47;d"><a href="/e&#X41;"><a href="/f&#233;&bogus;&amp;amp">|}) );
+    ( "file of a path",
+      fun () ->
+        List.iter
+          (fun (path, expected) -> Alcotest.(check (option string)) path expected (Server.prerender_file path))
+          [ ("/", Some "index.html"); ("/a/b", Some "a/b/index.html"); ("/feed.xml", Some "feed.xml");
+            ("/caf%C3%A9", Some "caf\xc3\xa9/index.html"); ("/%2e%2e/x", None); ("/a%2Fb", None);
+            ("/a?q=1", Some "a/index.html") ] );
+    ( "the 404 page of the app",
+      fun () ->
+        match Async.status (Server.missing_page config app ~sleep:Test_adapter.sleep) with
+        | Async.Done resp -> (
+            match Async.status (Test_adapter.respond resp) with
+            | Async.Done r ->
+                check_status r 404;
+                check_true "page" (contains r.body "missing /404.html");
+                check_true "layout" (contains r.body {|class="root"|})
+            | _ -> Alcotest.fail "no body")
+        | _ -> Alcotest.fail "no page" );
+    ( "served directories",
+      fun () ->
+        Alcotest.(check (list (pair string string))) "dirs"
+          [ ("/_yuka", "js"); ("/static", "pub") ]
+          (Server.served_dirs prerendered) );
+    ( "query pairs are decoded",
+      fun () ->
+        let r = get "/find?q=a+b%26&tag=x%2By&tag=&other=1" in
+        check_true "decoded" (contains r.body "a b&amp;|x+y,") );
+  ]
+
 let normalize =
   [
     ( "trailing slash is 308 with the query kept",
@@ -305,7 +383,7 @@ let matching =
         check_status r 404;
         check_true "org layout" (contains r.body {|<section class="org">|});
         check_true "org outlet" (contains r.body {|data-k="L2/acme"|});
-        check_true "page" (contains r.body "no org page /org/acme/x/404");
+        check_true "page with the param" (contains r.body "no org page /org/acme/x/404 in acme");
         let r = get "/org/acme/x/1" in
         check_true "item" (contains r.body "acme 1 item") );
     ( "a param that does not decode is 404",
@@ -636,7 +714,7 @@ let render =
         let a =
           Server.handle config Cycle_server.Routes_server.app
             ~sleep:(fun _ -> Async.resolved ())
-            (request "/slow")
+            ~exists:Test_adapter.exists (request "/slow")
             { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun () -> Async.resolved "") }
         in
         match Async.status a with
@@ -671,6 +749,7 @@ let () =
   Alcotest.run "cycle"
     [
       ("assets", cases assets);
+      ("prerender", cases prerender);
       ("normalize", cases normalize);
       ("match", cases matching);
       ("head and rules", cases head_and_rules);

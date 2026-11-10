@@ -75,7 +75,7 @@ let%client make ~(title : string) ~(issues : Model.Issue.t list) () =
       | "Escape" -> State.set menu None
       | "Enter" -> (
           match State.peek selected with
-          | Some id -> Browser.navigate (Routes.issue_url id)
+          | Some id -> Browser.navigate (Routes.href (Issue { id }))
           | None -> ())
       | _ -> ()
   in
@@ -131,7 +131,7 @@ let%client make ~(title : string) ~(issues : Model.Issue.t list) () =
         </button>
         (if State.get menu = Some (Status issue.id) then status_menu issue else Yuka.empty)
       </span>
-      <a class_="row-title" href=(Routes.issue_url issue.id)>(Yuka.text issue.title)</a>
+      <a class_="row-title" href=(Routes.href (Issue { id = issue.id }))>(Yuka.text issue.title)</a>
       <Views.Labels labels=issue.labels />
       <Views.Avatar user=issue.assignee />
       <span class_="row-date">(Yuka.text issue.created_at)</span>

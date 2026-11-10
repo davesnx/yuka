@@ -1,3 +1,4 @@
 (test
  (name run)
+ (package yuka)
  (libraries template_cases yuka))

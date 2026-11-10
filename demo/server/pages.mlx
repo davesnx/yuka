@@ -6,20 +6,20 @@ let sidebar () : Yuka.server Yuka.element =
     <Yuka.Client loading=`Idle><Counter initial=0 /></Yuka.Client>
   </div>
 
-let shell ~active main : Yuka.server Yuka.element =
-  <Views.Shell workspace="Yuka" active sidebar=(sidebar ())>main</Views.Shell>
+let shell ~children () : Yuka.server Yuka.element =
+  <Views.Shell workspace="Yuka" sidebar=(sidebar ())>children</Views.Shell>
 
 let index () =
   let issues = !Store.issues in
-  shell ~active:Views.Shell.Issues
-    <Yuka.Client><Issue_list title="All issues" issues /></Yuka.Client>
+  Yuka.Server.page ~title:"Issues" (fun () ->
+      <Yuka.Client><Issue_list title="All issues" issues /></Yuka.Client>)
 
 let my_issues () =
   let issues = Store.mine () in
-  shell ~active:Views.Shell.My_issues
-    <Yuka.Client><Issue_list title="My issues" issues /></Yuka.Client>
+  Yuka.Server.page ~title:"My issues" (fun () ->
+      <Yuka.Client><Issue_list title="My issues" issues /></Yuka.Client>)
 
-let issue ?(delay = 0.6) (i : Model.Issue.t) =
+let issue_view ?(delay = 0.6) (i : Model.Issue.t) : Yuka.server Yuka.element =
   let comments =
     <Yuka.Await async=(Store.comments_async ~delay i.id)
       loading=(<Views.Skeleton lines=3 />)
@@ -39,13 +39,32 @@ let issue ?(delay = 0.6) (i : Model.Issue.t) =
       </Issue_props>
     </Yuka.Client>
   in
-  shell ~active:Views.Shell.Issues <Views.Issue_page issue=i comments props />
+  <Views.Issue_page issue=i comments props />
 
-let not_found id = shell ~active:Views.Shell.Issues <Views.Not_found id />
+let issue ~id ~issue () = Yuka.Server.page ~title:id (fun () -> issue_view issue)
 
-let about () : Yuka.server Yuka.element =
-  <main class_="about">
-    <h1>"About"</h1>
-    <p>"A mini Linear built with Yuka. This page has no island."</p>
-    <a href=Routes.index_url>"Back to issues"</a>
-  </main>
+let not_found ~target () =
+  Yuka.Server.page ~title:"Not found" (fun () ->
+      <div class_="not-found">
+        <h1>"Page not found"</h1>
+        <p>(Yuka.text ("There is no page at " ^ target ^ "."))</p>
+        <a href=(Routes.href Issues)>"Back to issues"</a>
+      </div>)
+
+let issue_not_found ~id ~target:_ () =
+  Yuka.Server.page ~title:"Not found" (fun () -> <Views.Not_found id />)
+
+let error ~status:_ () =
+  Yuka.Server.page ~title:"Error" (fun () ->
+      <div class_="not-found">
+        <h1>"Something went wrong"</h1>
+        <a href=(Routes.href Issues)>"Back to issues"</a>
+      </div>)
+
+let about () =
+  Yuka.Server.page ~title:"About" (fun () ->
+      <main class_="about">
+        <h1>"About"</h1>
+        <p>"A mini Linear built with Yuka. This page has no island."</p>
+        <a href=(Routes.href Issues)>"Back to issues"</a>
+      </main>)

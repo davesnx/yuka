@@ -22,3 +22,6 @@ let register () =
       | Some _ when String.trim body <> "" -> Yuka.Async.resolved (Store.add_comment ~issue_id ~body)
       | Some _ -> Yuka.Server.Action.rejected "Comment is empty"
       | None -> Yuka.Server.Action.rejected "No such issue")
+
+let issues_json (_ : Dream.request) =
+  Yuka.Server.json (Yuka.Codec.encode (Yuka.Codec.list Model.Issue.codec) !Store.issues)

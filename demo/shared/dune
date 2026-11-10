@@ -4,3 +4,10 @@
  (libraries yuka)
  (preprocess
   (pps yuka.ppx)))
+
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka-routes} --shared %{dep:../routes.ast}))))

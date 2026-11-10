@@ -1,0 +1,4 @@
+(library
+ (name yuka_dream)
+ (public_name yuka-dream)
+ (libraries yuka dream lwt lwt.unix))

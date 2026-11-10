@@ -754,7 +754,14 @@ let find nodes =
   :: sprintf "    (%s : (string * string) list) : t Yuka.Router.lookup ="
        (if uses_query then "query" else "_query")
   :: "  match path with"
-  :: indent 2 (arms @ [ "| _ -> Yuka.Router.Missing" ])
+  :: indent 2
+       (arms
+       @
+       let has segs = List.exists (fun g -> match g with n :: _ -> n.segs = segs | [] -> false) groups in
+       let root_rest =
+         List.exists (fun g -> match g with { segs = [ Rest _ ]; _ } :: _ -> true | _ -> false) groups
+       in
+       if has [] && root_rest then [] else [ "| _ -> Yuka.Router.Missing" ])
 
 let generate input nodes =
   if named nodes = [] then fail (Location.in_file input) "Routes.mlx has no named node";
@@ -817,6 +824,25 @@ let layers_lines levels =
   in
   match go [] levels with [] -> [ "[];" ] | items -> ("[" :: indent 2 items) @ [ "];" ]
 
+let prerendered levels =
+  List.fold_left
+    (fun acc l ->
+      match prop "prerender" l with
+      | Some { pexp_desc = Pexp_construct ({ txt = Lident b; _ }, None); _ } -> b = "true"
+      | _ -> acc)
+    false levels
+
+let seed n =
+  match n.kind with
+  | Named { meth = "GET"; _ } when prerendered n.levels ->
+      let rec statics acc = function
+        | [] -> Some (List.rev acc)
+        | Static s :: rest -> statics (encode s :: acc) rest
+        | (Param _ | Rest _) :: _ -> None
+      in
+      Option.map (fun parts -> "/" ^ String.concat "/" parts) (statics [] n.segs)
+  | _ -> None
+
 let rules_text levels =
   let headers = List.filter_map (fun l -> Option.map expr (prop "headers" l)) levels in
   let last name =
@@ -834,25 +860,35 @@ let fallback_levels levels =
   in
   List.filteri (fun i _ -> i <= depth) levels
 
+let nearest_fallback name levels =
+  List.fold_left
+    (fun acc l -> match prop name l with Some v -> Some (v, l) | None -> acc)
+    None (fallback_levels levels)
+
 let fallback_uses_params levels =
   List.exists (fun l -> l.layout <> None && seg_labels l.scope <> []) (fallback_levels levels)
+  || List.exists
+       (fun name ->
+         match nearest_fallback name levels with
+         | Some (_, l) -> seg_labels l.scope <> []
+         | None -> false)
+       [ "not_found"; "error" ]
 
 let fallback_text levels =
   let upto = fallback_levels levels in
-  let nearest name =
-    List.fold_left (fun acc l -> match prop name l with Some v -> Some v | None -> acc) None upto
+  let call name label default =
+    match nearest_fallback name levels with
+    | Some (f, l) ->
+        if List.mem label (seg_labels l.scope) then
+          fail f.pexp_loc "%s takes ~%s, so no param of its path can be named %s" name label label;
+        sprintf "(fun %s -> %s%s ~%s ())" label (expr f) (args (seg_labels l.scope)) label
+    | None -> default
   in
   String.concat "\n"
     (("{" :: "  Yuka.Server.layers =" :: indent 4 (layers_lines upto))
     @ [
-        sprintf "  not_found = %s;"
-          (match nearest "not_found" with
-          | Some f -> sprintf "(fun target -> %s ~target ())" (expr f)
-          | None -> "Yuka.Server.default_not_found");
-        sprintf "  error = %s;"
-          (match nearest "error" with
-          | Some f -> sprintf "(fun status -> %s ~status ())" (expr f)
-          | None -> "Yuka.Server.default_error");
+        sprintf "  not_found = %s;" (call "not_found" "target" "Yuka.Server.default_not_found");
+        sprintf "  error = %s;" (call "error" "status" "Yuka.Server.default_error");
         "}";
       ])
 
@@ -1003,6 +1039,8 @@ let generate_server ~shared ~prelude ~digest (nodes, root) =
         sprintf "  Yuka.Server.app ~build:%S" digest;
         sprintf "    ~headers:%s"
           (match prop "headers" root with Some h -> paren h | None -> "[]");
+        sprintf "    ~prerender:[ %s ]"
+          (String.concat "; " (List.map (sprintf "%S") (List.filter_map seed nodes)));
         sprintf "    ~find:%s.find ~resolve ~missing:%s" shared missing;
       ])
   ^ "\n"

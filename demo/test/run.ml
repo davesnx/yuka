@@ -8,34 +8,55 @@ let has html needle =
 let lacks html needle =
   if Model.Issue.contains ~sub:needle html then Alcotest.failf "unexpected %S" needle
 
-let render = Yuka.Server.to_string
+let config =
+  Yuka.Server.config
+    ~assets:(Yuka.Server.modules ~dir:"js" ~entry:"demo/client/main.js" ~manifest:"{}" ~packages:[])
+    ~public:[ ("/static", "static") ]
+    ~styles:[ "/static/style.css" ] ()
+
+let handler = Yuka_dream.handler config Routes_server.app
+
+let call ?(meth = `GET) ?(headers = []) ?(body = "") target =
+  let response = Dream.test handler (Dream.request ~method_:meth ~target ~headers body) in
+  (Dream.status_to_int (Dream.status response), response, Lwt_main.run (Dream.body response))
+
+let get target =
+  let status, _, body = call target in
+  Alcotest.(check int) ("status of " ^ target) 200 status;
+  body
+
+let header response name = Dream.header response name
 
 let index () =
-  let html = render Pages.index in
+  let status, response, html = call "/" in
+  Alcotest.(check int) "status" 200 status;
+  Alcotest.(check (option string)) "rule header" (Some "nosniff")
+    (header response "x-content-type-options");
+  Alcotest.(check (option string)) "cache" (Some "no-store") (header response "cache-control");
+  has html "<title>Issues</title>";
   has html "My issues";
+  has html "<a class=\"nav-link\" href=\"/\" aria-current=\"page\">Issues</a>";
   has html "<yuka-island data-name=\"Demo_shared.Issue_list\" data-id=\"i";
   has html "<yuka-island data-name=\"Demo_shared.New_issue\"";
   has html "<yuka-island data-name=\"Demo_shared.Counter\"";
+  has html "<script type=\"module\" async src=\"/_yuka/demo/client/main.js\"></script>";
   has html "data-start=\"idle\"";
   lacks html "data-start=\"interaction\"";
-  has html "data-yuka-props=\"i";
   has html "\"id\":\"YUK-1\"";
   has html "\"status\":\"In_progress\"";
   has html "Hydration mismatch on nested holes";
-  has html "In Progress";
   has html "Clicks: <!--[-->0<!--]-->";
   has html "<a class=\"row-title\" href=\"/issue/YUK-1\">"
 
 let my_issues () =
-  let html = render Pages.my_issues in
+  let html = get "/my" in
+  has html "<a class=\"nav-link\" href=\"/my\" aria-current=\"page\">My issues</a>";
   has html "YUK-1";
   lacks html "YUK-6\""
 
 let issue_page () =
-  let i = Option.get (Store.find "YUK-1") in
-  let html = Lwt_main.run
-      (Yuka_dream.to_lwt
-         (Yuka.Server.render_settled ~sleep:Yuka_dream.sleep (fun () -> Pages.issue i))) in
+  let html = get "/issue/YUK-1" in
+  has html "<title>YUK-1</title>";
   has html "Hydration mismatch on nested holes";
   has html "Maya Chen";
   has html "Urgent";
@@ -45,46 +66,96 @@ let issue_page () =
   has html "<yuka-island data-name=\"Demo_shared.Related\"";
   has html "<yuka-island data-name=\"Demo_shared.Issue_props\"";
   has html "data-start=\"interaction\"";
-  has html "<!--[$-->";
   has html "data-start=\"visible\"";
-  has html "\"$async\":\"a";
-  lacks html "skeleton"
-
-let pending_page () =
-  let i = Option.get (Store.find "YUK-1") in
-  let html = render (fun () -> Pages.issue ~delay:5. i) in
-  has html "<div class=\"skeleton\">";
-  lacks html "Please add a test with an empty filter result."
+  has html "\"$async\":\"a"
 
 let streaming () =
-  let i = Option.get (Store.find "YUK-1") in
-  let chunks = ref [] in
-  Lwt_main.run
-    (Yuka_dream.to_lwt
-       (Yuka.Server.stream ~sleep:Yuka_dream.sleep
-          ~write:(fun c ->
-            chunks := c :: !chunks;
-            Yuka.Async.resolved ())
-          (fun () -> Pages.issue ~delay:0.05 i)));
-  let chunks = List.rev !chunks in
+  let html = get "/issue/YUK-1" in
   let index_of needle =
-    let rec go n = function
-      | [] -> Alcotest.failf "no chunk with %S" needle
-      | c :: rest -> if Model.Issue.contains ~sub:needle c then n else go (n + 1) rest
+    let n = String.length needle in
+    let rec go i =
+      if i + n > String.length html then Alcotest.failf "no %S" needle
+      else if String.sub html i n = needle then i
+      else go (i + 1)
     in
-    go 0 chunks
+    go 0
   in
   let shell = index_of "<div class=\"skeleton\">" in
   let fill = index_of "data-yuka-fill=\"s1\"" in
   let related = index_of "data-yuka-async=\"a1\"" in
   Alcotest.(check bool) "shell first" true (shell < fill);
   Alcotest.(check bool) "comments before related" true (fill < related);
-  has (List.nth chunks fill) "Please add a test with an empty filter result."
+  Alcotest.(check bool) "fill script" true (index_of "__yukaFill" < shell)
+
+let navigation () =
+  let _, response, html = call ~headers:[ ("Yuka-Navigate", "1") ] "/issue/YUK-1" in
+  Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate") (header response "vary");
+  has html "Please add a test with an empty filter result.";
+  lacks html "skeleton";
+  lacks html "__yukaFill"
 
 let not_found () =
-  let html = render (fun () -> Pages.not_found "YUK-999") in
+  let status, response, html = call "/issue/NOPE" in
+  Alcotest.(check int) "status" 404 status;
+  Alcotest.(check (option string)) "no-store" (Some "no-store") (header response "cache-control");
   has html "Issue not found";
-  has html "YUK-999"
+  has html "There is no issue NOPE.";
+  let _, _, html = call "/issue/a%20b" in
+  has html "There is no issue a b.";
+  has html "class=\"sidebar\"";
+  let status, _, html = call "/nowhere" in
+  Alcotest.(check int) "status" 404 status;
+  has html "Page not found"
+
+let about () =
+  let html = get "/about" in
+  has html "<title>About</title>";
+  lacks html "<script type=\"module\"";
+  lacks html "__yukaFill";
+  lacks html "modulepreload"
+
+let prerendered () =
+  let out = Filename.temp_dir "yuka_demo" "" in
+  Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ()) Routes_server.app);
+  let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ()) Routes_server.app
+  in
+  let call meth =
+    let response = Dream.test handler (Dream.request ~method_:meth ~target:"/about" "") in
+    (Dream.status_to_int (Dream.status response), Lwt_main.run (Dream.body response))
+  in
+  let status, body = call `GET in
+  Alcotest.(check int) "GET" 200 status;
+  has body "<title>About</title>";
+  let status, body = call `HEAD in
+  Alcotest.(check int) "HEAD" 200 status;
+  Alcotest.(check string) "HEAD body" "" body
+
+let rules () =
+  let status, response, _ = call "/issues?x=1" in
+  Alcotest.(check int) "redirect" 308 status;
+  Alcotest.(check (option string)) "location" (Some "/?x=1") (header response "location");
+  let status, response, _ = call ~meth:`POST "/issues.json" in
+  Alcotest.(check int) "405" 405 status;
+  Alcotest.(check (option string)) "allow" (Some "GET, HEAD, OPTIONS") (header response "allow");
+  let status, response, body = call ~meth:`HEAD "/issues.json" in
+  Alcotest.(check int) "HEAD" 200 status;
+  Alcotest.(check string) "HEAD body" "" body;
+  Alcotest.(check (option string)) "endpoint cache" (Some "public, max-age=60")
+    (header response "cache-control");
+  let body = get "/issues.json" in
+  has body "\"id\":\"YUK-1\"";
+  let status, _, _ = call "/static/x/../style.css" in
+  Alcotest.(check int) "dot segment" 404 status
+
+let action_route () =
+  let status, _, body =
+    call ~meth:`POST ~headers:[ ("Content-Type", "application/json") ]
+      ~body:{|{"issue_id":"YUK-2","body":"From the test"}|} "/_yuka/action/add_comment"
+  in
+  Alcotest.(check int) "status" 200 status;
+  has body "From the test";
+  let status, _, _ = call "/_yuka/action/add_comment" in
+  Alcotest.(check int) "GET" 405 status
 
 let settle async =
   Lwt_main.run (Lwt.pause ());
@@ -94,7 +165,6 @@ let settle async =
   | Pending -> Error "pending"
 
 let actions () =
-  Handlers.register ();
   (match
      settle
        (Yuka.Action.call Actions.update_issue
@@ -155,7 +225,7 @@ let actions () =
    with
   | Ok (Ok (i : Model.Issue.t)) ->
       Alcotest.(check string) "id" "YUK-26" i.id;
-      has (render Pages.index) "Brand new"
+      has (get "/") "Brand new"
   | _ -> Alcotest.fail "create failed");
   match
     settle
@@ -168,6 +238,7 @@ let actions () =
   | Error m -> Alcotest.failf "comment failed: %s" m
 
 let () =
+  Handlers.register ();
   Alcotest.run "demo"
     [
       ( "pages",
@@ -175,9 +246,13 @@ let () =
           Alcotest.test_case "index" `Quick index;
           Alcotest.test_case "my issues" `Quick my_issues;
           Alcotest.test_case "issue page" `Quick issue_page;
-          Alcotest.test_case "pending page" `Quick pending_page;
           Alcotest.test_case "streaming order" `Quick streaming;
+          Alcotest.test_case "navigation" `Quick navigation;
           Alcotest.test_case "not found" `Quick not_found;
+          Alcotest.test_case "about has no JavaScript" `Quick about;
+          Alcotest.test_case "redirect, 405, HEAD, endpoint, assets" `Quick rules;
+          Alcotest.test_case "prerendered /about, GET and HEAD" `Quick prerendered;
+          Alcotest.test_case "action route" `Quick action_route;
         ] );
       ("actions", [ Alcotest.test_case "store through actions" `Quick actions ]);
     ]

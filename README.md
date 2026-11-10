@@ -8,8 +8,8 @@
 <p align="center">Web framework for OCaml. Server-rendered, with islands.</p>
 
 Yuka renders pages on the server and streams slow parts as they become ready.
-It does not depend on a web server: you connect it to Dream, or any other, in a
-few lines. Parts that need interaction are islands: small components that
+The `yuka` library does not depend on a web server; the `yuka-dream` package
+runs an app on Dream, and another server needs one small adapter. Parts that need interaction are islands: small components that
 Melange compiles to JavaScript and that hydrate in the browser. Components are
 written in mlx (JSX for OCaml) and use signals, so a component runs once and
 only the parts that read a signal update.
@@ -30,14 +30,15 @@ only the parts that read a signal update.
   `Visible`, `Interaction`) and lazy loading chosen where the island is used.
 - Codecs: `[@@deriving codec]` for props and action data.
 - Actions: declare once, call from the client, run on the server.
-- Router: typed paths shared by server and client (`Yuka.Router`).
 - Routes: one `Routes.mlx` tree. The `yuka-routes` generator turns it into a
-  `Routes` module with the route type, a typed `href` and the matcher, and a
-  server module that the request cycle (`Yuka.Server.handle`) runs: assets,
-  redirects, 405 and `OPTIONS`, guards, loaders, route headers and the
-  streamed page (in progress: no server adapter yet).
-- One library, `yuka`. A Melange entry also lists `yuka.js`, the browser
-  implementation of the DOM bindings.
+  `Routes` module shared by server and client (the route type, a typed
+  `href` and the matcher), and a server module that the request cycle runs:
+  assets, redirects, 405 and `OPTIONS`, guards, loaders, route headers and
+  the streamed page.
+- Prerender: pages marked `prerender=true` are written to a directory,
+  following links.
+- Two packages: `yuka` (a Melange entry also lists `yuka.js`, the browser
+  implementation of the DOM bindings) and `yuka-dream`, the Dream adapter.
 
 ## Examples
 
@@ -76,48 +77,8 @@ let issue_page (i : Issue.t) : Yuka.server Yuka.element =
   </main>
 ```
 
-`Yuka.Server.respond` writes the page through two functions that your web
-server gives: `write` sends a chunk, `sleep` waits (for the stream timeout).
-With Dream and Lwt (see `demo/server/yuka_dream.ml`):
-
-```ocaml
-let to_async p =
-  let async, resolve, fail = Yuka.Async.make () in
-  Lwt.on_any p resolve (fun e -> fail (Printexc.to_string e));
-  async
-
-let to_lwt async =
-  let p, w = Lwt.wait () in
-  Yuka.Async.on_result async (function
-    | Ok v -> Lwt.wakeup w v
-    | Error m -> Lwt.wakeup_exn w (Failure m));
-  p
-
-let handler request =
-  let navigating = Dream.header request "Yuka-Navigate" = Some "1" in
-  Dream.stream ~headers:[ ("Vary", "Yuka-Navigate") ] (fun stream ->
-      let write s = to_async (Lwt.bind (Dream.write stream s) (fun () -> Dream.flush stream)) in
-      let sleep d = to_async (Lwt_unix.sleep d) in
-      to_lwt
-        (Yuka.Server.respond ~navigating ~title:"Issue" ~preload ~sleep ~write (fun () ->
-             issue_page issue)))
-```
-
-`preload` makes the server print `<link rel="modulepreload">` for each island on
-the page, so the browser downloads its code early. Build it once at start from
-the manifest that `yuka-islands --manifest` writes (see "Island"):
-
-```ocaml
-let preload =
-  Yuka.Server.preload_urls ~manifest:(read_file "yuka_islands.json")
-    ~base:"/static/js/demo/client/" ()
-```
-
-With an esbuild `--metafile`, pass it as `~metafile:(read_file "meta.json")`:
-the links then point at the hashed chunks.
-
-Actions go through `Yuka.Server.handle_action`, which returns the status and
-the JSON body; mount it on `POST /_yuka/action/:name`.
+The request cycle streams the page (see "Routes"). A page with no
+`Await` still pending after the shell and no island loads no JavaScript.
 
 ### Island
 
@@ -173,7 +134,8 @@ Without the rule, the build fails with `Unbound module Yuka_islands`.
 `let%client` must be at the top level of a `.mlx` file: in any other file
 (`.ml`, `.re`) it is a compile error, and `yuka-islands` scans only `.mlx` files.
 
-To write the manifest for `~preload`, add a second rule that runs
+To write the manifest that `Yuka.Server.modules` and `Yuka.Server.bundle`
+take, add a second rule that runs
 `yuka-islands --manifest --library demo_shared ../shared` into
 `yuka_islands.json`.
 
@@ -191,8 +153,8 @@ warnings are on.
 Every island is its own file, loaded with a dynamic `import`. Islands that
 are not on a page are never downloaded. An island loads at page open (`Load`,
 the default) or, with a trigger, starts later but still downloads at page
-open through the `modulepreload` link that `~preload` prints (without
-`~preload`, an island downloads when it starts). To download and start it
+open through the `modulepreload` link that the server prints from the
+manifest (without a manifest entry, an island downloads when it starts). To download and start it
 only at the trigger, write
 ``<Yuka.Client loading=(`Lazy `Visible)>``. Lazy is chosen where the island is
 used, not in the island.
@@ -231,6 +193,10 @@ Two dune rules in the shared library (native and Melange) write `routes.ml`:
 
 The module has `type t = Home | Issue of { id : Issue_id.t; tab : Tab.t option } | ...`,
 `href : t -> string` and `find : Yuka.Router.meth -> string list -> (string * string) list -> t Yuka.Router.lookup`.
+`href` percent-encodes each param. It raises `Invalid_argument` when a
+param segment is `""`, `"."` or `".."` (or a catch-all is `[]`): no URL
+could give such a segment back, because the server drops empty segments
+and browsers resolve dot segments.
 A param type is `int`, `string`, `string...` (catch-all, last segment) or a
 module with `of_string` and `to_string` (`Yuka.Router.PARAM`). Search fields
 are `optional T`, `default T value` or `many T`. Two nodes with the same path
@@ -255,23 +221,69 @@ the server's request first (`Dream.request` with Dream), then the params by
 label. A page function returns `Yuka.Server.page ~title (fun () -> ...)`; it
 gets the params, the search fields and the loader results (labelled with the
 loader's name: `loader=Loaders.issue` gives `~issue`). The loaders of one
-route start together.
+route start together. A `not_found` page gets the params of the
+path of its node and `~target` (the request path); an `error` page gets
+them and `~status`.
+
+Loaders, guards and handlers that ignore the request must still name its
+type (`(_ : Dream.request)`) when no other function of the tree fixes it;
+otherwise `Routes_server.app` has a weak type variable.
 
 `Yuka.Server.handle config app` answers one request in a fixed order:
-`/_yuka/` and public files, a 308 for a trailing slash, the match, redirect
-nodes, 405 with `Allow`, `OPTIONS`, guards, loaders, then the page. A server
-implements `Yuka.Server.ADAPTER` (request fields, `respond`, `file`, its
-promise type) and gets a handler from `Yuka.Server.Make`. The page has no
-module script unless it has an island, and no inline script unless an
-`Await` is still pending when the shell is sent. Each layout's children are inside
+`/_yuka/` (actions, client JavaScript) and public files, a 308 for a
+trailing slash, the match, redirect nodes, 405 with `Allow`, `OPTIONS`,
+guards, loaders, then the page. The page has no module script unless it has
+an island, and no inline script unless an `Await` is still pending when the
+shell is sent. Each layout's children are inside
 `<yuka-outlet data-k="KEY" style="display:contents">`, and a link to the
-current path gets `aria-current="page"`.
+current path gets `aria-current="page"` (not inside an island).
+
+### With Dream
+
+The `yuka-dream` package runs the cycle on Dream:
+
+```ocaml
+let () =
+  let assets =
+    Yuka.Server.modules ~dir:"client/out" ~entry:"demo/client/main.js"
+      ~manifest:(read_file "client/yuka_islands.json") ~packages:[ "melange"; "yuka" ]
+  in
+  let config =
+    Yuka.Server.config ~assets ~public:[ ("/static", "static") ]
+      ~styles:[ "/static/style.css" ] ()
+  in
+  Dream.run @@ Dream.logger @@ Yuka_dream.handler config Routes_server.app
+```
+
+`Yuka.Server.modules` serves the Melange module tree under `/_yuka/` with an
+import map; `Yuka.Server.bundle` serves an esbuild bundle (with its
+`--metafile`, so the `<link rel="modulepreload">` of each island points at
+its hashed chunk). Actions are answered at `POST /_yuka/action/<name>`.
+`Yuka_dream.to_async` and `to_lwt` convert between `Lwt.t` and
+`Yuka.Async.t`.
+
+Another server implements `Yuka.Server.ADAPTER` (request fields, `respond`,
+`file`, `exists`, its promise type) and gets a handler from
+`Yuka.Server.Make`.
+
+### Prerender
+
+`prerender=true` on a node marks its pages for prerendering.
+`Yuka_dream.prerender ~out config app` renders each such page with no param,
+then follows the links of each page to other prerender pages (links to
+another origin are not followed), and writes the files: `/` to
+`index.html`, `/a/b` to `a/b/index.html`, `/feed.xml` to `feed.xml`, plus
+`404.html` and the `/_yuka/` and public files. A page that does not answer
+2xx is skipped with a warning. `Yuka.Server.config ~prerendered:dir` serves
+those files for a plain `GET` (no query, no `Yuka-Navigate`) after the
+guards, and renders the page when its file is missing. The demo writes its
+prerendered pages with `demo_server.exe --prerender DIR`.
 
 ## Getting started
 
 The demo is an issue tracker. It uses every feature above. It needs OCaml 5.4,
-dune 3.16+, Melange and mlx; the demo server also uses Dream. From the
-repository root:
+dune 3.16+, Melange and mlx; the demo server also uses Dream (through
+`yuka-dream`). From the repository root:
 
 ```sh
 dune build @demo/all

@@ -43,16 +43,24 @@ not_found below a loader but outside data layouts is fine
   >     </Group>
   >   </Router>
   > EOF
-  $ grep -A 8 '^let fallback_1' out.ml
-  let fallback_1 : Yuka.Server.fallback =
-    {
-      Yuka.Server.layers =
-        [
-          layer_0;
-        ];
-      not_found = (fun target -> P.missing ~target ());
-      error = Yuka.Server.default_error;
-    }
+  $ grep 'not_found =' out.ml
+      not_found = Yuka.Server.default_not_found;
+              not_found = (fun target -> P.missing ~id ~target ());
+
+not_found and error get the params of the path of their node, so no param
+there can be named target or status
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Group path="/t/:target<string>" not_found=P.missing>
+  >       <Route name=T path="/" page=P.t />
+  >     </Group>
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 47-56:
+  Error: not_found takes ~target, so no param of its path can be named target
+  [1]
 
 A fallback inside a param group with a layout is built in the arm, where
 the param is bound
@@ -77,7 +85,7 @@ the param is bound
                 [
                   layer_0;
                 ];
-              not_found = (fun target -> NF.page ~target ());
+              not_found = (fun target -> NF.page ~team ~target ());
               error = Yuka.Server.default_error;
             };
             load =

@@ -21,8 +21,10 @@
 
 (rule
  (alias runtest)
+ (package yuka)
  (action
   (diff rewrite.expected rewrite.actual)))
 
 (cram
+ (package yuka)
  (deps pp.exe %{bin:mlx-pp}))

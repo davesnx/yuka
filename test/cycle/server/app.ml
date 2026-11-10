@@ -81,6 +81,10 @@ module Pages = struct
 
   let plain () = Server.page ~title:"Plain" (fun () -> el "p" [ text "plain" ])
 
+  let find ~q ~tag () =
+    Server.page (fun () ->
+        text (Option.value q ~default:"-" ^ "|" ^ String.concat "," tag))
+
   let island name =
     Yuka.Client.island ~name ~props:`Null (fun () ->
         el "button" [ el "a" ~attrs:[ ("href", "/islands") ] [ text name ] ])
@@ -118,8 +122,8 @@ module Pages = struct
   let org_item ~org ~n ~org_item () =
     Server.page (fun () -> text (String.concat " " [ org; string_of_int n; org_item ]))
 
-  let org_missing ~target () =
-    Server.page ~title:"Org missing" (fun () -> el "p" [ text ("no org page " ^ target) ])
+  let org_missing ~org ~target () =
+    Server.page ~title:"Org missing" (fun () -> el "p" [ text ("no org page " ^ target ^ " in " ^ org) ])
 
   let not_found ~target () =
     Server.page ~title:"Not found" (fun () -> el "p" [ text ("missing " ^ target) ])

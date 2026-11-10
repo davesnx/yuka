@@ -1,4 +1,5 @@
 (test
  (name run)
+ (package yuka)
  (modules run)
  (libraries alcotest yuka cycle_shared cycle_server))

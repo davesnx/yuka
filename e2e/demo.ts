@@ -700,7 +700,7 @@ await step("7i. modulepreload", async () => {
   check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "new_issue"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
-  else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/static\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
+  else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/_yuka\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
   for (const l of pre) check(`7i.4 ${nameOf(l.path)} is requested once (preload and import share the request)`, reqs.filter((u) => u === l.path).length === 1, String(reqs.filter((u) => u === l.path).length));
   check("7i.5 Issue_list is never requested on the issue page", count("issue_list") === 0, String(count("issue_list")));
   check("7i.6 lazy modules requested at most once each", lazyModules.every((n) => count(n) <= 1), lazyModules.map((n) => `${n}=${count(n)}`).join(","));

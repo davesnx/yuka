@@ -5,7 +5,8 @@ let routes =
   <Router layout=Layouts.root not_found=Pages.not_found error=Pages.error
     headers=[ ("x-frame-options", "DENY"); ("x-a", "root") ] cache=No_store>
     <Route name=Home path="/" page=Pages.home />
-    <Route name=Plain path="/plain" page=Pages.plain />
+    <Route name=Plain path="/plain" page=Pages.plain prerender=true />
+    <Route name=Find path="/find" page=Pages.find search={ q = optional string; tag = many string } />
     <Route name=Islands path="/islands" page=Pages.islands />
     <Route name=Slow path="/slow" page=Pages.slow />
     <Route name=Twice path="/twice" page=Pages.twice />
@@ -26,7 +27,7 @@ let routes =
         <Route name=Org_item path="/:n<int>" page=Pages.org_item loader=Loaders.org_item />
       </Group>
     </Group>
-    <Endpoint name=Feed path="/feed.xml" method_=`GET handler=Api.feed />
+    <Endpoint name=Feed path="/feed.xml" method_=`GET handler=Api.feed prerender=true />
     <Endpoint name=Later path="/later" method_=`GET handler=Api.later />
     <Action name=Clear_feed path="/feed.xml" method_=`DELETE handler=Api.clear
       cache=Immutable />

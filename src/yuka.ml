@@ -48,6 +48,13 @@ module Private = struct
   include Types
   include Printer
 
+  let stream = Server.stream
+  let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep build
+  let import_map = Server.import_map
+  let query = Router.query
+  let preload_urls = Server.preload_urls
+  let handle_action = Server.handle_action
+
   let node n = n
   let template_shape (t : template) = t.shape
   let template = Template.of_shape

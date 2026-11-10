@@ -1,20 +1,3 @@
-type ('a, 'r) t =
-  | Root : ('r, 'r) t
-  | Lit : string -> ('r, 'r) t
-  | Str : (string -> 'r, 'r) t
-  | Int : (int -> 'r, 'r) t
-  | Seq : ('a, 'b) t * ('b, 'c) t -> ('a, 'c) t
-
-let root = Root
-
-let s text =
-  if text = "" || String.contains text '/' then invalid_arg "Yuka.Router.s";
-  Lit text
-
-let string = Str
-let int = Int
-let ( / ) a b = Seq (a, b)
-
 let encode text =
   let b = Buffer.create (String.length text) in
   String.iter
@@ -53,34 +36,6 @@ let decode ~plus text =
   done;
   Buffer.contents b
 
-let rec build : type a r. (a, r) t -> string list -> (string list -> r) -> a =
- fun path acc k ->
-  match path with
-  | Root -> k acc
-  | Lit text -> k (encode text :: acc)
-  | Str -> fun v -> k (encode v :: acc)
-  | Int -> fun v -> k (encode (string_of_int v) :: acc)
-  | Seq (x, y) -> build x acc (fun acc -> build y acc k)
-
-let href ?(query = []) path =
-  build path [] (fun acc ->
-      let p = match acc with [] -> "/" | _ -> "/" ^ String.concat "/" (List.rev acc) in
-      match query with
-      | [] -> p
-      | _ ->
-          p ^ "?"
-          ^ String.concat "&"
-              (List.map (fun (k, v) -> encode k ^ "=" ^ encode v) query))
-
-let is_int text =
-  let n = String.length text in
-  let start = if n > 0 && text.[0] = '-' then 1 else 0 in
-  n > start
-  &&
-  let ok = ref true in
-  String.iteri (fun i c -> if i >= start && (c < '0' || c > '9') then ok := false) text;
-  !ok
-
 let segment text =
   if text = "" || text = "." || text = ".." then
     invalid_arg "Yuka.Router.segment: empty, . or .. cannot be a path segment";
@@ -115,24 +70,6 @@ module type PARAM = sig
   val to_string : t -> string
 end
 
-let rec walk : type a r. (a, r) t -> string list -> a -> (string list * r) option =
- fun path segs f ->
-  match path with
-  | Root -> Some (segs, f)
-  | Lit text -> (
-      match segs with
-      | x :: rest when decode ~plus:false x = text -> Some (rest, f)
-      | _ -> None)
-  | Str -> (
-      match segs with x :: rest -> Some (rest, f (decode ~plus:false x)) | [] -> None)
-  | Int -> (
-      match segs with
-      | x :: rest when is_int x -> (
-          match int_of_string_opt x with Some v -> Some (rest, f v) | None -> None)
-      | _ -> None)
-  | Seq (x, y) -> (
-      match walk x segs f with Some (rest, g) -> walk y rest g | None -> None)
-
 let cut text c =
   match String.index_opt text c with
   | Some i -> (String.sub text 0 i, Some (String.sub text (i + 1) (String.length text - i - 1)))
@@ -144,10 +81,6 @@ let split_target target =
 
 let split_path p =
   List.filter (fun x -> x <> "") (String.split_on_char '/' p)
-
-let parse path f target =
-  let p, _ = split_target target in
-  match walk path (split_path p) f with Some ([], r) -> Some r | _ -> None
 
 let query target =
   match split_target target with
@@ -162,13 +95,3 @@ let query target =
               ( decode ~plus:true k,
                 decode ~plus:true (Option.value v ~default:"") ))
         (String.split_on_char '&' q)
-
-type 'r case = Case : ('a, 'r) t * 'a -> 'r case
-
-let case path f = Case (path, f)
-
-let rec dispatch cases target =
-  match cases with
-  | [] -> None
-  | Case (path, f) :: rest -> (
-      match parse path f target with Some _ as r -> r | None -> dispatch rest target)

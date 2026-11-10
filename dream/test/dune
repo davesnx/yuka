@@ -1,0 +1,19 @@
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka-routes} --shared %{dep:tree/routes.ast}))))
+
+(rule
+ (targets routes_server.ml)
+ (action
+  (with-stdout-to
+   routes_server.ml
+   (run %{bin:yuka-routes} --server --shared-module Routes %{dep:tree/routes.ast}))))
+
+(test
+ (name run)
+ (package yuka-dream)
+ (modules app routes routes_server run)
+ (libraries alcotest yuka yuka-dream dream lwt lwt.unix unix))

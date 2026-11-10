@@ -1,0 +1,7 @@
+(rule
+ (targets routes.ast)
+ (deps Routes.mlx)
+ (action
+  (with-stdout-to
+   routes.ast
+   (run %{bin:mlx-pp} %{deps}))))

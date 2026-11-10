@@ -49,7 +49,7 @@ let find ?(meth = `GET) target =
   let segments =
     String.split_on_char '/' path |> List.filter (fun s -> s <> "") |> List.map decode
   in
-  Routes.find meth segments (R.query target)
+  Routes.find meth segments (Yuka.Private.query target)
 
 let t name f = test_case name `Quick f
 

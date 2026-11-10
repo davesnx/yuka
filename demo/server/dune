@@ -1,11 +1,23 @@
 (library
  (name demo_app)
- (modules store pages handlers yuka_dream)
- (libraries demo_shared yuka dream lwt lwt.unix)
+ (modules store pages loaders handlers routes_server)
+ (libraries demo_shared yuka yuka-dream dream lwt lwt.unix)
  (preprocess
   (pps yuka.ppx)))
+
+(rule
+ (targets routes_server.ml)
+ (action
+  (with-stdout-to
+   routes_server.ml
+   (run
+    %{bin:yuka-routes}
+    --server
+    --shared-module
+    Demo_shared.Routes
+    %{dep:../routes.ast}))))
 
 (executable
  (name demo_server)
  (modules demo_server)
- (libraries demo_app demo_shared yuka dream))
+ (libraries demo_app yuka yuka-dream dream lwt))

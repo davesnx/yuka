@@ -5,15 +5,18 @@ let rules_0 =
   Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:(No_store) ~prerender:false ()
 
 let rules_1 =
-  Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("X-A", "team")] ] ~cache:(Private { max_age = 5 }) ~prerender:false ()
+  Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:(No_store) ~prerender:true ()
 
 let rules_2 =
-  Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("X-A", "team")] ] ~cache:(Public { max_age = 60; s_max_age = (Some 600) }) ~prerender:false ()
+  Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("X-A", "team")] ] ~cache:(Private { max_age = 5 }) ~prerender:false ()
 
 let rules_3 =
-  Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("Vary", "Cookie")] ] ~cache:(No_store) ~prerender:false ()
+  Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("X-A", "team")] ] ~cache:(Public { max_age = 60; s_max_age = (Some 600) }) ~prerender:false ()
 
 let rules_4 =
+  Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("Vary", "Cookie")] ] ~cache:(No_store) ~prerender:false ()
+
+let rules_5 =
   Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:(Immutable) ~prerender:false ()
 
 let layer_0 : Yuka.Server.layer =
@@ -52,7 +55,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Plain ->
       Yuka.Server.Page
         {
-          rules = rules_0;
+          rules = rules_1;
           guards = [];
           fallback = fallback_0;
           load =
@@ -65,6 +68,24 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
                          layer_0;
                        ];
                      page = Pages.plain ();
+                   }));
+        }
+  | Cycle_shared.Routes.Find { q; tag } ->
+      Yuka.Server.Page
+        {
+          rules = rules_0;
+          guards = [];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              Yuka.Async.resolved
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.layers =
+                       [
+                         layer_0;
+                       ];
+                     page = Pages.find ~q ~tag ();
                    }));
         }
   | Cycle_shared.Routes.Islands ->
@@ -162,7 +183,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Member { team; user } ->
       Yuka.Server.Page
         {
-          rules = rules_1;
+          rules = rules_2;
           guards = [ (fun () -> Guards.outer req ~team); (fun () -> Guards.inner req ~team ~user) ];
           fallback = fallback_0;
           load =
@@ -185,7 +206,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Team_json { team } ->
       Yuka.Server.Handler
         {
-          rules = rules_2;
+          rules = rules_3;
           same_origin = false;
           guards = [ (fun () -> Guards.outer req ~team) ];
           run = (fun () -> Api.team req ~team);
@@ -193,7 +214,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Rename { team } ->
       Yuka.Server.Handler
         {
-          rules = rules_1;
+          rules = rules_2;
           same_origin = true;
           guards = [ (fun () -> Guards.outer req ~team) ];
           run = (fun () -> Api.rename req ~team);
@@ -201,7 +222,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Varied ->
       Yuka.Server.Page
         {
-          rules = rules_3;
+          rules = rules_4;
           guards = [];
           fallback = fallback_0;
           load =
@@ -219,7 +240,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Asset ->
       Yuka.Server.Handler
         {
-          rules = rules_4;
+          rules = rules_5;
           same_origin = false;
           guards = [];
           run = (fun () -> Api.asset req);
@@ -236,7 +257,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
                 layer_0;
                 layer_2;
               ];
-            not_found = (fun target -> Pages.org_missing ~target ());
+            not_found = (fun target -> Pages.org_missing ~org ~target ());
             error = (fun status -> Pages.error ~status ());
           };
           load =
@@ -257,7 +278,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Feed ->
       Yuka.Server.Handler
         {
-          rules = rules_0;
+          rules = rules_1;
           same_origin = false;
           guards = [];
           run = (fun () -> Api.feed req);
@@ -273,13 +294,14 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
   | Cycle_shared.Routes.Clear_feed ->
       Yuka.Server.Handler
         {
-          rules = rules_4;
+          rules = rules_5;
           same_origin = true;
           guards = [];
           run = (fun () -> Api.clear req);
         }
 
 let app =
-  Yuka.Server.app ~build:"126e3e13bd2c2f07f3a73f5272438ce2"
+  Yuka.Server.app ~build:"8c34531656abd7379d8db7e3414c8d2d"
     ~headers:([("x-frame-options", "DENY"); ("x-a", "root")])
+    ~prerender:[ "/plain"; "/feed.xml" ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

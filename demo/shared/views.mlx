@@ -61,12 +61,8 @@ module Group_header = struct
 end
 
 module Shell = struct
-  type nav = Issues | My_issues
-
-  let make ~workspace ~active ~sidebar ~children () : _ Yuka.element =
-    let link nav href label =
-      <a class_=(if nav = active then "nav-link active" else "nav-link") href>(Yuka.text label)</a>
-    in
+  let make ~workspace ~sidebar ~children () : _ Yuka.element =
+    let link href label = <a class_="nav-link" href>(Yuka.text label)</a> in
     <div class_="app">
       <aside class_="sidebar">
         <div class_="workspace">
@@ -74,8 +70,8 @@ module Shell = struct
           <span class_="workspace-name">(Yuka.text workspace)</span>
         </div>
         <nav class_="nav">
-          (link Issues Routes.index_url "Issues")
-          (link My_issues Routes.my_url "My issues")
+          (link (Routes.href Issues) "Issues")
+          (link (Routes.href My_issues) "My issues")
         </nav>
         <div class_="sidebar-extra">sidebar</div>
       </aside>
@@ -102,7 +98,7 @@ module Issue_page = struct
   let make ~issue ~comments ~props () : _ Yuka.element =
     <div class_="issue-page">
       <header class_="page-header">
-        <a href=Routes.index_url class_="crumb">"Issues"</a>
+        <a href=(Routes.href Issues) class_="crumb">"Issues"</a>
         <span class_="muted">"/"</span>
         <span>(Yuka.text issue.Issue.id)</span>
       </header>
@@ -123,6 +119,6 @@ module Not_found = struct
     <div class_="not-found">
       <h1>"Issue not found"</h1>
       <p>(Yuka.text ("There is no issue " ^ id ^ "."))</p>
-      <a href=Routes.index_url>"Back to issues"</a>
+      <a href=(Routes.href Issues)>"Back to issues"</a>
     </div>
 end
