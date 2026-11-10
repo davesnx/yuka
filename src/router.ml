@@ -1,3 +1,5 @@
+open Tiny_hashtbl
+
 type ('a, 'r) t =
   | Root : ('r, 'r) t
   | Lit : string -> ('r, 'r) t
@@ -21,7 +23,9 @@ let encode text =
     (function
       | ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~') as c ->
           Buffer.add_char b c
-      | c -> Buffer.add_string b (Printf.sprintf "%%%02X" (Char.code c)))
+      | c ->
+          Buffer.add_string b
+            (Tiny_printf.Printf.sprintf "%%%02X" (Char.code c)))
     text;
   Buffer.contents b
 

@@ -1,3 +1,5 @@
+open Tiny_hashtbl
+
 module Json = Json
 module Async = Async
 module Codec = Codec

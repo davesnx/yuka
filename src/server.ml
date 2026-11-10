@@ -1,3 +1,5 @@
+open Tiny_hashtbl
+
 module Shared_action = Action
 
 let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)
@@ -32,15 +34,15 @@ let head ~extra ?head ?(early = false) ?(import_map = []) ?(title = "")
   let attr = Printer.escape ~quote:true in
   let styles =
     List.map
-      (fun s -> Printf.sprintf "<link rel=\"stylesheet\" href=\"%s\">" (attr s))
+      (fun s -> "<link rel=\"stylesheet\" href=\"" ^ attr s ^ "\">")
       styles
   in
   let scripts =
     List.map
       (fun s ->
-        Printf.sprintf "<script type=\"module\"%s src=\"%s\"></script>"
-          (if early then " async" else "")
-          (attr s))
+        "<script type=\"module\""
+        ^ (if early then " async" else "")
+        ^ " src=\"" ^ attr s ^ "\"></script>")
       scripts
   in
   String.concat ""
@@ -58,14 +60,12 @@ let page ?head:head_html ?early ?import_map ?title ?styles ?scripts build =
 let fill_script = Printer.fill_script
 
 let value_script id (json : Json.t) =
-  Printf.sprintf
-    "<script type=\"application/json\" data-yuka-async=\"%s\">%s</script>" id
-    (Json.to_string json)
+  "<script type=\"application/json\" data-yuka-async=\"" ^ id ^ "\">"
+  ^ Json.to_string json ^ "</script>"
 
 let fill_chunk id html =
-  Printf.sprintf
-    "<template data-yuka-fill=\"%s\">%s</template><script>__yukaFill(\"%s\")</script>"
-    id html id
+  "<template data-yuka-fill=\"" ^ id ^ "\">" ^ html
+  ^ "</template><script>__yukaFill(\"" ^ id ^ "\")</script>"
 
 let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
@@ -94,7 +94,7 @@ let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
     if not !finished then begin
       finished := true;
       on_timeout := None;
-      fail (Printexc.to_string exn)
+      fail (Web.exn_to_string exn)
     end
   in
   let remove id =
@@ -261,7 +261,7 @@ let preload_urls ~manifest ~base ?metafile () =
     match Json.of_string text with
     | Ok j -> j
     | Error m ->
-        invalid_arg (Printf.sprintf "Yuka.Server.preload_urls: bad %s JSON: %s" what m)
+        invalid_arg ("Yuka.Server.preload_urls: bad " ^ what ^ " JSON: " ^ m)
   in
   let paths =
     match parse "manifest" manifest with
@@ -355,7 +355,7 @@ module Action = struct
               match f v with
               | async -> async
               | exception Rejected m -> rejected m
-              | exception exn -> Async.failed (Printexc.to_string exn)
+              | exception exn -> Async.failed (Web.exn_to_string exn)
             in
             Async.map (fun o -> Output (Codec.encode output o)) run);
     install ()
@@ -416,7 +416,7 @@ let handle_action ~name ~content_type ~origin ~host ~body =
                     | Some message -> resolve (400, error_body message)
                     | None ->
                         !log_error
-                          (Printf.sprintf "action %s failed: %s" name m);
+                          ("action " ^ name ^ " failed: " ^ m);
                         resolve (500, error_body "action failed"))
                 | Async.Pending -> ());
               result)

@@ -100,7 +100,7 @@ install: ## Install the opam dependencies
 
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <url>" per line
-	@true
+	@echo "melange-tiny https://github.com/davesnx/melange-tiny.git"
 
 .PHONY: pin
 pin: ## Pin dependencies

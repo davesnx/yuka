@@ -47,6 +47,15 @@ external get_attribute : node -> string -> string option = "getAttribute"
 [@@mel.send] [@@mel.return nullable]
 external text_content : node -> string = "textContent" [@@mel.get]
 external console_error : string -> unit = "error" [@@mel.scope "console"]
+
+let exn_to_string : exn -> string =
+  [%mel.raw
+    {|function (e) {
+      var args = [];
+      for (var i = 1; ("_" + i) in e; i++) args.push(String(e["_" + i]));
+      return args.length ? e.MEL_EXN_ID + "(" + args.join(", ") + ")" : e.MEL_EXN_ID;
+    }|}]
+
 external encode_uri : string -> string = "encodeURIComponent"
 
 let fetch_post :

@@ -182,8 +182,8 @@ open Base
                   s.preloaded <- name :: s.preloaded;
                   Option.map
                     (fun url ->
-                      Printf.sprintf "<link rel=\"modulepreload\" href=\"%s\">"
-                        (escape ~quote:true url))
+                      "<link rel=\"modulepreload\" href=\""
+                      ^ escape ~quote:true url ^ "\">")
                     (f name)
                 end
           in
@@ -192,15 +192,15 @@ open Base
           | Some l -> s.queued <- l :: s.queued
           | None -> ());
           Buffer.add_string b
-            (Printf.sprintf
-               "<yuka-island data-name=\"%s\" data-id=\"%s\" style=\"display:contents\"%s>"
-               (escape ~quote:true name) id
-               (match loading with
+            ("<yuka-island data-name=\"" ^ escape ~quote:true name
+           ^ "\" data-id=\"" ^ id ^ "\" style=\"display:contents\""
+           ^ (match loading with
                | `Load -> ""
                | `Idle | `Lazy `Idle -> " data-start=\"idle\""
                | `Visible | `Lazy `Visible -> " data-start=\"visible\""
                | `Interaction | `Lazy `Interaction ->
-                   " data-start=\"interaction\""));
+                   " data-start=\"interaction\"")
+           ^ ">");
           after_text := false;
           s.depth <- s.depth + 1;
           (match go (render ()) with
@@ -210,9 +210,8 @@ open Base
               raise e);
           Buffer.add_string b "</yuka-island>";
           Buffer.add_string b
-            (Printf.sprintf
-               "<script type=\"application/json\" data-yuka-props=\"%s\">%s</script>"
-               id (Json.to_string props));
+            ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
+            ^ Json.to_string props ^ "</script>");
           if s.depth = 0 then begin
             List.iter (Buffer.add_string b) (List.rev s.queued);
             s.queued <- []

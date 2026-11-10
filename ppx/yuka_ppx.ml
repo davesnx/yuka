@@ -237,7 +237,7 @@ let attributes_expr ~loc props =
         (function Plain e -> [%expr Some [%e e]] | Maybe e -> e)
         props
     in
-    [%expr Stdlib.List.filter_map Stdlib.Fun.id [%e list_expr ~loc items]]
+    [%expr Stdlib.List.filter_map (fun x -> x) [%e list_expr ~loc items]]
 
 let rec list_items e =
   match e.pexp_desc with

@@ -1,3 +1,5 @@
+open Tiny_hashtbl
+
 include Island
 open Types
 
@@ -267,7 +269,7 @@ let compiled_template doc id node =
             { template; paths })
           (plan node)
       in
-      Hashtbl.add cache id c;
+      Hashtbl.replace cache id c;
       c
 
 let rec mount_node pos last n =
@@ -430,7 +432,7 @@ and mount_each :
     Array.iter
       (fun k ->
         if Hashtbl.mem wanted k then failwith ("Yuka.each: duplicate key " ^ k);
-        Hashtbl.add wanted k ())
+        Hashtbl.replace wanted k ())
       keys;
     let old = Hashtbl.create 16 in
     Array.iteri
@@ -542,7 +544,6 @@ let register cleanup =
 
 let transport name input =
   let result, resolve, fail = Async.make () in
-  let failf fmt = Printf.ksprintf fail fmt in
   let id = register ignore in
   let finish () = Hashtbl.remove cleanups id in
   let abort =
@@ -557,13 +558,17 @@ let transport name input =
           | Some value, _ -> resolve value
           | None, Some (`String message) -> fail message
           | None, _ ->
-              failf "action %s: unexpected response (HTTP %d)" name status)
+              fail
+                ("action " ^ name ^ ": unexpected response (HTTP "
+               ^ string_of_int status ^ ")"))
       | Ok _ | Error _ ->
-          failf "action %s: response is not JSON (HTTP %d)" name status)
+          fail
+            ("action " ^ name ^ ": response is not JSON (HTTP "
+           ^ string_of_int status ^ ")"))
     (fun cancelled message ->
       finish ();
       if cancelled then fail "cancelled"
-      else failf "action %s: network error: %s" name message)
+      else fail ("action " ^ name ^ ": network error: " ^ message))
   in
   if Hashtbl.mem cleanups id then Hashtbl.replace cleanups id abort;
   result
@@ -631,7 +636,7 @@ let boot entries props island =
   let id = Option.value (Web.get_attribute island "data-id") ~default:"" in
   let name = Option.value (Web.get_attribute island "data-name") ~default:"" in
   let fail reason =
-    Web.console_error (Printf.sprintf "yuka island %s (%s): %s" id name reason);
+    Web.console_error ("yuka island " ^ id ^ " (" ^ name ^ "): " ^ reason);
     None
   in
   let entry = List.find_opt (fun e -> e.name = name) entries in
@@ -647,7 +652,7 @@ let boot entries props island =
           | Ok build -> (
               try
                 Some (hydrate island build)
-              with e -> fail (Printexc.to_string e))))
+              with e -> fail (Web.exn_to_string e))))
 
 let schedule strategy island run =
   match strategy with
@@ -729,9 +734,9 @@ let start_island entries lazy_entries props island =
         let report reason =
           finish None;
           Web.console_error
-            (Printf.sprintf "yuka island %s (%s): cannot load code: %s"
-               (Option.value (Web.get_attribute island "data-id") ~default:"")
-               name reason)
+            ("yuka island "
+            ^ Option.value (Web.get_attribute island "data-id") ~default:""
+            ^ " (" ^ name ^ "): cannot load code: " ^ reason)
         in
         Web.promise_then
           (fun entry ->
@@ -757,28 +762,31 @@ let start ?(lazy_entries = []) entries =
   Action.transport := transport;
   Types.async_source := async_value;
   let props = Hashtbl.create 8 in
-  let waiting = Hashtbl.create 8 in
+  let waiting = ref [] in
   let island_id island =
     Option.value (Web.get_attribute island "data-id") ~default:""
   in
   let start_waiting ~final =
-    let ready =
-      Hashtbl.fold
-        (fun id island acc ->
-          if final || Hashtbl.mem props id then island :: acc else acc)
-        waiting []
+    let ready, rest =
+      List.partition (fun (id, _) -> final || Hashtbl.mem props id) !waiting
     in
+    waiting := rest;
     List.iter
-      (fun island ->
-        Hashtbl.remove waiting (island_id island);
+      (fun (_, island) ->
         let started : bool option = Web.get_prop island started_key in
         if started <> Some true then
           start_island entries lazy_entries props island)
-      ready
+      (List.rev ready)
   in
   let note_island island =
     let started : bool option = Web.get_prop island started_key in
-    if started <> Some true then Hashtbl.replace waiting (island_id island) island
+    if started <> Some true then begin
+      let id = island_id island in
+      waiting :=
+        if List.mem_assoc id !waiting then
+          List.map (fun (i, n) -> if i = id then (i, island) else (i, n)) !waiting
+        else (id, island) :: !waiting
+    end
   in
   let note_script ~final script =
     match script_props script with

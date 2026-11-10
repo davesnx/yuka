@@ -3,5 +3,6 @@
  (public_name yuka.js)
  (implements yuka)
  (modes melange)
+ (libraries melange-tiny.printf.js melange-tiny.hashtbl.js)
  (preprocess
   (pps melange.ppx)))

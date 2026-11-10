@@ -1,3 +1,5 @@
+open Tiny_hashtbl
+
 type owner = { mutable next : int; disposers : (int, unit -> unit) Hashtbl.t }
 
 let current_owner : owner option ref = ref None

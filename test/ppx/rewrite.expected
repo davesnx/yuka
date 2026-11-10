@@ -5,7 +5,7 @@ let static_attrs =
     Yuka.attr "tabindex" (Stdlib.string_of_int (3 : int))] [Yuka.text "home"]
 let bool_and_optional =
   Yuka.lower "input"
-    (Stdlib.List.filter_map Stdlib.Fun.id
+    (Stdlib.List.filter_map (fun x -> x)
        [Some
           (Yuka.attr "type"
              (match (`text : [ `button  | `checkbox  | `color  | `date 
@@ -57,7 +57,7 @@ let handler =
   Yuka.lower "button" [Yuka.on "click" (fun _ -> ())] [Yuka.text "go"]
 let optional_handler =
   Yuka.lower "input"
-    (Stdlib.List.filter_map Stdlib.Fun.id
+    (Stdlib.List.filter_map (fun x -> x)
        [Stdlib.Option.map (Yuka.on "input") onInput]) []
 let string_child = Yuka.lower "p" [] [Yuka.text "hello"]
 let hole_child = Yuka.lower "p" [] [Yuka.hole (fun () -> State.get count)]
@@ -897,7 +897,7 @@ module Templates =
     let fixed =
       Yuka.template "rewrite:103:14"
         (Yuka.lower "ul"
-           (Stdlib.List.filter_map Stdlib.Fun.id
+           (Stdlib.List.filter_map (fun x -> x)
               [Some (Yuka.attr "class" ("list" : string));
               Stdlib.Option.map (Yuka.attr "hidden")
                 (if (false : bool) then Some "" else None)])
@@ -920,7 +920,7 @@ module Templates =
         [Yuka.lower "span" [] [Yuka.text "a"]]
     let optional_attribute =
       Yuka.lower "div"
-        (Stdlib.List.filter_map Stdlib.Fun.id
+        (Stdlib.List.filter_map (fun x -> x)
            [Stdlib.Option.map (Yuka.attr "title")
               (Stdlib.Option.map (fun v -> (v : string))
                  (title : string option))])

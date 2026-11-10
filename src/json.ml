@@ -19,7 +19,8 @@
         | '\b' -> Buffer.add_string b "\\b"
         | '\012' -> Buffer.add_string b "\\f"
         | ('<' | '\000' .. '\031') as c ->
-            Buffer.add_string b (Printf.sprintf "\\u%04x" (Char.code c))
+            Buffer.add_string b
+              (Tiny_printf.Printf.sprintf "\\u%04x" (Char.code c))
         | c -> Buffer.add_char b c)
       s;
     Buffer.add_char b '"'
@@ -28,7 +29,7 @@
     if Float.is_nan f || Float.abs f = Float.infinity then "null"
     else
       let rec try_precision p =
-        let s = Printf.sprintf "%.*g" p f in
+        let s = Tiny_printf.Printf.sprintf "%.*g" p f in
         if p >= 17 || float_of_string s = f then s else try_precision (p + 1)
       in
       let s = try_precision 15 in
@@ -90,7 +91,7 @@
   let of_string s =
     let n = String.length s in
     let i = ref 0 in
-    let fail msg = raise (Parse (Printf.sprintf "%s at %d" msg !i)) in
+    let fail msg = raise (Parse (msg ^ " at " ^ string_of_int !i)) in
     let peek () = if !i < n then s.[!i] else '\000' in
     let rec ws () =
       if !i < n && (match s.[!i] with ' ' | '\t' | '\n' | '\r' -> true | _ -> false)
@@ -98,7 +99,7 @@
     in
     let expect c =
       if !i < n && s.[!i] = c then incr i
-      else fail (Printf.sprintf "expected %C" c)
+      else fail (Tiny_printf.Printf.sprintf "expected %C" c)
     in
     let literal word v =
       let l = String.length word in

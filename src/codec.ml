@@ -5,7 +5,7 @@ open Types
   let mismatch what (j : Json.t) =
     let s = Json.to_string j in
     let s = if String.length s > 40 then String.sub s 0 40 ^ "..." else s in
-    Error (Printf.sprintf "expected %s, got %s" what s)
+    Error ("expected " ^ what ^ ", got " ^ s)
 
   let int =
     { encode = (fun i -> `Int i);

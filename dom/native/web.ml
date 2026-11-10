@@ -53,6 +53,7 @@ let set_inner_html : node -> string -> unit = fun _ _ -> browser_only ()
 let content : node -> node = fun _ -> browser_only ()
 let import_node : node -> node -> bool -> node = fun _ _ _ -> browser_only ()
 let console_error : string -> unit = fun _ -> browser_only ()
+let exn_to_string = Printexc.to_string
 let encode_uri : string -> string = fun _ -> browser_only ()
 let fetch_post : string -> string -> (int -> string -> unit) -> (bool -> string -> unit) -> unit -> unit = fun _ _ _ _ _ -> browser_only ()
 let watch_added : (node array -> bool) -> unit -> unit = fun _ _ -> browser_only ()

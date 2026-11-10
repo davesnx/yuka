@@ -81,6 +81,20 @@ let islands_start () =
   D.click (D.query_all c "button").(1);
   check "only island 2 changes" "6,12" (spans c)
 
+let islands_start_in_document_order () =
+  ignore (setup_page (page [ counter_island 1; counter_island 2; counter_island 3 ]));
+  let started = ref [] in
+  let entry =
+    Client.entry ~name:"Counter" (fun json ->
+        Result.map
+          (fun n ->
+            started := ints n :: !started;
+            fun () -> counter_view n)
+          (Codec.decode Codec.int json))
+  in
+  Yuka.Client.start [ entry ];
+  check "start order" "1,2,3" (String.concat "," (List.rev !started))
+
 let unknown_island () =
   let c =
     setup_page (page [ counter_island ~name:"Nope" 1; counter_island 10 ])
@@ -1135,6 +1149,7 @@ let all =
     ("async prop inline ok", async_prop_inline);
     ("hole start marker with id", hole_start_marker);
     ("island start adopts and isolates", islands_start);
+    ("islands start in document order", islands_start_in_document_order);
     ("island unknown name", unknown_island);
     ("island broken props", broken_islands);
     ("island start twice", start_twice);

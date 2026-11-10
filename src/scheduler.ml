@@ -160,10 +160,8 @@ let max_rounds = 100
 
 let loop_error =
   Failure
-    (Printf.sprintf
-       "Yuka: an effect or a memo keeps changing a State it reads (more than \
-        %d update rounds in one flush)"
-       max_rounds)
+    ("Yuka: an effect or a memo keeps changing a State it reads (more than "
+    ^ string_of_int max_rounds ^ " update rounds in one flush)")
 
 let drop queue =
   List.iter clear_pending !queue;

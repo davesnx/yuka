@@ -123,7 +123,7 @@ end
 let%client make ~(item : Item.t) () =
   let n = State.make item.count in
   <button onClick=(fun _ -> State.update n succ)>
-    (Yuka.format "%s: %d" item.name (State.get n))
+    (Yuka.text (item.name ^ ": " ^ string_of_int (State.get n)))
   </button>
 
 (* server page *)
@@ -182,6 +182,10 @@ used, not in the island.
 The demo is an issue tracker. It uses every feature above. It needs OCaml 5.4,
 dune 3.16+, Melange and mlx; the demo server also uses Dream. From the
 repository root:
+
+Yuka needs [melange-tiny](https://github.com/davesnx/melange-tiny), which is
+not in opam. Pin it with `make pin`, or link a checkout that is next to this
+one: `mkdir -p vendor && ln -s ../../melange-tiny vendor/melange-tiny`.
 
 ```sh
 dune build @demo/all
