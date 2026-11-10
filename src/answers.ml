@@ -13,26 +13,37 @@ let of_json text =
       match Status.error_codec.decode e with Ok e -> Some (Error e) | Error _ -> None)
   | _ -> None
 
+let mine key elements =
+  List.filter (fun el -> Web.get_attribute el "data-yuka-answer" = Some key) elements
+
+let full key elements =
+  match List.find_opt (fun el -> Web.get_attribute el "data-pending" = None) (mine key elements) with
+  | Some el -> of_json (Web.text_content el)
+  | None -> None
+
 let find key =
-  let mine =
-    List.filter
-      (fun el -> Web.get_attribute el "data-yuka-answer" = Some key)
-      (Array.to_list (Web.query_all (Web.document ()) "script[data-yuka-answer]"))
-  in
-  let full = List.find_opt (fun el -> Web.get_attribute el "data-pending" = None) mine in
-  match full with
-  | Some el -> ( match of_json (Web.text_content el) with Some r -> Found r | None -> Absent)
-  | None when mine <> [] && Web.ready_state () = "loading" -> Pending
+  let elements = Array.to_list (Web.query_all (Web.document ()) "script[data-yuka-answer]") in
+  match full key elements with
+  | Some r -> Found r
+  | None when mine key elements <> [] && Web.ready_state () = "loading" -> Pending
   | None -> Absent
+
+let find_added key nodes =
+  full key
+    (List.concat_map
+       (fun n ->
+         (if Web.local_name n = "script" then [ n ] else [])
+         @ Array.to_list (Web.query_all n "script[data-yuka-answer]"))
+       (Array.to_list nodes))
 
 let record key (result : (Json.t, Status.error) result option) settled =
   match !Types.current_session with
   | Some s when s.depth > 0 && not (List.mem key s.answered) -> (
       s.answered <- key :: s.answered;
       match result with
-      | Some r -> s.answers <- Printer.answer_script key (to_json r) :: s.answers
+      | Some r -> s.answers <- (key, Some (to_json r)) :: s.answers
       | None when s.streaming ->
-          s.answers <- Printer.pending_answer_script key :: s.answers;
+          s.answers <- (key, None) :: s.answers;
           s.pending <- Types.Pending_answer { key; answer = Async.map to_json settled } :: s.pending
       | None -> ())
   | _ -> ()

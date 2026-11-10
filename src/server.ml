@@ -134,7 +134,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
       match fill () with
       | html ->
           register ();
-          let links = Printer.take_links session in
+          let links = Printer.take_answers session ^ Printer.take_links session in
           emit (fun () -> on_fill id inside links html);
           check_done ()
       | exception exn -> abort exn
@@ -174,7 +174,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_s
             match fill_failed "timeout" with
             | html ->
                 register ();
-                let links = Printer.take_links session in
+                let links = Printer.take_answers session ^ Printer.take_links session in
                 emit (fun () -> on_fill id inside_island links html);
                 expire ()
             | exception exn -> abort exn)
@@ -340,22 +340,12 @@ let find_action name =
   Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
 
 
-let transport name input =
-  match find_action name with
-  | None -> Async.failed ("unknown action " ^ name)
-  | Some handler ->
-      let settled, resolve, fail = Async.make () in
-      Async.on_settled (handler input) (function
-        | Async.Done (Output j) -> resolve j
-        | Async.Done (Bad_input m) -> fail m
-        | Async.Failed m -> fail (Option.value (rejection m) ~default:m)
-        | Async.Pending -> ());
-      settled
+type failure = Unknown | Bad of string | Refused of string | Broke of string
 
-let send name input k =
+let run name input k =
   match find_action name with
   | None ->
-      k (Error Status.Not_found);
+      k (Error Unknown);
       ignore
   | Some handler ->
       let live = ref true in
@@ -363,15 +353,35 @@ let send name input k =
           if !live then
             match st with
             | Async.Done (Output j) -> k (Ok j)
-            | Async.Done (Bad_input m) -> k (Error (Status.Rejected ("invalid input: " ^ m)))
+            | Async.Done (Bad_input m) -> k (Error (Bad m))
             | Async.Failed m -> (
                 match rejection m with
-                | Some message -> k (Error (Status.Rejected message))
-                | None ->
-                    !log_error ("action " ^ name ^ " failed: " ^ m);
-                    k (Error Status.Server))
+                | Some message -> k (Error (Refused message))
+                | None -> k (Error (Broke m)))
             | Async.Pending -> ());
       fun () -> live := false
+
+let transport name input =
+  let settled, resolve, fail = Async.make () in
+  let (_ : unit -> unit) =
+    run name input (function
+      | Ok j -> resolve j
+      | Error Unknown -> fail ("unknown action " ^ name)
+      | Error (Bad m | Refused m | Broke m) -> fail m)
+  in
+  settled
+
+let send name input k =
+  run name input (fun r ->
+      k
+        (match r with
+        | Ok j -> Ok j
+        | Error Unknown -> Error Status.Not_found
+        | Error (Bad m) -> Error (Status.Rejected ("invalid input: " ^ m))
+        | Error (Refused m) -> Error (Status.Rejected m)
+        | Error (Broke m) ->
+            !log_error ("action " ^ name ^ " failed: " ^ m);
+            Error Status.Server))
 
 let implement action f =
   let name = Action.name action in
@@ -394,7 +404,7 @@ let implement action f =
             Async.map (fun o -> Output (Codec.encode output o)) run )
     :: !registry;
   Action.transport := transport;
-  Action.send := send
+  Remote.server_send := send
 
 let max_body = 1_048_576
 

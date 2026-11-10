@@ -157,5 +157,12 @@ let%client make ~(title : string) ~(view : Queries.view) () =
     <div class_="list">
       (Yuka.each ~equal:( = ) ~key:(fun (s, _) -> Issue.status_slug s) (fun () -> State.get groups) group)
     </div>
-    (if State.get visible = [] then <p class_="list-empty">"No issues match."</p> else Yuka.empty)
+    (match Remote.status source with
+     | Status.Failed { error; last = None } ->
+         <p class_="list-empty error">
+           (Yuka.text ("Could not load the issues: " ^ Status.error_to_string error ^ ". "))
+           <button class_="button retry" onClick=(fun _ -> Remote.refetch source)>"Retry"</button>
+         </p>
+     | Status.Loading None -> <p class_="list-empty">"Loading issues..."</p>
+     | _ -> if State.get visible = [] then <p class_="list-empty">"No issues match."</p> else Yuka.empty)
   </div>

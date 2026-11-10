@@ -100,6 +100,11 @@ if (leaked.length > 0) {
   console.error(`size: the keyed app does not use remote data but contains ${leaked.join(", ")}`);
   process.exit(1);
 }
+const serverOnly = [...keyed, ...demo].filter((c) => "yuka/printer.js" in c.inputs).map((c) => c.name);
+if (serverOnly.length > 0) {
+  console.error(`size: the server printer is in a client chunk: ${serverOnly.join(", ")}`);
+  process.exit(1);
+}
 if (app.gzip > budget.keyed_gzip) {
   console.error(
     `size: the keyed benchmark app is ${app.gzip} B gzip, over the budget of ${budget.keyed_gzip} B (${options.budget})`,

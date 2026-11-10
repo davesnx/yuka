@@ -245,6 +245,53 @@ let answers =
         | _ -> Alcotest.fail "not settled" );
   ]
 
+let fill_and_rollback =
+  [
+    ( "an answer made during a streamed fill goes out with the fill",
+      fun () ->
+        reset ();
+        let chunks = ref [] in
+        let write c =
+          chunks := c :: !chunks;
+          Async.resolved ()
+        in
+        let never _ =
+          let a, _, _ = Async.make () in
+          a
+        in
+        let value, resolve, _ = Async.make () in
+        let p =
+          Private.stream ~sleep:never ~write (fun () ->
+              Client.island ~name:"F" ~props:`Null (fun () ->
+                  Await.make ~async:value ~loading:(text "wait")
+                    ~children:(fun v ->
+                      let r = Remote.use echo (fun () -> v) in
+                      lower "b" [] [ text (show (Remote.status r)) ])
+                    ()))
+        in
+        resolve "f";
+        Alcotest.(check bool) "done" true (Async.status p = Async.Done ());
+        let all = String.concat "" (List.rev !chunks) in
+        let answer = {|data-yuka-answer="r:echo &quot;f&quot;">{"ok":"echo f"}</script>|} in
+        Alcotest.(check bool) "answer written" true (contains all answer);
+        Alcotest.(check bool) "before the fill" true (index all answer < index all "<template data-yuka-fill") );
+    ( "an island that raises takes its answers back",
+      fun () ->
+        reset ();
+        let s = Private.session ~streaming:false ~islands_only:true in
+        let broken () =
+          Client.island ~name:"B" ~props:`Null (fun () ->
+              ignore (Remote.use echo (fun () -> "r"));
+              failwith "island broke")
+        in
+        (match Private.print s (fun () -> Private.node (broken ())) with
+        | _ -> Alcotest.fail "no exception"
+        | exception Failure _ -> ());
+        let html = Private.print s (fun () -> Private.node (island echo "r")) in
+        Alcotest.(check bool) "answer written by the next island" true
+          (contains html {|data-yuka-answer="r:echo &quot;r&quot;">|}) );
+  ]
+
 let edit = Action.declare ~name:"edit" ~input:Codec.string ~output:Codec.string
 let edits = ref []
 
@@ -295,6 +342,32 @@ let optimistic =
         fail_edit 2;
         Alcotest.(check bool) "failed" true (match Async.status b with Async.Failed _ -> true | _ -> false);
         check_status "rolled back" "ready base+x|Y" r );
+    ( "mutate: a commit while a refetch runs keeps Loading and asks again",
+      fun () ->
+        reset ();
+        edits := [];
+        let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "k")) in
+        settle 0 "old";
+        let _ = Remote.mutate r (fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        Remote.refetch r;
+        settle_edit 0 "ok";
+        check_status "still loading, with the change" "loading old+c" r;
+        Alcotest.(check int) "a new request after the commit" 3 (List.length !calls);
+        settle 1 "stale";
+        check_status "the request from before the commit is dropped" "loading old+c" r;
+        settle 2 "fresh";
+        check_status "fresh" "ready fresh" r );
+    ( "mutate: a commit after a failure keeps the error",
+      fun () ->
+        reset ();
+        edits := [];
+        let r, _ = in_owner (fun () -> Remote.use ~retry:Remote.no_retry gated (fun () -> "e")) in
+        settle 0 "base";
+        Remote.refetch r;
+        fail 1 "down";
+        let _ = Remote.mutate r (fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        settle_edit 0 "ok";
+        check_status "failed with the new last" "failed server error last base+c" r );
     ( "mutate: a refetch during a pending change keeps the change",
       fun () ->
         reset ();
@@ -314,4 +387,9 @@ let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) t
 
 let () =
   Alcotest.run "remote"
-    [ ("transport", cases transport); ("answers", cases answers); ("optimistic", cases optimistic) ]
+    [
+      ("transport", cases transport);
+      ("answers", cases answers);
+      ("fill and rollback", cases fill_and_rollback);
+      ("optimistic", cases optimistic);
+    ]

@@ -19,6 +19,17 @@ open Base
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key
     ^ "\" data-pending></script>"
 
+  let answers_html answers =
+    String.concat ""
+      (List.rev_map
+         (function key, Some json -> answer_script key json | key, None -> pending_answer_script key)
+         answers)
+
+  let take_answers s =
+    let html = answers_html s.answers in
+    s.answers <- [];
+    html
+
   let take_pending s =
     let p = List.rev s.pending in
     s.pending <- [];
@@ -142,7 +153,7 @@ open Base
            ^ ">");
           after_text := false;
           s.depth <- s.depth + 1;
-          let outer_answers = s.answers in
+          let outer_answers = s.answers and answered = s.answered and pending = s.pending in
           s.answers <- [];
           let restore () =
             s.depth <- s.depth - 1;
@@ -155,10 +166,12 @@ open Base
             | () -> restore ()
             | exception e ->
                 ignore (restore ());
+                s.answered <- answered;
+                s.pending <- pending;
                 raise e
           in
           Buffer.add_string b "</yuka-island>";
-          List.iter (Buffer.add_string b) (List.rev mine);
+          Buffer.add_string b (answers_html mine);
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
             ^ Json.to_string props ^ "</script>");

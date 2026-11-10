@@ -71,6 +71,25 @@ let view () =
   handle := Some r;
   lower "b" [] [ hole (fun () -> text (show (Remote.status r))) ]
 
+let later = State.make false
+
+let late_entry =
+  Client.entry ~name:"L" (fun json ->
+      Result.map
+        (fun () () ->
+          lower "i" []
+            [
+              hole (fun () ->
+                  if State.get later then (
+                    let r = Remote.use query (fun () -> "late") in
+                    lower "u" [] [ hole (fun () -> text (show (Remote.status r))) ])
+                  else empty);
+            ])
+        (Codec.decode Codec.unit json))
+
+let shown_late : unit -> string =
+  [%mel.raw "function () { const u = document.querySelector('yuka-island u'); return u ? u.textContent : 'none' }"]
+
 let entry =
   Client.entry ~name:"Q" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
 
@@ -161,7 +180,8 @@ let async =
             Yuka.unmount ()) );
     ( "remote: an embedded error is read too",
       fun finish ->
-        fresh ~shown:"failed server error" ~answer:(answer_for "a" {|{"error":{"kind":"server"}}|}) ();
+        fresh ~attempts:Remote.no_retry ~shown:"failed server error"
+          ~answer:(answer_for "a" {|{"error":{"kind":"server"}}|}) ();
         start ();
         finish (fun () ->
             check "no fetch" "0" (string_of_int (fetches ()));
@@ -195,6 +215,40 @@ let async =
                 check "no fetch while loading" "0" (string_of_int before);
                 check "one fetch" "1" (string_of_int (fetches ()));
                 Yuka.unmount ())) );
+    ( "remote: an embedded network error is retried",
+      fun finish ->
+        fresh ~shown:"failed network error: timeout"
+          ~attempts:{ Remote.attempts = 1; delay_ms = (fun _ -> 0) }
+          ~answer:(answer_for "a" {|{"error":{"kind":"network","message":"timeout"}}|})
+          ();
+        capture_warnings ();
+        start ();
+        let at_start = shown () in
+        let logged = warnings () in
+        after_ms 10 (fun () ->
+            let sent = fetches () in
+            if sent > 0 then respond 0 200 {|{"ok":"A"}|};
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "hydrated with the embedded error" "failed network error: timeout" at_start;
+                    check "no mismatch" "" logged;
+                    check "one fetch" "1" (string_of_int sent);
+                    check "ready" "ready A" (shown ());
+                    Yuka.unmount ()))) );
+    ( "remote: a use created later reads an answer that came with its content",
+      fun finish ->
+        Yuka.unmount ();
+        setup_fetch false;
+        State.set later false;
+        set_body
+          {|<yuka-island data-name="L" data-id="i1" style="display:contents"><i></i></yuka-island><script type="application/json" data-yuka-props="i1">null</script>|};
+        Yuka.mount ~islands:(Client.registry [ late_entry ]) ~navigation:false ();
+        append_html (answer_for "late" {|{"ok":"L"}|});
+        State.set later true;
+        finish (fun () ->
+            check "no fetch" "0" (string_of_int (fetches ()));
+            check "ready" "ready L" (shown_late ());
+            Yuka.unmount ()) );
     ( "remote: refetch after hydration sends a request",
       fun finish ->
         fresh ~shown:"ready A" ~answer:(answer_for "a" {|{"ok":"A"}|}) ();

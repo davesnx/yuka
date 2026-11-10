@@ -9,7 +9,13 @@ type retry = { attempts : int; delay_ms : int -> int }
 let default_retry = { attempts = 2; delay_ms = (fun n -> if n = 1 then 500 else 1500) }
 let no_retry = { attempts = 0; delay_ms = (fun _ -> 0) }
 
-let field name fields = List.assoc_opt name fields
+let server_send :
+    (string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit) ref =
+  ref (fun _ _ k ->
+      k (Error (Status.Network "no action transport"));
+      ignore)
+
+let field = Client.field
 
 let of_response status body : (Json.t, Status.error) result =
   let fields = match Json.of_string body with Ok (`Assoc f) -> Some f | _ -> None in
@@ -32,7 +38,7 @@ let fetch name input k =
     (fun status body -> k (of_response status body))
     (fun cancelled message -> if not cancelled then k (Error (Status.Network message)))
 
-let send () = if Web.in_browser then fetch else !Action.send
+let send () = if Web.in_browser then fetch else !server_send
 
 let table : (int * (unit -> unit)) list Web.table option ref = ref None
 let next_use = ref 0
@@ -59,7 +65,7 @@ let on_server ~enabled (q : (_, _, _) Action.t) args base =
   else
     let input = q.input.encode (args ()) in
     let settled, resolve, _ = Async.make () in
-    let (_abort : unit -> unit) = !Action.send q.name input resolve in
+    let (_abort : unit -> unit) = !server_send q.name input resolve in
     match Async.status settled with
     | Async.Done r ->
         State.set base (decode q None r);
@@ -83,14 +89,25 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
       stop := ignore
     in
     let finish g r = if g = !generation then State.set base (decode q (Status.data (State.peek base)) r) in
-    let rec attempt g input n =
-      stop :=
-        send q.name input (fun r ->
-            if g = !generation then
-              match r with
-              | Error (Status.Network _ | Status.Server) when n <= retry.attempts ->
-                  stop := Web.set_timeout (retry.delay_ms n) (fun () -> if g = !generation then attempt g input (n + 1))
-              | r -> finish g r)
+    let rec attempt g input n = stop := send q.name input (answered g input n)
+    and answered g input n r =
+      if g = !generation then
+        match r with
+        | Error (Status.Network _ | Status.Server) when n <= retry.attempts ->
+            stop := Web.set_timeout (retry.delay_ms n) (fun () -> if g = !generation then attempt g input (n + 1))
+        | r -> finish g r
+    in
+    let embedded g input r =
+      finish g r;
+      match r with
+      | Error (Status.Network _ | Status.Server) when retry.attempts >= 1 ->
+          stop :=
+            Web.set_timeout (retry.delay_ms 1) (fun () ->
+                if g = !generation then begin
+                  State.set base (Status.Loading (Status.data (State.peek base)));
+                  attempt g input 2
+                end)
+      | _ -> ()
     in
     let start input ~read =
       cancel ();
@@ -100,7 +117,7 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
       else
         let key = Answers.key q.name input in
         match Answers.find key with
-        | Answers.Found r -> finish g r
+        | Answers.Found r -> embedded g input r
         | Answers.Absent -> attempt g input 1
         | Answers.Pending ->
             let stop_watch = ref ignore and stop_ready = ref ignore in
@@ -109,18 +126,18 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
               !stop_ready ()
             in
             stop_watch :=
-              Web.watch_added (fun _ ->
-                  match Answers.find key with
-                  | Answers.Found r ->
+              Web.watch_added (fun nodes ->
+                  match Answers.find_added key nodes with
+                  | Some r ->
                       !stop_ready ();
-                      finish g r;
+                      embedded g input r;
                       true
-                  | _ -> false);
+                  | None -> false);
             stop_ready :=
               Web.on_dom_ready (fun () ->
                   !stop_watch ();
                   if g = !generation then
-                    match Answers.find key with Answers.Found r -> finish g r | _ -> attempt g input 1);
+                    match Answers.find key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
             stop := release
     in
     let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
@@ -169,14 +186,15 @@ let mutate r change ?commit run =
     | Async.Done v ->
         Scheduler.batch (fun () ->
             drop ();
+            let next data = match commit with Some f -> f v data | None -> change data in
             match State.peek r.base with
-            | Status.Ready { data; stale } ->
-                let next = match commit with Some f -> f v data | None -> change data in
-                State.set r.base (Status.Ready { data = next; stale })
-            | Status.Loading (Some data) | Status.Failed { last = Some data; _ } ->
-                let next = match commit with Some f -> f v data | None -> change data in
-                State.set r.base (Status.Ready { data = next; stale = false })
-            | _ -> ())
+            | Status.Ready { data; stale } -> State.set r.base (Status.Ready { data = next data; stale })
+            | Status.Loading (Some data) ->
+                State.set r.base (Status.Loading (Some (next data)));
+                r.refetch ()
+            | Status.Failed { error; last = Some data } ->
+                State.set r.base (Status.Failed { error; last = Some (next data) })
+            | Status.Idle | Status.Loading None | Status.Failed { last = None; _ } -> ())
     | Async.Failed _ -> drop ()
     | Async.Pending -> ());
   result

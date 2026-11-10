@@ -104,7 +104,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable entry : string option;
     mutable current : string option;
     mutable in_fill : bool;
-    mutable answers : string list;
+    mutable answers : (string * Json.t option) list;
     mutable answered : string list;
   }
 

@@ -1387,7 +1387,7 @@ R3 (ticket 12); its "Changes during build" section lists the differences.
 - Queries: `Action.query` is `Action.declare` with the kind `[ `Query ]`
   (a phantom third parameter of `Action.t`); `Remote.use` accepts only that
   kind. Same registry, endpoint and wire format.
-- Transport: `Action.send` gives `(Json.t, Status.error) result` and
+- Transport: `Remote.server_send` gives `(Json.t, Status.error) result` and
   returns an abort. The server sets it with `implement` (the
   implementation, `Server` logged); in the browser `Remote` maps the status
   of `fetch_post` itself (400 `Rejected` with the message, 403, 404, 413 and
@@ -1413,6 +1413,12 @@ R3 (ticket 12); its "Changes during build" section lists the differences.
   runs the call, and on success removes it and writes `commit result base`
   (default `change base`); on failure removes it.
 - Size: `make size` fails when the keyed app contains `remote.js`,
-  `answers.js`, `optimistic.js` or `status.js`; keyed app 10460 -> 10457 B
-  gzip. The demo client grows 35961 -> 38766 B gzip (it uses Remote).
+  `answers.js`, `optimistic.js` or `status.js`, or when any client chunk
+  contains `printer.js`; keyed app 10460 -> 10462 B gzip. The demo client
+  grows 35961 -> 38882 B gzip (it uses Remote).
+- Review fixes: answers made in an `Await` fill go out before the fill
+  chunk; a raising island rolls back its answers; embedded `Network` and
+  `Server` errors are retried after hydration; `mutate` keeps the base's
+  kind and asks again when it commits during a request; the typed server
+  transport ref is `Remote.server_send`.
 
