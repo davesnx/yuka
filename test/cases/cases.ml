@@ -1247,6 +1247,86 @@ let dependency_order_changes () =
   State.set a 1;
   check "both States tracked after the read order changes" "4" (string_of_int !runs)
 
+let memo_raises_reader_recovers () =
+  let n = State.make 0 in
+  let m =
+    State.memo (fun () -> if State.get n = 1 then failwith "bad" else State.get n)
+  in
+  let seen = ref [] in
+  Effect.run (fun () -> seen := State.get m :: !seen);
+  (try State.set n 1 with Failure _ -> ());
+  (try State.set n 2 with Failure _ -> ());
+  check "the effect sees the memo again after it raised" "2,0"
+    (String.concat "," (List.map string_of_int !seen))
+
+let loop_limit_recovers () =
+  let s = State.make 0 in
+  let m = State.memo (fun () -> State.get s) in
+  let loop = State.make false in
+  let seen = ref 0 in
+  Effect.run (fun () ->
+      let v = State.get m in
+      seen := v;
+      if State.peek loop then State.set s (v + 1));
+  State.set loop true;
+  (try State.set s 1 with Failure _ -> ());
+  State.set loop false;
+  (try State.set s 1000 with Failure _ -> ());
+  check "an effect dropped at the limit runs on a later write" "1000"
+    (string_of_int !seen)
+
+let raise_keeps_unread_dependencies () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  let b = State.make 0 in
+  Effect.run (fun () ->
+      incr runs;
+      if State.get a = 1 then failwith "stop";
+      ignore (State.get b));
+  (try State.set a 1 with Failure _ -> ());
+  (try State.set b 5 with Failure _ -> ());
+  check "a raising run keeps the States it did not read yet" "3"
+    (string_of_int !runs)
+
+let parent_runs_before_child () =
+  let add, read = log () in
+  let o = State.make (Some 1) in
+  Effect.run (fun () ->
+      match State.get o with
+      | Some _ ->
+          Effect.run (fun () -> add (string_of_int (Option.get (State.get o))))
+      | None -> add "none");
+  State.set o None;
+  check "the parent re-runs and disposes the child first" "1 none" (read ())
+
+let disposed_during_run () =
+  let s = State.make 0 in
+  let t = State.make 0 in
+  let dispose = ref ignore in
+  let (), d =
+    owner (fun () ->
+        Effect.run (fun () ->
+            if State.get s = 1 then begin
+              !dispose ();
+              ignore (State.get t)
+            end))
+  in
+  dispose := d;
+  State.set s 1;
+  check "an effect disposed during its run reads nothing more" "false false"
+    (Printf.sprintf "%b %b" (Private.has_readers s) (Private.has_readers t))
+
+let memo_first_compute_raises () =
+  let n = State.make 0 in
+  (try
+     ignore
+       (State.memo (fun () ->
+            ignore (State.get n);
+            failwith "bad"))
+   with Failure _ -> ());
+  check "a memo whose first compute raises leaves no reader" "false"
+    (string_of_bool (Private.has_readers n))
+
 let disposed_while_pending () =
   let add, read = log () in
   let s = State.make 0 in
@@ -1285,6 +1365,12 @@ let all =
     ("memo diamond", memo_diamond);
     ("dynamic dependencies", dynamic_dependencies);
     ("dependency order changes", dependency_order_changes);
+    ("memo that raises, then its reader", memo_raises_reader_recovers);
+    ("loop limit, then a later write", loop_limit_recovers);
+    ("a raising run keeps unread dependencies", raise_keeps_unread_dependencies);
+    ("parent effect before its child", parent_runs_before_child);
+    ("an effect disposed during its run", disposed_during_run);
+    ("a memo whose first compute raises", memo_first_compute_raises);
     ("disposed while pending", disposed_while_pending);
     ("memo that raises", memo_raises);
     ("batch in the first run of an effect", batch_in_first_run);

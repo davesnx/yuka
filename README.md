@@ -306,6 +306,6 @@ Experimental. APIs change. `DESIGN.md` describes the current design.
 
 ## Credits
 
-The signal core in `src/` comes from
-[reativa](src/LICENSE.reativa). The mlx attribute checks in `ppx/` come from
+The update algorithm of the signal core in `src/scheduler.ml` is adapted
+from Solid's `signal.ts` ([MIT](src/LICENSE.solid)). The mlx attribute checks in `ppx/` come from
 [html_of_jsx](ppx/LICENSE.html_of_jsx).

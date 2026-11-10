@@ -97,6 +97,8 @@ module Private = struct
     | Some o -> Base.owner_size o
     | None -> 0
 
+  let has_readers (s : _ Signal.t) = Option.is_some s.node.first
+
   let slot_content (s : slot) = s.content
   let slot_dom (s : slot) = s.dom
   let call_action = Action.transport

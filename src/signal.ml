@@ -47,7 +47,14 @@ let update s f = set s (f s.value)
 
 let computed ?equal compute =
   let node = Scheduler.make false Scheduler.never in
-  let s = { value = Scheduler.with_listener (Some node) compute; equal; node } in
+  let value =
+    match Scheduler.with_listener (Some node) compute with
+    | v -> v
+    | exception e ->
+        Scheduler.dispose node;
+        raise e
+  in
+  let s = { value; equal; node } in
   Scheduler.set_level node;
   node.fn <-
     (fun () ->

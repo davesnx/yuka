@@ -538,6 +538,9 @@ module Private : sig
   (** The number of live disposers of the current owner (0 outside an
       owner). For tests. *)
 
+  val has_readers : ('a, _) State.signal -> bool
+  (** Whether an effect or a memo reads the State. For tests. *)
+
   val untracked : (unit -> 'a) -> 'a
   (** Runs the function without tracking State reads. *)
 
