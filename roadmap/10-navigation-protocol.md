@@ -1,6 +1,7 @@
 # Navigation protocol
 
 Type: wayfinder:grilling
+Release: 0.3
 Blocked by: 09
 Claimed by: none
 

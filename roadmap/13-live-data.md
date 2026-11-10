@@ -1,6 +1,7 @@
 # Live data
 
 Type: wayfinder:grilling
+Release: 0.4
 Blocked by: 11, 12
 Claimed by: none
 

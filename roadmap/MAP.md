@@ -10,13 +10,16 @@ Yuka v1 is tagged when it matches SolidJS on measured numbers and has the featur
 - Size: client runtime min+gzip at or below Solid's (5 KB measured; Yuka's keyed app is 11 KB, ticket 14).
 - A page with no island sends 0 bytes of JavaScript.
 - Demo: Total Blocking Time 0 and LCP equal to plain server HTML.
-- Server: SSR throughput compared with an agreed reference.
+- Server: SSR throughput faster than both Solid and server-reason-react on `make bench-ssr` (user, 2026-11-10; ticket 31).
 - Features: generated router from `Routes.mlx`, first-party Dream adapter with Yuka owning the request cycle, three kinds of data (local, remote, live), and the areas listed in "Not yet specified".
 
 ## Releases before v1
 
 - 0.2 (plan: `.workplace/plans/yuka-0.2_PLAN.md`, local): tickets 05, 06, 07, 09, 11, 16, 17, 18, 19. `yuka-dream` is a separate opam package.
-- 0.3: ticket 12 and forms (candidate).
+- 0.3, apps: 10 (navigation), 12 (remote data), 20 (forms), 21 (error boundaries), 22 (prefetch, cache, view transitions), 26 (page measurements), 27 (SSR throughput), 28 (benchmark CI gate).
+- 0.4, platform: 13 (live data), 25 (live data on many nodes), 23 (CSS per island), 24 (dev server).
+- 0.5, speed and size: 29 (smaller reactive core), 30 (mount path), 31 (SSR faster than Solid and server-reason-react), with the 1.05 speed target confirmed by 28.
+- 1.0: every target in "Destination" met and measured.
 - A ticket's `Release:` line names its release.
 
 ## Notes
@@ -41,13 +44,7 @@ Yuka v1 is tagged when it matches SolidJS on measured numbers and has the featur
 
 ## Not yet specified
 
-- Forms and mutations with progressive enhancement: waits for the remote data design.
-- Prefetch on hover or when visible, navigation cache, view transitions: wait for the navigation protocol.
-- CSS per island or scoped styles.
-- Dev server with hot reload.
-- Error boundaries and loading states on the client.
-- Benchmarks and size budget as CI gates: wait for the benchmark suite.
-- Live data on more than one server node.
+All earlier items now have tickets (20 to 25, 28). Each grilling ticket gets its design from the user before it is built.
 
 ## Out of scope
 

@@ -23,3 +23,7 @@ Benchmark built (2026-11-10): `make bench-ssr`, sources and rerun steps in `benc
 | Solid 1.9 `renderToString`, Node 22 | 7689 | 4.06 | 8.10 | 0.56 |
 
 A second run (load average 62 -> 43) was within 4% for each candidate. The reference is not chosen: it is a user decision. Yuka renders this page at about half the speed of Solid and of server-reason-react.
+
+## Resolution
+
+Reference decided (user, 2026-11-10): Yuka must be faster than both Solid and server-reason-react. The benchmark is `make bench-ssr` (commit 8ae6986). The speed work is ticket 31.
