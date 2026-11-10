@@ -322,15 +322,18 @@ let abort : controller -> unit =
   [%mel.raw
     "function (c) { c.abort() }"]
 
-let click_href : event -> string =
+let plain_click : event -> bool =
   [%mel.raw
-    {|function (e) {
-  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return "";
-  const t = e.target;
+    "function (e) { return !(e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) }"]
+
+let link_href : bool -> node -> string =
+  [%mel.raw
+    {|function (prefetch, t) {
   const a = t && t.closest ? t.closest("a[href]") : null;
   if (!a) return "";
   const target = a.getAttribute("target");
   if ((target && target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-yuka-reload")) return "";
+  if (prefetch && a.getAttribute("data-yuka-prefetch") === "off") return "";
   const l = window.location;
   if (a.origin !== l.origin) return "";
   if (a.hash && a.pathname === l.pathname && a.search === l.search) return "";
@@ -338,13 +341,15 @@ let click_href : event -> string =
 }|}]
 
 let fetch_page :
-    string -> string -> controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string -> string -> bool -> controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
   [%mel.raw
-    {|function (url, keys, controller, ok, fail) {
+    {|function (url, keys, prefetch, controller, ok, fail) {
   const signal = controller.signal;
+  const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
+  if (prefetch) { init.headers["Yuka-Prefetch"] = "1"; init.cache = "no-store"; }
   let request;
   try {
-    request = fetch(url, { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal });
+    request = fetch(url, init);
   } catch (e) {
     fail();
     return;
@@ -363,6 +368,55 @@ let fetch_page :
         ok(target.pathname + target.search + hash, x.r.status, function (name) { const v = x.r.headers && x.r.headers.get ? x.r.headers.get(name) : null; return v === null ? undefined : v; }, x.text);
       },
       function () { if (!signal.aborted) fail(); });
+}|}]
+
+let absolute : string -> string =
+  [%mel.raw "function (u) { const x = new URL(u, window.location.href); x.hash = ''; return x.href }"]
+
+let max_age : string -> int =
+  [%mel.raw
+    {|function (v) { const m = /(?:^|,)\s*max-age=(\d+)/.exec(v); return /(?:^|,)\s*no-(?:store|cache)\s*(?:,|$)/.test(v) || !m ? 0 : +m[1] }|}]
+
+let key_before : string -> string -> bool =
+  [%mel.raw
+    {|function (a, b) { const x = a.split("-"), y = b.split("-"); return +x[0] < +y[0] || (+x[0] === +y[0] && +x[1] < +y[1]) }|}]
+
+let now : unit -> float = [%mel.raw "function () { return Date.now() }"]
+
+let after : int -> (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    "function (ms, f) { const id = setTimeout(function () { f() }, ms); return function () { clearTimeout(id) } }"]
+
+let save_data : unit -> bool =
+  [%mel.raw
+    "function () { const c = window.navigator.connection; return !!(c && c.saveData) }"]
+
+let observe : node array -> (node -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (els, f) {
+  const O = window.IntersectionObserver;
+  if (typeof O !== "function") return function () {};
+  const observer = new O(function (entries) {
+    for (const e of entries) if (e.isIntersecting) { observer.unobserve(e.target); f(e.target); }
+  });
+  for (const el of els) observer.observe(el);
+  return function () { observer.disconnect(); };
+}|}]
+
+let transition : string -> (unit -> unit) -> unit =
+  [%mel.raw
+    {|function (dir, f) {
+  const d = document;
+  if (typeof d.startViewTransition !== "function") { f(); return; }
+  const h = d.documentElement;
+  const id = (globalThis.__yukaTransition = (globalThis.__yukaTransition || 0) + 1);
+  h.setAttribute("data-yuka-nav", dir);
+  const done = function () { if (globalThis.__yukaTransition === id) h.removeAttribute("data-yuka-nav"); };
+  const t = d.startViewTransition(function () {
+    try { f(); } catch (e) { d.defaultView.setTimeout(function () { throw e; }); }
+  });
+  t.ready.then(null, function () {});
+  t.finished.then(done, done);
 }|}]
 
 let swap_page : string -> unit =

@@ -1526,10 +1526,57 @@ Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
   type from the headers before it reads the body. `yuka-dream` refuses a
   `Content-Length` over the limit with no read and closes the body stream
   over the limit. The form 303 goes only to a path or a URL of the request
-  `Host` with no CR or LF; else the 500 page and a log. One origin rule,
+  `Host` with no control character (below space, or DEL: browsers drop
+  TAB, CR and LF from a URL, so `/\t/evil.com` is `//evil.com`); else the
+  500 page and a log. One origin rule,
   `Server.trusted_origin`, for form posts, the action call and `Action`
   routes. Unknown field names in errors from the server are form errors;
   a `data-yuka-sent` that does not parse is ignored (a console message in
   a dev build). A form post with a content type other than
   `application/x-www-form-urlencoded` is 405 before the guards run.
 
+
+## Prefetch, navigation cache and view transitions (2026-11-10)
+
+Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
+
+- One cache in `Navigation`: a `Web.table` from `absolute URL without
+  fragment ^ " " ^ outlet keys` to an entry (answer or in-flight fetch,
+  waiters, time, prefetched). The keys are part of the key because the
+  answer depends on `Yuka-Navigate` (`Vary`). At most 30 entries; the
+  oldest goes first (`Map` keeps insertion order).
+- Lifetime from the answer's own `Cache-Control` (`Web.max_age`):
+  `max-age=N` without `no-store` or `no-cache` keeps it N seconds, also
+  for back and forward; otherwise only a prefetched answer is kept, used
+  once, within 10 s. A navigation fetch is stored only when `max-age` is
+  above 0 and no `clear` happened since it started (`era`).
+- Dropping entries (`clear`, eviction of the oldest when a new key comes
+  in) aborts an in-flight prefetch unless a navigation waits for it; that
+  navigation still gets the answer. `unmount` aborts every fetch, and it
+  and a `popstate` to the shown page bump the navigation counter, so a
+  waiting navigation does nothing.
+- A navigation finds an answer (used at once, no fetch), an in-flight
+  prefetch (it waits), or nothing (it fetches as before). A counter drops
+  the answer of a navigation that a newer one replaced; a prefetch is never
+  aborted by a navigation, only by `unmount`.
+- Prefetch: delegated `pointerover`/`focusin` start a 50 ms timer,
+  `pointerout`/`focusout` and any navigation cancel it; `touchstart` and a
+  `pointerdown` that would be a plain click prefetch at once. Links are the ones a click
+  would navigate (`Web.link_href`), minus `data-yuka-prefetch="off"`.
+  `IntersectionObserver` watches visible links after start and after each
+  navigation. A prefetch sends `Yuka-Prefetch: 1` and `cache: "no-store"`:
+  with the default cache mode, Chrome's HTTP cache lock made a same-URL
+  page load in a new tab (ctrl-click) wait for the end of a streamed
+  prefetch.
+- Actions: `Platform.acted` is called by the action transport on an `ok`
+  answer; navigation sets it to empty the cache. Anything that calls an
+  action through the transport (later `Remote.mutate`) empties it too.
+- Transitions: the history push and `loaded` change first; the DOM update
+  (swap, scroll, island start) is one function. With `~transitions:true`,
+  `Web.transition` runs it in `document.startViewTransition`, rethrows an
+  exception from it in a task (an uncaught error, not a rejected promise),
+  ignores the rejected `ready` of a skipped transition, and removes
+  `data-yuka-nav` when the last started transition finishes. The direction of `popstate` compares the history keys
+  (`time-counter`, made in order).
+- Size: about 1.4 KB gzip in an app that mounts navigation (demo +1381 B); 0 in
+  the keyed benchmark, which does not.

@@ -485,6 +485,12 @@ let guards =
         check_header r "cache-control" [ "no-store" ];
         check_header r "x-frame-options" [ "DENY" ];
         check_events [ "outer" ] );
+    ( "a prefetch gets the same answer as a navigation",
+      fun () ->
+        let plain = get ~headers:[ ("yuka-navigate", "-") ] "/team/a/1" in
+        let pre = get ~headers:[ ("yuka-navigate", "-"); ("yuka-prefetch", "1") ] "/team/a/1" in
+        check_status pre plain.status;
+        Alcotest.(check string) "same body" plain.body pre.body );
     ( "a stop Redirect needs a redirect status and a clean location",
       fun () ->
         List.iter
@@ -945,7 +951,17 @@ let forms =
             check_status r 500;
             check_true "no location" (not (List.mem_assoc "location" r.headers));
             Alcotest.(check int) "logged" 1 (List.length !logged))
-          [ "a%0D%0ASet-Cookie%3A+x%3D1"; "https%3A%2F%2Fevil.example%2Fx"; "http%3A%2F%2Fapp.example.evil%2F" ] );
+          [
+            "a%0D%0ASet-Cookie%3A+x%3D1";
+            "https%3A%2F%2Fevil.example%2Fx";
+            "http%3A%2F%2Fapp.example.evil%2F";
+            "%2F%09%2Fevil.com";
+            "%2F%0A%2Fevil.com";
+            "%2F%0D%2Fevil.com";
+            "%2F%7F%2Fevil.com";
+            "%2Fok%00";
+            "%09%2F%2Fevil.com";
+          ] );
     ( "page guards run before the action",
       fun () ->
         let r = post ~target:"/team/nobody/form" "_yuka_action=jot&body=hi" in

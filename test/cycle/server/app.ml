@@ -248,7 +248,9 @@ let saved = ref []
 let () =
   let open Forms_shared.Entry in
   Server.Form.implement save
-    ~redirect:(fun o -> if String.contains o ':' || String.contains o '\n' then o else "/entry?saved=" ^ o)
+    ~redirect:(fun o ->
+      if String.exists (fun c -> c = ':' || c < ' ' || c = '\127') o || String.starts_with ~prefix:"/" o then o
+      else "/entry?saved=" ^ o)
     (fun e ->
       saved := e.title :: !saved;
       match e.title with

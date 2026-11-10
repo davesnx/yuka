@@ -1028,6 +1028,8 @@ end
 val mount :
   ?islands:Client.registry ->
   ?navigation:bool ->
+  ?prefetch:[ `Hover | `Visible | `Off ] ->
+  ?transitions:bool ->
   ?on_error:(string -> unit) ->
   unit ->
   unit
@@ -1078,6 +1080,34 @@ val mount :
     is not [text/html], its [Yuka-Build] differs from the
     [<meta name="yuka-build">] of the page, or it was redirected to another
     origin, it does [location.assign url].
+
+    Prefetch ([prefetch], default [`Hover]): 50 ms after the pointer or the
+    focus enters a link that a click would navigate, or at once on
+    [touchstart] or a [pointerdown] of the main button with no modifier
+    key, the page is loaded with the navigation headers and
+    [Yuka-Prefetch: 1]. The server answers it as any navigation, so the
+    guards and loaders of a [GET] page must be safe to run for a link the
+    user may never click: no side effects. [`Visible] also prefetches every such link
+    when it becomes visible; with [`Hover], only links with
+    [data-yuka-prefetch="visible"] do. [data-yuka-prefetch="off"] on a link
+    and [`Off] turn it off, and so does [navigator.connection.saveData].
+    A navigation to a URL whose prefetch is in flight waits for it.
+
+    Answers are kept by URL and outlet keys, at most 30, by the
+    [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or
+    [no-cache]) for N seconds, also for back and forward; otherwise a
+    prefetched answer is used once, within 10 s, and a visited page is not
+    kept. An action call that succeeds empties the cache, and an answer
+    requested before it is not kept. [mount] and {!unmount} empty it and
+    abort the prefetches nobody waits for; after {!unmount} no navigation
+    updates the page.
+
+    With [~transitions:true], where [document.startViewTransition] exists,
+    the page update runs inside a view transition, and [<html>] has
+    [data-yuka-nav="push"], ["back"] or ["forward"] until the last one
+    ends. The URL, history and navigation state change before the
+    transition starts; an exception in the update is thrown again in a
+    task, as an uncaught error.
 
     With [~navigation:false] only the islands start and links load full
     pages. Calling [mount] again is safe: the listeners are not added twice.
@@ -1162,7 +1192,9 @@ module Server : sig
         values and errors on [Error], a decode error or {!Action.reject}.
         The 303, 403 and 413 carry the page's rule headers. A [redirect o]
         that is not a path ([/x], not [//x]) or a URL of the request [Host],
-        or that holds CR or LF, gives the 500 page and a
+        or that holds a control character (below space, or DEL; a browser
+        drops TAB from a URL, so [/\t/x] would go to [//x]), gives the 500
+        page and a
         {!log_error} message instead of a 303. Raises
         [Invalid_argument] when the action is not from {!Yuka.Form.val-action}. *)
   end

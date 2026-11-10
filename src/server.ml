@@ -472,7 +472,7 @@ let trusted_origin header =
   | None -> header "sec-fetch-site" = Some "same-origin"
 
 let local_location ~host location =
-  (not (String.exists (fun c -> c = '\r' || c = '\n') location))
+  (not (String.exists (fun c -> c < ' ' || c = '\127') location))
   &&
   match location with
   | "" -> false

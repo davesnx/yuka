@@ -96,15 +96,25 @@ val history_push_key : string -> string -> unit
 val manual_scroll : unit -> unit
 val new_controller : unit -> controller
 val abort : controller -> unit
-val click_href : event -> string
+val plain_click : event -> bool
+val link_href : bool -> node -> string
 val fetch_page :
   string ->
   string ->
+  bool ->
   controller ->
   (string -> int -> (string -> string option) -> string -> unit) ->
   (unit -> unit) ->
   unit
 val swap_page : string -> unit
+val absolute : string -> string
+val max_age : string -> int
+val key_before : string -> string -> bool
+val now : unit -> float
+val after : int -> (unit -> unit) -> unit -> unit
+val save_data : unit -> bool
+val observe : node array -> (node -> unit) -> unit -> unit
+val transition : string -> (unit -> unit) -> unit
 
 type 'a table
 

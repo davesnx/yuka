@@ -39,12 +39,12 @@ module Server = struct
   end
 end
 
-let mount ?islands ?(navigation = true) ?on_error () =
+let mount ?islands ?(navigation = true) ?prefetch ?transitions ?on_error () =
   match islands with
   | Some r when Web.in_browser ->
       Option.iter (fun f -> Client.on_error := f) on_error;
       let { Client.entries; lazy_registry } = r in
-      if navigation then Navigation.start ~lazy_entries:lazy_registry entries
+      if navigation then Navigation.start ~lazy_entries:lazy_registry ?prefetch ?transitions entries
       else Client.start ~lazy_entries:lazy_registry entries
   | _ ->
       failwith
