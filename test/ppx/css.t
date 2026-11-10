@@ -153,6 +153,12 @@ Errors:
   yuka-css: m/d.ml: [%yuka.css "nope.css"]: cannot read m/nope.css
   [1]
 
+Preprocessed copies that dune leaves in the build directory are skipped:
+
+  $ mkdir pp && echo 'module Css = [%yuka.css "gone.css"]' > pp/v.mlx.pp.ml && yuka-css pp
+  let sheets = [
+  ]
+
 Comments and strings that mention [%yuka.css] are not declarations:
 
   $ mkdir k && cp a.css k/ && cat > k/k.ml <<'X'

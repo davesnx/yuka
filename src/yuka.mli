@@ -833,6 +833,11 @@ module Private : sig
   (** The [walk], [kids], [attrs] and [values] given to [Template.make]. *)
 
   val node : 'kind element -> node
+
+  val dev_script : string -> string
+  (** The script that a page gets with [YUKA_DEV=1], for the state JSON
+      given (tests). *)
+
   val element : node -> 'kind element
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
@@ -1382,7 +1387,11 @@ module Server : sig
       and text; the generator [yuka-css] writes it ([Yuka_css.sheets]). The
       cycle serves each at [/_yuka/css/FILE] with [Immutable] (the name has
       a hash of the text); another path under [/_yuka/css/] is a 404 with
-      [no-store]. [timeout] (default 10 seconds) bounds a streamed
+      [no-store]. With the environment variable [YUKA_DEV=1] (set by
+      [yuka dev]), read here, the cycle answers [GET /_yuka/dev] with
+      Server-Sent Events of the state file in [YUKA_DEV_FILE], and full
+      pages get the reload script in their head; without it, [/_yuka/dev]
+      is a 404 and pages have no script. [timeout] (default 10 seconds) bounds a streamed
       render. *)
 
   val build_id : config -> 'req app -> string

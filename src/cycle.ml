@@ -165,7 +165,43 @@ let bundle ~dir ~entry ~manifest ~metafile =
     immutable = (fun path -> List.exists (String.equal path) hashed);
   }
 
+type dev = { state : unit -> string }
+
+let dev_default = {|{"build":0,"page":0,"error":null}|}
+
+let dev_of_env () =
+  match Sys.getenv_opt "YUKA_DEV" with
+  | Some "1" ->
+      let file = Sys.getenv_opt "YUKA_DEV_FILE" in
+      let state () =
+        match file with
+        | None -> dev_default
+        | Some f -> (
+            let read () =
+              let ic = open_in_bin f in
+              match really_input_string ic (in_channel_length ic) with
+              | text ->
+                  close_in ic;
+                  text
+              | exception e ->
+                  close_in_noerr ic;
+                  raise e
+            in
+            match String.trim (read ()) with
+            | "" -> dev_default
+            | text -> String.concat " " (String.split_on_char '\n' text)
+            | exception Sys_error _ -> dev_default)
+      in
+      Some { state }
+  | _ -> None
+
+let dev_script state =
+  let json = String.concat "\\u003c" (String.split_on_char '<' state) in
+  "<script>(function(){var s=" ^ json
+  ^ {|,b=s.build,p=s.page,k="yuka-dev-scroll",o=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.page>p){try{sessionStorage.setItem(k,String(scrollY))}catch(x){}p=d.page;location.reload();return}if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);u.searchParams.set("v",String(b));l.setAttribute("href",u.pathname+u.search)})}}})()</script>|}
+
 type config = {
+  dev : dev option;
   assets : assets option;
   public : (string list * string) list;
   styles : string list;
@@ -189,6 +225,7 @@ let public_prefix (prefix, dir) =
 
 let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.) () =
   {
+    dev = dev_of_env ();
     assets;
     public = List.map public_prefix public;
     styles;
@@ -318,7 +355,12 @@ let render env ~status ~headers layers (page : page) =
   let import_map = match assets with Some a -> a.import_map | None -> [] in
   let head extra =
     Server.head
-      ~extra:("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">" ^ extra)
+      ~extra:
+        ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
+        ^ (match (env.config.dev, env.navigate) with
+          | Some dev, None -> dev_script (dev.state ())
+          | _ -> "")
+        ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
   let build = nest layers page.body in
@@ -627,6 +669,14 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                             Async.return { resp with headers }))
                       (fail_page env a.missing))))
 
+let dev_events dev ~sleep write =
+  let rec loop last =
+    let now = dev.state () in
+    let sent = if String.equal now last then Async.return () else write ("data: " ^ now ^ "\n\n") in
+    Async.bind sent (fun () -> Async.bind (sleep 0.25) (fun () -> loop now))
+  in
+  loop ""
+
 let handle config (App a as app) ~sleep ~exists req (r : request) =
   let path, query = Router.split_target r.target in
   let env =
@@ -658,7 +708,19 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
   let run () =
     match (parts, public) with
     | "" :: "_yuka" :: _, _ -> (
-        match List.tl raw with
+        match (List.tl raw, config.dev) with
+        | [ "dev" ], Some dev -> (
+            match r.meth with
+            | `GET | `HEAD ->
+                reply
+                  {
+                    status = 200;
+                    headers = [ ("content-type", "text/event-stream"); ("cache-control", "no-store") ];
+                    body = Stream (dev_events dev ~sleep);
+                  }
+            | _ -> reply (method_not_allowed "GET, HEAD"))
+        | raw, _ ->
+        match raw with
         | "action" :: rest -> action r rest
         | "css" :: rest when config.css <> [] -> (
             match r.meth with

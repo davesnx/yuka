@@ -1048,11 +1048,89 @@ let forms =
         Alcotest.(check string) "no body" "" h.body );
   ]
 
+let dev =
+  let with_dev ?file f =
+    Unix.putenv "YUKA_DEV" "1";
+    Unix.putenv "YUKA_DEV_FILE" (Option.value file ~default:"/nonexistent/yuka-dev");
+    Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> f (Server.config ()))
+  in
+  let state_file text =
+    let f = Filename.temp_file "yuka_dev" "" in
+    Out_channel.with_open_bin f (fun oc -> output_string oc text);
+    f
+  in
+  let timers = ref [] in
+  let sleep _ =
+    let a, resolve, _ = Async.make () in
+    timers := !timers @ [ resolve ];
+    a
+  in
+  let tick () =
+    let due = !timers in
+    timers := [];
+    List.iter (fun resolve -> resolve ()) due
+  in
+  let stream config target =
+    let view = { Server.meth = `GET; target; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return None) } in
+    match
+      Async.status
+        (Server.handle config Cycle_server.Routes_server.app ~sleep ~exists:(fun ~root:_ ~path:_ -> false)
+           (request target) view)
+    with
+    | Async.Done (Server.Respond { status; headers; body = Server.Stream f }) ->
+        let written = ref [] in
+        ignore (f (fun s -> written := !written @ [ s ]; Async.return ()));
+        (status, headers, written)
+    | Async.Done (Server.Respond { status; _ }) -> (status, [], ref [])
+    | _ -> Alcotest.fail "no response"
+  in
+  [
+    ( "without YUKA_DEV: no /_yuka/dev and no script",
+      fun () ->
+        Unix.putenv "YUKA_DEV" "";
+        let config = Server.config () in
+        let r = get ~config "/_yuka/dev" in
+        check_status r 404;
+        check_true "no script" (not (contains (get ~config "/plain").body "/_yuka/dev")) );
+    ( "with YUKA_DEV=1: the events of the state file",
+      fun () ->
+        let file = state_file {|{"build":1,"page":1,"error":null}|} in
+        with_dev ~file (fun config ->
+            timers := [];
+            let status, headers, written = stream config "/_yuka/dev" in
+            Alcotest.(check int) "status" 200 status;
+            Alcotest.(check (option string)) "type" (Some "text/event-stream") (List.assoc_opt "content-type" headers);
+            Alcotest.(check (list string)) "first event" [ {|data: {"build":1,"page":1,"error":null}|} ^ "\n\n" ] !written;
+            tick ();
+            Alcotest.(check int) "no event without a change" 1 (List.length !written);
+            Out_channel.with_open_bin file (fun oc -> output_string oc {|{"build":2,"page":1,"error":null}|});
+            tick ();
+            Alcotest.(check string) "css change" ({|data: {"build":2,"page":1,"error":null}|} ^ "\n\n") (List.nth !written 1);
+            Out_channel.with_open_bin file (fun oc -> output_string oc "{\"build\":2,\"page\":1,\n\"error\":\"boom\"}");
+            tick ();
+            Alcotest.(check string) "error, on one line" ({|data: {"build":2,"page":1, "error":"boom"}|} ^ "\n\n") (List.nth !written 2);
+            let r = get ~config ~meth:`POST "/_yuka/dev" in
+            check_status r 405) );
+    ( "with YUKA_DEV=1: the script in full pages only",
+      fun () ->
+        let file = state_file {|{"build":3,"page":2,"error":"<\/script>"}|} in
+        with_dev ~file (fun config ->
+            let page = (get ~config "/plain").body in
+            check_true "script in the head" (index page "new EventSource(\"/_yuka/dev\")" < index page "</head>");
+            check_true "state in the script, < escaped" (contains page {|var s={"build":3,"page":2,"error":"\u003c\/script>"}|});
+            let partial = get ~config ~headers:[ ("Yuka-Navigate", "L0") ] "/plain" in
+            check_header partial "yuka-outlet" [ "L0" ];
+            check_true "no script in a partial answer" (not (contains partial.body "EventSource"));
+            let full = get ~config ~headers:[ ("Yuka-Navigate", "") ] "/plain" in
+            check_true "no script in a navigation answer" (not (contains full.body "EventSource"))) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
   Alcotest.run "cycle"
     [
+      ("dev", cases dev);
       ("assets", cases assets);
       ("prerender", cases prerender);
       ("normalize", cases normalize);

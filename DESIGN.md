@@ -1635,3 +1635,42 @@ through A.
   `Yuka.Private.stylesheet`, and the `Private` record kept the server
   printer in the demo client chunk (`make size` caught it).
 
+## Dev server (2026-11-10)
+
+Ticket 24; `.workplace/docs/app-spec.md` section 24, option A, level 1.
+
+- `yuka dev` is the native executable `yuka` (package `yuka`, library
+  `unix`, no Dream): the spec puts it in `yuka`, and it talks only to dune
+  and a child process, so `yuka-dream` users and other adapters get it.
+- It runs `dune build --watch TARGETS` with stdout and stderr in one pipe,
+  echoes every line, and reads the status lines: `Success, waiting for
+  filesystem changes...` and `Had N errors, waiting...` (the lines in
+  between, after `NEW BUILD`, are the error text). No dune RPC: the line
+  is enough, and RPC needs the `dune-rpc` library.
+- State: a file (`--state`, default `_build/.yuka-dev`), one JSON line
+  `{"build":B,"page":P,"error":E}`, written by rename. `build` counts the
+  builds that changed something, `page` is the last that needs a reload.
+  On success: the server executable's stamp (mtime and size) changed, the
+  server exited, or the first build: stop and start the server,
+  `page = build`; else files under `--assets` changed: `build + 1`, and
+  `page = build` unless all are `.css`. On failure: the same numbers with
+  the error. The server is started with `YUKA_DEV=1` and
+  `YUKA_DEV_FILE=<state>`; the spec's `YUKA_DEV_BUILD` is not needed,
+  since the server reads the file.
+- Server: `config` reads `YUKA_DEV` (so nothing changes in the app).
+  `/_yuka/dev` is a `Stream` that sends the file's line (newlines joined)
+  when it differs from the last one, checking every 0.25 s with the
+  adapter's `sleep`; a closed connection ends it through the failed
+  write. Full pages (not navigation answers) get the script in the head,
+  with the state at render time, `<` escaped.
+- Browser script (inline, about 1.2 KB, only in dev pages): an
+  `EventSource`; `page` above the page's: save `scrollY` in
+  `sessionStorage` and reload (restored on `load`); `build` above: add
+  `?v=build` to each `link rel=stylesheet` that is not a `[%yuka.css]`
+  sheet (those change their class names, so they come with a page build);
+  `error`: a fixed `<pre id="yuka-dev-error">`, removed by the next state
+  without one. A restarted server makes `EventSource` reconnect; the first
+  event then carries the new numbers.
+- Production: no route, no script, no client module; `make size` and
+  `make measure-pages` do not change.
+

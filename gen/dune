@@ -12,3 +12,10 @@
 
 (copy_files#
  (files ../ppx/css_scan.ml))
+
+(executable
+ (name yuka_cli)
+ (public_name yuka)
+ (modules yuka_cli)
+ (libraries unix)
+ (package yuka))

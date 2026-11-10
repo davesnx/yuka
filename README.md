@@ -663,6 +663,35 @@ dune exec ./server/main.exe
 Open `http://localhost:8080/` and click the button. The sections above
 describe each part.
 
+### Development
+
+`yuka dev` rebuilds on change, restarts the server and reloads the
+browser:
+
+```sh
+yuka dev --build @all --assets _build/default/static -- ./_build/default/server/main.exe
+```
+
+It runs `dune build --watch` on the `--build` targets (default `@@default`)
+and reads dune's results. After each successful build:
+
+- the server executable changed (or the server stopped): it stops the
+  server (`SIGTERM`, then `SIGKILL` after `--kill-after`, default 2 s),
+  starts it again, and the browser reloads, keeping the scroll position;
+- only files under an `--assets` directory changed: `.css` files only are
+  swapped in the page with no reload (`link` gets `?v=N`); other files
+  reload it.
+
+A failed build keeps the old server and shows dune's errors in an overlay
+in the page, and in the terminal. Island state is lost on a reload.
+
+The server needs no change: `yuka dev` starts it with `YUKA_DEV=1`, and
+then the cycle answers `GET /_yuka/dev` (Server-Sent Events) and puts a
+small script in the head of each page. Without `YUKA_DEV=1` there is
+neither, so production pages send no byte of it. Sheets of
+`[%yuka.css]` change their class names with their text, so editing one
+reloads the page. `make demo-dev` runs the demo this way.
+
 ### The demo
 
 The demo is an issue tracker. It uses every feature above. From the
