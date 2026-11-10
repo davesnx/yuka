@@ -24,9 +24,15 @@ let log name value =
     Web.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
   end
 
+let valid name =
+  if Web.in_browser && not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ name)
+
 let client_check ~tag name value =
   if Web.in_browser then Url.check ~tag:(Web.lowercase tag) ~log (Web.lowercase name) value else value
-let url_attr tag name value = Static (name, client_check ~tag name value)
+
+let url_attr tag name value =
+  valid name;
+  Static (name, client_check ~tag name value)
 let attr name value = url_attr "" name value
 
 let attr_unchecked name value =
@@ -57,6 +63,7 @@ let use_css href body =
   end
 
 let url_hole_attr tag name f =
+  valid name;
   if Web.in_browser && Url.checked ~tag:(Web.lowercase tag) (Web.lowercase name) then Dynamic (name, fun () -> Option.map (client_check ~tag name) (f ()))
   else Dynamic (name, f)
 

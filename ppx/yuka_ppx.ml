@@ -208,6 +208,7 @@ let rewrite_attribute ~self ~loc tag (label, value) =
       if optional then Maybe [%expr Stdlib.Option.map (Yuka.on [%e ev]) [%e value]]
       else Plain [%expr Yuka.on [%e ev] [%e value]]
   | Attribute { type_ = kind; name = dom; _ } | Rich_attribute { type_ = kind; name = dom; _ } ->
+      if not (Url.valid_name dom) then Location.raise_errorf ~loc:vloc "[yuka] %S is not a valid attribute name." dom;
       let dom_e = estring ~loc dom in
       let hole = reads_state value in
       let value = self#expression value in
@@ -346,6 +347,8 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
       | _ -> None
     in
     match fixed with
+    | Some (Some (dom, _)) when not (Url.valid_name dom) ->
+        Location.raise_errorf ~loc:value_loc "[yuka] %S is not a valid attribute name." dom
     | Some (Some (dom, v)) when Url.unsafe ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) v ->
         Location.raise_errorf ~loc:value_loc
           "[yuka] %s=%S has a script URL; Yuka would print %s instead. Use an event handler." dom v Url.blocked

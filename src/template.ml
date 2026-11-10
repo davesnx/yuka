@@ -21,7 +21,20 @@ let make shape ~html ~walk ~kids ~attrs ~values =
     ops = [||];
   }
 
+let rec checked_shape = function
+  | Fixed_element { tag; attrs; children } ->
+      let lt = String.lowercase_ascii tag in
+      let attr = function
+        | Fixed (n, v) ->
+            if not (Url.valid_name n) then invalid_arg ("Yuka: refused attribute name " ^ n);
+            Fixed (n, Url.check ~tag:lt ~log:(fun _ _ -> ()) (String.lowercase_ascii n) v)
+        | a -> a
+      in
+      Fixed_element { tag; attrs = List.map attr attrs; children = List.map checked_shape children }
+  | s -> s
+
 let of_shape shape =
+  let shape = checked_shape shape in
   let { Template_build.walk; kids; attrs; values } = Template_build.plan shape in
   make shape ~html:(Template_build.html shape) ~walk ~kids ~attrs ~values
 

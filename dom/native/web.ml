@@ -159,8 +159,10 @@ let take_buffer () =
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
 let lowercase = String.lowercase_ascii
 let refuse_url_name name =
+  let bad c = c <= ' ' || c = '\127' || c = '"' || c = '\'' || c = '>' || c = '/' || c = '=' || c = '<' in
   match String.lowercase_ascii name with
-  | "href" | "src" | "action" | "formaction" | "xlink:href" | "xlinkhref" | "poster" | "cite" | "data"
-  | "background" | "longdesc" | "manifest" | "codebase" | "icon" | "values" | "to" | "from" | "by" ->
-      invalid_arg ("Yuka: " ^ name ^ " is a URL attribute")
+  | "" | "href" | "src" | "action" | "formaction" | "xlink:href" | "xlinkhref" | "poster" | "cite" | "data"
+  | "background" | "longdesc" | "manifest" | "codebase" | "icon" | "srcdoc" ->
+      invalid_arg ("Yuka: refused attribute name " ^ name)
+  | _ when String.exists bad name -> invalid_arg ("Yuka: refused attribute name " ^ name)
   | _ -> ()

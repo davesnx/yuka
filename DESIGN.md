@@ -1824,25 +1824,33 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
 
 ## Unsafe URLs and raw-text elements (2026-11-10)
 
-Ticket 33 and its security review.
+Ticket 33 and its two security reviews.
 
 - Rule (`src/url.ml`, shared with the ppx; names and tags lowercased by the
   caller): a URL attribute is `href`, `src`, `action`, `formaction`,
   `xlink:href`/`xlinkhref`, `poster`, `cite`, `data`, `background`,
   `longdesc`, `manifest`, `codebase`, `icon`, and `values`, `to`, `from`,
-  `by` on `animate`, `set`, `animateMotion`, `animateTransform` (each
-  `;`-separated item of `values`). The value is read as the URL parser
+  `by` on `animate`, `set`, `animateMotion`, `animateTransform` or with no
+  known element (each `;`-separated item of `values`; on other elements,
+  such as `feColorMatrix`, they are not URLs). The value is read as the URL parser
   does: leading characters up to space dropped, tab, newline and CR dropped
   anywhere, any case. `javascript:` and `vbscript:` are blocked on every
   URL attribute. `data:` is blocked only where it opens or loads a
   document: `href` of `a`, `area`, `use`; `action`; `formaction`;
-  `xlink:href`; `src` of `iframe`, `frame`, `embed`, `object`; `data` of
-  `object`. With no known element (`Yuka.attr` in the browser), `href` and
+  `xlink:href`; `src` of `iframe`, `frame`, `embed`, `object`, `script`;
+  `href` of `script`; `data` of `object`. With no known element (`Yuka.attr` in the browser), `href` and
   `data` count as such and `src` does not. A blocked value becomes
   `about:blank#blocked` (React's rule; React blocks only `javascript:` and
   has no escape hatch, Angular checks `data:` and has one, Svelte, Solid and
-  Vue do not check). `srcdoc` is an HTML sink and is not checked (React
-  neither).
+  Vue do not check). `srcdoc` of `iframe` (or with no known element) is
+  an HTML sink: `check` gives `""` and logs, as for a script URL. Only a
+  literal `srcdoc` in `.mlx` is kept (`add_attr ~literal:true` for template
+  fixed attributes); React does not check it.
+- Attribute names (`Url.valid_name`): empty, or with a character up to
+  space, DEL, `"`, `'`, `>`, `/`, `=` or `<`, is refused by the server
+  printer, the browser constructors, the unchecked constructors,
+  `template_of_shape` and the ppx (a located error). Such a name would end
+  the attribute or the tag early.
 - Sinks (`Url.check ~tag ~log`): the server printer, for every attribute
   it prints, with the element (one check per print; `log_error` once per
   process); in the browser, `Yuka.attr` and each value of `Yuka.hole_attr`
@@ -1850,21 +1858,36 @@ Ticket 33 and its security review.
   (with the element). Constructors do not check on the server.
 - The ppx emits `url_attr`/`url_hole_attr` for checked names and
   `attr_unchecked`/`hole_attr_unchecked` for the others. The unchecked ones
-  refuse a URL name at run time (`Web.refuse_url_name`, a regular
-  expression in the browser), so they cannot set an unchecked URL. That
-  guard and the client guard below cost the keyed app 228 B gzip
-  (10,034 -> 10,262; budget raised to 10,262).
-- Raw text: in HTML (not under `svg` or `math`; `foreignObject` is HTML
-  again), `script` and `style` take no child, one `Text` or one `Hole`
-  that gives a `Text`; anything else raises `Invalid_argument` before
-  anything of the element is printed (server) or built (client). The ppx
+  refuse a URL name, `srcdoc` and a bad name at run time
+  (`Web.refuse_url_name`, a regular expression in the browser), so they
+  cannot set an unchecked URL. That guard and the client guard below cost
+  the keyed app 228 B gzip (10,034 -> 10,262); the second review added 42 B
+  (bad names in the regular expression +29 B, the case-insensitive client
+  guard +25 B, less the namespace test it dropped; 10,304, the budget).
+- Hand-written templates: the browser puts `Template.make`'s `html` in the
+  page as given, so `Yuka.template_of_shape` checks the fixed attributes
+  (with the element) before it computes the HTML. It is a top-level value
+  so that the keyed app, which uses `Yuka.Template`, does not keep the
+  template builder (0 B).
+- Raw text: `script` and `style` (any case, any namespace, on both sides)
+  take no child, one `Text` or one `Hole` that gives a `Text`; anything
+  else raises `Invalid_argument` before anything of the element is printed
+  (server) or built (client). The ppx
   joins the strings and `(Yuka.text e)` children into one text (a hole if
   one reads a State) and refuses other children with a located error. The
-  text is printed by `add_raw`: in a JavaScript script (no `type`,
-  `module`, or a JavaScript MIME type) `</script` and `<!--` get `\` after
-  `<`; in a style, `</style`; in a script of another type every `<` becomes
-  `\u003c`. Foreign context is a stack in the printer, also pushed and
-  popped by template ops (`Push_context`, `Pop_context`) around the
-  children of `svg`, `math` and `foreignObject`, since a template prints
-  their tags as static chunks. A dev client does not log a text mismatch
+  text is printed by `add_raw` only in the HTML namespace: every `</` gets
+  `\` after `<` (an end tag of any element, so a `noscript`, `textarea`,
+  `title` or `iframe` around it cannot be closed), and `<!--` too in a
+  JavaScript script (no `type`, `module`, or a JavaScript MIME type); in a
+  script of another type every `<` becomes `\u003c`. In `svg` and `math`
+  the text is escaped. The namespace is a stack in the printer (`Html`,
+  `Svg`, `Math`; tags compared in lowercase): `svg` and `math` enter their
+  namespace from HTML, `foreignObject` in SVG goes back to HTML, and
+  anything inside `math` stays MathML (also `math > svg` and
+  `math > foreignObject`). MathML text integration points (`mi`, `mtext`,
+  `annotation-xml` and the like) are treated as MathML: their raw text is
+  escaped, which is safe. Template ops `Enter tag` and `Leave` move the
+  stack around the children of `svg`, `math` and `foreignObject`, since a
+  template prints their tags as static chunks. Tag names are printed as
+  written: `createElementNS` is case-sensitive for SVG camelCase tags. A dev client does not log a text mismatch
   inside `script` or `style` (the server text has the escapes).

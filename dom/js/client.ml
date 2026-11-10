@@ -359,7 +359,8 @@ let rec mount_node pos last n =
   | Element { tag; attrs; children } ->
       last := false;
       let svg = pos.svg || tag = "svg" in
-      if (not svg) && (tag = "script" || tag = "style") then (
+      let raw = Web.lowercase tag in
+      if raw = "script" || raw = "style" then (
         match children with
         | [] | [ Text _ ] | [ Hole _ ] -> ()
         | _ -> invalid_arg "Yuka: <script> and <style> take one text or one hole");

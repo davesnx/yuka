@@ -1390,8 +1390,102 @@ let client_raw_text () =
   check "style text node is raw" "a > b { color: red }" (text_content (query c "style"));
   dispose ()
 
+let refused name f =
+  match f () with
+  | _ -> raise (Cases.Failed (name ^ ": accepted"))
+  | exception Invalid_argument _ -> ()
+  | exception Js.Exn.Error _ -> ()
+
+let client_attribute_names () =
+  List.iter
+    (fun name ->
+      refused ("attr " ^ name) (fun () -> attr name "x");
+      refused ("url_attr " ^ name) (fun () -> url_attr "a" name "x");
+      refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun () -> None));
+      refused ("attr_unchecked " ^ name) (fun () -> attr_unchecked name "x");
+      refused ("hole_attr_unchecked " ^ name) (fun () -> hole_attr_unchecked name (fun () -> None)))
+    [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a/b"; "a=b"; "a<b"; "a>b"; "a'b"; "a\x01b"; "a\x7fb" ]
+
+let client_srcdoc () =
+  let v = State.make "<script>alert(1)</script>" in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div []
+          [
+            lower "iframe" [ attr "srcdoc" "<script>alert(1)</script>" ] [];
+            lower "IFRAME" [ hole_attr "SrcDoc" (fun () -> Some (State.get v)) ] [];
+          ])
+  in
+  check "srcdoc is empty" {|<div><iframe srcdoc=""></iframe><iframe srcdoc=""></iframe></div>|} (html c);
+  State.set v "<b>";
+  check "still empty" {|<div><iframe srcdoc=""></iframe><iframe srcdoc=""></iframe></div>|} (html c);
+  dispose ();
+  refused "srcdoc unchecked" (fun () -> attr_unchecked "srcdoc" "x")
+
+let client_script_src () =
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div []
+          [
+            lower "script" [ url_attr "script" "src" "data:text/javascript,alert(1)" ] [];
+            lower "svg" []
+              [
+                lower "script" [ url_attr "script" "href" "data:text/javascript,alert(1)" ] [];
+                lower "script" [ url_attr "script" "xlink:href" "javascript:alert(1)" ] [];
+              ];
+          ])
+  in
+  check "script sources" {|<div><script src="about:blank#blocked"></script><svg><script href="about:blank#blocked"></script><script xlink:href="about:blank#blocked"></script></svg></div>|} (html c);
+  dispose ()
+
+let client_animation_names () =
+  let matrix = "0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0 0 0 1 0" in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        lower "svg" []
+          [
+            lower "feColorMatrix" [ attr_unchecked "values" matrix ] [];
+            lower "feColorMatrix" [ attr "values" matrix ] [];
+            lower "p" [ hole_attr_unchecked "to" (fun () -> Some "a") ] [];
+            lower "animate" [ url_attr "animate" "values" "javascript:alert(1)" ] [];
+            lower "set" [ attr "to" "javascript:alert(1)" ] [];
+          ])
+  in
+  check "values outside animations"
+    (Printf.sprintf {|<svg><feColorMatrix values="%s"></feColorMatrix><feColorMatrix values="%s"></feColorMatrix><p to="a"></p><animate values="about:blank#blocked"></animate><set to="about:blank#blocked"></set></svg>|} matrix matrix)
+    (html c);
+  dispose ()
+
+let client_hand_written_template () =
+  let t = template_of_shape Template.(element "a" [ fixed "href" "javascript:alert(1)"; fixed "title" "javascript:x" ] []) in
+  check "client-only render" {|<a href="about:blank#blocked" title="javascript:x"></a>|}
+    (render_html (fun () -> Template.instance t [||]));
+  let t = template_of_shape Template.(element "iframe" [ fixed "SRCDOC" "<script>alert(1)</script>" ] []) in
+  check "srcdoc" {|<iframe srcdoc=""></iframe>|} (render_html (fun () -> Template.instance t [||]));
+  refused "a bad name" (fun () -> template_of_shape Template.(element "a" [ fixed "x onclick=alert(1)" "" ] []))
+
+let client_raw_text_namespaces () =
+  List.iter
+    (fun (name, tree) ->
+      refused name (fun () -> render_html tree);
+      refused ("server: " ^ name) (fun () -> server (tree ())))
+    [
+      ("two texts in svg > style", fun () -> lower "svg" [] [ lower "style" [] [ text "a"; text "b" ] ]);
+      ("an element in math > script", fun () -> lower "math" [] [ lower "script" [] [ lower "b" [] [] ] ]);
+      ("two texts in SCRIPT", fun () -> lower "SCRIPT" [] [ text "a"; text "b" ]);
+    ]
+
 let all =
   [
+    ("client: attribute names are refused", client_attribute_names);
+    ("client: srcdoc is empty", client_srcdoc);
+    ("client: script src and href", client_script_src);
+    ("client: values, to, from and by outside animations", client_animation_names);
+    ("client: hand-written templates are checked", client_hand_written_template);
+    ("client: script and style take one text in every namespace", client_raw_text_namespaces);
     ("client: URL attributes are checked", client_urls);
     ("client: style text", client_raw_text);
     ("client: URL names in any case; data: kept on images", client_url_case);

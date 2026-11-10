@@ -54,18 +54,26 @@ Another server needs one small adapter.
   of SVG animations) are read as the browser reads them (case, leading
   spaces and control characters, tabs and newlines). A `javascript:` or
   `vbscript:` URL is printed and set as `about:blank#blocked`, like React
-  does; so is a `data:` URL where it would open or load a document (links,
-  forms, frames, `object`, `embed`, SVG `use`). A `data:` image or media URL
-  is kept. A dev build logs the first block; a literal one in `.mlx` does
-  not build. There is no way around it: use an event handler.
-- `srcdoc` of `iframe` is HTML and is not checked, like in React: never
-  put user input in it.
+  does; so is a `data:` URL where it would open or load a document or a
+  script (links, forms, frames, `object`, `embed`, `script`, SVG `use`). A
+  `data:` image or media URL is kept. A dev build logs the first block; a
+  literal one in `.mlx` does not build. There is no way around it: use an
+  event handler.
+- `srcdoc` of `iframe` is HTML: a value that is not a literal in `.mlx` is
+  printed and set as the empty string. Write the document in `.mlx`, or
+  point `src` at a page.
+- An attribute name that is empty or has a space, a control character,
+  `"`, `'`, `<`, `>`, `/` or `=` raises an exception; in `.mlx` it
+  does not build.
+- Hand-written templates go through `Yuka.template_of_shape`, which checks
+  their fixed attributes as above.
 - `<script>` and `<style>` take one text (the ppx joins the texts and
-  values you write inside them) and nothing else. In HTML their text is
-  printed as written, not HTML-escaped: in a JavaScript script `</script`
-  and `<!--` get a backslash after the `<`; in a style, `</style`; in a
-  script of another type (JSON, import map), every `<` becomes `\u003c`.
-  Inside `<svg>` and `<math>` they are ordinary elements and their text is
+  values you write inside them) and nothing else, in any case and in any
+  namespace. In HTML their text is printed as written, not HTML-escaped:
+  every `</` gets a backslash after the `<`, and so does `<!--` in a
+  JavaScript script; in a script of another type (JSON, import map), every
+  `<` becomes `\u003c`. Inside `<svg>` and `<math>` (but not in an
+  SVG `<foreignObject>`) they are ordinary elements and their text is
   escaped.
 
 ## Learn more

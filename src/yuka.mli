@@ -273,15 +273,15 @@ val fragment : 'kind element list -> 'kind element
 
 val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
 (** [lower tag attributes children]: an HTML element. The ppx makes it from
-    [<tag ...>]. A [script] or [style] element (in HTML, not inside [svg]
-    or [math]) takes no child, one {!text} or one {!hole} that gives a
-    text, else [Invalid_argument] (server and client); the ppx joins the
-    texts of [<script>] and [<style>] into one. The server prints that text
-    as written (no HTML escaping), with [</script], [</style] (any case)
-    and, in a JavaScript [script], [<!--] printed as [<\/script], [<\/style]
-    and [<\!--]; in a [script] of another [type] (JSON, import map,
-    template), every [<] is printed as [\u003c]. Inside [svg] and [math]
-    they are ordinary elements and their text is escaped. *)
+    [<tag ...>]. A [script] or [style] element (any case) takes no child,
+    one {!text} or one {!hole} that gives a text, else [Invalid_argument]
+    (server and client); the ppx joins the texts of [<script>] and
+    [<style>] into one. In HTML the server prints that text as written (no
+    HTML escaping), with every [</] printed as [<\/] and, in a JavaScript
+    [script], [<!--] as [<\!--]; in a [script] of another [type] (JSON,
+    import map, template), every [<] is printed as [\u003c]. Inside [svg]
+    and [math] (but not in the [foreignObject] of an [svg]) the text is
+    escaped. *)
 
 val attr : string -> string -> 'kind attribute
 (** [attr name value]: an attribute with a fixed value. The server escapes
@@ -298,14 +298,19 @@ val attr : string -> string -> 'kind attribute
     [object], [data] of [object]; with no known element, [href] and [data]
     count as such). A [data:] image or media URL stays. The server logs the
     first block with {!Server.log_error}; a dev build logs the first one in
-    the console. *)
+    the console. [data:] is also blocked on [src] of [script] and [href] of
+    [script]. [srcdoc] of [iframe] (or with no known element) becomes [""]
+    and is logged the same way; only a literal [srcdoc] in [.mlx] is kept.
+    A [name] that is empty or has a space, a control character, a quote,
+    [<], [>], [/] or [=] raises [Invalid_argument] (in the browser here, on
+    the server when printed). *)
 
 (**/**)
 
 val attr_unchecked : string -> string -> 'kind attribute
 val hole_attr_unchecked : string -> (unit -> string option) -> client attribute
-(** For the ppx, for names it proved are not URL attributes. Given a URL
-    attribute name, they act as {!attr} and {!hole_attr}. *)
+(** For the ppx, for names it proved are not URL attributes. They raise on a
+    URL attribute name, [srcdoc], or a name that {!attr} refuses. *)
 
 val url_attr : string -> string -> string -> 'kind attribute
 val url_hole_attr : string -> string -> (unit -> string option) -> client attribute
@@ -362,10 +367,10 @@ module Template : sig
     attrs:int array ->
     values:(int * string) array ->
     t
-  (** [make shape ~html ~walk ~kids ~attrs ~values]: the ppx computes all
-      arguments but [shape] from [shape] at build time. [html] is the HTML of
-      the shape without its parts; the other arguments are the paths from the
-      template root to its parts. The ppx writes this call. *)
+  (** [make shape ~html ~walk ~kids ~attrs ~values]: for the ppx, which
+      computes all arguments but [shape] from [shape] at build time and
+      checks the fixed attributes. The browser puts [html] in the page as
+      given, so a template written by hand uses {!Yuka.template_of_shape}. *)
 
   val child : 'kind element -> 'kind part
   (** The value of a {!val-part}. *)
@@ -382,6 +387,12 @@ module Template : sig
       [make] once, clones it and goes to each part with the paths of
       [make]. *)
 end
+
+val template_of_shape : Template.shape -> Template.t
+(** A template written by hand: checks the fixed attributes (names, and
+    URLs as {!attr} does, with the element known) and computes the HTML and
+    the paths that {!Template.make} takes. Raises [Invalid_argument] on a bad
+    attribute name. *)
 
 module Slot : sig
   val make : server element -> slot

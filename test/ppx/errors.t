@@ -596,3 +596,33 @@ Attribute names are read in any case, and data: is refused only where it loads a
                                      ^^^^^^^^^^^^^^
   Error: [yuka] <script> takes only text: a string or (Yuka.text e), not an element, a component or an island.
   [1]
+
+An attribute name that is not valid HTML is refused at build time:
+
+  $ cat > name1.mlx <<'Y'
+  > let x = <div data_x'="y" />
+  > Y
+  $ run name1
+  File "name1.mlx", line 1, characters 21-24:
+  1 | let x = <div data_x'="y" />
+                           ^^^
+  Error: [yuka] "data-x'" is not a valid attribute name.
+  [1]
+  $ cat > name2.mlx <<'Y'
+  > let v = "y"
+  > let x = <div data_x'=v />
+  > Y
+  $ run name2
+  File "name2.mlx", line 2, characters 21-22:
+  2 | let x = <div data_x'=v />
+                           ^
+  Error: [yuka] "data-x'" is not a valid attribute name.
+  [1]
+
+A literal srcdoc is kept:
+
+  $ cat > srcdoc1.mlx <<'Y'
+  > let x = <iframe srcdoc="<b>hi</b>" />
+  > Y
+  $ run srcdoc1 | grep -o 'srcdoc=[^ ]*'
+  srcdoc=\"&lt;b>hi&lt;/b>\"></iframe>"

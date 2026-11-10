@@ -13,12 +13,14 @@ open Base
       !log_error ("yuka: printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name ^ ": " ^ String.escaped value)
     end
 
-  let add_attr b ~tag name value =
+  let add_attr b ?(literal = false) ~tag name value =
+    if not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ String.escaped name);
+    let tag = String.lowercase_ascii tag and lname = String.lowercase_ascii name in
+    let value = if literal && Url.html_sink ~tag lname then value else Url.check ~tag ~log:log_blocked lname value in
     Buffer.add_char b ' ';
     Buffer.add_string b name;
     Buffer.add_string b "=\"";
-    add_escaped b ~quote:true
-      (Url.check ~tag:(String.lowercase_ascii tag) ~log:log_blocked (String.lowercase_ascii name) value);
+    add_escaped b ~quote:true value;
     Buffer.add_char b '"'
 
   let javascript_type = function
@@ -47,7 +49,7 @@ open Base
           Buffer.add_string b "\\u003c";
           start := i + 1
         end
-        else if at i ("</" ^ tag) || (tag = "script" && at i "<!--") then begin
+        else if at i "</" || (tag = "script" && at i "<!--") then begin
           Buffer.add_substring b text !start (i - !start);
           Buffer.add_string b "<\\";
           start := i + 1
@@ -117,7 +119,13 @@ open Base
     s.queued <- [];
     l
 
-  let needs_special = function "select" | "textarea" | "option" | "a" -> true | _ -> false
+  let needs_special tag =
+    match String.lowercase_ascii tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
+
+  type namespace = Html | Svg | Math
+
+  let enter ns tag =
+    match (ns, tag) with Html, "svg" -> Svg | Html, "math" -> Math | Svg, "foreignobject" -> Html | ns, _ -> ns
 
   let compile shape =
     let ops = ref [] and raw = Buffer.create 64 in
@@ -135,24 +143,26 @@ open Base
       | Fixed_text "" -> ()
       | Fixed_text t -> emit (Static_text (escape ~quote:false t))
       | Part i -> emit (if only then Only_part i else Child_part i)
-      | Fixed_element { tag = "script" | "style"; _ } as e -> emit (Subtree e)
-      | Fixed_element { tag = ("svg" | "math" | "foreignObject") as tag; attrs; children } ->
-          go_element ~only tag attrs children ~context:(Some (tag <> "foreignObject"))
-      | Fixed_element { tag; _ } as e when needs_special tag && tag <> "a" -> emit (Subtree e)
-      | Fixed_element { tag; attrs; children } -> go_element ~only tag attrs children ~context:None
+      | Fixed_element { tag; attrs; children } as e -> (
+          match String.lowercase_ascii tag with
+          | "script" | "style" -> emit (Subtree e)
+          | ("svg" | "math" | "foreignobject") as lt -> go_element ~only tag attrs children ~context:(Some lt)
+          | "a" -> go_element ~only tag attrs children ~context:None
+          | _ when needs_special tag -> emit (Subtree e)
+          | _ -> go_element ~only tag attrs children ~context:None)
     and go_element ~only:_ tag attrs children ~context =
       let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
       if (not (needs_special tag)) && List.length fixed = List.length attrs then begin
         Buffer.add_char raw '<';
         Buffer.add_string raw tag;
-        List.iter (fun (n, v) -> add_attr raw ~tag n v) fixed;
+        List.iter (fun (n, v) -> add_attr raw ~literal:true ~tag n v) fixed;
         Buffer.add_char raw '>'
       end
       else emit (Open (tag, attrs));
-      if not (Template_build.is_void tag) then begin
-        Option.iter (fun foreign -> emit (Push_context foreign)) context;
+      if not (Template_build.is_void (String.lowercase_ascii tag)) then begin
+        Option.iter (fun lt -> emit (Enter lt)) context;
         (match children with [ c ] -> go ~only:true c | cs -> List.iter (go ~only:false) cs);
-        if context <> None then emit Pop_context;
+        if context <> None then emit Leave;
         Buffer.add_string raw "</";
         Buffer.add_string raw tag;
         Buffer.add_char raw '>'
@@ -184,7 +194,7 @@ open Base
     let after_text = ref false in
     let hydrating () = (not s.islands_only) || s.depth > 0 in
     let foreign = ref [] in
-    let in_foreign () = match !foreign with f :: _ -> f | [] -> false in
+    let namespace () = match !foreign with ns :: _ -> ns | [] -> Html in
     let marker m =
       if hydrating () then Buffer.add_string b m;
       after_text := false
@@ -302,7 +312,7 @@ open Base
                    else
                      List.iter
                        (function
-                         | Fixed (n, v) -> add_attr b ~tag n v
+                         | Fixed (n, v) -> add_attr b ~literal:true ~tag n v
                          | Part_attr i -> (
                              match parts.(i) with
                              | Attribute (Static (n, v)) -> add_attr b ~tag n v
@@ -312,8 +322,8 @@ open Base
                   Buffer.add_char b '>';
                   after_text := false
               | Subtree shape -> go (Template.expand_shape parts shape)
-              | Push_context f -> foreign := f :: !foreign
-              | Pop_context -> foreign := List.tl !foreign)
+              | Enter lt -> foreign := enter (namespace ()) lt :: !foreign
+              | Leave -> foreign := List.tl !foreign)
             (ops template)
       | Catch { children; fallback; _ } -> (
           let length = Buffer.length b and text = !after_text and saved = snapshot s and context = !foreign in
@@ -407,8 +417,10 @@ open Base
           marker "<!--[-->";
           rows items render;
           marker "<!--]-->"
-      | Element { tag = ("script" | "style") as tag; attrs; children } when not (in_foreign ()) ->
-          let text = raw_text_children tag children in
+      | Element { tag; attrs; children }
+        when (match String.lowercase_ascii tag with "script" | "style" -> true | _ -> false) ->
+          let lt = String.lowercase_ascii tag in
+          let text = raw_text_children lt children in
           let type_ =
             List.find_map
               (function
@@ -426,7 +438,8 @@ open Base
               | Handler _ -> ())
             attrs;
           Buffer.add_char b '>';
-          add_raw b ~tag ~type_:(Option.join type_) text;
+          if namespace () = Html then add_raw b ~tag:lt ~type_:(Option.join type_) text
+          else add_escaped b ~quote:false text;
           Buffer.add_string b "</";
           Buffer.add_string b tag;
           Buffer.add_char b '>';
@@ -448,8 +461,9 @@ open Base
           in
           Buffer.add_char b '>';
           after_text := false;
-          if not (Template_build.is_void tag) then begin
-            (match (tag, value) with
+          let lt = String.lowercase_ascii tag in
+          if not (Template_build.is_void lt) then begin
+            (match (lt, value) with
             | "textarea", Some v ->
                 if String.length v > 0 && v.[0] = '\n' then
                   Buffer.add_char b '\n';
@@ -459,8 +473,8 @@ open Base
                 s.select_value <- value;
                 contents children;
                 s.select_value <- outer
-            | ("svg" | "math" | "foreignObject"), _ ->
-                foreign := (tag <> "foreignObject") :: !foreign;
+            | ("svg" | "math" | "foreignobject"), _ ->
+                foreign := enter (namespace ()) lt :: !foreign;
                 (match contents children with
                 | () -> foreign := List.tl !foreign
                 | exception e ->
@@ -473,6 +487,7 @@ open Base
             after_text := false
           end
     and special tag attrs =
+      let lt = String.lowercase_ascii tag in
       let resolved =
         List.filter_map
           (function
@@ -483,13 +498,13 @@ open Base
       in
       let value = List.assoc_opt "value" resolved in
       let resolved =
-        if tag = "select" || tag = "textarea" then List.filter (fun (name, _) -> name <> "value") resolved
-        else if tag = "option" && value <> None && s.select_value = value && not (List.mem_assoc "selected" resolved)
+        if lt = "select" || lt = "textarea" then List.filter (fun (name, _) -> name <> "value") resolved
+        else if lt = "option" && value <> None && s.select_value = value && not (List.mem_assoc "selected" resolved)
         then resolved @ [ ("selected", "") ]
         else resolved
       in
       let resolved =
-        match (tag, s.current) with
+        match (lt, s.current) with
         | "a", Some path
           when (not (hydrating ()))
                && (match List.assoc_opt "href" resolved with

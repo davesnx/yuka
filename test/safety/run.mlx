@@ -65,7 +65,8 @@ let data_scheme () =
         (fun (tag, name) ->
           Alcotest.(check string) ("blocked " ^ tag ^ " " ^ name) (blocked tag name ^ close tag) (one tag name v))
         [ ("a", "href"); ("area", "href"); ("form", "action"); ("button", "formaction"); ("input", "formaction");
-          ("iframe", "src"); ("frame", "src"); ("embed", "src"); ("object", "data"); ("use", "href"); ("use", "xlink:href") ];
+          ("iframe", "src"); ("frame", "src"); ("embed", "src"); ("object", "data"); ("use", "href"); ("use", "xlink:href");
+          ("script", "src"); ("script", "href"); ("script", "xlink:href"); ("SCRIPT", "SRC") ];
       List.iter
         (fun (tag, name) ->
           Alcotest.(check string) ("kept " ^ tag ^ " " ^ name) (kept tag name v ^ close tag) (one tag name v))
@@ -86,6 +87,47 @@ let printer_paths () =
   in
   check_html "a template: fixed and part" {|<form action="about:blank#blocked" formaction="about:blank#blocked"></form>|}
     (Template.instance t [| Template.attribute (attr "formaction" "vbscript:x") |])
+
+let attribute_names () =
+  List.iter
+    (fun name ->
+      raises ("printer: " ^ String.escaped name) (fun () -> html (lower "a" [ attr name "x" ] []));
+      raises ("hole: " ^ String.escaped name) (fun () -> print_client (lower "a" [ hole_attr name (fun () -> Some "x") ] []));
+      raises ("unchecked: " ^ String.escaped name) (fun () -> attr_unchecked name "x");
+      raises ("hole unchecked: " ^ String.escaped name) (fun () -> hole_attr_unchecked name (fun () -> None));
+      raises ("template: " ^ String.escaped name) (fun () -> template_of_shape Template.(element "a" [ fixed name "x" ] [])))
+    [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
+  check_html "a valid name" {|<a data-x:y_z.1="x"></a>|} (lower "a" [ attr "data-x:y_z.1" "x" ] [])
+
+let srcdoc () =
+  let v = "<script>alert(1)</script>" in
+  check_html "a dynamic srcdoc is empty" {|<iframe srcdoc=""></iframe>|} (lower "iframe" [ attr "srcdoc" v ] []);
+  check_html "any case" {|<IFRAME SrcDoc=""></IFRAME>|} (lower "IFRAME" [ attr "SrcDoc" v ] []);
+  check_client "a srcdoc hole is empty" {|<iframe srcdoc=""></iframe>|}
+    (lower "iframe" [ hole_attr "srcdoc" (fun () -> Some v) ] []);
+  check_html "mlx: a srcdoc value is empty" {|<iframe srcdoc=""></iframe>|} <iframe srcdoc=v />;
+  check_html "mlx: a literal srcdoc is kept" {|<iframe srcdoc="&lt;b>hi&lt;/b>"></iframe>|}
+    <iframe srcdoc="<b>hi</b>" />;
+  check_html "srcdoc on another element is not HTML" {|<p srcdoc="&lt;b>"></p>|} (lower "p" [ attr "srcdoc" "<b>" ] []);
+  raises "srcdoc unchecked" (fun () -> attr_unchecked "srcdoc" v);
+  raises "srcdoc hole unchecked" (fun () -> hole_attr_unchecked "SRCDOC" (fun () -> None))
+
+let animation_names () =
+  let matrix = "0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0 0 0 1 0" in
+  let expected = Printf.sprintf {|<svg><feColorMatrix type="matrix" values="%s"></feColorMatrix></svg>|} matrix in
+  check_html "mlx: feColorMatrix values" expected <svg><feColorMatrix type_="matrix" values=matrix /></svg>;
+  check_html "attr_unchecked values" expected
+    (lower "svg" [] [ lower "feColorMatrix" [ attr_unchecked "type" "matrix"; attr_unchecked "values" matrix ] [] ]);
+  check_client "hole_attr_unchecked to" {|<p to="a" from="b" by="c"></p>|}
+    (lower "p" [ hole_attr_unchecked "to" (fun () -> Some "a"); attr_unchecked "from" "b"; attr_unchecked "by" "c" ] []);
+  check_html "values on animate is still checked" {|<animate values="about:blank#blocked"></animate>|}
+    (lower "animate" [ attr "values" "javascript:alert(1)" ] [])
+
+let hand_written_template () =
+  let t = template_of_shape Template.(element "a" [ fixed "href" "javascript:alert(1)"; fixed "title" "javascript:x" ] []) in
+  check_html "a fixed script URL" {|<a href="about:blank#blocked" title="javascript:x"></a>|} (Template.instance t [||]);
+  let t = template_of_shape Template.(element "iframe" [ fixed "srcdoc" "<script>alert(1)</script>" ] []) in
+  check_html "a fixed srcdoc in a hand-written template" {|<iframe srcdoc=""></iframe>|} (Template.instance t [||])
 
 let mlx () =
   let url = "java\tscript:alert(1)" in
@@ -131,12 +173,45 @@ let raw_text () =
   in
   check_html "a template svg with a style part" {|<svg><style>&lt;b&gt;</style></svg>|}
     (Template.instance t [| Template.child (lower "style" [] [ text "<b>" ]) |]);
+  check_html "raw text inside noscript: every </ is escaped"
+    {|<noscript><style><\/noscript><img src=x onerror=alert(1)></style></noscript>|}
+    (let user = "</noscript><img src=x onerror=alert(1)>" in
+     <noscript><style>(Yuka.text user)</style></noscript>);
+  List.iter
+    (fun parent ->
+      check_html ("script in " ^ parent) (Printf.sprintf {|<%s><script>a<\/%s>b<\/ x</script></%s>|} parent parent parent)
+        (lower parent [] [ lower "script" [] [ text (Printf.sprintf "a</%s>b</ x" parent) ] ]))
+    [ "noscript"; "textarea"; "title"; "iframe"; "noembed"; "noframes"; "xmp" ];
+  check_html "a JSON script in noscript" {|<noscript><script type="application/json">\u003c/noscript></script></noscript>|}
+    (lower "noscript" [] [ lower "script" [ attr "type" "application/json" ] [ text "</noscript>" ] ]);
+  check_html "math > foreignObject stays MathML" {|<math><foreignObject><style>&lt;/math&gt;</style></foreignObject></math>|}
+    (lower "math" [] [ lower "foreignObject" [] [ lower "style" [] [ text "</math>" ] ] ]);
+  check_html "math > svg > foreignObject stays MathML" {|<math><svg><foreignObject><script>a &lt; b</script></foreignObject></svg></math>|}
+    (lower "math" [] [ lower "svg" [] [ lower "foreignObject" [] [ lower "script" [] [ text "a < b" ] ] ] ]);
+  check_html "mlx: math > svg > foreignObject" {|<math><svg><foreignObject><style>&lt;b&gt;</style></foreignObject></svg></math>|}
+    (let user = "<b>" in
+     <math><svg><foreignObject><style>(Yuka.text user)</style></foreignObject></svg></math>);
+  let t =
+    Template.make
+      (Template.element "math" [] [ Template.element "foreignObject" [] [ Template.part 0 ] ])
+      ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
+  in
+  check_html "a template math > foreignObject" {|<math><foreignObject><style>&lt;b&gt;</style></foreignObject></math>|}
+    (Template.instance t [| Template.child (lower "style" [] [ text "<b>" ]) |]);
+  check_html "tag case: SVG and Math are foreign" {|<SVG><STYLE>&lt;b&gt;</STYLE></SVG><Math><Script>&lt;b&gt;</Script></Math>|}
+    (fragment [ lower "SVG" [] [ lower "STYLE" [] [ text "<b>" ] ]; lower "Math" [] [ lower "Script" [] [ text "<b>" ] ] ]);
+  check_html "tag case: STYLE is raw text" {|<STYLE>a > b<\/style></STYLE>|} (lower "STYLE" [] [ text "a > b</style>" ]);
+  check_html "tag case: svg > FOREIGNOBJECT is HTML" {|<svg><FOREIGNOBJECT><style>a > b</style></FOREIGNOBJECT></svg>|}
+    (lower "svg" [] [ lower "FOREIGNOBJECT" [] [ lower "style" [] [ text "a > b" ] ] ]);
   check_html "text outside script is still escaped" {|<p>a &lt; b &amp;&amp; c</p>|} (lower "p" [] [ text "a < b && c" ])
 
 let raw_text_children () =
   raises "two texts" (fun () -> html (lower "script" [] [ text "a"; text "b" ]));
   raises "an element" (fun () -> html (lower "style" [] [ lower "b" [] [] ]));
   raises "a hole that gives an element" (fun () -> print_client (lower "script" [] [ hole (fun () -> lower "b" [] []) ]));
+  raises "two texts in svg" (fun () -> html (lower "svg" [] [ lower "style" [] [ text "a"; text "b" ] ]));
+  raises "an element in math" (fun () -> html (lower "math" [] [ lower "script" [] [ lower "b" [] [] ] ]));
+  raises "two texts in SCRIPT" (fun () -> html (lower "SCRIPT" [] [ text "a"; text "b" ]));
   let printed =
     match html (lower "div" [] [ text "before"; Catch.make ~fallback:(fun ~error:_ ~reset:_ -> text "caught") ~children:(fun () -> lower "script" [] [ text "a"; text "b" ]) () ]) with
     | s -> s
@@ -153,6 +228,10 @@ let () =
           Alcotest.test_case "data: only where it loads a document" `Quick data_scheme;
           Alcotest.test_case "unchecked constructors, dynamic and template attributes" `Quick printer_paths;
           Alcotest.test_case "mlx attributes and holes" `Quick mlx;
+          Alcotest.test_case "attribute names" `Quick attribute_names;
+          Alcotest.test_case "srcdoc" `Quick srcdoc;
+          Alcotest.test_case "values, to, from and by outside animations" `Quick animation_names;
+          Alcotest.test_case "hand-written templates" `Quick hand_written_template;
         ] );
       ( "raw text",
         [

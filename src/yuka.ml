@@ -15,6 +15,8 @@ type trigger = Types.trigger
 type loading = Types.loading
 include Element
 module Template = struct include Template end
+
+let template_of_shape = Template.of_shape
 module Client = Client
 module Action = Action
 module Optimistic = Optimistic

@@ -8,13 +8,17 @@ let url_name = function
 
 let animation_name = function "values" | "to" | "from" | "by" -> true | _ -> false
 let animation_tag = function "animate" | "set" | "animatemotion" | "animatetransform" -> true | _ -> false
-let checked ~tag name = url_name name || (animation_name name && (tag = "" || animation_tag tag))
+let html_sink ~tag name = name = "srcdoc" && (tag = "iframe" || tag = "")
+
+let checked ~tag name =
+  url_name name || html_sink ~tag name || (animation_name name && (tag = "" || animation_tag tag))
 
 let navigational ~tag name =
   match (name, tag) with
   | ("action" | "formaction" | "xlink:href" | "xlinkhref"), _ -> true
   | "href", ("a" | "area" | "use" | "") -> true
-  | "src", ("iframe" | "frame" | "embed" | "object") -> true
+  | "src", ("iframe" | "frame" | "embed" | "object" | "script") -> true
+  | "href", "script" -> true
   | "data", ("object" | "") -> true
   | _ -> false
 
@@ -49,8 +53,19 @@ let unsafe ~tag name value =
   else unsafe_part ~tag name value ~from:0 ~until:n
 
 let check ~tag ~log name value =
-  if unsafe ~tag name value then begin
+  if html_sink ~tag name then begin
+    log name value;
+    ""
+  end
+  else if unsafe ~tag name value then begin
     log name value;
     blocked
   end
   else value
+
+let valid_name name =
+  name <> ""
+  && not
+       (String.exists
+          (fun c -> c <= ' ' || c = '\127' || c = '"' || c = '\'' || c = '>' || c = '/' || c = '=' || c = '<')
+          name)
