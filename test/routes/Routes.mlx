@@ -33,6 +33,7 @@ let routes =
     <Endpoint name=Feed path="/feed.xml" method_=`GET handler=Feeds.rss
       cache=(Public { max_age = 60; s_max_age = None }) />
     <Action name=Clear_feed path="/feed.xml" method_=`DELETE handler=Actions.clear />
+    <Endpoint name=Missing path="/missing" method_=`GET handler=Api.missing />
     <Route path="/i/:id<Params.Issue_id>" redirect=(Permanent "/issue/:id") />
     <Route path="/old-docs/:parts<string...>" redirect=(Temporary "/docs/:parts") />
     <Route path="/legacy-blog" redirect=(Temporary "/blog") />

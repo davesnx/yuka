@@ -220,6 +220,8 @@ let add_labels loc labels names =
 
 let parse_name names v =
   match v.pexp_desc with
+  | Pexp_construct ({ txt = Lident (("Some" | "None" | "true" | "false" | "()" | "[]" | "::") as n); _ }, None) ->
+      fail v.pexp_loc "name %s is a predefined constructor that the generated code uses; choose another name" n
   | Pexp_construct ({ txt = Lident n; _ }, None) ->
       (match Hashtbl.find_opt names n with
       | Some first -> fail v.pexp_loc "name %s is used twice (first at line %d)" n (line first)
@@ -459,8 +461,16 @@ let rec merge = function
   | [] -> []
 
 let concat pieces =
-  String.concat " ^ "
-    (List.map (function Lit s -> sprintf "%S" s | Code c -> c) (merge pieces))
+  let text = function Lit s -> sprintf "%S" s | Code c -> c in
+  let rec go = function
+    | [] -> "\"\""
+    | [ p ] -> text p
+    | p :: rest ->
+        let arg = function Lit _ as l -> text l | Code c -> "(" ^ c ^ ")" in
+        let tail = match rest with [ Lit _ as l ] -> text l | _ -> "(" ^ go rest ^ ")" in
+        sprintf "Stdlib.( ^ ) %s %s" (arg p) tail
+  in
+  go (merge pieces)
 
 let to_url ty v =
   match ty with
@@ -476,15 +486,12 @@ let path_pieces segs =
       List.concat_map
         (function
           | Static s -> [ Lit ("/" ^ encode s) ]
-          | Param (n, ty) -> [ Lit "/"; Code (to_url ty n) ]
-          | Rest n ->
-              [
-                Code
-                  (sprintf
-                     "String.concat \"\" (List.map (fun s -> \"/\" ^ \
-                      Yuka.Router.encode s) %s)"
-                     n);
-              ])
+          | Param (n, Int) -> [ Lit "/"; Code ("Stdlib.string_of_int " ^ n) ]
+          | Param (n, String) -> [ Lit "/"; Code ("Yuka.Router.segment " ^ n) ]
+          | Param (n, Custom m) ->
+              [ Lit "/"; Code (sprintf "Yuka.Router.segment (%s.to_string %s)" m n) ]
+          | Param (_, Bool) -> assert false
+          | Rest n -> [ Code ("Yuka.Router.segments " ^ n) ])
         segs
 
 let search_pairs f =
@@ -494,12 +501,13 @@ let search_pairs f =
   | Default d ->
       let eq =
         match f.fty with
-        | Custom m -> sprintf "%s.to_string %s = %s.to_string (%s)" m f.fname m d
-        | _ -> sprintf "%s = (%s)" f.fname d
+        | Custom m -> sprintf "Stdlib.( = ) (%s.to_string %s) (%s.to_string (%s))" m f.fname m d
+        | _ -> sprintf "Stdlib.( = ) %s (%s)" f.fname d
       in
       sprintf "(if %s then [] else %s)" eq (pair f.fname)
   | Many ->
-      sprintf "List.map (fun v -> (%S, %s)) %s" (encode f.fname) (to_url f.fty "v") f.fname
+      sprintf "Stdlib.List.map (fun v -> (%S, %s)) %s" (encode f.fname) (to_url f.fty "v")
+        f.fname
 
 let href nodes =
   let uses_search = List.exists (fun (_, _, s) -> s <> []) (named nodes) in
@@ -510,8 +518,13 @@ let href nodes =
         "  match pairs with";
         "  | [] -> path";
         "  | _ ->";
-        "      path ^ \"?\"";
-        "      ^ String.concat \"&\" (List.map (fun (k, v) -> k ^ \"=\" ^ v) pairs)";
+        "      Stdlib.String.concat \"\"";
+        "        [";
+        "          path;";
+        "          \"?\";";
+        "          Stdlib.String.concat \"&\"";
+        "            (Stdlib.List.map (fun (k, v) -> Stdlib.String.concat \"=\" [ k; v ]) pairs);";
+        "        ]";
         "";
       ]
     else []
@@ -529,16 +542,20 @@ let href nodes =
            let path = concat pieces in
            match search with
            | [] -> indent 2 (arm head [ path ])
-           | first :: rest ->
+           | fields ->
                let path =
                  match merge pieces with [ Lit _ ] -> path | _ -> "(" ^ path ^ ")"
                in
+               let pairs =
+                 match fields with
+                 | [ f ] -> [ "(" ^ search_pairs f ^ ")" ]
+                 | _ ->
+                     ("(Stdlib.List.concat" :: "   [" :: List.map (fun f -> "     " ^ search_pairs f ^ ";") fields)
+                     @ [ "   ])" ]
+               in
                indent 2
                  ((sprintf "| %s ->" head :: indent 4 [ "with_query " ^ path ])
-                 @ indent 6
-                     (close
-                        (("(" ^ search_pairs first)
-                        :: List.map (fun f -> "@ " ^ search_pairs f) rest))))
+                 @ indent 6 pairs))
          (named nodes)
 
 let decode_search f =
@@ -557,7 +574,7 @@ let decode_search f =
       sprintf "(match %s with v :: _ -> (match %s with Some v -> v | None -> (%s)) | [] -> (%s))"
         values (dec "v") d d
   | Many, String -> values
-  | Many, _ -> sprintf "List.filter_map (fun v -> %s) (%s)" (dec "v") values
+  | Many, _ -> sprintf "Stdlib.List.filter_map (fun v -> %s) (%s)" (dec "v") values
 
 let rec decode_params params k =
   match params with
@@ -610,7 +627,8 @@ let redirect segs permanent target =
     let v = var segs name in
     match List.find (function Param (n, _) | Rest n -> n = name | Static _ -> false) segs with
     | Param (_, ty) -> Code (to_url ty v)
-    | Rest _ -> Code (sprintf "String.concat \"/\" (List.map Yuka.Router.encode %s)" v)
+    | Rest _ ->
+        Code (sprintf "Stdlib.String.concat \"/\" (Stdlib.List.map Yuka.Router.encode %s)" v)
     | Static _ -> assert false
   in
   let pieces =
@@ -679,8 +697,8 @@ let find nodes =
   :: "  match path with"
   :: indent 2 (arms @ [ "| _ -> Yuka.Router.Missing" ])
 
-let generate nodes =
-  if named nodes = [] then fail Location.none "Routes.mlx has no named node";
+let generate input nodes =
+  if named nodes = [] then fail (Location.in_file input) "Routes.mlx has no named node";
   String.concat "\n" (type_t nodes @ [ "" ] @ href nodes @ [ "" ] @ find nodes) ^ "\n"
 
 let routes_expr input structure =
@@ -711,7 +729,7 @@ let report (loc : Location.t) msg =
         (s.pos_cnum - s.pos_bol) (e.pos_cnum - s.pos_bol)
     else
       Printf.eprintf "File %S, lines %d-%d, characters %d-%d:\n" s.pos_fname s.pos_lnum
-        e.pos_lnum (s.pos_cnum - s.pos_bol) (e.pos_cnum - s.pos_bol);
+        e.pos_lnum (s.pos_cnum - s.pos_bol) (e.pos_cnum - e.pos_bol);
   Printf.eprintf "Error: %s\n" msg
 
 let usage = "usage: yuka-routes --shared FILE.ast"
@@ -732,7 +750,7 @@ let () =
               let input = Ast_io.get_input_name ast in
               try
                 let e = routes_expr input structure in
-                print_string (generate (read (Hashtbl.create 16) e))
+                print_string (generate input (read (Hashtbl.create 16) e))
               with Fail (loc, msg) ->
                 report loc msg;
                 exit 1)))

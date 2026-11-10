@@ -81,7 +81,20 @@ let is_int text =
   String.iteri (fun i c -> if i >= start && (c < '0' || c > '9') then ok := false) text;
   !ok
 
-let int_param text = if is_int text then int_of_string_opt text else None
+let segment text =
+  if text = "" || text = "." || text = ".." then
+    invalid_arg "Yuka.Router.segment: empty, . or .. cannot be a path segment";
+  encode text
+
+let segments parts =
+  match parts with
+  | [] -> invalid_arg "Yuka.Router.segments: a catch-all needs one segment"
+  | _ -> String.concat "" (List.map (fun p -> "/" ^ segment p) parts)
+
+let int_param text =
+  match int_of_string_opt text with
+  | Some n when string_of_int n = text -> Some n
+  | _ -> None
 
 let search (query : (string * string) list) (key : string) =
   List.filter_map (fun (k, v) -> if k = key then Some v else None) query
@@ -129,12 +142,12 @@ let split_target target =
   let target, _ = cut target '#' in
   cut target '?'
 
-let segments p =
+let split_path p =
   List.filter (fun x -> x <> "") (String.split_on_char '/' p)
 
 let parse path f target =
   let p, _ = split_target target in
-  match walk path (segments p) f with Some ([], r) -> Some r | _ -> None
+  match walk path (split_path p) f with Some ([], r) -> Some r | _ -> None
 
 let query target =
   match split_target target with

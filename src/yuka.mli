@@ -646,9 +646,21 @@ module Router : sig
   (** Percent-encodes one path segment or one query part. Only
       [A-Z a-z 0-9 - . _ ~] stay as they are. *)
 
+  val segment : string -> string
+  (** [encode] for one path segment that [href] writes. Raises
+      [Invalid_argument] on [""], ["."] and [".."]: the request cycle drops
+      empty segments and browsers resolve dot segments (also written
+      [%2E]), so no URL can give them back. *)
+
+  val segments : string list -> string
+  (** A catch-all for [href]: ["/"] and {!segment} of each element. Raises
+      [Invalid_argument] on [[]], since a catch-all matches one segment or
+      more, and on an element that {!segment} refuses. *)
+
   val int_param : string -> int option
-  (** Decodes an [int] param: an optional [-] and digits only, within the
-      range of [int]. *)
+  (** Decodes an [int] param in the form [string_of_int] writes: [0], or an
+      optional [-] and digits without a leading [0], within the range of
+      [int]. So each value has one URL: [01], [-0] and [+1] give [None]. *)
 
   val search : (string * string) list -> string -> string list
   (** [search query key] is every value of [key] in the decoded query pairs,

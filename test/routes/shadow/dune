@@ -1,0 +1,3 @@
+(library
+ (name shadow)
+ (modes native melange))

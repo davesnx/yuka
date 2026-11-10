@@ -362,7 +362,7 @@ A route with children
   >     </Route>
   >   </Router>
   > EOF
-  File "Routes.mlx", lines 3-5, characters 4-92:
+  File "Routes.mlx", lines 3-5, characters 4-12:
   Error: <Route> takes no children
   [1]
 
@@ -448,3 +448,99 @@ Valid input, every node kind, exits 0
   >     <Route path="/x" redirect=(Temporary "/") />
   >   </Router>
   > EOF
+
+A route named Some
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route name=Some path="/a" page=P.a />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 16-20:
+  Error: name Some is a predefined constructor that the generated code uses; choose another name
+  [1]
+
+A route named None
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route name=None path="/a" page=P.a />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 16-20:
+  Error: name None is a predefined constructor that the generated code uses; choose another name
+  [1]
+
+A route named true
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route name=true path="/a" page=P.a />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 16-20:
+  Error: name true is a predefined constructor that the generated code uses; choose another name
+  [1]
+
+A route named false
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route name=false path="/a" page=P.a />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 16-21:
+  Error: name false is a predefined constructor that the generated code uses; choose another name
+  [1]
+
+A route named ()
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route name=() path="/a" page=P.a />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 16-18:
+  Error: name () is a predefined constructor that the generated code uses; choose another name
+  [1]
+
+A route named []
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route name=[] path="/a" page=P.a />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 16-18:
+  Error: name [] is a predefined constructor that the generated code uses; choose another name
+  [1]
+
+A route named ::
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route name=(::) path="/a" page=P.a />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 3, characters 16-20:
+  Error: name :: is a predefined constructor that the generated code uses; choose another name
+  [1]
+
+No named node
+
+  $ gen <<'EOF'
+  > let routes =
+  >   <Router>
+  >     <Route path="/a" redirect=(Permanent "/b") />
+  >   </Router>
+  > EOF
+  File "Routes.mlx", line 1:
+  Error: Routes.mlx has no named node
+  [1]

@@ -81,6 +81,22 @@ let samples : (R.meth * Routes.t) list =
     (`GET, Doc { parts = [ "a b"; "c"; "%" ] });
     (`GET, Feed);
     (`DELETE, Clear_feed);
+    (`GET, Missing);
+  ]
+
+let edge_values : Routes.t list =
+  [
+    Post { slug = ""; lang = None };
+    Post { slug = "."; lang = None };
+    Post { slug = ".."; lang = None };
+    Post { slug = "..."; lang = None };
+    Post { slug = ".a"; lang = None };
+    Doc { parts = [] };
+    Doc { parts = [ "a"; "" ] };
+    Doc { parts = [ "." ] };
+    Doc { parts = [ "a"; ".."; "b" ] };
+    Doc { parts = [ "..."; "%2E" ] };
+    Blog { lang = Some ""; tag = Some "."; page = 1; label = [ ""; ".." ]; draft = false };
   ]
 
 let href_cases =
@@ -98,7 +114,7 @@ let href_cases =
     t "static segment is encoded" (fun () -> check_href "cafe" "/caf%C3%A9" Cafe);
     t "catch-all" (fun () ->
         check_href "parts" "/docs/a%20b/c%2Fd" (Doc { parts = [ "a b"; "c/d" ] });
-        check_href "empty" "/docs" (Doc { parts = [] }));
+        check_href "dots inside a segment" "/docs/.../.a" (Doc { parts = [ "..."; ".a" ] }));
     t "search at its absent value is left out" (fun () ->
         check_href "blog" "/blog" blog;
         check_href "issue" "/issue/YUK-12" issue);
@@ -122,6 +138,24 @@ let round_trip =
             let target = Routes.href r in
             check lookup (meth_name meth ^ " " ^ target) (R.Found r) (find ~meth target))
           samples);
+    t "href refuses or round-trips edge values" (fun () ->
+        List.iter
+          (fun r ->
+            match Routes.href r with
+            | exception Invalid_argument _ -> ()
+            | target -> check lookup target (R.Found r) (find target))
+          edge_values);
+    t "href refuses segments that find cannot give back" (fun () ->
+        let refused r =
+          match Routes.href r with exception Invalid_argument _ -> true | _ -> false
+        in
+        check bool "empty" true (refused (Post { slug = ""; lang = None }));
+        check bool "dot" true (refused (Post { slug = "."; lang = None }));
+        check bool "dot dot" true (refused (Post { slug = ".."; lang = None }));
+        check bool "empty catch-all" true (refused (Doc { parts = [] }));
+        check bool "empty catch-all item" true (refused (Doc { parts = [ "a"; "" ] }));
+        check bool "dot dot catch-all item" true (refused (Doc { parts = [ "a"; ".." ] }));
+        check bool "three dots" false (refused (Post { slug = "..."; lang = None })));
     t "every constructor has a sample" (fun () ->
         let name : Routes.t -> string = function
           | Home -> "Home"
@@ -137,9 +171,10 @@ let round_trip =
           | Doc _ -> "Doc"
           | Feed -> "Feed"
           | Clear_feed -> "Clear_feed"
+          | Missing -> "Missing"
         in
         let names = List.sort_uniq compare (List.map (fun (_, r) -> name r) samples) in
-        check int "constructors" 13 (List.length names));
+        check int "constructors" 14 (List.length names));
   ]
 
 let found (r : Routes.t) = R.Found r
@@ -158,7 +193,10 @@ let find_cases =
           (fun s -> check lookup s R.Missing (find ("/page/" ^ s)))
           [ "1a"; "-"; "+5"; "0x10"; "1.0"; "99999999999999999999999" ];
         check lookup "-5" (found (Page_n { n = -5 })) (find "/page/-5");
-        check lookup "007" (found (Page_n { n = 7 })) (find "/page/007"));
+        List.iter
+          (fun s -> check lookup ("not canonical " ^ s) R.Missing (find ("/page/" ^ s)))
+          [ "007"; "01"; "-0"; "+1"; "1_000"; "0b1" ];
+        check lookup "0" (found (Page_n { n = 0 })) (find "/page/0"));
     t "custom param None is Missing" (fun () ->
         check lookup "abc" R.Missing (find "/issue/abc");
         check lookup "zero" R.Missing (find "/issue/YUK-0");
@@ -212,10 +250,21 @@ let router_cases =
     t "encode" (fun () ->
         check string "reserved" "a%2Fb%20c%3F%23%C3%A9%26%3D%2B" (R.encode "a/b c?#\xc3\xa9&=+");
         check string "unreserved" "AZaz09-._~" (R.encode "AZaz09-._~"));
+    t "segment" (fun () ->
+        check string "encoded" "a%2Fb" (R.segment "a/b");
+        List.iter
+          (fun s ->
+            check bool s true
+              (match R.segment s with exception Invalid_argument _ -> true | _ -> false))
+          [ ""; "."; ".." ]);
     t "int_param" (fun () ->
         check (option int) "neg" (Some (-12)) (R.int_param "-12");
         check (option int) "empty" None (R.int_param "");
-        check (option int) "space" None (R.int_param " 1"));
+        check (option int) "space" None (R.int_param " 1");
+        check (option int) "zero" (Some 0) (R.int_param "0");
+        List.iter
+          (fun s -> check (option int) s None (R.int_param s))
+          [ "01"; "-0"; "+1"; "0x10"; "1_0"; "-01" ]);
     t "search" (fun () ->
         check (list string) "all values" [ "1"; "3" ]
           (R.search [ ("a", "1"); ("b", "2"); ("a", "3") ] "a");

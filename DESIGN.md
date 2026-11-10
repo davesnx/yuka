@@ -1111,9 +1111,14 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   params in path order, then search fields), `with_query` (only when a
   route has search fields), `href` and `find`.
 - `href`: static segments are encoded when the generator runs; params with
-  `Yuka.Router.encode` (`int` with `string_of_int`, a custom type through
-  `M.to_string`); a catch-all adds `/` and one encoded segment per element,
-  so `[]` gives the path without it. Search fields at their absent value
+  `Yuka.Router.segment` (`int` with `string_of_int`, a custom type through
+  `M.to_string`); a catch-all with `Yuka.Router.segments` (`/` and one
+  segment per element). `segment` raises `Invalid_argument` on `""`, `.`
+  and `..`, and `segments` also on `[]`: the cycle drops empty segments and
+  browsers resolve dot segments, even as `%2E`, so `find` could not give
+  the route back. So `find (href r) = Found r` for every `r` that `href`
+  accepts. Search values use `encode`; any value is allowed there. Search
+  fields at their absent value
   (`None`, the default, `[]`) are left out; the others follow as
   `?k=v&...` in field order.
 - `find meth path query`: one `match` on the decoded segment list. Nodes
@@ -1121,7 +1126,9 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   also takes `` `HEAD ``; other methods give `Wrong_method` with the
   methods of the path in file order. Cases are sorted by segment kind
   (static, param, catch-all) at the first position where they differ, so
-  OCaml's first match is the most specific path. `int` and custom params
+  OCaml's first match is the most specific path. `int` params accept only
+  the form `string_of_int` writes (no `01`, `-0`, `+1`), so each page has
+  one URL. `int` and custom params
   decode inside the case; `None` gives `Missing`, with no fall-through to
   a less specific case. A redirect node matches every method and returns
   `Redirect` with its params substituted and encoded.
@@ -1132,9 +1139,16 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   `` `GET ``; a bad path (no leading `/`, empty, `.` or `..` segment,
   `% ? #` in a static segment, unknown param type, catch-all not last or in
   a `Group`); unknown node or prop; a missing prop; children on a leaf; a
-  `prerender` that is not `true` or `false`.
-- New in `Yuka.Router`: `meth`, `lookup`, `PARAM`, `encode`, `int_param`,
-  `search`.
+  `prerender` that is not `true` or `false`; a name that is a predefined
+  constructor the generated code uses (`Some`, `None`, `true`, `false`,
+  `()`, `[]`, `::`). `Found`, `Missing` and the other `lookup`
+  constructors are allowed: the generated code qualifies them.
+- The generated code names the standard library only through `Stdlib`
+  (`Stdlib.List.map`, `Stdlib.( ^ )`, `Stdlib.( = )`), so a sibling `List`
+  module or `-open Base` does not change it. `test/routes/shadowed`
+  compiles the fixture with `-open Shadow`, which shadows them all.
+- New in `Yuka.Router`: `meth`, `lookup`, `PARAM`, `encode`, `segment`,
+  `segments`, `int_param`, `search`.
 - Size: `find` is a top-level function that a client which calls only
   `href` does not name, so esbuild drops it (checked by
   `test/routes/client/check.mts`). `Yuka.Router` is a JavaScript object, so

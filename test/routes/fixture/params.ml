@@ -4,14 +4,20 @@ module Issue_id = struct
   let prefix = "YUK-"
 
   let of_string s =
-    let n = String.length prefix in
-    if String.length s > n && String.sub s 0 n = prefix then
-      match Yuka.Router.int_param (String.sub s n (String.length s - n)) with
-      | Some i when i > 0 -> Some i
+    let n = Stdlib.String.length prefix in
+    if
+      Stdlib.( > ) (Stdlib.String.length s) n
+      && Stdlib.String.equal (Stdlib.String.sub s 0 n) prefix
+    then
+      match
+        Yuka.Router.int_param
+          (Stdlib.String.sub s n (Stdlib.( - ) (Stdlib.String.length s) n))
+      with
+      | Some i when Stdlib.( > ) i 0 -> Some i
       | _ -> None
     else None
 
-  let to_string i = prefix ^ string_of_int i
+  let to_string i = Stdlib.( ^ ) prefix (Stdlib.string_of_int i)
 end
 
 module Tab = struct

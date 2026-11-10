@@ -12,42 +12,55 @@ type t =
   | Doc of { parts : string list }
   | Feed
   | Clear_feed
+  | Missing
 
 let with_query path pairs =
   match pairs with
   | [] -> path
   | _ ->
-      path ^ "?"
-      ^ String.concat "&" (List.map (fun (k, v) -> k ^ "=" ^ v) pairs)
+      Stdlib.String.concat ""
+        [
+          path;
+          "?";
+          Stdlib.String.concat "&"
+            (Stdlib.List.map (fun (k, v) -> Stdlib.String.concat "=" [ k; v ]) pairs);
+        ]
 
 let href = function
   | Home -> "/"
   | Blog { lang; tag; page; label; draft } ->
       with_query "/blog"
-        ((match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> [])
-        @ (match tag with Some v -> [ ("tag", Yuka.Router.encode v) ] | None -> [])
-        @ (if page = (1) then [] else [ ("page", Stdlib.string_of_int page) ])
-        @ List.map (fun v -> ("label", Yuka.Router.encode v)) label
-        @ (if draft = (false) then [] else [ ("draft", Stdlib.string_of_bool draft) ]))
+        (Stdlib.List.concat
+           [
+             (match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []);
+             (match tag with Some v -> [ ("tag", Yuka.Router.encode v) ] | None -> []);
+             (if Stdlib.( = ) page (1) then [] else [ ("page", Stdlib.string_of_int page) ]);
+             Stdlib.List.map (fun v -> ("label", Yuka.Router.encode v)) label;
+             (if Stdlib.( = ) draft (false) then [] else [ ("draft", Stdlib.string_of_bool draft) ]);
+           ])
   | Post { slug; lang } ->
-      with_query ("/blog/" ^ Yuka.Router.encode slug)
+      with_query (Stdlib.( ^ ) "/blog/" (Yuka.Router.segment slug))
         ((match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []))
   | New_post { lang } ->
       with_query "/blog/new"
         ((match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []))
   | Issue { id; tab; seen; view } ->
-      with_query ("/issue/" ^ Yuka.Router.encode (Params.Issue_id.to_string id))
-        ((match tab with Some v -> [ ("tab", Yuka.Router.encode (Params.Tab.to_string v)) ] | None -> [])
-        @ List.map (fun v -> ("seen", Stdlib.string_of_int v)) seen
-        @ (if Params.Tab.to_string view = Params.Tab.to_string (Params.Tab.Overview) then [] else [ ("view", Yuka.Router.encode (Params.Tab.to_string view)) ]))
-  | Close_issue { id } -> "/issue/" ^ Yuka.Router.encode (Params.Issue_id.to_string id) ^ "/close"
-  | Issue_json { id } -> "/issue/" ^ Yuka.Router.encode (Params.Issue_id.to_string id) ^ "/json"
-  | Update_issue { id } -> "/issue/" ^ Yuka.Router.encode (Params.Issue_id.to_string id) ^ "/json"
-  | Page_n { n } -> "/page/" ^ Stdlib.string_of_int n
+      with_query (Stdlib.( ^ ) "/issue/" (Yuka.Router.segment (Params.Issue_id.to_string id)))
+        (Stdlib.List.concat
+           [
+             (match tab with Some v -> [ ("tab", Yuka.Router.encode (Params.Tab.to_string v)) ] | None -> []);
+             Stdlib.List.map (fun v -> ("seen", Stdlib.string_of_int v)) seen;
+             (if Stdlib.( = ) (Params.Tab.to_string view) (Params.Tab.to_string (Params.Tab.Overview)) then [] else [ ("view", Yuka.Router.encode (Params.Tab.to_string view)) ]);
+           ])
+  | Close_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Params.Issue_id.to_string id)) "/close")
+  | Issue_json { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Params.Issue_id.to_string id)) "/json")
+  | Update_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Params.Issue_id.to_string id)) "/json")
+  | Page_n { n } -> Stdlib.( ^ ) "/page/" (Stdlib.string_of_int n)
   | Cafe -> "/caf%C3%A9"
-  | Doc { parts } -> "/docs" ^ String.concat "" (List.map (fun s -> "/" ^ Yuka.Router.encode s) parts)
+  | Doc { parts } -> Stdlib.( ^ ) "/docs" (Yuka.Router.segments parts)
   | Feed -> "/feed.xml"
   | Clear_feed -> "/feed.xml"
+  | Missing -> "/missing"
 
 let find (meth : Yuka.Router.meth) (path : string list)
     (query : (string * string) list) : t Yuka.Router.lookup =
@@ -76,6 +89,10 @@ let find (meth : Yuka.Router.meth) (path : string list)
       | `GET | `HEAD -> Yuka.Router.Found Feed
       | `DELETE -> Yuka.Router.Found Clear_feed
       | _ -> Yuka.Router.Wrong_method [ `GET; `DELETE ])
+  | [ "missing" ] -> (
+      match meth with
+      | `GET | `HEAD -> Yuka.Router.Found Missing
+      | _ -> Yuka.Router.Wrong_method [ `GET ])
   | [ "legacy-blog" ] -> Yuka.Router.Redirect { permanent = false; location = "/blog" }
   | [ "blog"; "new" ] -> (
       match meth with
@@ -101,7 +118,7 @@ let find (meth : Yuka.Router.meth) (path : string list)
               Yuka.Router.Found (Issue {
                 id = p1;
                 tab = (match Yuka.Router.search query "tab" with v :: _ -> Params.Tab.of_string v | [] -> None);
-                seen = List.filter_map (fun v -> Yuka.Router.int_param v) (Yuka.Router.search query "seen");
+                seen = Stdlib.List.filter_map (fun v -> Yuka.Router.int_param v) (Yuka.Router.search query "seen");
                 view = (match Yuka.Router.search query "view" with v :: _ -> (match Params.Tab.of_string v with Some v -> v | None -> (Params.Tab.Overview)) | [] -> (Params.Tab.Overview));
               })))
       | _ -> Yuka.Router.Wrong_method [ `GET ])
@@ -115,7 +132,7 @@ let find (meth : Yuka.Router.meth) (path : string list)
   | [ "i"; p1 ] -> (
       match Params.Issue_id.of_string p1 with
       | None -> Yuka.Router.Missing
-      | Some p1 -> Yuka.Router.Redirect { permanent = true; location = "/issue/" ^ Yuka.Router.encode (Params.Issue_id.to_string p1) })
+      | Some p1 -> Yuka.Router.Redirect { permanent = true; location = Stdlib.( ^ ) "/issue/" (Yuka.Router.encode (Params.Issue_id.to_string p1)) })
   | [ "issue"; p1; "close" ] -> (
       match meth with
       | `POST -> (
@@ -138,5 +155,5 @@ let find (meth : Yuka.Router.meth) (path : string list)
       match meth with
       | `GET | `HEAD -> Yuka.Router.Found (Doc { parts = p1 })
       | _ -> Yuka.Router.Wrong_method [ `GET ])
-  | "old-docs" :: (_ :: _ as p1) -> Yuka.Router.Redirect { permanent = false; location = "/docs/" ^ String.concat "/" (List.map Yuka.Router.encode p1) }
+  | "old-docs" :: (_ :: _ as p1) -> Yuka.Router.Redirect { permanent = false; location = Stdlib.( ^ ) "/docs/" (Stdlib.String.concat "/" (Stdlib.List.map Yuka.Router.encode p1)) }
   | _ -> Yuka.Router.Missing

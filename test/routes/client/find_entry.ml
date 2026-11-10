@@ -1,4 +1,4 @@
 let () =
-  match Routes_fixture.Routes.find `GET [ "legacy-blog" ] [] with
-  | Yuka.Router.Redirect { location; _ } -> print_endline location
+  match Routes_fixture.Routes.find `GET [] [] with
+  | Yuka.Router.Found _ -> print_endline "found"
   | _ -> print_endline "other"

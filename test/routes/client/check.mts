@@ -1,4 +1,5 @@
 import { buildSync } from "esbuild";
+import { readFileSync } from "node:fs";
 
 const [hrefEntry, findEntry] = process.argv.slice(2);
 if (!hrefEntry || !findEntry) {
@@ -22,6 +23,16 @@ const bundle = (entry: string): string => {
 
 const matcherMarkers = ["legacy-blog", "old-docs"];
 const hrefMarker = "/docs";
+
+for (const entry of [hrefEntry, findEntry]) {
+  const source = readFileSync(entry, "utf8");
+  for (const marker of matcherMarkers) {
+    if (source.includes(marker)) {
+      console.error(`FAIL entry ${entry} holds the marker ${marker}, so the check would prove nothing`);
+      process.exit(1);
+    }
+  }
+}
 
 const href = bundle(hrefEntry);
 const find = bundle(findEntry);
