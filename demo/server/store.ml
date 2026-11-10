@@ -86,7 +86,7 @@ let comments_of id = Option.value (Hashtbl.find_opt comments id) ~default:[]
 let today = "Nov 6"
 
 let after delay compute =
-  if delay <= 0. then Yuka.Async.resolved (compute ())
+  if delay <= 0. then Yuka.Async.return (compute ())
   else
     Yuka_dream.to_async (Lwt.map compute (Lwt_unix.sleep delay))
 

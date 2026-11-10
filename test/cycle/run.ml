@@ -15,25 +15,25 @@ module Test_adapter = struct
   let meth (r : request) = r.meth
   let target (r : request) = r.target
   let header = App.header
-  let body (r : request) = Async.resolved r.body
+  let body (r : request) = Async.return r.body
 
   let respond (r : Server.http_response) =
     match r.body with
-    | Server.String s -> Async.resolved { status = r.status; headers = r.headers; body = s }
+    | Server.String s -> Async.return { status = r.status; headers = r.headers; body = s }
     | Server.Stream f ->
         let b = Buffer.create 64 in
         Async.map
           (fun () -> { status = r.status; headers = r.headers; body = Buffer.contents b })
           (f (fun s ->
                Buffer.add_string b s;
-               Async.resolved ()))
+               Async.return ()))
 
   let exists ~root ~path = List.mem_assoc (root ^ "/" ^ path) files
 
   let file _ ~root ~path ~headers =
     let name = root ^ "/" ^ path in
     file_calls := name :: !file_calls;
-    Async.resolved
+    Async.return
       (match List.assoc_opt name files with
       | Some body -> { status = 200; headers; body }
       | None -> { status = 404; headers = [ ("cache-control", "no-store") ]; body = "" })
@@ -60,8 +60,8 @@ module Held_adapter = struct
   let respond (r : Server.http_response) =
     match r.body with
     | Server.String s ->
-        Async.resolved
-          { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.resolved () }
+        Async.return
+          { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.return () }
     | Server.Stream f ->
         let ended =
           f (fun s ->
@@ -71,7 +71,7 @@ module Held_adapter = struct
               a)
         in
         Async.on_settled ended (fun _ -> stream_ended := true);
-        Async.resolved { reply = { status = r.status; headers = r.headers; body = "" }; ended }
+        Async.return { reply = { status = r.status; headers = r.headers; body = "" }; ended }
 
   let file _ ~root:_ ~path:_ ~headers:_ = assert false
 end
@@ -729,9 +729,9 @@ let render =
       fun () ->
         let a =
           Server.handle config Cycle_server.Routes_server.app
-            ~sleep:(fun _ -> Async.resolved ())
+            ~sleep:(fun _ -> Async.return ())
             ~exists:Test_adapter.exists (request "/slow")
-            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun () -> Async.resolved "") }
+            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun () -> Async.return "") }
         in
         match Async.status a with
         | Async.Done (Server.Respond r) ->

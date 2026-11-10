@@ -551,7 +551,7 @@ let await_fails () =
   dispose2 ()
 
 let await_hydrates_settled () =
-  let a = Async.resolved 3 in
+  let a = Async.return 3 in
   let c = container (server (await_tree a)) in
   check "server html" "<div>a<!--[--><b>3</b><!--]-->b</div>" (html c);
   let root = first_child c in

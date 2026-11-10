@@ -12,6 +12,7 @@
 - Error boundaries and loading states: `<Yuka.Catch fallback=(fun ~error ~reset -> ...)>` catches exceptions in its children (render, effects, memos, holes, event handlers), also during server rendering; `<Yuka.Show>` shows a `Yuka.Status.t`; `Yuka.mount ~on_error` gets the errors that no `Catch` caught (@davesnx)
 - Breaking: an island with no `Catch` now stops at its first exception after it started and keeps its DOM; the error goes to `console.error` and `on_error` (@davesnx)
 - Prefetch, navigation cache and view transitions: links are prefetched on hover, focus or pointer down (`Yuka.mount ~prefetch`, `data-yuka-prefetch="visible"` or `"off"`, header `Yuka-Prefetch: 1`); answers are reused by their `Cache-Control` (`max-age`, or once within 10 s for a `no-store` prefetch); a successful action call empties the cache; `~transitions:true` runs each client navigation in a view transition with `data-yuka-nav` on `<html>` (@davesnx)
+- Breaking: `Yuka.Async.resolved` is now `Yuka.Async.return` (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

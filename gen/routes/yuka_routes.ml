@@ -963,7 +963,7 @@ let server_arm ~shared ~rule ~fallback n =
               (args (labels @ List.map fst loaders))
           in
           let plan =
-            [ "Yuka.Async.resolved"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.layers =" ]
+            [ "Yuka.Async.return"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.layers =" ]
             @ indent 9 (layers_lines n.levels)
             @ [
                 sprintf "       page = %s;" page;

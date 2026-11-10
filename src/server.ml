@@ -257,14 +257,14 @@ let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ~sleep build =
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
          document := shell;
-         Async.resolved ())
+         Async.return ())
        ~on_fill:(fun id inside links html ->
          document := fill_marker !document id ~inside html;
          Buffer.add_string values links;
-         Async.resolved ())
+         Async.return ())
        ~on_value:(fun html ->
          Buffer.add_string values html;
-         Async.resolved ()))
+         Async.return ()))
 
 let normalize path =
   let rec go p =
@@ -393,7 +393,7 @@ let implement action f =
     ( name,
       fun json ->
         match Codec.decode input json with
-        | Error m -> Async.resolved (Bad_input m)
+        | Error m -> Async.return (Bad_input m)
         | Ok v ->
             let run =
               match f v with
@@ -436,7 +436,7 @@ let handle_action ~name ~content_type ~origin ~host ~body =
   let error_body message =
     Json.to_string (`Assoc [ ("error", `String message) ])
   in
-  let error status message = Async.resolved (status, error_body message) in
+  let error status message = Async.return (status, error_body message) in
   if not (same_origin ~origin ~host) then error 403 "origin mismatch"
   else
     match find_action name with

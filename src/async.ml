@@ -18,7 +18,7 @@
     let t = { status = Pending; waiters = [] } in
     (t, (fun v -> settle t (Done v)), fun e -> settle t (Failed e))
 
-  let resolved v = { status = Done v; waiters = [] }
+  let return v = { status = Done v; waiters = [] }
   let failed e = { status = Failed e; waiters = [] }
   let status t = t.status
 
@@ -45,7 +45,7 @@
             | Done x -> resolve x));
     r
 
-  let map f t = bind t (fun v -> resolved (f v))
+  let map f t = bind t (fun v -> return (f v))
 
   let watch t =
     let s = State.make t.status in

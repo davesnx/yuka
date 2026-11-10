@@ -125,7 +125,7 @@ module Async : sig
   (** A pending value and its resolve and fail functions. It settles once;
       later calls are ignored. *)
 
-  val resolved : 'a -> 'a t
+  val return : 'a -> 'a t
   (** A value that is already [Done]. *)
 
   val failed : string -> 'a t

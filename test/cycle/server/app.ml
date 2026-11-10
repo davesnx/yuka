@@ -150,18 +150,18 @@ module Loaders = struct
     note "squad start";
     match Params.Team.to_string team with
     | "wait" -> later ()
-    | t -> Async.resolved (Ok ("of " ^ t))
+    | t -> Async.return (Ok ("of " ^ t))
 
   let profile req ~team ~user =
     note "profile start";
     match (Params.Team.to_string team, user) with
     | "wait", _ -> later ()
-    | _, 404 -> Async.resolved (Error Server.Not_found)
+    | _, 404 -> Async.return (Error Server.Not_found)
     | _, 500 -> Async.failed "loader secret"
-    | _ -> Async.resolved (Ok (Option.value (header req "x-user") ~default:"anonymous"))
+    | _ -> Async.return (Ok (Option.value (header req "x-user") ~default:"anonymous"))
 
   let org_item _req ~org:_ ~n =
-    Async.resolved (if n = 404 then Error Server.Not_found else Ok "item")
+    Async.return (if n = 404 then Error Server.Not_found else Ok "item")
 
   let exploding _req : (string, Server.stop) result Async.t = failwith "loader secret"
 end
@@ -169,7 +169,7 @@ end
 module Guards = struct
   let outer _req ~team =
     note "outer";
-    Async.resolved
+    Async.return
       (match Params.Team.to_string team with
       | "nobody" -> Error Server.Not_found
       | "away" -> Error (Server.Redirect { status = 303; location = "/" })
@@ -179,7 +179,7 @@ module Guards = struct
 
   let inner _req ~team:_ ~user =
     note "inner";
-    Async.resolved (if user = 0 then Error (Server.Fail "guard secret") else Ok ())
+    Async.return (if user = 0 then Error (Server.Fail "guard secret") else Ok ())
 end
 
 module Api = struct

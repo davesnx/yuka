@@ -273,7 +273,7 @@ let fill_view a =
           lower "section" []
             [
               hole (fun () -> text (ints n));
-              Await.make ~async:(Async.resolved "z") ~loading:empty
+              Await.make ~async:(Async.return "z") ~loading:empty
                 ~children:(fun z -> lower "i" [] [ text z ])
                 ();
               text "t";

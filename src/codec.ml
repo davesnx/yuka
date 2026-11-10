@@ -99,7 +99,7 @@ let async c : 'a Async.t t =
       | `Assoc (("$async", `String id) :: rest) -> (
           let of_json j =
             match c.decode j with
-            | Ok v -> Async.resolved v
+            | Ok v -> Async.return v
             | Error m -> Async.failed m
           in
           match rest with
