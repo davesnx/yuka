@@ -566,4 +566,4 @@ let () =
   Driver.register_transformation "yuka"
     ~preprocess_impl:Island.check_placement
     ~rules:[ Context_free.Rule.extension Island.extension ]
-    ~impl:mapper#structure ~intf:mapper#signature
+    ~impl:(fun s -> mapper#structure (Css_ppx.attach s)) ~intf:mapper#signature

@@ -1,6 +1,6 @@
 (library
  (name demo_app)
- (modules store pages loaders handlers routes_server)
+ (modules store pages loaders handlers routes_server yuka_css)
  (libraries demo_shared yuka yuka-dream dream lwt lwt.unix)
  (preprocess
   (pps yuka.ppx)))
@@ -21,3 +21,12 @@
  (name demo_server)
  (modules demo_server)
  (libraries demo_app yuka yuka-dream dream lwt))
+
+(rule
+ (targets yuka_css.ml)
+ (deps
+  (glob_files ../shared/*.css))
+ (action
+  (with-stdout-to
+   yuka_css.ml
+   (run %{bin:yuka-css} %{deps}))))

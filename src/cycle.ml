@@ -169,6 +169,7 @@ type config = {
   assets : assets option;
   public : (string list * string) list;
   styles : string list;
+  css : (string * string) list;
   head : string;
   timeout : float;
   prerendered : string option;
@@ -182,11 +183,12 @@ let public_prefix (prefix, dir) =
        ^ " has no segment; it would hide every route")
   | segments -> (segments, dir)
 
-let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(head = "") ?(timeout = 10.) () =
+let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.) () =
   {
     assets;
     public = List.map public_prefix public;
     styles;
+    css;
     head;
     timeout;
     prerendered;
@@ -196,6 +198,8 @@ let build_id config (App a) =
   match config.assets with
   | None -> a.build
   | Some assets -> a.build ^ assets.digest
+
+let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
 let served_dirs config =
   Option.to_list (Option.map (fun (a : assets) -> ("/_yuka", a.dir)) config.assets)
@@ -651,6 +655,15 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
     | "" :: "_yuka" :: _, _ -> (
         match List.tl raw with
         | "action" :: rest -> action r rest
+        | [ "css"; file ] when List.mem_assoc file config.css ->
+            reply
+              {
+                status = 200;
+                headers =
+                  [ ("content-type", "text/css; charset=utf-8"); ("cache-control", cache_control Immutable) ];
+                body = String (List.assoc file config.css);
+              }
+        | "css" :: _ when config.css <> [] -> reply (asset_miss ())
         | rest -> (
             match config.assets with
             | None -> reply (asset_miss ())

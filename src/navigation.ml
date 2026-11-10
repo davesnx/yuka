@@ -66,11 +66,13 @@ let swap target final header text =
       in
       Client.stop_within el;
       Web.set_inner_html el text;
+      Web.adopt_stylesheets ();
       Option.iter Web.set_title title;
       mark_links el (fst (Router.split_target final))
   | None ->
       Client.stop ();
-      Web.swap_page text
+      Web.swap_page text;
+      Web.adopt_stylesheets ()
 
 let html header =
   match header "content-type" with

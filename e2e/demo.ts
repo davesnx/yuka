@@ -62,7 +62,7 @@ const installProbes = () => {
     if (n.nodeType !== 1) return;
     const el = n as Element;
     const mark = (e: Element) => {
-      if (e.matches(".row, .filter, .list, .toolbar, .new-issue-button, .comment-input, .comment, .props, .props select, .related, .related-list li"))
+      if (e.matches(".row, .filter, .list, .toolbar, .new-issue-button, .comment-input, .comment, .props, .props select, [class^=related_], [class^=related-list_] li"))
         (e as any).__tag = "server";
     };
     mark(el);
@@ -527,7 +527,7 @@ await step("7a. streaming", async () => {
   const firstPaint = await early.evaluate(() => ({
     skeleton: document.querySelectorAll(".skeleton").length,
     comments: document.querySelectorAll(".comment").length,
-    related: document.querySelectorAll(".related-list li").length,
+    related: document.querySelectorAll("[class^=related-list_] li").length,
     title: document.querySelector(".issue-title")?.textContent ?? "",
   }));
   const tSkeleton = Date.now() - t0;
@@ -538,8 +538,8 @@ await step("7a. streaming", async () => {
   );
   await early.waitForSelector(".comment", { timeout: 5000 });
   const tComments = Date.now() - t0;
-  const relatedAtComments = await early.locator(".related-list li").count();
-  await early.waitForSelector(".related-list li", { timeout: 5000 });
+  const relatedAtComments = await early.locator("[class^=related-list_] li").count();
+  await early.waitForSelector("[class^=related-list_] li", { timeout: 5000 });
   const tRelated = Date.now() - t0;
   check("7.2 comments arrive before related issues", relatedAtComments === 0 && tRelated > tComments, `comments ${tComments}ms, related ${tRelated}ms`);
   await early.waitForLoadState("networkidle");
@@ -547,7 +547,7 @@ await step("7a. streaming", async () => {
   const done = await early.evaluate(() => ({
     skeleton: document.querySelectorAll(".skeleton").length,
     comments: document.querySelectorAll(".comments .comment").length,
-    related: document.querySelectorAll(".related-list li").length,
+    related: document.querySelectorAll("[class^=related-list_] li").length,
     templates: document.querySelectorAll("template[data-yuka-fill]").length,
     fillScripts: [...document.scripts].filter((s) => s.textContent?.includes("__yukaFill(")  && !s.textContent.includes("window.__yukaFill=")).length,
     islands: document.querySelectorAll("yuka-island").length,
@@ -574,7 +574,7 @@ await step("7b. start strategies", async () => {
   });
   const names = () => chunks.map((c) => c.name).join(",");
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
-  await p.waitForSelector(".related-list li");
+  await p.waitForSelector("[class^=related-list_] li");
   await p.waitForTimeout(800);
   const state = () =>
     p.evaluate(() => {
@@ -582,7 +582,7 @@ await step("7b. start strategies", async () => {
         const el = document.querySelector(sel) as any;
         return !!el && !!el["__yuka_" + ev];
       };
-      const related = document.querySelector(".related") as Element;
+      const related = document.querySelector("[class^=related_]") as Element;
       const box = related.getBoundingClientRect();
       return {
         counter: handler(".counter-button", "click"),
@@ -604,15 +604,15 @@ await step("7b. start strategies", async () => {
   check("7b.4 Issue_props started after hover", hovered.props, JSON.stringify(hovered));
   check("7b.5 Related still not started after hover", hovered.io.length === 0);
   const tScroll = Date.now();
-  await p.locator(".related").scrollIntoViewIfNeeded();
+  await p.locator("[class^=related_]").scrollIntoViewIfNeeded();
   await p.waitForTimeout(300);
   const scrolled = await state();
   check("7b.6 Related started when scrolled into view", scrolled.io.length >= 1, `fired=${JSON.stringify(scrolled.io)} ${Date.now() - tScroll}ms after scroll`);
   check("7b.6b related chunk requested after scroll", names().includes("related"), names());
   const slot = await p.evaluate(() => ({
-    related: (document.querySelector(".related") as any)?.__tag === "server",
-    items: [...document.querySelectorAll(".related-list li")].filter((e) => (e as any).__tag === "server").length,
-    total: document.querySelectorAll(".related-list li").length,
+    related: (document.querySelector("[class^=related_]") as any)?.__tag === "server",
+    items: [...document.querySelectorAll("[class^=related-list_] li")].filter((e) => (e as any).__tag === "server").length,
+    total: document.querySelectorAll("[class^=related-list_] li").length,
     props: (document.querySelector(".props") as any)?.__tag === "server",
   }));
   check("7b.7 slot nodes inside Issue_props are the server nodes", slot.related && slot.props && slot.total === 4 && slot.items === 4, JSON.stringify(slot));
@@ -640,14 +640,14 @@ await step("7c. Issue_props status change", async () => {
   const posts: number[] = [];
   pg.on("response", (r) => r.request().method() === "POST" && r.url().includes("/_yuka/action/") && posts.push(r.status()));
   await pg.goto(base + "/issue/YUK-6", { waitUntil: "networkidle" });
-  await pg.waitForSelector(".related-list li");
+  await pg.waitForSelector("[class^=related-list_] li");
   const icon = () => pg.locator(".props .property").first().locator("svg").first().getAttribute("class");
   const select = pg.locator('.props select[aria-label="Status"]');
   const beforeStatus = statusSlug(await icon());
   const preValue = await select.inputValue();
   const preHandler = await pg.evaluate(() => !!(document.querySelector(".props select") as any)?.__yuka_change);
   check("7c.0 status select shows the saved status before hydration", !preHandler && preValue === beforeStatus, `select=${preValue} icon=${beforeStatus} hydrated=${preHandler}`);
-  const relatedBefore = await pg.locator(".related-list li").count();
+  const relatedBefore = await pg.locator("[class^=related-list_] li").count();
   const target = beforeStatus === "done" ? "todo" : "done";
   await pg.route("**/_yuka/action/**", async (route) => {
     await new Promise((r) => setTimeout(r, 800));
@@ -676,14 +676,14 @@ await step("7c. Issue_props status change", async () => {
   await pg.unroute("**/_yuka/action/**");
   check("7c.2 action returned 200", posts.length === 1 && posts[0] === 200, JSON.stringify(posts));
   const slot = await pg.evaluate(() => ({
-    items: document.querySelectorAll(".related-list li").length,
-    tagged: [...document.querySelectorAll(".related-list li")].filter((e) => (e as any).__tag === "server").length,
-    related: (document.querySelector(".related") as any)?.__tag === "server",
-    links: [...document.querySelectorAll(".related-list a")].every((a) => (a as HTMLAnchorElement).getAttribute("href")?.startsWith("/issue/")),
+    items: document.querySelectorAll("[class^=related-list_] li").length,
+    tagged: [...document.querySelectorAll("[class^=related-list_] li")].filter((e) => (e as any).__tag === "server").length,
+    related: (document.querySelector("[class^=related_]") as any)?.__tag === "server",
+    links: [...document.querySelectorAll("[class^=related-list_] a")].every((a) => (a as HTMLAnchorElement).getAttribute("href")?.startsWith("/issue/")),
   }));
   check("7c.3 Related island intact after Issue_props re-render", relatedBefore > 0 && slot.items === relatedBefore && slot.tagged === relatedBefore && slot.related && slot.links, JSON.stringify(slot));
   await pg.reload({ waitUntil: "networkidle" });
-  await pg.waitForSelector(".related-list li");
+  await pg.waitForSelector("[class^=related-list_] li");
   check("7c.4 status persists after reload", statusSlug(await icon()) === target && (await select.inputValue()) === target, `${beforeStatus} -> ${statusSlug(await icon())}`);
   check("7c.5 no errors", errors.length === 0, errors.join(" | "));
   await p.close();
@@ -747,7 +747,7 @@ await step("7g. generated island registry", async () => {
     p.evaluate(([s, e]) => !!(document.querySelector(s) as any)?.["__yuka_" + e], [sel, ev]);
 
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
-  await p.waitForSelector(".related-list li");
+  await p.waitForSelector("[class^=related-list_] li");
   await p.waitForTimeout(500);
 
   check("7g.1 eager New_issue hydrated", await has(".new-issue-button", "click"));
@@ -767,7 +767,7 @@ await step("7g. generated island registry", async () => {
     "7g.12 Related not started below the fold",
     (await p.evaluate(() => ((window as any).__ioFired as { cls: string }[]).filter((x) => /related/.test(x.cls)).length)) === 0,
   );
-  await p.locator(".related").scrollIntoViewIfNeeded();
+  await p.locator("[class^=related_]").scrollIntoViewIfNeeded();
   await p.waitForTimeout(400);
   check("7g.13 related chunk requested after scroll", lazyNames() === "comments,issue_props,related", lazyNames());
   const c0 = ((await p.locator(".counter-button").textContent()) ?? "").trim();
@@ -852,7 +852,7 @@ await step("7i. modulepreload", async () => {
   const lazyModules = ["comments", "issue_props", "related"];
 
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
-  await p.waitForSelector(".related-list li");
+  await p.waitForSelector("[class^=related-list_] li");
   await p.waitForTimeout(500);
   const pre = await preloads();
   const preNames = pre.map((l) => nameOf(l.path)).sort();
@@ -872,14 +872,14 @@ await step("7i. modulepreload", async () => {
   });
   await q.setViewportSize({ width: 1280, height: 260 });
   await q.goto(base + "/issue/YUK-2", { waitUntil: "commit" });
-  await q.waitForSelector(".related-list li", { timeout: 8000 });
+  await q.waitForSelector("[class^=related-list_] li", { timeout: 8000 });
   const at = (n: string) => qReqs.filter((r) => r.name === n).length;
   await q.waitForTimeout(500);
   check("7i.7 Comments (Lazy Idle) requested after idle, others not yet", at("comments") === 1 && at("issue_props") === 0 && at("related") === 0, qReqs.map((r) => r.name).join(","));
   await q.locator(".props .property").first().hover();
   await q.waitForTimeout(300);
   check("7i.8 Issue_props (Lazy Interaction) requested only after hover", at("issue_props") === 1 && at("related") === 0, qReqs.map((r) => r.name).join(","));
-  await q.locator(".related").scrollIntoViewIfNeeded();
+  await q.locator("[class^=related_]").scrollIntoViewIfNeeded();
   await q.waitForTimeout(400);
   check("7i.9 Related (Lazy Visible) requested only after scroll", at("related") === 1, qReqs.map((r) => r.name).join(","));
   await q.close();
@@ -888,7 +888,7 @@ await step("7i. modulepreload", async () => {
   const rReqs: string[] = [];
   r.on("request", (x) => rReqs.push(nameOf(new URL(x.url()).pathname)));
   await r.goto(base + "/issue/YUK-3", { waitUntil: "networkidle" });
-  await r.waitForSelector(".related-list li");
+  await r.waitForSelector("[class^=related-list_] li");
   await r.evaluate(() => ((window as any).__nav = "alive"));
   check("7i.10 Issue_list not loaded before navigation", !rReqs.includes("issue_list"));
   await r.locator('a[href="/"]').first().click();
@@ -901,6 +901,46 @@ await step("7i. modulepreload", async () => {
   await r.waitForTimeout(100);
   check("7i.13 Issue_list hydrates after navigation", (await r.locator(".row").count()) < total, `${total} -> ${await r.locator(".row").count()}`);
   check("7i.14 no errors", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+});
+
+await step("7j. css per module", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const p = await ctx.newPage();
+  const sheetsIn = (where: string) =>
+    p.evaluate((w) => [...document.querySelectorAll(w + " link[data-yuka-css]")].map((l) => l.getAttribute("href")), where);
+  const styled = () =>
+    p.evaluate(() => {
+      const r = document.querySelector('[class^=related_]');
+      const l = document.querySelector('[class^=related-list_]');
+      return !!r && !!l && getComputedStyle(r).borderTopWidth === "1px" && getComputedStyle(l).listStyleType === "none";
+    });
+  await p.goto(base + "/", { waitUntil: "networkidle" });
+  await p.waitForSelector(".row");
+  check("7j.1 a page that does not use the sheet has no link", (await sheetsIn("")).length === 0, JSON.stringify(await sheetsIn("")));
+  await p.locator('.row[data-id="YUK-8"] .row-title').click();
+  await p.waitForURL("**/issue/YUK-8");
+  await p.waitForSelector('[class^=related-list_] li');
+  check("7j.2 after a client navigation the sheet is in the head, once", (await sheetsIn("head")).length === 1 && (await sheetsIn("body")).length === 0, JSON.stringify([await sheetsIn("head"), await sheetsIn("body")]));
+  check("7j.3 Related is styled after a client navigation", await styled());
+  await p.goBack({ waitUntil: "networkidle" });
+  await p.waitForSelector(".row");
+  await p.locator('.row[data-id="YUK-1"] .row-title').click();
+  await p.waitForURL("**/issue/YUK-1");
+  await p.waitForSelector('[class^=related-list_] li');
+  check("7j.4 styles survive a second navigation, still one link", (await styled()) && (await sheetsIn("")).length === 1, JSON.stringify(await sheetsIn("")));
+  await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
+  await p.waitForSelector('[class^=related-list_] li');
+  const order = await p.evaluate(() => {
+    const l = document.querySelector("link[data-yuka-css]");
+    const island = document.querySelector('yuka-island[data-name="Demo_shared.Issue_props"]');
+    return !!l && !!island && l.compareDocumentPosition(island) === Node.DOCUMENT_POSITION_FOLLOWING && !island.contains(l);
+  });
+  check("7j.5 full load: one link, before the island that uses it", order && (await sheetsIn("")).length === 1);
+  check("7j.6 Related is styled on a full load", await styled());
+  const href = (await sheetsIn(""))[0]!;
+  const res = await p.request.get(base + href);
+  check("7j.7 the sheet is served immutable", res.status() === 200 && (res.headers()["cache-control"] ?? "").includes("immutable"), `${res.status()} ${res.headers()["cache-control"]}`);
   await ctx.close();
 });
 

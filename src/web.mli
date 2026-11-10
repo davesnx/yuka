@@ -130,3 +130,5 @@ val table_clear : 'a table -> unit
 val shortest_float : float -> string
 val parse_float : string -> float
 val parse_int : string -> int option
+val add_stylesheet : string -> unit
+val adopt_stylesheets : unit -> unit

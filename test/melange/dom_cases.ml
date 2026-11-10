@@ -1199,6 +1199,50 @@ let mismatch_log () =
     {|yuka: hydration mismatch in island T.Island at section > div > p:2: expected "z", found "y"|}
     logged
 
+let head_sheets : unit -> string =
+  [%mel.raw
+    {|function () {
+  return Array.from(document.head.querySelectorAll("link[data-yuka-css]")).map(function (l) { return l.getAttribute("href") }).join(",")
+}|}]
+
+let clear_sheets : unit -> unit =
+  [%mel.raw {|function () { document.querySelectorAll("link[data-yuka-css]").forEach(function (l) { l.remove() }) }|}]
+
+let css_render () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div [] [ use_css x (span [ text "a" ]); use_css x (span [ text "b" ]) ])
+  in
+  check "one link in the head" "/_yuka/css/x.css" (head_sheets ());
+  check "no link in the tree" "<div><span>a</span><span>b</span></div>" (html c);
+  dispose ()
+
+let css_present () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let c = container {|<link rel="stylesheet" href="/_yuka/css/x.css" data-yuka-css><div id="t"></div>|} in
+  let dispose = Yuka.Client.render (as_element (query c "#t")) (fun () -> use_css x (span [ text "a" ])) in
+  check "the link of the server is enough" "" (head_sheets ());
+  dispose ()
+
+let css_hydrate_rows () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let tree () =
+    lower "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun k -> use_css x (li k [ text k ])) ]
+  in
+  let c = container (Private.render_html (fun () -> Private.node (tree ()))) in
+  let server_html = html c in
+  let a = query c "[data-key=a]" in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  check "rows adopted as printed" server_html (html c);
+  same "row a" a (query c "[data-key=a]");
+  check "the client adds the link" "/_yuka/css/x.css" (head_sheets ());
+  dispose ()
+
 let all =
   [
     ("dom hydration mismatch log", mismatch_log);
@@ -1223,6 +1267,9 @@ let all =
     ("dom keyed list shuffle", keyed_list_shuffle);
     ("dom adjacent and empty texts hydrate", adjacent_texts_hydrate);
     ("dom hydrate server output", hydrate_server_output);
+    ("css: two uses add one link", css_render);
+    ("css: a link already in the document is kept", css_present);
+    ("css: hydrate rows that use a sheet", css_hydrate_rows);
     ("dom await swaps", await_swaps);
     ("dom await fails", await_fails);
     ("dom await hydrates settled", await_hydrates_settled);

@@ -128,3 +128,5 @@ let shortest_float f =
 
 let parse_float = float_of_string
 let parse_int = int_of_string_opt
+let add_stylesheet : string -> unit = fun _ -> browser_only ()
+let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()

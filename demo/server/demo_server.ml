@@ -44,7 +44,7 @@ let () =
     Yuka.Server.config ~assets
       ~public:[ ("/static", !static_dir) ]
       ?prerendered:(if !prerendered = "" then None else Some !prerendered)
-      ~styles:[ "/static/style.css" ] ()
+      ~styles:[ "/static/style.css" ] ~css:Demo_app.Yuka_css.sheets ()
   in
   Demo_app.Handlers.register ();
   let app = Demo_app.Routes_server.app in

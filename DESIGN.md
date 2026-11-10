@@ -1576,3 +1576,47 @@ Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
   (`time-counter`, made in order).
 - Size: about 1.4 KB gzip in an app that mounts navigation (demo +1381 B); 0 in
   the keyed benchmark, which does not.
+
+## CSS per module (2026-11-10)
+
+Ticket 23; `.workplace/docs/app-spec.md` section 23, option B built
+through A.
+
+- One sheet per file, declared by `module Css = [%yuka.css "file.css"]`
+  (a whole-file pass of the ppx, after `let%client`). The ppx reads the
+  file next to the source (dune `preprocessor_deps`), scans the selectors
+  (`ppx/css_scan.ml`: comments, strings and `url()` are skipped, a
+  segment is a selector when it ends with `{` and does not start with
+  `@`, `[...]` is skipped) and makes `Css.stylesheet` and one string per
+  class, `NAME_HASH`. The hash is the first 8 hex digits of the MD5 of the
+  file text, for both the class names and the file name
+  `BASE-HASH.css`: the ppx and the generator see the file under different
+  paths, and the same text gives the same rules.
+- The ppx wraps the body of each function named `make` after the
+  declaration (top level, `let%client`, submodules) in
+  `Yuka.use_css Css.stylesheet`. On the server, `use_css` returns
+  `Fragment [<link data-yuka-css>; body]`; in the browser it adds the link
+  to `<head>` if the document has none and returns the body. The client
+  tree has no new node kind, so `mount_node` and the keyed benchmark do
+  not change (10,026 B gzip).
+- Printer: the link is printed once per session, in document order, at
+  print time (components run before printing, and list elements are
+  evaluated right to left, so the order of `use_css` calls is not the page
+  order). Where the output is hydrated (inside an island), it is held and
+  written before the outermost island's `<yuka-island>`, after its
+  `modulepreload`, by cutting the buffer at the island's start; held links
+  of a fill inside an island go before its `<template>`. `each` rows and
+  the other places that look at a node's shape see the body, as the client
+  does. A `Catch` that fails restores the printed set.
+- Navigation: after a swap, `Web.adopt_stylesheets` moves
+  `link[data-yuka-css]` from the body to the head, dropping one whose
+  `href` is there. Sheets are never removed.
+- Cycle: `config ~css` holds the generated `(file, text)` list from
+  `yuka-css`, served at `/_yuka/css/FILE` with `Immutable`; any other
+  path there is a 404 `no-store`. `Server.css_files` gives them to a
+  prerender. The text lives only in the server executable; a client bundle
+  has the URL and the class names.
+- `Yuka.stylesheet` is a top-level value: the generated code first used
+  `Yuka.Private.stylesheet`, and the `Private` record kept the server
+  printer in the demo client chunk (`make size` caught it).
+

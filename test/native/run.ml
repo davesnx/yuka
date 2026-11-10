@@ -1386,6 +1386,122 @@ let loading_cases =
     test_case "preload_urls matches only equal paths" `Quick urls_exact_wins;
     test_case "preload_urls bad input" `Quick urls_bad ]
 
+let css_cases =
+  let open Alcotest in
+  let sheet name = Yuka.stylesheet ("/_yuka/css/" ^ name ^ ".css") in
+  let link name = "<link rel=\"stylesheet\" href=\"/_yuka/css/" ^ name ^ ".css\" data-yuka-css>" in
+  let x = sheet "x" and y = sheet "y" in
+  let span s = Yuka.lower "span" [] [ Yuka.text s ] in
+  let count text part =
+    let n = String.length part in
+    let rec go i acc =
+      if i + n > String.length text then acc
+      else go (i + 1) (if String.sub text i n = part then acc + 1 else acc)
+    in
+    go 0 0
+  in
+  let shell ?preload build =
+    let write, chunks = recorder () in
+    let p = Yuka.Private.stream ?preload ~sleep:never_sleep ~write build in
+    (p, chunks)
+  in
+  let first_use () =
+    let out =
+      Server.to_string (fun () ->
+          Yuka.lower "div" []
+            [ span "a"; Yuka.use_css x (span "b"); Yuka.use_css y (span "c"); Yuka.use_css x (span "d") ])
+    in
+    check string "one link per sheet, each before its first use"
+      ("<div><span>a</span>" ^ link "x" ^ "<span>b</span>" ^ link "y"
+     ^ "<span>c</span><span>d</span></div>")
+      out
+  in
+  let unused () =
+    let out = Server.to_string (fun () -> Yuka.fragment [ span "a"; Yuka.use_css x (span "b") ]) in
+    check bool "no link for y" false (contains out "y.css");
+    check int "x once" 1 (count out "x.css")
+  in
+  let no_islands () =
+    let p, chunks = shell (fun () -> Yuka.use_css x (span "b")) in
+    get p;
+    let body = String.concat "" (List.tl (chunks ())) in
+    check bool "the link" true (contains body (link "x" ^ "<span>b</span>"));
+    check bool "no script" false (contains body "<script")
+  in
+  let island_sheets () =
+    let isl name content =
+      Yuka.Client.island ~name ~props:`Null (fun () -> content)
+    in
+    let preload name = Some ("/js/" ^ name ^ ".js") in
+    let p, chunks =
+      shell ~preload (fun () ->
+          Yuka.fragment
+            [ isl "A"
+                (Yuka.use_css x (Yuka.lower "div" [] [ span "a"; Yuka.use_css y (span "b") ]));
+              Yuka.use_css y (span "c") ])
+    in
+    get p;
+    let out = List.nth (chunks ()) 1 in
+    check bool "the sheets of A before A, after its modulepreload" true
+      (contains out
+         ("<link rel=\"modulepreload\" href=\"/js/A.js\">" ^ link "x" ^ link "y"
+        ^ "<yuka-island data-name=\"A\""));
+    check int "x once" 1 (count out "x.css");
+    check int "y once" 1 (count out "y.css");
+    let inside =
+      let rec find i = if String.sub out i 12 = "<yuka-island" then i else find (i + 1) in
+      let i = find 0 in
+      String.sub out i (String.length out - i)
+    in
+    check bool "no link inside the island" false (contains inside "data-yuka-css")
+  in
+  let rows () =
+    let p, chunks =
+      shell (fun () ->
+          Yuka.Client.island ~name:"A" ~props:`Null (fun () ->
+              Yuka.lower "ul" []
+                [ Yuka.each ~key:Fun.id (fun () -> [ "1"; "2" ])
+                    (fun k -> Yuka.use_css x (Yuka.lower "li" [] [ Yuka.text k ])) ]))
+    in
+    get p;
+    let out = List.nth (chunks ()) 1 in
+    check bool "rows print as single elements, as the client sees them" true
+      (contains out "<ul><li>1</li><li>2</li></ul>")
+  in
+  let streamed () =
+    let a, resolve, _ = Async.make () in
+    let await () =
+      Yuka.Await.make ~async:a ~loading:(Yuka.text "L")
+        ~children:(fun n -> Yuka.use_css x (span (string_of_int n)))
+        ()
+    in
+    let run build =
+      let p, chunks = shell build in
+      check bool "no link in the shell" false (contains (List.nth (chunks ()) 1) "data-yuka-css");
+      (p, chunks)
+    in
+    let p, chunks = run (fun () -> await ()) in
+    let q, island_chunks =
+      run (fun () -> Yuka.Client.island ~name:"A" ~props:`Null (fun () -> await ()))
+    in
+    resolve 1;
+    get p;
+    get q;
+    let fills c = String.concat "" (List.filteri (fun i _ -> i >= 2) (c ())) in
+    check bool "outside islands, in the fill before its first use" true
+      (contains (fills chunks) ("<template data-yuka-fill=\"s1\">" ^ link "x" ^ "<span>1</span>"));
+    check int "one link" 1 (count (fills chunks) "x.css");
+    check bool "inside an island, before the template" true
+      (contains (fills island_chunks) (link "x" ^ "<template data-yuka-fill"));
+    check int "one link in the island chunks" 1 (count (fills island_chunks) "x.css")
+  in
+  [ test_case "a link once, before the first use" `Quick first_use;
+    test_case "no link for a sheet the page does not use" `Quick unused;
+    test_case "a page without islands has links and no script" `Quick no_islands;
+    test_case "island sheets before the island" `Quick island_sheets;
+    test_case "each rows with a sheet" `Quick rows;
+    test_case "streamed chunks get their links" `Quick streamed ]
+
 let () =
   Alcotest.run "yuka"
     [
@@ -1403,4 +1519,5 @@ let () =
       ("early and navigation", navigation_cases);
       ("review fixes", review_cases);
       ("island loading", loading_cases);
+      ("css", css_cases);
     ]

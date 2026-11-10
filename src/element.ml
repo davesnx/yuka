@@ -24,6 +24,23 @@ module Slot = struct
   let make content = { content = Some content; dom = ref [] }
 end
 
+type stylesheet = string
+
+let stylesheet href = href
+
+let use_css href body =
+  if !Base.server_rendering then
+    Fragment
+      [ Element
+          { tag = "link";
+            attrs = [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ];
+            children = [] };
+        body ]
+  else begin
+    if Web.in_browser then Web.add_stylesheet href;
+    body
+  end
+
 let hole_attr name f = Dynamic (name, f)
 let on name handler = Handler (name, handler)
 

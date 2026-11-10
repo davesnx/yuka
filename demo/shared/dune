@@ -3,7 +3,9 @@
  (modes native melange)
  (libraries yuka)
  (preprocess
-  (pps yuka.ppx)))
+  (pps yuka.ppx))
+ (preprocessor_deps
+  (glob_files *.css)))
 
 (rule
  (targets routes.ml)

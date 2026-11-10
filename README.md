@@ -254,6 +254,58 @@ when there is no data yet.
 </Yuka.Show>
 ```
 
+### CSS per module
+
+A module brings its own stylesheet. `[%yuka.css]` reads the file at build
+time and gives one `string` per class, with a name scoped to the file:
+
+```css
+/* related.css */
+.related { margin-top: 20px; }
+.related-list li { display: flex; }
+```
+
+```ocaml
+(* related.mlx *)
+module Css = [%yuka.css "related.css"]
+
+let%client make ~related () =
+  <div class_=Css.related><ul class_=Css.related_list>...</ul></div>
+```
+
+`Css.related` is `"related_1084c5c6"`; a class that the file does not have
+is a compile error. Classes are found in selectors only (not in comments,
+strings, `url()` or attribute values); `-` becomes `_` in the OCaml name.
+Each function named `make` after `[%yuka.css]` calls
+`Yuka.use_css Css.stylesheet`; call it yourself in other functions. The
+server prints `<link rel="stylesheet" data-yuka-css>` once per page, before
+the first element that uses it; the sheets an island uses are printed
+before its `<yuka-island>`, next to its `modulepreload`. In the browser, a
+sheet that the page does not have yet is added to `<head>`, and after a
+client navigation the new links move to `<head>`. A sheet is never removed.
+A page with no island still loads no JavaScript.
+
+The library needs the files at preprocessing time, and the server needs
+the rewritten sheets, which `yuka-css` writes as an OCaml module:
+
+```dune
+; shared/dune
+(library (name shared) (preprocess (pps yuka.ppx))
+ (preprocessor_deps (glob_files *.css)))
+
+; server/dune
+(rule (targets yuka_css.ml) (deps (glob_files ../shared/*.css))
+ (action (with-stdout-to yuka_css.ml (run %{bin:yuka-css} %{deps}))))
+```
+
+```ocaml
+Yuka.Server.config ~css:Yuka_css.sheets ()
+```
+
+The cycle serves them at `/_yuka/css/NAME-HASH.css` with `Immutable`, and a
+prerender writes them. Global CSS (resets, variables) stays in
+`~styles`.
+
 ### Forms
 
 A record with `[@@deriving form]` gets a field type and a decoder that runs

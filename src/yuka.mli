@@ -459,6 +459,23 @@ val each :
     stays keeps its DOM nodes; it renders again when [equal] says its value
     changed. Default [equal]: identity, as in {!State.make}. *)
 
+type stylesheet
+(** A CSS file of a module, made by [module Css = [%yuka.css "file.css"]].
+    The ppx gives [Css.stylesheet] and one [string] per class of the file,
+    [Css.row] for [.row], with a name scoped to the file. *)
+
+val stylesheet : string -> stylesheet
+(** For generated code: the sheet served at this URL. A top-level value, so
+    that a client bundle does not keep {!Private}. *)
+
+val use_css : stylesheet -> 'k element -> 'k element
+(** [use_css sheet element] is [element] with [sheet] in the page. On the
+    server, the page gets [<link rel="stylesheet">] once, before the first
+    element that uses it; the sheets of an island are printed before its
+    [<yuka-island>]. In the browser, a [link] is added to [<head>] if the
+    document has none for this sheet. The ppx calls it in every function
+    named [make] that comes after [[%yuka.css]] in the same file. *)
+
 module Client : sig
   type entry
   (** Made by [entry]. The island modules expose it as [register], for
@@ -1348,6 +1365,7 @@ module Server : sig
     ?public:(string * string) list ->
     ?prerendered:string ->
     ?styles:string list ->
+    ?css:(string * string) list ->
     ?head:string ->
     ?timeout:float ->
     unit ->
@@ -1360,7 +1378,11 @@ module Server : sig
       without [Yuka-Navigate], is answered with its file there when the file
       exists ({!prerender_file}), after the guards and instead of the
       loaders. [styles] are stylesheet URLs and [head] raw HTML for the head
-      of every page. [timeout] (default 10 seconds) bounds a streamed
+      of every page. [css] lists the sheets of [[%yuka.css]], as file name
+      and text; the generator [yuka-css] writes it ([Yuka_css.sheets]). The
+      cycle serves each at [/_yuka/css/FILE] with [Immutable] (the name has
+      a hash of the text); another path under [/_yuka/css/] is a 404 with
+      [no-store]. [timeout] (default 10 seconds) bounds a streamed
       render. *)
 
   val build_id : config -> 'req app -> string
@@ -1369,6 +1391,10 @@ module Server : sig
       document has [<meta name="yuka-build" content="ID">], and a response to
       [Yuka-Navigate] has the header [Yuka-Build: ID]; the client loads the
       page in full when the two differ. *)
+
+  val css_files : config -> (string * string) list
+  (** The sheets of [css] as paths relative to the site root
+      ([_yuka/css/FILE]) and text. A prerender writes them. *)
 
   val served_dirs : config -> (string * string) list
   (** The URL prefixes and directories that the cycle serves files from:

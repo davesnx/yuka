@@ -9,7 +9,8 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None }
+      current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
+      sheets = []; held = [] }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -35,6 +36,20 @@ open Base
     s.pending <- [];
     p
 
+  let sheet_link href =
+    "<link rel=\"stylesheet\" href=\"" ^ escape ~quote:true href ^ "\" data-yuka-css>"
+
+  let sheet_of = function
+    | Fragment
+        [ Element { tag = "link"; attrs = [ _; Static ("href", href); Static ("data-yuka-css", _) ]; _ }; body ] ->
+        Some (href, body)
+    | _ -> None
+
+  let take_held s =
+    let l = String.concat "" (List.rev s.held) in
+    s.held <- [];
+    l
+
   let take_links s =
     let l = String.concat "" (List.rev s.queued) in
     s.queued <- [];
@@ -48,7 +63,22 @@ open Base
       if hydrating () then Buffer.add_string b m;
       after_text := false
     in
-    let rec go = function
+    let use_sheet href =
+      if not (List.mem href s.sheets) then begin
+        s.sheets <- href :: s.sheets;
+        if hydrating () then s.held <- sheet_link href :: s.held
+        else Buffer.add_string b (sheet_link href)
+      end
+    in
+    let rec unwrap n =
+      match sheet_of n with
+      | Some (href, body) ->
+          use_sheet href;
+          unwrap body
+      | None -> n
+    in
+    let rec go n =
+      match unwrap n with
       | Text "" -> ()
       | Text t ->
           if !after_text && hydrating () then Buffer.add_string b "<!---->";
@@ -154,6 +184,7 @@ open Base
           | Some l when direct -> Buffer.add_string b l
           | Some l -> s.queued <- l :: s.queued
           | None -> ());
+          let outermost = s.depth = 0 and start = Buffer.length b in
           Buffer.add_string b
             ("<yuka-island data-name=\"" ^ escape ~quote:true name
            ^ "\" data-id=\"" ^ id ^ "\" style=\"display:contents\""
@@ -180,6 +211,12 @@ open Base
                 raise e
           in
           Buffer.add_string b "</yuka-island>";
+          if outermost && s.held <> [] then begin
+            let island = Buffer.sub b start (Buffer.length b - start) in
+            Buffer.truncate b start;
+            Buffer.add_string b (take_held s);
+            Buffer.add_string b island
+          end;
           Buffer.add_string b (answers_html mine);
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
@@ -260,7 +297,7 @@ open Base
      fun items render ->
       List.iter
         (fun item ->
-          let n = render item in
+          let n = unwrap (render item) in
           if Template.single_element n then go n
           else begin
             marker "<!--[-->";
@@ -282,7 +319,17 @@ open Base
     | exception e ->
         restore ();
         raise e);
-    Buffer.contents b
+    if s.held = [] then Buffer.contents b
+    else if s.in_fill then begin
+      s.queued <- s.held @ s.queued;
+      s.held <- [];
+      Buffer.contents b
+    end
+    else if not s.islands_only then begin
+      s.held <- [];
+      Buffer.contents b
+    end
+    else take_held s ^ Buffer.contents b
 
   let render_html build = print (session ~streaming:false ~islands_only:false) build
 

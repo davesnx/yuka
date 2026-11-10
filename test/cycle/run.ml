@@ -174,6 +174,25 @@ let assets =
         check_header r "cache-control" [ "no-store" ];
         check_events [];
         Alcotest.(check (list string)) "file asked" [ "js/nope.js" ] !file_calls );
+    ( "css sheets are served immutable, a missing one is 404 no-store",
+      fun () ->
+        let config =
+          Server.config ~assets:modules ~css:[ ("a-1234.css", ".a_1234{}") ] ()
+        in
+        let r = get ~config "/_yuka/css/a-1234.css" in
+        check_status r 200;
+        Alcotest.(check string) "body" ".a_1234{}" r.body;
+        check_header r "content-type" [ "text/css; charset=utf-8" ];
+        check_header r "cache-control" [ "public, max-age=31536000, immutable" ];
+        let r = get ~config ~meth:`HEAD "/_yuka/css/a-1234.css" in
+        check_status r 200;
+        Alcotest.(check string) "HEAD has no body" "" r.body;
+        let r = get ~config "/_yuka/css/b-1234.css" in
+        check_status r 404;
+        check_header r "cache-control" [ "no-store" ];
+        Alcotest.(check (list string)) "no file asked" [] !file_calls;
+        Alcotest.(check (list (pair string string)))
+          "css_files" [ ("_yuka/css/a-1234.css", ".a_1234{}") ] (Server.css_files config) );
     ( "asset file with no-cache",
       fun () ->
         let r = get "/_yuka/app/main.js" in

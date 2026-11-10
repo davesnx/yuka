@@ -15,6 +15,7 @@
 - Breaking: the action call (`POST /_yuka/action/<name>`) and `Action` routes refuse (403) a request with no `Origin` unless it has `Sec-Fetch-Site: same-origin`; the action call checks the origin, the name and the content type before it reads the body (@davesnx)
 - Prefetch, navigation cache and view transitions: links are prefetched on hover, focus or pointer down (`Yuka.mount ~prefetch`, `data-yuka-prefetch="visible"` or `"off"`, header `Yuka-Prefetch: 1`); answers are reused by their `Cache-Control` (`max-age`, or once within 10 s for a `no-store` prefetch); a successful action call empties the cache; `~transitions:true` runs each client navigation in a view transition with `data-yuka-nav` on `<html>` (@davesnx)
 - Breaking: `Yuka.Async.resolved` is now `Yuka.Async.return` (@davesnx)
+- CSS per module: `module Css = [%yuka.css "file.css"]` gives one scoped class name per class of the file; the server prints each sheet once, before its first use (an island's sheets before the island), the browser adds missing sheets to `<head>` and moves new ones there after a client navigation; `yuka-css` writes the sheets for `Yuka.Server.config ~css`, served at `/_yuka/css/` and written by a prerender (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

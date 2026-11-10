@@ -1,4 +1,14 @@
 (executable
  (name yuka_islands)
  (public_name yuka-islands)
+ (modules yuka_islands)
  (package yuka))
+
+(executable
+ (name yuka_css)
+ (public_name yuka-css)
+ (modules yuka_css css_scan)
+ (package yuka))
+
+(copy_files#
+ (files ../ppx/css_scan.ml))

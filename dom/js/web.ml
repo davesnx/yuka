@@ -472,3 +472,26 @@ external parse_float : string -> float = "Number"
 
 let parse_int : string -> int option =
   [%mel.raw "function (t) { const n = Number(t); return (n | 0) === n ? n | 0 : undefined }"]
+
+let add_stylesheet : string -> unit =
+  [%mel.raw
+    {|function (href) {
+  var links = document.querySelectorAll("link[data-yuka-css]");
+  for (var i = 0; i < links.length; i++) if (links[i].getAttribute("href") === href) return;
+  var l = document.createElement("link");
+  l.rel = "stylesheet";
+  l.setAttribute("href", href);
+  l.setAttribute("data-yuka-css", "");
+  document.head.appendChild(l);
+}|}]
+
+let adopt_stylesheets : unit -> unit =
+  [%mel.raw
+    {|function () {
+  var head = document.head, links = document.body.querySelectorAll("link[data-yuka-css]");
+  for (var i = 0; i < links.length; i++) {
+    var l = links[i], href = l.getAttribute("href"), have = head.querySelectorAll("link[data-yuka-css]"), found = false;
+    for (var j = 0; j < have.length; j++) if (have[j].getAttribute("href") === href) found = true;
+    if (found) l.remove(); else head.appendChild(l);
+  }
+}|}]
