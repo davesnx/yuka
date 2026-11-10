@@ -52,7 +52,7 @@ are only called inside effects and handlers, which never run on the server.
 The server output and the client hydration must agree on this format.
 
 The browser hydrates only `<yuka-island>` elements, so the page printer
-(`Yuka.Server.to_string`, `page`, `respond`, `stream`, `render_settled`)
+(`Yuka.Server.to_string`, `document`, `respond`, `stream`, `render_settled`)
 writes the markers below only inside an island. Outside an island it writes
 no `<!---->`, `<!--[-->` or `<!--]-->`. The one exception is a pending
 streamed `Await`, which keeps `<!--[sN-->` and `<!--]-->` because the fill
@@ -140,8 +140,8 @@ markers everywhere: the client hydrates their output.
     in one response. A comment whose text starts with `[` is a hole start
     for hydration, so `[s1` is one too.
 - Streaming (`Yuka.Server.respond`, and `Yuka.Server.stream ~sleep ~write build`):
-  1. One chunk: the document head (title, the inline script below, styles,
-     module scripts) and `<body>`. Then one chunk: the shell (the tree with
+  1. One chunk: the document head (title, the inline script below when
+     the shell has a pending `Await`, styles, module scripts) and `<body>`. Then one chunk: the shell (the tree with
      loading elements).
   2. Each pending `Await`, when its value settles, one chunk:
      `<template data-yuka-fill="sN">HTML</template><script>__yukaFill("sN")</script>`.
@@ -518,7 +518,8 @@ Lwt bridges live in the app). `Yuka.await` is now `<Yuka.Await>`.
   - `Yuka.Server.stream ~write page` writes chunks through
     `write : string -> unit Async.t`; the stream timeout uses a
     `~sleep : float -> unit Async.t` given by the app.
-  - `Yuka.Server.to_string`, `page`, `render_settled` stay pure.
+  - `Yuka.Server.to_string`, `document` (a full HTML string; named `page`
+    before the request cycle) and `render_settled` stay pure.
   - Actions: `Yuka.Server.Action.implement` (implementation returns
     `'o Async.t`), `reject`, and
     `Yuka.Server.handle_action : name:string -> content_type:string option
@@ -1160,3 +1161,96 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   checks the generated code; `test/routes/run.ml` checks `href`, `find`
   and the round trip `find (href r) = Found r`; `gen/routes/test/errors.t`
   has one case per build error.
+
+## Request cycle (2026-11-10)
+
+Spec: `.workplace/docs/routes-spec.md`, increment 2; its section 8 lists
+what changed from the spec. `yuka-dream`, the demo migration and the
+navigation protocol come later; the GADT `Yuka.Router` and
+`Server.respond` stay until then.
+
+- `src/cycle.ml`, included in `Yuka.Server`: the types the generated code
+  names (`stop`, `page`, `layer`, `plan`, `cache`, `rules`, `response`,
+  `fallback`, `target`, `'req app`), `assets`, `config`, `handle` and the
+  functor `Make (A : ADAPTER)`. No server dependency: `handle` takes the
+  adapter's request (passed to user code) and a neutral `request` record
+  (read by the cycle), and returns `Respond response` or `File`.
+- Order: `/_yuka/action/<name>` (POST, else 405), `/_yuka/<file>` and public
+  prefixes (GET/HEAD, decoded segments, `.`, `..` or `/` inside a segment is
+  404 `no-store`, never routed); trailing slash or empty segment 308 with
+  the query; `find`; redirect node 308/307; `Missing` 404 page;
+  `Wrong_method` 405 with `Allow` (`HEAD` after `GET`, `OPTIONS` last) or
+  204 for `OPTIONS`; guards one after another; same-origin check for
+  actions; handler (rule headers, then the handler's, then the rule
+  `cache-control` unless set; `HEAD` drops the body) or loaders, headers
+  (`content-type`, `vary: Yuka-Navigate`, rule headers and
+  `cache-control`), `HEAD` stops without calling the page body, then the
+  streamed document.
+- Errors: a stop or an exception before the first write gives the
+  fallback page (404 or 500, root headers, `no-store`, the message only in
+  `log_error`). The shell is printed before `handle` returns, and a render
+  that already failed at that point (a fill or timeout that raised) also
+  gives the 500 page; the adapter attaches its write function later through
+  the `Stream` body. After that the status is sent: a failure is logged,
+  the stream ends without `</body></html>`, and its `Async` succeeds, so the
+  adapter closes the response normally. That happens only after the
+  writes already queued have finished (`Server.drive` fails after its
+  write chain settles), so nothing is written after the end. Before the
+  adapter attaches its write function, chunks go to a buffer, which is
+  sent first. If the error page itself fails, the answer is a plain-text
+  500; a `log_error` that raises does not stop it. Every `HEAD` answer
+  (405, 403, 404, 500 included) has an empty body.
+- A stop `Redirect` must have status 301, 302, 303, 307 or 308 and a
+  location without CR or LF, else it is a logged 500. It gets the root
+  headers and `no-store`. A path with a literal `\` is the 404 page,
+  because browsers read `/\evil.com` as `//evil.com`.
+- `vary` values are joined: a rule `vary: Cookie` gives
+  `vary: Cookie, Yuka-Navigate`.
+- An `Action` always sends `cache-control: no-store`. An `Endpoint`
+  response that is not 2xx gets `no-store` instead of the rule cache,
+  unless the handler set `cache-control`.
+- A fallback whose layouts have param keys is written inside the route's
+  arm of `resolve`, where the params are bound; the others are top-level
+  `fallback_N` values. A layer whose layout takes no loader result is
+  built once: a top-level `layer_N` (N is the layout key number) when its
+  key has no param, else a `let layer_N = ... in` at the top of the arm,
+  shared by the fallback and the plan. Only layers that take a loader
+  result are built inside `load`.
+- A failed `Codec.async` value sends `{"error":"failed"}` and logs the
+  message, streamed or already failed at print time, unless it is a
+  rejection (`Server.Action.reject`), whose message is meant for the
+  client. `log_error` lives in `Types`, so `Codec` can call it;
+  `Server.log_error` is the same ref.
+- Printer: the session has `entry` (the module script tag, written once,
+  right before the first island; queued before the `<template>` inside a
+  fill), `current` (an `<a>` whose `href` equals the request path gets
+  `aria-current="page"`, but not inside an island, whose markup must match
+  the client render), `id_prefix` (for increment 4) and `in_fill`.
+  The head has `fill_script` only when the shell has a pending `Await`;
+  pending `Codec.async` values send JSON, which needs no script. A page
+  with no island and nothing to fill has no `<script>` other than the
+  import map.
+- `yuka-routes --server --shared-module M FILE.ast` prints
+  `Routes_server`: the opens before `let routes`, one `rules_N` per
+  distinct rule set, one `fallback_N` per distinct fallback, `resolve` (one
+  arm per named node) and `app`. All loader calls of a route are bound
+  before the first `Yuka.Server.loaded`, so they start together.
+- Size: the client never names `Cycle`, so esbuild drops it, as long as
+  `cycle.ml` has no top-level computation: `text`, `html` and the asset
+  404 are functions, not partial applications or values (as values they
+  kept 437 B of `cycle.js` in the keyed app). `make size`: keyed app
+  11008 B gzip, budget 11345 B (18 B from `log_error` and `async_error` in
+  `Types`, which the client `Codec.async` now names).
+- Tests: `test/cycle` builds a `Routes.mlx` with every node kind through
+  the three dune rules, diffs the server output against
+  `routes_server.expected`, and runs 60 cases through `Make` with a test
+  adapter (record request, `Async.t` as `io`, a fake file table): each
+  step and status code above. Breaking a step (no 308, `HEAD` renders, no
+  `HEAD` in `Allow`, guards reversed, dot segments allowed, no log, no
+  `OPTIONS` 204, no entry script, `aria-current` on every link, no
+  outlets, no rule cache, no origin check, loaders started one after
+  another) fails at least one case. `gen/routes/test/server.t` has the
+  server-mode generation errors. `test/cycle/shadowed` compiles the same
+  server output with `-open Shadow` (`List`, `String`, `Ok`, `Error`, `^`,
+  `=` and others hidden), so it names the standard library only through
+  `Stdlib`.

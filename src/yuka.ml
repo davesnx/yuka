@@ -22,6 +22,7 @@ module Router = Router
 
 module Server = struct
   include Server
+  include Cycle
 
   module Action = struct
     let implement = Server.implement

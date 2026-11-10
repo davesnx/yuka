@@ -81,13 +81,13 @@ let async c : 'a Async.t t =
           match !current_session with
           | Some s ->
               s.asyncs <- s.asyncs + 1;
-              ("a" ^ string_of_int s.asyncs, s.streaming)
+              (s.id_prefix ^ "a" ^ string_of_int s.asyncs, s.streaming)
           | None -> ("a0", false)
         in
         let assoc extra : Json.t = `Assoc (("$async", `String id) :: extra) in
         match Async.status j with
         | Async.Done v -> assoc [ ("ok", v) ]
-        | Async.Failed m -> assoc [ ("error", `String m) ]
+        | Async.Failed m -> assoc [ ("error", `String (async_error id m)) ]
         | Async.Pending -> (
             match !current_session with
             | Some s when streaming ->

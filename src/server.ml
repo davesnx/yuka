@@ -1,4 +1,4 @@
-let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)
+let log_error = Types.log_error
 
 let to_string build =
   Printer.print
@@ -49,7 +49,7 @@ let head ~extra ?head ?(early = false) ?(import_map = []) ?(title = "")
     @ [ extra; Option.value head ~default:"" ]
     @ styles @ scripts @ [ "</head><body>" ])
 
-let page ?head:head_html ?early ?import_map ?title ?styles ?scripts build =
+let document ?head:head_html ?early ?import_map ?title ?styles ?scripts build =
   head ~extra:"" ?head:head_html ?early ?import_map ?title ?styles ?scripts ()
   ^ to_string build ^ "</body></html>"
 
@@ -63,15 +63,25 @@ let fill_chunk id html =
   "<template data-yuka-fill=\"" ^ id ^ "\">" ^ html
   ^ "</template><script>__yukaFill(\"" ^ id ^ "\")</script>"
 
+let reject_prefix = Types.reject_prefix
+let rejection = Types.rejection
+
 let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
 
-let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
+let drive ?preload ?entry ?current ?(id_prefix = "") ~timeout ~sleep build ~on_shell
+    ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.preload <- preload;
+  session.entry <- entry;
+  session.current <- current;
+  session.id_prefix <- id_prefix;
   let shell = Printer.print session (fun () -> build ()) in
+  let fills =
+    List.exists (function Types.Pending_await _ -> true | Types.Pending_async _ -> false) session.pending
+  in
   let result, resolve, fail = Async.make () in
-  let chain = ref (on_shell shell) in
+  let chain = ref (on_shell ~fills shell) in
   let emit f = chain := Async.bind !chain f in
   let outstanding = ref [] in
   let finished = ref false in
@@ -90,7 +100,8 @@ let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
     if not !finished then begin
       finished := true;
       on_timeout := None;
-      fail (Web.exn_to_string exn)
+      let message = Web.exn_to_string exn in
+      Async.on_settled !chain (fun _ -> fail message)
     end
   in
   let remove id =
@@ -126,7 +137,7 @@ let drive ?preload ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
       let json : Json.t =
         match status with
         | Async.Done v -> `Assoc [ ("ok", v) ]
-        | Async.Failed m -> `Assoc [ ("error", `String m) ]
+        | Async.Failed m -> `Assoc [ ("error", `String (Types.async_error id m)) ]
         | Async.Pending -> `Assoc [ ("error", `String "pending") ]
       in
       emit (fun () -> on_value id json);
@@ -171,9 +182,9 @@ let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
   let ( >>= ) = Async.bind in
   drive ?preload ~timeout ~sleep
     (fun () -> build ())
-    ~on_shell:(fun shell ->
+    ~on_shell:(fun ~fills shell ->
       write
-        (head ~extra:fill_script ?head:head_html ?early ?import_map ?title
+        (head ~extra:(if fills then fill_script else "") ?head:head_html ?early ?import_map ?title
            ?styles ?scripts ())
       >>= fun () -> write shell)
     ~on_fill:(fun id _ links html -> write (links ^ fill_chunk id html))
@@ -214,14 +225,14 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-let render_settled ?(timeout = 10.) ?preload ~sleep build =
+let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ~sleep build =
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
     (fun () -> !document ^ Buffer.contents values)
-    (drive ?preload ~timeout ~sleep
+    (drive ?preload ?entry ?current ?id_prefix ~timeout ~sleep
        (fun () -> build ())
-       ~on_shell:(fun shell ->
+       ~on_shell:(fun ~fills:_ shell ->
          document := shell;
          Async.resolved ())
        ~on_fill:(fun id inside links html ->
@@ -231,6 +242,9 @@ let render_settled ?(timeout = 10.) ?preload ~sleep build =
        ~on_value:(fun id json ->
          Buffer.add_string values (value_script id json);
          Async.resolved ()))
+
+let render_settled ?timeout ?preload ~sleep build =
+  settled ?timeout ?preload ~sleep build
 
 let respond ?(navigating = false) ?head:head_html ?early ?import_map ?timeout
     ?title ?styles ?scripts ?preload ~sleep ~write build =
@@ -308,21 +322,15 @@ let preload_urls ~manifest ~base ?metafile () =
 exception Rejected of string
 
 let reject message = raise (Rejected message)
-let reject_prefix = "yuka.reject:"
 let rejected message = Async.failed (reject_prefix ^ message)
 
-type outcome = Output of Json.t | Bad_input of string
+type answer = Output of Json.t | Bad_input of string
 
-let registry : (string * (Json.t -> outcome Async.t)) list ref = ref []
+let registry : (string * (Json.t -> answer Async.t)) list ref = ref []
 
 let find_action name =
   Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
 
-let rejection message =
-  let n = String.length reject_prefix in
-  if String.length message >= n && String.sub message 0 n = reject_prefix then
-    Some (String.sub message n (String.length message - n))
-  else None
 
 let transport name input =
   match find_action name with

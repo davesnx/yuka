@@ -99,9 +99,28 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable depth : int;
     islands_only : bool;
     mutable queued : string list;
+    mutable id_prefix : string;
+    mutable entry : string option;
+    mutable current : string option;
+    mutable in_fill : bool;
   }
 
 let current_session : session option ref = ref None
+let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)
+let reject_prefix = "yuka.reject:"
+
+let rejection message =
+  let n = String.length reject_prefix in
+  if String.length message >= n && String.sub message 0 n = reject_prefix then
+    Some (String.sub message n (String.length message - n))
+  else None
+
+let async_error id message =
+  match rejection message with
+  | Some shown -> shown
+  | None ->
+      !log_error ("async value " ^ id ^ " failed: " ^ message);
+      "failed"
 
 let async_source : (string -> Json.t Async.t) ref =
   ref (fun _ -> Async.failed "no async transport")

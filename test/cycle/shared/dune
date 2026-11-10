@@ -1,0 +1,18 @@
+(library
+ (name cycle_shared)
+ (libraries yuka))
+
+(rule
+ (targets routes.ast)
+ (deps ../Routes.mlx)
+ (action
+  (with-stdout-to
+   routes.ast
+   (run %{bin:mlx-pp} %{deps}))))
+
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka-routes} --shared %{dep:routes.ast}))))

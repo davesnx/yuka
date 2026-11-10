@@ -1,0 +1,35 @@
+open Cycle_shared
+open App
+
+let routes =
+  <Router layout=Layouts.root not_found=Pages.not_found error=Pages.error
+    headers=[ ("x-frame-options", "DENY"); ("x-a", "root") ] cache=No_store>
+    <Route name=Home path="/" page=Pages.home />
+    <Route name=Plain path="/plain" page=Pages.plain />
+    <Route name=Islands path="/islands" page=Pages.islands />
+    <Route name=Slow path="/slow" page=Pages.slow />
+    <Route name=Twice path="/twice" page=Pages.twice />
+    <Route name=Broken path="/broken" page=Pages.broken />
+    <Route name=Boom path="/boom" page=Pages.boom loader=Loaders.exploding />
+    <Group path="/team/:team<Params.Team>" layout=Layouts.team guard=Guards.outer
+      loader=Loaders.squad headers=[ ("X-A", "team") ] cache=(Private { max_age = 5 })>
+      <Route name=Member path="/:user<int>" page=Pages.member loader=Loaders.profile
+        guard=Guards.inner />
+      <Endpoint name=Team_json path="/json" method_=`GET handler=Api.team
+        cache=(Public { max_age = 60; s_max_age = Some 600 }) />
+      <Action name=Rename path="/rename" method_=`POST handler=Api.rename />
+    </Group>
+    <Route name=Varied path="/varied" page=Pages.plain headers=[ ("Vary", "Cookie") ] />
+    <Endpoint name=Asset path="/asset.txt" method_=`GET handler=Api.asset cache=Immutable />
+    <Group path="/org/:org<string>" layout=Layouts.org>
+      <Group path="/x" not_found=Pages.org_missing>
+        <Route name=Org_item path="/:n<int>" page=Pages.org_item loader=Loaders.org_item />
+      </Group>
+    </Group>
+    <Endpoint name=Feed path="/feed.xml" method_=`GET handler=Api.feed />
+    <Endpoint name=Later path="/later" method_=`GET handler=Api.later />
+    <Action name=Clear_feed path="/feed.xml" method_=`DELETE handler=Api.clear
+      cache=Immutable />
+    <Route path="/old" redirect=(Permanent "/") />
+    <Route path="/tmp/:x<string>" redirect=(Temporary "/team/:x/json") />
+  </Router>

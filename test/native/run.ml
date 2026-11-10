@@ -80,7 +80,7 @@ let page_cases =
   let open Alcotest in
   let page () =
     let html =
-      Server.page ~title:"A & B" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
+      Server.document ~title:"A & B" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
         (fun () -> Yuka.lower "p" [] [ Yuka.text "hi" ])
     in
     check string "document"
@@ -124,8 +124,7 @@ let page_cases =
     get
       (Server.respond ~sleep:never_sleep ~write (fun () -> Yuka.text "x"));
     check string "body"
-      ("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title></title>"
-      ^ Server.fill_script ^ "</head><body>x</body></html>")
+      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title></title></head><body>x</body></html>"
       (String.concat "" (chunks ()))
   in
   let component_effect () =
@@ -405,10 +404,46 @@ let stream_cases =
     resolve 5;
     get p;
     check list_of "values"
-      [ value_script "a2" "{\"error\":\"no\"}";
+      [ value_script "a2" "{\"error\":\"failed\"}";
         value_script "a1" "{\"ok\":5}";
         "</body></html>" ]
       (List.filteri (fun i _ -> i >= 2) (chunks ()))
+  in
+  let async_errors () =
+    let a, _, fail_a = Async.make () in
+    let b, _, fail_b = Async.make () in
+    let write, chunks = recorder () in
+    let logged = ref [] in
+    let saved = !Server.log_error in
+    Server.log_error := (fun m -> logged := m :: !logged);
+    let p = stream (fun () -> Yuka.fragment [ island a; island b ]) write in
+    fail_a "db password wrong";
+    fail_b "yuka.reject:title is empty";
+    get p;
+    Server.log_error := saved;
+    check list_of "values"
+      [ value_script "a2" "{\"error\":\"failed\"}";
+        value_script "a1" "{\"error\":\"title is empty\"}";
+        "</body></html>" ]
+      (List.filteri (fun i _ -> i >= 2) (chunks ()));
+    check list_of "log" [ "async value a2 failed: db password wrong" ] !logged
+  in
+  let async_errors_inline () =
+    let logged = ref [] in
+    let saved = !Server.log_error in
+    Server.log_error := (fun m -> logged := m :: !logged);
+    let html =
+      Server.to_string (fun () ->
+          Yuka.fragment
+            [ island (Async.failed "db password wrong");
+              island (Async.failed "yuka.reject:title is empty") ])
+    in
+    Server.log_error := saved;
+    check string "inline values"
+      (island_html "i1" "{\"$async\":\"a2\",\"error\":\"failed\"}"
+      ^ island_html "i2" "{\"$async\":\"a1\",\"error\":\"title is empty\"}")
+      html;
+    check list_of "log" [ "async value a2 failed: db password wrong" ] !logged
   in
   let async_in_fill () =
     let outer, resolve_outer, _ = Async.make () in
@@ -544,6 +579,8 @@ let stream_cases =
     test_case "nested await" `Quick nested;
     test_case "failure" `Quick failure;
     test_case "async props" `Quick async_prop;
+    test_case "async errors stay on the server" `Quick async_errors;
+    test_case "async errors at print time stay on the server" `Quick async_errors_inline;
     test_case "async prop inside a fill" `Quick async_in_fill;
     test_case "to_string" `Quick to_string_sync;
     test_case "Codec.async decode" `Quick codec_async;
@@ -555,7 +592,7 @@ let page_extra_cases =
   let open Alcotest in
   let page_head () =
     let html =
-      Server.page ~head:"<meta name=\"x\" content=\"y\">"
+      Server.document ~head:"<meta name=\"x\" content=\"y\">"
         ~import_map:[ ("yuka/", "/js/node_modules/yuka/"); ("m<", "/m") ]
         ~title:"T" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
         (fun () -> Yuka.text "x")
@@ -566,15 +603,19 @@ let page_extra_cases =
   in
   let no_import_map () =
     check bool "no importmap by default" false
-      (contains (Server.page (fun () -> Yuka.text "x")) "importmap")
+      (contains (Server.document (fun () -> Yuka.text "x")) "importmap")
   in
   let stream_head () =
     let write, chunks = recorder () in
-    get
-      (stream ~head:"<b></b>" ~import_map:[ ("p/", "/p/") ]
-         ~scripts:[ "/m.js" ]
-         (fun () -> Yuka.text "x")
-         write);
+    let a, resolve, _ = Async.make () in
+    let p =
+      stream ~head:"<b></b>" ~import_map:[ ("p/", "/p/") ]
+        ~scripts:[ "/m.js" ]
+        (fun () -> text_await a "a")
+        write
+    in
+    resolve 1;
+    get p;
     let head = List.hd (chunks ()) in
     let index part =
       let n = String.length part in
@@ -878,7 +919,7 @@ let settled_cases =
       (island_html "i1" "{\"$async\":\"a1\"}"
       ^ island_html "i2" "{\"$async\":\"a2\"}"
       ^ value_script "a1" "{\"ok\":5}"
-      ^ value_script "a2" "{\"error\":\"no\"}")
+      ^ value_script "a2" "{\"error\":\"failed\"}")
       (get p)
   in
   let nothing_pending () =
@@ -934,17 +975,17 @@ let navigation_cases =
       (raises_ppx (fun () -> Yuka.mount ~islands:(Yuka.Client.registry []) ()))
   in
   let early_head () =
-    let html = Server.page ~early:true ~scripts:[ "/a.js"; "/b.js" ] (fun () -> Yuka.text "x") in
+    let html = Server.document ~early:true ~scripts:[ "/a.js"; "/b.js" ] (fun () -> Yuka.text "x") in
     check bool "async module scripts" true
       (contains html
          "<script type=\"module\" async src=\"/a.js\"></script><script type=\"module\" async src=\"/b.js\"></script>");
     check bool "not async by default" true
       (contains
-         (Server.page ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
+         (Server.document ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
          "<script type=\"module\" src=\"/a.js\"></script>");
     check bool "early false" false
       (contains
-         (Server.page ~early:false ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
+         (Server.document ~early:false ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
          "async");
     let write, chunks = recorder () in
     get (stream ~early:true ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x") write);

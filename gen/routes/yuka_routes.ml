@@ -14,17 +14,32 @@ type kind =
   | Named of { name : string; meth : string; search : field list }
   | Redirect of { permanent : bool; target : string }
 
-type node = { kind : kind; segs : seg list; path : string; loc : Location.t }
+type level = {
+  props : (string * expression) list;
+  scope : seg list;
+  layout : int option;
+  lloc : Location.t;
+}
+
+type node = {
+  kind : kind;
+  segs : seg list;
+  path : string;
+  loc : Location.t;
+  tag : string;
+  levels : level list;
+}
 
 type ctx = {
   prefix : seg list;
   text : string;
   search : field list;
   labels : string list;
+  levels : level list;
 }
 
 let rules = [ "headers"; "cache"; "prerender" ]
-let reserved = [ "with_query" ]
+let reserved = [ "with_query"; "req"; "children" ]
 
 let encode text =
   let b = Buffer.create (String.length text) in
@@ -262,8 +277,41 @@ let check_prerender props =
       ()
   | Some v -> fail v.pexp_loc "prerender must be true or false"
 
-let read names e =
+let takes_loader levels =
+  List.exists (fun l -> List.mem_assoc "loader" l.props) levels
+
+let check_fallback levels =
+  let here = List.nth levels (List.length levels - 1) in
+  match List.find_opt (fun (l, _) -> l = "not_found" || l = "error") here.props with
+  | None -> ()
+  | Some (prop, v) ->
+      let rec scan above = function
+        | [] -> ()
+        | l :: rest ->
+            let above = above @ [ l ] in
+            if Option.is_some l.layout && takes_loader above then
+              fail v.pexp_loc
+                "%s here renders inside the layout at line %d, which takes a loader \
+                 result; declare %s on a node above the loader"
+                prop (line l.lloc) prop
+            else scan above rest
+      in
+      scan [] levels
+
+let read ~server names e =
   let nodes = ref [] in
+  let layouts = ref 0 in
+  let level props scope loc =
+    let layout =
+      if List.mem_assoc "layout" props then begin
+        let i = !layouts in
+        incr layouts;
+        Some i
+      end
+      else None
+    in
+    { props; scope; layout; lloc = loc }
+  in
   let add n = nodes := n :: !nodes in
   let rec walk ctx e =
     let tag, props, children, loc = element e in
@@ -295,12 +343,15 @@ let read names e =
         if has_rest segs then fail ploc "a Group path cannot hold a catch-all";
         let labels = add_labels ploc ctx.labels (seg_labels segs) |> with_loader in
         let search, labels = with_search labels in
+        let levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ] in
+        if server then check_fallback levels;
         let ctx =
           {
             prefix = ctx.prefix @ segs;
             text = join ctx.text text;
             search = ctx.search @ search;
             labels;
+            levels;
           }
         in
         List.iter (walk ctx) children
@@ -316,6 +367,8 @@ let read names e =
             segs;
             path = join ctx.text text;
             loc;
+            tag;
+            levels = ctx.levels;
           }
     | "Route" ->
         leaf ();
@@ -331,6 +384,8 @@ let read names e =
             segs = ctx.prefix @ segs;
             path = join ctx.text text;
             loc;
+            tag;
+            levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
           }
     | "Endpoint" | "Action" ->
         leaf ();
@@ -347,6 +402,8 @@ let read names e =
             segs = ctx.prefix @ segs;
             path = join ctx.text text;
             loc;
+            tag;
+            levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
           }
     | "Router" -> fail loc "<Router> can only be the root"
     | _ ->
@@ -358,8 +415,10 @@ let read names e =
   check_props tag loc props ~required:[]
     ~optional:([ "layout"; "not_found"; "error"; "guard" ] @ rules);
   check_prerender props;
-  List.iter (walk { prefix = []; text = "/"; search = []; labels = [] }) children;
-  List.rev !nodes
+  let root = [ level props [] loc ] in
+  if server then check_fallback root;
+  List.iter (walk { prefix = []; text = "/"; search = []; labels = []; levels = root }) children;
+  (List.rev !nodes, List.hd root)
 
 type shape = S of string | P | R
 
@@ -701,6 +760,253 @@ let generate input nodes =
   if named nodes = [] then fail (Location.in_file input) "Routes.mlx has no named node";
   String.concat "\n" (type_t nodes @ [ "" ] @ href nodes @ [ "" ] @ find nodes) ^ "\n"
 
+let expr e = Pprintast.string_of_expression e
+let paren e = "(" ^ expr e ^ ")"
+let prop l level = List.assoc_opt l level.props
+let args labels = String.concat "" (List.map (fun l -> " ~" ^ l) labels)
+
+let key_text level =
+  let base = sprintf "%S" ("L" ^ string_of_int (Option.get level.layout)) in
+  let params =
+    List.filter_map
+      (function
+        | Param (n, Int) -> Some ("Stdlib.string_of_int " ^ n)
+        | Param (n, (String | Bool)) -> Some ("Yuka.Router.encode " ^ n)
+        | Param (n, Custom m) -> Some (sprintf "Yuka.Router.encode (%s.to_string %s)" m n)
+        | Rest _ | Static _ -> None)
+      level.scope
+  in
+  match params with
+  | [] -> base
+  | _ -> sprintf "Stdlib.String.concat \"/\" [ %s ]" (String.concat "; " (base :: params))
+
+let loader_labels levels =
+  List.filter_map (fun l -> Option.map loader_label (prop "loader" l)) levels
+
+let layer_text ~loaders level =
+  sprintf "{ Yuka.Server.key = %s; wrap = (fun children -> %s%s ~children ()) }"
+    (key_text level)
+    (expr (Option.get (prop "layout" level)))
+    (args loaders)
+
+let layer_name level = sprintf "layer_%d" (Option.get level.layout)
+
+let loader_free_layers levels =
+  let rec go above = function
+    | [] -> []
+    | l :: rest ->
+        let above = above @ [ l ] in
+        (if l.layout <> None && loader_labels above = [] then [ l ] else []) @ go above rest
+  in
+  go [] levels
+
+let static_key level = not (List.exists (function Param _ -> true | _ -> false) level.scope)
+
+let layer_binding level = layer_text ~loaders:[] level
+
+let layers_lines levels =
+  let rec go above = function
+    | [] -> []
+    | l :: rest ->
+        let above = above @ [ l ] in
+        (match (l.layout, loader_labels above) with
+        | Some _, [] -> [ layer_name l ^ ";" ]
+        | Some _, loaders -> [ layer_text ~loaders l ^ ";" ]
+        | None, _ -> [])
+        @ go above rest
+  in
+  match go [] levels with [] -> [ "[];" ] | items -> ("[" :: indent 2 items) @ [ "];" ]
+
+let rules_text levels =
+  let headers = List.filter_map (fun l -> Option.map expr (prop "headers" l)) levels in
+  let last name =
+    List.fold_left (fun acc l -> match prop name l with Some v -> Some v | None -> acc) None levels
+  in
+  sprintf "Yuka.Server.rules ~headers:[ %s ]%s ~prerender:%s ()"
+    (String.concat "; " headers)
+    (match last "cache" with Some c -> " ~cache:" ^ paren c | None -> "")
+    (match last "prerender" with Some p -> expr p | None -> "false")
+
+let fallback_levels levels =
+  let declares l = List.mem_assoc "not_found" l.props || List.mem_assoc "error" l.props in
+  let depth =
+    snd (List.fold_left (fun (i, best) l -> (i + 1, if declares l then i else best)) (0, 0) levels)
+  in
+  List.filteri (fun i _ -> i <= depth) levels
+
+let fallback_uses_params levels =
+  List.exists (fun l -> l.layout <> None && seg_labels l.scope <> []) (fallback_levels levels)
+
+let fallback_text levels =
+  let upto = fallback_levels levels in
+  let nearest name =
+    List.fold_left (fun acc l -> match prop name l with Some v -> Some v | None -> acc) None upto
+  in
+  String.concat "\n"
+    (("{" :: "  Yuka.Server.layers =" :: indent 4 (layers_lines upto))
+    @ [
+        sprintf "  not_found = %s;"
+          (match nearest "not_found" with
+          | Some f -> sprintf "(fun target -> %s ~target ())" (expr f)
+          | None -> "Yuka.Server.default_not_found");
+        sprintf "  error = %s;"
+          (match nearest "error" with
+          | Some f -> sprintf "(fun status -> %s ~status ())" (expr f)
+          | None -> "Yuka.Server.default_error");
+        "}";
+      ])
+
+let scope_args level = args (seg_labels level.scope)
+
+let guards_text levels =
+  let gs =
+    List.filter_map
+      (fun l ->
+        Option.map
+          (fun g -> sprintf "(fun () -> %s req%s)" (expr g) (scope_args l))
+          (prop "guard" l))
+      levels
+  in
+  match gs with [] -> "[]" | _ -> "[ " ^ String.concat "; " gs ^ " ]"
+
+let uses_req nodes =
+  List.exists
+    (fun n ->
+      match n.kind with
+      | Redirect _ -> false
+      | Named _ ->
+          n.tag <> "Route"
+          || List.exists
+               (fun l -> List.mem_assoc "loader" l.props || List.mem_assoc "guard" l.props)
+               n.levels)
+    nodes
+
+let interned prefix =
+  let table = ref [] in
+  let name text =
+    match List.assoc_opt text !table with
+    | Some n -> n
+    | None ->
+        let n = sprintf "%s_%d" prefix (List.length !table) in
+        table := !table @ [ (text, n) ];
+        n
+  in
+  (name, fun () -> List.map (fun (t, n) -> (n, t)) !table)
+
+let server_arm ~shared ~rule ~fallback n =
+  match n.kind with
+  | Redirect _ -> []
+  | Named { name; search; _ } ->
+      let labels = List.map fst (fields n.segs search) in
+      let head =
+        match labels with
+        | [] -> sprintf "%s.%s" shared name
+        | _ -> sprintf "%s.%s { %s }" shared name (String.concat "; " labels)
+      in
+      let leaf = List.nth n.levels (List.length n.levels - 1) in
+      let rules = rule (rules_text n.levels) in
+      let guards = guards_text n.levels in
+      let body =
+        if n.tag = "Route" then
+          let parents = List.filter (fun l -> l != leaf) n.levels in
+          let fb =
+            if fallback_uses_params parents then
+              String.concat "\n          " (String.split_on_char '\n' (fallback_text parents))
+            else fallback (fallback_text parents)
+          in
+          let loaders =
+            List.filter_map
+              (fun l ->
+                Option.map
+                  (fun v -> (loader_label v, sprintf "%s req%s" (expr v) (scope_args l)))
+                  (prop "loader" l))
+              n.levels
+          in
+          let page =
+            sprintf "%s%s ()" (expr (Option.get (prop "page" leaf)))
+              (args (labels @ List.map fst loaders))
+          in
+          let plan =
+            [ "Yuka.Async.resolved"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.layers =" ]
+            @ indent 9 (layers_lines n.levels)
+            @ [
+                sprintf "       page = %s;" page;
+                sprintf "     })%s);" (String.make (List.length loaders) ')');
+              ]
+          in
+          List.map
+            (fun l -> sprintf "let %s = %s in" (layer_name l) (layer_binding l))
+            (List.filter (fun l -> not (static_key l)) (loader_free_layers n.levels))
+          @ [
+            "Yuka.Server.Page";
+            "  {";
+            sprintf "    rules = %s;" rules;
+            sprintf "    guards = %s;" guards;
+            sprintf "    fallback = %s;" fb;
+            "    load =";
+            "      (fun () ->";
+          ]
+          @ List.map (fun (l, call) -> sprintf "        let %s = %s in" l call) loaders
+          @ List.map (fun (l, _) -> sprintf "        Yuka.Server.loaded %s (fun %s ->" l l) loaders
+          @ indent 8 plan
+          @ [ "  }" ]
+        else
+          [
+            "Yuka.Server.Handler";
+            "  {";
+            sprintf "    rules = %s;" rules;
+            sprintf "    same_origin = %b;" (n.tag = "Action");
+            sprintf "    guards = %s;" guards;
+            sprintf "    run = (fun () -> %s req%s);"
+              (expr (Option.get (prop "handler" leaf)))
+              (args (seg_labels n.segs));
+            "  }";
+          ]
+      in
+      sprintf "| %s ->" head :: indent 4 body
+
+let generate_server ~shared ~prelude ~digest (nodes, root) =
+  let rule, rules = interned "rules" in
+  let fallback, fallbacks = interned "fallback" in
+  let static_layers =
+    List.sort_uniq
+      (fun a b -> compare a.layout b.layout)
+      (List.filter static_key
+         (loader_free_layers [ root ]
+         @ List.concat_map
+             (fun n ->
+               match n.kind with
+               | Named _ when n.tag = "Route" -> loader_free_layers n.levels
+               | _ -> [])
+             nodes))
+  in
+  let missing = fallback (fallback_text [ root ]) in
+  let arms = List.concat_map (server_arm ~shared ~rule ~fallback) nodes in
+  let req = if uses_req nodes then "req" else "_req" in
+  String.concat "\n"
+    ((if prelude = "" then [] else [ prelude; "" ])
+    @ List.map (fun (n, t) -> sprintf "let %s =\n  %s\n" n t) (rules ())
+    @ List.map
+        (fun l -> sprintf "let %s : Yuka.Server.layer =\n  %s\n" (layer_name l) (layer_binding l))
+        static_layers
+    @ List.map
+        (fun (n, t) ->
+          sprintf "let %s : Yuka.Server.fallback =\n%s\n" n
+            (String.concat "\n" (indent 2 (String.split_on_char '\n' t))))
+        (fallbacks ())
+    @ [ sprintf "let resolve %s (route : %s.t) : Yuka.Server.target =" req shared;
+        "  match route with" ]
+    @ indent 2 arms
+    @ [
+        "";
+        sprintf "let app =";
+        sprintf "  Yuka.Server.app ~build:%S" digest;
+        sprintf "    ~headers:%s"
+          (match prop "headers" root with Some h -> paren h | None -> "[]");
+        sprintf "    ~find:%s.find ~resolve ~missing:%s" shared missing;
+      ])
+  ^ "\n"
+
 let routes_expr input structure =
   let found =
     List.concat_map
@@ -732,28 +1038,49 @@ let report (loc : Location.t) msg =
         e.pos_lnum (s.pos_cnum - s.pos_bol) (e.pos_cnum - e.pos_bol);
   Printf.eprintf "Error: %s\n" msg
 
-let usage = "usage: yuka-routes --shared FILE.ast"
+let usage =
+  "usage: yuka-routes --shared FILE.ast\n       yuka-routes --server --shared-module MODULE FILE.ast"
+
+let defines_routes si =
+  match si.pstr_desc with
+  | Pstr_value (_, vbs) ->
+      List.exists
+        (fun vb -> match vb.pvb_pat.ppat_desc with Ppat_var { txt = "routes"; _ } -> true | _ -> false)
+        vbs
+  | _ -> false
+
+let rec prelude = function
+  | si :: rest when not (defines_routes si) -> si :: prelude rest
+  | _ -> []
+
+let run ~server file output =
+  match Ast_io.read_binary file with
+  | Error e ->
+      prerr_endline ("yuka-routes: " ^ e);
+      exit 2
+  | Ok ast -> (
+      match Ast_io.get_ast ast with
+      | Intf _ ->
+          prerr_endline "yuka-routes: expected an implementation (Routes.mlx)";
+          exit 2
+      | Impl structure -> (
+          let input = Ast_io.get_input_name ast in
+          try
+            let e = routes_expr input structure in
+            print_string (output input structure e (read ~server (Hashtbl.create 16) e))
+          with Fail (loc, msg) ->
+            report loc msg;
+            exit 1))
 
 let () =
   match Array.to_list Sys.argv with
-  | [ _; "--shared"; file ] -> (
-      match Ast_io.read_binary file with
-      | Error e ->
-          prerr_endline ("yuka-routes: " ^ e);
-          exit 2
-      | Ok ast -> (
-          match Ast_io.get_ast ast with
-          | Intf _ ->
-              prerr_endline "yuka-routes: expected an implementation (Routes.mlx)";
-              exit 2
-          | Impl structure -> (
-              let input = Ast_io.get_input_name ast in
-              try
-                let e = routes_expr input structure in
-                print_string (generate input (read (Hashtbl.create 16) e))
-              with Fail (loc, msg) ->
-                report loc msg;
-                exit 1)))
+  | [ _; "--shared"; file ] -> run ~server:false file (fun input _ _ (nodes, _) -> generate input nodes)
+  | [ _; "--server"; "--shared-module"; shared; file ] when is_module_path shared ->
+      run ~server:true file (fun _ structure e tree ->
+          generate_server ~shared
+            ~prelude:(String.trim (Pprintast.string_of_structure (prelude structure)))
+            ~digest:(Digest.to_hex (Digest.string (Pprintast.string_of_expression e)))
+            tree)
   | _ ->
       prerr_endline usage;
       exit 2

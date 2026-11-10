@@ -32,8 +32,10 @@ only the parts that read a signal update.
 - Actions: declare once, call from the client, run on the server.
 - Router: typed paths shared by server and client (`Yuka.Router`).
 - Routes: one `Routes.mlx` tree. The `yuka-routes` generator turns it into a
-  `Routes` module with the route type, a typed `href` and the matcher
-  (in progress: the request cycle does not use it yet).
+  `Routes` module with the route type, a typed `href` and the matcher, and a
+  server module that the request cycle (`Yuka.Server.handle`) runs: assets,
+  redirects, 405 and `OPTIONS`, guards, loaders, route headers and the
+  streamed page (in progress: no server adapter yet).
 - One library, `yuka`. A Melange entry also lists `yuka.js`, the browser
   implementation of the DOM bindings.
 
@@ -236,6 +238,34 @@ shape and a common method fail the build with a location in `Routes.mlx`.
 Otherwise the more specific path wins: a static segment before a param, a
 param before a catch-all. A client that calls only `href` does not contain
 `find`.
+
+A third rule writes the server module, in the server library:
+
+```
+(rule
+ (targets routes_server.ml)
+ (action
+  (with-stdout-to routes_server.ml
+   (run %{bin:yuka-routes} --server --shared-module Demo_shared.Routes
+    %{dep:../shared/routes.ast}))))
+```
+
+`Routes_server.app` is a `Yuka.Server.app`. Loaders, guards and handlers take
+the server's request first (`Dream.request` with Dream), then the params by
+label. A page function returns `Yuka.Server.page ~title (fun () -> ...)`; it
+gets the params, the search fields and the loader results (labelled with the
+loader's name: `loader=Loaders.issue` gives `~issue`). The loaders of one
+route start together.
+
+`Yuka.Server.handle config app` answers one request in a fixed order:
+`/_yuka/` and public files, a 308 for a trailing slash, the match, redirect
+nodes, 405 with `Allow`, `OPTIONS`, guards, loaders, then the page. A server
+implements `Yuka.Server.ADAPTER` (request fields, `respond`, `file`, its
+promise type) and gets a handler from `Yuka.Server.Make`. The page has no
+module script unless it has an island, and no inline script unless an
+`Await` is still pending when the shell is sent. Each layout's children are inside
+`<yuka-outlet data-k="KEY" style="display:contents">`, and a link to the
+current path gets `aria-current="page"`.
 
 ## Getting started
 

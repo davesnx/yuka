@@ -8,7 +8,8 @@ open Base
 
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
-      preloaded = []; depth = 0; queued = [] }
+      preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
+      current = None; in_fill = false }
 
   let take_pending s =
     let p = List.rev s.pending in
@@ -51,18 +52,23 @@ open Base
           | Async.Pending when s.streaming ->
               let inside = s.depth > 0 in
               let held f =
-                let outer = s.depth in
+                let outer = s.depth and outer_fill = s.in_fill in
                 s.depth <- (if inside then max outer 1 else outer);
+                s.in_fill <- true;
+                let restore () =
+                  s.depth <- outer;
+                  s.in_fill <- outer_fill
+                in
                 match f () with
                 | r ->
-                    s.depth <- outer;
+                    restore ();
                     r
                 | exception e ->
-                    s.depth <- outer;
+                    restore ();
                     raise e
               in
               s.awaits <- s.awaits + 1;
-              let id = "s" ^ string_of_int s.awaits in
+              let id = s.id_prefix ^ "s" ^ string_of_int s.awaits in
               s.pending <-
                 Pending_await
                   {
@@ -91,7 +97,13 @@ open Base
           marker "<!--]-->"
       | Island { name; props; render; loading } ->
           s.islands <- s.islands + 1;
-          let id = "i" ^ string_of_int s.islands in
+          let id = s.id_prefix ^ "i" ^ string_of_int s.islands in
+          let direct = s.depth = 0 && not s.in_fill in
+          (match s.entry with
+          | Some tag ->
+              s.entry <- None;
+              if direct then Buffer.add_string b tag else s.queued <- tag :: s.queued
+          | None -> ());
           let link =
             match (loading, s.preload) with
             | `Lazy _, _ | _, None -> None
@@ -107,7 +119,7 @@ open Base
                 end
           in
           (match link with
-          | Some l when s.depth = 0 -> Buffer.add_string b l
+          | Some l when direct -> Buffer.add_string b l
           | Some l -> s.queued <- l :: s.queued
           | None -> ());
           Buffer.add_string b
@@ -131,7 +143,7 @@ open Base
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
             ^ Json.to_string props ^ "</script>");
-          if s.depth = 0 then begin
+          if s.depth = 0 && not s.in_fill then begin
             List.iter (Buffer.add_string b) (List.rev s.queued);
             s.queued <- []
           end;
@@ -158,6 +170,17 @@ open Base
               && not (List.mem_assoc "selected" resolved)
             then resolved @ [ ("selected", "") ]
             else resolved
+          in
+          let resolved =
+            match (tag, s.current) with
+            | "a", Some path
+              when (not (hydrating ()))
+                   && (match List.assoc_opt "href" resolved with
+                   | Some href -> String.equal href path
+                   | None -> false)
+                   && not (List.mem_assoc "aria-current" resolved) ->
+                resolved @ [ ("aria-current", "page") ]
+            | _ -> resolved
           in
           Buffer.add_char b '<';
           Buffer.add_string b tag;

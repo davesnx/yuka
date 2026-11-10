@@ -38,7 +38,7 @@ let () =
   Dream.run ~interface:"127.0.0.1" ~port
   @@ Dream.router
        [
-         Dream.get "/" (fun _ -> Dream.html (Yuka.Server.page ~title:"Issues" ~styles (view issues)));
+         Dream.get "/" (fun _ -> Dream.html (Yuka.Server.document ~title:"Issues" ~styles (view issues)));
          Dream.get "/stream" (fun _ ->
              Dream.stream
                ~headers:[ ("Content-Type", "text/html; charset=utf-8") ]

@@ -1,0 +1,20 @@
+(library
+ (name cycle_server)
+ (libraries yuka cycle_shared))
+
+(rule
+ (targets routes_server.ml)
+ (action
+  (with-stdout-to
+   routes_server.ml
+   (run
+    %{bin:yuka-routes}
+    --server
+    --shared-module
+    Cycle_shared.Routes
+    %{dep:../shared/routes.ast}))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff routes_server.expected routes_server.ml)))

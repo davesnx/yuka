@@ -16,7 +16,7 @@ hydration data.
 | candidate | how it renders | server |
 | --- | --- | --- |
 | `dream-concat` | `Buffer` and hand escaping (the floor) | Dream |
-| `yuka-page` | `Yuka.Server.page` of mlx components | Dream |
+| `yuka-page` | `Yuka.Server.document` of mlx components | Dream |
 | `yuka-stream` | `Yuka.Server.stream`, as the demo answers (adds the fill script) | Dream `stream` |
 | `server-reason-react` | `ReactDOM.renderToString` | Dream |
 | `react-node` | React 19 `renderToString`, `NODE_ENV=production` | `node:http` |

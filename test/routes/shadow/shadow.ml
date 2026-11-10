@@ -8,3 +8,5 @@ let ( @ ) No No = No
 let ( = ) No No = No
 let string_of_int No = No
 let string_of_bool No = No
+
+type result = Ok | Error
