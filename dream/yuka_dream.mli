@@ -3,7 +3,14 @@
 val handler : Yuka.Server.config -> Dream.request Yuka.Server.app -> Dream.handler
 (** Answers every request with the request cycle ([Yuka.Server.handle]).
     Put Dream middleware (logger, sessions) around it. Sets
-    [Yuka.Server.log_error] to [Dream.error]. *)
+    [Yuka.Server.log_error] to [Dream.error].
+
+    It also answers [GET /_yuka/live], the WebSocket of {!Yuka.Live}; this
+    needs Dream sessions shared by every process and stable across restarts
+    ([Dream.cookie_sessions] with [Dream.set_secret]). Known risk until
+    httpun-ws is fixed (https://github.com/camlworks/dream/issues/467): a
+    publish written to a client that reset its connection just before can
+    freeze the server at 100% CPU. *)
 
 val prerender :
   out:string -> Yuka.Server.config -> Dream.request Yuka.Server.app -> unit Lwt.t

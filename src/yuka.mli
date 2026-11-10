@@ -660,8 +660,13 @@ module Live : sig
         reconnect gets the full state again.
       - [Failed]: the server refused the key ([Forbidden], [Not_found],
         [Rejected] from the loader, [Server]); this use does not subscribe
-        again. A refused CSRF token gives [Forbidden] to every use, and an
-        unsupported protocol [Protocol]; the page then needs a reload. *)
+        again. An unsupported protocol gives [Protocol] to every use.
+      - Token: the client keeps the newest token it saw (from the page, the
+        server [hello] and each [pong]). When the server refuses it (an
+        expired token), the client gets a fresh one once from
+        [GET /_yuka/csrf] and connects again; if that fails too, every use
+        is [Failed Forbidden] until a new use (after a navigation) connects
+        again with the token of its page. *)
 
   val status : 's t -> 's Status.t
   (** Tracked read, with the pending {!mutate} changes applied. *)
@@ -1258,7 +1263,21 @@ module Server : sig
     val publish : ('k, 's) Topic.t -> 'k -> 's -> unit
     (** The new full state of a key, sent to each subscriber of the key. It
         does nothing when the key has no subscriber. A publish while the
-        loader runs wins over the loaded state. *)
+        loader runs wins over the loaded state. [allow] decides at subscribe
+        time: a subscriber gets every publish of its key until it
+        unsubscribes, its socket reconnects (each connection checks [allow]
+        again), or {!revoke} closes it. *)
+
+    val revoke : (peer -> bool) -> unit
+    (** Closes, with code 4401, every live socket whose peer matches. The
+        page reconnects, and [allow] decides again for each key. Call it on
+        logout ([revoke (fun p -> p.session = id)]) and after a permission
+        change. *)
+
+    val set_limits : ?per_session:int -> ?total:int -> unit -> unit
+    (** The most open live sockets per session (default 16) and in this
+        process (default 10,000). A socket over a limit is closed with 1013
+        before its [hello]; the page tries again later. *)
 
     type connection = {
       send : string -> unit Async.t;
@@ -1291,7 +1310,14 @@ module Server : sig
           to be sent.
         - Limits: a message over 64 KiB closes with 1009; more than 64
           subscriptions gives [limit]; a message out over 1 MiB is sent and
-          logged. No message for 60 s closes with 4408. *)
+          logged; more than 256 replies waiting on a slow socket close it
+          with 1008. No [hello] within 10 s, or no message for 60 to 120 s
+          after it, closes with 4408. A [pong] carries a fresh token too.
+        - [synced] with [ref] [R] answers every [sync] of the subscription
+          with a [ref] up to [R].
+        - The function closes the socket once, when it ends the protocol
+          itself (a limit, a failed send or receive, {!revoke}); it does
+          not close a socket that the client closed. *)
 
     module type SOCKET = sig
       type request
@@ -1526,7 +1552,8 @@ module Server : sig
     body : limit:int -> string option Async.t;  (** [None] over [limit] bytes. *)
     csrf_token : unit -> string;
         (** A token for the live [hello] ({!Yuka.Live}); called once by the
-            first {!Yuka.Live.use} of a render, never otherwise. *)
+            first {!Yuka.Live.use} of a render and by [GET /_yuka/csrf],
+            never otherwise. *)
   }
   (** What the cycle reads from a request. *)
 
@@ -1556,6 +1583,10 @@ module Server : sig
         there is no [Origin] and [Sec-Fetch-Site] is [same-origin]; a
         request with neither (an old browser, a client that is not a
         browser) is refused.
+        [/_yuka/csrf]: for [GET] and [HEAD] with the same origin rule,
+        [{"csrf":TOKEN}] from {!request.csrf_token} with [no-store] (the
+        live client renews an expired token with it); 403 for another
+        origin, 405 for another method.
         [/_yuka/<file>]: the file of [assets] for [GET] and [HEAD], else
         405; a [.] or [..] segment, or no [assets], gives a plain 404 with
         [no-store]. A path under a [public] prefix: the file of its
@@ -1634,7 +1665,8 @@ module Server : sig
     val csrf_token : request -> string
     (** A CSRF token bound to the session of the request (Dream:
         [Dream.csrf_token]). It is written in a page only when the page
-        has a {!Yuka.Live.use}; raise when the request has no session. *)
+        has a {!Yuka.Live.use}, and answers [GET /_yuka/csrf]; raise when
+        the request has no session. *)
 
     val respond : http_response -> response io
     (** Sends the status, the headers and the body; a [Stream] body is

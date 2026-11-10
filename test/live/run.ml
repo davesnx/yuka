@@ -16,17 +16,22 @@ type fake = {
   mutable waiter : (string option -> unit) option;
   mutable out : string list;
   mutable closed : int option;
+  mutable closes : int;
   mutable gate : unit Async.t option;
+  mutable broken : bool;
 }
 
-let fake () = { inbox = []; waiter = None; out = []; closed = None; gate = None }
+let fake () = { inbox = []; waiter = None; out = []; closed = None; closes = 0; gate = None; broken = false }
 
 let connection f : Live.connection =
   {
     send =
       (fun text ->
-        f.out <- f.out @ [ text ];
-        match f.gate with Some g -> g | None -> Async.return ());
+        if f.broken then Async.failed "broken pipe"
+        else begin
+          f.out <- f.out @ [ text ];
+          match f.gate with Some g -> g | None -> Async.return ()
+        end);
     receive =
       (fun () ->
         match f.inbox with
@@ -40,6 +45,7 @@ let connection f : Live.connection =
     close =
       (fun code ->
         f.closed <- Some code;
+        f.closes <- f.closes + 1;
         Async.return ());
   }
 
@@ -59,12 +65,16 @@ let sleep _ =
   sleeps := resolve :: !sleeps;
   a
 
-let peer = { Live.session = "s1"; header = (fun _ -> None) }
+let sessions = ref 0
 
-let start ?(csrf = "good") ?(fresh = "next") () =
+let fresh_session () =
+  incr sessions;
+  "s" ^ string_of_int !sessions
+
+let start ?(csrf = "good") ?(fresh = "next") ?(session = fresh_session ()) () =
   let f = fake () in
   let finished =
-    Live.run ~sleep peer
+    Live.run ~sleep { Live.session; header = (fun _ -> None) }
       ~verify_csrf:(fun t -> Async.return (t = csrf))
       ~token:(fun () -> fresh)
       (connection f)
@@ -73,8 +83,8 @@ let start ?(csrf = "good") ?(fresh = "next") () =
 
 let hello = {|{"t":"hello","v":1,"csrf":"good"}|}
 let sub id topic key = Printf.sprintf {|{"t":"sub","id":%d,"topic":"%s","key":%s}|} id topic key
-let open_ () =
-  let f, finished = start () in
+let open_ ?session () =
+  let f, finished = start ?session () in
   push f hello;
   f.out <- [];
   (f, finished)
@@ -160,7 +170,7 @@ let hello_cases =
         let f = fake () in
         f.inbox <- [ Some hello; Some (sub 1 "count" {|"abcd"|}) ];
         let verify, accept, _ = Async.make () in
-        let _ = Live.run ~sleep peer ~verify_csrf:(fun _ -> verify) ~token:(fun () -> "T2") (connection f) in
+        let _ = Live.run ~sleep { Live.session = "pipe"; header = (fun _ -> None) } ~verify_csrf:(fun _ -> verify) ~token:(fun () -> "T2") (connection f) in
         Alcotest.(check (list string)) "nothing before the check" [] f.out;
         accept true;
         Alcotest.(check (list string)) "messages" [ "hello"; "state" ] (kinds f);
@@ -213,9 +223,9 @@ let sub_cases =
     ( "allow, unknown topic, bad key, rejected and raising loaders",
       fun () ->
         logged := [];
-        let a, _ = open_ () in
-        push a (sub 1 "private" {|"s2"|});
-        push a (sub 2 "private" {|"s1"|});
+        let a, _ = open_ ~session:"owner" () in
+        push a (sub 1 "private" {|"other"|});
+        push a (sub 2 "private" {|"owner"|});
         push a (sub 3 "nothing" {|"x"|});
         push a (sub 4 "count" "12");
         push a (sub 5 "count" {|"nope"|});
@@ -323,6 +333,151 @@ let sync_cases =
         hang_up a );
   ]
 
+
+let pair : (int * int) Codec.t =
+  {
+    encode = (fun (a, b) -> `Assoc [ ("a", `Int a); ("b", `Int b) ]);
+    decode =
+      (function
+      | `Assoc f -> (
+          match (List.assoc_opt "a" f, List.assoc_opt "b" f) with
+          | Some (`Int a), Some (`Int b) -> Ok (a, b)
+          | _ -> Error "pair")
+      | _ -> Error "pair");
+  }
+
+let pairs = Topic.declare ~name:"pairs" ~key:pair ~state:Codec.int
+let () = Live.serve pairs (fun (a, b) -> Async.return (a + b))
+let allowed = ref true
+let guarded_topic = Topic.declare ~name:"guarded" ~key:Codec.string ~state:Codec.int
+let () = Live.serve ~allow:(fun _ _ -> !allowed) guarded_topic (fun _ -> Async.return 0)
+
+let review_cases =
+  [
+    ( "a slow socket closes 1008 when its queue of replies is full",
+      fun () ->
+        let a, _ = open_ () in
+        let g, _, _ = Async.make () in
+        a.gate <- Some g;
+        for _ = 1 to 300 do
+          push a {|{"t":"ping"}|}
+        done;
+        Alcotest.(check (option int)) "1008" (Some 1008) a.closed );
+    ( "syncs before the first state keep only the latest ref",
+      fun () ->
+        let a, _ = open_ () in
+        push a (sub 1 "count" {|"slow3"|});
+        push a {|{"t":"sync","id":1,"ref":1}|};
+        push a {|{"t":"sync","id":1,"ref":5}|};
+        push a {|{"t":"sync","id":1,"ref":3}|};
+        let _, resolve, _ = gate "slow3" in
+        resolve 1;
+        Alcotest.(check (list string)) "one synced" [ "state"; "synced" ] (kinds a);
+        Alcotest.(check (option string)) "latest ref" (Some "5")
+          (Option.map Json.to_string (field "ref" (List.nth a.out 1)));
+        hang_up a );
+    ( "a socket that never sends closes after 10 s",
+      fun () ->
+        sleeps := [];
+        let a, _ = start () in
+        Alcotest.(check int) "one timer" 1 (List.length !sleeps);
+        List.iter (fun w -> w ()) !sleeps;
+        Alcotest.(check (option int)) "4408" (Some 4408) a.closed );
+    ( "one deadline per connection",
+      fun () ->
+        sleeps := [];
+        let a, _ = open_ () in
+        for _ = 1 to 5 do
+          push a {|{"t":"ping"}|}
+        done;
+        Alcotest.(check int) "one timer" 1 (List.length !sleeps);
+        hang_up a );
+    ( "connection limits per session and in total close 1013",
+      fun () ->
+        Live.set_limits ~per_session:2 ~total:1_000_000 ();
+        let a, _ = open_ ~session:"limited" () in
+        let b, _ = open_ ~session:"limited" () in
+        let c, _ = open_ ~session:"limited" () in
+        let d, _ = open_ ~session:"another" () in
+        Alcotest.(check (list (option int))) "third of a session" [ None; None; Some 1013; None ]
+          [ a.closed; b.closed; c.closed; d.closed ];
+        List.iter hang_up [ a; b; d ];
+        let e, _ = open_ () in
+        Live.set_limits ~total:1 ();
+        let f, _ = open_ () in
+        Alcotest.(check (option int)) "over the total" (Some 1013) f.closed;
+        Live.set_limits ~per_session:16 ~total:10_000 ();
+        hang_up e );
+    ( "a failed send ends the connection and its subscriptions",
+      fun () ->
+        loads := [];
+        let a, finished = open_ () in
+        push a (sub 1 "count" {|"cut"|});
+        a.broken <- true;
+        Live.publish count "cut" 1;
+        Alcotest.(check bool) "run ends" true (Async.status finished = Async.Done ());
+        Alcotest.(check int) "closed once" 1 a.closes;
+        let b, _ = open_ () in
+        push b (sub 1 "count" {|"cut"|});
+        Alcotest.(check (list string)) "no stale subscriber: loaded again" [ "cut"; "cut" ] !loads;
+        hang_up b );
+    ( "the entry of a key does not depend on the client's JSON field order",
+      fun () ->
+        let a, _ = open_ () in
+        push a (sub 1 "pairs" {|{"b":2,"a":1}|});
+        a.out <- [];
+        Live.publish pairs (1, 2) 30;
+        check_states "published to the canonical key" [ (1, "30") ] a;
+        hang_up a );
+    ( "allow runs again on each new connection",
+      fun () ->
+        allowed := true;
+        let a, _ = open_ () in
+        push a (sub 1 "guarded" {|"k"|});
+        hang_up a;
+        allowed := false;
+        let b, _ = open_ () in
+        push b (sub 1 "guarded" {|"k"|});
+        allowed := true;
+        Alcotest.(check (list string)) "first allowed" [] (errors a);
+        Alcotest.(check (list string)) "then forbidden" [ "forbidden" ] (errors b);
+        hang_up b );
+    ( "revoke closes the matching connections with 4401",
+      fun () ->
+        let a, _ = open_ ~session:"leaving" () in
+        let b, _ = open_ ~session:"staying" () in
+        push a (sub 1 "count" {|"rev"|});
+        push b (sub 1 "count" {|"rev"|});
+        Live.revoke (fun p -> p.Live.session = "leaving");
+        a.out <- [];
+        b.out <- [];
+        Live.publish count "rev" 9;
+        Alcotest.(check (option int)) "revoked" (Some 4401) a.closed;
+        Alcotest.(check (option int)) "kept" None b.closed;
+        check_states "nothing to the revoked" [] a;
+        check_states "the other gets it" [ (1, "9") ] b;
+        hang_up b );
+    ( "the socket is closed at most once, never after the client closed it",
+      fun () ->
+        let a, _ = open_ () in
+        hang_up a;
+        Alcotest.(check int) "client close: none" 0 a.closes;
+        let b = fake () in
+        b.inbox <- [ Some hello ];
+        let _ =
+          Live.run ~sleep { Live.session = "err"; header = (fun _ -> None) }
+            ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t")
+            { (connection b) with receive = (fun () -> if b.inbox = [] then Async.failed "reset" else (connection b).receive ()) }
+        in
+        Alcotest.(check int) "receive error: one" 1 b.closes;
+        sleeps := [];
+        let c, _ = open_ () in
+        Live.revoke (fun _ -> true);
+        List.iter (fun w -> w ()) !sleeps;
+        push c (String.make 70_000 ' ');
+        Alcotest.(check int) "revoke, then the deadline: one" 1 c.closes );
+  ]
+
 type handled = Refused of int | Upgraded
 
 module Socket = struct
@@ -392,4 +547,5 @@ let () =
       ("sync", cases sync_cases);
       ("handshake", cases handle_cases);
       ("server render", cases ssr_cases);
+      ("review", cases review_cases);
     ]

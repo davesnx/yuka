@@ -140,3 +140,4 @@ let live_url : unit -> string = fun _ -> browser_only ()
 let online : unit -> bool = fun _ -> browser_only ()
 let on_online : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let random : unit -> float = fun () -> Random.float 1.
+let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit = fun _ _ _ -> browser_only ()

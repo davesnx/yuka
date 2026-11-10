@@ -140,3 +140,4 @@ val live_url : unit -> string
 val online : unit -> bool
 val on_online : (unit -> unit) -> unit -> unit
 val random : unit -> float
+val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit

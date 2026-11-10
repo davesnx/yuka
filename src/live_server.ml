@@ -6,7 +6,7 @@ type connection = {
   close : int -> unit Async.t;
 }
 
-type check = Accept | Bad_key of string | Forbid
+type check = Accept of string | Bad_key of string | Forbid
 
 type served = { check : peer -> Json.t -> check; load : Json.t -> Json.t Async.t }
 
@@ -17,13 +17,15 @@ type conn = {
   peer : peer;
   mutable front : job list;
   mutable back : job list;
+  mutable texts : int;
   waiting : string Web.table;
   mutable busy : bool;
-  mutable closed : bool;
+  mutable ended : bool;
+  mutable stop : int -> unit;
   mutable subs : (int * sub) list;
 }
 
-and sub = { conn : conn; id : int; entry : entry; mutable has_state : bool; mutable syncs : int list }
+and sub = { conn : conn; id : int; entry : entry; mutable has_state : bool; mutable sync : int option }
 
 and entry = {
   topic : string;
@@ -34,12 +36,21 @@ and entry = {
   mutable loading : bool;
 }
 
+type limits = { mutable per_session : int; mutable total : int }
+
 let max_message = 65_536
 let max_subs = 64
 let max_out = 1_048_576
+let max_queued = 256
+let limits = { per_session = 16; total = 10_000 }
 let topics : (string * served) list ref = ref []
 let table : entry Web.table option ref = ref None
+let open_conns : conn list ref = ref []
 let counter = ref 0
+
+let set_limits ?per_session ?total () =
+  Option.iter (fun n -> limits.per_session <- n) per_session;
+  Option.iter (fun n -> limits.total <- n) total
 
 let entries () =
   match !table with
@@ -55,28 +66,37 @@ let next_seq () =
   incr counter;
   !counter
 
-let push conn job = conn.back <- job :: conn.back
+let failure topic m =
+  match Types.rejection m with
+  | Some shown -> Status.Rejected shown
+  | None ->
+      !Types.log_error ("live topic " ^ topic ^ " failed: " ^ m);
+      Status.Server
+
+let code_of = function Status.Rejected m -> ("rejected", m) | _ -> ("server", "")
 
 let take conn =
-  (match conn.front with [] -> conn.front <- List.rev conn.back; conn.back <- [] | _ -> ());
+  (match conn.front with
+  | [] ->
+      conn.front <- List.rev conn.back;
+      conn.back <- []
+  | _ -> ());
   match conn.front with
   | [] -> None
   | job :: rest ->
       conn.front <- rest;
       Some job
 
-let clear conn =
-  conn.front <- [];
-  conn.back <- []
-
 let rec pump conn =
-  if (not conn.busy) && not conn.closed then
+  if (not conn.busy) && not conn.ended then
     match take conn with
     | None -> ()
     | Some job -> (
         let text =
           match job with
-          | Text t -> Some t
+          | Text t ->
+              conn.texts <- conn.texts - 1;
+              Some t
           | State_of id ->
               let t = Web.table_get conn.waiting (string_of_int id) in
               Web.table_delete conn.waiting (string_of_int id);
@@ -89,38 +109,35 @@ let rec pump conn =
               !Types.log_error
                 ("warning: live message of " ^ string_of_int (String.length text) ^ " bytes, over 1 MiB");
             conn.busy <- true;
-            let sent = match conn.c.send text with a -> a | exception e -> Async.failed (Web.exn_to_string e) in
-            Async.on_settled sent (function
+            Async.on_settled (Async.guard conn.c.send text) (function
               | Async.Pending -> ()
               | Async.Done () ->
                   conn.busy <- false;
                   pump conn
-              | Async.Failed _ ->
-                  conn.busy <- false;
-                  clear conn))
+              | Async.Failed _ -> conn.stop 1011))
 
 let send_text conn text =
-  push conn (Text text);
-  pump conn
+  if conn.texts >= max_queued then conn.stop 1008
+  else begin
+    conn.texts <- conn.texts + 1;
+    conn.back <- Text text :: conn.back;
+    pump conn
+  end
 
 let message fields = Json.to_string (`Assoc fields)
-
-let synced (sub : sub) r =
-  send_text sub.conn (message [ ("t", `String "synced"); ("id", `Int sub.id); ("ref", `Int r) ])
+let synced conn id r = send_text conn (message [ ("t", `String "synced"); ("id", `Int id); ("ref", `Int r) ])
 
 let send_state (sub : sub) seq text =
-  let msg =
-    "{\"t\":\"state\",\"id\":" ^ string_of_int sub.id ^ ",\"seq\":" ^ string_of_int seq ^ ",\"state\":" ^ text
-    ^ "}"
-  in
   let slot = string_of_int sub.id in
-  if not (Web.table_has sub.conn.waiting slot) then push sub.conn (State_of sub.id);
-  Web.table_set sub.conn.waiting slot msg;
+  if not (Web.table_has sub.conn.waiting slot) then sub.conn.back <- State_of sub.id :: sub.conn.back;
+  Web.table_set sub.conn.waiting slot
+    ("{\"t\":\"state\",\"id\":" ^ slot ^ ",\"seq\":" ^ string_of_int seq ^ ",\"state\":" ^ text ^ "}");
   sub.has_state <- true;
-  let syncs = List.rev sub.syncs in
-  sub.syncs <- [];
-  List.iter (synced sub) syncs;
-  pump sub.conn
+  match sub.sync with
+  | Some r ->
+      sub.sync <- None;
+      synced sub.conn sub.id r
+  | None -> pump sub.conn
 
 let leave (sub : sub) =
   let e = sub.entry in
@@ -136,18 +153,8 @@ let leave (sub : sub) =
 let error_message id code text =
   message [ ("t", `String "error"); ("id", `Int id); ("code", `String code); ("message", `String text) ]
 
-let fail_sub (sub : sub) code text =
-  leave sub;
-  send_text sub.conn (error_message sub.id code text)
-
-let failure_code topic m =
-  match Types.rejection m with
-  | Some shown -> ("rejected", shown)
-  | None ->
-      !Types.log_error ("live topic " ^ topic ^ " failed: " ^ m);
-      ("server", "")
-
-let current e = match Web.table_get (entries ()) (entry_key e.topic e.wire) with Some x -> x == e | None -> false
+let current e =
+  match Web.table_get (entries ()) (entry_key e.topic e.wire) with Some x -> x == e | None -> false
 
 let store e json =
   let text = Json.to_string json in
@@ -157,8 +164,7 @@ let store e json =
 
 let start_load e (served : served) key =
   e.loading <- true;
-  let loaded = match served.load key with a -> a | exception ex -> Async.failed (Web.exn_to_string ex) in
-  Async.on_settled loaded (function
+  Async.on_settled (Async.guard served.load key) (function
     | Async.Pending -> ()
     | Async.Done json ->
         e.loading <- false;
@@ -166,8 +172,12 @@ let start_load e (served : served) key =
     | Async.Failed m ->
         e.loading <- false;
         if current e && e.state = None then begin
-          let code, text = failure_code e.topic m in
-          List.iter (fun s -> fail_sub s code text) (List.rev e.members)
+          let code, text = code_of (failure e.topic m) in
+          List.iter
+            (fun (s : sub) ->
+              leave s;
+              send_text s.conn (error_message s.id code text))
+            (List.rev e.members)
         end)
 
 let subscribe conn id topic key =
@@ -179,12 +189,11 @@ let subscribe conn id topic key =
     | Some served -> (
         match served.check conn.peer key with
         | exception ex ->
-            let code, text = failure_code topic (Web.exn_to_string ex) in
+            let code, text = code_of (failure topic (Web.exn_to_string ex)) in
             fail code text
         | Bad_key m -> fail "bad_key" m
         | Forbid -> fail "forbidden" ""
-        | Accept ->
-            let wire = Json.to_string key in
+        | Accept wire ->
             let t = entries () in
             let e =
               match Web.table_get t (entry_key topic wire) with
@@ -194,19 +203,12 @@ let subscribe conn id topic key =
                   Web.table_set t (entry_key topic wire) e;
                   e
             in
-            let sub = { conn; id; entry = e; has_state = false; syncs = [] } in
+            let sub = { conn; id; entry = e; has_state = false; sync = None } in
             e.members <- sub :: e.members;
             conn.subs <- (id, sub) :: conn.subs;
             match e.state with
             | Some (_, text) -> send_state sub e.seq text
             | None -> if not e.loading then start_load e served key)
-
-let cleanup conn =
-  conn.closed <- true;
-  List.iter (fun (_, s) -> leave s) conn.subs;
-  conn.subs <- [];
-  clear conn;
-  Web.table_clear conn.waiting
 
 type incoming =
   | Hello of { v : int; csrf : string }
@@ -235,52 +237,68 @@ let parse text =
 
 let run ~sleep peer ~verify_csrf ~token (c : connection) =
   let conn =
-    { c; peer; front = []; back = []; waiting = Web.table (); busy = false; closed = false; subs = [] }
+    {
+      c;
+      peer;
+      front = [];
+      back = [];
+      texts = 0;
+      waiting = Web.table ();
+      busy = false;
+      ended = false;
+      stop = ignore;
+      subs = [];
+    }
   in
   let finished, resolve, _ = Async.make () in
-  let heard = ref 0 in
-  let ready = ref false in
-  let stop code =
-    if not conn.closed then begin
-      cleanup conn;
-      let closing = match c.close code with a -> a | exception e -> Async.failed (Web.exn_to_string e) in
-      Async.on_settled closing (function Async.Pending -> () | _ -> resolve ())
+  let heard = ref 0 and ready = ref false in
+  let finish ~close code =
+    if not conn.ended then begin
+      conn.ended <- true;
+      open_conns := List.filter (fun x -> x != conn) !open_conns;
+      List.iter (fun (_, s) -> leave s) conn.subs;
+      conn.subs <- [];
+      conn.front <- [];
+      conn.back <- [];
+      Web.table_clear conn.waiting;
+      if close then Async.on_settled (Async.guard c.close code) (function Async.Pending -> () | _ -> resolve ())
+      else resolve ()
     end
   in
+  conn.stop <- (fun code -> finish ~close:true code);
+  let rec watch seconds =
+    let mark = !heard in
+    Async.on_settled (sleep seconds) (fun _ ->
+        if not conn.ended then if !heard = mark then conn.stop 4408 else watch 60.)
+  in
   let rec next () =
-    if not conn.closed then
-      let received = match c.receive () with a -> a | exception e -> Async.failed (Web.exn_to_string e) in
-      Async.on_settled received (function
+    if not conn.ended then
+      Async.on_settled (Async.guard c.receive ()) (function
         | Async.Pending -> ()
-        | Async.Done (Some text) when not conn.closed ->
+        | Async.Done (Some text) ->
             incr heard;
-            let n = !heard in
-            Async.on_settled (sleep 60.) (fun _ -> if !heard = n then stop 4408);
             handle text
-        | Async.Done _ | Async.Failed _ ->
-            if not conn.closed then begin
-              cleanup conn;
-              resolve ()
-            end)
+        | Async.Done None -> finish ~close:false 1000
+        | Async.Failed _ -> conn.stop 1011)
   and handle text =
-    if String.length text > max_message then stop 1009
+    if String.length text > max_message then conn.stop 1009
     else
       match (parse text, !ready) with
-      | None, _ -> stop 4400
+      | None, _ -> conn.stop 4400
       | Some (Hello { v; csrf }), false ->
-          if v <> 1 then stop 4426
+          if v <> 1 then conn.stop 4426
           else
-            let verified = match verify_csrf csrf with a -> a | exception e -> Async.failed (Web.exn_to_string e) in
-            Async.on_settled verified (function
+            Async.on_settled (Async.guard verify_csrf csrf) (function
               | Async.Pending -> ()
-              | Async.Done true when not conn.closed ->
+              | Async.Done true when not conn.ended ->
                   ready := true;
-                  send_text conn (message [ ("t", `String "hello"); ("v", `Int 1); ("csrf", `String (token ())) ]);
+                  send_text conn
+                    (message [ ("t", `String "hello"); ("v", `Int 1); ("csrf", `String (token ())) ]);
                   next ()
-              | _ -> stop 4403)
-      | Some _, false | Some (Hello _), true -> stop 4400
+              | _ -> conn.stop 4403)
+      | Some _, false | Some (Hello _), true -> conn.stop 4400
       | Some (Sub { id; topic; key }), true ->
-          if List.mem_assoc id conn.subs then stop 4400
+          if List.mem_assoc id conn.subs then conn.stop 4400
           else begin
             subscribe conn id topic key;
             next ()
@@ -290,57 +308,53 @@ let run ~sleep peer ~verify_csrf ~token (c : connection) =
           next ()
       | Some (Sync { id; r }), true ->
           (match List.assoc_opt id conn.subs with
-          | Some sub when not sub.has_state -> sub.syncs <- r :: sub.syncs
-          | _ -> send_text conn (message [ ("t", `String "synced"); ("id", `Int id); ("ref", `Int r) ]));
+          | Some sub when not sub.has_state ->
+              sub.sync <- Some (match sub.sync with Some s -> max s r | None -> r)
+          | _ -> synced conn id r);
           next ()
       | Some Ping, true ->
-          send_text conn {|{"t":"pong"}|};
+          send_text conn (message [ ("t", `String "pong"); ("csrf", `String (token ())) ]);
           next ()
   in
-  next ();
+  let same = List.filter (fun x -> x.peer.session = peer.session) !open_conns in
+  if List.length !open_conns >= limits.total || List.length same >= limits.per_session then conn.stop 1013
+  else begin
+    open_conns := conn :: !open_conns;
+    watch 10.;
+    next ()
+  end;
   finished
 
-let encode_load (topic : (_, _) Topic.t) load j =
-  match topic.key.decode j with
-  | Error m -> Async.failed m
-  | Ok k ->
-      let state =
-        match load k with
-        | a -> a
-        | exception Server.Rejected m -> Server.rejected m
-        | exception e -> Async.failed (Web.exn_to_string e)
-      in
-      Async.map topic.state.encode state
+let revoke matches = List.iter (fun conn -> if matches conn.peer then conn.stop 4401) !open_conns
 
 let ssr_state name key =
-  let failed m =
-    match Types.rejection m with
-    | Some shown -> Status.Rejected shown
-    | None ->
-        !Types.log_error ("live topic " ^ name ^ " failed: " ^ m);
-        Status.Server
-  in
   match Web.table_get (entries ()) (entry_key name (Json.to_string key)) with
   | Some { state = Some (json, _); _ } -> Async.return (Ok json)
   | _ -> (
       match List.assoc_opt name !topics with
       | None -> Async.return (Error Status.Not_found)
       | Some served ->
-          let loaded = match served.load key with a -> a | exception e -> Async.failed (Web.exn_to_string e) in
           let result, resolve, _ = Async.make () in
-          Async.on_settled loaded (function
+          Async.on_settled (Async.guard served.load key) (function
             | Async.Pending -> ()
             | Async.Done j -> resolve (Ok j)
-            | Async.Failed m -> resolve (Error (failed m)));
+            | Async.Failed m -> resolve (Error (failure name m)));
           result)
 
 let serve ?(allow = fun _ _ -> true) (topic : ('k, 's) Topic.t) load =
   if List.mem_assoc topic.name !topics then
     invalid_arg ("Yuka.Server.Live.serve: already served: " ^ topic.name);
   let check peer j =
-    match topic.key.decode j with Error m -> Bad_key m | Ok k -> if allow peer k then Accept else Forbid
+    match topic.key.decode j with
+    | Error m -> Bad_key m
+    | Ok k -> if allow peer k then Accept (Topic.wire_key topic k) else Forbid
   in
-  topics := (topic.name, { check; load = encode_load topic load }) :: !topics;
+  let load j =
+    match topic.key.decode j with
+    | Error m -> Async.failed m
+    | Ok k -> Async.map topic.state.encode (Server.guarded load k)
+  in
+  topics := (topic.name, { check; load }) :: !topics;
   Live.server_state := ssr_state
 
 let publish (topic : ('k, 's) Topic.t) key state =

@@ -109,9 +109,11 @@ module Socket = struct
   let refuse ~status message = to_async (Dream.respond ~code:status message)
 
   let upgrade _request run =
-    (* dream 1.0.0~alpha8 with gluten 0.5.2 spins at 100% CPU in its write
-       loop when it closes a WebSocket that the client has already closed;
-       [run] closes the socket itself when it ends it. *)
+    (* Calling Dream.close_websocket after the connection is gone spins at
+       100% CPU: https://github.com/camlworks/dream/issues/467. [run] closes
+       only a live connection: never after [receive] gave [None], and not
+       after a timeout (4408) or a failed send or receive (1011), when the
+       client is likely gone. *)
     to_async
       (Dream.websocket ~close:false (fun ws ->
            to_lwt
@@ -119,7 +121,10 @@ module Socket = struct
                 {
                   Yuka.Server.Live.send = (fun text -> to_async (Dream.send ws text));
                   receive = (fun () -> to_async (Dream.receive ws));
-                  close = (fun code -> to_async (Dream.close_websocket ~code ws));
+                  close =
+                    (fun code ->
+                      if code = 4408 || code = 1011 then Yuka.Async.return ()
+                      else to_async (Dream.close_websocket ~code ws));
                 })))
 
   let sleep = Adapter.sleep

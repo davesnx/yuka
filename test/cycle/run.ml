@@ -222,6 +222,18 @@ let assets =
         check_header r "cache-control" [ "public, max-age=31536000, immutable" ];
         let r = get ~config "/_yuka/bundle/main.js" in
         check_header r "cache-control" [ "no-cache" ] );
+    ( "GET /_yuka/csrf gives a fresh token to the same origin only",
+      fun () ->
+        let r = get ~headers:[ ("sec-fetch-site", "same-origin") ] "/_yuka/csrf" in
+        check_status r 200;
+        check_header r "cache-control" [ "no-store" ];
+        Alcotest.(check string) "body" {|{"csrf":"cycle-token"}|} r.body;
+        let r = get ~headers:[ ("origin", "https://evil.example"); ("host", "app.example") ] "/_yuka/csrf" in
+        check_status r 403;
+        let r = get ~headers:[ ("sec-fetch-site", "cross-site") ] "/_yuka/csrf" in
+        check_status r 403;
+        let r = get ~meth:`POST ~headers:[ ("sec-fetch-site", "same-origin") ] "/_yuka/csrf" in
+        check_status r 405 );
     ( "action RPC",
       fun () ->
         let r = get ~meth:`GET "/_yuka/action/x" in

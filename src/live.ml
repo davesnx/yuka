@@ -31,6 +31,7 @@ type manager = {
   mutable pong : unit -> unit;
   mutable token : string option;
   mutable dead : Status.error option;
+  mutable renewed : bool;
 }
 
 let server_state : (string -> Json.t -> (Json.t, Status.error) result Async.t) ref =
@@ -58,6 +59,7 @@ let get () =
           pong = ignore;
           token = None;
           dead = None;
+          renewed = false;
         }
       in
       manager := Some m;
@@ -124,8 +126,11 @@ and heard m text =
       let str k = match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None in
       let use () = Option.bind (int "id") (fun id -> List.assoc_opt id m.ids) in
       match str "t" with
-      | Some "hello" ->
-          m.attempt <- 0;
+      | Some ("hello" | "pong") as t ->
+          if t = Some "hello" then begin
+            m.attempt <- 0;
+            m.renewed <- false
+          end;
           Option.iter (fun t -> m.token <- Some t) (str "csrf")
       | Some "state" -> (
           match (use (), int "seq", List.assoc_opt "state" f) with
@@ -169,12 +174,25 @@ and closed m code =
     | _ -> None
   in
   match fatal with
-  | Some error ->
-      m.dead <- Some error;
-      List.iter (fun u -> if not u.ended then u.on_error error) m.uses
+  | Some Status.Forbidden when not m.renewed ->
+      m.renewed <- true;
+      List.iter (fun u -> if not u.ended then u.on_stale ()) m.uses;
+      Web.fetch_text "/_yuka/csrf"
+        (fun status body ->
+          match (status, Json.of_string body) with
+          | 200, Ok (`Assoc [ ("csrf", `String t) ]) ->
+              m.token <- Some t;
+              connect m
+          | _ -> give_up m Status.Forbidden)
+        (fun _ -> give_up m Status.Forbidden)
+  | Some error -> give_up m error
   | None ->
       List.iter (fun u -> if not u.ended then u.on_stale ()) m.uses;
       retry m
+
+and give_up m error =
+  m.dead <- Some error;
+  List.iter (fun u -> if not u.ended then u.on_error error) m.uses
 
 and hang_up m code =
   match m.socket with
@@ -200,13 +218,18 @@ and retry m =
            online ())
   end
 
+let renew m =
+  match Answers.find "l:csrf" with
+  | Answers.Found (Ok (`String t)) -> m.token <- Some t
+  | _ -> ()
+
 let attach m u =
   m.closing ();
   m.closing <- ignore;
   m.uses <- u :: m.uses;
-  match m.dead with
-  | Some error -> u.on_error error
-  | None -> if m.live then send_sub m u else if Option.is_none m.socket && not m.waiting then connect m
+  renew m;
+  m.dead <- None;
+  if m.live then send_sub m u else if Option.is_none m.socket && not m.waiting then connect m
 
 let unsub m u =
   (match u.wire_id with
@@ -236,9 +259,7 @@ let decode (topic : (_, 's) Topic.t) last j =
 
 let csrf_answer () =
   match !Types.current_session with
-  | Some ({ csrf = Some token; _ } as s) when s.depth > 0 && not (List.mem "l:csrf" s.answered) ->
-      let r = Ok (`String (token ())) in
-      Answers.record "l:csrf" (Some r) (Async.return r)
+  | Some { csrf = Some token; _ } -> Answers.record_value "l:csrf" (fun () -> Ok (`String (token ())))
   | _ -> ()
 
 let on_server (topic : (_, _) Topic.t) key base =
@@ -284,10 +305,10 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
               (match data () with Some data -> Status.Ready { data; stale = true } | None -> Status.Loading None));
         on_synced =
           (fun r ->
-            if List.mem r u.syncs then begin
-              u.syncs <- List.filter (fun x -> x <> r) u.syncs;
-              State.set changes (Optimistic.remove (State.peek changes) r)
-            end);
+            let settled, waiting = List.partition (fun x -> x <= r) u.syncs in
+            u.syncs <- waiting;
+            Scheduler.batch (fun () ->
+                List.iter (fun id -> State.set changes (Optimistic.remove (State.peek changes) id)) settled));
       }
     in
     let m = get () in

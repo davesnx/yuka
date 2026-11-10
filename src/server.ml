@@ -333,6 +333,7 @@ exception Rejected of string
 
 let reject message = raise (Rejected message)
 let rejected message = Async.failed (reject_prefix ^ message)
+let guarded f x = Async.guard (fun x -> match f x with a -> a | exception Rejected m -> rejected m) x
 
 type answer = Output of Json.t | Bad_input of string
 
@@ -396,13 +397,7 @@ let register action f encode =
         match Codec.decode input json with
         | Error m -> Async.return (Bad_input m)
         | Ok v ->
-            let run =
-              match f v with
-              | async -> async
-              | exception Rejected m -> rejected m
-              | exception exn -> Async.failed (Web.exn_to_string exn)
-            in
-            Async.map (fun o -> Output (encode o)) run )
+            Async.map (fun o -> Output (encode o)) (guarded f v) )
     :: !registry;
   Action.transport := transport;
   Remote.server_send := send
@@ -435,17 +430,11 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _)
     match Form_core.decode t values with
     | Error e -> Async.return (Unprocessable (Form_core.named t e))
     | Ok input ->
-        let answer =
-          match f input with
-          | a -> a
-          | exception Rejected m -> rejected m
-          | exception exn -> Async.failed (Web.exn_to_string exn)
-        in
         Async.map
           (function
             | Ok o -> Saved (Option.map (fun r -> r o) redirect)
             | Error e -> Unprocessable (Form_core.named t e))
-          answer
+          (guarded f input)
   in
   forms := (Action.name action, run) :: !forms
 

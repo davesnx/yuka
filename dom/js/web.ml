@@ -507,3 +507,11 @@ let on_online : (unit -> unit) -> unit -> unit =
 }|}]
 
 let random : unit -> float = [%mel.raw "function () { return Math.random() }"]
+
+let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
+  [%mel.raw
+    {|function (url, ok, fail) {
+  fetch(url, { credentials: "same-origin" })
+    .then(function (r) { return r.text().then(function (t) { ok(r.status, t); }); })
+    .catch(function (e) { fail(String((e && e.message) || e)); });
+}|}]

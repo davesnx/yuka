@@ -476,6 +476,19 @@ let serve_file meth ~root ~headers raw =
       | None -> reply (asset_miss ()))
   | _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "GET, HEAD") ])
 
+let csrf_answer (r : request) =
+  match r.meth with
+  | `GET | `HEAD ->
+      if Server.trusted_origin r.header then
+        reply
+          {
+            status = 200;
+            headers = [ ("content-type", "application/json"); no_store ];
+            body = String (Json.to_string (`Assoc [ ("csrf", `String (r.csrf_token ())) ]));
+          }
+      else reply (plain 403 "Forbidden" [])
+  | _ -> reply (method_not_allowed "GET, HEAD")
+
 let action (r : request) raw =
   match (raw, r.meth) with
   | [ name ], `POST -> (
@@ -654,6 +667,7 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
     | "" :: "_yuka" :: _, _ -> (
         match List.tl raw with
         | "action" :: rest -> action r rest
+        | [ "csrf" ] -> csrf_answer r
         | rest -> (
             match config.assets with
             | None -> reply (asset_miss ())

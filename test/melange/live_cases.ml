@@ -27,6 +27,17 @@ let install : unit -> unit =
   };
   globalThis.WebSocket.prototype.send = function (t) { this.sent.push(t); };
   globalThis.WebSocket.prototype.close = function (code) { this.closedWith = code; };
+  globalThis.__fetches = [];
+  globalThis.__realFetch = globalThis.__realFetch || globalThis.fetch;
+  globalThis.fetch = function (url) {
+    return new Promise(function (resolve, reject) {
+      globalThis.__fetches.push({
+        url: url,
+        respond: function (status, body) { resolve({ status: status, text: function () { return Promise.resolve(body); } }); },
+        fail: function () { reject(new Error("offline")); },
+      });
+    });
+  };
   globalThis.__random = Math.random;
   Math.random = function () { return globalThis.__rand === undefined ? 1 : globalThis.__rand; };
 }|}]
@@ -36,6 +47,7 @@ let uninstall : unit -> unit =
     {|function () {
   globalThis.setTimeout = globalThis.__realSetTimeout;
   globalThis.clearTimeout = globalThis.__realClearTimeout;
+  globalThis.fetch = globalThis.__realFetch;
   Math.random = globalThis.__random;
   delete globalThis.__rand;
   Object.defineProperty(window.navigator, "onLine", { configurable: true, get: function () { return true; } });
@@ -80,6 +92,15 @@ let go_online : unit -> unit =
   Object.defineProperty(window.navigator, "onLine", { configurable: true, get: function () { return true; } });
   window.dispatchEvent(new window.Event("online"));
 }|}]
+
+let fetched : unit -> string =
+  [%mel.raw "function () { return globalThis.__fetches.map(function (f) { return f.url; }).join(' ') }"]
+
+let fetch_respond : int -> int -> string -> unit =
+  [%mel.raw "function (i, status, body) { globalThis.__fetches[i].respond(status, body) }"]
+
+let later : (unit -> unit) -> unit =
+  [%mel.raw "function (f) { globalThis.__realSetTimeout(function () { f() }, 5) }"]
 
 let set_body : string -> unit = [%mel.raw "function (h) { document.body.innerHTML = h }"]
 
@@ -171,12 +192,26 @@ let reconnect () =
   stop_a ();
   stop_b ()
 
-let forbidden () =
+let pong_token () =
+  let _, stop = use "a" in
+  ws_open 0;
+  ws_message 0 {|{"t":"hello","v":1,"csrf":"t1"}|};
+  ws_message 0 {|{"t":"pong","csrf":"t2"}|};
+  ws_close 0 1006;
+  fire 250;
+  ws_open 1;
+  check "the pong token" {|{"t":"hello","v":1,"csrf":"t2"}|} (List.hd (String.split_on_char ' ' (sent 1)));
+  stop ()
+
+let synced_covers_older () =
   let a, stop = use "a" in
   ws_open 0;
-  ws_close 0 4403;
-  check "failed" "failed forbidden" (show a);
-  check "no reconnect" "" (timers ());
+  ws_message 0 (state 1 [ "x" ]);
+  let _ = Live.mutate a (fun s -> s @ [ "p" ]) (fun () -> Async.return ()) in
+  let _ = Live.mutate a (fun s -> s @ [ "q" ]) (fun () -> Async.return ()) in
+  check "both pending" "ready x,p,q" (show a);
+  ws_message 0 {|{"t":"synced","id":1,"ref":1}|};
+  check "both settled" "ready x" (show a);
   stop ()
 
 let protocol_close () =
@@ -325,7 +360,8 @@ let all =
       ("one socket for every use, hello then sub", one_socket);
       ("a lower seq is dropped", lower_seq_dropped);
       ("close gives stale, backoff grows and resets after hello, reopen subscribes again", reconnect);
-      ("close 4403 fails every use, no reconnect", forbidden);
+      ("the token of a pong is used by the next hello", pong_token);
+      ("synced covers every older sync", synced_covers_older);
       ("close 4426 fails with a protocol error, no reconnect", protocol_close);
       ("the last use closes the socket after 2 s", idle_close);
       ("a new use within 2 s keeps the socket", navigation_keeps_socket);
@@ -338,3 +374,68 @@ let all =
       ("mutate while the socket is down syncs after the next sub", mutate_while_down);
       ("a key change unsubscribes and subscribes", key_change);
     ]
+
+let expired_token finish =
+  fresh ();
+  let a, stop = use "a" in
+  ws_open 0;
+  ws_message 0 (state 1 [ "x" ]);
+  ws_close 0 4403;
+  let fetched_once = fetched () in
+  let while_fetching = show a in
+  fetch_respond 0 200 {|{"csrf":"renewed"}|};
+  later (fun () ->
+      let reopened = sockets () in
+      ws_open 1;
+      let hello = List.hd (String.split_on_char ' ' (sent 1)) in
+      ws_message 1 {|{"t":"hello","v":1,"csrf":"next"}|};
+      ws_message 1 (state 2 [ "y" ]);
+      let recovered = show a in
+      finish (fun () ->
+          check "fetched a fresh token" "/_yuka/csrf" fetched_once;
+          check "not failed while fetching" "stale x" while_fetching;
+          check "a new socket" "2" (string_of_int reopened);
+          check "hello with the fresh token" {|{"t":"hello","v":1,"csrf":"renewed"}|} hello;
+          check "recovered" "ready y" recovered;
+          stop ();
+          uninstall ()))
+
+let second_forbidden finish =
+  fresh ();
+  let a, stop = use "a" in
+  ws_open 0;
+  ws_close 0 4403;
+  fetch_respond 0 200 {|{"csrf":"renewed"}|};
+  later (fun () ->
+      ws_open 1;
+      ws_close 1 4403;
+      let after_second = (show a, fetched (), timers (), string_of_int (sockets ())) in
+      set_body {|<script type="application/json" data-yuka-answer="l:csrf">{"ok":"from-navigation"}</script>|};
+      let b, stop_b = use "b" in
+      let reconnected = string_of_int (sockets ()) in
+      ws_open 2;
+      let hello = sent 2 in
+      ws_message 2 {|{"t":"hello","v":1,"csrf":"n"}|};
+      ws_message 2 (state 3 [ "back" ]);
+      ws_message 2 (state 4 [ "b" ]);
+      finish (fun () ->
+          let shown, fetches, timers, count = after_second in
+          check "the second 4403 gives up" "failed forbidden" shown;
+          check "one fetch only" "/_yuka/csrf" fetches;
+          check "no timer" "" timers;
+          check "no new socket" "2" count;
+          check "a new use with a fresh page token connects again" "3" reconnected;
+          check "with the page token, and the failed use subscribes again"
+            {|{"t":"hello","v":1,"csrf":"from-navigation"} {"t":"sub","id":3,"topic":"items","key":"a"} {"t":"sub","id":4,"topic":"items","key":"b"}|}
+            hello;
+          check "the old use recovers" "ready back" (show a);
+          check "the new use" "ready b" (show b);
+          stop ();
+          stop_b ();
+          uninstall ()))
+
+let async =
+  [
+    ("live: an expired token is renewed once through /_yuka/csrf", expired_token);
+    ("live: a second 4403 gives up until a new use brings a fresh token", second_forbidden);
+  ]

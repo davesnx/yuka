@@ -1457,17 +1457,52 @@ Spec: `.workplace/docs/data-spec.md` section 3 (ticket 13).
   5 s, whichever comes first (a headless Chrome in a sandbox reports
   offline with a working network). Ping every 25 s; 10 s of silence after
   a ping closes the socket. The client does not wait for the server's
-  close reply when it closes the socket itself.
+  close reply when it closes the socket itself: `yuka-dream` does not
+  answer a client close frame (see below), so the browser would stay in
+  `CLOSING` until its own timeout.
 - `yuka-dream`: `Yuka_dream.handler` answers `GET /_yuka/live` before the
-  request cycle. Dream does not answer a close frame from the client, and
-  closing a socket that the client closed spins at 100% CPU (dream
-  1.0.0~alpha8, gluten 0.5.2), so the socket is created with
-  `~close:false` and only `run` closes it, when it ends the protocol.
+  request cycle. Calling `Dream.close_websocket` after the connection is
+  gone spins at 100% CPU (dream issue #467; in httpun-ws 0.2.0,
+  `Wsd.report_result` on `Closed` closes the writer without draining it).
+  So the socket is created with `~close:false` and `run` closes only a
+  live connection: never after `receive` gave `None` (the client closed),
+  and not after a timeout (4408) or a failed send or receive (1011). With
+  `~close:false` and no `close_websocket` call, Dream sends no close reply
+  to a client close frame (measured with a raw client against the demo,
+  dream 1.0.0~alpha8; with a call while the connection is alive the reply
+  `1000` is sent). Remaining risk until httpun-ws is fixed upstream (a PR
+  for camlworks/dream#467): a publish written to a client that reset its
+  connection just before can freeze the server at 100% CPU. README and
+  `yuka_dream.mli` say so.
 - Demo: the issue list on `Topics.issues` (key `All` or `Mine`) and the
   properties panel on `Topics.issue`, both with `Live.mutate`;
   `update_issue` and `create_issue` publish. The label chips above the list
   read the query `Queries.labels` (remote data), which the list and the new
   issue dialog invalidate.
+- Review fixes:
+  - Token renewal: each `pong` carries a fresh token; a first `Live.use`
+    takes the token of its page; on 4403 the client asks
+    `GET /_yuka/csrf` (request cycle, origin rule of the action call) once
+    and connects again. A refusal after that is final only for the uses of
+    that socket: a new use (after a navigation) connects again.
+  - Bounds: at most 256 replies wait on a slow socket (else close 1008);
+    `synced R` answers every `sync` up to `R`, so the server keeps one ref
+    per subscription. No `hello` within 10 s, or no message for 60 to 120 s,
+    closes 4408, with one timer per socket. `Server.Live.set_limits`
+    (default 16 sockets per session, 10,000 per process) closes 1013 over a
+    limit.
+  - A failed send or receive ends the socket and its subscriptions (1011).
+    The socket is closed once, by the protocol code, and never after the
+    client closed it.
+  - The entry key is the key decoded and encoded again
+    (`Topic.wire_key`), so `{"b":2,"a":1}` and `{"a":1,"b":2}` are one
+    entry.
+  - `allow` runs on each subscribe of each connection; a reconnect checks
+    again. `Server.Live.revoke` closes matching sockets with 4401 (logout,
+    permission change); until then a subscriber gets every publish.
+  - One exception guard (`Async.guard`; `Server.guarded` adds the app's
+    `reject`), one failure mapping, and `Answers.record_value` for the
+    token answer.
 - Measured (`dune build --profile=release @bench/live/bench-live`, one
   machine under load): 25 issues 6 KB per message, publish to 100 sockets
   under 1 ms; 500 issues 122 KB, 14 ms; 5000 issues 1.2 MB (over the 1 MiB

@@ -246,8 +246,15 @@ Dream.run @@ Dream.set_secret secret @@ Dream.cookie_sessions @@ Yuka_dream.hand
 
 With `Dream.memory_sessions`, or with no `Dream.set_secret` (a random secret
 per process), a reconnect after a restart is refused and the page needs a
-reload. A page with a live use holds a per-session token, so its route must
-not use a shared cache (`Public` or `Immutable`). One server process only:
+reload. On logout or a permission change, call
+`Yuka.Server.Live.revoke (fun peer -> peer.session = id)`: the matching
+sockets close and reconnect, and `allow` decides again. A page with a live use holds a per-session token, so its route must
+not use a shared cache (`Public` or `Immutable`).
+
+Known risk with `yuka-dream` until httpun-ws is fixed
+([camlworks/dream#467](https://github.com/camlworks/dream/issues/467)): a
+publish written to a client that reset its connection just before can
+freeze the server at 100% CPU. One server process only:
 `publish` reaches the sockets of its process. An app that does not call
 `Live` gets none of its code.
 
