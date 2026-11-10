@@ -761,20 +761,25 @@ let boot entries props island =
           | Error message -> fail ("cannot decode props: " ^ message)
           | Ok build -> (
               let failed = ref false and dispose = ref ignore in
+              let report e =
+                let m = "yuka island " ^ id ^ " (" ^ name ^ "): " ^ Web.exn_to_string e in
+                Web.console_error m;
+                try !on_error m with _ -> ()
+              in
+              let stop d = try d () with e -> report e in
               let catch e =
                 if not !failed then begin
                   failed := true;
-                  !dispose ();
-                  let m = "yuka island " ^ id ^ " (" ^ name ^ "): " ^ Web.exn_to_string e in
-                  Web.console_error m;
-                  try !on_error m with _ -> ()
+                  let late = try !dispose (); None with d -> Some d in
+                  report e;
+                  Option.iter report late
                 end
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
               match Base.with_owner o (fun () -> hydrate island build) with
               | d when !failed ->
-                  d ();
+                  stop d;
                   None
               | d ->
                   dispose := d;

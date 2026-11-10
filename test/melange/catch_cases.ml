@@ -402,6 +402,33 @@ let on_error_raises () =
   D.click (button 1);
   check "the other island works" "1,11" (I.spans c)
 
+let cleanup_raises_view () =
+  let n = State.make 0 in
+  Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
+  Effect.run (fun () -> if State.get n = 1 then failwith "effect");
+  lower "div" []
+    [ lower "span" [] [ hole (fun () -> text (ints (State.get n))) ];
+      lower "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
+
+let island_dispose_raises () =
+  check "the DOM stays" "1,10"
+    (without_boundary cleanup_raises_view
+       {|Failure(effect)|yuka island i1 (Bad): Failure(cleanup)|})
+
+let island_start_dispose_raises () =
+  let view () =
+    Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
+    Effect.run (fun () -> failwith "first");
+    D.span [ text "x" ]
+  in
+  let c = I.setup_page (I.page [ Client.island ~name:"Bad" ~props:(`Int 0) view; I.counter_island 10 ]) in
+  I.capture_errors ();
+  I.start_islands [ Client.entry ~name:"Bad" (fun _ -> Ok view); I.counter_entry ];
+  check "both errors logged"
+    {|yuka island i1 (Bad): Failure(first)|yuka island i1 (Bad): Failure(cleanup)|} (I.errors ());
+  D.click (D.query_all c "button").(0);
+  check "the other island started" "x,11" (I.spans c)
+
 let all =
   [
     ("catch: render", catch_render);
@@ -420,6 +447,8 @@ let all =
     ("catch: a handler error stops the event", handler_error_stops_event);
     ("catch: a cleanup that raises on dispose", cleanup_on_dispose);
     ("island: on_error that raises", on_error_raises);
+    ("island: a cleanup that raises while the island stops", island_dispose_raises);
+    ("island: a cleanup that raises while a failed start stops", island_start_dispose_raises);
     ("catch: nested", catch_nested);
     ("catch: error in the fallback", catch_fallback_error);
     ("catch: hydrate a server fallback", catch_hydrate_fallback);
