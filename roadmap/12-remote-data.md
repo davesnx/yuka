@@ -1,6 +1,7 @@
 # Remote data
 
 Type: wayfinder:grilling
+Release: 0.3
 Blocked by: none
 Claimed by: none
 

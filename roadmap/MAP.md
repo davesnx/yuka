@@ -7,11 +7,17 @@ Label: wayfinder:map. Tickets are the numbered files in this folder. A ticket is
 Yuka v1 is tagged when it matches SolidJS on measured numbers and has the features below, built and checked:
 
 - Updates: js-framework-benchmark keyed, weighted mean within 5% of Solid.
-- Size: client runtime min+gzip at or below Solid's (5 KB measured; Yuka is 31 KB today).
+- Size: client runtime min+gzip at or below Solid's (5 KB measured; Yuka's keyed app is 11 KB, ticket 14).
 - A page with no island sends 0 bytes of JavaScript.
 - Demo: Total Blocking Time 0 and LCP equal to plain server HTML.
 - Server: SSR throughput compared with an agreed reference.
 - Features: generated router from `Routes.mlx`, first-party Dream adapter with Yuka owning the request cycle, three kinds of data (local, remote, live), and the areas listed in "Not yet specified".
+
+## Releases before v1
+
+- 0.2 (plan: `.workplace/plans/yuka-0.2_PLAN.md`, local): tickets 05, 06, 07, 09, 11, 16, 17, 18, 19. `yuka-dream` is a separate opam package.
+- 0.3: ticket 12 and forms (candidate).
+- A ticket's `Release:` line names its release.
 
 ## Notes
 
@@ -21,7 +27,7 @@ Yuka v1 is tagged when it matches SolidJS on measured numbers and has the featur
 - Order: easy and unblocking work first. Measurement before optimisation.
 - Skills: grilling and domain-modeling for decisions; mlx-syntax for `.mlx`; melange-advanced for generated JS.
 - Baseline facts and interview answers: `.workplace/plans/yuka-solid_ANSWERS.md` (local). Silica's design for remote and live data: /home/me/workplace/davesnx/silica, `.workplace/plans/silica-v1/012`, `016`, `017`.
-- No tag and no release before the destination is reached.
+- No v1 tag before the destination is reached. 0.x releases come before it (user, 2026-11-10).
 
 ## Decisions so far
 
