@@ -246,8 +246,9 @@ markers everywhere: the client hydrates their output.
   process on the server. Rule: only client code paths (handlers, effects)
   may write it, and server rendering must not read a value that a request
   changed. A lint for this comes later.
-- A `State.set` updates holes synchronously when no batch is running, so
-  code right after it (for example `Browser.focus`) sees the new DOM.
+- A `State.set` updates holes synchronously when no `Yuka.batch` is
+  running, so code right after it (for example `Browser.focus`) sees the new
+  DOM.
 
 ## v0.2: the rest of Yuka (decided 2026-11-06)
 
@@ -289,13 +290,8 @@ work", except the items listed as out of scope there.
 
 ### Other decisions
 
-- Default equality of `State.make`, `memo` and `on_change`: physical `==`
-  first, then structural `=`; when `=` raises (a functional value), the
-  values count as different. Reason: `==` alone gives different results on
-  native and Melange for strings and floats. Known difference: a new record
-  that holds the same closure is "different" on native and "equal" on
-  Melange (Melange `=` compares closures by identity). Pass `~equal` for
-  such values.
+- Default equality of `State.make`, `memo` and `on_change`: replaced on
+  2026-11-10 by identity; see "Equality and batch".
 - `State.set` and `State.update` on a `memo` raise
   `Invalid_argument "Yuka: State.set on a memo"`. The user decided that
   `memo` returns `'a State.t`, so the check is at run time. A type-level
@@ -876,3 +872,56 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   owns its parent, otherwise a `Range` from the start marker to the stop
   marker.
 
+## Equality and batch (2026-11-10)
+
+### Default equality
+
+- `State.make`, `State.memo`, `Effect.on_change` and `Yuka.each` skip an
+  update when the new value is the same as the old one. The default rule is
+  JavaScript `===`, as in Solid: `==` in Melange. Native OCaml follows the
+  same rule: ints, chars, bools and constant constructors are immediates;
+  two strings or two floats compare by value (a float NaN is never the
+  same); every other value compares with `==`. So a new record, tuple,
+  list, array or constructor with arguments is a change, even with equal
+  contents. Closures compare by identity and never raise.
+- Known differences between native and the browser: Melange represents
+  `Some x` as `x`, so a new `Some x` around the same `x` is "the same" in
+  the browser and a change on native; `bytes` are compared by value on
+  native and by identity in the browser; `Int32` is a JS number in the
+  browser. Pass `~equal` for such values. Effects do not run on the server,
+  so server HTML never depends on equality.
+- `~equal` replaces the rule. An exception from `equal` counts as a change.
+  The default needs no closure call: the State stores `None` and the check is
+  inline.
+- The demo's status groups (a list of tuples built by a memo) pass
+  `~equal:( = )` to `Yuka.each`, so an unchanged group keeps its DOM.
+
+### `Yuka.batch`
+
+- `batch f` raises a depth counter. While it is above 0, a write marks its
+  effects pending and does not flush. When the outermost `batch` returns,
+  pending memos and effects run in one flush. Inside a flush (an effect that
+  calls `batch`), the running flush picks the work up.
+- When `f` raises, the counter goes back, the pending work still runs (its
+  own errors are dropped), then the exception of `f` is raised again.
+- Event handlers are not batched: the document listener calls the handler
+  directly, so each `State.set` updates the DOM before the next line (the
+  rule above for `Browser.focus`). A handler that sets several States can
+  wrap them in `Yuka.batch`. The demo does so for the comment form.
+
+### Function arity in the JavaScript output
+
+- Melange calls a function through `Curry._N` when it cannot see its arity.
+  It cannot for a module alias (`module State = Base.State`, or a module
+  that `include Element` brought in): user code then called every
+  `Yuka.State.*` and `Yuka.Template.*` function through `Curry`. `State` and
+  `Template` are now their own files, and `yuka.ml` binds them with
+  `module X = struct include X end`, which Melange compiles with known
+  arity. The keyed benchmark entry went from 90 `Curry._` call sites to 1.
+- Calls from the runtime into the virtual module `Web` still go through
+  `Curry` (161 sites in the runtime): the runtime is compiled against
+  `web.mli` only. Known arity there needs `external` or `[@u]` in
+  `web.mli`. Both need `melange.ppx` on the shared library, which also runs
+  for native: it turns a `[@u]` type into a `Js.Fn` type and a
+  `[@@mel.send]` external into an encoded primitive, and native has neither
+  (an external would need a C stub per DOM primitive). Not done.

@@ -439,7 +439,7 @@ let rec mount_node pos last n =
       last := false;
       let status = Async.watch async in
       mount_hole pos false (fun () ->
-          match Base.State.get status with
+          match State.get status with
           | Async.Pending -> loading
           | Async.Done v -> render v
           | Async.Failed m -> failed m)
@@ -550,7 +550,7 @@ and mount_each :
     unit =
  fun pos owned items key equal render ->
   let start = if owned then None else Some (comment pos "[") in
-  let source = Base.State.memo ~equal:(fun _ _ -> false) items in
+  let source = State.memo ~equal:(fun _ _ -> false) items in
   let mount_row pos v =
     let first = ref pos.parent and last = ref pos.parent in
     let (), dispose =
@@ -577,7 +577,7 @@ and mount_each :
   let entries =
     ref
       (Array.of_list
-         (List.map (fun v -> make_entry pos (key v) v) (Base.State.peek source)))
+         (List.map (fun v -> make_entry pos (key v) v) (State.peek source)))
   in
   let stop = if owned then (drop_to_end pos; None) else Some (comment pos "]") in
   let clear_all () =

@@ -309,6 +309,33 @@ let item_view log (id, label) =
 
 let order c = texts c "li"
 
+let each_identity_default () =
+  let a = ("a", "A") and b = ("b", "B") in
+  let items = State.make [ a; b ] in
+  let renders = ref [] in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        lower "ul" []
+          [
+            each ~key:fst
+              (fun () -> State.get items)
+              (fun (k, v) ->
+                renders := k :: !renders;
+                li k [ text v ]);
+          ])
+  in
+  let node k = query c ("[data-key=" ^ k ^ "]") in
+  let li_a = node "a" in
+  State.set items [ b; a ];
+  check "same items moved, not rendered" "a,b" (String.concat "," (List.rev !renders));
+  same "a kept" li_a (node "a");
+  State.set items [ ("b", "B"); a ];
+  check "a new tuple with equal contents renders again" "a,b,b"
+    (String.concat "," (List.rev !renders));
+  check "order" "B,A" (order c);
+  dispose ()
+
 let keyed_list () =
   let items = State.make [ ("a", "A"); ("b", "B"); ("c", "C"); ("d", "D") ] in
   let log = ref [] in
@@ -316,7 +343,7 @@ let keyed_list () =
   let dispose =
     Yuka.Client.render (as_element c) (fun () ->
         lower "ul" []
-          [ each ~key:fst (fun () -> State.get items) (item_view log) ])
+          [ each ~equal:( = ) ~key:fst (fun () -> State.get items) (item_view log) ])
   in
   let node k = query c ("[data-key=" ^ k ^ "]") in
   let a, b, cc, d = (node "a", node "b", node "c", node "d") in
@@ -407,7 +434,7 @@ let hydrate_server_output () =
         text "y";
         hole (fun () -> text (ints (State.get n)));
         lower "ul" []
-          [ each ~key:fst (fun () -> State.get items) (fun (k, v) -> li k [ text v ]) ];
+          [ each ~equal:( = ) ~key:fst (fun () -> State.get items) (fun (k, v) -> li k [ text v ]) ];
         lower "button" [ on "click" (fun _ -> State.update n succ) ] [ text "go" ];
       ]
   in
@@ -1126,6 +1153,7 @@ let all =
     ("dom nested hole disposed", nested_hole_disposed);
     ("dom dynamic attributes", dynamic_attributes);
     ("dom keyed list", keyed_list);
+    ("dom each compares items by identity", each_identity_default);
     ("dom keyed list shuffle", keyed_list_shuffle);
     ("dom adjacent and empty texts hydrate", adjacent_texts_hydrate);
     ("dom hydrate server output", hydrate_server_output);

@@ -1,10 +1,11 @@
 module Json = Json
 module Async = Async
 module Codec = Codec
-module State = Base.State
+module State = struct include State end
 module Effect = Base.Effect
 
 let owner = Base.mount
+let batch = Scheduler.batch
 
 type server = Types.server
 type client = Types.client
@@ -12,6 +13,7 @@ type slot = Types.slot
 type trigger = Types.trigger
 type loading = Types.loading
 include Element
+module Template = struct include Template end
 module Client = Client
 module Action = Action
 module Event = Platform.Event

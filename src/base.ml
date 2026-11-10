@@ -67,21 +67,6 @@ let mount f =
       dispose_owner o;
       raise e
 
-module State = struct
-  type 'a t = 'a Signal.t
-
-  let make = Signal.make
-  let get = Signal.get
-  let peek = Signal.peek
-  let set = Signal.set
-  let update = Signal.update
-
-  let memo ?equal f =
-    let s = Signal.computed ?equal f in
-    own (fun () -> Signal.dispose_computed s);
-    s
-end
-
 let server_rendering = ref false
 
 module Effect = struct
@@ -116,7 +101,7 @@ module Effect = struct
     node.level <- Scheduler.compute_level node;
     own stop
 
-  let on_change ?(equal = Signal.default_equal) state f =
+  let on_change ?equal state f =
     let prev = ref (Signal.peek state) in
     run (fun () ->
         let next = Signal.get state in

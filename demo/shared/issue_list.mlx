@@ -160,7 +160,7 @@ let%client make ~(title : string) ~(issues : Model.Issue.t list) () =
          </div>
      | None -> Yuka.empty)
     <div class_="list">
-      (Yuka.each ~key:(fun (s, _) -> Issue.status_slug s) (fun () -> State.get groups) group)
+      (Yuka.each ~equal:( = ) ~key:(fun (s, _) -> Issue.status_slug s) (fun () -> State.get groups) group)
     </div>
     (if State.get visible = [] then <p class_="list-empty">"No issues match."</p> else Yuka.empty)
   </div>

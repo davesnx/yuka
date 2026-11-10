@@ -11,10 +11,11 @@ let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Com
     if body <> "" then (
       let n = State.peek pending + 1 in
       let tmp : Comment.t = { id = "tmp-" ^ string_of_int n; author = me; body; created_at = "Just now" } in
-      State.set pending n;
-      State.set error None;
-      State.set draft "";
-      State.set comments (State.peek comments @ [ tmp ]);
+      Yuka.batch (fun () ->
+          State.set pending n;
+          State.set error None;
+          State.set draft "";
+          State.set comments (State.peek comments @ [ tmp ]));
       let swap with_ =
         State.set comments
           (List.filter_map
@@ -29,9 +30,10 @@ let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Com
               State.set comments
                 (List.map (fun (x : Comment.t) -> if x.id = tmp.id then c else x) (State.peek comments))
           | Error message ->
-              swap None;
-              State.set draft body;
-              State.set error (Some message)))
+              Yuka.batch (fun () ->
+                  swap None;
+                  State.set draft body;
+                  State.set error (Some message))))
   in
   let comment (c : Comment.t) : client element =
     <li class_="comment">

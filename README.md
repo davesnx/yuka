@@ -16,7 +16,10 @@ only the parts that read a signal update.
 
 ## Features
 
-- Signals: `State.make`, `State.get`, `State.set`, `State.memo`, `Effect`.
+- Signals: `State.make`, `State.get`, `State.set`, `State.memo`, `Effect`,
+  `Yuka.batch`. A write is a change unless the new value is the same as the
+  old one (identity, as JavaScript `===`); pass `~equal:( = )` for structural
+  equality.
 - Render once: no virtual DOM. Only holes and keyed lists update.
 - mlx syntax through a ppx (`yuka.ppx`), with attribute checks.
 - Compiled templates: the ppx turns each JSX tree into one HTML template that

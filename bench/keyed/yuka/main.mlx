@@ -31,15 +31,16 @@ let button ~id ~label ~action =
   </div>
 
 let app () =
-  let rows = State.make ~equal:( == ) [] in
+  let rows = State.make [] in
   let selected = State.make 0 in
   let run () = State.set rows (build 1_000) in
   let run_lots () = State.set rows (build 10_000) in
   let add () = State.set rows (State.peek rows @ build 1_000) in
   let update () =
-    List.iteri
-      (fun i r -> if i mod 10 = 0 then State.update r.label (fun l -> l ^ " !!!"))
-      (State.peek rows)
+    Yuka.batch (fun () ->
+        List.iteri
+          (fun i r -> if i mod 10 = 0 then State.update r.label (fun l -> l ^ " !!!"))
+          (State.peek rows))
   in
   let clear () = State.set rows [] in
   let swap_rows () =
@@ -84,7 +85,7 @@ let app () =
     </div>
     <table class_="table table-hover table-striped test-data">
       <tbody>
-        (Yuka.each ~equal:( == ) ~key:(fun r -> string_of_int r.id) (fun () -> State.get rows) row)
+        (Yuka.each ~key:(fun r -> string_of_int r.id) (fun () -> State.get rows) row)
       </tbody>
     </table>
     <span class_="preloadicon glyphicon glyphicon-remove" aria_hidden=true />

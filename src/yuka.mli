@@ -7,9 +7,15 @@ module State : sig
   type 'a t
 
   val make : ?equal:('a -> 'a -> bool) -> 'a -> 'a t
-  (** [equal] decides whether a write is a change. Default: structural
-      equality, or physical equality when structural equality raises
-      [Invalid_argument] (a functional value). *)
+  (** [equal] decides whether a write is a change. Default: identity, as
+      JavaScript [===]: the same value ([==]), or two ints, chars, bools,
+      constant constructors, strings or floats with the same value. A new
+      record, tuple, list, array or constructor with arguments is a change
+      even when its contents are equal; pass [~equal:( = )] for structural
+      equality. The default never raises, also for functional values. In the
+      browser, [Some x] is [x] itself, so a new [Some x] that wraps the same
+      [x] is not a change there; on native it is. An exception raised by
+      [equal] counts as a change. *)
 
   val get : 'a t -> 'a
   (** Reads the value. Inside an effect or a memo, the read is tracked. *)
@@ -28,6 +34,15 @@ module State : sig
       recompute is a change only if [equal] says the new value differs.
       Default: the same equality as {!make}. *)
 end
+
+val batch : (unit -> 'a) -> 'a
+(** [batch f] runs [f] and returns its result. Effects that writes in [f]
+    make pending run once, after [f] returns, not after each write. Memos
+    read inside [f] are up to date. A [batch] inside a [batch] (or inside an
+    effect) runs its pending effects when the outermost one ends. When [f]
+    raises, the pending effects still run, then the exception of [f] is
+    raised again. Event handlers are not batched: each [State.set] in a
+    handler updates the DOM before the next line runs. *)
 
 module Effect : sig
   val run : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
@@ -265,7 +280,7 @@ val each :
   client element
 (** A keyed list. The list function is tracked as a hole. An item whose key
     stays keeps its DOM nodes; it renders again when [equal] says its value
-    changed. Default [equal]: structural equality. *)
+    changed. Default [equal]: identity, as in {!State.make}. *)
 
 module Client : sig
   type entry

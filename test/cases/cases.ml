@@ -704,12 +704,24 @@ let default_equality () =
   check "equal float built at run time" "1"
     (string_of_int
        (runs "float" (float_of_int 3 /. 2.) (fun s -> State.set s (float_of_int 3 /. 2.))));
-  check "equal list" "1"
+  check "equal list is a change" "2"
     (string_of_int
        (runs "list" [ 1; 2 ] (fun s -> State.set s (List.map succ [ 0; 1 ]))));
+  let list = List.map succ [ 0; 1 ] in
+  check "same list is not a change" "1"
+    (string_of_int (runs "list" list (fun s -> State.set s list)));
+  check "float nan is a change" "2"
+    (string_of_int (runs "nan" Float.nan (fun s -> State.set s Float.nan)));
+  check "same int is not a change" "1"
+    (string_of_int (runs "int" 7 (fun s -> State.set s (3 + 4))));
+  check "same constant constructor is not a change" "1"
+    (string_of_int (runs "variant" `On (fun s -> State.set s `On)));
   let value = { f = (fun x -> x + 1); n = 1 } in
   check "same record with a function is equal" "1"
     (string_of_int (runs "fn" value (fun s -> State.set s value)));
+  check "new record with the same function and fields is a change" "2"
+    (string_of_int
+       (runs "fn" value (fun s -> State.set s { f = value.f; n = 1 })));
   check "record with another function is a change" "2"
     (string_of_int
        (runs "fn" value (fun s -> State.set s { f = (fun x -> x * 2); n = 1 })));
@@ -718,13 +730,119 @@ let default_equality () =
   let parity = State.memo (fun () -> [ State.get n mod 2 ]) in
   Effect.run (fun () -> ignore (State.get parity); incr memo_runs);
   State.set n 3;
-  check "memo with a structural value does not re-run" "1" (string_of_int !memo_runs);
+  check "memo with a new list re-runs" "2" (string_of_int !memo_runs);
   let seen = ref 0 in
   let s = State.make "a" in
   Effect.on_change s (fun ~prev:_ ~next:_ -> incr seen);
   State.set s (String.make 1 'a');
   State.set s "b";
   check "on_change uses the same equality" "1" (string_of_int !seen)
+
+let structural_equal_option () =
+  let runs = ref 0 in
+  let s = State.make ~equal:( = ) [ 1; 2 ] in
+  Effect.run (fun () -> ignore (State.get s); incr runs);
+  State.set s (List.map succ [ 0; 1 ]);
+  check "~equal:( = ) skips an equal list" "1" (string_of_int !runs);
+  State.set s [ 3 ];
+  check "~equal:( = ) runs on a different list" "2" (string_of_int !runs);
+  let memo_runs = ref 0 in
+  let n = State.make 1 in
+  let parity = State.memo ~equal:( = ) (fun () -> [ State.get n mod 2 ]) in
+  Effect.run (fun () -> ignore (State.get parity); incr memo_runs);
+  State.set n 3;
+  check "memo ~equal:( = ) skips an equal list" "1" (string_of_int !memo_runs);
+  let seen = ref 0 in
+  let p = State.make (1, "a") in
+  Effect.on_change ~equal:( = ) p (fun ~prev:_ ~next:_ -> incr seen);
+  State.set p (1, String.make 1 'a');
+  State.set p (2, "a");
+  check "on_change ~equal:( = )" "1" (string_of_int !seen)
+
+let closure_state () =
+  let runs = ref 0 in
+  let f = State.make (fun x -> x + 1) in
+  Effect.run (fun () -> ignore (State.get f : int -> int); incr runs);
+  let g = fun x -> x * 2 in
+  State.set f g;
+  State.set f g;
+  check "a closure in a State compares by identity" "2" (string_of_int !runs);
+  let pair = State.make ((fun x -> x), 1) in
+  let pair_runs = ref 0 in
+  Effect.run (fun () -> ignore (State.get pair : (int -> int) * int); incr pair_runs);
+  State.set pair ((fun x -> x + 1), 1);
+  check "a tuple with a closure does not raise" "2" (string_of_int !pair_runs);
+  check "closure kept" "6" (string_of_int ((State.peek f) 3))
+
+let batch_delays () =
+  let add, read = log () in
+  let a = State.make 0 in
+  let b = State.make 0 in
+  let double = State.memo (fun () -> State.get a * 2) in
+  Effect.run (fun () ->
+      add (Printf.sprintf "%d/%d" (State.get a) (State.get b)));
+  let result =
+    batch (fun () ->
+        State.set a 1;
+        State.set b 1;
+        add ("memo" ^ string_of_int (State.peek double));
+        "done")
+  in
+  check "one run after the batch" "0/0 memo2 1/1" (read ());
+  check "batch returns the result" "done" result;
+  State.set a 2;
+  check "no batch after it ends" "0/0 memo2 1/1 2/1" (read ())
+
+let batch_nests () =
+  let add, read = log () in
+  let a = State.make 0 in
+  Effect.run (fun () -> add (string_of_int (State.get a)));
+  batch (fun () ->
+      State.set a 1;
+      batch (fun () -> State.set a 2);
+      add "inner-done";
+      State.set a 3);
+  check "inner batch does not flush" "0 inner-done 3" (read ());
+  let trigger = State.make 0 in
+  let inside = State.make 0 in
+  let seen = ref [] in
+  Effect.run (fun () ->
+      if State.get trigger = 1 then
+        batch (fun () -> State.set inside 1; State.set inside 2));
+  Effect.run (fun () -> seen := State.get inside :: !seen);
+  State.set trigger 1;
+  check "batch inside an effect" "2,0" (String.concat "," (List.map string_of_int !seen))
+
+let batch_raises () =
+  let add, read = log () in
+  let a = State.make 0 in
+  Effect.run (fun () -> add (string_of_int (State.get a)));
+  let raised =
+    match
+      batch (fun () ->
+          State.set a 1;
+          failwith "stop")
+    with
+    | () -> "no"
+    | exception Failure m -> m
+  in
+  check "the exception of the batch" "stop" raised;
+  check "pending effects ran" "0 1" (read ());
+  State.set a 2;
+  check "no batch left open" "0 1 2" (read ());
+  let nested =
+    match
+      batch (fun () ->
+          (try batch (fun () -> State.set a 3; failwith "inner")
+           with Failure _ -> ());
+          add "after-inner";
+          State.set a 4)
+    with
+    | () -> "ok"
+    | exception Failure m -> m
+  in
+  check "inner exception caught" "ok" nested;
+  check "inner raise keeps the outer batch" "0 1 2 after-inner 4" (read ())
 
 let memo_set_raises () =
   let n = State.make 1 in
@@ -1134,6 +1252,11 @@ let all =
     ("html slot", html_slot);
     ("html island loading", html_island_loading);
     ("default equality", default_equality);
+    ("structural equality on request", structural_equal_option);
+    ("closure in a State", closure_state);
+    ("batch delays effects", batch_delays);
+    ("batch nests", batch_nests);
+    ("batch with an exception", batch_raises);
     ("memo set raises", memo_set_raises);
     ("owned removed from its parent", owned_removed_from_parent);
     ("disposal order", disposal_order);

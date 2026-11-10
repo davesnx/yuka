@@ -1,5 +1,3 @@
-open Base
-
   type 'a status = Pending | Done of 'a | Failed of string
 
   type 'a t = {

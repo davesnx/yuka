@@ -9,6 +9,7 @@ let current_dep_cursor : link option ref = ref None
 let pending_effects : node list ref = ref []
 let pending_computeds : node list ref = ref []
 let flushing = ref false
+let batch_depth = ref 0
 
 let add_effect_to_pending node =
   if not (is_pending node) then begin
@@ -226,8 +227,27 @@ let notify_subs source =
         in
         loop s.first_sub
       done);
-  if (!pending_effects <> [] || !pending_computeds <> []) && not !flushing then
-    flush ()
+  if
+    (!pending_effects <> [] || !pending_computeds <> [])
+    && (not !flushing) && !batch_depth = 0
+  then flush ()
+
+let batch f =
+  incr batch_depth;
+  let finish () =
+    decr batch_depth;
+    if
+      !batch_depth = 0 && (not !flushing)
+      && (!pending_effects <> [] || !pending_computeds <> [])
+    then flush ()
+  in
+  match f () with
+  | result ->
+      finish ();
+      result
+  | exception e ->
+      (try finish () with _ -> ());
+      raise e
 
 let ensure_computed_fresh node =
   if is_computed node && is_dirty node then
