@@ -791,8 +791,8 @@ let loader_labels levels =
   List.filter_map (fun l -> Option.map loader_label (prop "loader" l)) levels
 
 let layer_text ~loaders level =
-  sprintf "{ Yuka.Server.key = %s; wrap = (fun children -> %s%s ~children ()) }"
-    (key_text level)
+  sprintf "{ Yuka.Server.key = %s; data = %b; wrap = (fun children -> %s%s ~children ()) }"
+    (key_text level) (loaders <> [])
     (expr (Option.get (prop "layout" level)))
     (args loaders)
 

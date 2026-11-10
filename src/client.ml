@@ -188,6 +188,16 @@ let stopped_key = Platform.stopped_key
 type handler = { run : Web.event -> unit; owner : Base.owner; gen : int }
 
 let live h = h.owner.gen = h.gen
+let acting : Base.owner option ref = ref None
+
+let acting_as owner f ev =
+  let prev = !acting in
+  acting := owner;
+  match f ev with
+  | () -> acting := prev
+  | exception e ->
+      acting := prev;
+      raise e
 
 let dispatch event ev =
   let key = handlers_key event in
@@ -195,7 +205,7 @@ let dispatch event ev =
     | None -> ()
     | Some n ->
         (match Web.get_prop n key with
-        | Some hs -> List.iter (fun h -> if live h then h.run ev) hs
+        | Some hs -> List.iter (fun h -> if live h then acting_as (Some h.owner) h.run ev) hs
         | None -> ());
         match Web.get_flag ev stopped_key with
         | Some true -> ()
@@ -223,6 +233,7 @@ let unowned : Base.owner = { last = None; gen = 0 }
 
 let add_handler ctx el event handler =
   if non_bubbling event then begin
+    let handler = acting_as !Base.current_owner handler in
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
   end
@@ -643,7 +654,14 @@ let transport name input =
       if cancelled then fail "cancelled"
       else fail ("action " ^ name ^ ": network error: " ^ message))
   in
-  if Web.table_has (cleanups ()) (string_of_int id) then set_cleanup id abort;
+  if Web.table_has (cleanups ()) (string_of_int id) then begin
+    set_cleanup id abort;
+    match (match !acting with Some o -> Some o | None -> !Base.current_owner) with
+    | Some owner ->
+        let disposer = Base.add_disposer owner abort in
+        Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
+    | None -> ()
+  end;
   result
 
 let async_value id =

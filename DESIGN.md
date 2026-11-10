@@ -1367,4 +1367,12 @@ Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
   `e2e/demo.ts` 3c (sidebar counter and `New_issue` survive, title,
   `aria-current`, back, `Yuka-Build` mismatch through a rewritten
   response header) and 3d (no script on `/about`).
+- Review fixes (2026-11-10): a layout that takes a loader result
+  (`layer.data`) is never shared, so it is rendered again with fresh data;
+  `Server.modules ~digest` (`Yuka_dream.tree_digest`) puts the module
+  contents into the build id, computed once; the client sends `-` when the
+  page has no outlet, does a full load when the answered outlet is not on
+  the page, decodes the title before changing the DOM, leaves an existing
+  `aria-current` alone, and `stop_within` aborts the action calls of the
+  islands it stops (the event handler's owner is the acting owner).
 

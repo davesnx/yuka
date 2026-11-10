@@ -20,7 +20,7 @@ let rules_5 =
   Yuka.Server.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:(Immutable) ~prerender:false ()
 
 let layer_0 : Yuka.Server.layer =
-  { Yuka.Server.key = "L0"; wrap = (fun children -> Layouts.root ~children ()) }
+  { Yuka.Server.key = "L0"; data = false; wrap = (fun children -> Layouts.root ~children ()) }
 
 let fallback_0 : Yuka.Server.fallback =
   {
@@ -198,7 +198,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
                      Yuka.Server.layers =
                        [
                          layer_0;
-                         { Yuka.Server.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; wrap = (fun children -> Layouts.team ~squad ~children ()) };
+                         { Yuka.Server.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; data = true; wrap = (fun children -> Layouts.team ~squad ~children ()) };
                        ];
                      page = Pages.member ~team ~user ~squad ~profile ();
                    }))));
@@ -246,7 +246,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.target =
           run = (fun () -> Api.asset req);
         }
   | Cycle_shared.Routes.Org_item { org; n } ->
-      let layer_2 = { Yuka.Server.key = Stdlib.String.concat "/" [ "L2"; Yuka.Router.encode org ]; wrap = (fun children -> Layouts.org ~children ()) } in
+      let layer_2 = { Yuka.Server.key = Stdlib.String.concat "/" [ "L2"; Yuka.Router.encode org ]; data = false; wrap = (fun children -> Layouts.org ~children ()) } in
       Yuka.Server.Page
         {
           rules = rules_0;

@@ -5,6 +5,8 @@
 ### yuka
 
 - Client navigation replaces only the content below the deepest shared layout: islands in shared layouts keep their state; `aria-current` follows the path; a new build id (`Yuka-Build`) makes a full page load (@davesnx)
+- Breaking: `Yuka.Server.modules` takes `~digest` (use `Yuka_dream.tree_digest dir`), so a deploy that changes client code changes the build id; `Yuka.Server.layer` has a `data` field, and a layout that takes a loader result is rendered again on each navigation (@davesnx)
+- Leaving a page stops the action calls of the islands it removes (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

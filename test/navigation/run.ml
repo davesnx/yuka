@@ -151,7 +151,7 @@ let click_fetches finish =
   check "click on a child is intercepted" "true" (bools (click "#in" ""));
   check "one fetch" "1" (ints (calls ()));
   check "fetched url" "http://localhost/issue/1" (call_url 0);
-  check "header" "" (call_header 0);
+  check "header" "-" (call_header 0);
   check "not pushed before the page loaded" "/start?x=1" (location_ ());
   check "body unchanged while loading" (page {|<a id="l" href="/issue/1"><span id="in">go</span></a>|}) (body_html ());
   resolve_call 0 (doc "Issue 1" (page "<p>one</p>")) "";
@@ -246,7 +246,7 @@ let history_and_popstate finish =
           tick (fun () ->
               check "back fetches a" "3" (ints (calls ()));
               check "relative url" "/a" (call_url 2);
-              check "header on back" "" (call_header 2);
+              check "header on back" "-" (call_header 2);
               check "location is a" "/a" (location_ ());
               resolve_call 2 (doc "A again" (page "<p>ay</p>")) "";
               tick (fun () ->
@@ -367,7 +367,7 @@ let navigate_api finish =
   plain_start ();
   Browser.navigate "/x?q=1";
   check "fetch" "/x?q=1" (call_url 0);
-  check "header" "" (call_header 0);
+  check "header" "-" (call_header 0);
   resolve_call 0 (doc "X" (page "<p>new</p>")) "";
   tick (fun () ->
       check "body" (page "<p>new</p>") (body_html ());
@@ -391,7 +391,7 @@ let browser_navigate finish =
   plain_start ();
   Browser.navigate "/x";
   check "client navigation: fetch" "/x" (call_url 0);
-  check "header" "" (call_header 0);
+  check "header" "-" (call_header 0);
   resolve_call 0 (doc "X" (page "<p>x</p>")) "";
   tick (fun () ->
       check "body" (page "<p>x</p>") (body_html ());
@@ -506,7 +506,7 @@ let attr : string -> string -> string =
 let outlet_page () =
   set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
   (set_body
-       ({|<nav><a id="home" href="/start" aria-current="page">home</a><a id="two" href="/two">two</a><a id="step" href="/x" aria-current="step">x</a></nav>|}
+       ({|<nav><a id="home" href="/start" aria-current="page">home</a><a id="two" href="/two">two</a><a id="step" href="/x" aria-current="step">x</a><a id="twoloc" href="/two" aria-current="location">2</a></nav>|}
        ^ island_at "i1" 1
        ^ {|<yuka-island data-name="Probe" data-id="i9" data-start="interaction" style="display:contents"><a id="isl" href="/two">i</a></yuka-island><script type="application/json" data-yuka-props="i9">9</script>|}
        ^ {|<yuka-outlet data-k="L0" style="display:contents"><p id="old">old</p>|}
@@ -534,6 +534,7 @@ let partial finish =
       check "old mark removed" "null" (attr "#home" "aria-current");
       check "other value kept" "step" (attr "#step" "aria-current");
       check "links inside an island untouched" "null" (attr "#isl" "aria-current");
+      check "another value on the new path is kept" "location" (attr "#twoloc" "aria-current");
       check "new island started, outer not again" "g0/1|g0/2|g0/3" (log_g ());
       log_clear ();
       State.set probe_runs 1;
@@ -556,10 +557,54 @@ let unknown_outlet finish =
   outlet_page ();
   plain_start ();
   ignore (click "#two" "");
-  resolve_headers 0 (doc "Two" (page "<p>whole</p>")) 200 [| ("yuka-outlet", "L9"); ("yuka-build", "b1") |];
+  resolve_headers 0 "<p>part</p>" 200 [| ("yuka-outlet", "L9"); ("yuka-build", "b1") |];
   tick (fun () ->
-      check "body swapped" (page "<p>whole</p>") (body_html ());
-      check "title" "Two" (title ());
+      check "full page load" "assign" (log_read ());
+      check "outlet kept" "old" (attr "#old" "id");
+      check "not pushed" "/start?x=1" (location_ ());
+      finish ())
+
+let bad_title finish =
+  setup "";
+  outlet_page ();
+  plain_start ();
+  ignore (click "#two" "");
+  resolve_headers 0 {|<p id="new">new</p>|} 200
+    [| ("yuka-outlet", "L0"); ("yuka-title", "%E0%A4%A"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "outlet replaced" "new" (attr "#new" "id");
+      check "raw title" "%E0%A4%A" (title ());
+      check "pushed" "/two" (location_ ());
+      finish ())
+
+let act = Action.declare ~name:"act" ~input:Codec.string ~output:Codec.string
+
+let actor_entry =
+  Client.entry ~name:"Actor" (fun json ->
+      Result.map
+        (fun (_ : int) () ->
+          lower "button"
+            [ on "click" (fun _ -> ignore (Action.call act "go")) ]
+            [ text "act" ])
+        (Codec.decode Codec.int json))
+
+let actions_of_stopped_islands finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<a id="two" href="/two">two</a>|}
+    ^ {|<yuka-island data-name="Actor" data-id="i1" style="display:contents"><button id="outer">act</button></yuka-island><script type="application/json" data-yuka-props="i1">1</script>|}
+    ^ {|<yuka-outlet data-k="L0" style="display:contents"><yuka-island data-name="Actor" data-id="i2" style="display:contents"><button id="inner">act</button></yuka-island><script type="application/json" data-yuka-props="i2">2</script></yuka-outlet>|});
+  mount ~islands:(Client.registry [ actor_entry ]) ();
+  ignore (click "#inner" "");
+  ignore (click "#outer" "");
+  check "two action calls" "2" (ints (calls ()));
+  ignore (click "#two" "");
+  let nav = calls () - 1 in
+  resolve_headers nav "<p>new</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "inner island action aborted" "true" (bools (call_aborted 0));
+      check "outer island action still running" "false" (bools (call_aborted 1));
       finish ())
 
 let not_a_page status type_ finish =
@@ -601,7 +646,9 @@ let all =
     ("500 is shown in place", shown_in_place 500);
     ("partial response replaces the outlet", partial);
     ("another build is a full load", stale_build);
-    ("unknown outlet swaps the body", unknown_outlet);
+    ("unknown outlet is a full load", unknown_outlet);
+    ("a bad title still navigates", bad_title);
+    ("stop_within aborts the actions of the islands it stops", actions_of_stopped_islands);
     ("302 not followed is a full load", not_a_page 302 "text/html");
     ("json is a full load", not_a_page 200 "application/json");
     ("no content type is a full load", not_a_page 200 "");

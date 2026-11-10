@@ -9,7 +9,7 @@ type page = { title : string; head : string; body : unit -> node }
 
 let page ?(title = "") ?(head = "") body = { title; head; body }
 
-type layer = { key : string; wrap : node -> node }
+type layer = { key : string; data : bool; wrap : node -> node }
 type plan = { layers : layer list; page : page }
 
 type cache =
@@ -122,7 +122,13 @@ type assets = {
   immutable : string -> bool;
 }
 
-let modules ~dir ~entry ~manifest ~packages =
+let fingerprint text =
+  let hash seed =
+    String.fold_left (fun h c -> (h lxor Char.code c) * 0x01000193 land 0xffffffff) seed text
+  in
+  Printf.sprintf "%08x%08x" (hash 0x811c9dc5) (hash 0x050c5d1f)
+
+let modules ~dir ~entry ~manifest ~packages ~digest =
   let entry = Server.normalize entry in
   let base =
     match String.rindex_opt entry '/' with
@@ -132,7 +138,7 @@ let modules ~dir ~entry ~manifest ~packages =
   {
     dir;
     entry;
-    digest = String.concat "\n" (entry :: manifest :: packages);
+    digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
     import_map = Server.import_map ~url:"/_yuka" packages;
     preload = Server.preload_urls ~manifest ~base ();
     immutable = (fun _ -> false);
@@ -153,7 +159,7 @@ let bundle ~dir ~entry ~manifest ~metafile =
   {
     dir;
     entry;
-    digest = String.concat "\n" [ entry; manifest; metafile ];
+    digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
     import_map = [];
     preload = Server.preload_urls ~manifest ~base:"/_yuka/" ~metafile ();
     immutable = (fun path -> List.exists (String.equal path) hashed);
@@ -186,16 +192,10 @@ let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(head = "") ?(tim
     prerendered;
   }
 
-let fingerprint text =
-  let hash seed =
-    String.fold_left (fun h c -> (h lxor Char.code c) * 0x01000193 land 0xffffffff) seed text
-  in
-  Printf.sprintf "%08x%08x" (hash 0x811c9dc5) (hash 0x050c5d1f)
-
 let build_id config (App a) =
   match config.assets with
   | None -> a.build
-  | Some assets -> fingerprint (a.build ^ "\n" ^ assets.digest)
+  | Some assets -> a.build ^ assets.digest
 
 let served_dirs config =
   Option.to_list (Option.map (fun (a : assets) -> ("/_yuka", a.dir)) config.assets)
@@ -285,9 +285,9 @@ let html_headers rule_headers extra =
   add_vary "Yuka-Navigate"
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
-let rec shared sent keys =
-  match (sent, keys) with
-  | s :: sent, k :: keys when String.equal s k -> 1 + shared sent keys
+let rec shared sent (layers : layer list) =
+  match (sent, layers) with
+  | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
   | _ -> 0
 
 let render env ~status ~headers layers (page : page) =
@@ -313,7 +313,7 @@ let render env ~status ~headers layers (page : page) =
   | Some sent -> (
       let headers = set_header ("yuka-build", env.build) headers in
       let keys = List.map (fun (l : layer) -> l.key) layers in
-      match shared sent keys with
+      match shared sent layers with
       | 0 ->
           Async.map
             (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })

@@ -38,7 +38,7 @@ let () =
         ~metafile:(read_file !metafile)
     else
       Yuka.Server.modules ~dir:!js_dir ~entry:"demo/client/main.js" ~manifest
-        ~packages:(packages !js_dir)
+        ~packages:(packages !js_dir) ~digest:(Yuka_dream.tree_digest !js_dir)
   in
   let config =
     Yuka.Server.config ~assets

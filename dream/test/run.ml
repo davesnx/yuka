@@ -110,6 +110,22 @@ let out_inside_a_served_dir () =
     [ Filename.concat dir "site"; dir; Filename.concat dir "a/../site" ];
   Alcotest.(check (list string)) "nothing written" [ "s.css" ] (List.map fst (files dir ""))
 
+let tree_digest () =
+  let dir = Filename.temp_dir "yuka_tree" "" in
+  let write name text =
+    Out_channel.with_open_bin (Filename.concat dir name) (fun oc -> output_string oc text)
+  in
+  Sys.mkdir (Filename.concat dir "a") 0o755;
+  write "a/x.js" "one";
+  write "y.js" "two";
+  let first = Yuka_dream.tree_digest dir in
+  Alcotest.(check string) "stable" first (Yuka_dream.tree_digest dir);
+  write "a/x.js" "ONE";
+  let changed = Yuka_dream.tree_digest dir in
+  check_true "content changes it" (changed <> first);
+  write "z.js" "";
+  check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
+
 let () =
   Alcotest.run "yuka-dream"
     [
@@ -119,5 +135,6 @@ let () =
           Alcotest.test_case "twice gives the same files" `Quick twice;
           Alcotest.test_case "the handler serves prerendered files" `Quick serve;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
+          Alcotest.test_case "tree digest follows file contents" `Quick tree_digest;
         ] );
     ]

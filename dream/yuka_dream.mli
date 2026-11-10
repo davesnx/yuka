@@ -21,6 +21,11 @@ val prerender :
     A file in the [prerendered] directory of the config is not read. Files
     already in [out] are replaced; running it twice gives the same files. *)
 
+val tree_digest : string -> string
+(** A digest of the paths and contents of every file under a directory
+    (symbolic links followed), for the [digest] of [Yuka.Server.modules].
+    Compute it once at start. *)
+
 val to_async : 'a Lwt.t -> 'a Yuka.Async.t
 (** A failed promise gives a failed [Async] with the exception text. *)
 

@@ -258,6 +258,7 @@ let () =
     Yuka.Server.modules ~dir:"client/out" ~entry:"demo/client/main.js"
       ~manifest:(read_file "client/yuka_islands.json")
       ~packages:[ "melange"; "melange.js"; "yuka"; "yuka.js" ]
+      ~digest:(Yuka_dream.tree_digest "client/out")
   in
   let config =
     Yuka.Server.config ~assets ~public:[ ("/static", "static") ]
@@ -411,6 +412,7 @@ let () =
     Yuka.Server.modules ~dir:"_build/default/client/out" ~entry:"client/main.js"
       ~manifest:(read_file "_build/default/client/yuka_islands.json")
       ~packages:[ "melange"; "melange.js"; "yuka"; "yuka.js" ]
+      ~digest:(Yuka_dream.tree_digest "_build/default/client/out")
   in
   let config = Yuka.Server.config ~assets () in
   Dream.run @@ Dream.logger @@ Yuka_dream.handler config Routes_server.app

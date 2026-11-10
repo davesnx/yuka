@@ -10,7 +10,7 @@ let lacks html needle =
 
 let config =
   Yuka.Server.config
-    ~assets:(Yuka.Server.modules ~dir:"js" ~entry:"demo/client/main.js" ~manifest:"{}" ~packages:[])
+    ~assets:(Yuka.Server.modules ~dir:"js" ~entry:"demo/client/main.js" ~manifest:"{}" ~packages:[] ~digest:"")
     ~public:[ ("/static", "static") ]
     ~styles:[ "/static/style.css" ] ()
 

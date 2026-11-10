@@ -79,7 +79,7 @@ end
 module Held = Server.Make (Held_adapter)
 
 let modules =
-  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./a.js"}|}
+  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./a.js"}|} ~digest:"d1"
     ~packages:[ "pkg" ]
 
 let config =
@@ -760,9 +760,15 @@ let navigation =
         Alcotest.(check string) "body" "<p>plain</p>" r.body );
     ( "the deepest shared layout is the outlet",
       fun () ->
+        let r = nav "L0 L2/acme" "/org/acme/x/2" in
+        check_header r "yuka-outlet" [ "L2/acme" ];
+        check_true "no org layout" (not (contains r.body {|class="org"|}));
+        check_true "page" (contains r.body "acme 2 item") );
+    ( "a layout that takes a loader result is rendered again",
+      fun () ->
         let r = nav "L0 L1/a" "/team/a/2" in
-        check_header r "yuka-outlet" [ "L1/a" ];
-        check_true "no team layout" (not (contains r.body {|class="team"|}));
+        check_header r "yuka-outlet" [ "L0" ];
+        check_true "team layout with fresh data" (contains r.body {|<section class="team">squad of a|});
         check_true "page" (contains r.body "a 2 of a");
         let r = nav "L0 L1/a" "/team/b/1" in
         check_header r "yuka-outlet" [ "L0" ];
@@ -776,7 +782,7 @@ let navigation =
             check_header r "yuka-build" [ build ];
             check_true "document" (String.starts_with ~prefix:"<!DOCTYPE html>" r.body);
             check_true "meta" (contains r.body ({|<meta name="yuka-build" content="|} ^ build ^ {|">|})))
-          [ "X0"; ""; "1"; "L1/a" ] );
+          [ "X0"; ""; "-"; "1"; "L1/a" ] );
     ( "ids in a partial start with the outlet key",
       fun () ->
         let r = nav "L0" "/islands" in
@@ -803,12 +809,15 @@ let navigation =
     ( "the build id follows the assets",
       fun () ->
         let app = Cycle_server.Routes_server.app in
-        let other =
+        let with_assets ~manifest ~digest =
           Server.config
-            ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./b.js"}|} ~packages:[ "pkg" ])
+            ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest)
             ()
         in
+        let other = with_assets ~manifest:{|{"A":"./b.js"}|} ~digest:"d1" in
         check_true "differs" (Server.build_id other app <> build);
+        let new_code = with_assets ~manifest:{|{"A":"./a.js"}|} ~digest:"d2" in
+        check_true "new file content, new id" (Server.build_id new_code app <> build);
         check_true "stable" (Server.build_id config app = build) );
   ]
 

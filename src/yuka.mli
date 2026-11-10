@@ -769,13 +769,16 @@ val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
 
     A client navigation loads the URL with the header [Yuka-Navigate] set
     to the [data-k] keys of the [<yuka-outlet>] elements of the page, in
-    document order, separated by spaces. With a [Yuka-Outlet: KEY] answer
-    and that outlet on the page, it stops only the islands inside the
-    outlet, replaces its content, sets [document.title] from [Yuka-Title],
-    and moves [aria-current="page"] to the links outside the outlet (and
-    outside islands) whose [href] is the new path; islands outside the
-    outlet keep running. Otherwise it stops every island and replaces
-    [<body>] and [document.title] with those of the response. Then it starts
+    document order, separated by spaces ([-] when there is none). With a
+    [Yuka-Outlet: KEY] answer it stops only the islands inside that outlet
+    (and aborts their action calls), replaces its content, sets
+    [document.title] from [Yuka-Title] (the raw value if it does not
+    decode), and sets [aria-current="page"] on the links outside the outlet
+    and outside islands whose [href] is the new path and that have no
+    [aria-current], removing it from the others that have [page]; islands
+    outside the outlet keep running. If that outlet is not on the page, it
+    does [location.assign]. Without [Yuka-Outlet] it stops every island and
+    replaces [<body>] and [document.title] with those of the response. Then it starts
     the new islands, pushes a history entry (after the page loaded) and
     scrolls to the fragment or to the top. A navigation started while
     another one loads aborts the first. Any 2xx or 4xx/5xx status is shown
@@ -873,9 +876,11 @@ module Server : sig
   (** [page ~title body]. The cycle calls [body] only when it renders: never
       for [HEAD]. [head] is raw HTML added to the document head. *)
 
-  type layer = { key : string; wrap : server element -> server element }
-  (** A layout on the path of a route. [key] names its outlet; [wrap] puts
-      the layout around its children. *)
+  type layer = { key : string; data : bool; wrap : server element -> server element }
+  (** A layout on the path of a route. [key] names its outlet; [data] is
+      true when the layout takes a loader result, so a client navigation
+      renders it again instead of keeping it; [wrap] puts the layout around
+      its children. *)
 
   type plan = { layers : layer list; page : page }
   (** What a page route renders. [layers] are outermost first. *)
@@ -971,12 +976,14 @@ module Server : sig
   (** Where the client JavaScript is. The cycle serves it under [/_yuka/]. *)
 
   val modules :
-    dir:string -> entry:string -> manifest:string -> packages:string list -> assets
+    dir:string -> entry:string -> manifest:string -> packages:string list -> digest:string -> assets
   (** The Melange module tree. [dir] is the emit directory, [entry] the path
       of the entry module in it (served as [/_yuka/<entry>]), [manifest] the
       JSON text that [yuka-islands --manifest] prints (paths relative to the
       directory of [entry]), and [packages] the npm packages under
-      [dir/node_modules] for the import map. Files get
+      [dir/node_modules] for the import map. [digest] stands for the content
+      of the files (for example [Yuka_dream.tree_digest dir]): it goes into
+      {!build_id}, so new JavaScript gives a new build id. Files get
       [cache-control: no-cache]. *)
 
   val bundle :

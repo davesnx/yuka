@@ -32,22 +32,14 @@ let hash_of url =
 let outlets () = Web.query_all (Web.document ()) "yuka-outlet"
 
 let keys () =
-  String.concat " "
-    (List.filter_map (fun o -> Web.get_attribute o "data-k") (Array.to_list (outlets ())))
+  match List.filter_map (fun o -> Web.get_attribute o "data-k") (Array.to_list (outlets ())) with
+  | [] -> "-"
+  | keys -> String.concat " " keys
 
 let build () =
   match Web.query_all (Web.document ()) "meta[name=yuka-build]" with
   | [| meta |] -> Web.get_attribute meta "content"
   | _ -> None
-
-let path_of url =
-  let stop =
-    match (String.index_opt url '?', String.index_opt url '#') with
-    | Some q, Some h -> min q h
-    | Some i, None | None, Some i -> i
-    | None, None -> String.length url
-  in
-  String.sub url 0 stop
 
 let mark_links outlet path =
   let doc = Web.document () in
@@ -55,32 +47,37 @@ let mark_links outlet path =
   Array.iter
     (fun a ->
       if not (Web.contains outlet a || Array.exists (fun i -> Web.contains i a) islands) then
-        if Web.get_attribute a "href" = Some path then Web.set_attribute a "aria-current" "page"
-        else if Web.get_attribute a "aria-current" = Some "page" then
-          Web.remove_attribute a "aria-current")
+        match (Web.get_attribute a "href" = Some path, Web.get_attribute a "aria-current") with
+        | true, None -> Web.set_attribute a "aria-current" "page"
+        | false, Some "page" -> Web.remove_attribute a "aria-current"
+        | _ -> ())
     (Web.query_all doc "a")
 
 let swap final header text =
   let outlet =
-    match header "yuka-outlet" with
-    | Some key -> Array.find_opt (fun o -> Web.get_attribute o "data-k" = Some key) (outlets ())
-    | None -> None
+    Option.map
+      (fun key -> Array.find_opt (fun o -> Web.get_attribute o "data-k" = Some key) (outlets ()))
+      (header "yuka-outlet")
   in
   match outlet with
-  | Some el ->
+  | Some None -> false
+  | Some (Some el) ->
+      let title =
+        Option.map (fun t -> try Web.decode_uri t with _ -> t) (header "yuka-title")
+      in
       Client.stop_within el;
       Web.set_inner_html el text;
-      Option.iter (fun t -> Web.set_title (Web.decode_uri t)) (header "yuka-title");
-      mark_links el (path_of final)
+      Option.iter Web.set_title title;
+      mark_links el (fst (Router.split_target final));
+      true
   | None ->
       Client.stop ();
-      Web.swap_page text
+      Web.swap_page text;
+      true
 
 let html header =
   match header "content-type" with
-  | Some t ->
-      let t = String.lowercase_ascii t in
-      String.length t >= 9 && String.sub t 0 9 = "text/html"
+  | Some t -> String.starts_with ~prefix:"text/html" (String.lowercase_ascii t)
   | None -> false
 
 let load ~push ~restore url =
@@ -94,9 +91,9 @@ let load ~push ~restore url =
         pending := None;
         let stale = match header "yuka-build" with Some b -> build () <> Some b | None -> false in
         let shown = (status >= 200 && status < 300) || status >= 400 in
-        if stale || (not shown) || not (html header) then Web.location_assign final
+        if stale || (not shown) || (not (html header)) || not (swap final header text) then
+          Web.location_assign final
         else begin
-          swap final header text;
           if push then begin
             let key = Web.fresh_key () in
             Web.history_push_key key final;
