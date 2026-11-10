@@ -1,7 +1,8 @@
 open Model
+module Css = [%yuka.css "related.css"]
 
 let%client make ~(related : Model.Issue.t list Yuka.Async.t) () =
-  <div class_="related">
+  <div class_=Css.related>
     <h2 class_="section-title">"Related issues"</h2>
     <Yuka.Await async=related
        loading=(<Views.Skeleton lines=3 />)
@@ -9,7 +10,7 @@ let%client make ~(related : Model.Issue.t list Yuka.Async.t) () =
        (fun issues ->
          if issues = [] then <p class_="muted">"None."</p>
          else
-           <ul class_="related-list">
+           <ul class_=Css.related_list>
              (Yuka.list
                 (List.map
                    (fun (i : Issue.t) ->

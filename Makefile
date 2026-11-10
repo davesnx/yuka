@@ -69,6 +69,14 @@ demo-bundle: demo-build ## Bundle the demo client with esbuild
 demo-serve: demo-build ## Serve the demo on PORT
 	$(BUILD_DIR)/default/demo/server/demo_server.exe --port $(PORT)
 
+.PHONY: demo-dev
+demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
+	$(DUNE) build --profile=dev ./gen/yuka_cli.exe
+	opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- $(BUILD_DIR)/default/gen/yuka_cli.exe dev \
+	  --build @demo/all --state $(BUILD_DIR)/.yuka-dev \
+	  --assets $(BUILD_DIR)/default/demo/static --assets $(BUILD_DIR)/default/demo/client/out \
+	  -- $(BUILD_DIR)/default/demo/server/demo_server.exe --port $(PORT)
+
 .PHONY: demo-test
 demo-test: ## Run the demo tests
 	$(DUNE) build @demo/runtest --force

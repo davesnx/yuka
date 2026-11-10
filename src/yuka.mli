@@ -459,6 +459,23 @@ val each :
     stays keeps its DOM nodes; it renders again when [equal] says its value
     changed. Default [equal]: identity, as in {!State.make}. *)
 
+type stylesheet
+(** A CSS file of a module, made by [module Css = [%yuka.css "file.css"]].
+    The ppx gives [Css.stylesheet] and one [string] per class of the file,
+    [Css.row] for [.row], with a name scoped to the file. *)
+
+val stylesheet : string -> stylesheet
+(** For generated code: the sheet served at this URL. A top-level value, so
+    that a client bundle does not keep {!Private}. *)
+
+val use_css : stylesheet -> 'k element -> 'k element
+(** [use_css sheet element] is [element] with [sheet] in the page. On the
+    server, the page gets [<link rel="stylesheet">] once, before the first
+    element that uses it; the sheets of an island are printed before its
+    [<yuka-island>]. In the browser, a [link] is added to [<head>] if the
+    document has none for this sheet. The ppx calls it in every function
+    named [make] that comes after [[%yuka.css]] in the same file. *)
+
 module Client : sig
   type entry
   (** Made by [entry]. The island modules expose it as [register], for
@@ -878,6 +895,15 @@ module Private : sig
   (** The [walk], [kids], [attrs] and [values] given to [Template.make]. *)
 
   val node : 'kind element -> node
+
+  val dev_events :
+    state:(unit -> string) -> sleep:(float -> unit Async.t) -> (string -> unit Async.t) -> unit Async.t
+  (** The body of [/_yuka/dev] for a state function (tests). *)
+
+  val dev_script : string -> string
+  (** The script that a page gets with [YUKA_DEV=1], for the state JSON
+      given (tests). *)
+
   val element : node -> 'kind element
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
@@ -1518,6 +1544,7 @@ module Server : sig
     ?public:(string * string) list ->
     ?prerendered:string ->
     ?styles:string list ->
+    ?css:(string * string) list ->
     ?head:string ->
     ?timeout:float ->
     unit ->
@@ -1530,7 +1557,15 @@ module Server : sig
       without [Yuka-Navigate], is answered with its file there when the file
       exists ({!prerender_file}), after the guards and instead of the
       loaders. [styles] are stylesheet URLs and [head] raw HTML for the head
-      of every page. [timeout] (default 10 seconds) bounds a streamed
+      of every page. [css] lists the sheets of [[%yuka.css]], as file name
+      and text; the generator [yuka-css] writes it ([Yuka_css.sheets]). The
+      cycle serves each at [/_yuka/css/FILE] with [Immutable] (the name has
+      a hash of the text); another path under [/_yuka/css/] is a 404 with
+      [no-store]. With the environment variable [YUKA_DEV=1] (set by
+      [yuka dev]), read here, the cycle answers [GET /_yuka/dev] with
+      Server-Sent Events of the state file in [YUKA_DEV_FILE], and full
+      pages get the reload script in their head; without it, [/_yuka/dev]
+      is a 404 and pages have no script. [timeout] (default 10 seconds) bounds a streamed
       render. *)
 
   val build_id : config -> 'req app -> string
@@ -1539,6 +1574,14 @@ module Server : sig
       document has [<meta name="yuka-build" content="ID">], and a response to
       [Yuka-Navigate] has the header [Yuka-Build: ID]; the client loads the
       page in full when the two differ. *)
+
+  val prerender_config : config -> config
+  (** [config] with [YUKA_DEV] ignored. A prerender uses it, so a static
+      page never gets the dev script. *)
+
+  val css_files : config -> (string * string) list
+  (** The sheets of [css] as paths relative to the site root
+      ([_yuka/css/FILE]) and text. A prerender writes them. *)
 
   val served_dirs : config -> (string * string) list
   (** The URL prefixes and directories that the cycle serves files from:

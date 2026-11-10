@@ -71,6 +71,8 @@ module Private = struct
   let preload_urls = Server.preload_urls
   let handle_action = Server.handle_action
 
+  let dev_script = Cycle.dev_script
+  let dev_events = Cycle.dev_events
   let node n = n
   let template_shape (t : template) = t.shape
   let template = Template.of_shape

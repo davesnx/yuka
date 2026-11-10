@@ -1199,6 +1199,123 @@ let mismatch_log () =
     {|yuka: hydration mismatch in island T.Island at section > div > p:2: expected "z", found "y"|}
     logged
 
+let head_sheets : unit -> string =
+  [%mel.raw
+    {|function () {
+  return Array.from(document.head.querySelectorAll("link[data-yuka-css]")).map(function (l) { return l.getAttribute("href") }).join(",")
+}|}]
+
+let clear_sheets : unit -> unit =
+  [%mel.raw {|function () { delete document.__yukaSheets; document.querySelectorAll("link[data-yuka-css]").forEach(function (l) { l.remove() }) }|}]
+
+let css_render () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div [] [ use_css x (span [ text "a" ]); use_css x (span [ text "b" ]) ])
+  in
+  check "one link in the head" "/_yuka/css/x.css" (head_sheets ());
+  check "no link in the tree" "<div><span>a</span><span>b</span></div>" (html c);
+  dispose ()
+
+let count_sheets : string -> int =
+  [%mel.raw {|function (href) { return Array.from(document.querySelectorAll("link[data-yuka-css]")).filter(function (l) { return l.getAttribute("href") === href }).length }|}]
+
+let css_present () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" and y = stylesheet "/_yuka/css/y.css" in
+  let c = container {|<link rel="stylesheet" href="/_yuka/css/x.css" data-yuka-css><div id="t"></div>|} in
+  let dispose =
+    Yuka.Client.render (as_element (query c "#t")) (fun () -> div [] [ use_css x (span [ text "a" ]); use_css y (span [ text "b" ]) ])
+  in
+  check "x: the link of the server is the only one" "1" (ints (count_sheets "/_yuka/css/x.css"));
+  check "y: added to the head" "/_yuka/css/y.css" (head_sheets ());
+  dispose ()
+
+let count_queries : (unit -> unit) -> int =
+  [%mel.raw
+    {|function (f) {
+  var d = document, saved = d.querySelectorAll, n = 0;
+  d.querySelectorAll = function (s) { n++; return saved.call(d, s); };
+  try { f(); } finally { d.querySelectorAll = saved; }
+  return n;
+}|}]
+
+let css_no_scan () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let c = container "" in
+  let n =
+    count_queries (fun () ->
+        let dispose =
+          Yuka.Client.render (as_element c) (fun () ->
+              div [] (List.init 20 (fun i -> use_css x (span [ text (ints i) ]))))
+        in
+        dispose ())
+  in
+  check "the document is scanned once, not on each use" "1" (ints n)
+
+let apply_stream : string -> string -> string -> unit =
+  [%mel.raw
+    {|function (fill_script, shell, chunk) {
+  var code = fill_script.replace(/^<script>/, "").replace(/<\/script>$/, "");
+  new Function(code)();
+  document.__yukaFill = window.__yukaFill;
+  var host = document.createElement("div");
+  host.id = "stream";
+  host.innerHTML = shell;
+  document.body.appendChild(host);
+  var at = chunk.indexOf("<script>");
+  var t = document.createElement("div");
+  t.innerHTML = chunk.slice(0, at);
+  while (t.firstChild) document.body.appendChild(t.firstChild);
+  var id = /__yukaFill\("([^"]*)"\)/.exec(chunk)[1];
+  window.__yukaFill(id);
+}|}]
+
+let css_loading_fill () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let a, resolve, _ = Async.make () in
+  let chunks = ref [] in
+  let write c =
+    chunks := !chunks @ [ c ];
+    Async.return ()
+  in
+  let never _ =
+    let p, _, _ = Async.make () in
+    p
+  in
+  ignore
+    (Private.stream ~sleep:never ~write (fun () ->
+         div []
+           [ Await.make ~async:a ~loading:(use_css x (span [ text "L" ]))
+               ~children:(fun n -> use_css x (span [ text (ints n) ]))
+               () ]));
+  resolve 1;
+  let shell = List.nth !chunks 1 and fill = List.nth !chunks 2 in
+  apply_stream Private.fill_script shell fill;
+  check "filled" "1" (text_content (query (body ()) "#stream"));
+  check "the link survives the fill" "1" (ints (count_sheets "/_yuka/css/x.css"));
+  set_html (query (body ()) "#stream") ""
+
+let css_hydrate_rows () =
+  clear_sheets ();
+  let x = stylesheet "/_yuka/css/x.css" in
+  let tree () =
+    lower "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun k -> use_css x (li k [ text k ])) ]
+  in
+  let c = container (Private.render_html (fun () -> Private.node (tree ()))) in
+  let server_html = html c in
+  let a = query c "[data-key=a]" in
+  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  check "rows adopted as printed" server_html (html c);
+  same "row a" a (query c "[data-key=a]");
+  check "the client adds the link" "/_yuka/css/x.css" (head_sheets ());
+  dispose ()
+
 let all =
   [
     ("dom hydration mismatch log", mismatch_log);
@@ -1223,6 +1340,11 @@ let all =
     ("dom keyed list shuffle", keyed_list_shuffle);
     ("dom adjacent and empty texts hydrate", adjacent_texts_hydrate);
     ("dom hydrate server output", hydrate_server_output);
+    ("css: two uses add one link", css_render);
+    ("css: a link already in the document is kept", css_present);
+    ("css: hydrate rows that use a sheet", css_hydrate_rows);
+    ("css: a link of a loading part survives the fill", css_loading_fill);
+    ("css: uses do not scan the document", css_no_scan);
     ("dom await swaps", await_swaps);
     ("dom await fails", await_fails);
     ("dom await hydrates settled", await_hydrates_settled);

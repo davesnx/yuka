@@ -200,6 +200,7 @@ let check_out out config =
     (Yuka.Server.served_dirs config)
 
 let prerender ~out config app =
+  let config = Yuka.Server.prerender_config config in
   check_out out config;
   let ( let* ) = Lwt.bind in
   let request path = Dream.request ~method_:`GET ~target:path "" in
@@ -242,6 +243,7 @@ let prerender ~out config app =
   let* page = to_lwt (Yuka.Server.missing_page config app ~sleep:Adapter.sleep) in
   let* text = to_lwt (drain page) in
   write_file (Filename.concat out "404.html") text;
+  List.iter (fun (path, css) -> write_file (Filename.concat out path) css) (Yuka.Server.css_files config);
   List.iter
     (fun (prefix, dir) -> copy dir (Filename.concat out (String.sub prefix 1 (String.length prefix - 1))))
     (Yuka.Server.served_dirs config);

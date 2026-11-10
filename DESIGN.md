@@ -1663,3 +1663,124 @@ Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
   (`time-counter`, made in order).
 - Size: about 1.4 KB gzip in an app that mounts navigation (demo +1381 B); 0 in
   the keyed benchmark, which does not.
+
+## CSS per module (2026-11-10)
+
+Ticket 23; `.workplace/docs/app-spec.md` section 23, option B built
+through A.
+
+- One sheet per file, declared by `module Css = [%yuka.css "file.css"]`
+  (a whole-file pass of the ppx, after `let%client`). The ppx reads the
+  file next to the source (dune `preprocessor_deps`), scans the selectors
+  (`ppx/css_scan.ml`: comments, strings and `url()` with a quoted or bare
+  argument are skipped; a segment is a selector when it ends with `{` and
+  does not start with `@`, except `@scope` (all of it) and `@supports`
+  (inside `selector()`); `[...]` is skipped; class names follow the CSS
+  identifier rules, with escapes and non-ASCII code points) and makes
+  `Css.stylesheet` and one string per class, the unescaped name and
+  `_HASH`. The OCaml name keeps letters, digits and `_`, other ASCII
+  becomes `_`, a leading digit gets `_`; a non-ASCII name is an error. The hash is the first 8 hex digits of the MD5 of the
+  file text, for both the class names and the file name
+  `BASE-HASH.css`: the ppx and the generator see the file under different
+  paths, and the same text gives the same rules.
+- The ppx wraps the body (or each case of a `function`) of each `make`
+  after the declaration that returns an element: a `let%client`, a body
+  in JSX (also through `let`, `match`, `if`), or an `element` type on the
+  binding or the result. Other functions named `make` (constructors) are
+  left alone; a `make` that is not a function gets a `ppwarning`. On the server, `use_css` returns
+  `Fragment [<link data-yuka-css>; body]`; in the browser it adds the link
+  to `<head>` if the document has none and returns the body. The client
+  tree has no new node kind, so `mount_node` and the keyed benchmark do
+  not change (10,026 B gzip).
+- Printer: the link is printed once per session, in document order, at
+  print time (components run before printing, and list elements are
+  evaluated right to left, so the order of `use_css` calls is not the page
+  order). Where the output is hydrated (inside an island), it is held and
+  written before the outermost island's `<yuka-island>`, after its
+  `modulepreload`, by cutting the buffer at the island's start; held links
+  of a fill inside an island go before its `<template>`. A link used in
+  the `loading` part of a streamed `Await` goes before the region's
+  start marker (or to the island), since the fill replaces the region.
+  `Private.render_html` (whole-tree hydration) prints no links. `each` rows and
+  the other places that look at a node's shape see the body, as the client
+  does. A `Catch` that fails restores the printed set.
+- Navigation: at start and before and after a swap,
+  `Web.adopt_stylesheets` moves `link[data-yuka-css]` from the body to
+  the head in one pass, dropping one whose `href` is there, so a swap
+  never deletes a sheet that content outside the outlet needs. Sheets are
+  never removed. `add_stylesheet` keeps the known `href`s in a `Set` on
+  the document, filled from the DOM once.
+- Cycle: `config ~css` holds the generated `(file, text)` list from
+  `yuka-css` (which finds the `[%yuka.css]` declarations in the sources,
+  so a sheet cannot be missed by a glob; a missing file fails the build).
+  Names must be one path segment (`Invalid_argument`). Served at
+  `/_yuka/css/FILE` (decoded) with `Immutable` for `GET` and `HEAD`, 405
+  otherwise; any other path there is a 404 `no-store`. `Server.css_files` gives them to a
+  prerender. The text lives only in the server executable; a client bundle
+  has the URL and the class names.
+- `Yuka.stylesheet` is a top-level value: the generated code first used
+  `Yuka.Private.stylesheet`, and the `Private` record kept the server
+  printer in the demo client chunk (`make size` caught it).
+
+## Dev server (2026-11-10)
+
+Ticket 24; `.workplace/docs/app-spec.md` section 24, option A, level 1.
+
+- `yuka dev` is the native executable `yuka` (package `yuka`, library
+  `unix`, no Dream): the spec puts it in `yuka`, and it talks only to dune
+  and a child process, so `yuka-dream` users and other adapters get it.
+- It runs `dune build --watch TARGETS` with stdout and stderr in one pipe,
+  echoes every line, and reads the status lines: `Success, waiting for
+  filesystem changes...` and `Had N errors, waiting...` (the lines in
+  between, after `NEW BUILD`, are the error text). No dune RPC: the line
+  is enough, and RPC needs the `dune-rpc` library.
+- State: a file (`--state`, default `_build/.yuka-dev`), one JSON line
+  `{"build":B,"page":P,"error":E}`, written by rename. `build` counts the
+  builds that changed something, `page` is the last that needs a reload.
+  On success: the server executable's stamp (mtime and size) changed, the
+  server exited, or the first build: stop and start the server,
+  `page = build`; else files under `--assets` changed: `build + 1`, and
+  `page = build` unless all are `.css`. On failure: the same numbers with
+  the error. The server is started with `YUKA_DEV=1` and
+  `YUKA_DEV_FILE=<state>`; the spec's `YUKA_DEV_BUILD` is not needed,
+  since the server reads the file.
+- Server: `config` reads `YUKA_DEV` (so nothing changes in the app).
+  `/_yuka/dev` is a `Stream` that sends the file's line (newlines joined)
+  when it differs from the last one, checking every 0.25 s with the
+  adapter's `sleep`; a closed connection ends it through the failed
+  write. Full pages (not navigation answers) get the script in the head,
+  with the state at render time, `<` escaped.
+- Browser script (inline, about 1.2 KB, only in dev pages): an
+  `EventSource`; `page` above the page's: save `scrollY` in
+  `sessionStorage` and reload (restored on `load`); `build` above: add
+  `?v=build` to each `link rel=stylesheet` that is not a `[%yuka.css]`
+  sheet (those change their class names, so they come with a page build);
+  `error`: a fixed `<pre id="yuka-dev-error">`, removed by the next state
+  without one. A restarted server makes `EventSource` reconnect; the first
+  event then carries the new numbers.
+- Production: no route, no script, no client module; `make size` and
+  `make measure-pages` do not change.
+- Review fixes:
+  - A change under `--assets` restarts the server, unless only `.css`
+    files changed; the server reads the manifest, the metafile and the
+    build id at start.
+  - `/_yuka/dev` is a callback loop with no growing chain. It sends
+    `: ping` after 15 s without a change, ends on the first failed
+    write, and answers `HEAD` with headers only.
+  - The state has a random `session` per `yuka dev` run; a page that sees
+    another session reloads.
+  - The CSS swap keeps other origins as they are and writes `u.href`.
+  - The watched executable is looked up in `PATH`, or named with
+    `--watch-exe`.
+  - Any exception in the loop stops the server and dune. The state
+    directory is made with all its parents.
+  - `stop` keeps the pid until the process is reaped and retries
+    `waitpid` on `EINTR`. A signal during a restart then stops the old
+    server (also after `SIGKILL`) and starts no second one.
+  - Deleted asset files count as changes.
+  - `json_string` is shared in `gen/source_text.ml`.
+  - The state file is read through `Web.read_file`, which is native only,
+    so the cycle has no channel primitives for Melange.
+  - A prerender uses `Server.prerender_config` (`YUKA_DEV` ignored), and
+    with `YUKA_DEV` prerendered routes render live.
+

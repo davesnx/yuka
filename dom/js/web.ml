@@ -515,3 +515,36 @@ let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
     .then(function (r) { return r.text().then(function (t) { ok(r.status, t); }); })
     .catch(function (e) { fail(String((e && e.message) || e)); });
 }|}]
+
+let add_stylesheet : string -> unit =
+  [%mel.raw
+    {|function (href) {
+  var seen = document.__yukaSheets;
+  if (!seen) {
+    seen = document.__yukaSheets = new Set();
+    document.querySelectorAll("link[data-yuka-css]").forEach(function (l) { seen.add(l.getAttribute("href")); });
+  }
+  if (seen.has(href)) return;
+  seen.add(href);
+  var l = document.createElement("link");
+  l.rel = "stylesheet";
+  l.setAttribute("href", href);
+  l.setAttribute("data-yuka-css", "");
+  document.head.appendChild(l);
+}|}]
+
+let adopt_stylesheets : unit -> unit =
+  [%mel.raw
+    {|function () {
+  if (!document.body) return;
+  var head = document.head, seen = new Set();
+  head.querySelectorAll("link[data-yuka-css]").forEach(function (l) { seen.add(l.getAttribute("href")); });
+  document.body.querySelectorAll("link[data-yuka-css]").forEach(function (l) {
+    var href = l.getAttribute("href");
+    if (seen.has(href)) l.remove();
+    else { seen.add(href); head.appendChild(l); }
+  });
+  document.__yukaSheets = seen;
+}|}]
+
+let read_file (_ : string) : string option = None

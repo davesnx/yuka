@@ -318,6 +318,64 @@ when there is no data yet.
 </Yuka.Show>
 ```
 
+### CSS per module
+
+A module brings its own stylesheet. `[%yuka.css]` reads the file at build
+time and gives one `string` per class, with a name scoped to the file:
+
+```css
+/* related.css */
+.related { margin-top: 20px; }
+.related-list li { display: flex; }
+```
+
+```ocaml
+(* related.mlx *)
+module Css = [%yuka.css "related.css"]
+
+let%client make ~related () =
+  <div class_=Css.related><ul class_=Css.related_list>...</ul></div>
+```
+
+`Css.related` is `"related_1084c5c6"`; a class that the file does not have
+is a compile error. Classes are found in selectors, also in `@scope` and
+`@supports selector()` (not in comments, strings, `url()` or attribute
+values), with CSS escapes (`.md\:flex` is `Css.md_flex`, `"md:flex_HASH"`);
+other characters become `_` in the OCaml name, and a non-ASCII class name
+is an error. After `[%yuka.css]`, each function named `make` that returns
+an element (JSX, an `element` type annotation, or a `let%client`) calls
+`Yuka.use_css Css.stylesheet`; a `make` that is not a function gets a
+warning. Call `use_css` yourself in other functions. The
+server prints `<link rel="stylesheet" data-yuka-css>` once per page, before
+the first element that uses it; the sheets an island uses are printed
+before its `<yuka-island>`, next to its `modulepreload`. In the browser, a
+sheet that the page does not have yet is added to `<head>`, and after a
+client navigation (and when it starts) the links move to `<head>`. A sheet is never removed.
+A page with no island still loads no JavaScript.
+
+The library needs the files at preprocessing time, and the server needs
+the rewritten sheets. `yuka-css` reads the sources of the library, finds
+each `[%yuka.css]` and writes the sheets as an OCaml module; a declared
+file that is missing fails the build:
+
+```dune
+; shared/dune
+(library (name shared) (preprocess (pps yuka.ppx))
+ (preprocessor_deps (glob_files *.css)))
+
+; server/dune
+(rule (targets yuka_css.ml) (deps (source_tree ../shared))
+ (action (with-stdout-to yuka_css.ml (run %{bin:yuka-css} ../shared))))
+```
+
+```ocaml
+Yuka.Server.config ~css:Yuka_css.sheets ()
+```
+
+The cycle serves them at `/_yuka/css/NAME-HASH.css` with `Immutable`, and a
+prerender writes them. Global CSS (resets, variables) stays in
+`~styles`.
+
 ### Forms
 
 A record with `[@@deriving form]` gets a field type and a decoder that runs
@@ -668,6 +726,44 @@ dune exec ./server/main.exe
 
 Open `http://localhost:8080/` and click the button. The sections above
 describe each part.
+
+### Development
+
+`yuka dev` rebuilds on change, restarts the server and reloads the
+browser:
+
+```sh
+yuka dev --build @all --assets _build/default/static -- ./_build/default/server/main.exe
+```
+
+It runs `dune build --watch` on the `--build` targets (default `@@default`)
+and reads dune's results. After each successful build:
+
+- the server executable changed, the server stopped, or files under an
+  `--assets` directory changed (other than only `.css` files): it stops
+  the server (`SIGTERM`, then `SIGKILL` after `--kill-after`, default
+  2 s), starts it again (it reads the manifest and the build id at
+  start), and the browser reloads, keeping the scroll position;
+- only `.css` files under `--assets` changed: the page's stylesheets of
+  the same origin are swapped with no reload (`link` gets `?v=N`).
+
+The server executable is the first word of the command, looked up in
+`PATH` if it has no `/`; when the command is a wrapper (`dune exec`, a
+shell script), name the binary to watch with `--watch-exe FILE`. Each
+`yuka dev` run has its own session, so open tabs reload after a restart
+of `yuka dev`.
+
+A failed build keeps the old server and shows dune's errors in an overlay
+in the page, and in the terminal. Island state is lost on a reload.
+
+The server needs no change: `yuka dev` starts it with `YUKA_DEV=1`, and
+then the cycle answers `GET /_yuka/dev` (Server-Sent Events, with a
+comment every 15 s) and puts a small script in the head of each page, and
+renders prerendered pages live. Without `YUKA_DEV=1` there is neither, so
+production pages send no byte of it; a prerender never writes the
+script. Sheets of
+`[%yuka.css]` change their class names with their text, so editing one
+reloads the page. `make demo-dev` runs the demo this way.
 
 ### The demo
 

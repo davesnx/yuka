@@ -3,7 +3,7 @@ let static =
   Out_channel.with_open_bin (Filename.concat dir "s.css") (fun oc -> output_string oc "body{}");
   dir
 
-let config = Yuka.Server.config ~public:[ ("/static", static) ] ()
+let config = Yuka.Server.config ~public:[ ("/static", static) ] ~css:[ ("w-0a1b.css", ".w_0a1b{}") ] ()
 
 let rec files dir prefix =
   Sys.readdir dir |> Array.to_list |> List.sort compare
@@ -41,6 +41,7 @@ let pages () =
     "files"
     [
       "404.html";
+      "_yuka/css/w-0a1b.css";
       "docs/index.html";
       "feed.xml";
       "guide/index.html";
@@ -57,6 +58,7 @@ let pages () =
   Alcotest.(check string) "endpoint" "<rss/>" (file "feed.xml");
   check_true "404 page" (contains (file "404.html") "missing /404.html");
   Alcotest.(check string) "static copied" "body{}" (file "static/s.css");
+  Alcotest.(check string) "css sheet written" ".w_0a1b{}" (file "_yuka/css/w-0a1b.css");
   check_true "warning for the 404 link" (contains warnings "/post/missing answered 404");
   check_true "no warning for links that are not prerendered" (not (contains warnings "/secret"));
   check_true "files are not crawled" (not (contains warnings "/_yuka"));
@@ -97,6 +99,15 @@ let serve () =
   let response, body = call "/post/nope" in
   Alcotest.(check int) "missing file renders" 404 (Dream.status_to_int (Dream.status response));
   check_true "not found" (contains body "missing /post/nope")
+
+let prerender_without_dev () =
+  Unix.putenv "YUKA_DEV" "1";
+  let config = Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> Yuka.Server.config ()) in
+  let out = Filename.temp_dir "yuka_out" "" in
+  ignore (with_stderr (fun () -> Lwt_main.run (Yuka_dream.prerender ~out config Routes_server.app)));
+  let index = In_channel.with_open_bin (Filename.concat out "index.html") In_channel.input_all in
+  check_true "a page" (contains index "<title>Home</title>");
+  check_true "no dev script in a prerendered page" (not (contains index "EventSource"))
 
 let out_inside_a_served_dir () =
   let dir = Filename.temp_dir "yuka_static" "" in
@@ -156,6 +167,7 @@ let () =
           Alcotest.test_case "seeds, crawled links, 404.html, assets" `Quick pages;
           Alcotest.test_case "twice gives the same files" `Quick twice;
           Alcotest.test_case "the handler serves prerendered files" `Quick serve;
+          Alcotest.test_case "a prerender with YUKA_DEV=1 writes no dev script" `Quick prerender_without_dev;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
           Alcotest.test_case "tree digest follows file contents" `Quick tree_digest;
         ] );

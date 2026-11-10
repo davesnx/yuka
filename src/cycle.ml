@@ -165,14 +165,44 @@ let bundle ~dir ~entry ~manifest ~metafile =
     immutable = (fun path -> List.exists (String.equal path) hashed);
   }
 
+type dev = { state : unit -> string }
+
+let dev_default = {|{"session":"","build":0,"page":0,"error":null}|}
+
+let dev_of_env () =
+  match Sys.getenv_opt "YUKA_DEV" with
+  | Some "1" ->
+      let file = Sys.getenv_opt "YUKA_DEV_FILE" in
+      let state () =
+        match file with
+        | None -> dev_default
+        | Some f -> (
+            match Option.map String.trim (Web.read_file f) with
+            | None | Some "" -> dev_default
+            | Some text -> String.concat " " (String.split_on_char '\n' text))
+      in
+      Some { state }
+  | _ -> None
+
+let dev_script state =
+  let json = String.concat "\\u003c" (String.split_on_char '<' state) in
+  "<script>(function(){var s=" ^ json
+  ^ {|,b=s.build,p=s.page,k="yuka-dev-scroll",o=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){try{sessionStorage.setItem(k,String(scrollY))}catch(x){}s.session=d.session;p=d.page;location.reload();return}if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
+
 type config = {
+  dev : dev option;
   assets : assets option;
   public : (string list * string) list;
   styles : string list;
+  css : (string * string) list;
   head : string;
   timeout : float;
   prerendered : string option;
 }
+
+let valid_file_segment s =
+  s <> "" && s <> "." && s <> ".."
+  && not (String.exists (fun c -> c = '/' || c = '\\' || c = '\000') s)
 
 let public_prefix (prefix, dir) =
   match Router.split_path prefix with
@@ -182,11 +212,18 @@ let public_prefix (prefix, dir) =
        ^ " has no segment; it would hide every route")
   | segments -> (segments, dir)
 
-let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(head = "") ?(timeout = 10.) () =
+let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.) () =
   {
+    dev = dev_of_env ();
     assets;
     public = List.map public_prefix public;
     styles;
+    css =
+      List.map
+        (fun (name, text) ->
+          if valid_file_segment name then (name, text)
+          else invalid_arg (Printf.sprintf "Yuka.Server.config: css file name %S is not one path segment" name))
+        css;
     head;
     timeout;
     prerendered;
@@ -196,6 +233,10 @@ let build_id config (App a) =
   match config.assets with
   | None -> a.build
   | Some assets -> a.build ^ assets.digest
+
+let prerender_config config = { config with dev = None }
+
+let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
 let served_dirs config =
   Option.to_list (Option.map (fun (a : assets) -> ("/_yuka", a.dir)) config.assets)
@@ -307,7 +348,12 @@ let render env ~status ~headers layers (page : page) =
   let import_map = match assets with Some a -> a.import_map | None -> [] in
   let head extra =
     Server.head
-      ~extra:("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">" ^ extra)
+      ~extra:
+        ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
+        ^ (match (env.config.dev, env.navigate) with
+          | Some dev, None -> dev_script (dev.state ())
+          | _ -> "")
+        ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
   let build = nest layers page.body in
@@ -438,10 +484,6 @@ let rule_cache (rules : rules) headers =
       headers @ [ ("cache-control", cache_control c) ]
   | _ -> headers
 
-let valid_file_segment s =
-  s <> "" && s <> "." && s <> ".."
-  && not (String.exists (fun c -> c = '/' || c = '\\' || c = '\000') s)
-
 let file_path raw =
   let parts = List.map (Router.decode ~plus:false) raw in
   if parts <> [] && List.for_all valid_file_segment parts then Some (String.concat "/" parts)
@@ -462,7 +504,8 @@ let prerender_file target =
 
 let prerendered_file env (rules : rules) (r : request) ~path ~query =
   match (env.config.prerendered, r.meth, query) with
-  | Some root, (`GET | `HEAD), (None | Some "") when rules.prerender && env.navigate = None -> (
+  | Some root, (`GET | `HEAD), (None | Some "")
+    when rules.prerender && env.navigate = None && Option.is_none env.config.dev -> (
       match prerender_file path with
       | Some file when env.exists ~root ~path:file -> Some (root, file)
       | _ -> None)
@@ -633,6 +676,32 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                             Async.return { resp with headers }))
                       (fail_page env a.missing))))
 
+let dev_events ~state ~sleep write =
+  let result, resolve, _ = Async.make () in
+  let rec step last idle =
+    match state () with
+    | exception e ->
+        log_quietly ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e);
+        resolve ()
+    | now ->
+    let message =
+      if not (String.equal now last) then Some ("data: " ^ now ^ "\n\n")
+      else if idle >= 60 then Some ": ping\n\n"
+      else None
+    in
+    match message with
+    | None -> wait now (idle + 1)
+    | Some m -> (
+        match write m with
+        | sent ->
+            Async.on_settled sent (function
+              | Async.Done () -> wait now 1
+              | Async.Failed _ | Async.Pending -> resolve ())
+        | exception _ -> resolve ())
+  and wait last idle = Async.on_settled (sleep 0.25) (fun _ -> step last idle) in
+  step "" 0;
+  result
+
 let handle config (App a as app) ~sleep ~exists req (r : request) =
   let path, query = Router.split_target r.target in
   let env =
@@ -665,9 +734,31 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
   let run () =
     match (parts, public) with
     | "" :: "_yuka" :: _, _ -> (
-        match List.tl raw with
+        match (List.tl raw, config.dev) with
+        | [ "dev" ], Some dev -> (
+            let headers = [ ("content-type", "text/event-stream"); ("cache-control", "no-store") ] in
+            match r.meth with
+            | `GET -> reply { status = 200; headers; body = Stream (dev_events ~state:dev.state ~sleep) }
+            | `HEAD -> reply { status = 200; headers; body = String "" }
+            | _ -> reply (method_not_allowed "GET, HEAD"))
+        | raw, _ ->
+        match raw with
         | "action" :: rest -> action r rest
         | [ "csrf" ] -> csrf_answer r
+        | "css" :: rest when config.css <> [] -> (
+            match r.meth with
+            | `GET | `HEAD -> (
+                match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
+                | Some text ->
+                    reply
+                      {
+                        status = 200;
+                        headers =
+                          [ ("content-type", "text/css; charset=utf-8"); ("cache-control", cache_control Immutable) ];
+                        body = String text;
+                      }
+                | None -> reply (asset_miss ()))
+            | _ -> reply (method_not_allowed "GET, HEAD"))
         | rest -> (
             match config.assets with
             | None -> reply (asset_miss ())

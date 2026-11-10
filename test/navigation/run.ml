@@ -544,6 +544,134 @@ let partial finish =
       check "outer kept, inner stopped, new running" "g1/3|g1/1" (log_g ());
       finish ())
 
+let attr_text : string -> string =
+  [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.textContent : 'none' }"]
+let document_session_set : string -> string -> unit =
+  [%mel.raw "function (k, v) { document.defaultView.sessionStorage.setItem(k, v) }"]
+let fire_load : unit -> unit =
+  [%mel.raw "function () { document.defaultView.dispatchEvent(new document.defaultView.Event('load')) }"]
+
+let sheets : string -> string =
+  [%mel.raw
+    {|function (where) {
+  return Array.from(document.querySelectorAll(where + " link[data-yuka-css]")).map(function (l) { return l.getAttribute("href") }).join(",")
+}|}]
+
+let css_link href = {|<link rel="stylesheet" href="|} ^ href ^ {|" data-yuka-css>|}
+
+let partial_css finish =
+  setup "";
+  outlet_page ();
+  set_head ({|<title>start</title><meta name="yuka-build" content="b1">|} ^ css_link "/_yuka/css/a.css");
+  plain_start ();
+  ignore (click "#two" "");
+  resolve_headers 0
+    (css_link "/_yuka/css/a.css" ^ css_link "/_yuka/css/b.css" ^ {|<p id="new">new</p>|})
+    200
+    [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "new sheets moved to the head, no duplicate" "/_yuka/css/a.css,/_yuka/css/b.css" (sheets "head");
+      check "none left in the body" "" (sheets "body");
+      check "content swapped" "new" (attr "#new" "id");
+      ignore (click "#home" "");
+      resolve_headers 1 {|<p id="back">back</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "the sheets stay after the next swap" "/_yuka/css/a.css,/_yuka/css/b.css" (sheets "head");
+          finish ()))
+
+let first_load_css finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<nav><a id="two" href="/two">two</a></nav><yuka-outlet data-k="L0" style="display:contents">|}
+    ^ css_link "/_yuka/css/a.css" ^ {|<p class="a_1">in</p></yuka-outlet><p class="a_1">out</p>|});
+  plain_start ();
+  check "moved to the head at start" "/_yuka/css/a.css" (sheets "head");
+  ignore (click "#two" "");
+  resolve_headers 0 {|<p id="new">new</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "content outside the outlet keeps its sheet" "/_yuka/css/a.css" (sheets "");
+      finish ())
+
+let full_swap_css finish =
+  setup (page {|<a id="l" href="/issue/1">go</a>|});
+  plain_start ();
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Issue 1" (css_link "/_yuka/css/c.css" ^ page "<p>one</p>")) "";
+  tick (fun () ->
+      check "sheet of the new page in the head" "/_yuka/css/c.css" (sheets "head");
+      check "body without it" (page "<p>one</p>") (body_html ());
+      finish ())
+
+let run_dev : string -> unit =
+  [%mel.raw
+    {|function (html) {
+  var w = document.defaultView;
+  w.EventSource = function (url) { globalThis.__es = this; this.url = url; };
+  w.scrollTo = function (x, y) { globalThis.__log.push("scroll:" + y); };
+  var code = html.replace(/^<script>/, "").replace(/<\/script>$/, "");
+  new Function("window", "with (window) {" + code + "}")(w);
+}|}]
+
+let dev_send : string -> unit =
+  [%mel.raw {|function (data) { globalThis.__es.onmessage({ data: data }) }|}]
+
+let dev_url : unit -> string = [%mel.raw {|function () { return globalThis.__es.url }|}]
+let session : string -> string =
+  [%mel.raw {|function (k) { return String(document.defaultView.sessionStorage.getItem(k)) }|}]
+
+let dev_page () =
+  setup "";
+  set_head
+    ({|<link rel="stylesheet" href="/static/s.css"><link rel="stylesheet" href="/_yuka/css/a-1.css" data-yuka-css>|}
+    ^ {|<link rel="stylesheet" href="https://cdn.example/x.css">|});
+  set_body "<p>x</p>";
+  run_dev (Private.dev_script {|{"session":"a","build":2,"page":1,"error":null}|})
+
+let dev_reload finish =
+  dev_page ();
+  check "listens on /_yuka/dev" "/_yuka/dev" (dev_url ());
+  dev_send {|{"session":"a","build":2,"page":1,"error":null}|};
+  check "same build: nothing" "" (log_read ());
+  dev_send {|{"session":"a","build":3,"page":3,"error":null}|};
+  check "a new page build reloads" "assign" (log_read ());
+  check "the scroll is kept for the next page" "0" (session "yuka-dev-scroll");
+  finish ()
+
+let dev_session finish =
+  dev_page ();
+  dev_send {|{"session":"b","build":1,"page":1,"error":null}|};
+  check "a new yuka dev session reloads, also with lower numbers" "assign" (log_read ());
+  finish ()
+
+let dev_css finish =
+  dev_page ();
+  dev_send {|{"session":"a","build":3,"page":1,"error":null}|};
+  check "no reload" "" (log_read ());
+  check "the stylesheet gets the build" "http://localhost/static/s.css?v=3" (attr {|link[href*="/static/"]|} "href");
+  check "another origin is left alone" "https://cdn.example/x.css" (attr {|link[href*="cdn"]|} "href");
+  check "a /_yuka/css sheet is left alone" "/_yuka/css/a-1.css" (attr "link[data-yuka-css]" "href");
+  finish ()
+
+let dev_error finish =
+  dev_page ();
+  dev_send {|{"session":"a","build":2,"page":1,"error":"File a.ml: Error"}|};
+  check "the overlay shows the error" "File a.ml: Error" (attr_text "#yuka-dev-error");
+  check "no reload" "" (log_read ());
+  dev_send {|{"session":"a","build":3,"page":3,"error":null}|};
+  check "the overlay goes away" "none" (attr_text "#yuka-dev-error");
+  check "then the reload" "assign" (log_read ());
+  finish ()
+
+let after_scroll finish =
+  setup "";
+  document_session_set "yuka-dev-scroll" "250";
+  run_dev (Private.dev_script {|{"session":"a","build":1,"page":1,"error":null}|});
+  fire_load ();
+  check "the scroll position is restored on load" "scroll:250" (log_read ());
+  check "and forgotten" "null" (session "yuka-dev-scroll");
+  finish ()
+
 let stale_build finish =
   setup "";
   outlet_page ();
@@ -1176,6 +1304,14 @@ let all =
   [
     ("navigate before start", navigate_before_start);
     ("click fetches and swaps", click_fetches);
+    ("dev: a new page build reloads and keeps the scroll", dev_reload);
+    ("dev: a css build swaps the stylesheets", dev_css);
+    ("dev: a new session reloads", dev_session);
+    ("dev: a build error shows an overlay", dev_error);
+    ("dev: the scroll position comes back after the reload", after_scroll);
+    ("css: sheets of a partial navigation move to the head", partial_css);
+    ("css: sheets of a full swap move to the head", full_swap_css);
+    ("css: sheets of the first page move to the head at start", first_load_css);
     ("links that are not intercepted", not_intercepted);
     ("stop then start", stop_then_start);
     ("history and popstate", history_and_popstate);

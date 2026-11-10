@@ -219,10 +219,5 @@ h1, h2, p { margin: 0; }
 .skeleton-line.w2 { width: 80%; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
-.related { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--border); }
-.related-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.related-list li { display: flex; gap: 6px; align-items: center; }
-.related-list a:hover { text-decoration: underline; }
-
 .chip { border: 1px solid var(--border); border-radius: 12px; background: none; color: var(--muted); font-size: 12px; padding: 2px 8px; cursor: pointer; }
 .chip.on { color: inherit; border-color: currentColor; }
