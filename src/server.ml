@@ -1,7 +1,3 @@
-open Tiny_hashtbl
-
-module Shared_action = Action
-
 let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)
 
 let to_string build =
@@ -309,45 +305,46 @@ let preload_urls ~manifest ~base ?metafile () =
         | Some outs -> (
             match List.find_opt (fun (_, e) -> e = path) outs with Some (file, _) -> Some (base ^ file) | None -> None))
 
-module Action = struct
-  exception Rejected of string
+exception Rejected of string
 
-  let reject message = raise (Rejected message)
-  let reject_prefix = "yuka.reject:"
-  let rejected message = Async.failed (reject_prefix ^ message)
+let reject message = raise (Rejected message)
+let reject_prefix = "yuka.reject:"
+let rejected message = Async.failed (reject_prefix ^ message)
 
-  type outcome = Output of Json.t | Bad_input of string
+type outcome = Output of Json.t | Bad_input of string
 
-  let registry : (string, Json.t -> outcome Async.t) Hashtbl.t =
-    Hashtbl.create 16
+let registry : (string * (Json.t -> outcome Async.t)) list ref = ref []
 
-  let rejection message =
-    let n = String.length reject_prefix in
-    if String.length message >= n && String.sub message 0 n = reject_prefix then
-      Some (String.sub message n (String.length message - n))
-    else None
+let find_action name =
+  Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
 
-  let transport name input =
-    match Hashtbl.find_opt registry name with
-    | None -> Async.failed ("unknown action " ^ name)
-    | Some handler ->
-        let settled, resolve, fail = Async.make () in
-        Async.on_settled (handler input) (function
-          | Async.Done (Output j) -> resolve j
-          | Async.Done (Bad_input m) -> fail m
-          | Async.Failed m -> fail (Option.value (rejection m) ~default:m)
-          | Async.Pending -> ());
-        settled
+let rejection message =
+  let n = String.length reject_prefix in
+  if String.length message >= n && String.sub message 0 n = reject_prefix then
+    Some (String.sub message n (String.length message - n))
+  else None
 
-  let install () = Shared_action.transport := transport
+let transport name input =
+  match find_action name with
+  | None -> Async.failed ("unknown action " ^ name)
+  | Some handler ->
+      let settled, resolve, fail = Async.make () in
+      Async.on_settled (handler input) (function
+        | Async.Done (Output j) -> resolve j
+        | Async.Done (Bad_input m) -> fail m
+        | Async.Failed m -> fail (Option.value (rejection m) ~default:m)
+        | Async.Pending -> ());
+      settled
 
-  let implement action f =
-    let name = Shared_action.name action in
-    if Hashtbl.mem registry name then
-      invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
-    let input = action.Shared_action.input
-    and output = action.Shared_action.output in
-    Hashtbl.replace registry name (fun json ->
+let implement action f =
+  let name = Action.name action in
+  if Option.is_some (find_action name) then
+    invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
+  let input = action.Action.input
+  and output = action.Action.output in
+  registry :=
+    ( name,
+      fun json ->
         match Codec.decode input json with
         | Error m -> Async.resolved (Bad_input m)
         | Ok v ->
@@ -357,9 +354,9 @@ module Action = struct
               | exception Rejected m -> rejected m
               | exception exn -> Async.failed (Web.exn_to_string exn)
             in
-            Async.map (fun o -> Output (Codec.encode output o)) run);
-    install ()
-end
+            Async.map (fun o -> Output (Codec.encode output o)) run )
+    :: !registry;
+  Action.transport := transport
 
 let max_body = 1_048_576
 
@@ -394,7 +391,7 @@ let handle_action ~name ~content_type ~origin ~host ~body =
   let error status message = Async.resolved (status, error_body message) in
   if not (same_origin ~origin ~host) then error 403 "origin mismatch"
   else
-    match Hashtbl.find_opt Action.registry name with
+    match find_action name with
     | None -> error 404 ("unknown action " ^ name)
     | Some handler ->
         if not (is_json content_type) then
@@ -407,12 +404,12 @@ let handle_action ~name ~content_type ~origin ~host ~body =
           | Ok json ->
               let result, resolve, _ = Async.make () in
               Async.on_settled (handler json) (function
-                | Async.Done (Action.Bad_input m) ->
+                | Async.Done (Bad_input m) ->
                     resolve (400, error_body ("invalid input: " ^ m))
-                | Async.Done (Action.Output j) ->
+                | Async.Done (Output j) ->
                     resolve (200, Json.to_string (`Assoc [ ("ok", j) ]))
                 | Async.Failed m -> (
-                    match Action.rejection m with
+                    match rejection m with
                     | Some message -> resolve (400, error_body message)
                     | None ->
                         !log_error

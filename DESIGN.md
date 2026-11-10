@@ -40,10 +40,11 @@ Current layout (v0.4; earlier sections use the old names, see "v0.4"):
 | `yuka.native` | native, melange | `dom/native/` | the default implementation of `Web` (raises "browser only") |
 | `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.mount ()` |
 
-Platform functions (event fields, window listeners, fetch) are a record of
-functions in the core (`Internal.platform`). The client library installs
-them at boot. On native they raise; they are only called inside effects and
-handlers, which never run on the server.
+Platform functions (event fields, window listeners, navigation) are a record
+of functions in the core (`Internal.platform`). Their defaults call `Web`, so
+in the browser they work without a boot step, and on native they raise; they
+are only called inside effects and handlers, which never run on the server.
+`Yuka.mount` with navigation replaces `navigate`.
 
 ## HTML and hydration markers
 
@@ -809,8 +810,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 
 - The ppx turns each lowercase JSX tree into a `Yuka.Template.t`, made once
   at the top of the module (`let __yuka_template_<module>_N =
-  Yuka.Template.make shape`), and an `instance` call with an array of parts at the place of the
-  JSX. Nested lowercase tags are part of the same template. The ppx adds the
+  Yuka.Template.make shape ~html ~walk ~kids ~attrs ~values`), and an
+  `instance` call with an array of parts at the place of the JSX. Nested lowercase tags are part of the same template. The ppx adds the
   bindings before the structure item that contains the JSX.
 - A shape is `Fixed_text`, `Fixed_element { tag; attrs; children }` or
   `Part i`. An attribute is `Fixed (name, value)` or `Part_attr i`.
@@ -823,14 +824,16 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   (`Part_attr`: computed values, holes, handlers, optional attributes).
 - The server and hydration use `Internal.expand`, the tree as `lower` makes
   it. So the HTML and the hydration walk do not change.
-- Fresh client creation: on first use, per template and per context (HTML or
-  inside SVG), the client prints the shape with `Internal.template_html`
-  (parts write nothing), parses it in a `<template>` (inside `<svg>` for the
-  SVG context), imports the root, and computes a walk: for each node it
-  needs, the index of a node already found, then "first child" or "next
-  sibling", then a number of "next sibling" steps. Each instance is
-  `cloneNode(true)` and one run of the walk. Then child parts are mounted at
-  their place, then attribute parts are set.
+- Fresh client creation: the ppx computes, at build time, the HTML of the
+  shape (`~html`, parts write nothing) and the paths (`~walk`, `~kids`,
+  `~attrs`, `~values`); see "Small client bundles" below. On first use, per
+  template and per context (HTML or inside SVG), the client parses `html` in
+  a `<template>` (inside `<svg>` for the SVG context) and imports the root.
+  The walk lists, for each node the client needs, the index of a node
+  already found, then "first child" or "next sibling", then a number of
+  "next sibling" steps. Each instance is `cloneNode(true)` and one run of
+  the walk. Then child parts are mounted at their place, then attribute
+  parts are set.
 - A child part is placed before the next fixed sibling (or at the end of the
   parent). Text separators: in the template, two fixed texts with only parts
   between them get `<!---->`. After the parts that follow a fixed text, the
@@ -925,3 +928,82 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   for native: it turns a `[@u]` type into a `Js.Fn` type and a
   `[@@mel.send]` external into an encoded primitive, and native has neither
   (an external would need a C stub per DOM primitive). Not done.
+
+## Small client bundles (2026-11-10)
+
+Goal: a client bundle holds only the features the app uses. Measured with
+`make size` (`bench/size/size.ts`): the keyed benchmark app and the demo
+chunks, minified, raw and gzip -9. The keyed benchmark app must stay under
+the budget in `bench/size/budget.json`.
+
+### What keeps code in a bundle
+
+- esbuild drops a top-level function or value that nothing uses, but keeps
+  every top-level statement that may have a side effect, in every module
+  that is imported, used or not: a call (`Hashtbl.create 16`,
+  `Base.new_owner ()`), a `new`, a string built with `^`. Melange imports
+  every module that `yuka.ml` names, so such a statement in any module of
+  the library is in every app. The library has none now: a table that must
+  exist at the top is created on first use (`ref None`), a constant
+  exception is built when it is raised.
+- An OCaml submodule is a JavaScript object. Using one member keeps all
+  members. So a submodule of `Yuka` holds only members that are small or
+  used together, and a feature that only some apps need is a top-level
+  value of `Yuka` (an ES export, dropped when unused) or is reached only from
+  one:
+  - `Yuka.mount` (top level) is the only way to the island runtime, the
+    action transport, the async-value watcher and navigation.
+    `Client.start` and `Client.stop` are gone from `Yuka.Client`;
+    `Yuka.mount ~navigation:false ()` starts the islands and
+    `Yuka.unmount ()` stops them and navigation (listeners, a fetch in
+    flight, `Browser.navigate`).
+  - `Router.navigate` is gone from `Yuka.Router`, which now holds only the
+    route functions. `Browser.navigate` is a client navigation after
+    `mount` and `location.assign` otherwise, as `Router.navigate` was.
+    The navigation code is in `navigation.ml`.
+  - `Server.Action` is rebuilt in `yuka.ml` from top-level functions of
+    `server.ml`, so `Yuka.Server` is an object of plain references that
+    the bundler can drop.
+- Some stdlib modules have side effects at load (`Sys`, `Int`, `Float`,
+  `Obj`) and are imported by `String`, `Bytes` and `Buffer`. The runtime
+  does not use `Float`, `Queue` or `Hashtbl`; `String` and `Buffer` stay
+  (printer, JSON, router), so about 300 bytes of `Sys`/`Int` load code stay
+  in every bundle.
+
+### Templates compiled by the ppx
+
+- `src/template_build.ml` holds the shape type, `html` (the template HTML,
+  as `to_html` prints the shape) and `plan` (the paths). The ppx compiles
+  the same file (`copy_files` in `ppx/dune`), so build time and run time
+  share one implementation. The client does not contain the printer or the
+  path code: it only parses `html` and follows the paths.
+- Paths are int arrays. `walk`: pairs (source index * 2 + 0 for first child
+  or 1 for next sibling, number of extra next-sibling steps). `kids`: five
+  ints per child part (part, parent node, anchor node or -1, flags, finish);
+  flags: 1 only child, 2 first of a run of parts, 4 a text before the run,
+  8 SVG in an HTML context, 16 SVG in an SVG context; finish: 1 remove the
+  `<!---->` after the run when it did not end with a text, 2 add one when it
+  did. `attrs`: three ints per attribute part (node, part, flags: 1 SVG in
+  an HTML context, 2 SVG in an SVG context). `values`: a fixed `select`
+  value per node.
+- Hand-written templates use `Internal.template shape`, which computes the
+  same arguments at run time. `Internal.recompile` does it for a ppx
+  template; the tests in `test/templates` compare the ppx output with it,
+  and the ppx HTML with the server HTML of the shape.
+
+### Smaller primitives
+
+- `Web.table` (a JS `Map`; `Hashtbl` on native) replaces `Hashtbl` in
+  `each`, the island registry and the scroll positions.
+- JSON: `\u00XX` escapes are written by hand; floats use
+  `Web.shortest_float` (on native the `%.{15,16,17}g` loop as before; in the
+  browser the same digits from `toExponential`; an exact tie at 17 digits
+  rounds to even, as C `printf` does, so both print the same text, where the
+  old Melange `Printf` rounded it up; `-0.0` is written `-0.0` on native and
+  `0.0` in the browser, as before);
+  numbers are parsed with `Web.parse_float` and `Web.parse_int`.
+  `Router` writes `%XX` by hand. `melange-tiny` is no longer a dependency.
+- The scheduler checks for empty lists with a pattern (no `caml_notequal`),
+  sorts by level with a small stable merge sort, and uses two lists as its
+  queue.
+

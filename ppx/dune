@@ -6,3 +6,6 @@
  (ppx_runtime_libraries yuka)
  (preprocess
   (pps ppxlib.metaquot)))
+
+(copy_files#
+ (files ../src/template_build.ml))

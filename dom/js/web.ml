@@ -1,5 +1,5 @@
 type node
-type event = Types.event
+type event
 type 'a promise = 'a Js.Promise.t
 
 let in_browser = true
@@ -352,3 +352,49 @@ let swap_page : string -> unit =
   document.title = parsed.title;
   document.body.innerHTML = parsed.body.innerHTML;
 }|}]
+
+type 'a table
+
+external table : unit -> 'a table = "Map" [@@mel.new]
+external table_get : 'a table -> string -> 'a option = "get"
+[@@mel.send] [@@mel.return undefined_to_opt]
+external table_set : 'a table -> string -> 'a -> unit = "set" [@@mel.send]
+external table_has : 'a table -> string -> bool = "has" [@@mel.send]
+external table_delete : 'a table -> string -> unit = "delete" [@@mel.send]
+external table_size : 'a table -> int = "size" [@@mel.get]
+external table_clear : 'a table -> unit = "clear" [@@mel.send]
+
+let table_values : 'a table -> 'a array =
+  [%mel.raw "function (t) { return Array.from(t.values()) }"]
+
+let shortest_float : float -> string =
+  [%mel.raw
+    {|function (f) {
+  if (f === 0) return "0";
+  for (let p = 15; ; p++) {
+    let e = f.toExponential(p - 1);
+    if (p < 17 && Number(e) !== f) continue;
+    if (p === 17) {
+      const x = f.toExponential(99), i = x.indexOf("e"), sign = f < 0 ? "-" : "";
+      const all = x.slice(sign.length, i).replace(".", "");
+      if (/^50*$/.test(all.slice(17)) && all.charCodeAt(16) % 2 === 0)
+        e = sign + all[0] + "." + all.slice(1, 17) + x.slice(i);
+    }
+    const at = e.indexOf("e"), x = Number(e.slice(at + 1)), neg = f < 0;
+    const d = e.slice(neg ? 1 : 0, at).replace(".", "");
+    let s;
+    if (x < -4 || x >= p) {
+      const m = d.replace(/0+$/, ""), a = Math.abs(x);
+      s = m[0] + (m.length > 1 ? "." + m.slice(1) : "") + "e" + (x < 0 ? "-" : "+") + (a < 10 ? "0" : "") + a;
+    } else if (x >= 0) {
+      const frac = d.slice(x + 1).replace(/0+$/, "");
+      s = d.slice(0, x + 1) + (frac ? "." + frac : "");
+    } else s = "0." + ("0".repeat(-x - 1) + d).replace(/0+$/, "");
+    return neg ? "-" + s : s;
+  }
+}|}]
+
+external parse_float : string -> float = "Number"
+
+let parse_int : string -> int option =
+  [%mel.raw "function (t) { const n = Number(t); return (n | 0) === n ? n | 0 : undefined }"]

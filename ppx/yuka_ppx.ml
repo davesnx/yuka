@@ -301,7 +301,7 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
   let add_part e =
     let i = List.length !parts in
     parts := e :: !parts;
-    eint ~loc i
+    i
   in
   let attr ((label, value) as prop) =
     let fixed =
@@ -315,7 +315,9 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
     in
     match fixed with
     | Some (Some (dom, v)) ->
-        Some [%expr Yuka.Template.fixed [%e estring ~loc dom] [%e estring ~loc v]]
+        Some
+          ( [%expr Yuka.Template.fixed [%e estring ~loc dom] [%e estring ~loc v]],
+            Template_build.Fixed (dom, v) )
     | Some None -> None
     | None ->
         let part =
@@ -323,24 +325,28 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
           | Plain e -> [%expr Yuka.Template.attribute [%e e]]
           | Maybe e -> [%expr Yuka.Template.attribute_option [%e e]]
         in
-        Some [%expr Yuka.Template.part_attr [%e add_part part]]
+        let i = add_part part in
+        Some ([%expr Yuka.Template.part_attr [%e eint ~loc i]], Template_build.Part_attr i)
   in
   let attrs = List.filter_map attr props in
   let child c =
     match c.pexp_desc with
     | Pexp_constant (Pconst_string (s, _, _)) when (not (is_jsx c)) && s <> "" ->
-        [%expr Yuka.Template.text [%e estring ~loc s]]
+        ([%expr Yuka.Template.text [%e estring ~loc s]], Template_build.Fixed_text s)
     | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; loc = fnloc }; _ }, args)
       when is_jsx c ->
         template_element ~self ~parts ~loc:c.pexp_loc ~fnloc tag args
     | _ ->
         let e = rewrite_child ~self c in
-        [%expr Yuka.Template.part [%e add_part [%expr Yuka.Template.child [%e e]]]]
+        let i = add_part [%expr Yuka.Template.child [%e e]] in
+        ([%expr Yuka.Template.part [%e eint ~loc i]], Template_build.Part i)
   in
   let kids = List.map child children in
-  [%expr
-    Yuka.Template.element [%e estring ~loc tag] [%e list_expr ~loc attrs]
-      [%e list_expr ~loc kids]]
+  ( [%expr
+      Yuka.Template.element [%e estring ~loc tag] [%e list_expr ~loc (List.map fst attrs)]
+        [%e list_expr ~loc (List.map fst kids)]],
+    Template_build.Fixed_element
+      { tag; attrs = List.map snd attrs; children = List.map snd kids } )
 
 let template_prefix (loc : Location.t) =
   let file = Filename.basename loc.loc_start.pos_fname in
@@ -352,11 +358,25 @@ let template_prefix (loc : Location.t) =
 
 let template ~self ~loc ~fnloc tag args =
   let parts = ref [] in
-  let shape = template_element ~self ~parts ~loc ~fnloc tag args in
+  let shape, built = template_element ~self ~parts ~loc ~fnloc tag args in
   let name = "__yuka_template_" ^ template_prefix loc ^ string_of_int !template_count in
   incr template_count;
+  let { Template_build.walk; kids; attrs; values } = Template_build.plan built in
+  let ints a = pexp_array ~loc (List.map (eint ~loc) (Array.to_list a)) in
+  let values =
+    pexp_array ~loc
+      (List.map
+         (fun (i, v) -> [%expr [%e eint ~loc i], [%e estring ~loc v]])
+         (Array.to_list values))
+  in
   hoisted :=
-    value_binding ~loc ~pat:(pvar ~loc name) ~expr:[%expr Yuka.Template.make [%e shape]]
+    value_binding ~loc ~pat:(pvar ~loc name)
+      ~expr:
+        [%expr
+          Yuka.Template.make [%e shape]
+            ~html:[%e estring ~loc (Template_build.html built)]
+            ~walk:[%e ints walk] ~kids:[%e ints kids] ~attrs:[%e ints attrs]
+            ~values:[%e values]]
     :: !hoisted;
   [%expr Yuka.Template.instance [%e evar ~loc name] [%e pexp_array ~loc (List.rev !parts)]]
 

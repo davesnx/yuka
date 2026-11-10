@@ -1,5 +1,5 @@
 type node = unit
-type event = Types.event
+type event = unit
 type 'a promise = unit
 
 let in_browser = false
@@ -91,3 +91,24 @@ let abort : controller -> unit = fun _ -> browser_only ()
 let click_href : event -> string = fun _ -> browser_only ()
 let fetch_page : string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit = fun _ _ _ _ -> browser_only ()
 let swap_page : string -> unit = fun _ -> browser_only ()
+
+type 'a table = (string, 'a) Hashtbl.t
+
+let table () = Hashtbl.create 8
+let table_get = Hashtbl.find_opt
+let table_set = Hashtbl.replace
+let table_has = Hashtbl.mem
+let table_delete = Hashtbl.remove
+let table_size = Hashtbl.length
+let table_values t = Array.of_seq (Hashtbl.to_seq_values t)
+let table_clear = Hashtbl.reset
+
+let shortest_float f =
+  let rec try_precision p =
+    let s = Printf.sprintf "%.*g" p f in
+    if p >= 17 || float_of_string s = f then s else try_precision (p + 1)
+  in
+  try_precision 15
+
+let parse_float = float_of_string
+let parse_int = int_of_string_opt

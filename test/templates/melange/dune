@@ -1,0 +1,14 @@
+(melange.emit
+ (target out)
+ (alias melange-templates)
+ (libraries template_cases yuka yuka.js)
+ (preprocess
+  (pps melange.ppx))
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (deps
+  (alias melange-templates))
+ (action
+  (run node %{dep:out/test/templates/melange/run.js})))

@@ -82,7 +82,7 @@ let check name expected actual =
   end
 
 let start html =
-  Yuka.Client.stop ();
+  Yuka.unmount ();
   setup html;
   capture ();
   remember ();

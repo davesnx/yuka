@@ -1,25 +1,31 @@
 open Types
 open Base
 
-let browser_only _ = failwith "Yuka: this function runs only in the browser"
+let stopped_key = "__yuka_stopped"
 
 let platform =
   ref
     {
-      target_value = browser_only;
-      target_checked = browser_only;
-      key = browser_only;
-      meta_key = browser_only;
-      ctrl_key = browser_only;
-      prevent_default = browser_only;
-      on_window = (fun _ _ -> browser_only ());
-      stop_propagation = browser_only;
-      target_tag = browser_only;
-      shift_key = browser_only;
-      alt_key = browser_only;
-      navigate = browser_only;
-      focus = browser_only;
-      scroll_into_view = browser_only;
+      target_value = (fun e -> Web.value (Web.target e));
+      target_checked = (fun e -> Web.checked (Web.target e));
+      key = Web.key;
+      meta_key = Web.meta_key;
+      ctrl_key = Web.ctrl_key;
+      prevent_default = Web.prevent_default;
+      stop_propagation =
+        (fun e ->
+          Web.set_flag e stopped_key true;
+          Web.stop_propagation e);
+      target_tag = (fun e -> Web.local_name (Web.target e));
+      shift_key = Web.shift_key;
+      alt_key = Web.alt_key;
+      navigate = Web.navigate;
+      focus = Web.focus;
+      scroll_into_view = Web.scroll_into_view;
+      on_window =
+        (fun name handler ->
+          Web.add_listener (Web.window ()) name handler;
+          fun () -> Web.remove_listener (Web.window ()) name handler);
     }
 
 module Event = struct

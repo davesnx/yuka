@@ -2,6 +2,9 @@ open Yuka
 module D = Dom_cases
 
 let check = Cases.check
+
+let start_islands ?lazy_entries entries =
+  Yuka.mount ~islands:(Yuka.Client.registry ?lazy_entries entries) ~navigation:false ()
 let ints = string_of_int
 let same = D.same
 
@@ -17,7 +20,7 @@ let clear_body : unit -> unit =
   [%mel.raw {|function () { document.body.innerHTML = ""; }|}]
 
 let reset_body () =
-  Yuka.Client.stop ();
+  Yuka.unmount ();
   clear_body ()
 
 let install_fetch : string -> int -> string -> unit =
@@ -70,7 +73,7 @@ let islands_start () =
   let c = setup_page (page [ counter_island 5; counter_island 10 ]) in
   let buttons = D.query_all c "button" in
   let roots = D.query_all c "yuka-island > div" in
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   same "button 1 adopted" buttons.(0) (D.query_all c "button").(0);
   same "button 2 adopted" buttons.(1) (D.query_all c "button").(1);
   same "root 1 adopted" roots.(0) (D.query_all c "yuka-island > div").(0);
@@ -92,7 +95,7 @@ let islands_start_in_document_order () =
             fun () -> counter_view n)
           (Codec.decode Codec.int json))
   in
-  Yuka.Client.start [ entry ];
+  start_islands [ entry ];
   check "start order" "1,2,3" (String.concat "," (List.rev !started))
 
 let unknown_island () =
@@ -101,7 +104,7 @@ let unknown_island () =
   in
   let before = D.html (D.query_all c "yuka-island").(0) in
   capture_errors ();
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   let logged = errors () in
   check "logged" "yuka island i1 (Nope): unknown island name" logged;
   check "server html kept" before (D.html (D.query_all c "yuka-island").(0));
@@ -116,7 +119,7 @@ let broken_islands () =
       {|<yuka-island data-name="Counter" data-id="i1"><span>x</span></yuka-island><script type="application/json" data-yuka-props="i1">"text"</script><yuka-island data-name="Counter" data-id="i2"><span>y</span></yuka-island><yuka-island data-name="Counter" data-id="i3"><span>z</span></yuka-island><script type="application/json" data-yuka-props="i3">{oops</script>|}
   in
   capture_errors ();
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   let logged = errors () in
   let has s =
     let n = String.length s and m = String.length logged in
@@ -130,8 +133,8 @@ let broken_islands () =
 
 let start_twice () =
   let c = setup_page (page [ counter_island 0 ]) in
-  Yuka.Client.start [ counter_entry ];
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
+  start_islands [ counter_entry ];
   D.click (D.query_all c "button").(0);
   check "one handler" "1" (spans c)
 
@@ -150,7 +153,7 @@ let contains s sub =
 let action_case ~mode ~status ~body expected_status expected_call =
  fun finish ->
   reset_body ();
-  Yuka.Client.start [];
+  start_islands [];
   install_fetch mode status body;
   Async.on_settled (Action.call action "hi") (fun st ->
       finish (fun () ->
@@ -163,7 +166,7 @@ let action_case ~mode ~status ~body expected_status expected_call =
 let action_contains ~mode ~status ~body part =
  fun finish ->
   reset_body ();
-  Yuka.Client.start [];
+  start_islands [];
   install_fetch mode status body;
   Async.on_settled (Action.call action "hi") (fun st ->
       finish (fun () ->
@@ -198,7 +201,7 @@ let async_prop_value () =
       ^ {|<script type="application/json" data-yuka-async="a1">{"ok":5}</script>|})
   in
   let b = D.query c "b" in
-  Yuka.Client.start [ lazy_entry ];
+  start_islands [ lazy_entry ];
   check "value rendered" "<!--[s1--><b>5</b><!--]-->" (island_html c);
   same "settled content adopted" b (D.query c "b")
 
@@ -209,7 +212,7 @@ let async_prop_mismatch () =
       (lazy_island "i1" {|{"$async":"a1"}|}
       ^ {|<script type="application/json" data-yuka-async="a1">{"ok":5}</script>|})
   in
-  Yuka.Client.start [ lazy_entry ];
+  start_islands [ lazy_entry ];
   check "stale loading removed" "<!--[s1--><b>5</b><!--]-->" (island_html c)
 
 let async_prop_error () =
@@ -219,7 +222,7 @@ let async_prop_error () =
       (lazy_island "i1" {|{"$async":"a1"}|}
       ^ {|<script type="application/json" data-yuka-async="a1">{"error":"nope"}</script>|})
   in
-  Yuka.Client.start [ lazy_entry ];
+  start_islands [ lazy_entry ];
   check "failed rendered" "<!--[s1--><i>failed nope</i><!--]-->" (island_html c)
 
 let async_prop_inline () =
@@ -228,13 +231,13 @@ let async_prop_inline () =
     D.container
       (lazy_island ~start:"[" "i1" {|{"$async":"a1","ok":8}|})
   in
-  Yuka.Client.start [ lazy_entry ];
+  start_islands [ lazy_entry ];
   check "inline value" "<!--[--><b>8</b><!--]-->" (island_html c)
 
 let hole_start_marker () =
   reset_body ();
   let c = D.container (lazy_island "i1" {|{"$async":"a1","ok":1}|}) in
-  Yuka.Client.start [ lazy_entry ];
+  start_islands [ lazy_entry ];
   check "start marker kept" "<!--[s1--><b>1</b><!--]-->" (island_html c)
 
 let after : (unit -> unit) -> unit =
@@ -445,7 +448,7 @@ let nested_island ~outer_loading () =
   reset_body ();
   let c = D.container (D.server tree) in
   let counter_button = D.query c "yuka-island yuka-island button" in
-  Yuka.Client.start [ outer_entry; counter_entry ];
+  start_islands [ outer_entry; counter_entry ];
   (c, counter_button)
 
 let click_outer c = D.click (D.query c "#outer")
@@ -510,7 +513,7 @@ let btn c = D.query c "button"
 
 let strategy_load_default () =
   let c = one_island None in
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   D.click (btn c);
   check "started at once" "1" (spans c)
 
@@ -523,8 +526,8 @@ let strategy_data_attribute () =
 
 let strategy_idle () =
   let c = one_island (Some `Idle) in
-  Yuka.Client.start [ counter_entry ];
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
+  start_islands [ counter_entry ];
   D.click (btn c);
   check "not started before idle" "0" (spans c);
   check "one callback" "1" (ints (run_idle ()));
@@ -533,7 +536,7 @@ let strategy_idle () =
 
 let strategy_visible () =
   let c = one_island (Some `Visible) in
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   check "observes first child" "true" (string_of_bool (io_target_is_first_child ()));
   D.click (btn c);
   check "not started" "0" (spans c);
@@ -548,13 +551,13 @@ let strategy_visible () =
 let strategy_visible_without_observer () =
   let c = one_island (Some `Visible) in
   unstub_io ();
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   D.click (btn c);
   check "started at once" "1" (spans c)
 
 let strategy_interaction () =
   let c = one_island (Some `Interaction) in
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   D.click (btn c);
   check "not started" "0" (spans c);
   fire (btn c) "focusin";
@@ -567,7 +570,7 @@ let strategy_interaction_each_event () =
   List.iter
     (fun name ->
       let c = one_island (Some `Interaction) in
-      Yuka.Client.start [ counter_entry ];
+      start_islands [ counter_entry ];
       fire (btn c) name;
       D.click (btn c);
       check ("started by " ^ name) "1" (spans c))
@@ -602,39 +605,39 @@ let after_ms : int -> (unit -> unit) -> unit =
 
 let stop_disposes () =
   let c = one_island None in
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   D.click (btn c);
   check "running" "1" (spans c);
-  Yuka.Client.stop ();
+  Yuka.unmount ();
   D.click (btn c);
   check "handlers removed" "1" (spans c);
   let c2 = one_island None in
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   D.click (btn c2);
   check "start works again on a new body" "1" (spans c2);
-  Yuka.Client.stop ()
+  Yuka.unmount ()
 
 let stop_restarts_same_body () =
   let c = one_island None in
-  Yuka.Client.start [ counter_entry ];
-  Yuka.Client.stop ();
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
+  Yuka.unmount ();
+  start_islands [ counter_entry ];
   D.click (btn c);
   check "island started again" "1" (spans c);
-  Yuka.Client.stop ()
+  Yuka.unmount ()
 
 let stop_cancels_idle () =
   let c = one_island (Some `Idle) in
-  Yuka.Client.start [ counter_entry ];
-  Yuka.Client.stop ();
+  start_islands [ counter_entry ];
+  Yuka.unmount ();
   check "no callback left" "0" (ints (run_idle ()));
   D.click (btn c);
   check "not started" "0" (spans c)
 
 let stop_cancels_visible () =
   let c = one_island (Some `Visible) in
-  Yuka.Client.start [ counter_entry ];
-  Yuka.Client.stop ();
+  start_islands [ counter_entry ];
+  Yuka.unmount ();
   check "observer disconnected" "true" (string_of_bool (io_disconnected ()));
   io_report true;
   D.click (btn c);
@@ -642,8 +645,8 @@ let stop_cancels_visible () =
 
 let stop_cancels_interaction () =
   let c = one_island (Some `Interaction) in
-  Yuka.Client.start [ counter_entry ];
-  Yuka.Client.stop ();
+  start_islands [ counter_entry ];
+  Yuka.unmount ();
   fire (btn c) "pointerover";
   D.click (btn c);
   check "not started" "0" (spans c)
@@ -760,12 +763,12 @@ let select_island () =
 let replay_select_with_value_hole () =
   reset_body ();
   let c = D.container (D.server (page [ select_island () ])) in
-  Yuka.Client.start [ select_entry ];
+  start_islands [ select_entry ];
   choose (D.query c "select") "b";
   fire (D.query c "select") "pointerover";
   check "handler saw the new value" "b" (D.text_content (D.query c "#chosen"));
   check "select shows it" "b" (D.value (D.query c "select"));
-  Yuka.Client.stop ()
+  Yuka.unmount ()
 
 let navigations : string list ref = ref []
 
@@ -773,23 +776,23 @@ let platform_override_survives () =
   reset_body ();
   navigations := [];
   let c = D.container (D.server (page [ select_island () ])) in
-  Yuka.Client.start [ select_entry ];
+  start_islands [ select_entry ];
   Internal.platform :=
     { !Internal.platform with navigate = (fun url -> navigations := url :: !navigations) };
   fire (D.query c "select") "pointerover";
   Browser.navigate "/next";
   check "the override is still installed after an island started" "/next"
     (String.concat "," !navigations);
-  Yuka.Client.stop ();
+  Yuka.unmount ();
   reset_body ();
   let c2 = D.container (D.server (page [ select_island () ])) in
-  Yuka.Client.start [ select_entry ];
+  start_islands [ select_entry ];
   fire (D.query c2 "select") "pointerover";
   Browser.navigate "/again";
   check "still there after stop and start" "/again,/next" (String.concat "," !navigations);
   choose (D.query c2 "select") "b";
   check "islands still work" "b" (D.text_content (D.query c2 "#chosen"));
-  Yuka.Client.stop ()
+  Yuka.unmount ()
 
 let texts_of c = String.concat "," (List.map (fun s -> D.text_content (D.query c s)) [ "#count"; "#chosen"; "#keys" ])
 
@@ -801,7 +804,7 @@ let async =
         replay_log := [];
         let c = D.container (D.server (page [ replay_island () ])) in
         let entry, release = slow_lazy () in
-        Yuka.Client.start ~lazy_entries:[ entry ] [];
+        start_islands ~lazy_entries:[ entry ] [];
         D.click (D.query c "button");
         choose (D.query c "select") "b";
         key_event (D.query c "input") "x";
@@ -817,16 +820,16 @@ let async =
                 check "applied after the load" "2,b,x" applied;
                 check "order kept" "c,s:b,k:x,c" (String.concat "," (List.rev !replay_log |> fun l -> List.filteri (fun i _ -> i < 4) l));
                 check "recording stopped" "3,b,x" again;
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "replay: stop drops the queue",
       fun finish ->
         reset_body ();
         replay_log := [];
         let c = D.container (D.server (page [ replay_island () ])) in
         let entry, release = slow_lazy () in
-        Yuka.Client.start ~lazy_entries:[ entry ] [];
+        start_islands ~lazy_entries:[ entry ] [];
         D.click (D.query c "button");
-        Yuka.Client.stop ();
+        Yuka.unmount ();
         release ();
         after_ms 30 (fun () ->
             D.click (D.query c "button");
@@ -838,7 +841,7 @@ let async =
       fun finish ->
         reset_body ();
         set_ready "loading";
-        Yuka.Client.start [ counter_entry ];
+        start_islands [ counter_entry ];
         let html = D.server (counter_island 0) in
         append_html html;
         tick (fun () ->
@@ -846,13 +849,13 @@ let async =
             clear_ready ();
             finish (fun () ->
                 check "started on arrival" "1" (D.text_content (D.query (body_node ()) "span"));
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "early start: island waits for its props script",
       fun finish ->
         reset_body ();
         set_ready "loading";
         capture_errors ();
-        Yuka.Client.start [ counter_entry ];
+        start_islands [ counter_entry ];
         let island, script = split_island (D.server (counter_island 0)) in
         append_html island;
         tick (fun () ->
@@ -868,13 +871,13 @@ let async =
                     check "not started without props" "0" early;
                     check "started when the script arrived" "1" late;
                     check "no error" "" logged;
-                    Yuka.Client.stop ()))) );
+                    Yuka.unmount ()))) );
     ( "early start: partial props script",
       fun finish ->
         reset_body ();
         set_ready "loading";
         capture_errors ();
-        Yuka.Client.start [ counter_entry ];
+        start_islands [ counter_entry ];
         let island, script = split_island (D.server (counter_island 7)) in
         let partial =
           String.concat "" [ island; {|<script type="application/json" data-yuka-props="i1">|} ]
@@ -895,12 +898,12 @@ let async =
                     check "not started on an empty script" "7" early;
                     check "started when complete" "8" late;
                     check "no error" "" logged;
-                    Yuka.Client.stop ()))) );
+                    Yuka.unmount ()))) );
     ( "early start: unrelated mutations cost no scan",
       fun finish ->
         reset_body ();
         set_ready "loading";
-        Yuka.Client.start [ counter_entry ];
+        start_islands [ counter_entry ];
         count_queries ();
         append_html "<p>one</p><div><span>two</span></div>";
         tick (fun () ->
@@ -909,12 +912,12 @@ let async =
             clear_ready ();
             finish (fun () ->
                 check "no whole-document query for unrelated nodes" "0" (ints n);
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "early start: no observer after DOMContentLoaded",
       fun finish ->
         reset_body ();
         set_ready "loading";
-        Yuka.Client.start [ counter_entry ];
+        start_islands [ counter_entry ];
         dispatch_ready ();
         count_queries ();
         append_html (D.server (counter_island 0));
@@ -927,7 +930,7 @@ let async =
                 check "no scan after the final one" "0" (ints n);
                 check "island added later is not started by the observer" "0"
                   (D.text_content (D.query (body_node ()) "span"));
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "early start: async value watcher ignores other mutations",
       fun finish ->
         reset_body ();
@@ -955,8 +958,8 @@ let async =
     ( "early start: stop disconnects the watcher",
       fun finish ->
         reset_body ();
-        Yuka.Client.start [ counter_entry ];
-        Yuka.Client.stop ();
+        start_islands [ counter_entry ];
+        Yuka.unmount ();
         append_html (D.server (counter_island 0));
         tick (fun () ->
             D.click (D.query (body_node ()) "button");
@@ -969,7 +972,7 @@ let async =
         set_ready "loading";
         let html = D.server (counter_island 0) in
         append_html ({|<div><!--[s1-->loading<!--]--></div>|});
-        Yuka.Client.start [ counter_entry ];
+        start_islands [ counter_entry ];
         append_html ({|<template data-yuka-fill="s1">|} ^ html ^ "</template>");
         eval_global {|__yukaFill("s1")|};
         tick (fun () ->
@@ -977,19 +980,19 @@ let async =
             clear_ready ();
             finish (fun () ->
                 check "island from the fill started" "1" (D.text_content (D.query (body_node ()) "span"));
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "lazy entry loads on start",
       fun finish ->
         import_calls := 0;
         reset_body ();
         let c = D.container (D.server (lazy_page None)) in
-        Yuka.Client.start ~lazy_entries:[ lazy_counter () ] [];
+        start_islands ~lazy_entries:[ lazy_counter () ] [];
         check "import called once for two islands" "1" (ints !import_calls);
         after_ms 100 (fun () ->
             lazy_click_started c 0;
             finish (fun () ->
                 check "island works after the import" "4,4" (spans c);
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "lazy entry waits for the strategy",
       fun finish ->
         import_calls := 0;
@@ -998,7 +1001,7 @@ let async =
         reset_body ();
         stub_browser ();
         let c = D.container (D.server (lazy_page (Some `Idle))) in
-        Yuka.Client.start ~lazy_entries:[ lazy_counter () ] [];
+        start_islands ~lazy_entries:[ lazy_counter () ] [];
         let before = !import_calls in
         ignore (run_idle ());
         after_ms 100 (fun () ->
@@ -1007,7 +1010,7 @@ let async =
                 check "no import before idle" "0" (ints before);
                 check "imported after idle" "1" (ints !import_calls);
                 check "island works" "3,5" (spans c);
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "lazy entry that fails to load",
       fun finish ->
         reset_body ();
@@ -1016,37 +1019,37 @@ let async =
           Yuka.Client.lazy_entry ~name:"LazyCounter" (fun () -> of_js (Js.Promise.reject (Failure "no chunk")))
         in
         capture_errors ();
-        Yuka.Client.start ~lazy_entries:[ bad ] [];
+        start_islands ~lazy_entries:[ bad ] [];
         after_ms 50 (fun () ->
             let logged = errors () in
             finish (fun () ->
                 check "logged" "true" (string_of_bool (contains logged "cannot load code"));
                 check "html kept" "3,4" (spans c);
-                Yuka.Client.stop ())) );
+                Yuka.unmount ())) );
     ( "stop aborts an action in flight",
       fun finish ->
         reset_body ();
-        Yuka.Client.start [];
+        start_islands [];
         install_fetch "hang" 0 "";
         let result = Action.call action "hi" in
         check "pending" "pending" (status_text (Async.status result));
-        Yuka.Client.stop ();
+        Yuka.unmount ();
         Async.on_settled result (fun st ->
             finish (fun () -> check "cancelled" "failed cancelled" (status_text st))) );
     ( "stop leaves a settled action alone",
       fun finish ->
         reset_body ();
-        Yuka.Client.start [];
+        start_islands [];
         install_fetch "ok" 200 {|{"ok":3}|};
         let result = Action.call action "hi" in
         Async.on_settled result (fun st ->
-            Yuka.Client.stop ();
+            Yuka.unmount ();
             finish (fun () -> check "done" "done 3" (status_text st))) );
     ( "start idle falls back to a timeout",
       fun finish ->
         let c = one_island (Some `Idle) in
         unstub_idle ();
-        Yuka.Client.start [ counter_entry ];
+        start_islands [ counter_entry ];
         after_ms 50 (fun () ->
             D.click (btn c);
             let early = spans c in
@@ -1062,7 +1065,7 @@ let async =
           D.container (lazy_island ~start:"[s1" "i1" {|{"$async":"a1"}|})
         in
         let span = D.query c "span" in
-        Yuka.Client.start [ lazy_entry ];
+        start_islands [ lazy_entry ];
         same "loading adopted" span (D.query c "span");
         let before = island_html c in
         add_script {|{"ok":11}|};
@@ -1092,7 +1095,7 @@ let ready_final_scan () =
   set_ready "loading";
   capture_errors ();
   append_html (fst (split_island (D.server (counter_island 0))));
-  Yuka.Client.start [ counter_entry ];
+  start_islands [ counter_entry ];
   let during = errors () in
   capture_errors ();
   dispatch_ready ();
@@ -1100,13 +1103,13 @@ let ready_final_scan () =
   clear_ready ();
   check "silent while loading" "" during;
   check "reported at DOMContentLoaded" "yuka island i1 (Counter): props script not found" after;
-  Yuka.Client.stop ()
+  Yuka.unmount ()
 
 let replay_interaction () =
   reset_body ();
   replay_log := [];
   let c = D.container (D.server (page [ replay_island ~loading:`Interaction () ])) in
-  Yuka.Client.start [ replay_entry ];
+  start_islands [ replay_entry ];
   D.click (D.query c "button");
   D.click (D.query c "button");
   check "not started" "0,," (texts_of c);
@@ -1114,7 +1117,7 @@ let replay_interaction () =
   check "replayed after the start" "2,," (texts_of c);
   D.click (D.query c "button");
   check "live afterwards, once" "3,," (texts_of c);
-  Yuka.Client.stop ()
+  Yuka.unmount ()
 
 let all =
   [

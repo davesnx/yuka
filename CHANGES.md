@@ -12,3 +12,4 @@
 - Actions: declare once, call from the client, run on the server (@davesnx)
 - Router: typed paths shared by the server and the client (`Yuka.Router`) (@davesnx)
 - No web server dependency: `Yuka.Server.respond` writes through functions that your server gives, with a Dream example in the demo (@davesnx)
+- Small client bundles: an app contains only the features it uses, templates are compiled to HTML and paths by the ppx, and `make size` checks the keyed benchmark app against a budget (@davesnx)

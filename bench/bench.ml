@@ -11,8 +11,8 @@ let remove_container : Yuka.Client.container -> unit =
   [%mel.raw "function (c) { c.remove() }"]
 
 let row_template =
-  Template.(
-    make
+  Internal.template
+    Template.(
       (element "li"
          [ fixed "class" "row"; part_attr 0; part_attr 1 ]
          [
@@ -24,8 +24,8 @@ let row_template =
          ]))
 
 let static_template =
-  Template.(
-    make
+  Internal.template
+    Template.(
       (element "li" [ fixed "class" "row" ]
          [
            element "span" [ fixed "class" "status" ] [ text "o" ];

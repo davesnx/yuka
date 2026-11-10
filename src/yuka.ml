@@ -19,18 +19,29 @@ module Action = Action
 module Event = Platform.Event
 module Browser = Platform.Browser
 module Router = Router
-module Server = Server
+
+module Server = struct
+  include Server
+
+  module Action = struct
+    let implement = Server.implement
+    let reject = Server.reject
+    let rejected = Server.rejected
+  end
+end
 
 let mount ?islands ?(navigation = true) () =
   match islands with
   | Some r when Web.in_browser ->
       let { Client.entries; lazy_registry } = r in
-      if navigation then Router.start ~lazy_entries:lazy_registry entries
+      if navigation then Navigation.start ~lazy_entries:lazy_registry entries
       else Client.start ~lazy_entries:lazy_registry entries
   | _ ->
       failwith
         "Yuka.mount: no island registry or not in the browser. Run it in a \
          Melange client entry built with yuka.ppx, which adds ~islands."
+
+let unmount = Navigation.stop
 
 module Internal = struct
   include Types
@@ -38,6 +49,13 @@ module Internal = struct
 
   let node n = n
   let template_shape (t : template) = t.shape
+  let template = Template.of_shape
+  let recompile (t : template) = Template.of_shape t.shape
+  let template_html (t : template) = t.markup
+  let template_plan (t : template) =
+    let { Template_build.walk; kids; attrs; values } = t.plan in
+    (walk, kids, attrs, values)
+  let expand = Template.expand
   let element n = n
 
   let owned f =

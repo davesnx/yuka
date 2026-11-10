@@ -146,14 +146,33 @@ let retrack_effect node =
   clear_dirty node;
   if old_level = 0 then node.level <- compute_level node
 
-let by_level a b = Int.compare a.level b.level
-
 let rec sorted = function
   | a :: (b :: _ as rest) -> a.level <= b.level && sorted rest
   | _ -> true
 
+let by_level l =
+  let rec merge acc a b =
+    match (a, b) with
+    | [], l | l, [] -> List.rev_append acc l
+    | x :: a', y :: b' ->
+        if x.level <= y.level then merge (x :: acc) a' b else merge (y :: acc) a b'
+  in
+  let rec take n acc l =
+    match l with
+    | x :: rest when n > 0 -> take (n - 1) (x :: acc) rest
+    | _ -> (List.rev acc, l)
+  in
+  let rec sort l =
+    match l with
+    | [] | [ _ ] -> l
+    | _ ->
+        let a, b = take (List.length l / 2) [] l in
+        merge [] (sort a) (sort b)
+  in
+  sort l
+
 let run_batch first_error retrack queue =
-  let batch = if sorted !queue then !queue else List.sort by_level !queue in
+  let batch = if sorted !queue then !queue else by_level !queue in
   queue := [];
   List.iter
     (fun node ->
@@ -163,10 +182,12 @@ let run_batch first_error retrack queue =
 
 let max_rounds = 100
 
-let loop_error =
+let loop_error () =
   Failure
-    ("Yuka: an effect or a memo keeps changing a State it reads (more than "
-    ^ string_of_int max_rounds ^ " update rounds in one flush)")
+    "Yuka: an effect or a memo keeps changing a State it reads (more than 100 \
+     update rounds in one flush)"
+
+let has = function [] -> false | _ :: _ -> true
 
 let drop queue =
   List.iter clear_pending !queue;
@@ -176,17 +197,17 @@ let flush () =
   flushing := true;
   let first_error = ref None in
   let rounds = ref 0 in
-  while !pending_computeds <> [] || !pending_effects <> [] do
+  while has !pending_computeds || has !pending_effects do
     if !rounds >= max_rounds then begin
       drop pending_computeds;
       drop pending_effects;
-      if Option.is_none !first_error then first_error := Some loop_error
+      if Option.is_none !first_error then first_error := Some (loop_error ())
     end
     else begin
       incr rounds;
-      if !pending_computeds <> [] then
+      if has !pending_computeds then
         run_batch first_error retrack_computed pending_computeds;
-      if !pending_effects <> [] then
+      if has !pending_effects then
         run_batch first_error retrack_effect pending_effects
     end
   done;
@@ -206,10 +227,26 @@ let notify_subs source =
       in
       loop source.first_sub
   | Some _ ->
-      let queue = Queue.create () in
-      Queue.push source queue;
-      while not (Queue.is_empty queue) do
-        let s = Queue.pop queue in
+      let front = ref [ source ] and back = ref [] in
+      let push n = back := n :: !back in
+      let rec pop () =
+        match !front with
+        | s :: rest ->
+            front := rest;
+            Some s
+        | [] -> (
+            match !back with
+            | [] -> None
+            | b ->
+                front := List.rev b;
+                back := [];
+                pop ())
+      in
+      let continue = ref true in
+      while !continue do
+        match pop () with
+        | None -> continue := false
+        | Some s ->
         let rec loop = function
           | None -> ()
           | Some (l : link) ->
@@ -217,7 +254,7 @@ let notify_subs source =
               if is_computed target then begin
                 if not (is_dirty target) then begin
                   set_dirty target;
-                  Queue.push target queue
+                  push target
                 end
               end
               else if is_computed s && s.defer_effects_until_recompute then
@@ -228,7 +265,7 @@ let notify_subs source =
         loop s.first_sub
       done);
   if
-    (!pending_effects <> [] || !pending_computeds <> [])
+    (has !pending_effects || has !pending_computeds)
     && (not !flushing) && !batch_depth = 0
   then flush ()
 
@@ -238,7 +275,7 @@ let batch f =
     decr batch_depth;
     if
       !batch_depth = 0 && (not !flushing)
-      && (!pending_effects <> [] || !pending_computeds <> [])
+      && (has !pending_effects || has !pending_computeds)
     then flush ()
   in
   match f () with

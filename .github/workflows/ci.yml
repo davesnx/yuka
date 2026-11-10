@@ -81,6 +81,9 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Check bundle size
+        run: make size
+
       - name: Save dune cache
         uses: ml-in-barcelona/gh-ci-action/dune-cache/save@v1.1.0
 

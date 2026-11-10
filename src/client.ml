@@ -1,5 +1,3 @@
-open Tiny_hashtbl
-
 include Island
 open Types
 
@@ -172,7 +170,7 @@ let set_attr svg el name value =
       | Some v -> Web.set_attribute el name v
       | None -> Web.remove_attribute el name)
 
-let stopped_key = "__yuka_stopped"
+let stopped_key = Platform.stopped_key
 
 type handler = { run : Web.event -> unit; owner : Base.owner; gen : int }
 
@@ -186,7 +184,9 @@ let dispatch event ev =
         (match Web.get_prop n key with
         | Some hs -> List.iter (fun h -> if live h then h.run ev) hs
         | None -> ());
-        if Web.get_flag ev stopped_key <> Some true then go (Web.parent_node n)
+        match Web.get_flag ev stopped_key with
+        | Some true -> ()
+        | Some false | None -> go (Web.parent_node n)
   in
   go (Some (Web.target ev))
 
@@ -206,7 +206,7 @@ let delegate ctx event =
       delegated := (ctx.doc, event, key) :: !delegated;
       key
 
-let unowned = Base.new_owner ()
+let unowned : Base.owner = { last = None; gen = 0 }
 
 let add_handler ctx el event handler =
   if non_bubbling event then begin
@@ -219,46 +219,19 @@ let add_handler ctx el event handler =
     let h = { run = handler; owner; gen = owner.gen } in
     match Web.get_prop el key with
     | None -> Web.set_prop el key [ h ]
-    | Some hs -> Web.set_prop el key (List.filter live hs @ [ h ])
+    | Some hs -> Web.set_prop el key (List.rev_append (List.rev (List.filter live hs)) [ h ])
   end
 
-type kid = {
-  part : int;
-  at : int;
-  anchor : int;
-  only : bool;
-  kid_svg : bool;
-  first_of_run : bool;
-  text_before : bool;
-  finish : int;
-}
-
-type compiled = {
-  root : Web.node;
-  walk : int array;
-  attr_ops : (int * int * bool) array;
-  values : (int * string) array;
-  kids : kid array;
-}
+type compiled = { root : Web.node; kid_svg : int; attr_svg : int }
 
 type Types.cache += Compiled of Web.node * compiled option
-
-let void_or_value tag attrs =
-  List.mem tag Printer.void_tags
-  || (tag = "textarea"
-     && List.exists (function Fixed ("value", _) -> true | _ -> false) attrs)
-
-let select_value tag attrs =
-  if tag = "select" then
-    List.find_map (function Fixed ("value", v) -> Some v | _ -> None) attrs
-  else None
 
 let rec same_tree shape n =
   match shape with
   | Fixed_element { tag; attrs; children } ->
       Web.node_type n = 1
       && Web.local_name n = tag
-      && (void_or_value tag attrs || same_children children (Web.first_child n))
+      && (Template_build.void_or_value tag attrs || same_children children (Web.first_child n))
   | Fixed_text _ | Part _ -> false
 
 and same_children children cur =
@@ -284,18 +257,10 @@ and same_children children cur =
   in
   go false cur children
 
-let rec needs = function
-  | Fixed_text _ -> false
-  | Part _ -> true
-  | Fixed_element { tag; attrs; children } ->
-      List.exists (function Part_attr _ -> true | Fixed _ -> false) attrs
-      || Option.is_some (select_value tag attrs)
-      || ((not (void_or_value tag attrs)) && List.exists needs children)
-
-let rec compile doc svg (template : template) =
-  let html = Printer.template_html template in
+let compile doc svg (template : template) =
   let t = Web.create_element doc "template" in
-  Web.set_inner_html t (if svg then "<svg>" ^ html ^ "</svg>" else html);
+  Web.set_inner_html t
+    (if svg then "<svg>" ^ template.markup ^ "</svg>" else template.markup);
   let only n =
     match n with
     | Some n when Option.is_none (Web.next_sibling n) -> Some n
@@ -307,98 +272,25 @@ let rec compile doc svg (template : template) =
     | top -> top
   in
   match parsed with
-  | Some n when same_tree template.shape n -> Some (build doc svg template n)
+  | Some n when same_tree template.shape n ->
+      Some
+        {
+          root = Web.import_node doc n true;
+          kid_svg =
+            (if svg then Template_build.kid_svg_in_svg else Template_build.kid_svg_in_html);
+          attr_svg =
+            (if svg then Template_build.attr_svg_in_svg
+             else Template_build.attr_svg_in_html);
+        }
   | _ -> None
 
-and build doc svg (template : template) parsed =
-  let root = Web.import_node doc parsed true in
-  let walk = ref [] and count = ref 1 in
-  let add src kind steps =
-    walk := steps :: ((src * 2) + kind) :: !walk;
-    let i = !count in
-    incr count;
-    i
-  in
-  let attr_ops = ref [] and kids = ref [] and values = ref [] in
-  let rec element idx svg tag attrs children =
-    let here = svg || tag = "svg" in
-    let inner = here && tag <> "foreignObject" in
-    Option.iter (fun v -> values := (idx, v) :: !values) (select_value tag attrs);
-    List.iter
-      (function Part_attr i -> attr_ops := (idx, i, here) :: !attr_ops | Fixed _ -> ())
-      attrs;
-    if not (void_or_value tag attrs) then
-      match children with
-      | [ Part i ] ->
-          kids :=
-            { part = i; at = idx; anchor = -1; only = true; kid_svg = inner;
-              first_of_run = true; text_before = false; finish = 0 }
-            :: !kids
-      | _ ->
-          let dom = ref 0 and after_text = ref false in
-          let prev = ref (-1, -1) in
-          let get d =
-            match !prev with
-            | pd, pi when pd = d -> pi
-            | pd, pi ->
-                let i = if pi >= 0 then add pi 1 (d - pd) else add idx 0 d in
-                prev := (d, i);
-                i
-          in
-          let run = ref [] and run_text = ref false in
-          let flush anchor finish =
-            let parts = List.rev !run in
-            run := [];
-            let n = List.length parts in
-            if n > 0 then begin
-              let anchor = match anchor with Some d -> get d | None -> -1 in
-              List.iteri
-                (fun k i ->
-                  kids :=
-                    { part = i; at = idx; anchor; only = false; kid_svg = inner;
-                      first_of_run = k = 0; text_before = !run_text;
-                      finish = (if k = n - 1 then finish else 0) }
-                    :: !kids)
-                parts
-            end
-          in
-          List.iter
-            (function
-              | Part i ->
-                  if !run = [] then run_text := !after_text;
-                  run := i :: !run
-              | Fixed_text "" -> ()
-              | Fixed_text _ ->
-                  let sep = !after_text in
-                  flush (Some !dom) (if sep then 1 else 2);
-                  if sep then incr dom;
-                  incr dom;
-                  after_text := true
-              | Fixed_element { tag; attrs; children } as e ->
-                  flush (Some !dom) 0;
-                  if needs e then element (get !dom) inner tag attrs children;
-                  incr dom;
-                  after_text := false)
-            children;
-          flush None 0
-  in
-  (match template.shape with
-  | Fixed_element { tag; attrs; children } -> element 0 svg tag attrs children
-  | Fixed_text _ | Part _ -> ());
-  {
-    root;
-    walk = Array.of_list (List.rev !walk);
-    attr_ops = Array.of_list (List.rev !attr_ops);
-    values = Array.of_list (List.rev !values);
-    kids = Array.of_list (List.rev !kids);
-  }
-
 let compiled doc svg (template : template) =
-  match if svg then template.svg else template.html with
+  match if svg then template.in_svg else template.in_html with
   | Compiled (d, c) when d == doc -> c
   | _ ->
       let c = compile doc svg template in
-      if svg then template.svg <- Compiled (doc, c) else template.html <- Compiled (doc, c);
+      if svg then template.in_svg <- Compiled (doc, c)
+      else template.in_html <- Compiled (doc, c);
       c
 
 let fixed_root template =
@@ -447,13 +339,13 @@ let rec mount_node pos last n =
       last := false;
       mount_slot pos slot
   | Template { template; parts } when pos.adopt || not (fixed_root template) ->
-      mount_node pos last (Printer.expand template parts)
+      mount_node pos last (Template.expand template parts)
   | Template { template; parts } -> (
       match compiled pos.ctx.doc pos.svg template with
       | Some c ->
           last := false;
-          instantiate pos c parts
-      | None -> mount_node pos last (Printer.expand template parts))
+          instantiate pos template c parts
+      | None -> mount_node pos last (Template.expand template parts))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
   | Each { items; key; equal; render } ->
       last := false;
@@ -466,39 +358,48 @@ and mount_children pos = function
       let last = ref false in
       List.iter (mount_node pos last) children
 
-and instantiate pos c parts =
+and instantiate pos (template : template) c parts =
   let doc = pos.ctx.doc in
+  let { Template_build.walk; kids; attrs; values } = template.plan in
   let root = Web.clone_node c.root true in
-  let nodes = Web.walk root c.walk in
+  let nodes = Web.walk root walk in
   let last = ref false in
-  Array.iter
-    (fun k ->
-      match parts.(k.part) with
-      | Child n ->
-          let anchor = if k.anchor < 0 then None else Some nodes.(k.anchor) in
-          let inner =
-            { ctx = pos.ctx; parent = nodes.(k.at); cur = anchor; adopt = false;
-              svg = k.kid_svg }
-          in
-          if k.only then mount_children inner [ n ]
-          else begin
-            if k.first_of_run then last := k.text_before;
-            mount_node inner last n;
-            match (k.finish, anchor) with
-            | 1, Some sep -> if not !last then Web.remove sep
-            | 2, Some next ->
-                if !last then Web.insert_before inner.parent (Web.create_comment doc "") next
-            | _ -> ()
-          end
-      | Attribute _ | No_attribute -> ())
-    c.kids;
-  Array.iter (fun (i, v) -> set_attr false nodes.(i) "value" (Some v)) c.values;
-  Array.iter
-    (fun (i, p, svg) ->
-      match parts.(p) with
-      | Attribute a -> mount_attr pos.ctx svg nodes.(i) false a
-      | Child _ | No_attribute -> ())
-    c.attr_ops;
+  let get = Array.unsafe_get in
+  let k = ref 0 in
+  while !k < Array.length kids do
+    let i = !k in
+    k := i + 5;
+    match parts.(get kids i) with
+    | Child n -> (
+        let anchor = get kids (i + 2) and flags = get kids (i + 3) in
+        let anchor = if anchor < 0 then None else Some (get nodes anchor) in
+        let inner =
+          { ctx = pos.ctx; parent = get nodes (get kids (i + 1)); cur = anchor;
+            adopt = false; svg = flags land c.kid_svg <> 0 }
+        in
+        if flags land Template_build.kid_only <> 0 then mount_children inner [ n ]
+        else begin
+          if flags land Template_build.kid_first_of_run <> 0 then
+            last := flags land Template_build.kid_text_before <> 0;
+          mount_node inner last n;
+          match (get kids (i + 4), anchor) with
+          | 1, Some sep -> if not !last then Web.remove sep
+          | 2, Some next ->
+              if !last then Web.insert_before inner.parent (Web.create_comment doc "") next
+          | _ -> ()
+        end)
+    | Attribute _ | No_attribute -> ()
+  done;
+  Array.iter (fun (i, v) -> set_attr false (get nodes i) "value" (Some v)) values;
+  let k = ref 0 in
+  while !k < Array.length attrs do
+    let i = !k in
+    k := i + 3;
+    match parts.(get attrs (i + 1)) with
+    | Attribute a ->
+        mount_attr pos.ctx (get attrs (i + 2) land c.attr_svg <> 0) (get nodes (get attrs i)) false a
+    | Child _ | No_attribute -> ()
+  done;
   insert pos.parent root pos.cur
 
 and mount_attr ctx svg el adopted = function
@@ -557,7 +458,7 @@ and mount_each :
       Base.mount (fun () ->
           Scheduler.untrack (fun () ->
               let n = render v in
-              if Printer.single_element n then begin
+              if Template.single_element n then begin
                 mount_node pos (ref false) n;
                 first := before pos;
                 last := !first
@@ -589,20 +490,20 @@ and mount_each :
     let items = Array.of_list list in
     let n = Array.length items in
     let keys = Array.map key items in
-    let wanted = Hashtbl.create n in
+    let wanted = Web.table () in
     Array.iter
       (fun k ->
-        if Hashtbl.mem wanted k then failwith ("Yuka.each: duplicate key " ^ k);
-        Hashtbl.replace wanted k ())
+        if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
+        Web.table_set wanted k true)
       keys;
-    let old = Hashtbl.create 16 in
+    let old = Web.table () in
     let removed = ref [] in
     Array.iteri
       (fun i e ->
-        if Hashtbl.mem wanted e.key then Hashtbl.replace old e.key (i, e)
+        if Web.table_has wanted e.key then Web.table_set old e.key (i, e)
         else removed := e :: !removed)
       !entries;
-    if Hashtbl.length old = 0 && Array.length !entries > 0 then begin
+    if Web.table_size old = 0 && Array.length !entries > 0 then begin
       Array.iter (fun e -> e.dispose ()) !entries;
       clear_all ()
     end
@@ -616,7 +517,7 @@ and mount_each :
       lis
         (Array.map
            (fun k ->
-             match Hashtbl.find_opt old k with Some (i, _) -> i | None -> -1)
+             match Web.table_get old k with Some (i, _) -> i | None -> -1)
            keys)
     in
     let fresh anchor = { pos with cur = anchor; adopt = false } in
@@ -624,7 +525,7 @@ and mount_each :
     let next = ref [] in
     for j = n - 1 downto 0 do
       let e =
-        match Hashtbl.find_opt old keys.(j) with
+        match Web.table_get old keys.(j) with
         | Some (_, e) ->
             if not (equal e.value items.(j)) then begin
               e.dispose ();
@@ -650,38 +551,7 @@ and mount_each :
     (fun ~prev:_ ~next -> reconcile next);
   on_dispose (fun () -> Array.iter (fun e -> e.dispose ()) !entries)
 
-let platform_installed = ref false
-
-let install_platform () =
-  if not !platform_installed then begin
-  platform_installed := true;
-  Platform.platform :=
-    {
-      target_value = (fun e -> Web.value (Web.target e));
-      target_checked = (fun e -> Web.checked (Web.target e));
-      key = Web.key;
-      meta_key = Web.meta_key;
-      ctrl_key = Web.ctrl_key;
-      prevent_default = Web.prevent_default;
-      stop_propagation =
-        (fun e ->
-          Web.set_flag e stopped_key true;
-          Web.stop_propagation e);
-      target_tag = (fun e -> Web.local_name (Web.target e));
-      shift_key = Web.shift_key;
-      alt_key = Web.alt_key;
-      navigate = Web.navigate;
-      focus = Web.focus;
-      scroll_into_view = Web.scroll_into_view;
-      on_window =
-        (fun name handler ->
-          Web.add_listener (Web.window ()) name handler;
-          fun () -> Web.remove_listener (Web.window ()) name handler);
-    }
-  end
-
 let start ~adopt container f =
-  install_platform ();
   let ctx =
     {
       doc = Web.owner_document container;
@@ -700,19 +570,35 @@ let start ~adopt container f =
 let render container f = start ~adopt:false container f
 let hydrate container f = start ~adopt:true container f
 
-let cleanups : (int, unit -> unit) Hashtbl.t = Hashtbl.create 16
+let cleanup_table : (unit -> unit) Web.table option ref = ref None
+
+let cleanups () =
+  match !cleanup_table with
+  | Some t -> t
+  | None ->
+      let t = Web.table () in
+      cleanup_table := Some t;
+      t
+
+let set_cleanup id f = Web.table_set (cleanups ()) (string_of_int id) f
+let drop_cleanup id = Web.table_delete (cleanups ()) (string_of_int id)
 let live_islands : Web.node list ref = ref []
 let next_cleanup = ref 0
 
 let register cleanup =
   incr next_cleanup;
-  Hashtbl.replace cleanups !next_cleanup cleanup;
+  set_cleanup !next_cleanup cleanup;
   !next_cleanup
+
+let field name fields =
+  List.find_map (fun (k, v) -> if String.equal k name then Some v else None) fields
+
+let has_value value id = match value with Some v -> String.equal v id | None -> false
 
 let transport name input =
   let result, resolve, fail = Async.make () in
   let id = register ignore in
-  let finish () = Hashtbl.remove cleanups id in
+  let finish () = drop_cleanup id in
   let abort =
     Web.fetch_post
     ("/_yuka/action/" ^ Web.encode_uri name)
@@ -721,7 +607,7 @@ let transport name input =
       finish ();
       match Json.of_string body with
       | Ok (`Assoc fields) -> (
-          match (List.assoc_opt "ok" fields, List.assoc_opt "error" fields) with
+          match (field "ok" fields, field "error" fields) with
           | Some value, _ -> resolve value
           | None, Some (`String message) -> fail message
           | None, _ ->
@@ -737,7 +623,7 @@ let transport name input =
       if cancelled then fail "cancelled"
       else fail ("action " ^ name ^ ": network error: " ^ message))
   in
-  if Hashtbl.mem cleanups id then Hashtbl.replace cleanups id abort;
+  if Web.table_has (cleanups ()) (string_of_int id) then set_cleanup id abort;
   result
 
 let async_value id =
@@ -745,7 +631,7 @@ let async_value id =
   let find () =
     let found =
       List.find_opt
-        (fun s -> Web.get_attribute s "data-yuka-async" = Some id)
+        (fun s -> has_value (Web.get_attribute s "data-yuka-async") id)
         (Array.to_list
            (Web.query_all (Web.document ()) "script[data-yuka-async]"))
     in
@@ -759,7 +645,7 @@ let async_value id =
     | Some script ->
         (match Json.of_string (Web.text_content script) with
         | Ok (`Assoc fields) -> (
-            match (List.assoc_opt "ok" fields, List.assoc_opt "error" fields) with
+            match (field "ok" fields, field "error" fields) with
             | Some value, _ -> resolve value
             | None, Some (`String message) -> fail message
             | None, _ -> fail ("async value " ^ id ^ ": unexpected shape"))
@@ -774,7 +660,7 @@ let async_value id =
         (fun n ->
           let own = if Web.local_name n = "script" then [| n |] else [||] in
           Array.exists
-            (fun s -> Web.get_attribute s "data-yuka-async" = Some id)
+            (fun s -> has_value (Web.get_attribute s "data-yuka-async") id)
             (Array.append own (Web.query_all n "script[data-yuka-async]")))
         nodes
     in
@@ -782,14 +668,15 @@ let async_value id =
       Web.watch_added (fun nodes ->
           touches nodes
           && find ()
-          && (Hashtbl.remove cleanups cleanup_id;
+          && (drop_cleanup cleanup_id;
               true))
     in
-    Hashtbl.replace cleanups cleanup_id disconnect
+    set_cleanup cleanup_id disconnect
   end;
   result
 
 let started_key = "__yuka_started"
+let is_true = function Some true -> true | Some false | None -> false
 
 type lazy_entry = {
   lazy_name : string;
@@ -807,7 +694,7 @@ let boot entries props island =
     None
   in
   let entry = List.find_opt (fun e -> e.name = name) entries in
-  match (entry, Hashtbl.find_opt props id) with
+  match (entry, Web.table_get props id) with
   | None, _ -> fail "unknown island name"
   | _, None -> fail "props script not found"
   | Some entry, Some text -> (
@@ -849,9 +736,9 @@ let schedule strategy island run =
       ignore
 
 let stop () =
-  let pending = Hashtbl.fold (fun _ f acc -> f :: acc) cleanups [] in
-  Hashtbl.reset cleanups;
-  List.iter (fun f -> f ()) pending;
+  let pending = Web.table_values (cleanups ()) in
+  Web.table_clear (cleanups ());
+  Array.iter (fun f -> f ()) pending;
   List.iter (fun island -> Web.set_bool island started_key false) !live_islands;
   live_islands := []
 
@@ -883,10 +770,10 @@ let start_island entries lazy_entries props island =
   in
   let finish = function
     | Some dispose ->
-        Hashtbl.replace cleanups id dispose;
+        set_cleanup id dispose;
         replay_events ()
     | None ->
-        Hashtbl.remove cleanups id;
+        drop_cleanup id;
         drop_events ()
   in
   let run () =
@@ -895,7 +782,7 @@ let start_island entries lazy_entries props island =
     | None -> finish (boot entries props island)
     | Some (promise, forget) ->
         let cancelled = ref false in
-        Hashtbl.replace cleanups id (fun () ->
+        set_cleanup id (fun () ->
             cancelled := true;
             drop_events ());
         let report reason =
@@ -915,7 +802,7 @@ let start_island entries lazy_entries props island =
   in
   let cancel = schedule strategy island run in
   if not !fired then
-    Hashtbl.replace cleanups id (fun () ->
+    set_cleanup id (fun () ->
         cancel ();
         drop_events ())
 
@@ -925,32 +812,31 @@ let script_props script =
   | None -> None
 
 let start ?(lazy_entries = []) entries =
-  install_platform ();
   Action.transport := transport;
   Types.async_source := async_value;
-  let props = Hashtbl.create 8 in
+  let props = Web.table () in
   let waiting = ref [] in
   let island_id island =
     Option.value (Web.get_attribute island "data-id") ~default:""
   in
   let start_waiting ~final =
     let ready, rest =
-      List.partition (fun (id, _) -> final || Hashtbl.mem props id) !waiting
+      List.partition (fun (id, _) -> final || Web.table_has props id) !waiting
     in
     waiting := rest;
     List.iter
       (fun (_, island) ->
         let started : bool option = Web.get_prop island started_key in
-        if started <> Some true then
+        if not (is_true started) then
           start_island entries lazy_entries props island)
       (List.rev ready)
   in
   let note_island island =
     let started : bool option = Web.get_prop island started_key in
-    if started <> Some true then begin
+    if not (is_true started) then begin
       let id = island_id island in
       waiting :=
-        if List.mem_assoc id !waiting then
+        if List.exists (fun (i, _) -> String.equal i id) !waiting then
           List.map (fun (i, n) -> if i = id then (i, island) else (i, n)) !waiting
         else (id, island) :: !waiting
     end
@@ -959,7 +845,7 @@ let start ?(lazy_entries = []) entries =
     match script_props script with
     | Some (id, text) ->
         if final || Result.is_ok (Json.of_string text) then
-          Hashtbl.replace props id text
+          Web.table_set props id text
     | None -> ()
   in
   let full ~final =
@@ -976,7 +862,7 @@ let start ?(lazy_entries = []) entries =
     let release () =
       !disconnect ();
       !remove_ready ();
-      Hashtbl.remove cleanups id
+      drop_cleanup id
     in
     disconnect :=
       Web.watch_added (fun nodes ->
@@ -994,7 +880,7 @@ let start ?(lazy_entries = []) entries =
       Web.on_dom_ready (fun () ->
           full ~final:true;
           release ());
-    Hashtbl.replace cleanups id release
+    set_cleanup id release
   end
 
 type registry = { entries : Island.entry list; lazy_registry : lazy_entry list }

@@ -1,5 +1,5 @@
 type node
-type event = Types.event
+type event
 type 'a promise
 
 val in_browser : bool
@@ -95,3 +95,18 @@ val click_href : event -> string
 val fetch_page :
   string -> controller -> (string -> string -> unit) -> (unit -> unit) -> unit
 val swap_page : string -> unit
+
+type 'a table
+
+val table : unit -> 'a table
+val table_get : 'a table -> string -> 'a option
+val table_set : 'a table -> string -> 'a -> unit
+val table_has : 'a table -> string -> bool
+val table_delete : 'a table -> string -> unit
+val table_size : 'a table -> int
+val table_values : 'a table -> 'a array
+val table_clear : 'a table -> unit
+
+val shortest_float : float -> string
+val parse_float : string -> float
+val parse_int : string -> int option

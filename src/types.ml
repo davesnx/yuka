@@ -1,6 +1,6 @@
 type server
 type client
-type event
+type event = Web.event
 type trigger = [ `Idle | `Visible | `Interaction ]
 type loading = [ `Load | trigger | `Lazy of trigger ]
 
@@ -35,14 +35,20 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 
   and slot = { content : node option; dom : Obj.t list ref }
 
-  and template = { shape : shape; mutable html : cache; mutable svg : cache }
+  and template = {
+    shape : shape;
+    markup : string;
+    plan : Template_build.plan;
+    mutable in_html : cache;
+    mutable in_svg : cache;
+  }
 
-  and shape =
+  and shape = Template_build.shape =
     | Fixed_text of string
     | Fixed_element of { tag : string; attrs : fixed_attr list; children : shape list }
     | Part of int
 
-  and fixed_attr = Fixed of string * string | Part_attr of int
+  and fixed_attr = Template_build.fixed_attr = Fixed of string * string | Part_attr of int
 
   and part = Child of node | Attribute of attr | No_attribute
 

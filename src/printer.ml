@@ -1,106 +1,10 @@
 open Types
 open Base
 
-  let escape ~quote s =
-    let b = Buffer.create (String.length s) in
-    String.iter
-      (function
-        | '&' -> Buffer.add_string b "&amp;"
-        | '<' -> Buffer.add_string b "&lt;"
-        | '>' when not quote -> Buffer.add_string b "&gt;"
-        | '"' when quote -> Buffer.add_string b "&quot;"
-        | c -> Buffer.add_char b c)
-      s;
-    Buffer.contents b
-
-  let void_tags =
-    [ "area"; "base"; "br"; "col"; "embed"; "hr"; "img"; "input"; "link";
-      "meta"; "source"; "track"; "wbr" ]
+  let escape = Template_build.escape
 
   let fill_script =
     "<script>window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};</script>"
-
-  let expand template parts =
-    let rec go = function
-      | Fixed_text s -> Text s
-      | Part i -> ( match parts.(i) with Child n -> n | Attribute _ | No_attribute -> Fragment [])
-      | Fixed_element { tag; attrs; children } ->
-          Element
-            {
-              tag;
-              attrs =
-                List.filter_map
-                  (function
-                    | Fixed (name, value) -> Some (Static (name, value))
-                    | Part_attr i -> (
-                        match parts.(i) with Attribute a -> Some a | Child _ | No_attribute -> None))
-                  attrs;
-              children = List.map go children;
-            }
-    in
-    go template.shape
-
-  let single_element = function Element _ | Template _ -> true | _ -> false
-
-  let template_html template =
-    let b = Buffer.create 256 in
-    let after_text = ref false in
-    let select_value = ref None in
-    let rec go = function
-      | Fixed_text "" -> ()
-      | Fixed_text t ->
-          if !after_text then Buffer.add_string b "<!---->";
-          Buffer.add_string b (escape ~quote:false t);
-          after_text := true
-      | Part _ -> ()
-      | Fixed_element { tag; attrs; children } ->
-          let resolved =
-            List.filter_map
-              (function Fixed (name, value) -> Some (name, value) | Part_attr _ -> None)
-              attrs
-          in
-          let value = List.assoc_opt "value" resolved in
-          let resolved =
-            if tag = "select" || tag = "textarea" then
-              List.filter (fun (name, _) -> name <> "value") resolved
-            else if
-              tag = "option" && value <> None && !select_value = value
-              && not (List.mem_assoc "selected" resolved)
-            then resolved @ [ ("selected", "") ]
-            else resolved
-          in
-          Buffer.add_char b '<';
-          Buffer.add_string b tag;
-          List.iter
-            (fun (name, v) ->
-              Buffer.add_char b ' ';
-              Buffer.add_string b name;
-              Buffer.add_string b "=\"";
-              Buffer.add_string b (escape ~quote:true v);
-              Buffer.add_char b '"')
-            resolved;
-          Buffer.add_char b '>';
-          after_text := false;
-          if not (List.mem tag void_tags) then begin
-            (match (tag, value) with
-            | "textarea", Some v ->
-                if String.length v > 0 && v.[0] = '\n' then
-                  Buffer.add_char b '\n';
-                Buffer.add_string b (escape ~quote:false v)
-            | "select", _ ->
-                let outer = !select_value in
-                select_value := value;
-                List.iter go children;
-                select_value := outer
-            | _ -> List.iter go children);
-            Buffer.add_string b "</";
-            Buffer.add_string b tag;
-            Buffer.add_char b '>';
-            after_text := false
-          end
-    in
-    go template.shape;
-    Buffer.contents b
 
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
@@ -180,7 +84,7 @@ open Base
               marker "<!--[-->";
               go (body ());
               marker "<!--]-->")
-      | Template { template; parts } -> go (expand template parts)
+      | Template { template; parts } -> go (Template.expand template parts)
       | Slot { content; _ } ->
           marker "<!--[$-->";
           Option.iter go content;
@@ -267,7 +171,7 @@ open Base
             resolved;
           Buffer.add_char b '>';
           after_text := false;
-          if not (List.mem tag void_tags) then begin
+          if not (Template_build.is_void tag) then begin
             (match (tag, value) with
             | "textarea", Some v ->
                 if String.length v > 0 && v.[0] = '\n' then
@@ -293,7 +197,7 @@ open Base
       List.iter
         (fun item ->
           let n = render item in
-          if single_element n then go n
+          if Template.single_element n then go n
           else begin
             marker "<!--[-->";
             go n;

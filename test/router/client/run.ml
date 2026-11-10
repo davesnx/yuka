@@ -132,7 +132,7 @@ let plain_start () = mount ~islands:(Client.registry []) ()
 
 let navigate_before_start finish =
   setup "";
-  Router.navigate "/early";
+  Browser.navigate "/early";
   check "falls back to a page load" "assign" (log_read ());
   check "no fetch" "0" (ints (calls ()));
   finish ()
@@ -347,7 +347,7 @@ let redirect finish =
   tick (fun () ->
       check "history shows the final url" "/login?next=%2Fa" (location_ ());
       log_clear ();
-      Router.navigate "/b";
+      Browser.navigate "/b";
       resolve_call 1 (doc "Away" (page "x")) "http://example.com/b";
       tick (fun () ->
           check "cross-origin redirect: full page load" "assign" (log_read ());
@@ -357,7 +357,7 @@ let redirect finish =
 let navigate_api finish =
   setup (page "<p>old</p>");
   plain_start ();
-  Router.navigate "/x?q=1";
+  Browser.navigate "/x?q=1";
   check "fetch" "/x?q=1" (call_url 0);
   check "header" "1" (call_header 0);
   resolve_call 0 (doc "X" (page "<p>new</p>")) "";
@@ -422,6 +422,58 @@ let mount_with_navigation finish =
   check "one fetch" "1" (ints (calls ()));
   finish ()
 
+let popstate_to : string -> unit =
+  [%mel.raw
+    "function (url) { window.history.pushState(null, '', url); window.dispatchEvent(new window.PopStateEvent('popstate')) }"]
+
+let unmount_stops_navigation finish =
+  State.set probe_runs 0;
+  setup (page ({|<a id="l" href="/two">x</a>|} ^ island 5));
+  mount ~islands:(Client.registry [ probe_entry ]) ();
+  check "island started" "g0/5" (log_g ());
+  unmount ();
+  check "click not intercepted after unmount" "false" (bools (click "#l" ""));
+  popstate_to "/back";
+  check "no fetch for a click or popstate" "0" (ints (calls ()));
+  log_clear ();
+  Browser.navigate "/x";
+  check "Browser.navigate is a page load" "assign" (log_read ());
+  check "still no fetch" "0" (ints (calls ()));
+  State.set probe_runs 1;
+  check "island stopped and not started again" "" (log_g ());
+  finish ()
+
+let unmount_cancels_in_flight finish =
+  State.set probe_runs 0;
+  setup (page ({|<a id="l" href="/two">x</a>|} ^ island 6));
+  mount ~islands:(Client.registry [ probe_entry ]) ();
+  ignore (click "#l" "");
+  unmount ();
+  check "request aborted" "true" (bools (call_aborted 0));
+  let before = body_html () in
+  ignore_abort ();
+  resolve_call 0 (doc "Two" (page (island 7))) "";
+  tick (fun () ->
+      check "body kept" before (body_html ());
+      check "location kept" "/start?x=1" (location_ ());
+      check "no island started after unmount" "g0/6" (log_g ());
+      finish ())
+
+let mount_after_unmount finish =
+  State.set probe_runs 0;
+  setup (page ({|<a id="l" href="/two">x</a>|} ^ island 8));
+  count_listeners ();
+  mount ~islands:(Client.registry [ probe_entry ]) ();
+  unmount ();
+  mount ~islands:(Client.registry [ probe_entry ]) ();
+  check "island started twice" "g0/8|g0/8" (log_g ());
+  check "click intercepted again" "true" (bools (click "#l" ""));
+  check "one fetch for one click" "1" (ints (calls ()));
+  popstate_to "/back";
+  check "one fetch for one popstate" "2" (ints (calls ()));
+  check "listeners added once per mount" "2,2" (listeners ());
+  finish ()
+
 let not_a_page status type_ finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -454,6 +506,9 @@ let all =
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);
+    ("unmount stops navigation", unmount_stops_navigation);
+    ("unmount cancels a navigation in flight", unmount_cancels_in_flight);
+    ("mount after unmount", mount_after_unmount);
     ("404 is a full load", not_a_page 404 "text/html");
     ("500 is a full load", not_a_page 500 "text/html");
     ("302 not followed is a full load", not_a_page 302 "text/html");

@@ -2,6 +2,5 @@
  (name yuka)
  (public_name yuka)
  (modes native melange)
- (libraries melange-tiny.printf melange-tiny.hashtbl)
  (virtual_modules web)
  (default_implementation yuka.native))

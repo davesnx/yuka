@@ -321,6 +321,10 @@ let json_printing () =
   check "compact" "{\"a\":[1,2.5,null,true],\"b\":\"x\"}"
     (show_json (`Assoc [ ("a", `List [ `Int 1; `Float 2.5; `Null; `Bool true ]); ("b", `String "x") ]));
   check "float keeps a dot" "1.0" (show_json (`Float 1.0));
+  check "a tie at 17 digits rounds to even" "1234567890123456.2"
+    (show_json (`Float 1234567890123456.25));
+  check "a tie at 17 digits rounds up to even" "1234567890123456.8"
+    (show_json (`Float 1234567890123456.75));
   check "control chars" "\"\\u0001\\b\\f\\n\"" (show_json (`String "\001\b\012\n"));
   check "utf-8 kept" "\"caf\xc3\xa9\"" (show_json (`String "caf\xc3\xa9"));
   check "nan" "null" (show_json (`Float nan))
@@ -1033,10 +1037,10 @@ let codec_result () =
     | Ok (Ok l) -> "ok " ^ String.concat "," (List.map string_of_int l)
     | _ -> "bad")
 
-let shape_html shape = Internal.template_html (Template.make shape)
+let shape_html shape = Internal.template_html (Internal.template shape)
 
 let html_template () =
-  let p = Template.(make (element "p" [ fixed "class" "c" ] [ text "a" ])) in
+  let p = Internal.template Template.(element "p" [ fixed "class" "c" ] [ text "a" ]) in
   check "printed as its tree" "<p class=\"c\">a</p>" (chtml (Template.instance p [||]));
   check "no marker around nested" "<div><p class=\"c\">a</p></div>"
     (chtml (lower "div" [] [ Template.instance p [||] ]))
@@ -1044,8 +1048,8 @@ let html_template () =
 let template_parts_print () =
   let state = State.make "x" in
   let t =
-    Template.(
-      make
+    Internal.template
+      Template.(
         (element "div"
            [ fixed "id" "d"; part_attr 0; part_attr 1; part_attr 2 ]
            [ text "a"; part 3; element "span" [] [ part 4 ]; text "b" ]))
@@ -1113,7 +1117,7 @@ let only_child_markers () =
     (chtml
        (lower "ul" []
           [ each ~key:Fun.id (fun () -> [ "a" ])
-              (fun v -> Template.(instance (make (element "li" [] [ part 0 ])) [| child (Yuka.text v) |]));
+              (fun v -> Template.instance (Internal.template Template.(element "li" [] [ part 0 ])) Template.[| child (Yuka.text v) |]);
             lower "i" [] [] ]))
 
 let await_component () =

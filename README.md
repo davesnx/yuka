@@ -188,10 +188,6 @@ The demo is an issue tracker. It uses every feature above. It needs OCaml 5.4,
 dune 3.16+, Melange and mlx; the demo server also uses Dream. From the
 repository root:
 
-Yuka needs [melange-tiny](https://github.com/davesnx/melange-tiny), which is
-not in opam. Pin it with `make pin`, or link a checkout that is next to this
-one: `mkdir -p vendor && ln -s ../../melange-tiny vendor/melange-tiny`.
-
 ```sh
 dune build @demo/all
 _build/default/demo/server/demo_server.exe --port 8080

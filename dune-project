@@ -33,7 +33,6 @@
    (>= 7.0.1-54))
   (ppxlib
    (>= 0.38.0))
-  melange-tiny
   (mlx :with-test)
   (alcotest :with-test)
   (dream :with-test)

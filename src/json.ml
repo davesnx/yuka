@@ -19,20 +19,18 @@
         | '\b' -> Buffer.add_string b "\\b"
         | '\012' -> Buffer.add_string b "\\f"
         | ('<' | '\000' .. '\031') as c ->
-            Buffer.add_string b
-              (Tiny_printf.Printf.sprintf "\\u%04x" (Char.code c))
+            let hex = "0123456789abcdef" and n = Char.code c in
+            Buffer.add_string b "\\u00";
+            Buffer.add_char b hex.[n lsr 4];
+            Buffer.add_char b hex.[n land 15]
         | c -> Buffer.add_char b c)
       s;
     Buffer.add_char b '"'
 
   let float_repr f =
-    if Float.is_nan f || Float.abs f = Float.infinity then "null"
+    if f <> f || f = infinity || f = neg_infinity then "null"
     else
-      let rec try_precision p =
-        let s = Tiny_printf.Printf.sprintf "%.*g" p f in
-        if p >= 17 || float_of_string s = f then s else try_precision (p + 1)
-      in
-      let s = try_precision 15 in
+      let s = Web.shortest_float f in
       if String.contains s '.' || String.contains s 'e' || String.contains s 'E'
       then s
       else s ^ ".0"
@@ -99,7 +97,7 @@
     in
     let expect c =
       if !i < n && s.[!i] = c then incr i
-      else fail (Tiny_printf.Printf.sprintf "expected %C" c)
+      else fail ("expected '" ^ String.make 1 c ^ "'")
     in
     let literal word v =
       let l = String.length word in
@@ -183,11 +181,11 @@
         if peek () = '+' || peek () = '-' then incr i;
         digits ());
       let text = String.sub s start (!i - start) in
-      if !is_float then `Float (float_of_string text)
+      if !is_float then `Float (Web.parse_float text)
       else
-        match int_of_string_opt text with
+        match Web.parse_int text with
         | Some v -> `Int v
-        | None -> `Float (float_of_string text)
+        | None -> `Float (Web.parse_float text)
     in
     let rec value depth : t =
       ws ();

@@ -95,6 +95,11 @@ bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUN
 	BUILD_DIR=$(BUILD_DIR) bench/keyed/build.sh
 	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --out $(BENCH_OUT)
 
+.PHONY: size
+size: ## Bundle the keyed benchmark app and the demo, print raw and gzip bytes, check the budget in bench/size/budget.json
+	$(DUNE) build --profile=release @bench/keyed/bench-keyed @demo/client/demo-client
+	node bench/size/size.ts --build-dir $(BUILD_DIR)
+
 .PHONY: install-npm
 install-npm: ## Install npm dependencies (esbuild, jsdom)
 	npm install
@@ -109,7 +114,6 @@ install: ## Install the opam dependencies
 
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <url>" per line
-	@echo "melange-tiny https://github.com/davesnx/melange-tiny.git"
 
 .PHONY: pin
 pin: ## Pin dependencies

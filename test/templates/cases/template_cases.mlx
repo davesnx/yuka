@@ -1,0 +1,47 @@
+let label : string Yuka.State.t = Yuka.State.make "l" [@@yuka.shared]
+let on : bool Yuka.State.t = Yuka.State.make true [@@yuka.shared]
+
+let cases : (string * (unit -> Yuka.client Yuka.element)) list =
+  [
+    ( "escaping",
+      fun () -> <p title="a \"q\" & <b> 'x'">"x < y & z > w \"q\" 'a'"</p> );
+    ( "texts and parts",
+      fun () ->
+        <p>"a" (Yuka.text (Yuka.State.get label)) "b" "c" <br /> "d" <i>(Yuka.text "e")</i> "f"</p> );
+    ( "static text parts",
+      fun () ->
+        <p>"a" (Yuka.text "x") "b" (Yuka.text "y") (Yuka.text "z") "c" (Yuka.text "w")</p> );
+    ( "attribute parts",
+      fun () ->
+        <div id="d" class_=(if Yuka.State.get on then "on" else "off") onClick=(fun _ -> ())>
+          <span title=(Yuka.State.get label)>"s"</span>
+        </div> );
+    ( "svg",
+      fun () ->
+        <svg viewBox="0 0 10 10" width="10">
+          <circle cx="5" cy="5" r="4" strokeWidth="1" />
+          <g class_=(Yuka.State.get label)>(Yuka.text "t")</g>
+          <foreignObject><div>(Yuka.text "html")</div></foreignObject>
+        </svg> );
+    ( "select value",
+      fun () ->
+        <select value="b">
+          <option value="a">"A"</option>
+          <option value="b">"B &"</option>
+        </select> );
+    ( "textarea value", fun () -> <textarea rows=3 value="\nline & <tag>" /> );
+    ( "void elements",
+      fun () -> <div><input type_=`text value="v" /><img src="/a.png" alt="a" /><hr /></div> );
+    ( "nested",
+      fun () ->
+        <ul class_="list">
+          <li>"one"</li>
+          <li><a href="/x">(Yuka.text (Yuka.State.get label))</a>"!"</li>
+        </ul> );
+    ("table without tbody", fun () -> <table><tr><td>"x"</td></tr></table>);
+    ("div inside p", fun () -> <p><div>"x"</div></p>);
+  ]
+
+let parser_changes = [ "table without tbody"; "div inside p" ]
+
+let value_properties = [ "select value"; "textarea value"; "void elements" ]

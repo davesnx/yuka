@@ -240,15 +240,29 @@ module Template : sig
   (** The attribute at this place is part [i], made with [attribute] or
       [attribute_option]. *)
 
-  val make : shape -> t
+  val make :
+    shape ->
+    html:string ->
+    walk:int array ->
+    kids:int array ->
+    attrs:int array ->
+    values:(int * string) array ->
+    t
+  (** [make shape ~html ~walk ~kids ~attrs ~values]: the ppx computes all
+      arguments but [shape] from [shape] at build time. [html] is the HTML of
+      the shape without its parts; the other arguments are the paths from the
+      template root to its parts. Hand-written code uses [Internal.template]
+      instead. *)
+
   val child : 'kind element -> 'kind part
   val attribute : 'kind attribute -> 'kind part
   val attribute_option : 'kind attribute option -> 'kind part
 
   val instance : t -> 'kind part array -> 'kind element
   (** The tree of [t] with its parts filled in. It prints and hydrates as the
-      same tree made with [lower]. Fresh client creation clones the parsed
-      template and goes to each part with a fixed path. *)
+      same tree made with [lower]. Fresh client creation parses [html] of
+      [make] once, clones it and goes to each part with the paths of
+      [make]. *)
 end
 
 module Slot : sig
@@ -338,26 +352,6 @@ module Client : sig
       Where the DOM does not match, it creates the missing nodes. Returns a
       function that stops all effects and handlers. Browser only. *)
 
-  val start : ?lazy_entries:lazy_entry list -> entry list -> unit
-  (** [start entries] installs the browser runtime and the action transport,
-      then hydrates every [yuka-island] element of the document with the
-      entry of the same name, following each island's start strategy. Props
-      come from the [script] element with the same [data-yuka-props] id. It
-      also watches the document, so islands that arrive later (streaming,
-      fills) start when their props script is complete. An island that
-      cannot start is logged with [console.error] and keeps its server HTML.
-      An island is not started twice.
-
-      The action transport sends [POST /_yuka/action/<name>] with the input
-      as a JSON body. The response is [{"ok": value}] or
-      [{"error": message}]. *)
-
-  val stop : unit -> unit
-  (** Stops every island that [start] started: effects, handlers and
-      document listeners are removed, start strategies that did not fire yet
-      are cancelled, and action requests in flight are aborted (their
-      [Async] fails with ["cancelled"]). The DOM stays. [start] works again
-      afterwards, for example on a new body. *)
 end
 
 module Action : sig
@@ -379,7 +373,9 @@ module Browser : sig
       call it inside [Effect.run]. *)
 
   val navigate : string -> unit
-  (** Loads the URL. *)
+  (** Loads the URL. After [mount] with navigation (the default), it is a
+      client navigation, as a click on a link; see {!mount}. Otherwise it
+      does [location.assign url]. *)
 
   val focus : string -> unit
   (** Focuses the element with this id. *)
@@ -434,6 +430,20 @@ module Internal : sig
 
   val template_shape : template -> shape
 
+  val template : Template.shape -> template
+  (** A template made at run time: its HTML and paths are computed from the
+      shape with the code that the ppx runs at build time. For tests and
+      hand-written trees. *)
+
+  val recompile : template -> template
+  (** [template (template_shape t)]: the template again, with its HTML and
+      paths computed at run time. Tests compare it with what the ppx
+      emitted. *)
+
+  val template_plan :
+    template -> int array * int array * int array * (int * string) array
+  (** The [walk], [kids], [attrs] and [values] given to [Template.make]. *)
+
   val node : 'kind element -> node
   val element : node -> 'kind element
 
@@ -459,10 +469,11 @@ module Internal : sig
   (** One server render. Counts ids and collects pending parts. *)
 
   val template_html : template -> string
-  (** The HTML of a template without its parts: elements, fixed attributes
-      and texts as [to_html] prints them. A part writes nothing. Two texts
-      with only parts between them get [<!---->]. Static [value] on
-      [select] and [textarea] follows the rules of [to_html]. *)
+  (** The [html] given to [Template.make]: the HTML of a template without
+      its parts, elements, fixed attributes and texts as [to_html] prints
+      them. A part writes nothing. Two texts with only parts between them get
+      [<!---->]. Static [value] on [select] and [textarea] follows the rules
+      of [to_html]. *)
 
   val expand : template -> part array -> node
   (** The tree of a template instance, as [lower] would make it. *)
@@ -584,34 +595,58 @@ module Router : sig
 
   val dispatch : 'r case list -> string -> 'r option
   (** The result of the first case that matches the target. *)
-
-  val navigate : string -> unit
-  (** [navigate url] loads [url] with the header [Yuka-Navigate: 1], stops
-      the islands, replaces the content of [<body>] and [document.title] with
-      those of the response, starts the islands again, pushes a history entry
-      (after the page loaded) and scrolls to the fragment or to the top. A
-      navigation started while another one loads aborts the first. If the
-      request fails, the response is not 2xx or not [text/html], or it was
-      redirected to another origin, it does [location.assign url]. Before [Yuka.mount], it does
-      [location.assign url]. Browser only. *)
 end
 
 val mount : ?islands:Client.registry -> ?navigation:bool -> unit -> unit
 (** [mount ()] is the whole client start. [yuka.ppx] rewrites it into
-    [mount ~islands:Yuka_islands.registry ()]. It starts the islands. When
-    [navigation] is true (default) it also takes over navigation:
+    [mount ~islands:Yuka_islands.registry ()].
 
-    - A left click on an [<a href>] goes through [Router.navigate] unless:
-      the event is already prevented, a modifier key is down, the link has a
+    It installs the browser runtime and the action transport, then hydrates
+    every [yuka-island] element of the document with the entry of the same
+    name, following each island's start strategy. Props come from the
+    [script] element with the same [data-yuka-props] id. It also watches the
+    document, so islands that arrive later (streaming, fills) start when
+    their props script is complete. An island that cannot start is logged
+    with [console.error] and keeps its server HTML. An island is not started
+    twice. The action transport sends [POST /_yuka/action/<name>] with the
+    input as a JSON body. The response is [{"ok": value}] or
+    [{"error": message}].
+
+    When [navigation] is true (default) it also takes over navigation:
+
+    - A left click on an [<a href>] is a client navigation unless: the
+      event is already prevented, a modifier key is down, the link has a
       [target] other than [_self], a [download] attribute or a
       [data-yuka-reload] attribute, the URL is on another origin, or the URL
       differs from the current one only by its fragment.
     - [popstate] loads the entry's URL without pushing history.
+    - {!Browser.navigate} is a client navigation.
+
+    A client navigation loads the URL with the header [Yuka-Navigate: 1],
+    stops the islands, replaces the content of [<body>] and [document.title]
+    with those of the response, starts the islands again, pushes a history
+    entry (after the page loaded) and scrolls to the fragment or to the top.
+    A navigation started while another one loads aborts the first. If the
+    request fails, the response is not 2xx or not [text/html], or it was
+    redirected to another origin, it does [location.assign url].
 
     With [~navigation:false] only the islands start and links load full
     pages. Calling [mount] again is safe: the listeners are not added twice.
     Raises [Failure], naming [yuka.ppx], without [~islands] (the ppx did not
-    run) or outside the browser. *)
+    run) or outside the browser.
+
+    Only an app that calls [mount] contains the island, action and
+    navigation code. *)
+
+val unmount : unit -> unit
+(** Stops every island that [mount] started: effects, handlers and document
+    listeners are removed, start strategies that did not fire yet are
+    cancelled, and action requests in flight are aborted (their [Async]
+    fails with ["cancelled"]). It also stops navigation: the [click] and
+    [popstate] listeners are removed, a navigation in flight is aborted, and
+    {!Browser.navigate} does [location.assign] again (unless the app
+    replaced [Internal.platform.navigate]). The DOM stays. [mount] works
+    again afterwards, for example on a new body. *)
 
 module Server : sig
   val log_error : (string -> unit) ref

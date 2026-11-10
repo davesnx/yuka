@@ -7,10 +7,10 @@ let text s = Text s
 let int n = Text (string_of_int n)
 let float f =
   Text
-    (if Float.is_nan f then "NaN"
-     else if f = Float.infinity then "Infinity"
-     else if f = Float.neg_infinity then "-Infinity"
-     else Json.to_string (`Float f))
+    (if f <> f then "NaN"
+     else if f = infinity then "Infinity"
+     else if f = neg_infinity then "-Infinity"
+     else Json.float_repr f)
 let empty = Fragment []
 let list children = Fragment children
 let array children = Fragment (Array.to_list children)
