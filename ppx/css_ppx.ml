@@ -98,11 +98,8 @@ let cannot_wrap (vb : value_binding) =
 let wrap_make ~component sheet (vb : value_binding) =
   match vb.pvb_pat.ppat_desc with
   | Ppat_var { txt = "make"; _ } -> (
-      match wrap_function sheet vb.pvb_expr with
-      | None -> cannot_wrap vb
-      | Some e ->
-          if component || constrained_element vb || returns_element vb.pvb_expr then { vb with pvb_expr = e }
-          else vb)
+      if not (component || constrained_element vb || returns_element vb.pvb_expr) then vb
+      else match wrap_function sheet vb.pvb_expr with None -> cannot_wrap vb | Some e -> { vb with pvb_expr = e })
   | _ -> vb
 
 let defines name items =

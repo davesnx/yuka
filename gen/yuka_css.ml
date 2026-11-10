@@ -14,19 +14,20 @@ let rec sources dir =
 
 let declared src =
   let text = read src in
+  let code = Source_text.code_only text in
   let key = "[%yuka.css" in
   let k = String.length key and n = String.length text in
   let rec go i acc =
-    if i + k > n then List.rev acc
-    else if String.sub text i k <> key then go (i + 1) acc
-    else
-      let j = ref (i + k) in
-      while !j < n && (text.[!j] = ' ' || text.[!j] = '\n' || text.[!j] = '\t' || text.[!j] = '\r') do incr j done;
-      if !j < n && text.[!j] = '"' then
-        match String.index_from_opt text (!j + 1) '"' with
-        | Some e -> go (e + 1) (String.sub text (!j + 1) (e - !j - 1) :: acc)
-        | None -> List.rev acc
-      else go (i + k) acc
+    match Source_text.find_from ~sub:key code i with
+    | None -> List.rev acc
+    | Some p ->
+        let j = ref (p + k) in
+        while !j < n && (text.[!j] = ' ' || text.[!j] = '\n' || text.[!j] = '\t' || text.[!j] = '\r') do incr j done;
+        if !j < n && text.[!j] = '"' then
+          match String.index_from_opt text (!j + 1) '"' with
+          | Some e -> go (e + 1) (String.sub text (!j + 1) (e - !j - 1) :: acc)
+          | None -> List.rev acc
+        else go (p + k) acc
   in
   go 0 []
 

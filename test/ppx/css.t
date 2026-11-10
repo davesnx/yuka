@@ -78,8 +78,8 @@ A class that cannot be an OCaml name:
   Error: [yuka] n.css: the class "caf\195\169" has characters an OCaml name cannot have; rename it
   [1]
 
-Only functions that return an element get the sheet; a make that is not a
-function gets a warning:
+Only functions that return an element get the sheet; a component make
+that is not a function gets a warning, another make is left alone:
 
   $ cat > w.ml <<'X'
   > module Css = [%yuka.css "a.css"]
@@ -90,6 +90,7 @@ function gets a warning:
   > end
   > module Model = struct let make a b = (a, b) end
   > module Alias = struct let make = Typed.make end
+  > module Typed_alias = struct let make : unit -> Yuka.client Yuka.element = Typed.make end
   > X
   $ run w | sed -n '/^type t/,$p'
   type t =
@@ -105,10 +106,11 @@ function gets a warning:
         fun () -> Yuka.use_css Css.stylesheet (Yuka.text "x")
     end
   module Model = struct let make a b = (a, b) end
-  module Alias =
+  module Alias = struct let make = Typed.make end
+  module Typed_alias =
     struct
-      let make = Typed.make[@@ocaml.ppwarning
-                             "[yuka] this make is not a function, so [%yuka.css] cannot add its sheet; call Yuka.use_css Css.stylesheet in the component"]
+      let make : unit -> Yuka.client Yuka.element = Typed.make[@@ocaml.ppwarning
+                                                                "[yuka] this make is not a function, so [%yuka.css] cannot add its sheet; call Yuka.use_css Css.stylesheet in the component"]
     end
 
 The island of a let%client gets the sheet:
@@ -150,6 +152,19 @@ Errors:
   $ mkdir m && cp d.ml m/ && yuka-css m
   yuka-css: m/d.ml: [%yuka.css "nope.css"]: cannot read m/nope.css
   [1]
+
+Comments and strings that mention [%yuka.css] are not declarations:
+
+  $ mkdir k && cp a.css k/ && cat > k/k.ml <<'X'
+  > (** Use [%yuka.css "doc.css"] (* nested [%yuka.css "nested.css"] *) *)
+  > let s = "[%yuka.css \"str.css\"]"
+  > let q = {|[%yuka.css "quoted.css"]|}
+  > module Css = [%yuka.css "a.css"]
+  > X
+  $ yuka-css k | cut -c1-24
+  let sheets = [
+    ("a-705346f1.css", "/*
+  ]
 
   $ cat > e.ml <<'X'
   > module Css = [%yuka.css 1]

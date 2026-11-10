@@ -1,13 +1,13 @@
 (executable
  (name yuka_islands)
  (public_name yuka-islands)
- (modules yuka_islands)
+ (modules yuka_islands source_text)
  (package yuka))
 
 (executable
  (name yuka_css)
  (public_name yuka-css)
- (modules yuka_css css_scan)
+ (modules yuka_css css_scan source_text)
  (package yuka))
 
 (copy_files#
