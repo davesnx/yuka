@@ -10,30 +10,59 @@ let make_container : unit -> Yuka.Client.container =
 let remove_container : Yuka.Client.container -> unit =
   [%mel.raw "function (c) { c.remove() }"]
 
+let row_template =
+  Template.(
+    make
+      (element "li"
+         [ fixed "class" "row"; part_attr 0; part_attr 1 ]
+         [
+           element "span" [ fixed "class" "status" ] [ text "o" ];
+           element "span" [ fixed "class" "prio" ] [ text "!" ];
+           element "a" [ fixed "href" "#" ] [ part 2 ];
+           element "span" [ fixed "class" "id" ] [ part 3 ];
+           element "time" [] [ text "2d" ];
+         ]))
+
+let static_template =
+  Template.(
+    make
+      (element "li" [ fixed "class" "row" ]
+         [
+           element "span" [ fixed "class" "status" ] [ text "o" ];
+           element "span" [ fixed "class" "prio" ] [ text "!" ];
+           element "a" [ fixed "href" "#" ] [ text "title" ];
+           element "span" [ fixed "class" "id" ] [ text "YU-1" ];
+           element "time" [] [ text "2d" ];
+         ]))
+
 let row ~wrap i =
   let selected = State.make false in
   let title = State.make ("Issue " ^ string_of_int i) in
-  let tree =
+  let selected_attr =
+    hole_attr "data-selected" (fun () -> if State.get selected then Some "1" else None)
+  in
+  let click = on "click" (fun _ -> State.set selected true) in
+  let title_hole = hole (fun () -> text (State.get title)) in
+  let id_hole = hole (fun () -> text ("YU-" ^ string_of_int i)) in
+  if wrap then
+    Template.(
+      instance row_template
+        [| attribute selected_attr; attribute click; child title_hole; child id_hole |])
+  else
     lower "li"
-      [
-        attr "class" "row";
-        hole_attr "data-selected" (fun () ->
-            if State.get selected then Some "1" else None);
-        on "click" (fun _ -> State.set selected true);
-      ]
+      [ attr "class" "row"; selected_attr; click ]
       [
         lower "span" [ attr "class" "status" ] [ text "o" ];
         lower "span" [ attr "class" "prio" ] [ text "!" ];
-        lower "a" [ attr "href" "#" ] [ hole (fun () -> text (State.get title)) ];
-        lower "span" [ attr "class" "id" ]
-          [ hole (fun () -> text ("YU-" ^ string_of_int i)) ];
+        lower "a" [ attr "href" "#" ] [ title_hole ];
+        lower "span" [ attr "class" "id" ] [ id_hole ];
         lower "time" [] [ text "2d" ];
       ]
-  in
-  if wrap then template "bench-row" tree else tree
 
 let static_row ~wrap i =
-  let tree =
+  ignore i;
+  if wrap then Template.instance static_template [||]
+  else
     lower "li" [ attr "class" "row" ]
       [
         lower "span" [ attr "class" "status" ] [ text "o" ];
@@ -42,9 +71,6 @@ let static_row ~wrap i =
         lower "span" [ attr "class" "id" ] [ text "YU-1" ];
         lower "time" [] [ text "2d" ];
       ]
-  in
-  ignore i;
-  if wrap then template "bench-static" tree else tree
 
 let once ?(static = false) wrap rows =
   let row = if static then static_row else row in
