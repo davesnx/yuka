@@ -1213,6 +1213,65 @@ the budget in `bench/size/budget.json`.
   babel, without terser, and then with the same script: its JavaScript is
   4,715 B gzip, where rollup and terser gave 4,812 B.
 
+### Mount code per node kind (2026-11-11)
+
+- `mount_node` matches every node kind, so before this change every app
+  kept the mount code of every kind. Four kinds that an app may not make
+  are now reached through a reference in `client.ml`, and the code is
+  linked only when the app calls the function that sets it:
+  - `element_hook` (an `Element` made with `createElement`): set by
+    `Client.use_element`, which `Yuka.lower` calls (and `use_css` and
+    `Form`, which build their nodes with `lower`), `Client.hydrate` (its
+    expander builds `Element` nodes from the shape), and, in `yuka.ml`,
+    `template_of_shape`, `Template.make`, `Private.template`,
+    `Private.recompile` and `Private.expand`.
+  - `await_hook`: set by `Client.use_await`, which `Await.make` calls
+    (`suspend` too). It is a record with a polymorphic field, because the
+    value type of an `Await` is existential.
+  - `slot_hook`: `Client.use_slot`, from `Yuka.slot`.
+  - `catch_hook`: `Client.use_catch`, from `Catch.make`.
+  On the server the four `use_*` functions do nothing.
+- Rule: every place that builds one of these nodes for the client calls its
+  `use_*` function before it returns the node. Nothing resets a hook, so a
+  node never reaches `mount_node` before its hook is set. The only other
+  constructors are `Cycle.heading` (an `Element` for server error pages)
+  and `Cycle.outlet` (the `yuka-outlet` element around a nested layout),
+  both server-only. A default can therefore only run after a broken rule,
+  and it raises `Failure "Yuka: no mount code for a node of Yuka.lower"`
+  (or `Yuka.Await.make`, `Yuka.slot`, `Yuka.Catch.make`) instead of doing
+  nothing.
+- `Private.node` is `private` in `yuka.mli`: tests can match on it but not
+  build a node kind without its constructor. `Private.hole` builds a
+  `Hole` for the tests that need one.
+- Checks: `test/mount_hooks` has one process per installer (`lower`,
+  `Await.make`, `slot`, `Catch.make`, `template_of_shape`, `Template.make`,
+  `Private.expand`) that makes its node only that way and never hydrates;
+  without that `use_*` call, it fails with the error above.
+  `test/constructors` parses `src/*.ml`, `dom/js/*.ml` and `dom/native/*.ml`
+  with the OCaml parser and fails when `Element`, `Await`, `Slot` or
+  `Catch` is built as an expression outside `src/element.ml`,
+  `src/template.ml` and `src/cycle.ml`.
+- `log` moved from `element.ml` to `types.ml` (`Element.log` is an alias),
+  so `Element` can call `Client` without a cycle through `Platform`.
+- Internal functions of `client.ml` take uncurried arguments (`[@u]`), so
+  their calls are direct and need no `Curry`: `take`'s and
+  `comment_where`'s tests, `walk_region`'s visitor, the four hooks and the
+  list of mounted roots. Calls of functions that the app gives (`on`,
+  `hole`, `hole_attr`, `each`, the `Await` children, the root of `render`)
+  and of the dispose functions of `Base.mount` still go through `Curry`;
+  removing them would change public types or the reactive core. Shared
+  modules in `src/` cannot use `[@u]`: the library is compiled for native
+  too and has no Melange ppx.
+- The client's cache of a parsed template is a plain variant (`Empty`, or
+  `Compiled` with the document and the cloned root) in `types.ml`, in place
+  of an extensible type, so the bundle no longer needs
+  `Caml_exceptions.create`.
+- Size: the keyed app goes from 25,569 B, 9,104 B gzip to 24,482 B,
+  8,698 B gzip (hooks 8,838 B, `[@u]` 8,769 B, cache 8,698 B). The demo,
+  all chunks, goes from 44,109 B to 44,228 B gzip (+119 B): it makes nodes
+  of every kind, so it keeps all the mount code and also pays for the four
+  references, their default errors and the `use_*` calls.
+
 ## Routes.mlx generator (2026-11-10)
 
 The input format and the reader changed later; see "Routes.ml: one OCaml

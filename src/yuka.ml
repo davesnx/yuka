@@ -14,9 +14,17 @@ type slot = Types.slot
 type trigger = Types.trigger
 type loading = Types.loading
 include Element
-module Template = struct include Template end
+module Template = struct
+  include Template
 
-let template_of_shape = Template.of_shape
+  let make shape ~html ~walk ~kids ~attrs ~values =
+    Client.use_element ();
+    make shape ~html ~walk ~kids ~attrs ~values
+end
+
+let template_of_shape shape =
+  Client.use_element ();
+  Template.of_shape shape
 let template_coded = Template.coded
 let template_child = Template.child
 let template_attribute = Template.attribute
@@ -99,15 +107,18 @@ module Private = struct
   let dev_events = Cycle.dev_events
   let node n = n
   let template_shape (t : template) = Template.shape t
-  let template = Template.of_shape
-  let recompile (t : template) = Template.of_shape (Template.shape t)
+  let template = template_of_shape
+  let recompile (t : template) = template_of_shape (Template.shape t)
   let template_html (t : template) = t.markup
   let parser_changes = Template_build.parser_changes
   let template_plan (t : template) =
     let { Template_build.walk; kids; attrs; values } = t.plan in
     (walk, kids, attrs, values)
-  let expand = Template.expand
+  let expand t parts =
+    Client.use_element ();
+    Template.expand t parts
   let element n = n
+  let hole f = Hole f
 
   let owned f =
     let o = Base.new_owner () in

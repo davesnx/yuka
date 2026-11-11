@@ -15,14 +15,11 @@ let empty = Fragment []
 let list children = Fragment children
 let array children = Fragment (Array.to_list children)
 let fragment children = Fragment children
-let lower tag attrs children = Element { tag; attrs; children }
-let warned = ref false
+let lower tag attrs children =
+  Client.use_element ();
+  Element { tag; attrs; children }
 
-let log name value =
-  if Dev.on && not !warned then begin
-    warned := true;
-    Web.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
-  end
+let log = Types.log
 
 let valid name =
   if Web.in_browser && not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ name)
@@ -36,7 +33,9 @@ let attr_unchecked name value =
   Web.refuse_url_name name;
   Static (name, value)
 let hole f = Hole f
-let slot s = Slot s
+let slot s =
+  Client.use_slot ();
+  Slot s
 
 module Slot = struct
   let make content = { content = Some content; dom = ref [] }
@@ -49,10 +48,7 @@ let stylesheet href = href
 let use_css href body =
   if !Base.server_rendering then
     Fragment
-      [ Element
-          { tag = "link";
-            attrs = [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ];
-            children = [] };
+      [ lower "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] [];
         body ]
   else begin
     if Web.in_browser then Web.add_stylesheet href;
@@ -74,6 +70,7 @@ let each ?(equal = Signal.same) ~key items render =
 
 module Await = struct
   let make ~async ~loading ?(failed = fun _ -> Fragment []) ~children () =
+    Client.use_await ();
     Await { async; loading; failed; render = children }
 end
 
@@ -112,6 +109,7 @@ module Catch = struct
                   error.value <- Some m;
                   show o m))
     in
+    Client.use_catch ();
     Catch { children; fallback; client }
 end
 

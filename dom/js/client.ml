@@ -66,17 +66,17 @@ let handlers_key event = "__yuka_" ^ event
 
 let skip pos n = pos.cur <- next_sibling n
 
-let take pos kind matches : cur =
+let take pos kind (matches : Web.node -> bool [@u]) : cur =
   let c = pos.cur in
-  if pos.adopt && c != Js.null && Web.node_type (node_of c) = kind && matches (node_of c)
+  if pos.adopt && c != Js.null && Web.node_type (node_of c) = kind && matches (node_of c) [@u]
   then begin
     skip pos (node_of c);
     c
   end
   else Js.null
 
-let comment_where pos matches data =
-  let n = take pos 8 (fun n -> matches (Web.data n)) in
+let comment_where pos (matches : string -> bool [@u]) data =
+  let n = take pos 8 (fun [@u] n -> matches (Web.data n) [@u]) in
   if n != Js.null then node_of n
   else begin
     if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
@@ -86,13 +86,13 @@ let comment_where pos matches data =
     n
   end
 
-let comment pos data = comment_where pos (String.equal data) data
+let comment pos data = comment_where pos (fun [@u] d -> d = data) data
 
 let opens d = String.length d > 0 && String.unsafe_get d 0 = '['
 
-let hole_start pos = comment_where pos opens "["
+let hole_start pos = comment_where pos (fun [@u] d -> opens d) "["
 
-let walk_region pos visit =
+let walk_region pos (visit : Web.node -> unit [@u]) =
   let rec go depth =
     let c = pos.cur in
     if c != Js.null then begin
@@ -100,7 +100,7 @@ let walk_region pos visit =
       let d = if Web.node_type n = 8 then Web.data n else "" in
       if not (d = "]" && depth = 0) then begin
         skip pos n;
-        visit n;
+        visit n [@u];
         go (if opens d then depth + 1 else if d = "]" then depth - 1 else depth)
       end
     end
@@ -112,15 +112,15 @@ let adopt_slot : (pos -> slot -> bool [@u]) ref = ref (fun [@u] _ _ -> false)
 
 let drop_to_end pos =
   if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
-    walk_region { pos with cur = pos.cur } (fun n ->
+    walk_region { pos with cur = pos.cur } (fun [@u] n ->
         Dev.mismatch pos.parent "nothing" (Some n));
   if pos.adopt then (!drop_rest) pos [@u]
 
 let adopt_slot_now pos slot =
-  take pos 8 (fun n -> Web.data n = "[$") != Js.null
+  take pos 8 (fun [@u] n -> Web.data n = "[$") != Js.null
   && begin
        let nodes = ref [] in
-       walk_region pos (fun n -> nodes := Obj.repr n :: !nodes);
+       walk_region pos (fun [@u] n -> nodes := Obj.repr n :: !nodes);
        let rec rev acc = function [] -> acc | n :: rest -> rev (n :: acc) rest in
        slot.dom := rev [] !nodes;
        ignore (comment pos "]");
@@ -146,7 +146,7 @@ let mount_slot pos slot =
   end
 
 let text pos s =
-  let n = if s = "" then Js.null else take pos 3 (fun _ -> true) in
+  let n = if s = "" then Js.null else take pos 3 (fun [@u] _ -> true) in
   if n != Js.null then begin
     let n = node_of n in
     if Web.data n <> s then begin
@@ -216,7 +216,7 @@ let lis a =
 let set_attr svg el name value =
   let value =
     match value with
-    | Some v -> Some (Url.check ~tag:(Web.lowercase (Web.local_name el)) ~log:Element.log (Web.lowercase name) v)
+    | Some v -> Some (Url.check ~tag:(Web.lowercase (Web.local_name el)) ~log:Types.log (Web.lowercase name) v)
     | None -> None
   in
   match name with
@@ -301,9 +301,6 @@ let add_handler doc el event handler =
     end
   end
 
-type compiled = { root : Web.node; kid_svg : int; attr_svg : int }
-
-type Types.cache += Compiled of Web.node * compiled option
 
 let compile doc svg (template : template) =
   let t = Web.create_element doc "template" in
@@ -342,6 +339,21 @@ let compiled doc svg (template : template) =
       else template.in_html <- Compiled (doc, c);
       c
 
+let unset kind = failwith ("Yuka: no mount code for a node of " ^ kind)
+
+type await_mount = {
+  run : 'a. (pos -> 'a Async.t -> node -> (string -> node) -> ('a -> node) -> unit[@u]);
+}
+
+let element_hook : (pos -> string -> attr list -> node list -> unit [@u]) ref =
+  ref (fun [@u] _ _ _ _ -> unset "Yuka.lower")
+
+let await_hook = ref { run = (fun [@u] _ _ _ _ _ -> unset "Yuka.Await.make") }
+let slot_hook : (pos -> slot -> unit [@u]) ref = ref (fun [@u] _ _ -> unset "Yuka.slot")
+
+let catch_hook : (pos -> bool ref -> (Obj.t option -> node) -> unit [@u]) ref =
+  ref (fun [@u] _ _ _ -> unset "Yuka.Catch.make")
+
 let rec mount_node pos last n =
   match n with
   | Text "" -> ignore (text pos "")
@@ -352,45 +364,16 @@ let rec mount_node pos last n =
   | Fragment children -> mount_list pos last children
   | Element { tag; attrs; children } ->
       last := false;
-      let svg = pos.svg || tag = "svg" in
-      let raw = Web.lowercase tag in
-      if raw = "script" || raw = "style" then (
-        match children with
-        | [] | [ Text _ ] | [ Hole _ ] -> ()
-        | _ -> invalid_arg "Yuka: <script> and <style> take one text or one hole");
-      let adopted = take pos 1 (fun n -> Web.local_name n = tag) in
-      let is_adopted = adopted != Js.null in
-      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt && not is_adopted then
-        Dev.mismatch pos.parent ("<" ^ tag ^ ">") (Js.Null.toOption pos.cur);
-      let el =
-        if is_adopted then node_of adopted
-        else if svg then Web.create_element_ns pos.doc svg_ns tag
-        else Web.create_element pos.doc tag
-      in
-      let inner_svg = svg && tag <> "foreignObject" in
-      let inner =
-        if is_adopted then { pos with parent = el; cur = first_child el; svg = inner_svg }
-        else { pos with parent = el; cur = Js.null; adopt = false; svg = inner_svg }
-      in
-      mount_children inner children;
-      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if is_adopted && tag <> "textarea" then
-        walk_region inner (fun n -> Dev.mismatch el "nothing" (Some n));
-      mount_attrs pos.doc svg el is_adopted attrs;
-      if not is_adopted then insert pos.parent el pos.cur
+      (!element_hook) pos tag attrs children [@u]
   | Hole f ->
       last := false;
       mount_hole pos false f
   | Await { async; loading; failed; render } ->
       last := false;
-      let status = Async.watch async in
-      mount_hole pos false (fun () ->
-          match State.get status with
-          | Async.Pending -> loading
-          | Async.Done v -> render v
-          | Async.Failed m -> failed m)
+      !await_hook.run pos async loading failed render [@u]
   | Slot slot ->
       last := false;
-      mount_slot pos slot
+      (!slot_hook) pos slot [@u]
   | Template { template; parts }
     when pos.adopt || (not template.fixed_root) || template.clones land (if pos.svg then 2 else 1) = 0 ->
       mount_node pos last ((uncurry2 !Template.expander) template parts [@u])
@@ -401,8 +384,7 @@ let rec mount_node pos last n =
           instantiate pos template c parts
       | None -> mount_node pos last ((uncurry2 !Template.expander) template parts [@u]))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
-  | Catch { client; _ } ->
-      mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
+  | Catch { client; _ } -> (!catch_hook) pos last client [@u]
   | Each { items; key; equal; render } ->
       last := false;
       mount_each pos false items key equal render
@@ -641,6 +623,52 @@ and mount_each :
     (fun ~prev:_ ~next -> reconcile next);
   on_dispose (fun () -> dispose_all !entries)
 
+let mount_element pos tag attrs children =
+  let svg = pos.svg || tag = "svg" in
+  let raw = Web.lowercase tag in
+  if raw = "script" || raw = "style" then (
+    match children with
+    | [] | [ Text _ ] | [ Hole _ ] -> ()
+    | _ -> invalid_arg "Yuka: <script> and <style> take one text or one hole");
+  let adopted = take pos 1 (fun [@u] n -> Web.local_name n = tag) in
+  let is_adopted = adopted != Js.null in
+  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt && not is_adopted then
+    Dev.mismatch pos.parent ("<" ^ tag ^ ">") (Js.Null.toOption pos.cur);
+  let el =
+    if is_adopted then node_of adopted
+    else if svg then Web.create_element_ns pos.doc svg_ns tag
+    else Web.create_element pos.doc tag
+  in
+  let inner_svg = svg && tag <> "foreignObject" in
+  let inner =
+    if is_adopted then { pos with parent = el; cur = first_child el; svg = inner_svg }
+    else { pos with parent = el; cur = Js.null; adopt = false; svg = inner_svg }
+  in
+  mount_children inner children;
+  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if is_adopted && tag <> "textarea" then
+    walk_region inner (fun [@u] n -> Dev.mismatch el "nothing" (Some n));
+  mount_attrs pos.doc svg el is_adopted attrs;
+  if not is_adopted then insert pos.parent el pos.cur
+
+let mount_await pos async loading failed render =
+  let status = Async.watch async in
+  mount_hole pos false (fun () ->
+      match State.get status with
+      | Async.Pending -> loading
+      | Async.Done v -> render v
+      | Async.Failed m -> failed m)
+
+let mount_catch pos last client =
+  mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
+
+let use_element () =
+  element_hook := fun [@u] pos tag attrs children -> mount_element pos tag attrs children
+
+let use_await () =
+  await_hook := { run = (fun [@u] pos async loading failed render -> mount_await pos async loading failed render) }
+let use_slot () = slot_hook := fun [@u] pos slot -> mount_slot pos slot
+let use_catch () = catch_hook := fun [@u] pos last client -> mount_catch pos last client
+
 let start ~adopt container f =
   let doc = Web.owner_document container in
   let (), dispose =
@@ -650,7 +678,7 @@ let start ~adopt container f =
         let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
         if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then begin
           mount_node pos (ref false) n;
-          if adopt then walk_region pos (fun x -> Dev.mismatch container "nothing" (Some x))
+          if adopt then walk_region pos (fun [@u] x -> Dev.mismatch container "nothing" (Some x))
         end
         else mount_node pos (ref false) n)
   in
@@ -658,24 +686,25 @@ let start ~adopt container f =
 
 let render container f = start ~adopt:false container f
 let hydrate container f =
-  drop_rest := (fun [@u] pos -> walk_region pos Web.remove);
+  use_element ();
+  drop_rest := (fun [@u] pos -> walk_region pos (fun [@u] n -> Web.remove n));
   adopt_slot := (fun [@u] pos slot -> adopt_slot_now pos slot);
   Template.expander := (fun t p -> Template.expand t p);
   start ~adopt:true container f
 
-let roots = ref ignore
+let roots : (unit -> unit [@u]) ref = ref (fun [@u] () -> ())
 
 let render_root (container, f) =
   let dispose = render container f and before = !roots in
   roots :=
-    fun () ->
-      before ();
+    fun [@u] () ->
+      before () [@u];
       dispose ()
 
 let stop_roots () =
   let stop = !roots in
-  roots := ignore;
-  stop ()
+  roots := (fun [@u] () -> ());
+  stop () [@u]
 
 let on_error : (string -> unit) ref = ref ignore
 

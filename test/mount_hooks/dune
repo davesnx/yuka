@@ -1,0 +1,24 @@
+(melange.emit
+ (target out)
+ (alias melange-mount-hooks)
+ (libraries yuka yuka.js)
+ (preprocess
+  (pps melange.ppx))
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (enabled_if
+  (<> %{profile} release))
+ (deps
+  (alias melange-mount-hooks))
+ (action
+  (progn
+   (run node %{dep:out/test/mount_hooks/element_only.js})
+   (run node %{dep:out/test/mount_hooks/await_only.js})
+   (run node %{dep:out/test/mount_hooks/slot_only.js})
+   (run node %{dep:out/test/mount_hooks/catch_only.js})
+   (run node %{dep:out/test/mount_hooks/shape_only.js})
+   (run node %{dep:out/test/mount_hooks/make_only.js})
+   (run node %{dep:out/test/mount_hooks/expand_only.js}))))

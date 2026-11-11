@@ -924,7 +924,7 @@ end
 (**/**)
 
 module Private : sig
-  type node =
+  type node = private
     | Text of string
     | Element of { tag : string; attrs : attr list; children : node list }
     | Fragment of node list
@@ -1005,6 +1005,10 @@ module Private : sig
       given (tests). *)
 
   val element : node -> 'kind element
+
+  val hole : (unit -> node) -> node
+  (** [Hole f]. [node] is private, so that a test cannot build a node kind
+      without the constructor that installs its client code. *)
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
   (** Runs the function in a new owner that belongs to the current owner.

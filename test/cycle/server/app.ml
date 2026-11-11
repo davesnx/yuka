@@ -134,7 +134,7 @@ module Pages = struct
               ~children:(fun () ->
                 if !fail_first then
                   Yuka.fragment
-                    [ island "A"; Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "A")) ]
+                    [ island "A"; Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "A")) ]
                 else island "A")
               ();
             island "B" ])

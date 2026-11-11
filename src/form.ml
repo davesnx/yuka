@@ -184,16 +184,11 @@ let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action
     | None -> []
   in
   let hidden name value =
-    Element { tag = "input"; attrs = [ Static ("type", "hidden"); Static ("name", name); Static ("value", value) ]; children = [] }
+    Element.lower "input" [ Static ("type", "hidden"); Static ("name", name); Static ("value", value) ] []
   in
-  Element
-    {
-      tag = "form";
-      attrs =
-        [ Static ("method", "post"); Static ("data-yuka-action", action.name); Static ("data-yuka-key", key) ]
-        @ sent_attr
-        @ [ Handler ("submit", submit) ];
-      children =
-        (hidden "_yuka_action" action.name :: (if key = "" then [] else [ hidden "_yuka_key" key ]))
-        @ [ children form ];
-    }
+  Element.lower "form"
+    ([ Static ("method", "post"); Static ("data-yuka-action", action.name); Static ("data-yuka-key", key) ]
+    @ sent_attr
+    @ [ Handler ("submit", submit) ])
+    ((hidden "_yuka_action" action.name :: (if key = "" then [] else [ hidden "_yuka_key" key ]))
+    @ [ children form ])

@@ -29,3 +29,10 @@ val start : ?lazy_entries:lazy_entry list -> entry list -> unit
 val stop : unit -> unit
 val stop_within : Web.node -> unit
 val on_error : (string -> unit) ref
+
+val use_element : unit -> unit
+val use_await : unit -> unit
+val use_slot : unit -> unit
+val use_catch : unit -> unit
+(** The node constructors call these, so that the client links the mount
+    code of a node kind only when the app makes such a node. *)

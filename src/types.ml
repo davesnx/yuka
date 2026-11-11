@@ -71,14 +71,15 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 
   and part = Child of node | Attribute of attr | No_attribute
 
-  and cache = ..
+  and cache = Empty | Compiled of Web.node * compiled option
+
+  and compiled = { root : Web.node; kid_svg : int; attr_svg : int }
 
   and attr =
     | Static of string * string
     | Dynamic of string * (unit -> string option)
     | Handler of string * (event -> unit)
 
-  type cache += Empty
 
   type platform = {
     target_value : event -> string;
@@ -157,6 +158,14 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     s.csrf <- csrf;
     s.sheets <- sheets;
     s.held <- held
+
+let warned = ref false
+
+let log name value =
+  if Dev.on && not !warned then begin
+    warned := true;
+    Web.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
+  end
 
 let current_session : session option ref = ref None
 let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)

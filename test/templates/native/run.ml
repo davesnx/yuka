@@ -18,7 +18,7 @@ let plan_string (walk, kids, attrs, values) =
 let without_parts parts =
   Array.map
     (function
-      | Private.Child _ -> Private.Child (Private.Fragment [])
+      | Private.Child _ -> Private.Child (Private.node Yuka.empty)
       | Private.Attribute _ | Private.No_attribute -> Private.No_attribute)
     parts
 

@@ -1233,7 +1233,7 @@ let loading_cases =
                 ~children:(fun () ->
                   Yuka.fragment
                     [ isl "A";
-                      Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "x")) ])
+                      Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
                 ();
               isl "A" ])
     in
@@ -1335,7 +1335,7 @@ let loading_cases =
                 ~children:(fun () ->
                   Yuka.fragment
                     [ Yuka.Private.element (Yuka.Private.node (isl "Inner"));
-                      Yuka.Private.element (Yuka.Private.Hole (fun () -> failwith "x")) ])
+                      Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
                 ()))
     in
     Yuka.Server.log_error := saved;

@@ -1362,7 +1362,7 @@ let batch_in_first_run () =
     "e0 end e1" (read ())
 
 let boom () : _ element = failwith "secret detail"
-let late () : _ element = Private.element (Private.Hole (fun () -> failwith "secret detail"))
+let late () : _ element = Private.element (Private.hole (fun () -> failwith "secret detail"))
 
 let fallback ~error ~reset:_ = lower "p" [] [ text ("caught " ^ error) ]
 
