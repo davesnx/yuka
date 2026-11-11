@@ -1310,10 +1310,31 @@ the budget in `bench/size/budget.json`.
   `url_shape_only`) that blocks the ticket 33 cases with only that
   installer, and `url_unset`, where a URL attribute with no installer
   raises and a non-URL one is set.
-- Size: the keyed app goes from 24,482 B, 8,698 B gzip to 23,453 B,
-  8,373 B gzip (-325 B). The demo, all chunks, goes from 46,605 B to
-  46,670 B gzip (+65 B), and each one-island page about +65 B: they keep
+- Size, measured before `each` over arrays: the keyed app goes from
+  8,698 B to 8,373 B gzip (-325 B). With both changes it is 7,961 B gzip.
+  The demo, all chunks, goes from 46,605 B to 46,670 B gzip (+65 B), and each one-island page about +65 B: they keep
   the check and also pay for the hook, its default and the calls.
+
+### `each` over arrays (2026-11-11)
+
+- `Yuka.each` takes `unit -> 'a array` (it took `unit -> 'a list`). The
+  reconcile works on arrays: with a list, an app that changes rows by
+  index (the keyed benchmark: swap, append, remove) converts between list
+  and array and links `Stdlib.List` code for it.
+- No list form: `Array.of_list` at the call site does the same, and only
+  apps that call it pay for it.
+- The reconcile copies the items and their keys into its own arrays, then
+  renders. The previous state is the rows it rendered (key, value, nodes),
+  never the caller's array. So a write into an array after `each` read it
+  changes nothing; a new array shows the change. `State.set` with the same
+  array is no change (default equality is identity).
+- The first render does not check keys; an update with two equal keys
+  raises `Failure "Yuka.each: duplicate key K"` (unchanged).
+- Size: the keyed app goes from 24,482 B, 8,698 B gzip to 23,171 B,
+  8,287 B gzip (library and app: -359 B; the app's append and copy through
+  `Js.Array` in place of `Stdlib.Array`: -52 B). The demo keeps its lists
+  and calls `Array.of_list`: all chunks 46,605 -> 46,660 B gzip, start set
+  23,806 -> 23,864 B.
 
 ## Pages pay for the features of their islands (2026-11-11)
 

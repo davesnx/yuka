@@ -18,7 +18,7 @@ type row = { id : int; label : string State.t }
 let next_id = ref 1
 
 let build count =
-  List.init count (fun _ ->
+  Array.init count (fun _ ->
       let id = !next_id in
       incr next_id;
       { id; label = State.make (pick adjectives ^ " " ^ pick colors ^ " " ^ pick nouns) })
@@ -31,28 +31,28 @@ let button ~id ~label ~action =
   </div>
 
 let app () =
-  let rows = State.make [] in
+  let rows = State.make [||] in
   let selected = State.make 0 in
   let run () = State.set rows (build 1_000) in
   let run_lots () = State.set rows (build 10_000) in
-  let add () = State.set rows (State.peek rows @ build 1_000) in
+  let add () = State.set rows (Js.Array.concat ~other:(build 1_000) (State.peek rows)) in
   let update () =
     Yuka.batch (fun () ->
-        List.iteri
+        Array.iteri
           (fun i r -> if i mod 10 = 0 then State.update r.label (fun l -> l ^ " !!!"))
           (State.peek rows))
   in
-  let clear () = State.set rows [] in
+  let clear () = State.set rows [||] in
   let swap_rows () =
-    let a = Array.of_list (State.peek rows) in
+    let a = Js.Array.copy (State.peek rows) in
     if Array.length a > 998 then begin
       let item = a.(1) in
       a.(1) <- a.(998);
       a.(998) <- item;
-      State.set rows (Array.to_list a)
+      State.set rows a
     end
   in
-  let remove row = State.set rows (List.filter (fun r -> r != row) (State.peek rows)) in
+  let remove row = State.set rows (Js.Array.filter ~f:(fun r -> r != row) (State.peek rows)) in
   let row r : client element =
     <tr class_=(if State.get selected = r.id then "danger" else "")>
       <td class_="col-md-1">(Yuka.int r.id)</td>

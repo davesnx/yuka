@@ -49,7 +49,7 @@ let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Com
   in
   <div class_="activity">
     <ul class_="comments">
-      (Yuka.each ~key:(fun (c : Comment.t) -> c.id) (fun () -> State.get comments) comment)
+      (Yuka.each ~key:(fun (c : Comment.t) -> c.id) (fun () -> Array.of_list (State.get comments)) comment)
     </ul>
     <div class_="comment-box">
       <textarea class_="comment-input" placeholder="Leave a comment" rows=3
