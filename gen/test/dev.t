@@ -43,7 +43,7 @@ server logs its starts and stops. The session is random per run:
   > echo 'File "a.ml", line 1:'
   > echo 'Error: "boom"'
   > echo "Had 1 error, waiting for filesystem changes..."; step
-  > touch -d '+1 hour' server
+  > perl -e '$t = time + 1 * 3600; utime $t, $t, @ARGV' server
   > echo "Success, waiting for filesystem changes..."; step
   > kill -9 $(cat server.pid); sleep 0.2
   > echo "Success, waiting for filesystem changes..."; step
@@ -87,7 +87,7 @@ to watch when the command is a wrapper:
   > #!/bin/sh
   > echo "Success, waiting for filesystem changes..."; sleep 0.5
   > echo "Success, waiting for filesystem changes..."; sleep 0.5
-  > touch -d '+2 hours' bin/myserver
+  > perl -e '$t = time + 2 * 3600; utime $t, $t, @ARGV' bin/myserver
   > echo "Success, waiting for filesystem changes..."; sleep 0.5
   > X
   $ chmod +x fake-dune3
@@ -135,7 +135,7 @@ CLI gets SIGTERM in the middle of a restart:
   $ cat > fake-dune6 <<'X'
   > #!/bin/sh
   > echo "Success, waiting for filesystem changes..."; sleep 0.4
-  > touch -d '+3 hours' stubborn
+  > perl -e '$t = time + 3 * 3600; utime $t, $t, @ARGV' stubborn
   > echo "Success, waiting for filesystem changes..."; sleep 0.3
   > kill -TERM $PPID
   > sleep 3
@@ -144,7 +144,7 @@ CLI gets SIGTERM in the middle of a restart:
   $ yuka dev --dune ./fake-dune6 --state s6 --kill-after 1 -- ./stubborn 2>&1 | grep -v Success
   yuka dev: restarting the server
   yuka dev: the server did not stop after 1 s, killing it
-  $ wc -l < slog
+  $ wc -l < slog | tr -d ' '
   1
   $ kill -0 $(cut -d' ' -f2 slog) 2>/dev/null || echo "server gone"
   server gone
