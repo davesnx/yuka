@@ -467,7 +467,10 @@ let local_location ~host location =
   match location with
   | "" -> false
   | l when l.[0] = '/' -> not (String.length l > 1 && (l.[1] = '/' || l.[1] = '\\'))
-  | l -> same_origin ~origin:l ~host
+  | l ->
+      let n = String.length l in
+      (Url.has_scheme l ~from:0 ~until:n "http:" || Url.has_scheme l ~from:0 ~until:n "https:")
+      && same_origin ~origin:l ~host
 
 let media_type = function
   | None -> None

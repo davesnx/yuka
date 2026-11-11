@@ -1616,8 +1616,9 @@ Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
 - Second review fixes: the action call checks origin, name and content
   type from the headers before it reads the body. `yuka-dream` refuses a
   `Content-Length` over the limit with no read and closes the body stream
-  over the limit. The form 303 goes only to a path or a URL of the request
-  `Host` with no control character (below space, or DEL: browsers drop
+  over the limit. The form 303 (and the island answer's `redirect`) goes only
+  to a path or an `http:`/`https:` URL of the request `Host` (scheme read as
+  `Url` reads it, so `javascript://HOST/` is refused) with no control character (below space, or DEL: browsers drop
   TAB, CR and LF from a URL, so `/\t/evil.com` is `//evil.com`); else the
   500 page and a log. One origin rule,
   `Server.trusted_origin`, for form posts, the action call and `Action`

@@ -1447,8 +1447,8 @@ module Server : sig
         on [Ok o], or renders the page again with status 422 and the sent
         values and errors on [Error], a decode error or {!Action.reject}.
         The 303, 403 and 413 carry the page's rule headers. A [redirect o]
-        that is not a path ([/x], not [//x]) or a URL of the request [Host],
-        or that holds a control character (below space, or DEL; a browser
+        that is not a path ([/x], not [//x]) or an [http:] or [https:] URL
+        of the request [Host] (the island answer too), or that holds a control character (below space, or DEL; a browser
         drops TAB from a URL, so [/\t/x] would go to [//x]), gives the 500
         page and a
         {!log_error} message instead of a 303. Raises

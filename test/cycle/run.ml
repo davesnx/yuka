@@ -1015,6 +1015,9 @@ let forms =
         let r = post "_yuka_action=save_entry&title=http%3A%2F%2Fapp.example%2Fdone&count=1&level=low" in
         check_status r 303;
         check_header r "location" [ "http://app.example/done" ];
+        let r = post "_yuka_action=save_entry&title=HTTPS%3A%2F%2Fapp.example%2Fdone&count=1&level=low" in
+        check_status r 303;
+        check_header r "location" [ "HTTPS://app.example/done" ];
         List.iter
           (fun title ->
             let r = post ("_yuka_action=save_entry&count=1&level=low&title=" ^ title) in
@@ -1031,6 +1034,10 @@ let forms =
             "%2F%7F%2Fevil.com";
             "%2Fok%00";
             "%09%2F%2Fevil.com";
+            "javascript%3A%2F%2Fapp.example%2F%250aalert(1)";
+            "JavaScript%3A%2F%2Fapp.example%2F%250aalert(1)";
+            "data%3A%2F%2Fapp.example%2Fx";
+            "ftp%3A%2F%2Fapp.example%2Fx";
           ] );
     ( "the action RPC answer of a form refuses a redirect that is not a path on this site",
       fun () ->
@@ -1049,7 +1056,16 @@ let forms =
             check_status r 500;
             Alcotest.(check string) ("answer " ^ String.escaped title) {|{"error":"action failed"}|} r.body;
             Alcotest.(check int) "logged" 1 (List.length !logged))
-          [ "javascript:alert(1)"; " javascript:alert(1)"; "https://evil.example/x"; "//evil.example"; "/\\evil.example" ] );
+          [
+            "javascript:alert(1)";
+            " javascript:alert(1)";
+            "https://evil.example/x";
+            "//evil.example";
+            "/\\evil.example";
+            "javascript://app.example/%0aalert(1)";
+            "JAVASCRIPT://app.example/%0aalert(1)";
+            "data://app.example/x";
+          ] );
     ( "page guards run before the action",
       fun () ->
         let r = post ~target:"/team/nobody/form" "_yuka_action=jot&body=hi" in
