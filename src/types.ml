@@ -41,7 +41,10 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   and slot = { content : node option; dom : Obj.t list ref }
 
   and template = {
-    shape : shape;
+    mutable shape : shape option;
+    code : string;
+    fixed_root : bool;
+    clones : int;
     markup : string;
     plan : Template_build.plan;
     mutable in_html : cache;

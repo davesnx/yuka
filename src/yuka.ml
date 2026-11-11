@@ -17,6 +17,11 @@ include Element
 module Template = struct include Template end
 
 let template_of_shape = Template.of_shape
+let template_coded = Template.coded
+let template_child = Template.child
+let template_attribute = Template.attribute
+let template_attribute_option = Template.attribute_option
+let template_instance = Template.instance
 module Client = struct
   include Client
 
@@ -93,10 +98,11 @@ module Private = struct
   let dev_script = Cycle.dev_script
   let dev_events = Cycle.dev_events
   let node n = n
-  let template_shape (t : template) = t.shape
+  let template_shape (t : template) = Template.shape t
   let template = Template.of_shape
-  let recompile (t : template) = Template.of_shape t.shape
+  let recompile (t : template) = Template.of_shape (Template.shape t)
   let template_html (t : template) = t.markup
+  let parser_changes = Template_build.parser_changes
   let template_plan (t : template) =
     let { Template_build.walk; kids; attrs; values } = t.plan in
     (walk, kids, attrs, values)

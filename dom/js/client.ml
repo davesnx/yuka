@@ -28,6 +28,11 @@ external defined : 'a Js.undefined -> 'a = "%identity"
    option; a DOM node is neither. *)
 external present : Web.node -> Obj.t option = "%identity"
 
+(* Safe only for [Template.expander] and [Template.check]: every value stored
+   in them is a lambda of two parameters, which Melange compiles to a
+   JavaScript function of two parameters. *)
+let uncurry2 : ('a -> 'b -> 'c) -> ('a -> 'b -> 'c [@u]) = Obj.magic
+
 let get = Array.unsafe_get
 let set = Array.unsafe_set
 let some n : cur = Js.Null.return n
@@ -102,21 +107,29 @@ let walk_region pos visit =
   in
   go 0
 
+let drop_rest : (pos -> unit [@u]) ref = ref (fun [@u] _ -> ())
+let adopt_slot : (pos -> slot -> bool [@u]) ref = ref (fun [@u] _ _ -> false)
+
 let drop_to_end pos =
   if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
     walk_region { pos with cur = pos.cur } (fun n ->
         Dev.mismatch pos.parent "nothing" (Some n));
-  if pos.adopt then walk_region pos Web.remove
+  if pos.adopt then (!drop_rest) pos [@u]
+
+let adopt_slot_now pos slot =
+  take pos 8 (fun n -> Web.data n = "[$") != Js.null
+  && begin
+       let nodes = ref [] in
+       walk_region pos (fun n -> nodes := Obj.repr n :: !nodes);
+       let rec rev acc = function [] -> acc | n :: rest -> rev (n :: acc) rest in
+       slot.dom := rev [] !nodes;
+       ignore (comment pos "]");
+       true
+     end
 
 let mount_slot pos slot =
   let dom = slot.dom in
-  if take pos 8 (fun n -> Web.data n = "[$") != Js.null then begin
-    let nodes = ref [] in
-    walk_region pos (fun n -> nodes := Obj.repr n :: !nodes);
-    let rec rev acc = function [] -> acc | n :: rest -> rev (n :: acc) rest in
-    dom := rev [] !nodes;
-    ignore (comment pos "]")
-  end
+  if pos.adopt && (!adopt_slot) pos slot [@u] then ()
   else begin
     if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
       Dev.mismatch pos.parent "<!--[$-->" (Js.Null.toOption pos.cur);
@@ -292,36 +305,6 @@ type compiled = { root : Web.node; kid_svg : int; attr_svg : int }
 
 type Types.cache += Compiled of Web.node * compiled option
 
-let rec same_tree shape n =
-  match shape with
-  | Fixed_element { tag; attrs; children } ->
-      Web.node_type n = 1
-      && Web.local_name n = tag
-      && (Template_build.void_or_value tag attrs || same_children children (first_child n))
-  | Fixed_text _ | Part _ -> false
-
-and same_children children cur =
-  let rec go after_text cur = function
-    | [] -> cur == Js.null
-    | (Part _ | Fixed_text "") :: rest -> go after_text cur rest
-    | Fixed_text t :: rest ->
-        let cur =
-          if not after_text then cur
-          else if cur != Js.null && Web.node_type (node_of cur) = 8 then
-            next_sibling (node_of cur)
-          else Js.null
-        in
-        cur != Js.null
-        && Web.node_type (node_of cur) = 3
-        && Web.data (node_of cur) = t
-        && go true (next_sibling (node_of cur)) rest
-    | (Fixed_element _ as e) :: rest ->
-        cur != Js.null
-        && same_tree e (node_of cur)
-        && go false (next_sibling (node_of cur)) rest
-  in
-  go false cur children
-
 let compile doc svg (template : template) =
   let t = Web.create_element doc "template" in
   Web.set_inner_html t
@@ -329,7 +312,16 @@ let compile doc svg (template : template) =
   let only c = if c != Js.null && next_sibling (node_of c) == Js.null then c else Js.null in
   let top = only (first_child (Web.content t)) in
   let parsed = if svg && top != Js.null then only (first_child (node_of top)) else top in
-  if parsed != Js.null && same_tree template.shape (node_of parsed) then
+  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then
+    if template.code <> "" && not (parsed != Js.null && Template.same_shape template (node_of parsed)) then
+      Dev.mismatch (Web.content t)
+        ("the tree of the template " ^ template.markup ^ if svg then " inside <svg>" else "")
+        (Js.Null.toOption (first_child (Web.content t)));
+  if
+    parsed != Js.null
+    && (template.code <> ""
+       || (uncurry2 !Template.check) template (node_of parsed) [@u])
+  then
     Some
       {
         root = Web.import_node doc (node_of parsed) true;
@@ -349,9 +341,6 @@ let compiled doc svg (template : template) =
       if svg then template.in_svg <- Compiled (doc, c)
       else template.in_html <- Compiled (doc, c);
       c
-
-let fixed_root template =
-  match template.shape with Fixed_element _ -> true | Fixed_text _ | Part _ -> false
 
 let rec mount_node pos last n =
   match n with
@@ -402,14 +391,15 @@ let rec mount_node pos last n =
   | Slot slot ->
       last := false;
       mount_slot pos slot
-  | Template { template; parts } when pos.adopt || not (fixed_root template) ->
-      mount_node pos last (Template.expand template parts)
+  | Template { template; parts }
+    when pos.adopt || (not template.fixed_root) || template.clones land (if pos.svg then 2 else 1) = 0 ->
+      mount_node pos last ((uncurry2 !Template.expander) template parts [@u])
   | Template { template; parts } -> (
       match compiled pos.doc pos.svg template with
       | Some c ->
           last := false;
           instantiate pos template c parts
-      | None -> mount_node pos last (Template.expand template parts))
+      | None -> mount_node pos last ((uncurry2 !Template.expander) template parts [@u]))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
   | Catch { client; _ } ->
       mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
@@ -667,7 +657,11 @@ let start ~adopt container f =
   dispose
 
 let render container f = start ~adopt:false container f
-let hydrate container f = start ~adopt:true container f
+let hydrate container f =
+  drop_rest := (fun [@u] pos -> walk_region pos Web.remove);
+  adopt_slot := (fun [@u] pos slot -> adopt_slot_now pos slot);
+  Template.expander := (fun t p -> Template.expand t p);
+  start ~adopt:true container f
 
 let roots = ref ignore
 

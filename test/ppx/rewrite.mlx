@@ -162,3 +162,5 @@ let script_root = <script>"x < 1"</script>
 
 let animate_values u = <svg><animate values=u from=u /></svg>
 let style_parts c = <style>"a{color:"(Yuka.text (State.get c))"}"</style>
+
+let reparsed c = <p class_="p"><div id=c>"x"<a href="/y">(Yuka.text c)</a></div></p>

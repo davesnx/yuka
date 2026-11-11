@@ -179,7 +179,7 @@ open Base
     Array.of_list (List.rev !ops)
 
   let ops (t : template) =
-    if Array.length t.ops = 0 then t.ops <- compile t.shape;
+    if Array.length t.ops = 0 then t.ops <- compile (Template.shape t);
     t.ops
 
   let kept_buffer = 262_144

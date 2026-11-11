@@ -371,7 +371,9 @@ let lower_element ~self ~loc ~fnloc tag args =
   in
   [%expr Yuka.lower [%e estring ~loc tag] [%e attrs] [%e content]]
 
-let rec template_element ~self ~parts ~loc ~fnloc tag args =
+type part = Child_part of expression | Attribute_part of prop
+
+let rec template_element ~self ~parts ~fnloc tag args =
   if not (Html.is_html_element tag || Html.is_svg_element tag) then
     Location.raise_errorf ~loc:fnloc "[yuka] HTML tag '%s' does not exist." tag;
   let props, children = split_args args in
@@ -397,42 +399,26 @@ let rec template_element ~self ~parts ~loc ~fnloc tag args =
     | Some (Some (dom, v)) when Url.unsafe ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) v ->
         Location.raise_errorf ~loc:value_loc
           "[yuka] %s=%S has a script URL; Yuka would print %s instead. Use an event handler." dom v Url.blocked
-    | Some (Some (dom, v)) ->
-        Some
-          ( [%expr Yuka.Template.fixed [%e estring ~loc dom] [%e estring ~loc v]],
-            Template_build.Fixed (dom, v) )
+    | Some (Some (dom, v)) -> Some (Template_build.Fixed (dom, v))
     | Some None -> None
     | None ->
-        let part =
-          match rewrite_attribute ~self ~loc:fnloc tag prop with
-          | Plain e -> [%expr Yuka.Template.attribute [%e e]]
-          | Maybe e -> [%expr Yuka.Template.attribute_option [%e e]]
-        in
-        let i = add_part part in
-        Some ([%expr Yuka.Template.part_attr [%e eint ~loc i]], Template_build.Part_attr i)
+        let i = add_part (Attribute_part (rewrite_attribute ~self ~loc:fnloc tag prop)) in
+        Some (Template_build.Part_attr i)
   in
   let attrs = List.filter_map attr props in
   let child c =
     match c.pexp_desc with
     | Pexp_constant (Pconst_string (s, _, _)) when (not (is_jsx c)) && s <> "" ->
-        ([%expr Yuka.Template.text [%e estring ~loc s]], Template_build.Fixed_text s)
+        Template_build.Fixed_text s
     | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; loc = fnloc }; _ }, args)
       when is_jsx c && not (raw_text_element tag) ->
-        template_element ~self ~parts ~loc:c.pexp_loc ~fnloc tag args
+        template_element ~self ~parts ~fnloc tag args
     | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; loc = fnloc }; _ }, args) when is_jsx c ->
-        let i = add_part [%expr Yuka.Template.child [%e lower_element ~self ~loc:c.pexp_loc ~fnloc tag args]] in
-        ([%expr Yuka.Template.part [%e eint ~loc i]], Template_build.Part i)
-    | _ ->
-        let e = rewrite_child ~self c in
-        let i = add_part [%expr Yuka.Template.child [%e e]] in
-        ([%expr Yuka.Template.part [%e eint ~loc i]], Template_build.Part i)
+        Template_build.Part (add_part (Child_part (lower_element ~self ~loc:c.pexp_loc ~fnloc tag args)))
+    | _ -> Template_build.Part (add_part (Child_part (rewrite_child ~self c)))
   in
-  let kids = List.map child children in
-  ( [%expr
-      Yuka.Template.element [%e estring ~loc tag] [%e list_expr ~loc (List.map fst attrs)]
-        [%e list_expr ~loc (List.map fst kids)]],
-    Template_build.Fixed_element
-      { tag; attrs = List.map snd attrs; children = List.map snd kids } )
+  let children = List.map child children in
+  Template_build.Fixed_element { tag; attrs; children }
 
 let template_prefix (loc : Location.t) =
   let file = Filename.basename loc.loc_start.pos_fname in
@@ -442,9 +428,37 @@ let template_prefix (loc : Location.t) =
     (fun c -> match c with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> c | _ -> '_')
     (String.lowercase_ascii (lib ^ file ^ "_"))
 
-let template ~self ~loc ~fnloc tag args =
-  let parts = ref [] in
-  let shape, built = template_element ~self ~parts ~loc ~fnloc tag args in
+let clones built =
+  let tag = match built with Template_build.Fixed_element { tag; _ } -> tag | _ -> "" in
+  let html = not (Template_build.parser_changes ~svg:false built)
+  and svg = not (Template_build.parser_changes ~svg:true built) in
+  let primary = if Html.is_svg_element tag && not (Html.is_html_element tag) then svg else html in
+  if primary then Some ((if html then 1 else 0) lor if svg then 2 else 0) else None
+
+let renumber built (parts : part array) =
+  let taken = ref [] in
+  let take i =
+    taken := parts.(i) :: !taken;
+    List.length !taken - 1
+  in
+  let rec go = function
+    | Template_build.Fixed_text _ as t -> t
+    | Part i -> Template_build.Part (take i)
+    | Fixed_element { tag; attrs; children } ->
+        let attrs =
+          List.map
+            (function
+              | Template_build.Fixed _ as a -> a
+              | Part_attr i -> Template_build.Part_attr (take i))
+            attrs
+        in
+        let children = List.map go children in
+        Template_build.Fixed_element { tag; attrs; children }
+  in
+  let built = go built in
+  (built, Array.of_list (List.rev !taken))
+
+let emit_template ~loc built parts clones =
   let name = "__yuka_template_" ^ template_prefix loc ^ string_of_int !template_count in
   incr template_count;
   let { Template_build.walk; kids; attrs; values } = Template_build.plan built in
@@ -459,12 +473,61 @@ let template ~self ~loc ~fnloc tag args =
     value_binding ~loc ~pat:(pvar ~loc name)
       ~expr:
         [%expr
-          Yuka.Template.make [%e shape]
+          Yuka.template_coded [%e estring ~loc (Template_build.encode built)]
             ~html:[%e estring ~loc (Template_build.html built)]
             ~walk:[%e ints walk] ~kids:[%e ints kids] ~attrs:[%e ints attrs]
-            ~values:[%e values]]
+            ~values:[%e values] ~clones:[%e eint ~loc clones]]
     :: !hoisted;
-  [%expr Yuka.Template.instance [%e evar ~loc name] [%e pexp_array ~loc (List.rev !parts)]]
+  let part = function
+    | Child_part e -> [%expr Yuka.template_child [%e e]]
+    | Attribute_part (Plain e) -> [%expr Yuka.template_attribute [%e e]]
+    | Attribute_part (Maybe e) -> [%expr Yuka.template_attribute_option [%e e]]
+  in
+  [%expr Yuka.template_instance [%e evar ~loc name] [%e pexp_array ~loc (List.map part (Array.to_list parts))]]
+
+let has_literal_sink = function
+  | Template_build.Fixed_element { tag; attrs; _ } ->
+      List.exists
+        (function
+          | Template_build.Fixed (dom, _) ->
+              Url.html_sink ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom)
+          | Part_attr _ -> false)
+        attrs
+  | Fixed_text _ | Part _ -> false
+
+let rec lower_shape ~loc parts shape =
+  match (shape, if has_literal_sink shape then clones shape else None) with
+  | _, Some clones ->
+      let built, parts = renumber shape parts in
+      emit_template ~loc built parts clones
+  | Template_build.Fixed_text s, _ -> [%expr Yuka.text [%e estring ~loc s]]
+  | Part i, _ -> (
+      match parts.(i) with
+      | Child_part e -> e
+      | Attribute_part _ -> assert false)
+  | Fixed_element { tag; attrs; children }, None ->
+      let attr = function
+        | Template_build.Fixed (dom, v) ->
+            if Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) then
+              Plain [%expr Yuka.url_attr [%e estring ~loc tag] [%e estring ~loc dom] [%e estring ~loc v]]
+            else Plain [%expr Yuka.attr_unchecked [%e estring ~loc dom] [%e estring ~loc v]]
+        | Part_attr i -> (
+            match parts.(i) with
+            | Attribute_part p -> p
+            | Child_part _ -> assert false)
+      in
+      [%expr
+        Yuka.lower [%e estring ~loc tag]
+          [%e attributes_expr ~loc (List.map attr attrs)]
+          [%e list_expr ~loc (List.map (lower_shape ~loc parts) children)]]
+
+let template ~self ~loc ~fnloc tag args =
+  let parts = ref [] in
+  let built = template_element ~self ~parts ~fnloc tag args in
+  let parts = Array.of_list (List.rev !parts) in
+  match clones built with
+  | Some clones -> emit_template ~loc built parts clones
+  | None -> lower_shape ~loc parts built
 
 let rewrite_jsx self e =
   let loc = e.pexp_loc in

@@ -1,0 +1,17 @@
+(melange.emit
+ (target out)
+ (alias melange-templates-render-only)
+ (libraries template_cases yuka yuka.js)
+ (preprocess
+  (pps melange.ppx))
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (enabled_if
+  (<> %{profile} release))
+ (deps
+  (alias melange-templates-render-only))
+ (action
+  (run node %{dep:out/test/templates/render_only/run.js})))

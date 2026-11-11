@@ -40,8 +40,53 @@ let cases : (string * (unit -> Yuka.client Yuka.element)) list =
         </ul> );
     ("table without tbody", fun () -> <table><tr><td>"x"</td></tr></table>);
     ("div inside p", fun () -> <p><div>"x"</div></p>);
+    ("li inside li", fun () -> <ul><li>"a"<li>(Yuka.text (Yuka.State.get label))</li></li></ul>);
+    ("a inside a", fun () -> <a href="/x"><span><a href="/y">"y"</a></span></a>);
+    ("pre leading newline", fun () -> <pre>"\nx"</pre>);
+    ("row outside a table", fun () -> <div><tr><td>"x"</td></tr></div>);
+    ("table with tbody", fun () -> <table><tbody><tr><td>"x"</td></tr></tbody></table>);
+    ("div in a button in p", fun () -> <p><button type_=`button><div>"x"</div></button></p>);
   ]
 
-let parser_changes = [ "table without tbody"; "div inside p" ]
+let parser_changes =
+  [ "table without tbody"; "div inside p"; "li inside li"; "a inside a"; "pre leading newline";
+    "row outside a table" ]
 
 let value_properties = [ "select value"; "textarea value"; "void elements" ]
+
+let wbr_link_part x = <a href="#"><wbr />(Yuka.text x)"hi"</a>
+let span_link () = <a href="#"><span>"t"</span></a>
+let circle_link () = <a href="#"><circle r="1" /></a>
+
+module Param_root = struct
+  let make () = <param name="a">"x"</param>
+end
+
+let svg_cases : (string * (unit -> Yuka.client Yuka.element) * string * string) list =
+  [
+    ( "wbr link in svg",
+      (fun () -> <svg>(wbr_link_part "X")</svg>),
+      {|<svg><a href="#"><wbr></wbr>X<!---->hi</a></svg>|},
+      "svg:svg svg:a svg:wbr" );
+    ( "span link in svg",
+      (fun () -> <svg>(span_link ())</svg>),
+      {|<svg><a href="#"><span>t</span></a></svg>|},
+      "svg:svg svg:a svg:span" );
+    ( "circle link in svg",
+      (fun () -> <svg>(circle_link ())</svg>),
+      {|<svg><a href="#"><circle r="1"></circle></a></svg>|},
+      "svg:svg svg:a svg:circle" );
+  ]
+
+let svg_clones = [ "circle link in svg" ]
+
+let regressions : (string * (unit -> Yuka.client Yuka.element)) list =
+  [
+    ( "param with a text and a part",
+      fun () -> <object><param name="a" value="b">"x"</param><b>(Yuka.text "z")</b></object> );
+    ("param at the root of a component", fun () -> <div><Param_root /></div>);
+    ("srcdoc in a lowered template", fun () -> <p><div><iframe srcdoc="<b>hi</b>" /></div></p>);
+    ("srcdoc in a kept template", fun () -> <div><iframe srcdoc="<b>hi</b>" /></div>);
+    ("base href in a lowered template", fun () -> <p><div><base href="/app/" /></div></p>);
+    ("base href in a kept template", fun () -> <div><base href="/app/" /></div>);
+  ]

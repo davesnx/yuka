@@ -222,3 +222,225 @@ let plan shape =
     attrs = Array.of_list (List.rev !attrs);
     values = Array.of_list (List.rev !values);
   }
+
+let encode shape =
+  let b = Buffer.create 256 in
+  let str s =
+    String.iter
+      (fun c ->
+        if Char.code c < 0x10 then begin
+          Buffer.add_char b '\x0f';
+          Buffer.add_char b (Char.chr (Char.code c + 0x40))
+        end
+        else Buffer.add_char b c)
+      s
+  in
+  let rec go = function
+    | Fixed_text s ->
+        Buffer.add_char b '\x08';
+        str s
+    | Part _ -> Buffer.add_char b '\x07'
+    | Fixed_element { tag; attrs; children } ->
+        Buffer.add_char b '\x01';
+        str tag;
+        List.iter
+          (function
+            | Fixed (n, v) ->
+                Buffer.add_char b '\x03';
+                str n;
+                Buffer.add_char b '\x04';
+                str v
+            | Part_attr _ -> Buffer.add_char b '\x05')
+          attrs;
+        Buffer.add_char b '\x02';
+        List.iter go children;
+        Buffer.add_char b '\x06'
+  in
+  go shape;
+  Buffer.contents b
+
+type ns = Html | Svg
+
+let svg_tag_names =
+  [ "altGlyph"; "altGlyphDef"; "altGlyphItem"; "animateColor"; "animateMotion";
+    "animateTransform"; "clipPath"; "feBlend"; "feColorMatrix"; "feComponentTransfer";
+    "feComposite"; "feConvolveMatrix"; "feDiffuseLighting"; "feDisplacementMap";
+    "feDistantLight"; "feDropShadow"; "feFlood"; "feFuncA"; "feFuncB"; "feFuncG"; "feFuncR";
+    "feGaussianBlur"; "feImage"; "feMerge"; "feMergeNode"; "feMorphology"; "feOffset";
+    "fePointLight"; "feSpecularLighting"; "feSpotLight"; "feTile"; "feTurbulence";
+    "foreignObject"; "glyphRef"; "linearGradient"; "radialGradient"; "textPath" ]
+
+let svg_tag_name lower =
+  match List.find_opt (fun t -> String.lowercase_ascii t = lower) svg_tag_names with
+  | Some t -> t
+  | None -> lower
+
+let breaks_out_of_svg = function
+  | "b" | "big" | "blockquote" | "body" | "br" | "center" | "code" | "dd" | "div" | "dl" | "dt"
+  | "em" | "embed" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "head" | "hr" | "i" | "img" | "li"
+  | "listing" | "menu" | "meta" | "nobr" | "ol" | "p" | "pre" | "ruby" | "s" | "small" | "span"
+  | "strong" | "strike" | "sub" | "sup" | "table" | "tt" | "u" | "ul" | "var" | "font" ->
+      true
+  | _ -> false
+
+let closes_p = function
+  | "address" | "article" | "aside" | "blockquote" | "center" | "details" | "dialog" | "dir"
+  | "div" | "dl" | "fieldset" | "figcaption" | "figure" | "footer" | "header" | "hgroup"
+  | "main" | "menu" | "nav" | "ol" | "p" | "search" | "section" | "summary" | "ul" | "h1" | "h2"
+  | "h3" | "h4" | "h5" | "h6" | "pre" | "listing" | "form" | "li" | "dd" | "dt" | "plaintext"
+  | "table" | "hr" | "xmp" ->
+      true
+  | _ -> false
+
+let heading = function "h1" | "h2" | "h3" | "h4" | "h5" | "h6" -> true | _ -> false
+
+let special = function
+  | Svg, ("foreignObject" | "desc" | "title") -> true
+  | Svg, _ -> false
+  | Html, t -> (
+      heading t
+      ||
+      match t with
+      | "address" | "applet" | "area" | "article" | "aside" | "base" | "basefont" | "bgsound"
+      | "blockquote" | "body" | "br" | "button" | "caption" | "center" | "col" | "colgroup" | "dd"
+      | "details" | "dir" | "div" | "dl" | "dt" | "embed" | "fieldset" | "figcaption" | "figure"
+      | "footer" | "form" | "frame" | "frameset" | "head" | "header" | "hgroup" | "hr" | "html"
+      | "iframe" | "img" | "input" | "keygen" | "li" | "link" | "listing" | "main" | "marquee"
+      | "menu" | "meta" | "nav" | "noembed" | "noframes" | "noscript" | "object" | "ol" | "p"
+      | "param" | "plaintext" | "pre" | "script" | "search" | "section" | "select" | "source"
+      | "style" | "summary" | "table" | "tbody" | "td" | "template" | "textarea" | "tfoot" | "th"
+      | "thead" | "title" | "tr" | "track" | "ul" | "wbr" | "xmp" ->
+          true
+      | _ -> false)
+
+let scope_boundary = function
+  | Svg, ("foreignObject" | "desc" | "title") -> true
+  | Svg, _ -> false
+  | Html, ("applet" | "caption" | "html" | "table" | "td" | "th" | "marquee" | "object" | "template")
+    ->
+      true
+  | Html, _ -> false
+
+let rec in_scope ?(button = false) name = function
+  | [] -> false
+  | (Html, t) :: _ when t = name -> true
+  | ((ns, t) as e) :: rest ->
+      if scope_boundary e || (button && ns = Html && t = "button") then false
+      else in_scope ~button name rest
+
+let table_parent = function
+  | "caption" | "colgroup" | "thead" | "tbody" | "tfoot" -> Some [ "table" ]
+  | "col" -> Some [ "colgroup" ]
+  | "tr" -> Some [ "thead"; "tbody"; "tfoot" ]
+  | "td" | "th" -> Some [ "tr" ]
+  | _ -> None
+
+let table_children = function
+  | "table" -> Some [ "caption"; "colgroup"; "thead"; "tbody"; "tfoot"; "script"; "style"; "template" ]
+  | "thead" | "tbody" | "tfoot" -> Some [ "tr"; "script"; "style"; "template" ]
+  | "tr" -> Some [ "td"; "th"; "script"; "style"; "template" ]
+  | "colgroup" -> Some [ "col"; "template" ]
+  | _ -> None
+
+let ascii_space = function ' ' | '\t' | '\n' | '\012' | '\r' -> true | _ -> false
+
+let parser_changes ~svg shape =
+  let texts children =
+    List.filter_map (function Fixed_text t when t <> "" -> Some t | _ -> None) children
+  in
+  let has_element children = List.exists (function Fixed_element _ -> true | _ -> false) children in
+  let bad_text t = String.contains t '\r' || String.contains t '\000' in
+  let rec first_output = function
+    | [] -> None
+    | (Part _ | Fixed_text "") :: rest -> first_output rest
+    | c :: _ -> Some c
+  in
+  let rec element stack ns tag attrs children =
+    let lower = String.lowercase_ascii tag in
+    let parent = match stack with (Html, p) :: _ -> Some p | _ -> None in
+    let html_rules () =
+      tag <> lower
+      || (match lower with
+         | "html" | "head" | "body" | "frameset" | "frame" | "image" | "plaintext" | "math" -> true
+         | "template" -> children <> []
+         | _ -> false)
+      || (match (table_parent lower, stack) with
+         | Some _, [] -> false
+         | Some parents, _ -> not (match parent with Some p -> List.mem p parents | None -> false)
+         | None, _ -> false)
+      || (match parent with
+         | Some p -> (
+             (match table_children p with Some allowed -> not (List.mem lower allowed) | None -> false)
+             || (match p with
+                | "select" -> not (List.mem lower [ "option"; "optgroup"; "hr" ])
+                | "optgroup" -> lower <> "option"
+                | "option" -> true
+                | _ -> false)
+             || (heading lower && heading p))
+         | None -> false)
+      || (match lower with
+         | "rb" | "rtc" -> parent <> Some "ruby"
+         | "rt" | "rp" -> not (parent = Some "ruby" || parent = Some "rtc")
+         | _ -> false)
+      || (closes_p lower && in_scope ~button:true "p" stack)
+      || (lower = "li" && list_item [ "li" ] stack)
+      || ((lower = "dd" || lower = "dt") && list_item [ "dd"; "dt" ] stack)
+      || (lower = "a" && open_a stack)
+      || ((lower = "nobr" || lower = "button") && in_scope lower stack)
+      || (lower = "form" && List.exists (fun e -> e = (Html, "form")) stack)
+      || (match (lower, first_output children) with
+         | ("pre" | "listing" | "textarea"), Some (Fixed_text t) -> t.[0] = '\n'
+         | _ -> false)
+      || (match lower with
+         | "title" | "textarea" -> has_element children || List.length (texts children) > 1
+         | "xmp" | "iframe" | "noembed" | "noframes" | "noscript" | "style" | "script" ->
+             has_element children
+             || (match texts children with
+                | [] -> false
+                | [ t ] -> String.exists (fun c -> c = '&' || c = '<' || c = '>') t
+                | _ -> true)
+         | _ -> false)
+      || (match lower with
+         | "param" | "keygen" | "basefont" | "bgsound" -> has_element children || texts children <> []
+         | _ -> false)
+      || (match table_children lower with
+         | Some _ -> List.exists (fun t -> not (String.for_all ascii_space t)) (texts children)
+         | None -> false)
+    in
+    match ns with
+    | Svg ->
+        breaks_out_of_svg lower || is_void lower || lower = "math" || svg_tag_name lower <> tag
+        || inside stack (Svg, tag) children
+    | Html ->
+        html_rules ()
+        || (not (void_or_value lower attrs))
+           && inside stack (if lower = "svg" then (Svg, tag) else (Html, lower)) children
+  and inside stack ((ns, _) as here) children =
+    let stack = here :: stack in
+    let child_ns =
+      match here with
+      | Svg, ("foreignObject" | "desc" | "title") -> Html
+      | _ -> ns
+    in
+    List.exists
+      (function
+        | Fixed_text t -> bad_text t
+        | Part _ -> false
+        | Fixed_element { tag; attrs; children } -> element stack child_ns tag attrs children)
+      children
+  and list_item names = function
+    | [] -> false
+    | (Html, t) :: _ when List.mem t names -> true
+    | (Html, ("address" | "div" | "p")) :: rest -> list_item names rest
+    | e :: rest -> if special e then false else list_item names rest
+  and open_a = function
+    | [] -> false
+    | (Html, "a") :: _ -> true
+    | (Html, ("applet" | "object" | "marquee" | "template" | "td" | "th" | "caption")) :: _ -> false
+    | _ :: rest -> open_a rest
+  in
+  match shape with
+  | Fixed_element { tag; attrs; children } ->
+      if svg then element [ (Svg, "svg") ] Svg tag attrs children
+      else element [] Html tag attrs children
+  | Fixed_text _ | Part _ -> true

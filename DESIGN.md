@@ -907,8 +907,15 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 
 - The ppx turns each lowercase JSX tree into a `Yuka.Template.t`, made once
   at the top of the module (`let __yuka_template_<module>_N =
-  Yuka.Template.make shape ~html ~walk ~kids ~attrs ~values`), and an
-  `instance` call with an array of parts at the place of the JSX. Nested lowercase tags are part of the same template. The ppx adds the
+  Yuka.template_coded code ~html ~walk ~kids ~attrs ~values`), and a
+  `Yuka.template_instance` call with an array of parts at the place of the
+  JSX. `code` is the shape in one string (`Template_build.encode`): an
+  element is `\x01` tag, `\x03` name `\x04` value per fixed attribute,
+  `\x05` per attribute part, `\x02`, the children, `\x06`; a text is `\x08`
+  and the text; a child part is `\x07`; a byte below `\x10` in a name, value
+  or text is `\x0f` and the byte plus `0x40`. Part numbers are the order of
+  the markers. The `Yuka.template_*` functions are top-level values, so an
+  app does not keep the `Yuka.Template` module object. Nested lowercase tags are part of the same template. The ppx adds the
   bindings before the structure item that contains the JSX.
 - A shape is `Fixed_text`, `Fixed_element { tag; attrs; children }` or
   `Part i`. An attribute is `Fixed (name, value)` or `Part_attr i`.
@@ -920,7 +927,14 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   `Yuka.text e`, the empty string literal) and every other attribute
   (`Part_attr`: computed values, holes, handlers, optional attributes).
 - The server and hydration use `Private.expand`, the tree as `lower` makes
-  it. So the HTML and the hydration walk do not change.
+  it. So the HTML and the hydration walk do not change. They decode `code`
+  on first use (`Template.shape`). Fresh client creation does not need the
+  shape, so only the code that installs them links the decoder and
+  `expand`: `Client.hydrate` sets `Template.expander` and the adopt steps
+  (`drop_rest`, `adopt_slot` in `client.ml`), and `Template.make` sets the
+  expander and the run-time check below. A render-only app links none of
+  them (keyed app, A and C of the 2026-11-11 council: 10,846 -> 10,158 B
+  gzip).
 - Fresh client creation: the ppx computes, at build time, the HTML of the
   shape (`~html`, parts write nothing) and the paths (`~walk`, `~kids`,
   `~attrs`, `~values`); see "Small client bundles" below. On first use, per
@@ -937,15 +951,78 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   client removes that `<!---->` when the parts did not end with a text, or
   adds one before the next fixed text when they did. The result is the DOM
   that hydration of the server HTML gives.
-- After the first parse, the client checks once that the parsed DOM has the
-  shape of the template: one root, the same element names and the same
-  number of children along the whole tree, and the same static texts. The
-  HTML parser can change a tree (a `tbody` added in a `table`, a `p` closed
-  by a block, `template` children moved to `.content`, a leading newline
-  dropped in `pre` and `textarea`, `html`/`head`/`body` dropped, `\r\n`
-  read as `\n`, entities kept literal in `style` and `script`). When the
-  check fails, that template is not cloned: its instances are created from
-  the expanded tree, element by element.
+- The HTML parser can change a tree (a `tbody` added in a `table`, a `p`
+  closed by a block, `template` children moved to `.content`, a leading
+  newline dropped in `pre` and `textarea`, `html`/`head`/`body` dropped,
+  `\r\n` read as `\n`, entities kept literal in `style` and `script`). The
+  ppx checks the shape at build time (`Template_build.parser_changes`) and
+  lowers a template that the parser could change with `Yuka.lower`, the
+  tree that the client used to build element by element after a failed
+  check. The check reads the shape as the tree construction stage of the
+  HTML standard does (section 13.2.6), in two contexts: in a `<template>`
+  (the "in template" mode lets a `tr`, `td`, `col`, `caption` or table
+  section be the root) and inside an `<svg>` in a `<template>`, where the
+  client parses a template that is mounted in SVG content. The ppx lowers
+  the template when the parse fails in its own context (inside `<svg>` for
+  a root that is an SVG element and not an HTML element, else in the
+  `<template>`), and gives the result of both to `template_coded` as
+  `~clones` (bit 1 HTML context, bit 2 SVG context). It changes the tree
+  on: a start tag that closes a `p` in button scope
+  (`div`, `table`, headings, lists, `form`, `hr`, ...); `li` in an open `li`
+  and `dd`/`dt` in an open `dd`/`dt` (the "in body" loop); a heading in a
+  heading; `a` in an `a` with no marker between (adoption agency); `nobr`
+  and `button` in scope; `form` in a `form`; a table element out of its
+  place, and anything but its own children in `table`, a table section,
+  `tr` or `colgroup` ("in table" foster parenting), non-space text there;
+  in `select` anything but `option`, `optgroup`, `hr`, in `optgroup`
+  anything but `option`, any element in `option`; `rb`/`rtc` out of
+  `ruby`, `rt`/`rp` out of `ruby` or `rtc`; children of `template`; a
+  leading newline in `pre`, `listing`, `textarea`; an element or two texts
+  in `title`/`textarea` (RCDATA), and also an entity in `xmp`, `iframe`,
+  `noembed`, `noframes`, `noscript`, `style`, `script` (RAWTEXT);
+  `html`, `head`, `body`, `frameset`, `frame`, `image`, `plaintext`,
+  `math`; a child element or text in `param`, `keygen`, `basefont`,
+  `bgsound` (the parser closes them at once, and the printer writes their
+  end tag); a tag name that the parser would write in another case (HTML
+  lowercases; SVG uses its camelCase table); `\r` or NUL in a text; in
+  SVG, a tag that breaks out of foreign content (`div`, `p`, `span`, `b`,
+  `font`, ...) and an HTML void name (no end tag is printed). Elements the
+  "in body" mode closes at once were checked against the standard: `area`,
+  `br`, `embed`, `img`, `wbr`, `input`, `source`, `track`, `hr`, `base`,
+  `link`, `meta` are void for the printer (no children, no end tag, as
+  before); `keygen`, `param`, `basefont`, `bgsound` are the rule above;
+  `col` and `frame` are table placement and always lowered. The check may
+  refuse a tree that would parse the same (about 19% of the refused checks
+  in the test); it must not accept one that would not:
+  `test/templates/nesting` compares it with jsdom's parser in both
+  contexts on 4,500 random trees with a fixed seed. Two jsdom departures
+  from the standard are left out there and named in its output: `search`
+  is not special in jsdom, and an SVG `select` resets jsdom's insertion
+  mode by its tag name.
+- The client clones a ppx template only in a context whose bit is set in
+  `clones`. In the other context (HTML content inside `<svg>`, such as
+  `<a><span>` or a `wbr`, or SVG content outside it) it takes the expanded
+  tree, element by element, as it did when the run-time check failed. An
+  app that hydrates links that path; an app that only renders does not
+  (it would cost the keyed app 1,059 B gzip: 10,108 -> 11,167), so there
+  `Template.expander` raises `Failure` with the template's HTML. Such
+  trees are not valid SVG content, so a render-only app does not need
+  them. `test/templates/render_only` mounts the coded templates in a
+  process that never hydrates nor makes a template at run time.
+- A literal `srcdoc` of `iframe` or `href` of `base` in a tree that the
+  ppx lowers stays a template of its own (that element and its children,
+  with its parts renumbered) when that subtree parses as it is, so it
+  prints and mounts as given, as in any template; otherwise it goes
+  through `url_attr` and becomes `""`.
+- Dev build: after the first parse of a ppx template, the client compares
+  the parsed tree with the decoded shape, in the context it parsed it in,
+  and logs a difference with `Dev.mismatch` and the template's HTML. The
+  check is behind `__YUKA_DEV__`, so a production bundle does not contain
+  it (the keyed bundle is the same file with and without it).
+- A hand-written template (`Template.make`, `template_of_shape`) is
+  still checked at run time after its first parse (`Template.check`, the
+  same element names, numbers of children and static texts); when the check
+  fails, its instances are created from the expanded tree.
 - A fixed `value` on a `select` is set as the property after the child parts
   are mounted, as `lower` does.
 - The hoisted name carries the library and the file's module name
@@ -1888,10 +1965,13 @@ Ticket 33 and its four security reviews.
   an HTML sink: `check` gives `""` and logs, as for a script URL. Only a
   literal `srcdoc` in `.mlx` is kept (`add_attr ~literal:true` for template
   fixed attributes); React does not check it. `href` of `base` is handled
-  the same way (it moves every relative URL of the page). Only `Template.make`, hidden and for the ppx,
-  reaches `literal`: a hand-written template goes through
-  `template_of_shape`, which runs `Url.check` on its fixed attributes
-  first. `src` of `script` and `content` of a refresh `meta` are left to
+  the same way (it moves every relative URL of the page). Only
+  `template_coded` (hidden, for the ppx) and `Template.make` (hidden, for
+  tests) reach `literal`. A template that the ppx lowers keeps a literal
+  `srcdoc` or `base` `href` only in a nested `template_coded` made from
+  the literal; see "Template format".
+  A hand-written template goes through `template_of_shape`, which runs
+  `Url.check` on its fixed attributes first. `src` of `script` and `content` of a refresh `meta` are left to
   the developer (README).
 - Attribute names (`Url.valid_name`): empty, or with a character up to
   space, DEL, `"`, `'`, `>`, `/`, `=` or `<`, is refused by the server

@@ -27,6 +27,8 @@ let () =
     (fun (name, tree) ->
       match Private.node (tree ()) with
       | Private.Template { template; parts } ->
+          if List.mem name Template_cases.parser_changes then
+            check (name ^ ": lowered by the ppx") "lowered" "a template";
           check (name ^ ": ppx html is the server html of the tree without parts")
             (Private.to_html (Private.expand template (without_parts parts)))
             (Private.template_html template);
@@ -36,6 +38,7 @@ let () =
           check (name ^ ": ppx paths are the run-time paths")
             (plan_string (Private.template_plan again))
             (plan_string (Private.template_plan template))
+      | _ when List.mem name Template_cases.parser_changes -> ()
       | _ -> check name "a template" "not a template")
     Template_cases.cases;
   check "escaping: server html"

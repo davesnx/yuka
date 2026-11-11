@@ -373,11 +373,12 @@ module Template : sig
     attrs:int array ->
     values:(int * string) array ->
     t
-  (** [make shape ~html ~walk ~kids ~attrs ~values]: for the ppx only, which
-      computes all arguments but [shape] from [shape] at build time and
-      checks the fixed attributes. The browser puts [html] in the page as
-      given and the server prints a fixed [srcdoc] or [base] [href] as
-      given, so a template written by hand uses {!Yuka.template_of_shape}. *)
+  (** [make shape ~html ~walk ~kids ~attrs ~values]: for tests, which give
+      [html] and the paths by hand. Nothing is checked: the browser puts
+      [html] in the page as given and the server prints a fixed [srcdoc] or
+      [base] [href] as given, so a template written by hand uses
+      {!Yuka.template_of_shape}. The client checks the parsed [html] against
+      [shape] once. *)
 
   (**/**)
 
@@ -401,6 +402,35 @@ val template_of_shape : Template.shape -> Template.t
     attributes (names, and URLs, [srcdoc] and [base] [href] as {!attr} does,
     with the element known) and computes its HTML and the paths to its
     parts. Raises [Invalid_argument] on a bad tag or attribute name. *)
+
+(**/**)
+
+val template_coded :
+  string ->
+  html:string ->
+  walk:int array ->
+  kids:int array ->
+  attrs:int array ->
+  values:(int * string) array ->
+  clones:int ->
+  Template.t
+(** For the ppx only: [code] is the shape in the form of
+    [Template_build.encode], and the other arguments are computed from it at
+    build time, where the ppx also checks the fixed attributes and lowers a
+    tree that the HTML parser would change. [clones]: bit 1 when the parse
+    of [html] in a [<template>] keeps the tree, bit 2 when its parse inside
+    an [<svg>] does; the client clones only in such a context and otherwise
+    builds the tree element by element, which needs {!Client.hydrate}. The
+    browser clones [html] as given and the server prints a fixed [srcdoc]
+    or [base] [href] as given. The client decodes [code] only to hydrate
+    and in a dev build. *)
+
+val template_child : 'kind element -> 'kind Template.part
+val template_attribute : 'kind attribute -> 'kind Template.part
+val template_attribute_option : 'kind attribute option -> 'kind Template.part
+val template_instance : Template.t -> 'kind Template.part array -> 'kind element
+
+(**/**)
 
 module Slot : sig
   val make : server element -> slot
@@ -957,6 +987,12 @@ module Private : sig
   val template_plan :
     template -> int array * int array * int array * (int * string) array
   (** The [walk], [kids], [attrs] and [values] given to [Template.make]. *)
+
+  val parser_changes : svg:bool -> Template.shape -> bool
+  (** The build-time nesting check of the ppx: [true] when the HTML parser
+      could build another tree from the HTML of the shape, parsed in a
+      [<template>] ([svg:false]) or in an [<svg>] in a [<template>]
+      ([svg:true]). The ppx lowers such a template with {!lower}. *)
 
   val node : 'kind element -> node
 

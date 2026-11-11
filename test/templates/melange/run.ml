@@ -18,6 +18,15 @@ let () =
 })()|}]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]
+
+let namespaces : node -> string =
+  [%mel.raw
+    {|function (c) {
+  const out = [];
+  const prefix = { "http://www.w3.org/2000/svg": "svg", "http://www.w3.org/1999/xhtml": "html" };
+  c.querySelectorAll("*").forEach(function (e) { out.push(prefix[e.namespaceURI] + ":" + e.localName); });
+  return out.join(" ");
+}|}]
 let templates_created : unit -> int = [%mel.raw "function () { return globalThis.__templates }"]
 let container : unit -> node =
   [%mel.raw "function () { const c = document.createElement('div'); document.body.appendChild(c); return c }"]
@@ -87,14 +96,24 @@ let () =
           if not (List.mem name Template_cases.value_properties) then
             check (name ^ ": clone is the node tree") tree_html cloned;
           if List.mem name Template_cases.parser_changes then
-            check (name ^ ": fallback prints the server html")
-              (Private.to_html (Private.node (tree ())))
-              cloned
+            check (name ^ ": lowered by the ppx") "lowered" "a template"
           else begin
             let parsed, hydrated = hydrate tree in
             check (name ^ ": hydrate keeps the server html") parsed hydrated
           end
+      | _ when List.mem name Template_cases.parser_changes ->
+          check (name ^ ": render prints the server html")
+            (Private.to_html (Private.node (tree ())))
+            (render tree)
       | _ -> check name "a template" "not a template")
     Template_cases.cases;
+  List.iter
+    (fun (name, tree, expected, spaces) ->
+      let c = container () in
+      let dispose = Private.render (as_container c) tree in
+      check (name ^ ": render after hydrate") expected (html c);
+      check (name ^ ": namespaces") spaces (namespaces c);
+      dispose ())
+    Template_cases.svg_cases;
   if !failures > 0 then set_exit_code 1
   else print_endline (string_of_int (List.length Template_cases.cases) ^ " template cases: ok")
