@@ -127,10 +127,10 @@ open Base
   let needs_special tag =
     match String.lowercase_ascii tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
 
-  type namespace = Html | Svg | Math
+  type namespace = Html | Svg | Math | Select
 
   let enter ns tag =
-    match (ns, tag) with Html, "svg" -> Svg | Html, "math" -> Math | Svg, "foreignobject" -> Html | ns, _ -> ns
+    match (ns, tag) with Html, "svg" -> Svg | Html, "math" -> Math | Html, "select" -> Select | Svg, "foreignobject" -> Html | ns, _ -> ns
 
   let compile shape =
     let ops = ref [] and raw = Buffer.create 64 in
@@ -475,7 +475,12 @@ open Base
             | "select", _ ->
                 let outer = s.select_value in
                 s.select_value <- value;
-                contents children;
+                foreign := enter (namespace ()) lt :: !foreign;
+                (match contents children with
+                | () -> foreign := List.tl !foreign
+                | exception e ->
+                    foreign := List.tl !foreign;
+                    raise e);
                 s.select_value <- outer
             | ("svg" | "math" | "foreignobject"), _ ->
                 foreign := enter (namespace ()) lt :: !foreign;

@@ -545,7 +545,7 @@ let action (r : request) raw =
       | Ok handler ->
           Async.bind (r.body ~limit:Server.max_body) (function
             | None -> Async.return (json (Server.action_error 413 "request too large"))
-            | Some body -> Async.map json (Server.answer_action ~name handler body)))
+            | Some body -> Async.map json (Server.answer_action ~name ~host:(r.header "host") handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
 

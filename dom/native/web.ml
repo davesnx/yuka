@@ -83,6 +83,7 @@ type controller = unit
 
 let location_assign : string -> unit = fun _ -> browser_only ()
 let current_url : unit -> string = fun _ -> browser_only ()
+let same_origin : string -> bool = fun _ -> browser_only ()
 let scroll_y : unit -> float = fun _ -> browser_only ()
 let scroll_to : float -> unit = fun _ -> browser_only ()
 let scroll_to_hash : string -> unit = fun _ -> browser_only ()

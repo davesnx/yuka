@@ -282,13 +282,13 @@ val lower : string -> 'kind attribute list -> 'kind element list -> 'kind elemen
     HTML escaping), with every [</] printed as [<\/] and, in a JavaScript
     [script], [<!--] as [<\!--]; in a [script] of another [type] (JSON,
     import map, template), every [<] is printed as [\u003c]. Inside [svg]
-    and [math] (but not in the [foreignObject] of an [svg]) the text is
-    escaped. *)
+    and [math] (but not in the [foreignObject] of an [svg]), and inside
+    [select], the text is escaped. *)
 
 val attr : string -> string -> 'kind attribute
 (** [attr name value]: an attribute with a fixed value. The server escapes
-    the value. URL check, in the browser here and for every attribute the
-    server prints: the value of a URL attribute ([href], [src], [action],
+    the value. URL check, for every attribute the server prints and the
+    browser sets, with the element: the value of a URL attribute ([href], [src], [action],
     [formaction], [xlink:href], [poster], [cite], [data], [background],
     [longdesc], [manifest], [codebase], [icon], any case; [values], [to],
     [from], [by] of SVG animations) is read as the browser does (leading
@@ -297,11 +297,10 @@ val attr : string -> string -> 'kind attribute
     ["about:blank#blocked"]; so does a [data:] URL where it would load or
     open a document ([href] of [a], [area] and [use], [action],
     [formaction], [xlink:href], [src] of [iframe], [frame], [embed] and
-    [object], [data] of [object]; with no known element, [href] and [data]
-    count as such). A [data:] image or media URL stays. The server logs the
+    [object], [data] of [object]). A [data:] image or media URL stays. The server logs the
     first block with {!Server.log_error}; a dev build logs the first one in
     the console. [data:] is also blocked on [src] of [script] and [href] of
-    [script]. [srcdoc] of [iframe] (or with no known element) and [href] of
+    [script]. [srcdoc] of [iframe] and [href] of
     [base] become [""] and are logged the same way; only a literal one in
     [.mlx] is kept. A [name] that is empty, starts with [on] (any case:
     use {!on}), or has a space, a control character, a quote, [<], [>], [/]
@@ -862,7 +861,8 @@ module Form : sig
       then [run input] (default: the action call) runs while [pending] is
       true; field errors show, and on [Ok o] [on_ok o] runs, or else the page
       follows the server's [redirect] (with [run], the page URL) with a
-      client navigation, as a post with no JavaScript does. Raises
+      client navigation, as a post with no JavaScript does. A [redirect] to
+      another origin is not followed: it shows as a form error. Raises
       [Invalid_argument] when [action] is not from {!val-action}. *)
 end
 
@@ -874,7 +874,9 @@ module Browser : sig
   val navigate : string -> unit
   (** Loads the URL. After [mount] with navigation (the default), it is a
       client navigation, as a click on a link; see {!mount}. Otherwise it
-      does [location.assign url]. *)
+      does [location.assign url]. A [javascript:], [vbscript:] or [data:]
+      URL (read as {!attr} reads a URL) does nothing; a dev build logs the
+      first one. *)
 
   val focus : string -> unit
   (** Focuses the element with this id. *)
@@ -1434,7 +1436,9 @@ module Server : sig
       unit
     (** Registers a form action (see {!Yuka.Form}). It answers the island
         path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
-        with [redirect o] in the answer, and the form post of a page. The
+        with [redirect o] in the answer (checked as for the 303 below: a
+        bad one answers 500 [action failed] and is logged), and the form
+        post of a page. The
         request cycle checks the origin as for {!handle} (403), runs the
         page's guards (a
         refusal answers as for [GET] and the function does not run), reads

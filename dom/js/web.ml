@@ -275,6 +275,10 @@ let location_assign : string -> unit =
   [%mel.raw
     "function (url) { window.location.assign(url) }"]
 
+let same_origin : string -> bool =
+  [%mel.raw
+    "function (url) { try { return new URL(url, window.location.href).origin === window.location.origin } catch (e) { return false } }"]
+
 let current_url : unit -> string =
   [%mel.raw
     "function () { const l = window.location; return l.pathname + l.search }"]

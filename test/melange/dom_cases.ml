@@ -6,7 +6,7 @@ let setup () : unit =
   [%mel.raw
     {|(function () {
   const { JSDOM } = require("jsdom");
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", { runScripts: "outside-only" });
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { runScripts: "outside-only", url: "http://localhost/" });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
 })()|}]
@@ -1505,6 +1505,30 @@ let client_base_href () =
   check "a hand-written template" {|<base href="">|}
     (render_html (fun () -> Template.instance (template_of_shape Template.(element "base" [ fixed "href" "/app/" ] [])) [||]))
 
+let client_sink_urls () =
+  let v = State.make "https://evil.example/" in
+  let t = template_of_shape Template.(element "iframe" [ part_attr 0 ] []) in
+  let c = container "" in
+  let dispose =
+    Yuka.Client.render (as_element c) (fun () ->
+        div []
+          [
+            lower "base" [ hole_attr "href" (fun () -> Some (State.get v)) ] [];
+            lower "iframe" [ attr "src" "data:text/html,<script>alert(1)</script>" ] [];
+            lower "script" [ attr "src" "data:text/javascript,alert(1)" ] [];
+            lower "img" [ attr "src" "data:image/png;base64,iVBORw0KGgo=" ] [];
+            lower "a" [ attr "href" "data:text/html,x" ] [];
+            Template.instance t [| Template.attribute (attr "src" "data:text/html,x") |];
+          ])
+  in
+  let expected =
+    {|<div><base href=""><iframe src="about:blank#blocked"></iframe><script src="about:blank#blocked"></script><img src="data:image/png;base64,iVBORw0KGgo="><a href="about:blank#blocked"></a><iframe src="about:blank#blocked"></iframe></div>|}
+  in
+  check "the element decides" expected (html c);
+  State.set v "/x/";
+  check "base href stays empty" expected (html c);
+  dispose ()
+
 let client_raw_text_namespaces () =
   List.iter
     (fun (name, tree) ->
@@ -1527,6 +1551,7 @@ let all =
     ("client: tag names are refused", client_tag_names);
     ("client: event handler names are refused", client_event_names);
     ("client: base href is empty", client_base_href);
+    ("client: URL checks with the element known at the sink", client_sink_urls);
     ("client: URL attributes are checked", client_urls);
     ("client: style text", client_raw_text);
     ("client: URL names in any case; data: kept on images", client_url_case);

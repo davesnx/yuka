@@ -79,6 +79,16 @@ let plain_view key () =
         ])
     ()
 
+let redirect_view () =
+  Form.make ~action:jot ~key:"r"
+    ~children:(fun form ->
+      fragment
+        [
+          lower "input" [ attr "name" "body"; attr "value" (Form.value form Body) ] [];
+          Form.form_error_view form (fun m -> lower "u" [] [ text m ]);
+        ])
+    ()
+
 let button_view () =
   Form.make ~action:jot
     ~on_ok:(fun n -> ok_value := Some n)
@@ -100,6 +110,7 @@ let entries =
     entry_of "A" (plain_view "a");
     entry_of "B" (plain_view "b");
     entry_of "Btn" button_view;
+    entry_of "R" redirect_view;
     entry_of "T" toggled_view;
   ]
 
@@ -204,6 +215,25 @@ let async =
                 finish (fun () ->
                     check "each its own" "/b,/a" (String.concat "," !navigated);
                     Yuka.unmount ()))) );
+    ( "form: a redirect to another site is refused",
+      fun finish ->
+        start (Server.to_string (fun () -> island_of "R" redirect_view));
+        let answers =
+          [ "javascript:alert(1)"; " JavaScript:alert(1)"; "https://evil.example/"; "//evil.example/x"; "data:text/html,x" ]
+        in
+        let rec go i = function
+          | [] ->
+              finish (fun () ->
+                  check "not followed" "" (String.concat "," !navigated);
+                  check "shown" "Yuka: refused a redirect to another site: data:text/html,x" (text_of "u");
+                  Yuka.unmount ())
+          | l :: rest ->
+              set_input_in "r" "x";
+              submit_in "r";
+              respond i 200 (Printf.sprintf {|{"ok":{"value":1,"redirect":%S}}|} l);
+              after_ms 10 (fun () -> go (i + 1) rest)
+        in
+        go 0 answers );
     ( "form: with no redirect and no on_ok, reload the page URL",
       fun finish ->
         start (Server.to_string (fun () -> island_of "A" (plain_view "a")));

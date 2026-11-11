@@ -201,6 +201,11 @@ let lis a =
   keep
 
 let set_attr svg el name value =
+  let value =
+    match value with
+    | Some v -> Some (Url.check ~tag:(Web.lowercase (Web.local_name el)) ~log:Element.log (Web.lowercase name) v)
+    | None -> None
+  in
   match name with
   | _ when svg -> (
       match value with

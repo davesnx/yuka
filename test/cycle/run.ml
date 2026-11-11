@@ -1032,6 +1032,24 @@ let forms =
             "%2Fok%00";
             "%09%2F%2Fevil.com";
           ] );
+    ( "the action RPC answer of a form refuses a redirect that is not a path on this site",
+      fun () ->
+        let call title =
+          logged := [];
+          get ~meth:`POST ~headers:json_headers
+            ~body:(Printf.sprintf {|[["title",%S],["count","1"],["level","low"]]|} title)
+            "/_yuka/action/save_entry"
+        in
+        let r = call "http://app.example/done" in
+        check_status r 200;
+        Alcotest.(check string) "same site" {|{"ok":{"value":"http://app.example/done","redirect":"http://app.example/done"}}|} r.body;
+        List.iter
+          (fun title ->
+            let r = call title in
+            check_status r 500;
+            Alcotest.(check string) ("answer " ^ String.escaped title) {|{"error":"action failed"}|} r.body;
+            Alcotest.(check int) "logged" 1 (List.length !logged))
+          [ "javascript:alert(1)"; " javascript:alert(1)"; "https://evil.example/x"; "//evil.example"; "/\\evil.example" ] );
     ( "page guards run before the action",
       fun () ->
         let r = post ~target:"/team/nobody/form" "_yuka_action=jot&body=hi" in

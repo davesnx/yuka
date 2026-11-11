@@ -58,7 +58,8 @@ Another server needs one small adapter.
   script (links, forms, frames, `object`, `embed`, `script`, SVG `use`). A
   `data:` image or media URL is kept. A dev build logs the first block; a
   literal one in `.mlx` does not build. There is no way around it: use an
-  event handler.
+  event handler. In the browser the check runs where the attribute is set,
+  with the real element, so it gives what the server prints.
 - `srcdoc` of `iframe` is HTML, and `href` of `base` changes where every
   relative URL of the page points: a value that is not a literal in `.mlx`
   is printed and set as the empty string. Write them in `.mlx`, or point
@@ -73,6 +74,10 @@ Another server needs one small adapter.
   space, a control character, `"`, `'`, `<`, `>`, `/` or `=` raises an
   exception. Event handlers are functions: `onclick=(fun event -> ...)`
   in `.mlx` or `Yuka.on`; a string handler in `.mlx` does not build.
+- `Yuka.Browser.navigate` does nothing with a `javascript:`, `vbscript:`
+  or `data:` URL (a dev build logs it once). A form follows only a
+  `redirect` on this site: the server answers 500 and logs one that is
+  not, and the browser refuses one from another origin and shows an error.
 - Hand-written templates go through `Yuka.template_of_shape`, which checks
   their tags and fixed attributes as above.
 - `<script>` and `<style>` take one text (the ppx joins the texts and
@@ -82,7 +87,8 @@ Another server needs one small adapter.
   JavaScript script; in a script of another type (JSON, import map), every
   `<` becomes `\u003c`. Inside `<svg>` and `<math>` (but not in an
   SVG `<foreignObject>`) they are ordinary elements and their text is
-  escaped.
+  escaped; so it is inside `<select>`, where an HTML parser can drop the
+  start tag and read the text as markup.
 
 ## Learn more
 

@@ -1824,31 +1824,28 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
 
 ## Unsafe URLs and raw-text elements (2026-11-10)
 
-Ticket 33 and its three security reviews.
+Ticket 33 and its four security reviews.
 
 - Rule (`src/url.ml`, shared with the ppx; names and tags lowercased by the
   caller): a URL attribute is `href`, `src`, `action`, `formaction`,
   `xlink:href`/`xlinkhref`, `poster`, `cite`, `data`, `background`,
   `longdesc`, `manifest`, `codebase`, `icon`, and `values`, `to`, `from`,
-  `by` on `animate`, `set`, `animateMotion`, `animateTransform` or with no
-  known element (each `;`-separated item of `values`; on other elements,
+  `by` on `animate`, `set`, `animateMotion`, `animateTransform` (each `;`-separated item of `values`; on other elements,
   such as `feColorMatrix`, they are not URLs). The value is read as the URL parser
   does: leading characters up to space dropped, tab, newline and CR dropped
   anywhere, any case. `javascript:` and `vbscript:` are blocked on every
   URL attribute. `data:` is blocked only where it opens or loads a
   document: `href` of `a`, `area`, `use`; `action`; `formaction`;
   `xlink:href`; `src` of `iframe`, `frame`, `embed`, `object`, `script`;
-  `href` of `script`; `data` of `object`. With no known element (`Yuka.attr` in the browser), `href` and
-  `data` count as such and `src` does not. A blocked value becomes
+  `href` of `script`; `data` of `object`. Every sink knows the element.
+  A blocked value becomes
   `about:blank#blocked` (React's rule; React blocks only `javascript:` and
   has no escape hatch, Angular checks `data:` and has one, Svelte, Solid and
-  Vue do not check). `srcdoc` of `iframe` (or with no known element) is
+  Vue do not check). `srcdoc` of `iframe` is
   an HTML sink: `check` gives `""` and logs, as for a script URL. Only a
   literal `srcdoc` in `.mlx` is kept (`add_attr ~literal:true` for template
   fixed attributes); React does not check it. `href` of `base` is handled
-  the same way (it moves every relative URL of the page); with no known
-  element (`Yuka.attr` in the browser) it cannot be told from a link and
-  is only checked as a URL. Only `Template.make`, hidden and for the ppx,
+  the same way (it moves every relative URL of the page). Only `Template.make`, hidden and for the ppx,
   reaches `literal`: a hand-written template goes through
   `template_of_shape`, which runs `Url.check` on its fixed attributes
   first. `src` of `script` and `content` of a refresh `meta` are left to
@@ -1867,9 +1864,18 @@ Ticket 33 and its three security reviews.
   the client adds no check. The ppx takes only tags it knows.
 - Sinks (`Url.check ~tag ~log`): the server printer, for every attribute
   it prints, with the element (one check per print; `log_error` once per
-  process); in the browser, `Yuka.attr` and each value of `Yuka.hole_attr`
-  (no element), and the ppx's `Yuka.url_attr tag` and `url_hole_attr tag`
-  (with the element). Constructors do not check on the server.
+  process); in the browser, `Client.set_attr`, for every attribute value it
+  sets (static, each hole value, template parts), with the element's
+  `localName`. So both sides apply the same rule with the real element;
+  constructors check only names. That costs the keyed app 595 B gzip
+  (10,303 -> 10,898): `Url` was not in it before, because its
+  constructors with no URL name never called the check.
+- Navigation: `Browser.navigate` drops a URL that `Url.unsafe ~tag:"a"
+  "href"` blocks (a dev build logs it), with navigation on or off. A form
+  answer's `redirect` goes through `Server.local_location` with the
+  request `Host` in `answer_action` (as the 303 does; `Redirect` answer
+  case), and the browser follows it only when `new URL(r, location)` has
+  the page's origin.
 - The ppx emits `url_attr`/`url_hole_attr` for checked names and
   `attr_unchecked`/`hole_attr_unchecked` for the others. The unchecked ones
   refuse a URL name, `srcdoc` and a bad name at run time
@@ -1894,8 +1900,10 @@ Ticket 33 and its three security reviews.
   `title` or `iframe` around it cannot be closed), and `<!--` too in a
   JavaScript script (no `type`, `module`, or a JavaScript MIME type); in a
   script of another type every `<` becomes `\u003c`. In `svg` and `math`
-  the text is escaped. The namespace is a stack in the printer (`Html`,
-  `Svg`, `Math`; tags compared in lowercase): `svg` and `math` enter their
+  the text is escaped, and so inside `select` (a `Select` entry on the
+  same stack): a classic parser ignores a `style` start tag there and reads
+  its text as markup. The namespace is a stack in the printer (`Html`,
+  `Svg`, `Math`, `Select`; tags compared in lowercase): `svg` and `math` enter their
   namespace from HTML, `foreignObject` in SVG goes back to HTML, and
   anything inside `math` stays MathML (also `math > svg` and
   `math > foreignObject`). MathML text integration points (`mi`, `mtext`,

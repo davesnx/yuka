@@ -335,7 +335,9 @@ let reject message = raise (Rejected message)
 let rejected message = Async.failed (reject_prefix ^ message)
 let guarded f x = Async.guard (fun x -> match f x with a -> a | exception Rejected m -> rejected m) x
 
-type answer = Output of Json.t | Bad_input of string
+type answer = Output of Json.t | Redirect of Json.t * string | Bad_input of string
+
+let with_redirect j location = match j with `Assoc fields -> `Assoc (fields @ [ ("redirect", `String location) ]) | j -> j
 
 let registry : (string * (Json.t -> answer Async.t)) list ref = ref []
 
@@ -356,6 +358,7 @@ let run name input k =
           if !live then
             match st with
             | Async.Done (Output j) -> k (Ok j)
+            | Async.Done (Redirect (j, location)) -> k (Ok (with_redirect j location))
             | Async.Done (Bad_input m) -> k (Error (Bad m))
             | Async.Failed m -> (
                 match rejection m with
@@ -397,12 +400,12 @@ let register action f encode =
         match Codec.decode input json with
         | Error m -> Async.return (Bad_input m)
         | Ok v ->
-            Async.map (fun o -> Output (encode o)) (guarded f v) )
+            Async.map encode (guarded f v) )
     :: !registry;
   Action.transport := transport;
   Remote.server_send := send
 
-let implement action f = register action f (Codec.encode action.Action.output)
+let implement action f = register action f (fun o -> Output (Codec.encode action.Action.output o))
 
 type form_outcome = Saved of string option | Unprocessable of (string option * string) list
 
@@ -418,12 +421,9 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _)
   in
   let output = action.Action.output in
   let encode result =
-    match (result, Codec.encode output result) with
-    | Ok o, `Assoc fields -> (
-        match redirect with
-        | Some r -> `Assoc (fields @ [ ("redirect", `String (r o)) ])
-        | None -> `Assoc fields)
-    | _, j -> j
+    match (result, redirect) with
+    | Ok o, Some r -> Redirect (Codec.encode output result, r o)
+    | _ -> Output (Codec.encode output result)
   in
   register action f encode;
   let run values =
@@ -485,7 +485,7 @@ let accept_action ~name header =
         if is_json (header "content-type") then Ok handler
         else Error (action_error 415 "content type must be application/json")
 
-let answer_action ~name handler body =
+let answer_action ~name ~host handler body =
   match Json.of_string body with
   | Error m -> Async.return (action_error 400 ("invalid JSON: " ^ m))
   | Ok json ->
@@ -493,6 +493,13 @@ let answer_action ~name handler body =
       Async.on_settled (handler json) (function
         | Async.Done (Bad_input m) -> resolve (action_error 400 ("invalid input: " ^ m))
         | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc [ ("ok", j) ]))
+        | Async.Done (Redirect (j, location)) ->
+            if local_location ~host location then
+              resolve (200, Json.to_string (`Assoc [ ("ok", with_redirect j location) ]))
+            else begin
+              !log_error ("form " ^ name ^ " redirect to " ^ String.escaped location ^ " is not a path on this site");
+              resolve (action_error 500 "action failed")
+            end
         | Async.Failed m -> (
             match rejection m with
             | Some message -> resolve (action_error 400 message)
@@ -505,4 +512,4 @@ let answer_action ~name handler body =
 let handle_action ~name ~header ~body =
   match accept_action ~name header with
   | Error e -> Async.return e
-  | Ok handler -> answer_action ~name handler body
+  | Ok handler -> answer_action ~name ~host:(header "host") handler body

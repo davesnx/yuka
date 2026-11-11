@@ -246,6 +246,15 @@ let raw_text () =
   check_html "tag case: STYLE is raw text" {|<STYLE>a > b<\/style></STYLE>|} (lower "STYLE" [] [ text "a > b</style>" ]);
   check_html "tag case: svg > FOREIGNOBJECT is HTML" {|<svg><FOREIGNOBJECT><style>a > b</style></FOREIGNOBJECT></svg>|}
     (lower "svg" [] [ lower "FOREIGNOBJECT" [] [ lower "style" [] [ text "a > b" ] ] ]);
+  let user = "<input autofocus onfocus=alert(1)>" in
+  check_html "select > style is escaped" {|<select><style>&lt;input autofocus onfocus=alert(1)&gt;</style></select>|}
+    (lower "select" [] [ lower "style" [] [ text user ] ]);
+  check_html "select > option > script is escaped" {|<select><option><script>&lt;input autofocus onfocus=alert(1)&gt;</script></option></select>|}
+    (lower "select" [] [ lower "option" [] [ lower "script" [] [ text user ] ] ]);
+  check_html "mlx: select > optgroup > style" {|<select><optgroup><style>&lt;input autofocus onfocus=alert(1)&gt;</style></optgroup></select>|}
+    <select><optgroup><style>(Yuka.text user)</style></optgroup></select>;
+  check_html "after select, raw again" {|<select></select><style>a > b</style>|}
+    (fragment [ lower "select" [] []; lower "style" [] [ text "a > b" ] ]);
   check_html "text outside script is still escaped" {|<p>a &lt; b &amp;&amp; c</p>|} (lower "p" [] [ text "a < b && c" ])
 
 let raw_text_children () =

@@ -144,6 +144,8 @@ let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action
     }
   in
   let follow = function
+    | Some location when not (Web.same_origin location) ->
+        State.set form.failed [ (None, "Yuka: refused a redirect to another site: " ^ location) ]
     | Some location -> Platform.Browser.navigate location
     | None -> Platform.Browser.navigate (Web.current_url ())
   in

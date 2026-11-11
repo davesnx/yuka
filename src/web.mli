@@ -86,6 +86,7 @@ type controller
 
 val location_assign : string -> unit
 val current_url : unit -> string
+val same_origin : string -> bool
 val scroll_y : unit -> float
 val scroll_to : float -> unit
 val scroll_to_hash : string -> unit

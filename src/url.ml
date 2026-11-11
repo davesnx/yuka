@@ -8,18 +8,18 @@ let url_name = function
 
 let animation_name = function "values" | "to" | "from" | "by" -> true | _ -> false
 let animation_tag = function "animate" | "set" | "animatemotion" | "animatetransform" -> true | _ -> false
-let html_sink ~tag name = (name = "srcdoc" && (tag = "iframe" || tag = "")) || (name = "href" && tag = "base")
+let html_sink ~tag name = (name = "srcdoc" && tag = "iframe") || (name = "href" && tag = "base")
 
 let checked ~tag name =
-  url_name name || html_sink ~tag name || (animation_name name && (tag = "" || animation_tag tag))
+  url_name name || html_sink ~tag name || (animation_name name && animation_tag tag)
 
 let navigational ~tag name =
   match (name, tag) with
   | ("action" | "formaction" | "xlink:href" | "xlinkhref"), _ -> true
-  | "href", ("a" | "area" | "use" | "") -> true
+  | "href", ("a" | "area" | "use") -> true
   | "src", ("iframe" | "frame" | "embed" | "object" | "script") -> true
   | "href", "script" -> true
-  | "data", ("object" | "") -> true
+  | "data", "object" -> true
   | _ -> false
 
 let has_scheme value ~from ~until scheme =
@@ -28,11 +28,13 @@ let has_scheme value ~from ~until scheme =
     if k = n then true
     else if i >= until then false
     else
-      match value.[i] with
+      match String.unsafe_get value i with
       | '\t' | '\n' | '\r' -> go (i + 1) k
-      | c -> Char.lowercase_ascii c = scheme.[k] && go (i + 1) (k + 1)
+      | c ->
+          (if c >= 'A' && c <= 'Z' then Char.unsafe_chr (Char.code c + 32) else c) = String.unsafe_get scheme k
+          && go (i + 1) (k + 1)
   in
-  let rec start i = if i < until && value.[i] <= ' ' then start (i + 1) else i in
+  let rec start i = if i < until && String.unsafe_get value i <= ' ' then start (i + 1) else i in
   go (start from) 0
 
 let unsafe_part ~tag name value ~from ~until =
@@ -46,7 +48,8 @@ let unsafe ~tag name value =
   let n = String.length value in
   if animation_name name then
     let rec parts from =
-      let until = match String.index_from_opt value from ';' with Some i -> i | None -> n in
+      let rec semi i = if i < n && String.unsafe_get value i <> ';' then semi (i + 1) else i in
+      let until = semi from in
       unsafe_part ~tag name value ~from ~until || (until < n && parts (until + 1))
     in
     parts 0

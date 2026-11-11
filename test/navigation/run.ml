@@ -403,6 +403,20 @@ let browser_navigate finish =
       check "no full load" "scroll:0" (log_read ());
       finish ())
 
+let script_urls = [ " javascript:alert(1)"; "JavaScript:alert(1)"; "java\tscript:alert(1)"; "vbscript:x"; "data:text/html,x" ]
+
+let navigate_refuses_scripts finish =
+  setup (page "<p>old</p>");
+  List.iter Browser.navigate script_urls;
+  check "off: no page load" "" (log_read ());
+  plain_start ();
+  List.iter Browser.navigate script_urls;
+  check "on: no fetch" "0" (ints (calls ()));
+  check "on: no page load" "" (log_read ());
+  Browser.navigate "/ok";
+  check "a path still navigates" "/ok" (call_url 0);
+  finish ()
+
 let start_twice_listeners finish =
   setup (page "x");
   count_listeners ();
@@ -1325,6 +1339,7 @@ let all =
     ("navigate", navigate_api);
     ("start twice", start_twice);
     ("Browser.navigate", browser_navigate);
+    ("Browser.navigate refuses script URLs, navigation off and on", navigate_refuses_scripts);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);
