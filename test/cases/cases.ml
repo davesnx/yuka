@@ -1361,6 +1361,37 @@ let batch_in_first_run () =
   check "a batch in an effect runs pending effects when the effect ends"
     "e0 end e1" (read ())
 
+let first_run_raises_stops () =
+  let runs = ref 0 in
+  let s = State.make 0 in
+  (try
+     Effect.run (fun () ->
+         incr runs;
+         ignore (State.get s);
+         failwith "first")
+   with Failure _ -> ());
+  State.set s 1;
+  check "an effect whose first run raises outside a boundary is stopped" "1 false"
+    (Printf.sprintf "%d %b" !runs (Private.has_readers s))
+
+let caught_memo_error_keeps_reader () =
+  let n = State.make 0 in
+  let m =
+    State.memo (fun () -> if State.get n = 1 then failwith "bad" else State.get n)
+  in
+  let t = State.make 0 in
+  let runs = ref 0 in
+  Effect.run (fun () ->
+      incr runs;
+      (try ignore (State.get m) with Failure _ -> ());
+      ignore (State.get t));
+  batch (fun () ->
+      State.set t 1;
+      State.set n 1);
+  State.set t 2;
+  check "a read after a caught memo error still tracks the effect" "3"
+    (string_of_int !runs)
+
 let boom () : _ element = failwith "secret detail"
 let late () : _ element = Private.element (Private.hole (fun () -> failwith "secret detail"))
 
@@ -1527,6 +1558,8 @@ let all =
     ("disposed while pending", disposed_while_pending);
     ("memo that raises", memo_raises);
     ("batch in the first run of an effect", batch_in_first_run);
+    ("a first run that raises stops the effect", first_run_raises_stops);
+    ("a caught memo error keeps the reader", caught_memo_error_keeps_reader);
     ("first run", first_run);
     ("re-run on change", rerun_on_change);
     ("no re-run on an equal write", no_rerun_on_equal_write);
