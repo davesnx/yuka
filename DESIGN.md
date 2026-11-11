@@ -1190,6 +1190,29 @@ the budget in `bench/size/budget.json`.
   sorts by level with a small stable merge sort, and uses two lists as its
   queue.
 
+### Minify with swc after esbuild (2026-11-11)
+
+- A production bundle is two steps: esbuild bundles and minifies, then swc
+  minifies each output file again. `scripts/bundle.ts` does both;
+  `demo/bundle.sh`, `bench/keyed/build.sh` and `make size` use it, so they
+  measure and serve the same bytes. An app can copy the script; it needs
+  the npm packages `esbuild` and `@swc/core`:
+
+      node scripts/bundle.ts --entry main.js --outdir dist
+      node scripts/bundle.ts --entry main.js --outdir bundle \
+        --format esm --splitting --metafile meta.json
+
+  It passes `--define:__YUKA_DEV__=false`. Dev builds do not change.
+- Why: esbuild does not inline functions or remove aliases, and Melange
+  output has many (`let make = State.make`, wrappers of externals). swc
+  (`compress.passes = 3`) removes them. The keyed app goes from 30,688 B,
+  10,846 B gzip to 27,852 B, 9,675 B gzip; the demo, all chunks, from
+  48,393 B to 44,553 B gzip. The e2e check of the demo in bundle mode
+  passes.
+- Like for like: `make bench-keyed` builds the Solid app with rollup and
+  babel, without terser, and then with the same script: its JavaScript is
+  4,715 B gzip, where rollup and terser gave 4,812 B.
+
 ## Routes.mlx generator (2026-11-10)
 
 The input format and the reader changed later; see "Routes.ml: one OCaml

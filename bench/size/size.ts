@@ -1,4 +1,4 @@
-import { build, type Metafile } from "esbuild";
+import { bundle as release } from "../../scripts/bundle.ts";
 import { readFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gzipSync, constants } from "node:zlib";
@@ -34,19 +34,7 @@ const short = (path: string) =>
   path.replace(/^.*?node_modules\//, "").replace(/^.*?\/out\//, "");
 
 async function bundle(entry: string, out: string, esm: boolean): Promise<Chunk[]> {
-  const result = await build({
-    entryPoints: [entry],
-    bundle: true,
-    minify: true,
-    define: { __YUKA_DEV__: "false" },
-    format: esm ? "esm" : "iife",
-    splitting: esm,
-    outdir: out,
-    write: true,
-    metafile: true,
-    logLevel: "warning",
-  });
-  const meta: Metafile = result.metafile;
+  const meta = await release({ entry, outdir: out, format: esm ? "esm" : "iife", splitting: esm, cwd: root });
   return Object.entries(meta.outputs)
     .filter(([file]) => file.endsWith(".js"))
     .map(([file, output]) => {
@@ -86,6 +74,7 @@ const demo = await bundle(
 );
 mkdirSync(outDir, { recursive: true });
 
+console.log("method: scripts/bundle.ts (esbuild --bundle --minify, then swc minify)");
 print("keyed benchmark app (iife)", keyed);
 print("demo client (esm, split)", demo);
 const total = demo.reduce((n, c) => n + c.raw, 0);
