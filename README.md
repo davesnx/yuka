@@ -17,7 +17,7 @@ Melange compiles to JavaScript. A page with no island loads no JavaScript.
 - **mlx syntax.** JSX for OCaml, checked at compile time.
 - **Streaming.** Send the page shell first and fill in the rest when it is ready.
 - **Islands.** Start on load, when idle, when visible or on interaction, and download only when needed.
-- **Typed routes.** One route tree gives typed links, loaders and guards on the server and the client.
+- **Typed routes.** One route tree gives typed links on the server and the client, and loaders and guards on the server.
 - **Actions and forms.** Declare once, run on the server, call from the browser. Forms work without JavaScript.
 - **Remote and live data.** Queries with retry and optimistic updates; server state pushed over a WebSocket.
 - **Scoped CSS.** One stylesheet per module, with a compile error for a class that does not exist.
@@ -39,8 +39,12 @@ let%client make ~(initial : int) () =
 
 ## Install
 
+Yuka is not on opam yet. Pin it from GitHub:
+
 ```sh
-opam install yuka yuka-dream mlx
+opam pin add yuka git+https://github.com/davesnx/yuka.git
+opam pin add yuka-dream git+https://github.com/davesnx/yuka.git
+opam install mlx
 ```
 
 `yuka-dream` runs an app on [Dream](https://github.com/camlworks/dream).
@@ -92,7 +96,7 @@ Another server needs one small adapter.
 
 ## Learn more
 
-- [`demo/`](demo/README.md): an issue tracker that uses every feature.
+- [`demo/`](demo/README.md): an issue tracker that uses most features.
 - [`DESIGN.md`](DESIGN.md): how Yuka works.
 
 ## Status
