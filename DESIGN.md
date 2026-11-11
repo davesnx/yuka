@@ -1952,3 +1952,22 @@ Ticket 33 and its four security reviews.
   template prints their tags as static chunks. Tag names are printed as
   written: `createElementNS` is case-sensitive for SVG camelCase tags. A dev client does not log a text mismatch
   inside `script` or `style` (the server text has the escapes).
+
+## suspend: a server element that arrives later (2026-11-11)
+
+```ocaml
+val suspend :
+  loading:server element ->
+  ?failed:(string -> server element) ->
+  server element Async.t ->
+  server element
+```
+
+- `suspend ~loading ?failed el` is
+  `Await.make ~async:el ~loading ?failed ~children:(fun e -> e) ()`: the same
+  node, markers, fills, timeout and navigation behaviour. The usual
+  argument is `Async.map (fun data -> <View data />) fetch`.
+- Server only: `Async.map` runs its function in the settle callback, so in
+  the browser a component built there would run with no owner. In an
+  island, `<Yuka.Await>` builds the element in the island's owner.
+- `Await` is unchanged.

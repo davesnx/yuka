@@ -24,6 +24,7 @@
 - Faster server rendering, with the same HTML: about three times the requests per second on `make bench-ssr`, ahead of Solid and server-reason-react on the benchmark machine. A page with nothing pending after its shell is sent as one response with `Content-Length` instead of a stream; a `HEAD` on a page renders it and sends the same headers as `GET` (before: no page body call and `Content-Length: 0`) (@davesnx)
 - `yuka dev`: runs `dune build --watch`, restarts the server when its executable changes and reloads the browser keeping the scroll position, swaps changed stylesheets with no reload, and shows build errors in an overlay; the cycle serves `/_yuka/dev` and the dev script only with `YUKA_DEV=1` (@davesnx)
 - CSS per module: `module Css = [%yuka.css "file.css"]` gives one scoped class name per class of the file; the server prints each sheet once, before its first use (an island's sheets before the island), the browser adds missing sheets to `<head>` and moves new ones there after a client navigation; `yuka-css` writes the sheets for `Yuka.Server.config ~css`, served at `/_yuka/css/` and written by a prerender (@davesnx)
+- `Yuka.suspend ~loading ?failed el`: a server element that arrives later (an `Async.t`), shown and streamed as `<Yuka.Await>` (@davesnx)
 
 ### yuka-dream
 

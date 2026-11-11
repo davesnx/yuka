@@ -381,6 +381,56 @@ let stream_cases =
         "</body></html>" ]
       (List.tl (chunks ()))
   in
+  let suspend_settled () =
+    let write, chunks = recorder () in
+    get
+      (stream
+         (fun () -> Yuka.suspend ~loading:(Yuka.text "L") (Async.return (Yuka.text "a7")))
+         write);
+    check list_of "inline" [ "a7"; "</body></html>" ] (List.tl (chunks ()));
+    check string "same as Await"
+      (Server.to_string (fun () -> text_await (Async.return 7) "a"))
+      (Server.to_string (fun () ->
+           Yuka.suspend ~loading:(Yuka.text "La") (Async.return (Yuka.text "a7"))))
+  in
+  let suspend_pending () =
+    let a, resolve, _ = Async.make () in
+    let write, chunks = recorder () in
+    let p =
+      stream
+        (fun () -> Yuka.lower "div" [] [ Yuka.suspend ~loading:(Yuka.text "La") a ])
+        write
+    in
+    check string "shell" "<div><!--[s1-->La<!--]--></div>" (List.nth (chunks ()) 1);
+    resolve (Yuka.lower "b" [] [ Yuka.text "v" ]);
+    get p;
+    check list_of "fill"
+      [ fill "s1" "<b>v</b>"; "</body></html>" ]
+      (List.filteri (fun i _ -> i >= 2) (chunks ()))
+  in
+  let suspend_failure () =
+    let a, _, fail_a = Async.make () in
+    let b, _, fail_b = Async.make () in
+    let write, chunks = recorder () in
+    let p =
+      stream
+        (fun () ->
+          Yuka.fragment
+            [ Yuka.suspend ~loading:(Yuka.text "La")
+                ~failed:(fun m -> Yuka.text ("E:" ^ m)) a;
+              Yuka.suspend ~loading:(Yuka.text "Lb") b ])
+        write
+    in
+    fail_b "x";
+    fail_a "boom";
+    get p;
+    check list_of "failure chunks"
+      [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->";
+        fill "s2" "";
+        fill "s1" "E:boom";
+        "</body></html>" ]
+      (List.tl (chunks ()))
+  in
   let async_prop () =
     let a, resolve, _ = Async.make () in
     let b, _, fail_b = Async.make () in
@@ -575,6 +625,9 @@ let stream_cases =
     test_case "settled value is inline" `Quick settled_inline;
     test_case "nested await" `Quick nested;
     test_case "failure" `Quick failure;
+    test_case "suspend settled is inline" `Quick suspend_settled;
+    test_case "suspend streams" `Quick suspend_pending;
+    test_case "suspend failure" `Quick suspend_failure;
     test_case "async props" `Quick async_prop;
     test_case "async errors stay on the server" `Quick async_errors;
     test_case "async errors at print time stay on the server" `Quick async_errors_inline;

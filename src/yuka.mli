@@ -421,6 +421,17 @@ module Await : sig
       DESIGN.md. *)
 end
 
+val suspend :
+  loading:server element ->
+  ?failed:(string -> server element) ->
+  server element Async.t ->
+  server element
+(** Shows [loading] until the element is settled, then the element, or
+    [failed message] (default: nothing). It streams as [<Yuka.Await>] does.
+    Build the argument with [Async.map (fun data -> <View data />) fetch].
+    Server only: in an island, use [<Yuka.Await>], which builds the element
+    in the island's owner. *)
+
 module Catch : sig
   val make :
     fallback:(error:string -> reset:(unit -> unit) -> 'k element) ->

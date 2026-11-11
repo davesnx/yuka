@@ -77,6 +77,9 @@ module Await = struct
     Await { async; loading; failed; render = children }
 end
 
+let suspend ~loading ?failed async =
+  Await.make ~async ~loading ?failed ~children:(fun e -> e) ()
+
 module Catch = struct
   let make ~fallback ~children () =
     let client at =
