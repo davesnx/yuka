@@ -50,8 +50,9 @@ Use a fresh server for each run: the check creates an issue and a comment.
     BUILD_DIR=_build_demo demo/bundle.sh
     _build_demo/default/demo/server/demo_server.exe --bundle
 
-`bundle.sh` runs esbuild with `--splitting` and `--metafile`: `main.js`, shared
-chunks, and one chunk per island. The server serves them from `/_yuka/bundle/`
+`bundle.sh` runs `scripts/bundle.ts` (esbuild with `--splitting` and
+`--metafile`, then swc on each file): `main.js`, shared chunks, and one chunk
+per island. The server serves them from `/_yuka/bundle/`
 and writes no import map. At start it reads `yuka_islands.json` (and
 `meta.json` with `--bundle`) and prints `<link rel="modulepreload">` for each
 island on the page, except those used with `` `Lazy _ ``. Comments, Issue props

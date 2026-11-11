@@ -7,14 +7,15 @@ site="$root/$build/bench-keyed"
 mkdir -p "$site/yuka/dist" "$site/solid/dist" "$site/vanillajs/src"
 cp -R "$keyed/css" "$site/"
 
-"$root/node_modules/.bin/esbuild" "$root/$build/default/bench/keyed/yuka/out/bench/keyed/yuka/main.js" \
-  --bundle --format=iife --minify --define:__YUKA_DEV__=false --log-level=warning --outfile="$site/yuka/dist/main.js"
+node "$root/scripts/bundle.ts" --entry "$root/$build/default/bench/keyed/yuka/out/bench/keyed/yuka/main.js" \
+  --outdir "$site/yuka/dist"
 cp "$keyed/yuka/index.html" "$site/yuka/"
 
 if [ ! -d "$keyed/solid/node_modules" ]; then
   npm ci --prefix "$keyed/solid" --no-audit --no-fund
 fi
-npm run --prefix "$keyed/solid" --silent build-prod -- --file "$site/solid/dist/main.js"
+npm run --prefix "$keyed/solid" --silent build -- --file "$root/$build/bench-keyed-solid/main.js"
+node "$root/scripts/bundle.ts" --entry "$root/$build/bench-keyed-solid/main.js" --outdir "$site/solid/dist"
 cp "$keyed/solid/index.html" "$site/solid/"
 
 cp "$keyed/vanillajs/index.html" "$site/vanillajs/"
