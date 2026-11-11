@@ -143,6 +143,10 @@ create-switch: ## Create a local opam switch in _opam (OCAML_VERSION)
 
 pin install: export OPAMSWITCH = $(CURDIR)
 
+ifeq ($(shell uname),Darwin)
+install: export PKG_CONFIG_PATH := $(shell brew --prefix libpq)/lib/pkgconfig:$(PKG_CONFIG_PATH)
+endif
+
 .PHONY: init
 init: system-deps create-switch pin install install-npm ## Set up the dev environment: system packages, local switch, opam and npm dependencies
 
@@ -150,11 +154,13 @@ init: system-deps create-switch pin install install-npm ## Set up the dev enviro
 install: ## Install the opam dependencies, the dev packages and ocaml-lsp-server
 	opam update
 	opam install . --deps-only --with-test --with-doc -y
-	opam install -y $$($(MAKE) -s dev-packages) ocaml-lsp-server
+	opam install -y $(DEV_PACKAGES) ocaml-lsp-server
+
+DEV_PACKAGES = server-reason-react
 
 .PHONY: dev-packages
 dev-packages: ## List opam packages the benchmarks need that are not in the opam files
-	@echo "server-reason-react"
+	@echo "$(DEV_PACKAGES)"
 
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
