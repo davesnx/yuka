@@ -404,7 +404,7 @@ const liveOpen = (p: Page) =>
     const s = (window as any).__sockets as WebSocket[];
     return s.length > 0 && s[s.length - 1].readyState === 1;
   }, null, { timeout: 5000 });
-const livePage = async (path: string) => {
+const livePage = async (path: string, at = base) => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await ctx.addInitScript(recordSockets);
   const routes: { close: (o?: { code?: number; reason?: string }) => Promise<void> }[] = [];
@@ -416,7 +416,7 @@ const livePage = async (path: string) => {
   const errors: string[] = [];
   p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   p.on("pageerror", (e) => errors.push(String(e)));
-  await p.goto(base + path, { waitUntil: "networkidle" });
+  await p.goto(at + path, { waitUntil: "networkidle" });
   await p.waitForSelector(".row");
   await liveOpen(p);
   return { ctx, p, errors, routes };
@@ -452,6 +452,44 @@ const handshake = (origin: string) =>
     });
     req.on("error", reject);
     req.end();
+  });
+
+const second = process.env.YUKA_E2E_SECOND;
+if (second)
+  await step("3h. live data across two server nodes", async () => {
+    const A = await livePage("/");
+    const B = await livePage("/", second);
+    const id = (await B.p.locator(".row").first().getAttribute("data-id")) ?? "";
+    const before = await statusIn(B.p, id);
+    const target = before === "done" ? "todo" : "done";
+    await pickStatus(A.p, id, target === "done" ? "Done" : "Todo");
+    const seen = await B.p
+      .waitForFunction(
+        ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
+        [id, target],
+        { timeout: 2000 },
+      )
+      .then(() => true, () => false);
+    check("3h.1 a change in a page on node 1 shows in a page on node 2", seen, `${id} ${before} -> ${target} on ${second}`);
+    const back = target === "done" ? "todo" : "done";
+    await pickStatus(B.p, id, back === "done" ? "Done" : "Todo");
+    const shown: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      shown.push(await statusIn(B.p, id));
+      await B.p.waitForTimeout(100);
+    }
+    const inA = await A.p
+      .waitForFunction(
+        ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
+        [id, back],
+        { timeout: 2000 },
+      )
+      .then(() => true, () => false);
+    check("3h.2 a change made on node 2 never flickers back there and reaches node 1", shown.every((s) => s === back) && inA, `node 2 showed ${shown.join(",")}, node 1 got it: ${inA}`);
+    const unexpected = [...A.errors, ...B.errors];
+    check("3h.3 no console errors in the two-node pages", unexpected.length === 0, unexpected.join(" | "));
+    await A.ctx.close();
+    await B.ctx.close();
   });
 
 await step("3g. live data", async () => {

@@ -19,7 +19,7 @@ Melange compiles to JavaScript. A page with no island loads no JavaScript.
 - **Islands.** Start on load, when idle, when visible or on interaction, and download only when needed.
 - **Typed routes.** One route tree gives typed links on the server and the client, and loaders and guards on the server.
 - **Actions and forms.** Declare once, run on the server, call from the browser. Forms work without JavaScript.
-- **Remote and live data.** Queries with retry and optimistic updates; server state pushed over a WebSocket.
+- **Remote and live data.** Queries with retry and optimistic updates; server state pushed over a WebSocket, also across server nodes through a bus (`yuka-live-pg` for Postgres).
 - **Scoped CSS.** One stylesheet per module, with a compile error for a class that does not exist.
 - **Client navigation.** Prefetch, cache and view transitions.
 - **Prerender** pages to static files, and **`yuka dev`** to rebuild and reload on change.
@@ -48,7 +48,9 @@ opam install mlx
 ```
 
 `yuka-dream` runs an app on [Dream](https://github.com/camlworks/dream).
-Another server needs one small adapter.
+Another server needs one small adapter. `yuka-live-pg` (pin it the same
+way; it needs libpq) carries live data between server nodes over Postgres
+`LISTEN`/`NOTIFY`.
 
 ## Security
 

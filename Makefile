@@ -84,11 +84,11 @@ demo-test: ## Run the demo tests
 
 .PHONY: e2e
 e2e: ## Browser check of the demo (native ES modules)
-	BUILD_DIR=$(BUILD_DIR) e2e/run.sh
+	SWITCH=$(SWITCH) BUILD_DIR=$(BUILD_DIR) e2e/run.sh
 
 .PHONY: e2e-bundle
 e2e-bundle: ## Browser check of the demo (esbuild bundle)
-	BUILD_DIR=$(BUILD_DIR) BUNDLE=1 e2e/run.sh
+	SWITCH=$(SWITCH) BUILD_DIR=$(BUILD_DIR) BUNDLE=1 e2e/run.sh
 
 .PHONY: bench
 bench: ## Build and run the browser benchmark

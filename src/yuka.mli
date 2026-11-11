@@ -1335,12 +1335,23 @@ module Server : sig
   end
 
   module Live : sig
-    (** The server side of {!Yuka.Live}. One process: a publish reaches the
-        sockets of this process only. Sessions and the secret must be the
-        same on every node and across restarts (Dream: [cookie_sessions] or
-        SQL sessions, and [Dream.set_secret]); with memory sessions or a
-        random secret, every [hello] after a restart, or on another node,
-        is refused and the page needs a reload. *)
+    (** The server side of {!Yuka.Live}. A publish reaches the sockets of
+        this process; with a bus ({!use_bus}) it also tells the other
+        server nodes, which load the key again for their own sockets.
+        Sessions and the secret must be the same on every node and across
+        restarts (Dream: [cookie_sessions] or SQL sessions, and
+        [Dream.set_secret]); with memory sessions or a random secret, every
+        [hello] after a restart, or on another node, is refused and the page
+        needs a reload. *)
+
+    type instance
+    (** The live state of one server node: its subscriptions, sockets,
+        [seq] counter and bus. A process has one, which every function
+        uses when [?instance] is not given. *)
+
+    val instance : unit -> instance
+    (** A new, empty node, for tests that run more than one node in one
+        process. *)
 
     type peer = { session : string; header : string -> string option }
     (** Who subscribes: the session id and the headers of the upgrade
@@ -1355,19 +1366,71 @@ module Server : sig
         and a {!log_error} message. Raises [Invalid_argument] when the topic
         is already served. *)
 
-    val publish : ('k, 's) Topic.t -> 'k -> 's -> unit
-    (** The new full state of a key, sent to each subscriber of the key. It
-        does nothing when the key has no subscriber. A publish while the
+    val publish : ?instance:instance -> ('k, 's) Topic.t -> 'k -> 's -> unit
+    (** The new full state of a key, sent to each subscriber of the key on
+        this node; with a bus, a note tells the other nodes that the key
+        changed. With no bus it does nothing when the key has no
+        subscriber. A publish while the
         loader runs wins over the loaded state. [allow] decides at subscribe
         time: a subscriber gets every publish of its key until it
         unsubscribes, its socket reconnects (each connection checks [allow]
         again), or {!revoke} closes it. *)
 
-    val revoke : (peer -> bool) -> unit
-    (** Closes, with code 4401, every live socket whose peer matches. The
-        page reconnects, and [allow] decides again for each key. Call it on
-        logout ([revoke (fun p -> p.session = id)]) and after a permission
-        change. *)
+    val changed : ?instance:instance -> ('k, 's) Topic.t -> 'k -> unit
+    (** The key changed: this node loads it again with the topic's loader
+        for its subscribers, and the bus tells the other nodes, which do
+        the same. Use it when the action does not have the new state. *)
+
+    val revoke : ?instance:instance -> (peer -> bool) -> unit
+    (** Closes, with code 4401, every live socket of this node whose peer
+        matches. The page reconnects, and [allow] decides again for each
+        key. Call it on logout ([revoke (fun p -> p.session = id)]) and
+        after a permission change. It does not go over the bus: with more
+        than one node, the app must call it on every node (for example
+        from its own message between nodes). *)
+
+    type bus = {
+      send : string -> unit Async.t;  (** One short note to every node, this one too. *)
+      listen : (string -> unit) -> unit Async.t;
+          (** Calls the function with each note; settles when listening
+              started. *)
+      on_restart : (unit -> unit) -> unit;
+          (** Calls the function after the bus reconnects: notes may have
+              been lost. *)
+    }
+    (** How server nodes tell each other that a key changed. A note is
+        [{"n":NODE,"t":TOPIC,"k":KEY,"p":N}], under 7,900 bytes (Postgres
+        [NOTIFY] takes 8,000); a publish whose note would be longer is not
+        sent and is logged. The order of notes between nodes does not
+        matter. *)
+
+    val use_bus : ?instance:instance -> node:string -> bus -> unit Async.t
+    (** Joins the bus as the node [node] (a name unique to this process, such
+        as the host name and the port). For each note from another node
+        about a key that has subscribers here, the node runs the topic's
+        loader again and sends the result; one load per key at a time, and
+        notes that come during a load make one more load after it. After
+        [on_restart], every key with subscribers here loads again. Raises
+        [Invalid_argument] when the node already has a bus or [node] is
+        empty. Settles when the bus listens. Each node must load from the
+        same storage. *)
+
+    val mark : ?instance:instance -> unit -> (string * int) option
+    (** The node name and the number of notes it sent. An action answer
+        carries the mark of the node's own {!type-instance} as [live]: a
+        [Live.mutate] that settles on another node waits until that node
+        has heard those notes and loaded the key again (see {!run}). *)
+
+    type memory
+    (** A bus inside one process (tests, two nodes in one process). *)
+
+    val memory : unit -> memory
+    val memory_bus : memory -> bus
+    (** Every node that uses this bus gets each note at once. *)
+
+    val memory_down : memory -> bool -> unit
+    (** [memory_down m true] drops notes; [false] brings the bus back and
+        calls each [on_restart] function. *)
 
     val set_limits : ?per_session:int -> ?total:int -> unit -> unit
     (** The most open live sockets per session (default 16) and in this
@@ -1382,6 +1445,7 @@ module Server : sig
     (** One open WebSocket, text frames. *)
 
     val run :
+      ?instance:instance ->
       sleep:(float -> unit Async.t) ->
       peer ->
       verify_csrf:(string -> bool Async.t) ->
@@ -1410,6 +1474,11 @@ module Server : sig
           after it, closes with 4408. A [pong] carries a fresh token too.
         - [synced] with [ref] [R] answers every [sync] of the subscription
           with a [ref] up to [R].
+        - A [sync] with [after] ([[[NODE, N], ...]], from the [live] mark of
+          the action answer) waits until this node has heard note [N] of
+          [NODE] (or [NODE] is this node) and every load of the key that
+          those notes started has finished; then [synced] comes after the
+          latest state. It waits 5 s at most (a lost note).
         - The function closes the socket once, when it ends the protocol
           itself (a limit, a failed send or receive, {!revoke}); it does
           not close a socket that the client closed. *)
@@ -1433,7 +1502,7 @@ module Server : sig
     (** What a server gives for [GET /_yuka/live]. *)
 
     module Handle (S : SOCKET) : sig
-      val live : S.request -> S.response Async.t
+      val live : ?instance:instance -> S.request -> S.response Async.t
       (** The origin rule of the action call ({!handle}), else
           [refuse ~status:403]; then [upgrade] with {!run}. *)
     end

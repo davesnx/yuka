@@ -65,6 +65,8 @@ let fill_chunk id html =
 
 let reject_prefix = Types.reject_prefix
 let rejection = Types.rejection
+let live_mark : (unit -> Json.t option) ref = ref (fun () -> None)
+let live () = match !live_mark () with Some m -> [ ("live", m) ] | None -> []
 
 let timeout_answer () : Json.t =
   `Assoc [ ("error", Status.error_codec.encode (Status.Network "timeout")) ]
@@ -495,10 +497,10 @@ let answer_action ~name ~host handler body =
       let result, resolve, _ = Async.make () in
       Async.on_settled (handler json) (function
         | Async.Done (Bad_input m) -> resolve (action_error 400 ("invalid input: " ^ m))
-        | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc [ ("ok", j) ]))
+        | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc (("ok", j) :: live ())))
         | Async.Done (Redirect (j, location)) ->
             if local_location ~host location then
-              resolve (200, Json.to_string (`Assoc [ ("ok", with_redirect j location) ]))
+              resolve (200, Json.to_string (`Assoc (("ok", with_redirect j location) :: live ())))
             else begin
               !log_error ("form " ^ name ^ " redirect to " ^ String.escaped location ^ " is not a path on this site");
               resolve (action_error 500 "action failed")

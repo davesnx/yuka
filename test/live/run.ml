@@ -537,6 +537,228 @@ let ssr_cases =
         Alcotest.(check int) "not asked" 0 !asked );
   ]
 
+let shared = ref 0
+let shared_loads : string list ref = ref []
+let shared_gates : (int -> unit) list ref = ref []
+let slow_shared = ref false
+let shared_topic = Topic.declare ~name:"shared" ~key:Codec.string ~state:Codec.int
+
+let () =
+  Live.serve shared_topic (fun key ->
+      shared_loads := key :: !shared_loads;
+      if !slow_shared then begin
+        let a, resolve, _ = Async.make () in
+        shared_gates := !shared_gates @ [ resolve ];
+        a
+      end
+      else Async.return !shared)
+
+let open_on node =
+  let f = fake () in
+  let _ =
+    Live.run ~instance:node ~sleep { Live.session = fresh_session (); header = (fun _ -> None) }
+      ~verify_csrf:(fun t -> Async.return (t = "good"))
+      ~token:(fun () -> "next")
+      (connection f)
+  in
+  push f hello;
+  f.out <- [];
+  f
+
+let two_nodes () =
+  let m = Live.memory () in
+  let a = Live.instance () and b = Live.instance () in
+  ignore (Live.use_bus ~instance:a ~node:"A" (Live.memory_bus m));
+  ignore (Live.use_bus ~instance:b ~node:"B" (Live.memory_bus m));
+  (m, a, b)
+
+let queued_bus () =
+  let listeners = ref [] and queue = ref [] in
+  let bus =
+    {
+      Live.send =
+        (fun text ->
+          queue := !queue @ [ text ];
+          Async.return ());
+      listen =
+        (fun l ->
+          listeners := !listeners @ [ l ];
+          Async.return ());
+      on_restart = (fun _ -> ());
+    }
+  in
+  let deliver () =
+    let q = !queue in
+    queue := [];
+    List.iter (fun t -> List.iter (fun l -> l t) !listeners) q
+  in
+  (bus, deliver)
+
+let reset_shared () =
+  shared := 0;
+  shared_loads := [];
+  shared_gates := [];
+  slow_shared := false
+
+let node_cases =
+  [
+    ( "two instances do not share entries",
+      fun () ->
+        reset_shared ();
+        let a = Live.instance () and b = Live.instance () in
+        let fa = open_on a and fb = open_on b in
+        shared := 1;
+        push fa (sub 1 "shared" {|"k"|});
+        shared := 2;
+        push fb (sub 1 "shared" {|"k"|});
+        Live.publish ~instance:a shared_topic "k" 9;
+        check_states "a gets its publish" [ (1, "1"); (1, "9") ] fa;
+        check_states "b, no bus: only its own load" [ (1, "2") ] fb );
+    ( "a publish on A reaches a subscriber on B, which loads the key",
+      fun () ->
+        reset_shared ();
+        let _, a, b = two_nodes () in
+        let fb = open_on b in
+        push fb (sub 3 "shared" {|"k"|});
+        check_states "first state" [ (3, "0") ] fb;
+        shared := 5;
+        Live.publish ~instance:a shared_topic "k" 5;
+        check_states "B loaded again" [ (3, "0"); (3, "5") ] fb;
+        Alcotest.(check (list string)) "two loads on B, none on A" [ "k"; "k" ] !shared_loads );
+    ( "a node with no subscriber for the key does not load",
+      fun () ->
+        reset_shared ();
+        let _, a, b = two_nodes () in
+        let fb = open_on b in
+        push fb (sub 3 "shared" {|"other"|});
+        shared_loads := [];
+        Live.publish ~instance:a shared_topic "k" 5;
+        Live.changed ~instance:a shared_topic "k";
+        Alcotest.(check (list string)) "no load" [] !shared_loads );
+    ( "notes during a load give exactly one more load",
+      fun () ->
+        reset_shared ();
+        let _, a, b = two_nodes () in
+        let fb = open_on b in
+        push fb (sub 3 "shared" {|"k"|});
+        slow_shared := true;
+        shared_loads := [];
+        for i = 1 to 10 do
+          shared := i;
+          Live.publish ~instance:a shared_topic "k" i
+        done;
+        Alcotest.(check int) "one load running" 1 (List.length !shared_loads);
+        (List.hd !shared_gates) 1;
+        Alcotest.(check int) "one more load" 2 (List.length !shared_loads);
+        (List.nth !shared_gates 1) 10;
+        Alcotest.(check int) "no third load" 2 (List.length !shared_loads);
+        check_states "B ends on the last value" [ (3, "0"); (3, "1"); (3, "10") ] fb );
+    ( "a note from the node itself is ignored",
+      fun () ->
+        reset_shared ();
+        let _, a, _ = two_nodes () in
+        let fa = open_on a in
+        push fa (sub 3 "shared" {|"k"|});
+        shared_loads := [];
+        Live.publish ~instance:a shared_topic "k" 4;
+        check_states "the publish only" [ (3, "0"); (3, "4") ] fa;
+        Alcotest.(check (list string)) "no load" [] !shared_loads );
+    ( "after the bus reconnects, every subscribed key loads again",
+      fun () ->
+        reset_shared ();
+        let m, a, b = two_nodes () in
+        let fb = open_on b in
+        push fb (sub 3 "shared" {|"k"|});
+        Live.memory_down m true;
+        shared := 7;
+        Live.publish ~instance:a shared_topic "k" 7;
+        check_states "the note is lost" [ (3, "0") ] fb;
+        Live.memory_down m false;
+        check_states "the current state after the restart" [ (3, "0"); (3, "7") ] fb );
+    ( "Live.mutate settles on B only after B loaded the change of A",
+      fun () ->
+        reset_shared ();
+        let bus, deliver = queued_bus () in
+        let a = Live.instance () and b = Live.instance () in
+        ignore (Live.use_bus ~instance:a ~node:"A" bus);
+        ignore (Live.use_bus ~instance:b ~node:"B" bus);
+        let fb = open_on b in
+        push fb (sub 3 "shared" {|"k"|});
+        fb.out <- [];
+        slow_shared := true;
+        shared := 8;
+        Live.publish ~instance:a shared_topic "k" 8;
+        let n, p = Option.get (Live.mark ~instance:a ()) in
+        Alcotest.(check (pair string int)) "mark" ("A", 1) (n, p);
+        push fb (Printf.sprintf {|{"t":"sync","id":3,"ref":1,"after":[["%s",%d]]}|} n p);
+        Alcotest.(check (list string)) "no synced before the note" [] (kinds fb);
+        deliver ();
+        Alcotest.(check (list string)) "no synced while B loads" [] (kinds fb);
+        (List.hd !shared_gates) 8;
+        Alcotest.(check (list string)) "the new state, then synced" [ "state"; "synced" ] (kinds fb);
+        check_states "state" [ (3, "8") ] fb );
+    ( "a sync waits 5 s at most for a lost note",
+      fun () ->
+        reset_shared ();
+        let bus, _ = queued_bus () in
+        let b = Live.instance () in
+        ignore (Live.use_bus ~instance:b ~node:"B" bus);
+        let fb = open_on b in
+        push fb (sub 3 "shared" {|"k"|});
+        fb.out <- [];
+        sleeps := [];
+        push fb {|{"t":"sync","id":3,"ref":2,"after":[["A",4]]}|};
+        Alcotest.(check (list string)) "waits" [] (kinds fb);
+        List.iter (fun w -> w ()) !sleeps;
+        Alcotest.(check (list string)) "synced after the bound" [ "synced" ] (kinds fb) );
+    ( "revoke stays on its node",
+      fun () ->
+        let _, a, b = two_nodes () in
+        let fa = open_on a and fb = open_on b in
+        Live.revoke ~instance:a (fun _ -> true);
+        Alcotest.(check (option int)) "A closed" (Some 4401) fa.closed;
+        Alcotest.(check (option int)) "B open" None fb.closed );
+    ( "use_bus twice, and an empty node name, are refused",
+      fun () ->
+        let _, a, _ = two_nodes () in
+        Alcotest.check_raises "twice" (Invalid_argument "Yuka.Server.Live.use_bus: this node already has a bus")
+          (fun () -> ignore (Live.use_bus ~instance:a ~node:"A" (Live.memory_bus (Live.memory ()))));
+        Alcotest.check_raises "empty" (Invalid_argument "Yuka.Server.Live.use_bus: the node name is empty")
+          (fun () -> ignore (Live.use_bus ~instance:(Live.instance ()) ~node:"" (Live.memory_bus (Live.memory ())))) );
+    ( "a key too long for the bus is not sent and is logged",
+      fun () ->
+        reset_shared ();
+        logged := [];
+        let _, a, _ = two_nodes () in
+        Live.publish ~instance:a shared_topic (String.make 8000 'x') 1;
+        Alcotest.(check (option (pair string int))) "no note counted" (Some ("A", 0)) (Live.mark ~instance:a ());
+        Alcotest.(check bool) "logged" true
+          (List.exists (fun m -> Astring_like.contains m "too long for the bus") !logged) );
+  ]
+
+let action_mark_cases =
+  [
+    ( "an action answer carries the mark of the node",
+      fun () ->
+        let echo = Action.declare ~name:"mark-echo" ~input:Codec.int ~output:Codec.int in
+        Server.Action.implement echo (fun n ->
+            Live.publish shared_topic "m" n;
+            Async.return n);
+        let header = function
+          | "origin" -> Some "https://x.test"
+          | "host" -> Some "x.test"
+          | "content-type" -> Some "application/json"
+          | _ -> None
+        in
+        let before = Private.handle_action ~name:"mark-echo" ~header ~body:"3" in
+        Alcotest.(check (option (pair int string))) "no bus: no mark" (Some (200, {|{"ok":3}|}))
+          (match Async.status before with Async.Done r -> Some r | _ -> None);
+        ignore (Live.use_bus ~node:"main" (Live.memory_bus (Live.memory ())));
+        let after = Private.handle_action ~name:"mark-echo" ~header ~body:"4" in
+        Alcotest.(check (option (pair int string))) "mark" (Some (200, {|{"ok":4,"live":["main",1]}|}))
+          (match Async.status after with Async.Done r -> Some r | _ -> None) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -548,4 +770,6 @@ let () =
       ("handshake", cases handle_cases);
       ("server render", cases ssr_cases);
       ("review", cases review_cases);
+      ("nodes", cases node_cases);
+      ("action mark", cases action_mark_cases);
     ]

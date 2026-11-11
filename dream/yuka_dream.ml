@@ -132,11 +132,11 @@ end
 
 module Sockets = Yuka.Server.Live.Handle (Socket)
 
-let handler config app =
+let handler ?live config app =
   log_to_dream ();
   fun request ->
     match String.split_on_char '?' (Dream.target request) with
-    | "/_yuka/live" :: _ -> to_lwt (Sockets.live request)
+    | "/_yuka/live" :: _ -> to_lwt (Sockets.live ?instance:live request)
     | _ -> Live.handler config app request
 
 let rec make_dirs dir =

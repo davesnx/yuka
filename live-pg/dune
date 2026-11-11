@@ -1,0 +1,4 @@
+(library
+ (name yuka_live_pg)
+ (public_name yuka-live-pg)
+ (libraries yuka postgresql lwt lwt.unix))

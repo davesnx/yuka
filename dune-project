@@ -59,3 +59,19 @@
     (>= 0.12)))
   (alcotest :with-test)
   (odoc :with-doc)))
+
+(package
+ (name yuka-live-pg)
+ (synopsis "A Postgres LISTEN/NOTIFY bus for the live data of Yuka")
+ (description
+  "Server.Live.use_bus with Postgres: each server node of a Yuka app tells the other nodes that a live key changed through NOTIFY on one channel, and listens with LISTEN on its own connection.")
+ (depends
+  (ocaml
+   (>= 5.4))
+  (yuka
+   (= :version))
+  (postgresql
+   (>= 5.0))
+  lwt
+  (alcotest :with-test)
+  (odoc :with-doc)))

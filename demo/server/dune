@@ -23,7 +23,7 @@
 (executable
  (name demo_server)
  (modules demo_server)
- (libraries demo_app yuka yuka-dream dream lwt))
+ (libraries demo_app yuka yuka-dream yuka-live-pg dream lwt))
 
 (rule
  (targets yuka_css.ml)

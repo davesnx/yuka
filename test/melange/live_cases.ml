@@ -434,8 +434,32 @@ let second_forbidden finish =
           stop_b ();
           uninstall ()))
 
+let marked_action = Action.declare ~name:"live-mark" ~input:Codec.int ~output:Codec.int
+
+let mutate_sync_carries_mark finish =
+  fresh ();
+  Yuka.mount ~islands:(Client.registry []) ~navigation:false ();
+  let a, stop = use "a" in
+  ws_open 0;
+  ws_message 0 (state ~seq:1 1 [ "x" ]);
+  clear_sent 0;
+  let _ = Live.mutate a edit (fun () -> Action.call marked_action 1) in
+  fetch_respond 0 200 {|{"ok":1,"live":["A",3]}|};
+  later (fun () ->
+      let sync = sent 0 in
+      ws_message 0 {|{"t":"synced","id":1,"ref":0}|};
+      let shown = show a in
+      finish (fun () ->
+          check "the sync names the mark of the action's node"
+            {|{"t":"sync","id":1,"ref":0,"after":[["A",3]]}|} sync;
+          check "settled" "ready x" shown;
+          stop ();
+          Yuka.unmount ();
+          uninstall ()))
+
 let async =
   [
+    ("live: the sync of a mutate carries the mark of the action answer", mutate_sync_carries_mark);
     ("live: an expired token is renewed once through /_yuka/csrf", expired_token);
     ("live: a second 4403 gives up until a new use brings a fresh token", second_forbidden);
   ]

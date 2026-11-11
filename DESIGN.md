@@ -1971,3 +1971,47 @@ val suspend :
   the browser a component built there would run with no owner. In an
   island, `<Yuka.Await>` builds the element in the island's owner.
 - `Await` is unchanged.
+
+## Live data on more than one node (2026-11-10)
+
+Ticket 25; `.workplace/docs/app-spec.md` section 25, option B; settle rule
+in `.workplace/docs/data-spec.md` section 8 ("More nodes").
+
+- The live server state is a value, `Server.Live.instance` (entries,
+  sockets, `seq`, bus, the notes sent, the notes heard per node, a local
+  event counter, the subscriptions waiting for a `synced`). The process has
+  one; every function takes `?instance` for tests with two nodes in one
+  process. Topics (loaders) stay global: they are the app's code.
+- The bus record (`send`, `listen`, `on_restart`) has no Dream or Lwt type.
+  A note is `{"n","t","k","p"}`, at most 7,900 bytes (Postgres `NOTIFY`:
+  8,000); sends go through one chain per node, so `p` is in send order.
+- A note for a key with subscribers starts a load unless one runs; then it
+  marks the entry `again`, and one more load runs after it. A local publish
+  during a load marks `again` and keeps its state (the load result is not
+  stored when `seq` changed during the load). A failed reload keeps the
+  last state and logs.
+- Settle rule: the action answer gets `"live":[NODE,P]` through
+  `Server.live_mark` (set by `use_bus` on the process instance); the client
+  transport hands it to `Live` through `Platform.live_mark`, and the next
+  `Live.mutate` puts it in its `sync` as `after`. The node holds `synced`
+  until it heard note `P` of `NODE` and no load started before that point
+  is still running (the entry keeps the event numbers of notes that no
+  finished load started after). At most 5 s.
+- `yuka-live-pg` (its own opam package, so `yuka` and `yuka-dream` keep
+  no database dependency): two libpq connections from `postgresql`
+  (postgresql-ocaml, the client with `notifies`). One sends with
+  `SELECT pg_notify($1, $2)` (a query sent with `send_query`, the result
+  read when the socket is readable, under a mutex). The other runs
+  `LISTEN` and waits with `Lwt_unix.wait_read` on its socket, then
+  `consume_input` and `notifies`. A failed listener connects again every
+  `retry` seconds, runs `LISTEN` again and calls the `on_restart`
+  functions; a failed sender connects again on the next note. Tested
+  against Postgres 17 in docker over a unix socket (the test reads
+  `YUKA_LIVE_PG`, and skips without it).
+- The demo serves a second node on another port in the same process
+  (`--second-node PORT`, `--bus memory|pg:CONNINFO`): the store is in
+  memory, so two processes would load different data. The e2e opens a
+  page on each node.
+- `revoke` is per node. The client protocol and bundle sizes do not change
+  for apps without a bus; the keyed app does not use `Live`.
+

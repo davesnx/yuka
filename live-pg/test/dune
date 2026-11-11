@@ -1,0 +1,4 @@
+(test
+ (name run)
+ (package yuka-live-pg)
+ (libraries alcotest yuka yuka-live-pg postgresql lwt lwt.unix))

@@ -3,6 +3,7 @@ open Base
 
 let stopped_key = "__yuka_stopped"
 let acted : (unit -> unit) ref = ref ignore
+let live_mark : ((string * Json.t) list -> unit) ref = ref ignore
 
 let platform =
   ref

@@ -710,6 +710,7 @@ let transport name input =
           match (field "ok" fields, field "error" fields) with
           | Some value, _ ->
               !Platform.acted ();
+              !Platform.live_mark fields;
               resolve value
           | None, Some (`String message) -> fail message
           | None, _ ->

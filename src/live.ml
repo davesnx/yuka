@@ -4,7 +4,7 @@ type use = {
   mutable wire_id : int option;
   mutable last_seq : int;
   mutable ended : bool;
-  mutable syncs : int list;
+  mutable syncs : (int * Json.t option) list;
   on_state : Json.t -> unit;
   on_error : Status.error -> unit;
   on_stale : unit -> unit;
@@ -70,9 +70,14 @@ let send m (fields : (string * Json.t) list) =
   | Some s when m.live -> Web.socket_send s (Json.to_string (`Assoc fields))
   | _ -> ()
 
-let send_sync m u r =
+let last_mark : Json.t option ref = ref None
+
+let send_sync m u (r, after) =
   match u.wire_id with
-  | Some id -> send m [ ("t", `String "sync"); ("id", `Int id); ("ref", `Int r) ]
+  | Some id ->
+      send m
+        ([ ("t", `String "sync"); ("id", `Int id); ("ref", `Int r) ]
+        @ match after with Some mark -> [ ("after", `List [ mark ]) ] | None -> [])
   | None -> ()
 
 let send_sub m u =
@@ -294,7 +299,7 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
         on_state = (fun j -> State.set base (decode topic (data ()) j));
         on_error =
           (fun error ->
-            let dropped = u.syncs in
+            let dropped = List.map fst u.syncs in
             u.syncs <- [];
             Scheduler.batch (fun () ->
                 List.iter (fun id -> State.set changes (Optimistic.remove (State.peek changes) id)) dropped;
@@ -305,12 +310,13 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
               (match data () with Some data -> Status.Ready { data; stale = true } | None -> Status.Loading None));
         on_synced =
           (fun r ->
-            let settled, waiting = List.partition (fun x -> x <= r) u.syncs in
+            let settled, waiting = List.partition (fun (x, _) -> x <= r) u.syncs in
             u.syncs <- waiting;
             Scheduler.batch (fun () ->
-                List.iter (fun id -> State.set changes (Optimistic.remove (State.peek changes) id)) settled));
+                List.iter (fun (id, _) -> State.set changes (Optimistic.remove (State.peek changes) id)) settled));
       }
     in
+    Platform.live_mark := (fun fields -> last_mark := List.assoc_opt "live" fields);
     let m = get () in
     let first = ref true in
     Base.Effect.run (fun () ->
@@ -352,8 +358,10 @@ let mutate t change run =
     | Async.Done _ -> (
         match t.use with
         | Some u when not u.ended ->
-            u.syncs <- u.syncs @ [ id ];
-            Option.iter (fun m -> if m.live then send_sync m u id) !manager
+            let after = !last_mark in
+            last_mark := None;
+            u.syncs <- u.syncs @ [ (id, after) ];
+            Option.iter (fun m -> if m.live then send_sync m u (id, after)) !manager
         | _ -> drop ())
     | Async.Failed _ -> drop ()
     | Async.Pending -> ());

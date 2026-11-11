@@ -17,6 +17,8 @@ let () =
   let bundle = ref false in
   let prerender = ref "" in
   let prerendered = ref "" in
+  let second = ref 0 in
+  let bus = ref "memory" in
   let secret =
     ref (Option.value (Sys.getenv_opt "YUKA_DEMO_SECRET") ~default:"yuka-demo-secret-for-development-only")
   in
@@ -31,6 +33,10 @@ let () =
       ("--prerender", Arg.Set_string prerender, "Write the prerendered pages to DIR and exit");
       ("--prerendered", Arg.Set_string prerendered, "Serve the prerendered pages of DIR");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
+      ( "--second-node",
+        Arg.Set_int second,
+        "Also serve a second live node on this port, joined to the first by a bus (same store)" );
+      ("--bus", Arg.Set_string bus, "With --second-node: memory (default) or pg:CONNINFO (yuka-live-pg)");
     ]
     (fun _ -> ())
     "demo_server [--port N] [--bundle] [--prerender DIR] [--prerendered DIR]";
@@ -53,6 +59,28 @@ let () =
   Demo_app.Handlers.register ();
   let app = Demo_app.Routes_server.app in
   if !prerender <> "" then Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app)
-  else
+  else if !second = 0 then
     Dream.run ~port:!port @@ Dream.logger @@ Dream.set_secret !secret @@ Dream.cookie_sessions
     @@ Yuka_dream.handler config app
+  else begin
+    let make_bus =
+      match String.index_opt !bus ':' with
+      | Some i when String.sub !bus 0 i = "pg" ->
+          let conninfo = String.sub !bus (i + 1) (String.length !bus - i - 1) in
+          fun () -> Yuka_live_pg.bus ~conninfo ~channel:"yuka_demo" ()
+      | _ when !bus = "memory" ->
+          let m = Yuka.Server.Live.memory () in
+          fun () -> Yuka.Server.Live.memory_bus m
+      | _ -> failwith ("demo_server: unknown --bus " ^ !bus)
+    in
+    let other = Yuka.Server.Live.instance () in
+    let serve ?live port =
+      Dream.serve ~port @@ Dream.logger @@ Dream.set_secret !secret @@ Dream.cookie_sessions
+      @@ Yuka_dream.handler ?live config app
+    in
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let* () = Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~node:"first" (make_bus ())) in
+       let* () = Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~instance:other ~node:"second" (make_bus ())) in
+       Lwt.join [ serve !port; serve ~live:other !second ])
+  end
