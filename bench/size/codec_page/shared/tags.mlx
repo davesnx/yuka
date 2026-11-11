@@ -1,0 +1,6 @@
+let%client make ~(title : string option) ~(tags : string list) ~(score : float) () =
+  <p>
+    (Yuka.text (Option.value title ~default:""))
+    (Yuka.list (List.map Yuka.text tags))
+    (Yuka.float score)
+  </p>

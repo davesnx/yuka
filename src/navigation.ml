@@ -30,6 +30,7 @@ let hash_of url =
   | None -> ""
 
 let outlets () = Web.query_all (Web.document ()) "yuka-outlet"
+let is value = function Some v -> String.equal v value | None -> false
 
 let keys () =
   match List.filter_map (fun o -> Web.get_attribute o "data-k") (Array.to_list (outlets ())) with
@@ -47,7 +48,7 @@ let mark_links outlet path =
   Array.iter
     (fun a ->
       if not (Web.contains outlet a || Array.exists (fun i -> Web.contains i a) islands) then
-        match (Web.get_attribute a "href" = Some path, Web.get_attribute a "aria-current") with
+        match (is path (Web.get_attribute a "href"), Web.get_attribute a "aria-current") with
         | true, None -> Web.set_attribute a "aria-current" "page"
         | false, Some "page" -> Web.remove_attribute a "aria-current"
         | _ -> ())
@@ -55,7 +56,7 @@ let mark_links outlet path =
 
 let outlet header =
   Option.map
-    (fun key -> Array.find_opt (fun o -> Web.get_attribute o "data-k" = Some key) (outlets ()))
+    (fun key -> Array.find_opt (fun o -> is key (Web.get_attribute o "data-k")) (outlets ()))
     (header "yuka-outlet")
 
 let swap target final header text =
@@ -173,7 +174,7 @@ let show ~dir ~push ~restore url a =
     | h, Some i -> String.sub a.final 0 i ^ h
     | h, None -> a.final ^ h
   in
-  let stale = match a.header "yuka-build" with Some b -> build () <> Some b | None -> false in
+  let stale = match a.header "yuka-build" with Some b -> not (is b (build ())) | None -> false in
   let shown = (a.status >= 200 && a.status < 300) || a.status >= 400 in
   match outlet a.header with
   | Some None -> Web.location_assign final

@@ -21,4 +21,6 @@
    (run node %{dep:out/test/mount_hooks/catch_only.js})
    (run node %{dep:out/test/mount_hooks/shape_only.js})
    (run node %{dep:out/test/mount_hooks/make_only.js})
-   (run node %{dep:out/test/mount_hooks/expand_only.js}))))
+   (run node %{dep:out/test/mount_hooks/expand_only.js})
+   (run node %{dep:out/test/mount_hooks/call_action_only.js})
+   (run node %{dep:out/test/mount_hooks/async_source_only.js}))))

@@ -34,9 +34,6 @@ type manager = {
   mutable renewed : bool;
 }
 
-let server_state : (string -> Json.t -> (Json.t, Status.error) result Async.t) ref =
-  ref (fun name _ -> Async.return (Error (Status.Network ("no live topic " ^ name))))
-
 let delays = [| 250; 500; 1000; 2000; 4000; 5000 |]
 let manager : manager option ref = ref None
 
@@ -63,6 +60,7 @@ let get () =
         }
       in
       manager := Some m;
+      Bridge.reset_live := (fun () -> manager := None);
       m
 
 let send m (fields : (string * Json.t) list) =
@@ -255,10 +253,10 @@ let detach m u =
           if m.uses == [] then hang_up m 1000)
   end
 
-let key_name (topic : (_, _) Topic.t) key = "l:" ^ topic.name ^ " " ^ Json.to_string key
+let key_name (topic : (_, _) Topic.t) key = "l:" ^ Topic.name topic ^ " " ^ Json.to_string key
 
 let decode (topic : (_, 's) Topic.t) last j =
-  match topic.state.decode j with
+  match (Topic.state topic).decode j with
   | Ok data -> Status.Ready { data; stale = false }
   | Error m -> Status.Failed { error = Status.Protocol m; last }
 
@@ -268,7 +266,7 @@ let csrf_answer () =
   | _ -> ()
 
 let on_server (topic : (_, _) Topic.t) key base =
-  let loaded = !server_state topic.name key in
+  let loaded = !Bridge.live_state (Topic.name topic) key in
   let settle r = State.set base (match r with Ok j -> decode topic None j | Error error -> Status.Failed { error; last = None }) in
   Async.on_result loaded (function Ok r -> settle r | Error m -> settle (Error (Status.Network m)));
   if !Base.server_rendering then begin
@@ -283,14 +281,14 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
   if !Base.server_rendering || not Web.in_browser then begin
-    on_server topic (topic.key.encode (args ())) base;
+    on_server topic ((Topic.key topic).encode (args ())) base;
     { base; changes; use = None }
   end
   else begin
     let data () = Status.data (State.peek base) in
     let rec u =
       {
-        topic = topic.name;
+        topic = Topic.name topic;
         key = None;
         wire_id = None;
         last_seq = 0;
@@ -320,7 +318,7 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
     let m = get () in
     let first = ref true in
     Base.Effect.run (fun () ->
-        let key = topic.key.encode (args ()) in
+        let key = (Topic.key topic).encode (args ()) in
         match u.key with
         | Some k when Json.to_string k = Json.to_string key -> ()
         | _ ->

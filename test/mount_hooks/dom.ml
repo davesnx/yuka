@@ -35,3 +35,6 @@ let mount tree =
       (c, ignore)
 
 let finish name = if !failures > 0 then set_exit_code 1 else print_endline (name ^ ": ok")
+
+let stub_fetch : unit -> unit = [%mel.raw "function () { globalThis.fetch = function () { return new Promise(function () {}) } }"]
+let start_islands () = Yuka.render ~islands:(Yuka.Client.registry []) ~navigation:false ()

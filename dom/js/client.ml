@@ -684,13 +684,13 @@ let start ~adopt container f =
   in
   dispose
 
-let render container f = start ~adopt:false container f
+let render container f = start ~adopt:false container (Kind.fn f)
 let hydrate container f =
   use_element ();
   drop_rest := (fun [@u] pos -> walk_region pos (fun [@u] n -> Web.remove n));
   adopt_slot := (fun [@u] pos slot -> adopt_slot_now pos slot);
   Template.expander := (fun t p -> Template.expand t p);
-  start ~adopt:true container f
+  start ~adopt:true container (Kind.fn f)
 
 let roots : (unit -> unit [@u]) ref = ref (fun [@u] () -> ())
 
@@ -869,7 +869,7 @@ let boot entries props island =
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
-              match Base.with_owner o (fun () -> hydrate island build) with
+              match Base.with_owner o (fun () -> hydrate island (Kind.of_fn build)) with
               | d when !failed ->
                   stop d;
                   None
@@ -998,14 +998,24 @@ let start_island entries lazy_entries props island =
         cancel ();
         drop_events ())
 
+let transport_hook : (string -> Json.t -> Json.t Async.t) ref =
+  ref (fun name _ -> failwith ("Yuka: no action transport for " ^ name ^ ": Action.send did not call Client.use_actions"))
+
+let use_actions () = transport_hook := transport
+
+let async_hook : (string -> Json.t Async.t) ref =
+  ref (fun id -> failwith ("Yuka: no reader for async value " ^ id ^ ": Codec.async did not call Client.use_async"))
+
+let use_async () = async_hook := async_value
+
 let script_props script =
   match Web.get_attribute script "data-yuka-props" with
   | Some id -> Some (id, Web.text_content script)
   | None -> None
 
 let start ?(lazy_entries = []) entries =
-  Action.transport := transport;
-  Types.async_source := async_value;
+  Types.transport := (fun name input -> !transport_hook name input);
+  Types.async_source := (fun id -> !async_hook id);
   let props = Web.table () in
   let waiting = ref [] in
   let island_id island =

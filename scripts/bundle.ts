@@ -1,4 +1,4 @@
-import { build, type Format, type Metafile } from "esbuild";
+import { build, type Format, type Metafile, type Plugin } from "esbuild";
 import { minify } from "@swc/core";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -13,6 +13,23 @@ export interface BundleOptions {
   metafile?: string;
   cwd?: string;
 }
+
+const pure: Plugin = {
+  name: "yuka-pure",
+  setup(build) {
+    build.onResolve({ filter: /\.js$/ }, async (args) => {
+      if (args.pluginData === pure) return undefined;
+      const resolved = await build.resolve(args.path, {
+        kind: args.kind,
+        importer: args.importer,
+        resolveDir: args.resolveDir,
+        pluginData: pure,
+      });
+      if (resolved.errors.length > 0) return { errors: resolved.errors };
+      return /[\\/]node_modules[\\/]yuka(\.js)?[\\/]/.test(resolved.path) ? { ...resolved, sideEffects: false } : resolved;
+    });
+  },
+};
 
 export async function bundle(options: BundleOptions): Promise<Metafile> {
   const cwd = resolve(options.cwd ?? process.cwd());
@@ -29,6 +46,7 @@ export async function bundle(options: BundleOptions): Promise<Metafile> {
     write: false,
     metafile: true,
     logLevel: "warning",
+    plugins: [pure],
   });
   const esm = format === "esm";
   for (const file of result.outputFiles) {

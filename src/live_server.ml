@@ -465,20 +465,20 @@ let ssr_state name key =
           result)
 
 let serve ?(allow = fun _ _ -> true) (topic : ('k, 's) Topic.t) load =
-  if List.mem_assoc topic.name !topics then
-    invalid_arg ("Yuka.Server.Live.serve: already served: " ^ topic.name);
+  if List.mem_assoc (Topic.name topic) !topics then
+    invalid_arg ("Yuka.Server.Live.serve: already served: " ^ Topic.name topic);
   let check peer j =
-    match topic.key.decode j with
+    match (Topic.key topic).decode j with
     | Error m -> Bad_key m
     | Ok k -> if allow peer k then Accept (Topic.wire_key topic k) else Forbid
   in
   let load j =
-    match topic.key.decode j with
+    match (Topic.key topic).decode j with
     | Error m -> Async.failed m
-    | Ok k -> Async.map topic.state.encode (Server.guarded load k)
+    | Ok k -> Async.map (Topic.state topic).encode (Server.guarded load k)
   in
-  topics := (topic.name, { check; load }) :: !topics;
-  Live.server_state := ssr_state
+  topics := (Topic.name topic, { check; load }) :: !topics;
+  Bridge.live_state := ssr_state
 
 let note node topic wire =
   match node.bus with
@@ -507,20 +507,20 @@ let note node topic wire =
 let publish ?instance:node (topic : ('k, 's) Topic.t) key state =
   let node = match node with Some n -> n | None -> main () in
   let wire = Topic.wire_key topic key in
-  (match Web.table_get node.table (entry_key topic.name wire) with
+  (match Web.table_get node.table (entry_key (Topic.name topic) wire) with
   | None -> ()
   | Some e ->
       if e.loading then e.again <- true;
-      store e (topic.state.encode state));
-  note node topic.name wire
+      store e ((Topic.state topic).encode state));
+  note node (Topic.name topic) wire
 
 let changed ?instance:node (topic : ('k, 's) Topic.t) key =
   let node = match node with Some n -> n | None -> main () in
   let wire = Topic.wire_key topic key in
-  (match Web.table_get node.table (entry_key topic.name wire) with
+  (match Web.table_get node.table (entry_key (Topic.name topic) wire) with
   | Some e when e.members <> [] -> reload e
   | _ -> ());
-  note node topic.name wire
+  note node (Topic.name topic) wire
 
 let heard node text =
   match Json.of_string text with

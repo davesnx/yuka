@@ -184,5 +184,8 @@ let async_error id message =
       !log_error ("async value " ^ id ^ " failed: " ^ message);
       "failed"
 
+let transport : (string -> Json.t -> Json.t Async.t) ref =
+  ref (fun _ _ -> Async.failed "no action transport")
+
 let async_source : (string -> Json.t Async.t) ref =
   ref (fun _ -> Async.failed "no async transport")

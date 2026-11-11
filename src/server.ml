@@ -395,7 +395,7 @@ let register action f encode =
   let name = Action.name action in
   if Option.is_some (find_action name) then
     invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
-  let input = action.Action.input in
+  let input = Action.input action in
   registry :=
     ( name,
       fun json ->
@@ -404,10 +404,10 @@ let register action f encode =
         | Ok v ->
             Async.map encode (guarded f v) )
     :: !registry;
-  Action.transport := transport;
-  Remote.server_send := send
+  Types.transport := transport;
+  Bridge.send := send
 
-let implement action f = register action f (fun o -> Output (Codec.encode action.Action.output o))
+let implement action f = register action f (fun o -> Output (Codec.encode (Action.output action) o))
 
 type form_outcome = Saved of string option | Unprocessable of (string option * string) list
 
@@ -417,11 +417,11 @@ let find_form name = List.assoc_opt name !forms
 let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _) Action.t) ?redirect
     (f : i -> (o, f Form_core.errors) result Async.t) =
   let t : (i, f) Form_core.t =
-    match action.Action.form with
+    match Action.form action with
     | Some (Action.Form (t, _)) -> t
     | None -> invalid_arg ("Yuka.Server.Form.implement: " ^ Action.name action ^ " is not a form action")
   in
-  let output = action.Action.output in
+  let output = Action.output action in
   let encode result =
     match (result, redirect) with
     | Ok o, Some r -> Redirect (Codec.encode output result, r o)

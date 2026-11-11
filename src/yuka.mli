@@ -76,7 +76,7 @@ module Effect : sig
       {!State.make}. *)
 end
 
-type slot
+type slot = Slot_value.t
 (** Server content passed to a client component. The server prints it; the
     client keeps its DOM nodes and can place them, never re-render them. *)
 
@@ -118,7 +118,7 @@ module Json : sig
 end
 
 module Async : sig
-  type 'a t
+  type 'a t = 'a Async.t
   type 'a status = Pending | Done of 'a | Failed of string
 
   val make : unit -> 'a t * ('a -> unit) * (string -> unit)
@@ -151,64 +151,13 @@ module Async : sig
   (** A State that follows the status. *)
 end
 
-module Codec : sig
-  type 'a t = { encode : 'a -> Json.t; decode : Json.t -> ('a, string) result }
-
-  val int : int t
-  (** [`Int]. *)
-
-  val float : float t
-  (** Decoding accepts [`Int] too. *)
-
-  val string : string t
-  (** [`String]. *)
-
-  val bool : bool t
-  (** [`Bool]. *)
-
-  val unit : unit t
-  (** [`Null]. *)
-
-  val list : 'a t -> 'a list t
-  (** [`List]. Decoding stops at the first element that fails. *)
-
-  val array : 'a t -> 'a array t
-  (** As [list]. *)
-
-  val option : 'a t -> 'a option t
-  (** [None] is [`Null]. *)
-
-  val slot : slot t
-  (** Encodes as [null]; decodes to an empty slot. *)
-
-  val result : 'a t -> 'e t -> ('a, 'e) result t
-  (** [Ok v] is [{"ok": v}] and [Error e] is [{"error": e}]. *)
-
-  val async : 'a t -> 'a Async.t t
-  (** On the server, a settled value is written inline:
-      [{"$async":"aN","ok":v}] or [{"$async":"aN","error":"failed"}]. In a
-      streaming render, a pending value is written as [{"$async":"aN"}] and
-      the stream writes its value later, or [{"error":"failed"}] if it fails.
-      A failure message goes to [Server.log_error] and never into the page,
-      except for a [Server.Action.reject] message, which is sent. Outside a streaming render, a pending value is
-      written as [{"$async":"aN","error":"pending at render"}]. Decoding a
-      bare reference gives, after [render ~islands], the value that the page
-      writes for that id; before it or outside the browser, a failed
-      [Async]. *)
-
-  val encode : 'a t -> 'a -> Json.t
-  (** [encode c v] is [c.encode v]. *)
-
-  val decode : 'a t -> Json.t -> ('a, string) result
-  (** [decode c j] is [c.decode j]. The error names the expected kind and
-      the start of the JSON text. *)
-end
+module Codec = Codec
 
 type server
 type client
 
 
-type +'kind element
+type +'kind element = 'kind Kind.element
 (** What a JSX expression makes. A server element has no handlers and no
     holes. A client element can have both. *)
 
@@ -494,37 +443,7 @@ module Catch : sig
       the browser. *)
 end
 
-module Status : sig
-  (** Why a remote call failed. *)
-  type error =
-    | Rejected of string
-        (** The server refused the input ({!Server.Action.reject}, bad
-            input). The message is for the user. *)
-    | Forbidden  (** The origin check failed. *)
-    | Not_found  (** Unknown action. *)
-    | Server  (** The implementation raised or failed; the detail is in the server log. *)
-    | Network of string  (** No answer: offline, aborted, timeout. *)
-    | Protocol of string  (** The answer did not decode. *)
-
-  (** The state of data that loads. [Loading (Some x)]: a new load runs and
-      [x] is the last good data. *)
-  type 'a t =
-    | Idle  (** Not enabled. *)
-    | Loading of 'a option  (** A request runs; the option is the last good data. *)
-    | Ready of { data : 'a; stale : bool }  (** [stale] is [false] for remote data. *)
-    | Failed of { error : error; last : 'a option }
-
-  val data : 'a t -> 'a option
-  (** [data] of [Ready], [last] of [Failed], the option of [Loading]. *)
-
-  val map : ('a -> 'b) -> 'a t -> 'b t
-
-  val error_to_string : error -> string
-  (** [Rejected m] is [m]; the others are short English text. *)
-
-  val error_codec : error Codec.t
-  (** [{"kind": "rejected", "message": m}], [{"kind": "server"}], ... *)
-end
+module Status = Status
 
 module Show : sig
   val make :
@@ -650,7 +569,7 @@ module Optimistic : sig
 end
 
 module Action : sig
-  type ('i, 'o, 'kind) t
+  type ('i, 'o, 'kind) t = ('i, 'o, 'kind) Action.t
   (** ['kind] is [[ `Mutation ]] for {!declare} and [[ `Query ]] for
       {!query}. *)
 
@@ -674,65 +593,13 @@ module Action : sig
       implementation), decodes the output. A decode error is [Failed]. *)
 end
 
-module Remote : sig
-  (** Server data read through a query ({!Action.query}). *)
-
-  type 'o t
-
-  type retry = { attempts : int; delay_ms : int -> int }
-  (** [attempts] more tries after the first; [delay_ms n] waits before try
-      [n + 1]. *)
-
-  val default_retry : retry
-  (** Two more tries, after 500 ms and 1500 ms. *)
-
-  val no_retry : retry
-
-  val use :
-    ?retry:retry -> ?enabled:(unit -> bool) -> ('i, 'o, [ `Query ]) Action.t -> (unit -> 'i) -> 'o t
-  (** Runs the query for the input that the function returns, and again
-      when a State that the function or [enabled] reads changes. Call it in
-      a component body: when its owner is disposed, the request in flight
-      is aborted.
-
-      - The key of a request is the query name and the JSON of the input;
-        the query runs again only when the key changes. A new key,
-        {!refetch} or {!invalidate} aborts the request in flight, and only
-        the latest request writes the status.
-      - [enabled ()] false gives [Idle] and aborts the request.
-      - [Network] and [Server] errors are tried again by [retry] (default
-        {!default_retry}); the others fail at once.
-      - In a server render it runs the implementation once. If it settles
-        during the render, the status is [Ready] or [Failed]; else
-        [Loading None]. Inside an island the answer is written in the page
-        ([<script data-yuka-answer>], after the island), and the client
-        reads it on the first run instead of sending a request; a pending
-        answer is streamed later.
-      - Outside the browser and outside a render (tests), it calls the
-        implementation directly. *)
-
-  val status : 'o t -> 'o Status.t
-  (** Tracked read, with the pending {!mutate} changes applied to the data. *)
-
-  val refetch : 'o t -> unit
-  (** Sends the request again (the manual retry after [Failed]). *)
-
-  val invalidate : (_, _, [ `Query ]) Action.t -> unit
-  (** {!refetch} every mounted use of this query, for every input. *)
-
-  val mutate : 'o t -> ('o -> 'o) -> ?commit:('r -> 'o -> 'o) -> (unit -> 'r Async.t) -> 'r Async.t
-  (** [mutate r change run] shows [change] on the data at once, then calls
-      [run ()]. When it succeeds the change is removed and the data becomes
-      [commit result data] (default [change data]); when it fails the
-      change is removed (rollback). A new answer while the change is pending
-      gets the change on top. The result is the [Async] of [run ()]. *)
-end
+module Remote = Remote
 
 module Topic : sig
   (** A kind of live state ({!Live}): a name, the codec of its key and the
       codec of its state. One topic has one state per key. *)
 
-  type ('k, 's) t
+  type ('k, 's) t = ('k, 's) Topic.t
 
   val declare : name:string -> key:'k Codec.t -> state:'s Codec.t -> ('k, 's) t
   (** The server and the client must declare it with the same name and
@@ -741,166 +608,9 @@ module Topic : sig
   val name : (_, _) t -> string
 end
 
-module Live : sig
-  (** Server state that the server pushes to the page over one WebSocket
-      ([GET /_yuka/live]) when it changes. Each message is the full state of
-      one key. The server side is {!Server.Live}. *)
+module Live = Live
 
-  type 's t
-
-  val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
-  (** Subscribes to the state of the key that the function returns, and
-      again when a State that the function reads changes the key. Call it
-      in a component body; the subscription ends when its owner is disposed.
-
-      - In a server render it reads the state (the current one, else the
-        topic's loader) and, inside an island, writes it in the page with
-        a CSRF token for the socket; the client starts from it with no
-        wait. A page that has such a use holds a per-session token, so its
-        route must not use a shared cache.
-      - In the browser, one socket serves every use of the page. It opens
-        on the first use and closes 2 s after the last one ends.
-      - The status is [Loading None] until the first state, then [Ready].
-        When the socket closes it is [Ready { stale = true }] (or
-        [Loading None] with no data) while the client reconnects, after
-        250 ms, 500 ms, 1 s, 2 s, 4 s, then every 5 s (half to all of each
-        delay, at random), or when the browser comes back online. Each
-        reconnect gets the full state again.
-      - [Failed]: the server refused the key ([Forbidden], [Not_found],
-        [Rejected] from the loader, [Server]); this use does not subscribe
-        again. An unsupported protocol gives [Protocol] to every use.
-      - Token: the client keeps the newest token it saw (from the page, the
-        server [hello] and each [pong]). When the server refuses it (an
-        expired token), the client gets a fresh one once from
-        [GET /_yuka/csrf] and connects again; if that fails too, every use
-        is [Failed Forbidden] until a new use (after a navigation) connects
-        again with the token of its page. *)
-
-  val status : 's t -> 's Status.t
-  (** Tracked read, with the pending {!mutate} changes applied. *)
-
-  val mutate : 's t -> ('s -> 's) -> (unit -> 'r Async.t) -> 'r Async.t
-  (** [mutate t change run] shows [change] at once and calls [run ()],
-      which should call an action that publishes the new state. When it
-      fails, the change is removed. When it succeeds, the change stays until
-      the server confirms, on the socket, that every state it had for this
-      subscription when the answer arrived was sent: the published state
-      then holds the change, in whatever order the HTTP answer and the
-      socket message arrived. While the socket is down, the confirmation
-      comes after the reconnect. *)
-end
-
-module Form : sig
-  (** Forms that post with no JavaScript and submit through {!Action.call}
-      in an island. [[@@deriving form]] on a record writes the field type,
-      the field names and a [('i, 'f) t]; the same decoder runs on the
-      server and in the browser. *)
-
-  type 'f errors = ('f option * string) list
-  (** [None] is an error for the whole form. *)
-
-  type 'a kind
-  (** How one field reads from the posted strings and writes back. *)
-
-  val string : string kind
-  (** The first value; ["Missing"] when the field is absent. *)
-
-  val int : int kind
-  (** ["Not a whole number"] when it does not parse. *)
-
-  val float : float kind
-  val bool : bool kind
-  (** A checkbox: present is [true], absent is [false]. *)
-
-  val option : 'a kind -> 'a option kind
-  (** Absent or empty is [None]. *)
-
-  val list : 'a kind -> 'a list kind
-  (** Every value of the field, in order. *)
-
-  val custom : (string -> 'a option) -> ('a -> string) -> 'a kind
-  (** ["Not valid"] when [of_string] gives [None]. *)
-
-  type ('i, 'f) t
-  (** The fields of a form: decode, encode and names. *)
-
-  type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
-
-  type 'f decoding
-
-  val fields :
-    names:('f * string) list ->
-    decode:('f decoding -> ('i, 'f errors) result) ->
-    encode:('i -> (string * string) list) ->
-    ('i, 'f) t
-  (** Used by the code that [[@@deriving form]] writes. *)
-
-  val field : 'f decoding -> 'f -> string -> 'a kind -> 'a option
-  val get : 'a option -> 'a
-  val finish : 'f decoding -> (unit -> 'i) -> ('i, 'f errors) result
-  val put : string -> 'a kind -> 'a -> (string * string) list
-
-  val decode : ('i, 'f) t -> (string * string) list -> ('i, 'f errors) result
-  (** Every field error, in field order. *)
-
-  val encode : ('i, 'f) t -> 'i -> (string * string) list
-  val name : ('i, 'f) t -> 'f -> string
-
-  val action :
-    name:string ->
-    fields:('i, 'f) t ->
-    output:'o Codec.t ->
-    ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
-  (** An action whose input is a form: {!Action.call} sends the encoded
-      fields; the answer is [Ok o] or the field errors. *)
-
-  type ('o, 'f) form
-  (** What the children of {!make} get. *)
-
-  val value : ('o, 'f) form -> 'f -> string
-  (** The value sent for the field when the page answers a failed post
-      (422), else [""]. *)
-
-  val error : ('o, 'f) form -> 'f -> string option
-  (** Tracked read of the first error of the field. *)
-
-  val error_view : ('o, 'f) form -> 'f -> (string -> 'k element) -> 'k element
-  (** A hole: the view of the field's error, or nothing. *)
-
-  val form_errors : ('o, 'f) form -> string list
-  val form_error_view : ('o, 'f) form -> (string -> 'k element) -> 'k element
-  (** The errors for the whole form. *)
-
-  val pending : ('o, 'f) form -> bool
-  (** Tracked: true while an island submit waits for its answer. Read it in
-      a hole ([Yuka.hole]); read in the children directly, it renders the
-      enclosing component again, with a new form. *)
-
-  val make :
-    action:('i, ('o, 'f errors) result, [ `Mutation ]) Action.t ->
-    ?key:string ->
-    ?run:('i -> ('o, 'f errors) result Async.t) ->
-    ?on_ok:('o -> unit) ->
-    children:(('o, 'f) form -> 'k element) ->
-    unit ->
-    'k element
-  (** [<Yuka.Form action>(fun form -> ...)</Yuka.Form>]: a
-      [<form method="post">] with no [action] attribute (it posts to the
-      page URL) and a hidden [_yuka_action] field, so it works with no
-      JavaScript. Give [key] to tell apart two forms of one action on a
-      page: after a failed post (422) only the form with the posted key
-      shows the sent values and errors. In an island, they stay for the
-      life of that [<form>] element (a new render of the form shows them
-      again) until a submit in the browser. In an island, a submit is handled
-      in the browser: the fields (with the submit button's [name] and
-      [value]) are decoded first (an error shows at once, with no request),
-      then [run input] (default: the action call) runs while [pending] is
-      true; field errors show, and on [Ok o] [on_ok o] runs, or else the page
-      follows the server's [redirect] (with [run], the page URL) with a
-      client navigation, as a post with no JavaScript does. A [redirect] to
-      another origin is not followed: it shows as a form error. Raises
-      [Invalid_argument] when [action] is not from {!val-action}. *)
-end
+module Form = Form
 
 module Browser : sig
   val on_window : string -> (Event.t -> unit) -> unit
@@ -942,7 +652,7 @@ module Private : sig
         render : 'a -> node;
       }
         -> node
-    | Slot of slot
+    | Slot of slot_data
     | Template of { template : template; parts : part array }
     | Each : {
         items : unit -> 'a list;
@@ -964,6 +674,7 @@ module Private : sig
 
   and template = Template.t
   and part = Child of node | Attribute of attr | No_attribute
+  and slot_data
 
   type shape =
     | Fixed_text of string
@@ -1058,8 +769,11 @@ module Private : sig
   (** The parts recorded since the last call, in order. *)
 
   val async_source : (string -> Json.t Async.t) ref
-  (** Where [Codec.async] decoding finds the value of a bare reference. The
-      browser runtime installs it. Default: a failed [Async]. *)
+  (** Where [Codec.async] decoding finds the value of a bare reference.
+      Default: a failed [Async]. [render ~islands] sets it to read the
+      values that the page writes; that reader is installed by the first
+      [Codec.async] decoding of a bare reference, and a call before it raises
+      [Failure]. *)
 
   val render_html : (unit -> node) -> string
   (** Like [to_html], but also builds the tree with [server_rendering] true,
@@ -1091,7 +805,10 @@ module Private : sig
   (** Runs the function without tracking State reads. *)
 
   val call_action : (string -> Json.t -> Json.t Async.t) ref
-  (** The transport of [Action.call]. Default: a failed [Async]. *)
+  (** The transport of [Action.call]. Default: a failed [Async].
+      [render ~islands] sets it to the browser transport; that transport is
+      installed by the first [Action.call] or island form submit, and a call
+      before it raises [Failure]. *)
 
   val server_rendering : bool ref
   (** When true, [Effect.run] does nothing. *)
