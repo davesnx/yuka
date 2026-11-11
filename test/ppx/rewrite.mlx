@@ -4,9 +4,9 @@ let bool_and_optional = <input type_=`text disabled=true hidden=flag ?placeholde
 
 let data_and_aria = <div data_user_id="7" aria_label="menu" />
 
-let handler = <button onClick=(fun _ -> ())>"go"</button>
+let handler = <button on_click=(fun _ -> ())>"go"</button>
 
-let optional_handler = <input ?onInput />
+let optional_handler = <input ?on_input />
 
 let string_child = <p>"hello"</p>
 
@@ -14,7 +14,7 @@ let hole_child = <p>(State.get count)</p>
 
 let qualified_hole_child = <p>(Yuka.State.get count)</p>
 
-let get_inside_fun = <button onClick=(fun _ -> State.set c (State.get c + 1))>(label)</button>
+let get_inside_fun = <button on_click=(fun _ -> State.set c (State.get c + 1))>(label)</button>
 
 let get_inside_fun_child = <ul>(Yuka.each ~key (fun () -> State.get items) (fun i -> <li>"x"</li>))</ul>
 
@@ -32,7 +32,7 @@ let nested = <ul class_="list"><li>"one"</li><li><a href="/y">(State.get name)</
 
 let lowercase_function = <Ui.button label="l">"txt"</Ui.button>
 
-let svg = <svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" strokeDasharray="2 2" strokeWidth="1" fillOpacity="0.5" /><use xlinkHref="#a" /></svg>
+let svg = <svg view_box="0 0 10 10"><circle cx="5" cy="5" r="4" stroke_dasharray="2 2" stroke_width="1" fill_opacity="0.5" /><use xlink_href="#a" /></svg>
 
 let island = <Yuka.Client><Issue_list items=1 ?filter /></Yuka.Client>
 
@@ -100,7 +100,7 @@ let textarea_value = <textarea value="x" />
 let textarea_hole = <textarea value=(State.get t) />
 
 module Templates = struct
-  let fixed = <ul class_="list" hidden=false><li>"one"</li><li onClick=(fun _ -> ())>(State.get n)</li></ul>
+  let fixed = <ul class_="list" hidden=false><li>"one"</li><li on_click=(fun _ -> ())>(State.get n)</li></ul>
 
   let fixed_hole_attr = <div class_=(State.get c)><span>"x"</span></div>
 

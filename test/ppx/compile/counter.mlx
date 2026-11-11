@@ -1,6 +1,6 @@
 let%client make ~(label : string) ?(step : int option) ~(issue : Model.issue) () =
   let count = Yuka.State.make 0 in
-  <button onClick=(fun _ -> Yuka.State.update count (fun n -> n + Option.value step ~default:1))>
+  <button on_click=(fun _ -> Yuka.State.update count (fun n -> n + Option.value step ~default:1))>
     (Yuka.text label)
     (Yuka.text issue.title)
     (Yuka.hole (fun () -> Yuka.text (string_of_int (Yuka.State.get count))))

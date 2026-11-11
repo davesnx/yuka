@@ -2,16 +2,19 @@
  (name cycle_shadowed)
  (libraries yuka cycle_shared cycle_server shadow)
  (flags
-  (:standard -open Cycle_server -open Shadow)))
+  (:standard -open Cycle_shared -open Cycle_server -open Shadow)))
 
 (rule
  (targets routes_server.ml)
  (action
   (with-stdout-to
    routes_server.ml
-   (run
-    %{bin:yuka-routes}
-    --server
-    --shared-module
-    Cycle_shared.Routes
-    %{dep:../shared/routes.ast}))))
+   (with-stdin-from
+    %{dep:../Routes.ml}
+    (run
+     %{bin:yuka-routes}
+     --server
+     --shared-module
+     Cycle_shared.Routes
+     --source
+     %{dep:../Routes.ml})))))

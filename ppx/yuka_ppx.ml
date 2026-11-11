@@ -125,21 +125,67 @@ let svg_presentation =
     "stroke-opacity"; "stroke-width"; "text-anchor"; "text-decoration"; "text-rendering";
     "transform-origin"; "unicode-bidi"; "vector-effect"; "word-spacing"; "writing-mode" ]
 
-let camel_of_kebab k =
-  let b = Buffer.create (String.length k) in
-  let up = ref false in
+let snake_of_camel s =
+  let b = Buffer.create (String.length s + 4) in
   String.iter
     (fun c ->
-      if c = '-' then up := true
+      if c >= 'A' && c <= 'Z' then (
+        Buffer.add_char b '_';
+        Buffer.add_char b (Char.lowercase_ascii c))
+      else Buffer.add_char b c)
+    s;
+  Buffer.contents b
+
+let camel_of_snake s =
+  let n = String.length s in
+  let b = Buffer.create n in
+  let up = ref false in
+  String.iteri
+    (fun i c ->
+      if c = '_' && i > 0 && i < n - 1 then up := true
       else (
         Buffer.add_char b (if !up then Char.uppercase_ascii c else c);
         up := false))
-    k;
+    s;
   Buffer.contents b
 
+let event_name jsx = String.sub jsx 2 (String.length jsx - 2)
+
+let label_of_prop = function
+  | Html_attributes.Event { jsxName; _ } -> "on_" ^ event_name jsxName
+  | p -> snake_of_camel (Html.getJSXName p)
+
+let has_upper s = String.exists (fun c -> c >= 'A' && c <= 'Z') s
+
+let snake_hint label =
+  if String.length label > 2 && String.sub label 0 2 = "on" && label.[2] >= 'A' && label.[2] <= 'Z'
+  then "on_" ^ String.lowercase_ascii (String.sub label 2 (String.length label - 2))
+  else snake_of_camel label
+
+let table_keys label =
+  if String.starts_with ~prefix:"on_" label then [ "on" ^ String.sub label 3 (String.length label - 3) ]
+  else [ label; camel_of_snake label ]
+
+let lookup tag label =
+  let rec go = function
+    | [] -> Error (`AttributeNotFound None)
+    | key :: rest -> (
+        match Html.findByName tag key with
+        | Ok p when label_of_prop p = label -> Ok p
+        | Error `ElementNotFound -> Error `ElementNotFound
+        | Ok _ | Error (`AttributeNotFound _) -> go rest)
+  in
+  go (table_keys label)
+
+let suggestion tag label =
+  match Hashtbl.find_opt (Lazy.force Html.element_index) tag with
+  | Some (element, _) ->
+      Html.find_closest_name label (List.map label_of_prop element.Html_attributes.attributes)
+  | None -> None
+
 let svg_overrides =
-  ("xlinkHref", "xlink:href")
-  :: List.map (fun k -> (camel_of_kebab k, k)) svg_presentation
+  ("xlink_href", "xlink:href")
+  :: List.map (fun k -> (String.map (fun c -> if c = '-' then '_' else c) k, k)) svg_presentation
 
 let svg_override tag label =
   if not (Html.is_svg_element tag) then None
@@ -147,20 +193,17 @@ let svg_override tag label =
     match List.assoc_opt label svg_overrides with
     | None -> None
     | Some name -> (
-        match Html.findByName tag label with
+        match lookup tag label with
         | Ok (Html_attributes.Attribute { name = n; _ } as p) when n = name -> Some p
         | _ ->
             Some (Html_attributes.Attribute { name; jsxName = label; type_ = String }))
 
 let find_prop ~loc tag label =
+  if has_upper label then
+    Location.raise_errorf ~loc "[yuka] Write '%s' as '%s'." label (snake_hint label);
   match svg_override tag label with
   | Some p -> p
   | None ->
-  let key =
-    if String.length label > 2 && String.sub label 0 2 = "on" then
-      String.lowercase_ascii label
-    else label
-  in
   let generic () =
     let prefixed p = String.starts_with ~prefix:p label in
     if prefixed "aria_" then
@@ -170,7 +213,7 @@ let find_prop ~loc tag label =
              jsxName = label; type_ = String })
     else None
   in
-  match Html.findByName tag key with
+  match lookup tag label with
   | Ok (Html_attributes.Event { jsxName; _ })
     when String.ends_with ~suffix:"capture" jsxName ->
       Location.raise_errorf ~loc
@@ -178,19 +221,17 @@ let find_prop ~loc tag label =
   | Ok p -> p
   | Error `ElementNotFound ->
       Location.raise_errorf ~loc "[yuka] HTML tag '%s' does not exist." tag
-  | Error (`AttributeNotFound suggestion) -> (
+  | Error (`AttributeNotFound _) -> (
       match generic () with
       | Some p -> p
       | None ->
           let hint =
-            match suggestion with
+            match suggestion tag label with
             | Some s -> Printf.sprintf " Maybe you mean '%s'?" s
             | None -> ""
           in
           Location.raise_errorf ~loc
             "[yuka] The attribute '%s' is not valid on a '%s' element.%s" label tag hint)
-
-let event_name jsx = String.sub jsx 2 (String.length jsx - 2)
 
 let rewrite_attribute ~self ~loc tag (label, value) =
   let name, optional =

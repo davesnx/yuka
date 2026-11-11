@@ -23,7 +23,7 @@ let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
   in
   let select label items slug to_label of_slug selected on_pick =
     <select class_="select" aria_label=label value=(slug (State.get selected))
-      onChange=(fun e -> Option.iter on_pick (of_slug (Event.target_value e)))>
+      on_change=(fun e -> Option.iter on_pick (of_slug (Event.target_value e)))>
       (Yuka.list
          (List.map
             (fun x ->
@@ -38,7 +38,7 @@ let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
   <Yuka.Catch fallback=(fun ~error:_ ~reset ->
       <div class_="props">
         <p class_="error">"The properties could not be shown."</p>
-        <button class_="button" onClick=(fun _ -> reset ())>"Try again"</button>
+        <button class_="button" on_click=(fun _ -> reset ())>"Try again"</button>
       </div>)>
     <div class_="props">
       <Views.Property name="Status">

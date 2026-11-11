@@ -85,7 +85,11 @@ markers everywhere: the client hydrates their output.
 - mlx gives `[@JSX] tag ~a:1 ~children:[...] ()`. The ppx turns a lowercase
   tag into `Yuka.lower "tag" [attributes] [children]`, with html_of_jsx's
   attribute checks as the baseline (valid attributes for the tag, plus
-  `data-*` and `aria-*`), and `onClick` style props into `Yuka.on "click"`.
+  `data-*` and `aria-*`), and `on_click` style props into `Yuka.on "click"`.
+  Props on a lowercase tag are snake_case: `on_` and the DOM event name
+  (`on_mousedown`), and the snake form of other names (`view_box`,
+  `stroke_width`, `accept_charset`). A prop with an uppercase letter is an
+  error that gives the snake name.
 - An uppercase tag `<M.Name a=1 />` becomes `M.Name.make ~a:1 ()`, with
   `~children` only when children are given.
 - A string literal child becomes `Yuka.text`. A child or an attribute value
@@ -211,8 +215,9 @@ markers everywhere: the client hydrates their output.
 ## Router
 
 - Pages are server routes (a multi-page app). Since 2026-11-10 they come
-  from `Routes.mlx` through `yuka-routes` and the request cycle; see
-  "Routes.mlx generator", "Request cycle" and "yuka-dream". The typed
+  from `Routes.ml` through `yuka-routes` and the request cycle; see
+  "Routes.mlx generator", "Request cycle", "yuka-dream" and "Routes.ml:
+  one OCaml expression". The typed
   path GADT of `Yuka.Router` is gone.
 
 ## Demo: mini Linear
@@ -1106,6 +1111,9 @@ the budget in `bench/size/budget.json`.
 
 ## Routes.mlx generator (2026-11-10)
 
+The input format and the reader changed later; see "Routes.ml: one OCaml
+expression".
+
 Spec: `.workplace/docs/routes-spec.md`. Built: increment 1, the generator
 and the shared module. The request cycle, `yuka-dream`, the demo migration
 and navigation come later. The GADT `Yuka.Router` stays until then.
@@ -1722,6 +1730,36 @@ through A.
   `Yuka.Private.stylesheet`, and the `Private` record kept the server
   printer in the demo client chunk (`make size` caught it).
 
+## Routes.ml: one OCaml expression (2026-11-10)
+
+Plan: `.workplace/plans/routes-async_PLAN.md`. As server-reason-react
+router-gen: the manifest is a plain OCaml file, not mlx.
+
+- `Routes.ml` holds exactly one top-level item, the expression
+  `Router.make ...`. An `open`, a `let`, a second expression or an empty
+  file is an error with a location. The file is never compiled.
+- Nodes: `Router.make`, `Router.group`, `Router.route Name`,
+  `Router.endpoint Name`, `Router.action Name` and
+  `Router.redirect ~path ~to_:(Permanent "/")`. The name is the one
+  unlabelled argument of a route, endpoint or action; the child nodes are
+  the one unlabelled list of `Router.make` and `Router.group`. Each former
+  prop is a labelled argument with the same name and meaning; a redirect
+  is its own node with `~to_` instead of a `Route` with `redirect`.
+- Attachments (`page`, `layout`, `loader`, `guard`, `handler`,
+  `not_found`, `error`) must be value paths (`Pexp_ident`). They are
+  called as before.
+- `yuka-routes --shared --source FILE` and `yuka-routes --server
+  --shared-module M --source FILE` read the source text from stdin and
+  parse it with `Parse.implementation`; `--source` names the file in
+  locations. Dune rules use `with-stdin-from %{dep:../Routes.ml}`. The
+  `mlx-pp` step and `routes.ast` are gone; syntax errors are reported by
+  the OCaml parser.
+- The prelude is dropped: the server output no longer starts with the
+  `open`s written before `let routes`. Paths in `Routes.ml` must resolve
+  in the server library as written (`test/cycle` writes `App.Pages.home`).
+- The build id (`~build` of `Routes_server.app`) is a digest of the
+  printed expression, so it changes with the format.
+
 ## Dev server (2026-11-10)
 
 Ticket 24; `.workplace/docs/app-spec.md` section 24, option A, level 1.
@@ -1856,7 +1894,7 @@ Ticket 33 and its four security reviews.
   `template_of_shape` and the ppx (a located error). Such a name would end
   the attribute or the tag early. A name that starts with `on` (any case)
   is refused too: it is an inline event handler. Handlers are `Yuka.on`
-  only; the ppx turns `onclick=f` into it and refuses a string literal.
+  only; the ppx turns `on_click=f` into it and refuses a string literal.
 - Tag names (`Url.valid_tag`: a letter, then letters, digits and `-`):
   the printer refuses another tag before it writes `<` (also in template
   compilation), and so does `template_of_shape`. The browser's

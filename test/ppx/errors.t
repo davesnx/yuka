@@ -257,13 +257,73 @@ let%client with a reserved argument:
 SVG attribute on a tag that is not SVG:
 
   $ cat > h11.mlx <<'X'
-  > let x = <div strokeDasharray="1" />
+  > let x = <div stroke_dasharray="1" />
   > X
   $ run h11
-  File "h11.mlx", line 1, characters 29-32:
-  1 | let x = <div strokeDasharray="1" />
-                                   ^^^
-  Error: [yuka] The attribute 'strokeDasharray' is not valid on a 'div' element.
+  File "h11.mlx", line 1, characters 30-33:
+  1 | let x = <div stroke_dasharray="1" />
+                                    ^^^
+  Error: [yuka] The attribute 'stroke_dasharray' is not valid on a 'div' element.
+  [1]
+
+camelCase event on a DOM element:
+
+  $ cat > p0.mlx <<'X'
+  > let x = <button onClick=(fun _ -> ()) />
+  > X
+  $ run p0
+  File "p0.mlx", line 1, characters 24-37:
+  1 | let x = <button onClick=(fun _ -> ()) />
+                              ^^^^^^^^^^^^^
+  Error: [yuka] Write 'onClick' as 'on_click'.
+  [1]
+
+camelCase attribute on a DOM element:
+
+  $ cat > p1.mlx <<'X'
+  > let x = <svg viewBox="0 0 1 1" />
+  > X
+  $ run p1
+  File "p1.mlx", line 1, characters 21-30:
+  1 | let x = <svg viewBox="0 0 1 1" />
+                           ^^^^^^^^^
+  Error: [yuka] Write 'viewBox' as 'view_box'.
+  [1]
+
+Event without the underscore:
+
+  $ cat > p2.mlx <<'X'
+  > let x = <button onclick=(fun _ -> ()) />
+  > X
+  $ run p2
+  File "p2.mlx", line 1, characters 24-37:
+  1 | let x = <button onclick=(fun _ -> ()) />
+                              ^^^^^^^^^^^^^
+  Error: [yuka] The attribute 'onclick' is not valid on a 'button' element. Maybe you mean 'on_click'?
+  [1]
+
+Suggestion in snake case:
+
+  $ cat > p3.mlx <<'X'
+  > let x = <svg view_bx="0 0 1 1" />
+  > X
+  $ run p3
+  File "p3.mlx", line 1, characters 21-30:
+  1 | let x = <svg view_bx="0 0 1 1" />
+                           ^^^^^^^^^
+  Error: [yuka] The attribute 'view_bx' is not valid on a 'svg' element. Maybe you mean 'view_box'?
+  [1]
+
+Optional camelCase prop:
+
+  $ cat > p4.mlx <<'X'
+  > let x = <div ?onMouseDown />
+  > X
+  $ run p4
+  File "p4.mlx", line 1, characters 14-25:
+  1 | let x = <div ?onMouseDown />
+                    ^^^^^^^^^^^
+  Error: [yuka] Write 'onMouseDown' as 'on_mousedown'.
   [1]
 
 Templates are values at the top of the module; their names carry the module name, not the directory:
@@ -630,13 +690,22 @@ A literal srcdoc is kept:
 An event handler takes a function, not a string; only names the ppx knows are tags:
 
   $ cat > event1.mlx <<'Y'
-  > let x = <button onclick="alert(1)">"x"</button>
+  > let x = <button on_click="alert(1)">"x"</button>
   > Y
   $ run event1
-  File "event1.mlx", line 1, characters 24-34:
+  File "event1.mlx", line 1, characters 25-35:
+  1 | let x = <button on_click="alert(1)">"x"</button>
+                               ^^^^^^^^^^
+  Error: [yuka] on_click takes a function, not a string: write on_click=(fun event -> ...).
+  [1]
+  $ cat > event2.mlx <<'Y'
+  > let x = <button onclick="alert(1)">"x"</button>
+  > Y
+  $ run event2
+  File "event2.mlx", line 1, characters 24-34:
   1 | let x = <button onclick="alert(1)">"x"</button>
                               ^^^^^^^^^^
-  Error: [yuka] onclick takes a function, not a string: write onclick=(fun event -> ...).
+  Error: [yuka] The attribute 'onclick' is not valid on a 'button' element. Maybe you mean 'on_click'?
   [1]
   $ cat > tag1.mlx <<'Y'
   > let x = <img_x />

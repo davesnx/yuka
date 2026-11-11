@@ -11,7 +11,7 @@ Yuka v1 is tagged when it matches SolidJS on measured numbers and has the featur
 - A page with no island sends 0 bytes of JavaScript.
 - Demo: Total Blocking Time 0 and LCP equal to plain server HTML.
 - Server: SSR throughput faster than both Solid and server-reason-react on `make bench-ssr` (user, 2026-11-10; ticket 31).
-- Features: generated router from `Routes.mlx`, first-party Dream adapter with Yuka owning the request cycle, three kinds of data (local, remote, live), and the areas listed in "Not yet specified".
+- Features: generated router from `Routes.ml`, first-party Dream adapter with Yuka owning the request cycle, three kinds of data (local, remote, live), and the areas listed in "Not yet specified".
 
 ## Releases before v1
 
@@ -34,7 +34,7 @@ Yuka v1 is tagged when it matches SolidJS on measured numbers and has the featur
 
 ## Decisions so far
 
-- Route format: one `Routes.mlx` route tree, in the style of server-reason-react router-gen. Not file-system routes.
+- Route format: one `Routes.ml` route tree (one OCaml expression), in the style of server-reason-react router-gen. Not file-system routes.
 - Nitro (nitro.build) is the model for the server layer, not for the page router: route rules as props on route nodes, method nodes, a generated matcher, a fixed request order, prerender. See tickets 09 and 11.
 - Yuka does not depend on melange-tiny: the client uses a JS `Map` and no `sprintf`.
 - Server: Dream only for now, as a first-party adapter; Yuka owns routes, data loading, actions, assets and headers on top of it.

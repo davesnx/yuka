@@ -120,53 +120,64 @@ let parse_path loc path =
 let join parent child =
   if child = "/" then parent else if parent = "/" then child else parent ^ child
 
-let is_jsx e = List.exists (fun a -> a.attr_name.txt = "JSX") e.pexp_attributes
-
 let rec list_items e =
   match e.pexp_desc with
   | Pexp_construct ({ txt = Lident "[]"; _ }, None) -> []
   | Pexp_construct ({ txt = Lident "::"; _ }, Some { pexp_desc = Pexp_tuple [ hd; tl ]; _ })
     ->
       hd :: list_items tl
-  | _ -> fail e.pexp_loc "children must be route nodes"
+  | _ ->
+      fail e.pexp_loc
+        "the child nodes must be a list such as [ Router.route A ~path:\"/a\" ~page:P.a ]"
 
 let element e =
   match e.pexp_desc with
-  | Pexp_apply
-      ({ pexp_desc = Pexp_ident { txt = Ldot (Lident tag, "createElement"); _ }; _ }, args)
-    when is_jsx e ->
+  | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Router", tag); _ }; _ }, args) ->
       let props =
         List.filter_map
           (fun (label, v) ->
             match label with
             | Nolabel -> None
             | Labelled l -> Some (l, v)
-            | Optional l -> fail v.pexp_loc "?%s: optional props are not supported" l)
+            | Optional l -> fail v.pexp_loc "?%s: optional arguments are not supported" l)
           args
       in
       let rec no_dups = function
         | [] -> ()
         | (l, _) :: rest ->
             (match List.assoc_opt l rest with
-            | Some v -> fail v.pexp_loc "prop %s is given twice" l
+            | Some v -> fail v.pexp_loc "argument ~%s is given twice" l
             | None -> ());
             no_dups rest
       in
       no_dups props;
-      let children, props = List.partition (fun (l, _) -> l = "children") props in
-      let children = match children with [ (_, c) ] -> list_items c | _ -> [] in
-      (tag, props, children, e.pexp_loc)
-  | _ -> fail e.pexp_loc "expected a route node such as <Route ... />"
+      let unlabelled = List.filter_map (fun (l, v) -> if l = Nolabel then Some v else None) args in
+      (tag, unlabelled, props, e.pexp_loc)
+  | _ ->
+      fail e.pexp_loc
+        "expected a route node such as Router.route Home ~path:\"/\" ~page:Pages.home"
+
+let unlabelled tag loc what = function
+  | [ v ] -> v
+  | _ -> fail loc "Router.%s takes %s as its one unlabelled argument" tag what
+
+let attachments = [ "page"; "layout"; "handler"; "guard"; "not_found"; "error" ]
 
 let check_props tag loc props ~required ~optional =
   List.iter
     (fun (l, v) ->
       if not (List.mem l required || List.mem l optional) then
-        fail v.pexp_loc "<%s> has no prop %s; its props are %s" tag l
-          (String.concat ", " (required @ optional)))
+        fail v.pexp_loc "Router.%s has no argument ~%s; its labelled arguments are %s" tag l
+          (String.concat ", " (List.map (( ^ ) "~") (required @ optional)));
+      match v.pexp_desc with
+      | Pexp_ident _ -> ()
+      | _ when List.mem l attachments ->
+          fail v.pexp_loc "~%s must be a value path such as Pages.home" l
+      | _ -> ())
     props;
   List.iter
-    (fun r -> if not (List.mem_assoc r props) then fail loc "<%s> needs the prop %s" tag r)
+    (fun r ->
+      if not (List.mem_assoc r props) then fail loc "Router.%s needs the argument ~%s" tag r)
     required
 
 let string_lit name v =
@@ -211,14 +222,14 @@ let parse_search v =
               | _ -> bad ())
           | _ -> bad ())
         fields
-  | _ -> fail v.pexp_loc "search must be a record such as { tag = optional string }"
+  | _ -> fail v.pexp_loc "~search must be a record such as { tag = optional string }"
 
 let loader_label v =
   match v.pexp_desc with
   | Pexp_ident { txt; _ } -> Longident.last_exn txt
   | _ ->
       fail v.pexp_loc
-        "loader must be a value name such as Loaders.issue; its last name labels \
+        "~loader must be a value path such as Loaders.issue; its last name labels \
          the result"
 
 let add_labels loc labels names =
@@ -242,22 +253,22 @@ let parse_name names v =
       | Some first -> fail v.pexp_loc "name %s is used twice (first at line %d)" n (line first)
       | None -> Hashtbl.add names n v.pexp_loc);
       n
-  | _ -> fail v.pexp_loc "name must be a constructor such as Issue"
+  | _ -> fail v.pexp_loc "the route name must be a constructor such as Issue"
 
 let parse_method tag v =
   match v.pexp_desc with
   | Pexp_variant ((("GET" | "POST" | "PUT" | "PATCH" | "DELETE") as m), None) ->
-      if tag = "Action" && m = "GET" then
-        fail v.pexp_loc "an Action cannot use `GET; use `POST, `PUT, `PATCH or `DELETE";
+      if tag = "action" && m = "GET" then
+        fail v.pexp_loc "Router.action cannot use `GET; use `POST, `PUT, `PATCH or `DELETE";
       m
-  | _ -> fail v.pexp_loc "method_ must be one of `GET, `POST, `PUT, `PATCH, `DELETE"
+  | _ -> fail v.pexp_loc "~method_ must be one of `GET, `POST, `PUT, `PATCH, `DELETE"
 
 let parse_redirect segs v =
   let permanent, tv =
     match v.pexp_desc with
     | Pexp_construct ({ txt = Lident "Permanent"; _ }, Some t) -> (true, t)
     | Pexp_construct ({ txt = Lident "Temporary"; _ }, Some t) -> (false, t)
-    | _ -> fail v.pexp_loc "redirect must be (Permanent \"/path\") or (Temporary \"/path\")"
+    | _ -> fail v.pexp_loc "~to_ must be (Permanent \"/path\") or (Temporary \"/path\")"
   in
   let target = string_lit "a redirect target" tv in
   List.iter
@@ -275,7 +286,7 @@ let check_prerender props =
   | Some { pexp_desc = Pexp_construct ({ txt = Lident ("true" | "false"); _ }, None); _ }
   | None ->
       ()
-  | Some v -> fail v.pexp_loc "prerender must be true or false"
+  | Some v -> fail v.pexp_loc "~prerender must be true or false"
 
 let takes_loader levels =
   List.exists (fun l -> List.mem_assoc "loader" l.props) levels
@@ -314,10 +325,12 @@ let read ~server names e =
   in
   let add n = nodes := n :: !nodes in
   let rec walk ctx e =
-    let tag, props, children, loc = element e in
+    let tag, args, props, loc = element e in
     let prop l = List.assoc_opt l props in
     check_prerender props;
-    let leaf () = if children <> [] then fail loc "<%s> takes no children" tag in
+    let name () =
+      parse_name names (unlabelled tag loc "the route name (such as Issue)" args)
+    in
     let own_path () =
       let v = List.assoc "path" props in
       let text = string_lit "path" v in
@@ -336,11 +349,12 @@ let read ~server names e =
       | None -> ([], labels)
     in
     match tag with
-    | "Group" ->
+    | "group" ->
         check_props tag loc props ~required:[ "path" ]
           ~optional:([ "layout"; "loader"; "guard"; "not_found"; "error"; "search" ] @ rules);
+        let children = list_items (unlabelled tag loc "a list of child nodes" args) in
         let text, ploc, segs = own_path () in
-        if has_rest segs then fail ploc "a Group path cannot hold a catch-all";
+        if has_rest segs then fail ploc "a Router.group path cannot hold a catch-all";
         let labels = add_labels ploc ctx.labels (seg_labels segs) |> with_loader in
         let search, labels = with_search labels in
         let levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ] in
@@ -355,26 +369,27 @@ let read ~server names e =
           }
         in
         List.iter (walk ctx) children
-    | "Route" when List.mem_assoc "redirect" props ->
-        leaf ();
-        check_props tag loc props ~required:[ "path"; "redirect" ] ~optional:[];
+    | "redirect" ->
+        (match args with
+        | [] -> ()
+        | v :: _ -> fail v.pexp_loc "Router.redirect takes no unlabelled argument");
+        check_props tag loc props ~required:[ "path"; "to_" ] ~optional:[];
         let text, ploc, segs = own_path () in
         ignore (add_labels ploc ctx.labels (seg_labels segs));
         let segs = ctx.prefix @ segs in
         add
           {
-            kind = parse_redirect segs (List.assoc "redirect" props);
+            kind = parse_redirect segs (List.assoc "to_" props);
             segs;
             path = join ctx.text text;
             loc;
             tag;
             levels = ctx.levels;
           }
-    | "Route" ->
-        leaf ();
-        check_props tag loc props ~required:[ "name"; "path"; "page" ]
+    | "route" ->
+        check_props tag loc props ~required:[ "path"; "page" ]
           ~optional:([ "loader"; "guard"; "search" ] @ rules);
-        let name = parse_name names (List.assoc "name" props) in
+        let name = name () in
         let text, ploc, segs = own_path () in
         let labels = add_labels ploc ctx.labels (seg_labels segs) |> with_loader in
         let search, _ = with_search labels in
@@ -387,12 +402,10 @@ let read ~server names e =
             tag;
             levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
           }
-    | "Endpoint" | "Action" ->
-        leaf ();
-        check_props tag loc props
-          ~required:[ "name"; "path"; "method_"; "handler" ]
+    | "endpoint" | "action" ->
+        check_props tag loc props ~required:[ "path"; "method_"; "handler" ]
           ~optional:("guard" :: rules);
-        let name = parse_name names (List.assoc "name" props) in
+        let name = name () in
         let meth = parse_method tag (List.assoc "method_" props) in
         let text, ploc, segs = own_path () in
         ignore (add_labels ploc ctx.labels (seg_labels segs));
@@ -405,15 +418,18 @@ let read ~server names e =
             tag;
             levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
           }
-    | "Router" -> fail loc "<Router> can only be the root"
+    | "make" -> fail loc "Router.make can only be the root"
     | _ ->
-        fail loc "unknown node <%s>; the nodes are Router, Group, Route, Endpoint and Action"
+        fail loc
+          "unknown node Router.%s; the nodes are Router.make, Router.group, Router.route, \
+           Router.endpoint, Router.action and Router.redirect"
           tag
   in
-  let tag, props, children, loc = element e in
-  if tag <> "Router" then fail loc "the root must be <Router>";
+  let tag, args, props, loc = element e in
+  if tag <> "make" then fail loc "the root must be Router.make";
   check_props tag loc props ~required:[]
     ~optional:([ "layout"; "not_found"; "error"; "guard" ] @ rules);
+  let children = list_items (unlabelled tag loc "a list of child nodes" args) in
   check_prerender props;
   let root = [ level props [] loc ] in
   if server then check_fallback root;
@@ -764,7 +780,7 @@ let find nodes =
        if has [] && root_rest then [] else [ "| _ -> Yuka.Router.Missing" ])
 
 let generate input nodes =
-  if named nodes = [] then fail (Location.in_file input) "Routes.mlx has no named node";
+  if named nodes = [] then fail (Location.in_file input) "the route tree has no named node";
   String.concat "\n" (type_t nodes @ [ "" ] @ href nodes @ [ "" ] @ find nodes) ^ "\n"
 
 let expr e = Pprintast.string_of_expression e
@@ -911,7 +927,7 @@ let uses_req nodes =
       match n.kind with
       | Redirect _ -> false
       | Named _ ->
-          n.tag <> "Route"
+          n.tag <> "route"
           || List.exists
                (fun l -> List.mem_assoc "loader" l.props || List.mem_assoc "guard" l.props)
                n.levels)
@@ -943,7 +959,7 @@ let server_arm ~shared ~rule ~fallback n =
       let rules = rule (rules_text n.levels) in
       let guards = guards_text n.levels in
       let body =
-        if n.tag = "Route" then
+        if n.tag = "route" then
           let parents = List.filter (fun l -> l != leaf) n.levels in
           let fb =
             if fallback_uses_params parents then
@@ -991,7 +1007,7 @@ let server_arm ~shared ~rule ~fallback n =
             "Yuka.Server.Handler";
             "  {";
             sprintf "    rules = %s;" rules;
-            sprintf "    same_origin = %b;" (n.tag = "Action");
+            sprintf "    same_origin = %b;" (n.tag = "action");
             sprintf "    guards = %s;" guards;
             sprintf "    run = (fun () -> %s req%s);"
               (expr (Option.get (prop "handler" leaf)))
@@ -1001,7 +1017,7 @@ let server_arm ~shared ~rule ~fallback n =
       in
       sprintf "| %s ->" head :: indent 4 body
 
-let generate_server ~shared ~prelude ~digest (nodes, root) =
+let generate_server ~shared ~digest (nodes, root) =
   let rule, rules = interned "rules" in
   let fallback, fallbacks = interned "fallback" in
   let static_layers =
@@ -1012,7 +1028,7 @@ let generate_server ~shared ~prelude ~digest (nodes, root) =
          @ List.concat_map
              (fun n ->
                match n.kind with
-               | Named _ when n.tag = "Route" -> loader_free_layers n.levels
+               | Named _ when n.tag = "route" -> loader_free_layers n.levels
                | _ -> [])
              nodes))
   in
@@ -1020,8 +1036,7 @@ let generate_server ~shared ~prelude ~digest (nodes, root) =
   let arms = List.concat_map (server_arm ~shared ~rule ~fallback) nodes in
   let req = if uses_req nodes then "req" else "_req" in
   String.concat "\n"
-    ((if prelude = "" then [] else [ prelude; "" ])
-    @ List.map (fun (n, t) -> sprintf "let %s =\n  %s\n" n t) (rules ())
+    (List.map (fun (n, t) -> sprintf "let %s =\n  %s\n" n t) (rules ())
     @ List.map
         (fun l -> sprintf "let %s : Yuka.Server.layer =\n  %s\n" (layer_name l) (layer_binding l))
         static_layers
@@ -1045,25 +1060,12 @@ let generate_server ~shared ~prelude ~digest (nodes, root) =
       ])
   ^ "\n"
 
-let routes_expr input structure =
-  let found =
-    List.concat_map
-      (fun si ->
-        match si.pstr_desc with
-        | Pstr_value (_, vbs) ->
-            List.filter_map
-              (fun vb ->
-                match vb.pvb_pat.ppat_desc with
-                | Ppat_var { txt = "routes"; _ } -> Some vb.pvb_expr
-                | _ -> None)
-              vbs
-        | _ -> [])
-      structure
-  in
-  match found with
-  | [ e ] -> e
-  | [] -> fail (Location.in_file input) "no let routes = <Router>...</Router>"
-  | _ :: e :: _ -> fail e.pexp_loc "let routes is defined twice"
+let manifest source structure =
+  let only = "the route file must hold one expression, Router.make ..., and nothing else" in
+  match structure with
+  | [ { pstr_desc = Pstr_eval (e, _); _ } ] -> e
+  | [] -> fail (Location.in_file source) "%s" only
+  | { pstr_desc = Pstr_eval _; _ } :: si :: _ | si :: _ -> fail si.pstr_loc "%s" only
 
 let report (loc : Location.t) msg =
   let s = loc.loc_start and e = loc.loc_end in
@@ -1077,46 +1079,30 @@ let report (loc : Location.t) msg =
   Printf.eprintf "Error: %s\n" msg
 
 let usage =
-  "usage: yuka-routes --shared FILE.ast\n       yuka-routes --server --shared-module MODULE FILE.ast"
+  "usage: yuka-routes --shared --source FILE < FILE\n\
+  \       yuka-routes --server --shared-module MODULE --source FILE < FILE"
 
-let defines_routes si =
-  match si.pstr_desc with
-  | Pstr_value (_, vbs) ->
-      List.exists
-        (fun vb -> match vb.pvb_pat.ppat_desc with Ppat_var { txt = "routes"; _ } -> true | _ -> false)
-        vbs
-  | _ -> false
-
-let rec prelude = function
-  | si :: rest when not (defines_routes si) -> si :: prelude rest
-  | _ -> []
-
-let run ~server file output =
-  match Ast_io.read_binary file with
-  | Error e ->
-      prerr_endline ("yuka-routes: " ^ e);
-      exit 2
-  | Ok ast -> (
-      match Ast_io.get_ast ast with
-      | Intf _ ->
-          prerr_endline "yuka-routes: expected an implementation (Routes.mlx)";
-          exit 2
-      | Impl structure -> (
-          let input = Ast_io.get_input_name ast in
-          try
-            let e = routes_expr input structure in
-            print_string (output input structure e (read ~server (Hashtbl.create 16) e))
-          with Fail (loc, msg) ->
-            report loc msg;
-            exit 1))
+let run ~server source output =
+  let lexbuf = Lexing.from_channel stdin in
+  Location.init lexbuf source;
+  try
+    let e = manifest source (Parse.implementation lexbuf) in
+    print_string (output e (read ~server (Hashtbl.create 16) e))
+  with
+  | Fail (loc, msg) ->
+      report loc msg;
+      exit 1
+  | exn when Option.is_some (Location.Error.of_exn exn) ->
+      Location.report_exception Format.err_formatter exn;
+      exit 1
 
 let () =
   match Array.to_list Sys.argv with
-  | [ _; "--shared"; file ] -> run ~server:false file (fun input _ _ (nodes, _) -> generate input nodes)
-  | [ _; "--server"; "--shared-module"; shared; file ] when is_module_path shared ->
-      run ~server:true file (fun _ structure e tree ->
+  | [ _; "--shared"; "--source"; source ] ->
+      run ~server:false source (fun _ (nodes, _) -> generate source nodes)
+  | [ _; "--server"; "--shared-module"; shared; "--source"; source ] when is_module_path shared ->
+      run ~server:true source (fun e tree ->
           generate_server ~shared
-            ~prelude:(String.trim (Pprintast.string_of_structure (prelude structure)))
             ~digest:(Digest.to_hex (Digest.string (Pprintast.string_of_expression e)))
             tree)
   | _ ->

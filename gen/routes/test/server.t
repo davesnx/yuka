@@ -1,47 +1,45 @@
-Server output errors point into Routes.mlx
+Server output errors point into Routes.ml
 
-  $ gen () { cat > Routes.mlx; mlx-pp Routes.mlx > routes.ast && yuka-routes --server --shared-module Shared.Routes routes.ast > out.ml; }
+  $ gen () { cat > Routes.ml; yuka-routes --server --shared-module Shared.Routes --source Routes.ml < Routes.ml > out.ml; }
 
 not_found under a layout that takes a loader result
 
   $ gen <<'EOF'
-  > let routes =
-  >   <Router>
-  >     <Group path="/issue/:id<string>" loader=L.issue layout=Layouts.issue
-  >       not_found=P.missing>
-  >       <Route name=Issue path="/" page=P.issue />
-  >     </Group>
-  >   </Router>
+  > Router.make
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:L.issue ~layout:Layouts.issue
+  >       ~not_found:P.missing
+  >       [ Router.route Issue ~path:"/" ~page:P.issue ];
+  >   ]
   > EOF
-  File "Routes.mlx", line 4, characters 16-25:
+  File "Routes.ml", line 4, characters 17-26:
   Error: not_found here renders inside the layout at line 3, which takes a loader result; declare not_found on a node above the loader
   [1]
 
 error under a layout below a loader
 
   $ gen <<'EOF'
-  > let routes =
-  >   <Router layout=Layouts.root>
-  >     <Group path="/issue/:id<string>" loader=L.issue>
-  >       <Group path="/edit" layout=Layouts.edit error=P.error>
-  >         <Route name=Edit path="/" page=P.edit />
-  >       </Group>
-  >     </Group>
-  >   </Router>
+  > Router.make ~layout:Layouts.root
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:L.issue
+  >       [
+  >         Router.group ~path:"/edit" ~layout:Layouts.edit ~error:P.error
+  >           [ Router.route Edit ~path:"/" ~page:P.edit ];
+  >       ];
+  >   ]
   > EOF
-  File "Routes.mlx", line 4, characters 52-59:
-  Error: error here renders inside the layout at line 4, which takes a loader result; declare error on a node above the loader
+  File "Routes.ml", line 5, characters 63-70:
+  Error: error here renders inside the layout at line 5, which takes a loader result; declare error on a node above the loader
   [1]
 
 not_found below a loader but outside data layouts is fine
 
   $ gen <<'EOF'
-  > let routes =
-  >   <Router layout=Layouts.root>
-  >     <Group path="/issue/:id<string>" loader=L.issue not_found=P.missing>
-  >       <Route name=Issue path="/" page=P.issue />
-  >     </Group>
-  >   </Router>
+  > Router.make ~layout:Layouts.root
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:L.issue ~not_found:P.missing
+  >       [ Router.route Issue ~path:"/" ~page:P.issue ];
+  >   ]
   > EOF
   $ grep 'not_found =' out.ml
       not_found = Yuka.Server.default_not_found;
@@ -51,14 +49,13 @@ not_found and error get the params of the path of their node, so no param
 there can be named target or status
 
   $ gen <<'EOF'
-  > let routes =
-  >   <Router>
-  >     <Group path="/t/:target<string>" not_found=P.missing>
-  >       <Route name=T path="/" page=P.t />
-  >     </Group>
-  >   </Router>
+  > Router.make
+  >   [
+  >     Router.group ~path:"/t/:target<string>" ~not_found:P.missing
+  >       [ Router.route T ~path:"/" ~page:P.t ];
+  >   ]
   > EOF
-  File "Routes.mlx", line 3, characters 47-56:
+  File "Routes.ml", line 3, characters 55-64:
   Error: not_found takes ~target, so no param of its path can be named target
   [1]
 
@@ -66,14 +63,14 @@ A fallback inside a param group with a layout is built in the arm, where
 the param is bound
 
   $ gen <<'EOF'
-  > let routes =
-  >   <Router>
-  >     <Group path="/t/:team<string>" layout=L.team>
-  >       <Group path="/x" not_found=NF.page>
-  >         <Route name=X path="/" page=P.x />
-  >       </Group>
-  >     </Group>
-  >   </Router>
+  > Router.make
+  >   [
+  >     Router.group ~path:"/t/:team<string>" ~layout:L.team
+  >       [
+  >         Router.group ~path:"/x" ~not_found:NF.page
+  >           [ Router.route X ~path:"/" ~page:P.x ];
+  >       ];
+  >   ]
   > EOF
   $ grep -c '^let fallback' out.ml
   1
@@ -93,18 +90,15 @@ the param is bound
 The generated code names its request req
 
   $ gen <<'EOF'
-  > let routes =
-  >   <Router>
-  >     <Route name=A path="/" page=P.a loader=L.req />
-  >   </Router>
+  > Router.make [ Router.route A ~path:"/" ~page:P.a ~loader:L.req ]
   > EOF
-  File "Routes.mlx", line 3, characters 43-48:
+  File "Routes.ml", line 1, characters 57-62:
   Error: label req is reserved by the generated code
   [1]
 
 The shared module must be a module path
 
-  $ yuka-routes --server --shared-module shared routes.ast
-  usage: yuka-routes --shared FILE.ast
-         yuka-routes --server --shared-module MODULE FILE.ast
+  $ yuka-routes --server --shared-module shared --source Routes.ml < Routes.ml
+  usage: yuka-routes --shared --source FILE < FILE
+         yuka-routes --server --shared-module MODULE --source FILE < FILE
   [2]

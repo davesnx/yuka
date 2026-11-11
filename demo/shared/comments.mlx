@@ -54,10 +54,10 @@ let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Com
     <div class_="comment-box">
       <textarea class_="comment-input" placeholder="Leave a comment" rows=3
         value=(State.get draft)
-        onInput=(fun e -> State.set draft (Event.target_value e)) />
+        on_input=(fun e -> State.set draft (Event.target_value e)) />
       (match State.get error with
        | Some m -> <p class_="error">(Yuka.text m)</p>
        | None -> Yuka.empty)
-      <button class_="button primary" disabled=(State.get draft = "") onClick=(fun _ -> submit ())>"Comment"</button>
+      <button class_="button primary" disabled=(State.get draft = "") on_click=(fun _ -> submit ())>"Comment"</button>
     </div>
   </div>

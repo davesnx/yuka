@@ -18,10 +18,10 @@ let%client make () =
               open_ ()
           | _ -> ()));
   <div class_="new-issue">
-    <button class_="new-issue-button" onClick=(fun _ -> open_ ())>"+ New issue (c)"</button>
+    <button class_="new-issue-button" on_click=(fun _ -> open_ ())>"+ New issue (c)"</button>
     (if State.get Ui.dialog_open then
        <div class_="dialog-wrap">
-         <div class_="backdrop dim" onClick=(fun _ -> close ()) />
+         <div class_="backdrop dim" on_click=(fun _ -> close ()) />
          <div class_="dialog">
            <h2>"New issue"</h2>
            <Yuka.Form action=Actions.create_issue
@@ -32,7 +32,7 @@ let%client make () =
                <div>
                  <Views.Issue_form form />
                  <div class_="dialog-actions">
-                   <button class_="button" type_=`button onClick=(fun _ -> close ())>"Cancel"</button>
+                   <button class_="button" type_=`button on_click=(fun _ -> close ())>"Cancel"</button>
                    (Yuka.hole (fun () ->
                       <button class_="button primary" type_=`submit disabled=(Form.pending form)>"Create issue"</button>))
                  </div>

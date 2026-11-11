@@ -1,18 +1,23 @@
 (library
  (name cycle_server)
- (libraries yuka cycle_shared forms_shared))
+ (libraries yuka cycle_shared forms_shared)
+ (flags
+  (:standard -open Cycle_shared)))
 
 (rule
  (targets routes_server.ml)
  (action
   (with-stdout-to
    routes_server.ml
-   (run
-    %{bin:yuka-routes}
-    --server
-    --shared-module
-    Cycle_shared.Routes
-    %{dep:../shared/routes.ast}))))
+   (with-stdin-from
+    %{dep:../Routes.ml}
+    (run
+     %{bin:yuka-routes}
+     --server
+     --shared-module
+     Cycle_shared.Routes
+     --source
+     %{dep:../Routes.ml})))))
 
 (rule
  (alias runtest)

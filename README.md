@@ -31,7 +31,7 @@ open Yuka
 
 let%client make ~(initial : int) () =
   let n = State.make initial in
-  <button onClick=(fun _ -> State.update n succ)>
+  <button on_click=(fun _ -> State.update n succ)>
     "Clicks: "
     (Yuka.int (State.get n))
   </button>
@@ -72,7 +72,7 @@ Another server needs one small adapter.
   anything else raises an exception (in the browser, the DOM refuses it).
 - An attribute name that is empty, starts with `on` (any case), or has a
   space, a control character, `"`, `'`, `<`, `>`, `/` or `=` raises an
-  exception. Event handlers are functions: `onclick=(fun event -> ...)`
+  exception. Event handlers are functions: `on_click=(fun event -> ...)`
   in `.mlx` or `Yuka.on`; a string handler in `.mlx` does not build.
 - `Yuka.Browser.navigate` does nothing with a `javascript:`, `vbscript:`
   or `data:` URL (a dev build logs it once). A form follows only a

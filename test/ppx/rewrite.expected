@@ -60,7 +60,7 @@ let __yuka_template_rewrite_4 =
 let optional_handler =
   Yuka.Template.instance __yuka_template_rewrite_4
     [|(Yuka.Template.attribute_option
-         (Stdlib.Option.map (Yuka.on "input") onInput))|]
+         (Stdlib.Option.map (Yuka.on "input") on_input))|]
 let __yuka_template_rewrite_5 =
   Yuka.Template.make
     (Yuka.Template.element "p" [] [Yuka.Template.text "hello"])
