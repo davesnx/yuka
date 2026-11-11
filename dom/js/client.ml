@@ -502,7 +502,7 @@ and mount_each :
     type a.
     pos ->
     bool ->
-    (unit -> a list) ->
+    (unit -> a array) ->
     (a -> string) ->
     (a -> a -> bool) ->
     (a -> node) ->
@@ -534,13 +534,11 @@ and mount_each :
     { key = k; value = v; first; last; dispose }
   in
   let entries = ref [||] in
-  let rec initial = function
-    | [] -> ()
-    | v :: rest ->
-        push !entries (make_entry pos (key v) v);
-        initial rest
-  in
-  initial (State.peek source);
+  let first = State.peek source in
+  for i = 0 to Array.length first - 1 do
+    let v = get first i in
+    push !entries (make_entry pos (key v) v)
+  done;
   let stop = if owned then (drop_to_end pos; Js.null) else some (comment pos "]") in
   let clear_all () =
     if start == Js.null then Web.clear pos.parent ""
@@ -551,21 +549,18 @@ and mount_each :
       (get es i).dispose ()
     done
   in
-  let reconcile list =
-    let items = [||] and keys = [||] in
+  let reconcile source =
+    let n = Array.length source in
+    let items = alloc n and keys = alloc n in
     let wanted = Web.table () in
-    let rec collect = function
-      | [] -> ()
-      | v :: rest ->
-          let k = key v in
-          if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
-          Web.table_set wanted k true;
-          push items v;
-          push keys k;
-          collect rest
-    in
-    collect list;
-    let n = Array.length items in
+    for j = 0 to n - 1 do
+      let v = get source j in
+      let k = key v in
+      if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
+      Web.table_set wanted k true;
+      set items j v;
+      set keys j k
+    done;
     let es = !entries in
     let old = Web.table () in
     let removed = [||] in

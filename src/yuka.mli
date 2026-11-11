@@ -467,12 +467,17 @@ val on : string -> (Event.t -> unit) -> client attribute
 val each :
   ?equal:('a -> 'a -> bool) ->
   key:('a -> string) ->
-  (unit -> 'a list) ->
+  (unit -> 'a array) ->
   ('a -> client element) ->
   client element
-(** A keyed list. The list function is tracked as a hole. An item whose key
+(** A keyed list. The array function is tracked as a hole. An item whose key
     stays keeps its DOM nodes; it renders again when [equal] says its value
-    changed. Default [equal]: identity, as in {!State.make}. *)
+    changed. Default [equal]: identity, as in {!State.make}. Two items with
+    the same key raise [Failure] on an update. [each] reads the array only
+    while it renders: it keeps the items, not the array, so a later write
+    into that array changes nothing on the page. To show a change, give a
+    new array ({!State.set} with the same array is no change). For a list,
+    [fun () -> Array.of_list (State.get items)]. *)
 
 type stylesheet
 (** A CSS file of a module, made by [module Css = [%yuka.css "file.css"]].
@@ -655,7 +660,7 @@ module Private : sig
     | Slot of slot_data
     | Template of { template : template; parts : part array }
     | Each : {
-        items : unit -> 'a list;
+        items : unit -> 'a array;
         key : 'a -> string;
         equal : 'a -> 'a -> bool;
         render : 'a -> node;

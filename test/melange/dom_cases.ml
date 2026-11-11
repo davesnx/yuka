@@ -218,7 +218,7 @@ let direct_handler () =
 
 let each_item_reads_untracked () =
   let other = State.make 0 in
-  let items = State.make [ "a" ] in
+  let items = State.make [| "a" |] in
   let hole_runs = ref 0 in
   let c = container "" in
   let dispose =
@@ -235,7 +235,7 @@ let each_item_reads_untracked () =
   check "first" "1" (ints !hole_runs);
   State.set other 1;
   check "enclosing hole did not re-run" "1" (ints !hole_runs);
-  State.set items [ "a"; "b" ];
+  State.set items [| "a"; "b" |];
   State.set other 2;
   check "still not after an update" "1" (ints !hole_runs);
   check "items render" "a0,b1" (texts c "li");
@@ -338,7 +338,7 @@ let order c = texts c "li"
 
 let each_identity_default () =
   let a = ("a", "A") and b = ("b", "B") in
-  let items = State.make [ a; b ] in
+  let items = State.make [| a; b |] in
   let renders = ref [] in
   let c = container "" in
   let dispose =
@@ -354,17 +354,17 @@ let each_identity_default () =
   in
   let node k = query c ("[data-key=" ^ k ^ "]") in
   let li_a = node "a" in
-  State.set items [ b; a ];
+  State.set items [| b; a |];
   check "same items moved, not rendered" "a,b" (String.concat "," (List.rev !renders));
   same "a kept" li_a (node "a");
-  State.set items [ ("b", "B"); a ];
+  State.set items [| ("b", "B"); a |];
   check "a new tuple with equal contents renders again" "a,b,b"
     (String.concat "," (List.rev !renders));
   check "order" "B,A" (order c);
   dispose ()
 
 let keyed_list () =
-  let items = State.make [ ("a", "A"); ("b", "B"); ("c", "C"); ("d", "D") ] in
+  let items = State.make [| ("a", "A"); ("b", "B"); ("c", "C"); ("d", "D") |] in
   let log = ref [] in
   let c = container "" in
   let dispose =
@@ -375,28 +375,28 @@ let keyed_list () =
   let node k = query c ("[data-key=" ^ k ^ "]") in
   let a, b, cc, d = (node "a", node "b", node "c", node "d") in
   check "start" "A,B,C,D" (order c);
-  State.set items [ ("d", "D"); ("c", "C"); ("b", "B"); ("a", "A") ];
+  State.set items [| ("d", "D"); ("c", "C"); ("b", "B"); ("a", "A") |];
   check "reversed" "D,C,B,A" (order c);
   same "a kept" a (node "a");
   same "b kept" b (node "b");
   same "c kept" cc (node "c");
   same "d kept" d (node "d");
-  State.set items [ ("d", "D"); ("x", "X"); ("b", "B"); ("a", "A") ];
+  State.set items [| ("d", "D"); ("x", "X"); ("b", "B"); ("a", "A") |];
   check "removed and inserted" "D,X,B,A" (order c);
   check "removed owner disposed" "gone c" (String.concat "," !log);
   same "b still kept" b (node "b");
-  State.set items [ ("d", "D"); ("x", "X"); ("b", "B2"); ("a", "A") ];
+  State.set items [| ("d", "D"); ("x", "X"); ("b", "B2"); ("a", "A") |];
   check "value changed" "D,X,B2,A" (order c);
   same "a kept after change" a (node "a");
   same "d kept after change" d (node "d");
   check "re-render disposed old item" "gone b,gone c" (String.concat "," !log);
-  State.set items [];
+  State.set items [||];
   check "emptied" "" (order c);
   check "all disposed" 
     "gone a,gone b,gone x,gone d,gone b,gone c"
     (String.concat "," !log);
   check "no markers" "<ul></ul>" (html c);
-  State.set items [ ("a", "A") ];
+  State.set items [| ("a", "A") |];
   check "refilled" "A" (order c);
   dispose ()
 
@@ -409,7 +409,7 @@ let keyed_list_shuffle () =
         lower "ul" []
           [
             each ~key:Fun.id
-              (fun () -> State.get items)
+              (fun () -> Array.of_list (State.get items))
               (fun id -> li id [ text id ]);
           ])
   in
@@ -426,6 +426,36 @@ let keyed_list_shuffle () =
     ];
   same "g kept" (List.nth before 6) (node "g");
   same "a kept" (List.hd before) (node "a");
+  dispose ()
+
+let each_source_mutated_in_place () =
+  let first = [| "a"; "b"; "c" |] in
+  let items = State.make first in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        lower "ul" [] [ each ~key:Fun.id (fun () -> State.get items) (fun id -> li id [ text id ]) ])
+  in
+  let node k = query c ("[data-key=" ^ k ^ "]") in
+  let a, b, cc = (node "a", node "b", node "c") in
+  first.(0) <- "x";
+  check "a write into the array is not seen" "a,b,c" (order c);
+  State.set items [| "a"; "b"; "c"; "d" |];
+  check "the previous state is the rendered rows" "a,b,c,d" (order c);
+  same "a kept" a (node "a");
+  let swapped = Array.copy (State.peek items) in
+  swapped.(1) <- "c";
+  swapped.(2) <- "b";
+  State.set items swapped;
+  check "swap" "a,c,b,d" (order c);
+  same "b moved" b (node "b");
+  same "c moved" cc (node "c");
+  swapped.(0) <- "z";
+  State.set items swapped;
+  check "the same array again is no change" "a,c,b,d" (order c);
+  State.set items (Array.copy swapped);
+  check "a copy of it is" "z,c,b,d" (order c);
+  same "c kept" cc (node "c");
   dispose ()
 
 let adjacent_texts_hydrate () =
@@ -453,7 +483,7 @@ let adjacent_texts_hydrate () =
 
 let hydrate_server_output () =
   let n = State.make 1 in
-  let items = State.make [ ("a", "A"); ("b", "B") ] in
+  let items = State.make [| ("a", "A"); ("b", "B") |] in
   let tree () =
     div [ hole_attr "title" (fun () -> Some (ints (State.get n))) ]
       [
@@ -478,7 +508,7 @@ let hydrate_server_output () =
   same "li a" li_a (query c "[data-key=a]");
   click (query c "button");
   check "title updated" "2" (Option.value (get_attribute root "title") ~default:"");
-  State.set items [ ("b", "B"); ("c", "C"); ("a", "A") ];
+  State.set items [| ("b", "B"); ("c", "C"); ("a", "A") |];
   check "list updated" "B,C,A" (order c);
   same "li a moved not recreated" li_a (query c "[data-key=a]");
   same "li b kept" li_b (query c "[data-key=b]");
@@ -850,7 +880,7 @@ let template_works () =
 let template_cached () =
   count_templates ();
   let template = Private.template row_shape in
-  let items = State.make [ 1; 2; 3 ] in
+  let items = State.make [| 1; 2; 3 |] in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
@@ -862,7 +892,7 @@ let template_cached () =
           ])
   in
   check "three rows" "3" (ints (Array.length (query_all c "li")));
-  State.set items [ 1; 2; 3; 4; 5 ];
+  State.set items [| 1; 2; 3; 4; 5 |];
   check "five rows" "5" (ints (Array.length (query_all c "li")));
   check "one template element for the template" "1" (ints (templates_created ()));
   dispose ()
@@ -892,7 +922,7 @@ let template_timing () =
           lower "ul" []
             [
               each ~key:ints
-                (fun () -> List.init rows Fun.id)
+                (fun () -> Array.init rows Fun.id)
                 (fun i -> row ~wrap (State.make i) (State.make "t"));
             ])
     in
@@ -1027,7 +1057,7 @@ let only_child_hole_hydrates () =
 let list_clear_disposes () =
   let run sibling =
     let gone = ref 0 in
-    let items = State.make [ 1; 2; 3; 4 ] in
+    let items = State.make [| 1; 2; 3; 4 |] in
     let c = container "" in
     let dispose =
       Yuka.Private.render (as_element c) (fun () ->
@@ -1039,13 +1069,13 @@ let list_clear_disposes () =
                    li (ints i) [ text (ints i) ]) ]
             @ if sibling then [ lower "i" [] [] ] else []))
     in
-    State.set items [];
+    State.set items [||];
     check "every row disposed" "4" (ints !gone);
     check "rows removed" "" (order c);
     let after_clear = html c in
-    State.set items [ 5; 6 ];
+    State.set items [| 5; 6 |];
     check "refilled" "5,6" (order c);
-    State.set items [ 7 ];
+    State.set items [| 7 |];
     check "replaced" "7" (order c);
     check "replaced rows disposed" "6" (ints !gone);
     dispose ();
@@ -1056,7 +1086,7 @@ let list_clear_disposes () =
   check "with a sibling: markers stay" "<ul><!--[--><!--]--><i></i></ul>" (run true)
 
 let row_root_removed_in_one_call () =
-  let items = State.make [ "a"; "b"; "c" ] in
+  let items = State.make [| "a"; "b"; "c" |] in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
@@ -1068,13 +1098,13 @@ let row_root_removed_in_one_call () =
   in
   check "no row markers" {|<ul><li data-key="a">a</li><li data-key="b">b</li><li data-key="c">c</li></ul>|}
     (html c);
-  State.set items [ "a"; "c" ];
+  State.set items [| "a"; "c" |];
   check "one removed" {|<ul><li data-key="a">a</li><li data-key="c">c</li></ul>|} (html c);
-  State.set items [ "c"; "f"; "a" ];
+  State.set items [| "c"; "f"; "a" |];
   check "fragment row has markers"
     {|<ul><li data-key="c">c</li><!--[-->f1<li data-key="f"></li><!--]--><li data-key="a">a</li></ul>|}
     (html c);
-  State.set items [ "f"; "a" ];
+  State.set items [| "f"; "a" |];
   check "moved range" {|<ul><!--[-->f1<li data-key="f"></li><!--]--><li data-key="a">a</li></ul>|}
     (html c);
   dispose ()
@@ -1091,7 +1121,7 @@ let template_select_value () =
     Yuka.Private.render (as_element c) (fun () ->
         Template.(
           instance t
-            [| child (each ~key:Fun.id (fun () -> [ "a"; "b"; "c" ]) opt) |]))
+            [| child (each ~key:Fun.id (fun () -> [| "a"; "b"; "c" |]) opt) |]))
   in
   check "value set after options mount" "b" (select_value (query c "select"));
   dispose ()
@@ -1331,7 +1361,7 @@ let css_hydrate_rows () =
   clear_sheets ();
   let x = stylesheet "/_yuka/css/x.css" in
   let tree () =
-    lower "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun k -> use_css x (li k [ text k ])) ]
+    lower "ul" [] [ each ~key:Fun.id (fun () -> [| "a"; "b" |]) (fun k -> use_css x (li k [ text k ])) ]
   in
   let c = container (Private.render_html (fun () -> Private.node (tree ()))) in
   let server_html = html c in
@@ -1603,6 +1633,7 @@ let all =
     ("dom keyed list", keyed_list);
     ("dom each compares items by identity", each_identity_default);
     ("dom keyed list shuffle", keyed_list_shuffle);
+    ("dom each source mutated in place", each_source_mutated_in_place);
     ("dom adjacent and empty texts hydrate", adjacent_texts_hydrate);
     ("dom hydrate server output", hydrate_server_output);
     ("css: two uses add one link", css_render);

@@ -1273,6 +1273,27 @@ the budget in `bench/size/budget.json`.
   of every kind, so it keeps all the mount code and also pays for the four
   references, their default errors and the `use_*` calls.
 
+### `each` over arrays (2026-11-11)
+
+- `Yuka.each` takes `unit -> 'a array` (it took `unit -> 'a list`). The
+  reconcile works on arrays: with a list, an app that changes rows by
+  index (the keyed benchmark: swap, append, remove) converts between list
+  and array and links `Stdlib.List` code for it.
+- No list form: `Array.of_list` at the call site does the same, and only
+  apps that call it pay for it.
+- The reconcile copies the items and their keys into its own arrays, then
+  renders. The previous state is the rows it rendered (key, value, nodes),
+  never the caller's array. So a write into an array after `each` read it
+  changes nothing; a new array shows the change. `State.set` with the same
+  array is no change (default equality is identity).
+- The first render does not check keys; an update with two equal keys
+  raises `Failure "Yuka.each: duplicate key K"` (unchanged).
+- Size: the keyed app goes from 24,482 B, 8,698 B gzip to 23,171 B,
+  8,287 B gzip (library and app: -359 B; the app's append and copy through
+  `Js.Array` in place of `Stdlib.Array`: -52 B). The demo keeps its lists
+  and calls `Array.of_list`: all chunks 46,605 -> 46,660 B gzip, start set
+  23,806 -> 23,864 B.
+
 ## Pages pay for the features of their islands (2026-11-11)
 
 Goal: the JavaScript that a page with islands loads at start holds only

@@ -26,7 +26,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     | Slot of slot
     | Template of { template : template; parts : part array }
     | Each : {
-        items : unit -> 'a list;
+        items : unit -> 'a array;
         key : 'a -> string;
         equal : 'a -> 'a -> bool;
         render : 'a -> node;
