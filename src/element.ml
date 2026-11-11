@@ -22,6 +22,7 @@ let lower tag attrs children =
 let log = Types.log
 
 let valid name =
+  Client.use_url_check ();
   if Web.in_browser && not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ name)
 
 let url_attr _tag name value =

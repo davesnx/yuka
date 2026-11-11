@@ -41,3 +41,8 @@ val use_async : unit -> unit
     [Action.send] calls [use_actions] and a [Codec.async] reference calls
     [use_async], so that the action transport and the reader of streamed
     async values are linked only when the app uses them. *)
+
+val use_url_check : unit -> unit
+(** Links the URL check of the attributes the client sets. {!Yuka.attr},
+    {!Yuka.hole_attr} (and their ppx forms) and [use_element] call it.
+    Without it, setting a URL attribute raises [Failure]. *)

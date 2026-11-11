@@ -213,10 +213,16 @@ let lis a =
   done;
   keep
 
+let url_hook : (string -> string -> string -> string [@u]) ref =
+  ref (fun [@u] tag name v ->
+      if Url.checked ~tag name then
+        failwith ("Yuka: no URL check for " ^ name ^ " of " ^ tag ^ ": the attribute was made without Yuka.attr, Yuka.hole_attr or Yuka.lower")
+      else v)
+
 let set_attr svg el name value =
   let value =
     match value with
-    | Some v -> Some (Url.check ~tag:(Web.lowercase (Web.local_name el)) ~log:Types.log (Web.lowercase name) v)
+    | Some v -> Some ((!url_hook) (Web.lowercase (Web.local_name el)) (Web.lowercase name) v [@u])
     | None -> None
   in
   match name with
@@ -661,7 +667,10 @@ let mount_await pos async loading failed render =
 let mount_catch pos last client =
   mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
 
+let use_url_check () = url_hook := fun [@u] tag name v -> Url.check ~tag ~log:Types.log name v
+
 let use_element () =
+  use_url_check ();
   element_hook := fun [@u] pos tag attrs children -> mount_element pos tag attrs children
 
 let use_await () =

@@ -19,6 +19,7 @@ let stop () = ()
 let stop_within _ = ()
 let on_error : (string -> unit) ref = ref ignore
 let use_element () = ()
+let use_url_check () = ()
 let use_await () = ()
 let use_slot () = ()
 let use_catch () = ()

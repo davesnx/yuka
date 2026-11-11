@@ -4,6 +4,7 @@
 
 ### yuka
 
+- The client links the URL check of attributes only when the app makes an attribute that can carry a URL (`Yuka.attr`, `Yuka.hole_attr`, `Yuka.lower`, hydration or a template built node by node); the rule is unchanged, and a URL attribute that reaches the DOM without it raises `Failure`. The keyed benchmark app goes from 8,698 B to 8,373 B gzip (@davesnx)
 - A page with islands loads the code of `Codec`, `Status`, `Remote`, `Live` and `Form` only in the chunks of the islands that use them, and the action transport only when an island calls an action; `scripts/bundle.ts` marks the library files as free of side effects. `make size` prints the JavaScript that a one-island page, the demo start and each demo page load (@davesnx)
 - Breaking: `Yuka.render` is the one client start and replaces `Yuka.mount` and `Yuka.Client.render`. `Yuka.render ~islands ()` starts the islands and navigation (`yuka.ppx` rewrites a bare `~islands` into `~islands:Yuka_islands.registry`); `Yuka.render ~root:(container, app) ()` builds a client-only tree; `Yuka.unmount ()` stops both (@davesnx)
 - Security: a form redirect to an absolute URL must be `http:` or `https:` as well as on the request `Host` (`javascript://HOST/...` and `data://HOST/...` were accepted) (@davesnx)

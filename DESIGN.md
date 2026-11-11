@@ -1273,6 +1273,48 @@ the budget in `bench/size/budget.json`.
   of every kind, so it keeps all the mount code and also pays for the four
   references, their default errors and the `use_*` calls.
 
+### URL check per app (2026-11-11)
+
+- `Client.set_attr` calls `url_hook` in place of `Url.check`.
+  `Client.use_url_check` sets it to `Url.check ~tag ~log:Types.log`, the
+  same call as before. Installers: `Element.valid`, which `attr`,
+  `url_attr`, `hole_attr` and `url_hole_attr` call, and `use_element`
+  (so `lower`, `hydrate`, `Template.make`, `template_of_shape` and
+  `Private.expand`). The unchecked constructors do not call it.
+- The default is not a pass-through: when `Url.checked ~tag name` is true
+  (every name and tag that `Url.check` can change), it raises
+  `Failure "Yuka: no URL check for <name> of <tag>: ..."`; otherwise it
+  returns the value, which is what `Url.check` returns for such a name.
+  So a broken installer rule can make an app raise, never set an unchecked
+  URL.
+- Why every URL attribute meets an installer: a `Static` or `Dynamic`
+  attribute comes from a constructor or from `Template.expand` (fixed
+  attributes), from `Form` (through `lower`), or from server-only code
+  (`use_css` on the server, `Cycle`). The checked constructors install.
+  `Template.expand` runs only after `hydrate`, `Template.make`,
+  `template_of_shape` or `Private.expand` set the expander, and all of them
+  call `use_element`. The unchecked constructors refuse every URL name and
+  `srcdoc` (`Web.refuse_url_name`, unchanged, in all builds); the
+  remaining names (`values`, `to`, `from`, `by`) are URLs only on SVG
+  animation elements, which the ppx gives the checked constructors. A
+  hand-written `attr_unchecked "to"` on an `animate` made with `lower` is
+  checked (`lower` installs); in a template clone with no other
+  installer, it raises.
+- Fixed attributes in cloned template HTML never go through `set_attr`:
+  the ppx checks them at build time and `template_of_shape` with
+  `Url.check` directly, as before. The server printer still calls
+  `Url.check` directly.
+- Checks: `test/mount_hooks` has one process per installer
+  (`url_attr_only`, `url_hole_attr_only`, `url_lower_only`,
+  `url_hydrate_only`, `url_expand_only`, `url_make_only`,
+  `url_shape_only`) that blocks the ticket 33 cases with only that
+  installer, and `url_unset`, where a URL attribute with no installer
+  raises and a non-URL one is set.
+- Size: the keyed app goes from 24,482 B, 8,698 B gzip to 23,453 B,
+  8,373 B gzip (-325 B). The demo, all chunks, goes from 46,605 B to
+  46,670 B gzip (+65 B), and each one-island page about +65 B: they keep
+  the check and also pay for the hook, its default and the calls.
+
 ## Pages pay for the features of their islands (2026-11-11)
 
 Goal: the JavaScript that a page with islands loads at start holds only
@@ -2265,7 +2307,9 @@ Ticket 33 and its four security reviews.
   `localName`. So both sides apply the same rule with the real element;
   constructors check only names. That costs the keyed app 595 B gzip
   (10,303 -> 10,898): `Url` was not in it before, because its
-  constructors with no URL name never called the check.
+  constructors with no URL name never called the check. Since "URL check
+  per app" (2026-11-11), `set_attr` reaches the check through a hook that
+  the checked constructors and `use_element` set; the rule is the same.
 - Navigation: `Browser.navigate` drops a URL that `Url.unsafe ~tag:"a"
   "href"` blocks (a dev build logs it), with navigation on or off. A form
   answer's `redirect` goes through `Server.local_location` with the

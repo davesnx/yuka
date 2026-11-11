@@ -262,7 +262,9 @@ val attr_unchecked : string -> string -> 'kind attribute
 val hole_attr_unchecked : string -> (unit -> string option) -> client attribute
 (** For the ppx, for names it proved are not URL attributes. They raise on a
     URL attribute name, [srcdoc], or a name that {!attr} refuses (an [on]
-    name too). *)
+    name too). They do not refuse [to], [from], [values] and [by], which are
+    URL names only on SVG animation elements: there the client checks the
+    value, or raises [Failure] when the app links no URL check. *)
 
 val url_attr : string -> string -> string -> 'kind attribute
 val url_hole_attr : string -> string -> (unit -> string option) -> client attribute
