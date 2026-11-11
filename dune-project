@@ -33,7 +33,10 @@
    (>= 7.0.1-54))
   (ppxlib
    (>= 0.38.0))
-  (mlx :with-test)
+  (mlx
+   (and
+    :with-test
+    (>= 0.12)))
   (alcotest :with-test)
   (odoc :with-doc)))
 
@@ -50,6 +53,9 @@
   (dream
    (>= 1.0.0~alpha8))
   lwt
-  (mlx :with-test)
+  (mlx
+   (and
+    :with-test
+    (>= 0.12)))
   (alcotest :with-test)
   (odoc :with-doc)))

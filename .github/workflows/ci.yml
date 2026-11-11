@@ -53,6 +53,7 @@ jobs:
             echo 'list<<EOF'
             make -s pin-list
             echo EOF
+            echo "extras=$(make -s dev-packages)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Setup OCaml and dependencies
@@ -60,6 +61,7 @@ jobs:
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
           pins: ${{ steps.pins.outputs.list }}
+          extra-packages: ${{ steps.pins.outputs.extras }}
           with-doc: true
           with-dev-setup: false
 

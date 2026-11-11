@@ -1,6 +1,7 @@
-SWITCH ?=
+SWITCH ?= $(shell d="$(CURDIR)"; while [ "$$d" != / ]; do [ -d "$$d/_opam" ] && { echo "$$d"; break; }; d=$$(dirname "$$d"); done)
 BUILD_DIR ?= _build
 PORT ?= 8080
+OCAML_VERSION ?= 5.4.1
 
 DUNE = opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- dune
 export DUNE_BUILD_DIR = $(BUILD_DIR)
@@ -128,19 +129,40 @@ measure-pages: demo-bundle ## Measure JS bytes, TBT and LCP of each demo page, a
 install-npm: ## Install npm dependencies (esbuild, jsdom)
 	npm install
 
+.PHONY: system-deps
+system-deps: ## Install system packages: libpq for the Postgres live bus (sudo apt-get on Debian/Ubuntu, brew on macOS)
+	@if [ "$$(uname)" = Darwin ]; then \
+		brew install libpq pkg-config; \
+	else \
+		sudo apt-get install -y libpq-dev pkg-config; \
+	fi
+
+.PHONY: create-switch
+create-switch: ## Create a local opam switch in _opam (OCAML_VERSION)
+	opam switch create . ocaml-base-compiler.$(OCAML_VERSION) --no-install -y
+
+pin install: export OPAMSWITCH = $(CURDIR)
+
 .PHONY: init
-init: install-npm ## Set up the dev environment
+init: system-deps create-switch pin install install-npm ## Set up the dev environment: system packages, local switch, opam and npm dependencies
 
 .PHONY: install
-install: ## Install the opam dependencies
+install: ## Install the opam dependencies, the dev packages and ocaml-lsp-server
 	opam update
 	opam install . --deps-only --with-test --with-doc -y
+	opam install -y $$($(MAKE) -s dev-packages) ocaml-lsp-server
+
+.PHONY: dev-packages
+dev-packages: ## List opam packages the benchmarks need that are not in the opam files
+	@echo "server-reason-react"
 
 .PHONY: pin-list
-pin-list: ## List pinned dependencies, one "<name> <url>" per line
+pin-list: ## List pinned dependencies, one "<name> <target>" per line
+	@echo "server-reason-react git+https://github.com/ml-in-barcelona/server-reason-react.git#5be562689712124c1f7344c09f9de4ea9582d13a"
+	@echo "quickjs 0.4.2"
 
 .PHONY: pin
 pin: ## Pin dependencies
-	@$(MAKE) -s pin-list | while read -r name url; do \
-		opam pin add "$$name" "$$url" --yes --no-action || exit 1; \
+	@$(MAKE) -s pin-list | while read -r name target; do \
+		opam pin add "$$name" "$$target" --yes --no-action || exit 1; \
 	done

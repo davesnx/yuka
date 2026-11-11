@@ -164,9 +164,9 @@ Slots:
   > let%client make ~(children : int) () = <p />
   > X
   $ run h3
-  File "h3.mlx", line 1, characters 18-32:
+  File "h3.mlx", line 1, characters 16-33:
   1 | let%client make ~(children : int) () = <p />
-                        ^^^^^^^^^^^^^^
+                      ^^^^^^^^^^^^^^^^^
   Error: [yuka] ~children must be written ~(children : Yuka.slot)
   [1]
 
@@ -176,9 +176,9 @@ Missing annotation:
   > let%client make ~a () = <p />
   > X
   $ run h4
-  File "h4.mlx", line 1, characters 17-18:
+  File "h4.mlx", line 1, characters 16-18:
   1 | let%client make ~a () = <p />
-                       ^
+                      ^^
   Error: [yuka] the argument 'a' needs a type annotation
   [1]
 
@@ -188,9 +188,9 @@ Last parameter:
   > let%client make ~(a : int) = <p />
   > X
   $ run h5
-  File "h5.mlx", line 1, characters 18-25:
+  File "h5.mlx", line 1, characters 16-26:
   1 | let%client make ~(a : int) = <p />
-                        ^^^^^^^
+                      ^^^^^^^^^^
   Error: [yuka] the last parameter must be ()
   [1]
 
@@ -248,9 +248,9 @@ let%client with a reserved argument:
   > let%client make ~(loading : int) () = <p />
   > X
   $ run h10
-  File "h10.mlx", line 1, characters 18-31:
+  File "h10.mlx", line 1, characters 16-32:
   1 | let%client make ~(loading : int) () = <p />
-                        ^^^^^^^^^^^^^
+                      ^^^^^^^^^^^^^^^^
   Error: [yuka] the argument 'loading' is reserved for the start strategy
   [1]
 
