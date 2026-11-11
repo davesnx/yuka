@@ -977,7 +977,7 @@ await step("7g. generated island registry", async () => {
   await ctx.close();
 });
 
-await step("7h. client navigation with Yuka.mount ()", async () => {
+await step("7h. client navigation with Yuka.render ~islands", async () => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const p = await ctx.newPage();
   const errors: string[] = [];

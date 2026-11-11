@@ -577,14 +577,10 @@ let rewrite_jsx self e =
             (props @ [ (Labelled "children", list_expr ~loc kids); (Nolabel, [%expr ()]) ]))
   | _ -> e
 
-let is_unapplied_mount args =
-  match List.rev args with
-  | (Nolabel, { pexp_desc = Pexp_construct ({ txt = Lident "()"; _ }, None); _ }) :: rest ->
-      not
-        (List.exists
-           (fun (l, _) -> match l with Labelled "islands" | Optional "islands" -> true | _ -> false)
-           rest)
-  | _ -> false
+let registry_arg = function
+  | Labelled "islands", { pexp_desc = Pexp_ident { txt = Lident "islands"; _ }; pexp_loc = loc; _ } ->
+      (Labelled "islands", [%expr Yuka_islands.registry])
+  | arg -> arg
 
 let mapper =
   object (self)
@@ -598,20 +594,15 @@ let mapper =
             check_open ~loc:e.pexp_loc o "a local open of Yuka.State";
             super#expression e
         | Pexp_apply
-            ( ({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Yuka", "mount"); _ }; _ } as f),
-              args )
-          when is_unapplied_mount args ->
-            let loc = e.pexp_loc in
-            let args = List.map (fun (l, a) -> (l, self#expression a)) args in
-            let rev = List.rev args in
-            let unit_arg = List.hd rev in
-            let rest = List.rev (List.tl rev) in
-            { e with
-              pexp_desc =
-                Pexp_apply
-                  ( f,
-                    rest
-                    @ [ (Labelled "islands", [%expr Yuka_islands.registry]); unit_arg ] ) }
+            (({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Yuka", "render"); _ }; _ } as f), args) ->
+            let args =
+              List.map
+                (fun arg ->
+                  let l, a = registry_arg arg in
+                  (l, self#expression a))
+                args
+            in
+            { e with pexp_desc = Pexp_apply (f, args) }
         | Pexp_letmodule (n, m, _) when n.txt <> Some "State" && is_yuka_state m ->
             lint_error ~loc:e.pexp_loc "a local alias of Yuka.State"
         | _ -> super#expression e

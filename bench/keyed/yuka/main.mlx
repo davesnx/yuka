@@ -91,4 +91,4 @@ let app () =
     <span class_="preloadicon glyphicon glyphicon-remove" aria_hidden=true />
   </div>
 
-let (_dispose : unit -> unit) = Client.render (get_element_by_id "main") app
+let () = render ~root:(get_element_by_id "main", app) ()

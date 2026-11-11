@@ -12,7 +12,7 @@ let shown c = D.text_content c
 
 let render tree =
   let c = D.container "" in
-  let dispose = Client.render (D.as_element c) tree in
+  let dispose = Private.render (D.as_element c) tree in
   (c, dispose)
 
 let boundary children = Catch.make ~fallback ~children ()
@@ -38,7 +38,7 @@ let flush_tree s ~wrap =
 
 let render_error tree =
   let c = D.container "" in
-  match Client.render (D.as_element c) tree with
+  match Private.render (D.as_element c) tree with
   | dispose ->
       dispose ();
       ("no error", shown c)
@@ -309,7 +309,7 @@ let without_boundary view expected =
   in
   I.capture_errors ();
   let reported = ref [] in
-  Yuka.mount
+  Yuka.render
     ~islands:(Client.registry [ Client.entry ~name:"Bad" (fun _ -> Ok view); I.counter_entry ])
     ~navigation:false
     ~on_error:(fun m -> reported := m :: !reported)
@@ -418,7 +418,7 @@ let on_error_raises () =
       (I.page [ Client.island ~name:"Bad" ~props:(`Int 0) click_view; I.counter_island 10 ])
   in
   I.capture_errors ();
-  Yuka.mount
+  Yuka.render
     ~islands:(Client.registry [ Client.entry ~name:"Bad" (fun _ -> Ok click_view); I.counter_entry ])
     ~navigation:false
     ~on_error:(fun _ -> failwith "reporter down")

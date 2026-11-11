@@ -28,6 +28,8 @@ Not done: a render-only app still links the hydration and slot code. The cause i
 
 Either fix saves about 1.5 KB minified.
 
+Done with the second fix (2026-11-11): `Yuka.render` replaces `Yuka.mount` and `Yuka.Client.render` (DESIGN.md, "`Yuka.render`, one client start"). The keyed app went from 30,767 B, 10,886 B gzip (main abe450a) to 30,688 B, 10,846 B gzip; the budget is now 10,860 B gzip. The estimate of 1.5 KB was wrong: `hydrate` itself is small, and the code that adopts server DOM is in the functions that render also runs (`mount_node`, `take`, `mount_slot`, `drop_to_end` test `pos.adopt` at run time), so esbuild keeps it. To drop it, the adopt paths must be reached through a value that only `hydrate` sets.
+
 What is left to reach 5 KB, in minified bytes of the keyed app:
 
 - `client.js`: 9.2 KB, including hydration.

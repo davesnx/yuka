@@ -93,7 +93,7 @@ let shown_late : unit -> string =
 let entry =
   Client.entry ~name:"Q" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
 
-let start () = Yuka.mount ~islands:(Client.registry [ entry ]) ~navigation:false ()
+let start () = Yuka.render ~islands:(Client.registry [ entry ]) ~navigation:false ()
 
 let island_html ?(shown = "loading") ?answer () =
   {|<yuka-island data-name="Q" data-id="i1" style="display:contents"><b>|} ^ shown ^ {|</b></yuka-island>|}
@@ -242,7 +242,7 @@ let async =
         State.set later false;
         set_body
           {|<yuka-island data-name="L" data-id="i1" style="display:contents"><i></i></yuka-island><script type="application/json" data-yuka-props="i1">null</script>|};
-        Yuka.mount ~islands:(Client.registry [ late_entry ]) ~navigation:false ();
+        Yuka.render ~islands:(Client.registry [ late_entry ]) ~navigation:false ();
         append_html (answer_for "late" {|{"ok":"L"}|});
         State.set later true;
         finish (fun () ->

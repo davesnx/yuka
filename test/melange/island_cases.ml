@@ -4,7 +4,7 @@ module D = Dom_cases
 let check = Cases.check
 
 let start_islands ?lazy_entries entries =
-  Yuka.mount ~islands:(Yuka.Client.registry ?lazy_entries entries) ~navigation:false ()
+  Yuka.render ~islands:(Yuka.Client.registry ?lazy_entries entries) ~navigation:false ()
 let ints = string_of_int
 let same = D.same
 
@@ -416,7 +416,7 @@ let slot_moves_with_hole () =
 let slot_never_captured () =
   let c = D.container "" in
   let dispose =
-    Yuka.Client.render (D.as_element c) (fun () ->
+    Yuka.Private.render (D.as_element c) (fun () ->
         lower "div" [] [ Yuka.slot (empty_slot ()) ])
   in
   check "markers only" "<div><!--[$--><!--]--></div>" (D.html c);

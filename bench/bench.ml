@@ -76,17 +76,19 @@ let once ?(static = false) wrap rows =
   let row = if static then static_row else row in
   let c = make_container () in
   let t0 = now () in
-  let dispose =
-    Yuka.Client.render c (fun () ->
-        lower "ul" []
-          [
-            each ~key:string_of_int
-              (fun () -> List.init rows Fun.id)
-              (fun i -> row ~wrap i);
-          ])
-  in
+  Yuka.render
+    ~root:
+      ( c,
+        fun () ->
+          lower "ul" []
+            [
+              each ~key:string_of_int
+                (fun () -> List.init rows Fun.id)
+                (fun i -> row ~wrap i);
+            ] )
+    ();
   let t1 = now () in
-  dispose ();
+  Yuka.unmount ();
   remove_container c;
   t1 -. t0
 

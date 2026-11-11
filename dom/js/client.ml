@@ -668,6 +668,21 @@ let start ~adopt container f =
 
 let render container f = start ~adopt:false container f
 let hydrate container f = start ~adopt:true container f
+
+let roots = ref ignore
+
+let render_root (container, f) =
+  let dispose = render container f and before = !roots in
+  roots :=
+    fun () ->
+      before ();
+      dispose ()
+
+let stop_roots () =
+  let stop = !roots in
+  roots := ignore;
+  stop ()
+
 let on_error : (string -> unit) ref = ref ignore
 
 let cleanup_table : (unit -> unit) Web.table option ref = ref None
@@ -1036,7 +1051,3 @@ let start ?(lazy_entries = []) entries =
           release ());
     set_cleanup id release
   end
-
-type registry = { entries : Island.entry list; lazy_registry : lazy_entry list }
-
-let registry ?(lazy_entries = []) entries = { entries; lazy_registry = lazy_entries }

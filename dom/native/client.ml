@@ -9,12 +9,11 @@ type lazy_entry = unit
 
 let lazy_entry ~name:_ _ = ()
 
-type registry = { entries : Island.entry list; lazy_registry : lazy_entry list }
-
-let registry ?(lazy_entries = []) entries = { entries; lazy_registry = lazy_entries }
 let browser_only () = failwith "Yuka: browser only"
 let render _ _ = browser_only ()
 let hydrate _ _ = browser_only ()
+let render_root _ = browser_only ()
+let stop_roots () = ()
 let start ?lazy_entries:_ _ = browser_only ()
 let stop () = ()
 let stop_within _ = ()

@@ -46,7 +46,7 @@ let finish () =
 
 let () =
   setup html;
-  Yuka.mount ();
+  Yuka.render ~islands ();
   click "load-add";
   check "idle chunk is not imported before its trigger" "false" (string_of_bool (loaded "idle_island"));
   check "click before the import resolves changes nothing yet" "5" (text "load");

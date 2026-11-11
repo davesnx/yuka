@@ -1129,14 +1129,21 @@ let __yuka_template_rewrite_37 =
     ~html:"<div><ul><li>a</li><li>b</li></ul><p>c</p></div>" ~walk:[||]
     ~kids:[||] ~attrs:[||] ~values:[||]
 let nested_fixed = Yuka.Template.instance __yuka_template_rewrite_37 [||]
-let () = Yuka.mount ~islands:Yuka_islands.registry ()
-let () = Yuka.mount ~navigation:false ~islands:Yuka_islands.registry ()
-let () = Yuka.mount ?navigation:x ~islands:Yuka_islands.registry ()
-let partial = Yuka.mount
-let partial_nav = Yuka.mount ~navigation:false
-let applied_once = Yuka.mount ~islands:other ()
-let () = Yuka.owner ()
-let () = mount ()
+let () = Yuka.render ~islands:Yuka_islands.registry ()
+let () = Yuka.render ~navigation:false ~islands:Yuka_islands.registry ()
+let () =
+  Yuka.render ~islands:Yuka_islands.registry ?navigation:x ~root:(el, app) ()
+let () = Yuka.render ~islands:Yuka_islands.registry ()
+let () = Yuka.render ~root:(el, app) ()
+let () = Yuka.render ()
+let partial = Yuka.render
+let partial_islands = Yuka.render ~islands:Yuka_islands.registry
+let partial_nav = Yuka.render ~navigation:false
+let explicit = Yuka.render ~islands:other ()
+let optional = Yuka.render ?islands ()
+let () = Yuka.render ~islands:(Yuka.Client.registry []) ()
+let () = Yuka.owner ~islands ()
+let () = render ~islands ()
 module Awaiting =
   struct
     let __yuka_template_rewrite_38 =

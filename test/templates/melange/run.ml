@@ -40,7 +40,7 @@ let control_value : node -> string =
 
 let render_with_value tree =
   let c = container () in
-  let dispose = Client.render (as_container c) tree in
+  let dispose = Private.render (as_container c) tree in
   let out = (html c, control_value c) in
   dispose ();
   out

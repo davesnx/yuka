@@ -438,7 +438,7 @@ let marked_action = Action.declare ~name:"live-mark" ~input:Codec.int ~output:Co
 
 let mutate_sync_carries_mark finish =
   fresh ();
-  Yuka.mount ~islands:(Client.registry []) ~navigation:false ();
+  Yuka.render ~islands:(Client.registry []) ~navigation:false ();
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state ~seq:1 1 [ "x" ]);

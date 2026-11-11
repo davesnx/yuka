@@ -150,7 +150,7 @@ let start html =
   setup_fetch ();
   ok_value := None;
   set_body html;
-  Yuka.mount ~islands:(Client.registry (entry :: entries)) ~navigation:false ();
+  Yuka.render ~islands:(Client.registry (entry :: entries)) ~navigation:false ();
   record_navigation ()
 
 let async =

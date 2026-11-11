@@ -21,11 +21,10 @@ type lazy_entry
 
 val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
 
-type registry = { entries : entry list; lazy_registry : lazy_entry list }
-
-val registry : ?lazy_entries:lazy_entry list -> entry list -> registry
 val render : container -> (unit -> Types.node) -> unit -> unit
 val hydrate : container -> (unit -> Types.node) -> unit -> unit
+val render_root : container * (unit -> Types.node) -> unit
+val stop_roots : unit -> unit
 val start : ?lazy_entries:lazy_entry list -> entry list -> unit
 val stop : unit -> unit
 val stop_within : Web.node -> unit

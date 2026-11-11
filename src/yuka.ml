@@ -17,7 +17,23 @@ include Element
 module Template = struct include Template end
 
 let template_of_shape = Template.of_shape
-module Client = Client
+module Client = struct
+  include Client
+
+  type registry = {
+    start :
+      bool * [ `Hover | `Visible | `Off ] option * bool option * (string -> unit) option -> unit;
+  }
+
+  let registry ?(lazy_entries = []) entries =
+    {
+      start =
+        (fun (navigation, prefetch, transitions, on_error) ->
+          Option.iter (fun f -> Client.on_error := f) on_error;
+          if navigation then Navigation.start ~lazy_entries ?prefetch ?transitions entries
+          else Client.start ~lazy_entries entries);
+    }
+end
 module Action = Action
 module Optimistic = Optimistic
 module Remote = Remote
@@ -45,19 +61,20 @@ module Server = struct
   module Live = Live_server
 end
 
-let mount ?islands ?(navigation = true) ?prefetch ?transitions ?on_error () =
-  match islands with
-  | Some r when Web.in_browser ->
-      Option.iter (fun f -> Client.on_error := f) on_error;
-      let { Client.entries; lazy_registry } = r in
-      if navigation then Navigation.start ~lazy_entries:lazy_registry ?prefetch ?transitions entries
-      else Client.start ~lazy_entries:lazy_registry entries
-  | _ ->
-      failwith
-        "Yuka.mount: no island registry or not in the browser. Run it in a \
-         Melange client entry built with yuka.ppx, which adds ~islands."
+let render ?islands ?navigation ?prefetch ?transitions ?on_error ?root () =
+  if not Web.in_browser then failwith "Yuka.render: browser only";
+  match (islands, root) with
+  | None, None -> invalid_arg "Yuka.render: no ~islands and no ~root"
+  | _ -> (
+      (match root with Some r -> Client.render_root r | None -> ());
+      match islands with
+      | Some { Client.start } ->
+          start ((match navigation with Some n -> n | None -> true), prefetch, transitions, on_error)
+      | None -> ())
 
-let unmount = Navigation.stop
+let unmount () =
+  Client.stop_roots ();
+  Navigation.stop ()
 
 module Private = struct
   include Types
@@ -124,4 +141,5 @@ module Private = struct
   let call_action = Action.transport
   let async_source = Types.async_source
   let action_codecs (a : (_, _, _) Action.t) = (a.input, a.output)
+  let render = Client.render
 end

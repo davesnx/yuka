@@ -39,13 +39,13 @@ Current layout (v0.4; earlier sections use the old names, see "v0.4"):
 | `yuka` | native, melange | `src/` | everything users call: State, Effect, elements, Json, Codec, Async, Action, `Yuka.Server`, `Yuka.Client` (islands and browser runtime), `Yuka.Router`, `Yuka.Await`; the virtual DOM module `Web` |
 | `yuka.js` | melange | `dom/js/` | the browser implementation of `Web` (a Melange entry lists it) |
 | `yuka.native` | native, melange | `dom/native/` | the default implementation of `Web` (raises "browser only") |
-| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.mount ()` |
+| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.render ~islands` |
 
 Platform functions (event fields, window listeners, navigation) are a record
 of functions in the core (`Private.platform`). Their defaults call `Web`, so
 in the browser they work without a boot step, and on native they raise; they
 are only called inside effects and handlers, which never run on the server.
-`Yuka.mount` with navigation replaces `navigate`.
+`Yuka.render ~islands` with navigation replaces `navigate`.
 
 ## HTML and hydration markers
 
@@ -560,6 +560,9 @@ Lwt bridges live in the app). `Yuka.await` is now `<Yuka.Await>`.
 
 ## v0.3 addendum: generated island registry and `Yuka.mount ()` (decided by the user, 2026-11-06)
 
+`Yuka.mount` is now `Yuka.render ~islands`: see "`Yuka.render`, one client
+start".
+
 The user: users never write `M.register` or an island list, and the client
 entry is `Yuka.mount ()`, the whole client start. This section uses the v0.4
 names (one library `yuka`).
@@ -1053,15 +1056,16 @@ the budget in `bench/size/budget.json`.
   used together, and a feature that only some apps need is a top-level
   value of `Yuka` (an ES export, dropped when unused) or is reached only from
   one:
-  - `Yuka.mount` (top level) is the only way to the island runtime, the
-    action transport, the async-value watcher and navigation.
+  - The registry given as `Yuka.render ~islands` is the only way to the
+    island runtime, the action transport, the async-value watcher and
+    navigation.
     `Client.start` and `Client.stop` are gone from `Yuka.Client`;
-    `Yuka.mount ~navigation:false ()` starts the islands and
+    `Yuka.render ~islands ~navigation:false ()` starts the islands and
     `Yuka.unmount ()` stops them and navigation (listeners, a fetch in
     flight, `Browser.navigate`).
   - `Router.navigate` is gone from `Yuka.Router`, which now holds only the
     route functions. `Browser.navigate` is a client navigation after
-    `mount` and `location.assign` otherwise, as `Router.navigate` was.
+    `render ~islands` and `location.assign` otherwise, as `Router.navigate` was.
     The navigation code is in `navigation.ml`.
   - `Server.Action` is rebuilt in `yuka.ml` from top-level functions of
     `server.ml`, so `Yuka.Server` is an object of plain references that
@@ -1548,7 +1552,7 @@ Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.
   returns has its range. `Show` and `Catch` call their children untracked.
 - Islands: `boot` hydrates under an owner whose catch logs
   disposes the island, then logs `yuka island ID (NAME): message` with
-  `console.error` and calls `Client.on_error` (set by `mount ~on_error`);
+  `console.error` and calls `Client.on_error` (set by `render ~on_error`);
   an exception from `on_error` is dropped. The DOM stays as it is.
 - Server: the printer remembers the buffer length and a copy of the
   session (`Types.snapshot`: every mutable field, with the `select` value),
@@ -2015,3 +2019,49 @@ in `.workplace/docs/data-spec.md` section 8 ("More nodes").
 - `revoke` is per node. The client protocol and bundle sizes do not change
   for apps without a bus; the keyed app does not use `Live`.
 
+## `Yuka.render`, one client start (decided by the user, 2026-11-11)
+
+```ocaml
+val render :
+  ?islands:Client.registry ->
+  ?navigation:bool ->
+  ?prefetch:[ `Hover | `Visible | `Off ] ->
+  ?transitions:bool ->
+  ?on_error:(string -> unit) ->
+  ?root:Client.container * (unit -> 'k element) ->
+  unit ->
+  unit
+```
+
+- `Yuka.render ~islands ()` is what `Yuka.mount ()` was.
+  `Yuka.render ~root:(container, app) ()` is what `Client.render` was, and
+  `Yuka.unmount ()` stops it (and every other `~root` tree) as well as the
+  islands. Both labels can be in one call; the root is built first.
+  `Yuka.mount` and `Yuka.Client.render` are removed; tests that need the
+  dispose function of one tree use `Yuka.Private.render`.
+- Without `~islands`, `~navigation`, `~prefetch`, `~transitions` and
+  `~on_error` do nothing; a check would cost bytes in every app. A call
+  with neither `~islands` nor `~root` raises `Invalid_argument`, because
+  `Yuka.render ()` is the likely mistake when moving from `Yuka.mount ()`.
+- The ppx rewrites an argument `~islands` whose value is the identifier
+  `islands` (so the punned `~islands`, and also `~islands:islands`) in any
+  application of `Yuka.render`, partial or not, into
+  `~islands:Yuka_islands.registry`. Other values, `?islands` and calls
+  without `~islands` stay as they are. Without the ppx, a punned
+  `~islands` is `Unbound value islands`, so the old runtime check that named
+  `yuka.ppx` is gone.
+- The registry carries the start function: `Yuka.Client.registry` (in
+  `yuka.ml`) builds a record whose one field is a closure over the entries
+  that calls `Navigation.start` or `Client.start`. `Yuka.render` reaches
+  the island, action and navigation code only through that field, so an
+  app that never builds a registry does not contain it. The closure takes
+  its options as one tuple: a call of a closure of unknown arity goes
+  through `Curry`, and `Curry._1` is in every app already.
+- `Client.render_root` and `Client.stop_roots` keep the dispose functions
+  in `dom/js/client.ml`, so `yuka.ml` calls `Client` with one argument.
+- Size (`make size`, keyed app, which now calls `Yuka.render ~root`): from
+  30,767 B, 10,886 B gzip to 30,688 B, 10,846 B gzip. Not the 1.5 KB of
+  roadmap 30: `Yuka.Client` (which held `hydrate`) and `island.js` leave
+  the bundle, but the code that adopts server DOM is in the same functions
+  that render uses (`mount_node`, `take`, `mount_slot`, `drop_to_end` test
+  `pos.adopt` at run time), so esbuild keeps it.

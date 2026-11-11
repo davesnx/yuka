@@ -86,7 +86,7 @@ let start html =
   setup html;
   capture ();
   remember ();
-  Yuka.mount ()
+  Yuka.render ~islands ()
 
 let cases :
     (string * string * (unit -> unit) * (unit -> unit) option) list =

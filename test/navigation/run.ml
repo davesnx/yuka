@@ -139,7 +139,7 @@ let ints = string_of_int
 let bools = string_of_bool
 let page body = "<main>" ^ body ^ "</main>"
 let doc title body = "<!doctype html><html><head><title>" ^ title ^ "</title></head><body>" ^ body ^ "</body></html>"
-let plain_start () = mount ~islands:(Client.registry []) ()
+let plain_start () = render ~islands:(Client.registry []) ()
 
 let navigate_before_start finish =
   setup "";
@@ -221,7 +221,7 @@ let island n =
 let stop_then_start finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 1));
-  mount ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(Client.registry [ probe_entry ]) ();
   check "first island started" "g0/1" (log_g ());
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page (island 2))) "";
@@ -431,7 +431,7 @@ let start_twice_listeners finish =
 let mount_without_navigation finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 3));
-  mount ~islands:(Client.registry [ probe_entry ]) ~navigation:false ();
+  render ~islands:(Client.registry [ probe_entry ]) ~navigation:false ();
   check "island started" "g0/3" (log_g ());
   check "click not intercepted" "false" (bools (click "#l" ""));
   check "no fetch" "0" (ints (calls ()));
@@ -441,7 +441,7 @@ let mount_without_navigation finish =
 let mount_with_navigation finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 4));
-  mount ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(Client.registry [ probe_entry ]) ();
   check "island started" "g0/4" (log_g ());
   check "click intercepted" "true" (bools (click "#l" ""));
   check "one fetch" "1" (ints (calls ()));
@@ -454,7 +454,7 @@ let popstate_to : string -> unit =
 let unmount_stops_navigation finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 5));
-  mount ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(Client.registry [ probe_entry ]) ();
   check "island started" "g0/5" (log_g ());
   unmount ();
   check "click not intercepted after unmount" "false" (bools (click "#l" ""));
@@ -471,7 +471,7 @@ let unmount_stops_navigation finish =
 let unmount_cancels_in_flight finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 6));
-  mount ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(Client.registry [ probe_entry ]) ();
   ignore (click "#l" "");
   unmount ();
   check "request aborted" "true" (bools (call_aborted 0));
@@ -488,9 +488,9 @@ let mount_after_unmount finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 8));
   count_listeners ();
-  mount ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(Client.registry [ probe_entry ]) ();
   unmount ();
-  mount ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(Client.registry [ probe_entry ]) ();
   check "island started twice" "g0/8|g0/8" (log_g ());
   check "click intercepted again" "true" (bools (click "#l" ""));
   check "one fetch for one click" "1" (ints (calls ()));
@@ -533,7 +533,7 @@ let partial finish =
   State.set probe_runs 0;
   setup "";
   outlet_page ();
-  mount ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(Client.registry [ probe_entry ]) ();
   check "both islands started" "g0/1|g0/2" (log_g ());
   ignore (click "#two" "");
   check "keys sent" "L0" (call_header 0);
@@ -740,7 +740,7 @@ let actions_of_stopped_islands finish =
     ({|<a id="two" href="/two">two</a>|}
     ^ {|<yuka-island data-name="Actor" data-id="i1" style="display:contents"><button id="outer">act</button></yuka-island><script type="application/json" data-yuka-props="i1">1</script>|}
     ^ {|<yuka-outlet data-k="L0" style="display:contents"><yuka-island data-name="Actor" data-id="i2" style="display:contents"><button id="inner">act</button></yuka-island><script type="application/json" data-yuka-props="i2">2</script></yuka-outlet>|});
-  mount ~islands:(Client.registry [ actor_entry ]) ();
+  render ~islands:(Client.registry [ actor_entry ]) ();
   ignore (click "#inner" "");
   ignore (click "#outer" "");
   check "two action calls" "2" (ints (calls ()));
@@ -869,7 +869,7 @@ let not_prefetched finish =
   fire "#l" "pointerdown";
   check "save data: no prefetch" "0" (ints (calls ()));
   setup links;
-  mount ~islands:(Client.registry []) ~prefetch:`Off ();
+  render ~islands:(Client.registry []) ~prefetch:`Off ();
   fire "#l" "pointerdown";
   check "prefetch off: no prefetch" "0" (ints (calls ()));
   check "prefetch off: click still navigates" "true" (bools (click "#l" ""));
@@ -892,7 +892,7 @@ let visible finish =
   check "a link in flight is not prefetched again" "1" (ints (calls ()));
   setup (page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
   stub_observer ();
-  mount ~islands:(Client.registry []) ~prefetch:`Visible ();
+  render ~islands:(Client.registry []) ~prefetch:`Visible ();
   check "visible mode observes every link" "v,o" (observed ());
   intersect "o";
   check "off still wins" "0" (ints (calls ()));
@@ -1035,7 +1035,7 @@ let waits_for_prefetch finish =
 let transitions_on finish =
   setup links;
   stub_transition ();
-  mount ~islands:(Client.registry []) ~transitions:true ();
+  render ~islands:(Client.registry []) ~transitions:true ();
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
   tick (fun () ->
@@ -1058,7 +1058,7 @@ let transitions_off finish =
   tick (fun () ->
       check "no transition by default" "scroll:0" (log_read ());
       setup links;
-      mount ~islands:(Client.registry []) ~transitions:true ();
+      render ~islands:(Client.registry []) ~transitions:true ();
       ignore (click "#l" "");
       resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
       tick (fun () ->
@@ -1197,7 +1197,7 @@ let popstate_cancels_waiter finish =
 let transition_token finish =
   setup links;
   deferred_transitions ();
-  mount ~islands:(Client.registry []) ~transitions:true ();
+  render ~islands:(Client.registry []) ~transitions:true ();
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page {|<a id="m" href="/three">three</a>|})) "";
   tick (fun () ->
@@ -1221,7 +1221,7 @@ let transition_token finish =
 let transition_error finish =
   setup links;
   raising_transition ();
-  mount ~islands:(Client.registry []) ~transitions:true ();
+  render ~islands:(Client.registry []) ~transitions:true ();
   ignore (click "#l" "");
   scroll_throws ();
   resolve_call 0 (doc "Two" (page "<p>two</p>")) "";

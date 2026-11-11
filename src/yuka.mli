@@ -62,7 +62,7 @@ module Effect : sig
       in the body, or in a cleanup that runs during a State change or an
       event handler, goes to that boundary. A cleanup that raises when its
       owner is disposed by a direct call (the function returned by {!owner},
-      {!Client.render} or {!Client.hydrate}, or {!unmount}) raises to that
+      {!Client.hydrate}, or {!unmount}) raises to that
       caller. Elsewhere, an exception in one effect does not stop other
       effects; the first one is raised again after all pending effects
       ran. If effects and memos keep changing States they read for more than
@@ -192,8 +192,8 @@ module Codec : sig
       A failure message goes to [Server.log_error] and never into the page,
       except for a [Server.Action.reject] message, which is sent. Outside a streaming render, a pending value is
       written as [{"$async":"aN","error":"pending at render"}]. Decoding a
-      bare reference gives, after [mount], the value that the page writes
-      for that id; before [mount] or outside the browser, a failed
+      bare reference gives, after [render ~islands], the value that the page
+      writes for that id; before it or outside the browser, a failed
       [Async]. *)
 
   val encode : 'a t -> 'a -> Json.t
@@ -455,7 +455,7 @@ module Catch : sig
 
       In an island with no [Catch] above, the island is the boundary: it
       stops, its DOM stays as it is, and the error goes to [console.error]
-      and to the [on_error] of {!mount}.
+      and to the [on_error] of {!render}.
 
       On the server, an exception in the children prints the fallback with
       [~error:"server error"] and sends the exception to
@@ -562,7 +562,7 @@ module Client : sig
 
   val registry : ?lazy_entries:lazy_entry list -> entry list -> registry
   (** The islands of an app. For generated code: [yuka.ppx] and
-      [yuka-islands] build it. Pass it to [Yuka.mount]. *)
+      [yuka-islands] build it. Pass it to [Yuka.render]. *)
 
   val entry :
     name:string ->
@@ -587,11 +587,6 @@ module Client : sig
       named [name] fires, for example with a dynamic import of the module
       that defines the entry. If it fails, the island keeps its server HTML
       and the error is logged. *)
-
-  val render : container -> (unit -> 'k element) -> unit -> unit
-  (** [render container f] clears [container], builds the DOM of [f ()] and
-      returns a function that stops all effects and handlers of this tree.
-      The DOM stays in place. Browser only. *)
 
   val hydrate : container -> (unit -> 'k element) -> unit -> unit
   (** [hydrate container f] adopts the server DOM in [container] (written
@@ -645,7 +640,7 @@ module Action : sig
 
   val call : ('i, 'o, _) t -> 'i -> 'o Async.t
   (** Encodes the input, sends it to the server (in the browser after
-      [mount], as [POST /_yuka/action/<name>]; on the server, to the
+      [render ~islands], as [POST /_yuka/action/<name>]; on the server, to the
       implementation), decodes the output. A decode error is [Failed]. *)
 end
 
@@ -883,8 +878,8 @@ module Browser : sig
       call it inside [Effect.run]. *)
 
   val navigate : string -> unit
-  (** Loads the URL. After [mount] with navigation (the default), it is a
-      client navigation, as a click on a link; see {!mount}. Otherwise it
+  (** Loads the URL. After [render ~islands] with navigation (the default), it
+      is a client navigation, as a click on a link; see {!render}. Otherwise it
       does [location.assign url]. A [javascript:], [vbscript:] or [data:]
       URL (read as {!attr} reads a URL) does nothing; a dev build logs the
       first one. *)
@@ -1124,6 +1119,11 @@ module Private : sig
 
   val handle_action :
     name:string -> header:(string -> string option) -> body:string -> (int * string) Async.t
+
+  val render : Client.container -> (unit -> 'k element) -> unit -> unit
+  (** [render container f] clears [container], builds the DOM of [f ()] and
+      returns a function that stops the effects and handlers of this tree,
+      for tests. Browser only. *)
 end
 
 (**/**)
@@ -1185,19 +1185,32 @@ module Router : sig
       in order. *)
 end
 
-val mount :
+val render :
   ?islands:Client.registry ->
   ?navigation:bool ->
   ?prefetch:[ `Hover | `Visible | `Off ] ->
   ?transitions:bool ->
   ?on_error:(string -> unit) ->
+  ?root:Client.container * (unit -> 'k element) ->
   unit ->
   unit
-(** [mount ()] is the whole client start. [yuka.ppx] rewrites it into
-    [mount ~islands:Yuka_islands.registry ()].
+(** The client start. Give [~islands] for a page that the server rendered,
+    [~root] for a tree that only the client builds, or both:
 
-    It installs the browser runtime and the action transport, then hydrates
-    every [yuka-island] element of the document with the entry of the same
+    {[
+      let () = Yuka.render ~islands ()
+      let () = Yuka.render ~root:(container, app) ()
+    ]}
+
+    [yuka.ppx] rewrites a bare [~islands] in a [Yuka.render] call into
+    [~islands:Yuka_islands.registry], the islands of the app.
+
+    [~root:(container, app)] clears [container] and builds the DOM of
+    [app ()] in it. {!unmount} stops the effects and handlers of this tree;
+    the DOM stays. It runs before the islands start.
+
+    With [~islands], it installs the browser runtime and the action
+    transport, then hydrates every [yuka-island] element of the document with the entry of the same
     name, following each island's start strategy. Props come from the
     [script] element with the same [data-yuka-props] id. It also watches the
     document, so islands that arrive later (streaming, fills) start when
@@ -1258,7 +1271,7 @@ val mount :
     [no-cache]) for N seconds, also for back and forward; otherwise a
     prefetched answer is used once, within 10 s, and a visited page is not
     kept. An action call that succeeds empties the cache, and an answer
-    requested before it is not kept. [mount] and {!unmount} empty it and
+    requested before it is not kept. [render ~islands] and {!unmount} empty it and
     abort the prefetches nobody waits for; after {!unmount} no navigation
     updates the page.
 
@@ -1270,21 +1283,22 @@ val mount :
     task, as an uncaught error.
 
     With [~navigation:false] only the islands start and links load full
-    pages. Calling [mount] again is safe: the listeners are not added twice.
-    Raises [Failure], naming [yuka.ppx], without [~islands] (the ppx did not
-    run) or outside the browser.
+    pages. Calling [render ~islands] again is safe: the listeners are not
+    added twice.
 
-    Only an app that calls [mount] contains the island, action and
-    navigation code. *)
+    Without [~islands], [~navigation], [~prefetch], [~transitions] and
+    [~on_error] do nothing. Raises [Failure] outside the browser, and
+    [Invalid_argument] without [~islands] and [~root]. An app that does not
+    pass [~islands] contains no island, action or navigation code. *)
 
 val unmount : unit -> unit
-(** Stops every island that [mount] started: effects, handlers and document
-    listeners are removed, start strategies that did not fire yet are
+(** Stops every tree that {!render} started: each [~root] tree and every
+    island. Effects, handlers and document listeners are removed, start strategies that did not fire yet are
     cancelled, and action requests in flight are aborted (their [Async]
     fails with ["cancelled"]). It also stops navigation: the [click] and
     [popstate] listeners are removed, a navigation in flight is aborted, and
     {!Browser.navigate} does [location.assign] again. The DOM stays.
-    [mount] works again afterwards, for example on a new body. *)
+    {!render} works again afterwards, for example on a new body. *)
 
 module Server : sig
   val log_error : (string -> unit) ref
