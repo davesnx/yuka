@@ -9,13 +9,15 @@ type owner = Scheduler.owner = {
   mutable last : cell option;
   mutable gen : int;
   mutable catch : (exn -> unit) option;
+  parent : owner option;
 }
 
 let current_owner : owner option ref = ref None
 
 let new_owner () =
   { last = None; gen = 0;
-    catch = (match !current_owner with Some o -> o.catch | None -> None) }
+    catch = (match !current_owner with Some o -> o.catch | None -> None);
+    parent = !current_owner }
 
 let fail = Scheduler.catch
 

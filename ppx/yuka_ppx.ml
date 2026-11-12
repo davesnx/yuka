@@ -259,8 +259,8 @@ let rewrite_attribute ~self ~loc tag (label, value) =
       let value = self#expression value in
       let url = Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) in
       let tag_e = estring ~loc tag in
-      let attr = if url then [%expr Yuka.url_attr [%e tag_e]] else [%expr Yuka.attr_unchecked] in
-      let hole_attr = if url then [%expr Yuka.url_hole_attr [%e tag_e]] else [%expr Yuka.hole_attr_unchecked] in
+      let attr = if url then [%expr Yuka.runtime_url_attr [%e tag_e]] else [%expr Yuka.runtime_attr] in
+      let hole_attr = if url then [%expr Yuka.runtime_url_hole_attr [%e tag_e]] else [%expr Yuka.runtime_hole_attr] in
       if hole then
         Plain
           [%expr
@@ -369,7 +369,7 @@ let lower_element ~self ~loc ~fnloc tag args =
         if List.exists reads_state children then [%expr [ Yuka.hole (fun () -> Yuka.text [%e joined]) ]]
         else [%expr [ Yuka.text [%e joined] ]]
   in
-  [%expr Yuka.lower [%e estring ~loc tag] [%e attrs] [%e content]]
+  [%expr Yuka.element [%e estring ~loc tag] [%e attrs] [%e content]]
 
 type part = Child_part of expression | Attribute_part of prop
 
@@ -473,17 +473,17 @@ let emit_template ~loc built parts clones =
     value_binding ~loc ~pat:(pvar ~loc name)
       ~expr:
         [%expr
-          Yuka.template_coded [%e estring ~loc (Template_build.encode built)]
+          Yuka.runtime_template [%e estring ~loc (Template_build.encode built)]
             ~html:[%e estring ~loc (Template_build.html built)]
             ~walk:[%e ints walk] ~kids:[%e ints kids] ~attrs:[%e ints attrs]
             ~values:[%e values] ~clones:[%e eint ~loc clones]]
     :: !hoisted;
   let part = function
-    | Child_part e -> [%expr Yuka.template_child [%e e]]
-    | Attribute_part (Plain e) -> [%expr Yuka.template_attribute [%e e]]
-    | Attribute_part (Maybe e) -> [%expr Yuka.template_attribute_option [%e e]]
+    | Child_part e -> [%expr Yuka.runtime_child [%e e]]
+    | Attribute_part (Plain e) -> [%expr Yuka.runtime_attribute [%e e]]
+    | Attribute_part (Maybe e) -> [%expr Yuka.runtime_attribute_option [%e e]]
   in
-  [%expr Yuka.template_instance [%e evar ~loc name] [%e pexp_array ~loc (List.map part (Array.to_list parts))]]
+  [%expr Yuka.runtime_instance [%e evar ~loc name] [%e pexp_array ~loc (List.map part (Array.to_list parts))]]
 
 let has_literal_sink = function
   | Template_build.Fixed_element { tag; attrs; _ } ->
@@ -509,15 +509,15 @@ let rec lower_shape ~loc parts shape =
       let attr = function
         | Template_build.Fixed (dom, v) ->
             if Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) then
-              Plain [%expr Yuka.url_attr [%e estring ~loc tag] [%e estring ~loc dom] [%e estring ~loc v]]
-            else Plain [%expr Yuka.attr_unchecked [%e estring ~loc dom] [%e estring ~loc v]]
+              Plain [%expr Yuka.runtime_url_attr [%e estring ~loc tag] [%e estring ~loc dom] [%e estring ~loc v]]
+            else Plain [%expr Yuka.runtime_attr [%e estring ~loc dom] [%e estring ~loc v]]
         | Part_attr i -> (
             match parts.(i) with
             | Attribute_part p -> p
             | Child_part _ -> assert false)
       in
       [%expr
-        Yuka.lower [%e estring ~loc tag]
+        Yuka.element [%e estring ~loc tag]
           [%e attributes_expr ~loc (List.map attr attrs)]
           [%e list_expr ~loc (List.map (lower_shape ~loc parts) children)]]
 
@@ -593,12 +593,12 @@ let rewrite_jsx self e =
           in
           [%expr Yuka.Catch.make ~fallback:[%e fallback] ~children:(fun () -> [%e kids]) ()]
       | Ldot (Ldot (Lident "Yuka", "Client"), "createElement") ->
-          let loading =
+          let start =
             List.map
               (fun (l, v) ->
                 match l with
-                | Labelled "loading" | Optional "loading" -> (l, self#expression v)
-                | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Client takes no props except loading")
+                | Labelled "start" | Optional "start" -> (l, self#expression v)
+                | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Client takes no props except start")
               props
           in
           (match children with
@@ -616,7 +616,7 @@ let rewrite_jsx self e =
                in
                pexp_apply ~loc
                  (pexp_ident ~loc:cloc { txt = Ldot (path, "island"); loc = cloc })
-                 (loading @ cprops @ slot @ [ (Nolabel, [%expr ()]) ])
+                 (start @ cprops @ slot @ [ (Nolabel, [%expr ()]) ])
            | _ ->
                Location.raise_errorf ~loc:fnloc
                  "[yuka] Yuka.Client needs exactly one child, a component tag such as <M a=1 />")

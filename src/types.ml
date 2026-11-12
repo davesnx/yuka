@@ -2,7 +2,7 @@ type server
 type client
 type event = Web.event
 type trigger = [ `Idle | `Visible | `Interaction ]
-type loading = [ `Load | trigger | `Lazy of trigger ]
+type start = [ `Load | trigger | `Lazy of trigger ]
 
 
   type node =
@@ -14,7 +14,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
         name : string;
         props : Json.t;
         render : unit -> node;
-        loading : loading;
+        start : start;
       }
     | Await : {
         async : 'a Async.t;
@@ -177,12 +177,14 @@ let rejection message =
     Some (String.sub message n (String.length message - n))
   else None
 
-let async_error id message =
+let shown what message =
   match rejection message with
-  | Some shown -> shown
+  | Some m -> m
   | None ->
-      !log_error ("async value " ^ id ^ " failed: " ^ message);
-      "failed"
+      !log_error (what ^ " failed: " ^ message);
+      "server error"
+
+let async_error id message = shown ("async value " ^ id) message
 
 let async_source : (string -> Json.t Async.t) ref =
   ref (fun _ -> Async.failed "no async transport")

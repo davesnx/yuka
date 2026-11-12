@@ -137,7 +137,7 @@ let tree_digest () =
   write "z.js" "";
   check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
 
-let echo = Yuka.Action.declare ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
+let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
 let () = Yuka.Server.Action.implement echo (fun s -> Yuka.Async.return (String.length s))
 
 let body_limit () =

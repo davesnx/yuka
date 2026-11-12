@@ -369,16 +369,6 @@ let run name input k =
             | Async.Pending -> ());
       fun () -> live := false
 
-let transport name input =
-  let settled, resolve, fail = Async.make () in
-  let (_ : unit -> unit) =
-    run name input (function
-      | Ok j -> resolve j
-      | Error Unknown -> fail ("unknown action " ^ name)
-      | Error (Bad m | Refused m | Broke m) -> fail m)
-  in
-  settled
-
 let send name input k =
   run name input (fun r ->
       k
@@ -390,6 +380,11 @@ let send name input k =
         | Error (Broke m) ->
             !log_error ("action " ^ name ^ " failed: " ^ m);
             Error Status.Server))
+
+let transport name input =
+  let settled, resolve, _ = Async.make () in
+  let (_ : unit -> unit) = send name input resolve in
+  settled
 
 let register action f encode =
   let name = Action.name action in
@@ -414,13 +409,10 @@ type form_outcome = Saved of string option | Unprocessable of (string option * s
 let forms : (string * ((string * string) list -> form_outcome Async.t)) list ref = ref []
 let find_form name = List.assoc_opt name !forms
 
-let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, _) Action.t) ?redirect
+let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ `Form ]) Action.t) ?redirect
     (f : i -> (o, f Form_core.errors) result Async.t) =
-  let t : (i, f) Form_core.t =
-    match action.Action.form with
-    | Some (Action.Form (t, _)) -> t
-    | None -> invalid_arg ("Yuka.Server.Form.implement: " ^ Action.name action ^ " is not a form action")
-  in
+  let (Action.Form (t, _)) = action.Action.form in
+  let t : (i, f) Form_core.t = t in
   let output = action.Action.output in
   let encode result =
     match (result, redirect) with

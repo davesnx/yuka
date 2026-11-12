@@ -69,20 +69,20 @@ let show (s : string Status.t) =
 let view () =
   let r = Remote.use ~retry:!retry query (fun () -> State.get input) in
   handle := Some r;
-  lower "b" [] [ hole (fun () -> text (show (Remote.status r))) ]
+  element "b" [] [ hole (fun () -> text (show (Remote.status r))) ]
 
 let later = State.make false
 
 let late_entry =
-  Client.entry ~name:"L" (fun json ->
+  runtime_entry ~name:"L" (fun json ->
       Result.map
         (fun () () ->
-          lower "i" []
+          element "i" []
             [
               hole (fun () ->
                   if State.get later then (
                     let r = Remote.use query (fun () -> "late") in
-                    lower "u" [] [ hole (fun () -> text (show (Remote.status r))) ])
+                    element "u" [] [ hole (fun () -> text (show (Remote.status r))) ])
                   else empty);
             ])
         (Codec.decode Codec.unit json))
@@ -91,9 +91,9 @@ let shown_late : unit -> string =
   [%mel.raw "function () { const u = document.querySelector('yuka-island u'); return u ? u.textContent : 'none' }"]
 
 let entry =
-  Client.entry ~name:"Q" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
+  runtime_entry ~name:"Q" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
 
-let start () = Yuka.render ~islands:(Client.registry [ entry ]) ~navigation:false ()
+let start () = Yuka.render ~islands:(runtime_registry [ entry ]) ~navigation:false ()
 
 let island_html ?(shown = "loading") ?answer () =
   {|<yuka-island data-name="Q" data-id="i1" style="display:contents"><b>|} ^ shown ^ {|</b></yuka-island>|}
@@ -107,7 +107,7 @@ let pending_for value =
   {|<script type="application/json" data-yuka-answer="r:q &quot;|} ^ value ^ {|&quot;" data-pending></script>|}
 
 let fresh ?(ignore_abort = false) ?(value = "a") ?shown ?answer ?(attempts = Remote.default_retry) () =
-  Yuka.unmount ();
+  Yuka.stop ();
   setup_fetch ignore_abort;
   State.set input value;
   retry := attempts;
@@ -126,7 +126,7 @@ let async =
             check "first body" {|"a"|} (fetch_body 0);
             check "first aborted" "true" (string_of_bool (aborted 0));
             check "second sent" {|"b"|} (fetch_body 1);
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "remote: only the latest request writes the status",
       fun finish ->
         fresh ~ignore_abort:true ();
@@ -138,10 +138,10 @@ let async =
             after_ms 10 (fun () ->
                 finish (fun () ->
                     check "status" "ready B" (shown ());
-                    Yuka.unmount ()))) );
+                    Yuka.stop ()))) );
     ( "remote: 503 then 200 is Ready after one retry",
       fun finish ->
-        fresh ~attempts:{ Remote.attempts = 2; delay_ms = (fun _ -> 0) } ();
+        fresh ~attempts:(Remote.retry ~attempts:2 ~delay_ms:(fun _ -> 0)) ();
         start ();
         respond 0 503 "";
         after_ms 20 (fun () ->
@@ -150,22 +150,22 @@ let async =
                 finish (fun () ->
                     check "two fetches" "2" (string_of_int (fetches ()));
                     check "ready" "ready A" (shown ());
-                    Yuka.unmount ()))) );
+                    Yuka.stop ()))) );
     ( "remote: 400 fails at once",
       fun finish ->
-        fresh ~attempts:{ Remote.attempts = 2; delay_ms = (fun _ -> 0) } ();
+        fresh ~attempts:(Remote.retry ~attempts:2 ~delay_ms:(fun _ -> 0)) ();
         start ();
         respond 0 400 {|{"error":"bad title"}|};
         after_ms 20 (fun () ->
             finish (fun () ->
                 check "one fetch" "1" (string_of_int (fetches ()));
                 check "rejected" "failed bad title" (shown ());
-                Yuka.unmount ())) );
-    ( "remote: unmount aborts",
+                Yuka.stop ())) );
+    ( "remote: stop aborts",
       fun finish ->
         fresh ();
         start ();
-        Yuka.unmount ();
+        Yuka.stop ();
         finish (fun () -> check "aborted" "true" (string_of_bool (aborted 0))) );
     ( "remote: an embedded answer is read on hydration, with no fetch",
       fun finish ->
@@ -177,7 +177,7 @@ let async =
             check "no fetch" "0" (string_of_int (fetches ()));
             check "ready" "ready A" (shown ());
             check "no mismatch" "" logged;
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "remote: an embedded error is read too",
       fun finish ->
         fresh ~attempts:Remote.no_retry ~shown:"failed server error"
@@ -186,7 +186,7 @@ let async =
         finish (fun () ->
             check "no fetch" "0" (string_of_int (fetches ()));
             check "failed" "failed server error" (shown ());
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "remote: a pending answer, then the full one, gives no fetch",
       fun finish ->
         fresh ~answer:(pending_for "a") ();
@@ -200,7 +200,7 @@ let async =
                 check "loading first" "loading" before;
                 check "ready" "ready late" (shown ());
                 check "no fetch" "0" (string_of_int (fetches ()));
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "remote: a pending answer that never comes is fetched when the document ends",
       fun finish ->
         fresh ~answer:(pending_for "a") ();
@@ -214,11 +214,11 @@ let async =
             finish (fun () ->
                 check "no fetch while loading" "0" (string_of_int before);
                 check "one fetch" "1" (string_of_int (fetches ()));
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "remote: an embedded network error is retried",
       fun finish ->
         fresh ~shown:"failed network error: timeout"
-          ~attempts:{ Remote.attempts = 1; delay_ms = (fun _ -> 0) }
+          ~attempts:(Remote.retry ~attempts:1 ~delay_ms:(fun _ -> 0))
           ~answer:(answer_for "a" {|{"error":{"kind":"network","message":"timeout"}}|})
           ();
         capture_warnings ();
@@ -234,21 +234,21 @@ let async =
                     check "no mismatch" "" logged;
                     check "one fetch" "1" (string_of_int sent);
                     check "ready" "ready A" (shown ());
-                    Yuka.unmount ()))) );
+                    Yuka.stop ()))) );
     ( "remote: a use created later reads an answer that came with its content",
       fun finish ->
-        Yuka.unmount ();
+        Yuka.stop ();
         setup_fetch false;
         State.set later false;
         set_body
           {|<yuka-island data-name="L" data-id="i1" style="display:contents"><i></i></yuka-island><script type="application/json" data-yuka-props="i1">null</script>|};
-        Yuka.render ~islands:(Client.registry [ late_entry ]) ~navigation:false ();
+        Yuka.render ~islands:(runtime_registry [ late_entry ]) ~navigation:false ();
         append_html (answer_for "late" {|{"ok":"L"}|});
         State.set later true;
         finish (fun () ->
             check "no fetch" "0" (string_of_int (fetches ()));
             check "ready" "ready L" (shown_late ());
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "remote: refetch after hydration sends a request",
       fun finish ->
         fresh ~shown:"ready A" ~answer:(answer_for "a" {|{"ok":"A"}|}) ();
@@ -257,5 +257,5 @@ let async =
         finish (fun () ->
             check "one fetch" "1" (string_of_int (fetches ()));
             check "keeps the data while loading" "loading A" (shown ());
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
   ]

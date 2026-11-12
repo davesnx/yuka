@@ -1,7 +1,7 @@
 open Types
 include Form_core
 
-type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
+type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Form ]) Action.t
 
 let pairs_json values : Json.t = `List (List.map (fun (k, v) -> `List [ `String k; `String v ]) values)
 
@@ -73,7 +73,7 @@ let action ~name ~fields:t ~(output : 'o Codec.t) : ('i, 'o, 'f) action =
             (read_answer output j));
     }
   in
-  { Action.name; input; output = result; form = Some (Action.Form (t, output)) }
+  { Action.name; input; output = result; form = Action.Form (t, output) }
 
 type ('o, 'f) form = {
   sent : (string * string) list;
@@ -89,9 +89,9 @@ let error form f =
     (fun (g, m) -> match g with Some g when g == f -> Some m | _ -> None)
     (State.get form.failed)
 
-let form_errors form = List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
+let errors form = List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
 let error_view form f view = Hole (fun () -> match error form f with Some m -> view m | None -> Fragment [])
-let form_error_view form view = Hole (fun () -> Fragment (List.map view (form_errors form)))
+let errors_view form view = Hole (fun () -> Fragment (List.map view (errors form)))
 let pending form = State.get form.busy
 let parse_sent sent =
   match Json.of_string sent with
@@ -127,13 +127,9 @@ let sent_state name key =
   | None when Web.in_browser -> read_sent name key
   | None -> None
 
-let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action.t) ?(key = "") ?run ?on_ok
-    ~(children : (o, f) form -> 'k) () =
-  let t, output =
-    match action.form with
-    | Some (Action.Form (t, output)) -> ((t : (i, f) Form_core.t), (output : o Codec.t))
-    | None -> invalid_arg ("Yuka.Form.make: " ^ action.name ^ " is not a form action")
-  in
+let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(children : (o, f) form -> 'k) () =
+  let (Action.Form (t, output)) = action.form in
+  let t : (i, f) Form_core.t = t and output : o Codec.t = output in
   let sent = sent_state action.name key in
   let form =
     {
@@ -156,14 +152,16 @@ let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action
     | Ok (Error e) -> State.set form.failed e
     | Error m -> State.set form.failed [ (None, m) ]
   in
+  let failed e = finish (Error (Status.error_to_string e)) None in
   let call input =
     let json = action.input.encode input in
     Async.on_result (!Action.transport action.name json) (function
-      | Error m -> finish (Error m) None
-      | Ok j -> (
+      | Ok (Ok j) -> (
           match read_answer output j with
           | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
-          | Error m -> finish (Error m) None))
+          | Error m -> finish (Error m) None)
+      | Ok (Error e) -> failed e
+      | Error m -> finish (Error m) None)
   in
   let submit ev =
     Web.prevent_default ev;
@@ -174,7 +172,11 @@ let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action
         State.set form.failed [];
         State.set form.busy true;
         match run with
-        | Some f -> Async.on_result (f input) (fun r -> finish r None)
+        | Some f ->
+            Async.on_result (f input) (function
+              | Ok (Ok r) -> finish (Ok r) None
+              | Ok (Error e) -> failed e
+              | Error m -> finish (Error m) None)
         | None -> call input)
   in
   let sent_attr =
@@ -184,9 +186,9 @@ let make (type i o f) ~(action : (i, (o, f errors) result, [ `Mutation ]) Action
     | None -> []
   in
   let hidden name value =
-    Element.lower "input" [ Static ("type", "hidden"); Static ("name", name); Static ("value", value) ] []
+    Element.element "input" [ Static ("type", "hidden"); Static ("name", name); Static ("value", value) ] []
   in
-  Element.lower "form"
+  Element.element "form"
     ([ Static ("method", "post"); Static ("data-yuka-action", action.name); Static ("data-yuka-key", key) ]
     @ sent_attr
     @ [ Handler ("submit", submit) ])

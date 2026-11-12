@@ -87,9 +87,9 @@ let slot_one = <Yuka.Client><Slotted label="a"><p>"x"</p></Slotted></Yuka.Client
 
 let slot_many = <Yuka.Client><Slotted label="a">"text" <b>"y"</b> <Yuka.Client><Slotted label="in" /></Yuka.Client></Slotted></Yuka.Client>
 
-let loading = <Yuka.Client loading=`Visible><Slotted label="a" /></Yuka.Client>
+let start = <Yuka.Client start=`Visible><Slotted label="a" /></Yuka.Client>
 
-let loading_optional = <Yuka.Client ?loading><Slotted label="a" /></Yuka.Client>
+let start_optional = <Yuka.Client ?start><Slotted label="a" /></Yuka.Client>
 
 let select_value = <select value="a"><option value="a">"A"</option></select>
 
@@ -136,7 +136,7 @@ let partial_islands = Yuka.render ~islands
 let partial_nav = Yuka.render ~navigation:false
 let explicit = Yuka.render ~islands:other ()
 let optional = Yuka.render ?islands ()
-let () = Yuka.render ~islands:(Yuka.Client.registry []) ()
+let () = Yuka.render ~islands:(Yuka.runtime_registry []) ()
 let () = Yuka.owner ~islands ()
 let () = render ~islands ()
 

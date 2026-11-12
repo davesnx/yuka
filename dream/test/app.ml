@@ -1,5 +1,5 @@
 let el tag ?(attrs = []) children =
-  Yuka.lower tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
+  Yuka.element tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
 
 let link href = el "a" ~attrs:[ ("href", href) ] [ Yuka.text href ]
 let root ~children () = el "div" ~attrs:[ ("class", "root") ] [ children ]

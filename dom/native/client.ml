@@ -1,6 +1,8 @@
 include Island
 
 type container = Web.node
+
+let container _ = None
 type 'a promise = 'a Web.promise
 
 let promise_map = Web.promise_map

@@ -12,7 +12,7 @@ let remove_container : Yuka.Client.container -> unit =
 
 let row_template =
   Private.template
-    Template.(
+    Private.Template.(
       (element "li"
          [ fixed "class" "row"; part_attr 0; part_attr 1 ]
          [
@@ -25,7 +25,7 @@ let row_template =
 
 let static_template =
   Private.template
-    Template.(
+    Private.Template.(
       (element "li" [ fixed "class" "row" ]
          [
            element "span" [ fixed "class" "status" ] [ text "o" ];
@@ -45,31 +45,30 @@ let row ~wrap i =
   let title_hole = hole (fun () -> text (State.get title)) in
   let id_hole = hole (fun () -> text ("YU-" ^ string_of_int i)) in
   if wrap then
-    Template.(
-      instance row_template
-        [| attribute selected_attr; attribute click; child title_hole; child id_hole |])
+    runtime_instance row_template
+      [| runtime_attribute selected_attr; runtime_attribute click; runtime_child title_hole; runtime_child id_hole |]
   else
-    lower "li"
+    element "li"
       [ attr "class" "row"; selected_attr; click ]
       [
-        lower "span" [ attr "class" "status" ] [ text "o" ];
-        lower "span" [ attr "class" "prio" ] [ text "!" ];
-        lower "a" [ attr "href" "#" ] [ title_hole ];
-        lower "span" [ attr "class" "id" ] [ id_hole ];
-        lower "time" [] [ text "2d" ];
+        element "span" [ attr "class" "status" ] [ text "o" ];
+        element "span" [ attr "class" "prio" ] [ text "!" ];
+        element "a" [ attr "href" "#" ] [ title_hole ];
+        element "span" [ attr "class" "id" ] [ id_hole ];
+        element "time" [] [ text "2d" ];
       ]
 
 let static_row ~wrap i =
   ignore i;
-  if wrap then Template.instance static_template [||]
+  if wrap then runtime_instance static_template [||]
   else
-    lower "li" [ attr "class" "row" ]
+    element "li" [ attr "class" "row" ]
       [
-        lower "span" [ attr "class" "status" ] [ text "o" ];
-        lower "span" [ attr "class" "prio" ] [ text "!" ];
-        lower "a" [ attr "href" "#" ] [ text "title" ];
-        lower "span" [ attr "class" "id" ] [ text "YU-1" ];
-        lower "time" [] [ text "2d" ];
+        element "span" [ attr "class" "status" ] [ text "o" ];
+        element "span" [ attr "class" "prio" ] [ text "!" ];
+        element "a" [ attr "href" "#" ] [ text "title" ];
+        element "span" [ attr "class" "id" ] [ text "YU-1" ];
+        element "time" [] [ text "2d" ];
       ]
 
 let once ?(static = false) wrap rows =
@@ -80,7 +79,7 @@ let once ?(static = false) wrap rows =
     ~root:
       ( c,
         fun () ->
-          lower "ul" []
+          element "ul" []
             [
               each ~key:string_of_int
                 (fun () -> List.init rows Fun.id)
@@ -88,7 +87,7 @@ let once ?(static = false) wrap rows =
             ] )
     ();
   let t1 = now () in
-  Yuka.unmount ();
+  Yuka.stop ();
   remove_container c;
   t1 -. t0
 

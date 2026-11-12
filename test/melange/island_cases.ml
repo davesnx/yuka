@@ -4,7 +4,7 @@ module D = Dom_cases
 let check = Cases.check
 
 let start_islands ?lazy_entries entries =
-  Yuka.render ~islands:(Yuka.Client.registry ?lazy_entries entries) ~navigation:false ()
+  Yuka.render ~islands:(Yuka.runtime_registry ?lazy_entries entries) ~navigation:false ()
 let ints = string_of_int
 let same = D.same
 
@@ -20,7 +20,7 @@ let clear_body : unit -> unit =
   [%mel.raw {|function () { document.body.innerHTML = ""; }|}]
 
 let reset_body () =
-  Yuka.unmount ();
+  Yuka.stop ();
   clear_body ()
 
 let install_fetch : string -> int -> string -> unit =
@@ -47,22 +47,22 @@ let calls : unit -> string =
 
 let counter_view n =
   let c = State.make n in
-  lower "div" []
+  element "div" []
     [
-      lower "span" [] [ hole (fun () -> text (ints (State.get c))) ];
-      lower "button" [ on "click" (fun _ -> State.update c succ) ] [ text "+" ];
+      element "span" [] [ hole (fun () -> text (ints (State.get c))) ];
+      element "button" [ on "click" (fun _ -> State.update c succ) ] [ text "+" ];
     ]
 
-let counter_island ?(name = "Counter") ?loading n =
-  Client.island ?loading ~name ~props:(Codec.encode Codec.int n) (fun () -> counter_view n)
+let counter_island ?(name = "Counter") ?start n =
+  runtime_island ?start ~name ~props:(Codec.encode Codec.int n) (fun () -> counter_view n)
 
 let counter_entry =
-  Client.entry ~name:"Counter" (fun json ->
+  runtime_entry ~name:"Counter" (fun json ->
       Result.map
         (fun n -> fun () -> counter_view n)
         (Codec.decode Codec.int json))
 
-let page islands = lower "main" [] islands
+let page islands = element "main" [] islands
 let spans c = String.concat "," (Array.to_list (Array.map D.text_content (D.query_all c "span")))
 
 let setup_page tree =
@@ -88,7 +88,7 @@ let islands_start_in_document_order () =
   ignore (setup_page (page [ counter_island 1; counter_island 2; counter_island 3 ]));
   let started = ref [] in
   let entry =
-    Client.entry ~name:"Counter" (fun json ->
+    runtime_entry ~name:"Counter" (fun json ->
         Result.map
           (fun n ->
             started := ints n :: !started;
@@ -138,10 +138,11 @@ let start_twice () =
   D.click (D.query_all c "button").(0);
   check "one handler" "1" (spans c)
 
-let action = Action.declare ~name:"create issue" ~input:Codec.string ~output:Codec.int
+let action = Action.mutation ~name:"create issue" ~input:Codec.string ~output:Codec.int
 
 let status_text = function
-  | Async.Done n -> "done " ^ ints n
+  | Async.Done (Ok n) -> "done " ^ ints n
+  | Async.Done (Error e) -> "error " ^ Status.error_to_string e
   | Async.Failed m -> "failed " ^ m
   | Async.Pending -> "pending"
 
@@ -172,16 +173,16 @@ let action_contains ~mode ~status ~body part =
       finish (fun () ->
           let t = status_text st in
           check ("failure mentions " ^ part) "true" (string_of_bool (contains t part));
-          check "is a failure" "failed" (String.sub t 0 6)))
+          check "is an error" "error " (String.sub t 0 6)))
 
 let lazy_view a =
-  Await.make ~async:a ~loading:(lower "span" [] [ text "loading" ])
-    ~failed:(fun m -> lower "i" [] [ text ("failed " ^ m) ])
-    ~children:(fun n -> lower "b" [] [ text (ints n) ])
+  Await.make ~async:a ~loading:(element "span" [] [ text "loading" ])
+    ~failed:(fun m -> element "i" [] [ text ("failed " ^ m) ])
+    ~children:(fun n -> element "b" [] [ text (ints n) ])
     ()
 
 let lazy_entry =
-  Client.entry ~name:"Lazy" (fun json ->
+  runtime_entry ~name:"Lazy" (fun json ->
       Result.map
         (fun a -> fun () -> lazy_view a)
         (Codec.decode (Codec.async Codec.int) json))
@@ -265,21 +266,21 @@ let fill_js =
   String.sub s 8 (String.length s - 8 - 9)
 
 let fill_view a =
-  lower "div" []
+  element "div" []
     [
       text "x";
       Await.make ~async:a ~loading:(hole (fun () -> text "wait"))
         ~children:(fun n ->
-          lower "section" []
+          element "section" []
             [
               hole (fun () -> text (ints n));
               Await.make ~async:(Async.return "z") ~loading:empty
-                ~children:(fun z -> lower "i" [] [ text z ])
+                ~children:(fun z -> element "i" [] [ text z ])
                 ();
               text "t";
             ])
         ();
-      lower "p" [] [];
+      element "p" [] [];
     ]
 
 let streamed () =
@@ -345,7 +346,7 @@ let fill_then_hydrate () =
   let i = D.query body "i" in
   let before = D.html body in
   let dispose =
-    Yuka.Client.hydrate (D.as_element body) (fun () -> fill_view a)
+    Yuka.Private.hydrate (D.as_element body) (fun () -> fill_view a)
   in
   same "section adopted" section (D.query body "section");
   same "i adopted" i (D.query body "i");
@@ -361,24 +362,24 @@ let empty_slot () =
 let slot_node p = D.query p "p"
 
 let slot_page_tree slot =
-  lower "div" []
+  element "div" []
     [
       text "a";
       hole (fun () ->
-          if true then lower "div" [] [ Yuka.slot slot ] else empty);
+          if true then element "div" [] [ Yuka.slot slot ] else empty);
     ]
 
 let slot_adopted () =
-  let content = Slot.make (lower "p" [] [ text "x"; lower "b" [] [ text "y" ] ]) in
-  let server_html = D.server (lower "div" [] [ text "a"; Yuka.slot content ]) in
+  let content = Slot.make (element "p" [] [ text "x"; element "b" [] [ text "y" ] ]) in
+  let server_html = D.server (element "div" [] [ text "a"; Yuka.slot content ]) in
   check "server html"
     "<div>a<!--[$--><p>x<b>y</b></p><!--]--></div>" server_html;
   let c = D.container server_html in
   let p = slot_node c in
   let client = empty_slot () in
   let dispose =
-    Yuka.Client.hydrate (D.as_element c) (fun () ->
-        lower "div" [] [ text "a"; Yuka.slot client ])
+    Yuka.Private.hydrate (D.as_element c) (fun () ->
+        element "div" [] [ text "a"; Yuka.slot client ])
   in
   same "slot node adopted" p (slot_node c);
   check "captured" "1" (ints (List.length !(Private.slot_dom client)));
@@ -386,20 +387,20 @@ let slot_adopted () =
   dispose ()
 
 let slot_moves_with_hole () =
-  let content = Slot.make (lower "p" [] [ text "x" ]) in
+  let content = Slot.make (element "p" [] [ text "x" ]) in
   let wrap = State.make true in
   let view slot =
-    lower "main" []
+    element "main" []
       [
         hole (fun () ->
-            if State.get wrap then lower "div" [] [ Yuka.slot slot ]
-            else lower "section" [] [ Yuka.slot slot ]);
+            if State.get wrap then element "div" [] [ Yuka.slot slot ]
+            else element "section" [] [ Yuka.slot slot ]);
       ]
   in
   let c = D.container (D.server (view content)) in
   let p = slot_node c in
   let client = empty_slot () in
-  let dispose = Yuka.Client.hydrate (D.as_element c) (fun () -> view client) in
+  let dispose = Yuka.Private.hydrate (D.as_element c) (fun () -> view client) in
   same "adopted" p (slot_node c);
   State.set wrap false;
   check "moved into section"
@@ -417,23 +418,23 @@ let slot_never_captured () =
   let c = D.container "" in
   let dispose =
     Yuka.Private.render (D.as_element c) (fun () ->
-        lower "div" [] [ Yuka.slot (empty_slot ()) ])
+        element "div" [] [ Yuka.slot (empty_slot ()) ])
   in
   check "markers only" "<div><!--[$--><!--]--></div>" (D.html c);
   dispose ()
 
 let outer_view slot =
   let wrap = State.make true in
-  lower "div" []
+  element "div" []
     [
-      lower "button" [ attr "id" "outer"; on "click" (fun _ -> State.update wrap not) ] [];
+      element "button" [ attr "id" "outer"; on "click" (fun _ -> State.update wrap not) ] [];
       hole (fun () ->
-          if State.get wrap then lower "div" [] [ Yuka.slot slot ]
-          else lower "section" [] [ Yuka.slot slot ]);
+          if State.get wrap then element "div" [] [ Yuka.slot slot ]
+          else element "section" [] [ Yuka.slot slot ]);
     ]
 
 let outer_entry =
-  Client.entry ~name:"Outer" (fun _ ->
+  runtime_entry ~name:"Outer" (fun _ ->
       Ok (fun () -> outer_view (empty_slot ())))
 
 let nested_island ~outer_loading () =
@@ -441,7 +442,7 @@ let nested_island ~outer_loading () =
   let tree =
     page
       [
-        Client.island ?loading:outer_loading ~name:"Outer" ~props:`Null (fun () ->
+        runtime_island ?start:outer_loading ~name:"Outer" ~props:`Null (fun () ->
             outer_view (Slot.make inner));
       ]
   in
@@ -505,7 +506,7 @@ let io_disconnected : unit -> bool = [%mel.raw "function () { return globalThis.
 
 let one_island loading =
   reset_body ();
-  let c = D.container (D.server (page [ counter_island ?loading 0 ])) in
+  let c = D.container (D.server (page [ counter_island ?start:loading 0 ])) in
   stub_browser ();
   c
 
@@ -608,28 +609,28 @@ let stop_disposes () =
   start_islands [ counter_entry ];
   D.click (btn c);
   check "running" "1" (spans c);
-  Yuka.unmount ();
+  Yuka.stop ();
   D.click (btn c);
   check "handlers removed" "1" (spans c);
   let c2 = one_island None in
   start_islands [ counter_entry ];
   D.click (btn c2);
   check "start works again on a new body" "1" (spans c2);
-  Yuka.unmount ()
+  Yuka.stop ()
 
 let stop_restarts_same_body () =
   let c = one_island None in
   start_islands [ counter_entry ];
-  Yuka.unmount ();
+  Yuka.stop ();
   start_islands [ counter_entry ];
   D.click (btn c);
   check "island started again" "1" (spans c);
-  Yuka.unmount ()
+  Yuka.stop ()
 
 let stop_cancels_idle () =
   let c = one_island (Some `Idle) in
   start_islands [ counter_entry ];
-  Yuka.unmount ();
+  Yuka.stop ();
   check "no callback left" "0" (ints (run_idle ()));
   D.click (btn c);
   check "not started" "0" (spans c)
@@ -637,7 +638,7 @@ let stop_cancels_idle () =
 let stop_cancels_visible () =
   let c = one_island (Some `Visible) in
   start_islands [ counter_entry ];
-  Yuka.unmount ();
+  Yuka.stop ();
   check "observer disconnected" "true" (string_of_bool (io_disconnected ()));
   io_report true;
   D.click (btn c);
@@ -646,19 +647,19 @@ let stop_cancels_visible () =
 let stop_cancels_interaction () =
   let c = one_island (Some `Interaction) in
   start_islands [ counter_entry ];
-  Yuka.unmount ();
+  Yuka.stop ();
   fire (btn c) "pointerover";
   D.click (btn c);
   check "not started" "0" (spans c)
 
-external of_js : 'a Js.Promise.t -> 'a Yuka.Client.promise = "%identity"
+external of_js : 'a Js.Promise.t -> 'a Yuka.runtime_promise = "%identity"
 external import : string -> 'a Js.Promise.t = "import"
-external entry_of : 'a -> Yuka.Client.entry = "entry" [@@mel.get]
+external entry_of : 'a -> Yuka.runtime_entry = "entry" [@@mel.get]
 
 let import_calls = ref 0
 
 let lazy_counter () =
-  Yuka.Client.lazy_entry ~name:"LazyCounter" (fun () ->
+  Yuka.runtime_lazy_entry ~name:"LazyCounter" (fun () ->
       incr import_calls;
       of_js
         (Js.Promise.then_
@@ -671,7 +672,7 @@ let emitted_has_dynamic_import : unit -> bool =
 let dynamic_import_emitted () =
   check "the emitted JS has import(...)" "true" (string_of_bool (emitted_has_dynamic_import ()))
 
-let lazy_page loading = page [ Counter_island.island ?loading 3; Counter_island.island ?loading 4 ]
+let lazy_page loading = page [ Counter_island.island ?start:loading 3; Counter_island.island ?start:loading 4 ]
 
 let lazy_click_started c i =
   D.click (D.query_all c "button").(i)
@@ -702,28 +703,28 @@ let replay_view () =
   let chosen = State.make "" in
   let keys = State.make "" in
   let log s = replay_log := s :: !replay_log in
-  lower "div" []
+  element "div" []
     [
-      lower "span" [ attr "id" "count" ] [ hole (fun () -> text (ints (State.get count))) ];
-      lower "button"
+      element "span" [ attr "id" "count" ] [ hole (fun () -> text (ints (State.get count))) ];
+      element "button"
         [ on "click" (fun _ -> log "c"; State.update count succ) ]
         [ text "+" ];
-      lower "select"
+      element "select"
         [ on "change" (fun e -> log ("s:" ^ Event.target_value e); State.set chosen (Event.target_value e)) ]
         [
-          lower "option" [ attr "value" "a" ] [ text "A" ];
-          lower "option" [ attr "value" "b" ] [ text "B" ];
+          element "option" [ attr "value" "a" ] [ text "A" ];
+          element "option" [ attr "value" "b" ] [ text "B" ];
         ];
-      lower "span" [ attr "id" "chosen" ] [ hole (fun () -> text (State.get chosen)) ];
-      lower "input" [ on "keydown" (fun e -> log ("k:" ^ Event.key e); State.update keys (fun k -> k ^ Event.key e)) ] [];
-      lower "span" [ attr "id" "keys" ] [ hole (fun () -> text (State.get keys)) ];
+      element "span" [ attr "id" "chosen" ] [ hole (fun () -> text (State.get chosen)) ];
+      element "input" [ on "keydown" (fun e -> log ("k:" ^ Event.key e); State.update keys (fun k -> k ^ Event.key e)) ] [];
+      element "span" [ attr "id" "keys" ] [ hole (fun () -> text (State.get keys)) ];
     ]
 
 let replay_entry =
-  Client.entry ~name:"Replay" (fun _ -> Ok (fun () -> replay_view ()))
+  runtime_entry ~name:"Replay" (fun _ -> Ok (fun () -> replay_view ()))
 
-let replay_island ?loading () =
-  Client.island ?loading ~name:"Replay" ~props:`Null (fun () -> replay_view ())
+let replay_island ?start () =
+  runtime_island ?start ~name:"Replay" ~props:`Null (fun () -> replay_view ())
 
 let key_event : D.node -> string -> unit =
   [%mel.raw "function (el, key) { el.dispatchEvent(new window.KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true })) }"]
@@ -734,31 +735,31 @@ let choose : D.node -> string -> unit =
 let slow_lazy () =
   let resolve = ref (fun () -> ()) in
   let entry =
-    Yuka.Client.lazy_entry ~name:"Replay" (fun () ->
+    Yuka.runtime_lazy_entry ~name:"Replay" (fun () ->
         of_js (Js.Promise.make (fun ~resolve:r ~reject:_ -> resolve := (fun () -> r replay_entry [@u]))))
   in
   (entry, fun () -> !resolve ())
 
 let select_view () =
   let chosen = State.make "a" in
-  lower "div" []
+  element "div" []
     [
-      lower "select"
+      element "select"
         [
           hole_attr "value" (fun () -> Some (State.get chosen));
           on "change" (fun e -> State.set chosen (Event.target_value e));
         ]
         [
-          lower "option" [ attr "value" "a" ] [ text "A" ];
-          lower "option" [ attr "value" "b" ] [ text "B" ];
+          element "option" [ attr "value" "a" ] [ text "A" ];
+          element "option" [ attr "value" "b" ] [ text "B" ];
         ];
-      lower "span" [ attr "id" "chosen" ] [ hole (fun () -> text (State.get chosen)) ];
+      element "span" [ attr "id" "chosen" ] [ hole (fun () -> text (State.get chosen)) ];
     ]
 
-let select_entry = Client.entry ~name:"Select" (fun _ -> Ok (fun () -> select_view ()))
+let select_entry = runtime_entry ~name:"Select" (fun _ -> Ok (fun () -> select_view ()))
 
 let select_island () =
-  Client.island ~loading:`Interaction ~name:"Select" ~props:`Null (fun () -> select_view ())
+  runtime_island ~start:`Interaction ~name:"Select" ~props:`Null (fun () -> select_view ())
 
 let replay_select_with_value_hole () =
   reset_body ();
@@ -768,7 +769,7 @@ let replay_select_with_value_hole () =
   fire (D.query c "select") "pointerover";
   check "handler saw the new value" "b" (D.text_content (D.query c "#chosen"));
   check "select shows it" "b" (D.value (D.query c "select"));
-  Yuka.unmount ()
+  Yuka.stop ()
 
 let navigations : string list ref = ref []
 
@@ -783,7 +784,7 @@ let platform_override_survives () =
   Browser.navigate "/next";
   check "the override is still installed after an island started" "/next"
     (String.concat "," !navigations);
-  Yuka.unmount ();
+  Yuka.stop ();
   reset_body ();
   let c2 = D.container (D.server (page [ select_island () ])) in
   start_islands [ select_entry ];
@@ -792,7 +793,7 @@ let platform_override_survives () =
   check "still there after stop and start" "/again,/next" (String.concat "," !navigations);
   choose (D.query c2 "select") "b";
   check "islands still work" "b" (D.text_content (D.query c2 "#chosen"));
-  Yuka.unmount ()
+  Yuka.stop ()
 
 let texts_of c = String.concat "," (List.map (fun s -> D.text_content (D.query c s)) [ "#count"; "#chosen"; "#keys" ])
 
@@ -820,7 +821,7 @@ let async =
                 check "applied after the load" "2,b,x" applied;
                 check "order kept" "c,s:b,k:x,c" (String.concat "," (List.rev !replay_log |> fun l -> List.filteri (fun i _ -> i < 4) l));
                 check "recording stopped" "3,b,x" again;
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "replay: stop drops the queue",
       fun finish ->
         reset_body ();
@@ -829,7 +830,7 @@ let async =
         let entry, release = slow_lazy () in
         start_islands ~lazy_entries:[ entry ] [];
         D.click (D.query c "button");
-        Yuka.unmount ();
+        Yuka.stop ();
         release ();
         after_ms 30 (fun () ->
             D.click (D.query c "button");
@@ -849,7 +850,7 @@ let async =
             clear_ready ();
             finish (fun () ->
                 check "started on arrival" "1" (D.text_content (D.query (body_node ()) "span"));
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "early start: island waits for its props script",
       fun finish ->
         reset_body ();
@@ -871,7 +872,7 @@ let async =
                     check "not started without props" "0" early;
                     check "started when the script arrived" "1" late;
                     check "no error" "" logged;
-                    Yuka.unmount ()))) );
+                    Yuka.stop ()))) );
     ( "early start: partial props script",
       fun finish ->
         reset_body ();
@@ -898,7 +899,7 @@ let async =
                     check "not started on an empty script" "7" early;
                     check "started when complete" "8" late;
                     check "no error" "" logged;
-                    Yuka.unmount ()))) );
+                    Yuka.stop ()))) );
     ( "early start: unrelated mutations cost no scan",
       fun finish ->
         reset_body ();
@@ -912,7 +913,7 @@ let async =
             clear_ready ();
             finish (fun () ->
                 check "no whole-document query for unrelated nodes" "0" (ints n);
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "early start: no observer after DOMContentLoaded",
       fun finish ->
         reset_body ();
@@ -930,7 +931,7 @@ let async =
                 check "no scan after the final one" "0" (ints n);
                 check "island added later is not started by the observer" "0"
                   (D.text_content (D.query (body_node ()) "span"));
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "early start: async value watcher ignores other mutations",
       fun finish ->
         reset_body ();
@@ -959,7 +960,7 @@ let async =
       fun finish ->
         reset_body ();
         start_islands [ counter_entry ];
-        Yuka.unmount ();
+        Yuka.stop ();
         append_html (D.server (counter_island 0));
         tick (fun () ->
             D.click (D.query (body_node ()) "button");
@@ -980,7 +981,7 @@ let async =
             clear_ready ();
             finish (fun () ->
                 check "island from the fill started" "1" (D.text_content (D.query (body_node ()) "span"));
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "lazy entry loads on start",
       fun finish ->
         import_calls := 0;
@@ -992,7 +993,7 @@ let async =
             lazy_click_started c 0;
             finish (fun () ->
                 check "island works after the import" "4,4" (spans c);
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "lazy entry waits for the strategy",
       fun finish ->
         import_calls := 0;
@@ -1010,13 +1011,13 @@ let async =
                 check "no import before idle" "0" (ints before);
                 check "imported after idle" "1" (ints !import_calls);
                 check "island works" "3,5" (spans c);
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "lazy entry that fails to load",
       fun finish ->
         reset_body ();
         let c = D.container (D.server (lazy_page None)) in
         let bad =
-          Yuka.Client.lazy_entry ~name:"LazyCounter" (fun () -> of_js (Js.Promise.reject (Failure "no chunk")))
+          Yuka.runtime_lazy_entry ~name:"LazyCounter" (fun () -> of_js (Js.Promise.reject (Failure "no chunk")))
         in
         capture_errors ();
         start_islands ~lazy_entries:[ bad ] [];
@@ -1025,7 +1026,7 @@ let async =
             finish (fun () ->
                 check "logged" "true" (string_of_bool (contains logged "cannot load code"));
                 check "html kept" "3,4" (spans c);
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "stop aborts an action in flight",
       fun finish ->
         reset_body ();
@@ -1033,9 +1034,9 @@ let async =
         install_fetch "hang" 0 "";
         let result = Action.call action "hi" in
         check "pending" "pending" (status_text (Async.status result));
-        Yuka.unmount ();
+        Yuka.stop ();
         Async.on_settled result (fun st ->
-            finish (fun () -> check "cancelled" "failed cancelled" (status_text st))) );
+            finish (fun () -> check "cancelled" "error network error: cancelled" (status_text st))) );
     ( "stop leaves a settled action alone",
       fun finish ->
         reset_body ();
@@ -1043,7 +1044,7 @@ let async =
         install_fetch "ok" 200 {|{"ok":3}|};
         let result = Action.call action "hi" in
         Async.on_settled result (fun st ->
-            Yuka.unmount ();
+            Yuka.stop ();
             finish (fun () -> check "done" "done 3" (status_text st))) );
     ( "start idle falls back to a timeout",
       fun finish ->
@@ -1076,14 +1077,18 @@ let async =
 
     ( "action ok",
       action_case ~mode:"ok" ~status:200 ~body:{|{"ok":42}|} "done 42" true );
+    ( "action rejected in a 400",
+      action_case ~mode:"ok" ~status:400 ~body:{|{"error":"title is empty"}|} "error title is empty" false );
+    ( "action origin check in a 403",
+      action_case ~mode:"ok" ~status:403 ~body:{|{"error":"origin mismatch"}|} "error forbidden" false );
+    ( "action unknown in a 404",
+      action_case ~mode:"ok" ~status:404 ~body:{|{"error":"unknown action"}|} "error not found" false );
     ( "action error in a 500",
-      action_case ~mode:"ok" ~status:500 ~body:{|{"error":"boom"}|}
-        "failed boom" false );
+      action_case ~mode:"ok" ~status:500 ~body:{|{"error":"boom"}|} "error server error" false );
     ( "action error in a 200",
-      action_case ~mode:"ok" ~status:200 ~body:{|{"error":"boom"}|}
-        "failed boom" false );
+      action_contains ~mode:"ok" ~status:200 ~body:{|{"error":"boom"}|} "unexpected response (HTTP 200)" );
     ( "action non-JSON body",
-      action_contains ~mode:"ok" ~status:502 ~body:"<html>" "HTTP 502" );
+      action_case ~mode:"ok" ~status:502 ~body:"<html>" "error server error" false );
     ( "action network failure",
       action_contains ~mode:"network" ~status:0 ~body:"" "network error: down" );
     ( "action output decode failure",
@@ -1103,12 +1108,12 @@ let ready_final_scan () =
   clear_ready ();
   check "silent while loading" "" during;
   check "reported at DOMContentLoaded" "yuka island i1 (Counter): props script not found" after;
-  Yuka.unmount ()
+  Yuka.stop ()
 
 let replay_interaction () =
   reset_body ();
   replay_log := [];
-  let c = D.container (D.server (page [ replay_island ~loading:`Interaction () ])) in
+  let c = D.container (D.server (page [ replay_island ~start:`Interaction () ])) in
   start_islands [ replay_entry ];
   D.click (D.query c "button");
   D.click (D.query c "button");
@@ -1117,7 +1122,7 @@ let replay_interaction () =
   check "replayed after the start" "2,," (texts_of c);
   D.click (D.query c "button");
   check "live afterwards, once" "3,," (texts_of c);
-  Yuka.unmount ()
+  Yuka.stop ()
 
 let all =
   [

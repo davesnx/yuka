@@ -44,11 +44,11 @@ let%client make ~(title : string) ~(view : Queries.view) () =
         }
     in
     Async.on_result
-      (Live.mutate source (List.map edit) (fun () ->
+      (Live.mutate source ~change:(List.map edit) (fun () ->
            Action.call Actions.update_issue { Actions.id; status; priority }))
       (function
-        | Ok _ -> if status <> None then Remote.invalidate Queries.labels
-        | Error _ -> State.set toast (Some ("Could not update " ^ id ^ ".")))
+        | Ok (Ok _) -> if status <> None then Remote.invalidate Queries.labels
+        | Ok (Error _) | Error _ -> State.set toast (Some ("Could not update " ^ id ^ ".")))
   in
   let move step =
     let items = State.peek ordered in
@@ -78,10 +78,10 @@ let%client make ~(title : string) ~(view : Queries.view) () =
   in
   Effect.run (fun () -> Browser.on_window "keydown" on_key);
   let popup items : client element =
-    Yuka.list
+    Yuka.fragment
       [
         <div class_="backdrop" on_click=(fun _ -> State.set menu None) />;
-        <ul class_="menu">(Yuka.list items)</ul>;
+        <ul class_="menu">(Yuka.fragment items)</ul>;
       ]
   in
   let status_menu (issue : Issue.t) =
@@ -155,7 +155,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
       (Yuka.hole (fun () ->
          match Remote.status labels with
          | Status.Ready { data; _ } | Status.Loading (Some data) ->
-             Yuka.list
+             Yuka.fragment
                (List.map
                   (fun (l : Queries.label_count) ->
                     <button

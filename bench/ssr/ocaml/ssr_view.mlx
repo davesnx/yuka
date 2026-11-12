@@ -10,7 +10,7 @@ module Row = struct
         <span class_="priority">(Yuka.text i.priority)</span>
         <span class_="assignee">(Yuka.text (Option.value i.assignee ~default:"Unassigned"))</span>
         <span class_="labels">
-          (Yuka.list (List.map (fun l -> <span class_="label">(Yuka.text l)</span>) i.labels))
+          (Yuka.fragment (List.map (fun l -> <span class_="label">(Yuka.text l)</span>) i.labels))
         </span>
       </a>
     </li>
@@ -19,7 +19,7 @@ end
 let view issues () : Yuka.server Yuka.element =
   <main>
     <h1>"All issues"</h1>
-    <ul class_="issues">(Yuka.list (List.map (fun issue -> <Row issue />) issues))</ul>
+    <ul class_="issues">(Yuka.fragment (List.map (fun issue -> <Row issue />) issues))</ul>
   </main>
 
 let stream_app issues : Dream.request Yuka.Server.app =

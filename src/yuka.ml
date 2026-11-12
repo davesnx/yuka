@@ -12,24 +12,8 @@ type server = Types.server
 type client = Types.client
 type slot = Types.slot
 type trigger = Types.trigger
-type loading = Types.loading
+type start = Types.start
 include Element
-module Template = struct
-  include Template
-
-  let make shape ~html ~walk ~kids ~attrs ~values =
-    Client.use_element ();
-    make shape ~html ~walk ~kids ~attrs ~values
-end
-
-let template_of_shape shape =
-  Client.use_element ();
-  Template.of_shape shape
-let template_coded = Template.coded
-let template_child = Template.child
-let template_attribute = Template.attribute
-let template_attribute_option = Template.attribute_option
-let template_instance = Template.instance
 module Client = struct
   include Client
 
@@ -37,18 +21,8 @@ module Client = struct
     start :
       bool * [ `Hover | `Visible | `Off ] option * bool option * (string -> unit) option -> unit;
   }
-
-  let registry ?(lazy_entries = []) entries =
-    {
-      start =
-        (fun (navigation, prefetch, transitions, on_error) ->
-          Option.iter (fun f -> Client.on_error := f) on_error;
-          if navigation then Navigation.start ~lazy_entries ?prefetch ?transitions entries
-          else Client.start ~lazy_entries entries);
-    }
 end
 module Action = Action
-module Optimistic = Optimistic
 module Remote = Remote
 module Topic = Topic
 module Live = Live
@@ -85,9 +59,46 @@ let render ?islands ?navigation ?prefetch ?transitions ?on_error ?root () =
           start ((match navigation with Some n -> n | None -> true), prefetch, transitions, on_error)
       | None -> ())
 
-let unmount () =
+let stop () =
   Client.stop_roots ();
   Navigation.stop ()
+
+type runtime_template = Template.t
+type 'kind runtime_part = 'kind Template.part
+type runtime_entry = Client.entry
+type runtime_lazy_entry = Client.lazy_entry
+type 'a runtime_promise = 'a Client.promise
+type 'f runtime_form_decoding = 'f Form_core.decoding
+
+let runtime_attr = attr_unchecked
+let runtime_hole_attr = hole_attr_unchecked
+let runtime_url_attr = url_attr
+let runtime_url_hole_attr = url_hole_attr
+let runtime_template = Template.coded
+let runtime_child = Template.child
+let runtime_attribute = Template.attribute
+let runtime_attribute_option = Template.attribute_option
+let runtime_instance = Template.instance
+let runtime_stylesheet = stylesheet
+let runtime_island = Client.island
+let runtime_entry = Client.entry
+let runtime_lazy_entry = Client.lazy_entry
+let runtime_promise_map = Client.promise_map
+
+let runtime_registry ?(lazy_entries = []) entries =
+  {
+    Client.start =
+      (fun (navigation, prefetch, transitions, on_error) ->
+        Option.iter (fun f -> Client.on_error := f) on_error;
+        if navigation then Navigation.start ~lazy_entries ?prefetch ?transitions entries
+        else Client.start ~lazy_entries entries);
+  }
+
+let runtime_form_fields = Form_core.fields
+let runtime_form_field = Form_core.field
+let runtime_form_get = Form_core.get
+let runtime_form_finish = Form_core.finish
+let runtime_form_put = Form_core.put
 
 module Private = struct
   include Types
@@ -106,9 +117,20 @@ module Private = struct
   let dev_script = Cycle.dev_script
   let dev_events = Cycle.dev_events
   let node n = n
-  let template_shape (t : template) = Template.shape t
-  let template = template_of_shape
-  let recompile (t : template) = template_of_shape (Template.shape t)
+
+  module Template = struct
+    include Template
+
+    let make shape ~html ~walk ~kids ~attrs ~values =
+      Client.use_element ();
+      make shape ~html ~walk ~kids ~attrs ~values
+  end
+
+  let template shape =
+    Client.use_element ();
+    Template.of_shape shape
+
+  let recompile (t : template) = template (Template.shape t)
   let template_html (t : template) = t.markup
   let parser_changes = Template_build.parser_changes
   let template_plan (t : template) =
@@ -144,7 +166,6 @@ module Private = struct
   let platform = Platform.platform
   let entry_name (e : Island.entry) = e.name
   let entry_decode (e : Island.entry) j = e.decode j
-  let untracked = Scheduler.untrack
 
   let owner_size () =
     match !Base.current_owner with
@@ -157,6 +178,6 @@ module Private = struct
   let slot_dom (s : slot) = s.dom
   let call_action = Action.transport
   let async_source = Types.async_source
-  let action_codecs (a : (_, _, _) Action.t) = (a.input, a.output)
   let render = Client.render
+  let hydrate = Client.hydrate
 end

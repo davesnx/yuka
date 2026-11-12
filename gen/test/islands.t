@@ -4,15 +4,15 @@ Every island is a lazy entry
   $ printf 'let%%client make () = ()\n' > one/counter.mlx
   $ yuka-islands --library app one
   type m
-  type entry = Yuka.Client.entry
-  external import : string -> m Yuka.Client.promise = "import"
+  type entry = Yuka.runtime_entry
+  external import : string -> m Yuka.runtime_promise = "import"
   external register : m -> entry = "register" [@@mel.get]
   
   let registry =
-    Yuka.Client.registry
+    Yuka.runtime_registry
       ~lazy_entries:
-        [ Yuka.Client.lazy_entry ~name:"App.Counter" (fun () ->
-                Yuka.Client.promise_map register (import "./one/counter.js")) ]
+        [ Yuka.runtime_lazy_entry ~name:"App.Counter" (fun () ->
+                Yuka.runtime_promise_map register (import "./one/counter.js")) ]
       []
 
   $ yuka-islands --manifest --library app one
@@ -28,17 +28,17 @@ Two islands, path relative to the working directory
   $ cd up/client
   $ yuka-islands --library demo_shared ../shared
   type m
-  type entry = Yuka.Client.entry
-  external import : string -> m Yuka.Client.promise = "import"
+  type entry = Yuka.runtime_entry
+  external import : string -> m Yuka.runtime_promise = "import"
   external register : m -> entry = "register" [@@mel.get]
   
   let registry =
-    Yuka.Client.registry
+    Yuka.runtime_registry
       ~lazy_entries:
-        [ Yuka.Client.lazy_entry ~name:"Demo_shared.Counter" (fun () ->
-                Yuka.Client.promise_map register (import "../shared/counter.js"))
-        ; Yuka.Client.lazy_entry ~name:"Demo_shared.Related" (fun () ->
-                Yuka.Client.promise_map register (import "../shared/related.js")) ]
+        [ Yuka.runtime_lazy_entry ~name:"Demo_shared.Counter" (fun () ->
+                Yuka.runtime_promise_map register (import "../shared/counter.js"))
+        ; Yuka.runtime_lazy_entry ~name:"Demo_shared.Related" (fun () ->
+                Yuka.runtime_promise_map register (import "../shared/related.js")) ]
       []
   $ yuka-islands --manifest --library demo_shared ../shared
   {
@@ -98,7 +98,7 @@ No island at all
   $ mkdir empty
   $ printf 'let x = 1\n' > empty/x.mlx
   $ yuka-islands --library e empty | tail -2
-    Yuka.Client.registry
+    Yuka.runtime_registry
       []
   $ yuka-islands --manifest --library e empty
   {}

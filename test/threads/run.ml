@@ -1,6 +1,6 @@
 let page k () =
-  Yuka.lower "ul" []
-    (List.init 3 (fun j -> Yuka.lower "li" [ Yuka.attr "class" "row" ] [ Yuka.text (Printf.sprintf "page %d, row %d & more" k j) ]))
+  Yuka.element "ul" []
+    (List.init 3 (fun j -> Yuka.element "li" [ Yuka.attr "class" "row" ] [ Yuka.text (Printf.sprintf "page %d, row %d & more" k j) ]))
 
 let threads = 16
 let rounds = 20_000

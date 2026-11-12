@@ -236,7 +236,7 @@ open Base
           let body () =
             match Async.status async with
             | Async.Done v -> render v
-            | Async.Failed m -> failed m
+            | Async.Failed m -> failed (shown "await" m)
             | Async.Pending -> loading
           in
           match Async.status async with
@@ -350,7 +350,7 @@ open Base
           marker "<!--[$-->";
           Option.iter go content;
           marker "<!--]-->"
-      | Island { name; props; render; loading } ->
+      | Island { name; props; render; start = strategy } ->
           s.islands <- s.islands + 1;
           let id = s.id_prefix ^ "i" ^ string_of_int s.islands in
           let direct = s.depth = 0 && not s.in_fill in
@@ -360,7 +360,7 @@ open Base
               if direct then Buffer.add_string b tag else s.queued <- tag :: s.queued
           | None -> ());
           let link =
-            match (loading, s.preload) with
+            match (strategy, s.preload) with
             | `Lazy _, _ | _, None -> None
             | _, Some f ->
                 if List.mem name s.preloaded then None
@@ -381,7 +381,7 @@ open Base
           Buffer.add_string b
             ("<yuka-island data-name=\"" ^ escape ~quote:true name
            ^ "\" data-id=\"" ^ id ^ "\" style=\"display:contents\""
-           ^ (match loading with
+           ^ (match strategy with
                | `Load -> ""
                | `Idle | `Lazy `Idle -> " data-start=\"idle\""
                | `Visible | `Lazy `Visible -> " data-start=\"visible\""

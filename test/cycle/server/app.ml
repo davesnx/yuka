@@ -52,7 +52,7 @@ let reset () =
   second_state := Async.make ()
 
 let el tag ?(attrs = []) children =
-  Yuka.lower tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
+  Yuka.element tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
 
 let text = Yuka.text
 
@@ -103,7 +103,7 @@ module Pages = struct
                     el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form Count) ] [];
                     Yuka.Form.error_view form Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
                     Yuka.Form.error_view form Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
-                    Yuka.Form.form_error_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
+                    Yuka.Form.errors_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
                   ])
               ();
             jot_form "one";
@@ -122,7 +122,7 @@ module Pages = struct
         text (Option.value q ~default:"-" ^ "|" ^ String.concat "," tag))
 
   let island name =
-    Yuka.Client.island ~name ~props:`Null (fun () ->
+    Yuka.runtime_island ~name ~props:`Null (fun () ->
         el "button" [ el "a" ~attrs:[ ("href", "/islands") ] [ text name ] ])
 
   let islands () =

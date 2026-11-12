@@ -114,11 +114,11 @@ let () =
       end)
     Template_cases.svg_cases;
   let reparsed =
-    template_coded "\x01table\x02\x01tr\x02\x06\x06" ~html:"<table><tr></tr></table>" ~walk:[||]
+    runtime_template "\x01table\x02\x01tr\x02\x06\x06" ~html:"<table><tr></tr></table>" ~walk:[||]
       ~kids:[||] ~attrs:[||] ~values:[||] ~clones:1
   in
   capture_warnings ();
-  ignore (render (fun () -> template_instance reparsed [||]));
+  ignore (render (fun () -> runtime_instance reparsed [||]));
   check "dev build: a coded template that the parser changes is reported"
     "yuka: hydration mismatch in island ? at root: expected the tree of the template <table><tr></tr></table>, found <table>"
     (warnings ());

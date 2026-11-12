@@ -6,12 +6,13 @@ let view : Yuka.server Yuka.element =
   <main>
     <h1 class_="title">"Issues"</h1>
     <Yuka.Client><Counter label="count" step=2 issue /></Yuka.Client>
-    <Yuka.Client loading=`Visible>
+    <Yuka.Client start=`Visible>
       <Shell title="outer">
         <p>"server content"</p>
         <Yuka.Client><Counter label="inner" issue /></Yuka.Client>
       </Shell>
     </Yuka.Client>
-    <Yuka.Client loading=(`Lazy `Visible)><Counter label="lazy" issue /></Yuka.Client>
+    <Yuka.Client start=(`Lazy `Visible)><Counter label="lazy" issue /></Yuka.Client>
+    <Yuka.Client start=`Idle><Spinner loading=true /></Yuka.Client>
     <svg view_box="0 0 10 10"><circle cx="5" cy="5" r="4" stroke_dasharray="1 1" /></svg>
   </main>

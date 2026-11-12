@@ -17,14 +17,14 @@ let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
       }
     in
     Async.on_result
-      (Live.mutate live edit (fun () ->
+      (Live.mutate live ~change:edit (fun () ->
            Action.call Actions.update_issue { Actions.id = issue.id; status; priority }))
-      (function Ok _ -> () | Error _ -> State.set error (Some "Could not update the issue."))
+      (function Ok (Ok _) -> () | Ok (Error _) | Error _ -> State.set error (Some "Could not update the issue."))
   in
   let select label items slug to_label of_slug selected on_pick =
     <select class_="select" aria_label=label value=(slug (State.get selected))
       on_change=(fun e -> Option.iter on_pick (of_slug (Event.target_value e)))>
-      (Yuka.list
+      (Yuka.fragment
          (List.map
             (fun x ->
               <option value=(slug x)>

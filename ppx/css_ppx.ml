@@ -25,7 +25,7 @@ let expand ~loc payload =
   in
   let sheet = try Css_scan.sheet ~path:file text with Css_scan.Error m -> fail ~loc "%s" m in
   let href = "/_yuka/css/" ^ sheet.file in
-  let stylesheet = [%stri let stylesheet = Yuka.stylesheet [%e estring ~loc href]] in
+  let stylesheet = [%stri let stylesheet = Yuka.runtime_stylesheet [%e estring ~loc href]] in
   let classes =
     List.map
       (fun (name, value) ->

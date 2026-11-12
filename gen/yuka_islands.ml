@@ -161,18 +161,18 @@ let render islands =
   let b = Buffer.create 512 in
   Buffer.add_string b
     "type m\n\
-     type entry = Yuka.Client.entry\n\
-     external import : string -> m Yuka.Client.promise = \"import\"\n\
+     type entry = Yuka.runtime_entry\n\
+     external import : string -> m Yuka.runtime_promise = \"import\"\n\
      external register : m -> entry = \"register\" [@@mel.get]\n\n\
      let registry =\n\
-    \  Yuka.Client.registry\n";
+    \  Yuka.runtime_registry\n";
   if lazies <> [] then begin
     let items =
       List.map
         (fun i ->
           Printf.sprintf
-            "Yuka.Client.lazy_entry ~name:%S (fun () ->\n\
-            \              Yuka.Client.promise_map register (import %S))"
+            "Yuka.runtime_lazy_entry ~name:%S (fun () ->\n\
+            \              Yuka.runtime_promise_map register (import %S))"
             i.name i.path)
         lazies
     in

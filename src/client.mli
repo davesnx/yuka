@@ -4,7 +4,7 @@ type entry = Island.entry = {
 }
 
 val island :
-  ?loading:Types.loading ->
+  ?start:Types.start ->
   name:string ->
   props:Json.t ->
   (unit -> Types.node) ->
@@ -13,6 +13,8 @@ val island :
 val entry : name:string -> (Json.t -> (unit -> Types.node, string) result) -> entry
 
 type container = Web.node
+
+val container : string -> container option
 type 'a promise = 'a Web.promise
 
 val promise_map : ('a -> 'b) -> 'a promise -> 'b promise

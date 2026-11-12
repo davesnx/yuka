@@ -46,8 +46,8 @@ module Event = struct
 end
 
 module Browser = struct
-  let on_window name handler = own (!platform.on_window name handler)
+  let on_window name handler = own (!platform.on_window name (fun e -> Scheduler.batch (fun () -> handler e)))
   let navigate url = if Url.unsafe ~tag:"a" "href" url then Types.log "navigate" url else !platform.navigate url
-  let focus id = !platform.focus id
-  let scroll_into_view id = !platform.scroll_into_view id
+  let focus id = Scheduler.after (fun () -> !platform.focus id)
+  let scroll_into_view id = Scheduler.after (fun () -> !platform.scroll_into_view id)
 end

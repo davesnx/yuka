@@ -141,6 +141,8 @@ let form_values : event -> (string * string) array =
   return out;
 }|}]
 
+external microtask : (unit -> unit) -> unit = "queueMicrotask"
+
 let set_timeout : int -> (unit -> unit) -> unit -> unit =
   [%mel.raw
     {|function (ms, f) {

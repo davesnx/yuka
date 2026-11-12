@@ -27,6 +27,9 @@ external defined : 'a Js.undefined -> 'a = "%identity"
 (* Melange represents [Some x] as [x] when [x] is neither undefined nor an
    option; a DOM node is neither. *)
 external present : Web.node -> Obj.t option = "%identity"
+external by_id : string -> Web.node Js.nullable = "getElementById" [@@mel.scope "document"]
+
+let container id = Js.Nullable.toOption (by_id id)
 
 (* Safe only for [Template.expander] and [Template.check]: every value stored
    in them is a lambda of two parameters, which Melange compiles to a
@@ -249,6 +252,22 @@ let acting_as owner f ev =
       acting := prev;
       raise e
 
+let handle owner f ev =
+  let first = ref None in
+  let second =
+    try
+      Scheduler.batch (fun () -> try f ev with e -> first := Some e);
+      None
+    with e -> Some e
+  in
+  let report = function
+    | Some e -> ( try Base.fail owner e with e -> Web.microtask (fun () -> raise e))
+    | None -> ()
+  in
+  report !first;
+  report second;
+  match (!first, second) with None, None -> false | _ -> true
+
 let dispatch event ev =
   let key = handlers_key event in
   let rec go n =
@@ -257,11 +276,8 @@ let dispatch event ev =
       let hs = defined hs in
       for i = 0 to Array.length hs - 1 do
         let h = get hs i in
-        if live h then
-          try acting_as (Some h.owner) h.run ev
-          with e ->
-            Base.fail h.owner e;
-            Web.set_flag ev stopped_key true
+        if live h && handle h.owner (acting_as (Some h.owner) h.run) ev then
+          Web.set_flag ev stopped_key true
       done
     end;
     if flag ev stopped_key != Js.Undefined.return true then begin
@@ -278,13 +294,13 @@ let delegate doc event =
     Web.add_listener doc event (dispatch event)
   end
 
-let unowned : Base.owner = { last = None; gen = 0; catch = None }
+let unowned : Base.owner = { last = None; gen = 0; catch = None; parent = None }
 
 let add_handler doc el event handler =
   let owner = match !Base.current_owner with Some o -> o | None -> unowned in
   if non_bubbling event then begin
     let handler = acting_as !Base.current_owner handler in
-    let handler ev = try handler ev with e -> Base.fail owner e in
+    let handler ev = ignore (handle owner handler ev) in
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
   end
@@ -346,7 +362,7 @@ type await_mount = {
 }
 
 let element_hook : (pos -> string -> attr list -> node list -> unit [@u]) ref =
-  ref (fun [@u] _ _ _ _ -> unset "Yuka.lower")
+  ref (fun [@u] _ _ _ _ -> unset "Yuka.element")
 
 let await_hook = ref { run = (fun [@u] _ _ _ _ _ -> unset "Yuka.Await.make") }
 let slot_hook : (pos -> slot -> unit [@u]) ref = ref (fun [@u] _ _ -> unset "Yuka.slot")
@@ -734,7 +750,7 @@ let field name fields =
 let has_value value id = match value with Some v -> String.equal v id | None -> false
 
 let transport name input =
-  let result, resolve, fail = Async.make () in
+  let result, resolve, _ = Async.make () in
   let id = register ignore in
   let finish () = drop_cleanup id in
   let abort =
@@ -743,34 +759,33 @@ let transport name input =
     (Json.to_string input)
     (fun status body ->
       finish ();
-      match Json.of_string body with
-      | Ok (`Assoc fields) -> (
-          match (field "ok" fields, field "error" fields) with
-          | Some value, _ ->
-              !Platform.acted ();
-              !Platform.live_mark fields;
-              resolve value
-          | None, Some (`String message) -> fail message
-          | None, _ ->
-              fail
-                ("action " ^ name ^ ": unexpected response (HTTP "
-               ^ string_of_int status ^ ")"))
-      | Ok _ | Error _ ->
-          fail
-            ("action " ^ name ^ ": response is not JSON (HTTP "
-           ^ string_of_int status ^ ")"))
+      let fields = Action.fields body in
+      let answer = Action.of_response status fields in
+      (match (answer, fields) with
+      | Ok _, Some fields ->
+          !Platform.acted ();
+          !Platform.live_mark fields
+      | _ -> ());
+      resolve answer)
     (fun cancelled message ->
       finish ();
-      if cancelled then fail "cancelled"
-      else fail ("action " ^ name ^ ": network error: " ^ message))
+      resolve (Error (Status.Network (if cancelled then "cancelled" else message))))
   in
   if Web.table_has (cleanups ()) (string_of_int id) then begin
     set_cleanup id abort;
-    match (match !acting with Some o -> Some o | None -> !Base.current_owner) with
+    let tie (owner : Base.owner) =
+      let disposer = Base.add_disposer owner abort in
+      Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
+    in
+    match !acting with
     | Some owner ->
-        let disposer = Base.add_disposer owner abort in
-        Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
-    | None -> ()
+        let rec chain (o : Base.owner) = (o, o.gen) :: (match o.parent with Some p -> chain p | None -> []) in
+        let owners = chain owner in
+        Web.microtask (fun () ->
+            match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
+            | Some (o, _) -> tie o
+            | None -> abort ())
+    | None -> Option.iter tie !Base.current_owner
   end;
   result
 
@@ -872,8 +887,13 @@ let boot entries props island =
               match Base.with_owner o (fun () -> hydrate island build) with
               | d when !failed ->
                   stop d;
+                  Base.dispose_owner o;
                   None
               | d ->
+                  let d () =
+                    d ();
+                    Base.dispose_owner o
+                  in
                   dispose := d;
                   Some d
               | exception e ->

@@ -201,28 +201,28 @@ let chtml (el : client element) = Private.to_html (Private.node el)
 
 let html_escaping () =
   check "text" "<p>a &amp; b &lt;c&gt; \"d\"</p>"
-    (html (lower "p" [] [ text "a & b <c> \"d\"" ]));
+    (html (element "p" [] [ text "a & b <c> \"d\"" ]));
   check "attribute" "<a href=\"x&amp;y&quot;&lt;>\"></a>"
-    (html (lower "a" [ attr "href" "x&y\"<>" ] []))
+    (html (element "a" [ attr "href" "x&y\"<>" ] []))
 
 let html_adjacent_texts () =
   check "separator" "<p>a<!---->b<!---->c</p>"
-    (html (lower "p" [] [ text "a"; text "b"; text "c" ]));
+    (html (element "p" [] [ text "a"; text "b"; text "c" ]));
   check "across a fragment" "<p>a<!---->b</p>"
-    (html (lower "p" [] [ text "a"; fragment [ text "b" ] ]));
+    (html (element "p" [] [ text "a"; fragment [ text "b" ] ]));
   check "element between" "<p>a<b></b>b</p>"
-    (html (lower "p" [] [ text "a"; lower "b" [] []; text "b" ]))
+    (html (element "p" [] [ text "a"; element "b" [] []; text "b" ]))
 
 let html_empty_text () =
-  check "nothing" "<p></p>" (html (lower "p" [] [ text "" ]));
+  check "nothing" "<p></p>" (html (element "p" [] [ text "" ]));
   check "no separator for empty first" "<p>a</p>"
-    (html (lower "p" [] [ text ""; text "a" ]))
+    (html (element "p" [] [ text ""; text "a" ]))
 
 let html_hole () =
   let runs = ref 0 in
   let s = State.make "x" in
   let el =
-    lower "p" []
+    element "p" []
       [ hole (fun () -> incr runs; text (State.get s)); text "t" ]
   in
   check "markers" "<p><!--[-->x<!--]-->t</p>" (chtml el);
@@ -230,11 +230,11 @@ let html_hole () =
 
 let html_each () =
   let el =
-    lower "ul" []
+    element "ul" []
       [
         each ~key:string_of_int
           (fun () -> [ 1; 2 ])
-          (fun n -> lower "li" [] [ text (string_of_int n) ]);
+          (fun n -> element "li" [] [ text (string_of_int n) ]);
       ]
   in
   check "items" "<ul><li>1</li><li>2</li></ul>"
@@ -246,7 +246,7 @@ let html_each () =
 
 let html_dynamic_attribute () =
   let s = State.make (Some "v") in
-  let el = lower "i" [ hole_attr "title" (fun () -> State.get s) ] [] in
+  let el = element "i" [ hole_attr "title" (fun () -> State.get s) ] [] in
   check "Some" "<i title=\"v\"></i>" (chtml el);
   State.set s None;
   check "None" "<i></i>" (chtml el)
@@ -254,30 +254,30 @@ let html_dynamic_attribute () =
 let html_handler () =
   check "not written" "<button id=\"b\">go</button>"
     (chtml
-       (lower "button"
+       (element "button"
           [ attr "id" "b"; on "click" (fun _ -> ()) ]
           [ text "go" ]))
 
 let html_void () =
   check "void" "<p>a<br>b<input type=\"text\"></p>"
     (html
-       (lower "p" []
-          [ text "a"; lower "br" [] []; text "b";
-            lower "input" [ attr "type" "text" ] [ text "ignored" ] ]))
+       (element "p" []
+          [ text "a"; element "br" [] []; text "b";
+            element "input" [ attr "type" "text" ] [ text "ignored" ] ]))
 
 let html_nested () =
   check "nested" "<div class=\"c\"><ul><li>1</li></ul></div>"
     (html
-       (lower "div" [ attr "class" "c" ]
-          [ lower "ul" [] [ lower "li" [] [ text "1" ] ] ]))
+       (element "div" [ attr "class" "c" ]
+          [ element "ul" [] [ element "li" [] [ text "1" ] ] ]))
 
 let html_effect_skipped () =
   let runs = ref 0 in
   let component () =
     Effect.run (fun () -> incr runs);
-    lower "p" [] []
+    element "p" [] []
   in
-  let in_hole = lower "div" [] [ hole (fun () -> component () |> fun e -> (Private.element (Private.node e) : client element)) ] in
+  let in_hole = element "div" [] [ hole (fun () -> component () |> fun e -> (Private.element (Private.node e) : client element)) ] in
   check "hole html" "<div><p></p></div>" (chtml in_hole);
   check "hole body effect not run" "0" (string_of_int !runs);
   check "build and print" "<p></p>"
@@ -287,7 +287,7 @@ let html_effect_skipped () =
   (try
      ignore
        (Private.to_html
-          (Private.node (lower "p" [] [ hole (fun () -> failwith "x") ])))
+          (Private.node (element "p" [] [ hole (fun () -> failwith "x") ])))
    with Failure _ -> ());
   check "flag restored after exception" "false"
     (string_of_bool !Private.server_rendering);
@@ -379,13 +379,22 @@ let codec_round_trip () =
     | _ -> "bad");
   check "option encoding" "null" (show_json (Codec.encode (option int) None));
   check "nested" "[[1],[]]"
-    (show_json (Codec.encode (list (list int)) [ [ 1 ]; [] ]))
+    (show_json (Codec.encode (list (list int)) [ [ 1 ]; [] ]));
+  let tagged = Codec.make ~encode:(fun n -> `String (string_of_int n)) ~decode:(function
+    | `String s -> Option.to_result ~none:"not a number" (int_of_string_opt s)
+    | _ -> Error "not a string") in
+  check "make" "Ok 7" (match codec_ok tagged 7 with Ok n -> "Ok " ^ string_of_int n | Error m -> m);
+  let wrapped = Codec.map (fun s -> `Name s) (fun (`Name s) -> s) string in
+  check "map encode" "\"x\"" (show_json (Codec.encode wrapped (`Name "x")));
+  check "map decode" "Ok y" (match Codec.decode wrapped (`String "y") with Ok (`Name s) -> "Ok " ^ s | Error m -> m)
 
 let codec_errors () =
   let open Codec in
   let is_err = function Error _ -> "error" | Ok _ -> "ok" in
   check "int from string" "error" (is_err (decode int (`String "1")));
   check "int from float" "error" (is_err (decode int (`Float 1.5)));
+  check "int from an integral float" "Ok 3" (match decode int (`Float 3.) with Ok n -> "Ok " ^ string_of_int n | Error m -> m);
+  check "int from a float out of range" "error" (is_err (decode int (`Float 1e300)));
   check "float from int" "ok" (is_err (decode float (`Int 1)));
   check "float value" "3." (match decode float (`Int 3) with Ok f -> Printf.sprintf "%g." f | Error m -> m);
   check "string from null" "error" (is_err (decode string `Null));
@@ -446,6 +455,18 @@ let async_map_bind () =
   check "bind skips on failure" "failed e3 false"
     (status_text string_of_int (Async.status h) ^ " " ^ string_of_bool !called)
 
+let async_map_bind_raise () =
+  let failed a = match Async.status a with Async.Failed _ -> "failed" | Async.Done _ -> "done" | Async.Pending -> "pending" in
+  check "map raises on a settled value" "failed" (failed (Async.map (fun _ -> failwith "view") (Async.return 1)));
+  check "bind raises on a settled value" "failed"
+    (failed (Async.bind (Async.return 1) (fun _ -> (failwith "view" : int Async.t))));
+  let a, resolve, _ = Async.make () in
+  let m = Async.map (fun _ -> failwith "view") a in
+  let b = Async.bind a (fun _ -> (failwith "view" : int Async.t)) in
+  resolve 1;
+  check "map raises after resolve" "failed" (failed m);
+  check "bind raises after resolve" "failed" (failed b)
+
 let async_watch () =
   let add, read = log () in
   let a, resolve, _ = Async.make () in
@@ -457,7 +478,7 @@ let async_watch () =
   check "already settled" "done 1" (status_text string_of_int (State.peek w2))
 
 let double =
-  Action.declare ~name:"double" ~input:Codec.int ~output:Codec.int
+  Action.mutation ~name:"double" ~input:Codec.int ~output:Codec.int
 
 let with_transport f body =
   let saved = !Private.call_action in
@@ -469,42 +490,38 @@ let with_transport f body =
 let action_call () =
   check "name" "double" (Action.name double);
   let seen = ref "" in
+  let call transport = with_transport transport (fun () -> Async.status (Action.call double 21)) in
+  let show = function
+    | Async.Done (Ok n) -> "ok " ^ string_of_int n
+    | Async.Done (Error e) -> "error " ^ Status.error_to_string e
+    | Async.Failed m -> "failed " ^ m
+    | Async.Pending -> "pending"
+  in
   let result =
-    with_transport
-      (fun name input ->
+    call (fun name input ->
         seen := name ^ " " ^ show_json input;
         match input with
-        | `Int n -> Async.return (`Int (n * 2))
-        | _ -> Async.failed "bad")
-      (fun () -> Async.status (Action.call double 21))
+        | `Int n -> Async.return (Ok (`Int (n * 2)))
+        | _ -> Async.return (Error Status.Server))
   in
   check "transport got" "double 21" !seen;
-  check "decoded output" "done 42" (status_text string_of_int result);
-  let bad =
-    with_transport
-      (fun _ _ -> Async.return (`String "x"))
-      (fun () -> Async.status (Action.call double 1))
-  in
-  check "decode error is Failed" "failed"
-    (match bad with Async.Failed _ -> "failed" | _ -> "other");
-  let failing =
-    with_transport
-      (fun _ _ -> Async.failed "server down")
-      (fun () -> Async.status (Action.call double 1))
-  in
-  check "transport failure" "failed server down" (status_text string_of_int failing)
+  check "decoded output" "ok 42" (show result);
+  check "a decode error is Protocol" "error protocol error: expected int, got \"x\""
+    (show (call (fun _ _ -> Async.return (Ok (`String "x")))));
+  check "a transport error stays" "error forbidden"
+    (show (call (fun _ _ -> Async.return (Error Status.Forbidden))))
 
 let html_island () =
   let item name =
-    Client.island ~name
+    runtime_island ~name
       ~props:(`Assoc [ ("t", `String "</script>") ])
       (fun () ->
         Effect.run (fun () -> failwith "effect ran on the server");
-        lower "b" [] [ hole (fun () -> text "") ])
+        element "b" [] [ hole (fun () -> text "") ])
   in
   check "island"
     "<div><yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"t\":\"\\u003c/script>\"}</script>t<yuka-island data-name=\"B\" data-id=\"i2\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"t\":\"\\u003c/script>\"}</script></div>"
-    (html (lower "div" [] [ item "A"; text "t"; item "B" ]));
+    (html (element "div" [] [ item "A"; text "t"; item "B" ]));
   check "counter restarts" "i1"
     (let h = html (item "A") in
      let key = "data-id=\"" in
@@ -514,9 +531,9 @@ let html_island () =
 
 let island_entry () =
   let e =
-    Client.entry ~name:"Counter" (fun props ->
+    runtime_entry ~name:"Counter" (fun props ->
         match Codec.decode Codec.int props with
-        | Ok n -> Ok (fun () -> lower "i" [] [ text (string_of_int n) ])
+        | Ok n -> Ok (fun () -> element "i" [] [ text (string_of_int n) ])
         | Error m -> Error m)
   in
   check "name" "Counter" (Private.entry_name e);
@@ -530,15 +547,18 @@ let untracked_no_dependency () =
   let runs = ref 0 in
   let s = State.make 0 in
   Effect.run (fun () ->
-      ignore (Private.untracked (fun () -> State.get s));
+      ignore (State.untrack (fun () -> State.get s));
       incr runs);
   State.set s 1;
-  check "untracked read" "1" (string_of_int !runs)
+  check "untracked read" "1" (string_of_int !runs);
+  let r : int State.read = State.read_only s in
+  State.set s 2;
+  check "a read-only view follows its State" "2" (string_of_int (State.get r))
 
 let html_await () =
   let a, resolve, fail = Async.make () in
   let el =
-    lower "p" []
+    element "p" []
       [ Await.make ~failed:(fun m -> text ("E" ^ m)) ~async:a ~loading:(text "L")
           ~children:(fun n -> text (string_of_int n)) () ]
   in
@@ -548,7 +568,7 @@ let html_await () =
   let b, _, fail_b = Async.make () in
   let el_b = Await.make ~failed:(fun m -> text ("E" ^ m)) ~async:b ~loading:(text "L") ~children:(fun () -> text "x") () in
   fail_b "no";
-  check "failed" "<!--[-->Eno<!--]-->" (html el_b);
+  check "failed" "<!--[-->Eserver error<!--]-->" (html el_b);
   ignore fail;
   let c = Await.make ~async:(Async.failed "z") ~loading:(text "L") ~children:(fun () -> text "x") () in
   check "default failed is empty" "<!--[--><!--]-->" (html c)
@@ -560,7 +580,7 @@ let html_streaming_session () =
   let first =
     Private.print s (fun () ->
         Private.node
-          (lower "p" []
+          (element "p" []
              [ Await.make ~async:a ~loading:(text "L") ~children:(fun n -> text (string_of_int n)) ();
                Await.make ~async:(Async.return 1) ~loading:(text "no") ~children:(fun n -> text (string_of_int n)) ();
                Await.make ~async:b ~loading:(text "M") ~children:(fun n -> text (string_of_int n)) () ]))
@@ -600,13 +620,13 @@ let codec_async_inline () =
 
 let html_int_float_list () =
   check "ints are two texts" "<p>-3<!---->2</p>"
-    (html (lower "p" [] [ int (-3); int 2 ]));
+    (html (element "p" [] [ int (-3); int 2 ]));
   check "float" "2.5" (html (float 2.5));
   check "whole float" "1.0" (html (float 1.0));
   check "list" "<ul><li>a</li><li>b</li></ul>"
     (html
-       (lower "ul" []
-          [ list [ lower "li" [] [ text "a" ]; lower "li" [] [ text "b" ] ] ]))
+       (element "ul" []
+          [ fragment [ element "li" [] [ text "a" ]; element "li" [] [ text "b" ] ] ]))
 
 let with_platform p body =
   let saved = !Private.platform in
@@ -660,14 +680,14 @@ let async_on_result () =
   check "error and already settled" "ok 1 again ok 1 error boom ok 5" (read ())
 
 let html_slot () =
-  let content = Slot.make (lower "p" [] [ text "x" ]) in
+  let content = Slot.make (element "p" [] [ text "x" ]) in
   check "slot with content" "<div><!--[$--><p>x</p><!--]--></div>"
-    (chtml (lower "div" [] [ slot content ]));
+    (chtml (element "div" [] [ slot content ]));
   let empty_slot = match Codec.decode Codec.slot `Null with Ok s -> s | Error m -> raise (Failed m) in
   check "empty slot" "<!--[$--><!--]-->" (chtml (slot empty_slot));
   check "text before and after" "<b>a<!--[$-->b<!--]-->c</b>"
     (chtml
-       (lower "b" []
+       (element "b" []
           [ text "a"; slot (Slot.make (text "b")); text "c" ]));
   check "slot codec encodes null" "null" (show_json (Codec.encode Codec.slot content));
   check "content" "some"
@@ -679,8 +699,8 @@ let html_slot () =
   check "dom is shared" "1" (string_of_int (List.length !(Private.slot_dom content)))
 
 let html_island_loading () =
-  let make loading =
-    html (Client.island ?loading ~name:"A" ~props:`Null (fun () -> text ""))
+  let make start =
+    html (runtime_island ?start ~name:"A" ~props:`Null (fun () -> text ""))
   in
   let prefix = "<yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"" in
   let start loading = String.sub (make loading) (String.length prefix) 18 in
@@ -938,67 +958,67 @@ let owned_removed_from_parent () =
   check "a only once" "1"
     (string_of_int (List.length (List.filter (( = ) "a") words)))
 
-let opt v = lower "option" [ attr "value" v ] [ text (String.uppercase_ascii v) ]
+let opt v = element "option" [ attr "value" v ] [ text (String.uppercase_ascii v) ]
 
 let html_select_value () =
   check "static value" "<select><option value=\"a\">A</option><option value=\"b\" selected=\"\">B</option></select>"
-    (html (lower "select" [ attr "value" "b" ] [ opt "a"; opt "b" ]));
+    (html (element "select" [ attr "value" "b" ] [ opt "a"; opt "b" ]));
   let current = State.make (Some "a") in
-  let dynamic = lower "select" [ hole_attr "value" (fun () -> State.get current) ] [ opt "a"; opt "b" ] in
+  let dynamic = element "select" [ hole_attr "value" (fun () -> State.get current) ] [ opt "a"; opt "b" ] in
   check "dynamic value" "<select><option value=\"a\" selected=\"\">A</option><option value=\"b\">B</option></select>"
     (chtml dynamic);
   State.set current None;
   check "no value, no selection" "<select><option value=\"a\">A</option><option value=\"b\">B</option></select>"
     (chtml dynamic);
   check "no value attribute on the select" "<select><option value=\"a\">A</option></select>"
-    (html (lower "select" [] [ opt "a" ]));
+    (html (element "select" [] [ opt "a" ]));
   check "optgroup, fragment, hole and each"
     "<select><optgroup label=\"g\"><option value=\"b\" selected=\"\">B</option></optgroup><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><!--[--><option value=\"b\" selected=\"\">B</option><!--]--><option value=\"c\">C</option></select>"
     (chtml
-       (lower "select" [ attr "value" "b" ]
-          [ lower "optgroup" [ attr "label" "g" ] [ fragment [ opt "b" ] ];
+       (element "select" [ attr "value" "b" ]
+          [ element "optgroup" [ attr "label" "g" ] [ fragment [ opt "b" ] ];
             hole (fun () -> opt "b");
             each ~key:Fun.id (fun () -> [ "b" ]) opt;
             opt "c" ]));
   check "escaped values compare unescaped" "<select><option value=\"a&quot;&amp;\" selected=\"\">A\"&amp;</option></select>"
     (html
-       (lower "select" [ attr "value" "a\"&" ]
-          [ lower "option" [ attr "value" "a\"&" ] [ text "A\"&" ] ]));
+       (element "select" [ attr "value" "a\"&" ]
+          [ element "option" [ attr "value" "a\"&" ] [ text "A\"&" ] ]));
   check "option without value is not selected (text is not compared)"
     "<select><option>b</option></select>"
-    (html (lower "select" [ attr "value" "b" ] [ lower "option" [] [ text "b" ] ]));
+    (html (element "select" [ attr "value" "b" ] [ element "option" [] [ text "b" ] ]));
   check "own selected is not repeated" "<select><option value=\"b\" selected=\"\">B</option></select>"
     (html
-       (lower "select" [ attr "value" "b" ]
-          [ lower "option" [ attr "value" "b"; attr "selected" "" ] [ text "B" ] ]));
+       (element "select" [ attr "value" "b" ]
+          [ element "option" [ attr "value" "b"; attr "selected" "" ] [ text "B" ] ]));
   check "an option outside a select is untouched" "<option value=\"b\">B</option>"
     (html (opt "b"));
   check "the selection ends with the select"
     "<div><select><option value=\"a\" selected=\"\">A</option></select><option value=\"a\">A</option></div>"
-    (html (lower "div" [] [ lower "select" [ attr "value" "a" ] [ opt "a" ]; opt "a" ]));
+    (html (element "div" [] [ element "select" [ attr "value" "a" ] [ opt "a" ]; opt "a" ]));
   check "next select is independent"
     "<div><select><option value=\"a\" selected=\"\">A</option></select><select><option value=\"a\">A</option></select></div>"
     (html
-       (lower "div" []
-          [ lower "select" [ attr "value" "a" ] [ opt "a" ];
-            lower "select" [] [ opt "a" ] ]))
+       (element "div" []
+          [ element "select" [ attr "value" "a" ] [ opt "a" ];
+            element "select" [] [ opt "a" ] ]))
 
 let html_textarea_value () =
   check "static" "<textarea>a &amp; b &lt;c&gt;</textarea>"
-    (html (lower "textarea" [ attr "value" "a & b <c>" ] []));
+    (html (element "textarea" [ attr "value" "a & b <c>" ] []));
   check "children ignored" "<textarea>v</textarea>"
-    (html (lower "textarea" [ attr "value" "v" ] [ text "ignored" ]));
+    (html (element "textarea" [ attr "value" "v" ] [ text "ignored" ]));
   let v = State.make (Some "x") in
-  let el = lower "textarea" [ attr "rows" "3"; hole_attr "value" (fun () -> State.get v) ] [] in
+  let el = element "textarea" [ attr "rows" "3"; hole_attr "value" (fun () -> State.get v) ] [] in
   check "dynamic keeps other attributes" "<textarea rows=\"3\">x</textarea>" (chtml el);
   State.set v None;
   check "dynamic none" "<textarea rows=\"3\"></textarea>" (chtml el);
   check "without value the children stay" "<textarea>kept</textarea>"
-    (html (lower "textarea" [] [ text "kept" ]));
+    (html (element "textarea" [] [ text "kept" ]));
   check "leading newline survives" "<textarea>\n\nx</textarea>"
-    (html (lower "textarea" [ attr "value" "\nx" ] []));
+    (html (element "textarea" [ attr "value" "\nx" ] []));
   check "input keeps its value attribute" "<input value=\"v\">"
-    (html (lower "input" [ attr "value" "v" ] []))
+    (html (element "input" [ attr "value" "v" ] []))
 
 let codec_result () =
   let c = Codec.result Codec.int Codec.string in
@@ -1027,90 +1047,89 @@ let codec_result () =
 let shape_html shape = Private.template_html (Private.template shape)
 
 let html_template () =
-  let p = Private.template Template.(element "p" [ fixed "class" "c" ] [ text "a" ]) in
-  check "printed as its tree" "<p class=\"c\">a</p>" (chtml (Template.instance p [||]));
+  let p = Private.template Private.Template.(element "p" [ fixed "class" "c" ] [ text "a" ]) in
+  check "printed as its tree" "<p class=\"c\">a</p>" (chtml (runtime_instance p [||]));
   check "no marker around nested" "<div><p class=\"c\">a</p></div>"
-    (chtml (lower "div" [] [ Template.instance p [||] ]))
+    (chtml (element "div" [] [ runtime_instance p [||] ]))
 
 let template_parts_print () =
   let state = State.make "x" in
   let t =
     Private.template
-      Template.(
+      Private.Template.(
         (element "div"
            [ fixed "id" "d"; part_attr 0; part_attr 1; part_attr 2 ]
            [ text "a"; part 3; element "span" [] [ part 4 ]; text "b" ]))
   in
-  let parts : client Template.part array =
-    Template.
-      [|
-        attribute (hole_attr "title" (fun () -> Some (State.get state)));
-        attribute_option None;
-        attribute (on "click" (fun _ -> ()));
-        child (Yuka.text "t");
-        child (hole (fun () -> Yuka.text (State.get state)));
-      |]
+  let parts : client runtime_part array =
+    [|
+      runtime_attribute (hole_attr "title" (fun () -> Some (State.get state)));
+      runtime_attribute_option None;
+      runtime_attribute (on "click" (fun _ -> ()));
+      runtime_child (Yuka.text "t");
+      runtime_child (hole (fun () -> Yuka.text (State.get state)));
+    |]
   in
   let by_hand : client element =
-    lower "div"
+    element "div"
       [ attr "id" "d"; hole_attr "title" (fun () -> Some (State.get state)); on "click" (fun _ -> ()) ]
-      [ text "a"; text "t"; lower "span" [] [ hole (fun () -> text (State.get state)) ]; text "b" ]
+      [ text "a"; text "t"; element "span" [] [ hole (fun () -> text (State.get state)) ]; text "b" ]
   in
-  check "same html as lower" (chtml by_hand) (chtml (Template.instance t parts));
+  check "same html as element" (chtml by_hand) (chtml (runtime_instance t parts));
   check "html" "<div id=\"d\" title=\"x\">a<!---->t<span>x</span>b</div>"
-    (chtml (Template.instance t parts))
+    (chtml (runtime_instance t parts))
 
 let template_shape_html () =
   check "shape"
     "<div id=\"d\">a<!---->b<br><span>&amp;&lt;</span>c<!---->d<i></i>e</div>"
     (shape_html
-       Template.(
+       Private.Template.(
          element "div" [ fixed "id" "d"; part_attr 0 ]
            [ text "a"; text "b"; element "br" [] []; part 1;
              element "span" [] [ text "&<" ]; text "c"; part 2; text "d";
              element "i" [] []; part 3; text "e" ]))
 
 let template_values () =
-  let opt v = Template.(element "option" [ fixed "value" v ] [ text v ]) in
+  let opt v = Private.Template.(element "option" [ fixed "value" v ] [ text v ]) in
   check "static select value"
     "<select><option value=\"a\">a</option><option value=\"b\" selected=\"\">b</option></select>"
-    (shape_html Template.(element "select" [ fixed "value" "b" ] [ opt "a"; opt "b" ]));
+    (shape_html Private.Template.(element "select" [ fixed "value" "b" ] [ opt "a"; opt "b" ]));
   check "part select value is left out" "<select><option value=\"a\">a</option></select>"
-    (shape_html Template.(element "select" [ part_attr 0 ] [ opt "a" ]));
+    (shape_html Private.Template.(element "select" [ part_attr 0 ] [ opt "a" ]));
   check "static textarea value" "<textarea>v &amp;</textarea>"
-    (shape_html Template.(element "textarea" [ fixed "value" "v &" ] []));
+    (shape_html Private.Template.(element "textarea" [ fixed "value" "v &" ] []));
   check "part textarea value is left out" "<textarea></textarea>"
-    (shape_html Template.(element "textarea" [ part_attr 0 ] []))
+    (shape_html Private.Template.(element "textarea" [ part_attr 0 ] []))
 
 let only_child_markers () =
   let s = State.make "x" in
   check "hole as the only child has no markers" "<p>x</p>"
-    (chtml (lower "p" [] [ hole (fun () -> text (State.get s)) ]));
+    (chtml (element "p" [] [ hole (fun () -> text (State.get s)) ]));
   check "hole with a sibling keeps markers" "<p><!--[-->x<!--]-->!</p>"
-    (chtml (lower "p" [] [ hole (fun () -> text (State.get s)); text "!" ]));
+    (chtml (element "p" [] [ hole (fun () -> text (State.get s)); text "!" ]));
   check "hole at the root keeps markers" "<!--[-->x<!--]-->"
     (chtml (hole (fun () -> text (State.get s))));
   check "hole inside a fragment keeps markers" "<p><!--[-->x<!--]--></p>"
-    (chtml (lower "p" [] [ fragment [ hole (fun () -> text (State.get s)) ] ]));
+    (chtml (element "p" [] [ fragment [ hole (fun () -> text (State.get s)) ] ]));
   check "list as the only child, element rows: no markers"
     "<ul><li>a</li><li>b</li></ul>"
-    (chtml (lower "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun v -> lower "li" [] [ text v ]) ]));
+    (chtml (element "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun v -> element "li" [] [ text v ]) ]));
   check "list with a sibling, text rows: all markers"
     "<ul><!--[--><!--[-->a<!--]--><!--[-->b<!--]--><!--]--><li></li></ul>"
     (chtml
-       (lower "ul" []
-          [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) text; lower "li" [] [] ]));
+       (element "ul" []
+          [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) text; element "li" [] [] ]));
   check "template rows: no row markers" "<ul><!--[--><li>a</li><!--]--><i></i></ul>"
     (chtml
-       (lower "ul" []
+       (element "ul" []
           [ each ~key:Fun.id (fun () -> [ "a" ])
-              (fun v -> Template.instance (Private.template Template.(element "li" [] [ part 0 ])) Template.[| child (Yuka.text v) |]);
-            lower "i" [] [] ]))
+              (fun v -> runtime_instance (Private.template Private.Template.(element "li" [] [ part 0 ])) [| runtime_child (Yuka.text v) |]);
+            element "i" [] [] ]))
 
 let await_component () =
   let a, resolve, fail = Async.make () in
   let el =
-    lower "p" []
+    element "p" []
       [ Await.make ~async:a ~loading:(text "L")
           ~failed:(fun m -> text ("E" ^ m))
           ~children:(fun n -> text (string_of_int n))
@@ -1122,7 +1141,7 @@ let await_component () =
   let b, _, fail_b = Async.make () in
   let el_b = Await.make ~async:b ~loading:(text "L") ~failed:(fun m -> text ("E" ^ m)) ~children:(fun () -> text "x") () in
   fail_b "no";
-  check "failed element" "<!--[-->Eno<!--]-->" (html el_b);
+  check "failed element" "<!--[-->Eserver error<!--]-->" (html el_b);
   let c = Await.make ~async:(Async.failed "z") ~loading:(text "L") ~children:(fun () -> text "x") () in
   check "default failed is empty" "<!--[--><!--]-->" (html c);
   ignore fail
@@ -1187,10 +1206,6 @@ let html_float_special () =
   check "negative infinity" "-Infinity" (html (float neg_infinity));
   check "ordinary" "-0.5" (html (float (-0.5)));
   check "whole" "3.0" (html (float 3.0))
-
-let html_array () =
-  check "array" "a<!---->b" (html (array [| text "a"; text "b" |]));
-  check "empty array" "" (html (array [||]))
 
 let memo_lazy_without_readers () =
   let computes = ref 0 in
@@ -1395,7 +1410,7 @@ let caught_memo_error_keeps_reader () =
 let boom () : _ element = failwith "secret detail"
 let late () : _ element = Private.element (Private.hole (fun () -> failwith "secret detail"))
 
-let fallback ~error ~reset:_ = lower "p" [] [ text ("caught " ^ error) ]
+let fallback ~error ~reset:_ = element "p" [] [ text ("caught " ^ error) ]
 
 let logged f =
   let saved = !Server.log_error and messages = ref [] in
@@ -1406,7 +1421,7 @@ let logged f =
 let in_island tree =
   Private.print
     (Private.session ~streaming:false ~islands_only:true)
-    (fun () -> Private.node (Client.island ~name:"I" ~props:(`Int 0) (fun () -> tree ())))
+    (fun () -> Private.node (runtime_island ~name:"I" ~props:(`Int 0) (fun () -> tree ())))
 
 let page_html tree =
   Private.print (Private.session ~streaming:false ~islands_only:true) (fun () -> Private.node (tree ()))
@@ -1420,10 +1435,10 @@ let catch_server_fallback () =
   let html, messages =
     logged (fun () ->
         in_island (fun () ->
-            lower "div" []
+            element "div" []
               [ text "a";
                 Catch.make ~fallback
-                  ~children:(fun () -> lower "span" [] [ text "partial"; late () ])
+                  ~children:(fun () -> element "span" [] [ text "partial"; late () ])
                   ();
                 text "b" ]))
   in
@@ -1439,7 +1454,7 @@ let catch_server_children () =
   let html, messages =
     logged (fun () ->
         in_island (fun () ->
-            Catch.make ~fallback ~children:(fun () -> lower "span" [] [ text "ok" ]) ()))
+            Catch.make ~fallback ~children:(fun () -> element "span" [] [ text "ok" ]) ()))
   in
   check "children in a plain hole"
     {|<yuka-island data-name="I" data-id="i1" style="display:contents"><!--[--><span>ok</span><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
@@ -1450,8 +1465,8 @@ let catch_server_outside_island () =
   let html, _ =
     logged (fun () ->
         page_html (fun () ->
-            lower "main" []
-              [ Catch.make ~fallback ~children:(fun () -> lower "span" [] [ text "x"; boom () ]) () ]))
+            element "main" []
+              [ Catch.make ~fallback ~children:(fun () -> element "span" [] [ text "x"; boom () ]) () ]))
   in
   check "no marker outside an island" "<main><p>caught server error</p></main>" html
 
@@ -1461,7 +1476,7 @@ let catch_server_nested () =
         page_html (fun () ->
             Catch.make ~fallback
               ~children:(fun () ->
-                lower "div" []
+                element "div" []
                   [ text "outer";
                     Catch.make
                       ~fallback:(fun ~error:_ ~reset:_ -> failwith "fallback failed")
@@ -1476,13 +1491,13 @@ let catch_server_keeps_islands () =
   let html, _ =
     logged (fun () ->
         page_html (fun () ->
-            lower "main" []
+            element "main" []
               [ Catch.make ~fallback
                   ~children:(fun () ->
-                    lower "div" []
-                      [ Client.island ~name:"Lost" ~props:(`Int 1) (fun () -> text "l"); late () ])
+                    element "div" []
+                      [ runtime_island ~name:"Lost" ~props:(`Int 1) (fun () -> text "l"); late () ])
                   ();
-                Client.island ~name:"Kept" ~props:(`Int 2) (fun () -> text "k") ]))
+                runtime_island ~name:"Kept" ~props:(`Int 2) (fun () -> text "k") ]))
   in
   check "the island of the failed children is gone" "false" (string_of_bool (contains html "Lost"));
   check "the island after it is printed" "true" (string_of_bool (contains html {|data-name="Kept"|}))
@@ -1496,7 +1511,7 @@ let catch_server_drops_pending () =
             Private.node
               (Catch.make ~fallback
                  ~children:(fun () ->
-                   lower "div" []
+                   element "div" []
                      [ Await.make ~async:pending ~loading:(text "wait") ~children:text ();
                        late () ])
                  ())))
@@ -1508,12 +1523,12 @@ let catch_server_select () =
   let html, _ =
     logged (fun () ->
         page_html (fun () ->
-            lower "main" []
+            element "main" []
               [ Catch.make ~fallback
                   ~children:(fun () ->
-                    lower "select" [ attr "value" "x" ] [ lower "option" [ attr "value" "x" ] []; late () ])
+                    element "select" [ attr "value" "x" ] [ element "option" [ attr "value" "x" ] []; late () ])
                   ();
-                lower "datalist" [] [ lower "option" [ attr "value" "x" ] [] ] ]))
+                element "datalist" [] [ element "option" [ attr "value" "x" ] [] ] ]))
   in
   check "the select value of the dropped children does not leak"
     {|<main><p>caught server error</p><datalist><option value="x"></option></datalist></main>|} html
@@ -1523,7 +1538,7 @@ let show_view status =
     ~status:(fun () -> status)
     ~loading:(text "loading")
     ~failed:(fun e -> text ("failed " ^ Status.error_to_string e))
-    ~children:(fun d -> lower "b" [] [ text d ])
+    ~children:(fun d -> element "b" [] [ text d ])
     ()
 
 let show_server () =
@@ -1595,6 +1610,7 @@ let all =
     ("async settles once", async_settle_once);
     ("async on_settled", async_on_settled);
     ("async map and bind", async_map_bind);
+    ("async map and bind catch an exception", async_map_bind_raise);
     ("async watch", async_watch);
     ("action call", action_call);
     ("html island", html_island);
@@ -1630,6 +1646,5 @@ let all =
     ("mount disposes when the function raises", mount_raises_disposes);
     ("json depth limit", json_depth_limit);
     ("html float special values", html_float_special);
-    ("html array", html_array);
     ("owned disposes when the function raises", owned_raises_disposes);
   ]

@@ -335,16 +335,14 @@ let sync_cases =
 
 
 let pair : (int * int) Codec.t =
-  {
-    encode = (fun (a, b) -> `Assoc [ ("a", `Int a); ("b", `Int b) ]);
-    decode =
-      (function
+  Codec.make
+    ~encode:(fun (a, b) -> `Assoc [ ("a", `Int a); ("b", `Int b) ])
+    ~decode:(function
       | `Assoc f -> (
           match (List.assoc_opt "a" f, List.assoc_opt "b" f) with
           | Some (`Int a), Some (`Int b) -> Ok (a, b)
           | _ -> Error "pair")
-      | _ -> Error "pair");
-  }
+      | _ -> Error "pair")
 
 let pairs = Topic.declare ~name:"pairs" ~key:pair ~state:Codec.int
 let () = Live.serve pairs (fun (a, b) -> Async.return (a + b))
@@ -519,9 +517,9 @@ let ssr_cases =
         let view () =
           let a = Yuka.Live.use count (fun () -> "ssr") and b = Yuka.Live.use count (fun () -> "other") in
           let show t = match Yuka.Live.status t with Status.Ready { data; _ } -> string_of_int data | _ -> "?" in
-          lower "p" [] [ text (show a ^ "," ^ show b) ]
+          element "p" [] [ text (show a ^ "," ^ show b) ]
         in
-        let html = Private.print s (fun () -> Private.node (Client.island ~name:"L" ~props:`Null view)) in
+        let html = Private.print s (fun () -> Private.node (runtime_island ~name:"L" ~props:`Null view)) in
         let has part = Astring_like.contains html part in
         Alcotest.(check bool) "data" true (has "3,5");
         Alcotest.(check bool) "state answer" true (has {|data-yuka-answer="l:count &quot;ssr&quot;">{"ok":3}|});
@@ -532,7 +530,7 @@ let ssr_cases =
         let s = Private.session ~streaming:false ~islands_only:true in
         let asked = ref 0 in
         Private.set_csrf s (fun () -> incr asked; "tok");
-        let html = Private.print s (fun () -> Private.node (Client.island ~name:"N" ~props:`Null (fun () -> text "x"))) in
+        let html = Private.print s (fun () -> Private.node (runtime_island ~name:"N" ~props:`Null (fun () -> text "x"))) in
         Alcotest.(check bool) "no token" false (Astring_like.contains html "l:csrf");
         Alcotest.(check int) "not asked" 0 !asked );
   ]
@@ -740,7 +738,7 @@ let action_mark_cases =
   [
     ( "an action answer carries the mark of the node",
       fun () ->
-        let echo = Action.declare ~name:"mark-echo" ~input:Codec.int ~output:Codec.int in
+        let echo = Action.mutation ~name:"mark-echo" ~input:Codec.int ~output:Codec.int in
         Server.Action.implement echo (fun n ->
             Live.publish shared_topic "m" n;
             Async.return n);

@@ -186,7 +186,8 @@ end
 let settle async =
   Lwt_main.run (Lwt.pause ());
   match Yuka.Async.status async with
-  | Yuka.Async.Done v -> Ok v
+  | Yuka.Async.Done (Ok v) -> Ok v
+  | Done (Error e) -> Error (Yuka.Status.error_to_string e)
   | Failed m -> Error m
   | Pending -> Error "pending"
 

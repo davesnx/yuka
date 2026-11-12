@@ -6,6 +6,7 @@ type 'o t = {
 
 type retry = { attempts : int; delay_ms : int -> int }
 
+let retry ~attempts ~delay_ms = { attempts; delay_ms }
 let default_retry = { attempts = 2; delay_ms = (fun n -> if n = 1 then 500 else 1500) }
 let no_retry = { attempts = 0; delay_ms = (fun _ -> 0) }
 
@@ -15,25 +16,11 @@ let server_send :
       k (Error (Status.Network "no action transport"));
       ignore)
 
-let of_response status body : (Json.t, Status.error) result =
-  let fields = match Json.of_string body with Ok (`Assoc f) -> Some f | _ -> None in
-  let message () =
-    match Option.bind fields (List.assoc_opt "error") with Some (`String m) -> m | _ -> "HTTP " ^ string_of_int status
-  in
-  match (status, Option.bind fields (List.assoc_opt "ok")) with
-  | 200, Some v -> Ok v
-  | 400, _ -> Error (Status.Rejected (message ()))
-  | 403, _ -> Error Status.Forbidden
-  | 404, _ -> Error Status.Not_found
-  | (413 | 415), _ -> Error (Status.Protocol (message ()))
-  | s, _ when s >= 500 -> Error Status.Server
-  | _ -> Error (Status.Protocol ("unexpected response (HTTP " ^ string_of_int status ^ ")"))
-
 let fetch name input k =
   Web.fetch_post
     ("/_yuka/action/" ^ Web.encode_uri name)
     (Json.to_string input)
-    (fun status body -> k (of_response status body))
+    (fun status body -> k (Action.of_response status (Action.fields body)))
     (fun cancelled message -> if not cancelled then k (Error (Status.Network message)))
 
 let send () = if Web.in_browser then fetch else !server_send
@@ -175,13 +162,13 @@ let status r =
 let refetch r = r.refetch ()
 let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed q.name)
 
-let mutate r change ?commit run =
+let mutate ?commit r ~change run =
   let added, id = Optimistic.add (State.peek r.changes) change in
   State.set r.changes added;
   let drop () = State.set r.changes (Optimistic.remove (State.peek r.changes) id) in
   let result = match run () with a -> a | exception e -> drop (); raise e in
   Async.on_settled result (function
-    | Async.Done v ->
+    | Async.Done (Ok v) ->
         Scheduler.batch (fun () ->
             drop ();
             let next data = match commit with Some f -> f v data | None -> change data in
@@ -193,6 +180,6 @@ let mutate r change ?commit run =
             | Status.Failed { error; last = Some data } ->
                 State.set r.base (Status.Failed { error; last = Some (next data) })
             | Status.Idle | Status.Loading None | Status.Failed { last = None; _ } -> ())
-    | Async.Failed _ -> drop ()
+    | Async.Done (Error _) | Async.Failed _ -> drop ()
     | Async.Pending -> ());
   result

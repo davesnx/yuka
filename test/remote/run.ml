@@ -135,7 +135,7 @@ let transport =
         counted := 0;
         let r, _ =
           in_owner (fun () ->
-              Remote.use ~retry:{ Remote.attempts = 2; delay_ms = (fun _ -> 0) } rejecting (fun () -> 1))
+              Remote.use ~retry:(Remote.retry ~attempts:2 ~delay_ms:(fun _ -> 0)) rejecting (fun () -> 1))
         in
         check_status "failed" "failed no way" r;
         Alcotest.(check int) "one call" 1 !counted );
@@ -158,9 +158,9 @@ let transport =
   ]
 
 let island q input =
-  Client.island ~name:"Q" ~props:`Null (fun () ->
+  runtime_island ~name:"Q" ~props:`Null (fun () ->
       let r = Remote.use q (fun () -> input) in
-      lower "b" [] [ text (show (Remote.status r)) ])
+      element "b" [] [ text (show (Remote.status r)) ])
 
 let answers =
   [
@@ -184,7 +184,7 @@ let answers =
         let html =
           Server.to_string (fun () ->
               let r = Remote.use echo (fun () -> "out") in
-              lower "b" [] [ text (show (Remote.status r)) ])
+              element "b" [] [ text (show (Remote.status r)) ])
         in
         Alcotest.(check bool) "data" true (contains html "ready echo out");
         Alcotest.(check bool) "no answer" false (contains html "data-yuka-answer") );
@@ -262,11 +262,11 @@ let fill_and_rollback =
         let value, resolve, _ = Async.make () in
         let p =
           Private.stream ~sleep:never ~write (fun () ->
-              Client.island ~name:"F" ~props:`Null (fun () ->
+              runtime_island ~name:"F" ~props:`Null (fun () ->
                   Await.make ~async:value ~loading:(text "wait")
                     ~children:(fun v ->
                       let r = Remote.use echo (fun () -> v) in
-                      lower "b" [] [ text (show (Remote.status r)) ])
+                      element "b" [] [ text (show (Remote.status r)) ])
                     ()))
         in
         resolve "f";
@@ -280,7 +280,7 @@ let fill_and_rollback =
         reset ();
         let s = Private.session ~streaming:false ~islands_only:true in
         let broken () =
-          Client.island ~name:"B" ~props:`Null (fun () ->
+          runtime_island ~name:"B" ~props:`Null (fun () ->
               ignore (Remote.use echo (fun () -> "r"));
               failwith "island broke")
         in
@@ -295,12 +295,12 @@ let fill_and_rollback =
         reset ();
         let html =
           Server.to_string (fun () ->
-              lower "div" []
+              element "div" []
                 [
                   Catch.make
                     ~fallback:(fun ~error:_ ~reset:_ -> text "caught")
                     ~children:(fun () ->
-                      Client.island ~name:"B" ~props:`Null (fun () ->
+                      runtime_island ~name:"B" ~props:`Null (fun () ->
                           ignore (Remote.use echo (fun () -> "c"));
                           failwith "island broke"))
                     ();
@@ -312,7 +312,7 @@ let fill_and_rollback =
           (contains html {|data-yuka-answer="r:echo &quot;c&quot;">|}) );
   ]
 
-let edit = Action.declare ~name:"edit" ~input:Codec.string ~output:Codec.string
+let edit = Action.mutation ~name:"edit" ~input:Codec.string ~output:Codec.string
 let edits = ref []
 
 let () =
@@ -331,36 +331,24 @@ let fail_edit i =
 
 let optimistic =
   [
-    ( "Optimistic: order, remove, new base",
-      fun () ->
-        let t, first = Optimistic.add Optimistic.empty (fun s -> s ^ "1") in
-        let t, _ = Optimistic.add t (fun _ -> "two") in
-        let t, _ = Optimistic.add t (fun s -> s ^ "3") in
-        let run = Optimistic.apply (fun d f -> f d) in
-        Alcotest.(check string) "later wins, oldest first" "two3" (run t "base");
-        let t = Optimistic.remove t first in
-        Alcotest.(check string) "remove the first keeps the others" "two3" (run t "x");
-        let t2, _ = Optimistic.add Optimistic.empty (fun s -> s ^ "!") in
-        Alcotest.(check string) "new base" "new!" (run t2 "new");
-        Alcotest.(check bool) "empty" true (Optimistic.is_empty Optimistic.empty) );
     ( "mutate: shown at once, commit on Ok, rollback on Error",
       fun () ->
         reset ();
         edits := [];
         let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "m")) in
         settle 0 "base";
-        let a = Remote.mutate r (fun d -> d ^ "+x") (fun () -> Action.call edit "x") in
+        let a = Remote.mutate r ~change:(fun d -> d ^ "+x") (fun () -> Action.call edit "x") in
         check_status "shown before the call settles" "ready base+x" r;
         settle_edit 0 "server";
-        Alcotest.(check bool) "settled" true (Async.status a = Async.Done "server");
+        Alcotest.(check bool) "settled" true (Async.status a = Async.Done (Ok "server"));
         check_status "change kept as the base" "ready base+x" r;
-        let _ = Remote.mutate r (fun d -> d ^ "+y") ~commit:(fun v d -> d ^ "|" ^ v) (fun () -> Action.call edit "y") in
+        let _ = Remote.mutate ~commit:(fun v d -> d ^ "|" ^ v) r ~change:(fun d -> d ^ "+y") (fun () -> Action.call edit "y") in
         settle_edit 1 "Y";
         check_status "commit" "ready base+x|Y" r;
-        let b = Remote.mutate r (fun d -> d ^ "+z") (fun () -> Action.call edit "z") in
+        let b = Remote.mutate r ~change:(fun d -> d ^ "+z") (fun () -> Action.call edit "z") in
         check_status "shown" "ready base+x|Y+z" r;
         fail_edit 2;
-        Alcotest.(check bool) "failed" true (match Async.status b with Async.Failed _ -> true | _ -> false);
+        Alcotest.(check bool) "failed" true (Async.status b = Async.Done (Error Status.Server));
         check_status "rolled back" "ready base+x|Y" r );
     ( "mutate: a commit while a refetch runs keeps Loading and asks again",
       fun () ->
@@ -368,7 +356,7 @@ let optimistic =
         edits := [];
         let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "k")) in
         settle 0 "old";
-        let _ = Remote.mutate r (fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        let _ = Remote.mutate r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         Remote.refetch r;
         settle_edit 0 "ok";
         check_status "still loading, with the change" "loading old+c" r;
@@ -385,7 +373,7 @@ let optimistic =
         settle 0 "base";
         Remote.refetch r;
         fail 1 "down";
-        let _ = Remote.mutate r (fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        let _ = Remote.mutate r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         settle_edit 0 "ok";
         check_status "failed with the new last" "failed server error last base+c" r );
     ( "mutate: a refetch during a pending change keeps the change",
@@ -394,7 +382,7 @@ let optimistic =
         edits := [];
         let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "p")) in
         settle 0 "old";
-        let _ = Remote.mutate r (fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        let _ = Remote.mutate r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         Remote.refetch r;
         check_status "loading keeps last data with the change" "loading old+c" r;
         settle 1 "fresh";
@@ -411,5 +399,5 @@ let () =
       ("transport", cases transport);
       ("answers", cases answers);
       ("fill and rollback", cases fill_and_rollback);
-      ("optimistic", cases optimistic);
+      ("mutate", cases optimistic);
     ]

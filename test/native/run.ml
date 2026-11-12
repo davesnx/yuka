@@ -52,7 +52,7 @@ let fill id html =
     id html id
 
 let island a =
-  Yuka.Client.island ~name:"I"
+  Yuka.runtime_island ~name:"I"
     ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
     (fun () -> Yuka.text "")
 
@@ -81,7 +81,7 @@ let page_cases =
   let page () =
     let html =
       Server.document ~title:"A & B" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
-        (fun () -> Yuka.lower "p" [] [ Yuka.text "hi" ])
+        (fun () -> Yuka.element "p" [] [ Yuka.text "hi" ])
     in
     check string "document"
       "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>A &amp; B</title><link rel=\"stylesheet\" href=\"/a.css\"><script type=\"module\" src=\"/m.js\"></script></head><body><p>hi</p></body></html>"
@@ -90,12 +90,12 @@ let page_cases =
   let to_string () =
     check string "element" "<p>ab</p>"
       (Server.to_string (fun () ->
-           Yuka.lower "p" [] [ Yuka.text "a"; Yuka.text "b" ]))
+           Yuka.element "p" [] [ Yuka.text "a"; Yuka.text "b" ]))
   in
   let markers_only_in_islands () =
     let pending, _, _ = Async.make () in
     let content () =
-      Yuka.lower "p" []
+      Yuka.element "p" []
         [ Yuka.text "a";
           Yuka.text "b";
           Yuka.hole (fun () -> Yuka.text "h");
@@ -105,7 +105,7 @@ let page_cases =
     in
     let outside =
       Server.to_string (fun () ->
-          Yuka.lower "p" []
+          Yuka.element "p" []
             [ Yuka.text "a";
               Yuka.text "b";
               text_await (Async.return 1) "s";
@@ -117,7 +117,7 @@ let page_cases =
          "i1"
          "<p>a<!---->b<!--[-->h<!--]--><!--[--><!--[-->x<!--]--><!--[-->y<!--]--><!--]--><!--[-->s1<!--]--><!--[-->Ll<!--]--></p>")
       (Server.to_string (fun () ->
-           Yuka.Client.island ~name:"I" ~props:`Null content))
+           Yuka.runtime_island ~name:"I" ~props:`Null content))
   in
   let respond () =
     let write, chunks = recorder () in
@@ -131,7 +131,7 @@ let page_cases =
     let runs = ref 0 in
     let component () =
       Yuka.Effect.run (fun () -> incr runs);
-      Yuka.lower "p" [] []
+      Yuka.element "p" [] []
     in
     check string "html" "<p></p>" (Server.to_string component);
     check int "effect not run" 0 !runs
@@ -145,16 +145,14 @@ let page_cases =
 type issue = { title : string; n : int }
 
 let issue_codec : issue Yuka.Codec.t =
-  {
-    encode = (fun i -> `Assoc [ ("title", `String i.title); ("n", `Int i.n) ]);
-    decode =
-      (function
+  Yuka.Codec.make
+    ~encode:(fun i -> `Assoc [ ("title", `String i.title); ("n", `Int i.n) ])
+    ~decode:(function
       | `Assoc [ ("title", `String title); ("n", `Int n) ] -> Ok { title; n }
-      | _ -> Error "bad issue");
-  }
+      | _ -> Error "bad issue")
 
-let declare name = Yuka.Action.declare ~name ~input:Yuka.Codec.int ~output:Yuka.Codec.int
-let create = Yuka.Action.declare ~name:"create" ~input:issue_codec ~output:issue_codec
+let declare name = Yuka.Action.mutation ~name ~input:Yuka.Codec.int ~output:Yuka.Codec.int
+let create = Yuka.Action.mutation ~name:"create" ~input:issue_codec ~output:issue_codec
 let broken = declare "broken"
 let failing = declare "failing"
 let rejecting = declare "rejecting"
@@ -271,18 +269,20 @@ let action_cases =
   in
   let direct_call () =
     check string "resolved" "t 6"
-      (let i = get (Yuka.Action.call create { title = "t"; n = 5 }) in
-       i.title ^ " " ^ string_of_int i.n);
-    check bool "implementation failure" true
-      (match Async.status (Yuka.Action.call broken 1) with
-      | Async.Failed _ -> true
-      | _ -> false)
+      (match get (Yuka.Action.call create { title = "t"; n = 5 }) with
+      | Ok i -> i.title ^ " " ^ string_of_int i.n
+      | Error e -> Yuka.Status.error_to_string e);
+    let failure, messages = logged (fun () -> Async.status (Yuka.Action.call broken 1)) in
+    check bool "implementation failure is Server" true (failure = Async.Done (Error Yuka.Status.Server));
+    check bool "the detail is logged" true (List.exists (fun m -> contains m "secret detail") messages);
+    check bool "unknown action is Not_found" true
+      (Async.status (Yuka.Action.call (declare "nobody") 1) = Async.Done (Error Yuka.Status.Not_found))
   in
   let late_call () =
     let call = Yuka.Action.call late 3 in
     check bool "pending" true (is_pending call);
     call_open ();
-    check int "settles" 3 (get call)
+    check bool "settles" true (get call = Ok 3)
   in
   [ test_case "happy path" `Quick happy;
     test_case "bad JSON" `Quick bad_json;
@@ -305,7 +305,7 @@ let stream_cases =
     let write, chunks = recorder () in
     let p =
       stream ~title:"T"
-        (fun () -> Yuka.lower "div" [] [ text_await a "a"; text_await b "b" ])
+        (fun () -> Yuka.element "div" [] [ text_await a "a"; text_await b "b" ])
         write
     in
     (match chunks () with
@@ -343,7 +343,7 @@ let stream_cases =
         (fun () ->
           Yuka.Await.make ~async:outer ~loading:(Yuka.text "Lo")
             ~children:(fun n ->
-              Yuka.lower "p" []
+              Yuka.element "p" []
                 [ Yuka.text (string_of_int n); text_await inner "i" ])
             ())
         write
@@ -377,7 +377,7 @@ let stream_cases =
     check list_of "failure chunks"
       [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->";
         fill "s2" "";
-        fill "s1" "E:boom";
+        fill "s1" "E:server error";
         "</body></html>" ]
       (List.tl (chunks ()))
   in
@@ -398,11 +398,11 @@ let stream_cases =
     let write, chunks = recorder () in
     let p =
       stream
-        (fun () -> Yuka.lower "div" [] [ Yuka.suspend ~loading:(Yuka.text "La") a ])
+        (fun () -> Yuka.element "div" [] [ Yuka.suspend ~loading:(Yuka.text "La") a ])
         write
     in
     check string "shell" "<div><!--[s1-->La<!--]--></div>" (List.nth (chunks ()) 1);
-    resolve (Yuka.lower "b" [] [ Yuka.text "v" ]);
+    resolve (Yuka.element "b" [] [ Yuka.text "v" ]);
     get p;
     check list_of "fill"
       [ fill "s1" "<b>v</b>"; "</body></html>" ]
@@ -427,9 +427,38 @@ let stream_cases =
     check list_of "failure chunks"
       [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->";
         fill "s2" "";
-        fill "s1" "E:boom";
+        fill "s1" "E:server error";
         "</body></html>" ]
       (List.tl (chunks ()))
+  in
+  let failure_hidden () =
+    let html, messages =
+      logged (fun () ->
+          Server.to_string (fun () ->
+              Yuka.fragment
+                [ text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) (Async.failed "secret detail") "a";
+                  Yuka.suspend ~loading:(Yuka.text "L")
+                    ~failed:(fun m -> Yuka.text ("S:" ^ m))
+                    (Async.map (fun () -> failwith "secret view") (Async.return ())) ]))
+    in
+    check bool "no detail in the page" false (contains html "secret");
+    check bool "a fixed message" true (contains html "E:server error" && contains html "S:server error");
+    check bool "the detail in the log" true
+      (List.exists (fun m -> contains m "secret detail") messages
+      && List.exists (fun m -> contains m "secret view") messages)
+  in
+  let one_failure_rule () =
+    let html, _ =
+      logged (fun () ->
+          Server.to_string (fun () ->
+              text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) (Server.Action.rejected "Out of stock") "a"))
+    in
+    check bool "a rejection shows its message" true (contains html "E:Out of stock");
+    let prop a = Yuka.Json.to_string (Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a) in
+    let failed, _ = logged (fun () -> prop (Async.failed "secret")) in
+    check string "an Async prop failure has the text of Await" {|{"$async":"a0","error":"server error"}|} failed;
+    check string "an Async prop rejection has its message" {|{"$async":"a0","error":"Out of stock"}|}
+      (prop (Server.Action.rejected "Out of stock"))
   in
   let async_prop () =
     let a, resolve, _ = Async.make () in
@@ -451,7 +480,7 @@ let stream_cases =
     resolve 5;
     get p;
     check list_of "values"
-      [ value_script "a2" "{\"error\":\"failed\"}";
+      [ value_script "a2" "{\"error\":\"server error\"}";
         value_script "a1" "{\"ok\":5}";
         "</body></html>" ]
       (List.filteri (fun i _ -> i >= 2) (chunks ()))
@@ -469,7 +498,7 @@ let stream_cases =
     get p;
     Server.log_error := saved;
     check list_of "values"
-      [ value_script "a2" "{\"error\":\"failed\"}";
+      [ value_script "a2" "{\"error\":\"server error\"}";
         value_script "a1" "{\"error\":\"title is empty\"}";
         "</body></html>" ]
       (List.filteri (fun i _ -> i >= 2) (chunks ()));
@@ -487,7 +516,7 @@ let stream_cases =
     in
     Server.log_error := saved;
     check string "inline values"
-      (island_html "i1" "{\"$async\":\"a2\",\"error\":\"failed\"}"
+      (island_html "i1" "{\"$async\":\"a2\",\"error\":\"server error\"}"
       ^ island_html "i2" "{\"$async\":\"a1\",\"error\":\"title is empty\"}")
       html;
     check list_of "log" [ "async value a2 failed: db password wrong" ] !logged
@@ -628,6 +657,8 @@ let stream_cases =
     test_case "suspend settled is inline" `Quick suspend_settled;
     test_case "suspend streams" `Quick suspend_pending;
     test_case "suspend failure" `Quick suspend_failure;
+    test_case "a failure message stays on the server" `Quick failure_hidden;
+    test_case "one failure text for Await and Async props" `Quick one_failure_rule;
     test_case "async props" `Quick async_prop;
     test_case "async errors stay on the server" `Quick async_errors;
     test_case "async errors at print time stay on the server" `Quick async_errors_inline;
@@ -750,12 +781,12 @@ let reject_cases =
   in
   let direct () =
     let show = function
-      | Async.Failed m -> "failed " ^ m
+      | Async.Done (Error (Yuka.Status.Rejected m)) -> "rejected " ^ m
       | _ -> "other"
     in
-    check string "server-side call" "failed title is empty"
+    check string "server-side call" "rejected title is empty"
       (show (Async.status (Yuka.Action.call rejecting 1)));
-    check string "server-side call, chain" "failed from a chain"
+    check string "server-side call, chain" "rejected from a chain"
       (show (Async.status (Yuka.Action.call rejecting_chain 1)))
   in
   [ test_case "route answers 400" `Quick route;
@@ -893,7 +924,7 @@ let settled_cases =
     let b, resolve_b, _ = Async.make () in
     let p =
       render (fun () ->
-          Yuka.lower "div" [] [ text_await a "a"; text_await b "b" ])
+          Yuka.element "div" [] [ text_await a "a"; text_await b "b" ])
     in
     resolve_b 2;
     resolve_a 1;
@@ -906,8 +937,8 @@ let settled_cases =
     let sleep, fire, _ = manual_sleep () in
     let p =
       render ~sleep (fun () ->
-          Yuka.Client.island ~name:"I" ~props:`Null (fun () ->
-              Yuka.lower "p" []
+          Yuka.runtime_island ~name:"I" ~props:`Null (fun () ->
+              Yuka.element "p" []
                 [ Yuka.text "t";
                   Yuka.Await.make ~async:outer
                     ~loading:(Yuka.fragment [ text_await inner "i"; Yuka.text "x" ])
@@ -928,7 +959,7 @@ let settled_cases =
       render (fun () ->
           Yuka.Await.make ~async:outer ~loading:(Yuka.text "Lo")
             ~children:(fun n ->
-              Yuka.lower "p" []
+              Yuka.element "p" []
                 [ Yuka.text (string_of_int n); text_await inner "i" ])
             ())
     in
@@ -968,12 +999,12 @@ let settled_cases =
       (island_html "i1" "{\"$async\":\"a1\"}"
       ^ island_html "i2" "{\"$async\":\"a2\"}"
       ^ value_script "a1" "{\"ok\":5}"
-      ^ value_script "a2" "{\"error\":\"failed\"}")
+      ^ value_script "a2" "{\"error\":\"server error\"}")
       (get p)
   in
   let nothing_pending () =
     check string "same as to_string" "<p>x</p>"
-      (get (render (fun () -> Yuka.lower "p" [] [ Yuka.text "x" ])))
+      (get (render (fun () -> Yuka.element "p" [] [ Yuka.text "x" ])))
   in
   let failure_and_timeout () =
     let a, _, fail_a = Async.make () in
@@ -990,13 +1021,13 @@ let settled_cases =
     fail_a "x";
     fire ();
     check string "failed and timed out"
-      "E:xE:timeout" (get p)
+      "E:server errorE:timeout" (get p)
   in
   let text_inside_hole () =
     let a, resolve, _ = Async.make () in
     let p =
       render (fun () ->
-          Yuka.lower "p" [] [ Yuka.text "t"; text_await a "a"; Yuka.text "u" ])
+          Yuka.element "p" [] [ Yuka.text "t"; text_await a "a"; Yuka.text "u" ])
     in
     resolve 1;
     check string "text neighbours keep their separators"
@@ -1021,7 +1052,7 @@ let navigation_cases =
     in
     check bool "no arguments" true (browser_only (fun () -> Yuka.render ()));
     check bool "registry on native" true
-      (browser_only (fun () -> Yuka.render ~islands:(Yuka.Client.registry []) ()))
+      (browser_only (fun () -> Yuka.render ~islands:(Yuka.runtime_registry []) ()))
   in
   let early_head () =
     let html = Server.document ~early:true ~scripts:[ "/a.js"; "/b.js" ] (fun () -> Yuka.text "x") in
@@ -1047,7 +1078,7 @@ let navigation_cases =
     let v, resolve_v, _ = Async.make () in
     ( (fun () ->
         let prop = island v in
-        Yuka.lower "main" [] [ text_await a "a"; prop ]),
+        Yuka.element "main" [] [ text_await a "a"; prop ]),
       fun () ->
         resolve 1;
         resolve_v 5 )
@@ -1174,8 +1205,8 @@ let review_cases =
 
 let loading_cases =
   let open Alcotest in
-  let isl ?loading name =
-    Yuka.Client.island ?loading ~name ~props:(`Int 1) (fun () -> Yuka.text "")
+  let isl ?start name =
+    Yuka.runtime_island ?start ~name ~props:(`Int 1) (fun () -> Yuka.text "")
   in
   let link url = Printf.sprintf "<link rel=\"modulepreload\" href=\"%s\">" url in
   let count text part =
@@ -1193,7 +1224,7 @@ let loading_cases =
     List.nth (chunks ()) 1
   in
   let data_start () =
-    let html loading = Yuka.Server.to_string (fun () -> isl ~loading "A") in
+    let html start = Yuka.Server.to_string (fun () -> isl ~start "A") in
     check bool "lazy visible" true
       (contains (html (`Lazy `Visible)) "data-start=\"visible\"");
     check bool "lazy idle" true
@@ -1205,7 +1236,7 @@ let loading_cases =
   let once () =
     let out =
       shell ~preload (fun () ->
-          Yuka.fragment [ isl "A"; isl ~loading:`Visible "A"; isl "B" ])
+          Yuka.fragment [ isl "A"; isl ~start:`Visible "A"; isl "B" ])
     in
     check int "A once" 1 (count out (link "/js/A.js"));
     check int "B once" 1 (count out (link "/js/B.js"));
@@ -1213,11 +1244,11 @@ let loading_cases =
       (contains out (link "/js/A.js" ^ "<yuka-island data-name=\"A\""))
   in
   let lazy_none () =
-    let out = shell ~preload (fun () -> isl ~loading:(`Lazy `Idle) "A") in
+    let out = shell ~preload (fun () -> isl ~start:(`Lazy `Idle) "A") in
     check bool "no link" false (contains out "modulepreload");
     let out =
       shell ~preload (fun () ->
-          Yuka.fragment [ isl ~loading:(`Lazy `Visible) "A"; isl "A" ])
+          Yuka.fragment [ isl ~start:(`Lazy `Visible) "A"; isl "A" ])
     in
     check int "a later non-lazy use gets the link" 1
       (count out (link "/js/A.js"))
@@ -1295,7 +1326,7 @@ let loading_cases =
     (String.sub out o (c - o), String.sub out c (String.length out - c))
   in
   let outer_with child =
-    Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () -> child ())
+    Yuka.runtime_island ~name:"Outer" ~props:(`Int 1) (fun () -> child ())
   in
   let nested_in_render () =
     let out =
@@ -1317,7 +1348,7 @@ let loading_cases =
     let out =
       shell ~preload (fun () ->
           let s = Yuka.Slot.make (isl "Inner") in
-          Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () -> Yuka.slot s))
+          Yuka.runtime_island ~name:"Outer" ~props:(`Int 1) (fun () -> Yuka.slot s))
     in
     let inside, after = between out in
     check bool "no link inside the outer island" false (contains inside "<link");
@@ -1356,7 +1387,7 @@ let loading_cases =
     let write, chunks = recorder () in
     let p =
       Yuka.Private.stream ~preload ~sleep:never_sleep ~write (fun () ->
-          Yuka.Client.island ~name:"Outer" ~props:(`Int 1) (fun () ->
+          Yuka.runtime_island ~name:"Outer" ~props:(`Int 1) (fun () ->
               Yuka.Private.element
                 (Yuka.Private.node
                    (Yuka.Await.make ~async:a ~loading:Yuka.empty
@@ -1441,10 +1472,10 @@ let loading_cases =
 
 let css_cases =
   let open Alcotest in
-  let sheet name = Yuka.stylesheet ("/_yuka/css/" ^ name ^ ".css") in
+  let sheet name = Yuka.runtime_stylesheet ("/_yuka/css/" ^ name ^ ".css") in
   let link name = "<link rel=\"stylesheet\" href=\"/_yuka/css/" ^ name ^ ".css\" data-yuka-css>" in
   let x = sheet "x" and y = sheet "y" in
-  let span s = Yuka.lower "span" [] [ Yuka.text s ] in
+  let span s = Yuka.element "span" [] [ Yuka.text s ] in
   let count text part =
     let n = String.length part in
     let rec go i acc =
@@ -1461,7 +1492,7 @@ let css_cases =
   let first_use () =
     let out =
       Server.to_string (fun () ->
-          Yuka.lower "div" []
+          Yuka.element "div" []
             [ span "a"; Yuka.use_css x (span "b"); Yuka.use_css y (span "c"); Yuka.use_css x (span "d") ])
     in
     check string "one link per sheet, each before its first use"
@@ -1483,14 +1514,14 @@ let css_cases =
   in
   let island_sheets () =
     let isl name content =
-      Yuka.Client.island ~name ~props:`Null (fun () -> content)
+      Yuka.runtime_island ~name ~props:`Null (fun () -> content)
     in
     let preload name = Some ("/js/" ^ name ^ ".js") in
     let p, chunks =
       shell ~preload (fun () ->
           Yuka.fragment
             [ isl "A"
-                (Yuka.use_css x (Yuka.lower "div" [] [ span "a"; Yuka.use_css y (span "b") ]));
+                (Yuka.use_css x (Yuka.element "div" [] [ span "a"; Yuka.use_css y (span "b") ]));
               Yuka.use_css y (span "c") ])
     in
     get p;
@@ -1511,10 +1542,10 @@ let css_cases =
   let rows () =
     let p, chunks =
       shell (fun () ->
-          Yuka.Client.island ~name:"A" ~props:`Null (fun () ->
-              Yuka.lower "ul" []
+          Yuka.runtime_island ~name:"A" ~props:`Null (fun () ->
+              Yuka.element "ul" []
                 [ Yuka.each ~key:Fun.id (fun () -> [ "1"; "2" ])
-                    (fun k -> Yuka.use_css x (Yuka.lower "li" [] [ Yuka.text k ])) ]))
+                    (fun k -> Yuka.use_css x (Yuka.element "li" [] [ Yuka.text k ])) ]))
     in
     get p;
     let out = List.nth (chunks ()) 1 in
@@ -1535,7 +1566,7 @@ let css_cases =
     in
     let p, chunks = run (fun () -> await ()) in
     let q, island_chunks =
-      run (fun () -> Yuka.Client.island ~name:"A" ~props:`Null (fun () -> await ()))
+      run (fun () -> Yuka.runtime_island ~name:"A" ~props:`Null (fun () -> await ()))
     in
     resolve 1;
     get p;
@@ -1556,14 +1587,14 @@ let css_cases =
         ~children:(fun n -> Yuka.use_css x (span (string_of_int n)))
         ()
     in
-    let p, chunks = shell (fun () -> Yuka.lower "div" [] [ await () ]) in
+    let p, chunks = shell (fun () -> Yuka.element "div" [] [ await () ]) in
     check string "the link of the loading part is before the region the fill replaces"
       ("<div>" ^ link "x" ^ "<!--[s1--><span>L</span><!--]--></div>")
       (List.nth (chunks ()) 1);
     resolve 2;
     get p;
     let p, island_chunks =
-      shell (fun () -> Yuka.Client.island ~name:"A" ~props:`Null (fun () -> await ()))
+      shell (fun () -> Yuka.runtime_island ~name:"A" ~props:`Null (fun () -> await ()))
     in
     get p;
     check bool "inside an island, before the island" true
@@ -1575,7 +1606,7 @@ let css_cases =
           Yuka.Private.node
             (Yuka.fragment
                [ Yuka.use_css x (span "a");
-                 Yuka.Client.island ~name:"A" ~props:`Null (fun () -> Yuka.use_css y (span "b")) ]))
+                 Yuka.runtime_island ~name:"A" ~props:`Null (fun () -> Yuka.use_css y (span "b")) ]))
     in
     check bool "no link in a whole-tree render" false (contains out "data-yuka-css")
   in

@@ -60,7 +60,7 @@ let hydrate tree =
   let c = container () in
   set_html c (Private.render_html (fun () -> Private.node (tree ())));
   let parsed = html c in
-  let dispose = Client.hydrate (as_container c) tree in
+  let dispose = Private.hydrate (as_container c) tree in
   let out = html c in
   dispose ();
   (parsed, out)

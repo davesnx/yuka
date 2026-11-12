@@ -17,7 +17,7 @@ Class names are scoped with a hash of the file, one value per class:
   $ run a
   module Css =
     struct
-      let stylesheet = Yuka.stylesheet "/_yuka/css/a-705346f1.css"
+      let stylesheet = Yuka.runtime_stylesheet "/_yuka/css/a-705346f1.css"
       let row = "row_705346f1"
       let item = "item_705346f1"
       let done_ = "done_705346f1"
@@ -50,7 +50,7 @@ Escapes, quoted url(), @scope and @supports selector():
   $ run e/e
   module Css =
     struct
-      let stylesheet = Yuka.stylesheet "/_yuka/css/e-25e1fa53.css"
+      let stylesheet = Yuka.runtime_stylesheet "/_yuka/css/e-25e1fa53.css"
       let md_flex = "md:flex_25e1fa53"
       let _10 = "10_25e1fa53"
       let x_y = "x.y_25e1fa53"
@@ -135,8 +135,8 @@ A class that the file does not have is a compile error:
   > let make () = (Yuka.text Css.missing : _ Yuka.element)
   > X
   $ run c > c.pp.ml && ocamlfind ocamlc -c yuka.ml c.pp.ml 2>&1 | grep -v '^ *[0-9]* |\|^ *\^'
-  File "c.pp.ml", line 12, characters 41-52:
-  Error: Unbound value Css.missing
+  File "c.pp.ml", line 3, characters 21-44:
+  Error: Unbound value Yuka.runtime_stylesheet
 
 Errors:
 

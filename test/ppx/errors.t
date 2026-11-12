@@ -203,7 +203,7 @@ Yuka.Client with another prop:
   File "h6.mlx", line 1, characters 8-20:
   1 | let x = <Yuka.Client other=1><M a=1 /></Yuka.Client>
               ^^^^^^^^^^^^
-  Error: [yuka] Yuka.Client takes no props except loading
+  Error: [yuka] Yuka.Client takes no props except start
   [1]
 
 Yuka.Client without child:
@@ -245,13 +245,13 @@ Yuka.Client with a tag child:
 let%client with a reserved argument:
 
   $ cat > h10.mlx <<'X'
-  > let%client make ~(loading : int) () = <p />
+  > let%client make ~(start : int) () = <p />
   > X
   $ run h10
-  File "h10.mlx", line 1, characters 16-32:
-  1 | let%client make ~(loading : int) () = <p />
-                      ^^^^^^^^^^^^^^^^
-  Error: [yuka] the argument 'loading' is reserved for the start strategy
+  File "h10.mlx", line 1, characters 16-30:
+  1 | let%client make ~(start : int) () = <p />
+                      ^^^^^^^^^^^^^^
+  Error: [yuka] the argument 'start' is reserved for the start strategy
   [1]
 
 SVG attribute on a tag that is not SVG:
@@ -594,13 +594,8 @@ String.t, Int.t, Float.t and Bool.t are the base kinds, not custom modules:
   > X
   $ run form5 | grep -o 'Yuka.Form.[a-z]*' | sort -u
   Yuka.Form.bool
-  Yuka.Form.field
-  Yuka.Form.fields
-  Yuka.Form.finish
   Yuka.Form.float
-  Yuka.Form.get
   Yuka.Form.int
-  Yuka.Form.put
   Yuka.Form.string
   Yuka.Form.t
 

@@ -349,13 +349,14 @@ let status t =
   let base = State.get t.base in
   if Optimistic.is_empty changes then base else Status.map (Optimistic.apply (fun d f -> f d) changes) base
 
-let mutate t change run =
+let mutate ?commit t ~change run =
   let added, id = Optimistic.add (State.peek t.changes) change in
   State.set t.changes added;
   let drop () = State.set t.changes (Optimistic.remove (State.peek t.changes) id) in
   let result = match run () with a -> a | exception e -> drop (); raise e in
   Async.on_settled result (function
-    | Async.Done _ -> (
+    | Async.Done (Ok v) -> (
+        Option.iter (fun f -> State.set t.changes (Optimistic.replace (State.peek t.changes) id (f v))) commit;
         match t.use with
         | Some u when not u.ended ->
             let after = !last_mark in
@@ -363,6 +364,6 @@ let mutate t change run =
             u.syncs <- u.syncs @ [ (id, after) ];
             Option.iter (fun m -> if m.live then send_sync m u (id, after)) !manager
         | _ -> drop ())
-    | Async.Failed _ -> drop ()
+    | Async.Done (Error _) | Async.Failed _ -> drop ()
     | Async.Pending -> ());
   result

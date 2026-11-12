@@ -12,10 +12,8 @@ let float f =
      else if f = neg_infinity then "-Infinity"
      else Json.float_repr f)
 let empty = Fragment []
-let list children = Fragment children
-let array children = Fragment (Array.to_list children)
 let fragment children = Fragment children
-let lower tag attrs children =
+let element tag attrs children =
   Client.use_element ();
   Element { tag; attrs; children }
 
@@ -48,7 +46,7 @@ let stylesheet href = href
 let use_css href body =
   if !Base.server_rendering then
     Fragment
-      [ lower "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] [];
+      [ element "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] [];
         body ]
   else begin
     if Web.in_browser then Web.add_stylesheet href;

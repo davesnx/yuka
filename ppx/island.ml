@@ -24,8 +24,8 @@ let analyse_param (p : function_param) =
       `Arg { label = "children"; optional = false; codec = (let loc = p.pparam_loc in [%expr Yuka.Codec.slot]) }
   | Pparam_val ((Labelled "children" | Optional "children"), _, _) ->
       fail ~loc:p.pparam_loc "~children must be written ~(children : Yuka.slot)"
-  | Pparam_val ((Labelled "loading" | Optional "loading"), _, _) ->
-      fail ~loc:p.pparam_loc "the argument 'loading' is reserved for the start strategy"
+  | Pparam_val ((Labelled "start" | Optional "start"), _, _) ->
+      fail ~loc:p.pparam_loc "the argument 'start' is reserved for the start strategy"
   | Pparam_val (((Labelled label | Optional label) as l), default, pat) ->
       let loc = p.pparam_loc in
       let ty =
@@ -87,7 +87,7 @@ let expand ~ctxt (items : structure) =
                 { pparam_loc = loc;
                   pparam_desc = Pparam_val (label_of a, None, pvar ~loc a.label) })
               args
-            @ [ { pparam_loc = loc; pparam_desc = Pparam_val (Optional "loading", None, pvar ~loc "loading") };
+            @ [ { pparam_loc = loc; pparam_desc = Pparam_val (Optional "start", None, pvar ~loc "start") };
                 { pparam_loc = loc; pparam_desc = Pparam_val (Nolabel, None, [%pat? ()]) } ]
           in
           let props =
@@ -104,7 +104,7 @@ let expand ~ctxt (items : structure) =
           in
           let island_body =
             [%expr
-              (Yuka.Client.island ?loading ~name:[%e name] ~props:[%e props] (fun () -> [%e call])
+              (Yuka.runtime_island ?start ~name:[%e name] ~props:[%e props] (fun () -> [%e call])
                 : Yuka.server Yuka.element)]
           in
           let island =
@@ -129,7 +129,7 @@ let expand ~ctxt (items : structure) =
           let register =
             [%stri
               let register =
-                Yuka.Client.entry ~name:[%e name] (fun (j : Yuka.Json.t) ->
+                Yuka.runtime_entry ~name:[%e name] (fun (j : Yuka.Json.t) ->
                     match j with
                     | `Assoc _yuka_fields ->
                         [%e Codec_gen.decode_fields ~loc ~assoc:[%expr _yuka_fields] fields ok]

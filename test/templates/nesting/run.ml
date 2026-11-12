@@ -79,13 +79,13 @@ let to_template shape =
   let parts = ref 0 in
   let rec go = function
     | Element (tag, attrs, children) ->
-        Template.element tag
-          (List.map (fun (n, v) -> Template.fixed n v) attrs)
+        Private.Template.element tag
+          (List.map (fun (n, v) -> Private.Template.fixed n v) attrs)
           (List.map go children)
-    | Text t -> Template.text t
+    | Text t -> Private.Template.text t
     | Part ->
         incr parts;
-        Template.part (!parts - 1)
+        Private.Template.part (!parts - 1)
   in
   go shape
 

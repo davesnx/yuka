@@ -6,7 +6,7 @@ let check = Cases.check
 let ints = string_of_int
 
 let fallback ~error ~reset =
-  lower "p" [ attr "class" "fallback"; on "click" (fun _ -> reset ()) ] [ text ("caught " ^ error) ]
+  element "p" [ attr "class" "fallback"; on "click" (fun _ -> reset ()) ] [ text ("caught " ^ error) ]
 
 let shown c = D.text_content c
 
@@ -137,7 +137,7 @@ let catch_click () =
   let child () =
     D.div []
       [ D.span [ hole (fun () -> text (ints (State.get n))) ];
-        lower "button" [ on "click" (fun _ -> State.update n succ; failwith "click") ] [] ]
+        element "button" [ on "click" (fun _ -> State.update n succ; failwith "click") ] [] ]
   in
   let c, dispose = render (fun () -> D.div [] [ boundary child ]) in
   D.click (D.query c "button");
@@ -145,7 +145,7 @@ let catch_click () =
   dispose ()
 
 let catch_focus () =
-  let child () = lower "input" [ on "focus" (fun _ -> failwith "focus") ] [] in
+  let child () = element "input" [ on "focus" (fun _ -> failwith "focus") ] [] in
   let c, dispose = render (fun () -> D.div [] [ boundary child ]) in
   D.dispatch (D.query c "input") (D.nonbubbling "focus");
   check "an error in a non-bubbling handler" {|caught Failure(focus)|} (shown c);
@@ -156,16 +156,16 @@ let catch_reset () =
   let child () =
     let n = State.make 0 in
     D.div []
-      [ lower "button" [ attr "id" "inc"; on "click" (fun _ -> State.update n succ) ] [];
-        lower "i" [] [ hole (fun () -> text (ints (State.get n))) ];
-        lower "button"
+      [ element "button" [ attr "id" "inc"; on "click" (fun _ -> State.update n succ) ] [];
+        element "i" [] [ hole (fun () -> text (ints (State.get n))) ];
+        element "button"
           [ attr "id" "bad"; on "click" (fun _ -> if !fail then failwith "bad") ]
           [] ]
   in
   let c, dispose =
     render (fun () ->
         D.div []
-          [ lower "b" [] [ hole (fun () -> text (ints (State.get parent))) ]; boundary child ])
+          [ element "b" [] [ hole (fun () -> text (ints (State.get parent))) ]; boundary child ])
   in
   D.click (D.query c "#inc");
   D.click (D.query c "#inc");
@@ -232,7 +232,7 @@ let catch_hydrate_fallback () =
   D.set_html island html;
   let p = D.query island "p" in
   D.capture_warnings ();
-  let dispose = Client.hydrate (D.as_element island) hydratable in
+  let dispose = Private.hydrate (D.as_element island) hydratable in
   check "no mismatch" "" (D.warnings ());
   D.same "the fallback is adopted" p (D.query island "p");
   D.click p;
@@ -247,7 +247,7 @@ let catch_hydrate_children () =
   D.set_html island html;
   let span = D.query island "span" in
   D.capture_warnings ();
-  let dispose = Client.hydrate (D.as_element island) hydratable in
+  let dispose = Private.hydrate (D.as_element island) hydratable in
   check "no mismatch" "" (D.warnings ());
   D.same "the children are adopted" span (D.query island "span");
   dispose ()
@@ -256,7 +256,7 @@ let show_view status =
   Show.make ~status
     ~loading:(text "loading")
     ~failed:(fun e -> text ("failed " ^ Status.error_to_string e))
-    ~children:(fun d -> lower "b" [] [ text d ])
+    ~children:(fun d -> element "b" [] [ text d ])
     ()
 
 let show_client () =
@@ -292,25 +292,25 @@ let show_hydrate () =
 let effect_view () =
   let n = State.make 0 in
   Effect.run (fun () -> if State.get n = 2 then failwith "effect");
-  lower "div" []
-    [ lower "span" [] [ hole (fun () -> text (ints (State.get n))) ];
-      lower "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
+  element "div" []
+    [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
+      element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
 
 let click_view () =
   let n = State.make 0 in
-  lower "div" []
-    [ lower "span" [] [ hole (fun () -> text (ints (State.get n))) ];
-      lower "button" [ on "click" (fun _ -> State.update n succ; failwith "click") ] [ text "!" ] ]
+  element "div" []
+    [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
+      element "button" [ on "click" (fun _ -> State.update n succ; failwith "click") ] [ text "!" ] ]
 
 let without_boundary view expected =
   let c =
     I.setup_page
-      (I.page [ Client.island ~name:"Bad" ~props:(`Int 0) view; I.counter_island 10 ])
+      (I.page [ runtime_island ~name:"Bad" ~props:(`Int 0) view; I.counter_island 10 ])
   in
   I.capture_errors ();
   let reported = ref [] in
   Yuka.render
-    ~islands:(Client.registry [ Client.entry ~name:"Bad" (fun _ -> Ok view); I.counter_entry ])
+    ~islands:(runtime_registry [ runtime_entry ~name:"Bad" (fun _ -> Ok view); I.counter_entry ])
     ~navigation:false
     ~on_error:(fun m -> reported := m :: !reported)
     ();
@@ -334,9 +334,9 @@ let island_without_boundary_click () =
   check "the DOM stays" "1,10" (without_boundary click_view {|Failure(click)|})
 
 let island_boot_error () =
-  let entry = Client.entry ~name:"Bad" (fun _ -> Ok (fun () -> failwith "boot")) in
+  let entry = runtime_entry ~name:"Bad" (fun _ -> Ok (fun () -> failwith "boot")) in
   let c =
-    I.setup_page (I.page [ Client.island ~name:"Bad" ~props:(`Int 0) (fun () -> D.span [ text "server" ]) ])
+    I.setup_page (I.page [ runtime_island ~name:"Bad" ~props:(`Int 0) (fun () -> D.span [ text "server" ]) ])
   in
   I.capture_errors ();
   I.start_islands [ entry ];
@@ -361,7 +361,7 @@ let catch_each_first_hydrate () =
   D.append (D.body ()) island;
   D.set_html island html;
   D.capture_warnings ();
-  let dispose = Client.hydrate (D.as_element island) tree in
+  let dispose = Private.hydrate (D.as_element island) tree in
   ignore (D.warnings ());
   check "a row that raises during hydration"
     "<div><!--[--><p class=\"fallback\">caught Failure(row)</p><!--]--></div>" (D.html island);
@@ -374,7 +374,7 @@ let show_untracks_children () =
         Show.make
           ~status:(fun () -> State.get st)
           ~loading:(text "loading")
-          ~children:(fun d -> lower "b" [] [ text (d ^ State.get other) ])
+          ~children:(fun d -> element "b" [] [ text (d ^ State.get other) ])
           ())
   in
   let b = D.query c "b" in
@@ -387,9 +387,9 @@ let handler_error_stops_event () =
   let outer = ref 0 in
   let c, dispose =
     render (fun () ->
-        lower "div"
+        element "div"
           [ on "click" (fun _ -> incr outer) ]
-          [ boundary (fun () -> lower "button" [ on "click" (fun _ -> failwith "click") ] []) ])
+          [ boundary (fun () -> element "button" [ on "click" (fun _ -> failwith "click") ] []) ])
   in
   batch (fun () -> D.click (D.query c "button"));
   check "fallback" {|caught Failure(click)|} (shown c);
@@ -412,14 +412,37 @@ let cleanup_on_dispose () =
   check "the other cleanups of the owner ran" "1" (ints !cleaned);
   dispose ()
 
+let looping_view () =
+  boundary (fun () ->
+      let s = State.make 0 in
+      Effect.run (fun () -> if State.get s > 0 then State.set s (State.peek s + 1));
+      element "button" [ on "click" (fun _ -> State.set s 1; failwith "x") ] [ text "go" ])
+
+let flush_error_reported () =
+  let c = I.setup_page (I.page [ runtime_island ~name:"Loop" ~props:(`Int 0) looping_view ]) in
+  I.capture_errors ();
+  let reported = ref [] in
+  Yuka.render
+    ~islands:(runtime_registry [ runtime_entry ~name:"Loop" (fun _ -> Ok looping_view) ])
+    ~navigation:false
+    ~on_error:(fun m -> reported := m :: !reported)
+    ();
+  D.click (D.query c "button");
+  ignore (I.errors ());
+  let text = String.concat "|" !reported in
+  let n = String.length "100 update rounds" in
+  let rec go i = i + n <= String.length text && (String.sub text i n = "100 update rounds" || go (i + 1)) in
+  check "the Catch shows the handler error" "caught Failure(x)" (shown (D.query c "p"));
+  check "the update error goes to the island" "true" (string_of_bool (go 0))
+
 let on_error_raises () =
   let c =
     I.setup_page
-      (I.page [ Client.island ~name:"Bad" ~props:(`Int 0) click_view; I.counter_island 10 ])
+      (I.page [ runtime_island ~name:"Bad" ~props:(`Int 0) click_view; I.counter_island 10 ])
   in
   I.capture_errors ();
   Yuka.render
-    ~islands:(Client.registry [ Client.entry ~name:"Bad" (fun _ -> Ok click_view); I.counter_entry ])
+    ~islands:(runtime_registry [ runtime_entry ~name:"Bad" (fun _ -> Ok click_view); I.counter_entry ])
     ~navigation:false
     ~on_error:(fun _ -> failwith "reporter down")
     ();
@@ -435,9 +458,9 @@ let cleanup_raises_view () =
   let n = State.make 0 in
   Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
   Effect.run (fun () -> if State.get n = 1 then failwith "effect");
-  lower "div" []
-    [ lower "span" [] [ hole (fun () -> text (ints (State.get n))) ];
-      lower "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
+  element "div" []
+    [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
+      element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
 
 let island_dispose_raises () =
   check "the DOM stays" "1,10"
@@ -450,9 +473,9 @@ let island_start_dispose_raises () =
     Effect.run (fun () -> failwith "first");
     D.span [ text "x" ]
   in
-  let c = I.setup_page (I.page [ Client.island ~name:"Bad" ~props:(`Int 0) view; I.counter_island 10 ]) in
+  let c = I.setup_page (I.page [ runtime_island ~name:"Bad" ~props:(`Int 0) view; I.counter_island 10 ]) in
   I.capture_errors ();
-  I.start_islands [ Client.entry ~name:"Bad" (fun _ -> Ok view); I.counter_entry ];
+  I.start_islands [ runtime_entry ~name:"Bad" (fun _ -> Ok view); I.counter_entry ];
   check "both errors logged"
     {|yuka island i1 (Bad): Failure(first)|yuka island i1 (Bad): Failure(cleanup)|} (I.errors ());
   D.click (D.query_all c "button").(0);
@@ -460,6 +483,7 @@ let island_start_dispose_raises () =
 
 let all =
   [
+    ("catch: the update error of a raising handler is reported", flush_error_reported);
     ("catch: render", catch_render);
     ("catch: an error of another effect in the first flush", catch_other_effect_error);
     ("catch: first run of an effect", catch_first_effect);

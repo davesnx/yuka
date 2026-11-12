@@ -30,8 +30,8 @@
   or `data:` URL (a dev build logs it once). A form follows only a
   `redirect` on this site: the server answers 500 and logs one that is
   not, and the browser refuses one from another origin and shows an error.
-- Hand-written templates go through `Yuka.template_of_shape`, which checks
-  their tags and fixed attributes as above.
+- A hand-written template (`Yuka.Private.template`, for tests) has its
+  tags and fixed attributes checked as above.
 - `<script>` and `<style>` take one text (the ppx joins the texts and
   values you write inside them) and nothing else, in any case and in any
   namespace. In HTML their text is printed as written, not HTML-escaped:

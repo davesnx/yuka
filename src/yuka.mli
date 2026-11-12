@@ -1,7 +1,10 @@
 val owner : (unit -> 'a) -> 'a * (unit -> unit)
 (** [owner f] runs [f] in a new owner. Effects and memos created during [f]
     belong to it. The returned function disposes all of them: it stops the
-    effects and runs their cleanups. *)
+    effects and runs their cleanups. The new owner is detached: disposing
+    the owner that was current when [owner] was called does not dispose it,
+    so call the returned function yourself. An exception in an effect of the
+    new owner goes to the same {!Catch} or island as the current owner. *)
 
 module State : sig
   type ('a, 'access) signal
@@ -42,27 +45,40 @@ module State : sig
   (** A derived value. It recomputes when a State it read changes. A
       recompute is a change only if [equal] says the new value differs.
       Default: the same equality as {!make}. *)
+
+  external read_only : 'a t -> 'a read = "%identity"
+  (** The same State, typed so that {!set} and {!update} on it do not
+      compile. *)
+
+  val untrack : (unit -> 'a) -> 'a
+  (** Runs the function and returns its result. Its {!get} reads are not
+      tracked: inside an effect or a memo, a change of such a State does not
+      run it again. *)
 end
 
 val batch : (unit -> 'a) -> 'a
-(** [batch f] runs [f] and returns its result. Effects that writes in [f]
-    make pending run once, after [f] returns, not after each write. Memos
-    read inside [f] are up to date. A [batch] inside a [batch] (or inside an
-    effect) runs its pending effects when the outermost one ends. When [f]
-    raises, the pending effects still run, then the exception of [f] is
-    raised again. Event handlers are not batched: each [State.set] in a
-    handler updates the DOM before the next line runs. *)
+(** [batch f] runs [f] and returns its result. Effects that the writes in
+    [f] make pending run once, after [f] returns, not after each write.
+    Memos read inside [f] are up to date. A [batch] inside a [batch] (or
+    inside an effect) runs its pending effects when the outermost one ends.
+    When [f] raises, the pending effects still run, then the exception of
+    [f] is raised again. Each event handler that {!on} or
+    {!Browser.on_window} attaches runs in a [batch]: the DOM updates and
+    the effects run once, after the handler returns. When the handler
+    raises, its writes still update the DOM, then its exception and any
+    exception of the update go to the {!Catch} or island around it. *)
 
 module Effect : sig
   val run : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
   (** Runs the body now, and again when a State it read with [State.get]
-      changes. Before each re-run and when its owner is disposed, [cleanup]
+      changes. During a server render it does nothing: the body and
+      [cleanup] do not run. Before each re-run and when its owner is disposed, [cleanup]
       receives the result of the previous run, and effects created inside the
       previous run are disposed. Inside a {!Catch} or an island, an exception
       in the body, or in a cleanup that runs during a State change or an
       event handler, goes to that boundary. A cleanup that raises when its
       owner is disposed by a direct call (the function returned by {!owner},
-      {!Client.hydrate}, or {!unmount}) raises to that
+      or {!stop}) raises to that
       caller. Elsewhere, an exception in one effect does not stop other
       effects; the first one is raised again after all pending effects
       ran. If effects and memos keep changing States they read for more than
@@ -72,8 +88,8 @@ module Effect : sig
   val on_change :
     ?equal:('a -> 'a -> bool) -> ('a, _) State.signal -> (prev:'a -> next:'a -> unit) -> unit
   (** Calls the function when the value changes, with the previous and the
-      next value. Not called on the first run. Default [equal]: as in
-      {!State.make}. *)
+      next value. Not called on the first run, and never during a server
+      render. Default [equal]: as in {!State.make}. *)
 end
 
 type slot
@@ -84,8 +100,10 @@ type trigger = [ `Idle | `Visible | `Interaction ]
 (** An event that starts an island: the browser is idle, the island is
     visible, or the first interaction with it. *)
 
-type loading = [ `Load | trigger | `Lazy of trigger ]
-(** When the browser downloads and starts an island.
+type start = [ `Load | trigger | `Lazy of trigger ]
+(** When the browser downloads and starts an island, given as
+    [<Yuka.Client start=`Idle> <Counter /> </Yuka.Client>]. An island
+    component cannot have a prop named [start].
     - [`Load] (default): download and start when the page opens.
     - A trigger: download when the page opens, start at the trigger.
     - [`Lazy t]: download and start at the trigger [t]. Events before the
@@ -113,8 +131,11 @@ module Json : sig
       element. Non-finite floats are written as [null]. *)
 
   val of_string : string -> (t, string) result
-  (** A number without ['.'], ['e'] or ['E'] that fits an [int] is [`Int].
-      Arrays and objects nested more than 512 levels are an error. *)
+  (** A number without ['.'], ['e'] or ['E'] that fits an [int] is [`Int];
+      any other number is [`Float]. An [int] has 63 bits on native and 32
+      bits in the browser, so a number such as [5000000000] is [`Int] on the
+      server and [`Float] in the browser; {!Codec.int} accepts both. Arrays
+      and objects nested more than 512 levels are an error. *)
 end
 
 module Async : sig
@@ -142,7 +163,8 @@ module Async : sig
 
   val map : ('a -> 'b) -> 'a t -> 'b t
   (** Applies the function to the value when it is [Done]. A failure stays a
-      failure with the same message. *)
+      failure with the same message. An exception that the function raises
+      gives [Failed] with the exception as text. *)
 
   val bind : 'a t -> ('a -> 'b t) -> 'b t
   (** Like [map], with a function that gives an [Async]. *)
@@ -152,10 +174,17 @@ module Async : sig
 end
 
 module Codec : sig
-  type 'a t = { encode : 'a -> Json.t; decode : Json.t -> ('a, string) result }
+  type 'a t = private { encode : 'a -> Json.t; decode : Json.t -> ('a, string) result }
+
+  val make : encode:('a -> Json.t) -> decode:(Json.t -> ('a, string) result) -> 'a t
+
+  val map : ('a -> 'b) -> ('b -> 'a) -> 'a t -> 'b t
+  (** [map of_a to_a c]: a codec of ['b] that writes [to_a b] with [c] and
+      reads with [c], then applies [of_a]. *)
 
   val int : int t
-  (** [`Int]. *)
+  (** [`Int], or a [`Float] with an integral value in the [int] range of
+      the platform (see {!Json.of_string}). *)
 
   val float : float t
   (** Decoding accepts [`Int] too. *)
@@ -186,11 +215,14 @@ module Codec : sig
 
   val async : 'a t -> 'a Async.t t
   (** On the server, a settled value is written inline:
-      [{"$async":"aN","ok":v}] or [{"$async":"aN","error":"failed"}]. In a
+      [{"$async":"aN","ok":v}] or [{"$async":"aN","error":"server error"}]. In a
       streaming render, a pending value is written as [{"$async":"aN"}] and
-      the stream writes its value later, or [{"error":"failed"}] if it fails.
-      A failure message goes to [Server.log_error] and never into the page,
-      except for a [Server.Action.reject] message, which is sent. Outside a streaming render, a pending value is
+      the stream writes its value later, or [{"error":"server error"}] if it
+      fails. A failure message goes to [Server.log_error] and never into the
+      page, except for a [Server.Action.reject] message, which is sent in
+      place of ["server error"]. This is the rule of {!Await.make}, so an
+      [Await] in an island shows the same text before and after
+      hydration. Outside a streaming render, a pending value is
       written as [{"$async":"aN","error":"pending at render"}]. Decoding a
       bare reference gives, after [render ~islands], the value that the page
       writes for that id; before it or outside the browser, a failed
@@ -200,12 +232,16 @@ module Codec : sig
   (** [encode c v] is [c.encode v]. *)
 
   val decode : 'a t -> Json.t -> ('a, string) result
-  (** [decode c j] is [c.decode j]. The error names the expected kind and
-      the start of the JSON text. *)
+  (** [decode c j] is [c.decode j]. The error of a codec of this module
+      names the expected kind and the start of the JSON text. *)
 end
 
 type server
+(** The kind of an element that only the server prints. *)
+
 type client
+(** The kind of an element that can run in the browser: it can have
+    handlers ({!on}) and holes ({!hole}). *)
 
 
 type +'kind element
@@ -259,20 +295,14 @@ val float : float -> 'kind element
 (** Printed as JSON prints a float: [1.0], [2.5]. Not-a-number and the
     infinities are printed as [NaN], [Infinity] and [-Infinity]. *)
 
-val list : 'kind element list -> 'kind element
-(** The same as [fragment]. *)
-
-val array : 'kind element array -> 'kind element
-(** Like [list], for an array. *)
-
 val empty : 'kind element
 (** Nothing. *)
 
 val fragment : 'kind element list -> 'kind element
 (** The elements one after another, with no wrapper element. *)
 
-val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
-(** [lower tag attributes children]: an HTML element. The ppx makes it from
+val element : string -> 'kind attribute list -> 'kind element list -> 'kind element
+(** [element tag attributes children]: an HTML element. The ppx makes it from
     [<tag ...>]. [tag] is a letter followed by letters, digits and [-],
     else [Invalid_argument] when the server prints it (the DOM refuses it in
     the browser). A [script] or [style] element (any case) takes no child,
@@ -307,21 +337,6 @@ val attr : string -> string -> 'kind attribute
     or [=] raises [Invalid_argument] (in the browser here, on the server
     when printed). *)
 
-(**/**)
-
-val attr_unchecked : string -> string -> 'kind attribute
-val hole_attr_unchecked : string -> (unit -> string option) -> client attribute
-(** For the ppx, for names it proved are not URL attributes. They raise on a
-    URL attribute name, [srcdoc], or a name that {!attr} refuses (an [on]
-    name too). *)
-
-val url_attr : string -> string -> string -> 'kind attribute
-val url_hole_attr : string -> string -> (unit -> string option) -> client attribute
-(** For the ppx: [url_attr tag name value] is {!attr} that knows the
-    element. *)
-
-(**/**)
-
 val hole : (unit -> client element) -> client element
 (** A part that changes after the first render. The function runs once; it
     runs again when a State it read changes, and its output replaces the old
@@ -334,103 +349,6 @@ val hole_attr : string -> (unit -> string option) -> client attribute
 
 val slot : slot -> client element
 (** Puts a slot where the content goes. *)
-
-module Template : sig
-  (** A compiled element tree. The ppx makes one [t] per lowercase JSX tree
-      (at the top of the module) and one [instance] per evaluation. Part
-      numbers count from 0 in the order of [parts]. See "Templates" in
-      DESIGN.md. *)
-
-  type t
-  type shape
-  type attr
-  type 'kind part
-
-  val text : string -> shape
-  (** A fixed text. *)
-
-  val element : string -> attr list -> shape list -> shape
-  (** [element tag attrs children]: an HTML element. *)
-
-  val part : int -> shape
-  (** The child at this place is part [i], made with [child]. *)
-
-  val fixed : string -> string -> attr
-  (** [fixed name value]: an attribute with a fixed value, checked by
-      {!Yuka.template_of_shape}. *)
-
-  val part_attr : int -> attr
-  (** The attribute at this place is part [i], made with [attribute] or
-      [attribute_option]. *)
-
-  (**/**)
-
-  val make :
-    shape ->
-    html:string ->
-    walk:int array ->
-    kids:int array ->
-    attrs:int array ->
-    values:(int * string) array ->
-    t
-  (** [make shape ~html ~walk ~kids ~attrs ~values]: for tests, which give
-      [html] and the paths by hand. Nothing is checked: the browser puts
-      [html] in the page as given and the server prints a fixed [srcdoc] or
-      [base] [href] as given, so a template written by hand uses
-      {!Yuka.template_of_shape}. The client checks the parsed [html] against
-      [shape] once. *)
-
-  (**/**)
-
-  val child : 'kind element -> 'kind part
-  (** The value of a {!val-part}. *)
-
-  val attribute : 'kind attribute -> 'kind part
-  (** The value of a {!part_attr}. *)
-
-  val attribute_option : 'kind attribute option -> 'kind part
-  (** The value of a {!part_attr}; [None] writes no attribute. *)
-
-  val instance : t -> 'kind part array -> 'kind element
-  (** The tree of [t] with its parts filled in. It prints and hydrates as the
-      same tree made with [lower]. Fresh client creation parses the HTML of
-      the template once, clones it and goes to each part with its paths. *)
-end
-
-val template_of_shape : Template.shape -> Template.t
-(** A template written by hand: checks the tag names and the fixed
-    attributes (names, and URLs, [srcdoc] and [base] [href] as {!attr} does,
-    with the element known) and computes its HTML and the paths to its
-    parts. Raises [Invalid_argument] on a bad tag or attribute name. *)
-
-(**/**)
-
-val template_coded :
-  string ->
-  html:string ->
-  walk:int array ->
-  kids:int array ->
-  attrs:int array ->
-  values:(int * string) array ->
-  clones:int ->
-  Template.t
-(** For the ppx only: [code] is the shape in the form of
-    [Template_build.encode], and the other arguments are computed from it at
-    build time, where the ppx also checks the fixed attributes and lowers a
-    tree that the HTML parser would change. [clones]: bit 1 when the parse
-    of [html] in a [<template>] keeps the tree, bit 2 when its parse inside
-    an [<svg>] does; the client clones only in such a context and otherwise
-    builds the tree element by element, which needs {!Client.hydrate}. The
-    browser clones [html] as given and the server prints a fixed [srcdoc]
-    or [base] [href] as given. The client decodes [code] only to hydrate
-    and in a dev build. *)
-
-val template_child : 'kind element -> 'kind Template.part
-val template_attribute : 'kind attribute -> 'kind Template.part
-val template_attribute_option : 'kind attribute option -> 'kind Template.part
-val template_instance : Template.t -> 'kind Template.part array -> 'kind element
-
-(**/**)
 
 module Slot : sig
   val make : server element -> slot
@@ -448,7 +366,10 @@ module Await : sig
   (** Shows [loading] until the value is settled, then [children] applied to
       the value, or [failed message] (default: nothing). On the client it is
       a hole over [Async.watch]. On the server it is printed as a hole; see
-      DESIGN.md. *)
+      DESIGN.md. In a server render, [message] is the message of a
+      {!Server.Action.reject}, else ["server error"], and the failure
+      message goes to {!Server.log_error}, so the HTML never has the
+      detail. *)
 end
 
 val suspend :
@@ -457,7 +378,8 @@ val suspend :
   server element Async.t ->
   server element
 (** Shows [loading] until the element is settled, then the element, or
-    [failed message] (default: nothing). It streams as [<Yuka.Await>] does.
+    [failed message] (default: nothing), with the [message] rule of
+    {!Await.make}. It streams as [<Yuka.Await>] does.
     Build the argument with [Async.map (fun data -> <View data />) fetch].
     Server only: in an island, use [<Yuka.Await>], which builds the element
     in the island's owner. *)
@@ -539,7 +461,7 @@ module Show : sig
       [children data], so data stays on screen while it loads again; [Idle]
       and [Loading None] show [loading]; [Failed] shows [failed error]
       (default: nothing). The children render again only when the data
-      changes ([==]). *)
+      changes, by the default equality of {!State.make}. *)
 end
 
 val on : string -> (Event.t -> unit) -> client attribute
@@ -560,10 +482,6 @@ type stylesheet
     The ppx gives [Css.stylesheet] and one [string] per class of the file,
     [Css.row] for [.row], with a name scoped to the file. *)
 
-val stylesheet : string -> stylesheet
-(** For generated code: the sheet served at this URL. A top-level value, so
-    that a client bundle does not keep {!Private}. *)
-
 val use_css : stylesheet -> 'k element -> 'k element
 (** [use_css sheet element] is [element] with [sheet] in the page. On the
     server, the page gets [<link rel="stylesheet">] once, before the first
@@ -573,105 +491,51 @@ val use_css : stylesheet -> 'k element -> 'k element
     named [make] that comes after [[%yuka.css]] in the same file. *)
 
 module Client : sig
-  type entry
-  (** Made by [entry]. The island modules expose it as [register], for
-      generated code only. *)
-
   type registry
-
-  type lazy_entry
-
-  val island :
-    ?loading:loading ->
-    name:string ->
-    props:Json.t ->
-    (unit -> client element) ->
-    server element
-  (** A client component placed in a server tree. The server prints its
-      HTML and its props. *)
-
-  val registry : ?lazy_entries:lazy_entry list -> entry list -> registry
-  (** The islands of an app. For generated code: [yuka.ppx] and
-      [yuka-islands] build it. Pass it to [Yuka.render]. *)
-
-  val entry :
-    name:string ->
-    (Json.t -> (unit -> client element, string) result) ->
-    entry
-  (** What the browser knows about an island: it decodes the props and gives
-      the function that builds the component. *)
+  (** The islands of an app. [yuka-islands] writes it; pass it to
+      {!render}. *)
 
   type container
-  (** A DOM element that holds a rendered tree. In a Melange entry, get one
-      with an [external ... = "%identity"] binding of your own. *)
+  (** A DOM element that holds a rendered tree. *)
 
-  type 'a promise
-  (** A JavaScript promise, as made by a dynamic [import]. *)
-
-  val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
-  (** [then] of a JavaScript promise. For the code of [yuka-islands]. *)
-
-  val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
-  (** [lazy_entry ~name load]: an island whose code is loaded on demand.
-      [load] is called, at most once, when the start strategy of an island
-      named [name] fires, for example with a dynamic import of the module
-      that defines the entry. If it fails, the island keeps its server HTML
-      and the error is logged. *)
-
-  val hydrate : container -> (unit -> 'k element) -> unit -> unit
-  (** [hydrate container f] adopts the server DOM in [container] (written
-      with the markers of DESIGN.md), attaches handlers and starts holes.
-      Where the DOM does not match, it creates the missing nodes. Unless the bundler
-      defines [__YUKA_DEV__] as [false], each mismatch (a missing node,
-      another tag, another text, an extra node) logs one [console.warn] with
-      the island name, the expected and the found node, and a short path. Returns a function
-      that stops all effects and handlers. Browser only. *)
-
-end
-
-module Optimistic : sig
-  (** Pending changes over a base value that lives elsewhere (a State, the
-      data of a {!Status.t}). *)
-
-  type 'c t
-  (** The pending changes, in the order they were added. *)
-
-  type id
-
-  val empty : 'c t
-  val add : 'c t -> 'c -> 'c t * id
-  val remove : 'c t -> id -> 'c t
-  (** After the change succeeded or failed. *)
-
-  val apply : ('a -> 'c -> 'a) -> 'c t -> 'a -> 'a
-  (** The base with every pending change applied, oldest first. *)
-
-  val is_empty : 'c t -> bool
+  val container : string -> container option
+  (** The element with this id. [None] when the document has no such
+      element, and outside the browser. *)
 end
 
 module Action : sig
   type ('i, 'o, 'kind) t
-  (** ['kind] is [[ `Mutation ]] for {!declare} and [[ `Query ]] for
-      {!query}. *)
+  (** ['kind] is [[ `Mutation ]] for {!mutation}, [[ `Query ]] for {!query}
+      and [[ `Form ]] for {!Form.action}. *)
 
-  val declare :
+  val mutation :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Mutation ]) t
-  (** An action named [name]: the server and the client must declare it with
-      the same name and codecs. The server runs it after
-      {!Server.Action.implement}. *)
+  (** An action named [name] that can change data: the server and the client
+      must declare it with the same name and codecs. The server runs it
+      after {!Server.Action.implement}. *)
 
   val query :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Query ]) t
-  (** Like {!declare}, for a read with no side effect: a server render may
+  (** Like {!mutation}, for a read with no side effect: a server render may
       run it and {!Remote.use} may retry it. Same endpoint and wire format. *)
 
   val name : (_, _, _) t -> string
-  (** The name given to [declare]. *)
+  (** The name given to {!mutation} or {!query}. *)
 
-  val call : ('i, 'o, _) t -> 'i -> 'o Async.t
+  val call : ('i, 'o, _) t -> 'i -> ('o, Status.error) result Async.t
   (** Encodes the input, sends it to the server (in the browser after
       [render ~islands], as [POST /_yuka/action/<name>]; on the server, to the
-      implementation), decodes the output. A decode error is [Failed]. *)
+      implementation), decodes the output. The [Async] is always [Done]:
+      - [Ok o]: the output.
+      - [Error (Rejected m)]: the server refused the input (400); [m] is
+        for the user.
+      - [Error Forbidden]: the origin check failed (403).
+      - [Error Not_found]: no implementation has this name (404).
+      - [Error Server]: the implementation raised or failed (500); the
+        detail is in the server log.
+      - [Error (Network m)]: no answer. [m] is ["cancelled"] when the owner
+        of the call was disposed or {!stop} ran.
+      - [Error (Protocol m)]: the answer or the output did not decode. *)
 end
 
 module Remote : sig
@@ -679,7 +543,9 @@ module Remote : sig
 
   type 'o t
 
-  type retry = { attempts : int; delay_ms : int -> int }
+  type retry
+
+  val retry : attempts:int -> delay_ms:(int -> int) -> retry
   (** [attempts] more tries after the first; [delay_ms n] waits before try
       [n + 1]. *)
 
@@ -720,12 +586,18 @@ module Remote : sig
   val invalidate : (_, _, [ `Query ]) Action.t -> unit
   (** {!refetch} every mounted use of this query, for every input. *)
 
-  val mutate : 'o t -> ('o -> 'o) -> ?commit:('r -> 'o -> 'o) -> (unit -> 'r Async.t) -> 'r Async.t
-  (** [mutate r change run] shows [change] on the data at once, then calls
-      [run ()]. When it succeeds the change is removed and the data becomes
-      [commit result data] (default [change data]); when it fails the
-      change is removed (rollback). A new answer while the change is pending
-      gets the change on top. The result is the [Async] of [run ()]. *)
+  val mutate :
+    ?commit:('r -> 'o -> 'o) ->
+    'o t ->
+    change:('o -> 'o) ->
+    (unit -> ('r, Status.error) result Async.t) ->
+    ('r, Status.error) result Async.t
+  (** [mutate r ~change run] shows [change] on the data at once, then calls
+      [run ()], for example an {!Action.call}. On [Ok result] the change is
+      removed and the data becomes [commit result data] (default
+      [change data]); on [Error] or a failed [Async] the change is removed
+      (rollback). A new answer while the change is pending gets the change
+      on top. The result is the [Async] of [run ()]. *)
 end
 
 module Topic : sig
@@ -779,10 +651,16 @@ module Live : sig
   val status : 's t -> 's Status.t
   (** Tracked read, with the pending {!mutate} changes applied. *)
 
-  val mutate : 's t -> ('s -> 's) -> (unit -> 'r Async.t) -> 'r Async.t
-  (** [mutate t change run] shows [change] at once and calls [run ()],
-      which should call an action that publishes the new state. When it
-      fails, the change is removed. When it succeeds, the change stays until
+  val mutate :
+    ?commit:('r -> 's -> 's) ->
+    's t ->
+    change:('s -> 's) ->
+    (unit -> ('r, Status.error) result Async.t) ->
+    ('r, Status.error) result Async.t
+  (** [mutate t ~change run] shows [change] at once and calls [run ()],
+      which should call an action that publishes the new state. On [Error]
+      or a failed [Async], the change is removed. On [Ok result], the change
+      becomes [commit result] (default [change]) and stays until
       the server confirms, on the socket, that every state it had for this
       subscription when the answer arrived was sent: the published state
       then holds the change, in whatever order the HTTP answer and the
@@ -824,21 +702,8 @@ module Form : sig
   type ('i, 'f) t
   (** The fields of a form: decode, encode and names. *)
 
-  type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
-
-  type 'f decoding
-
-  val fields :
-    names:('f * string) list ->
-    decode:('f decoding -> ('i, 'f errors) result) ->
-    encode:('i -> (string * string) list) ->
-    ('i, 'f) t
-  (** Used by the code that [[@@deriving form]] writes. *)
-
-  val field : 'f decoding -> 'f -> string -> 'a kind -> 'a option
-  val get : 'a option -> 'a
-  val finish : 'f decoding -> (unit -> 'i) -> ('i, 'f errors) result
-  val put : string -> 'a kind -> 'a -> (string * string) list
+  type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Form ]) Action.t
+  (** An action whose input is a form. Only {!val-action} makes one. *)
 
   val decode : ('i, 'f) t -> (string * string) list -> ('i, 'f errors) result
   (** Every field error, in field order. *)
@@ -846,13 +711,9 @@ module Form : sig
   val encode : ('i, 'f) t -> 'i -> (string * string) list
   val name : ('i, 'f) t -> 'f -> string
 
-  val action :
-    name:string ->
-    fields:('i, 'f) t ->
-    output:'o Codec.t ->
-    ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
+  val action : name:string -> fields:('i, 'f) t -> output:'o Codec.t -> ('i, 'o, 'f) action
   (** An action whose input is a form: {!Action.call} sends the encoded
-      fields; the answer is [Ok o] or the field errors. *)
+      fields; the answer is [Ok (Ok o)] or [Ok (Error field_errors)]. *)
 
   type ('o, 'f) form
   (** What the children of {!make} get. *)
@@ -867,9 +728,11 @@ module Form : sig
   val error_view : ('o, 'f) form -> 'f -> (string -> 'k element) -> 'k element
   (** A hole: the view of the field's error, or nothing. *)
 
-  val form_errors : ('o, 'f) form -> string list
-  val form_error_view : ('o, 'f) form -> (string -> 'k element) -> 'k element
-  (** The errors for the whole form. *)
+  val errors : ('o, 'f) form -> string list
+  (** Tracked read of the errors for the whole form, not for one field. *)
+
+  val errors_view : ('o, 'f) form -> (string -> 'k element) -> 'k element
+  (** A hole: the view of each error of {!val-errors}. *)
 
   val pending : ('o, 'f) form -> bool
   (** Tracked: true while an island submit waits for its answer. Read it in
@@ -877,9 +740,9 @@ module Form : sig
       enclosing component again, with a new form. *)
 
   val make :
-    action:('i, ('o, 'f errors) result, [ `Mutation ]) Action.t ->
+    action:('i, 'o, 'f) action ->
     ?key:string ->
-    ?run:('i -> ('o, 'f errors) result Async.t) ->
+    ?run:('i -> (('o, 'f errors) result, Status.error) result Async.t) ->
     ?on_ok:('o -> unit) ->
     children:(('o, 'f) form -> 'k element) ->
     unit ->
@@ -895,33 +758,142 @@ module Form : sig
       in the browser: the fields (with the submit button's [name] and
       [value]) are decoded first (an error shows at once, with no request),
       then [run input] (default: the action call) runs while [pending] is
-      true; field errors show, and on [Ok o] [on_ok o] runs, or else the page
+      true; field errors show, an [Error e] shows as a form error with the
+      text of {!Status.error_to_string}, and on [Ok o] [on_ok o] runs, or
+      else the page
       follows the server's [redirect] (with [run], the page URL) with a
       client navigation, as a post with no JavaScript does. A [redirect] to
-      another origin is not followed: it shows as a form error. Raises
-      [Invalid_argument] when [action] is not from {!val-action}. *)
+      another origin is not followed: it shows as a form error. *)
 end
 
 module Browser : sig
   val on_window : string -> (Event.t -> unit) -> unit
-  (** Listens on [window] until the current owner is disposed. Browser only:
-      call it inside [Effect.run]. *)
+  (** Listens on [window] until the current owner is disposed. The handler
+      runs in a {!batch}. Browser only: call it inside [Effect.run]. *)
 
   val navigate : string -> unit
-  (** Loads the URL. After [render ~islands] with navigation (the default), it
+  (** Browser only: raises [Failure] on native. Loads the URL. After [render ~islands] with navigation (the default), it
       is a client navigation, as a click on a link; see {!render}. Otherwise it
       does [location.assign url]. A [javascript:], [vbscript:] or [data:]
       URL (read as {!attr} reads a URL) does nothing; a dev build logs the
       first one. *)
 
   val focus : string -> unit
-  (** Focuses the element with this id. *)
+  (** Focuses the element with this id; does nothing when no element has
+      it. Inside a {!batch} (an event handler), it runs after the batch
+      updated the DOM, so it finds an element that a write of the handler
+      creates. Browser only: raises [Failure] on native. *)
 
   val scroll_into_view : string -> unit
-  (** Scrolls the element with this id into view. *)
+  (** Scrolls the element with this id into view; does nothing when no
+      element has it. Inside a {!batch}, it runs as {!focus} does. Browser
+      only: raises [Failure] on native. *)
 end
 
 (**/**)
+
+(** {1 Runtime}
+
+    The types and values from here to {!Private} are for the code that
+    [yuka.ppx], [[@@deriving codec]], [[@@deriving form]], [[%yuka.css]]
+    and [yuka-islands] write. They are not part of the API: they are not
+    covered by semantic versioning, and any release can change or remove
+    them. Do not call them. *)
+
+type runtime_template
+(** A compiled element tree: the ppx makes one per lowercase JSX tree, at
+    the top of the module. See "Templates" in DESIGN.md. *)
+
+type 'kind runtime_part
+(** The value of one part of a {!runtime_template}. *)
+
+type runtime_entry
+(** What the browser knows about an island. The island modules expose it
+    as [register]. *)
+
+type runtime_lazy_entry
+type 'a runtime_promise
+(** A JavaScript promise, as made by a dynamic [import]. *)
+
+type 'f runtime_form_decoding
+
+val runtime_attr : string -> string -> 'kind attribute
+val runtime_hole_attr : string -> (unit -> string option) -> client attribute
+(** {!attr} and {!hole_attr} for names that the ppx proved are not URL
+    attributes. They raise [Invalid_argument] on a URL attribute name,
+    [srcdoc], or a name that {!attr} refuses (an [on] name too). *)
+
+val runtime_url_attr : string -> string -> string -> 'kind attribute
+val runtime_url_hole_attr : string -> string -> (unit -> string option) -> client attribute
+(** [runtime_url_attr tag name value] is {!attr} that knows the element. *)
+
+val runtime_template :
+  string ->
+  html:string ->
+  walk:int array ->
+  kids:int array ->
+  attrs:int array ->
+  values:(int * string) array ->
+  clones:int ->
+  runtime_template
+(** [code] is the shape in the form of [Template_build.encode], and the
+    other arguments are computed from it at build time, where the ppx also
+    checks the fixed attributes and lowers a tree that the HTML parser would
+    change. [clones]: bit 1 when the parse of [html] in a [<template>] keeps
+    the tree, bit 2 when its parse inside an [<svg>] does; the client clones
+    only in such a context and otherwise builds the tree element by element.
+    The browser clones [html] as given and the server prints a fixed
+    [srcdoc] or [base] [href] as given. The client decodes [code] only to
+    hydrate and in a dev build. Part numbers count from 0. *)
+
+val runtime_child : 'kind element -> 'kind runtime_part
+val runtime_attribute : 'kind attribute -> 'kind runtime_part
+val runtime_attribute_option : 'kind attribute option -> 'kind runtime_part
+(** [None] writes no attribute. *)
+
+val runtime_instance : runtime_template -> 'kind runtime_part array -> 'kind element
+(** The tree of the template with its parts filled in. It prints and
+    hydrates as the same tree made with {!val-element}. *)
+
+val runtime_stylesheet : string -> stylesheet
+(** The sheet served at this URL. *)
+
+val runtime_island :
+  ?start:start -> name:string -> props:Json.t -> (unit -> client element) -> server element
+(** A client component placed in a server tree. The server prints its HTML
+    and its props. *)
+
+val runtime_entry : name:string -> (Json.t -> (unit -> client element, string) result) -> runtime_entry
+(** It decodes the props and gives the function that builds the
+    component. *)
+
+val runtime_lazy_entry : name:string -> (unit -> runtime_entry runtime_promise) -> runtime_lazy_entry
+(** An island whose code is loaded on demand. [load] is called, at most
+    once, when the start strategy of an island named [name] fires. If it
+    fails, the island keeps its server HTML and the error is logged. *)
+
+val runtime_promise_map : ('a -> 'b) -> 'a runtime_promise -> 'b runtime_promise
+(** [then] of a JavaScript promise. *)
+
+val runtime_registry : ?lazy_entries:runtime_lazy_entry list -> runtime_entry list -> Client.registry
+
+val runtime_form_fields :
+  names:('f * string) list ->
+  decode:('f runtime_form_decoding -> ('i, 'f Form.errors) result) ->
+  encode:('i -> (string * string) list) ->
+  ('i, 'f) Form.t
+
+val runtime_form_field : 'f runtime_form_decoding -> 'f -> string -> 'a Form.kind -> 'a option
+val runtime_form_get : 'a option -> 'a
+(** Raises [Invalid_argument] on [None]. *)
+
+val runtime_form_finish : 'f runtime_form_decoding -> (unit -> 'i) -> ('i, 'f Form.errors) result
+val runtime_form_put : string -> 'a Form.kind -> 'a -> (string * string) list
+
+(** {1 Private}
+
+    For the tests of Yuka. Not covered by semantic versioning: any release
+    can change or remove it. *)
 
 module Private : sig
   type node = private
@@ -933,7 +905,7 @@ module Private : sig
         name : string;
         props : Json.t;
         render : unit -> node;
-        loading : loading;
+        start : start;
       }
     | Await : {
         async : 'a Async.t;
@@ -962,22 +934,50 @@ module Private : sig
     | Dynamic of string * (unit -> string option)
     | Handler of string * (Event.t -> unit)
 
-  and template = Template.t
+  and template = runtime_template
   and part = Child of node | Attribute of attr | No_attribute
 
-  type shape =
-    | Fixed_text of string
-    | Fixed_element of { tag : string; attrs : fixed_attr list; children : shape list }
-    | Part of int
+  module Template : sig
+    type shape
+    type attr
 
-  and fixed_attr = Fixed of string * string | Part_attr of int
+    val text : string -> shape
+    (** A fixed text. *)
 
-  val template_shape : template -> shape
+    val element : string -> attr list -> shape list -> shape
+    (** [element tag attrs children]: an HTML element. *)
+
+    val part : int -> shape
+    (** The child at this place is part [i], made with {!runtime_child}. *)
+
+    val fixed : string -> string -> attr
+    (** [fixed name value]: an attribute with a fixed value, checked by
+        {!template}. *)
+
+    val part_attr : int -> attr
+    (** The attribute at this place is part [i], made with
+        {!runtime_attribute} or {!runtime_attribute_option}. *)
+
+    val make :
+      shape ->
+      html:string ->
+      walk:int array ->
+      kids:int array ->
+      attrs:int array ->
+      values:(int * string) array ->
+      template
+    (** A template with [html] and the paths given by hand. Nothing is
+        checked: the browser puts [html] in the page as given and the server
+        prints a fixed [srcdoc] or [base] [href] as given. The client checks
+        the parsed [html] against [shape] once. *)
+  end
 
   val template : Template.shape -> template
-  (** A template made at run time: its HTML and paths are computed from the
-      shape with the code that the ppx runs at build time. For tests and
-      hand-written trees. *)
+  (** A template written by hand: checks the tag names and the fixed
+      attributes (names, and URLs, [srcdoc] and [base] [href] as {!attr}
+      does, with the element known) and computes its HTML and the paths to
+      its parts with the code that the ppx runs at build time. Raises
+      [Invalid_argument] on a bad tag or attribute name. *)
 
   val recompile : template -> template
   (** [template (template_shape t)]: the template again, with its HTML and
@@ -986,13 +986,13 @@ module Private : sig
 
   val template_plan :
     template -> int array * int array * int array * (int * string) array
-  (** The [walk], [kids], [attrs] and [values] given to [Template.make]. *)
+  (** The [walk], [kids], [attrs] and [values] given to {!Template.make}. *)
 
   val parser_changes : svg:bool -> Template.shape -> bool
   (** The build-time nesting check of the ppx: [true] when the HTML parser
       could build another tree from the HTML of the shape, parsed in a
       [<template>] ([svg:false]) or in an [<svg>] in a [<template>]
-      ([svg:true]). The ppx lowers such a template with {!lower}. *)
+      ([svg:true]). The ppx lowers such a template with {!val-element}. *)
 
   val node : 'kind element -> node
 
@@ -1011,8 +1011,8 @@ module Private : sig
       without the constructor that installs its client code. *)
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
-  (** Runs the function in a new owner that belongs to the current owner.
-      The returned function disposes it. *)
+  (** Like {!owner}, but the new owner belongs to the current owner: it is
+      disposed with it. *)
 
   type pending =
     | Pending_await of {
@@ -1040,7 +1040,7 @@ module Private : sig
       of [to_html]. *)
 
   val expand : template -> part array -> node
-  (** The tree of a template instance, as [lower] would make it. *)
+  (** The tree of a template instance, as {!val-element} would make it. *)
 
   val session : streaming:bool -> islands_only:bool -> session
   (** With [islands_only], [print] writes hydration markers only inside an
@@ -1069,10 +1069,8 @@ module Private : sig
   (** Prints the tree as HTML with the hydration markers of DESIGN.md. Holes
       and lists run once. [server_rendering] is true during the call. *)
 
-  val entry_name : Client.entry -> string
-  val entry_decode : Client.entry -> Json.t -> (unit -> node, string) result
-
-  val action_codecs : ('i, 'o, _) Action.t -> 'i Codec.t * 'o Codec.t
+  val entry_name : runtime_entry -> string
+  val entry_decode : runtime_entry -> Json.t -> (unit -> node, string) result
 
   val slot_content : slot -> node option
   (** The server element of the slot, if it has one. *)
@@ -1087,11 +1085,8 @@ module Private : sig
   val has_readers : ('a, _) State.signal -> bool
   (** Whether an effect or a memo reads the State. For tests. *)
 
-  val untracked : (unit -> 'a) -> 'a
-  (** Runs the function without tracking State reads. *)
-
-  val call_action : (string -> Json.t -> Json.t Async.t) ref
-  (** The transport of [Action.call]. Default: a failed [Async]. *)
+  val call_action : (string -> Json.t -> (Json.t, Status.error) result Async.t) ref
+  (** The transport of [Action.call]. Default: [Error (Network _)]. *)
 
   val server_rendering : bool ref
   (** When true, [Effect.run] does nothing. *)
@@ -1164,6 +1159,15 @@ module Private : sig
   (** [render container f] clears [container], builds the DOM of [f ()] and
       returns a function that stops the effects and handlers of this tree,
       for tests. Browser only. *)
+
+  val hydrate : Client.container -> (unit -> 'k element) -> unit -> unit
+  (** [hydrate container f] adopts the server DOM in [container] (written
+      with the markers of DESIGN.md), attaches handlers and starts holes.
+      Where the DOM does not match, it creates the missing nodes. In a dev
+      build (see {!render}), each mismatch (a missing node, another tag,
+      another text, an extra node) logs one [console.warn] with the island
+      name, the expected and the found node, and a short path. Returns a
+      function that stops all effects and handlers. Browser only. *)
 end
 
 (**/**)
@@ -1246,8 +1250,9 @@ val render :
     [~islands:Yuka_islands.registry], the islands of the app.
 
     [~root:(container, app)] clears [container] and builds the DOM of
-    [app ()] in it. {!unmount} stops the effects and handlers of this tree;
-    the DOM stays. It runs before the islands start.
+    [app ()] in it. {!stop} stops the effects and handlers of this tree;
+    the DOM stays. It runs before the islands start. Get [container] with
+    {!Client.container}.
 
     With [~islands], it installs the browser runtime and the action
     transport, then hydrates every [yuka-island] element of the document with the entry of the same
@@ -1311,8 +1316,8 @@ val render :
     [no-cache]) for N seconds, also for back and forward; otherwise a
     prefetched answer is used once, within 10 s, and a visited page is not
     kept. An action call that succeeds empties the cache, and an answer
-    requested before it is not kept. [render ~islands] and {!unmount} empty it and
-    abort the prefetches nobody waits for; after {!unmount} no navigation
+    requested before it is not kept. [render ~islands] and {!stop} empty it and
+    abort the prefetches nobody waits for; after {!stop} no navigation
     updates the page.
 
     With [~transitions:true], where [document.startViewTransition] exists,
@@ -1329,13 +1334,19 @@ val render :
     Without [~islands], [~navigation], [~prefetch], [~transitions] and
     [~on_error] do nothing. Raises [Failure] outside the browser, and
     [Invalid_argument] without [~islands] and [~root]. An app that does not
-    pass [~islands] contains no island, action or navigation code. *)
+    pass [~islands] contains no island, action or navigation code.
 
-val unmount : unit -> unit
+    Dev checks: unless the bundler defines the global [__YUKA_DEV__] as
+    [false] (for example esbuild [--define:__YUKA_DEV__=false]), the client
+    runs dev checks: hydration mismatch warnings, blocked URL logs and other
+    [console] messages. When [__YUKA_DEV__] is not defined at all, the
+    checks are on, so a production bundle must define it. *)
+
+val stop : unit -> unit
 (** Stops every tree that {!render} started: each [~root] tree and every
     island. Effects, handlers and document listeners are removed, start strategies that did not fire yet are
     cancelled, and action requests in flight are aborted (their [Async]
-    fails with ["cancelled"]). It also stops navigation: the [click] and
+    gives [Error (Network "cancelled")]). It also stops navigation: the [click] and
     [popstate] listeners are removed, a navigation in flight is aborted, and
     {!Browser.navigate} does [location.assign] again. The DOM stays.
     {!render} works again afterwards, for example on a new body. *)
@@ -1381,8 +1392,9 @@ module Server : sig
     val reject : string -> 'a
     (** Raised inside an implementation to refuse the input:
         the action call answers 400 [{"error": message}] and [Action.call]
-        on the server fails with the message. Any other exception or failed
-        [Async] is a 500 with a generic message. *)
+        on the server gives [Error (Rejected message)]. Any other exception
+        or failed [Async] is a 500 with a generic message ([Error Server]
+        for [Action.call] on the server). *)
 
     val rejected : string -> 'a Async.t
     (** Like [reject], for use after a wait (in an [Async] chain). *)
