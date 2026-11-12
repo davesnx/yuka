@@ -153,8 +153,8 @@ end
 
 module Codec = Codec
 
-type server
-type client
+type server = Types.server
+type client = Types.client
 
 
 type +'kind element = 'kind Kind.element
@@ -491,62 +491,7 @@ val use_css : stylesheet -> 'k element -> 'k element
     document has none for this sheet. The ppx calls it in every function
     named [make] that comes after [[%yuka.css]] in the same file. *)
 
-module Client : sig
-  type entry
-  (** Made by [entry]. The island modules expose it as [register], for
-      generated code only. *)
-
-  type registry
-
-  type lazy_entry
-
-  val island :
-    ?loading:loading ->
-    name:string ->
-    props:Json.t ->
-    (unit -> client element) ->
-    server element
-  (** A client component placed in a server tree. The server prints its
-      HTML and its props. *)
-
-  val registry : ?lazy_entries:lazy_entry list -> entry list -> registry
-  (** The islands of an app. For generated code: [yuka.ppx] and
-      [yuka-islands] build it. Pass it to [Yuka.render]. *)
-
-  val entry :
-    name:string ->
-    (Json.t -> (unit -> client element, string) result) ->
-    entry
-  (** What the browser knows about an island: it decodes the props and gives
-      the function that builds the component. *)
-
-  type container
-  (** A DOM element that holds a rendered tree. In a Melange entry, get one
-      with an [external ... = "%identity"] binding of your own. *)
-
-  type 'a promise
-  (** A JavaScript promise, as made by a dynamic [import]. *)
-
-  val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
-  (** [then] of a JavaScript promise. For the code of [yuka-islands]. *)
-
-  val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
-  (** [lazy_entry ~name load]: an island whose code is loaded on demand.
-      [load] is called, at most once, when the start strategy of an island
-      named [name] fires, for example with a dynamic import of the module
-      that defines the entry. If it fails, the island keeps its server HTML
-      and the error is logged. *)
-
-  val hydrate : container -> (unit -> 'k element) -> unit -> unit
-  (** [hydrate container f] adopts the server DOM in [container] (written
-      with the markers of DESIGN.md), attaches handlers and starts holes.
-      Where the DOM does not match, it creates the missing nodes. Unless the bundler
-      defines [__YUKA_DEV__] as [false], each mismatch (a missing node,
-      another tag, another text, an extra node) logs one [console.warn] with
-      the island name, the expected and the found node, and a short path. Returns a function
-      that stops all effects and handlers. Browser only. *)
-
-end
+module Client = Client_api
 
 module Optimistic : sig
   (** Pending changes over a base value that lives elsewhere (a State, the
@@ -1039,8 +984,20 @@ val render :
     transition starts; an exception in the update is thrown again in a
     task, as an uncaught error.
 
-    With [~navigation:false] only the islands start and links load full
-    pages. Calling [render ~islands] again is safe: the listeners are not
+    The code that fetches and swaps pages is not in the JavaScript that the
+    page loads at start. It is loaded with a dynamic [import] of
+    [yuka/navigation.js] on the first click on such a link, [popstate],
+    {!Browser.navigate}, or pointer, focus or touch on a link that it would
+    prefetch (at once with [`Visible] prefetch or a
+    [data-yuka-prefetch="visible"] link). Until it arrives, the click is
+    already prevented and the events wait in order. If the load fails, or
+    does not finish within 3 s, it is logged once with [console.error], the
+    waiting navigations do [location.assign], and until the next page load
+    there is no new attempt: links, [popstate] and {!Browser.navigate} load
+    full pages.
+
+    With [~navigation:false] only the islands start, links load full
+    pages and the navigation code is never loaded. Calling [render ~islands] again is safe: the listeners are not
     added twice.
 
     Without [~islands], [~navigation], [~prefetch], [~transitions] and

@@ -1461,7 +1461,7 @@ same fixtures and script:
   link-time choice needs a second registry builder that does not name
   `Navigation`, which is a new entry point. Loading it on the first
   click, hover or `popstate` makes the first navigation asynchronous.
-  Neither is done.
+  The second is done: see "Navigation code on first use".
 
 ## Routes.mlx generator (2026-11-10)
 
@@ -2404,8 +2404,10 @@ val render :
   `~islands` is `Unbound value islands`, so the old runtime check that named
   `yuka.ppx` is gone.
 - The registry carries the start function: `Yuka.Client.registry` (in
-  `yuka.ml`) builds a record whose one field is a closure over the entries
-  that calls `Navigation.start` or `Client.start`. `Yuka.render` reaches
+  `yuka.ml`; in `client_api.ml` since "Navigation code on first use")
+  builds a record whose one field is a closure over the entries
+  that calls `Navigation.start` (now `Navigation_stub.start`) or
+  `Client.start`. `Yuka.render` reaches
   the island, action and navigation code only through that field, so an
   app that never builds a registry does not contain it. The closure takes
   its options as one tuple: a call of a closure of unknown arity goes
@@ -2418,3 +2420,172 @@ val render :
   the bundle, but the code that adopts server DOM is in the same functions
   that render uses (`mount_node`, `take`, `mount_slot`, `drop_to_end` test
   `pos.adopt` at run time), so esbuild keeps it.
+
+## Navigation code on first use (2026-11-11)
+
+Goal: a page with islands does not load the client router (fetch, swap,
+cache, prefetch, history) at start. It loads it with a dynamic `import()`
+when it first needs it.
+
+### Design
+
+- `src/navigation_stub.ml` is what `Yuka.render ~islands` starts when
+  navigation is on. At start it does what must happen at page open: it
+  sets `history.scrollRestoration`, gives the history entry a key if it has
+  none, keeps the URL of the page, adds the `click`, `popstate` and
+  prefetch listeners (`pointerover`, `focusin`, `pointerout`, `focusout`,
+  `pointerdown`, `touchstart`), starts the islands and sets
+  `Platform.client_navigate`, which the default `navigate` of the platform
+  calls. A test that sets `Private.platform` keeps its own `navigate`.
+- The click listener decides as before (`Web.plain_click` and
+  `Web.link_href`) and calls `preventDefault` at once. `popstate` and
+  `Browser.navigate` go to the router. Before the router is loaded,
+  `pointerover`, `focusin`, `pointerdown` and `touchstart` go to it only
+  when their target is in a link that it would prefetch
+  (`Web.link_href true`), and `pointerout` and `focusout` only while the
+  router loads; after it is loaded, all of them go to it, as before. So
+  a pointer, focus or touch elsewhere on the page loads nothing (Chromium
+  sends a `pointerover` after layout with no user action). If the router
+  is not loaded, the stub keeps the events in order, starts the load, and
+  gives them to the router when it arrives. A hover, a focus or a pointer
+  down on a link starts the load, so the code is usually there before the
+  click. With `` `Visible `` prefetch, or a link with
+  `data-yuka-prefetch="visible"` on the page, the load starts at once.
+- Failure: if the `import()` rejects, or does not settle within 3 s, the
+  stub logs `yuka: cannot load navigation: ...` once and stops for this
+  page: a kept click does `location.assign` of its URL, a kept `popstate`
+  does `location.assign` of the new URL when it is not the page shown,
+  and later clicks are not prevented (the browser loads the page),
+  later `popstate` and `Browser.navigate` do `location.assign`, and
+  there is no new `import()`. A retry would not help: Chromium keeps a
+  failed module fetch in its module map, so the same `import()` rejects
+  again with no request. 3 s: the router chunk is one request of about
+  3.6 KB gzip from the same origin, well under 1 s on a slow 3G link
+  (400 ms round trip); a load that takes longer is stalled, and a user
+  should not wait longer than that for a link to work. A module that
+  arrives after the 3 s is not used.
+- An exception while the router starts (`boot`) is a failure as above.
+  An exception while one kept event runs is logged
+  (`yuka: navigation: ...`) and that event takes its fallback (a click
+  does `location.assign`); the other kept events still run. The stub does
+  not rely on `Web.promise_then`, which sends an exception of its success
+  function to its failure function.
+- `src/navigation.ml` is the router. It exports one value, `router`, of
+  type `Types.router` (`boot`, `navigate`, `handle`, `stop`), and keeps
+  `current_key` and `loaded` in the stub, so that a `popstate` before the
+  load knows the entry of the page.
+- The `import()` is in `dom/js/navigation_load.ml`, a virtual module
+  (`import("yuka/navigation.js")`, the same bare path as Melange's own
+  imports, so the import map and esbuild resolve it). `Navigation_web`
+  is a second virtual module with the browser functions that only the
+  router uses (`fetch_page`, `swap_page`, `transition`, `observe`, ...),
+  moved out of `web.js`: esbuild assigns a file to a chunk as a whole, so
+  a router-only function in `web.js` stayed in the start chunk. For the
+  same reason the router reads URL parts and outlet keys with small
+  JavaScript functions there instead of `String` and `List`.
+- No file that `yuka.js` imports may contain the `import()`: without
+  code splitting (the keyed app, IIFE), esbuild wraps every module that
+  the dynamic import reaches in a lazy `__esm` init function, also when
+  the `import()` is dead code. That cost the keyed app 771 B gzip. So:
+  - `Yuka.Client` is the module alias `module Client = Client_api` in
+    `yuka.mli` (the interface and its documentation moved to
+    `client_api.mli`), so `yuka.js` has no `Client` object and only an
+    app that builds a registry imports `client_api.js`. `Yuka.server` and
+    `Yuka.client` are now `Types.server` and `Types.client` in the
+    interface (still abstract), so that the types of `Client.island` are
+    the types of `Yuka`. The alias also shows equalities that were
+    abstract before: `Client.entry = Island.entry` (a record),
+    `Client.registry = Types.registry` (a record with `start`),
+    `Client.lazy_entry = Client.lazy_entry` of the virtual module,
+    `Client.container = Web.node` and `'a Client.promise = 'a Web.promise`.
+    Users reach those modules only through dune's private `Yuka__` names,
+    and an added equality makes no program that compiled before fail.
+  - `Client_api.registry` passes `Navigation_load.load` to
+    `Navigation_stub.start`; the stub keeps it in a reference, so
+    `Yuka.unmount`, which calls `Navigation_stub.stop`, does not reach it.
+- `~navigation:false` calls `Client.start` only: no listener, and the
+  router module is never requested. With code splitting the navigation
+  chunk exists but is not loaded; the flag is still a run-time choice.
+
+### Behaviour that changes
+
+- The first client navigation after a page load waits for the router
+  module (one request) unless a hover, focus or pointer down loaded it
+  before.
+- The default prefetch of the first link that the pointer enters is sent
+  after the module arrives (50 ms after the event, as before, when the
+  module is already there).
+- A hover or focus on a link loads the router code also with
+  `~prefetch:`Off` (it fetches no page).
+- After a failed or stalled load, the page does full page loads until the
+  next page load.
+- In an app built without code splitting, the router is in the one bundle
+  as before, and the modules it shares with the app are wrapped in lazy
+  init functions.
+
+### Size
+
+`make size`, gzip bytes. "no navigation" is the same tree with the
+registry calling `Client.start` only, the lower bound of this change.
+
+| page | before (main b865218) | after | no navigation |
+| --- | ---: | ---: | ---: |
+| counter island | 18,729 | 16,450 | 14,490 |
+| island with `Codec` props | 19,014 | 16,694 | 14,756 |
+| island with `Remote` | 22,672 | 20,431 | 18,566 |
+| demo start set | 23,806 | 22,544 | 20,410 |
+| demo `/`, `/my` | 42,495 | 41,333 | 39,130 |
+| demo `/new`, `/issue/YUK-1` | 36,498 | 35,325 | 33,137 |
+| all demo chunks | 46,605 | 49,070 | 43,226 |
+| keyed app | 8,698 | 8,698 | 8,698 |
+
+- The router chunk is about 3.6 KB gzip.
+- What the start set still pays for navigation, about 2.0 KB on the
+  counter page and 2.1 KB on the demo start: the stub (about 2 KB
+  minified), the `web.js` functions it needs (`link_href`, the history
+  key functions), the code of shared files that the router uses
+  (`Curry`, `Array`, `Option`, `Client.stop_within`), and one more chunk
+  per page: esbuild puts the files that the start and the islands share,
+  but the router does not, in their own chunk, and each file is
+  compressed on its own.
+- All demo chunks grow by 2,465 B: one more chunk, and code that is now
+  compressed in more files.
+
+### Tests
+
+`test/navigation` (jsdom, Node `require.cache` shows whether
+`yuka/navigation.js` was loaded):
+
+- "navigation off loads no navigation code": with `~navigation:false`, a
+  hover, a pointer down, a click and a `popstate` load no router code and
+  fetch nothing.
+- "the first click loads the navigation code and is not lost": no router
+  code at start; the click is prevented at once, the fetch starts when
+  the code arrives, the page is swapped and pushed, and there is no
+  `location.assign`.
+- `run.js back` (its own process, so the router is not loaded yet): a
+  `popstate` to an earlier entry and then forward, before the code
+  loads: each fetches its URL, swaps, restores the scroll and pushes no
+  entry.
+- "pointer, focus and touch off links load no navigation code": events
+  on a button and an input load nothing. `run.js hover`: a `pointerover`
+  on a link loads the router, which then prefetches the link.
+- `run.js stall` and `run.js fail` block `yuka/navigation.js` with a Node
+  resolve hook (`module.register`) that never answers or throws. Stall:
+  the click is prevented, nothing happens for 1 s, a full load at 3 s, a
+  later click is not prevented, one import, one error. Fail: one import
+  and one error, then a click is not prevented and a hover, a pointer
+  down and `Browser.navigate` start no import and log nothing more.
+- `run.js replay`: `window.scrollY` throws, so each kept click throws in
+  the router; both clicks do `location.assign` and both errors are
+  logged as replay errors, not as a load failure.
+
+On main b865218 the first three fail at "no navigation code" (the router
+is linked at start). With the stub but without the replay of kept
+events, the click and the back cases fail. The first version of the stub
+(any pointer or focus event loaded the router, no timeout, retries after
+a failure, `Web.promise_then` for the replay) fails the "off links",
+`stall`, `fail` and `replay` cases. `e2e/demo.ts` 3b.0 checks in
+Chromium, in module and bundle mode, that hovering and focusing the
+filter input requests no router module and that the first click
+requests it once; with the first stub it fails (`at start=1`).

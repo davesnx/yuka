@@ -1314,9 +1314,190 @@ let unmount_clears finish =
   check "a new fetch after unmount" "2" (ints (calls ()));
   finish ()
 
+let router_loaded : unit -> bool =
+  [%mel.raw
+    {|function () { return Object.keys(require.cache).some(function (k) { return k.endsWith("/yuka/navigation.js") }) }|}]
+
+let rec until name cond f n =
+  tick (fun () -> if cond () then f () else if n = 0 then check name "true" "false" else until name cond f (n - 1))
+
+let navigation_off_loads_nothing finish =
+  setup (page {|<a id="l" href="/two">x</a>|});
+  render ~islands:(Client.registry []) ~navigation:false ();
+  fire "#l" "pointerover";
+  fire "#l" "pointerdown";
+  check "click not intercepted" "false" (bools (click "#l" ""));
+  popstate_to "/other";
+  wait 30 (fun () ->
+      check "no navigation code" "false" (bools (router_loaded ()));
+      check "no fetch" "0" (ints (calls ()));
+      finish ())
+
+let cold_click finish =
+  setup (page {|<a id="l" href="/issue/1">go</a>|});
+  plain_start ();
+  check "no navigation code at start" "false" (bools (router_loaded ()));
+  check "first click prevented at once" "true" (bools (click "#l" ""));
+  check "no fetch before the code loads" "0" (ints (calls ()));
+  until "the click fetches once the code loads" (fun () -> calls () > 0)
+    (fun () ->
+      check "navigation code loaded" "true" (bools (router_loaded ()));
+      check "one fetch" "1" (ints (calls ()));
+      check "fetched url" "http://localhost/issue/1" (call_url 0);
+      resolve_call 0 (doc "Issue 1" (page "<p>one</p>")) "";
+      tick (fun () ->
+          check "body swapped" (page "<p>one</p>") (body_html ());
+          check "pushed" "/issue/1" (location_ ());
+          check "scrolled to the top, no full page load" "scroll:0" (log_read ());
+          finish ()))
+    100
+
+let history_entries : unit -> unit =
+  [%mel.raw
+    {|function () {
+  window.history.replaceState({ yukaKey: "1-1" }, "", "/first");
+  window.history.pushState({ yukaKey: "2-1" }, "", "/second");
+}|}]
+
+let cold_back_forward finish =
+  setup (page "<p>second</p>");
+  history_entries ();
+  plain_start ();
+  let length = history_length () in
+  check "no navigation code at start" "false" (bools (router_loaded ()));
+  back ();
+  until "back fetches once the code loads" (fun () -> calls () > 0)
+    (fun () ->
+      check "back fetches the first page" "/first" (call_url 0);
+      resolve_call 0 (doc "First" (page "<p>first</p>")) "";
+      tick (fun () ->
+          check "first shown" (page "<p>first</p>") (body_html ());
+          check "at first" "/first" (location_ ());
+          forward ();
+          until "forward fetches" (fun () -> calls () > 1)
+            (fun () ->
+              check "forward fetches the second page" "/second" (call_url 1);
+              resolve_call 1 (doc "Second" (page "<p>second again</p>")) "";
+              tick (fun () ->
+                  check "second shown" (page "<p>second again</p>") (body_html ());
+                  check "no push" (ints length) (ints (history_length ()));
+                  check "scroll restored, no full page load" "scroll:0|scroll:0" (log_read ());
+                  finish ()))
+            100))
+    100
+
+let fire_touch : string -> string -> unit =
+  [%mel.raw
+    "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
+
+let events_off_links_load_nothing finish =
+  setup (page {|<button id="b">b</button><input id="i"><a id="l" href="/two">x</a>|});
+  plain_start ();
+  List.iter (fire "#b") [ "pointerover"; "pointerdown"; "pointerout" ];
+  fire_touch "#b" "touchstart";
+  List.iter (fire_touch "#i") [ "focusin"; "focusout" ];
+  wait 30 (fun () ->
+      check "no navigation code after events off links" "false" (bools (router_loaded ()));
+      finish ())
+
+let hover_loads_and_prefetches finish =
+  setup (page {|<a id="l" href="/two">x</a>|});
+  plain_start ();
+  fire "#l" "pointerover";
+  until "a hover on a link loads the navigation code" router_loaded
+    (fun () ->
+      wait 80 (fun () ->
+          check "the hover prefetches once the code loads" "1" (ints (calls ()));
+          check "prefetch header" "1" (prefetch_header 0);
+          finish ()))
+    100
+
+let block_router : string -> unit =
+  [%mel.raw
+    {|function (mode) {
+  const { MessageChannel } = require("node:worker_threads");
+  const channel = new MessageChannel();
+  globalThis.__imports = 0;
+  channel.port1.on("message", function () { globalThis.__imports++; });
+  channel.port1.unref();
+  const hook = "let port, mode; export function initialize(d) { port = d.port; mode = d.mode; }" +
+    " export async function resolve(s, c, next) { if (s === 'yuka/navigation.js') { port.postMessage(1);" +
+    " if (mode === 'stall') return new Promise(function (r) { setTimeout(r, 600000); }); throw new Error('blocked'); }" +
+    " return next(s, c); }";
+  require("node:module").register("data:text/javascript," + encodeURIComponent(hook),
+    { data: { port: channel.port2, mode: mode }, transferList: [channel.port2] });
+  globalThis.__errors = [];
+  console.error = function (m) { globalThis.__errors.push(String(m)); };
+}|}]
+
+let imports : unit -> int = [%mel.raw "function () { return globalThis.__imports }"]
+
+let load_errors : unit -> int =
+  [%mel.raw
+    "function () { return globalThis.__errors.filter(function (m) { return m.indexOf('cannot load navigation') >= 0 }).length }"]
+
+let stalled_import finish =
+  setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
+  plain_start ();
+  check "the click is prevented while the code loads" "true" (bools (click "#l" ""));
+  wait 1000 (fun () ->
+      check "no full load before the timeout" "" (log_read ());
+      wait 2200 (fun () ->
+          check "after 3 s the waiting click is a full page load" "assign" (log_read ());
+          check "one error" "1" (ints (load_errors ()));
+          check "a later click is not prevented" "false" (bools (click "#m" ""));
+          check "one import" "1" (ints (imports ()));
+          finish ()))
+
+let failed_import finish =
+  setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
+  plain_start ();
+  fire "#l" "pointerover";
+  wait 100 (fun () ->
+      check "one import" "1" (ints (imports ()));
+      check "one error" "1" (ints (load_errors ()));
+      check "a click after the failure is not prevented" "false" (bools (click "#m" ""));
+      fire "#m" "pointerover";
+      fire "#l" "pointerdown";
+      Browser.navigate "/four";
+      wait 100 (fun () ->
+          check "no new import" "1" (ints (imports ()));
+          check "no new error" "1" (ints (load_errors ()));
+          check "clicks and Browser.navigate are full loads" "assign|assign" (log_read ());
+          finish ()))
+
+let throwing_scroll : unit -> unit =
+  [%mel.raw
+    {|function () {
+  Object.defineProperty(window, "scrollY", { get: function () { throw new Error("scrollY broken"); }, configurable: true });
+  globalThis.__errors = [];
+  console.error = function (m) { globalThis.__errors.push(String(m)); };
+}|}]
+
+let replay_errors : unit -> string =
+  [%mel.raw
+    "function () { return globalThis.__errors.map(function (m) { return m.indexOf('cannot load') >= 0 ? 'load' : 'replay' }).join(',') }"]
+
+let replay_error finish =
+  setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
+  throwing_scroll ();
+  plain_start ();
+  ignore (click "#l" "");
+  ignore (click "#m" "");
+  until "the code loads" router_loaded
+    (fun () ->
+      wait 30 (fun () ->
+          check "each waiting click that throws is a full load" "assign|assign" (log_read ());
+          check "reported as replay errors, not a load failure" "replay,replay" (replay_errors ());
+          finish ()))
+    100
+
 let all =
   [
     ("navigate before start", navigate_before_start);
+    ("navigation off loads no navigation code", navigation_off_loads_nothing);
+    ("pointer, focus and touch off links load no navigation code", events_off_links_load_nothing);
+    ("the first click loads the navigation code and is not lost", cold_click);
     ("click fetches and swaps", click_fetches);
     ("dev: a new page build reloads and keeps the scroll", dev_reload);
     ("dev: a css build swaps the stylesheets", dev_css);
@@ -1387,7 +1568,10 @@ let all =
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]
 let on_exit : (unit -> unit) -> unit = [%mel.raw "function (f) { process.on('exit', f) }"]
+let argument : unit -> string = [%mel.raw "function () { return process.argv[2] || '' }"]
+let exit_now : unit -> unit = [%mel.raw "function () { process.exit() }"]
 let failures = ref 0
+let ran = ref 0
 let finished = ref false
 
 let report name = function
@@ -1399,9 +1583,11 @@ let report name = function
 let rec run = function
   | [] ->
       finished := true;
-      Printf.printf "%d cases, %d failures\n" (List.length all) !failures;
-      if !failures > 0 then set_exit_code 1
+      Printf.printf "%d cases, %d failures\n" !ran !failures;
+      if !failures > 0 then set_exit_code 1;
+      if argument () = "stall" then exit_now ()
   | (name, case) :: rest ->
+      incr ran;
       let settled = ref false in
       let next result =
         if not !settled then begin
@@ -1419,4 +1605,15 @@ let () =
         print_endline "cases did not finish";
         set_exit_code 1
       end);
-  run all
+  run
+    (match argument () with
+    | "back" -> [ ("back and forward before the navigation code loads", cold_back_forward) ]
+    | "hover" -> [ ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
+    | "replay" -> [ ("an error while the waiting events run", replay_error) ]
+    | "stall" ->
+        block_router "stall";
+        [ ("an import with no answer: a full load after 3 s", stalled_import) ]
+    | "fail" ->
+        block_router "fail";
+        [ ("a failed import: full loads, no retry, one error", failed_import) ]
+    | _ -> all)

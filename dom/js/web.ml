@@ -61,8 +61,6 @@ external decode_uri : string -> string = "decodeURIComponent"
 
 let contains : node -> node -> bool = [%mel.raw "function (a, b) { return a.contains(b) }"]
 
-let set_title : string -> unit = [%mel.raw "function (t) { document.title = t }"]
-
 let fetch_post :
     string ->
     string ->
@@ -269,8 +267,6 @@ let record_events : node -> (unit -> unit) * (unit -> unit) =
   return [drop, replay];
 }|}]
 
-type controller
-
 let location_assign : string -> unit =
   [%mel.raw
     "function (url) { window.location.assign(url) }"]
@@ -282,21 +278,6 @@ let same_origin : string -> bool =
 let current_url : unit -> string =
   [%mel.raw
     "function () { const l = window.location; return l.pathname + l.search }"]
-
-let scroll_y : unit -> float =
-  [%mel.raw
-    "function () { return window.scrollY || 0 }"]
-
-let scroll_to : float -> unit =
-  [%mel.raw
-    "function (y) { window.scrollTo(0, y) }"]
-
-let scroll_to_hash : string -> unit =
-  [%mel.raw
-    {|function (hash) {
-  const el = hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
-  if (el) el.scrollIntoView(); else window.scrollTo(0, 0);
-}|}]
 
 let fresh_key : unit -> string =
   [%mel.raw
@@ -310,21 +291,9 @@ let history_replace_key : string -> unit =
   [%mel.raw
     "function (k) { window.history.replaceState({ yukaKey: k }, '', window.location.href) }"]
 
-let history_push_key : string -> string -> unit =
-  [%mel.raw
-    "function (k, url) { window.history.pushState({ yukaKey: k }, '', url) }"]
-
 let manual_scroll : unit -> unit =
   [%mel.raw
     "function () { try { window.history.scrollRestoration = 'manual' } catch (e) {} }"]
-
-let new_controller : unit -> controller =
-  [%mel.raw
-    "function () { return new AbortController() }"]
-
-let abort : controller -> unit =
-  [%mel.raw
-    "function (c) { c.abort() }"]
 
 let plain_click : event -> bool =
   [%mel.raw
@@ -342,93 +311,6 @@ let link_href : bool -> node -> string =
   if (a.origin !== l.origin) return "";
   if (a.hash && a.pathname === l.pathname && a.search === l.search) return "";
   return a.href;
-}|}]
-
-let fetch_page :
-    string -> string -> bool -> controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
-  [%mel.raw
-    {|function (url, keys, prefetch, controller, ok, fail) {
-  const signal = controller.signal;
-  const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
-  if (prefetch) { init.headers["Yuka-Prefetch"] = "1"; init.cache = "no-store"; }
-  let request;
-  try {
-    request = fetch(url, init);
-  } catch (e) {
-    fail();
-    return;
-  }
-  request
-    .then(function (r) {
-      return r.text().then(function (text) { return { r: r, text: text }; });
-    })
-    .then(
-      function (x) {
-        if (signal.aborted) return;
-        const base = window.location.href;
-        const target = new URL(typeof x.r.url === "string" && x.r.url ? x.r.url : url, base);
-        if (target.origin !== window.location.origin) { fail(); return; }
-        const hash = target.hash || new URL(url, base).hash;
-        ok(target.pathname + target.search + hash, x.r.status, function (name) { const v = x.r.headers && x.r.headers.get ? x.r.headers.get(name) : null; return v === null ? undefined : v; }, x.text);
-      },
-      function () { if (!signal.aborted) fail(); });
-}|}]
-
-let absolute : string -> string =
-  [%mel.raw "function (u) { const x = new URL(u, window.location.href); x.hash = ''; return x.href }"]
-
-let max_age : string -> int =
-  [%mel.raw
-    {|function (v) { const m = /(?:^|,)\s*max-age=(\d+)/.exec(v); return /(?:^|,)\s*no-(?:store|cache)\s*(?:,|$)/.test(v) || !m ? 0 : +m[1] }|}]
-
-let key_before : string -> string -> bool =
-  [%mel.raw
-    {|function (a, b) { const x = a.split("-"), y = b.split("-"); return +x[0] < +y[0] || (+x[0] === +y[0] && +x[1] < +y[1]) }|}]
-
-let now : unit -> float = [%mel.raw "function () { return Date.now() }"]
-
-let after : int -> (unit -> unit) -> unit -> unit =
-  [%mel.raw
-    "function (ms, f) { const id = setTimeout(function () { f() }, ms); return function () { clearTimeout(id) } }"]
-
-let save_data : unit -> bool =
-  [%mel.raw
-    "function () { const c = window.navigator.connection; return !!(c && c.saveData) }"]
-
-let observe : node array -> (node -> unit) -> unit -> unit =
-  [%mel.raw
-    {|function (els, f) {
-  const O = window.IntersectionObserver;
-  if (typeof O !== "function") return function () {};
-  const observer = new O(function (entries) {
-    for (const e of entries) if (e.isIntersecting) { observer.unobserve(e.target); f(e.target); }
-  });
-  for (const el of els) observer.observe(el);
-  return function () { observer.disconnect(); };
-}|}]
-
-let transition : string -> (unit -> unit) -> unit =
-  [%mel.raw
-    {|function (dir, f) {
-  const d = document;
-  if (typeof d.startViewTransition !== "function") { f(); return; }
-  const h = d.documentElement;
-  const id = (globalThis.__yukaTransition = (globalThis.__yukaTransition || 0) + 1);
-  h.setAttribute("data-yuka-nav", dir);
-  const done = function () { if (globalThis.__yukaTransition === id) h.removeAttribute("data-yuka-nav"); };
-  const t = d.startViewTransition(function () {
-    try { f(); } catch (e) { d.defaultView.setTimeout(function () { throw e; }); }
-  });
-  t.ready.then(null, function () {});
-  t.finished.then(done, done);
-}|}]
-
-let swap_page : string -> unit =
-  [%mel.raw
-    {|function (text) {
-  const parsed = new document.defaultView.DOMParser().parseFromString(text, "text/html");
-  document.title = parsed.title;
-  document.body.innerHTML = parsed.body.innerHTML;
 }|}]
 
 type 'a table
@@ -535,20 +417,6 @@ let add_stylesheet : string -> unit =
   l.setAttribute("href", href);
   l.setAttribute("data-yuka-css", "");
   document.head.appendChild(l);
-}|}]
-
-let adopt_stylesheets : unit -> unit =
-  [%mel.raw
-    {|function () {
-  if (!document.body) return;
-  var head = document.head, seen = new Set();
-  head.querySelectorAll("link[data-yuka-css]").forEach(function (l) { seen.add(l.getAttribute("href")); });
-  document.body.querySelectorAll("link[data-yuka-css]").forEach(function (l) {
-    var href = l.getAttribute("href");
-    if (seen.has(href)) l.remove();
-    else { seen.add(href); head.appendChild(l); }
-  });
-  document.__yukaSheets = seen;
 }|}]
 
 let read_file (_ : string) : string option = None

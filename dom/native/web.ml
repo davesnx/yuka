@@ -62,7 +62,6 @@ let exn_to_string = Printexc.to_string
 let encode_uri : string -> string = fun _ -> browser_only ()
 let decode_uri : string -> string = fun _ -> browser_only ()
 let contains : node -> node -> bool = fun _ _ -> browser_only ()
-let set_title : string -> unit = fun _ -> browser_only ()
 let fetch_post : string -> string -> (int -> string -> unit) -> (bool -> string -> unit) -> unit -> unit = fun _ _ _ _ _ -> browser_only ()
 let watch_added : (node array -> bool) -> unit -> unit = fun _ _ -> browser_only ()
 let navigate : string -> unit = fun _ -> browser_only ()
@@ -79,36 +78,15 @@ let record_events : node -> (unit -> unit) * (unit -> unit) = fun _ -> browser_o
 let promise_map : ('a -> 'b) -> 'a promise -> 'b promise = fun _ _ -> browser_only ()
 let promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit = fun _ _ _ -> browser_only ()
 
-type controller = unit
-
 let location_assign : string -> unit = fun _ -> browser_only ()
 let current_url : unit -> string = fun _ -> browser_only ()
 let same_origin : string -> bool = fun _ -> browser_only ()
-let scroll_y : unit -> float = fun _ -> browser_only ()
-let scroll_to : float -> unit = fun _ -> browser_only ()
-let scroll_to_hash : string -> unit = fun _ -> browser_only ()
 let fresh_key : unit -> string = fun _ -> browser_only ()
 let history_key : unit -> string = fun _ -> browser_only ()
 let history_replace_key : string -> unit = fun _ -> browser_only ()
-let history_push_key : string -> string -> unit = fun _ _ -> browser_only ()
 let manual_scroll : unit -> unit = fun _ -> browser_only ()
-let new_controller : unit -> controller = fun _ -> browser_only ()
-let abort : controller -> unit = fun _ -> browser_only ()
 let plain_click : event -> bool = fun _ -> browser_only ()
 let link_href : bool -> node -> string = fun _ _ -> browser_only ()
-let fetch_page :
-    string -> string -> bool -> controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
- fun _ _ _ _ _ _ -> browser_only ()
-let absolute : string -> string = fun _ -> browser_only ()
-let max_age : string -> int = fun _ -> browser_only ()
-let key_before : string -> string -> bool = fun _ _ -> browser_only ()
-let now : unit -> float = fun _ -> browser_only ()
-let after : int -> (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
-let save_data : unit -> bool = fun _ -> browser_only ()
-let observe : node array -> (node -> unit) -> unit -> unit = fun _ _ -> browser_only ()
-let transition : string -> (unit -> unit) -> unit = fun _ _ -> browser_only ()
-let swap_page : string -> unit = fun _ -> browser_only ()
-
 type 'a table = (string, 'a) Hashtbl.t
 
 let table () = Hashtbl.create 8
@@ -143,7 +121,6 @@ let on_online : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let random : unit -> float = fun () -> Random.float 1.
 let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit = fun _ _ _ -> browser_only ()
 let add_stylesheet : string -> unit = fun _ -> browser_only ()
-let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()
 let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None
 
 let buffers : Buffer.t list ref = ref []

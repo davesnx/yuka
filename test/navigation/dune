@@ -14,4 +14,10 @@
  (deps
   (alias melange-tests))
  (action
-  (run node %{dep:out/test/navigation/run.js})))
+  (progn
+   (run node %{dep:out/test/navigation/run.js})
+   (run node %{dep:out/test/navigation/run.js} back)
+   (run node %{dep:out/test/navigation/run.js} hover)
+   (run node %{dep:out/test/navigation/run.js} replay)
+   (run node %{dep:out/test/navigation/run.js} stall)
+   (run node %{dep:out/test/navigation/run.js} fail))))

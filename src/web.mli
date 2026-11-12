@@ -59,7 +59,6 @@ val exn_to_string : exn -> string
 val encode_uri : string -> string
 val decode_uri : string -> string
 val contains : node -> node -> bool
-val set_title : string -> unit
 val fetch_post :
   string ->
   string ->
@@ -82,41 +81,15 @@ val record_events : node -> (unit -> unit) * (unit -> unit)
 val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
 val promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit
 
-type controller
-
 val location_assign : string -> unit
 val current_url : unit -> string
 val same_origin : string -> bool
-val scroll_y : unit -> float
-val scroll_to : float -> unit
-val scroll_to_hash : string -> unit
 val fresh_key : unit -> string
 val history_key : unit -> string
 val history_replace_key : string -> unit
-val history_push_key : string -> string -> unit
 val manual_scroll : unit -> unit
-val new_controller : unit -> controller
-val abort : controller -> unit
 val plain_click : event -> bool
 val link_href : bool -> node -> string
-val fetch_page :
-  string ->
-  string ->
-  bool ->
-  controller ->
-  (string -> int -> (string -> string option) -> string -> unit) ->
-  (unit -> unit) ->
-  unit
-val swap_page : string -> unit
-val absolute : string -> string
-val max_age : string -> int
-val key_before : string -> string -> bool
-val now : unit -> float
-val after : int -> (unit -> unit) -> unit -> unit
-val save_data : unit -> bool
-val observe : node array -> (node -> unit) -> unit -> unit
-val transition : string -> (unit -> unit) -> unit
-
 type 'a table
 
 val table : unit -> 'a table
@@ -143,7 +116,6 @@ val on_online : (unit -> unit) -> unit -> unit
 val random : unit -> float
 val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
-val adopt_stylesheets : unit -> unit
 val read_file : string -> string option
 val take_buffer : unit -> Buffer.t option
 val give_buffer : Buffer.t -> unit

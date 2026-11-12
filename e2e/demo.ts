@@ -179,18 +179,26 @@ await step("3. keyboard", async () => {
 });
 
 await step("3b. router", async () => {
+  const opened = allRequests.length;
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
+  await page.locator(".filter").hover();
+  await page.locator(".filter").focus();
+  await page.waitForTimeout(200);
+  await page.locator(".filter").blur();
   await page.evaluate(() => ((window as any).__marker = "alive"));
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
   const titleBefore = await page.title();
   await page.evaluate(() => window.scrollTo(0, 250));
   const y = await page.evaluate(() => Math.round(window.scrollY));
   const mark = allRequests.length;
+  const routerCode = (r: { url: string }) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url).pathname);
+  const loadedAtStart = allRequests.slice(opened, mark).filter(routerCode).length;
   await page.locator('.row[data-id="YUK-8"] .row-title').click();
   await page.waitForURL("**/issue/YUK-8");
   await page.waitForSelector(".comment-input");
   const navReq = allRequests.slice(mark).filter((r) => r.url.endsWith("/issue/YUK-8"));
+  check("3b.0 the navigation code loads on first use, not at start nor on pointer or focus off links", loadedAtStart === 0 && allRequests.slice(mark).filter(routerCode).length === 1, `at start=${loadedAtStart} after=${allRequests.slice(mark).filter(routerCode).length}`);
   check("3b.1 click is a client navigation (marker survives)", (await marker()) === "alive", String(await marker()));
   check("3b.2 request has Yuka-Navigate with the outlet keys", navReq.length >= 1 && navReq.every((r) => r.keys === "L0"), JSON.stringify(navReq.map((r) => r.keys)));
   const titleAfter = await page.title();

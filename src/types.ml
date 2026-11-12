@@ -98,6 +98,18 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     scroll_into_view : string -> unit;
   }
 
+  type router = {
+    boot : [ `Hover | `Visible | `Off ] * bool * (unit -> unit) -> unit;
+    navigate : string -> unit;
+    handle : event -> unit;
+    stop : unit -> unit;
+  }
+
+  type registry = {
+    start :
+      bool * [ `Hover | `Visible | `Off ] option * bool option * (string -> unit) option -> unit;
+  }
+
   type pending =
     | Pending_await of {
         id : string;

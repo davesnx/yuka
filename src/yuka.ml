@@ -30,23 +30,8 @@ let template_child = Template.child
 let template_attribute = Template.attribute
 let template_attribute_option = Template.attribute_option
 let template_instance = Template.instance
-module Client = struct
-  include Client
-
-  type registry = {
-    start :
-      bool * [ `Hover | `Visible | `Off ] option * bool option * (string -> unit) option -> unit;
-  }
-
-  let registry ?(lazy_entries = []) entries =
-    {
-      start =
-        (fun (navigation, prefetch, transitions, on_error) ->
-          Option.iter (fun f -> Client.on_error := f) on_error;
-          if navigation then Navigation.start ~lazy_entries ?prefetch ?transitions entries
-          else Client.start ~lazy_entries entries);
-    }
-end
+module Dom = Client
+module Client = Client_api
 module Action = Action
 module Optimistic = Optimistic
 module Remote = Remote
@@ -86,15 +71,15 @@ let render ?islands ?navigation ?prefetch ?transitions ?on_error ?root () =
   match (islands, root) with
   | None, None -> invalid_arg "Yuka.render: no ~islands and no ~root"
   | _ -> (
-      (match root with Some r -> Client.render_root r | None -> ());
+      (match root with Some r -> Dom.render_root r | None -> ());
       match islands with
-      | Some { Client.start } ->
+      | Some { Types.start } ->
           start ((match navigation with Some n -> n | None -> true), prefetch, transitions, on_error)
       | None -> ())
 
 let unmount () =
-  Client.stop_roots ();
-  Navigation.stop ()
+  Dom.stop_roots ();
+  Navigation_stub.stop ()
 
 module Private = struct
   include Types
@@ -124,7 +109,7 @@ module Private = struct
     let { Template_build.walk; kids; attrs; values } = t.plan in
     (walk, kids, attrs, values)
   let expand t parts =
-    Client.use_element ();
+    Dom.use_element ();
     Template.expand t parts
   let element = Kind.of_node
   let hole f = Hole f
@@ -169,5 +154,5 @@ module Private = struct
   let call_action = Types.transport
   let async_source = Types.async_source
   let action_codecs a = (Action.input a, Action.output a)
-  let render = Client.render
+  let render = Dom.render
 end

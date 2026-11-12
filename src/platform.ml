@@ -4,6 +4,7 @@ open Base
 let stopped_key = "__yuka_stopped"
 let acted : (unit -> unit) ref = ref ignore
 let live_mark : ((string * Json.t) list -> unit) ref = ref ignore
+let client_navigate : (string -> unit) option ref = ref None
 
 let platform =
   ref
@@ -21,7 +22,7 @@ let platform =
       target_tag = (fun e -> Web.local_name (Web.target e));
       shift_key = Web.shift_key;
       alt_key = Web.alt_key;
-      navigate = Web.navigate;
+      navigate = (fun url -> match !client_navigate with Some f -> f url | None -> Web.navigate url);
       focus = Web.focus;
       scroll_into_view = Web.scroll_into_view;
       on_window =
