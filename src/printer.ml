@@ -550,10 +550,14 @@ open Base
       server_rendering := previous;
       current_session := previous_session
     in
-    (match go (build ()) with
-    | () -> restore ()
+    let owner = new_owner () in
+    (match with_owner owner (fun () -> go (build ())) with
+    | () ->
+        restore ();
+        dispose_owner owner
     | exception e ->
         restore ();
+        dispose_owner owner;
         release ();
         raise e);
     if s.held <> [] then begin
