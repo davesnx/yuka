@@ -151,10 +151,10 @@ endif
 init: system-deps create-switch pin install install-npm ## Set up the dev environment: system packages, local switch, opam and npm dependencies
 
 .PHONY: install
-install: ## Install the opam dependencies, the dev packages and ocaml-lsp-server
+install: ## Install the opam dependencies, the dev packages, ocaml-lsp-server and the mlx reader for it
 	opam update
 	opam install . --deps-only --with-test --with-doc -y
-	opam install -y $(DEV_PACKAGES) ocaml-lsp-server
+	opam install -y $(DEV_PACKAGES) ocaml-lsp-server ocamlmerlin-mlx
 
 DEV_PACKAGES = server-reason-react
 
