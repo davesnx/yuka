@@ -112,7 +112,7 @@ First release on opam.
 - A memo is read-only: `State.memo` returns `'a State.read`, and `State.set` or `State.update` on it is a compile error instead of an `Invalid_argument` at run time (@davesnx)
 - In a dev build, hydration logs one `console.warn` per mismatch between the server HTML and the client tree, with the island name, the expected and found node, and a short path; a production bundle built with `--define:__YUKA_DEV__=false` has no log code (@davesnx)
 - Small client bundles: an app contains only the features it uses, templates are compiled to HTML and paths by the ppx, and `make size` checks the keyed benchmark app against a budget (@davesnx)
-- A smaller reactive core, adapted from Solid's `signal.ts` (MIT): an effect keeps updating after a memo it reads raises or after the 100-round limit drops work, and a parent effect runs before the children it disposes (@davesnx)
+- A smaller reactive core: an effect keeps updating after a memo it reads raises or after the 100-round limit drops work, and a parent effect runs before the children it disposes (@davesnx)
 - Breaking: a `not_found` page gets the params of the path of the node that declares it and `~target`, and an `error` page gets them and `~status`; an existing `not_found` or `error` page under a route with params must take those params, and a param named `target` or `status` (for the page that takes it) fails the build (@davesnx)
 
 ### yuka-dream
