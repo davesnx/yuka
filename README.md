@@ -65,4 +65,8 @@ Router.make ~not_found:Pages.not_found
 
 ## Get started
 
-[`docs/getting-started.md`](docs/getting-started.md): install Yuka and set up an app.
+- [`docs/getting-started.md`](docs/getting-started.md): install Yuka and set up an app.
+- [`docs/islands.md`](docs/islands.md): components that run in the browser.
+- [`docs/state.md`](docs/state.md): state, memos and effects.
+- [`docs/router.md`](docs/router.md): routes, params and links.
+- [`docs/security.md`](docs/security.md): what Yuka escapes and blocks.
