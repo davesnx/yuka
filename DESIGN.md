@@ -1738,7 +1738,7 @@ what changed from the spec. `yuka-dream` and the demo migration are in
 
 ## yuka-dream, demo on Routes.mlx, prerender (2026-11-10)
 
-Current names: `handler` no longer sets a logger: give `Server.config ~log_error`. The prerender values are in `Server.Prerender`: `seeds`, `prerenderable`, `links`, `file`, `missing_page`, `served_dirs`. `ADAPTER.exists` is `Server.Adapter.Backend.exists`. Client files are under `/_yuka/app/`.
+Current names: `handler` sends the server log to `Dream.sub_log "yuka"` when the config has no `~log` (see "`Yuka.Console` and the server log"). The prerender values are in `Server.Prerender`: `seeds`, `prerenderable`, `links`, `file`, `missing_page`, `served_dirs`. `ADAPTER.exists` is `Server.Adapter.Backend.exists`. Client files are under `/_yuka/app/`.
 
 Spec: `.workplace/docs/routes-spec.md`, increment 3 (tickets 09, 11 and
 19); its section 8 lists what changed from the spec.
@@ -2586,8 +2586,8 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 - `Server.stop`: `Not_found`, `Forbidden` (a plain 403), `Redirect`
   (must stay on the site, else a logged 500), `Redirect_off_site` and
   `Fail`.
-- No global configuration: `Server.config ~log_error ~dev ~origins` and
-  `Server.Live.node ~log_error ~per_session ~total`. The library does not
+- No global configuration: `Server.config ~log ~dev ~origins` and
+  `Server.Live.node ~log ~per_session ~total`. The library does not
   read `YUKA_DEV`; `yuka dev` sets it and the app passes `~dev`.
 - `Server.response`, `Server.Live.bus` are private records with builder
   functions; `Server.Live.connection` and `Server.cache` are abstract
@@ -2617,7 +2617,7 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 - An `Async.map` or `Async.bind` function that raises gives `Failed`.
 - A failed `<Yuka.Await>`, `suspend` or `Async` prop shows the message of
   a `Server.Action.reject`, else `"server error"`; the detail goes to
-  `log_error`.
+  the `log` of `Server.config`.
 - `Codec.t` is private (`Codec.make`, `Codec.map`), `Remote.retry` is
   abstract, `Remote.mutate` and `Live.mutate` have one shape, and
   `Optimistic` is internal.
@@ -2663,7 +2663,7 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 | `Optimistic` | internal |
 | `Server.ADAPTER`, `Server.Make`, `Server.handle` | `Server.Adapter.Backend`, `Server.Adapter.Make`, internal |
 | `Server.Live.SOCKET`, `Server.Live.Handle` | the adapter's `upgrade` and `Server.Live.connection` |
-| `Server.log_error` | `Server.config ~log_error`, `Server.Live.node ~log_error` |
+| `Server.log_error` | `Server.config ~log`, `Server.Live.node ~log` |
 | `YUKA_DEV` read by `Server.config` | `Server.config ~dev:true` |
 | `Server.prerender_config` | `Server.Prerender.config` |
 | `Server.prerender_seeds`, `prerenderable`, `prerender_file`, `missing_page`, `served_dirs`, `css_files` | `Server.Prerender.seeds`, `prerenderable`, `file`, `missing_page`, `served_dirs`, `css_files` |
@@ -2925,3 +2925,50 @@ as a call, with the same checks.
   standard library value: its defaults are `[]` or the copied `default`
   values.
 - `test/cycle/Routes.ml` renames its route `Find` to `Search`.
+
+## `Yuka.Console` and the server log (2026-11-12)
+
+Plan: `.workplace/plans/console_PLAN.md`. A prototype, decided by the
+user: it will be improved later, and the API can change.
+
+- `Yuka.Console` has `log`, `info`, `warn`, `error` and `debug`, each
+  `string -> unit`, so shared code (an island that the server also
+  renders) can log. In the browser each calls the `console` method of its
+  name (`Web.console_*`). On the server each sends a level and the
+  message to the server log; `log` and `info` are `` `Info ``, as in the
+  browser. `Console` tests `Web.in_browser`; the server branch calls
+  `Types.log_message`.
+- One sink type, `Server.log_level -> string -> unit`, with
+  `` Server.log_level = [ `Error | `Warn | `Info | `Debug ] ``. It replaces
+  `string -> unit` in `Server.config ?log` (was `?log_error`),
+  `Server.Live.node ?log` and `Server.Testing.set_log`. Breaking.
+- The request context carries the sink of its config. A `Console` call
+  during a server render of a request goes there; any other call (no
+  render, or after the render returned, as in an action or a loader that
+  resumes later) goes to the default sink, `Types.default_log`. The
+  current request is the session of the running print, so an `Async`
+  callback does not know it.
+- Yuka's own messages use the same sink: `` `Warn `` for a blocked URL in
+  a server render, a live message over 1 MiB, a live key too long for the
+  bus and a `Live.use` under a shared cache rule; `` `Error `` for the
+  rest.
+- Default sink: one line on stderr, `yuka: LEVEL MESSAGE`; it drops
+  `` `Debug ``. No logging library in `yuka`. The blocked URL message lost
+  its `yuka: ` prefix and the live message its `warning: ` prefix, which
+  the line now carries.
+- The config keeps `log` as an option, so an adapter can fill it:
+  `Server.Adapter.default_log sink config` sets it only when the user gave
+  none. `Yuka_dream.handler` does this once, when it is applied to the
+  config and the app, with `Dream.sub_log "yuka"` (`` `Warn `` is
+  `` `Warning ``). Dream then adds the time, the level, the request id
+  (from `Dream.logger`) and its threshold. A field in `Backend` would make
+  every adapter, the test ones too, give a log, and would send the
+  messages of `Yuka_dream.prerender` to Dream; `prerender` keeps the
+  default sink.
+- Not in the prototype: lazy messages, a threshold in the core, named
+  sub-logs, values other than a string, and the request of an `Async`
+  callback.
+- Tests: `test/cycle` (the levels in a request and outside one),
+  `test/native/default_log` (the stderr line, no debug), `test/melange`
+  (the `console` methods), `dream/test` (a warning in the Dream log with
+  the request id; a config `log` is kept).

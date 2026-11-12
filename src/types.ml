@@ -3,6 +3,7 @@ type client
 type event = Web.event
 type trigger = [ `Idle | `Visible | `Interaction ]
 type start = [ `Load | trigger | `Lazy of trigger ]
+type log_level = [ `Error | `Warn | `Info | `Debug ]
 
 
   type node =
@@ -121,7 +122,7 @@ type start = [ `Load | trigger | `Lazy of trigger ]
     path : string;
     header : string -> string option;
     session : unit -> string option;
-    log : string -> unit;
+    log : log_level -> string -> unit;
     live : string -> Json.t -> (Json.t, Status_error.t) result Async.t;
   }
 
@@ -187,12 +188,15 @@ let log name value =
 
 let current_session : session option ref = ref None
 
-let default_log : (string -> unit) ref = ref prerr_endline
+let level_name = function `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug"
 
-let log_in session message =
-  match session with Some { context = Some c; _ } -> c.log message | _ -> !default_log message
+let default_log : (log_level -> string -> unit) ref =
+  ref (fun level message -> if level <> `Debug then prerr_endline ("yuka: " ^ level_name level ^ " " ^ message))
 
-let log_message message = log_in !current_session message
+let log_in session level message =
+  match session with Some { context = Some c; _ } -> c.log level message | _ -> !default_log level message
+
+let log_message level message = log_in !current_session level message
 
 let reject_prefix = lazy ("yuka.reject." ^ Web.nonce () ^ ":")
 
@@ -209,7 +213,7 @@ let shown ?(session = !current_session) what message =
   match rejection message with
   | Some m -> m
   | None ->
-      log_in session (what ^ " failed: " ^ message);
+      log_in session `Error (what ^ " failed: " ^ message);
       "server error"
 
 let async_error ?session id message = shown ?session ("async value " ^ id) message

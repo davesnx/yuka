@@ -43,9 +43,11 @@ let finish_second v =
   resolve v
 
 let fail_first = ref false
+let in_home = ref ignore
 
 let reset () =
   fail_first := false;
+  in_home := ignore;
   events := [];
   waiting := [];
   slow_state := Async.make ();
@@ -126,6 +128,7 @@ module Pages = struct
   let home () =
     Server.page ~title:"Home" (fun () ->
         note "home body";
+        !in_home ();
         text "home")
 
   let plain () = Server.page ~title:"Plain" (fun () -> el "p" [ text "plain" ])

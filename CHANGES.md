@@ -4,6 +4,7 @@
 
 ### yuka
 
+- `Yuka.Console` (prototype): `log`, `info`, `warn`, `error` and `debug` take a string. In the browser each calls the `console` method of its name; on the server each sends a level (`log` and `info` are `` `Info ``) and the message to the server log: the `log` of `Server.config` during a server render of a request, else the default sink. Breaking: `Server.config ?log:(Server.log_level -> string -> unit)` replaces `?log_error:(string -> unit)`, as do `Server.Live.node ?log` and `Server.Testing.set_log`; Yuka's own messages go there as `` `Error `` or `` `Warn ``. The default sink writes `yuka: LEVEL MESSAGE` to stderr and drops `` `Debug ``. `Server.Adapter.default_log` gives a config without `log` the log of the adapter. To migrate, write `~log:(fun _ m -> ...)` for `~log_error:(fun m -> ...)` (@davesnx)
 - Fix: a server render disposes the memos it created when the print ends. Before, a `State.memo` that read a State at the top level of a module (`[@@yuka.shared]`) stayed linked to that State, so each request kept its memo in memory for the life of the process (@davesnx)
 - The generated `Routes` module has a link function for each route, endpoint and action, named as the node in lowercase: `Routes.hello ~name:"Yuka" ()` is `Routes.href (Hello { name = "Yuka" })`. Path params are labelled arguments, search fields are optional arguments with the absent value as default, and each function ends with `()`. `href` stays, to turn a `Routes.t` from `find` into a URL. A node name whose function would be an OCaml keyword (`Type`, `Method`, `Effect`, ...) or `href`, `find` or `with_query`, and a param or search field named `href`, are build errors with a location in `Routes.ml` (@davesnx)
 - Breaking: an island is marked with the attribute `let[@client] make ...` (long name `[@yuka.client]`) instead of `let%client` and `let%yuka.client`, which the ppx now refuses with a message that gives the new form. The attribute takes no options yet: a payload is a compile error. `yuka islands` finds lines that start with `let[@client]` or `let[@yuka.client]`. To migrate, replace `let%client` with `let[@client]` (@davesnx)
@@ -42,7 +43,7 @@
 - Breaking: `Server.cache` is abstract: `no_store`, `no_cache` (new), `private_ ~max_age`, `public ?s_max_age ~max_age ()`, `immutable`. In `Routes.ml` write `~cache:no_store` or `~cache:(public ~max_age:60 ())` (@davesnx)
 - Breaking: values for generated code moved to `Server.Generated` (not covered by semantic versioning), prerender values to `Server.Prerender` (`config`, `seeds`, `prerenderable`, `links`, `file`, `missing_page`, `css_files`, `served_dirs`); `Router.encode`, `segment`, `segments`, `int_param` and `search` are for generated code only (@davesnx)
 - Breaking, security: `Server.stop` has `Redirect of { location; kind = `See_other | `Temporary | `Permanent }`, which must stay on the site (else a logged 500), `Redirect_off_site` for another site, and `Forbidden` (403) (@davesnx)
-- Breaking: `Server.log_error` is removed: give `Server.config ~log_error` (and `Server.Live.node ~log_error`) (@davesnx)
+- Breaking: `Server.log_error` is removed: give `Server.config ~log` (and `Server.Live.node ~log`) (@davesnx)
 - Breaking, security: `Server.Action.reject : string -> 'a Async.t` replaces `reject` (an exception) and `rejected`; a failure text that starts with `yuka.reject:` is no longer shown to the client (@davesnx)
 - Fix: a handler may send a header name more than once (two `set-cookie`); a rule header is replaced only by the same name from the handler (@davesnx)
 - Security: an outgoing header name or value with CR, LF or NUL gives a plain 500 and a log message (@davesnx)
@@ -52,7 +53,7 @@
 - Security: a prerender never writes the dev script or dev state (`Server.Prerender.config` turns dev off), and refuses a page that renders a `Live.use` (@davesnx)
 - Security: a page whose shell renders a `Live.use` under a shared cache rule (`public`, `s-maxage`) is sent with `cache-control: private, no-store`, and a log line once per path (@davesnx)
 - `GET /_yuka/live` without a session (no session middleware) is a 500 with a log line before the upgrade, instead of a failed socket after it (@davesnx)
-- A live node made without `~log_error`, the default one too, logs to the `log_error` of the config of the handler that serves it (@davesnx)
+- A live node made without `~log`, the default one too, logs to the `log` of the config of the handler that serves it (@davesnx)
 - Breaking: client files are served under `/_yuka/app/` (was `/_yuka/`); the reserved paths under `/_yuka/` are `action`, `csrf`, `css`, `dev`, `live` and `app` (@davesnx)
 - Breaking: the values and types that `yuka.ppx`, `[@@deriving codec]`, `[@@deriving form]`, `[%yuka.css]` and `yuka islands` write are top-level `Yuka.runtime_*` names, outside semantic versioning: `runtime_attr`, `runtime_hole_attr`, `runtime_url_attr`, `runtime_url_hole_attr`, `runtime_template`, `runtime_child`, `runtime_attribute`, `runtime_attribute_option`, `runtime_instance`, `runtime_stylesheet`, `runtime_island`, `runtime_entry`, `runtime_lazy_entry`, `runtime_promise_map`, `runtime_registry`, `runtime_form_*`. `Yuka.Template`, `template_coded`, the `template_*` duplicates, `attr_unchecked`, `url_attr`, `Client.entry`, `Client.registry` (the value), `Client.lazy_entry`, `Client.promise`, `Client.promise_map`, `Client.island` and `Client.hydrate` are removed; hand-written templates (`Private.Template.make`, `Private.template`) and `Private.hydrate` are for tests (@davesnx)
 - Breaking: `Action.call` gives `('o, Status.error) result Async.t` in the browser and on the server, with the same errors as `Remote` (`Rejected`, `Forbidden`, `Not_found`, `Server`, `Network`, `Protocol`); a cancelled call is `Error (Network "cancelled")` (@davesnx)
@@ -62,7 +63,7 @@
 - Breaking: `Yuka.lower` is `Yuka.element`; `Yuka.list` and `Yuka.array` are removed (use `fragment`) (@davesnx)
 - Breaking: each event handler (`on`, `Browser.on_window`) runs in a `batch`: the DOM updates and effects run once after the handler returns; `Browser.focus` and `Browser.scroll_into_view` called in a batch run after it, so they find an element that the handler's write creates; when a handler raises, its writes still apply and both its exception and an error of the update go to the boundary (@davesnx)
 - An action call made in a handler is aborted when the island that made it stops, also when the handler's own writes render the handler's element again (@davesnx)
-- Breaking, security: in a server render, a failed `<Yuka.Await>` or `suspend` gets the bare message of a `Server.Action.reject`, else `"server error"`, and the detail goes to the `log_error` of `Server.config`; an `Async` prop failure is written with the same text (was `"failed"`), so the text does not change at hydration (@davesnx)
+- Breaking, security: in a server render, a failed `<Yuka.Await>` or `suspend` gets the bare message of a `Server.Action.reject`, else `"server error"`, and the detail goes to the `log` of `Server.config`; an `Async` prop failure is written with the same text (was `"failed"`), so the text does not change at hydration (@davesnx)
 - Breaking: an exception raised by the function of `Async.map` or `Async.bind` gives `Failed` instead of escaping (@davesnx)
 - `State.read_only`, `State.untrack` (was `Private.untracked`) and `Client.container` (an element by id) (@davesnx)
 - `Codec.int` accepts an integral `Float` in the `int` range of the platform, so a server int above 32 bits decodes in the browser when it fits (@davesnx)
@@ -82,7 +83,7 @@
 ### yuka-dream
 
 - `Yuka_dream.handler ?node` serves `GET /_yuka/live` (live data) for a live node; it needs Dream sessions that every server process shares and that survive a restart (`Dream.cookie_sessions` with `Dream.set_secret`) (@davesnx)
-- Breaking: `Yuka_dream.handler` no longer sets `log_error`; give `Yuka.Server.config ~log_error:(fun m -> Dream.error (fun log -> log "%s" m))` (@davesnx)
+- `Yuka_dream.handler` sends the server log to `Dream.sub_log "yuka"` (`` `Warn `` is Dream's `` `Warning ``) when the config has no `log`; remove a `~log_error` that called `Dream.error` (@davesnx)
 - Fix: `Yuka_dream` sends every value of a repeated rule header on a prerendered file (@davesnx)
 
 ### yuka-live-pg

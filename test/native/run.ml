@@ -216,8 +216,8 @@ let post ?content_type ?origin ?host ?fetch_site name body =
 
 let logged f =
   let messages = ref [] in
-  let saved = prerr_endline in
-  Yuka.Server.Testing.set_log (fun m -> messages := m :: !messages);
+  let saved = fun _ m -> prerr_endline m in
+  Yuka.Server.Testing.set_log (fun _ m -> messages := m :: !messages);
   let result = (try f () with e -> Yuka.Server.Testing.set_log saved; raise e) in
   Yuka.Server.Testing.set_log saved;
   (result, List.rev !messages)
@@ -518,8 +518,8 @@ let stream_cases =
     let b = Async.bind gate (fun () -> Server.Action.reject "title is empty") in
     let write, chunks = recorder () in
     let logged = ref [] in
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged);
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
     let p = stream (fun () -> Yuka.fragment [ island a; island b ]) write in
     fail_a "db password wrong";
     open_b ();
@@ -534,8 +534,8 @@ let stream_cases =
   in
   let async_errors_inline () =
     let logged = ref [] in
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged);
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
     let html =
       Server.to_string (fun () ->
           Yuka.fragment
@@ -1309,8 +1309,8 @@ let loading_cases =
       (count out (link "/js/Counter.js"))
   in
   let catch_keeps_link () =
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log ignore;
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           Yuka.fragment
@@ -1411,8 +1411,8 @@ let loading_cases =
     check int "inner link once" 1 (count out (link "/js/Inner.js"))
   in
   let nested_in_failed_catch () =
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log ignore;
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           outer_with (fun () ->

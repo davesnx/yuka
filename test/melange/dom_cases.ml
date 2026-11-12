@@ -1270,6 +1270,23 @@ let warnings : unit -> string =
   [%mel.raw
     {|function () { console.warn = globalThis.__console_warn; return globalThis.__warnings.join("|"); }|}]
 
+let capture_console : unit -> unit =
+  [%mel.raw
+    {|function () { globalThis.__console = []; globalThis.__saved_console = {}; ["log", "info", "warn", "error", "debug"].forEach(function (k) { globalThis.__saved_console[k] = console[k]; console[k] = function (m) { globalThis.__console.push(k + " " + m); }; }); }|}]
+
+let console_calls : unit -> string =
+  [%mel.raw
+    {|function () { Object.assign(console, globalThis.__saved_console); return globalThis.__console.join("|"); }|}]
+
+let console_methods () =
+  capture_console ();
+  Console.log "l";
+  Console.info "i";
+  Console.warn "w";
+  Console.error "e";
+  Console.debug "d";
+  check "each function calls its console method" "log l|info i|warn w|error e|debug d" (console_calls ())
+
 let hydrate_logged server_html tree =
   let island = create (document ()) "yuka-island" in
   set_attribute island "data-name" "Board.Island";
@@ -1689,6 +1706,7 @@ let all =
     ("client: a style hole hydrates as one text node and updates", style_hole_hydrates);
     ("client: script takes one text or one hole", client_script_children);
     ("dom hydration mismatch log", mismatch_log);
+    ("Console calls the console method of its name", console_methods);
     ("dom template select value", template_select_value);
     ("dom template parser changes", parser_changes);
     ("dom create", create_tree);

@@ -106,8 +106,8 @@ module Raw = Server.Adapter.Make (struct
 end)
 
 let logged = ref []
-let log_hook = ref (fun m -> logged := m :: !logged)
-let config_with = Server.config ~log_error:(fun m -> !log_hook m)
+let log_hook = ref (fun (_ : Server.log_level) m -> logged := m :: !logged)
+let config_with = Server.config ~log:(fun level m -> !log_hook level m)
 
 let modules =
   Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"Counter":"./counter.js"}|} ~digest:"d1"
@@ -120,7 +120,7 @@ let request ?(meth = `GET) ?(headers = []) ?(body = "") target =
   App.reset ();
   logged := [];
   file_calls := [];
-  log_hook := (fun m -> logged := m :: !logged);
+  log_hook := (fun _ m -> logged := m :: !logged);
   { App.meth; target; headers; body }
 
 let fst3 (a, _, _) = a
@@ -799,7 +799,7 @@ let loaders =
     ( "a fallback that fails still answers 500",
       fun () ->
         let a = call (request "/later") in
-        log_hook := (fun _ -> failwith "log down");
+        log_hook := (fun _ _ -> failwith "log down");
         App.finish_slow "explode";
         match Async.status a with
         | Async.Done r ->
@@ -855,8 +855,38 @@ let loaders =
         Alcotest.(check (list string)) "log" [ "loader secret" ] !logged );
   ]
 
+let console_calls () =
+  Yuka.Console.log "l";
+  Yuka.Console.info "i";
+  Yuka.Console.warn "w";
+  Yuka.Console.error "e";
+  Yuka.Console.debug "d"
+
+let leveled got level m =
+  let name = match level with `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug" in
+  got := (name ^ " " ^ m) :: !got
+
+let console_levels = [ "info l"; "info i"; "warn w"; "error e"; "debug d" ]
+
 let render =
   [
+    ( "Console during a request goes to the log of the config",
+      fun () ->
+        let r = request "/" in
+        let got = ref [] in
+        log_hook := leveled got;
+        App.in_home := console_calls;
+        (match Async.status (call r) with
+        | Async.Done r -> check_status r 200
+        | _ -> Alcotest.fail "no response");
+        Alcotest.(check (list string)) "levels" console_levels (List.rev !got) );
+    ( "Console outside a request goes to the default sink",
+      fun () ->
+        let got = ref [] in
+        Server.Testing.set_log (leveled got);
+        console_calls ();
+        Server.Testing.set_log (fun _ m -> prerr_endline m);
+        Alcotest.(check (list string)) "levels" console_levels (List.rev !got) );
     ( "a failed render waits for the writes in flight",
       fun () ->
         held_writes := [];
@@ -1400,10 +1430,10 @@ let dev =
           if !calls = 1 then {|{"build":1}|} else failwith "state gone"
         in
         let logged = ref [] in
-        Server.Testing.set_log (fun m -> logged := m :: !logged);
+        Server.Testing.set_log (fun _ m -> logged := m :: !logged);
         let ended = Yuka.Private.dev_events ~state ~sleep (fun _ -> Async.return ()) in
         (try tick () with _ -> ());
-        Server.Testing.set_log prerr_endline;
+        Server.Testing.set_log (fun _ m -> prerr_endline m);
         check_true "ended" (Async.status ended = Async.Done ());
         Alcotest.(check int) "logged once" 1 (List.length !logged);
         Alcotest.(check int) "no timer left" 0 (List.length !timers) );
