@@ -1,10 +1,10 @@
 # Router
 
-`Routes.ml` is the route tree of an app. It holds one expression,
-`Router.make ...`, with no `open` and no `let`. It is never compiled:
-`yuka routes` reads it and writes two modules, the shared `Routes` and the
-server `Routes_server`. [`getting-started.md`](getting-started.md) has the
-dune rules.
+`Routes.ml` holds the route tree of an app, `Router.make ...`, which is
+never compiled: `yuka routes` reads it and writes two modules, the shared
+`Routes` and the server `Routes_server`. Items before the tree are
+allowed; see "Code before the tree".
+[`getting-started.md`](getting-started.md) has the dune rules.
 
 ```ocaml
 Router.make ~not_found:Pages.not_found ~error:Pages.error
@@ -127,7 +127,8 @@ does not decode counts as absent. Search fields go on a route or a group.
 
 ## Attachments
 
-Each attachment is a value path such as `Pages.home`. The generated code
+Each attachment is a value path such as `Pages.home`, or `home` after
+`open Pages` (see "Code before the tree"). The generated code
 calls it with labelled arguments. `req` is the request of the server
 adapter, such as `Dream.request`.
 
@@ -164,6 +165,45 @@ Rules, on any node except a redirect:
   file (see `Yuka.Server.Prerender`).
 - `~cross_origin:true`, on an endpoint only: skip the origin check that a
   method other than `GET`, `HEAD` and `OPTIONS` gets. Use it for webhooks.
+
+## Code before the tree
+
+Items before the tree (`open`, `let`, `module`, `type`) go, as written,
+to the top of the server module `Routes_server`. A file with items binds
+the tree as `let routes = Router.make ...`:
+
+```ocaml
+open Pages
+
+let week = Yuka.Server.public ~max_age:604800 ()
+let security = [ ("x-frame-options", "DENY") ]
+
+let routes =
+  Router.make ~not_found ~error ~headers:security
+    [
+      Router.route Home ~path:"/" ~page:home;
+      Router.route About ~path:"/about" ~page:about ~cache:week;
+    ]
+```
+
+`~not_found` is `~not_found:not_found`. `let routes` is the tree, not a
+value: it is not copied. `Yuka.Server` is opened only inside `~cache`, so
+an item writes `Yuka.Server.public`, or opens `Yuka.Server`. Error messages from the compiler
+for these items point to the same line in `routes_server.ml` as in
+`Routes.ml`.
+
+Two limits:
+
+- The shared `Routes` module, which the browser also builds, does not get
+  the items. A param type and a search default must still use a module
+  path that the shared library sees: `:tab<Model.tab>`,
+  `default int Config.first_page`. A default that names a `let` of the
+  items is a build error.
+- The generated server code binds the params, search fields and loader
+  results of a route, and `req`, `children`, `path`, `rules_N`, `layer_N`
+  and `fallback_N`. A one-name attachment with one of these names is a
+  build error: with `~loader:Loaders.issue`, write `~page:Pages.issue`,
+  not `~page:issue`.
 
 ## Links
 

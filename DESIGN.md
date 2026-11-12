@@ -2236,7 +2236,7 @@ through A.
 
 ## Routes.ml: one OCaml expression (2026-11-10)
 
-Current names: `yuka routes --source FILE` now reads FILE, not stdin; dune rules use `--source %{dep:../Routes.ml}`.
+Current names: `yuka routes --source FILE` now reads FILE, not stdin; dune rules use `--source %{dep:../Routes.ml}`. Items before the tree are allowed again; see "Code before the route tree".
 
 Plan: `.workplace/plans/routes-async_PLAN.md`. As server-reason-react
 router-gen: the manifest is a plain OCaml file, not mlx.
@@ -3154,3 +3154,56 @@ the component existed. Ticket 35.
   the deferral and a second copy of the `on_change` logic in the keyed
   list: a one-island page +90 to +102 B, the demo start +108 B, the demo
   pages +118 to +124 B.
+
+## Code before the route tree (2026-11-12)
+
+Decided by the user: `Routes.ml` ends with the tree, and the structure
+items before it (`open`, `let`, `module`, `include`, `type`) go to the top
+of the server module. The tree is the expression `Router.make ...` or the
+binding `let routes = Router.make ...` (the name `routes`, no `rec`, one
+binding, no parameter, no type, no attribute); a file with items uses the
+binding, because OCaml needs `;;` between an item and a top-level
+expression. The bare expression after `;;` still works but the docs and
+messages do not show it. Reason: short
+attachments (`~page:home` after `open Pages`) and named rules
+(`~cache:week`, `~headers:security`) without a module of their own.
+
+- Server output only. The shared module is compiled for the browser too,
+  where server modules do not exist, so `--shared` parses the items and
+  drops them. Param types and search defaults keep their module paths.
+- The items are copied as source text, from the start of the file to the
+  end of the last item, not printed with `Pprintast`: comments and format
+  stay, and they start at line 1, so a compiler error in them has the
+  line number of `Routes.ml`. The `let routes =` binding (or the `;;`) is
+  not copied, so an item or attachment named `routes` is the user's own
+  value, and `routes` is not a hidden name.
+- A bare `Router.make` after a `let` with no `;;` is an argument of that
+  `let`: a build error that says to write `let routes = Router.make ...`.
+  After an `open` it is a syntax error.
+- Build errors with a location: an empty file, a last item that is not
+  the tree, a tree bound in another form (`let () =`, another name,
+  `rec`, two bindings, a parameter, a type, an attribute), an expression
+  before the last item; a search default that
+  names a `let` of the items (the check covers `let` names only: a name
+  from an `open` gives `Unbound value` in the generated `routes.ml`); a
+  one-name attachment that the generated code hides: a param, search
+  field or loader result of its route, `req`, `children`, `path`,
+  `rules_N`, `layer_N` or `fallback_N`.
+- `~cache` is still read with `Yuka.Server` opened, now as
+  `(Yuka.Server.(c) [@warning "-33"])`: `~cache:week` with `week` from the
+  items uses no name of `Yuka.Server`, and the unused open was an error
+  in the dev profile. A `let` with the name of a `Yuka.Server` value is
+  hidden by it in `~cache`. Items are not under that open: they write
+  `Yuka.Server.public` or open `Yuka.Server` themselves.
+- The build id is a digest of the items text and the printed tree, so it
+  changes when an item changes. With no items it is the same as before.
+- `test/cycle/Routes.ml` uses `let routes =`, `open App`, `open Pages`, short pages, a
+  punned `~not_found` and `~error`, and `let`s in `~headers` and
+  `~cache`. `test/cycle/shadowed` prepends `open Shadow`, which defines
+  `List`, `String`, `app`, `resolve`, `rules`, `req`, `path` and the
+  record fields of the generated code; the server module compiles, and
+  the open is unused.
+- The prelude of `Routes.mlx` (2026-11-10 and before) was printed with
+  `Pprintast`, held only `open`s in practice, and was not in the build
+  id. It was dropped with the move to one expression, with no other
+  reason given.

@@ -1,26 +1,35 @@
+open App
+open Pages
+
+let root_headers = [ ("x-frame-options", "DENY"); ("x-a", "root") ]
+let minute = Yuka.Server.public ~max_age:60 ()
+
 let rules_0 =
-  Yuka.Server.Generated.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:Yuka.Server.(no_store) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:false ()
 
 let rules_1 =
-  Yuka.Server.Generated.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:Yuka.Server.(no_store) ~prerender:true ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:true ()
 
 let rules_2 =
-  Yuka.Server.Generated.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("X-A", "team")] ] ~cache:Yuka.Server.(private_ ~max_age:5) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prerender:false ()
 
 let rules_3 =
-  Yuka.Server.Generated.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("X-A", "team")] ] ~cache:Yuka.Server.(public ~s_max_age:600 ~max_age:60 ()) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(public ~s_max_age:600 ~max_age:60 ()) [@warning "-33"]) ~prerender:false ()
 
 let rules_4 =
-  Yuka.Server.Generated.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")]; [("Vary", "Cookie")] ] ~cache:Yuka.Server.(no_store) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("Vary", "Cookie")] ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:false ()
 
 let rules_5 =
-  Yuka.Server.Generated.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:Yuka.Server.(immutable) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(immutable) [@warning "-33"]) ~prerender:false ()
 
 let rules_6 =
-  Yuka.Server.Generated.rules ~headers:[ [("x-frame-options", "DENY"); ("x-a", "root")] ] ~cache:Yuka.Server.(public ~max_age:60 ()) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prerender:false ()
+
+let rules_7 =
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(minute) [@warning "-33"]) ~prerender:false ()
 
 let layer_0 : Yuka.Server.Generated.layer =
-  { Yuka.Server.Generated.key = "L0"; data = false; wrap = (fun children -> App.Layouts.root ~children ()) }
+  { Yuka.Server.Generated.key = "L0"; data = false; wrap = (fun children -> Layouts.root ~children ()) }
 
 let fallback_0 : Yuka.Server.Generated.fallback =
   {
@@ -28,8 +37,8 @@ let fallback_0 : Yuka.Server.Generated.fallback =
       [
         layer_0;
       ];
-    not_found = (fun path -> App.Pages.not_found ~path ());
-    error = (fun () -> App.Pages.error ());
+    not_found = (fun path -> not_found ~path ());
+    error = (fun () -> error ());
   }
 
 let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
@@ -49,7 +58,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                        [
                          layer_0;
                        ];
-                     page = App.Pages.home ();
+                     page = home ();
                    }));
         }
   | Cycle_shared.Routes.Plain ->
@@ -67,7 +76,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                        [
                          layer_0;
                        ];
-                     page = App.Pages.plain ();
+                     page = plain ();
                    }));
         }
   | Cycle_shared.Routes.Entry ->
@@ -326,7 +335,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   | Cycle_shared.Routes.Plain_public ->
       Yuka.Server.Generated.Page
         {
-          rules = rules_6;
+          rules = rules_7;
           guards = [];
           fallback = fallback_0;
           load =
@@ -338,7 +347,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                        [
                          layer_0;
                        ];
-                     page = App.Pages.plain ();
+                     page = plain ();
                    }));
         }
   | Cycle_shared.Routes.Cookies ->
@@ -390,7 +399,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                 layer_2;
               ];
             not_found = (fun path -> App.Pages.org_missing ~org ~path ());
-            error = (fun () -> App.Pages.error ());
+            error = (fun () -> error ());
           };
           load =
             (fun () ->
@@ -436,7 +445,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"f13190aaefeb403c06e62e4b659690c2"
-    ~headers:([("x-frame-options", "DENY"); ("x-a", "root")])
+  Yuka.Server.Generated.app ~build:"f9698f579cbf34be824e4e43f12ce0d1"
+    ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

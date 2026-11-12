@@ -584,42 +584,153 @@ A nested Router.make
   Error: Router.make can only be the root
   [1]
 
-A let binding instead of an expression
+The tree bound as let routes, alone or after items, is valid
+
+  $ gen <<'EOF' > /dev/null
+  > let routes = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+
+  $ gen <<'EOF' > /dev/null
+  > open Shared
+  > 
+  > let first = 1
+  > 
+  > let routes =
+  >   Router.make [ Router.route A ~path:"/a" ~page:a ]
+  > EOF
+
+The bare tree after items ended with ;; is valid too
+
+  $ gen <<'EOF' > /dev/null
+  > open Shared
+  > let first = 1
+  > ;;
+  > Router.make [ Router.route A ~path:"/a" ~page:a ]
+  > EOF
+
+The tree bound to another name, or with rec, two bindings, a parameter, a
+type or an attribute
+
+  $ gen <<'EOF'
+  > let () = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 0-64:
+  Error: write the tree as let routes = Router.make ...: one binding named routes, with no rec, no parameter, no type and no attribute
+  [1]
+
+  $ gen <<'EOF'
+  > let tree = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 0-66:
+  Error: write the tree as let routes = Router.make ...: one binding named routes, with no rec, no parameter, no type and no attribute
+  [1]
+
+  $ gen <<'EOF'
+  > let rec routes = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 0-72:
+  Error: write the tree as let routes = Router.make ...: one binding named routes, with no rec, no parameter, no type and no attribute
+  [1]
 
   $ gen <<'EOF'
   > let routes = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > and other = 1
   > EOF
-  File "Routes.ml", line 1, characters 0-68:
-  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
+  File "Routes.ml", lines 1-2, characters 0-13:
+  Error: write the tree as let routes = Router.make ...: one binding named routes, with no rec, no parameter, no type and no attribute
   [1]
 
-An open before the expression
+  $ gen <<'EOF'
+  > let routes () = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 0-71:
+  Error: write the tree as let routes = Router.make ...: one binding named routes, with no rec, no parameter, no type and no attribute
+  [1]
+
+  $ gen <<'EOF'
+  > let routes : t = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 0-72:
+  Error: write the tree as let routes = Router.make ...: one binding named routes, with no rec, no parameter, no type and no attribute
+  [1]
+
+  $ gen <<'EOF'
+  > let routes = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ] [@@inline]
+  > EOF
+  File "Routes.ml", line 1, characters 0-79:
+  Error: write the tree as let routes = Router.make ...: one binding named routes, with no rec, no parameter, no type and no attribute
+  [1]
+
+A bare tree after a let without ;; is an argument of that let
+
+  $ gen <<'EOF'
+  > let security = [ ("x-frame-options", "DENY") ]
+  > 
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 3, characters 0-11:
+  Error: Router.make is read as an argument of the let before it; write let routes = Router.make ...
+  [1]
+
+A bare tree after an open without ;; is a syntax error
 
   $ gen <<'EOF'
   > open Shared
-  > ;;
   > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
   > EOF
-  File "Routes.ml", line 1, characters 0-11:
-  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
+  File "Routes.ml", line 2, characters 0-6:
+  Error: Syntax error
   [1]
 
-A second expression
+An item after the tree
+
+  $ gen <<'EOF'
+  > let routes = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > let late = 1
+  > EOF
+  File "Routes.ml", line 2, characters 0-12:
+  Error: the route file must end with the route tree, Router.make ... or let routes = Router.make ...; open, let, module and type items go before it
+  [1]
+
+A second tree
 
   $ gen <<'EOF'
   > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ];;
   > Router.make [ Router.route B ~path:"/b" ~page:Pages.b ]
   > EOF
-  File "Routes.ml", line 2, characters 0-55:
-  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
+  File "Routes.ml", line 1, characters 0-55:
+  Error: the route file holds one route tree, as its last item; this is another expression
   [1]
 
 An empty file
 
   $ gen < /dev/null
   File "Routes.ml", line 1:
-  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
+  Error: the route file is empty; it must end with the route tree, Router.make ... or let routes = Router.make ...
   [1]
+
+A search default that names a value defined before the tree
+
+  $ gen <<'EOF'
+  > let first_page = 1
+  > 
+  > let routes =
+  >   Router.make
+  >     [ Router.route A ~path:"/a" ~page:Pages.a ~search:{ page = default int first_page } ]
+  > EOF
+  File "Routes.ml", line 5, characters 75-85:
+  Error: first_page is defined before the tree; the shared module holds this default and does not see the items before the tree, so write the value with its module path
+  [1]
+
+A search default with a module path
+
+  $ gen <<'EOF' > /dev/null
+  > let first_page = 1
+  > 
+  > let routes =
+  >   Router.make
+  >     [ Router.route A ~path:"/a" ~page:Pages.a ~search:{ page = default int Config.first_page } ]
+  > EOF
 
 A syntax error
 

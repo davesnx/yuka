@@ -2,7 +2,16 @@
  (name cycle_shadowed)
  (libraries yuka cycle_shared cycle_server shadow)
  (flags
-  (:standard -open Cycle_shared -open Cycle_server -open Shadow)))
+  (:standard -open Cycle_shared -open Cycle_server)))
+
+(rule
+ (targets routes.txt)
+ (action
+  (with-stdout-to
+   routes.txt
+   (progn
+    (echo "open Shadow [@@warning \"-33\"]\n")
+    (cat %{dep:../Routes.ml})))))
 
 (rule
  (targets routes_server.ml)
@@ -16,4 +25,4 @@
     --shared-module
     Cycle_shared.Routes
     --source
-    %{dep:../Routes.ml}))))
+    %{dep:routes.txt}))))

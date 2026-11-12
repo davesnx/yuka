@@ -217,7 +217,23 @@ let parse_ty fname kind e =
         ~what:(sprintf "search field %s" fname)
         ~fix:(sprintf "%s %s" kind) ~types:"int, string, bool" ty
 
-let parse_search v =
+let check_default ~items d =
+  (object
+     inherit Ast_traverse.iter as super
+
+     method! expression e =
+       (match e.pexp_desc with
+       | Pexp_ident { txt = Lident n; loc } when List.mem n items ->
+           fail loc
+             "%s is defined before the tree; the shared module holds this default and does not \
+              see the items before the tree, so write the value with its module path"
+             n
+       | _ -> ());
+       super#expression e
+  end)
+    #expression d
+
+let parse_search ~items v =
   match v.pexp_desc with
   | Pexp_record (fields, None) ->
       List.map
@@ -238,6 +254,7 @@ let parse_search v =
               | "optional", [ t ] -> { fname; fty = parse_ty fname kind t; fkind = Optional }
               | "many", [ t ] -> { fname; fty = parse_ty fname kind t; fkind = Many }
               | "default", [ t; d ] ->
+                  check_default ~items d;
                   {
                     fname;
                     fty = parse_ty fname kind t;
@@ -348,7 +365,7 @@ let check_fallback levels =
       in
       scan [] levels
 
-let read ~server names e =
+let read ~server ~items names e =
   let nodes = ref [] in
   let layouts = ref 0 in
   let level props scope loc =
@@ -383,7 +400,7 @@ let read ~server names e =
     let with_search labels =
       match prop "search" with
       | Some v ->
-          let fields = parse_search v in
+          let fields = parse_search ~items v in
           (fields, add_labels v.pexp_loc labels (List.map (fun f -> f.fname) fields))
       | None -> ([], labels)
     in
@@ -943,7 +960,7 @@ let rules_text levels =
   in
   sprintf "Yuka.Server.Generated.rules ~headers:[ %s ]%s ~prerender:%s ()"
     (String.concat "; " headers)
-    (match last "cache" with Some c -> " ~cache:Yuka.Server." ^ paren c | None -> "")
+    (match last "cache" with Some c -> sprintf " ~cache:(Yuka.Server.%s [@warning \"-33\"])" (paren c) | None -> "")
     (match last "prerender" with Some p -> expr p | None -> "false")
 
 let fallback_levels levels =
@@ -1096,7 +1113,48 @@ let server_arm ~shared ~rule ~fallback n =
       in
       sprintf "| %s ->" head :: indent 4 body
 
+let generated_name name =
+  List.mem name [ "req"; "children"; "path" ]
+  || List.exists
+       (fun prefix ->
+         let n = String.length prefix in
+         String.length name > n
+         && String.sub name 0 n = prefix
+         && String.for_all (function '0' .. '9' -> true | _ -> false) (String.sub name n (String.length name - n)))
+       [ "rules_"; "layer_"; "fallback_" ]
+
+let check_hidden nodes =
+  List.iter
+    (fun n ->
+      let route, labels =
+        match n.kind with
+        | Named { name; search; _ } ->
+            (name, List.map fst (fields n.segs search) @ loader_labels n.levels)
+        | Redirect _ -> ("", [])
+      in
+      List.iter
+        (fun level ->
+          List.iter
+            (fun (prop, v) ->
+              match v.pexp_desc with
+              | Pexp_ident { txt = Lident name; _ } when List.mem prop ("loader" :: attachments) ->
+                  if generated_name name then
+                    fail v.pexp_loc
+                      "~%s:%s is hidden by a name of the generated server code (req, children, path, \
+                       rules_N, layer_N, fallback_N); write it with its module path"
+                      prop name
+                  else if prop <> "loader" && List.mem name labels then
+                    fail v.pexp_loc
+                      "~%s:%s is hidden by the param, search field or loader result %s of the route \
+                       %s; write it with its module path"
+                      prop name name route
+              | _ -> ())
+            level.props)
+        n.levels)
+    nodes
+
 let generate_server ~shared ~digest (nodes, root) =
+  check_hidden nodes;
   let rule, rules = interned "rules" in
   let fallback, fallbacks = interned "fallback" in
   let static_layers =
@@ -1139,15 +1197,96 @@ let generate_server ~shared ~digest (nodes, root) =
       ])
   ^ "\n"
 
-let manifest source structure =
-  let only =
-    "the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not \
-     compiled, so it has no open and no let)"
+let router_make e =
+  match e.pexp_desc with
+  | Pexp_ident { txt = Ldot (Lident "Router", "make"); _ } -> true
+  | _ -> false
+
+let mentions_router_make si =
+  (object
+     inherit [bool] Ast_traverse.fold as super
+
+     method! expression e found = found || router_make e || super#expression e found
+  end)
+    #structure_item si false
+
+let manifest source text structure =
+  let tree = "the route tree, Router.make ... or let routes = Router.make ..." in
+  let e, before =
+    match List.rev structure with
+    | [] -> fail (Location.in_file source) "the route file is empty; it must end with %s" tree
+    | { pstr_desc = Pstr_eval (e, _); _ } :: before -> (e, before)
+    | {
+        pstr_desc =
+          Pstr_value
+            ( Nonrecursive,
+              [
+                {
+                  pvb_pat = { ppat_desc = Ppat_var { txt = "routes"; _ }; ppat_attributes = []; _ };
+                  pvb_expr = e;
+                  pvb_constraint = None;
+                  pvb_attributes = [];
+                  _;
+                };
+              ] );
+        _;
+      }
+      :: before
+      when match e.pexp_desc with Pexp_function _ -> false | _ -> true ->
+        (e, before)
+    | ({ pstr_desc = Pstr_value (_, vbs); _ } as si) :: _ -> (
+        let swallowed =
+          List.find_map
+            (fun vb ->
+              match vb.pvb_expr.pexp_desc with
+              | Pexp_apply (_, args) ->
+                  List.find_map (fun (l, a) -> if l = Nolabel && router_make a then Some a.pexp_loc else None) args
+              | _ -> None)
+            vbs
+        in
+        match swallowed with
+        | Some loc ->
+            fail loc "Router.make is read as an argument of the let before it; write let routes = Router.make ..."
+        | None when mentions_router_make si ->
+            fail si.pstr_loc
+              "write the tree as let routes = Router.make ...: one binding named routes, with no rec, \
+               no parameter, no type and no attribute"
+        | None ->
+            fail si.pstr_loc "the route file must end with %s; open, let, module and type items go before it"
+              tree)
+    | si :: _ ->
+        fail si.pstr_loc "the route file must end with %s; open, let, module and type items go before it" tree
   in
-  match structure with
-  | [ { pstr_desc = Pstr_eval (e, _); _ } ] -> e
-  | [] -> fail (Location.in_file source) "%s" only
-  | { pstr_desc = Pstr_eval _; _ } :: si :: _ | si :: _ -> fail si.pstr_loc "%s" only
+  let items = List.rev before in
+  List.iter
+    (fun si ->
+      match si.pstr_desc with
+      | Pstr_eval _ ->
+          fail si.pstr_loc "the route file holds one route tree, as its last item; this is another expression"
+      | _ -> ())
+    items;
+  let text = match before with [] -> "" | si :: _ -> String.sub text 0 si.pstr_loc.loc_end.pos_cnum in
+  (text, items, e)
+
+let item_values items =
+  List.concat_map
+    (fun si ->
+      match si.pstr_desc with
+      | Pstr_value (_, vbs) ->
+          List.concat_map
+            (fun vb ->
+              (object
+                 inherit [string list] Ast_traverse.fold as super
+
+                 method! pattern p acc =
+                   match p.ppat_desc with
+                   | Ppat_var { txt; _ } | Ppat_alias (_, { txt; _ }) -> super#pattern p (txt :: acc)
+                   | _ -> super#pattern p acc
+              end)
+                #pattern vb.pvb_pat [])
+            vbs
+      | _ -> [])
+    items
 
 let report (loc : Location.t) msg =
   let s = loc.loc_start and e = loc.loc_end in
@@ -1169,8 +1308,9 @@ let run ~server source output =
       let lexbuf = Lexing.from_string text in
       Location.init lexbuf source;
       try
-        let e = manifest source (Parse.implementation lexbuf) in
-        print_string (output e (read ~server (Hashtbl.create 16) e))
+        let text_before, items, e = manifest source text (Parse.implementation lexbuf) in
+        print_string
+          (output text_before e (read ~server ~items:(item_values items) (Hashtbl.create 16) e))
       with
       | Fail (loc, msg) ->
           report loc msg;
@@ -1179,10 +1319,13 @@ let run ~server source output =
           Location.report_exception Format.err_formatter exn;
           exit 1)
 
-let shared source = run ~server:false source (fun _ (nodes, _) -> generate source nodes)
+let shared source = run ~server:false source (fun _ _ (nodes, _) -> generate source nodes)
 
 let server ~shared_module source =
-  run ~server:true source (fun e tree ->
-      generate_server ~shared:shared_module
-        ~digest:(Digest.to_hex (Digest.string (Pprintast.string_of_expression e)))
-        tree)
+  run ~server:true source (fun before e tree ->
+      let server =
+        generate_server ~shared:shared_module
+          ~digest:(Digest.to_hex (Digest.string (before ^ Pprintast.string_of_expression e)))
+          tree
+      in
+      if before = "" then server else before ^ "\n\n" ^ server)

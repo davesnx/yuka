@@ -126,7 +126,96 @@ A cache value is read with Yuka.Server opened
   > Router.make ~cache:(public ~max_age:60 ()) [ Router.route A ~path:"/" ~page:Pages.a ]
   > EOF
   $ grep 'cache' out.ml
-    Yuka.Server.Generated.rules ~headers:[  ] ~cache:Yuka.Server.(public ~max_age:60 ()) ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prerender:false ()
+
+Items before the tree go, as written, at the top of the server module; a
+let in ~cache keeps its own value, and a punned label is a short path
+
+  $ gen <<'EOF'
+  > (* the pages *)
+  > open Pages
+  > 
+  > let week = Yuka.Server.public ~max_age:604800 ()
+  > let security = [ ("x-frame-options", "DENY") ]
+  > 
+  > let routes =
+  >   Router.make ~not_found ~headers:security
+  >     [ Router.route About ~path:"/about" ~page:about ~cache:week ]
+  > EOF
+  $ head -7 out.ml
+  (* the pages *)
+  open Pages
+  
+  let week = Yuka.Server.public ~max_age:604800 ()
+  let security = [ ("x-frame-options", "DENY") ]
+  
+  let rules_0 =
+  $ grep -e 'cache' -e 'not_found =' -e 'page =' -e '~headers:(' out.ml
+    Yuka.Server.Generated.rules ~headers:[ security ] ~cache:(Yuka.Server.(week) [@warning "-33"]) ~prerender:false ()
+      not_found = (fun path -> not_found ~path ());
+                       page = about ();
+      ~headers:(security)
+
+The shared module leaves the items out
+
+  $ yuka routes --shared --source Routes.ml | grep -c -e Pages -e week
+  0
+  [1]
+
+The build id changes with the items before the tree
+
+  $ grep -o 'build:"[0-9a-f]*"' out.ml > before
+  $ sed -i 's/604800/86400/' Routes.ml
+  $ yuka routes --server --shared-module Shared.Routes --source Routes.ml | grep -o 'build:"[0-9a-f]*"' > after
+  $ cmp -s before after
+  [1]
+
+The binding of the tree is not copied, so an item named routes is the
+user's value
+
+  $ gen <<'EOF'
+  > let routes = Pages.about
+  > let routes = Router.make [ Router.route About ~path:"/about" ~page:routes ]
+  > EOF
+  $ head -2 out.ml
+  let routes = Pages.about
+  
+  $ grep 'page =' out.ml
+                       page = routes ();
+
+A short attachment that the generated code would hide
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+  >       [ Router.route Issue ~path:"/" ~page:issue ];
+  >   ]
+  > EOF
+  File "Routes.ml", line 4, characters 43-48:
+  Error: ~page:issue is hidden by the param, search field or loader result issue of the route Issue; write it with its module path
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route Issue ~path:"/issue/:id<string>" ~page:id ]
+  > EOF
+  File "Routes.ml", line 1, characters 66-68:
+  Error: ~page:id is hidden by the param, search field or loader result id of the route Issue; write it with its module path
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make ~layout:children [ Router.route A ~path:"/" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 20-28:
+  Error: ~layout:children is hidden by a name of the generated server code (req, children, path, rules_N, layer_N, fallback_N); write it with its module path
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/" ~page:Pages.a ~guard:rules_0 ]
+  > EOF
+  File "Routes.ml", line 1, characters 60-67:
+  Error: ~guard:rules_0 is hidden by a name of the generated server code (req, children, path, rules_N, layer_N, fallback_N); write it with its module path
+  [1]
 
 The generated code names its request req
 
