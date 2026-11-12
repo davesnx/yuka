@@ -3,4 +3,17 @@
  (public_name yuka)
  (modes native melange)
  (virtual_modules web dev client)
+ (private_modules
+  answers
+  cycle
+  element
+  form_core
+  live_server
+  navigation
+  optimistic
+  printer
+  router
+  server
+  signal
+  topic)
  (default_implementation yuka.native))

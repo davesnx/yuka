@@ -32,11 +32,13 @@
   (melange
    (>= 7.0.1-54))
   (ppxlib
-   (>= 0.38.0))
+   (and
+    (>= 0.38.0)
+    (< 0.40.0)))
   (mlx
    (and
-    :with-test
-    (>= 0.12)))
+    (>= 0.12)
+    (< 0.13)))
   (alcotest :with-test)
   (odoc :with-doc)))
 

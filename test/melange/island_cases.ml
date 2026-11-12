@@ -939,7 +939,15 @@ let async =
         ignore value;
         let c = D.container (D.server (page [ Counter_island.island 0 ])) in
         ignore c;
-        let pending = !Private.async_source "a1" in
+        let pending =
+          match
+            Codec.decode
+              (Codec.async { Codec.encode = (fun j -> j); decode = (fun j -> Ok j) })
+              (`Assoc [ ("$async", `String "a1") ])
+          with
+          | Ok a -> a
+          | Error m -> raise (Cases.Failed m)
+        in
         count_queries ();
         append_html "<p>other</p>";
         tick (fun () ->

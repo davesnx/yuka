@@ -1,3 +1,3 @@
 (cram
  (package yuka)
- (deps %{bin:yuka-routes}))
+ (deps %{bin:yuka}))

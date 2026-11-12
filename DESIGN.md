@@ -1130,9 +1130,10 @@ the budget in `bench/size/budget.json`.
   exception is built when it is raised.
 - An OCaml submodule is a JavaScript object. Using one member keeps all
   members. So a submodule of `Yuka` holds only members that are small or
-  used together, and a feature that only some apps need is a top-level
-  value of `Yuka` (an ES export, dropped when unused) or is reached only from
-  one:
+  used together, a feature submodule is a module alias (see "Pages pay for
+  the features of their islands" below), and a feature that only some apps
+  need is a top-level value of `Yuka` (an ES export, dropped when unused) or
+  is reached only from one:
   - The registry given as `Yuka.render ~islands` is the only way to the
     island runtime, the action transport, the async-value watcher and
     navigation.
@@ -1271,6 +1272,259 @@ the budget in `bench/size/budget.json`.
   all chunks, goes from 44,109 B to 44,228 B gzip (+119 B): it makes nodes
   of every kind, so it keeps all the mount code and also pays for the four
   references, their default errors and the `use_*` calls.
+
+### URL check per app (2026-11-11)
+
+- `Client.set_attr` calls `url_hook` in place of `Url.check`.
+  `Client.use_url_check` sets it to `Url.check ~tag ~log:Types.log`, the
+  same call as before. Installers: `Element.valid`, which `attr`,
+  `url_attr`, `hole_attr` and `url_hole_attr` call, and `use_element`
+  (so `lower`, `hydrate`, `Template.make`, `template_of_shape` and
+  `Private.expand`). The unchecked constructors do not call it.
+- The default is not a pass-through: when `Url.checked ~tag name` is true
+  (every name and tag that `Url.check` can change), it raises
+  `Failure "Yuka: no URL check for <name> of <tag>: ..."`; otherwise it
+  returns the value, which is what `Url.check` returns for such a name.
+  So a broken installer rule can make an app raise, never set an unchecked
+  URL.
+- Why every URL attribute meets an installer: a `Static` or `Dynamic`
+  attribute comes from a constructor or from `Template.expand` (fixed
+  attributes), from `Form` (through `lower`), or from server-only code
+  (`use_css` on the server, `Cycle`). The checked constructors install.
+  `Template.expand` runs only after `hydrate`, `Template.make`,
+  `template_of_shape` or `Private.expand` set the expander, and all of them
+  call `use_element`. The unchecked constructors refuse every URL name and
+  `srcdoc` (`Web.refuse_url_name`, unchanged, in all builds); the
+  remaining names (`values`, `to`, `from`, `by`) are URLs only on SVG
+  animation elements, which the ppx gives the checked constructors. A
+  hand-written `attr_unchecked "to"` on an `animate` made with `lower` is
+  checked (`lower` installs); in a template clone with no other
+  installer, it raises.
+- Fixed attributes in cloned template HTML never go through `set_attr`:
+  the ppx checks them at build time and `template_of_shape` with
+  `Url.check` directly, as before. The server printer still calls
+  `Url.check` directly.
+- Checks: `test/mount_hooks` has one process per installer
+  (`url_attr_only`, `url_hole_attr_only`, `url_lower_only`,
+  `url_hydrate_only`, `url_expand_only`, `url_make_only`,
+  `url_shape_only`) that blocks the ticket 33 cases with only that
+  installer, and `url_unset`, where a URL attribute with no installer
+  raises and a non-URL one is set.
+- Size, measured before `each` over arrays: the keyed app goes from
+  8,698 B to 8,373 B gzip (-325 B). With both changes it is 7,961 B gzip.
+  The demo, all chunks, goes from 46,605 B to 46,670 B gzip (+65 B), and each one-island page about +65 B: they keep
+  the check and also pay for the hook, its default and the calls.
+
+### `each` over arrays (2026-11-11)
+
+- `Yuka.each` takes `unit -> 'a array` (it took `unit -> 'a list`). The
+  reconcile works on arrays: with a list, an app that changes rows by
+  index (the keyed benchmark: swap, append, remove) converts between list
+  and array and links `Stdlib.List` code for it.
+- No list form: `Array.of_list` at the call site does the same, and only
+  apps that call it pay for it.
+- The reconcile copies the items and their keys into its own arrays, then
+  renders. The previous state is the rows it rendered (key, value, nodes),
+  never the caller's array. So a write into an array after `each` read it
+  changes nothing; a new array shows the change. `State.set` with the same
+  array is no change (default equality is identity).
+- The first render does not check keys; an update with two equal keys
+  raises `Failure "Yuka.each: duplicate key K"` (unchanged).
+- Size: the keyed app goes from 24,482 B, 8,698 B gzip to 23,171 B,
+  8,287 B gzip (library and app: -359 B; the app's append and copy through
+  `Js.Array` in place of `Stdlib.Array`: -52 B). The demo keeps its lists
+  and calls `Array.of_list`: all chunks 46,605 -> 46,660 B gzip, start set
+  23,806 -> 23,864 B.
+
+## Pages pay for the features of their islands (2026-11-11)
+
+Goal: the JavaScript that a page with islands loads at start holds only
+the features that its islands use.
+
+### Measure
+
+`make size` also prints the JavaScript loaded at start, each file gzip -9
+on its own, summed:
+
+- three apps with one island each, built through the ppx and
+  `yuka-islands`: `main.js`, the island chunk and their static imports.
+  `bench/size/page`: a counter (one State, one button);
+  `bench/size/codec_page`: an island whose props are a `string option`, a
+  `string list` and a `float`; `bench/size/remote_page`: an island with
+  one `Remote.use`;
+- the demo start set: `main.js` and its static imports;
+- each demo page: `make size` starts the demo server, reads the module
+  script and the `<link rel="modulepreload">` links of the page (the
+  server's preload logic: a non-lazy island gets one), and adds the static
+  imports of each from the bundle metafile. A page with no island loads
+  nothing. The server gets a port that the OS gave as free and a
+  `--static-dir` with one file that holds a random nonce; the script
+  measures only after `/static/<nonce>.txt` answers the nonce, so another
+  process on the port fails the command (no answer within 20 s) instead of
+  being measured. Each page request times out after 10 s, a missing
+  `demo_server.exe` is an error that names it, and the server is stopped
+  on every exit path.
+
+There is no budget for these numbers.
+
+### What puts a module in the start chunk
+
+- esbuild splits by file, not by statement. A file goes to the chunk of
+  the set of entry points that reach it through static imports, whether
+  or not the importing code is used; the code of the file that any entry
+  point uses goes there. `yuka.js` imports every module that `yuka.ml`
+  names, and `main.js` imports `yuka.js`, so before this change `live.js`,
+  `form.js`, `remote.js` and `codec.js` were in the chunk of every page.
+- Melange compiles `module X : sig ... end` (a module with a signature in
+  `yuka.mli`) to an object in `yuka.js`, and a use of `Yuka.X.f` to a read
+  of that object, so the module is reached through `yuka.js`. A module
+  alias in the interface, `module X = X`, has no field in `yuka.js` and no
+  import from it: a use of `Yuka.X.f` compiles to an import of `x.js` by
+  the module that uses it. A `struct include X end` and an alias in
+  `yuka.ml` behind a signature in `yuka.mli` both keep the import (checked
+  with a scratch library: the island chunk got `a.js` only for the alias
+  in the interface).
+
+### Changes
+
+- `Codec`, `Status`, `Remote`, `Live` and `Form` are module aliases in
+  `yuka.mli`. Their interfaces and documentation moved to `codec.mli`,
+  `status.mli`, `remote.mli`, `live.mli` and `form.mli`, with the same
+  names and types. A type of an aliased module must be the type of
+  `Yuka`, so the abstract types they share are abstract types of lower
+  modules, and `yuka.mli` gives the equation:
+  - `'kind element = 'kind Kind.element`. `kind.mli` keeps it abstract
+    and gives `%identity` conversions to and from `Types.node`; the
+    modules that build or take elements (`element.ml`, `template.ml`,
+    `island.ml`, `form.ml`, `client.mli`, `cycle.ml`) convert at their
+    edges, so the JavaScript does not change. Conversions of a function
+    use a type abbreviation for the result, so the external has one
+    argument.
+  - `slot = Slot_value.t`, the same way. `Private.node` has
+    `Slot of slot_data`.
+  - `'a Async.t`, `('i, 'o, 'kind) Action.t` and `('k, 's) Topic.t` are
+    abstract in `async.mli`, `action.mli` and `topic.mli`; the library
+    reads an action and a topic through functions (`Action.input`,
+    `Topic.key`, ...). `Async`, `Action`, `Topic` and `Optimistic` stay
+    objects in `yuka.mli`: they are small, and the core uses them.
+  - `Codec.t` and `Status` types were already public; `Codec.t` is
+    re-exported with its fields.
+  - `Codec.mismatch` moved to `Json.mismatch`, so `codec.mli` is the
+    public interface only.
+- `Bridge` holds the references that the server sets for code that runs
+  on both sides: the action sender of `Remote` on the server, the live
+  state loader of `Live` in a server render, and the reset of the live
+  socket manager (`Private.reset_live`, set by `live.ml` when it creates
+  the manager; before that there is nothing to reset). Before, `server.ml`
+  and `live_server.ml` wrote into `remote.ml` and `live.ml`, and
+  `yuka.ml` into `live.ml`, so those files were reached from `main.js`.
+- `scripts/bundle.ts` marks the files of `node_modules/yuka/` and
+  `node_modules/yuka.js/` as free of side effects (an esbuild plugin that
+  returns `sideEffects: false`). esbuild then drops an import of such a
+  file when none of its names are used, also for chunk assignment, so the
+  server modules (`server.js`, `cycle.js`, `live_server.js`, `printer.js`)
+  no longer bring `form_core.js`, `codec.js` and `status.js` into the
+  start chunk. The rule of "What keeps code in a bundle" makes this true:
+  no module of the library has a top-level side effect. The Melange
+  standard library has some (the `MelangeError` setup, `Sys`), so it is
+  not marked; marking it saved nothing in the counter page.
+- The action transport and the reader of streamed async values are
+  installed on first use, as the mount code of a node kind is:
+  `Action.send` (used by `Action.call` and the island submit of `Form`)
+  calls `Client.use_actions`, and the decoder of a `Codec.async`
+  reference calls `Client.use_async`. `Client.start` installs a gate into
+  `Private.call_action` and `Private.async_source` that calls the
+  installed function, so before `render ~islands` the default failed
+  `Async` stays. After the start, a gate that runs with nothing installed
+  raises `Failure "Yuka: no action transport for NAME: ..."` or
+  `"Yuka: no reader for async value ID: ..."`. The transport moved from
+  `Action.transport` to `Types.transport`, so `action.ml` can call
+  `Client`. `yuka.mli` documents this for `Private.call_action` and
+  `Private.async_source`, and `test/mount_hooks` has one process for each
+  (`call_action_only`, `async_source_only`): it reads the reference before
+  `render ~islands` (the failed `Async`), after it (the `Failure`), then
+  calls `Action.call` or decodes a `Codec.async` reference and reads it
+  again; without the install, the process fails. Other checks: without the `use_actions` call, 6 cases of
+  `test/navigation` fail; without the `use_async` call, 5 cases of
+  `test/melange` fail (the "async value watcher" case now decodes through
+  `Codec.async` instead of reading `Private.async_source`); without the
+  reset in `live.ml`, the live cases of `test/melange` fail. In the split
+  bundle the gate and the hook are in the start chunk and the chunks that
+  call `use_async` import it from there: one instance.
+- No polymorphic compare on the boot path: `navigation.ml` compares
+  `string option` values with a match, and the island and record decoders
+  of the ppx look up a field with one local `_yuka_field` function
+  (`List.find_map` and `String.equal`) instead of `List.assoc_opt`. The
+  counter page no longer has `caml_obj.js`.
+
+### Size
+
+`make size`, gzip bytes; "/" is also "/my", "/new" is also
+"/issue/YUK-1"; "/about" loads nothing at every step.
+
+| step | counter page | demo start | / | /new | all demo chunks | keyed app |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| main 000ab12 | 20,936 | 29,880 | 40,211 | 36,997 | 44,244 | 8,698 |
+| aliases `Status`, `Remote`, `Live`; `Bridge` | 20,936 | 26,951 | 42,133 | 36,183 | 46,157 | 8,698 |
+| yuka files free of side effects | 20,935 | 26,526 | 42,140 | 36,180 | 46,155 | 8,698 |
+| alias `Codec` | 19,836 | 25,712 | 42,384 | 36,414 | 46,426 | 8,698 |
+| transport and async reader on first use | 19,054 | 25,833 | 42,512 | 36,545 | | 8,698 |
+| no polymorphic compare | 18,729 | 25,851 | 42,654 | 36,662 | 46,755 | 8,698 |
+| alias `Form` | 18,728 | 23,806 | 42,493 | 36,494 | 46,606 | 8,698 |
+
+The steps were measured in one build directory, the table below in another;
+chunk names hold a hash of the paths, so the gzip size moves by a few bytes
+between directories. `make size` on the final tree, and main 000ab12 with the
+same fixtures and script:
+
+| page | main 000ab12 | final |
+| --- | ---: | ---: |
+| counter island | 20,935 | 18,726 |
+| island with `Codec` props | 20,913 | 19,010 |
+| island with `Remote` | 22,880 | 22,677 |
+| demo start set | 29,880 | 23,805 |
+| demo `/`, `/my` | 40,201 | 42,489 |
+| demo `/new`, `/issue/YUK-1` | 36,990 | 36,489 |
+| demo `/about` | 0 | 0 |
+| all demo chunks | 44,231 | 46,597 |
+| keyed app | 8,698 | 8,698 |
+
+- A page that uses every feature pays more: "/" loads `live.js`,
+  `remote.js`, `form.js` and `codec.js` as before, but in more files. Each
+  file is compressed on its own and the chunks import each other by name,
+  so "/" grew by 2,288 B and all chunks by 2,366 B.
+- Grouping does not recover it. In the static import graph no two
+  feature modules need each other: `answers` always comes with `status`
+  (it imports it, and only `live` and `remote` import `answers`), but
+  `status` comes without `answers` (an island that reads a `Status.t`),
+  `codec` without `status` (the counter), `remote` without `live` and
+  the reverse. esbuild already puts files with the same entry set in one
+  chunk (`status` and `answers` share one in the demo). Any further group
+  makes a page load code it does not use. Two were measured, with a dead
+  reference that makes one module reach another, and dropped:
+
+  | group | counter | `Codec` props | `Remote` | demo start | / | /new | all chunks |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | none (final) | 18,726 | 19,010 | 22,677 | 23,805 | 42,489 | 36,489 | 46,597 |
+  | `live` with `status` and `answers` | 18,731 | 19,010 | 22,673 | 23,805 | 42,245 | 39,010 | 46,360 |
+  | `codec` in the start chunk | 18,763 | 18,946 | 22,719 | 24,399 | 42,029 | 36,049 | 46,109 |
+
+  The first makes "/new" load `live.js` (+2,521 B); the second makes the
+  counter, the `Remote` page and the demo start larger. In the one-island
+  apps a dead reference adds nothing, because the island and its features
+  are in one chunk anyway; a real dependency would add the code of the
+  other module.
+- What is left in the counter page (minified): `client.js` 14.7 KB,
+  `web.js` 9.2 KB, `navigation.js` 6.0 KB, `json.js` 5.4 KB, the
+  scheduler 4.0 KB, `Curry` 2.1 KB, `template.js` 2.0 KB, `url.js` 1.7 KB,
+  and `String`, `Bytes`, `Buffer` (about 4.5 KB with `caml_bytes`).
+  Navigation is the largest part that a page may not need: the counter
+  page without it is 14,535 B and the demo start set 20,441 B. Navigation
+  is on by default and `~navigation:false` is a run-time flag; making it a
+  link-time choice needs a second registry builder that does not name
+  `Navigation`, which is a new entry point. Loading it on the first
+  click, hover or `popstate` makes the first navigation asynchronous.
+  Neither is done.
 
 ## Routes.mlx generator (2026-11-10)
 
@@ -2074,7 +2328,9 @@ Ticket 33 and its four security reviews.
   `localName`. So both sides apply the same rule with the real element;
   constructors check only names. That costs the keyed app 595 B gzip
   (10,303 -> 10,898): `Url` was not in it before, because its
-  constructors with no URL name never called the check.
+  constructors with no URL name never called the check. Since "URL check
+  per app" (2026-11-11), `set_attr` reaches the check through a hook that
+  the checked constructors and `use_element` set; the rule is the same.
 - Navigation: `Browser.navigate` drops a URL that `Url.unsafe ~tag:"a"
   "href"` blocks (a dev build logs it), with navigation on or off. A form
   answer's `redirect` goes through `Server.local_location` with the

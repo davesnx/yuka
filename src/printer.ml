@@ -529,9 +529,9 @@ open Base
       | [ Hole f ] -> go (f ())
       | [ Each { items; key = _; equal = _; render } ] -> rows items render
       | children -> List.iter go children
-    and rows : type a. (unit -> a list) -> (a -> node) -> unit =
+    and rows : type a. (unit -> a array) -> (a -> node) -> unit =
      fun items render ->
-      List.iter
+      Array.iter
         (fun item ->
           let n = unwrap (render item) in
           if Template.single_element n then go n

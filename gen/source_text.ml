@@ -102,3 +102,6 @@ let json_string s =
     s;
   Buffer.add_char b '"';
   Buffer.contents b
+
+let is_ident_char c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_' || c = '\''

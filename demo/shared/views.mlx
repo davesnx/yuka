@@ -125,14 +125,14 @@ end
 
 module Issue_form = struct
   let make ~form () : _ Yuka.element =
-    let sent_status = match Yuka.Form.value form Actions.Status with "" -> "todo" | v -> v in
-    let sent_priority = match Yuka.Form.value form Actions.Priority with "" -> "no-priority" | v -> v in
+    let sent_status = match Yuka.Form.value form `Status with "" -> "todo" | v -> v in
+    let sent_priority = match Yuka.Form.value form `Priority with "" -> "no-priority" | v -> v in
     <div class_="issue-form">
       <input class_="dialog-title" type_=`text id="dialog-title" name="title" placeholder="Issue title"
-        autofocus=true value=(Yuka.Form.value form Actions.Title) />
-      (Yuka.Form.error_view form Actions.Title (fun m -> <p class_="error">(Yuka.text m)</p>))
+        autofocus=true value=(Yuka.Form.value form `Title) />
+      (Yuka.Form.error_view form `Title (fun m -> <p class_="error">(Yuka.text m)</p>))
       <textarea class_="dialog-description" name="description" placeholder="Description" rows=4
-        value=(Yuka.Form.value form Actions.Description) />
+        value=(Yuka.Form.value form `Description) />
       <div class_="dialog-row">
         <select class_="select" aria_label="Status" name="status">
           (Yuka.list

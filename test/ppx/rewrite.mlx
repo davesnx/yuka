@@ -154,7 +154,7 @@ let caught = <Yuka.Catch fallback=(fun ~error ~reset:_ -> <p>(Yuka.text error)</
 let shown = <Yuka.Show status=s loading="l">(fun d -> <b>(Yuka.text d)</b>)</Yuka.Show>
 
 type signup = { name : string; age : int; plan : Plan.t; news : bool; tags : string list } [@@deriving form]
-let signup_form_view = <Yuka.Form action=signup_action>(fun form -> <input name="name" value=(Yuka.Form.value form Name) />)</Yuka.Form>
+let signup_form_view = <Yuka.Form action=signup_action>(fun form -> <input name="name" value=(Yuka.Form.value form `Name) />)</Yuka.Form>
 
 let url_attrs u = <a href=u title=u>"x"</a>
 let script_text = <div><script>{|a < b && "</script>"|}</script><style>"p > a {}"</style></div>

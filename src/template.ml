@@ -179,9 +179,9 @@ let of_shape shape =
   let { Template_build.walk; kids; attrs; values } = Template_build.plan shape in
   make shape ~html:(Template_build.html shape) ~walk ~kids ~attrs ~values
 
-let child n = Child n
+let child n = Child (Kind.to_node n)
 let attribute a = Attribute a
 let attribute_option = function Some a -> Attribute a | None -> No_attribute
-let instance template parts = Template { template; parts }
+let instance template parts = Kind.of_node (Template { template; parts })
 
 let single_element = function Element _ | Template _ -> true | _ -> false

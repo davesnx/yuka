@@ -175,4 +175,6 @@ let () =
   check "show failed"
     (html (Catching.status (Yuka.Status.Failed { error = Yuka.Status.Not_found; last = None }))
     = "<!--[--><p>not found</p><!--]-->");
+  check "form fields named ok, error, some, none" (Form_names.names = [ "ok"; "error"; "some"; "none" ]);
+  check "Ok and Error after deriving form" (Form_names.parse "3" = Ok 3 && Form_names.parse "x" = Error "x");
   if !fails > 0 then exit 1 else print_endline "ok"

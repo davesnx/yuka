@@ -1,0 +1,4 @@
+(cram
+ (package yuka)
+ (deps
+  (package yuka)))

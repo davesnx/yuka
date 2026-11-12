@@ -82,8 +82,8 @@ let jot_form key =
     ~children:(fun form ->
       el "div"
         [
-          el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form Body) ] [];
-          Yuka.Form.error_view form Body (fun m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
+          el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form `Body) ] [];
+          Yuka.Form.error_view form `Body (fun m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
         ])
     ()
 
@@ -112,10 +112,10 @@ module Pages = struct
               ~children:(fun form ->
                 el "div"
                   [
-                    el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form Title) ] [];
-                    el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form Count) ] [];
-                    Yuka.Form.error_view form Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
-                    Yuka.Form.error_view form Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
+                    el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form `Title) ] [];
+                    el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form `Count) ] [];
+                    Yuka.Form.error_view form `Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
+                    Yuka.Form.error_view form `Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
                     Yuka.Form.form_error_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
                   ])
               ();
@@ -311,11 +311,11 @@ let () =
       saved := e.title :: !saved;
       match e.title with
       | "who" -> Async.return (Ok (Option.value (Server.Context.header ctx "x-user") ~default:"none"))
-      | "taken" -> Async.return (Error [ (Some Title, "Taken") ])
+      | "taken" -> Async.return (Error [ (Some `Title, "Taken") ])
       | "nope" -> Server.Action.reject "Refused"
       | "boom" -> failwith "secret boom"
       | t -> Async.return (Ok t));
   Server.Form.implement jot (fun _ n ->
       saved := ("jot " ^ n.body) :: !saved;
-      if n.body = "x" then Async.return (Error [ (Some Body, "Too short") ])
+      if n.body = "x" then Async.return (Error [ (Some `Body, "Too short") ])
       else Async.return (Ok (String.length n.body)))

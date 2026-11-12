@@ -2,16 +2,24 @@ Arguments:
 
   $ yuka
   yuka: no command
-  usage: yuka dev [--build TARGET]... [--assets DIR]... [--state FILE] [--dune CMD] [--kill-after SECONDS] [--watch-exe FILE] -- SERVER [ARG]...
+  usage: yuka COMMAND [OPTION]...
+  
+  commands:
+    routes   Write the shared or the server module of a Routes.ml route tree
+    islands  Write the island registry or manifest of the island libraries
+    css      Write the module with the sheets of every [%yuka.css] declaration
+    dev      Rebuild in watch mode, restart the server and reload the browser
+  
+  yuka COMMAND --help shows the options of a command.
   [2]
   $ yuka dev --build @x 2>&1 | head -1
-  yuka: no server command; give it after --
+  yuka dev: no server command; give it after --.
   $ yuka dev --kill-after soon -- ./server 2>&1 | head -1
-  yuka: --kill-after takes a number of seconds, not soon
+  yuka dev: wrong argument 'soon'; option '--kill-after' expects a float.
   $ yuka dev --frobnicate -- ./server 2>&1 | head -1
-  yuka: unknown argument --frobnicate
+  yuka dev: unknown option '--frobnicate'.
   $ yuka dev --watch-exe 2>&1 | head -1
-  yuka: --watch-exe needs a value
+  yuka dev: option '--watch-exe' needs an argument.
 
 A fake dune prints build results and changes files between them; a fake
 server logs its starts and stops. The session is random per run:
@@ -49,7 +57,7 @@ server logs its starts and stops. The session is random per run:
   > echo "Success, waiting for filesystem changes..."; step
   > X
   $ chmod +x fake-dune
-  $ yuka dev --dune ./fake-dune --build @x --assets static --state deep/er/state -- ./server 2> err
+  $ yuka dev --build './fake-dune build --watch @x' --assets static --state deep/er/state -- ./server 2> err
   $ cat log
   args: build --watch @x
   start 1 {"session":S,"build":1,"page":1,"error":null}
@@ -75,7 +83,7 @@ server logs its starts and stops. The session is random per run:
 Each run has its own session:
 
   $ cp deep/er/state first
-  $ yuka dev --dune ./fake-dune --build @x --assets static --state deep/er/state -- ./server 2> /dev/null
+  $ yuka dev --build './fake-dune build --watch @x' --assets static --state deep/er/state -- ./server 2> /dev/null
   $ test "$(grep -o '"session":"[0-9a-f]*"' first)" != "$(grep -o '"session":"[0-9a-f]*"' deep/er/state)" && echo different
   different
 
@@ -91,7 +99,7 @@ to watch when the command is a wrapper:
   > echo "Success, waiting for filesystem changes..."; sleep 0.5
   > X
   $ chmod +x fake-dune3
-  $ PATH="$PWD/bin:$PATH" yuka dev --dune ./fake-dune3 --state s3 -- myserver 2> /dev/null; grep -c start log
+  $ PATH="$PWD/bin:$PATH" yuka dev --build './fake-dune3 build --watch' --state s3 -- myserver 2> /dev/null; grep -c start log
   2
   $ rm -f log; echo exe > watched
   $ cat > fake-dune4 <<'X'
@@ -102,7 +110,7 @@ to watch when the command is a wrapper:
   > echo "Success, waiting for filesystem changes..."; sleep 0.5
   > X
   $ chmod +x fake-dune4
-  $ yuka dev --dune ./fake-dune4 --state s4 --watch-exe watched -- sh -c 'exec ./server' 2> /dev/null; grep -c start log
+  $ yuka dev --build './fake-dune4 build --watch' --state s4 --watch-exe watched -- sh -c 'exec ./server' 2> /dev/null; grep -c start log
   2
 
 An error after the server started stops it and dune:
@@ -116,7 +124,7 @@ An error after the server started stops it and dune:
   > echo "dune still running" >> log
   > X
   $ chmod +x fake-dune5
-  $ yuka dev --dune ./fake-dune5 --state s5dir/state -- ./server 2>&1 | grep -c "yuka dev: Sys_error"
+  $ yuka dev --build './fake-dune5 build --watch' --state s5dir/state -- ./server 2>&1 | grep -c "yuka dev: Sys_error"
   1
   $ sleep 2.5; cat log
   start 1 {"session":S,"build":1,"page":1,"error":null}
@@ -137,14 +145,56 @@ CLI gets SIGTERM in the middle of a restart:
   > echo "Success, waiting for filesystem changes..."; sleep 0.4
   > perl -e '$t = time + 3 * 3600; utime $t, $t, @ARGV' stubborn
   > echo "Success, waiting for filesystem changes..."; sleep 0.3
-  > kill -TERM $PPID
+  > kill -TERM $(cat yuka.pid)
   > sleep 3
   > X
   $ chmod +x fake-dune6
-  $ yuka dev --dune ./fake-dune6 --state s6 --kill-after 1 -- ./stubborn 2>&1 | grep -v Success
+  $ sh -c 'echo $$ > yuka.pid; exec yuka dev --build "./fake-dune6 build --watch" --state s6 --kill-after 1 -- ./stubborn' 2>&1 | grep -v Success
   yuka dev: restarting the server
   yuka dev: the server did not stop after 1 s, killing it
   $ wc -l < slog | tr -d ' '
   1
   $ kill -0 $(cut -d' ' -f2 slog) 2>/dev/null || echo "server gone"
   server gone
+
+The build is a full command, run by /bin/sh; the state file is in
+DUNE_BUILD_DIR when no --state is given:
+
+  $ rm -f log
+  $ cat > fake-dune7 <<'X'
+  > #!/bin/sh
+  > echo "args: $*" >> log
+  > echo "Success, waiting for filesystem changes..."; sleep 0.5
+  > X
+  $ chmod +x fake-dune7
+  $ DUNE_BUILD_DIR=out yuka dev --build "./fake-dune7 build --watch --profile=dev '@a b'" -- ./server 2> /dev/null
+  $ head -1 log
+  args: build --watch --profile=dev @a b
+  $ sed 's/"session":"[0-9a-f]*"/"session":S/' out/.yuka-dev
+  {"session":S,"build":1,"page":1,"error":null}
+
+The build command is any shell command: an assignment, a cd and a pipeline
+work, and yuka dev stops every process of the command:
+
+  $ rm -f log
+  $ FOO=0 yuka dev --build 'FOO=1 ./fake-dune7 build --watch' --state s7 -- ./server 2> /dev/null; echo $?
+  0
+  $ grep -c args log
+  1
+  $ mkdir sub && cp fake-dune7 sub/
+  $ yuka dev --build 'cd sub && ./fake-dune7 build --watch' --state s7 -- ./server 2> /dev/null; echo $?
+  0
+  $ grep -c args sub/log
+  1
+  $ cat > fake-dune8 <<'X'
+  > #!/bin/sh
+  > echo $$ > d8.pid
+  > echo "Success, waiting for filesystem changes..."; sleep 0.5
+  > kill -TERM $(cat yuka.pid)
+  > sleep 5
+  > X
+  $ chmod +x fake-dune8
+  $ sh -c 'echo $$ > yuka.pid; exec yuka dev --build "./fake-dune8 | cat" --state s8 -- ./server' > /dev/null 2>&1; echo $?
+  143
+  $ sleep 0.3; kill -0 $(cat d8.pid) 2>/dev/null || echo "build gone"
+  build gone

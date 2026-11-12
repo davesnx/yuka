@@ -1,3 +1,3 @@
 (cram
  (package yuka)
- (deps %{bin:yuka-islands} %{bin:yuka}))
+ (deps %{bin:yuka}))

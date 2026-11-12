@@ -108,7 +108,7 @@ let page_cases =
         [ Yuka.text "a";
           Yuka.text "b";
           Yuka.hole (fun () -> Yuka.text "h");
-          Yuka.each ~key:Fun.id (fun () -> [ "x"; "y" ]) Yuka.text;
+          Yuka.each ~key:Fun.id (fun () -> [| "x"; "y" |]) Yuka.text;
           text_await (Async.return 1) "s";
           text_await pending "l" ]
     in
@@ -1552,7 +1552,7 @@ let css_cases =
       shell (fun () ->
           Yuka.Client.island ~name:"A" ~props:`Null (fun () ->
               Yuka.lower "ul" []
-                [ Yuka.each ~key:Fun.id (fun () -> [ "1"; "2" ])
+                [ Yuka.each ~key:Fun.id (fun () -> [| "1"; "2" |])
                     (fun k -> Yuka.use_css x (Yuka.lower "li" [] [ Yuka.text k ])) ]))
     in
     get p;

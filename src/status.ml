@@ -58,6 +58,6 @@ let error_codec : error Codec.t =
             | Some (`String "server") -> Ok Server
             | Some (`String "network") -> Ok (Network (text ()))
             | Some (`String "protocol") -> Ok (Protocol (text ()))
-            | _ -> Codec.mismatch "status error" j)
-        | _ -> Codec.mismatch "status error" j);
+            | _ -> Json.mismatch "status error" j)
+        | _ -> Json.mismatch "status error" j);
   }

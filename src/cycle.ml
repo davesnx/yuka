@@ -13,7 +13,7 @@ type page = { title : string; head : string; body : unit -> node }
 
 let page ?(title = "") ?(head = "") body = { title; head; body }
 
-type layer = { key : string; data : bool; wrap : node -> node }
+type layer = { key : string; data : bool; wrap : server Kind.element -> server Kind.element }
 type plan = { layers : layer list; page : page }
 
 type cache = string
@@ -328,7 +328,7 @@ let outlet key inner =
     }
 
 let nest layers body () =
-  List.fold_right (fun (l : layer) inner -> l.wrap (outlet l.key inner)) layers (body ())
+  List.fold_right (fun (l : layer) inner -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key inner)))) layers (body ())
 
 let add_vary value headers =
   let existing =

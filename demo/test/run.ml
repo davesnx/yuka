@@ -206,7 +206,7 @@ let actions () =
        (Yuka.Action.call Actions.create_issue
           { Actions.title = " "; description = ""; status = Model.Issue.Todo; priority = Model.Issue.Low })
    with
-  | Ok (Error [ (Some Actions.Title, "Title is required") ]) -> ()
+  | Ok (Error [ (Some `Title, "Title is required") ]) -> ()
   | _ -> Alcotest.fail "expected Title is required");
   (match
      settle
@@ -218,7 +218,7 @@ let actions () =
             priority = Model.Issue.Low;
           })
    with
-  | Ok (Error [ (Some Actions.Title, "Title is too long (at most 80 characters)") ]) -> ()
+  | Ok (Error [ (Some `Title, "Title is too long (at most 80 characters)") ]) -> ()
   | _ -> Alcotest.fail "expected Title is too long");
   (match
      settle
@@ -230,7 +230,7 @@ let actions () =
             priority = Model.Issue.Low;
           })
    with
-  | Ok (Error [ (Some Actions.Title, "An issue with this title already exists: YUK-25") ]) -> ()
+  | Ok (Error [ (Some `Title, "An issue with this title already exists: YUK-25") ]) -> ()
   | _ -> Alcotest.fail "expected a duplicate title");
   (match
      settle

@@ -1,6 +1,6 @@
 Server output errors point into Routes.ml
 
-  $ gen () { cat > Routes.ml; yuka-routes --server --shared-module Shared.Routes --source Routes.ml < Routes.ml > out.ml; }
+  $ gen () { cat > Routes.ml; yuka routes --server --shared-module Shared.Routes --source Routes.ml > out.ml; }
 
 not_found under a layout that takes a loader result
 
@@ -139,7 +139,15 @@ The generated code names its request req
 
 The shared module must be a module path
 
-  $ yuka-routes --server --shared-module shared --source Routes.ml < Routes.ml
-  usage: yuka-routes --shared --source FILE < FILE
-         yuka-routes --server --shared-module MODULE --source FILE < FILE
+  $ yuka routes --server --shared-module shared --source Routes.ml
+  yuka routes: --shared-module takes a module path such as App.Routes, not "shared".
+  usage: yuka routes --source FILE --shared
+         yuka routes --source FILE --server --shared-module MODULE
+  Read the route tree in FILE (Routes.ml) and print the shared module (--shared) or the server module (--server).
+    --source FILE          The route file, Routes.ml
+    --shared               Print the shared module: the route type, href and find
+    --server               Print the server module: the app of the routes
+    --shared-module MODULE The module path of the shared module, for --server
+    -help                  Display this list of options
+    --help                 Display this list of options
   [2]

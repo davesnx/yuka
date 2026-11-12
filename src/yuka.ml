@@ -10,7 +10,7 @@ let batch = Scheduler.batch
 
 type server = Types.server
 type client = Types.client
-type slot = Types.slot
+type slot = Slot_value.t
 type trigger = Types.trigger
 type loading = Types.loading
 include Element
@@ -70,6 +70,9 @@ module Server = struct
     let path (c : context) = c.path
   end
 
+  let to_string build = Server.to_string (Kind.fn build)
+  let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
+
   module Action = struct
     let implement = Server.implement
     let reject = Server.reject
@@ -82,7 +85,7 @@ module Server = struct
   module Live = Live_server
   module Generated = struct
     type rules = Cycle.rules
-    type layer = Cycle.layer = { key : string; data : bool; wrap : Types.node -> Types.node }
+    type layer = Cycle.layer = { key : string; data : bool; wrap : Types.server Kind.element -> Types.server Kind.element }
     type plan = Cycle.plan = { layers : layer list; page : Cycle.page }
 
     type fallback = Cycle.fallback = {
@@ -162,12 +165,14 @@ module Private = struct
   include Types
   include Printer
 
-  let stream = Server.stream
-  let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep build
+  let stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write build =
+    Server.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write (Kind.fn build)
+
+  let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep (Kind.fn build)
   let import_map = Server.import_map
   let set_form (s : session) f = s.form <- Some f
   let set_csrf (s : session) f = s.csrf <- Some f
-  let reset_live () = Live.manager := None
+  let reset_live () = !Bridge.reset_live ()
   let query = Router.query
   let preload_urls ~manifest ~base ?metafile () = Server.preload_urls ~manifest ~base ?metafile ()
   let handle_action ~name ~header ~body =
@@ -175,7 +180,7 @@ module Private = struct
 
   let dev_script = Cycle.dev_script
   let dev_events = Cycle.dev_events ~log:(fun m -> !Types.default_log m)
-  let node n = n
+  let node = Kind.to_node
   let template_shape (t : template) = Template.shape t
   let template = template_of_shape
   let recompile (t : template) = template_of_shape (Template.shape t)
@@ -187,7 +192,7 @@ module Private = struct
   let expand t parts =
     Client.use_element ();
     Template.expand t parts
-  let element n = n
+  let element = Kind.of_node
   let hole f = Hole f
 
   let owned f =
@@ -223,10 +228,12 @@ module Private = struct
 
   let has_readers (s : _ Signal.t) = Option.is_some s.node.first
 
-  let slot_content (s : slot) = s.content
-  let slot_dom (s : slot) = s.dom
-  let call_action = Action.transport
+  type slot_data = Types.slot
+
+  let slot_content s = (Slot_value.to_slot s).content
+  let slot_dom s = (Slot_value.to_slot s).dom
+  let call_action = Types.transport
   let async_source = Types.async_source
-  let action_codecs (a : (_, _, _) Action.t) = (a.input, a.output)
+  let action_codecs a = (Action.input a, Action.output a)
   let render = Client.render
 end
