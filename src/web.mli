@@ -55,6 +55,10 @@ val set_inner_html : node -> string -> unit
 val content : node -> node
 val import_node : node -> node -> bool -> node
 val console_error : string -> unit
+val console_warn : string -> unit
+val console_info : string -> unit
+val console_log : string -> unit
+val console_debug : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
 val decode_uri : string -> string

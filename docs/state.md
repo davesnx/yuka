@@ -23,7 +23,7 @@ runs it again. You do not write a list of dependencies.
 let[@client] make ~(initial : int) () =
   let count = Yuka.State.make initial in
   let double = Yuka.State.memo (fun () -> Yuka.State.get count * 2) in
-  Yuka.Effect.after (fun () -> Printf.printf "count is %d\n" (Yuka.State.get count));
+  Yuka.Effect.after (fun () -> Yuka.Console.log ("count is " ^ Int.to_string (Yuka.State.get count)));
   <button on_click=(fun _ -> Yuka.State.update count succ)>
     "Double: "
     (Yuka.int (Yuka.State.get double))

@@ -56,7 +56,6 @@ let () =
       ?prerendered:(if !prerendered = "" then None else Some !prerendered)
       ~styles:[ "/static/style.css" ] ~css:Demo_app.Yuka_css.sheets
       ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
-      ~log_error:(fun m -> Dream.error (fun log -> log "%s" m))
       ()
   in
   Demo_app.Handlers.register ();

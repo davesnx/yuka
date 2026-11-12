@@ -1,4 +1,21 @@
 (test
  (name run)
  (package yuka)
+ (modules run)
  (libraries alcotest cases yuka))
+
+(executable
+ (name default_log)
+ (modules default_log)
+ (libraries yuka))
+
+(rule
+ (with-outputs-to
+  default_log.actual
+  (run ./default_log.exe)))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (action
+  (diff default_log.expected default_log.actual)))

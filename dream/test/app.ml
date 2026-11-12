@@ -35,5 +35,10 @@ let page ~parts () =
   Yuka.Server.page (fun () -> el "p" [ Yuka.text ("page " ^ String.concat "/" parts) ])
 
 let secret () = Yuka.Server.page (fun () -> Yuka.text "secret")
+
+let warned () =
+  Yuka.Server.page (fun () ->
+      Yuka.Console.warn "warned page";
+      Yuka.text "warned")
 let not_found ~path () = Yuka.Server.page ~title:"Missing" (fun () -> Yuka.text ("missing " ^ path))
 let feed (_ : Dream.request) = Yuka.Server.text ~headers:[ ("content-type", "application/rss+xml") ] "<rss/>"

@@ -165,13 +165,16 @@ let () =
   let config =
     Yuka.Server.config ~assets ~css:Yuka_css.sheets
       ~dev:(Sys.getenv_opt "YUKA_DEV" = Some "1")
-      ~log_error:(fun message -> Dream.error (fun log -> log "%s" message))
       ()
   in
   Dream.run @@ Dream.logger @@ Dream.set_secret "change-me"
   @@ Dream.cookie_sessions
   @@ Yuka_dream.handler config Routes_server.app
 ```
+
+The config has no `~log`, so `Yuka_dream.handler` sends the messages of
+Yuka, and of `Yuka.Console` during a request, to the Dream log under the
+name `yuka`.
 
 `client/dune` builds the browser entry and writes the island registry
 (`Yuka_islands`) and its manifest. The client lists `yuka.js`, the browser

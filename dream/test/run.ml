@@ -150,6 +150,22 @@ let tree_digest () =
   write "z.js" "";
   check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
 
+let dream_log () =
+  let get handler = ignore (Lwt_main.run (Dream.body (Dream.test handler (Dream.request ~target:"/warned" "")))) in
+  let output = with_stderr (fun () -> get (Dream.logger (Yuka_dream.handler (Yuka.Server.config ()) Routes_server.app))) in
+  (match List.find_opt (fun l -> contains l "warned page") (String.split_on_char '\n' output) with
+  | None -> Alcotest.failf "not in the Dream log: %s" output
+  | Some line ->
+      check_true "the yuka sub-log" (contains line "yuka");
+      check_true "a warning" (contains line "WARN");
+      check_true "the request id" (contains line "REQ "));
+  let got = ref [] in
+  let output =
+    with_stderr (fun () -> get (Yuka_dream.handler (Yuka.Server.config ~log:(fun _ m -> got := m :: !got) ()) Routes_server.app))
+  in
+  Alcotest.(check (list string)) "a config log is kept" [ "warned page" ] !got;
+  check_true "not in the Dream log" (not (contains output "warned page"))
+
 let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
 let () = Yuka.Server.Action.implement echo (fun _ s -> Yuka.Async.return (String.length s))
 
@@ -186,4 +202,5 @@ let () =
           Alcotest.test_case "tree digest follows file contents" `Quick tree_digest;
         ] );
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
+      ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);
     ]

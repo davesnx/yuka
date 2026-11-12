@@ -62,7 +62,7 @@ and entry = {
 
 and node = {
   table : entry Web.table;
-  mutable log : string -> unit;
+  mutable log : Types.log_level -> string -> unit;
   own_log : bool;
   per_session : int;
   total : int;
@@ -84,11 +84,11 @@ let max_queued = 256
 let max_note = 7_900
 let topics : (string * served) list ref = ref []
 
-let node ?log_error ?(per_session = 16) ?(total = 10_000) () =
+let node ?log ?(per_session = 16) ?(total = 10_000) () =
   {
     table = Web.table ();
-    log = (match log_error with Some f -> f | None -> fun m -> !Types.default_log m);
-    own_log = Option.is_some log_error;
+    log = (match log with Some f -> f | None -> fun level m -> !Types.default_log level m);
+    own_log = Option.is_some log;
     per_session;
     total;
     conns = [];
@@ -125,7 +125,7 @@ let failure log topic m =
   match Types.rejection m with
   | Some shown -> Status.Rejected shown
   | None ->
-      log ("live topic " ^ topic ^ " failed: " ^ m);
+      log `Error ("live topic " ^ topic ^ " failed: " ^ m);
       Status.Server
 
 let code_of = function Status.Rejected m -> ("rejected", m) | _ -> ("server", "")
@@ -161,8 +161,8 @@ let rec pump conn =
         | None -> pump conn
         | Some text ->
             if String.length text > max_out then
-              conn.node.log
-                ("warning: live message of " ^ string_of_int (String.length text) ^ " bytes, over 1 MiB");
+              conn.node.log `Warn
+                ("live message of " ^ string_of_int (String.length text) ^ " bytes, over 1 MiB");
             conn.busy <- true;
             Async.on_settled (Async.guard conn.c.send text) (function
               | Async.Pending -> ()
@@ -503,7 +503,7 @@ let note node topic wire =
         message [ ("n", `String node.name); ("t", `String topic); ("k", `String wire); ("p", `Int (node.notes + 1)) ]
       in
       if String.length text > max_note then
-        node.log
+        node.log `Warn
           ("live topic " ^ topic ^ ": the key is too long for the bus (" ^ string_of_int (String.length text)
          ^ " bytes); other nodes do not see this change")
       else begin
@@ -513,7 +513,7 @@ let note node topic wire =
               let sent, resolve, _ = Async.make () in
               Async.on_settled (Async.guard bus.send text) (function
                 | Async.Failed m ->
-                    node.log ("live bus: a note was not sent: " ^ m);
+                    node.log `Error ("live bus: a note was not sent: " ^ m);
                     resolve ()
                 | _ -> resolve ());
               sent)

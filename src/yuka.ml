@@ -29,13 +29,26 @@ module Live = Live
 module Form = Form
 module Event = Platform.Event
 module Browser = Platform.Browser
-module Router = Router
+module Router = struct
+  include Router
+  module Param = Router_param
+end
+
+module Console = struct
+  let send level browser message = if Web.in_browser then browser message else Types.log_message level message
+  let log = send `Info Web.console_log
+  let info = send `Info Web.console_info
+  let warn = send `Warn Web.console_warn
+  let error = send `Error Web.console_error
+  let debug = send `Debug Web.console_debug
+end
 
 module Server = struct
   include Server
   include Cycle
 
   type context = Types.context
+  type log_level = Types.log_level
 
   module Context = struct
     let header (c : context) = c.header
@@ -94,6 +107,8 @@ module Server = struct
     module type Backend = Cycle.ADAPTER
 
     module Make = Cycle.Make
+
+    let default_log = Cycle.default_log
 
     let build_id = Cycle.build_id
   end
@@ -193,7 +208,7 @@ module Private = struct
     Server.handle_action ~live:(Live_server.mark_json (Live_server.main ())) ~name ~header ~body
 
   let dev_script = Cycle.dev_script
-  let dev_events = Cycle.dev_events ~log:(fun m -> !Types.default_log m)
+  let dev_events = Cycle.dev_events ~log:(fun level m -> !Types.default_log level m)
   let node = Kind.to_node
 
   module Template = struct

@@ -25,7 +25,7 @@ let show (s : string Status.t) =
 
 let check_status msg expected r = Alcotest.(check string) msg expected (show (Remote.status r))
 let logged = ref []
-let () = Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged)
+let () = Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged)
 
 let gates : (string * (string Async.t * (string -> unit) * (string -> unit))) list ref = ref []
 let calls = ref []

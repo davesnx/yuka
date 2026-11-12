@@ -10,7 +10,7 @@ open Base
   let log_blocked name value =
     if not !blocked_logged then begin
       blocked_logged := true;
-      log_message ("yuka: printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name ^ ": " ^ String.escaped value)
+      log_message `Warn ("printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name ^ ": " ^ String.escaped value)
     end
 
   let add_attr b ?(literal = false) ~tag name value =
@@ -342,7 +342,7 @@ open Base
             after_text := text;
             foreign := context;
             restore s saved;
-            log_message ("Yuka.Catch: " ^ Web.exn_to_string e);
+            log_message `Error ("Yuka.Catch: " ^ Web.exn_to_string e);
             marker "<!--[!-->";
             go (fallback ~error:"server error" ~reset:ignore);
             marker "<!--]-->")

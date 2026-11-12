@@ -1593,7 +1593,7 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   route has search fields), `href` and `find`.
 - `href`: static segments are encoded when the generator runs; params with
   `Yuka.Router.segment` (`int` with `string_of_int`, a custom type through
-  `Issue_id.to_string`); a catch-all with `Yuka.Router.segments` (`/` and one
+  `Yuka.Router.Param.encode` of its value, see "Param values"); a catch-all with `Yuka.Router.segments` (`/` and one
   segment per element). `segment` raises `Invalid_argument` on `""`, `.`
   and `..`, and `segments` also on `[]`: the cycle drops empty segments and
   browsers resolve dot segments, even as `%2E`, so `find` could not give
@@ -1628,7 +1628,7 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   (`Stdlib.List.map`, `Stdlib.( ^ )`, `Stdlib.( = )`), so a sibling `List`
   module or `-open Base` does not change it. `test/routes/shadowed`
   compiles the fixture with `-open Shadow`, which shadows them all.
-- New in `Yuka.Router`: `meth`, `lookup`, `PARAM`, `encode`, `segment`,
+- New in `Yuka.Router`: `meth`, `lookup`, `Param`, `encode`, `segment`,
   `segments`, `int_param`, `search`.
 - Size: `find` is a top-level function that a client which calls only
   `href` does not name, so esbuild drops it (checked by
@@ -1738,7 +1738,7 @@ what changed from the spec. `yuka-dream` and the demo migration are in
 
 ## yuka-dream, demo on Routes.mlx, prerender (2026-11-10)
 
-Current names: `handler` no longer sets a logger: give `Server.config ~log_error`. The prerender values are in `Server.Prerender`: `seeds`, `prerenderable`, `links`, `file`, `missing_page`, `served_dirs`. `ADAPTER.exists` is `Server.Adapter.Backend.exists`. Client files are under `/_yuka/app/`.
+Current names: `handler` sends the server log to `Dream.sub_log "yuka"` when the config has no `~log` (see "`Yuka.Console` and the server log"). The prerender values are in `Server.Prerender`: `seeds`, `prerenderable`, `links`, `file`, `missing_page`, `served_dirs`. `ADAPTER.exists` is `Server.Adapter.Backend.exists`. Client files are under `/_yuka/app/`.
 
 Spec: `.workplace/docs/routes-spec.md`, increment 3 (tickets 09, 11 and
 19); its section 8 lists what changed from the spec.
@@ -2588,8 +2588,8 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 - `Server.stop`: `Not_found`, `Forbidden` (a plain 403), `Redirect`
   (must stay on the site, else a logged 500), `Redirect_off_site` and
   `Fail`.
-- No global configuration: `Server.config ~log_error ~dev ~origins` and
-  `Server.Live.node ~log_error ~per_session ~total`. The library does not
+- No global configuration: `Server.config ~log ~dev ~origins` and
+  `Server.Live.node ~log ~per_session ~total`. The library does not
   read `YUKA_DEV`; `yuka dev` sets it and the app passes `~dev`.
 - `Server.response`, `Server.Live.bus` are private records with builder
   functions; `Server.Live.connection` and `Server.cache` are abstract
@@ -2622,7 +2622,7 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 - An `Async.map` or `Async.bind` function that raises gives `Failed`.
 - A failed `<Yuka.Await>`, `suspend` or `Async` prop shows the message of
   a `Server.Action.reject`, else `"server error"`; the detail goes to
-  `log_error`.
+  the `log` of `Server.config`.
 - `Codec.t` is private (`Codec.make`, `Codec.map`), `Remote.retry` is
   abstract, `Remote.mutate` and `Live.mutate` have one shape, and
   `Optimistic` is internal.
@@ -2669,7 +2669,7 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 | `Optimistic` | internal |
 | `Server.ADAPTER`, `Server.Make`, `Server.handle` | `Server.Adapter.Backend`, `Server.Adapter.Make`, internal |
 | `Server.Live.SOCKET`, `Server.Live.Handle` | the adapter's `upgrade` and `Server.Live.connection` |
-| `Server.log_error` | `Server.config ~log_error`, `Server.Live.node ~log_error` |
+| `Server.log_error` | `Server.config ~log`, `Server.Live.node ~log` |
 | `YUKA_DEV` read by `Server.config` | `Server.config ~dev:true` |
 | `Server.prerender_config` | `Server.Prerender.config` |
 | `Server.prerender_seeds`, `prerenderable`, `prerender_file`, `missing_page`, `served_dirs`, `css_files` | `Server.Prerender.seeds`, `prerenderable`, `file`, `missing_page`, `served_dirs`, `css_files` |
@@ -2931,6 +2931,97 @@ as a call, with the same checks.
   standard library value: its defaults are `[]` or the copied `default`
   values.
 - `test/cycle/Routes.ml` renames its route `Find` to `Search`.
+
+## `Yuka.Console` and the server log (2026-11-12)
+
+Plan: `.workplace/plans/console_PLAN.md`. A prototype, decided by the
+user: it will be improved later, and the API can change.
+
+- `Yuka.Console` has `log`, `info`, `warn`, `error` and `debug`, each
+  `string -> unit`, so shared code (an island that the server also
+  renders) can log. In the browser each calls the `console` method of its
+  name (`Web.console_*`). On the server each sends a level and the
+  message to the server log; `log` and `info` are `` `Info ``, as in the
+  browser. `Console` tests `Web.in_browser`; the server branch calls
+  `Types.log_message`.
+- One sink type, `Server.log_level -> string -> unit`, with
+  `` Server.log_level = [ `Error | `Warn | `Info | `Debug ] ``. It replaces
+  `string -> unit` in `Server.config ?log` (was `?log_error`),
+  `Server.Live.node ?log` and `Server.Testing.set_log`. Breaking.
+- The request context carries the sink of its config. A `Console` call
+  during a server render of a request goes there; any other call (no
+  render, or after the render returned, as in an action or a loader that
+  resumes later) goes to the default sink, `Types.default_log`. The
+  current request is the session of the running print, so an `Async`
+  callback does not know it.
+- Yuka's own messages use the same sink: `` `Warn `` for a blocked URL in
+  a server render, a live message over 1 MiB, a live key too long for the
+  bus and a `Live.use` under a shared cache rule; `` `Error `` for the
+  rest.
+- Default sink: one line on stderr, `yuka: LEVEL MESSAGE`; it drops
+  `` `Debug ``. No logging library in `yuka`. The blocked URL message lost
+  its `yuka: ` prefix and the live message its `warning: ` prefix, which
+  the line now carries.
+- The config keeps `log` as an option, so an adapter can fill it:
+  `Server.Adapter.default_log sink config` sets it only when the user gave
+  none. `Yuka_dream.handler` does this once, when it is applied to the
+  config and the app, with `Dream.sub_log "yuka"` (`` `Warn `` is
+  `` `Warning ``). Dream then adds the time, the level, the request id
+  (from `Dream.logger`) and its threshold. A field in `Backend` would make
+  every adapter, the test ones too, give a log, and would send the
+  messages of `Yuka_dream.prerender` to Dream; `prerender` keeps the
+  default sink.
+- Not in the prototype: lazy messages, a threshold in the core, named
+  sub-logs, values other than a string, and the request of an `Async`
+  callback.
+- Tests: `test/cycle` (the levels in a request and outside one),
+  `test/native/default_log` (the stderr line, no debug), `test/melange`
+  (the `console` methods), `dream/test` (a warning in the Dream log with
+  the request id; a config `log` is kept).
+
+## Param values (2026-11-12)
+
+Decided by the user: a param type is a value, as a codec is.
+`Yuka.Router.Param` has an abstract `'a t`, `make ~decode ~encode`,
+`int`, `string`, `bool`, `decode` and `encode`. The module type `PARAM`
+(`of_string`, `to_string`) is gone, with no compatibility path: 1.0 is
+not released. Reason: one shape for codecs and params, and a user can
+build a param on `Param.int` and the others.
+
+- `Routes.ml` names the type of a param, with its module path:
+  `:id<Model.issue_id>`, `optional Tab.t`,
+  `default Model.sort Model.Newest`. The value comes from the rule of
+  `[@@deriving codec]`: `Issue_id.t` uses `Issue_id.param`,
+  `Model.issue_id` uses `Model.issue_id_param`.
+  Reason: the generator reads only `Routes.ml` and sees no types, but it
+  must write each field type in `type t` of `Routes`; a type path gives
+  it that name, and the value follows by the codec rule.
+- Build errors with a location in `Routes.ml`: a capitalised last name
+  (`:id<Issue_id>`) gives what to write (`:id<Issue_id.t>`); a type
+  without a module (`issue_id`) and a type with a parameter (`int list`)
+  are bad types. A bare type could resolve only through an `-open` flag
+  on the shared library, since the generated module opens nothing.
+- The generated `type t` writes the type path as given. The generated
+  code calls `Yuka.Router.Param.decode Model.issue_id_param s` and
+  `Yuka.Router.Param.encode Model.issue_id_param v` where it called
+  `Issue_id.of_string s` and `Issue_id.to_string v`. Percent-encoding
+  does not change.
+- The built-in `int`, `string`, `string...` and `bool` keep their inline
+  code: `Yuka.Router.int_param p` is shorter than
+  `Yuka.Router.Param.decode Yuka.Router.Param.int p`, which also goes
+  through `Curry._2` in JavaScript. `int_param` stays for the generated
+  code.
+- `Param` is its own compilation unit, `src/router_param.ml`, and
+  `yuka.mli` declares it as the alias `module Param = Router_param` inside
+  `Router`. `Yuka.Router` is one JavaScript object that a client keeps
+  whole when it uses the router; a member there cost the demo start
+  about 120 B gzip. An alias has no field in that object, and code that
+  names `Yuka.Router.Param` imports `router_param.js` itself, so a client
+  with no custom param type does not grow.
+- `int`, `string` and `bool` are record literals, so they are free of
+  side effects. A module that calls `Param.make` at its top level is not:
+  esbuild keeps it when the bundle imports it. A missing value fails with
+  `Unbound value Model.issue_id_param` in the generated `routes.ml`.
 
 ## `Effect.after` and `Effect.before` (2026-11-12)
 

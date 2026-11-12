@@ -286,7 +286,7 @@ val attr : string -> string -> 'kind attribute
     open a document ([href] of [a], [area] and [use], [action],
     [formaction], [xlink:href], [src] of [iframe], [frame], [embed] and
     [object], [data] of [object]). A [data:] image or media URL stays. The server logs the
-    first block with the [log_error] of {!Server.val-config}; a dev build logs the first one in
+    first block with the [log] of {!Server.val-config} (level [`Warn]); a dev build logs the first one in
     the console. [data:] is also blocked on [src] of [script] and [href] of
     [script]. [srcdoc] of [iframe] and [href] of
     [base] become [""] and are logged the same way; only a literal one in
@@ -326,7 +326,7 @@ module Await : sig
       a hole over [Async.watch]. On the server it is printed as a hole; see
       DESIGN.md. In a server render, [message] is the message of a
       {!Server.Action.reject}, else ["server error"], and the failure
-      message goes to the [log_error] of {!Server.val-config}, so the HTML never has the
+      message goes to the [log] of {!Server.val-config}, so the HTML never has the
       detail. *)
 end
 
@@ -369,7 +369,7 @@ module Catch : sig
 
       On the server, an exception in the children prints the fallback with
       [~error:"server error"] and sends the exception to
-      the [log_error] of {!Server.val-config}; the HTML never has the detail. In an island, the
+      the [log] of {!Server.val-config}; the HTML never has the detail. In an island, the
       client then hydrates the fallback, and [reset] renders the children in
       the browser. *)
 end
@@ -512,6 +512,30 @@ module Browser : sig
   (** Scrolls the element with this id into view; does nothing when no
       element has it. Inside a {!batch}, it runs as {!focus} does. Browser
       only: raises [Failure] on native. *)
+end
+
+module Console : sig
+  (** Messages for the developer, from code that runs on the server and in
+      the browser. In the browser, each function calls the [console] method
+      of its name. On the server, it sends the level and the message to the
+      [log] of {!Server.val-config} during a server render of a request, and
+      to the default sink otherwise ({!Server.Testing.set_log}). A prototype:
+      the API can change. *)
+
+  val log : string -> unit
+  (** [console.log]; level [`Info] on the server. *)
+
+  val info : string -> unit
+  (** [console.info]; level [`Info] on the server. *)
+
+  val warn : string -> unit
+  (** [console.warn]; level [`Warn] on the server. *)
+
+  val error : string -> unit
+  (** [console.error]; level [`Error] on the server. *)
+
+  val debug : string -> unit
+  (** [console.debug]; level [`Debug] on the server. *)
 end
 
 (**/**)
@@ -970,19 +994,12 @@ module Router : sig
             substituted and encoded. *)
     | Missing  (** No node matches, or a param does not decode. *)
 
-  (** A custom param or search type, written [:id<Issue_id>] in a path. *)
-  module type PARAM = sig
-    type t
-
-    val of_string : string -> t option
-    (** For a path param, [None] means the path does not match. For a
-        search field, the value is dropped: an optional field gets [None],
-        a field with a default gets the default, and a list field leaves
-        the value out. *)
-
-    val to_string : t -> string
-    (** The inverse of [of_string]. [href] encodes the result. *)
-  end
+  (** How a path param or a search field turns into a value and back. A
+      custom type is written with its module path, [:tab<Model.tab>] in a
+      path or [optional Model.tab] in a search, and uses the value of the
+      codec rule: [Issue_id.t] uses [Issue_id.param], and [Model.tab] uses
+      [Model.tab_param]. *)
+  module Param = Router_param
 
   (**/**)
 
@@ -1005,9 +1022,8 @@ module Router : sig
       more, and on an element that {!segment} refuses. *)
 
   val int_param : string -> int option
-  (** Decodes an [int] param in the form [string_of_int] writes: [0], or an
-      optional [-] and digits without a leading [0], within the range of
-      [int]. So each value has one URL: [01], [-0] and [+1] give [None]. *)
+  (** [Param.decode Param.int], which the generated code calls inline. Use
+      {!Param.int}. *)
 
   val search : (string * string) list -> string -> string list
   (** [search query key] is every value of [key] in the decoded query pairs,
@@ -1181,6 +1197,9 @@ module Server : sig
   type context
   (** The request that runs an action, a form action or a live [allow]. *)
 
+  type log_level = [ `Error | `Warn | `Info | `Debug ]
+  (** The level of a message to the server log ([log] of {!val-config}). *)
+
   module Context : sig
     val header : context -> string -> string option
     (** A request header, case-insensitive. For a live [allow], the
@@ -1237,12 +1256,12 @@ module Server : sig
         [seq] counter, limits and bus. A process has one default node, which
         every function uses when [?node] is not given. *)
 
-    val node : ?log_error:(string -> unit) -> ?per_session:int -> ?total:int -> unit -> node
+    val node : ?log:(log_level -> string -> unit) -> ?per_session:int -> ?total:int -> unit -> node
     (** A new, empty node, for example for a second handler in one process.
-        [log_error] gets the failures of loaders and of the bus. Without it
-        (and for the default node), the node logs to the [log_error] of the
+        [log] gets the failures of loaders and of the bus. Without it
+        (and for the default node), the node logs to the [log] of the
         config of the last request that a handler served on this node, and
-        to [prerr_endline] before the first request. [per_session] (default 16) and [total] (default
+        to the default sink (see {!Testing.set_log}) before the first request. [per_session] (default 16) and [total] (default
         10,000) are the most open live sockets per session and on this node;
         a socket over a limit is closed with 1013 before its [hello], and
         the page tries again later. *)
@@ -1403,7 +1422,7 @@ module Server : sig
             example to another site's login page. Do not give it a value
             from the request. *)
     | Fail of string
-        (** The error page, status 500. The message goes to [log_error],
+        (** The error page, status 500. The message goes to [log],
             never to the page. *)
 
   type page
@@ -1505,7 +1524,7 @@ module Server : sig
     ?timeout:float ->
     ?dev:bool ->
     ?origins:string list ->
-    ?log_error:(string -> unit) ->
+    ?log:(log_level -> string -> unit) ->
     unit ->
     config
   (** [public] maps URL prefixes to directories ([("/static", "static")]).
@@ -1539,9 +1558,13 @@ module Server : sig
       [Sec-Fetch-Site] is [same-origin], so a request with neither header
       (an old browser, a client that is not a browser) is refused.
 
-      [log_error] (default [prerr_endline]) gets what the client must not
-      see: an action that failed, a failed render, a failed async value, a
-      refused redirect or header. *)
+      [log] gets what the client must not see, as [`Error] (an action that
+      failed, a failed render, a failed async value, a refused redirect or
+      header) or [`Warn], and the {!Yuka.Console} calls of a server render
+      of a request. Without it, the adapter may give its own log
+      ({!Adapter.default_log}); else messages go to the default sink: one
+      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. This is a
+      prototype: the sink type can change. *)
 
   (** {2 Adapters} *)
 
@@ -1678,7 +1701,7 @@ module Server : sig
           A 404 or 500 page has the root [headers] and [no-store]. A
           failure before the response is returned (shell, or a fill that
           already failed) gives the 500 page. After it the status is sent:
-          the failure goes to [log_error], nothing more is written (no
+          the failure goes to [log], nothing more is written (no
           [</body></html>]), and the [Stream] function's [Async] succeeds
           once the writes already started have finished, so the adapter
           ends the response normally. When the error page itself fails, the
@@ -1695,6 +1718,12 @@ module Server : sig
           backslash is the 404 page. An answer with a header name or value
           that holds CR, LF or NUL becomes a plain 500 and a log message. *)
     end
+
+    val default_log : (log_level -> string -> unit) -> config -> config
+    (** [default_log sink config] is [config] with [log] set to [sink]
+        when [config] has no [log], else [config]. An adapter calls it to
+        send messages to the log of its server ([Yuka_dream.handler] uses
+        [Dream.sub_log "yuka"]). *)
 
     val build_id : config -> 'req app -> string
     (** The build id: a digest of the route tree and, with [assets], of the
@@ -1874,10 +1903,12 @@ module Server : sig
         that settles on another node waits until that node has heard those
         notes and loaded the key again. *)
 
-    val set_log : (string -> unit) -> unit
-    (** Where messages go outside a request: a render without the cycle,
-        an [Action.call] on the server outside a render, and the default
-        log of a {!Live.node}. Default: [prerr_endline]. *)
+    val set_log : (log_level -> string -> unit) -> unit
+    (** Replaces the default sink: where messages go outside a request (a
+        render without the cycle, an [Action.call] on the server outside a
+        render, a {!Yuka.Console} call outside a render), and the log of a
+        config without [log] and of a {!Live.node} without [log]. Default:
+        one line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
 
     val memory_down : Live.memory -> bool -> unit
     (** [memory_down m true] drops notes; [false] brings the bus back and
