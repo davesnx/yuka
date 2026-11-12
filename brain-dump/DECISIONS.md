@@ -183,6 +183,23 @@
 
 The items below came before this direction; check each one against it.
 
+## Direction set by the user (2026-11-12)
+
+- `[@@yuka.shared]` and `[@@shared]` go away, together with the ppx error on
+  a module-level `State.make` or `State.memo`. Reasons:
+  - The attribute is a statement that nothing checks.
+  - The ppx check goes by spelling. It does not see a State in a tuple or a
+    record, a State that a function returns, or `State` under a module alias.
+  - The statement "only client code writes it" is not enough. A read under a
+    memo adds a link to the node of the State (`Scheduler.track`), so two
+    domains that only read one module-level State write the same list.
+- The server checks at run time in place of the ppx: after the first
+  server render or request of the process, `State.set` or `State.update` on
+  a State made before that point raises `Invalid_argument`. See
+  "Module-level State" in `DESIGN.md`.
+- The check is on the server only, so the browser still accepts a
+  module-level State.
+
 ## Proposed, not yet agreed
 
 - Dependencies are a typed list: `Effect.on [ count; name ] (fun count name -> ...)`.
@@ -199,6 +216,11 @@ The items below came before this direction; check each one against it.
 
 ## Open
 
+- State shared across islands (2026-11-12): the user thinks this needs its
+  own Yuka feature and that a module-level State is not that feature; not
+  decided. Today a module-level State is the only way (`Ui.dialog_open` in
+  the demo, read by two islands). See also "a State shared across islands
+  or values only" under the client boundary below.
 - Collections: what a list state is (plain list, `Map` with diffs, persistent
   sequence with cached measures) and whether `each` receives whole values or
   edits. See `finger-trees.md`.

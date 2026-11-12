@@ -106,25 +106,6 @@ let is_yuka_state (m : module_expr) =
 let check_open ~loc (o : open_declaration) what =
   if is_yuka_state o.popen_expr then lint_error ~loc what
 
-let shared =
-  Attribute.declare "yuka.shared" Attribute.Context.value_binding
-    Ast_pattern.(pstr nil)
-    ()
-
-let rec state_constructor e =
-  match e.pexp_desc with
-  | Pexp_constraint (e, _) | Pexp_coerce (e, _, _) -> state_constructor e
-  | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot (p, (("make" | "memo") as f)); _ }; _ }, _)
-    when is_state_path p -> Some f
-  | _ -> None
-
-let check_module_state (vb : value_binding) =
-  match state_constructor vb.pvb_expr with
-  | Some f when Attribute.get shared vb = None ->
-      Location.raise_errorf ~loc:vb.pvb_loc
-        "[yuka] A module-level State.%s is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line." f
-  | _ -> ()
-
 let list_expr ~loc xs =
   List.fold_right (fun x acc -> [%expr [%e x] :: [%e acc]]) xs [%expr []]
 
@@ -771,7 +752,6 @@ let mapper =
 
     method! structure_item i =
       (match i.pstr_desc with
-       | Pstr_value (_, vbs) -> List.iter check_module_state vbs
        | Pstr_open o -> check_open ~loc:i.pstr_loc o "open Yuka.State"
        | Pstr_include { pincl_mod; _ } when is_yuka_state pincl_mod ->
            lint_error ~loc:i.pstr_loc "include Yuka.State"

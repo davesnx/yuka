@@ -545,6 +545,7 @@ open Base
     let previous = !server_rendering in
     let previous_session = !current_session in
     server_rendering := true;
+    Web.seal_states ();
     current_session := Some s;
     let restore () =
       server_rendering := previous;

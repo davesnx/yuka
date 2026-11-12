@@ -282,7 +282,8 @@ Current names: `Yuka_server` is now `Yuka.Server`; `Yuka.list` and `Yuka.array` 
 - A module-level `State.make` in shared code is one value for the whole
   process on the server. Rule: only client code paths (handlers, effects)
   may write it, and server rendering must not read a value that a request
-  changed. A lint for this comes later.
+  changed. A lint for this comes later: replaced on 2026-11-12 by a check
+  at run time; see "Module-level State".
 - A `State.set` updates holes synchronously when no `Yuka.batch` is
   running, so code right after it (for example `Browser.focus`) sees the new
   DOM.
@@ -358,7 +359,8 @@ work", except the items listed as out of scope there.
   (`'a t` gets `codec : 'a Codec.t -> 'a t Codec.t`).
 - Lint: a structure-level `let x = State.make ...` (or `State.memo`) is a
   compile error unless marked `[@@yuka.shared]`, which states that only
-  client code paths write it.
+  client code paths write it: replaced on 2026-11-12 by a check at run
+  time; see "Module-level State".
 - Production bundle: esbuild bundles the Melange output of the client entry
   into one ES module (`--bundle --format=esm --minify`); the server serves it
   instead of the module tree when started with `--bundle`.
@@ -2949,6 +2951,45 @@ as a call, with the same checks.
   standard library value: its defaults are `[]` or the copied `default`
   values.
 - `test/cycle/Routes.ml` renames its route `Find` to `Search`.
+
+## Module-level State (2026-11-12)
+
+Decided by the user: the server checks a module-level State at run time,
+in place of the ppx. Reason: the ppx check went by spelling, so it did not
+see a State in a tuple or a record, a State that a function returns, or
+`State` under a module alias; and `[@@yuka.shared]` was a statement that
+nothing checked.
+
+- Removed: `[@@yuka.shared]`, `[@@shared]` and the ppx error on a
+  structure-level `State.make` or `State.memo`. No compatibility path:
+  ppxlib reports an unused attribute only in its `-check` mode, which dune
+  does not use, so a leftover `[@@yuka.shared]` compiles with no message.
+- The seal is the first server render (`Printer.print`) or the first
+  request (`Cycle.handle`, which serves pages, actions, endpoints and the
+  live socket) of the process. A State made before the seal is
+  module-level. A State made after it never is, so the set does not grow
+  per request.
+- After the seal, `State.set` and `State.update` on a module-level State
+  raise `Invalid_argument "Yuka.State: a write to a State made at module
+  level, before the first server render or request. The server process has
+  one copy for every request. Create the State inside a component."`. A
+  read is allowed. A write before the seal is allowed.
+- Native only: `State.set` calls `Web.check_state_write`, and the seal
+  calls `Web.seal_states`. Both are in the virtual module `Web`; the
+  browser versions do nothing.
+- The native check is one compare: `Scheduler.make` gives each node the
+  next id, so the seal keeps the last id, and a State with an id at most
+  that one was made before the seal. If node ids become per domain, this
+  needs a table of the States made before the seal, found by id and
+  compared with `==`.
+- The States of Yuka itself (`Async.watch`, `Remote`, `Live`, `Form`,
+  `Catch`) go through the same check. A `Remote.use`, `Live.use` or form
+  made at module level is also one copy for every request, so a server
+  write to it raises.
+- Size: the check added 8 B gzip to the keyed benchmark app (7,967 to
+  7,975 before the merge with `Effect.after`; 7,965 after it, budget
+  7,981). A table filled by `State.make` added 23 B: `make` had to call
+  `Web` through `Curry`.
 
 ## `Yuka.Console` and the server log (2026-11-12)
 

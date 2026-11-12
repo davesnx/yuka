@@ -1,4 +1,4 @@
-let count : int Yuka.State.t = Yuka.State.make 0 [@@yuka.shared]
+let count : int Yuka.State.t = Yuka.State.make 0
 
 let fixed : Yuka.client Yuka.element =
   <ul class_="list">

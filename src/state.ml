@@ -5,8 +5,12 @@ type 'a read = ('a, [ `Read ]) signal
 let make = Signal.make
 let get = Signal.get
 let peek = Signal.peek
-let set = Signal.set
-let update = Signal.update
+
+let set (s : _ t) value =
+  Web.check_state_write s.node;
+  Signal.set s value
+
+let update s f = set s (f s.value)
 external read_only : 'a t -> 'a read = "%identity"
 let untrack = Scheduler.untrack
 
