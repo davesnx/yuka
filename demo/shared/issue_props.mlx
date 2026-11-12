@@ -1,14 +1,13 @@
-open Yuka
 open Model
 
 let[@client] make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
-  let live = Live.use Topics.issue (fun () -> issue.id) in
+  let live = Yuka.Live.use Topics.issue (fun () -> issue.id) in
   let current =
-    State.memo (fun () -> Option.value (Status.data (Live.status live)) ~default:issue)
+    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:issue)
   in
-  let error : string option State.t = State.make None in
+  let error : string option Yuka.State.t = Yuka.State.make None in
   let change ?status ?priority () =
-    State.set error None;
+    Yuka.State.set error None;
     let edit (i : Issue.t) =
       {
         i with
@@ -16,14 +15,14 @@ let[@client] make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
         priority = Option.value priority ~default:i.priority;
       }
     in
-    Async.on_result
-      (Live.mutate live ~change:edit (fun () ->
-           Action.call Actions.update_issue { Actions.id = issue.id; status; priority }))
-      (function Ok (Ok _) -> () | Ok (Error _) | Error _ -> State.set error (Some "Could not update the issue."))
+    Yuka.Async.on_result
+      (Yuka.Live.mutate live ~change:edit (fun () ->
+           Yuka.Action.call Actions.update_issue { Actions.id = issue.id; status; priority }))
+      (function Ok (Ok _) -> () | Ok (Error _) | Error _ -> Yuka.State.set error (Some "Could not update the issue."))
   in
   let select label items slug to_label of_slug selected on_pick =
-    <select class_="select" aria_label=label value=(slug (State.get selected))
-      on_change=(fun e -> Option.iter on_pick (of_slug (Event.target_value e)))>
+    <select class_="select" aria_label=label value=(slug (Yuka.State.get selected))
+      on_change=(fun e -> Option.iter on_pick (of_slug (Yuka.Event.target_value e)))>
       (Yuka.fragment
          (List.map
             (fun x ->
@@ -33,8 +32,8 @@ let[@client] make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
             items))
     </select>
   in
-  let status = State.memo (fun () -> (State.get current).status) in
-  let priority = State.memo (fun () -> (State.get current).priority) in
+  let status = Yuka.State.memo (fun () -> (Yuka.State.get current).status) in
+  let priority = Yuka.State.memo (fun () -> (Yuka.State.get current).priority) in
   <Yuka.Catch fallback=(fun ~error:_ ~reset ->
       <div class_="props">
         <p class_="error">"The properties could not be shown."</p>
@@ -42,12 +41,12 @@ let[@client] make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
       </div>)>
     <div class_="props">
       <Views.Property name="Status">
-        (Views.Status_icon.make ~status:(State.get status) ())
+        (Views.Status_icon.make ~status:(Yuka.State.get status) ())
         (select "Status" Issue.all_statuses Issue.status_slug Issue.status_label
            Issue.status_of_slug status (fun s -> change ~status:s ()))
       </Views.Property>
       <Views.Property name="Priority">
-        (Views.Priority_icon.make ~priority:(State.get priority) ())
+        (Views.Priority_icon.make ~priority:(Yuka.State.get priority) ())
         (select "Priority" Issue.all_priorities Issue.priority_slug Issue.priority_label
            Issue.priority_of_slug priority (fun p -> change ~priority:p ()))
       </Views.Property>
@@ -57,12 +56,12 @@ let[@client] make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
       </Views.Property>
       <Views.Property name="Labels"><Views.Labels labels=issue.labels /></Views.Property>
       <Views.Property name="Created">(Yuka.text issue.created_at)</Views.Property>
-      (match State.get error with
+      (match Yuka.State.get error with
        | Some m -> <p class_="error">(Yuka.text m)</p>
        | None -> Yuka.empty)
       (Yuka.hole (fun () ->
-         match Live.status live with
-         | Status.Ready { stale = true; _ } -> <p class_="offline">"Offline"</p>
+         match Yuka.Live.status live with
+         | Yuka.Status.Ready { stale = true; _ } -> <p class_="offline">"Offline"</p>
          | _ -> Yuka.empty))
       (Yuka.slot children)
     </div>

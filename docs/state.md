@@ -20,16 +20,13 @@ Each of them records the States it reads. A write to one of those States
 runs it again. You do not write a list of dependencies.
 
 ```ocaml
-open Yuka
-
 let[@client] make ~(initial : int) () =
-  let count = State.make initial in
-  let double = State.memo (fun () -> State.get count * 2) in
-  Effect.run (fun () ->
-      print_endline ("count is " ^ string_of_int (State.get count)));
-  <button on_click=(fun _ -> State.update count succ)>
+  let count = Yuka.State.make initial in
+  let double = Yuka.State.memo (fun () -> Yuka.State.get count * 2) in
+  Yuka.Effect.run (fun () -> Printf.printf "count is %d\n" (Yuka.State.get count));
+  <button on_click=(fun _ -> Yuka.State.update count succ)>
     "Double: "
-    (Yuka.int (State.get double))
+    (Yuka.int (Yuka.State.get double))
   </button>
 ```
 
@@ -56,7 +53,7 @@ same, and a new record, tuple or list is a change, also when its contents
 are equal. Pass `~equal:( = )` to compare contents:
 
 ```ocaml
-let filter = State.make ~equal:( = ) { status = Open; mine = false }
+let filter = Yuka.State.make ~equal:( = ) { status = Open; mine = false }
 ```
 
 ## Holes
@@ -66,8 +63,8 @@ becomes a hole. A hole is the only part of the markup that changes after
 the first render.
 
 ```ocaml
-<p class_=(if State.get active then "on" else "off")>
-  (Yuka.text (State.get name))
+<p class_=(if Yuka.State.get active then "on" else "off")>
+  (Yuka.text (Yuka.State.get name))
 </p>
 ```
 
@@ -90,8 +87,8 @@ computation is costly, or when several readers need the same result.
 
 ```ocaml
 let visible =
-  State.memo (fun () ->
-      List.filter (matches (State.get filter)) (State.get issues))
+  Yuka.State.memo (fun () ->
+      List.filter (matches (Yuka.State.get filter)) (Yuka.State.get issues))
 ```
 
 - A memo is read-only: `State.set` on it does not compile.
@@ -115,7 +112,7 @@ the next run and when the component is removed. Here `connect` and
 `close` are your own functions:
 
 ```ocaml
-Effect.run ~cleanup:close (fun () -> connect (State.get room))
+Yuka.Effect.run ~cleanup:close (fun () -> connect (Yuka.State.get room))
 ```
 
 When `room` changes, Yuka closes the old connection and opens a new one.
@@ -141,8 +138,8 @@ for several writes:
 
 ```ocaml
 Yuka.batch (fun () ->
-    State.set first "Ada";
-    State.set last "Lovelace")
+    Yuka.State.set first "Ada";
+    Yuka.State.set last "Lovelace")
 ```
 
 Each event handler already runs in a batch. Two writes in one `on_click`
@@ -174,14 +171,14 @@ one copy, and every request reads and writes that copy. One user could see
 the data of another. For that reason this is a compile error:
 
 ```ocaml
-let dialog_open = State.make false
+let dialog_open = Yuka.State.make false
 ```
 
 Create the State inside a function. When a State must be global in the
 browser, for example one flag that several islands read, mark it:
 
 ```ocaml
-let dialog_open = State.make false [@@yuka.shared]
+let dialog_open = Yuka.State.make false [@@yuka.shared]
 ```
 
 `[@@yuka.shared]` is your statement that only code that runs in the
