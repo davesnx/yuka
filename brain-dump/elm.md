@@ -37,7 +37,7 @@ Html.Lazy
 - Alternatives discussed but not in elm/html: deep equality (Gren's default), a small cache of several results, a global cache (memory risk). (src: caching)
 - Max 8 arguments (`lazy8`). Packing arguments into a tuple or record defeats caching, because the record is always new. Workaround: patch the compiled JS so the thunk compares record fields, not the record. (src: beyond)
 - Put `lazy` at the root of `view`. Elm does not skip `view` when `update` returns the same model, so root lazy gives nearly that effect: empty diff, no patches. (src: roots)
-- Nested update like `{ model | x = X.update m model.x }` always builds a new record. Root lazy then always misses. Move `lazy` down to each page or sub-view, taking its sub-model. (src: roots)
+- Nested update like `{ model | x = Page.update m model.x }` always builds a new record. Root lazy then always misses. Move `lazy` down to each page or sub-view, taking its sub-model. (src: roots)
 - A freshly built config record passed next to the model also makes it miss. (src: roots)
 
 elm-ui

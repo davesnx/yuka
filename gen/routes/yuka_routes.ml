@@ -132,7 +132,7 @@ let rec list_items e =
       hd :: list_items tl
   | _ ->
       fail e.pexp_loc
-        "the child nodes must be a list such as [ Router.route A ~path:\"/a\" ~page:P.a ]"
+        "the child nodes must be a list such as [ Router.route A ~path:\"/a\" ~page:Pages.a ]"
 
 let element e =
   match e.pexp_desc with

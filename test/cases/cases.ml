@@ -520,10 +520,10 @@ let html_island () =
         element "b" [] [ hole (fun () -> text "") ])
   in
   check "island"
-    "<div><yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"t\":\"\\u003c/script>\"}</script>t<yuka-island data-name=\"B\" data-id=\"i2\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"t\":\"\\u003c/script>\"}</script></div>"
-    (html (element "div" [] [ item "A"; text "t"; item "B" ]));
+    "<div><yuka-island data-name=\"Counter\" data-id=\"i1\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i1\">{\"t\":\"\\u003c/script>\"}</script>t<yuka-island data-name=\"Related\" data-id=\"i2\" style=\"display:contents\"><b></b></yuka-island><script type=\"application/json\" data-yuka-props=\"i2\">{\"t\":\"\\u003c/script>\"}</script></div>"
+    (html (element "div" [] [ item "Counter"; text "t"; item "Related" ]));
   check "counter restarts" "i1"
-    (let h = html (item "A") in
+    (let h = html (item "Counter") in
      let key = "data-id=\"" in
      let rec find i = if String.sub h i (String.length key) = key then i + String.length key else find (i + 1) in
      let start = find 0 in
@@ -700,9 +700,9 @@ let html_slot () =
 
 let html_island_loading () =
   let make start =
-    html (runtime_island ?start ~name:"A" ~props:`Null (fun () -> text ""))
+    html (runtime_island ?start ~name:"Counter" ~props:`Null (fun () -> text ""))
   in
-  let prefix = "<yuka-island data-name=\"A\" data-id=\"i1\" style=\"display:contents\"" in
+  let prefix = "<yuka-island data-name=\"Counter\" data-id=\"i1\" style=\"display:contents\"" in
   let start loading = String.sub (make loading) (String.length prefix) 18 in
   check "default" ("><" ^ "/yuka-island>") (String.sub (make None) (String.length prefix) 15);
   check "load" "></yuka-island>" (String.sub (make (Some `Load)) (String.length prefix) 15);
@@ -1421,7 +1421,7 @@ let logged f =
 let in_island tree =
   Private.print
     (Private.session ~streaming:false ~islands_only:true)
-    (fun () -> Private.node (runtime_island ~name:"I" ~props:(`Int 0) (fun () -> tree ())))
+    (fun () -> Private.node (runtime_island ~name:"Widget" ~props:(`Int 0) (fun () -> tree ())))
 
 let page_html tree =
   Private.print (Private.session ~streaming:false ~islands_only:true) (fun () -> Private.node (tree ()))
@@ -1443,7 +1443,7 @@ let catch_server_fallback () =
                 text "b" ]))
   in
   check "fallback with the marker"
-    {|<yuka-island data-name="I" data-id="i1" style="display:contents"><div>a<!--[!--><p>caught server error</p><!--]-->b</div></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
+    {|<yuka-island data-name="Widget" data-id="i1" style="display:contents"><div>a<!--[!--><p>caught server error</p><!--]-->b</div></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
     html;
   check "no detail in the HTML" "false" (string_of_bool (contains html "secret"));
   check "one log" "1" (string_of_int (List.length messages));
@@ -1457,7 +1457,7 @@ let catch_server_children () =
             Catch.make ~fallback ~children:(fun () -> element "span" [] [ text "ok" ]) ()))
   in
   check "children in a plain hole"
-    {|<yuka-island data-name="I" data-id="i1" style="display:contents"><!--[--><span>ok</span><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
+    {|<yuka-island data-name="Widget" data-id="i1" style="display:contents"><!--[--><span>ok</span><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|}
     html;
   check "no log" "0" (string_of_int (List.length messages))
 

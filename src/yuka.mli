@@ -932,7 +932,7 @@ module Router : sig
       turns a [Routes.t] (for example from [find]) into a URL; and [find]. A
       node name whose link function is an OCaml keyword or [href], [find] or
       [with_query] is a build error. Then
-      [yuka routes --server --shared-module M --source Routes.ml] writes the
+      [yuka routes --server --shared-module Routes --source Routes.ml] writes the
       server module with [app]. *)
 
   type meth =
@@ -951,7 +951,7 @@ module Router : sig
             substituted and encoded. *)
     | Missing  (** No node matches, or a param does not decode. *)
 
-  (** A custom param or search type, written [:id<M>] in a path. *)
+  (** A custom param or search type, written [:id<Issue_id>] in a path. *)
   module type PARAM = sig
     type t
 
@@ -1364,7 +1364,7 @@ module Server : sig
 
       The types and functions that a [Routes.ml] and its loaders, guards
       and handlers use. The cycle has no server dependency: a server
-      implements {!Adapter.S}. See "Request cycle" in DESIGN.md. *)
+      implements {!Adapter.Backend}. See "Request cycle" in DESIGN.md. *)
 
   (** Why a guard or a loader stops a request. *)
   type stop =
@@ -1528,7 +1528,7 @@ module Server : sig
 
   module Adapter : sig
     (** What a server provides to run the cycle. *)
-    module type S = sig
+    module type Backend = sig
       type request
 
       type reply
@@ -1590,9 +1590,9 @@ module Server : sig
           and the live socket for its timeouts. *)
     end
 
-    (** A request handler for the server of [A]. *)
-    module Make (A : S) : sig
-      val handler : ?node:Live.node -> config -> A.request app -> A.request -> A.reply Async.t
+    (** A request handler for the server of [Backend]. *)
+    module Make (Backend : Backend) : sig
+      val handler : ?node:Live.node -> config -> Backend.request app -> Backend.request -> Backend.reply Async.t
       (** Answers one request. [node] (default: the process node) is the
           live node of the sockets of [/_yuka/live] and of the server render
           of {!Yuka.Live.use}; a second handler in one process with its own
@@ -1604,13 +1604,13 @@ module Server : sig
             (403, see [config ~origins]), the action name (404) and the
             content type (415); then at most 1 MiB of body (413).
             [/_yuka/csrf]: for [GET] and [HEAD] with the same origin rule,
-            [{"csrf":TOKEN}] from {!S.csrf_token} with [no-store] (the live
+            [{"csrf":TOKEN}] from {!Backend.csrf_token} with [no-store] (the live
             client renews an expired token with it); 403 for another
             origin, 405 for another method. [/_yuka/live]: for [GET] with
-            the same origin rule and [Upgrade: websocket], [A.upgrade] with
+            the same origin rule and [Upgrade: websocket], [Backend.upgrade] with
             the live protocol; 403 for another origin, 426 without the
             upgrade header, 405 for another method, and a 500 with a log
-            message when {!S.session} raises (no session middleware). [/_yuka/app/<file>]: the
+            message when {!Backend.session} raises (no session middleware). [/_yuka/app/<file>]: the
             file of [assets] for [GET] and [HEAD], else 405; a [.] or [..]
             segment, or no [assets], gives a plain 404 with [no-store]. A
             path under a [public] prefix: the file of its directory, by the

@@ -147,10 +147,10 @@ module Pages = struct
               ~children:(fun () ->
                 if !fail_first then
                   Yuka.fragment
-                    [ island "A"; Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "A")) ]
-                else island "A")
+                    [ island "Counter"; Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "A")) ]
+                else island "Counter")
               ();
-            island "B" ])
+            island "Related" ])
 
   let slow () =
     Server.page ~title:"Slow" (fun () ->
@@ -191,7 +191,7 @@ module Pages = struct
 
   let live () =
     Server.page ~title:"Live" (fun () ->
-        Yuka.runtime_island ~name:"L" ~props:`Null (fun () ->
+        Yuka.runtime_island ~name:"Live" ~props:`Null (fun () ->
             let t = Yuka.Live.use mine (fun () -> "ann") in
             let shown =
               match Yuka.Live.status t with

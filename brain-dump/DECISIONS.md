@@ -148,7 +148,7 @@
 - The ppx has a lint phase that bans `open Yuka.State` (decided 2026-11-06),
   so a read is always written `State.get` and the ppx can mark holes from the
   syntax. Open: also ban local opens (`Yuka.State.(get c)`), module aliases
-  (`module S = Yuka.State`) and value aliases (`let g = Yuka.State.get`);
+  (`module Store = Yuka.State`) and value aliases (`let g = Yuka.State.get`);
   reads hidden inside another function are still not seen.
 - Open: a second constructor (a State from a function, for a lazy initial
   value); a derived value now uses `State.memo`.

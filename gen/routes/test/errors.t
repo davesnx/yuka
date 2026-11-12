@@ -6,11 +6,11 @@ Two pages with the same path shape
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.route A ~path:"/a/:x<int>" ~page:P.a;
-  >     Router.route B ~path:"/a/:y<string>" ~page:P.b;
+  >     Router.route A ~path:"/a/:x<int>" ~page:Pages.a;
+  >     Router.route B ~path:"/a/:y<string>" ~page:Pages.b;
   >   ]
   > EOF
-  File "Routes.ml", line 4, characters 4-50:
+  File "Routes.ml", line 4, characters 4-54:
   Error: path "/a/:y<string>" has the same shape as "/a/:x<int>" (line 3); both answer `GET
   [1]
 
@@ -19,11 +19,11 @@ An endpoint and a page on one path, both GET
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.route A ~path:"/feed" ~page:P.a;
-  >     Router.endpoint B ~path:"/feed" ~method_:`GET ~handler:H.b;
+  >     Router.route A ~path:"/feed" ~page:Pages.a;
+  >     Router.endpoint B ~path:"/feed" ~method_:`GET ~handler:Handlers.b;
   >   ]
   > EOF
-  File "Routes.ml", line 4, characters 4-62:
+  File "Routes.ml", line 4, characters 4-69:
   Error: path "/feed" has the same shape as "/feed" (line 3); both answer `GET
   [1]
 
@@ -32,7 +32,7 @@ A redirect answers every method, so it overlaps an action on its path
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.action A ~path:"/old" ~method_:`POST ~handler:H.a;
+  >     Router.action A ~path:"/old" ~method_:`POST ~handler:Handlers.a;
   >     Router.redirect ~path:"/old" ~to_:(Permanent "/new");
   >   ]
   > EOF
@@ -45,11 +45,11 @@ A group path and a route path give the same shape as another route
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.group ~path:"/a" [ Router.route A ~path:"/:x<string>" ~page:P.a ];
-  >     Router.route B ~path:"/a/:y<int>" ~page:P.b;
+  >     Router.group ~path:"/a" [ Router.route A ~path:"/:x<string>" ~page:Pages.a ];
+  >     Router.route B ~path:"/a/:y<int>" ~page:Pages.b;
   >   ]
   > EOF
-  File "Routes.ml", line 4, characters 4-47:
+  File "Routes.ml", line 4, characters 4-51:
   Error: path "/a/:y<int>" has the same shape as "/a/:x<string>" (line 3); both answer `GET
   [1]
 
@@ -58,8 +58,8 @@ A name used twice
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.route A ~path:"/a" ~page:P.a;
-  >     Router.route A ~path:"/b" ~page:P.b;
+  >     Router.route A ~path:"/a" ~page:Pages.a;
+  >     Router.route A ~path:"/b" ~page:Pages.b;
   >   ]
   > EOF
   File "Routes.ml", line 4, characters 17-18:
@@ -72,7 +72,7 @@ A param label used twice in a branch
   > Router.make
   >   [
   >     Router.group ~path:"/u/:id<string>"
-  >       [ Router.route A ~path:"/p/:id<int>" ~page:P.a ];
+  >       [ Router.route A ~path:"/p/:id<int>" ~page:Pages.a ];
   >   ]
   > EOF
   File "Routes.ml", line 4, characters 29-42:
@@ -85,10 +85,10 @@ A loader label used twice in a branch
   > Router.make
   >   [
   >     Router.group ~path:"/u" ~loader:Loaders.user
-  >       [ Router.route A ~path:"/" ~page:P.a ~loader:Other.user ];
+  >       [ Router.route A ~path:"/" ~page:Pages.a ~loader:Other.user ];
   >   ]
   > EOF
-  File "Routes.ml", line 4, characters 51-61:
+  File "Routes.ml", line 4, characters 55-65:
   Error: label user is used twice in this branch (params, search fields and loader results share one set of labels)
   [1]
 
@@ -97,7 +97,7 @@ A search field with the name of a param
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.route A ~path:"/u/:id<string>" ~page:P.a
+  >     Router.route A ~path:"/u/:id<string>" ~page:Pages.a
   >       ~search:{ id = optional int };
   >   ]
   > EOF
@@ -111,10 +111,10 @@ A group search field and a route search field with one name
   > Router.make
   >   [
   >     Router.group ~path:"/u" ~search:{ q = optional string }
-  >       [ Router.route A ~path:"/" ~page:P.a ~search:{ q = many string } ];
+  >       [ Router.route A ~path:"/" ~page:Pages.a ~search:{ q = many string } ];
   >   ]
   > EOF
-  File "Routes.ml", line 4, characters 51-70:
+  File "Routes.ml", line 4, characters 55-74:
   Error: label q is used twice in this branch (params, search fields and loader results share one set of labels)
   [1]
 
@@ -131,7 +131,7 @@ A redirect target that names an unknown param
 An action with GET
 
   $ gen <<'EOF'
-  > Router.make [ Router.action A ~path:"/a" ~method_:`GET ~handler:H.a ]
+  > Router.make [ Router.action A ~path:"/a" ~method_:`GET ~handler:Handlers.a ]
   > EOF
   File "Routes.ml", line 1, characters 50-54:
   Error: Router.action cannot use `GET; use `POST, `PUT, `PATCH or `DELETE
@@ -140,7 +140,7 @@ An action with GET
 An unknown method
 
   $ gen <<'EOF'
-  > Router.make [ Router.endpoint A ~path:"/a" ~method_:`TRACE ~handler:H.a ]
+  > Router.make [ Router.endpoint A ~path:"/a" ~method_:`TRACE ~handler:Handlers.a ]
   > EOF
   File "Routes.ml", line 1, characters 52-58:
   Error: ~method_ must be one of `GET, `POST, `PUT, `PATCH, `DELETE
@@ -149,7 +149,7 @@ An unknown method
 A catch-all that is not the last segment
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/docs/:parts<string...>/edit" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/docs/:parts<string...>/edit" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-65:
   Error: catch-all :parts in path "/docs/:parts<string...>/edit" must be the last segment
@@ -161,7 +161,7 @@ A catch-all in a group path
   > Router.make
   >   [
   >     Router.group ~path:"/docs/:parts<string...>"
-  >       [ Router.route A ~path:"/" ~page:P.a ];
+  >       [ Router.route A ~path:"/" ~page:Pages.a ];
   >   ]
   > EOF
   File "Routes.ml", line 3, characters 23-48:
@@ -171,7 +171,7 @@ A catch-all in a group path
 A trailing slash
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a/" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a/" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-40:
   Error: path "/a/" has an empty segment or a trailing slash
@@ -180,7 +180,7 @@ A trailing slash
 A dot segment
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a/../b" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a/../b" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-44:
   Error: path "/a/../b" has a ".." segment
@@ -189,7 +189,7 @@ A dot segment
 An encoded static segment
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/caf%C3%A9" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/caf%C3%A9" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-47:
   Error: segment "caf%C3%A9" in path "/caf%C3%A9" holds % ? or #; write segments decoded
@@ -198,7 +198,7 @@ An encoded static segment
 A path without a leading slash
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"a" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-38:
   Error: path "a" must start with /
@@ -207,7 +207,7 @@ A path without a leading slash
 An unknown param type
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a/:x<float>" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a/:x<float>" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-49:
   Error: param :x in path "/a/:x<float>" has type "float"; the types are int, string, string... and a module path
@@ -216,7 +216,7 @@ An unknown param type
 A param without a type
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a/:x" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a/:x" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-42:
   Error: param ":x" in path "/a/:x" must be written :name<type>
@@ -225,14 +225,14 @@ A param without a type
 A param name that is a keyword
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a/:type<string>" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a/:type<string>" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-53:
   Error: param "type" in path "/a/:type<string>" is not a lowercase OCaml label
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a/:effect<string>" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a/:effect<string>" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-55:
   Error: param "effect" in path "/a/:effect<string>" is not a lowercase OCaml label
@@ -243,7 +243,7 @@ A label reserved by the generated code
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.route A ~path:"/a" ~page:P.a
+  >     Router.route A ~path:"/a" ~page:Pages.a
   >       ~search:{ with_query = optional string };
   >   ]
   > EOF
@@ -254,7 +254,7 @@ A label reserved by the generated code
 A param named href, which the route helpers call
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a/:href<string>" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a/:href<string>" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-53:
   Error: label href is reserved by the generated code
@@ -263,21 +263,21 @@ A param named href, which the route helpers call
 A route name whose helper is a keyword
 
   $ gen <<'EOF'
-  > Router.make [ Router.route Type ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route Type ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name Type makes the helper Routes.type, which is an OCaml keyword; choose another name
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.endpoint Method ~path:"/a" ~method_:`GET ~handler:H.a ]
+  > Router.make [ Router.endpoint Method ~path:"/a" ~method_:`GET ~handler:Handlers.a ]
   > EOF
   File "Routes.ml", line 1, characters 30-36:
   Error: name Method makes the helper Routes.method, which is an OCaml keyword; choose another name
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.action Effect ~path:"/a" ~method_:`POST ~handler:H.a ]
+  > Router.make [ Router.action Effect ~path:"/a" ~method_:`POST ~handler:Handlers.a ]
   > EOF
   File "Routes.ml", line 1, characters 28-34:
   Error: name Effect makes the helper Routes.effect, which is an OCaml keyword; choose another name
@@ -286,21 +286,21 @@ A route name whose helper is a keyword
 A route name whose helper the generated code already defines
 
   $ gen <<'EOF'
-  > Router.make [ Router.route Href ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route Href ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name Href makes the helper Routes.href, which the generated code already defines; choose another name
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.route Find ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route Find ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name Find makes the helper Routes.find, which the generated code already defines; choose another name
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.route With_query ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route With_query ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-37:
   Error: name With_query makes the helper Routes.with_query, which the generated code already defines; choose another name
@@ -310,16 +310,16 @@ A bad search kind
 
   $ gen <<'EOF'
   > Router.make
-  >   [ Router.route A ~path:"/a" ~page:P.a ~search:{ q = required string } ]
+  >   [ Router.route A ~path:"/a" ~page:Pages.a ~search:{ q = required string } ]
   > EOF
-  File "Routes.ml", line 2, characters 54-69:
+  File "Routes.ml", line 2, characters 58-73:
   Error: search field q must be optional T, default T value or many T
   [1]
 
 A path that is not a literal
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:Paths.a ~page:P.a ]
+  > Router.make [ Router.route A ~path:Paths.a ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-42:
   Error: path must be a string literal
@@ -328,7 +328,7 @@ A path that is not a literal
 A name that is not a constructor
 
   $ gen <<'EOF'
-  > Router.make [ Router.route "a" ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route "a" ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-30:
   Error: the route name must be a constructor such as Issue
@@ -337,36 +337,36 @@ A name that is not a constructor
 A route without a name
 
   $ gen <<'EOF'
-  > Router.make [ Router.route ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route ~path:"/a" ~page:Pages.a ]
   > EOF
-  File "Routes.ml", line 1, characters 14-47:
+  File "Routes.ml", line 1, characters 14-51:
   Error: Router.route takes the route name (such as Issue) as its one unlabelled argument
   [1]
 
 An unknown node
 
   $ gen <<'EOF'
-  > Router.make [ Router.page A ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.page A ~path:"/a" ~page:Pages.a ]
   > EOF
-  File "Routes.ml", line 1, characters 14-48:
+  File "Routes.ml", line 1, characters 14-52:
   Error: unknown node Router.page; the nodes are Router.make, Router.group, Router.route, Router.endpoint, Router.action and Router.redirect (names of the route file syntax, not OCaml values)
   [1]
 
 A node that is not a Router call
 
   $ gen <<'EOF'
-  > Router.make [ route A ~path:"/a" ~page:P.a ]
+  > Router.make [ route A ~path:"/a" ~page:Pages.a ]
   > EOF
-  File "Routes.ml", line 1, characters 14-42:
+  File "Routes.ml", line 1, characters 14-46:
   Error: expected a route node such as Router.route Home ~path:"/" ~page:Pages.home
   [1]
 
 An unknown argument
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a" ~page:P.a ~layout:L.a ]
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~layout:Layouts.a ]
   > EOF
-  File "Routes.ml", line 1, characters 58-61:
+  File "Routes.ml", line 1, characters 62-71:
   Error: Router.route has no argument ~layout; its labelled arguments are ~path, ~page, ~loader, ~guard, ~search, ~headers, ~cache, ~prerender
   [1]
 
@@ -382,18 +382,18 @@ A missing argument
 An argument given twice
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a" ~page:P.a ~page:P.b ]
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~page:Pages.b ]
   > EOF
-  File "Routes.ml", line 1, characters 56-59:
+  File "Routes.ml", line 1, characters 60-67:
   Error: argument ~page is given twice
   [1]
 
 An optional argument
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a" ~page:P.a ?guard:None ]
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ?guard:None ]
   > EOF
-  File "Routes.ml", line 1, characters 57-61:
+  File "Routes.ml", line 1, characters 61-65:
   Error: ?guard: optional arguments are not supported
   [1]
 
@@ -402,11 +402,11 @@ A route with children
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.route A ~path:"/a" ~page:P.a
-  >       [ Router.route B ~path:"/b" ~page:P.b ];
+  >     Router.route A ~path:"/a" ~page:Pages.a
+  >       [ Router.route B ~path:"/b" ~page:Pages.b ];
   >   ]
   > EOF
-  File "Routes.ml", lines 3-4, characters 4-45:
+  File "Routes.ml", lines 3-4, characters 4-49:
   Error: Router.route takes the route name (such as Issue) as its one unlabelled argument
   [1]
 
@@ -425,7 +425,7 @@ Children that are not a list literal
   > Router.make children
   > EOF
   File "Routes.ml", line 1, characters 12-20:
-  Error: the child nodes must be a list such as [ Router.route A ~path:"/a" ~page:P.a ]
+  Error: the child nodes must be a list such as [ Router.route A ~path:"/a" ~page:Pages.a ]
   [1]
 
 A redirect with a name
@@ -449,9 +449,9 @@ A redirect target that is not Permanent or Temporary
 prerender that is not a literal
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a" ~page:P.a ~prerender:flag ]
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~prerender:flag ]
   > EOF
-  File "Routes.ml", line 1, characters 61-65:
+  File "Routes.ml", line 1, characters 65-69:
   Error: ~prerender must be true or false
   [1]
 
@@ -461,7 +461,7 @@ A loader that is not a value path
   > Router.make
   >   [
   >     Router.group ~path:"/a" ~loader:(fun _ -> ())
-  >       [ Router.route A ~path:"/" ~page:P.a ];
+  >       [ Router.route A ~path:"/" ~page:Pages.a ];
   >   ]
   > EOF
   File "Routes.ml", line 3, characters 36-49:
@@ -471,9 +471,9 @@ A loader that is not a value path
 A page that is not a value path
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a" ~page:(P.page ~x:1) ]
+  > Router.make [ Router.route A ~path:"/a" ~page:(Pages.page ~x:1) ]
   > EOF
-  File "Routes.ml", line 1, characters 46-59:
+  File "Routes.ml", line 1, characters 46-63:
   Error: ~page must be a value path such as Pages.home
   [1]
 
@@ -481,9 +481,9 @@ A handler that is not a value path
 
   $ gen <<'EOF'
   > Router.make
-  >   [ Router.endpoint A ~path:"/a" ~method_:`GET ~handler:(fun _ -> H.a) ]
+  >   [ Router.endpoint A ~path:"/a" ~method_:`GET ~handler:(fun _ -> Handlers.a) ]
   > EOF
-  File "Routes.ml", line 2, characters 56-70:
+  File "Routes.ml", line 2, characters 56-77:
   Error: ~handler must be a value path such as Pages.home
   [1]
 
@@ -499,9 +499,9 @@ A nested Router.make
 A let binding instead of an expression
 
   $ gen <<'EOF'
-  > let routes = Router.make [ Router.route A ~path:"/a" ~page:P.a ]
+  > let routes = Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
   > EOF
-  File "Routes.ml", line 1, characters 0-64:
+  File "Routes.ml", line 1, characters 0-68:
   Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
   [1]
 
@@ -510,7 +510,7 @@ An open before the expression
   $ gen <<'EOF'
   > open Shared
   > ;;
-  > Router.make [ Router.route A ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 0-11:
   Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
@@ -519,10 +519,10 @@ An open before the expression
 A second expression
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a" ~page:P.a ];;
-  > Router.make [ Router.route B ~path:"/b" ~page:P.b ]
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ];;
+  > Router.make [ Router.route B ~path:"/b" ~page:Pages.b ]
   > EOF
-  File "Routes.ml", line 2, characters 0-51:
+  File "Routes.ml", line 2, characters 0-55:
   Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
   [1]
 
@@ -536,7 +536,7 @@ An empty file
 A syntax error
 
   $ gen <<'EOF'
-  > Router.make [ Router.route A ~path:"/a" ~page:P.a
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a
   > EOF
   File "Routes.ml", line 2, characters 0-0:
   Error: Syntax error: ] expected
@@ -547,23 +547,23 @@ A syntax error
 The root must be Router.make
 
   $ gen <<'EOF'
-  > Router.route A ~path:"/a" ~page:P.a
+  > Router.route A ~path:"/a" ~page:Pages.a
   > EOF
-  File "Routes.ml", line 1, characters 0-35:
+  File "Routes.ml", line 1, characters 0-39:
   Error: the root must be Router.make
   [1]
 
 Valid input, every node kind, exits 0
 
   $ gen <<'EOF' > /dev/null
-  > Router.make ~layout:L.root ~headers:[ ("x", "y") ] ~cache:no_store ~prerender:false
+  > Router.make ~layout:Layouts.root ~headers:[ ("x", "y") ] ~cache:no_store ~prerender:false
   >   [
-  >     Router.group ~path:"/g/:id<M.Id>" ~layout:L.g ~loader:L.load ~guard:G.ok
-  >       ~not_found:P.nf ~error:P.err ~search:{ q = optional string } ~prerender:true
+  >     Router.group ~path:"/g/:id<Params.Id>" ~layout:Layouts.g ~loader:Loaders.load ~guard:Guards.ok
+  >       ~not_found:Pages.nf ~error:Pages.err ~search:{ q = optional string } ~prerender:true
   >       [
-  >         Router.route A ~path:"/" ~page:P.a;
-  >         Router.endpoint B ~path:"/b" ~method_:`GET ~handler:H.b;
-  >         Router.action C ~path:"/b" ~method_:`POST ~handler:H.c;
+  >         Router.route A ~path:"/" ~page:Pages.a;
+  >         Router.endpoint B ~path:"/b" ~method_:`GET ~handler:Handlers.b;
+  >         Router.action C ~path:"/b" ~method_:`POST ~handler:Handlers.c;
   >       ];
   >     Router.redirect ~path:"/x" ~to_:(Temporary "/");
   >   ]
@@ -572,7 +572,7 @@ Valid input, every node kind, exits 0
 A route named Some
 
   $ gen <<'EOF'
-  > Router.make [ Router.route Some ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route Some ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name Some is a predefined constructor that the generated code uses; choose another name
@@ -581,7 +581,7 @@ A route named Some
 A route named None
 
   $ gen <<'EOF'
-  > Router.make [ Router.route None ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route None ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name None is a predefined constructor that the generated code uses; choose another name
@@ -590,7 +590,7 @@ A route named None
 A route named true
 
   $ gen <<'EOF'
-  > Router.make [ Router.route true ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route true ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name true is a predefined constructor that the generated code uses; choose another name
@@ -599,7 +599,7 @@ A route named true
 A route named false
 
   $ gen <<'EOF'
-  > Router.make [ Router.route false ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route false ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-32:
   Error: name false is a predefined constructor that the generated code uses; choose another name
@@ -608,7 +608,7 @@ A route named false
 A route named ()
 
   $ gen <<'EOF'
-  > Router.make [ Router.route () ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route () ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-29:
   Error: name () is a predefined constructor that the generated code uses; choose another name
@@ -617,7 +617,7 @@ A route named ()
 A route named []
 
   $ gen <<'EOF'
-  > Router.make [ Router.route [] ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route [] ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-29:
   Error: name [] is a predefined constructor that the generated code uses; choose another name
@@ -626,7 +626,7 @@ A route named []
 A route named ::
 
   $ gen <<'EOF'
-  > Router.make [ Router.route (::) ~path:"/a" ~page:P.a ]
+  > Router.make [ Router.route (::) ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name :: is a predefined constructor that the generated code uses; choose another name

@@ -1,8 +1,8 @@
 open Alcotest
 open Routes_fixture
-module R = Yuka.Router
+module Router = Yuka.Router
 
-let meth_name : R.meth -> string = function
+let meth_name : Router.meth -> string = function
   | `GET -> "GET"
   | `HEAD -> "HEAD"
   | `POST -> "POST"
@@ -13,12 +13,12 @@ let meth_name : R.meth -> string = function
   | `Other m -> m
 
 let pp_lookup ppf = function
-  | R.Found r -> Format.fprintf ppf "Found %s" (Routes.href r)
-  | R.Wrong_method ms ->
+  | Router.Found r -> Format.fprintf ppf "Found %s" (Routes.href r)
+  | Router.Wrong_method ms ->
       Format.fprintf ppf "Wrong_method [%s]" (String.concat "; " (List.map meth_name ms))
-  | R.Redirect { permanent; location } ->
+  | Router.Redirect { permanent; location } ->
       Format.fprintf ppf "Redirect %b %s" permanent location
-  | R.Missing -> Format.fprintf ppf "Missing"
+  | Router.Missing -> Format.fprintf ppf "Missing"
 
 let lookup = testable pp_lookup ( = )
 
@@ -58,7 +58,7 @@ let blog = Routes.Blog { lang = None; tag = None; page = 1; label = []; draft = 
 let issue =
   Routes.Issue { id = 12; tab = None; seen = []; view = Params.Tab.Overview }
 
-let samples : (R.meth * Routes.t) list =
+let samples : (Router.meth * Routes.t) list =
   [
     (`GET, Home);
     (`GET, blog);
@@ -176,14 +176,14 @@ let round_trip =
         List.iter
           (fun (meth, r) ->
             let target = Routes.href r in
-            check lookup (meth_name meth ^ " " ^ target) (R.Found r) (find ~meth target))
+            check lookup (meth_name meth ^ " " ^ target) (Router.Found r) (find ~meth target))
           samples);
     t "href refuses or round-trips edge values" (fun () ->
         List.iter
           (fun r ->
             match Routes.href r with
             | exception Invalid_argument _ -> ()
-            | target -> check lookup target (R.Found r) (find target))
+            | target -> check lookup target (Router.Found r) (find target))
           edge_values);
     t "href refuses segments that find cannot give back" (fun () ->
         let refused r =
@@ -217,7 +217,7 @@ let round_trip =
         check int "constructors" 14 (List.length names));
   ]
 
-let found (r : Routes.t) = R.Found r
+let found (r : Routes.t) = Router.Found r
 
 let find_cases =
   [
@@ -225,41 +225,41 @@ let find_cases =
         check lookup "new" (found (New_post { lang = None })) (find "/blog/new");
         check lookup "news" (found (Post { slug = "news"; lang = None })) (find "/blog/news"));
     t "catch-all needs one segment" (fun () ->
-        check lookup "none" R.Missing (find "/docs");
+        check lookup "none" Router.Missing (find "/docs");
         check lookup "one" (found (Doc { parts = [ "a" ] })) (find "/docs/a");
         check lookup "decoded" (found (Doc { parts = [ "a/b"; "c" ] })) (find "/docs/a%2Fb/c"));
     t "int is strict" (fun () ->
         List.iter
-          (fun s -> check lookup s R.Missing (find ("/page/" ^ s)))
+          (fun s -> check lookup s Router.Missing (find ("/page/" ^ s)))
           [ "1a"; "-"; "+5"; "0x10"; "1.0"; "99999999999999999999999" ];
         check lookup "-5" (found (Page_n { n = -5 })) (find "/page/-5");
         List.iter
-          (fun s -> check lookup ("not canonical " ^ s) R.Missing (find ("/page/" ^ s)))
+          (fun s -> check lookup ("not canonical " ^ s) Router.Missing (find ("/page/" ^ s)))
           [ "007"; "01"; "-0"; "+1"; "1_000"; "0b1" ];
         check lookup "0" (found (Page_n { n = 0 })) (find "/page/0"));
     t "custom param None is Missing" (fun () ->
-        check lookup "abc" R.Missing (find "/issue/abc");
-        check lookup "zero" R.Missing (find "/issue/YUK-0");
-        check lookup "action" R.Missing (find ~meth:`POST "/issue/abc/close"));
+        check lookup "abc" Router.Missing (find "/issue/abc");
+        check lookup "zero" Router.Missing (find "/issue/YUK-0");
+        check lookup "action" Router.Missing (find ~meth:`POST "/issue/abc/close"));
     t "wrong method lists the methods of the path" (fun () ->
-        check lookup "page" (R.Wrong_method [ `GET ]) (find ~meth:`POST "/");
-        check lookup "two" (R.Wrong_method [ `GET; `DELETE ]) (find ~meth:`PUT "/feed.xml");
-        check lookup "group" (R.Wrong_method [ `GET; `PUT ]) (find ~meth:`DELETE "/issue/YUK-1/json");
-        check lookup "action" (R.Wrong_method [ `POST ]) (find "/issue/YUK-1/close");
-        check lookup "other" (R.Wrong_method [ `GET ]) (find ~meth:(`Other "TRACE") "/page/1"));
+        check lookup "page" (Router.Wrong_method [ `GET ]) (find ~meth:`POST "/");
+        check lookup "two" (Router.Wrong_method [ `GET; `DELETE ]) (find ~meth:`PUT "/feed.xml");
+        check lookup "group" (Router.Wrong_method [ `GET; `PUT ]) (find ~meth:`DELETE "/issue/YUK-1/json");
+        check lookup "action" (Router.Wrong_method [ `POST ]) (find "/issue/YUK-1/close");
+        check lookup "other" (Router.Wrong_method [ `GET ]) (find ~meth:(`Other "TRACE") "/page/1"));
     t "HEAD answers like GET" (fun () ->
         check lookup "page" (found Home) (find ~meth:`HEAD "/");
         check lookup "endpoint" (found Feed) (find ~meth:`HEAD "/feed.xml"));
     t "redirects substitute and encode params, for every method" (fun () ->
-        let moved = R.Redirect { permanent = true; location = "/issue/YUK-7" } in
+        let moved = Router.Redirect { permanent = true; location = "/issue/YUK-7" } in
         check lookup "GET" moved (find "/i/YUK-7");
         check lookup "POST" moved (find ~meth:`POST "/i/YUK-7");
-        check lookup "bad param" R.Missing (find "/i/x");
+        check lookup "bad param" Router.Missing (find "/i/x");
         check lookup "catch-all"
-          (R.Redirect { permanent = false; location = "/docs/a%20b/c" })
+          (Router.Redirect { permanent = false; location = "/docs/a%20b/c" })
           (find "/old-docs/a%20b/c");
         check lookup "static"
-          (R.Redirect { permanent = false; location = "/blog" })
+          (Router.Redirect { permanent = false; location = "/blog" })
           (find ~meth:`DELETE "/legacy-blog"));
     t "search decoding" (fun () ->
         let blog ?(tag = None) ?(page = 1) ?(label = []) ?(draft = false) () =
@@ -280,35 +280,35 @@ let find_cases =
           (found (New_post { lang = Some "fr" }))
           (find "/blog/new?lang=fr"));
     t "no match" (fun () ->
-        check lookup "unknown" R.Missing (find "/nope");
-        check lookup "too long" R.Missing (find "/blog/a/b");
-        check lookup "prefix only" R.Missing (find "/issue"));
+        check lookup "unknown" Router.Missing (find "/nope");
+        check lookup "too long" Router.Missing (find "/blog/a/b");
+        check lookup "prefix only" Router.Missing (find "/issue"));
   ]
 
 let router_cases =
   [
     t "encode" (fun () ->
-        check string "reserved" "a%2Fb%20c%3F%23%C3%A9%26%3D%2B" (R.encode "a/b c?#\xc3\xa9&=+");
-        check string "unreserved" "AZaz09-._~" (R.encode "AZaz09-._~"));
+        check string "reserved" "a%2Fb%20c%3F%23%C3%A9%26%3D%2B" (Router.encode "a/b c?#\xc3\xa9&=+");
+        check string "unreserved" "AZaz09-._~" (Router.encode "AZaz09-._~"));
     t "segment" (fun () ->
-        check string "encoded" "a%2Fb" (R.segment "a/b");
+        check string "encoded" "a%2Fb" (Router.segment "a/b");
         List.iter
           (fun s ->
             check bool s true
-              (match R.segment s with exception Invalid_argument _ -> true | _ -> false))
+              (match Router.segment s with exception Invalid_argument _ -> true | _ -> false))
           [ ""; "."; ".." ]);
     t "int_param" (fun () ->
-        check (option int) "neg" (Some (-12)) (R.int_param "-12");
-        check (option int) "empty" None (R.int_param "");
-        check (option int) "space" None (R.int_param " 1");
-        check (option int) "zero" (Some 0) (R.int_param "0");
+        check (option int) "neg" (Some (-12)) (Router.int_param "-12");
+        check (option int) "empty" None (Router.int_param "");
+        check (option int) "space" None (Router.int_param " 1");
+        check (option int) "zero" (Some 0) (Router.int_param "0");
         List.iter
-          (fun s -> check (option int) s None (R.int_param s))
+          (fun s -> check (option int) s None (Router.int_param s))
           [ "01"; "-0"; "+1"; "0x10"; "1_0"; "-01" ]);
     t "search" (fun () ->
         check (list string) "all values" [ "1"; "3" ]
-          (R.search [ ("a", "1"); ("b", "2"); ("a", "3") ] "a");
-        check (list string) "absent" [] (R.search [ ("a", "1") ] "z"));
+          (Router.search [ ("a", "1"); ("b", "2"); ("a", "3") ] "a");
+        check (list string) "absent" [] (Router.search [ ("a", "1") ] "z"));
   ]
 
 let () =

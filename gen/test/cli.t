@@ -19,9 +19,9 @@ order:
   $ cat > Routes.ml <<'X'
   > Router.make [ Router.route Home ~path:"/" ~page:Pages.home ]
   > X
-  $ yuka routes --shared --source Routes.ml < /dev/null > a.ml
-  $ yuka routes --source Routes.ml --shared > b.ml
-  $ cmp a.ml b.ml && grep -c "let find" a.ml
+  $ yuka routes --shared --source Routes.ml < /dev/null > first.ml
+  $ yuka routes --source Routes.ml --shared > second.ml
+  $ cmp first.ml second.ml && grep -c "let find" first.ml
   1
   $ yuka routes --shared-module App.Routes --source Routes.ml --server | grep -c "let app"
   1
@@ -31,7 +31,7 @@ order:
   2
   $ yuka routes --server --source Routes.ml 2>&1 | head -1
   yuka routes: --server needs --shared-module MODULE.
-  $ yuka routes --shared --shared-module A --source Routes.ml 2>&1 | head -1
+  $ yuka routes --shared --shared-module Routes --source Routes.ml 2>&1 | head -1
   yuka routes: --shared-module is only for --server.
   $ yuka routes --shared --source Routes.ml extra 2>&1 | head -1
   yuka routes: unexpected argument extra.
@@ -43,10 +43,10 @@ order:
 
 yuka islands and yuka css take --dir, once per directory:
 
-  $ mkdir lib && printf '(library (name app))\n' > lib/dune && printf 'let[@client] make () = ()\n' > lib/c.mlx
+  $ mkdir lib && printf '(library (name app))\n' > lib/dune && printf 'let[@client] make () = ()\n' > lib/counter.mlx
   $ yuka islands --dir lib --manifest
   {
-    "App.C": "./lib/c.js"
+    "App.Counter": "./lib/counter.js"
   }
   $ yuka islands --manifest 2>&1 | head -1
   yuka islands: give at least one --dir.

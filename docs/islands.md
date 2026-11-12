@@ -60,7 +60,7 @@ a codec:
 
 - `int`, `float`, `string`, `bool`, `unit`, tuples, and `list`,
   `array`, `option` and `result` of types with a codec.
-- `M.t` uses `M.codec`, and a type `foo` uses `foo_codec`.
+- `Issue.t` uses `Issue.codec`, and a type `foo` uses `foo_codec`.
   `[@@deriving codec]` on a record or a variant writes them.
 - `'a Yuka.Async.t`: the server sends the value when it is ready, in the
   same streamed response. Show it with `<Yuka.Await>`.
