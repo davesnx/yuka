@@ -1,0 +1,6 @@
+(library
+ (name size_codec_page)
+ (modes melange)
+ (libraries yuka)
+ (preprocess
+  (pps yuka.ppx)))

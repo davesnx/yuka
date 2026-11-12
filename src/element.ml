@@ -1,27 +1,28 @@
 open Types
 
-type 'kind element = node
+type 'kind element = 'kind Kind.element
 type 'kind attribute = attr
 
-let text s = Text s
-let int n = Text (string_of_int n)
+let text s = Kind.of_node (Text s)
+let int n = Kind.of_node (Text (string_of_int n))
 let float f =
-  Text
+  Kind.of_node @@ Text
     (if f <> f then "NaN"
      else if f = infinity then "Infinity"
      else if f = neg_infinity then "-Infinity"
      else Json.float_repr f)
-let empty = Fragment []
-let list children = Fragment children
-let array children = Fragment (Array.to_list children)
-let fragment children = Fragment children
+let empty = Kind.of_node (Fragment [])
+let list children = Kind.of_node (Fragment (Kind.nodes children))
+let array children = Kind.of_node (Fragment (Array.to_list (Kind.node_array children)))
+let fragment children = Kind.of_node (Fragment (Kind.nodes children))
 let lower tag attrs children =
   Client.use_element ();
-  Element { tag; attrs; children }
+  Kind.of_node (Element { tag; attrs; children = Kind.nodes children })
 
 let log = Types.log
 
 let valid name =
+  Client.use_url_check ();
   if Web.in_browser && not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ name)
 
 let url_attr _tag name value =
@@ -32,13 +33,13 @@ let attr name value = url_attr "" name value
 let attr_unchecked name value =
   Web.refuse_url_name name;
   Static (name, value)
-let hole f = Hole f
+let hole f = Kind.of_node (Hole (Kind.fn f))
 let slot s =
   Client.use_slot ();
-  Slot s
+  Kind.of_node (Slot (Slot_value.to_slot s))
 
 module Slot = struct
-  let make content = { content = Some content; dom = ref [] }
+  let make content = Slot_value.of_slot { content = Some (Kind.to_node content); dom = ref [] }
 end
 
 type stylesheet = string
@@ -47,9 +48,10 @@ let stylesheet href = href
 
 let use_css href body =
   if !Base.server_rendering then
-    Fragment
-      [ lower "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] [];
-        body ]
+    Kind.of_node
+      (Fragment
+         [ Kind.to_node (lower "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] []);
+           Kind.to_node body ])
   else begin
     if Web.in_browser then Web.add_stylesheet href;
     body
@@ -66,12 +68,12 @@ let hole_attr_unchecked name f =
 let on name handler = Handler (name, handler)
 
 let each ?(equal = Signal.same) ~key items render =
-  Each { items; key; equal; render }
+  Kind.of_node (Each { items; key; equal; render = Kind.fn render })
 
 module Await = struct
-  let make ~async ~loading ?(failed = fun _ -> Fragment []) ~children () =
+  let make ~async ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
     Client.use_await ();
-    Await { async; loading; failed; render = children }
+    Kind.of_node (Await { async; loading = Kind.to_node loading; failed = Kind.fn failed; render = Kind.fn children })
 end
 
 let suspend ~loading ?failed async =
@@ -92,7 +94,7 @@ module Catch = struct
       let reset () = State.set error None in
       let show (o : Base.owner) m =
         o.catch <- outer;
-        fallback ~error:m ~reset
+        Kind.to_node (fallback ~error:m ~reset)
       in
       Hole
         (fun () ->
@@ -102,7 +104,7 @@ module Catch = struct
           | None -> (
               o.catch <- Some (fun e -> State.set error (Some (Web.exn_to_string e)));
               match Scheduler.untrack children with
-              | n -> n
+              | n -> Kind.to_node n
               | exception e ->
                   let m = Web.exn_to_string e in
                   Base.dispose_owner o;
@@ -110,11 +112,11 @@ module Catch = struct
                   show o m))
     in
     Client.use_catch ();
-    Catch { children; fallback; client }
+    Kind.of_node (Catch { children = Kind.fn children; fallback = Kind.fallback fallback; client })
 end
 
 module Show = struct
-  let make ~status ~loading ?(failed = fun _ -> Fragment []) ~children () =
+  let make ~status ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
     let view =
       State.memo
         ~equal:(fun a b ->
@@ -129,10 +131,11 @@ module Show = struct
           | Idle | Loading None -> `Loading
           | Failed { error; _ } -> `Failed error)
     in
-    Hole
-      (fun () ->
-        match State.get view with
-        | `Data d -> Scheduler.untrack (fun () -> children d)
-        | `Loading -> loading
-        | `Failed e -> Scheduler.untrack (fun () -> failed e))
+    Kind.of_node
+      (Hole
+         (fun () ->
+           match State.get view with
+           | `Data d -> Kind.to_node (Scheduler.untrack (fun () -> children d))
+           | `Loading -> Kind.to_node loading
+           | `Failed e -> Kind.to_node (Scheduler.untrack (fun () -> failed e))))
 end

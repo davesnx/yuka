@@ -227,23 +227,25 @@ module Derived =
               (fun (j : Yuka.Json.t) ->
                  match j with
                  | `Assoc _yuka_fields ->
-                     (match Stdlib.List.assoc_opt "id" _yuka_fields with
+                     let _yuka_field _yuka_key =
+                       Stdlib.List.find_map
+                         (fun (_yuka_k, _yuka_v) ->
+                            if Stdlib.String.equal _yuka_k _yuka_key
+                            then Some _yuka_v
+                            else None) _yuka_fields in
+                     (match _yuka_field "id" with
                       | Some _yuka_j0 ->
                           (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0
                            with
                            | Stdlib.Ok _yuka_v0 ->
-                               (match Stdlib.List.assoc_opt "title"
-                                        _yuka_fields
-                                with
+                               (match _yuka_field "title" with
                                 | Some _yuka_j1 ->
                                     (match Yuka.Codec.decode
                                              Yuka.Codec.string _yuka_j1
                                      with
                                      | Stdlib.Ok _yuka_v1 ->
                                          let _yuka_j2 =
-                                           match Stdlib.List.assoc_opt "note"
-                                                   _yuka_fields
-                                           with
+                                           match _yuka_field "note" with
                                            | Some j -> j
                                            | None -> `Null in
                                          (match Yuka.Codec.decode
@@ -252,9 +254,7 @@ module Derived =
                                                   _yuka_j2
                                           with
                                           | Stdlib.Ok _yuka_v2 ->
-                                              (match Stdlib.List.assoc_opt
-                                                       "tags" _yuka_fields
-                                               with
+                                              (match _yuka_field "tags" with
                                                | Some _yuka_j3 ->
                                                    (match Yuka.Codec.decode
                                                             (Yuka.Codec.list
@@ -328,13 +328,18 @@ module Derived =
                            | Stdlib.Error e -> Stdlib.Error e)
                       | Stdlib.Error e -> Stdlib.Error e)
                  | `List ((`String "Box")::(`Assoc _yuka_fields)::[]) ->
-                     (match Stdlib.List.assoc_opt "w" _yuka_fields with
+                     let _yuka_field _yuka_key =
+                       Stdlib.List.find_map
+                         (fun (_yuka_k, _yuka_v) ->
+                            if Stdlib.String.equal _yuka_k _yuka_key
+                            then Some _yuka_v
+                            else None) _yuka_fields in
+                     (match _yuka_field "w" with
                       | Some _yuka_j0 ->
                           (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0
                            with
                            | Stdlib.Ok _yuka_v0 ->
-                               (match Stdlib.List.assoc_opt "h" _yuka_fields
-                                with
+                               (match _yuka_field "h" with
                                 | Some _yuka_j1 ->
                                     (match Yuka.Codec.decode Yuka.Codec.int
                                              _yuka_j1
@@ -412,12 +417,17 @@ module Derived =
               (fun (j : Yuka.Json.t) ->
                  match j with
                  | `Assoc _yuka_fields ->
-                     (match Stdlib.List.assoc_opt "s" _yuka_fields with
+                     let _yuka_field _yuka_key =
+                       Stdlib.List.find_map
+                         (fun (_yuka_k, _yuka_v) ->
+                            if Stdlib.String.equal _yuka_k _yuka_key
+                            then Some _yuka_v
+                            else None) _yuka_fields in
+                     (match _yuka_field "s" with
                       | Some _yuka_j0 ->
                           (match Yuka.Codec.decode status_codec _yuka_j0 with
                            | Stdlib.Ok _yuka_v0 ->
-                               (match Stdlib.List.assoc_opt "p" _yuka_fields
-                                with
+                               (match _yuka_field "p" with
                                 | Some _yuka_j1 ->
                                     (match Yuka.Codec.decode point_codec
                                              _yuka_j1
@@ -462,12 +472,18 @@ include
         (fun (j : Yuka.Json.t) ->
            match j with
            | `Assoc _yuka_fields ->
-               (match Stdlib.List.assoc_opt "a" _yuka_fields with
+               let _yuka_field _yuka_key =
+                 Stdlib.List.find_map
+                   (fun (_yuka_k, _yuka_v) ->
+                      if Stdlib.String.equal _yuka_k _yuka_key
+                      then Some _yuka_v
+                      else None) _yuka_fields in
+               (match _yuka_field "a" with
                 | Some _yuka_j0 ->
                     (match Yuka.Codec.decode Yuka.Codec.int _yuka_j0 with
                      | Stdlib.Ok _yuka_v0 ->
                          let _yuka_j1 =
-                           match Stdlib.List.assoc_opt "b" _yuka_fields with
+                           match _yuka_field "b" with
                            | Some j -> j
                            | None -> `Null in
                          (match Yuka.Codec.decode
@@ -476,8 +492,7 @@ include
                           with
                           | Stdlib.Ok _yuka_v1 ->
                               let _yuka_j2 =
-                                match Stdlib.List.assoc_opt "c" _yuka_fields
-                                with
+                                match _yuka_field "c" with
                                 | Some j -> j
                                 | None -> `Null in
                               (match Yuka.Codec.decode
@@ -520,7 +535,13 @@ module Async_codec =
               (fun (j : Yuka.Json.t) ->
                  match j with
                  | `Assoc _yuka_fields ->
-                     (match Stdlib.List.assoc_opt "a" _yuka_fields with
+                     let _yuka_field _yuka_key =
+                       Stdlib.List.find_map
+                         (fun (_yuka_k, _yuka_v) ->
+                            if Stdlib.String.equal _yuka_k _yuka_key
+                            then Some _yuka_v
+                            else None) _yuka_fields in
+                     (match _yuka_field "a" with
                       | Some _yuka_j0 ->
                           (match Yuka.Codec.decode
                                    (Yuka.Codec.async
@@ -528,8 +549,7 @@ module Async_codec =
                                    _yuka_j0
                            with
                            | Stdlib.Ok _yuka_v0 ->
-                               (match Stdlib.List.assoc_opt "b" _yuka_fields
-                                with
+                               (match _yuka_field "b" with
                                 | Some _yuka_j1 ->
                                     (match Yuka.Codec.decode
                                              (Yuka.Codec.async
@@ -573,7 +593,13 @@ include
         (fun (j : Yuka.Json.t) ->
            match j with
            | `Assoc _yuka_fields ->
-               (match Stdlib.List.assoc_opt "items" _yuka_fields with
+               let _yuka_field _yuka_key =
+                 Stdlib.List.find_map
+                   (fun (_yuka_k, _yuka_v) ->
+                      if Stdlib.String.equal _yuka_k _yuka_key
+                      then Some _yuka_v
+                      else None) _yuka_fields in
+               (match _yuka_field "items" with
                 | Some _yuka_j0 ->
                     (match Yuka.Codec.decode
                              (Yuka.Codec.async
@@ -652,14 +678,18 @@ module Recursive =
               (fun (j : Yuka.Json.t) ->
                  match j with
                  | `Assoc _yuka_fields ->
-                     (match Stdlib.List.assoc_opt "label" _yuka_fields with
+                     let _yuka_field _yuka_key =
+                       Stdlib.List.find_map
+                         (fun (_yuka_k, _yuka_v) ->
+                            if Stdlib.String.equal _yuka_k _yuka_key
+                            then Some _yuka_v
+                            else None) _yuka_fields in
+                     (match _yuka_field "label" with
                       | Some _yuka_j0 ->
                           (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0
                            with
                            | Stdlib.Ok _yuka_v0 ->
-                               (match Stdlib.List.assoc_opt "kids"
-                                        _yuka_fields
-                                with
+                               (match _yuka_field "kids" with
                                 | Some _yuka_j1 ->
                                     (match Yuka.Codec.decode
                                              (Yuka.Codec.list rose_codec)
@@ -750,14 +780,18 @@ module Recursive =
                       | Stdlib.Ok _yuka_v0 -> Stdlib.Ok (Do _yuka_v0)
                       | Stdlib.Error e -> Stdlib.Error e)
                  | `List ((`String "Let")::(`Assoc _yuka_fields)::[]) ->
-                     (match Stdlib.List.assoc_opt "name" _yuka_fields with
+                     let _yuka_field _yuka_key =
+                       Stdlib.List.find_map
+                         (fun (_yuka_k, _yuka_v) ->
+                            if Stdlib.String.equal _yuka_k _yuka_key
+                            then Some _yuka_v
+                            else None) _yuka_fields in
+                     (match _yuka_field "name" with
                       | Some _yuka_j0 ->
                           (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0
                            with
                            | Stdlib.Ok _yuka_v0 ->
-                               (match Stdlib.List.assoc_opt "value"
-                                        _yuka_fields
-                                with
+                               (match _yuka_field "value" with
                                 | Some _yuka_j1 ->
                                     (match Yuka.Codec.decode expr_codec
                                              _yuka_j1
@@ -933,12 +967,17 @@ include
         (fun (j : Yuka.Json.t) ->
            match j with
            | `Assoc _yuka_fields ->
-               (match Stdlib.List.assoc_opt "label" _yuka_fields with
+               let _yuka_field _yuka_key =
+                 Stdlib.List.find_map
+                   (fun (_yuka_k, _yuka_v) ->
+                      if Stdlib.String.equal _yuka_k _yuka_key
+                      then Some _yuka_v
+                      else None) _yuka_fields in
+               (match _yuka_field "label" with
                 | Some _yuka_j0 ->
                     (match Yuka.Codec.decode Yuka.Codec.string _yuka_j0 with
                      | Stdlib.Ok _yuka_v0 ->
-                         (match Stdlib.List.assoc_opt "children" _yuka_fields
-                          with
+                         (match _yuka_field "children" with
                           | Some _yuka_j1 ->
                               (match Yuka.Codec.decode Yuka.Codec.slot
                                        _yuka_j1

@@ -5,20 +5,15 @@
  (virtual_modules web dev client)
  (private_modules
   answers
-  codec
   cycle
   element
-  form
   form_core
-  live
   live_server
   navigation
   optimistic
   printer
-  remote
   router
   server
   signal
-  status
   topic)
  (default_implementation yuka.native))

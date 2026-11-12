@@ -213,10 +213,16 @@ let lis a =
   done;
   keep
 
+let url_hook : (string -> string -> string -> string [@u]) ref =
+  ref (fun [@u] tag name v ->
+      if Url.checked ~tag name then
+        failwith ("Yuka: no URL check for " ^ name ^ " of " ^ tag ^ ": the attribute was made without Yuka.attr, Yuka.hole_attr or Yuka.lower")
+      else v)
+
 let set_attr svg el name value =
   let value =
     match value with
-    | Some v -> Some (Url.check ~tag:(Web.lowercase (Web.local_name el)) ~log:Types.log (Web.lowercase name) v)
+    | Some v -> Some ((!url_hook) (Web.lowercase (Web.local_name el)) (Web.lowercase name) v [@u])
     | None -> None
   in
   match name with
@@ -502,7 +508,7 @@ and mount_each :
     type a.
     pos ->
     bool ->
-    (unit -> a list) ->
+    (unit -> a array) ->
     (a -> string) ->
     (a -> a -> bool) ->
     (a -> node) ->
@@ -534,13 +540,11 @@ and mount_each :
     { key = k; value = v; first; last; dispose }
   in
   let entries = ref [||] in
-  let rec initial = function
-    | [] -> ()
-    | v :: rest ->
-        push !entries (make_entry pos (key v) v);
-        initial rest
-  in
-  initial (State.peek source);
+  let first = State.peek source in
+  for i = 0 to Array.length first - 1 do
+    let v = get first i in
+    push !entries (make_entry pos (key v) v)
+  done;
   let stop = if owned then (drop_to_end pos; Js.null) else some (comment pos "]") in
   let clear_all () =
     if start == Js.null then Web.clear pos.parent ""
@@ -551,21 +555,18 @@ and mount_each :
       (get es i).dispose ()
     done
   in
-  let reconcile list =
-    let items = [||] and keys = [||] in
+  let reconcile source =
+    let n = Array.length source in
+    let items = alloc n and keys = alloc n in
     let wanted = Web.table () in
-    let rec collect = function
-      | [] -> ()
-      | v :: rest ->
-          let k = key v in
-          if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
-          Web.table_set wanted k true;
-          push items v;
-          push keys k;
-          collect rest
-    in
-    collect list;
-    let n = Array.length items in
+    for j = 0 to n - 1 do
+      let v = get source j in
+      let k = key v in
+      if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
+      Web.table_set wanted k true;
+      set items j v;
+      set keys j k
+    done;
     let es = !entries in
     let old = Web.table () in
     let removed = [||] in
@@ -661,7 +662,10 @@ let mount_await pos async loading failed render =
 let mount_catch pos last client =
   mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
 
+let use_url_check () = url_hook := fun [@u] tag name v -> Url.check ~tag ~log:Types.log name v
+
 let use_element () =
+  use_url_check ();
   element_hook := fun [@u] pos tag attrs children -> mount_element pos tag attrs children
 
 let use_await () =
@@ -684,13 +688,13 @@ let start ~adopt container f =
   in
   dispose
 
-let render container f = start ~adopt:false container f
+let render container f = start ~adopt:false container (Kind.fn f)
 let hydrate container f =
   use_element ();
   drop_rest := (fun [@u] pos -> walk_region pos (fun [@u] n -> Web.remove n));
   adopt_slot := (fun [@u] pos slot -> adopt_slot_now pos slot);
   Template.expander := (fun t p -> Template.expand t p);
-  start ~adopt:true container f
+  start ~adopt:true container (Kind.fn f)
 
 let roots : (unit -> unit [@u]) ref = ref (fun [@u] () -> ())
 
@@ -869,7 +873,7 @@ let boot entries props island =
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
-              match Base.with_owner o (fun () -> hydrate island build) with
+              match Base.with_owner o (fun () -> hydrate island (Kind.of_fn build)) with
               | d when !failed ->
                   stop d;
                   None
@@ -998,14 +1002,24 @@ let start_island entries lazy_entries props island =
         cancel ();
         drop_events ())
 
+let transport_hook : (string -> Json.t -> Json.t Async.t) ref =
+  ref (fun name _ -> failwith ("Yuka: no action transport for " ^ name ^ ": Action.send did not call Client.use_actions"))
+
+let use_actions () = transport_hook := transport
+
+let async_hook : (string -> Json.t Async.t) ref =
+  ref (fun id -> failwith ("Yuka: no reader for async value " ^ id ^ ": Codec.async did not call Client.use_async"))
+
+let use_async () = async_hook := async_value
+
 let script_props script =
   match Web.get_attribute script "data-yuka-props" with
   | Some id -> Some (id, Web.text_content script)
   | None -> None
 
 let start ?(lazy_entries = []) entries =
-  Action.transport := transport;
-  Types.async_source := async_value;
+  Types.transport := (fun name input -> !transport_hook name input);
+  Types.async_source := (fun id -> !async_hook id);
   let props = Web.table () in
   let waiting = ref [] in
   let island_id island =

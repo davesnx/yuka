@@ -26,7 +26,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     | Slot of slot
     | Template of { template : template; parts : part array }
     | Each : {
-        items : unit -> 'a list;
+        items : unit -> 'a array;
         key : 'a -> string;
         equal : 'a -> 'a -> bool;
         render : 'a -> node;
@@ -183,6 +183,9 @@ let async_error id message =
   | None ->
       !log_error ("async value " ^ id ^ " failed: " ^ message);
       "failed"
+
+let transport : (string -> Json.t -> Json.t Async.t) ref =
+  ref (fun _ _ -> Async.failed "no action transport")
 
 let async_source : (string -> Json.t Async.t) ref =
   ref (fun _ -> Async.failed "no async transport")
