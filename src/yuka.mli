@@ -36,7 +36,9 @@ module State : sig
   (** Reads the value without tracking. *)
 
   val set : 'a t -> 'a -> unit
-  (** Writes the value. *)
+  (** Writes the value. On the server, raises [Invalid_argument] for a
+      State made before the first server render or request of the process
+      (a module-level State): the process has one copy for every request. *)
 
   val update : 'a t -> ('a -> 'a) -> unit
   (** Like [set], with a function of the current value. *)
@@ -110,10 +112,6 @@ module Effect : sig
       called for the value at creation, and never during a server render.
       Default [equal]: as in {!State.make}. *)
 end
-
-type slot = Slot_value.t
-(** Server content passed to a client component. The server prints it; the
-    client keeps its DOM nodes and can place them, never re-render them. *)
 
 type trigger = [ `Idle | `Visible | `Interaction ]
 (** An event that starts an island: the browser is idle, the island is
@@ -304,14 +302,6 @@ val hole_attr : string -> (unit -> string option) -> client attribute
 (** An attribute whose value changes. [None] removes the attribute. On the
     client, [value], [checked] and [selected] are set as properties. A URL
     attribute gets the check of {!attr} on each value. *)
-
-val slot : slot -> client element
-(** Puts a slot where the content goes. *)
-
-module Slot : sig
-  val make : server element -> slot
-  (** A slot with this server content. *)
-end
 
 module Await : sig
   val make :
@@ -618,6 +608,10 @@ val runtime_island :
 (** A client component placed in a server tree. The server prints its HTML
     and its props. *)
 
+val runtime_slot : server element option -> client element
+(** The children of an island: [Some] content on the server, [None] on the
+    client, which keeps the DOM nodes the server printed. *)
+
 val runtime_entry : name:string -> (Json.t -> (unit -> client element, string) result) -> runtime_entry
 (** It decodes the props and gives the function that builds the
     component. *)
@@ -676,7 +670,7 @@ module Private : sig
         render : 'a -> node;
       }
         -> node
-    | Slot of slot_data
+    | Slot of slot
     | Template of { template : template; parts : part array }
     | Each : {
         items : unit -> 'a array;
@@ -698,7 +692,7 @@ module Private : sig
 
   and template = runtime_template
   and part = Child of node | Attribute of attr | No_attribute
-  and slot_data
+  and slot
 
   module Template : sig
     type shape
@@ -838,6 +832,17 @@ module Private : sig
   val entry_name : runtime_entry -> string
   val entry_decode : runtime_entry -> Json.t -> (unit -> node, string) result
 
+  val slot : slot -> client element
+  (** Puts the slot where its content goes. *)
+
+  module Slot : sig
+    val make : server element -> slot
+    (** A slot with this server content. *)
+
+    val empty : unit -> slot
+    (** A slot with no content, as the client decodes it. *)
+  end
+
   val slot_content : slot -> node option
   (** The server element of the slot, if it has one. *)
 
@@ -970,11 +975,14 @@ module Router : sig
       [yuka routes --shared --source Routes.ml] writes the shared [Routes]
       module: the route type [t]; a link function for each named node, named
       as the node in lowercase, that takes each path param as a labelled
-      argument, each search field as an optional argument, and [()]
-      ([Routes.issue ~id:"YUK-1" ()] is ["/issue/YUK-1"]); [href], which
+      argument, each search field as an optional argument, then
+      [?fragment], and [()] ([Routes.issue ~id:"YUK-1" ()] is
+      ["/issue/YUK-1"]; [Routes.issue ~id:"YUK-1" ~fragment:"comments" ()]
+      is ["/issue/YUK-1#comments"]; [~fragment:""] adds [#] alone); [href], which
       turns a [Routes.t] (for example from [find]) into a URL; and [find]. A
-      node name whose link function is an OCaml keyword or [href], [find] or
-      [with_query] is a build error. Then
+      node name whose link function is an OCaml keyword or [href], [find],
+      [with_query] or [with_fragment] is a build error, and so is a param,
+      search field or loader named [fragment]. Then
       [yuka routes --server --shared-module Routes --source Routes.ml] writes the
       server module with [app]. *)
 

@@ -1152,7 +1152,7 @@ let slot_a = Private.template Private.Template.(element "div" [] [ element "i" [
 let slot_b = Private.template Private.Template.(element "section" [] [ element "i" [] []; part 0 ])
 
 let template_with_slot () =
-  let content = Slot.make (element "p" [] [ text "x" ]) in
+  let content = Private.Slot.make (element "p" [] [ text "x" ]) in
   let wrap = State.make true in
   let view slot =
     element "main" []
@@ -1160,14 +1160,12 @@ let template_with_slot () =
         hole (fun () ->
             runtime_instance
               (if State.get wrap then slot_a else slot_b)
-              [| runtime_child (Yuka.slot slot) |]);
+              [| runtime_child (Private.slot slot) |]);
       ]
   in
   let c = container (server (view content)) in
   let p = query c "p" in
-  let client =
-    match Codec.decode Codec.slot `Null with Ok s -> s | Error m -> raise (Cases.Failed m)
-  in
+  let client = Private.Slot.empty () in
   let dispose = Yuka.Private.hydrate (as_element c) (fun () -> view client) in
   same "adopted" p (query c "p");
   State.set wrap false;

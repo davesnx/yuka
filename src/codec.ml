@@ -118,8 +118,3 @@ let async c : 'a Async.t t =
       | j -> mismatch "async reference" j);
   }
 
-let slot : Slot_value.t t =
-  {
-    encode = (fun _ -> `Null);
-    decode = (fun _ -> Ok (Slot_value.of_slot { content = None; dom = ref [] }));
-  }

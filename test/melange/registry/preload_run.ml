@@ -70,6 +70,10 @@ let in_slot =
 
 let link_inside = link "Wrap" ^ wrap 1 "w" (link "Counter" ^ counter 2 "n" 5)
 
+let server tree = Yuka.Private.render_html (fun () -> Yuka.Private.node tree)
+let wrap_server = server (Reg_islands.Wrap.island ~id:"w" ~children:(Yuka.element "p" [] [ Yuka.text "s" ]) ())
+let card = server (Reg_islands.Card.island ~id:"c" ())
+
 let failures = ref 0
 let total = ref 0
 
@@ -130,6 +134,19 @@ let cases :
           check "slot: idle island after trigger" "1" (text "v");
           click "n";
           check "slot: inner still live" "7" (text "n")) );
+    ( "client component with client children, called from client code",
+      card,
+      (fun () ->
+        check "children: wrap prints its children between markers and sends null" (wrap 1 "w" "<p>s</p>") wrap_server;
+        check "children: card html, no slot markers"
+          {|<yuka-island data-name="Reg_islands.Card" data-id="i1" style="display:contents"><section><span id="c">0</span><button id="c-add">+</button><span id="c-inner">0</span><button id="c-inner-add">+</button></section></yuka-island><script type="application/json" data-yuka-props="i1">{"id":"c"}</script>|}
+          card;
+        click "c";
+        click "c-inner";
+        click "c-inner";
+        check "children: outer" "1" (text "c");
+        check "children: inner" "2" (text "c-inner")),
+      None );
     ( "link inside an island (old placement)",
       link_inside,
       (fun () ->

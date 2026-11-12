@@ -34,11 +34,14 @@ let attr_unchecked name value =
 let hole f = Kind.of_node (Hole (Kind.fn f))
 let slot s =
   Client.use_slot ();
-  Kind.of_node (Slot (Slot_value.to_slot s))
+  Kind.of_node (Slot s)
 
 module Slot = struct
-  let make content = Slot_value.of_slot { content = Some (Kind.to_node content); dom = ref [] }
+  let make content = { content = Some (Kind.to_node content); dom = ref [] }
+  let empty () = { content = None; dom = ref [] }
 end
+
+let runtime_slot content = slot (match content with Some c -> Slot.make c | None -> Slot.empty ())
 
 type stylesheet = string
 

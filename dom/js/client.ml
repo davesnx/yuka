@@ -371,7 +371,7 @@ let element_hook : (pos -> string -> attr list -> node list -> unit [@u]) ref =
   ref (fun [@u] _ _ _ _ -> unset "Yuka.element")
 
 let await_hook = ref { run = (fun [@u] _ _ _ _ _ -> unset "Yuka.Await.make") }
-let slot_hook : (pos -> slot -> unit [@u]) ref = ref (fun [@u] _ _ -> unset "Yuka.slot")
+let slot_hook : (pos -> slot -> unit [@u]) ref = ref (fun [@u] _ _ -> unset "Yuka.runtime_slot")
 
 let catch_hook : (pos -> bool ref -> (Obj.t option -> node) -> unit [@u]) ref =
   ref (fun [@u] _ _ _ -> unset "Yuka.Catch.make")

@@ -106,25 +106,6 @@ let is_yuka_state (m : module_expr) =
 let check_open ~loc (o : open_declaration) what =
   if is_yuka_state o.popen_expr then lint_error ~loc what
 
-let shared =
-  Attribute.declare "yuka.shared" Attribute.Context.value_binding
-    Ast_pattern.(pstr nil)
-    ()
-
-let rec state_constructor e =
-  match e.pexp_desc with
-  | Pexp_constraint (e, _) | Pexp_coerce (e, _, _) -> state_constructor e
-  | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot (p, (("make" | "memo") as f)); _ }; _ }, _)
-    when is_state_path p -> Some f
-  | _ -> None
-
-let check_module_state (vb : value_binding) =
-  match state_constructor vb.pvb_expr with
-  | Some f when Attribute.get shared vb = None ->
-      Location.raise_errorf ~loc:vb.pvb_loc
-        "[yuka] A module-level State.%s is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line." f
-  | _ -> ()
-
 let list_expr ~loc xs =
   List.fold_right (fun x acc -> [%expr [%e x] :: [%e acc]]) xs [%expr []]
 
@@ -396,6 +377,12 @@ let rewrite_child ~self child =
       let hole = reads_state child in
       let child = self#expression child in
       if hole then [%expr Yuka.hole (fun () -> [%e child])] else child
+
+let children_arg ~loc kids =
+  match kids with
+  | [] -> []
+  | [ k ] -> [ (Labelled "children", k) ]
+  | ks -> [ (Labelled "children", [%expr Yuka.fragment [%e list_expr ~loc ks]]) ]
 
 let split_args args =
   let children = ref [] and props = ref [] in
@@ -671,31 +658,18 @@ let rewrite_jsx self e =
                let cprops, ckids = split_args cargs in
                let cprops = List.map (fun (l, v) -> (l, self#expression v)) cprops in
                let kids = List.map (rewrite_child ~self) ckids in
-               let slot =
-                 match kids with
-                 | [] -> []
-                 | [ k ] -> [ (Labelled "children", [%expr Yuka.Slot.make [%e k]]) ]
-                 | ks ->
-                     [ (Labelled "children", [%expr Yuka.Slot.make (Yuka.fragment [%e list_expr ~loc ks])]) ]
-               in
                pexp_apply ~loc
                  (pexp_ident ~loc:cloc { txt = Ldot (path, "island"); loc = cloc })
-                 (start @ cprops @ slot @ [ (Nolabel, [%expr ()]) ])
+                 (start @ cprops @ children_arg ~loc kids @ [ (Nolabel, [%expr ()]) ])
            | _ ->
                Location.raise_errorf ~loc:fnloc
                  "[yuka] Yuka.Client needs exactly one child, a component tag such as <Counter a=1 />")
       | Ldot (path, "createElement") ->
           let props = List.map (fun (l, v) -> (l, self#expression v)) props in
           let kids = List.map (rewrite_child ~self) children in
-          let children_arg =
-            match kids with
-            | [] -> []
-            | [ k ] -> [ (Labelled "children", k) ]
-            | ks -> [ (Labelled "children", [%expr Yuka.fragment [%e list_expr ~loc ks]]) ]
-          in
           pexp_apply ~loc
             (pexp_ident ~loc:fnloc { txt = Ldot (path, "make"); loc = fnloc })
-            (props @ children_arg @ [ (Nolabel, [%expr ()]) ])
+            (props @ children_arg ~loc kids @ [ (Nolabel, [%expr ()]) ])
       | _ ->
           let props = List.map (fun (l, v) -> (l, self#expression v)) props in
           let kids = List.map (rewrite_child ~self) children in
@@ -778,7 +752,6 @@ let mapper =
 
     method! structure_item i =
       (match i.pstr_desc with
-       | Pstr_value (_, vbs) -> List.iter check_module_state vbs
        | Pstr_open o -> check_open ~loc:i.pstr_loc o "open Yuka.State"
        | Pstr_include { pincl_mod; _ } when is_yuka_state pincl_mod ->
            lint_error ~loc:i.pstr_loc "include Yuka.State"

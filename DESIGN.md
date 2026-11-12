@@ -282,7 +282,8 @@ Current names: `Yuka_server` is now `Yuka.Server`; `Yuka.list` and `Yuka.array` 
 - A module-level `State.make` in shared code is one value for the whole
   process on the server. Rule: only client code paths (handlers, effects)
   may write it, and server rendering must not read a value that a request
-  changed. A lint for this comes later.
+  changed. A lint for this comes later: replaced on 2026-11-12 by a check
+  at run time; see "Module-level State".
 - A `State.set` updates holes synchronously when no `Yuka.batch` is
   running, so code right after it (for example `Browser.focus`) sees the new
   DOM.
@@ -299,14 +300,31 @@ work", except the items listed as out of scope there.
 - A slot is a server element passed as `children` into a client
   component. The server renders it; the client adopts its DOM nodes and can
   place and move them, never inspect or re-render them (Leptos's rule).
-- Core: `type slot`, `val slot : slot -> client element` (the user writes
-  `(Yuka.slot children)` where the content goes), `Slot.make : server element
-  -> slot`, `Codec.slot : slot Codec.t`, node `Private.Slot of slot`.
-- `let%client make ~(children : Yuka.slot) () = ...` is allowed. 
+- Updated 2026-11-12: slots are internal. The user writes
+  `let[@client] make ~children () = ... children ...`; the ppx gives
+  `children` the type `client element`. Children from server code become a
+  slot; children from client code (`M.make ~children`) are plain client
+  elements. The docs explain one concept, children, with one difference in
+  islands: server children go in one position. Placed twice, the server
+  prints them twice and the client tracks only the last set of nodes.
+- Core: node `Private.Slot of slot`; `Private.slot : slot -> client element`,
+  `Private.Slot.make : server element -> slot` and `Private.Slot.empty` for
+  the tests. The generated code calls
+  `runtime_slot : server element option -> client element` (`Some` content
+  on the server, `None` for the decoded prop). It does not use `Private`,
+  because `yuka.js` builds `Private` as one object that holds the printer
+  and the server code, and a client chunk that reads one field keeps all
+  of it.
+- `M.island ~children` takes a `server element`. The generated `island`
+  binds `children` to `runtime_slot (Some children)` before it encodes the
+  props and calls `make`; the `children` codec, built in the generated code
+  with `Codec.make`, writes `null` and decodes to `runtime_slot None`.
   `<Yuka.Client><Counter a=1><p>"x"</p></Counter></Yuka.Client>` becomes
-  `Counter.island ~a:1 ~children:(Yuka.Slot.make (Yuka.fragment [...])) ()`.
+  `Counter.island ~a:1 ~children:(Yuka.fragment [...]) ()`. `~(children :
+  Yuka.slot)` and `?children` are compile errors that say to write
+  `~children`.
 - Server print of a `Slot` inside a client tree: `<!--[$-->` HTML `<!--]-->`.
-  `Codec.slot` encodes as `null`; the position in the tree finds the nodes.
+  The `children` prop is `null`; the position in the tree finds the nodes.
 - Client: hydrating a `Slot` captures the DOM nodes between `[$` and its
   matching `]` into the slot without walking inside them. Rendering the slot
   again (a hole re-runs) moves the captured nodes to the new place. A slot
@@ -341,7 +359,8 @@ work", except the items listed as out of scope there.
   (`'a t` gets `codec : 'a Codec.t -> 'a t Codec.t`).
 - Lint: a structure-level `let x = State.make ...` (or `State.memo`) is a
   compile error unless marked `[@@yuka.shared]`, which states that only
-  client code paths write it.
+  client code paths write it: replaced on 2026-11-12 by a check at run
+  time; see "Module-level State".
 - Production bundle: esbuild bundles the Melange output of the client entry
   into one ES module (`--bundle --format=esm --minify`); the server serves it
   instead of the module tree when started with `--bundle`.
@@ -1272,7 +1291,8 @@ the budget in `bench/size/budget.json`.
   - `await_hook`: set by `Client.use_await`, which `Await.make` calls
     (`suspend` too). It is a record with a polymorphic field, because the
     value type of an `Await` is existential.
-  - `slot_hook`: `Client.use_slot`, from `Yuka.slot`.
+  - `slot_hook`: `Client.use_slot`, from `Element.slot` (`Private.slot`,
+    `runtime_slot`).
   - `catch_hook`: `Client.use_catch`, from `Catch.make`.
   On the server the four `use_*` functions do nothing.
 - Rule: every place that builds one of these nodes for the client calls its
@@ -1282,7 +1302,7 @@ the budget in `bench/size/budget.json`.
   and `Cycle.outlet` (the `yuka-outlet` element around a nested layout),
   both server-only. A default can therefore only run after a broken rule,
   and it raises `Failure "Yuka: no mount code for a node of Yuka.lower"`
-  (or `Yuka.Await.make`, `Yuka.slot`, `Yuka.Catch.make`) instead of doing
+  (or `Yuka.Await.make`, `Yuka.runtime_slot`, `Yuka.Catch.make`) instead of doing
   nothing.
 - `Private.node` is `private` in `yuka.mli`: tests can match on it but not
   build a node kind without its constructor. `Private.hole` builds a
@@ -1445,8 +1465,8 @@ There is no budget for these numbers.
     edges, so the JavaScript does not change. Conversions of a function
     use a type abbreviation for the result, so the external has one
     argument.
-  - `slot = Slot_value.t`, the same way. `Private.node` has
-    `Slot of slot_data`.
+  - Updated 2026-11-12: `slot` is no longer public, and `Slot_value` is
+    gone. `Private.node` has `Slot of slot`, with `Private.slot` abstract.
   - `'a Async.t`, `('i, 'o, 'kind) Action.t` and `('k, 's) Topic.t` are
     abstract in `async.mli`, `action.mli` and `topic.mli`; the library
     reads an action and a topic through functions (`Action.input`,
@@ -2931,6 +2951,60 @@ as a call, with the same checks.
   standard library value: its defaults are `[]` or the copied `default`
   values.
 - `test/cycle/Routes.ml` renames its route `Find` to `Search`.
+
+Fragment (2026-11-12): each link function takes `?fragment` as its last
+optional argument: `Routes.issue ~id ~fragment:"comments" ()` is
+`/issue/YUK-8#comments`. `None` adds nothing; `Some f` adds `#` and `f`
+encoded with `Yuka.Router.encode`, as a search value, which
+`scroll_to_hash` decodes with `decodeURIComponent`; `Some ""` adds `#`
+alone. One generated `with_fragment` adds it, so `Yuka.Router` gets no
+member. `type t`, `href` and `find` do not change: the server never sees
+a fragment, so it is not part of a route. `fragment` and `with_fragment`
+are reserved labels, and `With_fragment` is a reserved node name.
+`with_fragment` uses `path` once (`path ^ ""` when there is no fragment):
+with a `match` that returns `path` in one arm, swc kept a temporary and
+the demo start grew 68 B gzip, against 56 B now. The demo main and its
+imports do not change; the rest is `href`, which swc no longer folds into
+the link function when it inlines it.
+
+## Module-level State (2026-11-12)
+
+Decided by the user: the server checks a module-level State at run time,
+in place of the ppx. Reason: the ppx check went by spelling, so it did not
+see a State in a tuple or a record, a State that a function returns, or
+`State` under a module alias; and `[@@yuka.shared]` was a statement that
+nothing checked.
+
+- Removed: `[@@yuka.shared]`, `[@@shared]` and the ppx error on a
+  structure-level `State.make` or `State.memo`. No compatibility path:
+  ppxlib reports an unused attribute only in its `-check` mode, which dune
+  does not use, so a leftover `[@@yuka.shared]` compiles with no message.
+- The seal is the first server render (`Printer.print`) or the first
+  request (`Cycle.handle`, which serves pages, actions, endpoints and the
+  live socket) of the process. A State made before the seal is
+  module-level. A State made after it never is, so the set does not grow
+  per request.
+- After the seal, `State.set` and `State.update` on a module-level State
+  raise `Invalid_argument "Yuka.State: a write to a State made at module
+  level, before the first server render or request. The server process has
+  one copy for every request. Create the State inside a component."`. A
+  read is allowed. A write before the seal is allowed.
+- Native only: `State.set` calls `Web.check_state_write`, and the seal
+  calls `Web.seal_states`. Both are in the virtual module `Web`; the
+  browser versions do nothing.
+- The native check is one compare: `Scheduler.make` gives each node the
+  next id, so the seal keeps the last id, and a State with an id at most
+  that one was made before the seal. If node ids become per domain, this
+  needs a table of the States made before the seal, found by id and
+  compared with `==`.
+- The States of Yuka itself (`Async.watch`, `Remote`, `Live`, `Form`,
+  `Catch`) go through the same check. A `Remote.use`, `Live.use` or form
+  made at module level is also one copy for every request, so a server
+  write to it raises.
+- Size: the check added 8 B gzip to the keyed benchmark app (7,967 to
+  7,975 before the merge with `Effect.after`; 7,965 after it, budget
+  7,981). A table filled by `State.make` added 23 B: `make` had to call
+  `Web` through `Curry`.
 
 ## `Yuka.Console` and the server log (2026-11-12)
 

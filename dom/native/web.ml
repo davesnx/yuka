@@ -3,6 +3,13 @@ type event = unit
 type 'a promise = unit
 
 let in_browser = false
+let last_module_node = ref (-1)
+let seal_states () = if !last_module_node < 0 then last_module_node := !Scheduler.ids
+
+let check_state_write (n : Scheduler.node) =
+  if n.id <= !last_module_node then
+    invalid_arg
+      "Yuka.State: a write to a State made at module level, before the first server render or request. The server process has one copy for every request. Create the State inside a component."
 
 let browser_only () = failwith "Yuka: browser only"
 

@@ -314,6 +314,33 @@ A param named href, which the route helpers call
   Error: label href is reserved by the generated code
   [1]
 
+A search field named fragment, which is the last argument of each route helper
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.route A ~path:"/a" ~page:Pages.a
+  >       ~search:{ fragment = optional string };
+  >   ]
+  > EOF
+  File "Routes.ml", line 4, characters 14-44:
+  Error: label fragment is reserved by the generated code
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a/:fragment<string>" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 35-57:
+  Error: label fragment is reserved by the generated code
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~loader:Loaders.fragment ]
+  > EOF
+  File "Routes.ml", line 1, characters 62-78:
+  Error: label fragment is reserved by the generated code
+  [1]
+
 A route name whose helper is a keyword
 
   $ gen <<'EOF'
@@ -358,6 +385,13 @@ A route name whose helper the generated code already defines
   > EOF
   File "Routes.ml", line 1, characters 27-37:
   Error: name With_query makes the helper Routes.with_query, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route With_fragment ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-40:
+  Error: name With_fragment makes the helper Routes.with_fragment, which the generated code already defines; choose another name
   [1]
 
 A bad search kind

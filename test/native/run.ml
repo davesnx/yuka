@@ -100,6 +100,45 @@ let memo_released () =
   Alcotest.(check bool) "the memo of a finished render is not kept" false (Weak.check weak 0);
   Alcotest.(check int) "the State lives on" 1 (Yuka.State.get shared)
 
+let module_count =
+  let s = Yuka.State.make 0 in
+  Yuka.State.set s 1;
+  s
+
+let module_state_cases =
+  let open Alcotest in
+  let refused name f =
+    match f () with
+    | _ -> failf "%s: no exception" name
+    | exception Invalid_argument m ->
+        check string name
+          "Yuka.State: a write to a State made at module level, before the first server render or request. The server process has one copy for every request. Create the State inside a component."
+          m
+  in
+  let before_seal () = check int "a write before the first render is kept" 1 (Yuka.State.get module_count) in
+  let read () =
+    check string "a render reads it" "1" (Server.to_string (fun () -> Yuka.int (Yuka.State.get module_count)))
+  in
+  let write () =
+    refused "set" (fun () ->
+        Server.to_string (fun () ->
+            Yuka.State.set module_count 2;
+            Yuka.int 0));
+    refused "update" (fun () -> Yuka.State.update module_count succ);
+    check int "the value is unchanged" 1 (Yuka.State.get module_count)
+  in
+  let local () =
+    check string "a State made in a component is written" "2"
+      (Server.to_string (fun () ->
+           let s = Yuka.State.make 1 in
+           Yuka.State.set s 2;
+           Yuka.int (Yuka.State.get s)))
+  in
+  [ test_case "a write before the first render" `Quick before_seal;
+    test_case "a render reads a module-level State" `Quick read;
+    test_case "a write after the first render raises" `Quick write;
+    test_case "a State made in a component" `Quick local ]
+
 let page_cases =
   let open Alcotest in
   let page () =
@@ -1403,8 +1442,7 @@ let loading_cases =
   let nested_in_slot () =
     let out =
       shell ~preload (fun () ->
-          let s = Yuka.Slot.make (isl "Inner") in
-          Yuka.runtime_island ~name:"Outer" ~props:(`Int 1) (fun () -> Yuka.slot s))
+          Yuka.runtime_island ~name:"Outer" ~props:(`Int 1) (fun () -> Yuka.runtime_slot (Some (isl "Inner"))))
     in
     let inside, after = between out in
     check bool "no link inside the outer island" false (contains inside "<link");
@@ -1683,6 +1721,7 @@ let () =
           (fun (name, case) -> Alcotest.test_case name `Quick case)
           Cases.all );
       ("server", page_cases);
+      ("module-level State", module_state_cases);
       ("actions", action_cases);
       ("streaming", stream_cases);
       ("page extras", page_extra_cases);

@@ -992,7 +992,7 @@ module Sigs :
         let _ = tree_codec
       end[@@ocaml.doc "@inline"][@@merlin.hide ]
   end 
-let shared = State.make 0[@@yuka.shared ]
+let shared = State.make 0
 let in_function () = State.make 0
 include
   struct
@@ -1003,16 +1003,24 @@ include
             ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||]
             ~clones:1
       end
-    let make ~label:(label : string) ~children:(children : Yuka.slot) () =
+    let make ~label:(label : string)
+      ~children:(children : Yuka.client Yuka.element) () =
       Yuka.runtime_instance __yuka_template_rewrite_18
-        [|(Yuka.runtime_child (Yuka.slot children))|]
+        [|(Yuka.runtime_child children)|]
     let name = "Rewrite"
     let island ~label ~children ?start () =
+      let children = Yuka.runtime_slot (Stdlib.Option.Some children) in
       (Yuka.runtime_island ?start ~name:"Rewrite"
          ~props:(`Assoc
                    [("label", (Yuka.Codec.encode Yuka.Codec.string label));
-                   ("children", (Yuka.Codec.encode Yuka.Codec.slot children))])
-         (fun () -> make ~label ~children ()) : Yuka.server Yuka.element)
+                   ("children",
+                     (Yuka.Codec.encode
+                        (Yuka.Codec.make ~encode:(fun _ -> `Null)
+                           ~decode:(fun _ ->
+                                      Stdlib.Ok
+                                        (Yuka.runtime_slot Stdlib.Option.None)))
+                        children))]) (fun () -> make ~label ~children ()) : 
+        Yuka.server Yuka.element)
     let register =
       Yuka.runtime_entry ~name:"Rewrite"
         (fun (j : Yuka.Json.t) ->
@@ -1030,7 +1038,13 @@ include
                      | Stdlib.Ok _yuka_v0 ->
                          (match _yuka_field "children" with
                           | Some _yuka_j1 ->
-                              (match Yuka.Codec.decode Yuka.Codec.slot
+                              (match Yuka.Codec.decode
+                                       (Yuka.Codec.make
+                                          ~encode:(fun _ -> `Null)
+                                          ~decode:(fun _ ->
+                                                     Stdlib.Ok
+                                                       (Yuka.runtime_slot
+                                                          Stdlib.Option.None)))
                                        _yuka_j1
                                with
                                | Stdlib.Ok _yuka_v1 ->
@@ -1054,8 +1068,7 @@ open
   end
 let slot_one =
   Slotted.island ~label:"a"
-    ~children:(Yuka.Slot.make
-                 (Yuka.runtime_instance __yuka_template_rewrite_19 [||])) ()
+    ~children:(Yuka.runtime_instance __yuka_template_rewrite_19 [||]) ()
 open
   struct
     let __yuka_template_rewrite_20 =
@@ -1064,11 +1077,10 @@ open
   end
 let slot_many =
   Slotted.island ~label:"a"
-    ~children:(Yuka.Slot.make
-                 (Yuka.fragment
-                    [Yuka.text "text";
-                    Yuka.runtime_instance __yuka_template_rewrite_20 [||];
-                    Slotted.island ~label:"in" ()])) ()
+    ~children:(Yuka.fragment
+                 [Yuka.text "text";
+                 Yuka.runtime_instance __yuka_template_rewrite_20 [||];
+                 Slotted.island ~label:"in" ()]) ()
 let start = Slotted.island ~start:`Visible ~label:"a" ()
 let start_optional = Slotted.island ?start ~label:"a" ()
 open

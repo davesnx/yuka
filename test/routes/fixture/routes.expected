@@ -62,33 +62,37 @@ let href = function
   | Clear_feed -> "/feed.xml"
   | Missing -> "/missing"
 
-let home () = href Home
+let with_fragment path fragment =
+  Stdlib.( ^ ) path
+    (match fragment with None -> "" | Some fragment -> Stdlib.( ^ ) "#" (Yuka.Router.encode fragment))
 
-let blog ?lang ?tag ?(page = 1) ?(label = []) ?(draft = false) () = href (Blog { lang; tag; page; label; draft })
+let home ?fragment () = with_fragment (href Home) fragment
 
-let post ~slug ?lang () = href (Post { slug; lang })
+let blog ?lang ?tag ?(page = 1) ?(label = []) ?(draft = false) ?fragment () = with_fragment (href (Blog { lang; tag; page; label; draft })) fragment
 
-let new_post ?lang () = href (New_post { lang })
+let post ~slug ?lang ?fragment () = with_fragment (href (Post { slug; lang })) fragment
 
-let issue ~id ?tab ?(seen = []) ?(view = Params.Tab.Overview) () = href (Issue { id; tab; seen; view })
+let new_post ?lang ?fragment () = with_fragment (href (New_post { lang })) fragment
 
-let close_issue ~id () = href (Close_issue { id })
+let issue ~id ?tab ?(seen = []) ?(view = Params.Tab.Overview) ?fragment () = with_fragment (href (Issue { id; tab; seen; view })) fragment
 
-let issue_json ~id () = href (Issue_json { id })
+let close_issue ~id ?fragment () = with_fragment (href (Close_issue { id })) fragment
 
-let update_issue ~id () = href (Update_issue { id })
+let issue_json ~id ?fragment () = with_fragment (href (Issue_json { id })) fragment
 
-let page_n ~n () = href (Page_n { n })
+let update_issue ~id ?fragment () = with_fragment (href (Update_issue { id })) fragment
 
-let cafe () = href Cafe
+let page_n ~n ?fragment () = with_fragment (href (Page_n { n })) fragment
 
-let doc ~parts () = href (Doc { parts })
+let cafe ?fragment () = with_fragment (href Cafe) fragment
 
-let feed () = href Feed
+let doc ~parts ?fragment () = with_fragment (href (Doc { parts })) fragment
 
-let clear_feed () = href Clear_feed
+let feed ?fragment () = with_fragment (href Feed) fragment
 
-let missing () = href Missing
+let clear_feed ?fragment () = with_fragment (href Clear_feed) fragment
+
+let missing ?fragment () = with_fragment (href Missing) fragment
 
 let find (meth : Yuka.Router.meth) (path : string list)
     (query : (string * string) list) : t Yuka.Router.lookup =

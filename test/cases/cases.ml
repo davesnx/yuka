@@ -682,19 +682,21 @@ let async_on_result () =
   check "error and already settled" "ok 1 again ok 1 error boom ok 5" (read ())
 
 let html_slot () =
-  let content = Slot.make (element "p" [] [ text "x" ]) in
+  let content = Private.Slot.make (element "p" [] [ text "x" ]) in
   check "slot with content" "<div><!--[$--><p>x</p><!--]--></div>"
-    (chtml (element "div" [] [ slot content ]));
-  let empty_slot = match Codec.decode Codec.slot `Null with Ok s -> s | Error m -> raise (Failed m) in
-  check "empty slot" "<!--[$--><!--]-->" (chtml (slot empty_slot));
+    (chtml (element "div" [] [ Private.slot content ]));
+  let empty_slot = Private.Slot.empty () in
+  check "empty slot" "<!--[$--><!--]-->" (chtml (Private.slot empty_slot));
+  check "runtime slot with content" "<!--[$--><p>x</p><!--]-->"
+    (chtml (runtime_slot (Some (element "p" [] [ text "x" ]))));
+  check "runtime slot without content" "<!--[$--><!--]-->" (chtml (runtime_slot None));
   check "text before and after" "<b>a<!--[$-->b<!--]-->c</b>"
     (chtml
        (element "b" []
-          [ text "a"; slot (Slot.make (text "b")); text "c" ]));
-  check "slot codec encodes null" "null" (show_json (Codec.encode Codec.slot content));
+          [ text "a"; Private.slot (Private.Slot.make (text "b")); text "c" ]));
   check "content" "some"
     (match Private.slot_content content with Some _ -> "some" | None -> "none");
-  check "no content when decoded" "none"
+  check "no content when empty" "none"
     (match Private.slot_content empty_slot with Some _ -> "some" | None -> "none");
   check "dom empty at first" "0" (string_of_int (List.length !(Private.slot_dom content)));
   Private.slot_dom content := [ Obj.repr 1 ];

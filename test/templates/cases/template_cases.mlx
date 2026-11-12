@@ -1,5 +1,5 @@
-let label : string Yuka.State.t = Yuka.State.make "l" [@@yuka.shared]
-let on : bool Yuka.State.t = Yuka.State.make true [@@yuka.shared]
+let label : string Yuka.State.t = Yuka.State.make "l"
+let on : bool Yuka.State.t = Yuka.State.make true
 
 let cases : (string * (unit -> Yuka.client Yuka.element)) list =
   [

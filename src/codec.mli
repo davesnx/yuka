@@ -31,9 +31,6 @@ val array : 'a t -> 'a array t
 val option : 'a t -> 'a option t
 (** [None] is [`Null]. *)
 
-val slot : Slot_value.t t
-(** Encodes as [null]; decodes to an empty slot. *)
-
 val result : 'a t -> 'e t -> ('a, 'e) result t
 (** [Ok v] is [{"ok": v}] and [Error e] is [{"error": e}]. *)
 

@@ -1,0 +1,6 @@
+let[@client] make ~(id : string) () =
+  let n = Yuka.State.make 0 in
+  <Wrap id>
+    <span id=(id ^ "-inner")>(Yuka.int (Yuka.State.get n))</span>
+    <button id=(id ^ "-inner-add") on_click=(fun _ -> Yuka.State.update n succ)>"+"</button>
+  </Wrap>

@@ -1,7 +1,7 @@
-let[@client] make ~(id : string) ~(children : Yuka.slot) () =
+let[@client] make ~(id : string) ~children () =
   let n = Yuka.State.make 0 in
   <section>
     <span id>(Yuka.int (Yuka.State.get n))</span>
     <button id=(id ^ "-add") on_click=(fun _ -> Yuka.State.update n succ)>"+"</button>
-    (Yuka.slot children)
+    children
   </section>

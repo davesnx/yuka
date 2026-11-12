@@ -3,6 +3,8 @@ type event
 type 'a promise
 
 val in_browser : bool
+val check_state_write : Scheduler.node -> unit
+val seal_states : unit -> unit
 val window : unit -> node
 val document : unit -> node
 val owner_document : node -> node

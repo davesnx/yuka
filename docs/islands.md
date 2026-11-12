@@ -32,8 +32,9 @@ let home () =
   optional argument has a default, `?(limit : int = 3)`, or an option
   type, `?(note : string option)`.
 - The last parameter is `()`.
-- `start` and `make` cannot be argument names, and `children` must be
-  `~(children : Yuka.slot)`.
+- `start` and `make` cannot be argument names.
+- Children are written `~children`, with no type. They are a
+  `Yuka.client Yuka.element`.
 
 ## Use an island
 
@@ -133,18 +134,18 @@ keeps what the user did. When the island starts, Yuka sends `input` and
 `change` to that control, so your `on_input` and `on_change` handlers update
 the State. A click before the script runs is lost.
 
-## Slots
+## Children
 
-A slot is server-rendered content that you pass to an island as children.
-The island places it, and can move or hide it, but never re-renders it:
+A component takes children with `~children` and places them as any other
+element:
 
 ```ocaml
 (* shared/panel.mlx *)
-let[@client] make ~(title : string) ~(children : Yuka.slot) () =
+let[@client] make ~(title : string) ~children () =
   let open_ = Yuka.State.make true in
   <section>
     <button on_click=(fun _ -> Yuka.State.update open_ not)>(Yuka.text title)</button>
-    (if Yuka.State.get open_ then Yuka.slot children else Yuka.empty)
+    (if Yuka.State.get open_ then children else Yuka.empty)
   </section>
 
 (* server/pages.mlx *)
@@ -156,14 +157,23 @@ let[@client] make ~(title : string) ~(children : Yuka.slot) () =
 </Yuka.Client>
 ```
 
-A `<Yuka.Client>` in a slot is its own island.
+Children work the same in an island, with one difference: children that
+come from the server are rendered by the server. The client keeps their DOM
+nodes. It can place them, move them and hide them, but it does not render
+them again. Place them in one position: the client keeps track of one set
+of nodes.
+
+Children from client code, such as `<Panel title="Notes"> <p>"x"</p> </Panel>`
+inside another island, are rendered by the client as usual.
+
+A `<Yuka.Client>` in the children is its own island.
 
 ## Limitations
 
 - An event handler or a hole outside an island does not compile: "Type
   Yuka.client is not compatible with type Yuka.server".
 - An island cannot contain `<Yuka.Client>` in its own markup; that is a
-  type error. Pass the inner island through a slot, as above.
+  type error. Pass the inner island as children, as above.
 - An island cannot read the current route or search params as a State.
   Pass what it needs as props.
 

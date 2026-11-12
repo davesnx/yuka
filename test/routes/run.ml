@@ -168,6 +168,14 @@ let helper_cases =
         same "custom types"
           (Routes.issue ~id:12 ~tab:Activity ~seen:[ 1; -2 ] ~view:Activity ())
           (Issue { id = 12; tab = Some Activity; seen = [ 1; -2 ]; view = Activity }));
+    t "no fragment is href" (fun () ->
+        same "none" (Routes.post ~slug:"x" ?fragment:None ()) (Post { slug = "x"; lang = None }));
+    t "fragment" (fun () ->
+        check string "after a path" "/blog/x#comments" (Routes.post ~slug:"x" ~fragment:"comments" ());
+        check string "after a query" "/blog?page=2#top" (Routes.blog ~page:2 ~fragment:"top" ());
+        check string "encoded" "/issue/YUK-12#a%20b%23c%2F%C3%A9"
+          (Routes.issue ~id:12 ~fragment:"a b#c/\xc3\xa9" ());
+        check string "empty" "/#" (Routes.home ~fragment:"" ()));
   ]
 
 let round_trip =
