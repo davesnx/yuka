@@ -56,8 +56,8 @@ Router.make ~not_found:Pages.not_found
 ```
 
 `shared/dune` builds the shared library in both modes with the ppx, and
-writes the shared `Routes` module (the route type, `Routes.href` and
-`Routes.find`). `preprocessor_deps` lists the CSS files of `[%yuka.css]`:
+writes the shared `Routes` module (the route type, a link function for
+each route such as `Routes.home ()`, `Routes.href` and `Routes.find`). `preprocessor_deps` lists the CSS files of `[%yuka.css]`:
 
 ```
 (library
@@ -134,7 +134,7 @@ open App_shared
 let home () =
   Yuka.Server.page ~title:"Home" (fun () ->
       <main>
-        <a href=(Routes.href Home)>"Home"</a>
+        <a href=(Routes.home ())>"Home"</a>
         <Yuka.Client><Counter initial=0 /></Yuka.Client>
       </main>)
 
@@ -234,12 +234,73 @@ yuka dev --build 'dune build --watch' --assets _build/default/client/out \
 For production, bundle the client and define `__YUKA_DEV__` as `false`.
 Without the define, the bundle keeps the dev checks. The bundle goes in
 the build directory, so make it after the last `dune build` (a build
-deletes it). With esbuild:
+deletes it). Yuka does not bundle; you run esbuild:
 
 ```sh
 cd _build/default/client/out/client
-esbuild main.js --bundle --format=esm --splitting --outdir=bundle \
+esbuild main.js --bundle --minify --format=esm --splitting --outdir=bundle \
   --metafile=../../meta.json --define:__YUKA_DEV__=false
+```
+
+`--metafile` writes esbuild's report of the bundle as JSON. esbuild puts a
+hash in the name of each chunk, and the server reads the report to find
+the chunk of each island and to give the hashed files a long cache time.
+
+A smaller bundle needs two more steps, which the command line of esbuild
+cannot do: tell esbuild that the modules of Yuka have no side effects, so
+it drops the ones the app does not use, and minify a second time with
+[swc](https://swc.rs). On Yuka's demo the command above gives 53.0 KB
+gzip and this script 50.3 KB. Install `esbuild` and `@swc/core` from npm,
+save the script as `client/bundle.mjs` and run it in the place of the
+command above (`node ../../../../../client/bundle.mjs`):
+
+```js
+import { build } from "esbuild";
+import { minify } from "@swc/core";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
+const yuka = {
+  name: "yuka",
+  setup(build) {
+    build.onResolve({ filter: /\.js$/ }, async (args) => {
+      if (args.pluginData === yuka) return undefined;
+      const found = await build.resolve(args.path, {
+        kind: args.kind,
+        importer: args.importer,
+        resolveDir: args.resolveDir,
+        pluginData: yuka,
+      });
+      const inYuka = /[\\/]node_modules[\\/]yuka(\.js)?[\\/]/.test(found.path);
+      return inYuka ? { ...found, sideEffects: false } : found;
+    });
+  },
+};
+
+const result = await build({
+  entryPoints: ["main.js"],
+  bundle: true,
+  minify: true,
+  format: "esm",
+  splitting: true,
+  outdir: "bundle",
+  define: { __YUKA_DEV__: "false" },
+  metafile: true,
+  write: false,
+  plugins: [yuka],
+});
+
+for (const file of result.outputFiles) {
+  mkdirSync(dirname(file.path), { recursive: true });
+  const { code } = await minify(file.text, {
+    module: true,
+    compress: { passes: 3 },
+    mangle: { toplevel: true },
+  });
+  writeFileSync(file.path, code);
+}
+
+writeFileSync("../../meta.json", JSON.stringify(result.metafile));
 ```
 
 To serve the bundle instead of the module tree, `main.ml` gives these
@@ -252,3 +313,9 @@ let assets =
     ~manifest:(read "_build/default/client/yuka_islands.json")
     ~metafile:(read "_build/default/client/meta.json")
 ```
+
+## Next
+
+- [`router.md`](router.md): routes, params, loaders, guards and links.
+- [`islands.md`](islands.md): `<Yuka.Client>`, props, start strategies and
+  slots.
