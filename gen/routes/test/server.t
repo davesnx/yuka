@@ -165,7 +165,7 @@ The shared module leaves the items out
 The build id changes with the items before the tree
 
   $ grep -o 'build:"[0-9a-f]*"' out.ml > before
-  $ sed -i 's/604800/86400/' Routes.ml
+  $ sed 's/604800/86400/' Routes.ml > Routes.next && mv Routes.next Routes.ml
   $ yuka routes --server --shared-module Shared.Routes --source Routes.ml | grep -o 'build:"[0-9a-f]*"' > after
   $ cmp -s before after
   [1]
