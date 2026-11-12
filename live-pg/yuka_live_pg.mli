@@ -9,4 +9,5 @@ val bus : ?retry:float -> conninfo:string -> channel:string -> unit -> Yuka.Serv
     connection comes back, it calls the [on_restart] functions, because
     notes sent meanwhile are lost. Run it under [Lwt_main.run] (as Dream
     does). Postgres limits a note to 8,000 bytes, which
-    [Yuka.Server.Live.publish] checks. *)
+    [Yuka.Server.Live.publish] checks. [Yuka.Server.Live.close_bus] stops
+    listening and closes both connections; later sends fail. *)

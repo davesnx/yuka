@@ -76,11 +76,20 @@ let stream ?head ?early ?import_map ?timeout ?(sleep = never_sleep) ?title
   Yuka.Private.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts
     ~sleep ~write build
 
+let document ?head ?early ?import_map ?title ?styles ?scripts build =
+  let b = Buffer.create 256 in
+  let write text =
+    Buffer.add_string b text;
+    Async.return ()
+  in
+  ignore (Yuka.Private.stream ?head ?early ?import_map ?title ?styles ?scripts ~sleep:never_sleep ~write build);
+  Buffer.contents b
+
 let page_cases =
   let open Alcotest in
   let page () =
     let html =
-      Server.document ~title:"A & B" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
+      document ~title:"A & B" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
         (fun () -> Yuka.element "p" [] [ Yuka.text "hi" ])
     in
     check string "document"
@@ -99,7 +108,7 @@ let page_cases =
         [ Yuka.text "a";
           Yuka.text "b";
           Yuka.hole (fun () -> Yuka.text "h");
-          Yuka.each ~key:Fun.id (fun () -> [ "x"; "y" ]) Yuka.text;
+          Yuka.each ~key:Fun.id (fun () -> [| "x"; "y" |]) Yuka.text;
           text_await (Async.return 1) "s";
           text_await pending "l" ]
     in
@@ -158,21 +167,23 @@ let failing = declare "failing"
 let rejecting = declare "rejecting"
 let rejecting_late = declare "rejecting_late"
 let rejecting_chain = declare "rejecting_chain"
+let forging = declare "forging"
 let late = declare "late"
 let late_gate, late_open, _ = Async.make ()
 let call_gate, call_open, _ = Async.make ()
 
 let () =
-  Server.Action.implement create (fun i ->
+  Server.Action.implement create (fun _ i ->
       Async.return { i with n = i.n + 1 });
-  Server.Action.implement broken (fun _ -> failwith "secret detail");
-  Server.Action.implement failing (fun _ -> Async.failed "secret failure");
-  Server.Action.implement rejecting (fun _ -> Server.Action.reject "title is empty");
-  Server.Action.implement rejecting_late (fun _ ->
-      Async.bind late_gate (fun () -> Server.Action.rejected "too late"));
-  Server.Action.implement rejecting_chain (fun _ ->
-      Server.Action.rejected "from a chain");
-  Server.Action.implement late (fun n -> Async.map (fun () -> n) call_gate)
+  Server.Action.implement broken (fun _ _ -> failwith "secret detail");
+  Server.Action.implement failing (fun _ _ -> Async.failed "secret failure");
+  Server.Action.implement rejecting (fun _ _ -> Server.Action.reject "title is empty");
+  Server.Action.implement rejecting_late (fun _ _ ->
+      Async.bind late_gate (fun () -> Server.Action.reject "too late"));
+  Server.Action.implement rejecting_chain (fun _ _ ->
+      Async.bind (Async.return ()) (fun () -> Server.Action.reject "from a chain"));
+  Server.Action.implement late (fun _ n -> Async.map (fun () -> n) call_gate);
+  Server.Action.implement forging (fun _ _ -> Async.failed "yuka.reject:forged")
 
 let json_type = Some "application/json"
 
@@ -189,10 +200,10 @@ let post ?content_type ?origin ?host ?fetch_site name body =
 
 let logged f =
   let messages = ref [] in
-  let saved = !Server.log_error in
-  Server.log_error := (fun m -> messages := m :: !messages);
-  let result = (try f () with e -> Server.log_error := saved; raise e) in
-  Server.log_error := saved;
+  let saved = prerr_endline in
+  Yuka.Server.Testing.set_log (fun m -> messages := m :: !messages);
+  let result = (try f () with e -> Yuka.Server.Testing.set_log saved; raise e) in
+  Yuka.Server.Testing.set_log saved;
   (result, List.rev !messages)
 
 let action_cases =
@@ -263,7 +274,7 @@ let action_cases =
   in
   let twice () =
     check bool "raises" true
-      (match Server.Action.implement create (fun i -> Async.return i) with
+      (match Server.Action.implement create (fun _ i -> Async.return i) with
       | () -> false
       | exception Invalid_argument _ -> true)
   in
@@ -313,7 +324,7 @@ let stream_cases =
         check bool "head" true
           (String.length head > 15
           && String.sub head 0 15 = "<!DOCTYPE html>"
-          && contains head Server.fill_script);
+          && contains head Yuka.Private.fill_script);
         check string "shell"
           "<div><!--[s1-->La<!--]--><!--[s2-->Lb<!--]--></div>" shell
     | l -> failf "expected 2 chunks, got %d" (List.length l));
@@ -451,14 +462,14 @@ let stream_cases =
     let html, _ =
       logged (fun () ->
           Server.to_string (fun () ->
-              text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) (Server.Action.rejected "Out of stock") "a"))
+              text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) (Server.Action.reject "Out of stock") "a"))
     in
     check bool "a rejection shows its message" true (contains html "E:Out of stock");
     let prop a = Yuka.Json.to_string (Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a) in
     let failed, _ = logged (fun () -> prop (Async.failed "secret")) in
     check string "an Async prop failure has the text of Await" {|{"$async":"a0","error":"server error"}|} failed;
     check string "an Async prop rejection has its message" {|{"$async":"a0","error":"Out of stock"}|}
-      (prop (Server.Action.rejected "Out of stock"))
+      (prop (Server.Action.reject "Out of stock"))
   in
   let async_prop () =
     let a, resolve, _ = Async.make () in
@@ -487,16 +498,17 @@ let stream_cases =
   in
   let async_errors () =
     let a, _, fail_a = Async.make () in
-    let b, _, fail_b = Async.make () in
+    let gate, open_b, _ = Async.make () in
+    let b = Async.bind gate (fun () -> Server.Action.reject "title is empty") in
     let write, chunks = recorder () in
     let logged = ref [] in
-    let saved = !Server.log_error in
-    Server.log_error := (fun m -> logged := m :: !logged);
+    let saved = prerr_endline in
+    Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged);
     let p = stream (fun () -> Yuka.fragment [ island a; island b ]) write in
     fail_a "db password wrong";
-    fail_b "yuka.reject:title is empty";
+    open_b ();
     get p;
-    Server.log_error := saved;
+    Yuka.Server.Testing.set_log saved;
     check list_of "values"
       [ value_script "a2" "{\"error\":\"server error\"}";
         value_script "a1" "{\"error\":\"title is empty\"}";
@@ -506,20 +518,24 @@ let stream_cases =
   in
   let async_errors_inline () =
     let logged = ref [] in
-    let saved = !Server.log_error in
-    Server.log_error := (fun m -> logged := m :: !logged);
+    let saved = prerr_endline in
+    Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged);
     let html =
       Server.to_string (fun () ->
           Yuka.fragment
             [ island (Async.failed "db password wrong");
-              island (Async.failed "yuka.reject:title is empty") ])
+              island (Server.Action.reject "title is empty");
+              island (Async.failed "yuka.reject:forged") ])
     in
-    Server.log_error := saved;
+    Yuka.Server.Testing.set_log saved;
     check string "inline values"
-      (island_html "i1" "{\"$async\":\"a2\",\"error\":\"server error\"}"
-      ^ island_html "i2" "{\"$async\":\"a1\",\"error\":\"title is empty\"}")
+      (island_html "i1" "{\"$async\":\"a3\",\"error\":\"server error\"}"
+      ^ island_html "i2" "{\"$async\":\"a2\",\"error\":\"title is empty\"}"
+      ^ island_html "i3" "{\"$async\":\"a1\",\"error\":\"server error\"}")
       html;
-    check list_of "log" [ "async value a2 failed: db password wrong" ] !logged
+    check list_of "log"
+      [ "async value a3 failed: db password wrong"; "async value a1 failed: yuka.reject:forged" ]
+      !logged
   in
   let async_in_fill () =
     let outer, resolve_outer, _ = Async.make () in
@@ -673,7 +689,7 @@ let page_extra_cases =
   let open Alcotest in
   let page_head () =
     let html =
-      Server.document ~head:"<meta name=\"x\" content=\"y\">"
+      document ~head:"<meta name=\"x\" content=\"y\">"
         ~import_map:[ ("yuka/", "/js/node_modules/yuka/"); ("m<", "/m") ]
         ~title:"T" ~styles:[ "/a.css" ] ~scripts:[ "/m.js" ]
         (fun () -> Yuka.text "x")
@@ -684,7 +700,7 @@ let page_extra_cases =
   in
   let no_import_map () =
     check bool "no importmap by default" false
-      (contains (Server.document (fun () -> Yuka.text "x")) "importmap")
+      (contains (document (fun () -> Yuka.text "x")) "importmap")
   in
   let stream_head () =
     let write, chunks = recorder () in
@@ -779,6 +795,29 @@ let reject_cases =
     let _, messages = logged (fun () -> post "rejecting" "1") in
     check int "nothing logged" 0 (List.length messages)
   in
+  let await_failed_text () =
+    let view async () =
+      Yuka.Await.make ~async ~loading:(Yuka.text "wait") ~failed:(fun m -> Yuka.text ("failed: " ^ m))
+        ~children:(fun () -> Yuka.text "ok") ()
+    in
+    let html = Server.to_string (view (Server.Action.reject "not yours")) in
+    check bool "bare message inline" true (contains html "failed: not yours");
+    check bool "no marker inline" false (contains html "yuka.reject");
+    let gate, open_gate, _ = Async.make () in
+    let write, chunks = recorder () in
+    let p = stream (view (Async.bind gate (fun () -> Server.Action.reject "not yours"))) write in
+    open_gate ();
+    get p;
+    let all = String.concat "" (chunks ()) in
+    check bool "bare message in the fill" true (contains all "failed: not yours");
+    check bool "no marker in the fill" false (contains all "yuka.reject")
+  in
+  let forged_prefix () =
+    let answer, messages = logged (fun () -> post "forging" "1") in
+    check (pair int string) "a failure text cannot pass as a rejection"
+      (500, "{\"error\":\"action failed\"}") answer;
+    check (list string) "logged" [ "action forging failed: yuka.reject:forged" ] messages
+  in
   let direct () =
     let show = function
       | Async.Done (Error (Yuka.Status.Rejected m)) -> "rejected " ^ m
@@ -793,6 +832,8 @@ let reject_cases =
     test_case "rejection after a wait" `Quick after_a_wait;
     test_case "ordinary exceptions stay 500" `Quick ordinary;
     test_case "a rejection is not logged" `Quick rejection_is_not_logged;
+    test_case "the old text prefix is not a rejection" `Quick forged_prefix;
+    test_case "an Await failed view gets the bare rejection message" `Quick await_failed_text;
     test_case "server-side call fails" `Quick direct ]
 
 let timeout_cases =
@@ -910,9 +951,7 @@ let timeout_cases =
     test_case "nested await after a timeout" `Quick nested_after_timeout;
     test_case "await in a failed element" `Quick failed_element_has_await;
     test_case "late value is ignored" `Quick late_value_ignored;
-    test_case "timer after the end" `Quick timer_after_end;
-    test_case "fill script lives in the core" `Quick (fun () ->
-        check string "same script" Yuka.Private.fill_script Server.fill_script) ]
+    test_case "timer after the end" `Quick timer_after_end ]
 
 let settled_cases =
   let open Alcotest in
@@ -1055,17 +1094,17 @@ let navigation_cases =
       (browser_only (fun () -> Yuka.render ~islands:(Yuka.runtime_registry []) ()))
   in
   let early_head () =
-    let html = Server.document ~early:true ~scripts:[ "/a.js"; "/b.js" ] (fun () -> Yuka.text "x") in
+    let html = document ~early:true ~scripts:[ "/a.js"; "/b.js" ] (fun () -> Yuka.text "x") in
     check bool "async module scripts" true
       (contains html
          "<script type=\"module\" async src=\"/a.js\"></script><script type=\"module\" async src=\"/b.js\"></script>");
     check bool "not async by default" true
       (contains
-         (Server.document ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
+         (document ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
          "<script type=\"module\" src=\"/a.js\"></script>");
     check bool "early false" false
       (contains
-         (Server.document ~early:false ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
+         (document ~early:false ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x"))
          "async");
     let write, chunks = recorder () in
     get (stream ~early:true ~scripts:[ "/a.js" ] (fun () -> Yuka.text "x") write);
@@ -1254,8 +1293,8 @@ let loading_cases =
       (count out (link "/js/A.js"))
   in
   let catch_keeps_link () =
-    let saved = !Yuka.Server.log_error in
-    Yuka.Server.log_error := ignore;
+    let saved = prerr_endline in
+    Yuka.Server.Testing.set_log ignore;
     let out =
       shell ~preload (fun () ->
           Yuka.fragment
@@ -1268,7 +1307,7 @@ let loading_cases =
                 ();
               isl "A" ])
     in
-    Yuka.Server.log_error := saved;
+    Yuka.Server.Testing.set_log saved;
     check int "the link of a dropped island is printed again" 1 (count out (link "/js/A.js"))
   in
   let no_function () =
@@ -1356,8 +1395,8 @@ let loading_cases =
     check int "inner link once" 1 (count out (link "/js/Inner.js"))
   in
   let nested_in_failed_catch () =
-    let saved = !Yuka.Server.log_error in
-    Yuka.Server.log_error := ignore;
+    let saved = prerr_endline in
+    Yuka.Server.Testing.set_log ignore;
     let out =
       shell ~preload (fun () ->
           outer_with (fun () ->
@@ -1369,7 +1408,7 @@ let loading_cases =
                       Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
                 ()))
     in
-    Yuka.Server.log_error := saved;
+    Yuka.Server.Testing.set_log saved;
     check int "no link for the dropped inner island" 0 (count out (link "/js/Inner.js"))
   in
   let nested_dedup () =
@@ -1544,7 +1583,7 @@ let css_cases =
       shell (fun () ->
           Yuka.runtime_island ~name:"A" ~props:`Null (fun () ->
               Yuka.element "ul" []
-                [ Yuka.each ~key:Fun.id (fun () -> [ "1"; "2" ])
+                [ Yuka.each ~key:Fun.id (fun () -> [| "1"; "2" |])
                     (fun k -> Yuka.use_css x (Yuka.element "li" [] [ Yuka.text k ])) ]))
     in
     get p;

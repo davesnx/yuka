@@ -40,17 +40,14 @@ let constructor (l : label_declaration) = String.capitalize_ascii l.pld_name.txt
 let field_type ~loc (td : type_declaration) =
   type_declaration ~loc
     ~name:{ loc; txt = suffixed td.ptype_name.txt "field" }
-    ~params:[] ~cstrs:[] ~private_:Public ~manifest:None
-    ~kind:
-      (Ptype_variant
-         (List.map
-            (fun l ->
-              constructor_declaration ~loc:l.pld_loc
-                ~name:{ loc = l.pld_loc; txt = constructor l }
-                ~args:(Pcstr_tuple []) ~res:None)
-            (labels td)))
+    ~params:[] ~cstrs:[] ~private_:Public ~kind:Ptype_abstract
+    ~manifest:
+      (Some
+         (ptyp_variant ~loc
+            (List.map (fun l -> rtag ~loc:l.pld_loc { loc = l.pld_loc; txt = constructor l } true []) (labels td))
+            Closed None))
 
-let ctor ~loc l = pexp_construct ~loc { loc; txt = Lident (constructor l) } None
+let ctor ~loc l = pexp_variant ~loc (constructor l) None
 
 let str_items (td : type_declaration) =
   let loc = td.ptype_loc in
@@ -91,7 +88,7 @@ let str_items (td : type_declaration) =
   in
   let name_fn =
     pexp_function_cases ~loc
-      (List.map (fun l -> case ~lhs:(ppat_construct ~loc { loc; txt = Lident (constructor l) } None) ~guard:None ~rhs:(estring ~loc l.pld_name.txt)) ls)
+      (List.map (fun l -> case ~lhs:(ppat_variant ~loc (constructor l) None) ~guard:None ~rhs:(estring ~loc l.pld_name.txt)) ls)
   in
   [
     pstr_type ~loc Recursive [ field_type ~loc td ];

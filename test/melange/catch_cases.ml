@@ -121,15 +121,25 @@ let catch_hole () =
   dispose ()
 
 let catch_each_row () =
-  let items = State.make [ "a" ] in
+  let items = State.make [| "a" |] in
   let child () =
     D.div []
       [ each ~key:Fun.id (fun () -> State.get items)
           (fun s -> if s = "bad" then failwith "row" else D.span [ text s ]) ]
   in
   let c, dispose = render (fun () -> D.div [] [ boundary child ]) in
-  State.set items [ "a"; "bad" ];
+  State.set items [| "a"; "bad" |];
   check "an error in a new row" {|caught Failure(row)|} (shown c);
+  dispose ()
+
+let catch_each_duplicate_key () =
+  let items = State.make [| "a"; "b" |] in
+  let c, dispose =
+    render (fun () ->
+        D.div [] [ boundary (fun () -> D.div [] [ each ~key:Fun.id (fun () -> State.get items) text ]) ])
+  in
+  State.set items [| "b"; "a"; "b" |];
+  check "a duplicate key in an update" {|caught Failure(Yuka.each: duplicate key b)|} (shown c);
   dispose ()
 
 let catch_click () =
@@ -344,7 +354,7 @@ let island_boot_error () =
   check "server html kept" "server" (I.spans c)
 
 let bad_rows () =
-  D.div [] [ each ~key:Fun.id (fun () -> [ "a"; "bad" ])
+  D.div [] [ each ~key:Fun.id (fun () -> [| "a"; "bad" |])
                (fun s -> if s = "bad" then failwith "row" else D.span [ text s ]) ]
 
 let catch_each_first_render () =
@@ -397,7 +407,7 @@ let handler_error_stops_event () =
   dispose ()
 
 let cleanup_on_dispose () =
-  let items = State.make [ "a" ] and cleaned = ref 0 in
+  let items = State.make [| "a" |] and cleaned = ref 0 in
   let row _ =
     Effect.run ~cleanup:(fun () -> incr cleaned) ignore;
     Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
@@ -407,7 +417,7 @@ let cleanup_on_dispose () =
     render (fun () ->
         D.div [] [ boundary (fun () -> D.div [] [ each ~key:Fun.id (fun () -> State.get items) row ]) ])
   in
-  State.set items [];
+  State.set items [||];
   check "fallback" {|caught Failure(cleanup)|} (shown c);
   check "the other cleanups of the owner ran" "1" (ints !cleaned);
   dispose ()
@@ -492,6 +502,7 @@ let all =
     ("catch: memo", catch_memo);
     ("catch: hole that runs again", catch_hole);
     ("catch: each row", catch_each_row);
+    ("catch: each duplicate key", catch_each_duplicate_key);
     ("catch: event handler", catch_click);
     ("catch: non-bubbling handler", catch_focus);
     ("catch: reset", catch_reset);

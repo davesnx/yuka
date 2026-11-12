@@ -41,18 +41,18 @@ let issue_view ?(delay = 0.6) (i : Model.Issue.t) : Yuka.server Yuka.element =
 
 let issue ~id ~issue () = Yuka.Server.page ~title:id (fun () -> issue_view issue)
 
-let not_found ~target () =
+let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
       <div class_="not-found">
         <h1>"Page not found"</h1>
-        <p>(Yuka.text ("There is no page at " ^ target ^ "."))</p>
+        <p>(Yuka.text ("There is no page at " ^ path ^ "."))</p>
         <a href=(Routes.href Issues)>"Back to issues"</a>
       </div>)
 
-let issue_not_found ~id ~target:_ () =
+let issue_not_found ~id ~path:_ () =
   Yuka.Server.page ~title:"Not found" (fun () -> <Views.Not_found id />)
 
-let error ~status:_ () =
+let error () =
   Yuka.Server.page ~title:"Error" (fun () ->
       <div class_="not-found">
         <h1>"Something went wrong"</h1>

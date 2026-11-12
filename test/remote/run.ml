@@ -25,7 +25,7 @@ let show (s : string Status.t) =
 
 let check_status msg expected r = Alcotest.(check string) msg expected (show (Remote.status r))
 let logged = ref []
-let () = Server.log_error := fun m -> logged := m :: !logged
+let () = Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged)
 
 let gates : (string * (string Async.t * (string -> unit) * (string -> unit))) list ref = ref []
 let calls = ref []
@@ -33,7 +33,7 @@ let calls = ref []
 let gated = Action.query ~name:"gated" ~input:Codec.string ~output:Codec.string
 
 let () =
-  Server.Action.implement gated (fun input ->
+  Server.Action.implement gated (fun _ input ->
       calls := input :: !calls;
       let ((a, _, _) as g) = Async.make () in
       gates := !gates @ [ (input, g) ];
@@ -58,11 +58,11 @@ let broken = Action.query ~name:"broken" ~input:Codec.int ~output:Codec.string
 let counted = ref 0
 
 let () =
-  Server.Action.implement echo (fun s -> Async.return ("echo " ^ s));
-  Server.Action.implement rejecting (fun _ ->
+  Server.Action.implement echo (fun _ s -> Async.return ("echo " ^ s));
+  Server.Action.implement rejecting (fun _ _ ->
       incr counted;
       Server.Action.reject "no way");
-  Server.Action.implement broken (fun _ ->
+  Server.Action.implement broken (fun _ _ ->
       incr counted;
       failwith "secret detail")
 
@@ -316,7 +316,7 @@ let edit = Action.mutation ~name:"edit" ~input:Codec.string ~output:Codec.string
 let edits = ref []
 
 let () =
-  Server.Action.implement edit (fun s ->
+  Server.Action.implement edit (fun _ s ->
       let ((a, _, _) as g) = Async.make () in
       edits := !edits @ [ (s, g) ];
       a)

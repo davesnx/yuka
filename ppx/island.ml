@@ -26,6 +26,8 @@ let analyse_param (p : function_param) =
       fail ~loc:p.pparam_loc "~children must be written ~(children : Yuka.slot)"
   | Pparam_val ((Labelled "start" | Optional "start"), _, _) ->
       fail ~loc:p.pparam_loc "the argument 'start' is reserved for the start strategy"
+  | Pparam_val ((Labelled "make" | Optional "make"), _, _) ->
+      fail ~loc:p.pparam_loc "the argument 'make' would hide the component make; give the prop another name"
   | Pparam_val (((Labelled label | Optional label) as l), default, pat) ->
       let loc = p.pparam_loc in
       let ty =
@@ -142,7 +144,7 @@ let expand ~ctxt (items : structure) =
   | _ -> fail ~loc "let%%client takes one non-recursive let binding"
 
 let extension =
-  Extension.V3.declare "client" Extension.Context.structure_item
+  Extension.V3.declare "yuka.client" Extension.Context.structure_item
     Ast_pattern.(pstr __)
     expand
 
@@ -161,7 +163,7 @@ let check_placement (top : structure) =
 
       method! structure_item i =
         (match i.pstr_desc with
-         | Pstr_extension (({ txt = "client"; _ }, payload), attrs) ->
+         | Pstr_extension (({ txt = "client" | "yuka.client"; _ }, payload), attrs) ->
              let file = i.pstr_loc.loc_start.pos_fname in
              if
                file <> "" && file <> "_none_"

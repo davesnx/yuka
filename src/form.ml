@@ -25,8 +25,8 @@ let names_of_json (j : Json.t) =
     | _ -> None
   in
   match j with
-  | `List items -> ( match all item items with Some e -> Ok e | None -> Codec.mismatch "form errors" j)
-  | _ -> Codec.mismatch "form errors" j
+  | `List items -> ( match all item items with Some e -> Ok e | None -> Json.mismatch "form errors" j)
+  | _ -> Json.mismatch "form errors" j
 
 type 'o answer = { result : ('o, (string option * string) list) result; redirect : string option }
 
@@ -43,37 +43,32 @@ let read_answer (output : 'o Codec.t) (j : Json.t) : ('o answer, string) result 
               })
             (output.decode v)
       | None, Some e -> Result.map (fun e -> { result = Error e; redirect = None }) (names_of_json e)
-      | None, None -> Codec.mismatch "form answer" j)
-  | _ -> Codec.mismatch "form answer" j
+      | None, None -> Json.mismatch "form answer" j)
+  | _ -> Json.mismatch "form answer" j
 
 let action ~name ~fields:t ~(output : 'o Codec.t) : ('i, 'o, 'f) action =
   let input : _ Codec.t =
-    {
-      encode = (fun i -> pairs_json (encode t i));
-      decode =
-        (fun j ->
+    Codec.make
+      ~encode:((fun i -> pairs_json (encode t i)))
+      ~decode:((fun j ->
           match pairs_of_json j with
-          | None -> Codec.mismatch "form fields" j
+          | None -> Json.mismatch "form fields" j
           | Some values -> (
               match decode t values with
               | Ok i -> Ok i
-              | Error e -> Error (String.concat "; " (List.map snd e))));
-    }
+              | Error e -> Error (String.concat "; " (List.map snd e)))))
   in
   let result : ('o, _) result Codec.t =
-    {
-      encode =
-        (function
+    Codec.make
+      ~encode:((function
         | Ok o -> `Assoc [ ("value", output.encode o) ]
-        | Error e -> `Assoc [ ("errors", names_json (named t e)) ]);
-      decode =
-        (fun j ->
+        | Error e -> `Assoc [ ("errors", names_json (named t e)) ]))
+      ~decode:((fun j ->
           Result.map
             (fun a -> match a.result with Ok o -> Ok o | Error e -> Error (unnamed t e))
-            (read_answer output j));
-    }
+            (read_answer output j)))
   in
-  { Action.name; input; output = result; form = Action.Form (t, output) }
+  Action.with_form ~name ~input ~output:result (Action.Form (t, output))
 
 type ('o, 'f) form = {
   sent : (string * string) list;
@@ -90,8 +85,11 @@ let error form f =
     (State.get form.failed)
 
 let errors form = List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
-let error_view form f view = Hole (fun () -> match error form f with Some m -> view m | None -> Fragment [])
-let errors_view form view = Hole (fun () -> Fragment (List.map view (errors form)))
+let error_view form f view =
+  Kind.of_node (Hole (fun () -> match error form f with Some m -> Kind.to_node (view m) | None -> Fragment []))
+
+let errors_view form view =
+  Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (errors form))))
 let pending form = State.get form.busy
 let parse_sent sent =
   match Json.of_string sent with
@@ -128,9 +126,9 @@ let sent_state name key =
   | None -> None
 
 let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(children : (o, f) form -> 'k) () =
-  let (Action.Form (t, output)) = action.form in
+  let (Action.Form (t, output)) = Action.form action in
   let t : (i, f) Form_core.t = t and output : o Codec.t = output in
-  let sent = sent_state action.name key in
+  let sent = sent_state (Action.name action) key in
   let form =
     {
       sent = (match sent with Some (v, _) -> v | None -> []);
@@ -154,8 +152,8 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
   in
   let failed e = finish (Error (Status.error_to_string e)) None in
   let call input =
-    let json = action.input.encode input in
-    Async.on_result (!Action.transport action.name json) (function
+    let json = (Action.input action).encode input in
+    Async.on_result (Action.send (Action.name action) json) (function
       | Ok (Ok j) -> (
           match read_answer output j with
           | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
@@ -189,8 +187,8 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     Element.element "input" [ Static ("type", "hidden"); Static ("name", name); Static ("value", value) ] []
   in
   Element.element "form"
-    ([ Static ("method", "post"); Static ("data-yuka-action", action.name); Static ("data-yuka-key", key) ]
+    ([ Static ("method", "post"); Static ("data-yuka-action", Action.name action); Static ("data-yuka-key", key) ]
     @ sent_attr
     @ [ Handler ("submit", submit) ])
-    ((hidden "_yuka_action" action.name :: (if key = "" then [] else [ hidden "_yuka_key" key ]))
+    ((hidden "_yuka_action" (Action.name action) :: (if key = "" then [] else [ hidden "_yuka_key" key ]))
     @ [ children form ])

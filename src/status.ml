@@ -1,4 +1,4 @@
-type error =
+type error = Status_error.t =
   | Rejected of string
   | Forbidden
   | Not_found
@@ -35,17 +35,15 @@ let error_to_string = function
 let error_codec : error Codec.t =
   let kind k extra : Json.t = `Assoc (("kind", `String k) :: extra) in
   let message m = [ ("message", `String m) ] in
-  {
-    encode =
-      (function
+  Codec.make
+    ~encode:((function
       | Rejected m -> kind "rejected" (message m)
       | Forbidden -> kind "forbidden" []
       | Not_found -> kind "not_found" []
       | Server -> kind "server" []
       | Network m -> kind "network" (message m)
-      | Protocol m -> kind "protocol" (message m));
-    decode =
-      (fun j ->
+      | Protocol m -> kind "protocol" (message m)))
+    ~decode:((fun j ->
         match j with
         | `Assoc fields -> (
             let text () =
@@ -58,6 +56,5 @@ let error_codec : error Codec.t =
             | Some (`String "server") -> Ok Server
             | Some (`String "network") -> Ok (Network (text ()))
             | Some (`String "protocol") -> Ok (Protocol (text ()))
-            | _ -> Codec.mismatch "status error" j)
-        | _ -> Codec.mismatch "status error" j);
-  }
+            | _ -> Json.mismatch "status error" j)
+        | _ -> Json.mismatch "status error" j))

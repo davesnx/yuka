@@ -12,8 +12,7 @@ let to_lwt async =
 
 module Adapter = struct
   type request = Dream.request
-  type response = Dream.response
-  type 'a io = 'a Lwt.t
+  type reply = Dream.response
 
   let meth request : Yuka.Router.meth =
     match Dream.method_ request with
@@ -45,38 +44,61 @@ module Adapter = struct
     | Some n when n > limit -> to_async (refuse ())
     | _ -> to_async (read ())
 
+  let session = Dream.session_id
   let csrf_token request = Dream.csrf_token request
 
-  let respond ({ status; headers; body } : Yuka.Server.http_response) =
-    match body with
-    | Yuka.Server.String text -> Dream.respond ~code:status ~headers text
-    | Yuka.Server.Stream f ->
-        Dream.stream ~code:status ~headers (fun stream ->
-            to_lwt
-              (f (fun text ->
-                   to_async (Lwt.bind (Dream.write stream text) (fun () -> Dream.flush stream)))))
+  let verify_csrf request token =
+    to_async (Lwt.map (function `Ok -> true | _ -> false) (Dream.verify_csrf_token request token))
+
+  let respond ({ status; headers; body } : Yuka.Server.response) =
+    to_async
+      (match body with
+      | Yuka.Server.String text -> Dream.respond ~code:status ~headers text
+      | Yuka.Server.Stream f ->
+          Dream.stream ~code:status ~headers (fun stream ->
+              to_lwt
+                (f (fun text ->
+                     to_async (Lwt.bind (Dream.write stream text) (fun () -> Dream.flush stream))))))
 
   let file request ~root ~path ~headers =
-    Lwt.map
-      (fun response ->
-        (match Dream.status response with
-        | `Not_Found -> Dream.set_header response "cache-control" "no-store"
-        | _ -> List.iter (fun (name, value) -> Dream.set_header response name value) headers);
-        response)
-      (Dream.from_filesystem root path request)
+    to_async
+      (Lwt.map
+         (fun response ->
+           (match Dream.status response with
+           | `Not_Found -> Dream.set_header response "cache-control" "no-store"
+           | _ ->
+               List.iter (fun (name, _) -> Dream.drop_header response name) headers;
+               List.iter (fun (name, value) -> Dream.add_header response name value) headers);
+           response)
+         (Dream.from_filesystem root path request))
 
   let exists ~root ~path =
     let file = Filename.concat root path in
     Sys.file_exists file && not (Sys.is_directory file)
 
-  let of_async = to_lwt
-  let bind = Lwt.bind
+  let upgrade _request run =
+    (* Calling Dream.close_websocket after the connection is gone spins at
+       100% CPU: https://github.com/camlworks/dream/issues/467. [run] closes
+       only a live connection: never after [receive] gave [None], and not
+       after a timeout (4408) or a failed send or receive (1011), when the
+       client is likely gone. *)
+    to_async
+      (Dream.websocket ~close:false (fun ws ->
+           to_lwt
+             (run
+                (Yuka.Server.Live.connection
+                   ~send:(fun text -> to_async (Dream.send ws text))
+                   ~receive:(fun () -> to_async (Dream.receive ws))
+                   ~close:(fun code ->
+                     if code = 4408 || code = 1011 then Yuka.Async.return ()
+                     else to_async (Dream.close_websocket ~code ws))))))
+
   let sleep seconds = to_async (Lwt_unix.sleep seconds)
 end
 
-module Live = Yuka.Server.Make (Adapter)
+module Cycle = Yuka.Server.Adapter.Make (Adapter)
 
-module Fresh = Yuka.Server.Make (struct
+module Fresh = Yuka.Server.Adapter.Make (struct
   include Adapter
 
   let exists ~root:_ ~path:_ = false
@@ -92,52 +114,7 @@ let tree_digest dir =
   in
   Digest.to_hex (Digest.string (String.concat "\n" (files "")))
 
-let log_to_dream () =
-  Yuka.Server.log_error := fun message -> Dream.error (fun log -> log "%s" message)
-
-module Socket = struct
-  type request = Dream.request
-  type response = Dream.response
-
-  let header = Dream.header
-  let session = Dream.session_id
-  let csrf_token request = Dream.csrf_token request
-
-  let verify_csrf request token =
-    to_async (Lwt.map (function `Ok -> true | _ -> false) (Dream.verify_csrf_token request token))
-
-  let refuse ~status message = to_async (Dream.respond ~code:status message)
-
-  let upgrade _request run =
-    (* Calling Dream.close_websocket after the connection is gone spins at
-       100% CPU: https://github.com/camlworks/dream/issues/467. [run] closes
-       only a live connection: never after [receive] gave [None], and not
-       after a timeout (4408) or a failed send or receive (1011), when the
-       client is likely gone. *)
-    to_async
-      (Dream.websocket ~close:false (fun ws ->
-           to_lwt
-             (run
-                {
-                  Yuka.Server.Live.send = (fun text -> to_async (Dream.send ws text));
-                  receive = (fun () -> to_async (Dream.receive ws));
-                  close =
-                    (fun code ->
-                      if code = 4408 || code = 1011 then Yuka.Async.return ()
-                      else to_async (Dream.close_websocket ~code ws));
-                })))
-
-  let sleep = Adapter.sleep
-end
-
-module Sockets = Yuka.Server.Live.Handle (Socket)
-
-let handler ?live config app =
-  log_to_dream ();
-  fun request ->
-    match String.split_on_char '?' (Dream.target request) with
-    | "/_yuka/live" :: _ -> to_lwt (Sockets.live ?instance:live request)
-    | _ -> Live.handler config app request
+let handler ?node config app request = to_lwt (Cycle.handler ?node config app request)
 
 let rec make_dirs dir =
   if not (Sys.file_exists dir) then begin
@@ -161,7 +138,7 @@ let is_html response =
   | Some t -> String.starts_with ~prefix:"text/html" t
   | None -> false
 
-let drain (r : Yuka.Server.http_response) =
+let drain (r : Yuka.Server.response) =
   match r.body with
   | Yuka.Server.String text -> Yuka.Async.return text
   | Yuka.Server.Stream f ->
@@ -197,10 +174,10 @@ let check_out out config =
       if inside ~dir:(absolute dir) target then
         invalid_arg
           (Printf.sprintf "Yuka_dream.prerender: out %S is inside the served directory %S" out dir))
-    (Yuka.Server.served_dirs config)
+    (Yuka.Server.Prerender.served_dirs config)
 
 let prerender ~out config app =
-  let config = Yuka.Server.prerender_config config in
+  let config = Yuka.Server.Prerender.config config in
   check_out out config;
   let ( let* ) = Lwt.bind in
   let request path = Dream.request ~method_:`GET ~target:path "" in
@@ -216,20 +193,20 @@ let prerender ~out config app =
     match Queue.take_opt queue with
     | None -> Lwt.return_unit
     | Some path -> (
-        let* response = Fresh.handler config app (request path) in
+        let* response = to_lwt (Fresh.handler config app (request path)) in
         let status = Dream.status_to_int (Dream.status response) in
         let* body = Dream.body response in
         let ok = status >= 200 && status < 300 in
-        match Yuka.Server.prerender_file path with
+        match Yuka.Server.Prerender.file path with
         | Some file when ok ->
             write_file (Filename.concat out file) body;
             if is_html response then
               List.iter
                 (fun link ->
                   if (not (Hashtbl.mem seen link))
-                     && Yuka.Server.prerenderable config app (request link) link
+                     && Yuka.Server.Prerender.prerenderable config app (request link) link
                   then add link)
-                (Yuka.Server.links body);
+                (Yuka.Server.Prerender.links body);
             visit ()
         | None when ok ->
             warn path "answered %d but cannot be a file name, not written" status;
@@ -238,13 +215,13 @@ let prerender ~out config app =
             warn path "answered %d, not written" status;
             visit ())
   in
-  List.iter add (Yuka.Server.prerender_seeds app);
+  List.iter add (Yuka.Server.Prerender.seeds app);
   let* () = visit () in
-  let* page = to_lwt (Yuka.Server.missing_page config app ~sleep:Adapter.sleep) in
+  let* page = to_lwt (Yuka.Server.Prerender.missing_page config app ~sleep:Adapter.sleep) in
   let* text = to_lwt (drain page) in
   write_file (Filename.concat out "404.html") text;
-  List.iter (fun (path, css) -> write_file (Filename.concat out path) css) (Yuka.Server.css_files config);
+  List.iter (fun (path, css) -> write_file (Filename.concat out path) css) (Yuka.Server.Prerender.css_files config);
   List.iter
     (fun (prefix, dir) -> copy dir (Filename.concat out (String.sub prefix 1 (String.length prefix - 1))))
-    (Yuka.Server.served_dirs config);
+    (Yuka.Server.Prerender.served_dirs config);
   Lwt.return_unit

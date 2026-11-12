@@ -31,7 +31,7 @@ let decode_fields ~loc ~assoc fields final =
   List.fold_right
     (fun (i, (key, codec, optional)) rest ->
       let j = var_name "j" i and v = var_name "v" i in
-      let lookup = [%expr Stdlib.List.assoc_opt [%e estring ~loc key] [%e assoc]] in
+      let lookup = [%expr _yuka_field [%e estring ~loc key]] in
       let decode = chain ~loc [ (v, codec, evar ~loc j, Some key) ] rest in
       if optional then
         [%expr
@@ -46,6 +46,14 @@ let decode_fields ~loc ~assoc fields final =
           | None -> Stdlib.Error [%e estring ~loc ("missing field " ^ key)]])
     (List.mapi (fun i f -> (i, f)) fields)
     final
+  |> fun body ->
+  [%expr
+    let _yuka_field _yuka_key =
+      Stdlib.List.find_map
+        (fun (_yuka_k, _yuka_v) -> if Stdlib.String.equal _yuka_k _yuka_key then Some _yuka_v else None)
+        [%e assoc]
+    in
+    [%e body]]
 
 let is_option (t : core_type) =
   match t.ptyp_desc with

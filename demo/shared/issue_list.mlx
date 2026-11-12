@@ -137,7 +137,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
   let group ((status, items) : Issue.status * Issue.t list) : client element =
     <section class_="group">
       <Views.Group_header status count=(List.length items) />
-      (Yuka.each ~key:(fun (i : Issue.t) -> i.id) (fun () -> items) row)
+      (Yuka.each ~key:(fun (i : Issue.t) -> i.id) (fun () -> Array.of_list items) row)
     </section>
   in
   <div class_="issues">
@@ -176,7 +176,7 @@ let%client make ~(title : string) ~(view : Queries.view) () =
          </div>
      | None -> Yuka.empty)
     <div class_="list">
-      (Yuka.each ~equal:( = ) ~key:(fun (s, _) -> Issue.status_slug s) (fun () -> State.get groups) group)
+      (Yuka.each ~equal:( = ) ~key:(fun (s, _) -> Issue.status_slug s) (fun () -> Array.of_list (State.get groups)) group)
     </div>
     <Yuka.Show status=(fun () -> Live.status source)
       loading=(<p class_="list-empty">"Loading issues..."</p>)

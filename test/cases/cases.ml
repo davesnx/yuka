@@ -233,16 +233,16 @@ let html_each () =
     element "ul" []
       [
         each ~key:string_of_int
-          (fun () -> [ 1; 2 ])
+          (fun () -> [| 1; 2 |])
           (fun n -> element "li" [] [ text (string_of_int n) ]);
       ]
   in
   check "items" "<ul><li>1</li><li>2</li></ul>"
     (chtml el);
   check "empty" "<!--[--><!--]-->"
-    (chtml (each ~key:string_of_int (fun () -> []) (fun _ -> empty)));
+    (chtml (each ~key:string_of_int (fun () -> [||]) (fun _ -> empty)));
   check "texts in items stay apart" "<!--[--><!--[-->a<!--]--><!--[-->b<!--]--><!--]-->"
-    (chtml (each ~key:Fun.id (fun () -> [ "a"; "b" ]) text))
+    (chtml (each ~key:Fun.id (fun () -> [| "a"; "b" |]) text))
 
 let html_dynamic_attribute () =
   let s = State.make (Some "v") in
@@ -978,7 +978,7 @@ let html_select_value () =
        (element "select" [ attr "value" "b" ]
           [ element "optgroup" [ attr "label" "g" ] [ fragment [ opt "b" ] ];
             hole (fun () -> opt "b");
-            each ~key:Fun.id (fun () -> [ "b" ]) opt;
+            each ~key:Fun.id (fun () -> [| "b" |]) opt;
             opt "c" ]));
   check "escaped values compare unescaped" "<select><option value=\"a&quot;&amp;\" selected=\"\">A\"&amp;</option></select>"
     (html
@@ -1113,16 +1113,16 @@ let only_child_markers () =
     (chtml (element "p" [] [ fragment [ hole (fun () -> text (State.get s)) ] ]));
   check "list as the only child, element rows: no markers"
     "<ul><li>a</li><li>b</li></ul>"
-    (chtml (element "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun v -> element "li" [] [ text v ]) ]));
+    (chtml (element "ul" [] [ each ~key:Fun.id (fun () -> [| "a"; "b" |]) (fun v -> element "li" [] [ text v ]) ]));
   check "list with a sibling, text rows: all markers"
     "<ul><!--[--><!--[-->a<!--]--><!--[-->b<!--]--><!--]--><li></li></ul>"
     (chtml
        (element "ul" []
-          [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) text; element "li" [] [] ]));
+          [ each ~key:Fun.id (fun () -> [| "a"; "b" |]) text; element "li" [] [] ]));
   check "template rows: no row markers" "<ul><!--[--><li>a</li><!--]--><i></i></ul>"
     (chtml
        (element "ul" []
-          [ each ~key:Fun.id (fun () -> [ "a" ])
+          [ each ~key:Fun.id (fun () -> [| "a" |])
               (fun v -> runtime_instance (Private.template Private.Template.(element "li" [] [ part 0 ])) [| runtime_child (Yuka.text v) |]);
             element "i" [] [] ]))
 
@@ -1413,9 +1413,9 @@ let late () : _ element = Private.element (Private.hole (fun () -> failwith "sec
 let fallback ~error ~reset:_ = element "p" [] [ text ("caught " ^ error) ]
 
 let logged f =
-  let saved = !Server.log_error and messages = ref [] in
-  Server.log_error := (fun m -> messages := m :: !messages);
-  let result = Fun.protect ~finally:(fun () -> Server.log_error := saved) f in
+  let saved = prerr_endline and messages = ref [] in
+  Yuka.Server.Testing.set_log (fun m -> messages := m :: !messages);
+  let result = Fun.protect ~finally:(fun () -> Yuka.Server.Testing.set_log saved) f in
   (result, List.rev !messages)
 
 let in_island tree =

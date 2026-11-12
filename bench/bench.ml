@@ -82,7 +82,7 @@ let once ?(static = false) wrap rows =
           element "ul" []
             [
               each ~key:string_of_int
-                (fun () -> List.init rows Fun.id)
+                (fun () -> Array.init rows Fun.id)
                 (fun i -> row ~wrap i);
             ] )
     ();

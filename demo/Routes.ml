@@ -1,6 +1,6 @@
 Router.make ~not_found:Pages.not_found ~error:Pages.error
   ~headers:[ ("x-content-type-options", "nosniff") ]
-  ~cache:No_store
+  ~cache:no_store
   [
     Router.route About ~path:"/about" ~page:Pages.about ~prerender:true;
     Router.group ~path:"/" ~layout:Pages.shell ~not_found:Pages.not_found
@@ -15,6 +15,6 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
       ];
     Router.endpoint Issues_json ~path:"/issues.json" ~method_:`GET
       ~handler:Handlers.issues_json
-      ~cache:(Public { max_age = 60; s_max_age = None });
+      ~cache:(public ~max_age:60 ());
     Router.redirect ~path:"/issues" ~to_:(Permanent "/");
   ]

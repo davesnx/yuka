@@ -1,21 +1,9 @@
 (executable
- (name yuka_islands)
- (public_name yuka-islands)
- (modules yuka_islands source_text)
- (package yuka))
-
-(executable
- (name yuka_css)
- (public_name yuka-css)
- (modules yuka_css css_scan source_text)
+ (name yuka_cli)
+ (public_name yuka)
+ (modules yuka_cli cli yuka_routes_cmd yuka_islands yuka_css css_scan yuka_dev source_text)
+ (libraries unix yuka_routes)
  (package yuka))
 
 (copy_files#
  (files ../ppx/css_scan.ml))
-
-(executable
- (name yuka_cli)
- (public_name yuka)
- (modules yuka_cli source_text)
- (libraries unix)
- (package yuka))

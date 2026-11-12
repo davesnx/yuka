@@ -10,8 +10,7 @@ let body_read = ref 0
 
 module Test_adapter = struct
   type request = App.req
-  type response = reply
-  type 'a io = 'a Async.t
+  type nonrec reply = reply
 
   let meth (r : request) = r.meth
   let target (r : request) = r.target
@@ -27,9 +26,13 @@ module Test_adapter = struct
     in
     Async.return (read 0)
 
+  let session (r : request) =
+    if App.header r "x-no-session" <> None then failwith "no session middleware" else "cycle-session"
   let csrf_token (_ : request) = "cycle-token"
+  let verify_csrf (_ : request) token = Async.return (token = "cycle-token")
+  let upgrade (_ : request) _ = Async.return { status = 101; headers = []; body = "upgraded" }
 
-  let respond (r : Server.http_response) =
+  let respond (r : Server.response) =
     match r.body with
     | Server.String s -> Async.return { status = r.status; headers = r.headers; body = s }
     | Server.Stream f ->
@@ -50,15 +53,12 @@ module Test_adapter = struct
       | Some body -> { status = 200; headers; body }
       | None -> { status = 404; headers = [ ("cache-control", "no-store") ]; body = "" })
 
-  let of_async a = a
-  let bind = Async.bind
-
   let sleep _ =
     let a, _, _ = Async.make () in
     a
 end
 
-module H = Server.Make (Test_adapter)
+module H = Server.Adapter.Make (Test_adapter)
 
 let held_writes : (string * (unit -> unit)) list ref = ref []
 let stream_ended = ref false
@@ -67,9 +67,9 @@ let late_writes = ref 0
 module Held_adapter = struct
   include Test_adapter
 
-  type response = { reply : reply; ended : unit Async.t }
+  type nonrec reply = { reply : reply; ended : unit Async.t }
 
-  let respond (r : Server.http_response) =
+  let respond (r : Server.response) =
     match r.body with
     | Server.String s ->
         Async.return
@@ -86,24 +86,41 @@ module Held_adapter = struct
         Async.return { reply = { status = r.status; headers = r.headers; body = "" }; ended }
 
   let file _ ~root:_ ~path:_ ~headers:_ = assert false
+  let upgrade _ _ = assert false
 end
 
-module Held = Server.Make (Held_adapter)
+module Held = Server.Adapter.Make (Held_adapter)
+
+let raw_sleep = ref Test_adapter.sleep
+
+module Raw = Server.Adapter.Make (struct
+  include Test_adapter
+
+  type reply = Server.response
+
+  let respond r = Async.return r
+  let exists ~root:_ ~path:_ = false
+  let file _ ~root:_ ~path:_ ~headers:_ = assert false
+  let upgrade _ _ = assert false
+  let sleep s = !raw_sleep s
+end)
+
+let logged = ref []
+let log_hook = ref (fun m -> logged := m :: !logged)
+let config_with = Server.config ~log_error:(fun m -> !log_hook m)
 
 let modules =
   Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./a.js"}|} ~digest:"d1"
     ~packages:[ "pkg" ]
 
 let config =
-  Server.config ~assets:modules ~public:[ ("/static", "pub") ] ~styles:[ "/static/s.css" ] ()
-
-let logged = ref []
+  config_with ~assets:modules ~public:[ ("/static", "pub") ] ~styles:[ "/static/s.css" ] ()
 
 let request ?(meth = `GET) ?(headers = []) ?(body = "") target =
   App.reset ();
   logged := [];
   file_calls := [];
-  Server.log_error := (fun m -> logged := m :: !logged);
+  log_hook := (fun m -> logged := m :: !logged);
   { App.meth; target; headers; body }
 
 let fst3 (a, _, _) = a
@@ -162,10 +179,15 @@ let assets =
       fun () ->
         List.iter
           (fun prefix ->
-            match Server.config ~public:[ (prefix, "pub") ] () with
+            match config_with ~public:[ (prefix, "pub") ] () with
             | _ -> Alcotest.failf "prefix %S accepted" prefix
             | exception Invalid_argument _ -> ())
           [ "/"; ""; "//" ] );
+    ( "a bad manifest names Yuka.Server.modules",
+      fun () ->
+        match Server.modules ~dir:"js" ~entry:"main.js" ~manifest:"[]" ~packages:[] ~digest:"" with
+        | _ -> Alcotest.fail "accepted"
+        | exception Invalid_argument m -> check_true m (String.starts_with ~prefix:"Yuka.Server.modules:" m) );
     ( "a metafile without outputs is rejected",
       fun () ->
         match Server.bundle ~dir:"b" ~entry:"main.js" ~manifest:"{}" ~metafile:"{}" with
@@ -173,7 +195,7 @@ let assets =
         | exception Invalid_argument m -> check_true "context" (contains m "metafile") );
     ( "asset miss is 404 no-store and never routed",
       fun () ->
-        let r = get "/_yuka/nope.js" in
+        let r = get "/_yuka/app/nope.js" in
         check_status r 404;
         check_header r "cache-control" [ "no-store" ];
         check_events [];
@@ -181,7 +203,7 @@ let assets =
     ( "css sheets are served immutable, a missing one is 404 no-store",
       fun () ->
         let config =
-          Server.config ~assets:modules ~css:[ ("a-1234.css", ".a_1234{}") ] ()
+          config_with ~assets:modules ~css:[ ("a-1234.css", ".a_1234{}") ] ()
         in
         let r = get ~config "/_yuka/css/a-1234.css" in
         check_status r 200;
@@ -196,10 +218,10 @@ let assets =
         check_header r "cache-control" [ "no-store" ];
         Alcotest.(check (list string)) "no file asked" [] !file_calls;
         Alcotest.(check (list (pair string string)))
-          "css_files" [ ("_yuka/css/a-1234.css", ".a_1234{}") ] (Server.css_files config) );
+          "css_files" [ ("_yuka/css/a-1234.css", ".a_1234{}") ] (Server.Prerender.css_files config) );
     ( "css names are decoded, other methods are 405, bad names are refused",
       fun () ->
-        let config = Server.config ~css:[ ("a b.css", "x") ] () in
+        let config = config_with ~css:[ ("a b.css", "x") ] () in
         let r = get ~config "/_yuka/css/a%20b.css" in
         check_status r 200;
         Alcotest.(check string) "body" "x" r.body;
@@ -208,13 +230,13 @@ let assets =
         check_header r "allow" [ "GET, HEAD" ];
         List.iter
           (fun name ->
-            match Server.config ~css:[ (name, "x") ] () with
+            match config_with ~css:[ (name, "x") ] () with
             | _ -> Alcotest.failf "css name %S accepted" name
             | exception Invalid_argument _ -> ())
           [ "../../x.css"; "a/b.css"; ""; ".."; "a\\b.css" ] );
     ( "asset file with no-cache",
       fun () ->
-        let r = get "/_yuka/app/main.js" in
+        let r = get "/_yuka/app/app/main.js" in
         check_status r 200;
         Alcotest.(check string) "body" "main" r.body;
         check_header r "cache-control" [ "no-cache" ] );
@@ -226,10 +248,10 @@ let assets =
             check_status r 404;
             check_header r "cache-control" [ "no-store" ];
             Alcotest.(check (list string)) ("no file for " ^ target) [] !file_calls)
-          [ "/_yuka/../secret"; "/_yuka/%2e%2e/secret"; "/_yuka/a/%2F..%2Fx"; "/static/./s.css"; "/_yuka" ] );
+          [ "/_yuka/../secret"; "/_yuka/app/%2e%2e/secret"; "/_yuka/app/a/%2F..%2Fx"; "/static/./s.css"; "/_yuka"; "/_yuka/main.js" ] );
     ( "asset methods",
       fun () ->
-        let r = get ~meth:`POST "/_yuka/app/main.js" in
+        let r = get ~meth:`POST "/_yuka/app/app/main.js" in
         check_status r 405;
         check_header r "allow" [ "GET, HEAD" ];
         let r = get ~meth:`HEAD "/static/s.css" in
@@ -244,7 +266,7 @@ let assets =
         check_events [] );
     ( "no assets configured",
       fun () ->
-        let r = get ~config:(Server.config ()) "/_yuka/app/main.js" in
+        let r = get ~config:(config_with ()) "/_yuka/app/app/main.js" in
         check_status r 404;
         Alcotest.(check (list string)) "no file" [] !file_calls );
     ( "bundle outputs other than the entry are immutable",
@@ -253,10 +275,10 @@ let assets =
           Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:"{}"
             ~metafile:{|{"outputs":{"bundle/main.js":{"entryPoint":"main.js"},"bundle/chunk-X1.js":{}}}|}
         in
-        let config = Server.config ~assets:bundle () in
-        let r = get ~config "/_yuka/bundle/chunk-X1.js" in
+        let config = config_with ~assets:bundle () in
+        let r = get ~config "/_yuka/app/bundle/chunk-X1.js" in
         check_header r "cache-control" [ "public, max-age=31536000, immutable" ];
-        let r = get ~config "/_yuka/bundle/main.js" in
+        let r = get ~config "/_yuka/app/bundle/main.js" in
         check_header r "cache-control" [ "no-cache" ] );
     ( "GET /_yuka/csrf gives a fresh token to the same origin only",
       fun () ->
@@ -285,7 +307,7 @@ let assets =
   ]
 
 let prerender =
-  let prerendered = Server.config ~assets:modules ~public:[ ("/static", "pub") ] ~prerendered:"pre" () in
+  let prerendered = config_with ~assets:modules ~public:[ ("/static", "pub") ] ~prerendered:"pre" () in
   let app = Cycle_server.Routes_server.app in
   [
     ( "a prerendered page is its file, after the guards",
@@ -304,8 +326,8 @@ let prerender =
             let r = get ~config ~meth:`HEAD target in
             check_status r status;
             Alcotest.(check string) ("no body for " ^ target) "" r.body)
-          [ (prerendered, "/plain", 200); (config, "/_yuka/app/main.js", 200);
-            (config, "/static/s.css", 200); (config, "/_yuka/nope.js", 404) ];
+          [ (prerendered, "/plain", 200); (config, "/_yuka/app/app/main.js", 200);
+            (config, "/static/s.css", 200); (config, "/_yuka/app/nope.js", 404) ];
         let r = get ~config:prerendered ~meth:`HEAD "/plain" in
         check_header r "content-type" [ "text/html; charset=utf-8" ] );
     ( "a prerendered page is rendered with a query, Yuka-Navigate or no file",
@@ -319,28 +341,28 @@ let prerender =
         Alcotest.(check string) "endpoints are not served from files" "feed" r.body );
     ( "seeds and prerenderable paths",
       fun () ->
-        Alcotest.(check (list string)) "seeds" [ "/plain"; "/feed.xml" ] (Server.prerender_seeds app);
+        Alcotest.(check (list string)) "seeds" [ "/plain"; "/feed.xml" ] (Server.Prerender.seeds app);
         let req = request "/" in
         List.iter
-          (fun (path, expected) -> Alcotest.(check bool) path expected (Server.prerenderable config app req path))
+          (fun (path, expected) -> Alcotest.(check bool) path expected (Server.Prerender.prerenderable config app req path))
           [ ("/plain", true); ("/plain?x=1#y", true); ("/feed.xml", true); ("/", false); ("/nowhere", false);
-            ("/team/a/1", false); ("/_yuka/app/main.js", false); ("/static/s.css", false) ] );
+            ("/team/a/1", false); ("/_yuka/app/app/main.js", false); ("/static/s.css", false) ] );
     ( "links of a page",
       fun () ->
         Alcotest.(check (list string)) "links"
           [ "/a"; "/b&c"; "/"; "/caf%C3%A9"; "/c/d"; "/eA"; "/f\xc3\xa9&bogus;&amp" ]
-          (Server.links
+          (Server.Prerender.links
              {|<a href="/a?x=1#y"></a><a href="//evil.com/x"></a><a href="https://e.com/"></a><a href="/b&amp;c"></a><link href="/"><a href="/a"><a href="#top"><a href="/caf%C3%A9"><a href="&#x2F;c&#47;d"><a href="/e&#X41;"><a href="/f&#233;&bogus;&amp;amp">|}) );
     ( "file of a path",
       fun () ->
         List.iter
-          (fun (path, expected) -> Alcotest.(check (option string)) path expected (Server.prerender_file path))
+          (fun (path, expected) -> Alcotest.(check (option string)) path expected (Server.Prerender.file path))
           [ ("/", Some "index.html"); ("/a/b", Some "a/b/index.html"); ("/feed.xml", Some "feed.xml");
             ("/caf%C3%A9", Some "caf\xc3\xa9/index.html"); ("/%2e%2e/x", None); ("/a%2Fb", None);
             ("/a?q=1", Some "a/index.html") ] );
     ( "the 404 page of the app",
       fun () ->
-        match Async.status (Server.missing_page config app ~sleep:Test_adapter.sleep) with
+        match Async.status (Server.Prerender.missing_page config app ~sleep:Test_adapter.sleep) with
         | Async.Done resp -> (
             match Async.status (Test_adapter.respond resp) with
             | Async.Done r ->
@@ -352,8 +374,8 @@ let prerender =
     ( "served directories",
       fun () ->
         Alcotest.(check (list (pair string string))) "dirs"
-          [ ("/_yuka", "js"); ("/static", "pub") ]
-          (Server.served_dirs prerendered) );
+          [ ("/_yuka/app", "js"); ("/static", "pub") ]
+          (Server.Prerender.served_dirs prerendered) );
     ( "query pairs are decoded",
       fun () ->
         let r = get "/find?q=a+b%26&tag=x%2By&tag=&other=1" in
@@ -542,15 +564,26 @@ let guards =
         let pre = get ~headers:[ ("yuka-navigate", "-"); ("yuka-prefetch", "1") ] "/team/a/1" in
         check_status pre plain.status;
         Alcotest.(check string) "same body" plain.body pre.body );
-    ( "a stop Redirect needs a redirect status and a clean location",
+    ( "a stop Redirect stays on the site and needs a clean location",
       fun () ->
         List.iter
           (fun team ->
-            let r = get ("/team/" ^ team ^ "/1") in
+            let r = get ~headers:[ ("host", "app.example") ] ("/team/" ^ team ^ "/1") in
             check_status r 500;
             check_header r "location" [];
             Alcotest.(check int) "one log" 1 (List.length !logged))
-          [ "okay"; "crlf" ] );
+          [ "offsite"; "crlf"; "badelsewhere" ] );
+    ( "Redirect_off_site leaves the site, Forbidden is 403",
+      fun () ->
+        let r = get "/team/elsewhere/1" in
+        check_status r 307;
+        check_header r "location" [ "https://login.example/" ];
+        check_header r "cache-control" [ "no-store" ];
+        let r = get "/team/denied/1" in
+        check_status r 403;
+        check_header r "cache-control" [ "no-store" ];
+        check_header r "x-frame-options" [ "DENY" ];
+        check_events [ "outer" ] );
     ( "a guard Fail is 500 and logged",
       fun () ->
         let r = get "/team/a/0" in
@@ -570,7 +603,7 @@ let guards =
             "/team/a/rename"
         in
         check_status r 403;
-        check_events [ "outer" ];
+        check_events [];
         let r =
           get ~meth:`POST ~headers:[ ("Origin", "https://app.example"); ("Host", "app.example") ]
             "/team/a/rename"
@@ -581,12 +614,184 @@ let guards =
         check_status r 403;
         let r = get ~meth:`POST ~headers:[ ("Sec-Fetch-Site", "same-origin") ] "/team/a/rename" in
         check_status r 200 );
-    ( "Endpoint skips the origin check",
+    ( "an Endpoint with a safe method skips the origin check",
       fun () ->
         let r =
           get ~headers:[ ("Origin", "https://evil.example"); ("Host", "app.example") ] "/team/a/json"
         in
         check_status r 200 );
+    ( "an Endpoint with an unsafe method checks the origin before its guards",
+      fun () ->
+        let r = get ~meth:`PUT ~headers:[ ("Origin", "https://evil.example"); ("Host", "app.example") ] "/thing" in
+        check_status r 403;
+        check_events [];
+        let r = get ~meth:`PUT ~headers:[ ("Origin", "https://app.example"); ("Host", "app.example") ] "/thing" in
+        check_status r 200;
+        check_events [ "thing guard"; "thing" ] );
+    ( "~cross_origin:true lets a webhook in",
+      fun () ->
+        let r = get ~meth:`POST ~headers:[ ("Origin", "https://hooks.example"); ("Host", "app.example") ] "/hook" in
+        check_status r 200;
+        let r = get ~meth:`POST "/hook" in
+        check_status r 200 );
+    ( "config ~origins accepts the public origin behind a proxy",
+      fun () ->
+        let headers = [ ("Origin", "https://app.example"); ("Host", "internal:8080") ] in
+        let r = get ~meth:`PUT ~headers "/thing" in
+        check_status r 403;
+        let config = config_with ~origins:[ "https://App.Example" ] () in
+        let r = get ~config ~meth:`PUT ~headers "/thing" in
+        check_status r 200;
+        let r = get ~config ~meth:`PUT ~headers:[ ("Origin", "https://internal:8080"); ("Host", "internal:8080") ] "/thing" in
+        check_status r 403 );
+  ]
+
+let reviewed =
+  [
+    ( "a handler may send a header name twice",
+      fun () ->
+        let r = get "/cookies" in
+        check_status r 200;
+        check_header r "set-cookie" [ "a=1"; "b=2" ];
+        check_header r "x-a" [ "mine" ] );
+    ( "a header with CR or LF is a 500, not sent",
+      fun () ->
+        let r = get "/bad-header" in
+        check_status r 500;
+        check_header r "x-bad" [];
+        check_header r "set-cookie" [];
+        Alcotest.(check int) "one log" 1 (List.length !logged) );
+    ( "a server render of Live.use runs allow with the request",
+      fun () ->
+        let loads = !App.mine_loads in
+        let r = get ~headers:[ ("x-user", "ann") ] "/live" in
+        check_true "allowed" (contains r.body "data secret of ann");
+        let r = get ~headers:[ ("x-user", "bob") ] "/live" in
+        check_true "refused" (contains r.body "forbidden");
+        check_true "no state" (not (contains r.body "secret of ann"));
+        Alcotest.(check int) "loaded once" (loads + 1) !App.mine_loads );
+    ( "actions get the request context",
+      fun () ->
+        let r =
+          get ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example"); ("x-user", "ana") ]
+            ~body:"null" "/_yuka/action/whoami"
+        in
+        check_status r 200;
+        Alcotest.(check string) "body" {|{"ok":"ana cycle-session POST /_yuka/action/whoami"}|} r.body );
+    ( "form actions get the request context",
+      fun () ->
+        let r =
+          get ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/x-www-form-urlencoded"); ("origin", "http://app.example");
+                ("host", "app.example"); ("x-user", "ana") ]
+            ~body:"_yuka_action=save_entry&title=who&count=1&level=low" "/entry"
+        in
+        check_status r 303;
+        check_header r "location" [ "/entry?saved=ana" ] );
+    ( "the handler answers /_yuka/live",
+      fun () ->
+        let same = [ ("origin", "https://app.example"); ("host", "app.example") ] in
+        let r = get ~headers:(("upgrade", "websocket") :: same) "/_yuka/live" in
+        check_status r 101;
+        let r = get ~headers:[ ("upgrade", "websocket"); ("origin", "https://evil.example"); ("host", "app.example") ] "/_yuka/live" in
+        check_status r 403;
+        let r = get ~headers:same "/_yuka/live" in
+        check_status r 426;
+        let r = get ~meth:`POST ~headers:(("upgrade", "websocket") :: same) "/_yuka/live" in
+        check_status r 405;
+        Alcotest.(check (list string)) "no file" [] !file_calls );
+    ( "a server render of Live.use reads the state of the handler's node",
+      fun () ->
+        let node = Server.Live.node () in
+        let inbox = ref [ Some {|{"t":"hello","v":1,"csrf":"t"}|}; Some {|{"t":"sub","id":1,"topic":"cycle-mine","key":"ann"}|} ] in
+        let connection =
+          Server.Live.connection
+            ~send:(fun _ -> Async.return ())
+            ~receive:(fun () ->
+              match !inbox with
+              | x :: rest ->
+                  inbox := rest;
+                  Async.return x
+              | [] -> fst3 (Async.make ()))
+            ~close:(fun _ -> Async.return ())
+        in
+        let ann = Server.Testing.context ~header:(function "x-user" -> Some "ann" | _ -> None) ~session:"s" () in
+        ignore
+          (Server.Testing.live_run ~node ~sleep:(fun _ -> fst3 (Async.make ())) ann
+             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t") connection);
+        Server.Live.publish ~node App.mine "ann" "published on the node";
+        let page handler =
+          match Async.status handler with Async.Done (r : reply) -> r.body | _ -> Alcotest.fail "pending"
+        in
+        let r = request ~headers:[ ("x-user", "ann") ] "/live" in
+        check_true "the node's state"
+          (contains (page (H.handler ~node config Cycle_server.Routes_server.app r)) "data published on the node");
+        let r = request ~headers:[ ("x-user", "ann") ] "/live" in
+        check_true "the default node loads"
+          (contains (page (H.handler config Cycle_server.Routes_server.app r)) "data secret of ann") );
+    ( "a live upgrade without a session is a 500 and a log, before the upgrade",
+      fun () ->
+        let r =
+          get ~headers:[ ("upgrade", "websocket"); ("origin", "https://app.example"); ("host", "app.example"); ("x-no-session", "1") ]
+            "/_yuka/live"
+        in
+        check_status r 500;
+        Alcotest.(check int) "one log" 1 (List.length !logged);
+        check_true "names the session" (contains (List.hd !logged) "no session") );
+    ( "a page with live state under a shared cache rule is sent private, no-store",
+      fun () ->
+        let r = get ~headers:[ ("x-user", "ann") ] "/live-public" in
+        check_status r 200;
+        check_header r "cache-control" [ "private, no-store" ];
+        Alcotest.(check int) "one log" 1 (List.length !logged);
+        let r = get ~headers:[ ("x-user", "ann") ] "/live-public" in
+        check_header r "cache-control" [ "private, no-store" ];
+        Alcotest.(check int) "logged once per path" 0 (List.length !logged);
+        let r = get "/plain-public" in
+        check_header r "cache-control" [ "public, max-age=60" ];
+        let r = get ~headers:[ ("x-user", "ann") ] "/live" in
+        check_header r "cache-control" [ "no-store" ] );
+    ( "a prerender refuses a page with live state and has no dev script",
+      fun () ->
+        let pre = Server.Prerender.config (config_with ~dev:true ~assets:modules ()) in
+        let r = get ~config:pre ~headers:[ ("x-user", "ann") ] "/live" in
+        check_status r 500;
+        check_true "no state" (not (contains r.body "secret of ann"));
+        check_true "logged" (List.exists (fun m -> contains m "cannot be prerendered") !logged);
+        let r = get ~config:pre "/plain" in
+        check_status r 200;
+        check_true "no dev script" (not (contains r.body "EventSource")) );
+    ( "the default live node logs to the config of the handler",
+      fun () ->
+        ignore (get "/plain");
+        let inbox = ref [ Some {|{"t":"hello","v":1,"csrf":"t"}|}; Some {|{"t":"sub","id":1,"topic":"cycle-boom","key":"k"}|} ] in
+        let connection =
+          Server.Live.connection
+            ~send:(fun _ -> Async.return ())
+            ~receive:(fun () ->
+              match !inbox with
+              | x :: rest ->
+                  inbox := rest;
+                  Async.return x
+              | [] -> fst3 (Async.make ()))
+            ~close:(fun _ -> Async.return ())
+        in
+        ignore
+          (Server.Testing.live_run ~sleep:(fun _ -> fst3 (Async.make ())) (Server.Testing.context ~session:"s" ())
+             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t") connection);
+        check_true "in the config log" (List.exists (fun m -> contains m "boom secret") !logged) );
+    ( "the handler's live node marks its action answers",
+      fun () ->
+        let node = Server.Live.node () in
+        ignore (Server.Live.use_bus ~node ~name:"second" (Server.Live.memory_bus (Server.Live.memory ())));
+        let headers = [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ] in
+        let r = request ~meth:`POST ~headers ~body:"null" "/_yuka/action/whoami" in
+        match Async.status (H.handler ~node config Cycle_server.Routes_server.app r) with
+        | Async.Done r -> check_true "mark" (contains r.body {|"live":["second",0]|})
+        | _ -> Alcotest.fail "pending" );
   ]
 
 let loaders =
@@ -594,7 +799,7 @@ let loaders =
     ( "a fallback that fails still answers 500",
       fun () ->
         let a = call (request "/later") in
-        Server.log_error := (fun _ -> failwith "log down");
+        log_hook := (fun _ -> failwith "log down");
         App.finish_slow "explode";
         match Async.status a with
         | Async.Done r ->
@@ -605,11 +810,11 @@ let loaders =
       fun () ->
         let first_layer route =
           match Cycle_server.Routes_server.resolve (request "/") route with
-          | Server.Page { load; _ } -> (
+          | Server.Generated.Page { load; _ } -> (
               match Async.status (load ()) with
               | Async.Done (Ok plan) -> List.hd plan.layers
               | _ -> Alcotest.fail "no plan")
-          | Server.Handler _ -> Alcotest.fail "not a page"
+          | Server.Generated.Handler _ -> Alcotest.fail "not a page"
         in
         let a = first_layer Cycle_shared.Routes.Plain in
         let b = first_layer Cycle_shared.Routes.Home in
@@ -640,7 +845,7 @@ let loaders =
         let r = get "/boom" in
         check_status r 500;
         check_header r "cache-control" [ "no-store" ];
-        check_true "error page" (contains r.body "error 500");
+        check_true "error page" (contains r.body "error page");
         check_true "no message" (not (contains r.body "secret"));
         Alcotest.(check int) "one log" 1 (List.length !logged) );
     ( "failed loader Async is 500",
@@ -719,18 +924,18 @@ let render =
         App.finish_slow "ready";
         match Async.status a with
         | Async.Done r ->
-            check_true "fill script" (contains r.body Server.fill_script);
-            check_true "before the shell" (index r.body Server.fill_script < index r.body "wait")
+            check_true "fill script" (contains r.body Yuka.Private.fill_script);
+            check_true "before the shell" (index r.body Yuka.Private.fill_script < index r.body "wait")
         | _ -> Alcotest.fail "not done" );
     ( "one module script, before the first island",
       fun () ->
         let r = get "/islands" in
         Alcotest.(check int) "one" 1 (count r.body "<script type=\"module\"");
-        let script = index r.body {|<script type="module" async src="/_yuka/app/main.js"></script>|} in
+        let script = index r.body {|<script type="module" async src="/_yuka/app/app/main.js"></script>|} in
         check_true "found" (script >= 0);
         check_true "before the island" (script < index r.body "<yuka-island");
         check_true "after the content before it" (script > index r.body "before");
-        check_true "preload" (contains r.body {|<link rel="modulepreload" href="/_yuka/app/a.js">|}) );
+        check_true "preload" (contains r.body {|<link rel="modulepreload" href="/_yuka/app/app/a.js">|}) );
     ( "the module script stays when a Catch drops the first island",
       fun () ->
         let req = request "/islands" in
@@ -792,32 +997,21 @@ let render =
     ( "a settled page is one string, a page with a pending Await streams",
       fun () ->
         let kind target =
-          let r = request target in
-          let view =
-            { Server.meth = `GET; target; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return (Some "")); csrf_token = (fun () -> "t") }
-          in
-          match
-            Async.status
-              (Server.handle config Cycle_server.Routes_server.app ~sleep:(fun _ -> fst3 (Async.make ()))
-                 ~exists:Test_adapter.exists r view)
-          with
-          | Async.Done (Server.Respond { body = Server.String text; status; _ }) ->
+          raw_sleep := (fun _ -> fst3 (Async.make ()));
+          match Async.status (Raw.handler config Cycle_server.Routes_server.app (request target)) with
+          | Async.Done { body = Server.String text; status; _ } ->
               Printf.sprintf "string %d %b" status (String.ends_with ~suffix:"</body></html>" text)
-          | Async.Done (Server.Respond { body = Server.Stream _; status; _ }) -> Printf.sprintf "stream %d" status
+          | Async.Done { body = Server.Stream _; status; _ } -> Printf.sprintf "stream %d" status
           | _ -> "other"
         in
         Alcotest.(check string) "settled" "string 200 true" (kind "/plain");
         Alcotest.(check string) "pending" "stream 200" (kind "/slow") );
     ( "a render failure before the shell is written is the 500 page",
       fun () ->
-        let a =
-          Server.handle config Cycle_server.Routes_server.app
-            ~sleep:(fun _ -> Async.return ())
-            ~exists:Test_adapter.exists (request "/slow")
-            { Server.meth = `GET; target = "/slow"; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return (Some "")); csrf_token = (fun () -> "t") }
-        in
+        raw_sleep := (fun _ -> Async.return ());
+        let a = Raw.handler config Cycle_server.Routes_server.app (request "/slow") in
         match Async.status a with
-        | Async.Done (Server.Respond r) ->
+        | Async.Done r ->
             check_status { status = r.status; headers = r.headers; body = "" } 500;
             check_header { status = r.status; headers = r.headers; body = "" } "cache-control" [ "no-store" ];
             Alcotest.(check int) "one log" 1 (List.length !logged)
@@ -826,7 +1020,7 @@ let render =
       fun () ->
         let r = get "/broken" in
         check_status r 500;
-        check_true "error page" (contains r.body "error 500");
+        check_true "error page" (contains r.body "error page");
         check_true "no message" (not (contains r.body "secret"));
         Alcotest.(check (list string)) "log" [ "Failure(\"shell secret\")" ] !logged );
     ( "Yuka-Navigate gives the settled document",
@@ -844,7 +1038,7 @@ let render =
 
 let navigation =
   let nav keys target = get ~headers:[ ("Yuka-Navigate", keys) ] target in
-  let build = Server.build_id config Cycle_server.Routes_server.app in
+  let build = Server.Adapter.build_id config Cycle_server.Routes_server.app in
   [
     ( "shared root layout: partial with the page body",
       fun () ->
@@ -909,15 +1103,15 @@ let navigation =
       fun () ->
         let app = Cycle_server.Routes_server.app in
         let with_assets ~manifest ~digest =
-          Server.config
+          config_with
             ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest)
             ()
         in
         let other = with_assets ~manifest:{|{"A":"./b.js"}|} ~digest:"d1" in
-        check_true "differs" (Server.build_id other app <> build);
+        check_true "differs" (Server.Adapter.build_id other app <> build);
         let new_code = with_assets ~manifest:{|{"A":"./a.js"}|} ~digest:"d2" in
-        check_true "new file content, new id" (Server.build_id new_code app <> build);
-        check_true "stable" (Server.build_id config app = build) );
+        check_true "new file content, new id" (Server.Adapter.build_id new_code app <> build);
+        check_true "stable" (Server.Adapter.build_id config app = build) );
   ]
 
 let forms =
@@ -1119,10 +1313,9 @@ let forms =
   ]
 
 let dev =
-  let with_dev ?file ?(make = fun () -> Server.config ()) f =
-    Unix.putenv "YUKA_DEV" "1";
+  let with_dev ?file ?(make = fun () -> config_with ~dev:true ()) f =
     Unix.putenv "YUKA_DEV_FILE" (Option.value file ~default:"/nonexistent/yuka-dev");
-    Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> f (make ()))
+    f (make ())
   in
   let state_file text =
     let f = Filename.temp_file "yuka_dev" "" in
@@ -1141,30 +1334,24 @@ let dev =
     List.iter (fun resolve -> resolve ()) due
   in
   let stream ?(meth = `GET) ?(write = fun _ -> Async.return ()) config target =
-    let view =
-      { Server.meth; target; header = (fun _ -> None); body = (fun ~limit:_ -> Async.return None); csrf_token = (fun () -> "t") }
-    in
-    match
-      Async.status
-        (Server.handle config Cycle_server.Routes_server.app ~sleep ~exists:(fun ~root:_ ~path:_ -> false)
-           (request target) view)
-    with
-    | Async.Done (Server.Respond { status; headers; body = Server.Stream f }) ->
+    raw_sleep := sleep;
+    match Async.status (Raw.handler config Cycle_server.Routes_server.app (request ~meth target)) with
+    | Async.Done { status; headers; body = Server.Stream f } ->
         let written = ref [] in
         ignore (f (fun s -> written := !written @ [ s ]; write s));
         (status, headers, written)
-    | Async.Done (Server.Respond { status; headers; body = Server.String s }) -> (status, headers, ref [ s ])
+    | Async.Done { status; headers; body = Server.String s } -> (status, headers, ref [ s ])
     | _ -> Alcotest.fail "no response"
   in
   [
-    ( "without YUKA_DEV: no /_yuka/dev and no script",
+    ( "without ~dev: no /_yuka/dev and no script, even with YUKA_DEV=1",
       fun () ->
-        Unix.putenv "YUKA_DEV" "";
-        let config = Server.config () in
+        Unix.putenv "YUKA_DEV" "1";
+        let config = Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> config_with ()) in
         let r = get ~config "/_yuka/dev" in
         check_status r 404;
         check_true "no script" (not (contains (get ~config "/plain").body "/_yuka/dev")) );
-    ( "with YUKA_DEV=1: the events of the state file",
+    ( "with ~dev: the events of the state file",
       fun () ->
         let file = state_file {|{"build":1,"page":1,"error":null}|} in
         with_dev ~file (fun config ->
@@ -1183,7 +1370,7 @@ let dev =
             Alcotest.(check string) "error, on one line" ({|data: {"build":2,"page":1, "error":"boom"}|} ^ "\n\n") (List.nth !written 2);
             let r = get ~config ~meth:`POST "/_yuka/dev" in
             check_status r 405) );
-    ( "with YUKA_DEV=1: a heartbeat, an end on a failed write, HEAD without a loop",
+    ( "with ~dev: a heartbeat, an end on a failed write, HEAD without a loop",
       fun () ->
         let file = state_file {|{"build":1}|} in
         with_dev ~file (fun config ->
@@ -1212,27 +1399,25 @@ let dev =
           incr calls;
           if !calls = 1 then {|{"build":1}|} else failwith "state gone"
         in
-        let saved = !Server.log_error and logged = ref [] in
-        Server.log_error := (fun m -> logged := m :: !logged);
+        let logged = ref [] in
+        Server.Testing.set_log (fun m -> logged := m :: !logged);
         let ended = Yuka.Private.dev_events ~state ~sleep (fun _ -> Async.return ()) in
         (try tick () with _ -> ());
-        Server.log_error := saved;
+        Server.Testing.set_log prerr_endline;
         check_true "ended" (Async.status ended = Async.Done ());
         Alcotest.(check int) "logged once" 1 (List.length !logged);
         Alcotest.(check int) "no timer left" 0 (List.length !timers) );
-    ( "with YUKA_DEV=1: prerendered pages render live; a prerender gets no script",
+    ( "with ~dev: prerendered pages render live; without it, the file",
       fun () ->
         with_dev
-          ~make:(fun () -> Server.config ~assets:modules ~prerendered:"pre" ())
+          ~make:(fun () -> config_with ~dev:true ~assets:modules ~prerendered:"pre" ())
           (fun config ->
             let r = get ~config "/plain" in
             check_true "rendered, not the file" (not (String.equal r.body "prerendered plain"));
             check_true "with the script" (contains r.body "EventSource");
-            let r = get ~config:(Server.prerender_config config) "/plain" in
-            check_true "a prerender config: the file" (String.equal r.body "prerendered plain");
-            let r = get ~config:(Server.prerender_config (Server.config ())) "/plain" in
-            check_true "a prerender config renders no script" (not (contains r.body "EventSource"))) );
-    ( "with YUKA_DEV=1: the script in full pages only",
+            let r = get ~config:(config_with ~assets:modules ~prerendered:"pre" ()) "/plain" in
+            check_true "without dev: the file" (String.equal r.body "prerendered plain")) );
+    ( "with ~dev: the script in full pages only",
       fun () ->
         let file = state_file {|{"build":3,"page":2,"error":"<\/script>"}|} in
         with_dev ~file (fun config ->
@@ -1258,6 +1443,7 @@ let () =
       ("match", cases matching);
       ("head and rules", cases head_and_rules);
       ("guards", cases guards);
+      ("review", cases reviewed);
       ("loaders", cases loaders);
       ("render", cases render);
       ("navigation", cases navigation);

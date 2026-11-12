@@ -82,10 +82,23 @@ let jot_form key =
     ~children:(fun form ->
       el "div"
         [
-          el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form Body) ] [];
-          Yuka.Form.error_view form Body (fun m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
+          el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form `Body) ] [];
+          Yuka.Form.error_view form `Body (fun m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
         ])
     ()
+
+let mine = Yuka.Topic.declare ~name:"cycle-mine" ~key:Yuka.Codec.string ~state:Yuka.Codec.string
+let mine_loads = ref 0
+let boom_topic = Yuka.Topic.declare ~name:"cycle-boom" ~key:Yuka.Codec.string ~state:Yuka.Codec.string
+let () = Server.Live.serve boom_topic (fun _ -> Async.failed "boom secret")
+
+let () =
+  Server.Live.serve
+    ~allow:(fun ctx key -> Server.Context.header ctx "x-user" = Some key)
+    mine
+    (fun key ->
+      incr mine_loads;
+      Async.return ("secret of " ^ key))
 
 module Pages = struct
   let team_form ~team:_ ~squad:_ () = Server.page ~title:"Team form" (fun () -> jot_form "team")
@@ -99,10 +112,10 @@ module Pages = struct
               ~children:(fun form ->
                 el "div"
                   [
-                    el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form Title) ] [];
-                    el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form Count) ] [];
-                    Yuka.Form.error_view form Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
-                    Yuka.Form.error_view form Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
+                    el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form `Title) ] [];
+                    el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form `Count) ] [];
+                    Yuka.Form.error_view form `Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
+                    Yuka.Form.error_view form `Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
                     Yuka.Form.errors_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
                   ])
               ();
@@ -168,14 +181,25 @@ module Pages = struct
   let org_item ~org ~n ~org_item () =
     Server.page (fun () -> text (String.concat " " [ org; string_of_int n; org_item ]))
 
-  let org_missing ~org ~target () =
-    Server.page ~title:"Org missing" (fun () -> el "p" [ text ("no org page " ^ target ^ " in " ^ org) ])
+  let org_missing ~org ~path () =
+    Server.page ~title:"Org missing" (fun () -> el "p" [ text ("no org page " ^ path ^ " in " ^ org) ])
 
-  let not_found ~target () =
-    Server.page ~title:"Not found" (fun () -> el "p" [ text ("missing " ^ target) ])
+  let not_found ~path () =
+    Server.page ~title:"Not found" (fun () -> el "p" [ text ("missing " ^ path) ])
 
-  let error ~status () =
-    Server.page ~title:"Error" (fun () -> el "p" [ text ("error " ^ string_of_int status) ])
+  let error () = Server.page ~title:"Error" (fun () -> el "p" [ text "error page" ])
+
+  let live () =
+    Server.page ~title:"Live" (fun () ->
+        Yuka.runtime_island ~name:"L" ~props:`Null (fun () ->
+            let t = Yuka.Live.use mine (fun () -> "ann") in
+            let shown =
+              match Yuka.Live.status t with
+              | Yuka.Status.Ready { data; _ } -> "data " ^ data
+              | Yuka.Status.Failed { error = Yuka.Status.Forbidden; _ } -> "forbidden"
+              | _ -> "other"
+            in
+            el "p" [ text shown ]))
 end
 
 module Loaders = struct
@@ -205,10 +229,18 @@ module Guards = struct
     Async.return
       (match Params.Team.to_string team with
       | "nobody" -> Error Server.Not_found
-      | "away" -> Error (Server.Redirect { status = 303; location = "/" })
-      | "okay" -> Error (Server.Redirect { status = 200; location = "/" })
-      | "crlf" -> Error (Server.Redirect { status = 302; location = "/a\r\nset-cookie: x=1" })
+      | "away" -> Error (Server.Redirect { location = "/"; kind = `See_other })
+      | "offsite" -> Error (Server.Redirect { location = "https://evil.example/"; kind = `See_other })
+      | "crlf" -> Error (Server.Redirect { location = "/a\r\nset-cookie: x=1"; kind = `Temporary })
+      | "elsewhere" -> Error (Server.Redirect_off_site { location = "https://login.example/"; kind = `Temporary })
+      | "badelsewhere" ->
+          Error (Server.Redirect_off_site { location = "https://login.example/\r\nx: 1"; kind = `Permanent })
+      | "denied" -> Error Server.Forbidden
       | _ -> Ok ())
+
+  let thing _req =
+    note "thing guard";
+    Async.return (Ok ())
 
   let inner _req ~team:_ ~user =
     note "inner";
@@ -241,9 +273,33 @@ module Api = struct
 
   let clear _req = Server.text "cleared"
   let asset _req = Server.text "asset"
+
+  let cookies _req =
+    Server.text ~headers:[ ("set-cookie", "a=1"); ("Set-Cookie", "b=2"); ("x-a", "mine") ] "two cookies"
+
+  let bad_header _req = Async.return (Server.response ~headers:[ ("x-bad", "a\r\nset-cookie: x=1") ] (Server.String "bad"))
+
+  let thing _req =
+    note "thing";
+    Server.text "thing"
+
+  let hook _req = Server.text "hook"
 end
 
 let saved = ref []
+
+let whoami = Yuka.Action.mutation ~name:"whoami" ~input:Yuka.Codec.unit ~output:Yuka.Codec.string
+
+let () =
+  Server.Action.implement whoami (fun ctx () ->
+      Async.return
+        (String.concat " "
+           [
+             Option.value (Server.Context.header ctx "x-user") ~default:"-";
+             Option.value (Server.Context.session ctx) ~default:"-";
+             (match Server.Context.meth ctx with `POST -> "POST" | _ -> "other");
+             Server.Context.path ctx;
+           ]))
 
 let () =
   let open Forms_shared.Entry in
@@ -251,14 +307,15 @@ let () =
     ~redirect:(fun o ->
       if String.exists (fun c -> c = ':' || c < ' ' || c = '\127') o || String.starts_with ~prefix:"/" o then o
       else "/entry?saved=" ^ o)
-    (fun e ->
+    (fun ctx e ->
       saved := e.title :: !saved;
       match e.title with
-      | "taken" -> Async.return (Error [ (Some Title, "Taken") ])
+      | "who" -> Async.return (Ok (Option.value (Server.Context.header ctx "x-user") ~default:"none"))
+      | "taken" -> Async.return (Error [ (Some `Title, "Taken") ])
       | "nope" -> Server.Action.reject "Refused"
       | "boom" -> failwith "secret boom"
       | t -> Async.return (Ok t));
-  Server.Form.implement jot (fun n ->
+  Server.Form.implement jot (fun _ n ->
       saved := ("jot " ^ n.body) :: !saved;
-      if n.body = "x" then Async.return (Error [ (Some Body, "Too short") ])
+      if n.body = "x" then Async.return (Error [ (Some `Body, "Too short") ])
       else Async.return (Ok (String.length n.body)))

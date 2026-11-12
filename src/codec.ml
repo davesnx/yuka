@@ -2,10 +2,7 @@ open Types
 
   type 'a t = { encode : 'a -> Json.t; decode : Json.t -> ('a, string) result }
 
-  let mismatch what (j : Json.t) =
-    let s = Json.to_string j in
-    let s = if String.length s > 40 then String.sub s 0 40 ^ "..." else s in
-    Error ("expected " ^ what ^ ", got " ^ s)
+  let mismatch = Json.mismatch
 
   let make ~encode ~decode = { encode; decode }
 
@@ -114,13 +111,15 @@ let async c : 'a Async.t t =
           match rest with
           | [ ("ok", j) ] -> Ok (of_json j)
           | [ ("error", `String m) ] -> Ok (Async.failed m)
-          | [] -> Ok (Async.bind (!async_source id) of_json)
+          | [] ->
+              Client.use_async ();
+              Ok (Async.bind (!async_source id) of_json)
           | _ -> Error "bad async reference")
       | j -> mismatch "async reference" j);
   }
 
-let slot : slot t =
+let slot : Slot_value.t t =
   {
     encode = (fun _ -> `Null);
-    decode = (fun _ -> Ok { content = None; dom = ref [] });
+    decode = (fun _ -> Ok (Slot_value.of_slot { content = None; dom = ref [] }));
   }

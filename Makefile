@@ -74,7 +74,7 @@ demo-serve: demo-build ## Serve the demo on PORT
 demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
 	$(DUNE) build --profile=dev ./gen/yuka_cli.exe
 	opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- $(BUILD_DIR)/default/gen/yuka_cli.exe dev \
-	  --build @demo/all --state $(BUILD_DIR)/.yuka-dev \
+	  --build 'dune build --watch --profile=dev @demo/all' \
 	  --assets $(BUILD_DIR)/default/demo/static --assets $(BUILD_DIR)/default/demo/client/out \
 	  -- $(BUILD_DIR)/default/demo/server/demo_server.exe --port $(PORT)
 
@@ -105,8 +105,8 @@ bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUN
 	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --out $(BENCH_OUT)
 
 .PHONY: size
-size: ## Bundle the keyed benchmark app and the demo, print raw and gzip bytes, check the budget in bench/size/budget.json
-	$(DUNE) build --profile=release @bench/keyed/bench-keyed @demo/client/demo-client
+size: ## Bundle the keyed benchmark app, the demo and three one-island pages, print raw and gzip bytes and the JavaScript each page loads at start, check the budget in bench/size/budget.json
+	$(DUNE) build --profile=release @bench/keyed/bench-keyed @demo/all @bench/size/page/client/size-page @bench/size/codec_page/client/size-codec-page @bench/size/remote_page/client/size-remote-page
 	node bench/size/size.ts --build-dir $(BUILD_DIR)
 
 SSR_ROWS ?= 100

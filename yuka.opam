@@ -12,8 +12,8 @@ depends: [
   "dune" {>= "3.16"}
   "ocaml" {>= "5.4"}
   "melange" {>= "7.0.1-54"}
-  "ppxlib" {>= "0.38.0"}
-  "mlx" {with-test & >= "0.12"}
+  "ppxlib" {>= "0.38.0" & < "0.40.0"}
+  "mlx" {>= "0.12" & < "0.13"}
   "alcotest" {with-test}
   "odoc" {with-doc}
 ]

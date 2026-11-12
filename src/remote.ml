@@ -10,20 +10,14 @@ let retry ~attempts ~delay_ms = { attempts; delay_ms }
 let default_retry = { attempts = 2; delay_ms = (fun n -> if n = 1 then 500 else 1500) }
 let no_retry = { attempts = 0; delay_ms = (fun _ -> 0) }
 
-let server_send :
-    (string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit) ref =
-  ref (fun _ _ k ->
-      k (Error (Status.Network "no action transport"));
-      ignore)
-
 let fetch name input k =
   Web.fetch_post
     ("/_yuka/action/" ^ Web.encode_uri name)
     (Json.to_string input)
-    (fun status body -> k (Action.of_response status (Action.fields body)))
+    (fun status body -> k (Bridge.of_response status (Bridge.fields body)))
     (fun cancelled message -> if not cancelled then k (Error (Status.Network message)))
 
-let send () = if Web.in_browser then fetch else !server_send
+let send () = if Web.in_browser then fetch else !Bridge.send
 
 let table : (int * (unit -> unit)) list Web.table option ref = ref None
 let next_use = ref 0
@@ -40,7 +34,7 @@ let listed name = Option.value (Web.table_get (uses ()) name) ~default:[]
 
 let decode (q : (_, _, _) Action.t) last = function
   | Ok j -> (
-      match q.output.decode j with
+      match (Action.output q).decode j with
       | Ok data -> Status.Ready { data; stale = false }
       | Error m -> Status.Failed { error = Status.Protocol m; last })
   | Error error -> Status.Failed { error; last }
@@ -48,14 +42,14 @@ let decode (q : (_, _, _) Action.t) last = function
 let on_server ~enabled (q : (_, _, _) Action.t) args base =
   if not (enabled ()) then State.set base Status.Idle
   else
-    let input = q.input.encode (args ()) in
+    let input = (Action.input q).encode (args ()) in
     let settled, resolve, _ = Async.make () in
-    let (_abort : unit -> unit) = !server_send q.name input resolve in
+    let (_abort : unit -> unit) = !Bridge.send (Action.name q) input resolve in
     match Async.status settled with
     | Async.Done r ->
         State.set base (decode q None r);
-        Answers.record (Answers.key q.name input) (Some r) settled
-    | _ -> Answers.record (Answers.key q.name input) None settled
+        Answers.record (Answers.key (Action.name q) input) (Some r) settled
+    | _ -> Answers.record (Answers.key (Action.name q) input) None settled
 
 let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
     (args : unit -> 'i) : 'o t =
@@ -74,7 +68,7 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
       stop := ignore
     in
     let finish g r = if g = !generation then State.set base (decode q (Status.data (State.peek base)) r) in
-    let rec attempt g input n = stop := send q.name input (answered g input n)
+    let rec attempt g input n = stop := send (Action.name q) input (answered g input n)
     and answered g input n r =
       if g = !generation then
         match r with
@@ -100,7 +94,7 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
       State.set base (Status.Loading (Status.data (State.peek base)));
       if not read then attempt g input 1
       else
-        let key = Answers.key q.name input in
+        let key = Answers.key (Action.name q) input in
         match Answers.find key with
         | Answers.Found r -> embedded g input r
         | Answers.Absent -> attempt g input 1
@@ -128,8 +122,8 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
     let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
     Base.Effect.run (fun () ->
         if enabled () then begin
-          let input = q.input.encode (args ()) in
-          let key = Answers.key q.name input in
+          let input = (Action.input q).encode (args ()) in
+          let key = Answers.key (Action.name q) input in
           match !current with
           | Some (k, _) when String.equal k key -> ()
           | _ ->
@@ -146,10 +140,10 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
         end);
     incr next_use;
     let id = !next_use in
-    Web.table_set (uses ()) q.name ((id, refetch) :: listed q.name);
+    Web.table_set (uses ()) (Action.name q) ((id, refetch) :: listed (Action.name q));
     Base.own (fun () ->
         cancel ();
-        Web.table_set (uses ()) q.name (List.filter (fun (i, _) -> i <> id) (listed q.name)));
+        Web.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
     { base; changes; refetch }
   end
 
@@ -160,7 +154,7 @@ let status r =
   else Status.map (Optimistic.apply (fun d f -> f d) changes) base
 
 let refetch r = r.refetch ()
-let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed q.name)
+let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed (Action.name q))
 
 let mutate ?commit r ~change run =
   let added, id = Optimistic.add (State.peek r.changes) change in
