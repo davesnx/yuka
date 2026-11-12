@@ -17,27 +17,27 @@ let my_issues () =
   Yuka.Server.page ~title:"My issues" (fun () ->
       <Yuka.Client><Issue_list title="My issues" view=Queries.Mine /></Yuka.Client>)
 
-let issue_view ?(delay = 0.6) (i : Model.Issue.t) : Yuka.server Yuka.element =
+let issue_view ?(delay = 0.6) (issue : Model.Issue.t) : Yuka.server Yuka.element =
   let comments =
-    <Yuka.Await async=(Store.comments_async ~delay i.id)
+    <Yuka.Await async=(Store.comments_async ~delay issue.id)
       loading=(<Views.Skeleton lines=3 />)
-      failed=(fun m -> <p class_="error">(Yuka.text ("Could not load comments: " ^ m))</p>)>
+      failed=(fun message -> <p class_="error">(Yuka.text ("Could not load comments: " ^ message))</p>)>
       (fun comments ->
         <Yuka.Client start=(`Lazy `Idle)>
-          <Comments issue_id=i.id me=Store.me comments />
+          <Comments issue_id=issue.id me=Store.me comments />
         </Yuka.Client>)
     </Yuka.Await>
   in
   let props =
     <Yuka.Client start=(`Lazy `Interaction)>
-      <Issue_props issue=i>
+      <Issue_props issue>
         <Yuka.Client start=(`Lazy `Visible)>
-          <Related related=(Store.related_async ~delay:(delay *. 1.5) i) />
+          <Related related=(Store.related_async ~delay:(delay *. 1.5) issue) />
         </Yuka.Client>
       </Issue_props>
     </Yuka.Client>
   in
-  <Views.Issue_page issue=i comments props />
+  <Views.Issue_page issue comments props />
 
 let issue ~id ~issue () = Yuka.Server.page ~title:id (fun () -> issue_view issue)
 

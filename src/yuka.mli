@@ -1,5 +1,5 @@
 val owner : (unit -> 'a) -> 'a * (unit -> unit)
-(** [owner f] runs [f] in a new owner. Effects and memos created during [f]
+(** [owner body] runs [body] in a new owner. Effects and memos created during [body]
     belong to it. The returned function disposes all of them: it stops the
     effects and runs their cleanups. The new owner is detached: disposing
     the owner that was current when [owner] was called does not dispose it,
@@ -25,8 +25,8 @@ module State : sig
       record, tuple, list, array or constructor with arguments is a change
       even when its contents are equal; pass [~equal:( = )] for structural
       equality. The default never raises, also for functional values. In the
-      browser, [Some x] is [x] itself, so a new [Some x] that wraps the same
-      [x] is not a change there; on native it is. An exception raised by
+      browser, [Some value] is [value] itself, so a new [Some value] that wraps the same
+      [value] is not a change there; on native it is. An exception raised by
       [equal] counts as a change. *)
 
   val get : ('a, _) signal -> 'a
@@ -59,12 +59,12 @@ module State : sig
 end
 
 val batch : (unit -> 'a) -> 'a
-(** [batch f] runs [f] and returns its result. Effects that the writes in
-    [f] make pending run once, after [f] returns, not after each write.
-    Memos read inside [f] are up to date. A [batch] inside a [batch] (or
+(** [batch body] runs [body] and returns its result. Effects that the writes in
+    [body] make pending run once, after [body] returns, not after each write.
+    Memos read inside [body] are up to date. A [batch] inside a [batch] (or
     inside an effect) runs its pending effects when the outermost one ends.
-    When [f] raises, the pending effects still run, then the exception of
-    [f] is raised again. Each event handler that {!on} or
+    When [body] raises, the pending effects still run, then the exception of
+    [body] is raised again. Each event handler that {!on} or
     {!Browser.on_window} attaches runs in a [batch]: the DOM updates and
     the effects run once, after the handler returns. When the handler
     raises, its writes still update the DOM, then its exception and any
@@ -123,7 +123,7 @@ type start = [ `Load | trigger | `Lazy of trigger ]
     component cannot have a prop named [start].
     - [`Load] (default): download and start when the page opens.
     - A trigger: download when the page opens, start at the trigger.
-    - [`Lazy t]: download and start at the trigger [t]. Events before the
+    - [`Lazy trigger]: download and start at [trigger]. Events before the
       start are recorded and replayed. The server prints no preload link for
       it.
 
@@ -449,16 +449,16 @@ module Action : sig
   (** Encodes the input, sends it to the server (in the browser after
       [render ~islands], as [POST /_yuka/action/<name>]; on the server, to the
       implementation), decodes the output. The [Async] is always [Done]:
-      - [Ok o]: the output.
-      - [Error (Rejected m)]: the server refused the input (400); [m] is
+      - [Ok output]: the output.
+      - [Error (Rejected message)]: the server refused the input (400); [message] is
         for the user.
       - [Error Forbidden]: the origin check failed (403).
       - [Error Not_found]: no implementation has this name (404).
       - [Error Server]: the implementation raised or failed (500); the
         detail is in the server log.
-      - [Error (Network m)]: no answer. [m] is ["cancelled"] when the owner
+      - [Error (Network message)]: no answer. [message] is ["cancelled"] when the owner
         of the call was disposed or {!stop} ran.
-      - [Error (Protocol m)]: the answer or the output did not decode. *)
+      - [Error (Protocol message)]: the answer or the output did not decode. *)
 end
 
 module Remote = Remote
@@ -705,14 +705,14 @@ module Private : sig
     (** [element tag attrs children]: an HTML element. *)
 
     val part : int -> shape
-    (** The child at this place is part [i], made with {!runtime_child}. *)
+    (** The child at this place is part [index], made with {!runtime_child}. *)
 
     val fixed : string -> string -> attr
     (** [fixed name value]: an attribute with a fixed value, checked by
         {!template}. *)
 
     val part_attr : int -> attr
-    (** The attribute at this place is part [i], made with
+    (** The attribute at this place is part [index], made with
         {!runtime_attribute} or {!runtime_attribute_option}. *)
 
     val make :
@@ -737,7 +737,7 @@ module Private : sig
       [Invalid_argument] on a bad tag or attribute name. *)
 
   val recompile : template -> template
-  (** [template (template_shape t)]: the template again, with its HTML and
+  (** [template (template_shape original)]: the template again, with its HTML and
       paths computed at run time. Tests compare it with what the ppx
       emitted. *)
 
@@ -764,7 +764,7 @@ module Private : sig
   val element : node -> 'kind element
 
   val hole : (unit -> node) -> node
-  (** [Hole f]. [node] is private, so that a test cannot build a node kind
+  (** [Hole compute]. [node] is private, so that a test cannot build a node kind
       without the constructor that installs its client code. *)
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
@@ -930,12 +930,12 @@ module Private : sig
     name:string -> header:(string -> string option) -> body:string -> (int * string) Async.t
 
   val render : Client.container -> (unit -> 'k element) -> unit -> unit
-  (** [render container f] clears [container], builds the DOM of [f ()] and
+  (** [render container app] clears [container], builds the DOM of [app ()] and
       returns a function that stops the effects and handlers of this tree,
       for tests. Browser only. *)
 
   val hydrate : Client.container -> (unit -> 'k element) -> unit -> unit
-  (** [hydrate container f] adopts the server DOM in [container] (written
+  (** [hydrate container app] adopts the server DOM in [container] (written
       with the markers of DESIGN.md), attaches handlers and starts holes.
       Where the DOM does not match, it creates the missing nodes. In a dev
       build (see {!render}), each mismatch (a missing node, another tag,
@@ -1383,13 +1383,13 @@ module Server : sig
       unit
     (** Registers a form action (see {!Yuka.Form}). It answers the island
         path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
-        with [redirect o] in the answer (checked as for the 303 below: a
+        with [redirect output] in the answer (checked as for the 303 below: a
         bad one answers 500 [action failed] and is logged), and the form
         post of a page. The request cycle checks the origin (403), runs the
         guards of the page the form is posted to (a refusal answers as for
         [GET] and the function does not run), reads at most 1 MiB of body
         (413), decodes the posted fields, calls the function, and answers
-        303 to [redirect o] (default: the page URL) on [Ok o], or renders
+        303 to [redirect output] (default: the page URL) on [Ok output], or renders
         the page again with status 422 and the sent values and errors on
         [Error], a decode error or {!Action.reject}. The form field
         [_yuka_action] names the action, so a post to any [GET] page can run
@@ -1397,7 +1397,7 @@ module Server : sig
         {!Action.implement}. Only [application/x-www-form-urlencoded] posts
         reach a form action; a [multipart/form-data] post (a file input) is
         a 405. The 303, 403 and 413 carry the page's rule headers. A
-        [redirect o] that is not a path ([/x], not [//x]) or an [http:] or
+        [redirect output] that is not a path ([/x], not [//x]) or an [http:] or
         [https:] URL of the request [Host] or of [config ~origins] (the
         island answer too), or that holds a control character (below space,
         or DEL; a browser drops TAB from a URL, so [/\t/x] would go to
@@ -1473,7 +1473,7 @@ module Server : sig
       plain 500 instead, with a log message. *)
 
   val response : ?status:int -> ?headers:(string * string) list -> body -> response
-  (** Default status: 200; default headers: none. [response (Stream f)]
+  (** Default status: 200; default headers: none. [response (Stream producer)]
       streams. *)
 
   val text : ?status:int -> ?headers:(string * string) list -> string -> response Async.t
@@ -1698,10 +1698,10 @@ module Server : sig
             [aria-current="page"], except inside an island, whose markup
             must match the client render.
           + With a [Yuka-Navigate] header (the outlet keys of the page):
-            let [n] be the length of the common prefix of the sent keys and
+            let [shared] be the length of the common prefix of the sent keys and
             the layer keys of the page (or of the fallback, for a 404 or
-            500). [n = 0]: the settled document in one string. [n >= 1]:
-            only what goes inside outlet [n], settled, with the headers
+            500). [shared = 0]: the settled document in one string. [shared >= 1]:
+            only what goes inside outlet [shared], settled, with the headers
             [Yuka-Outlet] (its key) and [Yuka-Title] (percent-encoded);
             island, await and async ids get the prefix [KEY-]. Both have
             [Yuka-Build] ({!build_id}).
@@ -1919,7 +1919,7 @@ module Server : sig
         one line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
 
     val memory_down : Live.memory -> bool -> unit
-    (** [memory_down m true] drops notes; [false] brings the bus back and
+    (** [memory_down memory true] drops notes; [false] brings the bus back and
         calls each [on_restart] function. *)
   end
 

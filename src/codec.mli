@@ -3,8 +3,8 @@ type 'a t = private { encode : 'a -> Json.t; decode : Json.t -> ('a, string) res
 val make : encode:('a -> Json.t) -> decode:(Json.t -> ('a, string) result) -> 'a t
 
 val map : ('a -> 'b) -> ('b -> 'a) -> 'a t -> 'b t
-(** [map of_a to_a c]: a codec of ['b] that writes [to_a b] with [c] and
-    reads with [c], then applies [of_a]. *)
+(** [map of_a to_a codec]: a codec of ['b] that writes [to_a value] with [codec] and
+    reads with [codec], then applies [of_a]. *)
 
 val int : int t
 (** [`Int], or a [`Float] with an integral value in the [int] range of
@@ -32,11 +32,11 @@ val option : 'a t -> 'a option t
 (** [None] is [`Null]. *)
 
 val result : 'a t -> 'e t -> ('a, 'e) result t
-(** [Ok v] is [{"ok": v}] and [Error e] is [{"error": e}]. *)
+(** [Ok value] is [{"ok": value}] and [Error error] is [{"error": error}]. *)
 
 val async : 'a t -> 'a Async.t t
 (** On the server, a settled value is written inline:
-    [{"$async":"aN","ok":v}] or [{"$async":"aN","error":"server error"}].
+    [{"$async":"aN","ok":value}] or [{"$async":"aN","error":"server error"}].
     In a streaming render, a pending value is written as [{"$async":"aN"}]
     and the stream writes its value later, or [{"error":"server error"}] if
     it fails. A failure message goes to the [log] of

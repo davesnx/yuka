@@ -5,8 +5,8 @@ type 'o t
 type retry
 
 val retry : attempts:int -> delay_ms:(int -> int) -> retry
-(** [attempts] more tries after the first; [delay_ms n] waits before try
-    [n + 1]. *)
+(** [attempts] more tries after the first; [delay_ms attempt] waits before try
+    [attempt + 1]. *)
 
 val default_retry : retry
 (** Two more tries, after 500 ms and 1500 ms. *)
@@ -51,7 +51,7 @@ val mutate :
   change:('o -> 'o) ->
   (unit -> ('r, Status.error) result Async.t) ->
   ('r, Status.error) result Async.t
-(** [mutate r ~change run] shows [change] on the data at once, then calls
+(** [mutate remote ~change run] shows [change] on the data at once, then calls
     [run ()], for example an {!Action.call}. On [Ok result] the change is
     removed and the data becomes [commit result data] (default
     [change data]); on [Error] or a failed [Async] the change is removed

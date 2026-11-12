@@ -2,36 +2,36 @@ open Demo_shared
 
 let view_issues = function Queries.All -> !Store.issues | Queries.Mine -> Store.mine ()
 
-let publish_issue (i : Model.Issue.t) =
-  Yuka.Server.Live.publish Topics.issue i.id i;
-  List.iter (fun v -> Yuka.Server.Live.publish Topics.issues v (view_issues v)) [ Queries.All; Queries.Mine ]
+let publish_issue (issue : Model.Issue.t) =
+  Yuka.Server.Live.publish Topics.issue issue.id issue;
+  List.iter (fun view -> Yuka.Server.Live.publish Topics.issues view (view_issues view)) [ Queries.All; Queries.Mine ]
 
 let register () =
   Yuka.Server.Action.implement Queries.labels (fun _ () -> Yuka.Async.return (Store.label_counts ()));
   Yuka.Server.Live.serve Topics.issues (fun view -> Yuka.Async.return (view_issues view));
   Yuka.Server.Live.serve Topics.issue (fun id ->
-      match Store.find id with Some i -> Yuka.Async.return i | None -> Yuka.Server.Action.reject ("No issue " ^ id));
+      match Store.find id with Some issue -> Yuka.Async.return issue | None -> Yuka.Server.Action.reject ("No issue " ^ id));
   Yuka.Server.Action.implement Actions.update_issue
     (fun _ ({ id; status; priority } : Actions.update_input) ->
       match Store.update ~id ?status ?priority () with
-      | Some i ->
-          publish_issue i;
-          Yuka.Async.return i
+      | Some issue ->
+          publish_issue issue;
+          Yuka.Async.return issue
       | None -> Yuka.Server.Action.reject ("No issue " ^ id));
   Yuka.Server.Form.implement Actions.create_issue
-    ~redirect:(fun (i : Model.Issue.t) -> Routes.issue ~id:i.id ())
+    ~redirect:(fun (issue : Model.Issue.t) -> Routes.issue ~id:issue.id ())
     (fun _ { title; description; status; priority } ->
       let title = String.trim title in
-      let title_error m = Yuka.Async.return (Error [ (Some `Title, m) ]) in
+      let title_error message = Yuka.Async.return (Error [ (Some `Title, message) ]) in
       if title = "" then title_error "Title is required"
       else if String.length title > 80 then title_error "Title is too long (at most 80 characters)"
       else
         match Store.find_title title with
-        | Some (i : Model.Issue.t) -> title_error ("An issue with this title already exists: " ^ i.id)
+        | Some (issue : Model.Issue.t) -> title_error ("An issue with this title already exists: " ^ issue.id)
         | None ->
-            let i = Store.create ~title ~description ~status ~priority in
-            publish_issue i;
-            Yuka.Async.return (Ok i));
+            let issue = Store.create ~title ~description ~status ~priority in
+            publish_issue issue;
+            Yuka.Async.return (Ok issue));
   Yuka.Server.Action.implement Actions.add_comment
     (fun _ { issue_id; body } ->
       match Store.find issue_id with

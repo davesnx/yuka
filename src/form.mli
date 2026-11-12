@@ -2,8 +2,8 @@
     in an island. [[@@deriving form]] on a record [t] writes the field
     type [field], a polymorphic variant with one tag per record field
     ([title] gives [`Title]), the function [field_name] and the value
-    [form : (t, field) Yuka.Form.t] (for a record [r]: [r_field],
-    [r_field_name] and [r_form]); the same decoder runs on the server and
+    [form : (t, field) Yuka.Form.t] (for a record [issue]: [issue_field],
+    [issue_field_name] and [issue_form]); the same decoder runs on the server and
     in the browser. *)
 
 type 'f errors = ('f option * string) list
@@ -45,7 +45,7 @@ val name : ('i, 'f) t -> 'f -> string
 
 val action : name:string -> fields:('i, 'f) t -> output:'o Codec.t -> ('i, 'o, 'f) action
 (** An action whose input is a form: {!Action.call} sends the encoded
-    fields; the answer is [Ok (Ok o)] or [Ok (Error field_errors)]. *)
+    fields; the answer is [Ok (Ok output)] or [Ok (Error field_errors)]. *)
 
 type ('o, 'f) form
 (** What the children of {!make} get. *)
@@ -90,8 +90,8 @@ val make :
     in the browser: the fields (with the submit button's [name] and
     [value]) are decoded first (an error shows at once, with no request),
     then [run input] (default: the action call) runs while [pending] is
-    true; field errors show, an [Error e] shows as a form error with the
-    text of {!Status.error_to_string}, and on [Ok o] [on_ok o] runs, or
+    true; field errors show, an [Error error] shows as a form error with the
+    text of {!Status.error_to_string}, and on [Ok output] [on_ok output] runs, or
     else the page
     follows the server's [redirect] (with [run], the page URL) with a
     client navigation, as a post with no JavaScript does. A [redirect] to

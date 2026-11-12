@@ -8,18 +8,18 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.C
   let submit () =
     let body = String.trim (Yuka.State.peek draft) in
     if body <> "" then (
-      let n = Yuka.State.peek pending + 1 in
-      let tmp : Comment.t = { id = "tmp-" ^ Int.to_string n; author = me; body; created_at = "Just now" } in
+      let count = Yuka.State.peek pending + 1 in
+      let tmp : Comment.t = { id = "tmp-" ^ Int.to_string count; author = me; body; created_at = "Just now" } in
       Yuka.batch (fun () ->
-          Yuka.State.set pending n;
+          Yuka.State.set pending count;
           Yuka.State.set error None;
           Yuka.State.set draft "";
           Yuka.State.set comments (Yuka.State.peek comments @ [ tmp ]));
       let swap with_ =
         Yuka.State.set comments
           (List.filter_map
-             (fun (c : Comment.t) ->
-               if c.id <> tmp.id then Some c else with_)
+             (fun (comment : Comment.t) ->
+               if comment.id <> tmp.id then Some comment else with_)
              (Yuka.State.peek comments))
       in
       let failed message =
@@ -31,34 +31,34 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.C
       Yuka.Async.on_result
         (Yuka.Action.call Actions.add_comment { Actions.issue_id; body })
         (function
-          | Ok (Ok c) ->
+          | Ok (Ok saved) ->
               Yuka.State.set comments
-                (List.map (fun (x : Comment.t) -> if x.id = tmp.id then c else x) (Yuka.State.peek comments))
-          | Ok (Error e) -> failed (Yuka.Status.error_to_string e)
+                (List.map (fun (existing : Comment.t) -> if existing.id = tmp.id then saved else existing) (Yuka.State.peek comments))
+          | Ok (Error status) -> failed (Yuka.Status.error_to_string status)
           | Error message -> failed message))
   in
-  let comment (c : Comment.t) : Yuka.client Yuka.element =
+  let comment (entry : Comment.t) : Yuka.client Yuka.element =
     <li class_="comment">
-      <Views.Avatar user=(Some c.author) />
+      <Views.Avatar user=(Some entry.author) />
       <div class_="comment-body">
         <div class_="comment-meta">
-          <b>(Yuka.text c.author.name)</b>
-          <span class_="muted">(Yuka.text c.created_at)</span>
+          <b>(Yuka.text entry.author.name)</b>
+          <span class_="muted">(Yuka.text entry.created_at)</span>
         </div>
-        <p>(Yuka.text c.body)</p>
+        <p>(Yuka.text entry.body)</p>
       </div>
     </li>
   in
   <div class_="activity">
     <ul class_="comments">
-      (Yuka.each ~key:(fun (c : Comment.t) -> c.id) (fun () -> Array.of_list (Yuka.State.get comments)) comment)
+      (Yuka.each ~key:(fun (comment : Comment.t) -> comment.id) (fun () -> Array.of_list (Yuka.State.get comments)) comment)
     </ul>
     <div class_="comment-box">
       <textarea class_="comment-input" placeholder="Leave a comment" rows=3
         value=(Yuka.State.get draft)
-        on_input=(fun e -> Yuka.State.set draft (Yuka.Event.target_value e)) />
+        on_input=(fun event -> Yuka.State.set draft (Yuka.Event.target_value event)) />
       (match Yuka.State.get error with
-       | Some m -> <p class_="error">(Yuka.text m)</p>
+       | Some message -> <p class_="error">(Yuka.text message)</p>
        | None -> Yuka.empty)
       <button class_="button primary" disabled=(Yuka.State.get draft = "") on_click=(fun _ -> submit ())>"Comment"</button>
     </div>

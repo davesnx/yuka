@@ -54,7 +54,7 @@ let post (_ : Dream.request) ~slug =
   never cached.
 - `Router.redirect ~path ~to_:(Permanent "/")`: a 308 redirect, or
   `Temporary` for a 307. The target can use the params of the path:
-  `~to_:(Temporary "/team/:x")`.
+  `~to_:(Temporary "/team/:name")`.
 
 `method_` is one of `` `GET ``, `` `POST ``, `` `PUT ``, `` `PATCH `` and
 `` `DELETE ``. A `` `GET `` node also answers `HEAD`.
@@ -62,7 +62,7 @@ let post (_ : Dream.request) ~slug =
 ## Paths
 
 - `:id<string>`: one segment, as a `string`.
-- `:n<int>`: an `int`. Only the form `Int.to_string` writes matches, so
+- `:page<int>`: an `int`. Only the form `Int.to_string` writes matches, so
   `01` and `+1` do not.
 - `:tab<Model.tab>`: your own type, written with its module path. See
   below.
@@ -105,7 +105,7 @@ Router.route Issue ~path:"/issue/:id<string>/:tab<Model.tab>" ~page:Pages.issue
   result, so it can return any text.
 - `Yuka.Router.Param.int`, `string` and `bool` decode and encode as the
   built-in types do, so you can build on them:
-  `~decode:(fun s -> Yuka.Router.Param.(decode int) s)`.
+  `~decode:(fun segment -> Yuka.Router.Param.(decode int) segment)`.
 - The type and its value must be in the shared library, because the
   browser builds links too.
 - Write the module path: the generated `Routes` module opens nothing, so
@@ -120,7 +120,7 @@ Router.route Issue ~path:"/issue/:id<string>/:tab<Model.tab>" ~page:Pages.issue
 ~search:{ tag = optional string; page = default int 1; tab = optional Model.tab }
 ```
 
-`optional T` gives a `T option`, `default T d` gives a `T` (`d` when the
+`optional T` gives a `T option`, `default T fallback` gives a `T` (`fallback` when the
 param is absent), and `many T` gives a `T list`. `T` is `string`, `int`,
 `bool` or your own type with its module path, as in a path. A value that
 does not decode counts as absent. Search fields go on a route or a group.

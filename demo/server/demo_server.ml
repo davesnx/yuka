@@ -7,8 +7,8 @@ let packages dir =
 
 let late_script inner req =
   match Dream.header req "referer" with
-  | Some r
-    when String.ends_with ~suffix:"/before-hydration" r
+  | Some referer
+    when String.ends_with ~suffix:"/before-hydration" referer
          && String.ends_with ~suffix:"/main.js" (Dream.target req) ->
       Lwt.bind (Lwt_unix.sleep 3.) (fun () -> inner req)
   | _ -> inner req
@@ -75,12 +75,12 @@ let () =
   else begin
     let make_bus =
       match String.index_opt !bus ':' with
-      | Some i when String.sub !bus 0 i = "pg" ->
-          let conninfo = String.sub !bus (i + 1) (String.length !bus - i - 1) in
+      | Some colon when String.sub !bus 0 colon = "pg" ->
+          let conninfo = String.sub !bus (colon + 1) (String.length !bus - colon - 1) in
           fun () -> Yuka_live_pg.bus ~conninfo ~channel:"yuka_demo" ()
       | _ when !bus = "memory" ->
-          let m = Yuka.Server.Live.memory () in
-          fun () -> Yuka.Server.Live.memory_bus m
+          let memory = Yuka.Server.Live.memory () in
+          fun () -> Yuka.Server.Live.memory_bus memory
       | _ -> failwith ("demo_server: unknown --bus " ^ !bus)
     in
     let other = Yuka.Server.Live.node () in

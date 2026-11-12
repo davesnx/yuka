@@ -5,14 +5,14 @@ let[@client] make () =
     Yuka.Browser.focus "dialog-title"
   in
   Yuka.Effect.after (fun () ->
-      Yuka.Browser.on_window "keydown" (fun e ->
-          match Yuka.Event.key e with
+      Yuka.Browser.on_window "keydown" (fun event ->
+          match Yuka.Event.key event with
           | "Escape" -> close ()
           | "c"
             when not
-                   (Ui.typing e || Yuka.State.peek Ui.dialog_open
-                  || Yuka.Event.ctrl_key e || Yuka.Event.meta_key e) ->
-              Yuka.Event.prevent_default e;
+                   (Ui.typing event || Yuka.State.peek Ui.dialog_open
+                  || Yuka.Event.ctrl_key event || Yuka.Event.meta_key event) ->
+              Yuka.Event.prevent_default event;
               open_ ()
           | _ -> ()));
   <div class_="new-issue">
