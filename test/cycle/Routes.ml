@@ -6,7 +6,7 @@ Router.make ~layout:App.Layouts.root ~not_found:App.Pages.not_found
     Router.route Home ~path:"/" ~page:App.Pages.home;
     Router.route Plain ~path:"/plain" ~page:App.Pages.plain ~prerender:true;
     Router.route Entry ~path:"/entry" ~page:App.Pages.entry;
-    Router.route Find ~path:"/find" ~page:App.Pages.find
+    Router.route Search ~path:"/find" ~page:App.Pages.find
       ~search:{ q = optional string; tag = many string };
     Router.route Islands ~path:"/islands" ~page:App.Pages.islands;
     Router.route Slow ~path:"/slow" ~page:App.Pages.slow;

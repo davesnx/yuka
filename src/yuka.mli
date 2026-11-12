@@ -925,7 +925,13 @@ module Router : sig
       code calls them.
 
       [yuka routes --shared --source Routes.ml] writes the shared [Routes]
-      module (the route type, [href] and [find]), and
+      module: the route type [t]; a link function for each named node, named
+      as the node in lowercase, that takes each path param as a labelled
+      argument, each search field as an optional argument, and [()]
+      ([Routes.issue ~id:"YUK-1" ()] is ["/issue/YUK-1"]); [href], which
+      turns a [Routes.t] (for example from [find]) into a URL; and [find]. A
+      node name whose link function is an OCaml keyword or [href], [find] or
+      [with_query] is a build error. Then
       [yuka routes --server --shared-module M --source Routes.ml] writes the
       server module with [app]. *)
 
@@ -1460,7 +1466,9 @@ module Server : sig
 
   val bundle :
     dir:string -> entry:string -> manifest:string -> metafile:string -> assets
-  (** An esbuild bundle. [dir] is the directory esbuild ran in, so that the
+  (** An esbuild bundle. [metafile] is the text of the JSON report that
+      esbuild writes with [--metafile=FILE]: the server reads the hashed
+      name of each output from it. [dir] is the directory esbuild ran in, so that the
       [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
       the path of the entry output. Outputs other than [entry] get
       {!immutable}; other files get {!no_cache}. Raises [Invalid_argument]

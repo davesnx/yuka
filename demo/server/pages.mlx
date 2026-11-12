@@ -46,7 +46,7 @@ let not_found ~path () =
       <div class_="not-found">
         <h1>"Page not found"</h1>
         <p>(Yuka.text ("There is no page at " ^ path ^ "."))</p>
-        <a href=(Routes.href Issues)>"Back to issues"</a>
+        <a href=(Routes.issues ())>"Back to issues"</a>
       </div>)
 
 let issue_not_found ~id ~path:_ () =
@@ -56,7 +56,7 @@ let error () =
   Yuka.Server.page ~title:"Error" (fun () ->
       <div class_="not-found">
         <h1>"Something went wrong"</h1>
-        <a href=(Routes.href Issues)>"Back to issues"</a>
+        <a href=(Routes.issues ())>"Back to issues"</a>
       </div>)
 
 let about () =
@@ -64,7 +64,7 @@ let about () =
       <main class_="about">
         <h1>"About"</h1>
         <p>"A mini Linear built with Yuka. This page has no island."</p>
-        <a href=(Routes.href Issues)>"Back to issues"</a>
+        <a href=(Routes.issues ())>"Back to issues"</a>
       </main>)
 
 let create () =

@@ -70,8 +70,8 @@ module Shell = struct
           <span class_="workspace-name">(Yuka.text workspace)</span>
         </div>
         <nav class_="nav">
-          (link (Routes.href Issues) "Issues")
-          (link (Routes.href My_issues) "My issues")
+          (link (Routes.issues ()) "Issues")
+          (link (Routes.my_issues ()) "My issues")
         </nav>
         <div class_="sidebar-extra">sidebar</div>
       </aside>
@@ -98,7 +98,7 @@ module Issue_page = struct
   let make ~issue ~comments ~props () : _ Yuka.element =
     <div class_="issue-page">
       <header class_="page-header">
-        <a href=(Routes.href Issues) class_="crumb">"Issues"</a>
+        <a href=(Routes.issues ()) class_="crumb">"Issues"</a>
         <span class_="muted">"/"</span>
         <span>(Yuka.text issue.Issue.id)</span>
       </header>
@@ -119,7 +119,7 @@ module Not_found = struct
     <div class_="not-found">
       <h1>"Issue not found"</h1>
       <p>(Yuka.text ("There is no issue " ^ id ^ "."))</p>
-      <a href=(Routes.href Issues)>"Back to issues"</a>
+      <a href=(Routes.issues ())>"Back to issues"</a>
     </div>
 end
 

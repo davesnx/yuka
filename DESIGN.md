@@ -239,7 +239,8 @@ markers everywhere: the client hydrates their output.
   from `Routes.ml` through `yuka routes` and the request cycle; see
   "Routes.mlx generator", "Request cycle", "yuka-dream" and "Routes.ml:
   one OCaml expression". The typed
-  path GADT of `Yuka.Router` is gone.
+  path GADT of `Yuka.Router` is gone. A link is
+  `Routes.issue ~id ()`; see "Route helpers".
 
 ## Demo: mini Linear
 
@@ -1575,7 +1576,8 @@ same fixtures and script:
 Current names: `yuka-routes` is now `yuka routes --source FILE`.
 
 The input format and the reader changed later; see "Routes.ml: one OCaml
-expression".
+expression". The shared module also has a link function per named node;
+see "Route helpers".
 
 Spec: `.workplace/docs/routes-spec.md`. Built: increment 1, the generator
 and the shared module. The request cycle, `yuka-dream`, the demo migration
@@ -2888,3 +2890,38 @@ attribute can carry options later, for example `let[@client { x = 1 }]`.
 - `yuka islands` finds an island by text: a line that starts with
   `let[@client]` or `let[@yuka.client]`. A `make` marked only with
   `[@@client]` is not found.
+
+## Route helpers (2026-11-12)
+
+Decided by the user: the shared `Routes` module has one link function per
+named node (route, endpoint, action), so a link is
+`Routes.hello ~name:"Yuka" ()` instead of
+`Routes.href (Hello { name = "Yuka" })`. Reason: shorter links that read
+as a call, with the same checks.
+
+- `yuka routes --shared` writes, after `href`,
+  `let hello ~name () = href (Hello { name })`. The name is the node name
+  with its first letter in lowercase (`My_issues` is `my_issues`).
+- Arguments, in the order of the constructor fields: each path param
+  (also of a group, and a catch-all) is a required labelled argument; each
+  search field (also of a group) is optional: `optional T` is `?tag`,
+  `default T d` is `?(page = d)`, `many T` is `?(label = [])`. The default
+  is the absent value that `href` leaves out, so `Routes.blog ()` is
+  `/blog`.
+- Each function ends with `()`, also with no param (`Routes.issues ()`):
+  one form for all, as component `make`, and a search field added later
+  does not break callers.
+- `type t`, `href`, `find` and `with_query` do not change. `href` turns a
+  `Routes.t` (for example from `find`) into a URL; the server code and
+  `find` use the constructors.
+- Build errors with a location in `Routes.ml`: a node name whose function
+  is an OCaml keyword (the ppxlib list, plus `effect`, a keyword since
+  OCaml 5.3) or a value the module defines (`href`, `find`,
+  `with_query`). `href` is also a reserved label, since each function
+  calls it. Constructors start with a capital letter, so two node names
+  cannot give the same function name.
+- Each function is a plain top-level function, so esbuild drops the ones
+  a client does not call (`test/routes/client/check.mts`). It names no
+  standard library value: its defaults are `[]` or the copied `default`
+  values.
+- `test/cycle/Routes.ml` renames its route `Find` to `Search`.

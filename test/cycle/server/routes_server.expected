@@ -88,7 +88,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      page = App.Pages.entry ();
                    }));
         }
-  | Cycle_shared.Routes.Find { q; tag } ->
+  | Cycle_shared.Routes.Search { q; tag } ->
       Yuka.Server.Generated.Page
         {
           rules = rules_0;
@@ -436,7 +436,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"fda36c36b26b18e30440d3d4dd0d26c0"
+  Yuka.Server.Generated.app ~build:"a20163bcd752d2d52285dfac221adae9"
     ~headers:([("x-frame-options", "DENY"); ("x-a", "root")])
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

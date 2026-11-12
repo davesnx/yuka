@@ -130,6 +130,46 @@ let href_cases =
         check_href "post" "/blog/x?lang=en" (Post { slug = "x"; lang = Some "en" }));
   ]
 
+let helper_cases =
+  let same name helper route = check string name (Routes.href route) helper in
+  [
+    t "no param" (fun () ->
+        same "home" (Routes.home ()) Home;
+        same "cafe" (Routes.cafe ()) Cafe;
+        same "endpoint" (Routes.feed ()) Feed;
+        same "action" (Routes.clear_feed ()) Clear_feed;
+        same "missing" (Routes.missing ()) Missing);
+    t "path params" (fun () ->
+        same "string" (Routes.post ~slug:"a/b c" ()) (Post { slug = "a/b c"; lang = None });
+        same "int" (Routes.page_n ~n:(-5) ()) (Page_n { n = -5 }));
+    t "custom param type" (fun () ->
+        same "close" (Routes.close_issue ~id:3 ()) (Close_issue { id = 3 });
+        same "json" (Routes.issue_json ~id:3 ()) (Issue_json { id = 3 });
+        same "update" (Routes.update_issue ~id:3 ()) (Update_issue { id = 3 }));
+    t "catch-all" (fun () ->
+        same "parts" (Routes.doc ~parts:[ "a b"; "c/d" ] ()) (Doc { parts = [ "a b"; "c/d" ] }));
+    t "absent search is the absent value of href" (fun () ->
+        same "blog" (Routes.blog ()) blog;
+        same "issue" (Routes.issue ~id:12 ()) issue;
+        same "group search" (Routes.new_post ()) (New_post { lang = None }));
+    t "each search kind" (fun () ->
+        same "optional" (Routes.blog ~tag:"a b&c" ())
+          (Blog { lang = None; tag = Some "a b&c"; page = 1; label = []; draft = false });
+        same "default int" (Routes.blog ~page:2 ())
+          (Blog { lang = None; tag = None; page = 2; label = []; draft = false });
+        same "default bool" (Routes.blog ~draft:true ())
+          (Blog { lang = None; tag = None; page = 1; label = []; draft = true });
+        same "many" (Routes.blog ~label:[ "x"; "y/z" ] ())
+          (Blog { lang = None; tag = None; page = 1; label = [ "x"; "y/z" ]; draft = false });
+        same "group optional" (Routes.post ~slug:"x" ~lang:"en" ()) (Post { slug = "x"; lang = Some "en" });
+        same "all, in field order"
+          (Routes.blog ~draft:true ~label:[ "x" ] ~page:2 ~tag:"t" ~lang:"fr" ())
+          (Blog { lang = Some "fr"; tag = Some "t"; page = 2; label = [ "x" ]; draft = true });
+        same "custom types"
+          (Routes.issue ~id:12 ~tab:Activity ~seen:[ 1; -2 ] ~view:Activity ())
+          (Issue { id = 12; tab = Some Activity; seen = [ 1; -2 ]; view = Activity }));
+  ]
+
 let round_trip =
   [
     t "find (href r) is r for every sample" (fun () ->
@@ -275,6 +315,7 @@ let () =
   run "routes"
     [
       ("href", href_cases);
+      ("helpers", helper_cases);
       ("round trip", round_trip);
       ("find", find_cases);
       ("Yuka.Router", router_cases);

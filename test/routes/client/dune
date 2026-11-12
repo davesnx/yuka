@@ -18,4 +18,5 @@
    node
    check.mts
    out/test/routes/client/href_only.js
-   out/test/routes/client/find_entry.js)))
+   out/test/routes/client/find_entry.js
+   out/test/routes/client/helper_only.js)))

@@ -39,7 +39,8 @@ type ctx = {
 }
 
 let rules = [ "headers"; "cache"; "prerender" ]
-let reserved = [ "with_query"; "req"; "children" ]
+let reserved = [ "with_query"; "href"; "req"; "children" ]
+let generated_values = [ "href"; "find"; "with_query" ]
 
 let encode text =
   let b = Buffer.create (String.length text) in
@@ -55,11 +56,14 @@ let is_ident_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '\'' -> true
   | _ -> false
 
+(* OCaml 5.3 made effect a keyword; ppxlib's Keyword list does not hold it. *)
+let is_keyword s = Keyword.is_keyword s || s = "effect"
+
 let is_label s =
   s <> "" && s <> "_"
   && (match s.[0] with 'a' .. 'z' | '_' -> true | _ -> false)
   && String.for_all is_ident_char s
-  && not (Keyword.is_keyword s)
+  && not (is_keyword s)
 
 let is_module_path s =
   List.for_all
@@ -252,6 +256,11 @@ let parse_name names v =
       (match Hashtbl.find_opt names n with
       | Some first -> fail v.pexp_loc "name %s is used twice (first at line %d)" n (line first)
       | None -> Hashtbl.add names n v.pexp_loc);
+      let helper = String.uncapitalize_ascii n in
+      if is_keyword helper then
+        fail v.pexp_loc "name %s makes the helper Routes.%s, which is an OCaml keyword; choose another name" n helper;
+      if List.mem helper generated_values then
+        fail v.pexp_loc "name %s makes the helper Routes.%s, which the generated code already defines; choose another name" n helper;
       n
   | _ -> fail v.pexp_loc "the route name must be a constructor such as Issue"
 
@@ -644,6 +653,32 @@ let href nodes =
                  @ indent 6 pairs))
          (named nodes)
 
+let helpers nodes =
+  List.concat_map
+    (fun (name, segs, search) ->
+      let required = List.map (fun n -> "~" ^ n) (seg_labels segs) in
+      let optional =
+        List.map
+          (fun f ->
+            match f.fkind with
+            | Optional -> "?" ^ f.fname
+            | Default d -> sprintf "?(%s = %s)" f.fname d
+            | Many -> sprintf "?(%s = [])" f.fname)
+          search
+      in
+      let value =
+        match fields segs search with
+        | [] -> name
+        | fs -> sprintf "(%s { %s })" name (String.concat "; " (List.map fst fs))
+      in
+      [
+        "";
+        sprintf "let %s %s() = href %s" (String.uncapitalize_ascii name)
+          (String.concat "" (List.map (fun a -> a ^ " ") (required @ optional)))
+          value;
+      ])
+    (named nodes)
+
 let decode_search f =
   let values = sprintf "Yuka.Router.search query %S" f.fname in
   let dec v =
@@ -792,7 +827,7 @@ let find nodes =
 
 let generate input nodes =
   if named nodes = [] then fail (Location.in_file input) "the route tree has no named node";
-  String.concat "\n" (type_t nodes @ [ "" ] @ href nodes @ [ "" ] @ find nodes) ^ "\n"
+  String.concat "\n" (type_t nodes @ [ "" ] @ href nodes @ helpers nodes @ [ "" ] @ find nodes) ^ "\n"
 
 let expr e = Pprintast.string_of_expression e
 let paren e = "(" ^ expr e ^ ")"

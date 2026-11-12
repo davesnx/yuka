@@ -231,6 +231,13 @@ A param name that is a keyword
   Error: param "type" in path "/a/:type<string>" is not a lowercase OCaml label
   [1]
 
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a/:effect<string>" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 35-55:
+  Error: param "effect" in path "/a/:effect<string>" is not a lowercase OCaml label
+  [1]
+
 A label reserved by the generated code
 
   $ gen <<'EOF'
@@ -242,6 +249,61 @@ A label reserved by the generated code
   > EOF
   File "Routes.ml", line 4, characters 14-46:
   Error: label with_query is reserved by the generated code
+  [1]
+
+A param named href, which the route helpers call
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a/:href<string>" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 35-53:
+  Error: label href is reserved by the generated code
+  [1]
+
+A route name whose helper is a keyword
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route Type ~path:"/a" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-31:
+  Error: name Type makes the helper Routes.type, which is an OCaml keyword; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.endpoint Method ~path:"/a" ~method_:`GET ~handler:H.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 30-36:
+  Error: name Method makes the helper Routes.method, which is an OCaml keyword; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.action Effect ~path:"/a" ~method_:`POST ~handler:H.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 28-34:
+  Error: name Effect makes the helper Routes.effect, which is an OCaml keyword; choose another name
+  [1]
+
+A route name whose helper the generated code already defines
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route Href ~path:"/a" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-31:
+  Error: name Href makes the helper Routes.href, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route Find ~path:"/a" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-31:
+  Error: name Find makes the helper Routes.find, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route With_query ~path:"/a" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-37:
+  Error: name With_query makes the helper Routes.with_query, which the generated code already defines; choose another name
   [1]
 
 A bad search kind

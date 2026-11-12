@@ -19,7 +19,7 @@ let register () =
           Yuka.Async.return i
       | None -> Yuka.Server.Action.reject ("No issue " ^ id));
   Yuka.Server.Form.implement Actions.create_issue
-    ~redirect:(fun (i : Model.Issue.t) -> Routes.href (Issue { id = i.id }))
+    ~redirect:(fun (i : Model.Issue.t) -> Routes.issue ~id:i.id ())
     (fun _ { title; description; status; priority } ->
       let title = String.trim title in
       let title_error m = Yuka.Async.return (Error [ (Some `Title, m) ]) in
