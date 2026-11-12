@@ -5,7 +5,7 @@
  (action
   (with-stdout-to
    yuka_islands.ml
-   (run %{bin:yuka-islands} --library reg_islands islands))))
+   (run %{bin:yuka} islands --dir islands))))
 
 (melange.emit
  (target out)

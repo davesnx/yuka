@@ -1,12 +1,15 @@
 (** Forms that post with no JavaScript and submit through {!Action.call}
-    in an island. [[@@deriving form]] on a record writes the field type,
-    the field names and a [('i, 'f) t]; the same decoder runs on the
-    server and in the browser. *)
+    in an island. [[@@deriving form]] on a record [t] writes the field
+    type [field], a polymorphic variant with one tag per record field
+    ([title] gives [`Title]), the function [field_name] and the value
+    [form : (t, field) Yuka.Form.t] (for a record [r]: [r_field],
+    [r_field_name] and [r_form]); the same decoder runs on the server and
+    in the browser. *)
 
 type 'f errors = ('f option * string) list
 (** [None] is an error for the whole form. *)
 
-type 'a kind
+type 'a kind = 'a Form_core.kind
 (** How one field reads from the posted strings and writes back. *)
 
 val string : string kind
@@ -28,24 +31,11 @@ val list : 'a kind -> 'a list kind
 val custom : (string -> 'a option) -> ('a -> string) -> 'a kind
 (** ["Not valid"] when [of_string] gives [None]. *)
 
-type ('i, 'f) t
+type ('i, 'f) t = ('i, 'f) Form_core.t
 (** The fields of a form: decode, encode and names. *)
 
-type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
-
-type 'f decoding
-
-val fields :
-  names:('f * string) list ->
-  decode:('f decoding -> ('i, 'f errors) result) ->
-  encode:('i -> (string * string) list) ->
-  ('i, 'f) t
-(** Used by the code that [[@@deriving form]] writes. *)
-
-val field : 'f decoding -> 'f -> string -> 'a kind -> 'a option
-val get : 'a option -> 'a
-val finish : 'f decoding -> (unit -> 'i) -> ('i, 'f errors) result
-val put : string -> 'a kind -> 'a -> (string * string) list
+type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Form ]) Action.t
+(** An action whose input is a form. Only {!val-action} makes one. *)
 
 val decode : ('i, 'f) t -> (string * string) list -> ('i, 'f errors) result
 (** Every field error, in field order. *)
@@ -53,13 +43,9 @@ val decode : ('i, 'f) t -> (string * string) list -> ('i, 'f errors) result
 val encode : ('i, 'f) t -> 'i -> (string * string) list
 val name : ('i, 'f) t -> 'f -> string
 
-val action :
-  name:string ->
-  fields:('i, 'f) t ->
-  output:'o Codec.t ->
-  ('i, ('o, 'f errors) result, [ `Mutation ]) Action.t
+val action : name:string -> fields:('i, 'f) t -> output:'o Codec.t -> ('i, 'o, 'f) action
 (** An action whose input is a form: {!Action.call} sends the encoded
-    fields; the answer is [Ok o] or the field errors. *)
+    fields; the answer is [Ok (Ok o)] or [Ok (Error field_errors)]. *)
 
 type ('o, 'f) form
 (** What the children of {!make} get. *)
@@ -74,9 +60,11 @@ val error : ('o, 'f) form -> 'f -> string option
 val error_view : ('o, 'f) form -> 'f -> (string -> 'k Kind.element) -> 'k Kind.element
 (** A hole: the view of the field's error, or nothing. *)
 
-val form_errors : ('o, 'f) form -> string list
-val form_error_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.element
-(** The errors for the whole form. *)
+val errors : ('o, 'f) form -> string list
+(** Tracked read of the errors for the whole form, not for one field. *)
+
+val errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.element
+(** A hole: the view of each error of {!val-errors}. *)
 
 val pending : ('o, 'f) form -> bool
 (** Tracked: true while an island submit waits for its answer. Read it in
@@ -84,9 +72,9 @@ val pending : ('o, 'f) form -> bool
     enclosing component again, with a new form. *)
 
 val make :
-  action:('i, ('o, 'f errors) result, [ `Mutation ]) Action.t ->
+  action:('i, 'o, 'f) action ->
   ?key:string ->
-  ?run:('i -> ('o, 'f errors) result Async.t) ->
+  ?run:('i -> (('o, 'f errors) result, Status.error) result Async.t) ->
   ?on_ok:('o -> unit) ->
   children:(('o, 'f) form -> 'k Kind.element) ->
   unit ->
@@ -102,8 +90,9 @@ val make :
     in the browser: the fields (with the submit button's [name] and
     [value]) are decoded first (an error shows at once, with no request),
     then [run input] (default: the action call) runs while [pending] is
-    true; field errors show, and on [Ok o] [on_ok o] runs, or else the page
+    true; field errors show, an [Error e] shows as a form error with the
+    text of {!Status.error_to_string}, and on [Ok o] [on_ok o] runs, or
+    else the page
     follows the server's [redirect] (with [run], the page URL) with a
     client navigation, as a post with no JavaScript does. A [redirect] to
-    another origin is not followed: it shows as a form error. Raises
-    [Invalid_argument] when [action] is not from {!val-action}. *)
+    another origin is not followed: it shows as a form error. *)

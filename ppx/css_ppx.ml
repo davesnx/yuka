@@ -25,7 +25,7 @@ let expand ~loc payload =
   in
   let sheet = try Css_scan.sheet ~path:file text with Css_scan.Error m -> fail ~loc "%s" m in
   let href = "/_yuka/css/" ^ sheet.file in
-  let stylesheet = [%stri let stylesheet = Yuka.stylesheet [%e estring ~loc href]] in
+  let stylesheet = [%stri let stylesheet = Yuka.runtime_stylesheet [%e estring ~loc href]] in
   let classes =
     List.map
       (fun (name, value) ->
@@ -116,7 +116,7 @@ let rec wrap_items ~component sheet items = List.map (wrap_item ~component sheet
 and wrap_item ?(component = false) sheet item =
   match item.pstr_desc with
   | Pstr_value (r, vbs) -> { item with pstr_desc = Pstr_value (r, List.map (wrap_make ~component sheet) vbs) }
-  | Pstr_extension (({ txt = "client"; _ } as name, PStr items), attrs) ->
+  | Pstr_extension (({ txt = "client" | "yuka.client"; _ } as name, PStr items), attrs) ->
       { item with pstr_desc = Pstr_extension ((name, PStr (wrap_items ~component:true sheet items)), attrs) }
   | Pstr_include ({ pincl_mod = { pmod_desc = Pmod_structure items; _ } as m; _ } as i) ->
       let component = defines "island" items && defines "register" items in

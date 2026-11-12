@@ -73,6 +73,7 @@ val scroll_into_view : string -> unit
 val has_intersection_observer : node -> bool
 val on_idle : (unit -> unit) -> unit -> unit
 val set_timeout : int -> (unit -> unit) -> unit -> unit
+val microtask : (unit -> unit) -> unit
 val form_values : event -> (string * string) array
 val on_visible : node -> (unit -> unit) -> unit -> unit
 val ready_state : unit -> string
@@ -114,6 +115,7 @@ val live_url : unit -> string
 val online : unit -> bool
 val on_online : (unit -> unit) -> unit -> unit
 val random : unit -> float
+val nonce : unit -> string
 val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val read_file : string -> string option

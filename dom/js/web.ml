@@ -139,6 +139,8 @@ let form_values : event -> (string * string) array =
   return out;
 }|}]
 
+external microtask : (unit -> unit) -> unit = "queueMicrotask"
+
 let set_timeout : int -> (unit -> unit) -> unit -> unit =
   [%mel.raw
     {|function (ms, f) {
@@ -393,6 +395,7 @@ let on_online : (unit -> unit) -> unit -> unit =
 }|}]
 
 let random : unit -> float = [%mel.raw "function () { return Math.random() }"]
+let nonce : unit -> string = [%mel.raw "function () { return String(Math.random()).slice(2) }"]
 
 let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
   [%mel.raw

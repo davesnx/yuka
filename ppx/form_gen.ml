@@ -40,17 +40,14 @@ let constructor (l : label_declaration) = String.capitalize_ascii l.pld_name.txt
 let field_type ~loc (td : type_declaration) =
   type_declaration ~loc
     ~name:{ loc; txt = suffixed td.ptype_name.txt "field" }
-    ~params:[] ~cstrs:[] ~private_:Public ~manifest:None
-    ~kind:
-      (Ptype_variant
-         (List.map
-            (fun l ->
-              constructor_declaration ~loc:l.pld_loc
-                ~name:{ loc = l.pld_loc; txt = constructor l }
-                ~args:(Pcstr_tuple []) ~res:None)
-            (labels td)))
+    ~params:[] ~cstrs:[] ~private_:Public ~kind:Ptype_abstract
+    ~manifest:
+      (Some
+         (ptyp_variant ~loc
+            (List.map (fun l -> rtag ~loc:l.pld_loc { loc = l.pld_loc; txt = constructor l } true []) (labels td))
+            Closed None))
 
-let ctor ~loc l = pexp_construct ~loc { loc; txt = Lident (constructor l) } None
+let ctor ~loc l = pexp_variant ~loc (constructor l) None
 
 let str_items (td : type_declaration) =
   let loc = td.ptype_loc in
@@ -65,7 +62,7 @@ let str_items (td : type_declaration) =
   let build =
     pexp_record ~loc
       (List.mapi
-         (fun i l -> ({ loc; txt = Lident l.pld_name.txt }, [%expr Yuka.Form.get [%e evar ~loc (var i)]]))
+         (fun i l -> ({ loc; txt = Lident l.pld_name.txt }, [%expr Yuka.runtime_form_get [%e evar ~loc (var i)]]))
          ls)
       None
   in
@@ -74,31 +71,31 @@ let str_items (td : type_declaration) =
       (fun (i, l) body ->
         [%expr
           let [%p pvar ~loc (var i)] =
-            Yuka.Form.field _yuka_d [%e ctor ~loc l] [%e estring ~loc l.pld_name.txt] [%e kind l.pld_type]
+            Yuka.runtime_form_field _yuka_d [%e ctor ~loc l] [%e estring ~loc l.pld_name.txt] [%e kind l.pld_type]
           in
           [%e body]])
       (List.mapi (fun i l -> (i, l)) ls)
-      [%expr Yuka.Form.finish _yuka_d (fun () -> [%e build])]
+      [%expr Yuka.runtime_form_finish _yuka_d (fun () -> [%e build])]
   in
   let encode =
     elist ~loc
       (List.map
          (fun l ->
            [%expr
-             Yuka.Form.put [%e estring ~loc l.pld_name.txt] [%e kind l.pld_type]
+             Yuka.runtime_form_put [%e estring ~loc l.pld_name.txt] [%e kind l.pld_type]
                [%e pexp_field ~loc [%expr _yuka_v] { loc; txt = Lident l.pld_name.txt }]])
          ls)
   in
   let name_fn =
     pexp_function_cases ~loc
-      (List.map (fun l -> case ~lhs:(ppat_construct ~loc { loc; txt = Lident (constructor l) } None) ~guard:None ~rhs:(estring ~loc l.pld_name.txt)) ls)
+      (List.map (fun l -> case ~lhs:(ppat_variant ~loc (constructor l) None) ~guard:None ~rhs:(estring ~loc l.pld_name.txt)) ls)
   in
   [
     pstr_type ~loc Recursive [ field_type ~loc td ];
     [%stri let [%p pvar ~loc (suffixed n "field_name")] = [%e name_fn]];
     [%stri
       let [%p ppat_constraint ~loc (pvar ~loc (suffixed n "form")) [%type: ([%t record_ty], [%t field_ty]) Yuka.Form.t]] =
-        Yuka.Form.fields ~names:[%e names]
+        Yuka.runtime_form_fields ~names:[%e names]
           ~decode:(fun _yuka_d -> [%e decode])
           ~encode:(fun (_yuka_v : [%t record_ty]) -> Stdlib.List.concat [%e encode])];
   ]

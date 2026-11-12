@@ -3,7 +3,7 @@ open Demo_shared
 let sidebar () : Yuka.server Yuka.element =
   <div>
     <Yuka.Client><New_issue /></Yuka.Client>
-    <Yuka.Client loading=`Idle><Counter initial=0 /></Yuka.Client>
+    <Yuka.Client start=`Idle><Counter initial=0 /></Yuka.Client>
   </div>
 
 let shell ~children () : Yuka.server Yuka.element =
@@ -23,15 +23,15 @@ let issue_view ?(delay = 0.6) (i : Model.Issue.t) : Yuka.server Yuka.element =
       loading=(<Views.Skeleton lines=3 />)
       failed=(fun m -> <p class_="error">(Yuka.text ("Could not load comments: " ^ m))</p>)>
       (fun comments ->
-        <Yuka.Client loading=(`Lazy `Idle)>
+        <Yuka.Client start=(`Lazy `Idle)>
           <Comments issue_id=i.id me=Store.me comments />
         </Yuka.Client>)
     </Yuka.Await>
   in
   let props =
-    <Yuka.Client loading=(`Lazy `Interaction)>
+    <Yuka.Client start=(`Lazy `Interaction)>
       <Issue_props issue=i>
-        <Yuka.Client loading=(`Lazy `Visible)>
+        <Yuka.Client start=(`Lazy `Visible)>
           <Related related=(Store.related_async ~delay:(delay *. 1.5) i) />
         </Yuka.Client>
       </Issue_props>
@@ -41,18 +41,18 @@ let issue_view ?(delay = 0.6) (i : Model.Issue.t) : Yuka.server Yuka.element =
 
 let issue ~id ~issue () = Yuka.Server.page ~title:id (fun () -> issue_view issue)
 
-let not_found ~target () =
+let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
       <div class_="not-found">
         <h1>"Page not found"</h1>
-        <p>(Yuka.text ("There is no page at " ^ target ^ "."))</p>
+        <p>(Yuka.text ("There is no page at " ^ path ^ "."))</p>
         <a href=(Routes.href Issues)>"Back to issues"</a>
       </div>)
 
-let issue_not_found ~id ~target:_ () =
+let issue_not_found ~id ~path:_ () =
   Yuka.Server.page ~title:"Not found" (fun () -> <Views.Not_found id />)
 
-let error ~status:_ () =
+let error () =
   Yuka.Server.page ~title:"Error" (fun () ->
       <div class_="not-found">
         <h1>"Something went wrong"</h1>

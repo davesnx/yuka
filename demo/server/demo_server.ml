@@ -54,7 +54,10 @@ let () =
     Yuka.Server.config ~assets
       ~public:[ ("/static", !static_dir) ]
       ?prerendered:(if !prerendered = "" then None else Some !prerendered)
-      ~styles:[ "/static/style.css" ] ~css:Demo_app.Yuka_css.sheets ()
+      ~styles:[ "/static/style.css" ] ~css:Demo_app.Yuka_css.sheets
+      ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
+      ~log_error:(fun m -> Dream.error (fun log -> log "%s" m))
+      ()
   in
   Demo_app.Handlers.register ();
   let app = Demo_app.Routes_server.app in
@@ -73,14 +76,14 @@ let () =
           fun () -> Yuka.Server.Live.memory_bus m
       | _ -> failwith ("demo_server: unknown --bus " ^ !bus)
     in
-    let other = Yuka.Server.Live.instance () in
-    let serve ?live port =
+    let other = Yuka.Server.Live.node () in
+    let serve ?node port =
       Dream.serve ~port @@ Dream.logger @@ Dream.set_secret !secret @@ Dream.cookie_sessions
-      @@ Yuka_dream.handler ?live config app
+      @@ Yuka_dream.handler ?node config app
     in
     Lwt_main.run
       (let open Lwt.Syntax in
-       let* () = Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~node:"first" (make_bus ())) in
-       let* () = Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~instance:other ~node:"second" (make_bus ())) in
-       Lwt.join [ serve !port; serve ~live:other !second ])
+       let* () = Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~name:"first" (make_bus ())) in
+       let* () = Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~node:other ~name:"second" (make_bus ())) in
+       Lwt.join [ serve !port; serve ~node:other !second ])
   end

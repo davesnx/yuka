@@ -70,6 +70,7 @@ let scroll_into_view : string -> unit = fun _ -> browser_only ()
 let has_intersection_observer : node -> bool = fun _ -> browser_only ()
 let on_idle : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let set_timeout : int -> (unit -> unit) -> unit -> unit = fun _ _ () -> ()
+let microtask f = f ()
 let form_values : event -> (string * string) array = fun _ -> browser_only ()
 let on_visible : node -> (unit -> unit) -> unit -> unit = fun _ _ _ -> browser_only ()
 let ready_state : unit -> string = fun _ -> browser_only ()
@@ -119,6 +120,11 @@ let live_url : unit -> string = fun _ -> browser_only ()
 let online : unit -> bool = fun _ -> browser_only ()
 let on_online : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let random : unit -> float = fun () -> Random.float 1.
+
+let nonce () =
+  let r = Random.State.make_self_init () in
+  let part () = string_of_int (Random.State.bits r) in
+  part () ^ "." ^ part () ^ "." ^ part ()
 let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit = fun _ _ _ -> browser_only ()
 let add_stylesheet : string -> unit = fun _ -> browser_only ()
 let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None

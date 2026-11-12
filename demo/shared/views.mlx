@@ -32,7 +32,7 @@ module Priority_icon = struct
         class_=(if i <= level then "bar on" else "bar") />
     in
     <svg class_=("icon priority-" ^ Issue.priority_slug priority) view_box="0 0 14 14" width="14" height="14">
-      (Yuka.list (List.map bar [ 1; 2; 3 ]))
+      (Yuka.fragment (List.map bar [ 1; 2; 3 ]))
     </svg>
 end
 
@@ -46,7 +46,7 @@ end
 module Labels = struct
   let make ~labels () : _ Yuka.element =
     <span class_="labels">
-      (Yuka.list
+      (Yuka.fragment
          (List.map (fun l -> <span class_=("label label-" ^ l)>(Yuka.text l)</span>) labels))
     </span>
 end
@@ -82,7 +82,7 @@ end
 module Skeleton = struct
   let make ~lines () : _ Yuka.element =
     <div class_="skeleton">
-      (Yuka.list (List.init lines (fun i -> <div class_=("skeleton-line w" ^ string_of_int (i mod 3)) />)))
+      (Yuka.fragment (List.init lines (fun i -> <div class_=("skeleton-line w" ^ string_of_int (i mod 3)) />)))
     </div>
 end
 
@@ -125,17 +125,17 @@ end
 
 module Issue_form = struct
   let make ~form () : _ Yuka.element =
-    let sent_status = match Yuka.Form.value form Actions.Status with "" -> "todo" | v -> v in
-    let sent_priority = match Yuka.Form.value form Actions.Priority with "" -> "no-priority" | v -> v in
+    let sent_status = match Yuka.Form.value form `Status with "" -> "todo" | v -> v in
+    let sent_priority = match Yuka.Form.value form `Priority with "" -> "no-priority" | v -> v in
     <div class_="issue-form">
       <input class_="dialog-title" type_=`text id="dialog-title" name="title" placeholder="Issue title"
-        autofocus=true value=(Yuka.Form.value form Actions.Title) />
-      (Yuka.Form.error_view form Actions.Title (fun m -> <p class_="error">(Yuka.text m)</p>))
+        autofocus=true value=(Yuka.Form.value form `Title) />
+      (Yuka.Form.error_view form `Title (fun m -> <p class_="error">(Yuka.text m)</p>))
       <textarea class_="dialog-description" name="description" placeholder="Description" rows=4
-        value=(Yuka.Form.value form Actions.Description) />
+        value=(Yuka.Form.value form `Description) />
       <div class_="dialog-row">
         <select class_="select" aria_label="Status" name="status">
-          (Yuka.list
+          (Yuka.fragment
              (List.map
                 (fun s ->
                   <option value=(Issue.status_slug s) selected=(Issue.status_slug s = sent_status)>
@@ -144,7 +144,7 @@ module Issue_form = struct
                 Issue.all_statuses))
         </select>
         <select class_="select" aria_label="Priority" name="priority">
-          (Yuka.list
+          (Yuka.fragment
              (List.map
                 (fun p ->
                   <option value=(Issue.priority_slug p) selected=(Issue.priority_slug p = sent_priority)>
@@ -153,6 +153,6 @@ module Issue_form = struct
                 Issue.all_priorities))
         </select>
       </div>
-      (Yuka.Form.form_error_view form (fun m -> <p class_="error">(Yuka.text m)</p>))
+      (Yuka.Form.errors_view form (fun m -> <p class_="error">(Yuka.text m)</p>))
     </div>
 end

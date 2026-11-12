@@ -1,8 +1,12 @@
 open Types
 
+type redirect = [ `See_other | `Temporary | `Permanent ]
+
 type stop =
   | Not_found
-  | Redirect of { status : int; location : string }
+  | Forbidden
+  | Redirect of { location : string; kind : redirect }
+  | Redirect_off_site of { location : string; kind : redirect }
   | Fail of string
 
 type page = { title : string; head : string; body : unit -> node }
@@ -12,19 +16,17 @@ let page ?(title = "") ?(head = "") body = { title; head; body }
 type layer = { key : string; data : bool; wrap : server Kind.element -> server Kind.element }
 type plan = { layers : layer list; page : page }
 
-type cache =
-  | No_store
-  | Private of { max_age : int }
-  | Public of { max_age : int; s_max_age : int option }
-  | Immutable
+type cache = string
 
-let cache_control = function
-  | No_store -> "no-store"
-  | Private { max_age } -> "private, max-age=" ^ string_of_int max_age
-  | Public { max_age; s_max_age } -> (
-      "public, max-age=" ^ string_of_int max_age
-      ^ match s_max_age with Some s -> ", s-maxage=" ^ string_of_int s | None -> "")
-  | Immutable -> "public, max-age=31536000, immutable"
+let no_store = "no-store"
+let no_cache = "no-cache"
+let private_ ~max_age = "private, max-age=" ^ string_of_int max_age
+
+let public ?s_max_age ~max_age () =
+  "public, max-age=" ^ string_of_int max_age
+  ^ match s_max_age with Some s -> ", s-maxage=" ^ string_of_int s | None -> ""
+
+let immutable = "public, max-age=31536000, immutable"
 
 let same_name a b = String.equal (String.lowercase_ascii a) (String.lowercase_ascii b)
 
@@ -34,7 +36,9 @@ let set_header ((name, _) as h) headers =
   List.filter (fun (n, _) -> not (same_name n name)) headers @ [ h ]
 
 let merge_headers lists =
-  List.fold_left (fun acc l -> List.fold_left (fun acc h -> set_header h acc) acc l) [] lists
+  List.fold_left
+    (fun acc l -> List.filter (fun (n, _) -> not (has_header n l)) acc @ l)
+    [] lists
 
 type rules = { headers : (string * string) list; cache : cache option; prerender : bool }
 
@@ -43,6 +47,8 @@ let rules ~headers ?cache ~prerender () =
 
 type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
 type response = { status : int; headers : (string * string) list; body : body }
+
+let response ?(status = 200) ?(headers = []) body = { status; headers; body }
 
 let with_type kind ?(status = 200) ?(headers = []) text =
   Async.return
@@ -55,11 +61,11 @@ let json ?status ?headers j = with_type "application/json" ?status ?headers (Jso
 let see_other location =
   Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
 
-type fallback = { layers : layer list; not_found : string -> page; error : int -> page }
+type fallback = { layers : layer list; not_found : string -> page; error : unit -> page }
 
 let heading text () = Element { tag = "h1"; attrs = []; children = [ Text text ] }
 let default_not_found _ = page ~title:"Not Found" (heading "Not Found")
-let default_error _ = page ~title:"Error" (heading "Internal Server Error")
+let default_error () = page ~title:"Error" (heading "Internal Server Error")
 
 type target =
   | Page of {
@@ -70,7 +76,8 @@ type target =
     }
   | Handler of {
       rules : rules;
-      same_origin : bool;
+      action : bool;
+      cross_origin : bool;
       guards : (unit -> (unit, stop) result Async.t) list;
       run : unit -> response Async.t;
     }
@@ -132,14 +139,14 @@ let modules ~dir ~entry ~manifest ~packages ~digest =
   let entry = Server.normalize entry in
   let base =
     match String.rindex_opt entry '/' with
-    | Some i -> "/_yuka/" ^ String.sub entry 0 (i + 1)
-    | None -> "/_yuka/"
+    | Some i -> "/_yuka/app/" ^ String.sub entry 0 (i + 1)
+    | None -> "/_yuka/app/"
   in
   {
     dir;
     entry;
     digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
-    import_map = Server.import_map ~url:"/_yuka" packages;
+    import_map = Server.import_map ~url:"/_yuka/app" packages;
     preload = Server.preload_urls ~manifest ~base ();
     immutable = (fun _ -> false);
   }
@@ -161,7 +168,7 @@ let bundle ~dir ~entry ~manifest ~metafile =
     entry;
     digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
     import_map = [];
-    preload = Server.preload_urls ~manifest ~base:"/_yuka/" ~metafile ();
+    preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ();
     immutable = (fun path -> List.exists (String.equal path) hashed);
   }
 
@@ -169,20 +176,17 @@ type dev = { state : unit -> string }
 
 let dev_default = {|{"session":"","build":0,"page":0,"error":null}|}
 
-let dev_of_env () =
-  match Sys.getenv_opt "YUKA_DEV" with
-  | Some "1" ->
-      let file = Sys.getenv_opt "YUKA_DEV_FILE" in
-      let state () =
-        match file with
-        | None -> dev_default
-        | Some f -> (
-            match Option.map String.trim (Web.read_file f) with
-            | None | Some "" -> dev_default
-            | Some text -> String.concat " " (String.split_on_char '\n' text))
-      in
-      Some { state }
-  | _ -> None
+let dev_state () =
+  let file = Sys.getenv_opt "YUKA_DEV_FILE" in
+  let state () =
+    match file with
+    | None -> dev_default
+    | Some f -> (
+        match Option.map String.trim (Web.read_file f) with
+        | None | Some "" -> dev_default
+        | Some text -> String.concat " " (String.split_on_char '\n' text))
+  in
+  { state }
 
 let dev_script state =
   let json = String.concat "\\u003c" (String.split_on_char '<' state) in
@@ -198,6 +202,10 @@ type config = {
   head : string;
   timeout : float;
   prerendered : string option;
+  origins : string list option;
+  log_error : string -> unit;
+  prerendering : bool;
+  warned : string list ref;
 }
 
 let valid_file_segment s =
@@ -212,9 +220,14 @@ let public_prefix (prefix, dir) =
        ^ " has no segment; it would hide every route")
   | segments -> (segments, dir)
 
-let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.) () =
+let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
+    ?(dev = false) ?origins ?(log_error = prerr_endline) () =
   {
-    dev = dev_of_env ();
+    dev = (if dev then Some (dev_state ()) else None);
+    origins;
+    log_error;
+    prerendering = false;
+    warned = ref [];
     assets;
     public = List.map public_prefix public;
     styles;
@@ -234,12 +247,12 @@ let build_id config (App a) =
   | None -> a.build
   | Some assets -> a.build ^ assets.digest
 
-let prerender_config config = { config with dev = None }
+let prerender_config config = { config with dev = None; prerendering = true }
 
 let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
 let served_dirs config =
-  Option.to_list (Option.map (fun (a : assets) -> ("/_yuka", a.dir)) config.assets)
+  Option.to_list (Option.map (fun (a : assets) -> ("/_yuka/app", a.dir)) config.assets)
   @ List.map (fun (prefix, dir) -> ("/" ^ String.concat "/" prefix, dir)) config.public
 
 type request = {
@@ -247,12 +260,15 @@ type request = {
   target : string;
   header : string -> string option;
   body : limit:int -> string option Async.t;
+  session : unit -> string;
   csrf_token : unit -> string;
+  verify_csrf : string -> bool Async.t;
 }
 
 type outcome =
   | Respond of response
   | File of { root : string; path : string; headers : (string * string) list }
+  | Upgrade of (Live_server.connection -> unit Async.t)
 
 let method_name : Router.meth -> string = function
   | `GET -> "GET"
@@ -274,12 +290,12 @@ let allow ms =
   in
   String.concat ", " unique
 
-let no_store = ("cache-control", "no-store")
+let no_store_header = ("cache-control", no_store)
 
 let plain status message headers =
   {
     status;
-    headers = merge_headers [ headers; [ ("content-type", "text/plain; charset=utf-8"); no_store ] ];
+    headers = merge_headers [ headers; [ ("content-type", "text/plain; charset=utf-8"); no_store_header ] ];
     body = String message;
   }
 
@@ -298,6 +314,9 @@ type env = {
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
   csrf : (unit -> string) option;
+  context : Types.context;
+  node : Live_server.node;
+  live_used : bool ref;
 }
 
 let outlet key inner =
@@ -341,7 +360,7 @@ let render env ~status ~headers layers (page : page) =
     Option.map
       (fun (a : assets) ->
         "<script type=\"module\" async src=\""
-        ^ Printer.escape ~quote:true ("/_yuka/" ^ a.entry)
+        ^ Printer.escape ~quote:true ("/_yuka/app/" ^ a.entry)
         ^ "\"></script>")
       assets
   in
@@ -366,7 +385,7 @@ let render env ~status ~headers layers (page : page) =
       | 0 ->
           Async.map
             (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
-            (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~current ~timeout ~sleep:env.sleep build)
+            (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build)
       | n ->
           let outlet = List.nth keys (n - 1) in
           let headers =
@@ -375,7 +394,7 @@ let render env ~status ~headers layers (page : page) =
           in
           Async.map
             (fun body -> { status; headers; body = String body })
-            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
   | None ->
     let early = ref [] in
@@ -386,9 +405,9 @@ let render env ~status ~headers layers (page : page) =
     in
     let write text = !writer text in
     let finished =
-      Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~current ~timeout ~sleep:env.sleep build
+      Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build
         ~on_shell:(fun ~fills shell ->
-          Async.bind (write (head (if fills then Server.fill_script else ""))) (fun () -> write shell))
+          Async.bind (write (head (if fills then Printer.fill_script else ""))) (fun () -> write shell))
         ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
         ~on_value:write
     in
@@ -406,7 +425,7 @@ let render env ~status ~headers layers (page : page) =
       Async.on_settled finished (function
         | Async.Done () -> Async.on_settled (write "</body></html>") (fun _ -> resolve ())
         | Async.Failed m ->
-            !Server.log_error m;
+            env.config.log_error m;
             Async.on_settled flushed (fun _ -> resolve ())
         | Async.Pending -> ());
       result
@@ -414,12 +433,12 @@ let render env ~status ~headers layers (page : page) =
     Async.return { status; headers; body = Stream stream }
 
 let internal_error () = plain 500 "Internal Server Error" []
-let log_quietly m = try !Server.log_error m with _ -> ()
+let log_quietly config m = try config.log_error m with _ -> ()
 
-let recover_with ~last a f =
+let recover_with config ~last a f =
   let r, resolve, _ = Async.make () in
   let give_up m =
-    log_quietly m;
+    log_quietly config m;
     resolve (last ())
   in
   Async.on_settled a (function
@@ -435,41 +454,55 @@ let recover_with ~last a f =
     | Async.Pending -> ());
   r
 
-let recover a f = recover_with ~last:internal_error a f
+let recover env a f = recover_with env.config ~last:internal_error a f
 
 let error_page env (fallback : fallback) =
-  let headers = html_headers env.root_headers [ no_store ] in
+  let headers = html_headers env.root_headers [ no_store_header ] in
   let give_up m =
-    !Server.log_error m;
+    env.config.log_error m;
     Async.return (internal_error ())
   in
-    match render env ~status:500 ~headers fallback.layers (fallback.error 500) with
-    | a -> recover a give_up
+    match render env ~status:500 ~headers fallback.layers (fallback.error ()) with
+    | a -> recover env a give_up
     | exception e -> give_up (Web.exn_to_string e)
 
 let fail_page env fallback message =
-  !Server.log_error message;
+  env.config.log_error message;
   error_page env fallback
 
 let show env ~status ~headers ~fallback layers (page : unit -> page) =
     match render env ~status ~headers layers (page ()) with
-    | a -> recover a (fail_page env fallback)
+    | a -> recover env a (fail_page env fallback)
     | exception e -> fail_page env fallback (Web.exn_to_string e)
 
 let not_found_page env (fallback : fallback) target =
-  show env ~status:404 ~headers:(html_headers env.root_headers [ no_store ]) ~fallback
+  show env ~status:404 ~headers:(html_headers env.root_headers [ no_store_header ]) ~fallback
     fallback.layers (fun () -> fallback.not_found target)
+
+let redirect_status = function `See_other -> 303 | `Temporary -> 307 | `Permanent -> 308
+
+let control c = c < ' ' || c = '\127'
 
 let stopped env fallback target = function
   | Not_found -> not_found_page env fallback target
-  | Redirect { status; location } ->
-      if not (List.mem status [ 301; 302; 303; 307; 308 ]) then
-        fail_page env fallback ("redirect with status " ^ string_of_int status)
-      else if String.exists (fun c -> c = '\r' || c = '\n') location then
-        fail_page env fallback "redirect location holds CR or LF"
+  | Forbidden -> Async.return (plain 403 "Forbidden" env.root_headers)
+  | Redirect { location; kind } ->
+      let host = env.context.header "host" in
+      if Server.local_location ?origins:env.config.origins ~host location then
+        Async.return
+          (empty (redirect_status kind)
+             (merge_headers [ env.root_headers; [ ("location", location); no_store_header ] ]))
+      else
+        fail_page env fallback
+          ("redirect to " ^ String.escaped location
+         ^ " is not a path on this site; use Redirect_off_site for another site")
+  | Redirect_off_site { location; kind } ->
+      if location = "" || String.exists control location then
+        fail_page env fallback ("redirect location " ^ String.escaped location ^ " holds a control character")
       else
         Async.return
-          (empty status (merge_headers [ env.root_headers; [ ("location", location); no_store ] ]))
+          (empty (redirect_status kind)
+             (merge_headers [ env.root_headers; [ ("location", location); no_store_header ] ]))
   | Fail m -> fail_page env fallback m
 
 let rec run_guards = function
@@ -482,7 +515,7 @@ let rec run_guards = function
 let rule_cache (rules : rules) headers =
   match rules.cache with
   | Some c when not (has_header "cache-control" headers) ->
-      headers @ [ ("cache-control", cache_control c) ]
+      headers @ [ ("cache-control", c) ]
   | _ -> headers
 
 let file_path raw =
@@ -520,32 +553,36 @@ let serve_file meth ~root ~headers raw =
       | None -> reply (asset_miss ()))
   | _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "GET, HEAD") ])
 
-let csrf_answer (r : request) =
+let csrf_answer env (r : request) =
   match r.meth with
   | `GET | `HEAD ->
-      if Server.trusted_origin r.header then
+      if Server.trusted_origin ?origins:env.config.origins r.header then
         reply
           {
             status = 200;
-            headers = [ ("content-type", "application/json"); no_store ];
+            headers = [ ("content-type", "application/json"); no_store_header ];
             body = String (Json.to_string (`Assoc [ ("csrf", `String (r.csrf_token ())) ]));
           }
       else reply (plain 403 "Forbidden" [])
   | _ -> reply (method_not_allowed "GET, HEAD")
 
-let action (r : request) raw =
+let action env (r : request) raw =
   match (raw, r.meth) with
   | [ name ], `POST -> (
+      let context = env.context in
       let json (status, body) =
-        Respond { status; headers = [ ("content-type", "application/json"); no_store ]; body = String body }
+        Respond { status; headers = [ ("content-type", "application/json"); no_store_header ]; body = String body }
       in
       let name = Router.decode ~plus:false name in
-      match Server.accept_action ~name r.header with
+      let origins = env.config.origins in
+      match Server.accept_action ?origins ~name r.header with
       | Error e -> Async.return (json e)
       | Ok handler ->
           Async.bind (r.body ~limit:Server.max_body) (function
             | None -> Async.return (json (Server.action_error 413 "request too large"))
-            | Some body -> Async.map json (Server.answer_action ~name ~host:(r.header "host") handler body)))
+            | Some body ->
+                Async.map json
+                  (Server.answer_action ?origins ~context ~live:(Live_server.mark_json env.node) ~name handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
 
@@ -557,6 +594,32 @@ let rec strip_prefix prefix parts =
 
 let query_suffix = function Some q when q <> "" -> "?" ^ q | _ -> ""
 
+let shared_cache value =
+  let v = String.lowercase_ascii value in
+  let has part =
+    let n = String.length part in
+    let rec at i = i + n <= String.length v && (String.sub v i n = part || at (i + 1)) in
+    at 0
+  in
+  has "public" || has "s-maxage"
+
+let live_checked env fallback ~path (resp : response) =
+  if not !(env.live_used) then Async.return resp
+  else if env.config.prerendering then
+    fail_page env fallback
+      ("page " ^ path ^ " renders a Live.use, whose state depends on the request; it cannot be prerendered")
+  else
+    match List.find_opt (fun (n, _) -> same_name n "cache-control") resp.headers with
+    | Some (_, v) when shared_cache v ->
+        if not (List.mem path !(env.config.warned)) then begin
+          env.config.warned := path :: !(env.config.warned);
+          log_quietly env.config
+            ("page " ^ path ^ " renders a Live.use under a shared cache rule (" ^ v
+           ^ "); it is sent with private, no-store")
+        end;
+        Async.return { resp with headers = set_header ("cache-control", "private, no-store") resp.headers }
+    | _ -> Async.return resp
+
 let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
     ~(load : unit -> (plan, stop) result Async.t) ~(fallback : fallback) =
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
@@ -564,14 +627,17 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
     | Error stop -> page_or_error (stopped env fallback path stop)
     | Ok () -> (
         let headers = rule_cache rules (html_headers rules.headers []) in
-        let headers = if status = 200 then headers else set_header no_store headers in
+        let headers = if status = 200 then headers else set_header no_store_header headers in
         match prerendered_file env rules r ~path ~query with
         | Some (root, file) -> Async.return (File { root; path = file; headers })
         | None ->
             page_or_error
               (Async.bind (protect load) (function
                 | Error stop -> stopped env fallback path stop
-                | Ok plan -> show env ~status ~headers ~fallback plan.layers (fun () -> plan.page)))))
+                | Ok plan ->
+                    Async.bind
+                      (show env ~status ~headers ~fallback plan.layers (fun () -> plan.page))
+                      (live_checked env fallback ~path)))))
 
 let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
 
@@ -584,7 +650,7 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
       | Handler _ -> reply (method_not_allowed allowed)
       | Page { rules; guards; load; fallback } ->
           let plain status message = plain status message rules.headers in
-          if not (Server.trusted_origin r.header) then reply (plain 403 "Forbidden")
+          if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden")
           else
             Async.bind (run_guards guards) (function
               | Error stop -> page_or_error (stopped env fallback path stop)
@@ -607,17 +673,20 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
                                   serve_page { env with form = Some (name, key, values, errors) } r ~path ~query
                                     ~status:422 ~rules ~guards:[] ~load ~fallback
                                 in
+                                let context = env.context in
                                 let answer =
-                                  match run values with a -> a | exception e -> Async.failed (Web.exn_to_string e)
+                                  match run context values with
+                                  | a -> a
+                                  | exception e -> Async.failed (Web.exn_to_string e)
                                 in
-                                recover_with ~last:(fun () -> Respond (internal_error ()))
+                                recover_with env.config ~last:(fun () -> Respond (internal_error ()))
                                   (Async.bind answer (function
                                     | Server.Saved location ->
                                         let location = Option.value location ~default:(path ^ query_suffix query) in
-                                        if Server.local_location ~host:(r.header "host") location then
+                                        if Server.local_location ?origins:env.config.origins ~host:(r.header "host") location then
                                           reply
                                             (empty 303
-                                               (merge_headers [ rules.headers; [ ("location", location); no_store ] ]))
+                                               (merge_headers [ rules.headers; [ ("location", location); no_store_header ] ]))
                                         else
                                           page_or_error
                                             (fail_page env a.missing ("form " ^ name ^ " redirect to " ^ String.escaped location
@@ -648,41 +717,41 @@ let route env (App a) req (r : request) ~path ~raw ~query =
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
       | Page { rules; guards; load; fallback } ->
           serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
-      | Handler { rules; same_origin; guards; run } ->
+      | Handler { rules; action; cross_origin; guards; run } ->
+          let safe = match r.meth with `GET | `HEAD | `OPTIONS -> true | _ -> false in
+          if (not safe) && (not cross_origin) && not (Server.trusted_origin ?origins:env.config.origins r.header)
+          then reply (plain 403 "Forbidden" [])
+          else
           page_or_error
             (Async.bind (run_guards guards) (function
               | Error stop -> stopped env a.missing path stop
               | Ok () ->
-                  if
-                    same_origin && not (Server.trusted_origin r.header)
-                  then Async.return (plain 403 "Forbidden" [])
-                  else
                     let ran =
                       match run () with
                       | resp -> Async.map (fun x -> Ok x) resp
                       | exception e -> Async.return (Error (Web.exn_to_string e))
                     in
-                    recover
+                    recover env
                       (Async.bind ran (function
                         | Error m -> fail_page env a.missing m
                         | Ok (resp : response) ->
                             let merged = merge_headers [ rules.headers; resp.headers ] in
                             let headers =
-                              if same_origin then set_header no_store merged
+                              if action then set_header no_store_header merged
                               else if resp.status < 200 || resp.status > 299 then
                                 if has_header "cache-control" resp.headers then merged
-                                else set_header no_store merged
+                                else set_header no_store_header merged
                               else rule_cache rules merged
                             in
                             Async.return { resp with headers }))
                       (fail_page env a.missing))))
 
-let dev_events ~state ~sleep write =
+let dev_events ~log ~state ~sleep write =
   let result, resolve, _ = Async.make () in
   let rec step last idle =
     match state () with
     | exception e ->
-        log_quietly ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e);
+        (try log ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e) with _ -> ());
         resolve ()
     | now ->
     let message =
@@ -703,8 +772,56 @@ let dev_events ~state ~sleep write =
   step "" 0;
   result
 
-let handle config (App a as app) ~sleep ~exists req (r : request) =
+let bad_header (name, value) =
+  let bad c = c = '\r' || c = '\n' || c = '\000' in
+  name = "" || String.exists bad name || String.exists bad value
+
+let checked_headers config outcome =
+  let headers = match outcome with Respond r -> r.headers | File f -> f.headers | Upgrade _ -> [] in
+  match List.find_opt bad_header headers with
+  | None -> outcome
+  | Some (name, _) ->
+      log_quietly config ("response header " ^ String.escaped name ^ " holds CR, LF or NUL; answered 500");
+      Respond (internal_error ())
+
+let live_answer env (r : request) =
+  match r.meth with
+  | `GET ->
+      if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden" [])
+      else if Option.map String.lowercase_ascii (r.header "upgrade") <> Some "websocket" then
+        reply (plain 426 "Upgrade Required" [ ("upgrade", "websocket") ])
+      else (
+        match r.session () with
+        | exception e ->
+            log_quietly env.config
+              ("live socket refused: the request has no session (" ^ Web.exn_to_string e
+             ^ "); the live socket needs session middleware");
+            reply (plain 500 "Internal Server Error" [])
+        | session ->
+            let context = { env.context with session = (fun () -> Some session) } in
+            Async.return
+              (Upgrade
+                 (Live_server.run ~node:env.node ~sleep:env.sleep context ~verify_csrf:r.verify_csrf
+                    ~token:r.csrf_token)))
+  | _ -> reply (method_not_allowed "GET")
+
+let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists req (r : request) =
   let path, query = Router.split_target r.target in
+  Live_server.use_log node config.log_error;
+  let live_used = ref false in
+  let rec context : Types.context =
+    {
+      meth = r.meth;
+      path;
+      header = r.header;
+      session = (fun () -> Some (r.session ()));
+      log = config.log_error;
+      live =
+        (fun name key ->
+          live_used := true;
+          Live_server.ssr_state node context name key);
+    }
+  in
   let env =
     {
       config;
@@ -720,6 +837,9 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
       exists;
       form = None;
       csrf = Some r.csrf_token;
+      context;
+      node;
+      live_used;
     }
   in
   let parts = String.split_on_char '/' path in
@@ -739,13 +859,20 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
         | [ "dev" ], Some dev -> (
             let headers = [ ("content-type", "text/event-stream"); ("cache-control", "no-store") ] in
             match r.meth with
-            | `GET -> reply { status = 200; headers; body = Stream (dev_events ~state:dev.state ~sleep) }
+            | `GET ->
+                reply
+                  {
+                    status = 200;
+                    headers;
+                    body = Stream (dev_events ~log:config.log_error ~state:dev.state ~sleep);
+                  }
             | `HEAD -> reply { status = 200; headers; body = String "" }
             | _ -> reply (method_not_allowed "GET, HEAD"))
         | raw, _ ->
         match raw with
-        | "action" :: rest -> action r rest
-        | [ "csrf" ] -> csrf_answer r
+        | "action" :: rest -> action env r rest
+        | [ "csrf" ] -> csrf_answer env r
+        | [ "live" ] -> live_answer env r
         | "css" :: rest when config.css <> [] -> (
             match r.meth with
             | `GET | `HEAD -> (
@@ -755,21 +882,22 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
                       {
                         status = 200;
                         headers =
-                          [ ("content-type", "text/css; charset=utf-8"); ("cache-control", cache_control Immutable) ];
+                          [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
                         body = String text;
                       }
                 | None -> reply (asset_miss ()))
             | _ -> reply (method_not_allowed "GET, HEAD"))
-        | rest -> (
+        | "app" :: rest -> (
             match config.assets with
             | None -> reply (asset_miss ())
             | Some assets ->
                 let headers =
                   match file_path rest with
-                  | Some p when assets.immutable p -> [ ("cache-control", cache_control Immutable) ]
-                  | _ -> [ ("cache-control", "no-cache") ]
+                  | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
+                  | _ -> [ ("cache-control", no_cache) ]
                 in
-                serve_file r.meth ~root:assets.dir ~headers rest))
+                serve_file r.meth ~root:assets.dir ~headers rest)
+        | _ -> reply (asset_miss ()))
     | "" :: _, Some (dir, rest) -> serve_file r.meth ~root:dir ~headers:[] rest
     | "" :: _, None when String.contains path '\\' ->
         Async.map (fun x -> Respond x) (not_found_page env a.missing path)
@@ -800,49 +928,50 @@ let handle config (App a as app) ~sleep ~exists req (r : request) =
   let answer =
     match run () with
     | a ->
-        recover_with ~last a (fun m ->
-            !Server.log_error m;
+        recover_with config ~last a (fun m ->
+            config.log_error m;
             reply (internal_error ()))
     | exception e ->
-        log_quietly (Web.exn_to_string e);
+        log_quietly config (Web.exn_to_string e);
         Async.return (last ())
   in
-  Async.map bodyless answer
-
-type http_response = response
+  Async.map (fun o -> checked_headers config (bodyless o)) answer
 
 module type ADAPTER = sig
   type request
-  type response
-  type 'a io
+  type reply
 
   val meth : request -> Router.meth
   val target : request -> string
   val header : request -> string -> string option
   val body : request -> limit:int -> string option Async.t
+  val session : request -> string
   val csrf_token : request -> string
-  val respond : http_response -> response io
-  val file : request -> root:string -> path:string -> headers:(string * string) list -> response io
+  val verify_csrf : request -> string -> bool Async.t
+  val respond : response -> reply Async.t
+  val file : request -> root:string -> path:string -> headers:(string * string) list -> reply Async.t
   val exists : root:string -> path:string -> bool
-  val of_async : 'a Async.t -> 'a io
-  val bind : 'a io -> ('a -> 'b io) -> 'b io
+  val upgrade : request -> (Live_server.connection -> unit Async.t) -> reply Async.t
   val sleep : float -> unit Async.t
 end
 
 module Make (A : ADAPTER) = struct
-  let handler config app (req : A.request) =
+  let handler ?node config app (req : A.request) =
     let view =
       {
         meth = A.meth req;
         target = A.target req;
         header = A.header req;
         body = (fun ~limit -> A.body req ~limit);
+        session = (fun () -> A.session req);
         csrf_token = (fun () -> A.csrf_token req);
+        verify_csrf = A.verify_csrf req;
       }
     in
-    A.bind (A.of_async (handle config app ~sleep:A.sleep ~exists:A.exists req view)) (function
+    Async.bind (handle ?node config app ~sleep:A.sleep ~exists:A.exists req view) (function
       | Respond r -> A.respond r
-      | File { root; path; headers } -> A.file req ~root ~path ~headers)
+      | File { root; path; headers } -> A.file req ~root ~path ~headers
+      | Upgrade run -> A.upgrade req run)
 end
 
 let prerender_seeds (App a) = a.prerender
@@ -926,6 +1055,7 @@ let links html =
   scan 0 []
 
 let missing_page config (App a) ~sleep =
+  let config = prerender_config config in
   let env =
     {
       config;
@@ -938,6 +1068,9 @@ let missing_page config (App a) ~sleep =
       exists = (fun ~root:_ ~path:_ -> false);
       form = None;
       csrf = None;
+      context = Server.empty_context ();
+      node = Live_server.main ();
+      live_used = ref false;
     }
   in
   not_found_page env a.missing "/404.html"

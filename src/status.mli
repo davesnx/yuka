@@ -1,5 +1,5 @@
 (** Why a remote call failed. *)
-type error =
+type error = Status_error.t =
   | Rejected of string
       (** The server refused the input ({!Server.Action.reject}, bad
           input). The message is for the user. *)

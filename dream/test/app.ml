@@ -1,5 +1,5 @@
 let el tag ?(attrs = []) children =
-  Yuka.lower tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
+  Yuka.element tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
 
 let link href = el "a" ~attrs:[ ("href", href) ] [ Yuka.text href ]
 let root ~children () = el "div" ~attrs:[ ("class", "root") ] [ children ]
@@ -35,5 +35,5 @@ let page ~parts () =
   Yuka.Server.page (fun () -> el "p" [ Yuka.text ("page " ^ String.concat "/" parts) ])
 
 let secret () = Yuka.Server.page (fun () -> Yuka.text "secret")
-let not_found ~target () = Yuka.Server.page ~title:"Missing" (fun () -> Yuka.text ("missing " ^ target))
+let not_found ~path () = Yuka.Server.page ~title:"Missing" (fun () -> Yuka.text ("missing " ^ path))
 let feed (_ : Dream.request) = Yuka.Server.text ~headers:[ ("content-type", "application/rss+xml") ] "<rss/>"

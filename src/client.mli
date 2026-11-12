@@ -4,7 +4,7 @@ type entry = Island.entry = {
 }
 
 val island :
-  ?loading:Types.loading ->
+  ?start:Types.start ->
   name:string ->
   props:Json.t ->
   (unit -> Types.client Kind.element) ->
@@ -13,6 +13,8 @@ val island :
 val entry : name:string -> (Json.t -> (unit -> Types.client Kind.element, string) result) -> entry
 
 type container = Web.node
+
+val container : string -> container option
 type 'a promise = 'a Web.promise
 
 val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
@@ -41,3 +43,8 @@ val use_async : unit -> unit
     [Action.send] calls [use_actions] and a [Codec.async] reference calls
     [use_async], so that the action transport and the reader of streamed
     async values are linked only when the app uses them. *)
+
+val use_url_check : unit -> unit
+(** Links the URL check of the attributes the client sets. {!Yuka.attr},
+    {!Yuka.hole_attr} (and their ppx forms) and [use_element] call it.
+    Without it, setting a URL attribute raises [Failure]. *)

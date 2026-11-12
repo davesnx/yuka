@@ -1,6 +1,6 @@
 Generation errors point into Routes.ml
 
-  $ gen () { cat > Routes.ml; yuka-routes --shared --source Routes.ml < Routes.ml; }
+  $ gen () { cat > Routes.ml; yuka routes --shared --source Routes.ml; }
 Two pages with the same path shape
 
   $ gen <<'EOF'
@@ -287,7 +287,7 @@ An unknown node
   > Router.make [ Router.page A ~path:"/a" ~page:P.a ]
   > EOF
   File "Routes.ml", line 1, characters 14-48:
-  Error: unknown node Router.page; the nodes are Router.make, Router.group, Router.route, Router.endpoint, Router.action and Router.redirect
+  Error: unknown node Router.page; the nodes are Router.make, Router.group, Router.route, Router.endpoint, Router.action and Router.redirect (names of the route file syntax, not OCaml values)
   [1]
 
 A node that is not a Router call
@@ -440,7 +440,7 @@ A let binding instead of an expression
   > let routes = Router.make [ Router.route A ~path:"/a" ~page:P.a ]
   > EOF
   File "Routes.ml", line 1, characters 0-64:
-  Error: the route file must hold one expression, Router.make ..., and nothing else
+  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
   [1]
 
 An open before the expression
@@ -451,7 +451,7 @@ An open before the expression
   > Router.make [ Router.route A ~path:"/a" ~page:P.a ]
   > EOF
   File "Routes.ml", line 1, characters 0-11:
-  Error: the route file must hold one expression, Router.make ..., and nothing else
+  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
   [1]
 
 A second expression
@@ -461,14 +461,14 @@ A second expression
   > Router.make [ Router.route B ~path:"/b" ~page:P.b ]
   > EOF
   File "Routes.ml", line 2, characters 0-51:
-  Error: the route file must hold one expression, Router.make ..., and nothing else
+  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
   [1]
 
 An empty file
 
   $ gen < /dev/null
   File "Routes.ml", line 1:
-  Error: the route file must hold one expression, Router.make ..., and nothing else
+  Error: the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not compiled, so it has no open and no let)
   [1]
 
 A syntax error
@@ -494,7 +494,7 @@ The root must be Router.make
 Valid input, every node kind, exits 0
 
   $ gen <<'EOF' > /dev/null
-  > Router.make ~layout:L.root ~headers:[ ("x", "y") ] ~cache:No_store ~prerender:false
+  > Router.make ~layout:L.root ~headers:[ ("x", "y") ] ~cache:no_store ~prerender:false
   >   [
   >     Router.group ~path:"/g/:id<M.Id>" ~layout:L.g ~loader:L.load ~guard:G.ok
   >       ~not_found:P.nf ~error:P.err ~search:{ q = optional string } ~prerender:true

@@ -181,8 +181,8 @@ async function pageScripts(paths: string[]): Promise<Map<string, string[]>> {
         path,
         urls.map((u) => {
           const pathname = new URL(u, base).pathname;
-          if (!pathname.startsWith("/_yuka/")) throw new Error(`size: ${path} loads ${u}, outside /_yuka/`);
-          return join(buildDir, "default/demo/client/out", pathname.slice("/_yuka/".length));
+          if (!pathname.startsWith("/_yuka/app/")) throw new Error(`size: ${path} loads ${u}, outside /_yuka/app/`);
+          return join(buildDir, "default/demo/client/out", pathname.slice("/_yuka/app/".length));
         }),
       );
     }

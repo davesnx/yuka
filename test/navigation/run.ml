@@ -1,5 +1,13 @@
 open Yuka
 
+type m
+
+external import : string -> m runtime_promise = "import"
+external router : m -> runtime_router = "router" [@@mel.get]
+
+let runtime_registry entries =
+  runtime_registry ~navigation:(fun () -> runtime_promise_map router (import "yuka/navigation.js")) entries
+
 let check = Cases.check
 
 let setup : string -> unit =
@@ -139,7 +147,7 @@ let ints = string_of_int
 let bools = string_of_bool
 let page body = "<main>" ^ body ^ "</main>"
 let doc title body = "<!doctype html><html><head><title>" ^ title ^ "</title></head><body>" ^ body ^ "</body></html>"
-let plain_start () = render ~islands:(Client.registry []) ()
+let plain_start () = render ~islands:(runtime_registry []) ()
 
 let navigate_before_start finish =
   setup "";
@@ -206,12 +214,12 @@ let not_intercepted finish =
 let probe_runs = State.make 0
 
 let probe_entry =
-  Client.entry ~name:"Probe" (fun json ->
+  runtime_entry ~name:"Probe" (fun json ->
       Result.map
         (fun n () ->
           Effect.run (fun () ->
               log ("g" ^ ints (State.get probe_runs) ^ "/" ^ ints n));
-          lower "span" [] [ text "p" ])
+          element "span" [] [ text "p" ])
         (Codec.decode Codec.int json))
 
 let island n =
@@ -221,7 +229,7 @@ let island n =
 let stop_then_start finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 1));
-  render ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
   check "first island started" "g0/1" (log_g ());
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page (island 2))) "";
@@ -431,7 +439,7 @@ let start_twice_listeners finish =
 let mount_without_navigation finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 3));
-  render ~islands:(Client.registry [ probe_entry ]) ~navigation:false ();
+  render ~islands:(runtime_registry [ probe_entry ]) ~navigation:false ();
   check "island started" "g0/3" (log_g ());
   check "click not intercepted" "false" (bools (click "#l" ""));
   check "no fetch" "0" (ints (calls ()));
@@ -441,7 +449,7 @@ let mount_without_navigation finish =
 let mount_with_navigation finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 4));
-  render ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
   check "island started" "g0/4" (log_g ());
   check "click intercepted" "true" (bools (click "#l" ""));
   check "one fetch" "1" (ints (calls ()));
@@ -454,10 +462,10 @@ let popstate_to : string -> unit =
 let unmount_stops_navigation finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 5));
-  render ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
   check "island started" "g0/5" (log_g ());
-  unmount ();
-  check "click not intercepted after unmount" "false" (bools (click "#l" ""));
+  stop ();
+  check "click not intercepted after stop" "false" (bools (click "#l" ""));
   popstate_to "/back";
   check "no fetch for a click or popstate" "0" (ints (calls ()));
   log_clear ();
@@ -471,9 +479,9 @@ let unmount_stops_navigation finish =
 let unmount_cancels_in_flight finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 6));
-  render ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
   ignore (click "#l" "");
-  unmount ();
+  stop ();
   check "request aborted" "true" (bools (call_aborted 0));
   let before = body_html () in
   ignore_abort ();
@@ -481,16 +489,16 @@ let unmount_cancels_in_flight finish =
   tick (fun () ->
       check "body kept" before (body_html ());
       check "location kept" "/start?x=1" (location_ ());
-      check "no island started after unmount" "g0/6" (log_g ());
+      check "no island started after stop" "g0/6" (log_g ());
       finish ())
 
 let mount_after_unmount finish =
   State.set probe_runs 0;
   setup (page ({|<a id="l" href="/two">x</a>|} ^ island 8));
   count_listeners ();
-  render ~islands:(Client.registry [ probe_entry ]) ();
-  unmount ();
-  render ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  stop ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
   check "island started twice" "g0/8|g0/8" (log_g ());
   check "click intercepted again" "true" (bools (click "#l" ""));
   check "one fetch for one click" "1" (ints (calls ()));
@@ -533,7 +541,7 @@ let partial finish =
   State.set probe_runs 0;
   setup "";
   outlet_page ();
-  render ~islands:(Client.registry [ probe_entry ]) ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
   check "both islands started" "g0/1|g0/2" (log_g ());
   ignore (click "#two" "");
   check "keys sent" "L0" (call_header 0);
@@ -722,13 +730,13 @@ let bad_title finish =
       check "pushed" "/two" (location_ ());
       finish ())
 
-let act = Action.declare ~name:"act" ~input:Codec.string ~output:Codec.string
+let act = Action.mutation ~name:"act" ~input:Codec.string ~output:Codec.string
 
 let actor_entry =
-  Client.entry ~name:"Actor" (fun json ->
+  runtime_entry ~name:"Actor" (fun json ->
       Result.map
         (fun (_ : int) () ->
-          lower "button"
+          element "button"
             [ on "click" (fun _ -> ignore (Action.call act "go")) ]
             [ text "act" ])
         (Codec.decode Codec.int json))
@@ -740,7 +748,7 @@ let actions_of_stopped_islands finish =
     ({|<a id="two" href="/two">two</a>|}
     ^ {|<yuka-island data-name="Actor" data-id="i1" style="display:contents"><button id="outer">act</button></yuka-island><script type="application/json" data-yuka-props="i1">1</script>|}
     ^ {|<yuka-outlet data-k="L0" style="display:contents"><yuka-island data-name="Actor" data-id="i2" style="display:contents"><button id="inner">act</button></yuka-island><script type="application/json" data-yuka-props="i2">2</script></yuka-outlet>|});
-  render ~islands:(Client.registry [ actor_entry ]) ();
+  render ~islands:(runtime_registry [ actor_entry ]) ();
   ignore (click "#inner" "");
   ignore (click "#outer" "");
   check "two action calls" "2" (ints (calls ()));
@@ -750,6 +758,34 @@ let actions_of_stopped_islands finish =
   tick (fun () ->
       check "inner island action aborted" "true" (bools (call_aborted 0));
       check "outer island action still running" "false" (bools (call_aborted 1));
+      finish ())
+
+let rerender_entry =
+  runtime_entry ~name:"Rerender" (fun json ->
+      Result.map
+        (fun (_ : int) () ->
+          let n = State.make 0 in
+          hole (fun () ->
+              let v = State.get n in
+              element "button"
+                [ Yuka.attr "id" "b";
+                  on "click" (fun _ ->
+                      State.set n (v + 1);
+                      ignore (Action.call act "go")) ]
+                [ text (string_of_int v) ]))
+        (Codec.decode Codec.int json))
+
+let action_survives_own_render finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    {|<yuka-island data-name="Rerender" data-id="i1" style="display:contents"><!--[--><button id="b">0</button><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">1</script>|};
+  render ~islands:(runtime_registry [ rerender_entry ]) ();
+  ignore (click "#b" "");
+  tick (fun () ->
+      check "the handler's write rendered its button again" "1" (attr_text "#b");
+      check "one action call" "1" (ints (calls ()));
+      check "the call is not aborted by that render" "false" (bools (call_aborted 0));
       finish ())
 
 let not_a_page status type_ finish =
@@ -869,7 +905,7 @@ let not_prefetched finish =
   fire "#l" "pointerdown";
   check "save data: no prefetch" "0" (ints (calls ()));
   setup links;
-  render ~islands:(Client.registry []) ~prefetch:`Off ();
+  render ~islands:(runtime_registry []) ~prefetch:`Off ();
   fire "#l" "pointerdown";
   check "prefetch off: no prefetch" "0" (ints (calls ()));
   check "prefetch off: click still navigates" "true" (bools (click "#l" ""));
@@ -892,7 +928,7 @@ let visible finish =
   check "a link in flight is not prefetched again" "1" (ints (calls ()));
   setup (page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
   stub_observer ();
-  render ~islands:(Client.registry []) ~prefetch:`Visible ();
+  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
   check "visible mode observes every link" "v,o" (observed ());
   intersect "o";
   check "off still wins" "0" (ints (calls ()));
@@ -963,6 +999,52 @@ let no_store_once finish =
               check "an old prefetch is not used" "2" (ints (calls ()));
               finish ())))
 
+let rerendered_call_aborted_by_outlet finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<a id="two" href="/two">two</a>|}
+    ^ {|<yuka-outlet data-k="L0" style="display:contents"><yuka-island data-name="Rerender" data-id="i1" style="display:contents"><!--[--><button id="b">0</button><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">1</script></yuka-outlet>|});
+  render ~islands:(runtime_registry [ rerender_entry ]) ();
+  ignore (click "#b" "");
+  tick (fun () ->
+      check "not aborted by the render" "false" (bools (call_aborted 0));
+      ignore (click "#two" "");
+      resolve_headers 1 "<p>new</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "aborted when the outlet stops its island" "true" (bools (call_aborted 0));
+          finish ()))
+
+let leaver_entry =
+  runtime_entry ~name:"Leaver" (fun json ->
+      Result.map
+        (fun (_ : int) () ->
+          element "button"
+            [ Yuka.attr "id" "go";
+              on "click" (fun _ ->
+                  ignore (Action.call act "go");
+                  Browser.navigate "/two") ]
+            [ text "go" ])
+        (Codec.decode Codec.int json))
+
+let call_then_navigate_aborted finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<a id="l" href="/two">two</a>|}
+    ^ {|<yuka-outlet data-k="L0" style="display:contents"><yuka-island data-name="Leaver" data-id="i1" style="display:contents"><button id="go">go</button></yuka-island><script type="application/json" data-yuka-props="i1">1</script></yuka-outlet>|});
+  render ~islands:(runtime_registry [ leaver_entry ]) ();
+  fire "#l" "pointerdown";
+  resolve_headers 0 "<p>new</p>" 200
+    [| ("yuka-outlet", "L0"); ("yuka-build", "b1"); ("cache-control", "private, max-age=60") |];
+  tick (fun () ->
+      ignore (click "#go" "");
+      let action = calls () - 1 in
+      tick (fun () ->
+          check "the page changed" "/two" (location_ ());
+          check "the call of the stopped island is aborted" "true" (bools (call_aborted action));
+          finish ()))
+
 let set_outlet_key : string -> unit =
   [%mel.raw "function (k) { document.querySelector('yuka-outlet').setAttribute('data-k', k) }"]
 
@@ -1003,15 +1085,15 @@ let action_clears finish =
       resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
       tick (fun () ->
           let failed = Action.call act "x" in
-          resolve_with 2 {|{"error":"no"}|} "" 200 "application/json";
+          resolve_with 2 {|{"error":"no"}|} "" 400 "application/json";
           tick (fun () ->
-              check "failed action" "true" (bools (Async.status failed = Async.Failed "no"));
+              check "failed action" "true" (bools (Async.status failed = Async.Done (Error (Status.Rejected "no"))));
               fire "#l" "pointerdown";
               check "a failed action keeps the cache" "3" (ints (calls ()));
               let ok = Action.call act "x" in
               resolve_with 3 {|{"ok":"y"}|} "" 200 "application/json";
               tick (fun () ->
-                  check "action done" "true" (bools (Async.status ok = Async.Done "y"));
+                  check "action done" "true" (bools (Async.status ok = Async.Done (Ok "y")));
                   ignore (click "#l" "");
                   check "a successful action clears the cache" "5" (ints (calls ()));
                   finish ()))))
@@ -1035,7 +1117,7 @@ let waits_for_prefetch finish =
 let transitions_on finish =
   setup links;
   stub_transition ();
-  render ~islands:(Client.registry []) ~transitions:true ();
+  render ~islands:(runtime_registry []) ~transitions:true ();
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
   tick (fun () ->
@@ -1058,7 +1140,7 @@ let transitions_off finish =
   tick (fun () ->
       check "no transition by default" "scroll:0" (log_read ());
       setup links;
-      render ~islands:(Client.registry []) ~transitions:true ();
+      render ~islands:(runtime_registry []) ~transitions:true ();
       ignore (click "#l" "");
       resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
       tick (fun () ->
@@ -1094,16 +1176,16 @@ let remote_mutate_clears finish =
           tick (fun () ->
               fire "#l" "pointerdown";
               check "a query read keeps the cache" "3" (ints (calls ()));
-              let failed = Remote.mutate r (fun d -> d ^ "!") (fun () -> Action.call act "x") in
+              let failed = Remote.mutate r ~change:(fun d -> d ^ "!") (fun () -> Action.call act "x") in
               resolve_with 3 {|{"error":"no"}|} "" 400 "application/json";
               tick (fun () ->
-                  check "mutate failed" "true" (bools (match Async.status failed with Async.Failed _ -> true | _ -> false));
+                  check "mutate failed" "true" (bools (Async.status failed = Async.Done (Error (Status.Rejected "no"))));
                   fire "#l" "pointerdown";
                   check "a failed mutate keeps the cache" "4" (ints (calls ()));
-                  let ok = Remote.mutate r (fun d -> d ^ "!") (fun () -> Action.call act "y") in
+                  let ok = Remote.mutate r ~change:(fun d -> d ^ "!") (fun () -> Action.call act "y") in
                   resolve_with 4 {|{"ok":"y"}|} "" 200 "application/json";
                   tick (fun () ->
-                      check "mutate done" "true" (bools (Async.status ok = Async.Done "y"));
+                      check "mutate done" "true" (bools (Async.status ok = Async.Done (Ok "y")));
                       fire "#l" "pointerdown";
                       check "a successful mutate empties the cache" "6" (ints (calls ()));
                       dispose ();
@@ -1176,10 +1258,10 @@ let waiter_after_unmount finish =
   let _ = Action.call act "x" in
   resolve_with 1 {|{"ok":"y"}|} "" 200 "application/json";
   tick (fun () ->
-      unmount ();
+      stop ();
       resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
       tick (fun () ->
-          check "no swap after unmount" links (body_html ());
+          check "no swap after stop" links (body_html ());
           check "no push" "/start?x=1" (location_ ());
           finish ()))
 
@@ -1197,7 +1279,7 @@ let popstate_cancels_waiter finish =
 let transition_token finish =
   setup links;
   deferred_transitions ();
-  render ~islands:(Client.registry []) ~transitions:true ();
+  render ~islands:(runtime_registry []) ~transitions:true ();
   ignore (click "#l" "");
   resolve_call 0 (doc "Two" (page {|<a id="m" href="/three">three</a>|})) "";
   tick (fun () ->
@@ -1221,7 +1303,7 @@ let transition_token finish =
 let transition_error finish =
   setup links;
   raising_transition ();
-  render ~islands:(Client.registry []) ~transitions:true ();
+  render ~islands:(runtime_registry []) ~transitions:true ();
   ignore (click "#l" "");
   scroll_throws ();
   resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
@@ -1307,11 +1389,11 @@ let unmount_clears finish =
   setup links;
   plain_start ();
   fire "#l" "pointerdown";
-  unmount ();
+  stop ();
   check "prefetch aborted" "true" (bools (call_aborted 0));
   plain_start ();
   ignore (click "#l" "");
-  check "a new fetch after unmount" "2" (ints (calls ()));
+  check "a new fetch after stop" "2" (ints (calls ()));
   finish ()
 
 let router_loaded : unit -> bool =
@@ -1323,7 +1405,7 @@ let rec until name cond f n =
 
 let navigation_off_loads_nothing finish =
   setup (page {|<a id="l" href="/two">x</a>|});
-  render ~islands:(Client.registry []) ~navigation:false ();
+  render ~islands:(runtime_registry []) ~navigation:false ();
   fire "#l" "pointerover";
   fire "#l" "pointerdown";
   check "click not intercepted" "false" (bools (click "#l" ""));
@@ -1436,18 +1518,46 @@ let load_errors : unit -> int =
   [%mel.raw
     "function () { return globalThis.__errors.filter(function (m) { return m.indexOf('cannot load navigation') >= 0 }).length }"]
 
-let stalled_import finish =
+let fire_window : string -> unit =
+  [%mel.raw "function (name) { window.dispatchEvent(new window.Event(name)) }"]
+
+let stop_during_stall finish =
   setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
   plain_start ();
-  check "the click is prevented while the code loads" "true" (bools (click "#l" ""));
+  ignore (click "#l" "");
   wait 1000 (fun () ->
-      check "no full load before the timeout" "" (log_read ());
-      wait 2200 (fun () ->
-          check "after 3 s the waiting click is a full page load" "assign" (log_read ());
-          check "one error" "1" (ints (load_errors ()));
-          check "a later click is not prevented" "false" (bools (click "#m" ""));
-          check "one import" "1" (ints (imports ()));
+      stop ();
+      plain_start ();
+      wait 2500 (fun () ->
+          check "no give-up after a stop and a new render" "" (log_read ());
+          check "no error" "0" (ints (load_errors ()));
+          check "a click is still taken" "true" (bools (click "#m" ""));
+          stop ();
           finish ()))
+
+let leaving_drops_waiting finish =
+  setup (page {|<a id="l" href="/two">x</a>|});
+  plain_start ();
+  ignore (click "#l" "");
+  fire_window "beforeunload";
+  wait 3200 (fun () ->
+      check "a page that is leaving gets no late location.assign" "" (log_read ());
+      check "no error" "0" (ints (load_errors ()));
+      stop ();
+      finish ())
+
+let stalled_import finish =
+  setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
+  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  wait 1000 (fun () ->
+      check "the click is prevented while the code loads" "true" (bools (click "#l" ""));
+      wait 2500 (fun () ->
+          check "no full load 2.5 s after the click (the timer starts at the click)" "" (log_read ());
+          wait 700 (fun () ->
+              check "3.2 s after the click the waiting click is a full page load" "assign" (log_read ());
+              check "one error" "1" (ints (load_errors ()));
+              check "a later click is not prevented" "false" (bools (click "#m" ""));
+              finish ())))
 
 let failed_import finish =
   setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
@@ -1524,9 +1634,9 @@ let all =
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);
-    ("unmount stops navigation", unmount_stops_navigation);
-    ("unmount cancels a navigation in flight", unmount_cancels_in_flight);
-    ("mount after unmount", mount_after_unmount);
+    ("stop stops navigation", unmount_stops_navigation);
+    ("stop cancels a navigation in flight", unmount_cancels_in_flight);
+    ("mount after stop", mount_after_unmount);
     ("404 is shown in place", shown_in_place 404);
     ("500 is shown in place", shown_in_place 500);
     ("partial response replaces the outlet", partial);
@@ -1534,6 +1644,9 @@ let all =
     ("unknown outlet is a full load", unknown_outlet);
     ("a bad title still navigates", bad_title);
     ("stop_within aborts the actions of the islands it stops", actions_of_stopped_islands);
+    ("an action call survives the render that its handler's writes cause", action_survives_own_render);
+    ("that call is still aborted when its island stops", rerendered_call_aborted_by_outlet);
+    ("an action call then a navigation in one handler: the call is aborted", call_then_navigate_aborted);
     ("302 not followed is a full load", not_a_page 302 "text/html");
     ("json is a full load", not_a_page 200 "application/json");
     ("no content type is a full load", not_a_page 200 "");
@@ -1550,13 +1663,13 @@ let all =
     ("a navigation waits for the prefetch in flight", waits_for_prefetch);
     ("view transitions when enabled", transitions_on);
     ("no view transition by default or without the API", transitions_off);
-    ("unmount aborts prefetches and clears the cache", unmount_clears);
+    ("stop aborts prefetches and clears the cache", unmount_clears);
     ("a navigation cancels the hover timer", down_cancels_hover);
     ("at most 30 entries, the oldest goes first", thirty_entries);
     ("Remote.mutate empties the cache when it succeeds", remote_mutate_clears);
     ("an answer requested before an action is not kept", action_after_navigation_started);
     ("emptying the cache aborts its prefetches", clear_aborts_prefetch);
-    ("a waiting navigation does not swap after unmount", waiter_after_unmount);
+    ("a waiting navigation does not swap after stop", waiter_after_unmount);
     ("a popstate to the shown page cancels a waiting navigation", popstate_cancels_waiter);
     ("transitions: state first, one attribute owner", transition_token);
     ("transitions: an error in the update is reported", transition_error);
@@ -1612,7 +1725,11 @@ let () =
     | "replay" -> [ ("an error while the waiting events run", replay_error) ]
     | "stall" ->
         block_router "stall";
-        [ ("an import with no answer: a full load after 3 s", stalled_import) ]
+        [
+          ("a stop during a slow load does not turn navigation off", stop_during_stall);
+          ("a page that is leaving drops the waiting navigations", leaving_drops_waiting);
+          ("an import with no answer: a full load 3 s after the click", stalled_import);
+        ]
     | "fail" ->
         block_router "fail";
         [ ("a failed import: full loads, no retry, one error", failed_import) ]

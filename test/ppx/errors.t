@@ -113,7 +113,7 @@ Module-level State:
   File "s0.mlx", line 1, characters 0-24:
   1 | let count = State.make 0
       ^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared].
+  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
   [1]
 
   $ cat > s1.mlx <<'X'
@@ -123,7 +123,7 @@ Module-level State:
   File "s1.mlx", line 1, characters 0-41:
   1 | let total = Yuka.State.memo (fun () -> 1)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.memo is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared].
+  Error: [yuka] A module-level State.memo is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
   [1]
 
   $ cat > s2.mlx <<'X'
@@ -133,7 +133,7 @@ Module-level State:
   File "s2.mlx", line 1, characters 18-62:
   1 | module M = struct let c : int Yuka.State.t = Yuka.State.make 0 end
                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared].
+  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
   [1]
 
 Module-level State marked shared, and State inside a function:
@@ -203,7 +203,7 @@ Yuka.Client with another prop:
   File "h6.mlx", line 1, characters 8-20:
   1 | let x = <Yuka.Client other=1><M a=1 /></Yuka.Client>
               ^^^^^^^^^^^^
-  Error: [yuka] Yuka.Client takes no props except loading
+  Error: [yuka] Yuka.Client takes no props except start
   [1]
 
 Yuka.Client without child:
@@ -245,13 +245,13 @@ Yuka.Client with a tag child:
 let%client with a reserved argument:
 
   $ cat > h10.mlx <<'X'
-  > let%client make ~(loading : int) () = <p />
+  > let%client make ~(start : int) () = <p />
   > X
   $ run h10
-  File "h10.mlx", line 1, characters 16-32:
-  1 | let%client make ~(loading : int) () = <p />
-                      ^^^^^^^^^^^^^^^^
-  Error: [yuka] the argument 'loading' is reserved for the start strategy
+  File "h10.mlx", line 1, characters 16-30:
+  1 | let%client make ~(start : int) () = <p />
+                      ^^^^^^^^^^^^^^
+  Error: [yuka] the argument 'start' is reserved for the start strategy
   [1]
 
 SVG attribute on a tag that is not SVG:
@@ -594,13 +594,8 @@ String.t, Int.t, Float.t and Bool.t are the base kinds, not custom modules:
   > X
   $ run form5 | grep -o 'Yuka.Form.[a-z]*' | sort -u
   Yuka.Form.bool
-  Yuka.Form.field
-  Yuka.Form.fields
-  Yuka.Form.finish
   Yuka.Form.float
-  Yuka.Form.get
   Yuka.Form.int
-  Yuka.Form.put
   Yuka.Form.string
   Yuka.Form.t
 
@@ -724,3 +719,234 @@ A literal base href is kept:
   > Y
   $ run base1 | grep -o 'href=[^ ]*'
   href=\"/app/\">"
+
+The namespaced and the short names are the same: let%yuka.client and
+let%client, [@@shared] and [@@yuka.shared]:
+
+  $ cat > ns1.mlx <<'Y'
+  > let%yuka.client make ~(n : int) () = <b>(Yuka.text (string_of_int n))</b>
+  > Y
+  $ run ns1 | grep -c 'Yuka.runtime_entry'
+  1
+  $ cat > ns2.ml <<'Y'
+  > let%yuka.client make () = ()
+  > Y
+  $ ./pp.exe --impl ns2.ml
+  File "ns2.ml", line 1, characters 0-28:
+  1 | let%yuka.client make () = ()
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let%client is allowed only in .mlx files: rename ns2.ml to ns2.mlx
+  [1]
+  $ cat > ns3.mlx <<'Y'
+  > let count = State.make 0 [@@shared]
+  > Y
+  $ run ns3
+  let count = State.make 0[@@shared ]
+
+An island prop named make is refused:
+
+  $ cat > mk.mlx <<'Y'
+  > let%client make ~(make : int) () = <b>(Yuka.text (string_of_int make))</b>
+  > Y
+  $ run mk
+  File "mk.mlx", line 1, characters 16-29:
+  1 | let%client make ~(make : int) () = <b>(Yuka.text (string_of_int make))</b>
+                      ^^^^^^^^^^^^^
+  Error: [yuka] the argument 'make' would hide the component make; give the prop another name
+  [1]
+
+A bare ~islands is Yuka_islands.registry only when the file binds no islands;
+after open Yuka, render is Yuka.render unless the file binds render:
+
+  $ cat > is1.mlx <<'Y'
+  > let main () = Yuka.render ~islands ()
+  > Y
+  $ run is1
+  let main () = Yuka.render ~islands:Yuka_islands.registry ()
+  $ cat > is2.mlx <<'Y'
+  > let main mine = let islands = mine in Yuka.render ~islands ()
+  > Y
+  $ run is2
+  let main mine = let islands = mine in Yuka.render ~islands ()
+  $ cat > is3.mlx <<'Y'
+  > let main ~islands = Yuka.render ~islands ()
+  > Y
+  $ run is3
+  let main ~islands = Yuka.render ~islands ()
+  $ cat > is4.mlx <<'Y'
+  > open Yuka
+  > let main () = render ~islands ()
+  > Y
+  $ run is4
+  open Yuka
+  let main () = render ~islands:Yuka_islands.registry ()
+  $ cat > is5.mlx <<'Y'
+  > open Yuka
+  > let render ~islands () = islands
+  > let main () = render ~islands ()
+  > Y
+  $ run is5
+  open Yuka
+  let render ~islands () = islands
+  let main () = render ~islands ()
+  $ cat > is6.mlx <<'Y'
+  > let main () = render ~islands ()
+  > Y
+  $ run is6
+  let main () = render ~islands ()
+
+After open Yuka, Await, Show, Catch and Client need no Yuka. prefix, unless
+the file defines a module of that name:
+
+  $ cat > op1.mlx <<'Y'
+  > open Yuka
+  > let a x = <Await async=x loading=(text "l")>(fun v -> text v)</Await>
+  > let s x = <Show status=x loading=(text "l")>(fun v -> text v)</Show>
+  > let c () = <Catch fallback=(fun _ -> text "f")><b /></Catch>
+  > let i () = <Client><Counter n=1 /></Client>
+  > Y
+  $ run op1
+  open Yuka
+  let a x =
+    Yuka.Await.make ~async:x ~loading:(text "l") ~children:(fun v -> text v) ()
+  let s x =
+    Yuka.Show.make ~status:x ~loading:(text "l") ~children:(fun v -> text v) ()
+  open
+    struct
+      let __yuka_template_op1_0 =
+        Yuka.runtime_template "\001b\002\006" ~html:"<b></b>" ~walk:[||]
+          ~kids:[||] ~attrs:[||] ~values:[||] ~clones:1
+    end
+  let c () =
+    Yuka.Catch.make ~fallback:(fun _ -> text "f")
+      ~children:(fun () -> Yuka.runtime_instance __yuka_template_op1_0 [||]) ()
+  let i () = Counter.island ~n:1 ()
+  $ cat > op2.mlx <<'Y'
+  > open Yuka
+  > module Show = struct let createElement ~children () = children end
+  > let s () = <Show>"x"</Show>
+  > Y
+  $ run op2
+  open Yuka
+  module Show = struct let createElement ~children () = children end
+  let s () = Show.make ~children:(Yuka.text "x") ()
+  $ cat > op3.mlx <<'Y'
+  > let a x = <Await async=x loading="l">(fun v -> v)</Await>
+  > Y
+  $ run op3
+  let a x = Await.make ~async:x ~loading:"l" ~children:(fun v -> v) ()
+
+The State checks go by name; a module State that the file defines is not
+Yuka.State:
+
+  $ cat > st1.mlx <<'Y'
+  > module State = struct let make x = ref x let get r = !r end
+  > let initial = State.make 0
+  > let view () = <p>(State.get initial)</p>
+  > Y
+  $ run st1
+  module State = struct let make x = ref x
+                        let get r = !r end
+  let initial = State.make 0
+  open
+    struct
+      let __yuka_template_st1_0 =
+        Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+          [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+    end
+  let view () =
+    Yuka.runtime_instance __yuka_template_st1_0
+      [|(Yuka.runtime_child (State.get initial))|]
+  $ cat > st2.mlx <<'Y'
+  > module State = Yuka.State
+  > let initial = State.make 0
+  > Y
+  $ run st2
+  File "st2.mlx", line 2, characters 0-26:
+  2 | let initial = State.make 0
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
+  [1]
+
+The islands binding counts only where it is in scope:
+
+  $ cat > sc1.mlx <<'Y'
+  > let page ~islands = islands
+  > let main () = Yuka.render ~islands ()
+  > let after islands = Yuka.render ~islands ()
+  > let cased = function Some islands -> Yuka.render ~islands () | None -> Yuka.render ~islands ()
+  > let local () = (let islands = 1 in islands) + Yuka.render ~islands ()
+  > let islands = 2
+  > let last () = Yuka.render ~islands ()
+  > Y
+  $ run sc1
+  let page ~islands = islands
+  let main () = Yuka.render ~islands:Yuka_islands.registry ()
+  let after islands = Yuka.render ~islands ()
+  let cased =
+    function
+    | Some islands -> Yuka.render ~islands ()
+    | None -> Yuka.render ~islands:Yuka_islands.registry ()
+  let local () =
+    (let islands = 1 in islands) +
+      (Yuka.render ~islands:Yuka_islands.registry ())
+  let islands = 2
+  let last () = Yuka.render ~islands ()
+
+open Yuka counts from its place to the next top-level open:
+
+  $ cat > sc2.mlx <<'Y'
+  > let early x = <Show status=x loading=(text "l")>(fun v -> v)</Show>
+  > open Yuka
+  > let late x = <Show status=x loading=(text "l")>(fun v -> v)</Show>
+  > let r () = render ~islands ()
+  > open Other
+  > let other x = <Show status=x loading=(text "l")>(fun v -> v)</Show>
+  > let r2 () = render ~islands ()
+  > Y
+  $ run sc2
+  let early x =
+    Show.make ~status:x ~loading:(text "l") ~children:(fun v -> v) ()
+  open Yuka
+  let late x =
+    Yuka.Show.make ~status:x ~loading:(text "l") ~children:(fun v -> v) ()
+  let r () = render ~islands:Yuka_islands.registry ()
+  open Other
+  let other x =
+    Show.make ~status:x ~loading:(text "l") ~children:(fun v -> v) ()
+  let r2 () = render ~islands ()
+
+Only a top-level module State counts, and only after it; open Yuka brings
+Yuka.State back:
+
+  $ cat > sc3.mlx <<'Y'
+  > module Inner = struct module State = struct let make x = x end end
+  > let s = State.make 0
+  > Y
+  $ run sc3
+  File "sc3.mlx", line 2, characters 0-20:
+  2 | let s = State.make 0
+      ^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
+  [1]
+  $ cat > sc4.mlx <<'Y'
+  > let s = State.make 0
+  > module State = struct let make x = x end
+  > Y
+  $ run sc4
+  File "sc4.mlx", line 1, characters 0-20:
+  1 | let s = State.make 0
+      ^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
+  [1]
+  $ cat > sc5.mlx <<'Y'
+  > module State = struct let make x = x end
+  > open Yuka
+  > let s = State.make 0
+  > Y
+  $ run sc5
+  File "sc5.mlx", line 3, characters 0-20:
+  3 | let s = State.make 0
+      ^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
+  [1]

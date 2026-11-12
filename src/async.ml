@@ -38,11 +38,14 @@
     on_settled t (function
       | Pending -> ()
       | Failed e -> fail e
-      | Done v ->
-          on_settled (f v) (function
-            | Pending -> ()
-            | Failed e -> fail e
-            | Done x -> resolve x));
+      | Done v -> (
+          match f v with
+          | next ->
+              on_settled next (function
+                | Pending -> ()
+                | Failed e -> fail e
+                | Done x -> resolve x)
+          | exception e -> fail (Web.exn_to_string e)));
     r
 
   let map f t = bind t (fun v -> return (f v))

@@ -71,6 +71,8 @@ let () =
      let n = String.length sub in
      let rec go i = i + n <= String.length page && (String.sub page i n = sub || go (i + 1)) in
      go 0);
+  let has sub = let n = String.length sub in let rec go i = i + n <= String.length page && (String.sub page i n = sub || go (i + 1)) in go 0 in
+  check "an island prop named loading" (has {|data-name="Ppx_compile.Spinner"|} && has {|{"loading":true}|} && has "<p>loading</p>");
   let items = Yuka.Async.return [ 1; 2 ] in
   let direct = Yuka.Codec.encode (Yuka.Codec.async (Yuka.Codec.list Yuka.Codec.int)) items in
   check "async direct" (direct <> `Null);
@@ -163,16 +165,18 @@ let () =
     Yuka.Private.to_html
       (Yuka.Private.node (Awaiting.with_failed (Yuka.Async.failed "boom")))
   in
-  check ("await failed: " ^ failed_html) (contains failed_html "<p>boom</p>");
+  check ("await failed: " ^ failed_html) (contains failed_html "<p>server error</p>");
   let html e = Yuka.Private.to_html (Yuka.Private.node e) in
-  let saved = !Yuka.Server.log_error in
-  Yuka.Server.log_error := ignore;
+  let saved = prerr_endline in
+  Yuka.Server.Testing.set_log ignore;
   check "catch children" (html (Catching.view ~fail:false) = "<div><!--[--><span>before</span><b>ok</b><!--]--></div>");
   check "catch fallback" (html (Catching.view ~fail:true) = "<div><!--[!--><p>server error</p><!--]--></div>");
-  Yuka.Server.log_error := saved;
+  Yuka.Server.Testing.set_log saved;
   check "show loading" (html (Catching.status (Yuka.Status.Loading None)) = "<!--[-->wait<!--]-->");
   check "show data" (html (Catching.status (Yuka.Status.Loading (Some "d"))) = "<!--[--><b>d</b><!--]-->");
   check "show failed"
     (html (Catching.status (Yuka.Status.Failed { error = Yuka.Status.Not_found; last = None }))
     = "<!--[--><p>not found</p><!--]-->");
+  check "form fields named ok, error, some, none" (Form_names.names = [ "ok"; "error"; "some"; "none" ]);
+  check "Ok and Error after deriving form" (Form_names.parse "3" = Ok 3 && Form_names.parse "x" = Error "x");
   if !fails > 0 then exit 1 else print_endline "ok"

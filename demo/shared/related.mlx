@@ -11,7 +11,7 @@ let%client make ~(related : Model.Issue.t list Yuka.Async.t) () =
          if issues = [] then <p class_="muted">"None."</p>
          else
            <ul class_=Css.related_list>
-             (Yuka.list
+             (Yuka.fragment
                 (List.map
                    (fun (i : Issue.t) ->
                      <li>

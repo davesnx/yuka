@@ -6,8 +6,9 @@ let codec_name n = if n = "t" then "codec" else n ^ "_codec"
 let lid ~loc s = { loc; txt = Lident s }
 let var_name prefix i = Printf.sprintf "_yuka_%s%d" prefix i
 
-let mk_codec ~loc enc dec =
-  [%expr { Yuka.Codec.encode = [%e enc]; decode = [%e dec] }]
+let mk_codec ~loc enc dec = [%expr Yuka.Codec.make ~encode:[%e enc] ~decode:[%e dec]]
+let delayed : string list ref = ref []
+let delayed_name n = "_yuka_" ^ codec_name n
 
 let enc_call ~loc c v = [%expr Yuka.Codec.encode [%e c] [%e v]]
 let dec_call ~loc c v = [%expr Yuka.Codec.decode [%e c] [%e v]]
@@ -84,6 +85,8 @@ let rec codec_of_type ~params (t : core_type) =
           _ },
         [ a; e ] ) ->
       [%expr Yuka.Codec.result [%e recur a] [%e recur e]]
+  | Ptyp_constr ({ txt = Lident n; _ }, []) when List.mem n !delayed ->
+      [%expr [%e evar ~loc (delayed_name n)] ()]
   | Ptyp_constr ({ txt = Lident n; _ }, args) ->
       apply ~loc (evar ~loc (codec_name n)) (List.map recur args)
   | Ptyp_constr ({ txt = Ldot (p, n); _ }, args) ->
@@ -312,13 +315,30 @@ let str_gen ~ctxt:_ (rec_flag, tds) =
   let recursive = rec_flag = Recursive && List.exists (mentions names) tds in
   let binding (td : type_declaration) =
     let loc = td.ptype_loc in
-    let pat =
-      ppat_constraint ~loc (pvar ~loc (codec_name td.ptype_name.txt)) (codec_type ~loc td)
-    in
-    value_binding ~loc ~pat ~expr:(codec_of_decl ~recursive td)
+    let name = td.ptype_name.txt in
+    if List.mem name !delayed then
+      let pat = ppat_constraint ~loc (pvar ~loc (delayed_name name)) [%type: unit -> [%t codec_type ~loc td]] in
+      value_binding ~loc ~pat ~expr:[%expr fun () -> [%e codec_of_decl ~recursive td]]
+    else
+      let pat = ppat_constraint ~loc (pvar ~loc (codec_name name)) (codec_type ~loc td) in
+      value_binding ~loc ~pat ~expr:(codec_of_decl ~recursive td)
   in
-  if recursive then
-    [ pstr_value ~loc:(List.hd tds).ptype_loc Recursive (List.map binding tds) ]
+  if recursive then begin
+    delayed := List.filter_map (fun (td : type_declaration) -> if td.ptype_params = [] then Some td.ptype_name.txt else None) tds;
+    let group = Fun.protect ~finally:(fun () -> delayed := []) (fun () -> List.map binding tds) in
+    let forced =
+      List.filter_map
+        (fun (td : type_declaration) ->
+          let loc = td.ptype_loc and name = td.ptype_name.txt in
+          if td.ptype_params = [] then
+            Some
+              (pstr_value ~loc Nonrecursive
+                 [ value_binding ~loc ~pat:(pvar ~loc (codec_name name)) ~expr:[%expr [%e evar ~loc (delayed_name name)] ()] ])
+          else None)
+        tds
+    in
+    pstr_value ~loc:(List.hd tds).ptype_loc Recursive group :: forced
+  end
   else
     List.map (fun (td : type_declaration) -> pstr_value ~loc:td.ptype_loc Nonrecursive [ binding td ]) tds
 

@@ -1,7 +1,10 @@
 val owner : (unit -> 'a) -> 'a * (unit -> unit)
 (** [owner f] runs [f] in a new owner. Effects and memos created during [f]
     belong to it. The returned function disposes all of them: it stops the
-    effects and runs their cleanups. *)
+    effects and runs their cleanups. The new owner is detached: disposing
+    the owner that was current when [owner] was called does not dispose it,
+    so call the returned function yourself. An exception in an effect of the
+    new owner goes to the same {!Catch} or island as the current owner. *)
 
 module State : sig
   type ('a, 'access) signal
@@ -42,27 +45,40 @@ module State : sig
   (** A derived value. It recomputes when a State it read changes. A
       recompute is a change only if [equal] says the new value differs.
       Default: the same equality as {!make}. *)
+
+  external read_only : 'a t -> 'a read = "%identity"
+  (** The same State, typed so that {!set} and {!update} on it do not
+      compile. *)
+
+  val untrack : (unit -> 'a) -> 'a
+  (** Runs the function and returns its result. Its {!get} reads are not
+      tracked: inside an effect or a memo, a change of such a State does not
+      run it again. *)
 end
 
 val batch : (unit -> 'a) -> 'a
-(** [batch f] runs [f] and returns its result. Effects that writes in [f]
-    make pending run once, after [f] returns, not after each write. Memos
-    read inside [f] are up to date. A [batch] inside a [batch] (or inside an
-    effect) runs its pending effects when the outermost one ends. When [f]
-    raises, the pending effects still run, then the exception of [f] is
-    raised again. Event handlers are not batched: each [State.set] in a
-    handler updates the DOM before the next line runs. *)
+(** [batch f] runs [f] and returns its result. Effects that the writes in
+    [f] make pending run once, after [f] returns, not after each write.
+    Memos read inside [f] are up to date. A [batch] inside a [batch] (or
+    inside an effect) runs its pending effects when the outermost one ends.
+    When [f] raises, the pending effects still run, then the exception of
+    [f] is raised again. Each event handler that {!on} or
+    {!Browser.on_window} attaches runs in a [batch]: the DOM updates and
+    the effects run once, after the handler returns. When the handler
+    raises, its writes still update the DOM, then its exception and any
+    exception of the update go to the {!Catch} or island around it. *)
 
 module Effect : sig
   val run : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
   (** Runs the body now, and again when a State it read with [State.get]
-      changes. Before each re-run and when its owner is disposed, [cleanup]
+      changes. During a server render it does nothing: the body and
+      [cleanup] do not run. Before each re-run and when its owner is disposed, [cleanup]
       receives the result of the previous run, and effects created inside the
       previous run are disposed. Inside a {!Catch} or an island, an exception
       in the body, or in a cleanup that runs during a State change or an
       event handler, goes to that boundary. A cleanup that raises when its
       owner is disposed by a direct call (the function returned by {!owner},
-      {!Client.hydrate}, or {!unmount}) raises to that
+      or {!stop}) raises to that
       caller. Elsewhere, an exception in one effect does not stop other
       effects; the first one is raised again after all pending effects
       ran. If effects and memos keep changing States they read for more than
@@ -72,8 +88,8 @@ module Effect : sig
   val on_change :
     ?equal:('a -> 'a -> bool) -> ('a, _) State.signal -> (prev:'a -> next:'a -> unit) -> unit
   (** Calls the function when the value changes, with the previous and the
-      next value. Not called on the first run. Default [equal]: as in
-      {!State.make}. *)
+      next value. Not called on the first run, and never during a server
+      render. Default [equal]: as in {!State.make}. *)
 end
 
 type slot = Slot_value.t
@@ -84,8 +100,10 @@ type trigger = [ `Idle | `Visible | `Interaction ]
 (** An event that starts an island: the browser is idle, the island is
     visible, or the first interaction with it. *)
 
-type loading = [ `Load | trigger | `Lazy of trigger ]
-(** When the browser downloads and starts an island.
+type start = [ `Load | trigger | `Lazy of trigger ]
+(** When the browser downloads and starts an island, given as
+    [<Yuka.Client start=`Idle> <Counter /> </Yuka.Client>]. An island
+    component cannot have a prop named [start].
     - [`Load] (default): download and start when the page opens.
     - A trigger: download when the page opens, start at the trigger.
     - [`Lazy t]: download and start at the trigger [t]. Events before the
@@ -113,8 +131,11 @@ module Json : sig
       element. Non-finite floats are written as [null]. *)
 
   val of_string : string -> (t, string) result
-  (** A number without ['.'], ['e'] or ['E'] that fits an [int] is [`Int].
-      Arrays and objects nested more than 512 levels are an error. *)
+  (** A number without ['.'], ['e'] or ['E'] that fits an [int] is [`Int];
+      any other number is [`Float]. An [int] has 63 bits on native and 32
+      bits in the browser, so a number such as [5000000000] is [`Int] on the
+      server and [`Float] in the browser; {!Codec.int} accepts both. Arrays
+      and objects nested more than 512 levels are an error. *)
 end
 
 module Async : sig
@@ -142,7 +163,8 @@ module Async : sig
 
   val map : ('a -> 'b) -> 'a t -> 'b t
   (** Applies the function to the value when it is [Done]. A failure stays a
-      failure with the same message. *)
+      failure with the same message. An exception that the function raises
+      gives [Failed] with the exception as text. *)
 
   val bind : 'a t -> ('a -> 'b t) -> 'b t
   (** Like [map], with a function that gives an [Async]. *)
@@ -153,8 +175,12 @@ end
 
 module Codec = Codec
 
-type server = Types.server
-type client = Types.client
+type server
+(** The kind of an element that only the server prints. *)
+
+type client
+(** The kind of an element that can run in the browser: it can have
+    handlers ({!on}) and holes ({!hole}). *)
 
 
 type +'kind element = 'kind Kind.element
@@ -208,20 +234,14 @@ val float : float -> 'kind element
 (** Printed as JSON prints a float: [1.0], [2.5]. Not-a-number and the
     infinities are printed as [NaN], [Infinity] and [-Infinity]. *)
 
-val list : 'kind element list -> 'kind element
-(** The same as [fragment]. *)
-
-val array : 'kind element array -> 'kind element
-(** Like [list], for an array. *)
-
 val empty : 'kind element
 (** Nothing. *)
 
 val fragment : 'kind element list -> 'kind element
 (** The elements one after another, with no wrapper element. *)
 
-val lower : string -> 'kind attribute list -> 'kind element list -> 'kind element
-(** [lower tag attributes children]: an HTML element. The ppx makes it from
+val element : string -> 'kind attribute list -> 'kind element list -> 'kind element
+(** [element tag attributes children]: an HTML element. The ppx makes it from
     [<tag ...>]. [tag] is a letter followed by letters, digits and [-],
     else [Invalid_argument] when the server prints it (the DOM refuses it in
     the browser). A [script] or [style] element (any case) takes no child,
@@ -247,7 +267,7 @@ val attr : string -> string -> 'kind attribute
     open a document ([href] of [a], [area] and [use], [action],
     [formaction], [xlink:href], [src] of [iframe], [frame], [embed] and
     [object], [data] of [object]). A [data:] image or media URL stays. The server logs the
-    first block with {!Server.log_error}; a dev build logs the first one in
+    first block with the [log_error] of {!Server.val-config}; a dev build logs the first one in
     the console. [data:] is also blocked on [src] of [script] and [href] of
     [script]. [srcdoc] of [iframe] and [href] of
     [base] become [""] and are logged the same way; only a literal one in
@@ -255,21 +275,6 @@ val attr : string -> string -> 'kind attribute
     use {!on}), or has a space, a control character, a quote, [<], [>], [/]
     or [=] raises [Invalid_argument] (in the browser here, on the server
     when printed). *)
-
-(**/**)
-
-val attr_unchecked : string -> string -> 'kind attribute
-val hole_attr_unchecked : string -> (unit -> string option) -> client attribute
-(** For the ppx, for names it proved are not URL attributes. They raise on a
-    URL attribute name, [srcdoc], or a name that {!attr} refuses (an [on]
-    name too). *)
-
-val url_attr : string -> string -> string -> 'kind attribute
-val url_hole_attr : string -> string -> (unit -> string option) -> client attribute
-(** For the ppx: [url_attr tag name value] is {!attr} that knows the
-    element. *)
-
-(**/**)
 
 val hole : (unit -> client element) -> client element
 (** A part that changes after the first render. The function runs once; it
@@ -283,103 +288,6 @@ val hole_attr : string -> (unit -> string option) -> client attribute
 
 val slot : slot -> client element
 (** Puts a slot where the content goes. *)
-
-module Template : sig
-  (** A compiled element tree. The ppx makes one [t] per lowercase JSX tree
-      (at the top of the module) and one [instance] per evaluation. Part
-      numbers count from 0 in the order of [parts]. See "Templates" in
-      DESIGN.md. *)
-
-  type t
-  type shape
-  type attr
-  type 'kind part
-
-  val text : string -> shape
-  (** A fixed text. *)
-
-  val element : string -> attr list -> shape list -> shape
-  (** [element tag attrs children]: an HTML element. *)
-
-  val part : int -> shape
-  (** The child at this place is part [i], made with [child]. *)
-
-  val fixed : string -> string -> attr
-  (** [fixed name value]: an attribute with a fixed value, checked by
-      {!Yuka.template_of_shape}. *)
-
-  val part_attr : int -> attr
-  (** The attribute at this place is part [i], made with [attribute] or
-      [attribute_option]. *)
-
-  (**/**)
-
-  val make :
-    shape ->
-    html:string ->
-    walk:int array ->
-    kids:int array ->
-    attrs:int array ->
-    values:(int * string) array ->
-    t
-  (** [make shape ~html ~walk ~kids ~attrs ~values]: for tests, which give
-      [html] and the paths by hand. Nothing is checked: the browser puts
-      [html] in the page as given and the server prints a fixed [srcdoc] or
-      [base] [href] as given, so a template written by hand uses
-      {!Yuka.template_of_shape}. The client checks the parsed [html] against
-      [shape] once. *)
-
-  (**/**)
-
-  val child : 'kind element -> 'kind part
-  (** The value of a {!val-part}. *)
-
-  val attribute : 'kind attribute -> 'kind part
-  (** The value of a {!part_attr}. *)
-
-  val attribute_option : 'kind attribute option -> 'kind part
-  (** The value of a {!part_attr}; [None] writes no attribute. *)
-
-  val instance : t -> 'kind part array -> 'kind element
-  (** The tree of [t] with its parts filled in. It prints and hydrates as the
-      same tree made with [lower]. Fresh client creation parses the HTML of
-      the template once, clones it and goes to each part with its paths. *)
-end
-
-val template_of_shape : Template.shape -> Template.t
-(** A template written by hand: checks the tag names and the fixed
-    attributes (names, and URLs, [srcdoc] and [base] [href] as {!attr} does,
-    with the element known) and computes its HTML and the paths to its
-    parts. Raises [Invalid_argument] on a bad tag or attribute name. *)
-
-(**/**)
-
-val template_coded :
-  string ->
-  html:string ->
-  walk:int array ->
-  kids:int array ->
-  attrs:int array ->
-  values:(int * string) array ->
-  clones:int ->
-  Template.t
-(** For the ppx only: [code] is the shape in the form of
-    [Template_build.encode], and the other arguments are computed from it at
-    build time, where the ppx also checks the fixed attributes and lowers a
-    tree that the HTML parser would change. [clones]: bit 1 when the parse
-    of [html] in a [<template>] keeps the tree, bit 2 when its parse inside
-    an [<svg>] does; the client clones only in such a context and otherwise
-    builds the tree element by element, which needs {!Client.hydrate}. The
-    browser clones [html] as given and the server prints a fixed [srcdoc]
-    or [base] [href] as given. The client decodes [code] only to hydrate
-    and in a dev build. *)
-
-val template_child : 'kind element -> 'kind Template.part
-val template_attribute : 'kind attribute -> 'kind Template.part
-val template_attribute_option : 'kind attribute option -> 'kind Template.part
-val template_instance : Template.t -> 'kind Template.part array -> 'kind element
-
-(**/**)
 
 module Slot : sig
   val make : server element -> slot
@@ -397,7 +305,10 @@ module Await : sig
   (** Shows [loading] until the value is settled, then [children] applied to
       the value, or [failed message] (default: nothing). On the client it is
       a hole over [Async.watch]. On the server it is printed as a hole; see
-      DESIGN.md. *)
+      DESIGN.md. In a server render, [message] is the message of a
+      {!Server.Action.reject}, else ["server error"], and the failure
+      message goes to the [log_error] of {!Server.val-config}, so the HTML never has the
+      detail. *)
 end
 
 val suspend :
@@ -406,7 +317,8 @@ val suspend :
   server element Async.t ->
   server element
 (** Shows [loading] until the element is settled, then the element, or
-    [failed message] (default: nothing). It streams as [<Yuka.Await>] does.
+    [failed message] (default: nothing), with the [message] rule of
+    {!Await.make}. It streams as [<Yuka.Await>] does.
     Build the argument with [Async.map (fun data -> <View data />) fetch].
     Server only: in an island, use [<Yuka.Await>], which builds the element
     in the island's owner. *)
@@ -438,7 +350,7 @@ module Catch : sig
 
       On the server, an exception in the children prints the fallback with
       [~error:"server error"] and sends the exception to
-      {!Server.log_error}; the HTML never has the detail. In an island, the
+      the [log_error] of {!Server.val-config}; the HTML never has the detail. In an island, the
       client then hydrates the fallback, and [reset] renders the children in
       the browser. *)
 end
@@ -458,7 +370,7 @@ module Show : sig
       [children data], so data stays on screen while it loads again; [Idle]
       and [Loading None] show [loading]; [Failed] shows [failed error]
       (default: nothing). The children render again only when the data
-      changes ([==]). *)
+      changes, by the default equality of {!State.make}. *)
 end
 
 val on : string -> (Event.t -> unit) -> client attribute
@@ -467,21 +379,22 @@ val on : string -> (Event.t -> unit) -> client attribute
 val each :
   ?equal:('a -> 'a -> bool) ->
   key:('a -> string) ->
-  (unit -> 'a list) ->
+  (unit -> 'a array) ->
   ('a -> client element) ->
   client element
-(** A keyed list. The list function is tracked as a hole. An item whose key
+(** A keyed list. The array function is tracked as a hole. An item whose key
     stays keeps its DOM nodes; it renders again when [equal] says its value
-    changed. Default [equal]: identity, as in {!State.make}. *)
+    changed. Default [equal]: identity, as in {!State.make}. Two items with
+    the same key raise [Failure] on an update. [each] reads the array only
+    while it renders: it keeps the items, not the array, so a later write
+    into that array changes nothing on the page. To show a change, give a
+    new array ({!State.set} with the same array is no change). For a list,
+    [fun () -> Array.of_list (State.get items)]. *)
 
 type stylesheet
 (** A CSS file of a module, made by [module Css = [%yuka.css "file.css"]].
     The ppx gives [Css.stylesheet] and one [string] per class of the file,
     [Css.row] for [.row], with a name scoped to the file. *)
-
-val stylesheet : string -> stylesheet
-(** For generated code: the sheet served at this URL. A top-level value, so
-    that a client bundle does not keep {!Private}. *)
 
 val use_css : stylesheet -> 'k element -> 'k element
 (** [use_css sheet element] is [element] with [sheet] in the page. On the
@@ -491,51 +404,52 @@ val use_css : stylesheet -> 'k element -> 'k element
     document has none for this sheet. The ppx calls it in every function
     named [make] that comes after [[%yuka.css]] in the same file. *)
 
-module Client = Client_api
+module Client : sig
+  type registry
+  (** The islands of an app. [yuka islands] writes it; pass it to
+      {!render}. *)
 
-module Optimistic : sig
-  (** Pending changes over a base value that lives elsewhere (a State, the
-      data of a {!Status.t}). *)
+  type container
+  (** A DOM element that holds a rendered tree. *)
 
-  type 'c t
-  (** The pending changes, in the order they were added. *)
-
-  type id
-
-  val empty : 'c t
-  val add : 'c t -> 'c -> 'c t * id
-  val remove : 'c t -> id -> 'c t
-  (** After the change succeeded or failed. *)
-
-  val apply : ('a -> 'c -> 'a) -> 'c t -> 'a -> 'a
-  (** The base with every pending change applied, oldest first. *)
-
-  val is_empty : 'c t -> bool
+  val container : string -> container option
+  (** The element with this id. [None] when the document has no such
+      element, and outside the browser. *)
 end
 
 module Action : sig
   type ('i, 'o, 'kind) t = ('i, 'o, 'kind) Action.t
-  (** ['kind] is [[ `Mutation ]] for {!declare} and [[ `Query ]] for
-      {!query}. *)
+  (** ['kind] is [[ `Mutation ]] for {!mutation}, [[ `Query ]] for {!query}
+      and [[ `Form ]] for {!Form.val-action}. *)
 
-  val declare :
+  val mutation :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Mutation ]) t
-  (** An action named [name]: the server and the client must declare it with
-      the same name and codecs. The server runs it after
-      {!Server.Action.implement}. *)
+  (** An action named [name] that can change data: the server and the client
+      must declare it with the same name and codecs. The server runs it
+      after {!Server.Action.implement}. *)
 
   val query :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Query ]) t
-  (** Like {!declare}, for a read with no side effect: a server render may
+  (** Like {!mutation}, for a read with no side effect: a server render may
       run it and {!Remote.use} may retry it. Same endpoint and wire format. *)
 
   val name : (_, _, _) t -> string
-  (** The name given to [declare]. *)
+  (** The name given to {!mutation} or {!query}. *)
 
-  val call : ('i, 'o, _) t -> 'i -> 'o Async.t
+  val call : ('i, 'o, _) t -> 'i -> ('o, Status.error) result Async.t
   (** Encodes the input, sends it to the server (in the browser after
       [render ~islands], as [POST /_yuka/action/<name>]; on the server, to the
-      implementation), decodes the output. A decode error is [Failed]. *)
+      implementation), decodes the output. The [Async] is always [Done]:
+      - [Ok o]: the output.
+      - [Error (Rejected m)]: the server refused the input (400); [m] is
+        for the user.
+      - [Error Forbidden]: the origin check failed (403).
+      - [Error Not_found]: no implementation has this name (404).
+      - [Error Server]: the implementation raised or failed (500); the
+        detail is in the server log.
+      - [Error (Network m)]: no answer. [m] is ["cancelled"] when the owner
+        of the call was disposed or {!stop} ran.
+      - [Error (Protocol m)]: the answer or the output did not decode. *)
 end
 
 module Remote = Remote
@@ -559,24 +473,146 @@ module Form = Form
 
 module Browser : sig
   val on_window : string -> (Event.t -> unit) -> unit
-  (** Listens on [window] until the current owner is disposed. Browser only:
-      call it inside [Effect.run]. *)
+  (** Listens on [window] until the current owner is disposed. The handler
+      runs in a {!batch}. Browser only: call it inside [Effect.run]. *)
 
   val navigate : string -> unit
-  (** Loads the URL. After [render ~islands] with navigation (the default), it
+  (** Browser only: raises [Failure] on native. Loads the URL. After [render ~islands] with navigation (the default), it
       is a client navigation, as a click on a link; see {!render}. Otherwise it
       does [location.assign url]. A [javascript:], [vbscript:] or [data:]
       URL (read as {!attr} reads a URL) does nothing; a dev build logs the
       first one. *)
 
   val focus : string -> unit
-  (** Focuses the element with this id. *)
+  (** Focuses the element with this id; does nothing when no element has
+      it. Inside a {!batch} (an event handler), it runs after the batch
+      updated the DOM, so it finds an element that a write of the handler
+      creates. Browser only: raises [Failure] on native. *)
 
   val scroll_into_view : string -> unit
-  (** Scrolls the element with this id into view. *)
+  (** Scrolls the element with this id into view; does nothing when no
+      element has it. Inside a {!batch}, it runs as {!focus} does. Browser
+      only: raises [Failure] on native. *)
 end
 
 (**/**)
+
+(** {1 Runtime}
+
+    The types and values from here to {!Private} are for the code that
+    [yuka.ppx], [[@@deriving codec]], [[@@deriving form]], [[%yuka.css]]
+    and [yuka islands] write. They are not part of the API: they are not
+    covered by semantic versioning, and any release can change or remove
+    them. Do not call them. *)
+
+type runtime_template
+(** A compiled element tree: the ppx makes one per lowercase JSX tree, at
+    the top of the module. See "Compiled templates and fewer markers" in
+    DESIGN.md. *)
+
+type 'kind runtime_part
+(** The value of one part of a {!type-runtime_template}. *)
+
+type runtime_entry
+(** What the browser knows about an island. The island modules expose it
+    as [register]. *)
+
+type runtime_lazy_entry
+type 'a runtime_promise
+(** A JavaScript promise, as made by a dynamic [import]. *)
+
+type runtime_router
+(** The value [router] of the module [yuka/navigation.js]. *)
+
+type 'f runtime_form_decoding
+
+val runtime_attr : string -> string -> 'kind attribute
+val runtime_hole_attr : string -> (unit -> string option) -> client attribute
+(** {!attr} and {!hole_attr} for names that the ppx proved are not URL
+    attributes. They raise [Invalid_argument] on a URL attribute name,
+    [srcdoc], or a name that {!attr} refuses (an [on] name too). They do
+    not refuse [to], [from], [values] and [by], which are URL names only on
+    SVG animation elements: there the client checks the value, or raises
+    [Failure] when the app links no URL check. *)
+
+val runtime_url_attr : string -> string -> string -> 'kind attribute
+val runtime_url_hole_attr : string -> string -> (unit -> string option) -> client attribute
+(** [runtime_url_attr tag name value] is {!attr} that knows the element. *)
+
+val runtime_template :
+  string ->
+  html:string ->
+  walk:int array ->
+  kids:int array ->
+  attrs:int array ->
+  values:(int * string) array ->
+  clones:int ->
+  runtime_template
+(** [code] is the shape in the form of [Template_build.encode], and the
+    other arguments are computed from it at build time, where the ppx also
+    checks the fixed attributes and lowers a tree that the HTML parser would
+    change. [clones]: bit 1 when the parse of [html] in a [<template>] keeps
+    the tree, bit 2 when its parse inside an [<svg>] does; the client clones
+    only in such a context and otherwise builds the tree element by element.
+    The browser clones [html] as given and the server prints a fixed
+    [srcdoc] or [base] [href] as given. The client decodes [code] only to
+    hydrate and in a dev build. Part numbers count from 0. *)
+
+val runtime_child : 'kind element -> 'kind runtime_part
+val runtime_attribute : 'kind attribute -> 'kind runtime_part
+val runtime_attribute_option : 'kind attribute option -> 'kind runtime_part
+(** [None] writes no attribute. *)
+
+val runtime_instance : runtime_template -> 'kind runtime_part array -> 'kind element
+(** The tree of the template with its parts filled in. It prints and
+    hydrates as the same tree made with {!val-element}. *)
+
+val runtime_stylesheet : string -> stylesheet
+(** The sheet served at this URL. *)
+
+val runtime_island :
+  ?start:start -> name:string -> props:Json.t -> (unit -> client element) -> server element
+(** A client component placed in a server tree. The server prints its HTML
+    and its props. *)
+
+val runtime_entry : name:string -> (Json.t -> (unit -> client element, string) result) -> runtime_entry
+(** It decodes the props and gives the function that builds the
+    component. *)
+
+val runtime_lazy_entry : name:string -> (unit -> runtime_entry runtime_promise) -> runtime_lazy_entry
+(** An island whose code is loaded on demand. [load] is called, at most
+    once, when the start strategy of an island named [name] fires. If it
+    fails, the island keeps its server HTML and the error is logged. *)
+
+val runtime_promise_map : ('a -> 'b) -> 'a runtime_promise -> 'b runtime_promise
+(** [then] of a JavaScript promise. *)
+
+val runtime_registry :
+  ?lazy_entries:runtime_lazy_entry list ->
+  ?navigation:(unit -> runtime_router runtime_promise) ->
+  runtime_entry list ->
+  Client.registry
+(** [navigation] loads the client navigation code with a dynamic [import]
+    of [yuka/navigation.js]. Without it, {!render} starts the islands only,
+    as with [~navigation:false]. *)
+
+val runtime_form_fields :
+  names:('f * string) list ->
+  decode:('f runtime_form_decoding -> ('i, 'f Form.errors) result) ->
+  encode:('i -> (string * string) list) ->
+  ('i, 'f) Form.t
+
+val runtime_form_field : 'f runtime_form_decoding -> 'f -> string -> 'a Form.kind -> 'a option
+val runtime_form_get : 'a option -> 'a
+(** Raises [Invalid_argument] on [None]. *)
+
+val runtime_form_finish : 'f runtime_form_decoding -> (unit -> 'i) -> ('i, 'f Form.errors) result
+val runtime_form_put : string -> 'a Form.kind -> 'a -> (string * string) list
+
+(** {1 Private}
+
+    For the tests of Yuka. Not covered by semantic versioning: any release
+    can change or remove it. *)
 
 module Private : sig
   type node = private
@@ -588,7 +624,7 @@ module Private : sig
         name : string;
         props : Json.t;
         render : unit -> node;
-        loading : loading;
+        start : start;
       }
     | Await : {
         async : 'a Async.t;
@@ -600,7 +636,7 @@ module Private : sig
     | Slot of slot_data
     | Template of { template : template; parts : part array }
     | Each : {
-        items : unit -> 'a list;
+        items : unit -> 'a array;
         key : 'a -> string;
         equal : 'a -> 'a -> bool;
         render : 'a -> node;
@@ -617,23 +653,51 @@ module Private : sig
     | Dynamic of string * (unit -> string option)
     | Handler of string * (Event.t -> unit)
 
-  and template = Template.t
+  and template = runtime_template
   and part = Child of node | Attribute of attr | No_attribute
   and slot_data
 
-  type shape =
-    | Fixed_text of string
-    | Fixed_element of { tag : string; attrs : fixed_attr list; children : shape list }
-    | Part of int
+  module Template : sig
+    type shape
+    type attr
 
-  and fixed_attr = Fixed of string * string | Part_attr of int
+    val text : string -> shape
+    (** A fixed text. *)
 
-  val template_shape : template -> shape
+    val element : string -> attr list -> shape list -> shape
+    (** [element tag attrs children]: an HTML element. *)
+
+    val part : int -> shape
+    (** The child at this place is part [i], made with {!runtime_child}. *)
+
+    val fixed : string -> string -> attr
+    (** [fixed name value]: an attribute with a fixed value, checked by
+        {!template}. *)
+
+    val part_attr : int -> attr
+    (** The attribute at this place is part [i], made with
+        {!runtime_attribute} or {!runtime_attribute_option}. *)
+
+    val make :
+      shape ->
+      html:string ->
+      walk:int array ->
+      kids:int array ->
+      attrs:int array ->
+      values:(int * string) array ->
+      template
+    (** A template with [html] and the paths given by hand. Nothing is
+        checked: the browser puts [html] in the page as given and the server
+        prints a fixed [srcdoc] or [base] [href] as given. The client checks
+        the parsed [html] against [shape] once. *)
+  end
 
   val template : Template.shape -> template
-  (** A template made at run time: its HTML and paths are computed from the
-      shape with the code that the ppx runs at build time. For tests and
-      hand-written trees. *)
+  (** A template written by hand: checks the tag names and the fixed
+      attributes (names, and URLs, [srcdoc] and [base] [href] as {!attr}
+      does, with the element known) and computes its HTML and the paths to
+      its parts with the code that the ppx runs at build time. Raises
+      [Invalid_argument] on a bad tag or attribute name. *)
 
   val recompile : template -> template
   (** [template (template_shape t)]: the template again, with its HTML and
@@ -642,13 +706,13 @@ module Private : sig
 
   val template_plan :
     template -> int array * int array * int array * (int * string) array
-  (** The [walk], [kids], [attrs] and [values] given to [Template.make]. *)
+  (** The [walk], [kids], [attrs] and [values] given to {!Template.make}. *)
 
   val parser_changes : svg:bool -> Template.shape -> bool
   (** The build-time nesting check of the ppx: [true] when the HTML parser
       could build another tree from the HTML of the shape, parsed in a
       [<template>] ([svg:false]) or in an [<svg>] in a [<template>]
-      ([svg:true]). The ppx lowers such a template with {!lower}. *)
+      ([svg:true]). The ppx lowers such a template with {!val-element}. *)
 
   val node : 'kind element -> node
 
@@ -657,8 +721,8 @@ module Private : sig
   (** The body of [/_yuka/dev] for a state function (tests). *)
 
   val dev_script : string -> string
-  (** The script that a page gets with [YUKA_DEV=1], for the state JSON
-      given (tests). *)
+  (** The script that a page gets with [Server.config ~dev:true], for the
+      state JSON given (tests). *)
 
   val element : node -> 'kind element
 
@@ -667,8 +731,8 @@ module Private : sig
       without the constructor that installs its client code. *)
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
-  (** Runs the function in a new owner that belongs to the current owner.
-      The returned function disposes it. *)
+  (** Like {!owner}, but the new owner belongs to the current owner: it is
+      disposed with it. *)
 
   type pending =
     | Pending_await of {
@@ -696,7 +760,7 @@ module Private : sig
       of [to_html]. *)
 
   val expand : template -> part array -> node
-  (** The tree of a template instance, as [lower] would make it. *)
+  (** The tree of a template instance, as {!val-element} would make it. *)
 
   val session : streaming:bool -> islands_only:bool -> session
   (** With [islands_only], [print] writes hydration markers only inside an
@@ -728,10 +792,8 @@ module Private : sig
   (** Prints the tree as HTML with the hydration markers of DESIGN.md. Holes
       and lists run once. [server_rendering] is true during the call. *)
 
-  val entry_name : Client.entry -> string
-  val entry_decode : Client.entry -> Json.t -> (unit -> node, string) result
-
-  val action_codecs : ('i, 'o, _) Action.t -> 'i Codec.t * 'o Codec.t
+  val entry_name : runtime_entry -> string
+  val entry_decode : runtime_entry -> Json.t -> (unit -> node, string) result
 
   val slot_content : slot -> node option
   (** The server element of the slot, if it has one. *)
@@ -746,11 +808,8 @@ module Private : sig
   val has_readers : ('a, _) State.signal -> bool
   (** Whether an effect or a memo reads the State. For tests. *)
 
-  val untracked : (unit -> 'a) -> 'a
-  (** Runs the function without tracking State reads. *)
-
-  val call_action : (string -> Json.t -> Json.t Async.t) ref
-  (** The transport of [Action.call]. Default: a failed [Async].
+  val call_action : (string -> Json.t -> (Json.t, Status.error) result Async.t) ref
+  (** The transport of [Action.call]. Default: [Error (Network _)].
       [render ~islands] sets it to the browser transport; that transport is
       installed by the first [Action.call] or island form submit, and a call
       before it raises [Failure]. *)
@@ -826,14 +885,49 @@ module Private : sig
   (** [render container f] clears [container], builds the DOM of [f ()] and
       returns a function that stops the effects and handlers of this tree,
       for tests. Browser only. *)
+
+  val hydrate : Client.container -> (unit -> 'k element) -> unit -> unit
+  (** [hydrate container f] adopts the server DOM in [container] (written
+      with the markers of DESIGN.md), attaches handlers and starts holes.
+      Where the DOM does not match, it creates the missing nodes. In a dev
+      build (see {!render}), each mismatch (a missing node, another tag,
+      another text, an extra node) logs one [console.warn] with the island
+      name, the expected and the found node, and a short path. Returns a
+      function that stops all effects and handlers. Browser only. *)
 end
 
 (**/**)
 
 module Router : sig
-  (** The members that the code generated by [yuka-routes] calls: the
-      shared [Routes] module (route type, [href], [find]) is written from
-      [Routes.ml]. See "Routes" in the README. *)
+  (** The members that the code generated by [yuka routes] calls.
+
+      [Routes.ml] is not compiled. It is a route tree in its own syntax,
+      written with OCaml expressions, that only [yuka routes] reads. The
+      names [Router.make], [Router.group], [Router.route],
+      [Router.endpoint], [Router.action] and [Router.redirect] are nodes of
+      that syntax, not values of this module, so an editor does not check
+      the file; [yuka routes] reports each error with its location in
+      [Routes.ml]. The file holds one expression, [Router.make ... [ nodes ]],
+      with no [open] and no [let]:
+      {[
+        Router.make ~not_found:Pages.not_found ~error:Pages.error
+          [
+            Router.route Home ~path:"/" ~page:Pages.home;
+            Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+              [ Router.route Issue ~path:"/" ~page:Pages.issue ];
+            Router.endpoint Feed ~path:"/feed.json" ~method_:`GET
+              ~handler:Handlers.feed;
+            Router.redirect ~path:"/old" ~to_:(Permanent "/");
+          ]
+      ]}
+      Attachments such as [~page], [~layout], [~handler], [~guard],
+      [~not_found] and [~error] are value paths of the app; the generated
+      code calls them.
+
+      [yuka routes --shared --source Routes.ml] writes the shared [Routes]
+      module (the route type, [href] and [find]), and
+      [yuka routes --server --shared-module M --source Routes.ml] writes the
+      server module with [app]. *)
 
   type meth =
     [ `GET | `HEAD | `POST | `PUT | `PATCH | `DELETE | `OPTIONS | `Other of string ]
@@ -856,11 +950,19 @@ module Router : sig
     type t
 
     val of_string : string -> t option
-    (** [None] means the path does not match. *)
+    (** For a path param, [None] means the path does not match. For a
+        search field, the value is dropped: an optional field gets [None],
+        a field with a default gets the default, and a list field leaves
+        the value out. *)
 
     val to_string : t -> string
     (** The inverse of [of_string]. [href] encodes the result. *)
   end
+
+  (**/**)
+
+  (** For the generated code only. Not covered by semantic versioning: any
+      release can change these values. *)
 
   val encode : string -> string
   (** Percent-encodes one path segment or one query part. Only
@@ -885,6 +987,8 @@ module Router : sig
   val search : (string * string) list -> string -> string list
   (** [search query key] is every value of [key] in the decoded query pairs,
       in order. *)
+
+  (**/**)
 end
 
 val render :
@@ -905,11 +1009,18 @@ val render :
     ]}
 
     [yuka.ppx] rewrites a bare [~islands] in a [Yuka.render] call into
-    [~islands:Yuka_islands.registry], the islands of the app.
+    [~islands:Yuka_islands.registry], the islands of the app. After a
+    top-level [open Yuka], a bare [render] call is rewritten the same way,
+    up to the next top-level [open]. The rewrite does not apply where a
+    binding of [islands] is in scope (a [let], a function parameter or a
+    [match] or [function] case), or, for the bare [render], where a binding
+    of [render] is in scope. Names that an [open] or an [include] brings in
+    are not seen.
 
     [~root:(container, app)] clears [container] and builds the DOM of
-    [app ()] in it. {!unmount} stops the effects and handlers of this tree;
-    the DOM stays. It runs before the islands start.
+    [app ()] in it. {!stop} stops the effects and handlers of this tree;
+    the DOM stays. It runs before the islands start. Get [container] with
+    {!Client.val-container}.
 
     With [~islands], it installs the browser runtime and the action
     transport, then hydrates every [yuka-island] element of the document with the entry of the same
@@ -973,8 +1084,8 @@ val render :
     [no-cache]) for N seconds, also for back and forward; otherwise a
     prefetched answer is used once, within 10 s, and a visited page is not
     kept. An action call that succeeds empties the cache, and an answer
-    requested before it is not kept. [render ~islands] and {!unmount} empty it and
-    abort the prefetches nobody waits for; after {!unmount} no navigation
+    requested before it is not kept. [render ~islands] and {!stop} empty it and
+    abort the prefetches nobody waits for; after {!stop} no navigation
     updates the page.
 
     With [~transitions:true], where [document.startViewTransition] exists,
@@ -991,133 +1102,164 @@ val render :
     prefetch (at once with [`Visible] prefetch or a
     [data-yuka-prefetch="visible"] link). Until it arrives, the click is
     already prevented and the events wait in order. If the load fails, or
-    does not finish within 3 s, it is logged once with [console.error], the
-    waiting navigations do [location.assign], and until the next page load
-    there is no new attempt: links, [popstate] and {!Browser.navigate} load
-    full pages.
+    does not finish within 3 s of the first such event, it is logged once
+    with [console.error], the waiting navigations do [location.assign], and
+    until the next {!render} there is no new attempt: links, [popstate] and
+    {!Browser.navigate} load full pages.
 
-    With [~navigation:false] only the islands start, links load full
-    pages and the navigation code is never loaded. Calling [render ~islands] again is safe: the listeners are not
+    With [~navigation:false] only the islands start, links load full pages
+    and the navigation code is never loaded. Calling [render ~islands] again is safe: the listeners are not
     added twice.
 
     Without [~islands], [~navigation], [~prefetch], [~transitions] and
     [~on_error] do nothing. Raises [Failure] outside the browser, and
     [Invalid_argument] without [~islands] and [~root]. An app that does not
-    pass [~islands] contains no island, action or navigation code. *)
+    pass [~islands] contains no island, action or navigation code.
 
-val unmount : unit -> unit
+    Dev checks: unless the bundler defines the global [__YUKA_DEV__] as
+    [false] (for example esbuild [--define:__YUKA_DEV__=false]), the client
+    runs dev checks: hydration mismatch warnings, blocked URL logs and other
+    [console] messages. When [__YUKA_DEV__] is not defined at all, the
+    checks are on, so a production bundle must define it. *)
+
+val stop : unit -> unit
 (** Stops every tree that {!render} started: each [~root] tree and every
     island. Effects, handlers and document listeners are removed, start strategies that did not fire yet are
     cancelled, and action requests in flight are aborted (their [Async]
-    fails with ["cancelled"]). It also stops navigation: the [click] and
+    gives [Error (Network "cancelled")]). It also stops navigation: the [click] and
     [popstate] listeners are removed, a navigation in flight is aborted, and
     {!Browser.navigate} does [location.assign] again. The DOM stays.
     {!render} works again afterwards, for example on a new body. *)
 
 module Server : sig
-  val log_error : (string -> unit) ref
-  (** Where the server reports what the client must not see: an action
-      that failed, a failed render, a failed async value. Default:
-      [prerr_endline]. *)
+  (** The server side: the request cycle, actions, forms and live topics.
+
+      Reserved paths. The cycle answers these paths itself, before any
+      route, so a [Routes.ml] node or a [public] prefix cannot use them:
+
+      - [/_yuka/action/NAME]: an action call ({!Action}, {!Form}).
+      - [/_yuka/csrf]: a fresh CSRF token for the live socket.
+      - [/_yuka/css/FILE]: the sheets of [[%yuka.css]] (when [config] has
+        [css]).
+      - [/_yuka/dev]: the dev reload events (when [config] has [~dev:true]).
+      - [/_yuka/live]: the WebSocket of {!Yuka.Live}.
+      - [/_yuka/app/FILE]: the client JavaScript of [assets].
+
+      Any other path under [/_yuka/] is a 404. The app must be served at
+      the root of its origin: there is no base path. *)
 
   val to_string : (unit -> server element) -> string
   (** The tree as HTML. Hydration markers are written only inside an island,
       because the browser hydrates nothing else. The function builds the tree
       with effects off, so component bodies do not run effects. *)
 
-  val document :
-    ?head:string ->
-    ?early:bool ->
-    ?import_map:(string * string) list ->
-    ?title:string ->
-    ?styles:string list ->
-    ?scripts:string list ->
-    (unit -> server element) ->
-    string
-  (** A full HTML document. [styles] are stylesheet URLs, [scripts] are
-      module script URLs. [head] is raw HTML added inside the head.
-      [import_map] is written as an import map script before any other
-      script. With [early], module scripts get the [async] attribute, so
-      they run while the stream continues. *)
+  type context
+  (** The request that runs an action, a form action or a live [allow]. *)
 
-  val fill_script : string
-  (** The inline script that the request cycle writes in the head when the
-      shell has a pending [await]. It defines [window.__yukaFill(id)], which
-      replaces the loading content between the markers of [id] with the
-      streamed chunk. *)
+  module Context : sig
+    val header : context -> string -> string option
+    (** A request header, case-insensitive. For a live [allow], the
+        headers of the WebSocket upgrade request. *)
+
+    val session : context -> string option
+    (** The session id of the request, from the adapter ([Dream.session_id]
+        for Dream). [None] outside a request: an {!Yuka.Action.call} on the
+        server that no request runs (for example in a test). With Dream,
+        raises when the app has no session middleware. *)
+
+    val meth : context -> Router.meth
+    (** The request method. *)
+
+    val path : context -> string
+    (** The request path, without the query. *)
+  end
 
   module Action : sig
-    val implement : ('i, 'o, _) Action.t -> ('i -> 'o Async.t) -> unit
+    val implement : ('i, 'o, _) Action.t -> (context -> 'i -> 'o Async.t) -> unit
     (** Registers the implementation of a declared action, and makes
         [Action.call] run it directly on the server. Raises
-        [Invalid_argument] if the name is already implemented. *)
+        [Invalid_argument] if the name is already implemented.
 
-    val reject : string -> 'a
-    (** Raised inside an implementation to refuse the input:
-        the action call answers 400 [{"error": message}] and [Action.call]
-        on the server fails with the message. Any other exception or failed
-        [Async] is a 500 with a generic message. *)
+        Any page can call any action: [POST /_yuka/action/NAME] runs no
+        route guard, and a form post runs the guards of the page it is
+        posted to, not of a page that shows the form. So an action checks
+        permissions itself, with its [context] (a session, a cookie header).
+        On the server, [Action.call] during a render gets the context of
+        the rendered request; outside a request it gets a context with no
+        header and no session. *)
 
-    val rejected : string -> 'a Async.t
-    (** Like [reject], for use after a wait (in an [Async] chain). *)
+    val reject : string -> 'a Async.t
+    (** A failed [Async] that refuses the input: the action call answers
+        400 [{"error": message}], [Action.call] on the server gives
+        [Error (Rejected message)], and a form renders the page again with
+        the message as a form error. Any other failure or exception is a 500
+        with a generic message ([Error Server] for [Action.call] on the
+        server). *)
   end
 
   module Live : sig
     (** The server side of {!Yuka.Live}. A publish reaches the sockets of
-        this process; with a bus ({!use_bus}) it also tells the other
-        server nodes, which load the key again for their own sockets.
-        Sessions and the secret must be the same on every node and across
-        restarts (Dream: [cookie_sessions] or SQL sessions, and
-        [Dream.set_secret]); with memory sessions or a random secret, every
-        [hello] after a restart, or on another node, is refused and the page
-        needs a reload. *)
+        this node; with a bus ({!use_bus}) it also tells the other server
+        nodes, which load the key again for their own sockets. Sessions and
+        the secret must be the same on every node and across restarts
+        (Dream: [cookie_sessions] or SQL sessions, and [Dream.set_secret]);
+        with memory sessions or a random secret, every [hello] after a
+        restart, or on another node, is refused and the page needs a
+        reload. *)
 
-    type instance
+    type node
     (** The live state of one server node: its subscriptions, sockets,
-        [seq] counter and bus. A process has one, which every function
-        uses when [?instance] is not given. *)
+        [seq] counter, limits and bus. A process has one default node, which
+        every function uses when [?node] is not given. *)
 
-    val instance : unit -> instance
-    (** A new, empty node, for tests that run more than one node in one
-        process. *)
+    val node : ?log_error:(string -> unit) -> ?per_session:int -> ?total:int -> unit -> node
+    (** A new, empty node, for example for a second handler in one process.
+        [log_error] gets the failures of loaders and of the bus. Without it
+        (and for the default node), the node logs to the [log_error] of the
+        config of the last request that a handler served on this node, and
+        to [prerr_endline] before the first request. [per_session] (default 16) and [total] (default
+        10,000) are the most open live sockets per session and on this node;
+        a socket over a limit is closed with 1013 before its [hello], and
+        the page tries again later. *)
 
-    type peer = { session : string; header : string -> string option }
-    (** Who subscribes: the session id and the headers of the upgrade
-        request. *)
-
-    val serve : ?allow:(peer -> 'k -> bool) -> ('k, 's) Topic.t -> ('k -> 's Async.t) -> unit
+    val serve :
+      ?allow:(context -> 'k -> bool) -> ('k, 's) Topic.t -> ('k -> 's Async.t) -> unit
     (** Registers the loader of a topic: the full state of a key, run when
         a key that has no current state gets a subscriber, and by a server
-        render. [allow] (default: always) runs on each subscribe; false
-        refuses it ([Forbidden]). A loader that raises or fails with
-        {!Action.reject} gives [Rejected]; any other failure gives [Server]
-        and a {!log_error} message. Raises [Invalid_argument] when the topic
-        is already served. *)
+        render. The loaded state of a key is shared by every subscriber
+        of the key on the node, so the loader gets no request and must not
+        depend on who asks: [allow] decides who may read a key. [allow] (default: always) runs on each subscribe, with the
+        context of the WebSocket upgrade request, and on each server render
+        of {!Yuka.Live.use}, with the context of the page request; false
+        refuses it ([Forbidden]). A loader that fails with {!Action.reject}
+        gives [Rejected]; any other failure gives [Server] and a log
+        message. Raises [Invalid_argument] when the topic is already
+        served. *)
 
-    val publish : ?instance:instance -> ('k, 's) Topic.t -> 'k -> 's -> unit
+    val publish : ?node:node -> ('k, 's) Topic.t -> 'k -> 's -> unit
     (** The new full state of a key, sent to each subscriber of the key on
-        this node; with a bus, a note tells the other nodes that the key
+        the node; with a bus, a note tells the other nodes that the key
         changed. With no bus it does nothing when the key has no
-        subscriber. A publish while the
-        loader runs wins over the loaded state. [allow] decides at subscribe
-        time: a subscriber gets every publish of its key until it
-        unsubscribes, its socket reconnects (each connection checks [allow]
-        again), or {!revoke} closes it. *)
+        subscriber. A publish while the loader runs wins over the loaded
+        state. [allow] decides at subscribe time: a subscriber gets every
+        publish of its key until it unsubscribes, its socket reconnects
+        (each connection checks [allow] again), or {!revoke} closes it. *)
 
-    val changed : ?instance:instance -> ('k, 's) Topic.t -> 'k -> unit
-    (** The key changed: this node loads it again with the topic's loader
+    val changed : ?node:node -> ('k, 's) Topic.t -> 'k -> unit
+    (** The key changed: the node loads it again with the topic's loader
         for its subscribers, and the bus tells the other nodes, which do
         the same. Use it when the action does not have the new state. *)
 
-    val revoke : ?instance:instance -> (peer -> bool) -> unit
-    (** Closes, with code 4401, every live socket of this node whose peer
+    val revoke : ?node:node -> (context -> bool) -> unit
+    (** Closes, with code 4401, every live socket of the node whose context
         matches. The page reconnects, and [allow] decides again for each
-        key. Call it on logout ([revoke (fun p -> p.session = id)]) and
-        after a permission change. It does not go over the bus: with more
-        than one node, the app must call it on every node (for example
-        from its own message between nodes). *)
+        key. Call it on logout
+        ([revoke (fun c -> Context.session c = Some id)]) and after a
+        permission change. It does not go over the bus: with more than one
+        node, the app must call it on every node (for example from its own
+        message between nodes). *)
 
-    type bus = {
+    type bus = private {
       send : string -> unit Async.t;  (** One short note to every node, this one too. *)
       listen : (string -> unit) -> unit Async.t;
           (** Calls the function with each note; settles when listening
@@ -1125,6 +1267,7 @@ module Server : sig
       on_restart : (unit -> unit) -> unit;
           (** Calls the function after the bus reconnects: notes may have
               been lost. *)
+      close : unit -> unit Async.t;  (** Stops the bus and frees its resources. *)
     }
     (** How server nodes tell each other that a key changed. A note is
         [{"n":NODE,"t":TOPIC,"k":KEY,"p":N}], under 7,900 bytes (Postgres
@@ -1132,55 +1275,542 @@ module Server : sig
         sent and is logged. The order of notes between nodes does not
         matter. *)
 
-    val use_bus : ?instance:instance -> node:string -> bus -> unit Async.t
-    (** Joins the bus as the node [node] (a name unique to this process, such
-        as the host name and the port). For each note from another node
-        about a key that has subscribers here, the node runs the topic's
-        loader again and sends the result; one load per key at a time, and
-        notes that come during a load make one more load after it. After
-        [on_restart], every key with subscribers here loads again. Raises
-        [Invalid_argument] when the node already has a bus or [node] is
-        empty. Settles when the bus listens. Each node must load from the
-        same storage. *)
+    val bus :
+      send:(string -> unit Async.t) ->
+      listen:((string -> unit) -> unit Async.t) ->
+      on_restart:((unit -> unit) -> unit) ->
+      close:(unit -> unit Async.t) ->
+      bus
+    (** A bus with these functions. *)
 
-    val mark : ?instance:instance -> unit -> (string * int) option
-    (** The node name and the number of notes it sent. An action answer
-        carries the mark of the node's own {!type-instance} as [live]: a
-        [Live.mutate] that settles on another node waits until that node
-        has heard those notes and loaded the key again (see {!run}). *)
+    val close_bus : bus -> unit Async.t
+    (** Calls the [close] function of the bus. A node that uses the bus
+        hears no more notes, and its notes are not sent (each failure is
+        logged). *)
+
+    val use_bus : ?node:node -> name:string -> bus -> unit Async.t
+    (** Joins the bus as the node [name] (a name unique to this process,
+        such as the host name and the port). For each note from another
+        node about a key that has subscribers here, the node runs the
+        topic's loader again and sends the result; one load per key at a
+        time, and notes that come during a load make one more load after
+        it. After [on_restart], every key with subscribers here loads
+        again. Raises [Invalid_argument] when the node already has a bus or
+        [name] is empty. Settles when the bus listens. Each node must load
+        from the same storage. *)
 
     type memory
     (** A bus inside one process (tests, two nodes in one process). *)
 
     val memory : unit -> memory
+
     val memory_bus : memory -> bus
-    (** Every node that uses this bus gets each note at once. *)
+    (** Every node that uses a bus of this memory gets each note at once.
+        Closing the bus removes only its own listeners. *)
 
-    val memory_down : memory -> bool -> unit
-    (** [memory_down m true] drops notes; [false] brings the bus back and
-        calls each [on_restart] function. *)
-
-    val set_limits : ?per_session:int -> ?total:int -> unit -> unit
-    (** The most open live sockets per session (default 16) and in this
-        process (default 10,000). A socket over a limit is closed with 1013
-        before its [hello]; the page tries again later. *)
-
-    type connection = {
-      send : string -> unit Async.t;
-      receive : unit -> string option Async.t;  (** [None]: closed. *)
-      close : int -> unit Async.t;  (** Close with this code. *)
-    }
+    type connection
     (** One open WebSocket, text frames. *)
 
-    val run :
-      ?instance:instance ->
+    val connection :
+      send:(string -> unit Async.t) ->
+      receive:(unit -> string option Async.t) ->
+      close:(int -> unit Async.t) ->
+      connection
+    (** For an adapter's [upgrade]. [receive] gives [None] when the client
+        closed the socket. [close code] closes it with this code; the live
+        protocol calls it once, when it ends the protocol itself (a limit,
+        a failed send or receive, {!revoke}), and never after the client
+        closed the socket. *)
+  end
+
+  module Form : sig
+    val implement :
+      ('i, 'o, 'f) Form.action ->
+      ?redirect:('o -> string) ->
+      (context -> 'i -> ('o, 'f Form.errors) result Async.t) ->
+      unit
+    (** Registers a form action (see {!Yuka.Form}). It answers the island
+        path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
+        with [redirect o] in the answer (checked as for the 303 below: a
+        bad one answers 500 [action failed] and is logged), and the form
+        post of a page. The request cycle checks the origin (403), runs the
+        guards of the page the form is posted to (a refusal answers as for
+        [GET] and the function does not run), reads at most 1 MiB of body
+        (413), decodes the posted fields, calls the function, and answers
+        303 to [redirect o] (default: the page URL) on [Ok o], or renders
+        the page again with status 422 and the sent values and errors on
+        [Error], a decode error or {!Action.reject}. The form field
+        [_yuka_action] names the action, so a post to any [GET] page can run
+        any form action: the function checks permissions itself, as for
+        {!Action.implement}. Only [application/x-www-form-urlencoded] posts
+        reach a form action; a [multipart/form-data] post (a file input) is
+        a 405. The 303, 403 and 413 carry the page's rule headers. A
+        [redirect o] that is not a path ([/x], not [//x]) or an [http:] or
+        [https:] URL of the request [Host] or of [config ~origins] (the
+        island answer too), or that holds a control character (below space,
+        or DEL; a browser drops TAB from a URL, so [/\t/x] would go to
+        [//x]), gives the 500 page and a log message instead of a 303.
+        Raises [Invalid_argument] when the action is not from
+        {!Yuka.Form.val-action}. *)
+  end
+
+  (** {2 Request cycle}
+
+      The types and functions that a [Routes.ml] and its loaders, guards
+      and handlers use. The cycle has no server dependency: a server
+      implements {!Adapter.S}. See "Request cycle" in DESIGN.md. *)
+
+  (** Why a guard or a loader stops a request. *)
+  type stop =
+    | Not_found  (** The not-found page of the route, status 404. *)
+    | Forbidden
+        (** A plain-text 403 with the root rule headers and
+            [cache-control: no-store]. *)
+    | Redirect of { location : string; kind : [ `See_other | `Temporary | `Permanent ] }
+        (** A redirect on this site: 303, 307 or 308, no body. [location]
+            must be a path ([/x], not [//x]) or an [http:] or [https:] URL
+            of the request [Host] or of [config ~origins], without a control
+            character; otherwise the request gets the 500 page and a log
+            message. So a [?next=] value from the request cannot send the
+            user to another site. *)
+    | Redirect_off_site of { location : string; kind : [ `See_other | `Temporary | `Permanent ] }
+        (** A redirect to any location without a control character, for
+            example to another site's login page. Do not give it a value
+            from the request. *)
+    | Fail of string
+        (** The error page, status 500. The message goes to [log_error],
+            never to the page. *)
+
+  type page
+  (** What a page function returns: a title, extra head HTML and the body. *)
+
+  val page : ?title:string -> ?head:string -> (unit -> server element) -> page
+  (** [page ~title body]. The cycle calls [body] when it renders, for
+      [HEAD] too (to send the length of the [GET] answer). [head] is raw
+      HTML added to the document head. *)
+
+  type cache
+  (** The [cache-control] value of a route rule. In [Routes.ml], the
+      [~cache] value is read with [Yuka.Server] opened:
+      [~cache:(public ~max_age:60 ())]. *)
+
+  val no_store : cache
+  (** [no-store] *)
+
+  val no_cache : cache
+  (** [no-cache]: a cache must ask the server before it uses a copy. *)
+
+  val private_ : max_age:int -> cache
+  (** [private, max-age=N] *)
+
+  val public : ?s_max_age:int -> max_age:int -> unit -> cache
+  (** [public, max-age=N], and [, s-maxage=M] when given. *)
+
+  val immutable : cache
+  (** [public, max-age=31536000, immutable] *)
+
+  type body =
+    | String of string
+    | Stream of ((string -> unit Async.t) -> unit Async.t)
+        (** The adapter calls the function with its write function and ends
+            the response when the result settles. *)
+
+  type response = private { status : int; headers : (string * string) list; body : body }
+  (** A handler's answer. A header name may repeat (two [set-cookie]). A
+      header name or value with CR, LF or NUL makes the cycle answer a
+      plain 500 instead, with a log message. *)
+
+  val response : ?status:int -> ?headers:(string * string) list -> body -> response
+  (** Default status: 200; default headers: none. [response (Stream f)]
+      streams. *)
+
+  val text : ?status:int -> ?headers:(string * string) list -> string -> response Async.t
+  (** A [text/plain; charset=utf-8] response. Default status: 200. A
+      [content-type] in [headers] replaces the default one. *)
+
+  val html : ?status:int -> ?headers:(string * string) list -> string -> response Async.t
+  (** Like {!text}, with [text/html; charset=utf-8]. *)
+
+  val json : ?status:int -> ?headers:(string * string) list -> Json.t -> response Async.t
+  (** Like {!text}, with [application/json]. *)
+
+  val see_other : string -> response Async.t
+  (** 303 to the location, no body. *)
+
+  type 'req app
+  (** The routes of an app, from the code generated by [yuka routes
+      --server]. ['req] is the request type of the adapter: the generated
+      code passes the request to each loader, guard and handler. *)
+
+  type assets
+  (** Where the client JavaScript is. The cycle serves it under
+      [/_yuka/app/]. *)
+
+  val modules :
+    dir:string -> entry:string -> manifest:string -> packages:string list -> digest:string -> assets
+  (** The Melange module tree. [dir] is the emit directory, [entry] the path
+      of the entry module in it (served as [/_yuka/app/<entry>]), [manifest]
+      the JSON text that [yuka islands --manifest] prints (paths relative to
+      the directory of [entry]), and [packages] the npm packages under
+      [dir/node_modules] for the import map. [digest] stands for the content
+      of the files (for example [Yuka_dream.tree_digest dir]): it goes into
+      the build id, so new JavaScript gives a new build id. Files get
+      [cache-control: no-cache]. Raises [Invalid_argument] when [manifest]
+      is not a JSON object of strings. *)
+
+  val bundle :
+    dir:string -> entry:string -> manifest:string -> metafile:string -> assets
+  (** An esbuild bundle. [dir] is the directory esbuild ran in, so that the
+      [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
+      the path of the entry output. Outputs other than [entry] get
+      {!immutable}; other files get {!no_cache}. Raises [Invalid_argument]
+      when [manifest] or [metafile] is not valid JSON of that shape. *)
+
+  type config
+
+  val config :
+    ?assets:assets ->
+    ?public:(string * string) list ->
+    ?prerendered:string ->
+    ?styles:string list ->
+    ?css:(string * string) list ->
+    ?head:string ->
+    ?timeout:float ->
+    ?dev:bool ->
+    ?origins:string list ->
+    ?log_error:(string -> unit) ->
+    unit ->
+    config
+  (** [public] maps URL prefixes to directories ([("/static", "static")]).
+      A prefix with no segment (["/"]) raises [Invalid_argument]: files
+      under a prefix are never routed, so it would hide every route.
+      [prerendered] is the directory that a prerender wrote: a [GET] or
+      [HEAD] of a page whose rules say [prerender], without a query and
+      without [Yuka-Navigate], is answered with its file there when the file
+      exists ({!Prerender.file}), after the guards and instead of the
+      loaders. [styles] are stylesheet URLs and [head] raw HTML for the head
+      of every page. [css] lists the sheets of [[%yuka.css]], as file name
+      and text; the generator [yuka css] writes it ([Yuka_css.sheets]). The
+      cycle serves each at [/_yuka/css/FILE] with {!immutable} (the name
+      has a hash of the text); another path under [/_yuka/css/] is a 404
+      with [no-store]. [timeout] (default 10 seconds) bounds a streamed
+      render.
+
+      [dev] (default false) is for [yuka dev] only: the cycle answers
+      [GET /_yuka/dev] with Server-Sent Events of the state file named by
+      the environment variable [YUKA_DEV_FILE], full pages get the reload
+      script in their head, and [prerendered] is not used. Never set it in
+      production: [/_yuka/dev] streams that file. A prerender turns it off
+      ({!Prerender.config}).
+
+      [origins] lists the origins that an action, a form post, an endpoint
+      with an unsafe method, [/_yuka/csrf] and the live socket accept, as
+      [scheme://host[:port]] (["https://app.example"]), compared without
+      case. Without it, the [Origin] header must have the authority of the
+      [Host] header; behind a proxy that rewrites [Host], give [origins].
+      Either way, a request without [Origin] passes only when
+      [Sec-Fetch-Site] is [same-origin], so a request with neither header
+      (an old browser, a client that is not a browser) is refused.
+
+      [log_error] (default [prerr_endline]) gets what the client must not
+      see: an action that failed, a failed render, a failed async value, a
+      refused redirect or header. *)
+
+  (** {2 Adapters} *)
+
+  module Adapter : sig
+    (** What a server provides to run the cycle. *)
+    module type S = sig
+      type request
+
+      type reply
+      (** The response type of the server. *)
+
+      val meth : request -> Router.meth
+      (** The request method. *)
+
+      val target : request -> string
+      (** The path and query, as sent. *)
+
+      val header : request -> string -> string option
+      (** Case-insensitive. *)
+
+      val body : request -> limit:int -> string option Async.t
+      (** The request body, or [None] when it is longer than [limit] bytes.
+          Give [None] with no read when a [Content-Length] is over [limit];
+          else stop reading past [limit + 1] bytes. With [None], close the
+          request body so the server drops the rest. *)
+
+      val session : request -> string
+      (** The session id of the request (Dream: [Dream.session_id]). Called
+          only by {!Context.session}, and by the live socket to count the
+          sockets of a session. *)
+
+      val csrf_token : request -> string
+      (** A CSRF token bound to the session of the request (Dream:
+          [Dream.csrf_token]). It is written in a page only when the page
+          has a {!Yuka.Live.use}, answers [GET /_yuka/csrf], and renews the
+          token of the live socket; raise when the request has no session. *)
+
+      val verify_csrf : request -> string -> bool Async.t
+      (** Whether a token from {!csrf_token} is valid for the session of
+          the request (Dream: [Dream.verify_csrf_token]). The live socket
+          checks the token of its [hello] with it. *)
+
+      val respond : response -> reply Async.t
+      (** Sends the status, the headers (in order, a repeated name once per
+          value) and the body; a [Stream] body is written as it comes. *)
+
+      val file :
+        request -> root:string -> path:string -> headers:(string * string) list -> reply Async.t
+      (** Sends the file [root/path] with [headers], or 404 with
+          [cache-control: no-store] when it does not exist. [path] has no
+          empty, [.] or [..] segment. *)
+
+      val exists : root:string -> path:string -> bool
+      (** Whether the file [root/path] exists. The cycle asks it for a
+          prerendered page and to answer [HEAD] on a file without sending
+          the file. *)
+
+      val upgrade : request -> (Live.connection -> unit Async.t) -> reply Async.t
+      (** Answers 101 and runs the function on the open WebSocket. The
+          function closes the socket when it ends the protocol; when the
+          client closed it, nothing closes it again. *)
+
+      val sleep : float -> unit Async.t
+      (** Resolves after this many seconds. The cycle uses it for [timeout]
+          and the live socket for its timeouts. *)
+    end
+
+    (** A request handler for the server of [A]. *)
+    module Make (A : S) : sig
+      val handler : ?node:Live.node -> config -> A.request app -> A.request -> A.reply Async.t
+      (** Answers one request. [node] (default: the process node) is the
+          live node of the sockets of [/_yuka/live] and of the server render
+          of {!Yuka.Live.use}; a second handler in one process with its own
+          {!Live.type-node} is a second node. Steps, in this order:
+
+          + A reserved path (see {!Server}): [/_yuka/action/<name>], the
+            action call ([POST] with a JSON body; answers as described for
+            {!Action.reject}), else 405. From the headers first: the origin
+            (403, see [config ~origins]), the action name (404) and the
+            content type (415); then at most 1 MiB of body (413).
+            [/_yuka/csrf]: for [GET] and [HEAD] with the same origin rule,
+            [{"csrf":TOKEN}] from {!S.csrf_token} with [no-store] (the live
+            client renews an expired token with it); 403 for another
+            origin, 405 for another method. [/_yuka/live]: for [GET] with
+            the same origin rule and [Upgrade: websocket], [A.upgrade] with
+            the live protocol; 403 for another origin, 426 without the
+            upgrade header, 405 for another method, and a 500 with a log
+            message when {!S.session} raises (no session middleware). [/_yuka/app/<file>]: the
+            file of [assets] for [GET] and [HEAD], else 405; a [.] or [..]
+            segment, or no [assets], gives a plain 404 with [no-store]. A
+            path under a [public] prefix: the file of its directory, by the
+            same rules. These paths are never routed.
+          + A path with a trailing slash or an empty segment: 308 to the
+            path without them, query kept.
+          + [find] with the percent-decoded segments and the query pairs.
+          + [Redirect]: 308 (permanent) or 307, query kept.
+          + [Missing]: the not-found page, 404. [Wrong_method]: 405 with
+            [allow] (the methods, [HEAD] after [GET], then [OPTIONS]); for
+            [OPTIONS], 204 with the same [allow].
+          + An endpoint or action whose method is not [GET], [HEAD] or
+            [OPTIONS]: 403 when the origin check fails, before the guards,
+            unless its node has [~cross_origin:true].
+          + Guards, one after another. A {!type-stop} skips the rest.
+          + A handler: its response, after the rule headers (a header name
+            of the handler replaces that name of the rules) and the rule
+            [cache-control] unless it set one. [HEAD]: no body.
+          + A page: the prerendered file when [config] has [prerendered]
+            and it applies; else the loaders, then status 200 with the rule
+            headers, [content-type], [vary: Yuka-Navigate] and the rule
+            [cache-control]. When the shell of the page rendered a
+            {!Yuka.Live.use} (its state passed [allow] for this request) and
+            that [cache-control] is shared ([public] or [s-maxage]), the
+            answer has [cache-control: private, no-store] instead, and the
+            first such answer for a path logs a message. A [Live.use] that
+            renders only in a streamed fill comes after the headers and is
+            not covered: give such a route a private cache.
+          + The document, streamed. Each layer's children are inside
+            [<yuka-outlet data-k="KEY" style="display:contents">]. The
+            entry module script is written once, before the first island,
+            and the fill script only when the shell has a pending [await],
+            so a page without islands or pending [await] loads no
+            JavaScript. An [<a>] whose [href] is the request path gets
+            [aria-current="page"], except inside an island, whose markup
+            must match the client render.
+          + With a [Yuka-Navigate] header (the outlet keys of the page):
+            let [n] be the length of the common prefix of the sent keys and
+            the layer keys of the page (or of the fallback, for a 404 or
+            500). [n = 0]: the settled document in one string. [n >= 1]:
+            only what goes inside outlet [n], settled, with the headers
+            [Yuka-Outlet] (its key) and [Yuka-Title] (percent-encoded);
+            island, await and async ids get the prefix [KEY-]. Both have
+            [Yuka-Build] ({!build_id}).
+
+          A 404 or 500 page has the root [headers] and [no-store]. A
+          failure before the response is returned (shell, or a fill that
+          already failed) gives the 500 page. After it the status is sent:
+          the failure goes to [log_error], nothing more is written (no
+          [</body></html>]), and the [Stream] function's [Async] succeeds
+          once the writes already started have finished, so the adapter
+          ends the response normally. When the error page itself fails, the
+          answer is a plain-text 500. Every answer to [HEAD] has an empty
+          body. A [HEAD] on a page renders it as for [GET]: when the [GET]
+          answer is one string, [HEAD] has its [content-length]; when [GET]
+          streams, so does [HEAD], with no body. For a file, the cycle
+          answers 200 with the headers it knows (no [content-type] for a
+          client or public file) when [exists] says so, else the plain 404.
+
+          An [Action] always sends [cache-control: no-store]; a handler
+          response that is not 2xx gets [no-store] unless it set
+          [cache-control]. [vary] values are joined. A path with a literal
+          backslash is the 404 page. An answer with a header name or value
+          that holds CR, LF or NUL becomes a plain 500 and a log message. *)
+    end
+
+    val build_id : config -> 'req app -> string
+    (** The build id: a digest of the route tree and, with [assets], of the
+        entry, the manifest and the packages or the metafile. Every full
+        document has [<meta name="yuka-build" content="ID">], and a response
+        to [Yuka-Navigate] has the header [Yuka-Build: ID]; the client loads
+        the page in full when the two differ. *)
+  end
+
+  (** {2 Prerender}
+
+      The pure parts of a prerender; [Yuka_dream.prerender] runs them with
+      a server. *)
+
+  module Prerender : sig
+    val config : config -> config
+    (** The config a prerender renders with: [dev] off, whatever [~dev]
+        says, so no static file gets the dev script or the dev state; and a
+        page that renders a {!Yuka.Live.use} gives the 500 page and a log
+        message instead of a file, since its state depends on the request.
+        {!missing_page} uses it too. *)
+
+    val seeds : 'req app -> string list
+    (** The paths of the nodes with no param whose rules say
+        [prerender]. *)
+
+    val prerenderable : config -> 'req app -> 'req -> string -> bool
+    (** Whether a [GET] of this path matches a page or an endpoint whose
+        rules say [prerender]. A path that the cycle serves as a file
+        ([/_yuka/], a [public] prefix) is not, even when a route such as a
+        catch-all would match it. The query and fragment are ignored. *)
+
+    val links : string -> string list
+    (** The paths of the links of an HTML text: each [href="/..."],
+        entities decoded, query and fragment removed, once each, in order.
+        A link to another origin ([//host]) is not one. *)
+
+    val file : string -> string option
+    (** The file of a path, relative to the output directory: [/] gives
+        [index.html], [/a/b] gives [a/b/index.html], and a last segment
+        with a [.] ([/feed.xml]) gives [feed.xml]. Segments are
+        percent-decoded; the query and fragment are ignored. [None] when a
+        segment is empty, [.] or [..], or holds a slash, a backslash or a
+        NUL byte after decoding. *)
+
+    val missing_page : config -> 'req app -> sleep:(float -> unit Async.t) -> response Async.t
+    (** The 404 page of the app, as for an unknown path: the [404.html] of
+        a prerender. *)
+
+    val css_files : config -> (string * string) list
+    (** The sheets of [css] as paths relative to the site root
+        ([_yuka/css/FILE]) and text. A prerender writes them. *)
+
+    val served_dirs : config -> (string * string) list
+    (** The URL prefixes and directories that the cycle serves files from:
+        [("/_yuka/app", dir)] of [assets], then each [public] prefix. A
+        prerender copies them. *)
+  end
+
+  (**/**)
+
+  (** For the code generated by [yuka routes --server] only. Not covered by
+      semantic versioning: any release can change it. *)
+  module Generated : sig
+    type rules
+    (** The merged route rules of one node. *)
+
+    val rules :
+      headers:(string * string) list list -> ?cache:cache -> prerender:bool -> unit -> rules
+    (** [headers] holds one list per node from the root down. A header name
+        (case-insensitive) of a later list replaces that name of the
+        earlier ones; a name repeated in one list is kept. *)
+
+    type layer = { key : string; data : bool; wrap : server element -> server element }
+    (** A layout on the path of a route. [key] names its outlet; [data] is
+        true when the layout takes a loader result, so a client navigation
+        renders it again instead of keeping it; [wrap] puts the layout
+        around its children. *)
+
+    type plan = { layers : layer list; page : page }
+    (** What a page route renders. [layers] are outermost first. *)
+
+    type fallback = { layers : layer list; not_found : string -> page; error : unit -> page }
+    (** The pages for a 404 ([not_found] gets the request path) and a 500,
+        inside [layers]. *)
+
+    val default_not_found : string -> page
+    (** An [<h1>Not Found</h1>] page, for a [Routes.ml] without
+        [not_found]. *)
+
+    val default_error : unit -> page
+    (** An [<h1>Internal Server Error</h1>] page, for a [Routes.ml] without
+        [error]. *)
+
+    (** What a matched route runs. *)
+    type target =
+      | Page of {
+          rules : rules;
+          guards : (unit -> (unit, stop) result Async.t) list;  (** Parent first. *)
+          load : unit -> (plan, stop) result Async.t;
+          fallback : fallback;
+        }
+      | Handler of {
+          rules : rules;
+          action : bool;  (** An [Action] node: always [no-store]. *)
+          cross_origin : bool;  (** No origin check for an unsafe method. *)
+          guards : (unit -> (unit, stop) result Async.t) list;
+          run : unit -> response Async.t;
+        }
+
+    val loaded :
+      ('a, stop) result Async.t -> ('a -> ('b, stop) result Async.t) -> ('b, stop) result Async.t
+    (** Chains a loader result. An [Error], a failed [Async] or an exception
+        of the function gives an [Error]; the last two give [Fail]. *)
+
+    val app :
+      build:string ->
+      headers:(string * string) list ->
+      prerender:string list ->
+      find:(Router.meth -> string list -> (string * string) list -> 'r Router.lookup) ->
+      resolve:('req -> 'r -> target) ->
+      missing:fallback ->
+      'req app
+    (** [build] is a digest of the route tree. [headers] are the rule
+        headers of the root, sent with every 404 and 500 page. [prerender]
+        lists the paths where {!Prerender.seeds} starts. [missing] gives the
+        page when no route matches. *)
+  end
+
+  (** For Yuka's tests. Not covered by semantic versioning. *)
+  module Testing : sig
+    val context : ?header:(string -> string option) -> ?session:string -> unit -> context
+
+    val live_run :
+      ?node:Live.node ->
       sleep:(float -> unit Async.t) ->
-      peer ->
+      context ->
       verify_csrf:(string -> bool Async.t) ->
       token:(unit -> string) ->
-      connection ->
+      Live.connection ->
       unit Async.t
-    (** Runs the live protocol on one socket until it closes:
+    (** Runs the live protocol on one socket until it closes, as
+        [/_yuka/live] does:
 
         - The first message is [{"t":"hello","v":1,"csrf":T}]; another
           version closes with 4426, a token that [verify_csrf] refuses with
@@ -1208,437 +1838,24 @@ module Server : sig
           those notes started has finished; then [synced] comes after the
           latest state. It waits 5 s at most (a lost note).
         - The function closes the socket once, when it ends the protocol
-          itself (a limit, a failed send or receive, {!revoke}); it does
-          not close a socket that the client closed. *)
+          itself (a limit, a failed send or receive, {!Live.revoke}); it
+          does not close a socket that the client closed. *)
 
-    module type SOCKET = sig
-      type request
-      type response
+    val live_mark : ?node:Live.node -> unit -> (string * int) option
+    (** The node name and the number of notes it sent. An action answer
+        carries the mark of the handler's node as [live]: a [Live.mutate]
+        that settles on another node waits until that node has heard those
+        notes and loaded the key again. *)
 
-      val header : request -> string -> string option
-      val session : request -> string
-      val csrf_token : request -> string
-      val verify_csrf : request -> string -> bool Async.t
-      val refuse : status:int -> string -> response Async.t
-      val upgrade : request -> (connection -> unit Async.t) -> response Async.t
-      (** Answers 101 and runs the function on the open socket. The
-          function closes the socket when it ends the protocol; when the
-          client closed it, nothing closes it again. *)
+    val set_log : (string -> unit) -> unit
+    (** Where messages go outside a request: a render without the cycle,
+        an [Action.call] on the server outside a render, and the default
+        log of a {!Live.node}. Default: [prerr_endline]. *)
 
-      val sleep : float -> unit Async.t
-    end
-    (** What a server gives for [GET /_yuka/live]. *)
-
-    module Handle (S : SOCKET) : sig
-      val live : ?instance:instance -> S.request -> S.response Async.t
-      (** The origin rule of the action call ({!handle}), else
-          [refuse ~status:403]; then [upgrade] with {!run}. *)
-    end
+    val memory_down : Live.memory -> bool -> unit
+    (** [memory_down m true] drops notes; [false] brings the bus back and
+        calls each [on_restart] function. *)
   end
 
-  module Form : sig
-    val implement :
-      ('i, 'o, 'f) Form.action ->
-      ?redirect:('o -> string) ->
-      ('i -> ('o, 'f Form.errors) result Async.t) ->
-      unit
-    (** Registers a form action (see {!Yuka.Form}). It answers the island
-        path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
-        with [redirect o] in the answer (checked as for the 303 below: a
-        bad one answers 500 [action failed] and is logged), and the form
-        post of a page. The
-        request cycle checks the origin as for {!handle} (403), runs the
-        page's guards (a
-        refusal answers as for [GET] and the function does not run), reads
-        at most 1 MiB of body (413), decodes the posted fields, calls the
-        function, and answers 303 to [redirect o] (default: the page URL)
-        on [Ok o], or renders the page again with status 422 and the sent
-        values and errors on [Error], a decode error or {!Action.reject}.
-        The 303, 403 and 413 carry the page's rule headers. A [redirect o]
-        that is not a path ([/x], not [//x]) or an [http:] or [https:] URL
-        of the request [Host] (the island answer too), or that holds a control character (below space, or DEL; a browser
-        drops TAB from a URL, so [/\t/x] would go to [//x]), gives the 500
-        page and a
-        {!log_error} message instead of a 303. Raises
-        [Invalid_argument] when the action is not from {!Yuka.Form.val-action}. *)
-  end
-
-  (** {2 Request cycle}
-
-      The types and functions that the code generated by [yuka-routes
-      --server] calls, and the request cycle that answers a request with
-      them. The cycle has no server dependency: a server implements
-      {!ADAPTER}. See "Request cycle" in DESIGN.md. *)
-
-  (** Why a guard or a loader stops a request. *)
-  type stop =
-    | Not_found  (** The not-found page of the route, status 404. *)
-    | Redirect of { status : int; location : string }
-        (** A response with this status (303, 307 or 308) and [location],
-            and no body. *)
-    | Fail of string
-        (** The error page, status 500. The message goes to [log_error],
-            never to the page. *)
-
-  type page
-  (** What a page function returns: a title, extra head HTML and the body. *)
-
-  val page : ?title:string -> ?head:string -> (unit -> server element) -> page
-  (** [page ~title body]. The cycle calls [body] when it renders, for
-      [HEAD] too (to send the length of the [GET] answer). [head] is raw
-      HTML added to the document head. *)
-
-  type layer = { key : string; data : bool; wrap : server element -> server element }
-  (** A layout on the path of a route. [key] names its outlet; [data] is
-      true when the layout takes a loader result, so a client navigation
-      renders it again instead of keeping it; [wrap] puts the layout around
-      its children. *)
-
-  type plan = { layers : layer list; page : page }
-  (** What a page route renders. [layers] are outermost first. *)
-
-  (** The [cache-control] value of a route rule. *)
-  type cache =
-    | No_store  (** [no-store] *)
-    | Private of { max_age : int }  (** [private, max-age=N] *)
-    | Public of { max_age : int; s_max_age : int option }
-        (** [public, max-age=N], and [, s-maxage=M] when given *)
-    | Immutable  (** [public, max-age=31536000, immutable] *)
-
-  type rules
-  (** The merged route rules of one node. *)
-
-  val rules :
-    headers:(string * string) list list -> ?cache:cache -> prerender:bool -> unit -> rules
-  (** [headers] holds one list per node from the root down. Later lists are
-      added after earlier ones; for one header name (case-insensitive), the
-      last value wins. *)
-
-  type body =
-    | String of string
-    | Stream of ((string -> unit Async.t) -> unit Async.t)
-        (** The adapter calls the function with its write function and ends
-            the response when the result settles. *)
-
-  type response = { status : int; headers : (string * string) list; body : body }
-
-  val text : ?status:int -> ?headers:(string * string) list -> string -> response Async.t
-  (** A [text/plain; charset=utf-8] response. Default status: 200. A
-      [content-type] in [headers] replaces the default one. *)
-
-  val html : ?status:int -> ?headers:(string * string) list -> string -> response Async.t
-  (** Like {!text}, with [text/html; charset=utf-8]. *)
-
-  val json : ?status:int -> ?headers:(string * string) list -> Json.t -> response Async.t
-  (** Like {!text}, with [application/json]. *)
-
-  val see_other : string -> response Async.t
-  (** 303 to the location, no body. *)
-
-  type fallback = { layers : layer list; not_found : string -> page; error : int -> page }
-  (** The pages for a 404 ([not_found] gets the request path) and a 500
-      ([error] gets the status), inside [layers]. *)
-
-  val default_not_found : string -> page
-  (** An [<h1>Not Found</h1>] page, for a [Routes.ml] without [not_found]. *)
-
-  val default_error : int -> page
-  (** An [<h1>Internal Server Error</h1>] page, for a [Routes.ml] without
-      [error]. *)
-
-  (** What a matched route runs. *)
-  type target =
-    | Page of {
-        rules : rules;
-        guards : (unit -> (unit, stop) result Async.t) list;  (** Parent first. *)
-        load : unit -> (plan, stop) result Async.t;
-        fallback : fallback;
-      }
-    | Handler of {
-        rules : rules;
-        same_origin : bool;  (** True for an [Action]: 403 when the origin check of {!handle} fails. *)
-        guards : (unit -> (unit, stop) result Async.t) list;
-        run : unit -> response Async.t;
-      }
-
-  val loaded :
-    ('a, stop) result Async.t -> ('a -> ('b, stop) result Async.t) -> ('b, stop) result Async.t
-  (** Chains a loader result. An [Error], a failed [Async] or an exception
-      of the function gives an [Error]; the last two give [Fail]. *)
-
-  type 'req app
-  (** The routes of an app. ['req] is the request type of the adapter: the
-      generated code passes the request to each loader, guard and handler. *)
-
-  val app :
-    build:string ->
-    headers:(string * string) list ->
-    prerender:string list ->
-    find:(Router.meth -> string list -> (string * string) list -> 'r Router.lookup) ->
-    resolve:('req -> 'r -> target) ->
-    missing:fallback ->
-    'req app
-  (** [build] is a digest of the route tree. [headers] are the rule headers
-      of the root, sent with every 404 and 500 page. [prerender] lists the
-      paths of the nodes with no param whose rules say [prerender]: where
-      {!prerender_seeds} starts. [missing] gives the page when no route
-      matches. *)
-
-  type assets
-  (** Where the client JavaScript is. The cycle serves it under [/_yuka/]. *)
-
-  val modules :
-    dir:string -> entry:string -> manifest:string -> packages:string list -> digest:string -> assets
-  (** The Melange module tree. [dir] is the emit directory, [entry] the path
-      of the entry module in it (served as [/_yuka/<entry>]), [manifest] the
-      JSON text that [yuka-islands --manifest] prints (paths relative to the
-      directory of [entry]), and [packages] the npm packages under
-      [dir/node_modules] for the import map. [digest] stands for the content
-      of the files (for example [Yuka_dream.tree_digest dir]): it goes into
-      {!build_id}, so new JavaScript gives a new build id. Files get
-      [cache-control: no-cache]. *)
-
-  val bundle :
-    dir:string -> entry:string -> manifest:string -> metafile:string -> assets
-  (** An esbuild bundle. [dir] is the directory esbuild ran in, so that the
-      [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
-      the path of the entry output. Outputs other than [entry] get
-      [Immutable]; other files get [no-cache]. Raises [Invalid_argument]
-      when [manifest] or [metafile] is not valid JSON of that shape. *)
-
-  type config
-
-  val config :
-    ?assets:assets ->
-    ?public:(string * string) list ->
-    ?prerendered:string ->
-    ?styles:string list ->
-    ?css:(string * string) list ->
-    ?head:string ->
-    ?timeout:float ->
-    unit ->
-    config
-  (** [public] maps URL prefixes to directories ([("/static", "static")]).
-      A prefix with no segment (["/"]) raises [Invalid_argument]: files
-      under a prefix are never routed, so it would hide every route.
-      [prerendered] is the directory that a prerender wrote: a [GET] or
-      [HEAD] of a page whose rules say [prerender], without a query and
-      without [Yuka-Navigate], is answered with its file there when the file
-      exists ({!prerender_file}), after the guards and instead of the
-      loaders. [styles] are stylesheet URLs and [head] raw HTML for the head
-      of every page. [css] lists the sheets of [[%yuka.css]], as file name
-      and text; the generator [yuka-css] writes it ([Yuka_css.sheets]). The
-      cycle serves each at [/_yuka/css/FILE] with [Immutable] (the name has
-      a hash of the text); another path under [/_yuka/css/] is a 404 with
-      [no-store]. With the environment variable [YUKA_DEV=1] (set by
-      [yuka dev]), read here, the cycle answers [GET /_yuka/dev] with
-      Server-Sent Events of the state file in [YUKA_DEV_FILE], and full
-      pages get the reload script in their head; without it, [/_yuka/dev]
-      is a 404 and pages have no script. [timeout] (default 10 seconds) bounds a streamed
-      render. *)
-
-  val build_id : config -> 'req app -> string
-  (** The build id: a digest of the route tree and, with [assets], of the
-      entry, the manifest and the packages or the metafile. Every full
-      document has [<meta name="yuka-build" content="ID">], and a response to
-      [Yuka-Navigate] has the header [Yuka-Build: ID]; the client loads the
-      page in full when the two differ. *)
-
-  val prerender_config : config -> config
-  (** [config] with [YUKA_DEV] ignored. A prerender uses it, so a static
-      page never gets the dev script. *)
-
-  val css_files : config -> (string * string) list
-  (** The sheets of [css] as paths relative to the site root
-      ([_yuka/css/FILE]) and text. A prerender writes them. *)
-
-  val served_dirs : config -> (string * string) list
-  (** The URL prefixes and directories that the cycle serves files from:
-      [("/_yuka", dir)] of [assets], then each [public] prefix. A
-      prerender copies them. *)
-
-  type request = {
-    meth : Router.meth;
-    target : string;  (** Path and query, as sent. *)
-    header : string -> string option;  (** Case-insensitive. *)
-    body : limit:int -> string option Async.t;  (** [None] over [limit] bytes. *)
-    csrf_token : unit -> string;
-        (** A token for the live [hello] ({!Yuka.Live}); called once by the
-            first {!Yuka.Live.use} of a render and by [GET /_yuka/csrf],
-            never otherwise. *)
-  }
-  (** What the cycle reads from a request. *)
-
-  type outcome =
-    | Respond of response
-    | File of { root : string; path : string; headers : (string * string) list }
-        (** Send the file [root/path] with [headers], or 404 with
-            [cache-control: no-store] when it does not exist. [path] has no
-            empty, [.] or [..] segment. *)
-
-  val handle :
-    config ->
-    'req app ->
-    sleep:(float -> unit Async.t) ->
-    exists:(root:string -> path:string -> bool) ->
-    'req ->
-    request ->
-    outcome Async.t
-  (** Answers one request. [exists] tells whether a file is there
-      ({!ADAPTER.exists}). Steps, in this order:
-
-      + [/_yuka/action/<name>]: the action call ([POST] with a JSON body;
-        answers as described for {!Action.reject}), else 405. From the
-        headers first: the origin (403), the action name (404) and the
-        content type (415); then at most 1 MiB of body (413). The origin
-        check passes when [Origin] has the authority of [Host], or when
-        there is no [Origin] and [Sec-Fetch-Site] is [same-origin]; a
-        request with neither (an old browser, a client that is not a
-        browser) is refused.
-        [/_yuka/csrf]: for [GET] and [HEAD] with the same origin rule,
-        [{"csrf":TOKEN}] from {!request.csrf_token} with [no-store] (the
-        live client renews an expired token with it); 403 for another
-        origin, 405 for another method.
-        [/_yuka/<file>]: the file of [assets] for [GET] and [HEAD], else
-        405; a [.] or [..] segment, or no [assets], gives a plain 404 with
-        [no-store]. A path under a [public] prefix: the file of its
-        directory, by the same rules. These paths are never routed.
-      + A path with a trailing slash or an empty segment: 308 to the path
-        without them, query kept.
-      + [find] with the percent-decoded segments and the query pairs.
-      + [Redirect]: 308 (permanent) or 307, query kept.
-      + [Missing]: the [missing] page, 404. [Wrong_method]: 405 with
-        [allow] (the methods, [HEAD] after [GET], then [OPTIONS]); for
-        [OPTIONS], 204 with the same [allow].
-      + Guards, one after another. A {!stop} skips the rest.
-      + A handler with [same_origin]: 403 when the origin check of the
-        action call fails.
-      + A handler: its response, after the rule headers (the handler's win)
-        and the rule [cache-control] unless it set one. [HEAD]: no body.
-      + A page: the prerendered file when [config] has [prerendered] and
-        it applies; else [load], then status 200 with the rule headers,
-        [content-type], [vary: Yuka-Navigate] and the rule
-        [cache-control].
-      + The document, streamed. Each layer's children are inside
-        [<yuka-outlet data-k="KEY" style="display:contents">]. The entry
-        module script is written once, before the first island, and
-        {!fill_script} only when the shell has a pending [await], so a page
-        without islands or pending [await] loads no JavaScript. An [<a>] whose [href] is the
-        request path gets [aria-current="page"], except inside an island,
-        whose markup must match the client render.
-      + With a [Yuka-Navigate] header (the outlet keys of the page): let [n]
-        be the length of the common prefix of the sent keys and the layer
-        keys of the page (or of the fallback, for a 404 or 500). [n = 0]: the
-        settled document in one string. [n >= 1]: only what goes inside
-        outlet [n], settled, with the headers [Yuka-Outlet] (its key) and
-        [Yuka-Title] (percent-encoded); island, await and async ids get the
-        prefix [KEY-]. Both have [Yuka-Build] ({!build_id}).
-
-      A 404 or 500 page has the root [headers] and [no-store]. A failure
-      before the response is returned (shell, or a fill that already
-      failed) gives the 500 page. After it the status is sent: the failure
-      goes to [log_error], nothing more is written (no [</body></html>]),
-      and the [Stream] function's [Async] succeeds once the writes already
-      started have finished, so the adapter ends the response normally.
-      When the error page itself fails, the answer is a plain-text 500.
-      Every answer to [HEAD] has an empty body. A [HEAD] on a page renders
-      it as for [GET]: when the [GET] answer is one string, [HEAD] has its
-      [content-length]; when [GET] streams, so does [HEAD], with no body. For a file, the cycle
-      answers 200 with the headers it knows (no [content-type] for a client
-      or public file) when [exists] says so, else the plain 404.
-
-      A {!stop} [Redirect] must use 301, 302, 303, 307 or 308 and a
-      location without CR or LF; otherwise it is a logged 500. An [Action]
-      always sends [cache-control: no-store]; a handler response that is
-      not 2xx gets [no-store] unless it set [cache-control]. [vary] values
-      are joined. A path with a literal backslash is the 404 page. *)
-
-  type http_response = response
-
-  (** What a server provides to run the cycle. *)
-  module type ADAPTER = sig
-    type request
-    type response
-    type 'a io
-
-    val meth : request -> Router.meth
-    (** The request method. *)
-
-    val target : request -> string
-    (** The path and query, as sent. *)
-
-    val header : request -> string -> string option
-    (** Case-insensitive. *)
-
-    val body : request -> limit:int -> string option Async.t
-    (** The request body, or [None] when it is longer than [limit] bytes.
-        Give [None] with no read when a [Content-Length] is over [limit];
-        else stop reading past [limit + 1] bytes. With [None], close the
-        request body so the server drops the rest. *)
-
-    val csrf_token : request -> string
-    (** A CSRF token bound to the session of the request (Dream:
-        [Dream.csrf_token]). It is written in a page only when the page
-        has a {!Yuka.Live.use}, and answers [GET /_yuka/csrf]; raise when
-        the request has no session. *)
-
-    val respond : http_response -> response io
-    (** Sends the status, the headers and the body; a [Stream] body is
-        written as it comes. *)
-
-    val file : request -> root:string -> path:string -> headers:(string * string) list -> response io
-    (** Sends a file, or 404 with [cache-control: no-store]. *)
-
-    val exists : root:string -> path:string -> bool
-    (** Whether the file [root/path] exists. The cycle asks it for a
-        prerendered page and to answer [HEAD] on a file without sending the
-        file. *)
-
-    val of_async : 'a Async.t -> 'a io
-    (** Converts an [Async] to the promise type of the server. *)
-
-    val bind : 'a io -> ('a -> 'b io) -> 'b io
-    (** Chains two promises of the server. *)
-
-    val sleep : float -> unit Async.t
-    (** Resolves after this many seconds. The cycle uses it for [timeout]. *)
-  end
-
-  (** A request handler for the server of [A]. *)
-  module Make (A : ADAPTER) : sig
-    val handler : config -> A.request app -> A.request -> A.response A.io
-    (** Answers one request with {!handle}, then sends the outcome with
-        [A.respond] or [A.file]. *)
-  end
-
-  (** {2 Prerender}
-
-      The pure parts of a prerender; [Yuka_dream.prerender] runs them with
-      a server. *)
-
-  val prerender_seeds : 'req app -> string list
-  (** The [prerender] paths of {!val-app}. *)
-
-  val prerenderable : config -> 'req app -> 'req -> string -> bool
-  (** Whether a [GET] of this path matches a page or an endpoint whose
-      rules say [prerender]. A path that {!handle} serves as a file
-      ([/_yuka/], a [public] prefix) is not, even when a route such as a
-      catch-all would match it. The query and fragment are ignored. *)
-
-  val links : string -> string list
-  (** The paths of the links of an HTML text: each [href="/..."], entities
-      decoded, query and fragment removed, once each, in order. A link to
-      another origin ([//host]) is not one. *)
-
-  val prerender_file : string -> string option
-  (** The file of a path, relative to the output directory: [/] gives
-      [index.html], [/a/b] gives [a/b/index.html], and a last segment with
-      a [.] ([/feed.xml]) gives [feed.xml]. Segments are percent-decoded;
-      the query and fragment are ignored. [None] when a segment is empty,
-      [.] or [..], or holds a slash, a backslash or a NUL byte after
-      decoding. *)
-
-  val missing_page : config -> 'req app -> sleep:(float -> unit Async.t) -> response Async.t
-  (** The 404 page of the app, as for an unknown path: the [404.html] of a
-      prerender. *)
+  (**/**)
 end

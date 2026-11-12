@@ -4,9 +4,18 @@ open Types
 
   let mismatch = Json.mismatch
 
+  let make ~encode ~decode = { encode; decode }
+
+  let map f g c = { encode = (fun b -> c.encode (g b)); decode = (fun j -> Result.map f (c.decode j)) }
+
   let int =
     { encode = (fun i -> `Int i);
-      decode = (function `Int i -> Ok i | j -> mismatch "int" j) }
+      decode =
+        (function
+        | `Int i -> Ok i
+        | `Float f as j ->
+            if Float.is_integer f && f >= Float.of_int min_int && f < -.Float.of_int min_int then Ok (int_of_float f) else mismatch "int" j
+        | j -> mismatch "int" j) }
 
   let float =
     { encode = (fun f -> `Float f);

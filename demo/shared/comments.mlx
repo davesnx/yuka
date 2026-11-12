@@ -23,17 +23,20 @@ let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Com
                if c.id <> tmp.id then Some c else with_)
              (State.peek comments))
       in
+      let failed message =
+        Yuka.batch (fun () ->
+            swap None;
+            State.set draft body;
+            State.set error (Some message))
+      in
       Async.on_result
         (Action.call Actions.add_comment { Actions.issue_id; body })
         (function
-          | Ok c ->
+          | Ok (Ok c) ->
               State.set comments
                 (List.map (fun (x : Comment.t) -> if x.id = tmp.id then c else x) (State.peek comments))
-          | Error message ->
-              Yuka.batch (fun () ->
-                  swap None;
-                  State.set draft body;
-                  State.set error (Some message))))
+          | Ok (Error e) -> failed (Status.error_to_string e)
+          | Error message -> failed message))
   in
   let comment (c : Comment.t) : client element =
     <li class_="comment">
@@ -49,7 +52,7 @@ let%client make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Com
   in
   <div class_="activity">
     <ul class_="comments">
-      (Yuka.each ~key:(fun (c : Comment.t) -> c.id) (fun () -> State.get comments) comment)
+      (Yuka.each ~key:(fun (c : Comment.t) -> c.id) (fun () -> Array.of_list (State.get comments)) comment)
     </ul>
     <div class_="comment-box">
       <textarea class_="comment-input" placeholder="Leave a comment" rows=3

@@ -58,10 +58,10 @@ let view () =
     ~children:(fun form ->
       fragment
         [
-          lower "input" [ attr "name" "body"; attr "value" (Form.value form Body) ] [];
-          lower "i" [] [ hole (fun () -> text (if Form.pending form then "pending" else "idle")) ];
-          Form.error_view form Body (fun m -> lower "b" [] [ text m ]);
-          Form.form_error_view form (fun m -> lower "u" [] [ text m ]);
+          element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
+          element "i" [] [ hole (fun () -> text (if Form.pending form then "pending" else "idle")) ];
+          Form.error_view form `Body (fun m -> element "b" [] [ text m ]);
+          Form.errors_view form (fun m -> element "u" [] [ text m ]);
         ])
     ()
 
@@ -74,8 +74,8 @@ let plain_view key () =
     ~children:(fun form ->
       fragment
         [
-          lower "input" [ attr "name" "body"; attr "value" (Form.value form Body) ] [];
-          Form.error_view form Body (fun m -> lower "b" [] [ text m ]);
+          element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
+          Form.error_view form `Body (fun m -> element "b" [] [ text m ]);
         ])
     ()
 
@@ -84,15 +84,15 @@ let redirect_view () =
     ~children:(fun form ->
       fragment
         [
-          lower "input" [ attr "name" "body"; attr "value" (Form.value form Body) ] [];
-          Form.form_error_view form (fun m -> lower "u" [] [ text m ]);
+          element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
+          Form.errors_view form (fun m -> element "u" [] [ text m ]);
         ])
     ()
 
 let button_view () =
   Form.make ~action:jot
     ~on_ok:(fun n -> ok_value := Some n)
-    ~children:(fun _ -> lower "button" [ attr "type" "submit"; attr "name" "body"; attr "value" "from-button" ] [ text "go" ])
+    ~children:(fun _ -> element "button" [ attr "type" "submit"; attr "name" "body"; attr "value" "from-button" ] [ text "go" ])
     ()
 
 let tick = State.make 0
@@ -103,7 +103,7 @@ let toggled_view () =
       plain_view "" ())
 
 let entry_of name view =
-  Client.entry ~name (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
+  runtime_entry ~name (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
 
 let entries =
   [
@@ -114,7 +114,7 @@ let entries =
     entry_of "T" toggled_view;
   ]
 
-let island_of name view = Client.island ~name ~props:`Null view
+let island_of name view = runtime_island ~name ~props:`Null view
 
 let record_navigation () =
   navigated := [];
@@ -142,15 +142,15 @@ let submit_with_button : unit -> bool =
 let set_input_in : string -> string -> unit =
   [%mel.raw "function (key, v) { document.querySelector('form[data-yuka-key=\"' + key + '\"] input[name=body]').value = v }"]
 
-let entry = Client.entry ~name:"F" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
-let island () = Client.island ~name:"F" ~props:`Null view
+let entry = runtime_entry ~name:"F" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
+let island () = runtime_island ~name:"F" ~props:`Null view
 
 let start html =
-  Yuka.unmount ();
+  Yuka.stop ();
   setup_fetch ();
   ok_value := None;
   set_body html;
-  Yuka.render ~islands:(Client.registry (entry :: entries)) ~navigation:false ();
+  Yuka.render ~islands:(runtime_registry (entry :: entries)) ~navigation:false ();
   record_navigation ()
 
 let async =
@@ -164,7 +164,7 @@ let async =
             check "prevented" "true" (string_of_bool prevented);
             check "no fetch" "0" (string_of_int (fetches ()));
             check "field error" "Missing" (text_of "b");
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "form: pending until the answer, then on_ok",
       fun finish ->
         start (Server.to_string island);
@@ -179,7 +179,7 @@ let async =
                 check "pending" "pending" during;
                 check "idle after" "idle" (text_of "i");
                 check "on_ok" "5" (match !ok_value with Some n -> string_of_int n | None -> "none");
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "form: a 400 from the server shows its message",
       fun finish ->
         start (Server.to_string island);
@@ -190,7 +190,7 @@ let async =
             finish (fun () ->
                 check "form error" "Refused" (text_of "u");
                 check "idle" "idle" (text_of "i");
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "form: field errors from the server",
       fun finish ->
         start (Server.to_string island);
@@ -200,7 +200,7 @@ let async =
         after_ms 10 (fun () ->
             finish (fun () ->
                 check "field error" "Too short" (text_of "b");
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "form: two pending forms each follow their own redirect",
       fun finish ->
         start (Server.to_string (fun () -> fragment [ island_of "A" (plain_view "a"); island_of "B" (plain_view "b") ]));
@@ -214,7 +214,7 @@ let async =
             after_ms 10 (fun () ->
                 finish (fun () ->
                     check "each its own" "/b,/a" (String.concat "," !navigated);
-                    Yuka.unmount ()))) );
+                    Yuka.stop ()))) );
     ( "form: a redirect to another site is refused",
       fun finish ->
         start (Server.to_string (fun () -> island_of "R" redirect_view));
@@ -226,7 +226,7 @@ let async =
               finish (fun () ->
                   check "not followed" "" (String.concat "," !navigated);
                   check "shown" "Yuka: refused a redirect to another site: data:text/html,x" (text_of "u");
-                  Yuka.unmount ())
+                  Yuka.stop ())
           | l :: rest ->
               set_input_in "r" "x";
               submit_in "r";
@@ -243,14 +243,14 @@ let async =
         after_ms 10 (fun () ->
             finish (fun () ->
                 check "client navigation to the page URL" (here ()) (String.concat "," !navigated);
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "form: the submit button's name and value are sent",
       fun finish ->
         start (Server.to_string (fun () -> island_of "Btn" button_view));
         ignore (submit_with_button ());
         finish (fun () ->
             check "posted" {|[["body","from-button"]]|} (if fetches () > 0 then fetch_body 0 else "none");
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "form: a 422 state lasts until a client submit on that form",
       fun finish ->
         let html =
@@ -273,7 +273,7 @@ let async =
             check "value kept after a new render" "sent" (snd remounted);
             check "gone after a client submit" "none" (text_of "b");
             check "value gone after a client submit" "" (input_value "body");
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "form: unknown field names from the server are form errors",
       fun finish ->
         start (Server.to_string island);
@@ -284,7 +284,7 @@ let async =
             finish (fun () ->
                 check "form error" "Bad" (text_of "u");
                 check "idle" "idle" (text_of "i");
-                Yuka.unmount ())) );
+                Yuka.stop ())) );
     ( "form: a bad data-yuka-sent is ignored",
       fun finish ->
         let html =
@@ -305,7 +305,7 @@ let async =
             check "no error shown" "none" (text_of "b");
             check "the form still sends" "1" (string_of_int (fetches ()));
             check "pending" "pending" during;
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
     ( "form: a 422 page hydrates with the sent values and errors",
       fun finish ->
         let html =
@@ -321,5 +321,5 @@ let async =
             check "value kept" "sent" (input_value "body");
             check "error kept" "Too short" (text_of "b");
             check "same markup after hydration" html after;
-            Yuka.unmount ()) );
+            Yuka.stop ()) );
   ]

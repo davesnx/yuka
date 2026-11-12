@@ -12,6 +12,7 @@ type owner = {
   mutable last : cell option;
   mutable gen : int;
   mutable catch : (exn -> unit) option;
+  parent : owner option;
 }
 
 let catch o e = match o.catch with Some h -> h e | None -> raise e
@@ -268,13 +269,27 @@ let flush () =
       depth := 0;
       match !error with Some e -> raise e | None -> ()
 
+let later = ref ignore
+
+let after f =
+  if !depth = 0 then f ()
+  else
+    let g = !later in
+    later := fun () -> g (); f ()
+
+let flush_all () =
+  flush ();
+  let g = !later in
+  later := ignore;
+  g ()
+
 let changed n =
   mark n n 2;
-  if !depth = 0 then flush ()
+  if !depth = 0 then flush_all ()
 
 let finish () =
   decr depth;
-  if !depth = 0 then flush ()
+  if !depth = 0 then flush_all ()
 
 let batch f =
   incr depth;

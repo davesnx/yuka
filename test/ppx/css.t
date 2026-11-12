@@ -17,7 +17,7 @@ Class names are scoped with a hash of the file, one value per class:
   $ run a
   module Css =
     struct
-      let stylesheet = Yuka.stylesheet "/_yuka/css/a-705346f1.css"
+      let stylesheet = Yuka.runtime_stylesheet "/_yuka/css/a-705346f1.css"
       let row = "row_705346f1"
       let item = "item_705346f1"
       let done_ = "done_705346f1"
@@ -30,7 +30,7 @@ Class names are scoped with a hash of the file, one value per class:
 
 The generator finds the declarations in the sources and writes the same file:
 
-  $ yuka-css .
+  $ yuka css --dir .
   let sheets = [
     ("a-705346f1.css", "/* .in-comment { } */\n.row_705346f1, div.item_705346f1:not(.done_705346f1) > .label_705346f1 { background: url(x.png); }\n.row_705346f1:hover { content: \".in-string\"; margin: .5em; }\n@media (max-width: 10px) { .wide-thing_705346f1 { display: none } }\n[data-x=\".in-attr\"] .open_705346f1 { }\n@keyframes spin { 12.5% { opacity: 1 } }\n");
   ]
@@ -50,7 +50,7 @@ Escapes, quoted url(), @scope and @supports selector():
   $ run e/e
   module Css =
     struct
-      let stylesheet = Yuka.stylesheet "/_yuka/css/e-25e1fa53.css"
+      let stylesheet = Yuka.runtime_stylesheet "/_yuka/css/e-25e1fa53.css"
       let md_flex = "md:flex_25e1fa53"
       let _10 = "10_25e1fa53"
       let x_y = "x.y_25e1fa53"
@@ -63,7 +63,7 @@ Escapes, quoted url(), @scope and @supports selector():
       let p = "p_25e1fa53"
       let q = "q_25e1fa53"
     end
-  $ yuka-css e
+  $ yuka css --dir e
   let sheets = [
     ("e-25e1fa53.css", ".md\\:flex_25e1fa53:hover { } .\\31 0_25e1fa53 { } .x\\.y_25e1fa53 { }\n.u_25e1fa53 { background: url(\"a).png\"); } .v_25e1fa53 { background: url( 'b).png' ) }\n@scope (.card_25e1fa53) to (.content_25e1fa53) { .title_25e1fa53 { } }\n@supports selector(:has(.kid_25e1fa53)) { .p_25e1fa53 { } }\n@supports (display: grid) { .q_25e1fa53 { } }\n");
   ]
@@ -135,8 +135,8 @@ A class that the file does not have is a compile error:
   > let make () = (Yuka.text Css.missing : _ Yuka.element)
   > X
   $ run c > c.pp.ml && ocamlfind ocamlc -c yuka.ml c.pp.ml 2>&1 | grep -v '^ *[0-9]* |\|^ *\^'
-  File "c.pp.ml", line 12, characters 41-52:
-  Error: Unbound value Css.missing
+  File "c.pp.ml", line 3, characters 21-44:
+  Error: Unbound value Yuka.runtime_stylesheet
 
 Errors:
 
@@ -149,13 +149,13 @@ Errors:
                    ^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] cannot read nope.css; list it in the dune file of this library: (preprocessor_deps nope.css)
   [1]
-  $ mkdir m && cp d.ml m/ && yuka-css m
-  yuka-css: m/d.ml: [%yuka.css "nope.css"]: cannot read m/nope.css
+  $ mkdir m && cp d.ml m/ && yuka css --dir m
+  yuka css: m/d.ml: [%yuka.css "nope.css"]: cannot read m/nope.css
   [1]
 
 Preprocessed copies that dune leaves in the build directory are skipped:
 
-  $ mkdir pp && echo 'module Css = [%yuka.css "gone.css"]' > pp/v.mlx.pp.ml && yuka-css pp
+  $ mkdir pp && echo 'module Css = [%yuka.css "gone.css"]' > pp/v.mlx.pp.ml && yuka css --dir pp
   let sheets = [
   ]
 
@@ -167,7 +167,7 @@ Comments and strings that mention [%yuka.css] are not declarations:
   > let q = {|[%yuka.css "quoted.css"]|}
   > module Css = [%yuka.css "a.css"]
   > X
-  $ yuka-css k | cut -c1-24
+  $ yuka css --dir k | cut -c1-24
   let sheets = [
     ("a-705346f1.css", "/*
   ]
@@ -205,3 +205,17 @@ Comments and strings that mention [%yuka.css] are not declarations:
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] only one [%yuka.css] per file
   [1]
+
+Only [%yuka.css] is a declaration: [%css "..."] (for example from styled-ppx)
+is left alone by the ppx and by yuka css:
+
+  $ mkdir short && cat > short/s.ml <<'X'
+  > let cls = [%css "display: block"]
+  > let other = [%yuka.cssx "no.css"]
+  > X
+  $ ./pp.exe --impl short/s.ml
+  let cls = [%css "display: block"]
+  let other = [%yuka.cssx "no.css"]
+  $ yuka css --dir short
+  let sheets = [
+  ]

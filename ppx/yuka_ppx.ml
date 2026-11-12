@@ -7,8 +7,72 @@ let has_attr name e =
 let is_jsx = has_attr "JSX"
 let strip_jsx e = { e with pexp_attributes = List.filter (fun (a : attribute) -> a.attr_name.txt <> "JSX") e.pexp_attributes }
 
+type scope = { modules : string list; opens_yuka : bool }
+
+let empty_scope = { modules = []; opens_yuka = false }
+let scope = ref empty_scope
+let depth = ref 0
+let bound : string list ref = ref []
+
+let after_top_item (i : structure_item) =
+  let add_module (mb : module_binding) =
+    match (mb.pmb_name.txt, mb.pmb_expr.pmod_desc) with
+    | Some n, Pmod_ident { txt = Ldot (Lident "Yuka", n'); _ } when n = n' -> ()
+    | Some n, _ -> scope := { !scope with modules = n :: !scope.modules }
+    | None, _ -> ()
+  in
+  match i.pstr_desc with
+  | Pstr_open { popen_expr = { pmod_desc = Pmod_ident { txt = Lident "Yuka"; _ }; _ }; _ } ->
+      scope := { modules = []; opens_yuka = true }
+  | Pstr_open _ -> scope := { !scope with opens_yuka = false }
+  | Pstr_module mb -> add_module mb
+  | Pstr_recmodule mbs -> List.iter add_module mbs
+  | _ -> ()
+
+let pattern_vars p =
+  let names = ref [] in
+  let finder =
+    object
+      inherit Ast_traverse.iter as super
+
+      method! pattern p =
+        (match p.ppat_desc with
+         | Ppat_var { txt; _ } | Ppat_alias (_, { txt; _ }) -> names := txt :: !names
+         | _ -> ());
+        super#pattern p
+    end
+  in
+  finder#pattern p;
+  !names
+
+let binding_vars vbs = List.concat_map (fun (vb : value_binding) -> pattern_vars vb.pvb_pat) vbs
+
+let param_vars params =
+  List.concat_map
+    (fun (p : function_param) -> match p.pparam_desc with Pparam_val (_, _, pat) -> pattern_vars pat | Pparam_newtype _ -> [])
+    params
+
+let within names f =
+  let saved = !bound in
+  bound := names @ saved;
+  Fun.protect ~finally:(fun () -> bound := saved) f
+
+let own_module name = List.mem name !scope.modules
+
 let is_state_path = function
-  | Lident "State" | Ldot (Lident "Yuka", "State") -> true
+  | Lident "State" -> not (own_module "State")
+  | Ldot (Lident "Yuka", "State") -> true
+  | _ -> false
+
+let special_form = function
+  | Ldot (Lident (("Await" | "Show" | "Catch" | "Client") as m), "createElement")
+    when !scope.opens_yuka && not (own_module m) ->
+      Ldot (Ldot (Lident "Yuka", m), "createElement")
+  | path -> path
+
+let yuka_render = function
+  | Ldot (Lident "Yuka", "render") -> true
+  | Lident "render" -> !scope.opens_yuka && not (List.mem "render" !bound)
   | _ -> false
 
 let reads_state e =
@@ -58,7 +122,7 @@ let check_module_state (vb : value_binding) =
   match state_constructor vb.pvb_expr with
   | Some f when Attribute.get shared vb = None ->
       Location.raise_errorf ~loc:vb.pvb_loc
-        "[yuka] A module-level State.%s is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@@@yuka.shared]." f
+        "[yuka] A module-level State.%s is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line." f
   | _ -> ()
 
 let list_expr ~loc xs =
@@ -259,8 +323,8 @@ let rewrite_attribute ~self ~loc tag (label, value) =
       let value = self#expression value in
       let url = Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) in
       let tag_e = estring ~loc tag in
-      let attr = if url then [%expr Yuka.url_attr [%e tag_e]] else [%expr Yuka.attr_unchecked] in
-      let hole_attr = if url then [%expr Yuka.url_hole_attr [%e tag_e]] else [%expr Yuka.hole_attr_unchecked] in
+      let attr = if url then [%expr Yuka.runtime_url_attr [%e tag_e]] else [%expr Yuka.runtime_attr] in
+      let hole_attr = if url then [%expr Yuka.runtime_url_hole_attr [%e tag_e]] else [%expr Yuka.runtime_hole_attr] in
       if hole then
         Plain
           [%expr
@@ -369,7 +433,7 @@ let lower_element ~self ~loc ~fnloc tag args =
         if List.exists reads_state children then [%expr [ Yuka.hole (fun () -> Yuka.text [%e joined]) ]]
         else [%expr [ Yuka.text [%e joined] ]]
   in
-  [%expr Yuka.lower [%e estring ~loc tag] [%e attrs] [%e content]]
+  [%expr Yuka.element [%e estring ~loc tag] [%e attrs] [%e content]]
 
 type part = Child_part of expression | Attribute_part of prop
 
@@ -473,17 +537,17 @@ let emit_template ~loc built parts clones =
     value_binding ~loc ~pat:(pvar ~loc name)
       ~expr:
         [%expr
-          Yuka.template_coded [%e estring ~loc (Template_build.encode built)]
+          Yuka.runtime_template [%e estring ~loc (Template_build.encode built)]
             ~html:[%e estring ~loc (Template_build.html built)]
             ~walk:[%e ints walk] ~kids:[%e ints kids] ~attrs:[%e ints attrs]
             ~values:[%e values] ~clones:[%e eint ~loc clones]]
     :: !hoisted;
   let part = function
-    | Child_part e -> [%expr Yuka.template_child [%e e]]
-    | Attribute_part (Plain e) -> [%expr Yuka.template_attribute [%e e]]
-    | Attribute_part (Maybe e) -> [%expr Yuka.template_attribute_option [%e e]]
+    | Child_part e -> [%expr Yuka.runtime_child [%e e]]
+    | Attribute_part (Plain e) -> [%expr Yuka.runtime_attribute [%e e]]
+    | Attribute_part (Maybe e) -> [%expr Yuka.runtime_attribute_option [%e e]]
   in
-  [%expr Yuka.template_instance [%e evar ~loc name] [%e pexp_array ~loc (List.map part (Array.to_list parts))]]
+  [%expr Yuka.runtime_instance [%e evar ~loc name] [%e pexp_array ~loc (List.map part (Array.to_list parts))]]
 
 let has_literal_sink = function
   | Template_build.Fixed_element { tag; attrs; _ } ->
@@ -509,15 +573,15 @@ let rec lower_shape ~loc parts shape =
       let attr = function
         | Template_build.Fixed (dom, v) ->
             if Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) then
-              Plain [%expr Yuka.url_attr [%e estring ~loc tag] [%e estring ~loc dom] [%e estring ~loc v]]
-            else Plain [%expr Yuka.attr_unchecked [%e estring ~loc dom] [%e estring ~loc v]]
+              Plain [%expr Yuka.runtime_url_attr [%e estring ~loc tag] [%e estring ~loc dom] [%e estring ~loc v]]
+            else Plain [%expr Yuka.runtime_attr [%e estring ~loc dom] [%e estring ~loc v]]
         | Part_attr i -> (
             match parts.(i) with
             | Attribute_part p -> p
             | Child_part _ -> assert false)
       in
       [%expr
-        Yuka.lower [%e estring ~loc tag]
+        Yuka.element [%e estring ~loc tag]
           [%e attributes_expr ~loc (List.map attr attrs)]
           [%e list_expr ~loc (List.map (lower_shape ~loc parts) children)]]
 
@@ -535,7 +599,7 @@ let rewrite_jsx self e =
   match e.pexp_desc with
   | Pexp_apply ({ pexp_desc = Pexp_ident { txt = fn; loc = fnloc }; _ }, args) -> (
       let props, children = split_args args in
-      match fn with
+      match special_form fn with
       | Lident tag when raw_text_element tag ->
           if not (Html.is_html_element tag) then Location.raise_errorf ~loc:fnloc "[yuka] HTML tag '%s' does not exist." tag;
           lower_element ~self ~loc ~fnloc tag args
@@ -593,12 +657,12 @@ let rewrite_jsx self e =
           in
           [%expr Yuka.Catch.make ~fallback:[%e fallback] ~children:(fun () -> [%e kids]) ()]
       | Ldot (Ldot (Lident "Yuka", "Client"), "createElement") ->
-          let loading =
+          let start =
             List.map
               (fun (l, v) ->
                 match l with
-                | Labelled "loading" | Optional "loading" -> (l, self#expression v)
-                | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Client takes no props except loading")
+                | Labelled "start" | Optional "start" -> (l, self#expression v)
+                | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Client takes no props except start")
               props
           in
           (match children with
@@ -616,7 +680,7 @@ let rewrite_jsx self e =
                in
                pexp_apply ~loc
                  (pexp_ident ~loc:cloc { txt = Ldot (path, "island"); loc = cloc })
-                 (loading @ cprops @ slot @ [ (Nolabel, [%expr ()]) ])
+                 (start @ cprops @ slot @ [ (Nolabel, [%expr ()]) ])
            | _ ->
                Location.raise_errorf ~loc:fnloc
                  "[yuka] Yuka.Client needs exactly one child, a component tag such as <M a=1 />")
@@ -641,7 +705,8 @@ let rewrite_jsx self e =
   | _ -> e
 
 let registry_arg = function
-  | Labelled "islands", { pexp_desc = Pexp_ident { txt = Lident "islands"; _ }; pexp_loc = loc; _ } ->
+  | Labelled "islands", { pexp_desc = Pexp_ident { txt = Lident "islands"; _ }; pexp_loc = loc; _ }
+    when not (List.mem "islands" !bound) ->
       (Labelled "islands", [%expr Yuka_islands.registry])
   | arg -> arg
 
@@ -657,7 +722,8 @@ let mapper =
             check_open ~loc:e.pexp_loc o "a local open of Yuka.State";
             super#expression e
         | Pexp_apply
-            (({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Yuka", "render"); _ }; _ } as f), args) ->
+            (({ pexp_desc = Pexp_ident { txt = render; _ }; _ } as f), args)
+          when yuka_render render ->
             let args =
               List.map
                 (fun arg ->
@@ -668,20 +734,47 @@ let mapper =
             { e with pexp_desc = Pexp_apply (f, args) }
         | Pexp_letmodule (n, m, _) when n.txt <> Some "State" && is_yuka_state m ->
             lint_error ~loc:e.pexp_loc "a local alias of Yuka.State"
+        | Pexp_let (rf, vbs, body) ->
+            let names = binding_vars vbs in
+            let vbs = within (if rf = Recursive then names else []) (fun () -> List.map self#value_binding vbs) in
+            let body = within names (fun () -> self#expression body) in
+            { e with pexp_desc = Pexp_let (rf, vbs, body) }
+        | Pexp_function (params, _, _) -> within (param_vars params) (fun () -> super#expression e)
         | _ -> super#expression e
 
+    method! case c = within (pattern_vars c.pc_lhs) (fun () -> super#case c)
+
     method! structure items =
-      List.concat_map
-        (fun item ->
-          let saved = !hoisted in
-          hoisted := [];
-          let item = self#structure_item item in
-          let found = List.rev !hoisted in
-          hoisted := saved;
-          match found with
-          | [] -> [ item ]
-          | _ -> [ pstr_value ~loc:item.pstr_loc Nonrecursive found; item ])
-        items
+      let top = !depth = 0 in
+      let saved_bound = !bound in
+      incr depth;
+      Fun.protect
+        ~finally:(fun () ->
+          decr depth;
+          bound := saved_bound)
+        (fun () ->
+          List.concat_map
+            (fun item ->
+              (match item.pstr_desc with
+               | Pstr_value (Recursive, vbs) -> bound := binding_vars vbs @ !bound
+               | _ -> ());
+              let saved = !hoisted in
+              hoisted := [];
+              let mapped = self#structure_item item in
+              let found = List.rev !hoisted in
+              hoisted := saved;
+              (match item.pstr_desc with
+               | Pstr_value (Nonrecursive, vbs) -> bound := binding_vars vbs @ !bound
+               | _ -> ());
+              if top then after_top_item item;
+              match found with
+              | [] -> [ mapped ]
+              | _ ->
+                  let loc = mapped.pstr_loc in
+                  [ pstr_open ~loc
+                      (open_infos ~loc ~override:Fresh ~expr:(pmod_structure ~loc [ pstr_value ~loc Nonrecursive found ]));
+                    mapped ])
+            items)
 
     method! structure_item i =
       (match i.pstr_desc with
@@ -709,4 +802,11 @@ let () =
   Driver.register_transformation "yuka"
     ~preprocess_impl:Island.check_placement
     ~rules:[ Context_free.Rule.extension Island.extension ]
-    ~impl:(fun s -> mapper#structure (Css_ppx.attach s)) ~intf:mapper#signature
+    ~impl:(fun s ->
+      scope := empty_scope;
+      depth := 0;
+      bound := [];
+      mapper#structure (Css_ppx.attach s))
+    ~intf:(fun s ->
+      scope := empty_scope;
+      mapper#signature s)

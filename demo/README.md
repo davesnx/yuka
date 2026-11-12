@@ -5,10 +5,13 @@ pages, and islands hydrate in the browser.
 
 ## Run
 
-From the repository root:
+From the repository root (`SWITCH=` names the opam switch, `BUILD_DIR=`
+the build directory):
 
-    opam exec --switch=/home/me/workplace/davesnx/utopia -- dune build --build-dir _build_demo @demo/all
-    _build_demo/default/demo/server/demo_server.exe --port 8080
+    make demo-serve PORT=8080
+
+`make demo-dev` runs it under `yuka dev`: it rebuilds, restarts the server
+and reloads the browser on change.
 
 Flags: `--port`, `--js-dir` (Melange output), `--static-dir` (`style.css`),
 `--manifest`, `--metafile`, `--bundle`, `--prerender DIR` (write the
@@ -34,32 +37,32 @@ The data is in memory. Restart the server to reset it.
 
 ## Tests
 
-    opam exec --switch=/home/me/workplace/davesnx/utopia -- dune test --build-dir _build_demo demo --force
+    make demo-test
 
 ## Browser check
 
 It needs playwright-core (see `e2e/README.md`). It builds the demo, starts a
-server on port 8123, runs the check and stops the server:
+server on `PORT` (default 8123), runs the check and stops the server:
 
-    BUILD_DIR=_build_demo e2e/run.sh
+    make e2e
 
 Use a fresh server for each run: the check creates an issue and a comment.
 
 ## Production bundle
 
-    BUILD_DIR=_build_demo demo/bundle.sh
-    _build_demo/default/demo/server/demo_server.exe --bundle
+    make demo-bundle
+    _build/default/demo/server/demo_server.exe --bundle
 
 `bundle.sh` runs `scripts/bundle.ts` (esbuild with `--splitting` and
 `--metafile`, then swc on each file): `main.js`, shared chunks, and one chunk
-per island. The server serves them from `/_yuka/bundle/`
+per island. The server serves them from `/_yuka/app/bundle/`
 and writes no import map. At start it reads `yuka_islands.json` (and
 `meta.json` with `--bundle`) and prints `<link rel="modulepreload">` for each
 island on the page, except those used with `` `Lazy _ ``. Comments, Issue props
 and Related are used with `` `Lazy `Idle ``, `` `Lazy `Interaction `` and
 `` `Lazy `Visible ``.
 
-Routes are defined once in `Routes.ml`. `yuka-routes` writes the shared
+Routes are defined once in `Routes.ml`. `yuka routes` writes the shared
 `Routes` module (in `shared/`, for `Routes.href` in islands) and
 `Routes_server` (in `server/`); `server/demo_server.ml` gives
 `Routes_server.app` to `Yuka_dream.handler`. `client/main.ml` is

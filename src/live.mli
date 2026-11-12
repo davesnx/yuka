@@ -9,11 +9,15 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
     again when a State that the function reads changes the key. Call it
     in a component body; the subscription ends when its owner is disposed.
 
-    - In a server render it reads the state (the current one, else the
-      topic's loader) and, inside an island, writes it in the page with
+    - In a server render it runs the topic's [allow] with the context of
+      the page request ([Failed Forbidden] when it refuses), then reads
+      the state (the current one of the handler's node, else the topic's
+      loader) and, inside an island, writes it in the page with
       a CSRF token for the socket; the client starts from it with no
-      wait. A page that has such a use holds a per-session token, so its
-      route must not use a shared cache.
+      wait. A page that has such a use holds a per-session token and
+      state that [allow] passed for this request, so its route must not
+      use a shared cache (the cycle sends [private, no-store] when the
+      shell has such a use), and it cannot be prerendered.
     - In the browser, one socket serves every use of the page. It opens
       on the first use and closes 2 s after the last one ends.
     - The status is [Loading None] until the first state, then [Ready].
@@ -35,10 +39,16 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
 val status : 's t -> 's Status.t
 (** Tracked read, with the pending {!mutate} changes applied. *)
 
-val mutate : 's t -> ('s -> 's) -> (unit -> 'r Async.t) -> 'r Async.t
-(** [mutate t change run] shows [change] at once and calls [run ()],
-    which should call an action that publishes the new state. When it
-    fails, the change is removed. When it succeeds, the change stays until
+val mutate :
+  ?commit:('r -> 's -> 's) ->
+  's t ->
+  change:('s -> 's) ->
+  (unit -> ('r, Status.error) result Async.t) ->
+  ('r, Status.error) result Async.t
+(** [mutate t ~change run] shows [change] at once and calls [run ()],
+    which should call an action that publishes the new state. On [Error]
+    or a failed [Async], the change is removed. On [Ok result], the change
+    becomes [commit result] (default [change]) and stays until
     the server confirms, on the socket, that every state it had for this
     subscription when the answer arrived was sent: the published state
     then holds the change, in whatever order the HTTP answer and the

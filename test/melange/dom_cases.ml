@@ -54,9 +54,9 @@ let container initial =
   c
 
 let server tree = Private.render_html (fun () -> Private.node tree)
-let div attrs children = lower "div" attrs children
-let span children = lower "span" [] children
-let li key children = lower "li" [ attr "data-key" key ] children
+let div attrs children = element "div" attrs children
+let span children = element "span" [] children
+let li key children = element "li" [ attr "data-key" key ] children
 
 let texts c sel =
   String.concat "," (Array.to_list (Array.map text_content (query_all c sel)))
@@ -76,7 +76,7 @@ let counter () =
     div []
       [
         span [ hole (fun () -> text (ints (State.get n))) ];
-        lower "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ];
+        element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ];
       ]
   in
   (n, tree)
@@ -89,7 +89,7 @@ let hydrate_adopts () =
   let root = first_child c in
   let button = query c "button" in
   let span_text = (child_nodes (query c "span")).(0) in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   same "root kept" root (first_child c);
   same "button kept" button (query c "button");
   same "hole text kept" span_text (child_nodes (query c "span")).(0);
@@ -101,7 +101,7 @@ let hydrate_then_click () =
   let n, tree = counter () in
   let c = container (server (tree ())) in
   let span_text = (child_nodes (query c "span")).(0) in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   click (query c "button");
   click (query c "button");
   check "state" "2" (ints (State.peek n));
@@ -118,6 +118,79 @@ let render_then_click () =
   check "html"
     {|<div><span>1</span><button>+</button></div>|} (html c);
   dispose ()
+
+let handler_batched () =
+  let a = State.make 0 and b = State.make 0 and runs = ref 0 and focused = ref 0 in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        Effect.run (fun () ->
+            ignore (State.get a + State.get b);
+            incr runs);
+        element "div" []
+          [ element "button"
+              [ on "click" (fun _ ->
+                    State.set a 1;
+                    State.set b 1) ]
+              [];
+            element "input"
+              [ on "focus" (fun _ ->
+                    State.set a 2;
+                    State.set b 2;
+                    focused := State.peek a + State.peek b) ]
+              [];
+            hole (fun () -> text (ints (State.get a + State.get b))) ]) in
+  click (query c "button");
+  check "one effect run for two writes in a handler" "2" (ints !runs);
+  check "the DOM after the handler" "2" (text_content (query c "div"));
+  dispatch (query c "input") (nonbubbling "focus");
+  check "one effect run in a direct handler" "3" (ints !runs);
+  check "the writes are visible in the handler" "4" (ints !focused);
+  dispose ()
+
+let container_by_id () =
+  let c = container {|<p id="yuka-container-test">x</p>|} in
+  check "found" "true" (string_of_bool (Option.is_some (Client.container "yuka-container-test")));
+  check "missing" "true" (string_of_bool (Option.is_none (Client.container "yuka-no-such-id")));
+  set_html c ""
+
+let active_id : unit -> string =
+  [%mel.raw {|function () { const e = document.activeElement; return e && e.id ? e.id : "" }|}]
+
+let window_event : string -> unit =
+  [%mel.raw {|function (n) { document.defaultView.dispatchEvent(new document.defaultView.Event(n)) }|}]
+
+let focus_after_update () =
+  let editing = State.make false in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        element "div" []
+          [ element "button"
+              [ on "click" (fun _ ->
+                    State.set editing true;
+                    Browser.focus "yuka-focus-input") ]
+              [];
+            hole (fun () -> if State.get editing then element "input" [ attr "id" "yuka-focus-input" ] [] else empty) ])
+  in
+  click (query c "button");
+  check "focus finds the element that the handler's write creates" "yuka-focus-input" (active_id ());
+  dispose ()
+
+let on_window_batched () =
+  let a = State.make 0 and b = State.make 0 and runs = ref 0 in
+  let (), stop =
+    owner (fun () ->
+        Effect.run (fun () ->
+            ignore (State.get a + State.get b);
+            incr runs);
+        Browser.on_window "yuka-test" (fun _ ->
+            State.set a 1;
+            State.set b 1))
+  in
+  window_event "yuka-test";
+  check "one effect run for two writes in a window handler" "2" (ints !runs);
+  stop ()
 
 let handler_removed_after_dispose () =
   let n, tree = counter () in
@@ -140,7 +213,7 @@ let render_root_then_unmount () =
   click (query c "button");
   click (query c2 "button");
   check "both trees live" "1 1" (ints (State.peek n) ^ " " ^ ints (State.peek m));
-  Yuka.unmount ();
+  Yuka.stop ();
   click (query c "button");
   click (query c2 "button");
   check "no call after unmount" "1 1" (ints (State.peek n) ^ " " ^ ints (State.peek m));
@@ -154,14 +227,14 @@ let render_needs_islands_or_root () =
   check "nothing rendered" "<p>old</p>" (html c);
   check "island options ignored without islands" "ran"
     (invalid (fun () -> Yuka.render ~navigation:false ~transitions:true ~root:(as_element c, tree) ()));
-  Yuka.unmount ()
+  Yuka.stop ()
 
 let hydrate_again_after_dispose () =
   let n, tree = counter () in
   let c = container (server (tree ())) in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   dispose ();
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   click (query c "button");
   check "one call per click" "1" (ints (State.peek n));
   dispose ()
@@ -171,7 +244,7 @@ let two_handlers_in_order () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "button"
+        element "button"
           [
             on "click" (fun _ -> calls := "a" :: !calls);
             on "click" (fun _ -> calls := "b" :: !calls);
@@ -190,7 +263,7 @@ let old_handler_removed_on_hole_rerun () =
     Yuka.Private.render (as_element c) (fun () ->
         hole (fun () ->
             if State.get flag then
-              lower "button" [ on "click" (fun _ -> incr calls) ] []
+              element "button" [ on "click" (fun _ -> incr calls) ] []
             else span []))
   in
   let old = query c "button" in
@@ -207,7 +280,7 @@ let direct_handler () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "input" [ on "focus" (fun _ -> incr calls) ] [])
+        element "input" [ on "focus" (fun _ -> incr calls) ] [])
   in
   let input = query c "input" in
   dispatch input (nonbubbling "focus");
@@ -218,14 +291,14 @@ let direct_handler () =
 
 let each_item_reads_untracked () =
   let other = State.make 0 in
-  let items = State.make [ "a" ] in
+  let items = State.make [| "a" |] in
   let hole_runs = ref 0 in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
         hole (fun () ->
             incr hole_runs;
-            lower "ul" []
+            element "ul" []
               [
                 each ~key:Fun.id
                   (fun () -> State.get items)
@@ -235,7 +308,7 @@ let each_item_reads_untracked () =
   check "first" "1" (ints !hole_runs);
   State.set other 1;
   check "enclosing hole did not re-run" "1" (ints !hole_runs);
-  State.set items [ "a"; "b" ];
+  State.set items [| "a"; "b" |];
   State.set other 2;
   check "still not after an update" "1" (ints !hole_runs);
   check "items render" "a0,b1" (texts c "li");
@@ -263,7 +336,7 @@ let hole_swaps_element () =
           [
             hole (fun () ->
                 if State.get flag then span [ text "s" ]
-                else lower "p" [] [ text "p" ]);
+                else element "p" [] [ text "p" ]);
             text "!";
           ])
   in
@@ -302,7 +375,7 @@ let dynamic_attributes () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "input"
+        element "input"
           [
             hole_attr "value" (fun () -> Some (State.get v));
             hole_attr "title" (fun () -> State.get title);
@@ -329,7 +402,7 @@ let dynamic_attributes () =
   dispose ()
 
 let item_view log (id, label) =
-  li id [ hole (fun () -> text label); lower "b" [] [] ]
+  li id [ hole (fun () -> text label); element "b" [] [] ]
   |> fun el ->
   Effect.run ~cleanup:(fun () -> log := ("gone " ^ id) :: !log) (fun () -> ());
   el
@@ -338,12 +411,12 @@ let order c = texts c "li"
 
 let each_identity_default () =
   let a = ("a", "A") and b = ("b", "B") in
-  let items = State.make [ a; b ] in
+  let items = State.make [| a; b |] in
   let renders = ref [] in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "ul" []
+        element "ul" []
           [
             each ~key:fst
               (fun () -> State.get items)
@@ -354,49 +427,49 @@ let each_identity_default () =
   in
   let node k = query c ("[data-key=" ^ k ^ "]") in
   let li_a = node "a" in
-  State.set items [ b; a ];
+  State.set items [| b; a |];
   check "same items moved, not rendered" "a,b" (String.concat "," (List.rev !renders));
   same "a kept" li_a (node "a");
-  State.set items [ ("b", "B"); a ];
+  State.set items [| ("b", "B"); a |];
   check "a new tuple with equal contents renders again" "a,b,b"
     (String.concat "," (List.rev !renders));
   check "order" "B,A" (order c);
   dispose ()
 
 let keyed_list () =
-  let items = State.make [ ("a", "A"); ("b", "B"); ("c", "C"); ("d", "D") ] in
+  let items = State.make [| ("a", "A"); ("b", "B"); ("c", "C"); ("d", "D") |] in
   let log = ref [] in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "ul" []
+        element "ul" []
           [ each ~equal:( = ) ~key:fst (fun () -> State.get items) (item_view log) ])
   in
   let node k = query c ("[data-key=" ^ k ^ "]") in
   let a, b, cc, d = (node "a", node "b", node "c", node "d") in
   check "start" "A,B,C,D" (order c);
-  State.set items [ ("d", "D"); ("c", "C"); ("b", "B"); ("a", "A") ];
+  State.set items [| ("d", "D"); ("c", "C"); ("b", "B"); ("a", "A") |];
   check "reversed" "D,C,B,A" (order c);
   same "a kept" a (node "a");
   same "b kept" b (node "b");
   same "c kept" cc (node "c");
   same "d kept" d (node "d");
-  State.set items [ ("d", "D"); ("x", "X"); ("b", "B"); ("a", "A") ];
+  State.set items [| ("d", "D"); ("x", "X"); ("b", "B"); ("a", "A") |];
   check "removed and inserted" "D,X,B,A" (order c);
   check "removed owner disposed" "gone c" (String.concat "," !log);
   same "b still kept" b (node "b");
-  State.set items [ ("d", "D"); ("x", "X"); ("b", "B2"); ("a", "A") ];
+  State.set items [| ("d", "D"); ("x", "X"); ("b", "B2"); ("a", "A") |];
   check "value changed" "D,X,B2,A" (order c);
   same "a kept after change" a (node "a");
   same "d kept after change" d (node "d");
   check "re-render disposed old item" "gone b,gone c" (String.concat "," !log);
-  State.set items [];
+  State.set items [||];
   check "emptied" "" (order c);
   check "all disposed" 
     "gone a,gone b,gone x,gone d,gone b,gone c"
     (String.concat "," !log);
   check "no markers" "<ul></ul>" (html c);
-  State.set items [ ("a", "A") ];
+  State.set items [| ("a", "A") |];
   check "refilled" "A" (order c);
   dispose ()
 
@@ -406,10 +479,10 @@ let keyed_list_shuffle () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "ul" []
+        element "ul" []
           [
             each ~key:Fun.id
-              (fun () -> State.get items)
+              (fun () -> Array.of_list (State.get items))
               (fun id -> li id [ text id ]);
           ])
   in
@@ -428,15 +501,45 @@ let keyed_list_shuffle () =
   same "a kept" (List.hd before) (node "a");
   dispose ()
 
+let each_source_mutated_in_place () =
+  let first = [| "a"; "b"; "c" |] in
+  let items = State.make first in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        element "ul" [] [ each ~key:Fun.id (fun () -> State.get items) (fun id -> li id [ text id ]) ])
+  in
+  let node k = query c ("[data-key=" ^ k ^ "]") in
+  let a, b, cc = (node "a", node "b", node "c") in
+  first.(0) <- "x";
+  check "a write into the array is not seen" "a,b,c" (order c);
+  State.set items [| "a"; "b"; "c"; "d" |];
+  check "the previous state is the rendered rows" "a,b,c,d" (order c);
+  same "a kept" a (node "a");
+  let swapped = Array.copy (State.peek items) in
+  swapped.(1) <- "c";
+  swapped.(2) <- "b";
+  State.set items swapped;
+  check "swap" "a,c,b,d" (order c);
+  same "b moved" b (node "b");
+  same "c moved" cc (node "c");
+  swapped.(0) <- "z";
+  State.set items swapped;
+  check "the same array again is no change" "a,c,b,d" (order c);
+  State.set items (Array.copy swapped);
+  check "a copy of it is" "z,c,b,d" (order c);
+  same "c kept" cc (node "c");
+  dispose ()
+
 let adjacent_texts_hydrate () =
-  let tree () = div [] [ text "a"; text "b"; text ""; text "c"; lower "i" [] [] ] in
+  let tree () = div [] [ text "a"; text "b"; text ""; text "c"; element "i" [] [] ] in
   let c = container (server (tree ())) in
   check "server html" "<div>a<!---->b<!---->c<i></i></div>" (html c);
   let root = first_child c in
   let a = (child_nodes root).(0) in
   let b = (child_nodes root).(2) in
   let before = Array.length (child_nodes root) in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   same "a adopted" a (child_nodes root).(0);
   same "b adopted" b (child_nodes root).(2);
   check "one empty text created" (ints (before + 1))
@@ -453,16 +556,16 @@ let adjacent_texts_hydrate () =
 
 let hydrate_server_output () =
   let n = State.make 1 in
-  let items = State.make [ ("a", "A"); ("b", "B") ] in
+  let items = State.make [| ("a", "A"); ("b", "B") |] in
   let tree () =
     div [ hole_attr "title" (fun () -> Some (ints (State.get n))) ]
       [
         text "x";
         text "y";
         hole (fun () -> text (ints (State.get n)));
-        lower "ul" []
+        element "ul" []
           [ each ~equal:( = ) ~key:fst (fun () -> State.get items) (fun (k, v) -> li k [ text v ]) ];
-        lower "button" [ on "click" (fun _ -> State.update n succ) ] [ text "go" ];
+        element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "go" ];
       ]
   in
   let c = container (server (tree ())) in
@@ -471,21 +574,21 @@ let hydrate_server_output () =
   let ul = query c "ul" in
   let li_a = query c "[data-key=a]" in
   let li_b = query c "[data-key=b]" in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   check "html after hydrate" server_html (html c);
   same "root" root (first_child c);
   same "ul" ul (query c "ul");
   same "li a" li_a (query c "[data-key=a]");
   click (query c "button");
   check "title updated" "2" (Option.value (get_attribute root "title") ~default:"");
-  State.set items [ ("b", "B"); ("c", "C"); ("a", "A") ];
+  State.set items [| ("b", "B"); ("c", "C"); ("a", "A") |];
   check "list updated" "B,C,A" (order c);
   same "li a moved not recreated" li_a (query c "[data-key=a]");
   same "li b kept" li_b (query c "[data-key=b]");
   dispose ()
 
 let svg_ns = "http://www.w3.org/2000/svg"
-let svg_el tag attrs children = lower tag attrs children
+let svg_el tag attrs children = element tag attrs children
 
 let svg_render () =
   let c = container "" in
@@ -534,7 +637,7 @@ let svg_hydrate () =
   let s = query c "svg" in
   let p = query c "path" in
   check "parsed ns" svg_ns (namespace_uri p);
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   same "svg adopted" s (query c "svg");
   same "path adopted" p (query c "path");
   check "one path" "1" (ints (Array.length (query_all c "path")));
@@ -545,7 +648,7 @@ let await_tree ?failed a =
     [
       text "a";
       Await.make ?failed ~async:a ~loading:(span [ text "wait" ])
-        ~children:(fun n -> lower "b" [] [ text (ints n) ])
+        ~children:(fun n -> element "b" [] [ text (ints n) ])
         ();
       text "b";
     ]
@@ -564,7 +667,7 @@ let await_fails () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        await_tree ~failed:(fun m -> lower "i" [] [ text m ]) a)
+        await_tree ~failed:(fun m -> element "i" [] [ text m ]) a)
   in
   fail "boom";
   check "failed" "<div>a<!--[--><i>boom</i><!--]-->b</div>" (html c);
@@ -582,7 +685,7 @@ let await_hydrates_settled () =
   check "server html" "<div>a<!--[--><b>3</b><!--]-->b</div>" (html c);
   let root = first_child c in
   let b = query c "b" in
-  let dispose = Yuka.Client.hydrate (as_element c) (fun () -> await_tree a) in
+  let dispose = Yuka.Private.hydrate (as_element c) (fun () -> await_tree a) in
   same "root adopted" root (first_child c);
   same "settled element adopted" b (query c "b");
   check "html" "<div>a<!--[--><b>3</b><!--]-->b</div>" (html c);
@@ -592,7 +695,7 @@ let await_hydrates_pending_then_settles () =
   let a, resolve, _ = Async.make () in
   let c = container (server (await_tree a)) in
   let loading = query c "span" in
-  let dispose = Yuka.Client.hydrate (as_element c) (fun () -> await_tree a) in
+  let dispose = Yuka.Private.hydrate (as_element c) (fun () -> await_tree a) in
   same "loading adopted" loading (query c "span");
   resolve 9;
   check "settled" "<div>a<!--[--><b>9</b><!--]-->b</div>" (html c);
@@ -606,14 +709,14 @@ let stop_propagation_and_tag () =
     Yuka.Private.render (as_element c) (fun () ->
         div [ on "click" (fun _ -> add "outer") ]
           [
-            lower "button"
+            element "button"
               [
                 on "click" (fun e ->
                     add (Event.target_tag e);
                     Event.stop_propagation e);
               ]
               [];
-            lower "i" [] [];
+            element "i" [] [];
           ])
   in
   click (query c "button");
@@ -641,7 +744,7 @@ let modifiers () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "button"
+        element "button"
           [
             on "click" (fun e ->
                 seen :=
@@ -662,9 +765,9 @@ let browser_functions () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            lower "input" [ attr "id" "name" ] [];
-            lower "div" [ attr "id" "far" ] [];
-            lower "button"
+            element "input" [ attr "id" "name" ] [];
+            element "div" [ attr "id" "far" ] [];
+            element "button"
               [
                 on "click" (fun _ ->
                     Browser.focus "name";
@@ -688,15 +791,15 @@ let textarea_hydrate () =
   let tree () =
     div []
       [
-        lower "textarea" [ attr "value" "fixed" ] [];
-        lower "textarea" [ hole_attr "value" (fun () -> Some (State.get v)) ] [];
+        element "textarea" [ attr "value" "fixed" ] [];
+        element "textarea" [ hole_attr "value" (fun () -> Some (State.get v)) ] [];
       ]
   in
   let c = container (server (tree ())) in
   check "server html" "<div><textarea>fixed</textarea><textarea>one</textarea></div>" (html c);
   let areas = query_all c "textarea" in
   let texts = Array.map first_child areas in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   check "static value" "fixed" (value areas.(0));
   check "hole value" "one" (value areas.(1));
   same "text node 1 kept" texts.(0) (first_child areas.(0));
@@ -710,9 +813,9 @@ let textarea_hydrate () =
 
 let select_hydrate () =
   let v = State.make "b" in
-  let option_ k = lower "option" [ attr "value" k ] [ text (String.uppercase_ascii k) ] in
+  let option_ k = element "option" [ attr "value" k ] [ text (String.uppercase_ascii k) ] in
   let tree () =
-    lower "select" [ hole_attr "value" (fun () -> Some (State.get v)) ]
+    element "select" [ hole_attr "value" (fun () -> Some (State.get v)) ]
       [ option_ "a"; option_ "b"; option_ "c" ]
   in
   let c = container (server (tree ())) in
@@ -721,7 +824,7 @@ let select_hydrate () =
     (html c);
   let select = query c "select" in
   let options = query_all c "option" in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   same "select kept" select (query c "select");
   same "option kept" options.(1) (query_all c "option").(1);
   check "selected matches" "b" (value select);
@@ -736,7 +839,7 @@ let checked_property () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "input"
+        element "input"
           [
             attr "type" "checkbox";
             hole_attr "checked" (fun () -> if State.get on_ then Some "" else None);
@@ -762,10 +865,10 @@ let selected_property () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "select" []
+        element "select" []
           [
-            lower "option" [ attr "value" "a" ] [ text "A" ];
-            lower "option"
+            element "option" [ attr "value" "a" ] [ text "A" ];
+            element "option"
               [
                 attr "value" "b";
                 hole_attr "selected" (fun () -> if State.get on_ then Some "" else None);
@@ -794,7 +897,7 @@ let templates_created : unit -> int = [%mel.raw "function () { return globalThis
 let now : unit -> float = [%mel.raw "function () { return performance.now() }"]
 
 let row_shape =
-  Template.(
+  Private.Template.(
     element "li"
       [ fixed "class" "r"; part_attr 0; part_attr 1 ]
       [ element "span" [] [ part 2 ]; element "b" [] [ text "x"; text "y" ] ])
@@ -806,11 +909,11 @@ let row ?(wrap = true) ?(template = row_template) count title =
   let click = on "click" (fun _ -> State.update count succ) in
   let count_hole = hole (fun () -> text (ints (State.get count))) in
   if wrap then
-    Template.(instance template [| attribute title_attr; attribute click; child count_hole |])
+    runtime_instance template [| runtime_attribute title_attr; runtime_attribute click; runtime_child count_hole |]
   else
-    lower "li"
+    element "li"
       [ attr "class" "r"; title_attr; click ]
-      [ span [ count_hole ]; lower "b" [] [ text "x"; text "y" ] ]
+      [ span [ count_hole ]; element "b" [] [ text "x"; text "y" ] ]
 
 let template_same_output () =
   let render_row wrap =
@@ -850,11 +953,11 @@ let template_works () =
 let template_cached () =
   count_templates ();
   let template = Private.template row_shape in
-  let items = State.make [ 1; 2; 3 ] in
+  let items = State.make [| 1; 2; 3 |] in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "ul" []
+        element "ul" []
           [
             each ~key:ints
               (fun () -> State.get items)
@@ -862,7 +965,7 @@ let template_cached () =
           ])
   in
   check "three rows" "3" (ints (Array.length (query_all c "li")));
-  State.set items [ 1; 2; 3; 4; 5 ];
+  State.set items [| 1; 2; 3; 4; 5 |];
   check "five rows" "5" (ints (Array.length (query_all c "li")));
   check "one template element for the template" "1" (ints (templates_created ()));
   dispose ()
@@ -874,7 +977,7 @@ let template_in_hydrate () =
   let li = query c "li" in
   let b = query c "b" in
   count_templates ();
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   same "li adopted" li (query c "li");
   same "b adopted" b (query c "b");
   check "no template cloned when hydrating" "0" (ints (templates_created ()));
@@ -889,10 +992,10 @@ let template_timing () =
     let t0 = now () in
     let dispose =
       Yuka.Private.render (as_element c) (fun () ->
-          lower "ul" []
+          element "ul" []
             [
               each ~key:ints
-                (fun () -> List.init rows Fun.id)
+                (fun () -> Array.init rows Fun.id)
                 (fun i -> row ~wrap (State.make i) (State.make "t"));
             ])
     in
@@ -908,19 +1011,19 @@ let template_timing () =
   Printf.printf "timing: %d rows, best of 5: plain %.1f ms, template %.1f ms\n" rows without_t with_t;
   check "same output" (snd (run false)) (snd (run true))
 
-let slot_a = Private.template Template.(element "div" [] [ element "i" [] []; part 0 ])
-let slot_b = Private.template Template.(element "section" [] [ element "i" [] []; part 0 ])
+let slot_a = Private.template Private.Template.(element "div" [] [ element "i" [] []; part 0 ])
+let slot_b = Private.template Private.Template.(element "section" [] [ element "i" [] []; part 0 ])
 
 let template_with_slot () =
-  let content = Slot.make (lower "p" [] [ text "x" ]) in
+  let content = Slot.make (element "p" [] [ text "x" ]) in
   let wrap = State.make true in
   let view slot =
-    lower "main" []
+    element "main" []
       [
         hole (fun () ->
-            Template.instance
+            runtime_instance
               (if State.get wrap then slot_a else slot_b)
-              [| Template.child (Yuka.slot slot) |]);
+              [| runtime_child (Yuka.slot slot) |]);
       ]
   in
   let c = container (server (view content)) in
@@ -928,7 +1031,7 @@ let template_with_slot () =
   let client =
     match Codec.decode Codec.slot `Null with Ok s -> s | Error m -> raise (Cases.Failed m)
   in
-  let dispose = Yuka.Client.hydrate (as_element c) (fun () -> view client) in
+  let dispose = Yuka.Private.hydrate (as_element c) (fun () -> view client) in
   same "adopted" p (query c "p");
   State.set wrap false;
   same "moved into the new template" p (query c "p");
@@ -947,7 +1050,7 @@ let render_html tree =
 let template_clone_same_dom () =
   let t =
     Private.template
-      Template.(
+      Private.Template.(
         (element "p" []
            [ text "a"; part 0; text "b"; part 1; text "c"; part 2; part 3; text "d";
              element "i" [] []; part 4 ]))
@@ -968,27 +1071,27 @@ let template_clone_same_dom () =
     (fun (name, kids) ->
       let kid i = List.nth kids i in
       let by_hand () =
-        lower "p" []
+        element "p" []
           [ text "a"; kid 0; text "b"; kid 1; text "c"; kid 2; kid 3; text "d";
-            lower "i" [] []; kid 4 ]
+            element "i" [] []; kid 4 ]
       in
-      let instance () = Template.instance t (Array.of_list (List.map Template.child kids)) in
+      let instance () = runtime_instance t (Array.of_list (List.map runtime_child kids)) in
       let expected = server (by_hand ()) in
       check ("clone " ^ name) expected (render_html instance);
-      check ("lower " ^ name) expected (render_html by_hand);
+      check ("element " ^ name) expected (render_html by_hand);
       let c = container expected in
-      let dispose = Yuka.Client.hydrate (as_element c) instance in
+      let dispose = Yuka.Private.hydrate (as_element c) instance in
       check ("hydrate " ^ name) expected (html c);
       dispose ())
     cases
 
 let svg_template () =
-  let t = Private.template Template.(element "circle" [ fixed "r" "1"; part_attr 0 ] []) in
+  let t = Private.template Private.Template.(element "circle" [ fixed "r" "1"; part_attr 0 ] []) in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "svg" []
-          [ Template.(instance t [| attribute (hole_attr "cx" (fun () -> Some "2")) |]) ])
+        element "svg" []
+          [ runtime_instance t [| runtime_attribute (hole_attr "cx" (fun () -> Some "2")) |] ])
   in
   let circle = query c "circle" in
   check "svg namespace" "http://www.w3.org/2000/svg" (namespace_uri circle);
@@ -997,11 +1100,11 @@ let svg_template () =
 
 let only_child_hole_hydrates () =
   let s = State.make "x" in
-  let tree () = lower "p" [] [ hole (fun () -> text (State.get s)) ] in
+  let tree () = element "p" [] [ hole (fun () -> text (State.get s)) ] in
   let c = container (server (tree ())) in
   check "server html has no markers" "<p>x</p>" (html c);
   let t = first_child (query c "p") in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   same "text adopted" t (first_child (query c "p"));
   State.set s "y";
   check "updated in place" "<p>y</p>" (html c);
@@ -1009,12 +1112,12 @@ let only_child_hole_hydrates () =
   dispose ();
   let e = State.make "" in
   let tree () =
-    lower "p" []
+    element "p" []
       [ hole (fun () -> if State.get e = "el" then span [ text "s" ] else text (State.get e)) ]
   in
   let c = container (server (tree ())) in
   check "empty text writes nothing" "<p></p>" (html c);
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   check "one empty text node" "1" (ints (Array.length (child_nodes (query c "p"))));
   State.set e "z";
   check "text set" "<p>z</p>" (html c);
@@ -1027,25 +1130,25 @@ let only_child_hole_hydrates () =
 let list_clear_disposes () =
   let run sibling =
     let gone = ref 0 in
-    let items = State.make [ 1; 2; 3; 4 ] in
+    let items = State.make [| 1; 2; 3; 4 |] in
     let c = container "" in
     let dispose =
       Yuka.Private.render (as_element c) (fun () ->
-          lower "ul" []
+          element "ul" []
             ([ each ~key:ints
                  (fun () -> State.get items)
                  (fun i ->
                    Effect.run ~cleanup:(fun () -> incr gone) (fun () -> ());
                    li (ints i) [ text (ints i) ]) ]
-            @ if sibling then [ lower "i" [] [] ] else []))
+            @ if sibling then [ element "i" [] [] ] else []))
     in
-    State.set items [];
+    State.set items [||];
     check "every row disposed" "4" (ints !gone);
     check "rows removed" "" (order c);
     let after_clear = html c in
-    State.set items [ 5; 6 ];
+    State.set items [| 5; 6 |];
     check "refilled" "5,6" (order c);
-    State.set items [ 7 ];
+    State.set items [| 7 |];
     check "replaced" "7" (order c);
     check "replaced rows disposed" "6" (ints !gone);
     dispose ();
@@ -1056,11 +1159,11 @@ let list_clear_disposes () =
   check "with a sibling: markers stay" "<ul><!--[--><!--]--><i></i></ul>" (run true)
 
 let row_root_removed_in_one_call () =
-  let items = State.make [ "a"; "b"; "c" ] in
+  let items = State.make [| "a"; "b"; "c" |] in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "ul" []
+        element "ul" []
           [ each ~key:Fun.id
               (fun () -> State.get items)
               (fun k ->
@@ -1068,13 +1171,13 @@ let row_root_removed_in_one_call () =
   in
   check "no row markers" {|<ul><li data-key="a">a</li><li data-key="b">b</li><li data-key="c">c</li></ul>|}
     (html c);
-  State.set items [ "a"; "c" ];
+  State.set items [| "a"; "c" |];
   check "one removed" {|<ul><li data-key="a">a</li><li data-key="c">c</li></ul>|} (html c);
-  State.set items [ "c"; "f"; "a" ];
+  State.set items [| "c"; "f"; "a" |];
   check "fragment row has markers"
     {|<ul><li data-key="c">c</li><!--[-->f1<li data-key="f"></li><!--]--><li data-key="a">a</li></ul>|}
     (html c);
-  State.set items [ "f"; "a" ];
+  State.set items [| "f"; "a" |];
   check "moved range" {|<ul><!--[-->f1<li data-key="f"></li><!--]--><li data-key="a">a</li></ul>|}
     (html c);
   dispose ()
@@ -1083,56 +1186,54 @@ external select_value : node -> string = "value" [@@mel.get]
 
 let template_select_value () =
   let t =
-    Private.template Template.(element "select" [ fixed "value" "b" ] [ part 0 ])
+    Private.template Private.Template.(element "select" [ fixed "value" "b" ] [ part 0 ])
   in
-  let opt v = lower "option" [ attr "value" v ] [ text v ] in
+  let opt v = element "option" [ attr "value" v ] [ text v ] in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        Template.(
-          instance t
-            [| child (each ~key:Fun.id (fun () -> [ "a"; "b"; "c" ]) opt) |]))
+        runtime_instance t [| runtime_child (each ~key:Fun.id (fun () -> [| "a"; "b"; "c" |]) opt) |])
   in
   check "value set after options mount" "b" (select_value (query c "select"));
   dispose ()
 
 let parser_changes () =
   let x () = text "x" in
-  let cases : (string * Template.shape * (unit -> client element list) * (client element list -> client element)) list =
-    Template.
+  let cases : (string * Private.Template.shape * (unit -> client element list) * (client element list -> client element)) list =
+    Private.Template.
       [
         ( "table gets a tbody",
           element "table" [] [ element "tr" [] [ element "td" [] [ part 0 ] ] ],
           (fun () -> [ x () ]),
-          fun k -> lower "table" [] [ lower "tr" [] [ lower "td" [] k ] ] );
+          fun k -> Yuka.element "table" [] [ Yuka.element "tr" [] [ Yuka.element "td" [] k ] ] );
         ( "p closed by div",
           element "p" [] [ element "div" [] [ part 0 ] ],
           (fun () -> [ x () ]),
-          fun k -> lower "p" [] [ lower "div" [] k ] );
+          fun k -> Yuka.element "p" [] [ Yuka.element "div" [] k ] );
         ( "template element",
           element "div" [] [ element "template" [] [ element "i" [] [ part 0 ] ] ],
           (fun () -> [ x () ]),
-          fun k -> lower "div" [] [ lower "template" [] [ lower "i" [] k ] ] );
+          fun k -> Yuka.element "div" [] [ Yuka.element "template" [] [ Yuka.element "i" [] k ] ] );
         ( "pre leading newline",
           element "pre" [] [ text "\n"; part 0; text "y" ],
           (fun () -> [ x () ]),
-          fun k -> lower "pre" [] ([ Yuka.text "\n" ] @ k @ [ Yuka.text "y" ]) );
+          fun k -> Yuka.element "pre" [] ([ Yuka.text "\n" ] @ k @ [ Yuka.text "y" ]) );
         ( "textarea leading newline",
           element "div" [] [ element "textarea" [] [ text "\nv" ]; part 0 ],
           (fun () -> [ x () ]),
-          fun k -> lower "div" [] (lower "textarea" [] [ Yuka.text "\nv" ] :: k) );
+          fun k -> Yuka.element "div" [] (Yuka.element "textarea" [] [ Yuka.text "\nv" ] :: k) );
         ( "body at the root",
           element "body" [] [ element "i" [] [ part 0 ] ],
           (fun () -> [ x () ]),
-          fun k -> lower "body" [] [ lower "i" [] k ] );
+          fun k -> Yuka.element "body" [] [ Yuka.element "i" [] k ] );
         ( "carriage return",
           element "p" [] [ text "a\r\nb"; part 0 ],
           (fun () -> [ x () ]),
-          fun k -> lower "p" [] (Yuka.text "a\r\nb" :: k) );
+          fun k -> Yuka.element "p" [] (Yuka.text "a\r\nb" :: k) );
         ( "style text is not escaped",
           element "div" [] [ element "style" [] [ text "a > b {color:red}" ]; part 0 ],
           (fun () -> [ x () ]),
-          fun k -> lower "div" [] (lower "style" [] [ Yuka.text "a > b {color:red}" ] :: k) );
+          fun k -> Yuka.element "div" [] (Yuka.element "style" [] [ Yuka.text "a > b {color:red}" ] :: k) );
       ]
   in
   let wrong = ref [] in
@@ -1142,21 +1243,21 @@ let parser_changes () =
       let t = Private.template shape in
       let expected = render_html (fun () -> by_hand (kids ())) in
       let got =
-        try render_html (fun () -> Template.instance t (Array.of_list (List.map Template.child (kids ()))))
+        try render_html (fun () -> runtime_instance t (Array.of_list (List.map runtime_child (kids ()))))
         with e -> "raised " ^ Printexc.to_string e
       in
       check ("parser: " ^ name) expected got;
       let t2 = Private.template shape in
-      ignore (try render_html (fun () -> Template.instance t2 (Array.of_list (List.map Template.child (kids ())))) with _ -> "");
+      ignore (try render_html (fun () -> runtime_instance t2 (Array.of_list (List.map runtime_child (kids ())))) with _ -> "");
       check ("parser, second use: " ^ name) expected
-        (try render_html (fun () -> Template.instance t2 (Array.of_list (List.map Template.child (kids ()))))
+        (try render_html (fun () -> runtime_instance t2 (Array.of_list (List.map runtime_child (kids ()))))
          with e -> "raised " ^ Printexc.to_string e))
     cases;
-  Cases.check "parser: cases that differ from lower" "" (String.concat ", " (List.rev !wrong));
+  Cases.check "parser: cases that differ from element" "" (String.concat ", " (List.rev !wrong));
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        Template.instance (Private.template Template.(element "style" [] [ text "a > b {color:red}" ])) [||])
+        runtime_instance (Private.template Private.Template.(element "style" [] [ text "a > b {color:red}" ])) [||])
   in
   check "style text content" "a > b {color:red}" (text_content (query c "style"));
   dispose ()
@@ -1175,16 +1276,16 @@ let hydrate_logged server_html tree =
   append (body ()) island;
   set_html island server_html;
   capture_warnings ();
-  let dispose = Yuka.Client.hydrate (as_element island) tree in
+  let dispose = Yuka.Private.hydrate (as_element island) tree in
   let logged = warnings () in
   let after = html island in
   dispose ();
   (logged, after)
 
 let mismatch_log () =
-  let p children = lower "p" [] children in
+  let p children = element "p" [] children in
   let match_tree () =
-    div [] [ span [ text "a" ]; p [ hole (fun () -> text "b") ]; lower "i" [] [] ]
+    div [] [ span [ text "a" ]; p [ hole (fun () -> text "b") ]; element "i" [] [] ]
   in
   let logged, _ = hydrate_logged (server (match_tree ())) match_tree in
   check "a match logs nothing" "" logged;
@@ -1219,7 +1320,7 @@ let mismatch_log () =
     logged;
   let logged, _ =
     hydrate_logged "<section><div><p>x</p><p>y</p></div></section>" (fun () ->
-        lower "section" [] [ div [] [ p [ text "x" ]; p [ text "z" ] ] ])
+        element "section" [] [ div [] [ p [ text "x" ]; p [ text "z" ] ] ])
   in
   check "short path"
     {|yuka: hydration mismatch in island T.Island at section > div > p:2: expected "z", found "y"|}
@@ -1236,7 +1337,7 @@ let clear_sheets : unit -> unit =
 
 let css_render () =
   clear_sheets ();
-  let x = stylesheet "/_yuka/css/x.css" in
+  let x = runtime_stylesheet "/_yuka/css/x.css" in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
@@ -1251,7 +1352,7 @@ let count_sheets : string -> int =
 
 let css_present () =
   clear_sheets ();
-  let x = stylesheet "/_yuka/css/x.css" and y = stylesheet "/_yuka/css/y.css" in
+  let x = runtime_stylesheet "/_yuka/css/x.css" and y = runtime_stylesheet "/_yuka/css/y.css" in
   let c = container {|<link rel="stylesheet" href="/_yuka/css/x.css" data-yuka-css><div id="t"></div>|} in
   let dispose =
     Yuka.Private.render (as_element (query c "#t")) (fun () -> div [] [ use_css x (span [ text "a" ]); use_css y (span [ text "b" ]) ])
@@ -1271,7 +1372,7 @@ let count_queries : (unit -> unit) -> int =
 
 let css_no_scan () =
   clear_sheets ();
-  let x = stylesheet "/_yuka/css/x.css" in
+  let x = runtime_stylesheet "/_yuka/css/x.css" in
   let c = container "" in
   let n =
     count_queries (fun () ->
@@ -1303,7 +1404,7 @@ let apply_stream : string -> string -> string -> unit =
 
 let css_loading_fill () =
   clear_sheets ();
-  let x = stylesheet "/_yuka/css/x.css" in
+  let x = runtime_stylesheet "/_yuka/css/x.css" in
   let a, resolve, _ = Async.make () in
   let chunks = ref [] in
   let write c =
@@ -1329,14 +1430,14 @@ let css_loading_fill () =
 
 let css_hydrate_rows () =
   clear_sheets ();
-  let x = stylesheet "/_yuka/css/x.css" in
+  let x = runtime_stylesheet "/_yuka/css/x.css" in
   let tree () =
-    lower "ul" [] [ each ~key:Fun.id (fun () -> [ "a"; "b" ]) (fun k -> use_css x (li k [ text k ])) ]
+    element "ul" [] [ each ~key:Fun.id (fun () -> [| "a"; "b" |]) (fun k -> use_css x (li k [ text k ])) ]
   in
   let c = container (Private.render_html (fun () -> Private.node (tree ()))) in
   let server_html = html c in
   let a = query c "[data-key=a]" in
-  let dispose = Yuka.Client.hydrate (as_element c) tree in
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
   check "rows adopted as printed" server_html (html c);
   same "row a" a (query c "[data-key=a]");
   check "the client adds the link" "/_yuka/css/x.css" (head_sheets ());
@@ -1349,9 +1450,9 @@ let client_urls () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            lower "a" [ hole_attr "href" (fun () -> Some (State.get url)) ] [ text "a" ];
-            lower "iframe" [ attr "src" "java\tscript:alert(1)" ] [];
-            lower "a" [ attr "title" "javascript:x" ] [ text "b" ];
+            element "a" [ hole_attr "href" (fun () -> Some (State.get url)) ] [ text "a" ];
+            element "iframe" [ attr "src" "java\tscript:alert(1)" ] [];
+            element "a" [ attr "title" "javascript:x" ] [ text "b" ];
           ])
   in
   let first = html c in
@@ -1369,12 +1470,12 @@ let client_urls () =
 
 let style_hole_hydrates () =
   let c = State.make "red" in
-  let tree () = div [] [ lower "style" [] [ hole (fun () -> text ("a{color:" ^ State.get c ^ "}</style>")) ] ] in
+  let tree () = div [] [ element "style" [] [ hole (fun () -> text ("a{color:" ^ State.get c ^ "}</style>")) ] ] in
   let box = container (server (tree ())) in
   let before = html box in
   let text_node = (child_nodes (query box "style")).(0) in
   capture_warnings ();
-  let dispose = Yuka.Client.hydrate (as_element box) tree in
+  let dispose = Yuka.Private.hydrate (as_element box) tree in
   check "no hydration mismatch" "" (warnings ());
   same "text node kept" text_node (child_nodes (query box "style")).(0);
   State.set c "blue";
@@ -1385,7 +1486,7 @@ let style_hole_hydrates () =
 
 let client_script_children () =
   let box = container "" in
-  match Yuka.Private.render (as_element box) (fun () -> lower "script" [] [ text "a"; text "b" ]) with
+  match Yuka.Private.render (as_element box) (fun () -> element "script" [] [ text "a"; text "b" ]) with
   | dispose ->
       dispose ();
       raise (Cases.Failed "two texts in a script were accepted")
@@ -1397,21 +1498,21 @@ let client_url_case () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            lower "a" [ attr "HREF" "javascript:alert(1)" ] [];
-            lower "img" [ attr "Src" "data:image/png;base64,iVBORw0KGgo=" ] [];
-            lower "iframe" [ url_attr "iframe" "SRC" "data:text/html,x" ] [];
+            element "a" [ attr "HREF" "javascript:alert(1)" ] [];
+            element "img" [ attr "Src" "data:image/png;base64,iVBORw0KGgo=" ] [];
+            element "iframe" [ runtime_url_attr "iframe" "SRC" "data:text/html,x" ] [];
           ])
   in
   check "case and data" {|<div><a href="about:blank#blocked"></a><img src="data:image/png;base64,iVBORw0KGgo="><iframe src="about:blank#blocked"></iframe></div>|} (html c);
   dispose ();
-  match attr_unchecked "FormAction" "/x" with
+  match runtime_attr "FormAction" "/x" with
   | _ -> raise (Cases.Failed "attr_unchecked took a URL name")
   | exception Js.Exn.Error _ -> ()
 
 let client_raw_text () =
   let c = container "" in
   let dispose =
-    Yuka.Private.render (as_element c) (fun () -> lower "style" [] [ text "a > b { color: red }" ])
+    Yuka.Private.render (as_element c) (fun () -> element "style" [] [ text "a > b { color: red }" ])
   in
   check "style text node is raw" "a > b { color: red }" (text_content (query c "style"));
   dispose ()
@@ -1426,10 +1527,10 @@ let client_attribute_names () =
   List.iter
     (fun name ->
       refused ("attr " ^ name) (fun () -> attr name "x");
-      refused ("url_attr " ^ name) (fun () -> url_attr "a" name "x");
+      refused ("url_attr " ^ name) (fun () -> runtime_url_attr "a" name "x");
       refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun () -> None));
-      refused ("attr_unchecked " ^ name) (fun () -> attr_unchecked name "x");
-      refused ("hole_attr_unchecked " ^ name) (fun () -> hole_attr_unchecked name (fun () -> None)))
+      refused ("attr_unchecked " ^ name) (fun () -> runtime_attr name "x");
+      refused ("hole_attr_unchecked " ^ name) (fun () -> runtime_hole_attr name (fun () -> None)))
     [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a/b"; "a=b"; "a<b"; "a>b"; "a'b"; "a\x01b"; "a\x7fb" ]
 
 let client_srcdoc () =
@@ -1439,15 +1540,15 @@ let client_srcdoc () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            lower "iframe" [ attr "srcdoc" "<script>alert(1)</script>" ] [];
-            lower "IFRAME" [ hole_attr "SrcDoc" (fun () -> Some (State.get v)) ] [];
+            element "iframe" [ attr "srcdoc" "<script>alert(1)</script>" ] [];
+            element "IFRAME" [ hole_attr "SrcDoc" (fun () -> Some (State.get v)) ] [];
           ])
   in
   check "srcdoc is empty" {|<div><iframe srcdoc=""></iframe><iframe srcdoc=""></iframe></div>|} (html c);
   State.set v "<b>";
   check "still empty" {|<div><iframe srcdoc=""></iframe><iframe srcdoc=""></iframe></div>|} (html c);
   dispose ();
-  refused "srcdoc unchecked" (fun () -> attr_unchecked "srcdoc" "x")
+  refused "srcdoc unchecked" (fun () -> runtime_attr "srcdoc" "x")
 
 let client_script_src () =
   let c = container "" in
@@ -1455,11 +1556,11 @@ let client_script_src () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            lower "script" [ url_attr "script" "src" "data:text/javascript,alert(1)" ] [];
-            lower "svg" []
+            element "script" [ runtime_url_attr "script" "src" "data:text/javascript,alert(1)" ] [];
+            element "svg" []
               [
-                lower "script" [ url_attr "script" "href" "data:text/javascript,alert(1)" ] [];
-                lower "script" [ url_attr "script" "xlink:href" "javascript:alert(1)" ] [];
+                element "script" [ runtime_url_attr "script" "href" "data:text/javascript,alert(1)" ] [];
+                element "script" [ runtime_url_attr "script" "xlink:href" "javascript:alert(1)" ] [];
               ];
           ])
   in
@@ -1471,13 +1572,13 @@ let client_animation_names () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        lower "svg" []
+        element "svg" []
           [
-            lower "feColorMatrix" [ attr_unchecked "values" matrix ] [];
-            lower "feColorMatrix" [ attr "values" matrix ] [];
-            lower "p" [ hole_attr_unchecked "to" (fun () -> Some "a") ] [];
-            lower "animate" [ url_attr "animate" "values" "javascript:alert(1)" ] [];
-            lower "set" [ attr "to" "javascript:alert(1)" ] [];
+            element "feColorMatrix" [ runtime_attr "values" matrix ] [];
+            element "feColorMatrix" [ attr "values" matrix ] [];
+            element "p" [ runtime_hole_attr "to" (fun () -> Some "a") ] [];
+            element "animate" [ runtime_url_attr "animate" "values" "javascript:alert(1)" ] [];
+            element "set" [ attr "to" "javascript:alert(1)" ] [];
           ])
   in
   check "values outside animations"
@@ -1486,31 +1587,31 @@ let client_animation_names () =
   dispose ()
 
 let client_hand_written_template () =
-  let t = template_of_shape Template.(element "a" [ fixed "href" "javascript:alert(1)"; fixed "title" "javascript:x" ] []) in
+  let t = Private.template Private.Template.(element "a" [ fixed "href" "javascript:alert(1)"; fixed "title" "javascript:x" ] []) in
   check "client-only render" {|<a href="about:blank#blocked" title="javascript:x"></a>|}
-    (render_html (fun () -> Template.instance t [||]));
-  let t = template_of_shape Template.(element "iframe" [ fixed "SRCDOC" "<script>alert(1)</script>" ] []) in
-  check "srcdoc" {|<iframe srcdoc=""></iframe>|} (render_html (fun () -> Template.instance t [||]));
-  refused "a bad name" (fun () -> template_of_shape Template.(element "a" [ fixed "x onclick=alert(1)" "" ] []))
+    (render_html (fun () -> runtime_instance t [||]));
+  let t = Private.template Private.Template.(element "iframe" [ fixed "SRCDOC" "<script>alert(1)</script>" ] []) in
+  check "srcdoc" {|<iframe srcdoc=""></iframe>|} (render_html (fun () -> runtime_instance t [||]));
+  refused "a bad name" (fun () -> Private.template Private.Template.(element "a" [ fixed "x onclick=alert(1)" "" ] []))
 
 let client_tag_names () =
   List.iter
     (fun tag ->
-      refused ("render " ^ tag) (fun () -> render_html (fun () -> lower tag [] []));
-      refused ("render in svg " ^ tag) (fun () -> render_html (fun () -> lower "svg" [] [ lower tag [] [] ]));
-      refused ("template_of_shape " ^ tag) (fun () -> template_of_shape Template.(element "div" [] [ element tag [] [] ])))
+      refused ("render " ^ tag) (fun () -> render_html (fun () -> element tag [] []));
+      refused ("render in svg " ^ tag) (fun () -> render_html (fun () -> element "svg" [] [ element tag [] [] ]));
+      refused ("Private.template " ^ tag) (fun () -> Private.template Private.Template.(element "div" [] [ element tag [] [] ])))
     [ "img src=x onerror=alert(1)"; "x><script>alert(1)</script"; "svg\x0c"; "" ];
-  check "valid tags" {|<my-widget-2></my-widget-2>|} (render_html (fun () -> lower "my-widget-2" [] []))
+  check "valid tags" {|<my-widget-2></my-widget-2>|} (render_html (fun () -> element "my-widget-2" [] []))
 
 let client_event_names () =
   List.iter
     (fun name ->
       refused ("attr " ^ name) (fun () -> attr name "alert(1)");
-      refused ("url_attr " ^ name) (fun () -> url_attr "img" name "alert(1)");
+      refused ("url_attr " ^ name) (fun () -> runtime_url_attr "img" name "alert(1)");
       refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun () -> None));
-      refused ("url_hole_attr " ^ name) (fun () -> url_hole_attr "img" name (fun () -> None));
-      refused ("attr_unchecked " ^ name) (fun () -> attr_unchecked name "alert(1)");
-      refused ("hole_attr_unchecked " ^ name) (fun () -> hole_attr_unchecked name (fun () -> None)))
+      refused ("url_hole_attr " ^ name) (fun () -> runtime_url_hole_attr "img" name (fun () -> None));
+      refused ("attr_unchecked " ^ name) (fun () -> runtime_attr name "alert(1)");
+      refused ("hole_attr_unchecked " ^ name) (fun () -> runtime_hole_attr name (fun () -> None)))
     [ "onfocus"; "onerror"; "ONCLICK"; "onbegin" ]
 
 let client_base_href () =
@@ -1520,8 +1621,8 @@ let client_base_href () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            lower "base" [ url_attr "base" "href" "https://evil.example/" ] [];
-            lower "base" [ url_hole_attr "base" "HREF" (fun () -> Some (State.get v)) ] [];
+            element "base" [ runtime_url_attr "base" "href" "https://evil.example/" ] [];
+            element "base" [ runtime_url_hole_attr "base" "HREF" (fun () -> Some (State.get v)) ] [];
           ])
   in
   check "base href is empty" {|<div><base href=""><base href=""></div>|} (html c);
@@ -1529,22 +1630,22 @@ let client_base_href () =
   check "still empty" {|<div><base href=""><base href=""></div>|} (html c);
   dispose ();
   check "a hand-written template" {|<base href="">|}
-    (render_html (fun () -> Template.instance (template_of_shape Template.(element "base" [ fixed "href" "/app/" ] [])) [||]))
+    (render_html (fun () -> runtime_instance (Private.template Private.Template.(element "base" [ fixed "href" "/app/" ] [])) [||]))
 
 let client_sink_urls () =
   let v = State.make "https://evil.example/" in
-  let t = template_of_shape Template.(element "iframe" [ part_attr 0 ] []) in
+  let t = Private.template Private.Template.(element "iframe" [ part_attr 0 ] []) in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            lower "base" [ hole_attr "href" (fun () -> Some (State.get v)) ] [];
-            lower "iframe" [ attr "src" "data:text/html,<script>alert(1)</script>" ] [];
-            lower "script" [ attr "src" "data:text/javascript,alert(1)" ] [];
-            lower "img" [ attr "src" "data:image/png;base64,iVBORw0KGgo=" ] [];
-            lower "a" [ attr "href" "data:text/html,x" ] [];
-            Template.instance t [| Template.attribute (attr "src" "data:text/html,x") |];
+            element "base" [ hole_attr "href" (fun () -> Some (State.get v)) ] [];
+            element "iframe" [ attr "src" "data:text/html,<script>alert(1)</script>" ] [];
+            element "script" [ attr "src" "data:text/javascript,alert(1)" ] [];
+            element "img" [ attr "src" "data:image/png;base64,iVBORw0KGgo=" ] [];
+            element "a" [ attr "href" "data:text/html,x" ] [];
+            runtime_instance t [| runtime_attribute (attr "src" "data:text/html,x") |];
           ])
   in
   let expected =
@@ -1561,13 +1662,17 @@ let client_raw_text_namespaces () =
       refused name (fun () -> render_html tree);
       refused ("server: " ^ name) (fun () -> server (tree ())))
     [
-      ("two texts in svg > style", fun () -> lower "svg" [] [ lower "style" [] [ text "a"; text "b" ] ]);
-      ("an element in math > script", fun () -> lower "math" [] [ lower "script" [] [ lower "b" [] [] ] ]);
-      ("two texts in SCRIPT", fun () -> lower "SCRIPT" [] [ text "a"; text "b" ]);
+      ("two texts in svg > style", fun () -> element "svg" [] [ element "style" [] [ text "a"; text "b" ] ]);
+      ("an element in math > script", fun () -> element "math" [] [ element "script" [] [ element "b" [] [] ] ]);
+      ("two texts in SCRIPT", fun () -> element "SCRIPT" [] [ text "a"; text "b" ]);
     ]
 
 let all =
   [
+    ("handlers run in a batch", handler_batched);
+    ("container by id", container_by_id);
+    ("focus after the update of a handler", focus_after_update);
+    ("window handlers run in a batch", on_window_batched);
     ("client: attribute names are refused", client_attribute_names);
     ("client: srcdoc is empty", client_srcdoc);
     ("client: script src and href", client_script_src);
@@ -1603,6 +1708,7 @@ let all =
     ("dom keyed list", keyed_list);
     ("dom each compares items by identity", each_identity_default);
     ("dom keyed list shuffle", keyed_list_shuffle);
+    ("dom each source mutated in place", each_source_mutated_in_place);
     ("dom adjacent and empty texts hydrate", adjacent_texts_hydrate);
     ("dom hydrate server output", hydrate_server_output);
     ("css: two uses add one link", css_render);

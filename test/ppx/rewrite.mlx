@@ -87,9 +87,9 @@ let slot_one = <Yuka.Client><Slotted label="a"><p>"x"</p></Slotted></Yuka.Client
 
 let slot_many = <Yuka.Client><Slotted label="a">"text" <b>"y"</b> <Yuka.Client><Slotted label="in" /></Yuka.Client></Slotted></Yuka.Client>
 
-let loading = <Yuka.Client loading=`Visible><Slotted label="a" /></Yuka.Client>
+let start = <Yuka.Client start=`Visible><Slotted label="a" /></Yuka.Client>
 
-let loading_optional = <Yuka.Client ?loading><Slotted label="a" /></Yuka.Client>
+let start_optional = <Yuka.Client ?start><Slotted label="a" /></Yuka.Client>
 
 let select_value = <select value="a"><option value="a">"A"</option></select>
 
@@ -136,7 +136,7 @@ let partial_islands = Yuka.render ~islands
 let partial_nav = Yuka.render ~navigation:false
 let explicit = Yuka.render ~islands:other ()
 let optional = Yuka.render ?islands ()
-let () = Yuka.render ~islands:(Yuka.Client.registry []) ()
+let () = Yuka.render ~islands:(Yuka.runtime_registry []) ()
 let () = Yuka.owner ~islands ()
 let () = render ~islands ()
 
@@ -154,7 +154,7 @@ let caught = <Yuka.Catch fallback=(fun ~error ~reset:_ -> <p>(Yuka.text error)</
 let shown = <Yuka.Show status=s loading="l">(fun d -> <b>(Yuka.text d)</b>)</Yuka.Show>
 
 type signup = { name : string; age : int; plan : Plan.t; news : bool; tags : string list } [@@deriving form]
-let signup_form_view = <Yuka.Form action=signup_action>(fun form -> <input name="name" value=(Yuka.Form.value form Name) />)</Yuka.Form>
+let signup_form_view = <Yuka.Form action=signup_action>(fun form -> <input name="name" value=(Yuka.Form.value form `Name) />)</Yuka.Form>
 
 let url_attrs u = <a href=u title=u>"x"</a>
 let script_text = <div><script>{|a < b && "</script>"|}</script><style>"p > a {}"</style></div>

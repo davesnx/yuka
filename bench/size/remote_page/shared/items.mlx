@@ -5,6 +5,6 @@ let%client make () =
   <ul>
     (Yuka.hole (fun () ->
          match Yuka.Remote.status r with
-         | Yuka.Status.Ready { data; _ } -> Yuka.list (List.map (fun s -> <li>(Yuka.text s)</li>) data)
+         | Yuka.Status.Ready { data; _ } -> Yuka.fragment (List.map (fun s -> <li>(Yuka.text s)</li>) data)
          | _ -> Yuka.empty))
   </ul>

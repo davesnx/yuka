@@ -2,7 +2,9 @@
 
 type 'o t
 
-type retry = { attempts : int; delay_ms : int -> int }
+type retry
+
+val retry : attempts:int -> delay_ms:(int -> int) -> retry
 (** [attempts] more tries after the first; [delay_ms n] waits before try
     [n + 1]. *)
 
@@ -43,9 +45,15 @@ val refetch : 'o t -> unit
 val invalidate : (_, _, [ `Query ]) Action.t -> unit
 (** {!refetch} every mounted use of this query, for every input. *)
 
-val mutate : 'o t -> ('o -> 'o) -> ?commit:('r -> 'o -> 'o) -> (unit -> 'r Async.t) -> 'r Async.t
-(** [mutate r change run] shows [change] on the data at once, then calls
-    [run ()]. When it succeeds the change is removed and the data becomes
-    [commit result data] (default [change data]); when it fails the
-    change is removed (rollback). A new answer while the change is pending
-    gets the change on top. The result is the [Async] of [run ()]. *)
+val mutate :
+  ?commit:('r -> 'o -> 'o) ->
+  'o t ->
+  change:('o -> 'o) ->
+  (unit -> ('r, Status.error) result Async.t) ->
+  ('r, Status.error) result Async.t
+(** [mutate r ~change run] shows [change] on the data at once, then calls
+    [run ()], for example an {!Action.call}. On [Ok result] the change is
+    removed and the data becomes [commit result data] (default
+    [change data]); on [Error] or a failed [Async] the change is removed
+    (rollback). A new answer while the change is pending gets the change
+    on top. The result is the [Async] of [run ()]. *)

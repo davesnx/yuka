@@ -34,7 +34,7 @@ let script_urls =
 let data_urls = [ "data:text/html,<script>alert(1)</script>"; " DATA:text/html;base64,PHNjcmlwdD4="; "da\tta:text/html,x" ]
 let safe = [ "https://example.com/a"; "/issue/1"; "#top"; "mailto:a@b.c"; "javascript"; "./javascript:x" ]
 let escaped v = String.concat "&lt;" (String.split_on_char '<' (String.concat "&amp;" (String.split_on_char '&' v)))
-let one tag name v = html (lower tag [ attr name v ] [])
+let one tag name v = html (element tag [ attr name v ] [])
 let blocked tag name = Printf.sprintf {|<%s %s="about:blank#blocked">|} tag name
 let kept tag name v = Printf.sprintf {|<%s %s="%s">|} tag name (escaped v)
 
@@ -75,59 +75,59 @@ let data_scheme () =
     data_urls
 
 let printer_paths () =
-  raises "attr_unchecked refuses a URL name" (fun () -> attr_unchecked "href" "/x");
-  raises "attr_unchecked refuses any case" (fun () -> attr_unchecked "SRC" "/x");
-  raises "hole_attr_unchecked refuses a URL name" (fun () -> hole_attr_unchecked "formaction" (fun () -> None));
+  raises "attr_unchecked refuses a URL name" (fun () -> runtime_attr "href" "/x");
+  raises "attr_unchecked refuses any case" (fun () -> runtime_attr "SRC" "/x");
+  raises "hole_attr_unchecked refuses a URL name" (fun () -> runtime_hole_attr "formaction" (fun () -> None));
   check_client "a dynamic attribute" {|<a href="about:blank#blocked">x</a>|}
-    (lower "a" [ hole_attr "href" (fun () -> Some " javascript:x") ] [ text "x" ]);
+    (element "a" [ hole_attr "href" (fun () -> Some " javascript:x") ] [ text "x" ]);
   let t =
-    Template.make
-      (Template.element "form" [ Template.fixed "action" "javascript:alert(1)"; Template.part_attr 0 ] [])
+    Private.Template.make
+      (Private.Template.element "form" [ Private.Template.fixed "action" "javascript:alert(1)"; Private.Template.part_attr 0 ] [])
       ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
   in
   check_html "a template: fixed and part" {|<form action="about:blank#blocked" formaction="about:blank#blocked"></form>|}
-    (Template.instance t [| Template.attribute (attr "formaction" "vbscript:x") |])
+    (runtime_instance t [| runtime_attribute (attr "formaction" "vbscript:x") |])
 
 let attribute_names () =
   List.iter
     (fun name ->
-      raises ("printer: " ^ String.escaped name) (fun () -> html (lower "a" [ attr name "x" ] []));
-      raises ("hole: " ^ String.escaped name) (fun () -> print_client (lower "a" [ hole_attr name (fun () -> Some "x") ] []));
-      raises ("unchecked: " ^ String.escaped name) (fun () -> attr_unchecked name "x");
-      raises ("hole unchecked: " ^ String.escaped name) (fun () -> hole_attr_unchecked name (fun () -> None));
-      raises ("template: " ^ String.escaped name) (fun () -> template_of_shape Template.(element "a" [ fixed name "x" ] [])))
+      raises ("printer: " ^ String.escaped name) (fun () -> html (element "a" [ attr name "x" ] []));
+      raises ("hole: " ^ String.escaped name) (fun () -> print_client (element "a" [ hole_attr name (fun () -> Some "x") ] []));
+      raises ("unchecked: " ^ String.escaped name) (fun () -> runtime_attr name "x");
+      raises ("hole unchecked: " ^ String.escaped name) (fun () -> runtime_hole_attr name (fun () -> None));
+      raises ("template: " ^ String.escaped name) (fun () -> Private.template Private.Template.(element "a" [ fixed name "x" ] [])))
     [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
-  check_html "a valid name" {|<a data-x:y_z.1="x"></a>|} (lower "a" [ attr "data-x:y_z.1" "x" ] [])
+  check_html "a valid name" {|<a data-x:y_z.1="x"></a>|} (element "a" [ attr "data-x:y_z.1" "x" ] [])
 
 let srcdoc () =
   let v = "<script>alert(1)</script>" in
-  check_html "a dynamic srcdoc is empty" {|<iframe srcdoc=""></iframe>|} (lower "iframe" [ attr "srcdoc" v ] []);
-  check_html "any case" {|<IFRAME SrcDoc=""></IFRAME>|} (lower "IFRAME" [ attr "SrcDoc" v ] []);
+  check_html "a dynamic srcdoc is empty" {|<iframe srcdoc=""></iframe>|} (element "iframe" [ attr "srcdoc" v ] []);
+  check_html "any case" {|<IFRAME SrcDoc=""></IFRAME>|} (element "IFRAME" [ attr "SrcDoc" v ] []);
   check_client "a srcdoc hole is empty" {|<iframe srcdoc=""></iframe>|}
-    (lower "iframe" [ hole_attr "srcdoc" (fun () -> Some v) ] []);
+    (element "iframe" [ hole_attr "srcdoc" (fun () -> Some v) ] []);
   check_html "mlx: a srcdoc value is empty" {|<iframe srcdoc=""></iframe>|} <iframe srcdoc=v />;
   check_html "mlx: a literal srcdoc is kept" {|<iframe srcdoc="&lt;b>hi&lt;/b>"></iframe>|}
     <iframe srcdoc="<b>hi</b>" />;
-  check_html "srcdoc on another element is not HTML" {|<p srcdoc="&lt;b>"></p>|} (lower "p" [ attr "srcdoc" "<b>" ] []);
-  raises "srcdoc unchecked" (fun () -> attr_unchecked "srcdoc" v);
-  raises "srcdoc hole unchecked" (fun () -> hole_attr_unchecked "SRCDOC" (fun () -> None))
+  check_html "srcdoc on another element is not HTML" {|<p srcdoc="&lt;b>"></p>|} (element "p" [ attr "srcdoc" "<b>" ] []);
+  raises "srcdoc unchecked" (fun () -> runtime_attr "srcdoc" v);
+  raises "srcdoc hole unchecked" (fun () -> runtime_hole_attr "SRCDOC" (fun () -> None))
 
 let animation_names () =
   let matrix = "0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0 0 0 1 0" in
   let expected = Printf.sprintf {|<svg><feColorMatrix type="matrix" values="%s"></feColorMatrix></svg>|} matrix in
   check_html "mlx: feColorMatrix values" expected <svg><feColorMatrix type_="matrix" values=matrix /></svg>;
   check_html "attr_unchecked values" expected
-    (lower "svg" [] [ lower "feColorMatrix" [ attr_unchecked "type" "matrix"; attr_unchecked "values" matrix ] [] ]);
+    (element "svg" [] [ element "feColorMatrix" [ runtime_attr "type" "matrix"; runtime_attr "values" matrix ] [] ]);
   check_client "hole_attr_unchecked to" {|<p to="a" from="b" by="c"></p>|}
-    (lower "p" [ hole_attr_unchecked "to" (fun () -> Some "a"); attr_unchecked "from" "b"; attr_unchecked "by" "c" ] []);
+    (element "p" [ runtime_hole_attr "to" (fun () -> Some "a"); runtime_attr "from" "b"; runtime_attr "by" "c" ] []);
   check_html "values on animate is still checked" {|<animate values="about:blank#blocked"></animate>|}
-    (lower "animate" [ attr "values" "javascript:alert(1)" ] [])
+    (element "animate" [ attr "values" "javascript:alert(1)" ] [])
 
 let hand_written_template () =
-  let t = template_of_shape Template.(element "a" [ fixed "href" "javascript:alert(1)"; fixed "title" "javascript:x" ] []) in
-  check_html "a fixed script URL" {|<a href="about:blank#blocked" title="javascript:x"></a>|} (Template.instance t [||]);
-  let t = template_of_shape Template.(element "iframe" [ fixed "srcdoc" "<script>alert(1)</script>" ] []) in
-  check_html "a fixed srcdoc in a hand-written template" {|<iframe srcdoc=""></iframe>|} (Template.instance t [||])
+  let t = Private.template Private.Template.(element "a" [ fixed "href" "javascript:alert(1)"; fixed "title" "javascript:x" ] []) in
+  check_html "a fixed script URL" {|<a href="about:blank#blocked" title="javascript:x"></a>|} (runtime_instance t [||]);
+  let t = Private.template Private.Template.(element "iframe" [ fixed "srcdoc" "<script>alert(1)</script>" ] []) in
+  check_html "a fixed srcdoc in a hand-written template" {|<iframe srcdoc=""></iframe>|} (runtime_instance t [||])
 
 let bad_tags = [ "img src=x onerror=alert(1)"; "x><script>alert(1)</script"; "svg\x0c"; ""; "1a"; "-a"; "a_b"; "a:b" ]
 
@@ -135,42 +135,42 @@ let tag_names () =
   List.iter
     (fun tag ->
       let name = String.escaped tag in
-      raises ("lower: " ^ name) (fun () -> html (lower tag [] []));
-      raises ("nested: " ^ name) (fun () -> html (lower "div" [] [ lower tag [] [] ]));
-      raises ("client print: " ^ name) (fun () -> print_client (lower tag [] []));
-      raises ("raw text: " ^ name) (fun () -> html (lower "svg" [] [ lower tag [] [ text "x" ] ]));
-      raises ("template_of_shape: " ^ name) (fun () -> template_of_shape Template.(element "div" [] [ element tag [] [] ]));
+      raises ("element: " ^ name) (fun () -> html (element tag [] []));
+      raises ("nested: " ^ name) (fun () -> html (element "div" [] [ element tag [] [] ]));
+      raises ("client print: " ^ name) (fun () -> print_client (element tag [] []));
+      raises ("raw text: " ^ name) (fun () -> html (element "svg" [] [ element tag [] [ text "x" ] ]));
+      raises ("Private.template: " ^ name) (fun () -> Private.template Private.Template.(element "div" [] [ element tag [] [] ]));
       let t =
-        Template.make (Template.element tag [ Template.fixed "class" "c" ] []) ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
+        Private.Template.make (Private.Template.element tag [ Private.Template.fixed "class" "c" ] []) ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
       in
-      raises ("template: " ^ name) (fun () -> html (Template.instance t [||])))
+      raises ("template: " ^ name) (fun () -> html (runtime_instance t [||])))
     bad_tags;
   check_html "valid tags" {|<my-widget-2></my-widget-2><svg><feColorMatrix></feColorMatrix></svg><H1></H1>|}
-    (fragment [ lower "my-widget-2" [] []; lower "svg" [] [ lower "feColorMatrix" [] [] ]; lower "H1" [] [] ])
+    (fragment [ element "my-widget-2" [] []; element "svg" [] [ element "feColorMatrix" [] [] ]; element "H1" [] [] ])
 
 let event_names () =
   List.iter
     (fun name ->
-      raises ("printer: " ^ name) (fun () -> html (lower "img" [ attr name "alert(1)" ] []));
-      raises ("hole: " ^ name) (fun () -> print_client (lower "img" [ hole_attr name (fun () -> Some "alert(1)") ] []));
-      raises ("url_attr: " ^ name) (fun () -> html (lower "img" [ url_attr "img" name "alert(1)" ] []));
-      raises ("unchecked: " ^ name) (fun () -> attr_unchecked name "alert(1)");
-      raises ("hole unchecked: " ^ name) (fun () -> hole_attr_unchecked name (fun () -> None));
-      raises ("template: " ^ name) (fun () -> template_of_shape Template.(element "img" [ fixed name "alert(1)" ] [])))
+      raises ("printer: " ^ name) (fun () -> html (element "img" [ attr name "alert(1)" ] []));
+      raises ("hole: " ^ name) (fun () -> print_client (element "img" [ hole_attr name (fun () -> Some "alert(1)") ] []));
+      raises ("url_attr: " ^ name) (fun () -> html (element "img" [ runtime_url_attr "img" name "alert(1)" ] []));
+      raises ("unchecked: " ^ name) (fun () -> runtime_attr name "alert(1)");
+      raises ("hole unchecked: " ^ name) (fun () -> runtime_hole_attr name (fun () -> None));
+      raises ("template: " ^ name) (fun () -> Private.template Private.Template.(element "img" [ fixed name "alert(1)" ] [])))
     [ "onfocus"; "onerror"; "ONCLICK"; "onbegin"; "On"; "one" ];
   check_html "names that do not start with on" {|<p data-onclick="x" o="2" no="3"></p>|}
-    (lower "p" [ attr "data-onclick" "x"; attr "o" "2"; attr "no" "3" ] [])
+    (element "p" [ attr "data-onclick" "x"; attr "o" "2"; attr "no" "3" ] [])
 
 let base_href () =
   let v = "https://evil.example/" in
-  check_html "a dynamic base href is empty" {|<base href="">|} (lower "base" [ attr "href" v ] []);
-  check_html "any case" {|<BASE HREF="">|} (lower "BASE" [ attr "HREF" v ] []);
-  check_client "a base href hole" {|<base href="">|} (lower "base" [ hole_attr "href" (fun () -> Some v) ] []);
+  check_html "a dynamic base href is empty" {|<base href="">|} (element "base" [ attr "href" v ] []);
+  check_html "any case" {|<BASE HREF="">|} (element "BASE" [ attr "HREF" v ] []);
+  check_client "a base href hole" {|<base href="">|} (element "base" [ hole_attr "href" (fun () -> Some v) ] []);
   check_html "mlx: a base href value" {|<base href="">|} <base href=v />;
   check_html "mlx: a literal base href is kept" {|<base href="/app/">|} <base href="/app/" />;
   check_html "a hand-written template" {|<base href="">|}
-    (Template.instance (template_of_shape Template.(element "base" [ fixed "href" "/app/" ] [])) [||]);
-  check_html "href on a link is a URL, not a base" {|<a href="https://evil.example/"></a>|} (lower "a" [ attr "href" v ] [])
+    (runtime_instance (Private.template Private.Template.(element "base" [ fixed "href" "/app/" ] [])) [||]);
+  check_html "href on a link is a URL, not a base" {|<a href="https://evil.example/"></a>|} (element "a" [ attr "href" v ] [])
 
 let mlx () =
   let url = "java\tscript:alert(1)" in
@@ -183,39 +183,39 @@ let mlx () =
 let raw_text () =
   check_html "script text is not HTML-escaped, its end tag and <!-- are made safe"
     {|<script>if (a < b && c > d) { s = "<\/script><b>"; t = '<\/SCRIPT '; } <\!-- x</script>|}
-    (lower "script" [] [ text {|if (a < b && c > d) { s = "</script><b>"; t = '</SCRIPT '; } <!-- x|} ]);
+    (element "script" [] [ text {|if (a < b && c > d) { s = "</script><b>"; t = '</SCRIPT '; } <!-- x|} ]);
   check_html "a module script" {|<script type="module">a<\/script></script>|}
-    (lower "script" [ attr "type" "module" ] [ text "a</script>" ]);
+    (element "script" [ attr "type" "module" ] [ text "a</script>" ]);
   check_html "style text" {|<style>a > b { content: "<\/style>"; } <!-- kept</style>|}
-    (lower "style" [] [ text {|a > b { content: "</style>"; } <!-- kept|} ]);
+    (element "style" [] [ text {|a > b { content: "</style>"; } <!-- kept|} ]);
   check_html "a JSON script: every < is \\u003c"
     {|<script type="application/json">{"a":"\u003c/script>\u003c!--"}</script>|}
-    (lower "script" [ attr "type" "application/json" ] [ text {|{"a":"</script><!--"}|} ]);
+    (element "script" [ attr "type" "application/json" ] [ text {|{"a":"</script><!--"}|} ]);
   check_html "an import map" {|<script type="importmap">{"imports":{"\u003ca":"/x"}}</script>|}
-    (lower "script" [ attr "type" "importmap" ] [ text {|{"imports":{"<a":"/x"}}|} ]);
+    (element "script" [ attr "type" "importmap" ] [ text {|{"imports":{"<a":"/x"}}|} ]);
   check_client "one hole: one text, no markers" {|<script>a && "<\/script>"</script>|}
-    (lower "script" [] [ hole (fun () -> text {|a && "</script>"|}) ]);
+    (element "script" [] [ hole (fun () -> text {|a && "</script>"|}) ]);
   check_html "mlx: texts and a value joined, then made safe as one string"
     {|<div><script>x = 1 < 2 && "<\/script>"</script><style>p > a {} <\/style></style></div>|}
     (let tail = "/style>" in
      <div><script>{|x = 1 < 2 && "</script>"|}</script><style>"p > a {} <"(Yuka.text tail)</style></div>);
   check_html "inside svg, style is foreign content: escaped"
     {|<svg><style>&lt;img src=x onerror=alert(1)&gt;</style></svg>|}
-    (lower "svg" [] [ lower "style" [] [ text "<img src=x onerror=alert(1)>" ] ]);
+    (element "svg" [] [ element "style" [] [ text "<img src=x onerror=alert(1)>" ] ]);
   check_html "inside math, script is escaped" {|<math><script>a &lt; b</script></math>|}
-    (lower "math" [] [ lower "script" [] [ text "a < b" ] ]);
+    (element "math" [] [ element "script" [] [ text "a < b" ] ]);
   check_html "foreignObject is HTML again" {|<svg><foreignObject><style>a > b</style></foreignObject></svg>|}
-    (lower "svg" [] [ lower "foreignObject" [] [ lower "style" [] [ text "a > b" ] ] ]);
+    (element "svg" [] [ element "foreignObject" [] [ element "style" [] [ text "a > b" ] ] ]);
   check_html "mlx: style in svg" {|<svg><style>&lt;img src=x onerror=alert(1)&gt;</style></svg>|}
     (let user = "<img src=x onerror=alert(1)>" in
      <svg><style>(Yuka.text user)</style></svg>);
   let t =
-    Template.make
-      (Template.element "svg" [] [ Template.part 0 ])
+    Private.Template.make
+      (Private.Template.element "svg" [] [ Private.Template.part 0 ])
       ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
   in
   check_html "a template svg with a style part" {|<svg><style>&lt;b&gt;</style></svg>|}
-    (Template.instance t [| Template.child (lower "style" [] [ text "<b>" ]) |]);
+    (runtime_instance t [| runtime_child (element "style" [] [ text "<b>" ]) |]);
   check_html "raw text inside noscript: every </ is escaped"
     {|<noscript><style><\/noscript><img src=x onerror=alert(1)></style></noscript>|}
     (let user = "</noscript><img src=x onerror=alert(1)>" in
@@ -223,49 +223,49 @@ let raw_text () =
   List.iter
     (fun parent ->
       check_html ("script in " ^ parent) (Printf.sprintf {|<%s><script>a<\/%s>b<\/ x</script></%s>|} parent parent parent)
-        (lower parent [] [ lower "script" [] [ text (Printf.sprintf "a</%s>b</ x" parent) ] ]))
+        (element parent [] [ element "script" [] [ text (Printf.sprintf "a</%s>b</ x" parent) ] ]))
     [ "noscript"; "textarea"; "title"; "iframe"; "noembed"; "noframes"; "xmp" ];
   check_html "a JSON script in noscript" {|<noscript><script type="application/json">\u003c/noscript></script></noscript>|}
-    (lower "noscript" [] [ lower "script" [ attr "type" "application/json" ] [ text "</noscript>" ] ]);
+    (element "noscript" [] [ element "script" [ attr "type" "application/json" ] [ text "</noscript>" ] ]);
   check_html "math > foreignObject stays MathML" {|<math><foreignObject><style>&lt;/math&gt;</style></foreignObject></math>|}
-    (lower "math" [] [ lower "foreignObject" [] [ lower "style" [] [ text "</math>" ] ] ]);
+    (element "math" [] [ element "foreignObject" [] [ element "style" [] [ text "</math>" ] ] ]);
   check_html "math > svg > foreignObject stays MathML" {|<math><svg><foreignObject><script>a &lt; b</script></foreignObject></svg></math>|}
-    (lower "math" [] [ lower "svg" [] [ lower "foreignObject" [] [ lower "script" [] [ text "a < b" ] ] ] ]);
+    (element "math" [] [ element "svg" [] [ element "foreignObject" [] [ element "script" [] [ text "a < b" ] ] ] ]);
   check_html "mlx: math > svg > foreignObject" {|<math><svg><foreignObject><style>&lt;b&gt;</style></foreignObject></svg></math>|}
     (let user = "<b>" in
      <math><svg><foreignObject><style>(Yuka.text user)</style></foreignObject></svg></math>);
   let t =
-    Template.make
-      (Template.element "math" [] [ Template.element "foreignObject" [] [ Template.part 0 ] ])
+    Private.Template.make
+      (Private.Template.element "math" [] [ Private.Template.element "foreignObject" [] [ Private.Template.part 0 ] ])
       ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
   in
   check_html "a template math > foreignObject" {|<math><foreignObject><style>&lt;b&gt;</style></foreignObject></math>|}
-    (Template.instance t [| Template.child (lower "style" [] [ text "<b>" ]) |]);
+    (runtime_instance t [| runtime_child (element "style" [] [ text "<b>" ]) |]);
   check_html "tag case: SVG and Math are foreign" {|<SVG><STYLE>&lt;b&gt;</STYLE></SVG><Math><Script>&lt;b&gt;</Script></Math>|}
-    (fragment [ lower "SVG" [] [ lower "STYLE" [] [ text "<b>" ] ]; lower "Math" [] [ lower "Script" [] [ text "<b>" ] ] ]);
-  check_html "tag case: STYLE is raw text" {|<STYLE>a > b<\/style></STYLE>|} (lower "STYLE" [] [ text "a > b</style>" ]);
+    (fragment [ element "SVG" [] [ element "STYLE" [] [ text "<b>" ] ]; element "Math" [] [ element "Script" [] [ text "<b>" ] ] ]);
+  check_html "tag case: STYLE is raw text" {|<STYLE>a > b<\/style></STYLE>|} (element "STYLE" [] [ text "a > b</style>" ]);
   check_html "tag case: svg > FOREIGNOBJECT is HTML" {|<svg><FOREIGNOBJECT><style>a > b</style></FOREIGNOBJECT></svg>|}
-    (lower "svg" [] [ lower "FOREIGNOBJECT" [] [ lower "style" [] [ text "a > b" ] ] ]);
+    (element "svg" [] [ element "FOREIGNOBJECT" [] [ element "style" [] [ text "a > b" ] ] ]);
   let user = "<input autofocus onfocus=alert(1)>" in
   check_html "select > style is escaped" {|<select><style>&lt;input autofocus onfocus=alert(1)&gt;</style></select>|}
-    (lower "select" [] [ lower "style" [] [ text user ] ]);
+    (element "select" [] [ element "style" [] [ text user ] ]);
   check_html "select > option > script is escaped" {|<select><option><script>&lt;input autofocus onfocus=alert(1)&gt;</script></option></select>|}
-    (lower "select" [] [ lower "option" [] [ lower "script" [] [ text user ] ] ]);
+    (element "select" [] [ element "option" [] [ element "script" [] [ text user ] ] ]);
   check_html "mlx: select > optgroup > style" {|<select><optgroup><style>&lt;input autofocus onfocus=alert(1)&gt;</style></optgroup></select>|}
     <select><optgroup><style>(Yuka.text user)</style></optgroup></select>;
   check_html "after select, raw again" {|<select></select><style>a > b</style>|}
-    (fragment [ lower "select" [] []; lower "style" [] [ text "a > b" ] ]);
-  check_html "text outside script is still escaped" {|<p>a &lt; b &amp;&amp; c</p>|} (lower "p" [] [ text "a < b && c" ])
+    (fragment [ element "select" [] []; element "style" [] [ text "a > b" ] ]);
+  check_html "text outside script is still escaped" {|<p>a &lt; b &amp;&amp; c</p>|} (element "p" [] [ text "a < b && c" ])
 
 let raw_text_children () =
-  raises "two texts" (fun () -> html (lower "script" [] [ text "a"; text "b" ]));
-  raises "an element" (fun () -> html (lower "style" [] [ lower "b" [] [] ]));
-  raises "a hole that gives an element" (fun () -> print_client (lower "script" [] [ hole (fun () -> lower "b" [] []) ]));
-  raises "two texts in svg" (fun () -> html (lower "svg" [] [ lower "style" [] [ text "a"; text "b" ] ]));
-  raises "an element in math" (fun () -> html (lower "math" [] [ lower "script" [] [ lower "b" [] [] ] ]));
-  raises "two texts in SCRIPT" (fun () -> html (lower "SCRIPT" [] [ text "a"; text "b" ]));
+  raises "two texts" (fun () -> html (element "script" [] [ text "a"; text "b" ]));
+  raises "an element" (fun () -> html (element "style" [] [ element "b" [] [] ]));
+  raises "a hole that gives an element" (fun () -> print_client (element "script" [] [ hole (fun () -> element "b" [] []) ]));
+  raises "two texts in svg" (fun () -> html (element "svg" [] [ element "style" [] [ text "a"; text "b" ] ]));
+  raises "an element in math" (fun () -> html (element "math" [] [ element "script" [] [ element "b" [] [] ] ]));
+  raises "two texts in SCRIPT" (fun () -> html (element "SCRIPT" [] [ text "a"; text "b" ]));
   let printed =
-    match html (lower "div" [] [ text "before"; Catch.make ~fallback:(fun ~error:_ ~reset:_ -> text "caught") ~children:(fun () -> lower "script" [] [ text "a"; text "b" ]) () ]) with
+    match html (element "div" [] [ text "before"; Catch.make ~fallback:(fun ~error:_ ~reset:_ -> text "caught") ~children:(fun () -> element "script" [] [ text "a"; text "b" ]) () ]) with
     | s -> s
     | exception Invalid_argument _ -> "raised"
   in

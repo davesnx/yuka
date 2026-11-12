@@ -12,16 +12,15 @@ let float f =
      else if f = neg_infinity then "-Infinity"
      else Json.float_repr f)
 let empty = Kind.of_node (Fragment [])
-let list children = Kind.of_node (Fragment (Kind.nodes children))
-let array children = Kind.of_node (Fragment (Array.to_list (Kind.node_array children)))
 let fragment children = Kind.of_node (Fragment (Kind.nodes children))
-let lower tag attrs children =
+let element tag attrs children =
   Client.use_element ();
   Kind.of_node (Element { tag; attrs; children = Kind.nodes children })
 
 let log = Types.log
 
 let valid name =
+  Client.use_url_check ();
   if Web.in_browser && not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ name)
 
 let url_attr _tag name value =
@@ -49,7 +48,7 @@ let use_css href body =
   if !Base.server_rendering then
     Kind.of_node
       (Fragment
-         [ Kind.to_node (lower "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] []);
+         [ Kind.to_node (element "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] []);
            Kind.to_node body ])
   else begin
     if Web.in_browser then Web.add_stylesheet href;
