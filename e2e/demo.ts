@@ -1172,7 +1172,8 @@ await step("8. 404", async () => {
 await step("8c. live pages after a server restart", async () => {
   const command = process.env.YUKA_E2E_SERVER;
   const pidfile = process.env.YUKA_E2E_PIDFILE;
-  if (!command || !pidfile) {
+  const logfile = process.env.YUKA_E2E_LOG;
+  if (!command || !pidfile || !logfile) {
     console.log("SKIP  8c no YUKA_E2E_SERVER (run through e2e/run.sh)");
     return;
   }
@@ -1185,7 +1186,7 @@ await step("8c. live pages after a server restart", async () => {
   const offB = await B.p.waitForSelector(".offline", { timeout: 3000 }).then(() => true, () => false);
   check("8c.1 both pages show Offline", offA && offB, `A=${offA} B=${offB}`);
   const [exe, ...args] = command.split(" ").filter((x) => x !== "");
-  const log = openSync(join(process.env.TMPDIR ?? "/tmp", "yuka_e2e_server.log"), "a");
+  const log = openSync(logfile, "a");
   const server = spawn(exe, args, { detached: true, stdio: ["ignore", log, log] });
   server.unref();
   writeFileSync(pidfile, String(server.pid));

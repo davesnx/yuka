@@ -4,12 +4,19 @@ Status: decided by the agent on 2026-11-06, as the user asked. Earlier
 decisions: `brain-dump/DECISIONS.md`. Each item here can change; a change is
 recorded here first.
 
+This file is a log. The sections up to "Demo: mini Linear" describe the
+model and are kept current. The dated sections after them record a
+decision with the names of its date; a later section can change an earlier
+one, and a note under a dated heading gives the current name of what it
+calls by an old one. "API for 1.0 (2026-11-11)", the last section,
+describes the current API and lists the names that changed.
+
 ## Toolchain
 
-- OCaml 5.4.1, dune 3.24.2, Melange, mlx, Dream, ppxlib, Alcotest: the opam
-  switch at `/home/me/workplace/davesnx/utopia`. Every command runs as
-  `opam exec --switch=/home/me/workplace/davesnx/utopia -- <command>`.
-  A local switch for yuka comes later.
+- OCaml 5.4.1, dune 3.24.2, Melange, mlx, Dream, ppxlib, Alcotest: a local
+  opam switch (`_opam`) at the root of the checkout. The `Makefile` finds it
+  and runs every command as `opam exec --switch=<root> -- <command>`
+  (`SWITCH=` overrides it).
 - No bundler in v0.1. `melange.emit` writes ES modules, and the browser loads
   them as native modules from the server. esbuild comes later, for
   production builds.
@@ -32,14 +39,17 @@ recorded here first.
 
 ## Libraries
 
-Current layout (v0.4; earlier sections use the old names, see "v0.4"):
+Current layout:
 
 | Library | Modes | Directory | Holds |
 |---|---|---|---|
 | `yuka` | native, melange | `src/` | everything users call: State, Effect, elements, Json, Codec, Async, Action, `Yuka.Server`, `Yuka.Client` (islands and browser runtime), `Yuka.Router`, `Yuka.Await`; the virtual DOM module `Web` |
 | `yuka.js` | melange | `dom/js/` | the browser implementation of `Web` (a Melange entry lists it) |
-| `yuka.native` | native, melange | `dom/native/` | the default implementation of `Web` (raises "browser only") |
+| `yuka.native` | native | `dom/native/` | the default implementation of `Web` (raises "browser only"); a Melange build that does not list `yuka.js` fails to build |
 | `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.render ~islands` |
+
+The executable `yuka` (`gen/`, package `yuka`) has the commands `routes`,
+`islands`, `css` and `dev`.
 
 Platform functions (event fields, window listeners, navigation) are a record
 of functions in the core (`Private.platform`). Their defaults call `Web`, so
@@ -52,7 +62,7 @@ are only called inside effects and handlers, which never run on the server.
 The server output and the client hydration must agree on this format.
 
 The browser hydrates only `<yuka-island>` elements, so the page printer
-(`Yuka.Server.to_string`, `document`, `respond`, `stream`, `render_settled`)
+(`Yuka.Server.to_string` and the request cycle)
 writes the markers below only inside an island. Outside an island it writes
 no `<!---->`, `<!--[-->` or `<!--]-->`. The one exception is a pending
 streamed `Await`, which keeps `<!--[sN-->` and `<!--]-->` because the fill
@@ -71,7 +81,7 @@ markers everywhere: the client hydrates their output.
 - An `Each` item that renders one element (`Element` or `Template`) has no
   item markers: the element is the item.
 - `Template`: printed as the tree that `Private.expand` gives, so it has the
-  same HTML as the same tree made with `lower`.
+  same HTML as the same tree made with `Yuka.element`.
 - `Fragment`: no marker; the children are inline.
 - `Catch`: as a `Hole`. When the children raised on the server, the hole
   holds the fallback and its start marker is `<!--[!-->`.
@@ -83,7 +93,8 @@ markers everywhere: the client hydrates their output.
 ## ppx
 
 - mlx gives `[@JSX] tag ~a:1 ~children:[...] ()`. The ppx turns a lowercase
-  tag into `Yuka.lower "tag" [attributes] [children]`, with html_of_jsx's
+  tag into `Yuka.element "tag" [attributes] [children]` (since 2026-11-10 a
+  compiled template; see "Compiled templates and fewer markers"), with html_of_jsx's
   attribute checks as the baseline (valid attributes for the tag, plus
   `data-*` and `aria-*`), and `on_click` style props into `Yuka.on "click"`.
   Props on a lowercase tag are snake_case: `on_` and the DOM event name
@@ -113,10 +124,10 @@ markers everywhere: the client hydrates their output.
   `M.codec`; `M.foo` maps to `M.foo_codec`.
 - The server writes `<yuka-island data-name="M" data-id="i1" style="display:contents">html</yuka-island>`
   (with ` data-start="idle"`, `"visible"` or `"interaction"` after the style
-  for `Client.island ~loading`; nothing for `Load`)
+  for the `start` prop of `<Yuka.Client>`; nothing for `` `Load ``)
   and the props as `<script type="application/json" data-yuka-props="i1">`.
-  The client entry lists the islands it knows:
-  `Yuka_client.start [ M.register; ... ]`.
+  The client entry starts the islands it knows: `Yuka.render ~islands ()`,
+  where `yuka islands` writes the registry of every `M.register`.
 - Ids made inside an island carry the island's id as prefix.
 
 - Island name: `<Library>.<Module path>` (library name from dune's
@@ -126,7 +137,8 @@ markers everywhere: the client hydrates their output.
   `None`. A constant constructor is `"A"`, one with arguments is
   `["B", arg1, ...]`, an inline record is `["C", {...}]`. A tuple is a list.
 - Not supported yet (compile errors): recursive types, type parameters,
-  `~children` on a client component (slots), `loading` on `Yuka.Client`.
+  `~children` on a client component (slots), a start strategy on
+  `Yuka.Client` (added in v0.2; now the `start` prop).
 
 ## Async and streaming
 
@@ -136,7 +148,9 @@ markers everywhere: the client hydrates their output.
 - `Yuka.Await.make ~async ~loading ?failed ~children ()` (the component
   `<Yuka.Await>`; `children` is the function from the value to the element) makes the node
   `Await { async; loading; failed; render }`. `failed` gets the error
-  message; default: nothing.
+  message; default: nothing. In a server render the message is the one of
+  a `Server.Action.reject`, else `"server error"`, and the detail goes to
+  the `log_error` of `Server.config`.
 - Markers (the client hydrates `Await` as a hole over `Async.watch async`):
   - Settled at print time: `<!--[-->` content `<!--]-->`, where content is
     `render v` or `failed message`.
@@ -156,9 +170,10 @@ markers everywhere: the client hydrates their output.
      that is still pending gets the next free id and its own later chunk.
   3. Each pending async prop, when it settles, one chunk:
      `<script type="application/json" data-yuka-async="aN">JSON</script>`,
-     with JSON `{"ok": value}` or `{"error": message}`.
-  4. `</body></html>` when everything has settled. `Yuka.Server.fill_script`
-     defines `window.__yukaFill(id)` in the head. It finds the comment
+     with JSON `{"ok": value}` or `{"error": message}` (the message as for
+     `failed`).
+  4. `</body></html>` when everything has settled. The fill script
+     (`Yuka.Private.fill_script`) defines `window.__yukaFill(id)` in the head. It finds the comment
      `[id`, removes the nodes up to the matching `]` comment (nesting of
      `[...` and `]` comments is counted), inserts the template content
      there, and removes the template and its own script.
@@ -169,7 +184,7 @@ markers everywhere: the client hydrates their output.
   - Pending, streaming: `{"$async":"aN"}`, and chunk 3 above comes later.
   - Pending, not streaming: `{"$async":"aN","error":"pending at render"}`.
   - Ids `aN` count from 1 in one response. Encoding must run inside the
-    function given to `to_string`, `page`, `stream` or `respond`; outside
+    function given to `to_string`, `page` or `Private.stream`; outside
     a render the id is `a0` and a pending value is an error.
   - Decoding `{"$async":"aN"}` calls `Private.async_source "aN"`, which
     the browser runtime installs: it returns an `Async.t` of the JSON from
@@ -184,10 +199,12 @@ markers everywhere: the client hydrates their output.
 ## Server actions
 
 - Shared code declares an action:
-  `let create_issue = Yuka.Action.declare ~name:"create_issue" ~input:Issue.input_codec ~output:Issue.codec`.
-- Server code implements it: `Yuka.Server.Action.implement create_issue (fun input -> ...)`
-  (returns `Async.t`). Implementing a name twice raises `Invalid_argument`.
-- `Yuka.Action.call create_issue input : Issue.t Async.t`. On the client it
+  `let create_issue = Yuka.Action.mutation ~name:"create_issue" ~input:Issue.input_codec ~output:Issue.codec`.
+- Server code implements it: `Yuka.Server.Action.implement create_issue (fun ctx input -> ...)`
+  (returns `Async.t`; `ctx` is the request, a `Server.context`). Any page
+  can call any action, so the action checks permissions itself.
+  Implementing a name twice raises `Invalid_argument`.
+- `Yuka.Action.call create_issue input : (Issue.t, Status.error) result Async.t`. On the client it
   is a `POST /_yuka/action/create_issue` with JSON. On the server it calls
   the implementation directly (installed by the first `implement`).
 - Wire format of the action call `POST /_yuka/action/:name` (the request
@@ -195,17 +212,21 @@ markers everywhere: the client hydrates their output.
   is the JSON input. The answer is JSON: `{"ok": output}` with 200, or
   `{"error": message}` with:
   - 403: an `Origin` whose authority is not the request `Host` (scheme
-    ignored), or no `Origin` and no `Sec-Fetch-Site: same-origin`.
-    `Origin` without `Host` is refused. Form posts and `Action` routes use
-    the same rule (`Server.trusted_origin`).
+    ignored) or, with `Server.config ~origins`, not one of those origins;
+    or no `Origin` and no `Sec-Fetch-Site: same-origin`. `Origin` without
+    `Host` is refused. Form posts, `Action` routes, endpoints with an unsafe
+    method (unless `~cross_origin:true`), `/_yuka/csrf` and `/_yuka/live`
+    use the same rule.
   - 404: unknown action.
   - 415: `Content-Type` is not `application/json` (parameters such as
     `charset` are allowed).
-  - 400: the body is not JSON, or the input does not decode. The message
-    says which.
+  - 400: the body is not JSON, or the input does not decode, or the
+    implementation gave `Server.Action.reject message`. The message says
+    which.
   - 500: the implementation raised or its promise failed. The message is
-    always `action failed`; the failure goes to `Yuka.Server.log_error`.
-  - 413: the body is over 1 MiB (`ADAPTER.body`: `Content-Length` first,
+    always `action failed`; the failure goes to the `log_error` of
+    `Server.config`.
+  - 413: the body is over 1 MiB (`Server.Adapter.S.body ~limit`: `Content-Length` first,
     then while reading). The message is `request too large`.
   Checks run in this order: origin, action name, content type (all from
   the headers, no body read), body size, body.
@@ -215,7 +236,7 @@ markers everywhere: the client hydrates their output.
 ## Router
 
 - Pages are server routes (a multi-page app). Since 2026-11-10 they come
-  from `Routes.ml` through `yuka-routes` and the request cycle; see
+  from `Routes.ml` through `yuka routes` and the request cycle; see
   "Routes.mlx generator", "Request cycle", "yuka-dream" and "Routes.ml:
   one OCaml expression". The typed
   path GADT of `Yuka.Router` is gone.
@@ -231,6 +252,8 @@ markers everywhere: the client hydrates their output.
 - Style: one CSS file, dark, compact, Linear-like.
 
 ## Answers to the demo's friction list (2026-11-06)
+
+Current names: `Yuka_server` is now `Yuka.Server`; `Yuka.list` and `Yuka.array` are removed (use `fragment`); `Server.Action.reject` returns a failed `Async` instead of raising; event handlers now run in a batch (see "Equality and batch").
 
 - Text children stay explicit, as `React.string` in reason-react: the ppx
   cannot know the type of a child. The core adds `Yuka.int`, `Yuka.float`
@@ -264,6 +287,8 @@ markers everywhere: the client hydrates their output.
   DOM.
 
 ## v0.2: the rest of Yuka (decided 2026-11-06)
+
+Current names: `Yuka_server` and `Yuka_client` are now `Yuka.Server` and `Yuka.Client`; the island strategy `loading` is now the `start` prop of `<Yuka.Client>` (`type start`); `Client.island` is now `runtime_island`, which only the ppx calls; `Yuka_client.start` is now `Yuka.render ~islands ()`.
 
 Goal: everything left in `.workplace/plans/yuka-v0.1_PLAN.md` "Remaining
 work", except the items listed as out of scope there.
@@ -325,6 +350,8 @@ work", except the items listed as out of scope there.
 - Reversed by the user (2026-11-06): all five items are in scope. See v0.3.
 
 ## v0.3: router, early islands, chunks, templates, typed errors (decided 2026-11-06)
+
+Current names: `Action.declare` is now `Action.mutation`; `Router.start` is now `Yuka.render ~islands ()` and `Router.navigate` is `Browser.navigate`; `Client.entry` and `Client.lazy_entry` are now `runtime_entry` and `runtime_lazy_entry`, which `yuka islands` writes; `Yuka_server` and `Yuka_client` are `Yuka.Server` and `Yuka.Client`.
 
 The user put these in scope: "all of this is on scope!".
 
@@ -493,6 +520,8 @@ Replaced by "Compiled templates and fewer markers (2026-11-10)" below.
 
 ## v0.4: one library, no Dream (decided by the user, 2026-11-06)
 
+Current names: `Yuka.Server.stream` and `handle` are gone: `Server.Adapter.Make(A).handler` runs the request cycle (see "Request cycle"); `Client.lazy_entry` is now `runtime_lazy_entry`.
+
 The user: "Yuka as a single library. Yuka_server shouldn't depend on dream."
 And: "Yuka.Await should be a component not a function".
 
@@ -559,6 +588,8 @@ Lwt bridges live in the app). `Yuka.await` is now `<Yuka.Await>`.
   mlx-pp).
 
 ## v0.3 addendum: generated island registry and `Yuka.mount ()` (decided by the user, 2026-11-06)
+
+Current names: `yuka-islands --library NAME DIR` is now `yuka islands --dir DIR` (the library name comes from `DIR/dune`); `Client.entry`, `Client.lazy_entry`, `Client.promise`, `Client.promise_map` and the value `Client.registry` are now `runtime_entry`, `runtime_lazy_entry`, `runtime_promise`, `runtime_promise_map` and `runtime_registry` (the type `Client.registry` stays); `Router.start` and `Router.navigate` are `Yuka.render ~islands ()` and `Browser.navigate`.
 
 `Yuka.mount` is now `Yuka.render ~islands`: see "`Yuka.render`, one client
 start".
@@ -767,6 +798,8 @@ Changes from the design above, found in implementation and review:
 
 ## v1: lazy as a value of `loading` (decided by the user, 2026-11-06)
 
+Current names: The island prop `loading` and `type loading` are now `start` and `type start`; an island may have its own prop named `loading`. `yuka-islands` is now `yuka islands`.
+
 Replaces "Lazy islands" above and `let%client[@yuka.lazy]`. Source:
 `.workplace/plans/lazy-islands_PLAN.md` (measurement: all six demo islands
 together are about 3.4 KB gzip, 8% of the client; the runtime is the rest).
@@ -806,6 +839,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 - Not now: prefetch triggers, `` `Media ``, a `data-lazy` attribute.
 
 ## Only `.mlx` (2026-11-10)
+
+Current names: `yuka-islands` is now `yuka islands`.
 
 - Components and islands are written in `.mlx`. Plain logic modules
   (model, store, actions without JSX) stay `.ml`.
@@ -902,6 +937,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   already in order; the order of effects does not change.
 
 ## Compiled templates and fewer markers (2026-11-10)
+
+Current names: `Yuka.Template.t` and `template_coded` are now `runtime_template`, `template_instance` is `runtime_instance`, and `url_attr`, `url_hole_attr`, `attr_unchecked` and `hole_attr_unchecked` are `runtime_url_attr`, `runtime_url_hole_attr`, `runtime_attr` and `runtime_hole_attr`: names for the ppx only. `Template.make` and `template_of_shape` are now `Private.Template.make` and `Private.template`, and `Client.hydrate` is `Private.hydrate`, for tests. `lower` is now `Yuka.element`.
 
 ### Template format
 
@@ -1081,10 +1118,13 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   calls `batch`), the running flush picks the work up.
 - When `f` raises, the counter goes back, the pending work still runs (its
   own errors are dropped), then the exception of `f` is raised again.
-- Event handlers are not batched: the document listener calls the handler
-  directly, so each `State.set` updates the DOM before the next line (the
-  rule above for `Browser.focus`). A handler that sets several States can
-  wrap them in `Yuka.batch`. The demo does so for the comment form.
+- Event handlers run in a batch (since 2026-11-11): each delegated or
+  direct handler and each `Browser.on_window` handler runs in `batch`, so
+  the DOM updates and effects run once after it returns. `Browser.focus`
+  and `Browser.scroll_into_view` called in a batch run after it, so they
+  find an element that the handler's write creates. When a handler raises,
+  its writes still apply, and its exception and an error of the update go
+  to the boundary.
 
 ### Function arity in the JavaScript output
 
@@ -1112,6 +1152,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   `Curry` (`Navigation`, `Platform`, `Async`).
 
 ## Small client bundles (2026-11-10)
+
+Current names: The template and attribute names are the `runtime_` names of "Compiled templates and fewer markers"; `Template.make`, `template_of_shape` and `Client.hydrate` are in `Private`; `lower` is `Yuka.element`; `Yuka.unmount` is `Yuka.stop`; `Router.navigate` is `Browser.navigate`.
 
 Goal: a client bundle holds only the features the app uses. Measured with
 `make size` (`bench/size/size.ts`): the keyed benchmark app and the demo
@@ -1338,6 +1380,8 @@ the budget in `bench/size/budget.json`.
 
 ## Pages pay for the features of their islands (2026-11-11)
 
+Current names: `Optimistic` is no longer public; `lower` is now `Yuka.element`; `yuka-islands` is `yuka islands`.
+
 Goal: the JavaScript that a page with islands loads at start holds only
 the features that its islands use.
 
@@ -1528,6 +1572,8 @@ same fixtures and script:
 
 ## Routes.mlx generator (2026-11-10)
 
+Current names: `yuka-routes` is now `yuka routes --source FILE`.
+
 The input format and the reader changed later; see "Routes.ml: one OCaml
 expression".
 
@@ -1595,6 +1641,8 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   has one case per build error.
 
 ## Request cycle (2026-11-10)
+
+Current names: `ADAPTER` and `Make` are now `Server.Adapter.S` and `Server.Adapter.Make`, all in `Async.t`, and the `handler` of `Make` answers `/_yuka/live` too; `handle` and the `request` record are internal. Client files are served under `/_yuka/app/`. `Server.log_error` is now the `log_error` of `Server.config`. `fill_script` is `Private.fill_script`. A failed `Codec.async` value sends the message of a rejection, else `"server error"`. A stop `Redirect` is `Redirect { location; kind }` and must stay on the site; `Redirect_off_site` leaves it; `Forbidden` is a 403. Every handler with an unsafe method checks the origin. `yuka-routes` is `yuka routes`.
 
 Spec: `.workplace/docs/routes-spec.md`, increment 2; its section 8 lists
 what changed from the spec. `yuka-dream` and the demo migration are in
@@ -1688,6 +1736,8 @@ what changed from the spec. `yuka-dream` and the demo migration are in
 
 ## yuka-dream, demo on Routes.mlx, prerender (2026-11-10)
 
+Current names: `handler` no longer sets a logger: give `Server.config ~log_error`. The prerender values are in `Server.Prerender`: `seeds`, `prerenderable`, `links`, `file`, `missing_page`, `served_dirs`. `ADAPTER.exists` is `Server.Adapter.S.exists`. Client files are under `/_yuka/app/`.
+
 Spec: `.workplace/docs/routes-spec.md`, increment 3 (tickets 09, 11 and
 19); its section 8 lists what changed from the spec.
 
@@ -1753,6 +1803,8 @@ Spec: `.workplace/docs/routes-spec.md`, increment 3 (tickets 09, 11 and
 
 ## Navigation protocol (2026-11-10)
 
+Current names: `Server.build_id` is now `Server.Adapter.build_id config app`.
+
 Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
 (ticket 10); its section 8 lists what changed.
 
@@ -1802,6 +1854,8 @@ Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
 
 ## Remote data (2026-11-10)
 
+Current names: `Action.declare` is now `Action.mutation`; `Optimistic` is internal; `Remote.mutate` and `Live.mutate` take `?commit` and a function that gives `('r, Status.error) result Async.t`, and an `Error` rolls back; `Action.call` gives `('o, Status.error) result Async.t`.
+
 Spec: `.workplace/docs/data-spec.md`, sections 1 and 2, increments R1 to
 R3 (ticket 12); its "Changes during build" section lists the differences.
 
@@ -1847,6 +1901,8 @@ R3 (ticket 12); its "Changes during build" section lists the differences.
   transport ref is `Remote.server_send`.
 
 ## Live data (2026-11-10)
+
+Current names: `SOCKET` and `Handle` are gone: the adapter's `upgrade` gives a `Server.Live.connection` and `Server.Adapter.Make(A).handler` answers `/_yuka/live`. `ADAPTER.csrf_token` is `Server.Adapter.S.csrf_token`. `Live.set_limits` is now `Server.Live.node ?per_session ?total`. `allow` and `revoke` take a `Server.context`. A server render of `Live.use` runs `allow` with the page request.
 
 Spec: `.workplace/docs/data-spec.md` section 3 (ticket 13).
 
@@ -1979,6 +2035,8 @@ Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.
 
 ## Forms (2026-11-10)
 
+Current names: `ADAPTER.body` is now `Server.Adapter.S.body`. `Form.form_errors` and `Form.form_error_view` are now `Form.errors` and `Form.errors_view`; `Form.action` makes an action of the kind `` [ `Form ] ``. Form fields are polymorphic variants (`` `Title ``).
+
 Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
 "20: changes during build" lists the differences.
 
@@ -2047,6 +2105,8 @@ Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
 
 ## Prefetch, navigation cache and view transitions (2026-11-10)
 
+Current names: `Yuka.unmount` is now `Yuka.stop`.
+
 Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
 
 - One cache in `Navigation`: a `Web.table` from `absolute URL without
@@ -2091,6 +2151,8 @@ Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
   the keyed benchmark, which does not.
 
 ## CSS per module (2026-11-10)
+
+Current names: `yuka-css DIR` is now `yuka css --dir DIR`; `Server.css_files` is `Server.Prerender.css_files`; `Immutable` is `Server.immutable` (`Server.cache` is abstract); `Yuka.stylesheet` is `runtime_stylesheet`.
 
 Ticket 23; `.workplace/docs/app-spec.md` section 23, option B built
 through A.
@@ -2150,6 +2212,8 @@ through A.
 
 ## Routes.ml: one OCaml expression (2026-11-10)
 
+Current names: `yuka routes --source FILE` now reads FILE, not stdin; dune rules use `--source %{dep:../Routes.ml}`.
+
 Plan: `.workplace/plans/routes-async_PLAN.md`. As server-reason-react
 router-gen: the manifest is a plain OCaml file, not mlx.
 
@@ -2179,6 +2243,8 @@ router-gen: the manifest is a plain OCaml file, not mlx.
   printed expression, so it changes with the format.
 
 ## Dev server (2026-11-10)
+
+Current names: `yuka dev --build COMMAND` runs the full build command through `/bin/sh` (default `dune build --watch`); `--dune` is gone; the default state file is `$DUNE_BUILD_DIR/.yuka-dev`. The library no longer reads `YUKA_DEV`: `yuka dev` sets it, and the app passes `Server.config ~dev:true`. `prerender_config` is now `Server.Prerender.config`.
 
 Ticket 24; `.workplace/docs/app-spec.md` section 24, option A, level 1.
 
@@ -2279,6 +2345,8 @@ byte the same (`bench/ssr/ocaml/golden.expected`, `demo/test/pages.expected`).
   that need the resolved attributes (`needs_special`).
 
 ## Unsafe URLs and raw-text elements (2026-11-10)
+
+Current names: `template_coded` is now `runtime_template`; `url_attr`, `url_hole_attr`, `attr_unchecked` and `hole_attr_unchecked` are the `runtime_` names; `Template.make` and `template_of_shape` are `Private.Template.make` and `Private.template`, for tests.
 
 Ticket 33 and its four security reviews.
 
@@ -2396,6 +2464,8 @@ val suspend :
 
 ## Live data on more than one node (2026-11-10)
 
+Current names: `Server.Live.instance` and `?instance` are now `Server.Live.node` and `?node`; `use_bus ~node` is `use_bus ~name`; `Yuka_dream.handler ?live` is `?node`; `Server.live_mark` is internal.
+
 Ticket 25; `.workplace/docs/app-spec.md` section 25, option B; settle rule
 in `.workplace/docs/data-spec.md` section 8 ("More nodes").
 
@@ -2453,7 +2523,7 @@ val render :
 
 - `Yuka.render ~islands ()` is what `Yuka.mount ()` was.
   `Yuka.render ~root:(container, app) ()` is what `Client.render` was, and
-  `Yuka.unmount ()` stops it (and every other `~root` tree) as well as the
+  `Yuka.stop ()` (first named `Yuka.unmount`) stops it (and every other `~root` tree) as well as the
   islands. Both labels can be in one call; the root is built first.
   `Yuka.mount` and `Yuka.Client.render` are removed; tests that need the
   dispose function of one tree use `Yuka.Private.render`.
@@ -2464,12 +2534,13 @@ val render :
 - The ppx rewrites an argument `~islands` whose value is the identifier
   `islands` (so the punned `~islands`, and also `~islands:islands`) in any
   application of `Yuka.render`, partial or not, into
-  `~islands:Yuka_islands.registry`. Other values, `?islands` and calls
-  without `~islands` stay as they are. Without the ppx, a punned
+  `~islands:Yuka_islands.registry`, unless a binding of `islands` is in
+  scope there. After a top-level `open Yuka`, a bare `render` counts too.
+  Other values, `?islands` and calls without `~islands` stay as they are. Without the ppx, a punned
   `~islands` is `Unbound value islands`, so the old runtime check that named
   `yuka.ppx` is gone.
-- The registry carries the start function: `Yuka.Client.registry` (in
-  `yuka.ml`) builds a record whose one field is a closure over the entries
+- The registry carries the start function: `Yuka.runtime_registry` (in
+  `yuka.ml`; first named `Yuka.Client.registry`) builds a record whose one field is a closure over the entries
   that calls `Navigation.start` or `Client.start`. `Yuka.render` reaches
   the island, action and navigation code only through that field, so an
   app that never builds a registry does not contain it. The closure takes
@@ -2483,3 +2554,120 @@ val render :
   the bundle, but the code that adopts server DOM is in the same functions
   that render uses (`mount_node`, `take`, `mount_slot`, `drop_to_end` test
   `pos.adopt` at run time), so esbuild keeps it.
+
+## API for 1.0 (2026-11-11)
+
+Source: the API reviews of 2026-11-11 (server, client, and the surface:
+`Private`, ppx, packages, command line). Each change below is breaking
+unless it says otherwise; `CHANGES.md` lists them one by one.
+
+### Server
+
+- Actions, form actions and the live `allow` and `revoke` get a
+  `Server.context` (`Context.header`, `session`, `meth`, `path`). Any page
+  can call any action, so an action checks permissions itself. The live
+  loader gets no context: its state is shared by every subscriber of a key
+  on a node, so `allow` decides who reads it. A server render of
+  `Live.use` runs `allow` with the page request and reads the state of the
+  handler's node.
+- One adapter signature, `Server.Adapter.S`, all in `Async.t`; its answer
+  type is `reply`. `Server.Adapter.Make(A).handler ?node config app`
+  answers every path, `/_yuka/live` included. Reserved paths:
+  `/_yuka/action/NAME`, `/_yuka/csrf`, `/_yuka/css/FILE`, `/_yuka/dev`,
+  `/_yuka/live`, and `/_yuka/app/FILE` for the client files; any other
+  path under `/_yuka/` is a 404. There is no base path.
+- A handler with a method other than `GET`, `HEAD` and `OPTIONS` checks the
+  origin before its guards; `Router.endpoint ~cross_origin:true` turns
+  this off for webhooks. `Server.config ~origins` lists the accepted
+  origins behind a proxy that rewrites `Host`.
+- `Server.stop`: `Not_found`, `Forbidden` (a plain 403), `Redirect`
+  (must stay on the site, else a logged 500), `Redirect_off_site` and
+  `Fail`.
+- No global configuration: `Server.config ~log_error ~dev ~origins` and
+  `Server.Live.node ~log_error ~per_session ~total`. The library does not
+  read `YUKA_DEV`; `yuka dev` sets it and the app passes `~dev`.
+- `Server.response`, `Server.Live.bus` are private records with builder
+  functions; `Server.Live.connection` and `Server.cache` are abstract
+  (`no_store`, `no_cache`, `private_ ~max_age`, `public ?s_max_age
+  ~max_age ()`, `immutable`).
+- Values for generated code are in `Server.Generated`, prerender values in
+  `Server.Prerender`, test values in `Server.Testing`; these are outside
+  semantic versioning.
+- `Server.Action.reject message` fails the `Async` with a prefix that holds
+  a per-process secret (`Web.nonce`), so user text cannot pass for a
+  rejection.
+- Headers: a name can repeat inside one list; a later layer replaces a
+  name of an earlier one; CR, LF or NUL in an outgoing header is a 500.
+
+### Client
+
+- `Action.call` gives `('o, Status.error) result Async.t`, in the browser
+  and on the server. `Action.declare` is `Action.mutation`. `Form.action`
+  makes an action of the kind `` [ `Form ] ``, the only kind that
+  `Form.make ~action` takes.
+- `Yuka.stop` stops what `Yuka.render` started; calls in flight give
+  `Error (Network "cancelled")`.
+- The island start strategy is the `start` prop of `<Yuka.Client>`.
+- `Yuka.element` builds an element; `Yuka.list` and `Yuka.array` are
+  removed (use `fragment`).
+- Event handlers run in a batch (see "Equality and batch").
+- An `Async.map` or `Async.bind` function that raises gives `Failed`.
+- A failed `<Yuka.Await>`, `suspend` or `Async` prop shows the message of
+  a `Server.Action.reject`, else `"server error"`; the detail goes to
+  `log_error`.
+- `Codec.t` is private (`Codec.make`, `Codec.map`), `Remote.retry` is
+  abstract, `Remote.mutate` and `Live.mutate` have one shape, and
+  `Optimistic` is internal.
+- The values and types that the ppx, the derivers and `yuka islands`
+  write are top-level `Yuka.runtime_*` names, outside semantic versioning.
+  `Private` is for the tests of Yuka.
+- A production bundle must define `__YUKA_DEV__` as `false`; when it is
+  not defined, the dev checks are on.
+
+### Build and ppx
+
+- One executable `yuka` with the commands `routes`, `islands`, `css` and
+  `dev`; flags in any order, `--help` on each command, exit 2 on a usage
+  error. `yuka routes --source FILE` reads the file; `yuka islands --dir
+  DIR` reads the library name from `DIR/dune`; `yuka dev --build COMMAND`
+  runs a full command.
+- `yuka.native` is native only, so a Melange build without `yuka.js` fails
+  at build time.
+- `[@@deriving form]` field types are polymorphic variants.
+- `let%yuka.client` is the same as `let%client`. After a top-level
+  `open Yuka`, `<Await>`, `<Show>`, `<Catch>` and `<Client>` work
+  unqualified.
+
+### Names that changed
+
+| Old name | Current name |
+|---|---|
+| `Yuka_server`, `Yuka_client`, `Yuka_router` | `Yuka.Server`, `Yuka.Client`, `Yuka.Router` |
+| `Yuka.mount ()`, `Router.start`, `Client.render` | `Yuka.render ~islands ()`, `Yuka.render ~root ()` |
+| `Yuka.unmount` | `Yuka.stop` |
+| `Router.navigate` | `Browser.navigate` |
+| `Yuka.lower` | `Yuka.element` |
+| `Yuka.list`, `Yuka.array` | `Yuka.fragment` |
+| `Action.declare` | `Action.mutation` |
+| `<Yuka.Client loading=...>`, `type loading` | `<Yuka.Client start=...>`, `type start` |
+| `Client.entry`, `Client.lazy_entry`, `Client.promise`, `Client.promise_map`, `Client.island`, the value `Client.registry` | `runtime_entry`, `runtime_lazy_entry`, `runtime_promise`, `runtime_promise_map`, `runtime_island`, `runtime_registry` |
+| `Yuka.Template.t`, `template_coded`, `template_instance` | `runtime_template`, `runtime_instance` |
+| `url_attr`, `url_hole_attr`, `attr_unchecked`, `hole_attr_unchecked` | `runtime_url_attr`, `runtime_url_hole_attr`, `runtime_attr`, `runtime_hole_attr` |
+| `Yuka.stylesheet` | `runtime_stylesheet` |
+| `Template.make`, `template_of_shape`, `Client.hydrate` | `Private.Template.make`, `Private.template`, `Private.hydrate` |
+| `Form.form_errors`, `Form.form_error_view` | `Form.errors`, `Form.errors_view` |
+| `Optimistic` | internal |
+| `Server.ADAPTER`, `Server.Make`, `Server.handle` | `Server.Adapter.S`, `Server.Adapter.Make`, internal |
+| `Server.Live.SOCKET`, `Server.Live.Handle` | the adapter's `upgrade` and `Server.Live.connection` |
+| `Server.log_error` | `Server.config ~log_error`, `Server.Live.node ~log_error` |
+| `YUKA_DEV` read by `Server.config` | `Server.config ~dev:true` |
+| `Server.prerender_config` | `Server.Prerender.config` |
+| `Server.prerender_seeds`, `prerenderable`, `prerender_file`, `missing_page`, `served_dirs`, `css_files` | `Server.Prerender.seeds`, `prerenderable`, `file`, `missing_page`, `served_dirs`, `css_files` |
+| `Server.build_id app` | `Server.Adapter.build_id config app` |
+| `Server.Live.instance`, `?instance` | `Server.Live.node`, `?node` |
+| `Server.Live.set_limits` | `Server.Live.node ?per_session ?total` |
+| `Server.Live.peer` | `Server.context` |
+| `Server.document`, `Server.fill_script` | removed (`Private.fill_script` for tests) |
+| `Immutable` and the other `cache` constructors | `Server.immutable`, `no_store`, `no_cache`, `private_`, `public` |
+| `/_yuka/<file>` | `/_yuka/app/<file>` |
+| `yuka-routes`, `yuka-islands`, `yuka-css`, `yuka dev --dune` | `yuka routes`, `yuka islands`, `yuka css`, `yuka dev --build` |

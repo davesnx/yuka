@@ -267,7 +267,7 @@ val attr : string -> string -> 'kind attribute
     open a document ([href] of [a], [area] and [use], [action],
     [formaction], [xlink:href], [src] of [iframe], [frame], [embed] and
     [object], [data] of [object]). A [data:] image or media URL stays. The server logs the
-    first block with the [log_error] of {!Server.config}; a dev build logs the first one in
+    first block with the [log_error] of {!Server.val-config}; a dev build logs the first one in
     the console. [data:] is also blocked on [src] of [script] and [href] of
     [script]. [srcdoc] of [iframe] and [href] of
     [base] become [""] and are logged the same way; only a literal one in
@@ -307,7 +307,7 @@ module Await : sig
       a hole over [Async.watch]. On the server it is printed as a hole; see
       DESIGN.md. In a server render, [message] is the message of a
       {!Server.Action.reject}, else ["server error"], and the failure
-      message goes to the [log_error] of {!Server.config}, so the HTML never has the
+      message goes to the [log_error] of {!Server.val-config}, so the HTML never has the
       detail. *)
 end
 
@@ -350,7 +350,7 @@ module Catch : sig
 
       On the server, an exception in the children prints the fallback with
       [~error:"server error"] and sends the exception to
-      the [log_error] of {!Server.config}; the HTML never has the detail. In an island, the
+      the [log_error] of {!Server.val-config}; the HTML never has the detail. In an island, the
       client then hydrates the fallback, and [reset] renders the children in
       the browser. *)
 end
@@ -420,7 +420,7 @@ end
 module Action : sig
   type ('i, 'o, 'kind) t = ('i, 'o, 'kind) Action.t
   (** ['kind] is [[ `Mutation ]] for {!mutation}, [[ `Query ]] for {!query}
-      and [[ `Form ]] for {!Form.action}. *)
+      and [[ `Form ]] for {!Form.val-action}. *)
 
   val mutation :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Mutation ]) t
@@ -507,10 +507,11 @@ end
 
 type runtime_template
 (** A compiled element tree: the ppx makes one per lowercase JSX tree, at
-    the top of the module. See "Templates" in DESIGN.md. *)
+    the top of the module. See "Compiled templates and fewer markers" in
+    DESIGN.md. *)
 
 type 'kind runtime_part
-(** The value of one part of a {!runtime_template}. *)
+(** The value of one part of a {!type-runtime_template}. *)
 
 type runtime_entry
 (** What the browser knows about an island. The island modules expose it
@@ -710,8 +711,8 @@ module Private : sig
   (** The body of [/_yuka/dev] for a state function (tests). *)
 
   val dev_script : string -> string
-  (** The script that a page gets with [YUKA_DEV=1], for the state JSON
-      given (tests). *)
+  (** The script that a page gets with [Server.config ~dev:true], for the
+      state JSON given (tests). *)
 
   val element : node -> 'kind element
 
@@ -1009,7 +1010,7 @@ val render :
     [~root:(container, app)] clears [container] and builds the DOM of
     [app ()] in it. {!stop} stops the effects and handlers of this tree;
     the DOM stays. It runs before the islands start. Get [container] with
-    {!Client.container}.
+    {!Client.val-container}.
 
     With [~islands], it installs the browser runtime and the action
     transport, then hydrates every [yuka-island] element of the document with the entry of the same
@@ -1594,7 +1595,7 @@ module Server : sig
           + An endpoint or action whose method is not [GET], [HEAD] or
             [OPTIONS]: 403 when the origin check fails, before the guards,
             unless its node has [~cross_origin:true].
-          + Guards, one after another. A {!stop} skips the rest.
+          + Guards, one after another. A {!type-stop} skips the rest.
           + A handler: its response, after the rule headers (a header name
             of the handler replaces that name of the rules) and the rule
             [cache-control] unless it set one. [HEAD]: no body.

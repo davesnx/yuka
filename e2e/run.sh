@@ -12,10 +12,11 @@ if [ "${BUNDLE:-}" = 1 ]; then
   mode=bundle
   flags=--bundle
 fi
-pidfile="${TMPDIR:-/tmp}/yuka_e2e_server.pid"
+pidfile="${TMPDIR:-/tmp}/yuka_e2e_server_$port.pid"
+log="${TMPDIR:-/tmp}/yuka_e2e_server_$port.log"
 second=$((port + 1))
 bus=${YUKA_E2E_BUS:-memory}
-"$root/$build/default/demo/server/demo_server.exe" --port "$port" --second-node "$second" --bus "$bus" $flags >"${TMPDIR:-/tmp}/yuka_e2e_server.log" 2>&1 &
+"$root/$build/default/demo/server/demo_server.exe" --port "$port" --second-node "$second" --bus "$bus" $flags >"$log" 2>&1 &
 echo $! >"$pidfile"
 trap 'kill $(cat "$pidfile") 2>/dev/null' EXIT INT TERM
 i=0
@@ -25,5 +26,5 @@ until curl -s -o /dev/null "http://127.0.0.1:$port/" && curl -s -o /dev/null "ht
   sleep 0.1
 done
 YUKA_E2E_SECOND="http://127.0.0.1:$second" \
-YUKA_E2E_SERVER="$root/$build/default/demo/server/demo_server.exe --port $port --second-node $second --bus $bus $flags" YUKA_E2E_PIDFILE="$pidfile" \
+YUKA_E2E_SERVER="$root/$build/default/demo/server/demo_server.exe --port $port --second-node $second --bus $bus $flags" YUKA_E2E_PIDFILE="$pidfile" YUKA_E2E_LOG="$log" \
   node "$root/e2e/demo.ts" "http://127.0.0.1:$port" "$mode"
