@@ -53,8 +53,8 @@ val async : 'a t -> 'a Async.t t
     [Async]. *)
 
 val encode : 'a t -> 'a -> Json.t
-(** [encode c v] is [c.encode v]. *)
+(** [encode codec value] is [codec.encode value]. *)
 
 val decode : 'a t -> Json.t -> ('a, string) result
-(** [decode c j] is [c.decode j]. The error of a codec of this module
+(** [decode codec json] is [codec.decode json]. The error of a codec of this module
     names the expected kind and the start of the JSON text. *)

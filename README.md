@@ -29,10 +29,10 @@ An island, in `counter.mlx`. It runs on the server and in the browser:
 
 ```ocaml
 let[@client] make ~(initial : int) () =
-  let n = Yuka.State.make initial in
-  <button on_click=(fun _ -> Yuka.State.update n succ)>
+  let count = Yuka.State.make initial in
+  <button on_click=(fun _ -> Yuka.State.update count succ)>
     "Clicks: "
-    (Yuka.int (Yuka.State.get n))
+    (Yuka.int (Yuka.State.get count))
   </button>
 ```
 

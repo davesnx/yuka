@@ -1260,7 +1260,7 @@ module Server : sig
     (** Closes, with code 4401, every live socket of the node whose context
         matches. The page reconnects, and [allow] decides again for each
         key. Call it on logout
-        ([revoke (fun c -> Context.session c = Some id)]) and after a
+        ([revoke (fun context -> Context.session context = Some id)]) and after a
         permission change. It does not go over the bus: with more than one
         node, the app must call it on every node (for example from its own
         message between nodes). *)

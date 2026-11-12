@@ -89,10 +89,10 @@ each route such as `Routes.home ()`, `Routes.href` and `Routes.find`). `preproce
 module Css = [%yuka.css "counter.css"]
 
 let[@client] make ~(initial : int) () =
-  let n = Yuka.State.make initial in
-  <button class_=Css.button on_click=(fun _ -> Yuka.State.update n succ)>
+  let count = Yuka.State.make initial in
+  <button class_=Css.button on_click=(fun _ -> Yuka.State.update count succ)>
     "Clicks: "
-    (Yuka.int (Yuka.State.get n))
+    (Yuka.int (Yuka.State.get count))
   </button>
 ```
 
@@ -165,7 +165,7 @@ let () =
   let config =
     Yuka.Server.config ~assets ~css:Yuka_css.sheets
       ~dev:(Sys.getenv_opt "YUKA_DEV" = Some "1")
-      ~log_error:(fun m -> Dream.error (fun log -> log "%s" m))
+      ~log_error:(fun message -> Dream.error (fun log -> log "%s" message))
       ()
   in
   Dream.run @@ Dream.logger @@ Dream.set_secret "change-me"

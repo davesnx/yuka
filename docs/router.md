@@ -77,12 +77,12 @@ param. The module has a type `t` and two functions:
 (* shared/issue_id.ml *)
 type t = int
 
-let of_string s =
-  match String.split_on_char '-' s with
-  | [ "YUK"; n ] -> Yuka.Router.int_param n
+let of_string text =
+  match String.split_on_char '-' text with
+  | [ "YUK"; number ] -> Yuka.Router.int_param number
   | _ -> None
 
-let to_string n = "YUK-" ^ Int.to_string n
+let to_string id = "YUK-" ^ Int.to_string id
 ```
 
 ```ocaml
