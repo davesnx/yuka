@@ -299,14 +299,31 @@ work", except the items listed as out of scope there.
 - A slot is a server element passed as `children` into a client
   component. The server renders it; the client adopts its DOM nodes and can
   place and move them, never inspect or re-render them (Leptos's rule).
-- Core: `type slot`, `val slot : slot -> client element` (the user writes
-  `(Yuka.slot children)` where the content goes), `Slot.make : server element
-  -> slot`, `Codec.slot : slot Codec.t`, node `Private.Slot of slot`.
-- `let%client make ~(children : Yuka.slot) () = ...` is allowed. 
+- Updated 2026-11-12: slots are internal. The user writes
+  `let[@client] make ~children () = ... children ...`; the ppx gives
+  `children` the type `client element`. Children from server code become a
+  slot; children from client code (`M.make ~children`) are plain client
+  elements. The docs explain one concept, children, with one difference in
+  islands: server children go in one position. Placed twice, the server
+  prints them twice and the client tracks only the last set of nodes.
+- Core: node `Private.Slot of slot`; `Private.slot : slot -> client element`,
+  `Private.Slot.make : server element -> slot` and `Private.Slot.empty` for
+  the tests. The generated code calls
+  `runtime_slot : server element option -> client element` (`Some` content
+  on the server, `None` for the decoded prop). It does not use `Private`,
+  because `yuka.js` builds `Private` as one object that holds the printer
+  and the server code, and a client chunk that reads one field keeps all
+  of it.
+- `M.island ~children` takes a `server element`. The generated `island`
+  binds `children` to `runtime_slot (Some children)` before it encodes the
+  props and calls `make`; the `children` codec, built in the generated code
+  with `Codec.make`, writes `null` and decodes to `runtime_slot None`.
   `<Yuka.Client><Counter a=1><p>"x"</p></Counter></Yuka.Client>` becomes
-  `Counter.island ~a:1 ~children:(Yuka.Slot.make (Yuka.fragment [...])) ()`.
+  `Counter.island ~a:1 ~children:(Yuka.fragment [...]) ()`. `~(children :
+  Yuka.slot)` and `?children` are compile errors that say to write
+  `~children`.
 - Server print of a `Slot` inside a client tree: `<!--[$-->` HTML `<!--]-->`.
-  `Codec.slot` encodes as `null`; the position in the tree finds the nodes.
+  The `children` prop is `null`; the position in the tree finds the nodes.
 - Client: hydrating a `Slot` captures the DOM nodes between `[$` and its
   matching `]` into the slot without walking inside them. Rendering the slot
   again (a hole re-runs) moves the captured nodes to the new place. A slot
@@ -1272,7 +1289,8 @@ the budget in `bench/size/budget.json`.
   - `await_hook`: set by `Client.use_await`, which `Await.make` calls
     (`suspend` too). It is a record with a polymorphic field, because the
     value type of an `Await` is existential.
-  - `slot_hook`: `Client.use_slot`, from `Yuka.slot`.
+  - `slot_hook`: `Client.use_slot`, from `Element.slot` (`Private.slot`,
+    `runtime_slot`).
   - `catch_hook`: `Client.use_catch`, from `Catch.make`.
   On the server the four `use_*` functions do nothing.
 - Rule: every place that builds one of these nodes for the client calls its
@@ -1282,7 +1300,7 @@ the budget in `bench/size/budget.json`.
   and `Cycle.outlet` (the `yuka-outlet` element around a nested layout),
   both server-only. A default can therefore only run after a broken rule,
   and it raises `Failure "Yuka: no mount code for a node of Yuka.lower"`
-  (or `Yuka.Await.make`, `Yuka.slot`, `Yuka.Catch.make`) instead of doing
+  (or `Yuka.Await.make`, `Yuka.runtime_slot`, `Yuka.Catch.make`) instead of doing
   nothing.
 - `Private.node` is `private` in `yuka.mli`: tests can match on it but not
   build a node kind without its constructor. `Private.hole` builds a
@@ -1445,8 +1463,8 @@ There is no budget for these numbers.
     edges, so the JavaScript does not change. Conversions of a function
     use a type abbreviation for the result, so the external has one
     argument.
-  - `slot = Slot_value.t`, the same way. `Private.node` has
-    `Slot of slot_data`.
+  - Updated 2026-11-12: `slot` is no longer public, and `Slot_value` is
+    gone. `Private.node` has `Slot of slot`, with `Private.slot` abstract.
   - `'a Async.t`, `('i, 'o, 'kind) Action.t` and `('k, 's) Topic.t` are
     abstract in `async.mli`, `action.mli` and `topic.mli`; the library
     reads an action and a topic through functions (`Action.input`,

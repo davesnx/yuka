@@ -10,7 +10,6 @@ let batch = Scheduler.batch
 
 type server = Types.server
 type client = Types.client
-type slot = Slot_value.t
 type trigger = Types.trigger
 type start = Types.start
 include Element
@@ -252,10 +251,12 @@ module Private = struct
 
   let has_readers (s : _ Signal.t) = Option.is_some s.node.first
 
-  type slot_data = Types.slot
+  let slot = slot
 
-  let slot_content s = (Slot_value.to_slot s).content
-  let slot_dom s = (Slot_value.to_slot s).dom
+  module Slot = Slot
+
+  let slot_content (s : slot) = s.content
+  let slot_dom (s : slot) = s.dom
   let call_action = Types.transport
   let async_source = Types.async_source
   let render = Client.render

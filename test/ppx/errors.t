@@ -158,16 +158,25 @@ Unsupported type:
   Error: [yuka] cannot derive a codec for this type
   [1]
 
-Slots:
+Children:
 
   $ cat > h3.mlx <<'X'
-  > let[@client] make ~(children : int) () = <p />
+  > let[@client] make ~(children : Yuka.slot) () = <p />
   > X
   $ run h3
-  File "h3.mlx", line 1, characters 18-35:
-  1 | let[@client] make ~(children : int) () = <p />
-                        ^^^^^^^^^^^^^^^^^
-  Error: [yuka] ~children must be written ~(children : Yuka.slot)
+  File "h3.mlx", line 1, characters 18-41:
+  1 | let[@client] make ~(children : Yuka.slot) () = <p />
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] write ~children: the children of a let[@client] component are a Yuka.client Yuka.element, not a Yuka.slot or an option
+  [1]
+  $ cat > h3b.mlx <<'X'
+  > let[@client] make ?children () = <p />
+  > X
+  $ run h3b
+  File "h3b.mlx", line 1, characters 18-27:
+  1 | let[@client] make ?children () = <p />
+                        ^^^^^^^^^
+  Error: [yuka] write ~children: the children of a let[@client] component are a Yuka.client Yuka.element, not a Yuka.slot or an option
   [1]
 
 Missing annotation:

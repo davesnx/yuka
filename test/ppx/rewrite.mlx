@@ -80,7 +80,7 @@ end
 let shared = State.make 0 [@@yuka.shared]
 let in_function () = State.make 0
 
-let[@client] make ~(label : string) ~(children : Yuka.slot) () = <div>(Yuka.slot children)</div>
+let[@client] make ~(label : string) ~children () = <div>children</div>
 module Slotted = struct end
 
 let slot_one = <Yuka.Client><Slotted label="a"><p>"x"</p></Slotted></Yuka.Client>

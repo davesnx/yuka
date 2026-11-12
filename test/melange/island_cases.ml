@@ -353,10 +353,7 @@ let fill_then_hydrate () =
   check "html unchanged" before (Dom_cases.html body);
   dispose ()
 
-let empty_slot () =
-  match Codec.decode Codec.slot `Null with
-  | Ok s -> s
-  | Error m -> raise (Cases.Failed m)
+let empty_slot = Private.Slot.empty
 
 let slot_node p = Dom_cases.query p "p"
 
@@ -365,12 +362,12 @@ let slot_page_tree slot =
     [
       text "a";
       hole (fun () ->
-          if true then element "div" [] [ Yuka.slot slot ] else empty);
+          if true then element "div" [] [ Private.slot slot ] else empty);
     ]
 
 let slot_adopted () =
-  let content = Slot.make (element "p" [] [ text "x"; element "b" [] [ text "y" ] ]) in
-  let server_html = Dom_cases.server (element "div" [] [ text "a"; Yuka.slot content ]) in
+  let content = Private.Slot.make (element "p" [] [ text "x"; element "b" [] [ text "y" ] ]) in
+  let server_html = Dom_cases.server (element "div" [] [ text "a"; Private.slot content ]) in
   check "server html"
     "<div>a<!--[$--><p>x<b>y</b></p><!--]--></div>" server_html;
   let c = Dom_cases.container server_html in
@@ -378,7 +375,7 @@ let slot_adopted () =
   let client = empty_slot () in
   let dispose =
     Yuka.Private.hydrate (Dom_cases.as_element c) (fun () ->
-        element "div" [] [ text "a"; Yuka.slot client ])
+        element "div" [] [ text "a"; Private.slot client ])
   in
   same "slot node adopted" p (slot_node c);
   check "captured" "1" (ints (List.length !(Private.slot_dom client)));
@@ -386,14 +383,14 @@ let slot_adopted () =
   dispose ()
 
 let slot_moves_with_hole () =
-  let content = Slot.make (element "p" [] [ text "x" ]) in
+  let content = Private.Slot.make (element "p" [] [ text "x" ]) in
   let wrap = State.make true in
   let view slot =
     element "main" []
       [
         hole (fun () ->
-            if State.get wrap then element "div" [] [ Yuka.slot slot ]
-            else element "section" [] [ Yuka.slot slot ]);
+            if State.get wrap then element "div" [] [ Private.slot slot ]
+            else element "section" [] [ Private.slot slot ]);
       ]
   in
   let c = Dom_cases.container (Dom_cases.server (view content)) in
@@ -417,7 +414,7 @@ let slot_never_captured () =
   let c = Dom_cases.container "" in
   let dispose =
     Yuka.Private.render (Dom_cases.as_element c) (fun () ->
-        element "div" [] [ Yuka.slot (empty_slot ()) ])
+        element "div" [] [ Private.slot (empty_slot ()) ])
   in
   check "markers only" "<div><!--[$--><!--]--></div>" (Dom_cases.html c);
   dispose ()
@@ -428,8 +425,8 @@ let outer_view slot =
     [
       element "button" [ attr "id" "outer"; on "click" (fun _ -> State.update wrap not) ] [];
       hole (fun () ->
-          if State.get wrap then element "div" [] [ Yuka.slot slot ]
-          else element "section" [] [ Yuka.slot slot ]);
+          if State.get wrap then element "div" [] [ Private.slot slot ]
+          else element "section" [] [ Private.slot slot ]);
     ]
 
 let outer_entry =
@@ -442,7 +439,7 @@ let nested_island ~outer_loading () =
     page
       [
         runtime_island ?start:outer_loading ~name:"Outer" ~props:`Null (fun () ->
-            outer_view (Slot.make inner));
+            outer_view (Private.Slot.make inner));
       ]
   in
   reset_body ();

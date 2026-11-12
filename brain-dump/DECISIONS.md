@@ -14,9 +14,10 @@
   `Yuka.hole (fun () -> ...)`, made by the ppx, never written by the user.
   Yuka calls it once, records the States it reads, and calls it again when
   one of them changes. A hole makes a client element.
-- **slot**: a server element passed as `children` into a client component.
-  Rendered on the server and adopted on the client. `Yuka.slot` (inserted by
-  the ppx only) puts it in the client body.
+- **slot**: internal. A server element passed as `children` into a client
+  component, rendered on the server and adopted on the client. The
+  user-facing concept is children: `~children`, a client element. The code
+  that the ppx generates makes the slot (`Yuka.runtime_slot`).
 
 ## Agreed
 

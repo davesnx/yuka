@@ -20,10 +20,17 @@ let analyse_param (p : function_param) =
   match p.pparam_desc with
   | Pparam_newtype _ -> fail ~loc:p.pparam_loc "type parameters are not supported yet"
   | Pparam_val (Nolabel, _, _) -> `Positional p
-  | Pparam_val (Labelled "children", None, { ppat_desc = Ppat_constraint (_, { ptyp_desc = Ptyp_constr ({ txt = Lident "slot" | Ldot (Lident "Yuka", "slot"); _ }, []); _ }); _ }) ->
-      `Arg { label = "children"; optional = false; codec = (let loc = p.pparam_loc in [%expr Yuka.Codec.slot]) }
-  | Pparam_val ((Labelled "children" | Optional "children"), _, _) ->
-      fail ~loc:p.pparam_loc "~children must be written ~(children : Yuka.slot)"
+  | Pparam_val (Labelled "children", None, { ppat_desc = Ppat_constraint (_, { ptyp_desc = Ptyp_constr ({ txt = Lident "slot" | Ldot (Lident "Yuka", "slot"); _ }, []); _ }); _ })
+  | Pparam_val (Optional "children", _, _) ->
+      fail ~loc:p.pparam_loc "write ~children: the children of a let[@client] component are a Yuka.client Yuka.element, not a Yuka.slot or an option"
+  | Pparam_val (Labelled "children", _, _) ->
+      let loc = p.pparam_loc in
+      `Arg
+        { label = "children";
+          optional = false;
+          codec =
+            [%expr
+              Yuka.Codec.make ~encode:(fun _ -> `Null) ~decode:(fun _ -> Stdlib.Ok (Yuka.runtime_slot Stdlib.Option.None))] }
   | Pparam_val ((Labelled "start" | Optional "start"), _, _) ->
       fail ~loc:p.pparam_loc "the argument 'start' is reserved for the start strategy"
   | Pparam_val ((Labelled "make" | Optional "make"), _, _) ->
@@ -42,6 +49,13 @@ let analyse_param (p : function_param) =
       if optional && default = None && not (Codec_gen.is_option ty) then
         fail ~loc "the optional argument '%s' without default must have an option type" label;
       `Arg { label; optional; codec = Codec_gen.codec_of_type ~params:[] option_ty }
+
+let constrain_children (p : function_param) =
+  match p.pparam_desc with
+  | Pparam_val ((Labelled "children" as l), None, pat) ->
+      let loc = pat.ppat_loc in
+      { p with pparam_desc = Pparam_val (l, None, [%pat? ([%p pat] : Yuka.client Yuka.element)]) }
+  | _ -> p
 
 let module_path file =
   let path = Code_path.fully_qualified_path (Code_path.top_level ~file_path:file) in
@@ -78,12 +92,11 @@ let expand (item : structure_item) =
        | PStr [] -> ()
        | _ -> fail ~loc:attr_loc "[@client] takes no options yet: write let[@client] make");
       check_attributes vb.pvb_attributes;
-      let item = { item with pstr_desc = Pstr_value (Nonrecursive, [ vb ]) } in
       (match vb.pvb_pat.ppat_desc with
        | Ppat_var { txt = "make"; _ } -> ()
        | _ -> fail ~loc "let[@client] must define 'make'");
       match vb.pvb_expr.pexp_desc with
-      | Pexp_function (params, _, Pfunction_body _) ->
+      | Pexp_function (params, constraint_, (Pfunction_body _ as body)) ->
           let rev = List.rev params in
           (match rev with
            | last :: _ -> (
@@ -102,6 +115,11 @@ let expand (item : structure_item) =
                     | _ -> fail ~loc:p.pparam_loc "only labelled arguments are supported"))
               params
           in
+          let expr =
+            { vb.pvb_expr with
+              pexp_desc = Pexp_function (List.map constrain_children params, constraint_, body) }
+          in
+          let item = { item with pstr_desc = Pstr_value (Nonrecursive, [ { vb with pvb_expr = expr } ]) } in
           let name = estring ~loc (module_path file) in
           let label_of a = if a.optional then Optional a.label else Labelled a.label in
           let call =
@@ -134,6 +152,13 @@ let expand (item : structure_item) =
             [%expr
               (Yuka.runtime_island ?start ~name:[%e name] ~props:[%e props] (fun () -> [%e call])
                 : Yuka.server Yuka.element)]
+          in
+          let island_body =
+            if List.exists (fun a -> a.label = "children") args then
+              [%expr
+                let children = Yuka.runtime_slot (Stdlib.Option.Some children) in
+                [%e island_body]]
+            else island_body
           in
           let island =
             [%stri

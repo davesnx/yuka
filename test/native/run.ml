@@ -1402,8 +1402,7 @@ let loading_cases =
   let nested_in_slot () =
     let out =
       shell ~preload (fun () ->
-          let s = Yuka.Slot.make (isl "Inner") in
-          Yuka.runtime_island ~name:"Outer" ~props:(`Int 1) (fun () -> Yuka.slot s))
+          Yuka.runtime_island ~name:"Outer" ~props:(`Int 1) (fun () -> Yuka.runtime_slot (Some (isl "Inner"))))
     in
     let inside, after = between out in
     check bool "no link inside the outer island" false (contains inside "<link");

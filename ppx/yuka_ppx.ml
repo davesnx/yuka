@@ -397,6 +397,12 @@ let rewrite_child ~self child =
       let child = self#expression child in
       if hole then [%expr Yuka.hole (fun () -> [%e child])] else child
 
+let children_arg ~loc kids =
+  match kids with
+  | [] -> []
+  | [ k ] -> [ (Labelled "children", k) ]
+  | ks -> [ (Labelled "children", [%expr Yuka.fragment [%e list_expr ~loc ks]]) ]
+
 let split_args args =
   let children = ref [] and props = ref [] in
   List.iter
@@ -671,31 +677,18 @@ let rewrite_jsx self e =
                let cprops, ckids = split_args cargs in
                let cprops = List.map (fun (l, v) -> (l, self#expression v)) cprops in
                let kids = List.map (rewrite_child ~self) ckids in
-               let slot =
-                 match kids with
-                 | [] -> []
-                 | [ k ] -> [ (Labelled "children", [%expr Yuka.Slot.make [%e k]]) ]
-                 | ks ->
-                     [ (Labelled "children", [%expr Yuka.Slot.make (Yuka.fragment [%e list_expr ~loc ks])]) ]
-               in
                pexp_apply ~loc
                  (pexp_ident ~loc:cloc { txt = Ldot (path, "island"); loc = cloc })
-                 (start @ cprops @ slot @ [ (Nolabel, [%expr ()]) ])
+                 (start @ cprops @ children_arg ~loc kids @ [ (Nolabel, [%expr ()]) ])
            | _ ->
                Location.raise_errorf ~loc:fnloc
                  "[yuka] Yuka.Client needs exactly one child, a component tag such as <Counter a=1 />")
       | Ldot (path, "createElement") ->
           let props = List.map (fun (l, v) -> (l, self#expression v)) props in
           let kids = List.map (rewrite_child ~self) children in
-          let children_arg =
-            match kids with
-            | [] -> []
-            | [ k ] -> [ (Labelled "children", k) ]
-            | ks -> [ (Labelled "children", [%expr Yuka.fragment [%e list_expr ~loc ks]]) ]
-          in
           pexp_apply ~loc
             (pexp_ident ~loc:fnloc { txt = Ldot (path, "make"); loc = fnloc })
-            (props @ children_arg @ [ (Nolabel, [%expr ()]) ])
+            (props @ children_arg ~loc kids @ [ (Nolabel, [%expr ()]) ])
       | _ ->
           let props = List.map (fun (l, v) -> (l, self#expression v)) props in
           let kids = List.map (rewrite_child ~self) children in
