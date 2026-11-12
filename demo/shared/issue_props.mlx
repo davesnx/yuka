@@ -1,7 +1,7 @@
 open Yuka
 open Model
 
-let%client make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
+let[@client] make ~(issue : Model.Issue.t) ~(children : Yuka.slot) () =
   let live = Live.use Topics.issue (fun () -> issue.id) in
   let current =
     State.memo (fun () -> Option.value (Status.data (Live.status live)) ~default:issue)

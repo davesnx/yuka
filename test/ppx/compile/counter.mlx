@@ -1,4 +1,4 @@
-let%client make ~(label : string) ?(step : int option) ~(issue : Model.issue) () =
+let[@client] make ~(label : string) ?(step : int option) ~(issue : Model.issue) () =
   let count = Yuka.State.make 0 in
   <button on_click=(fun _ -> Yuka.State.update count (fun n -> n + Option.value step ~default:1))>
     (Yuka.text label)

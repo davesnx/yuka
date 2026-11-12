@@ -43,19 +43,45 @@ let analyse_param (p : function_param) =
         fail ~loc "the optional argument '%s' without default must have an option type" label;
       `Arg { label; optional; codec = Codec_gen.codec_of_type ~params:[] option_ty }
 
-let module_path ctxt =
-  let path = Code_path.fully_qualified_path (Expansion_context.Extension.code_path ctxt) in
+let module_path file =
+  let path = Code_path.fully_qualified_path (Code_path.top_level ~file_path:file) in
   match !library with
   | Some l -> String.capitalize_ascii l ^ "." ^ path
   | None -> path
 
-let expand ~ctxt (items : structure) =
-  let loc = Expansion_context.Extension.extension_point_loc ctxt in
-  match items with
-  | [ { pstr_desc = Pstr_value (Nonrecursive, [ vb ]); _ } as item ] -> (
+let client =
+  Attribute.declare_with_attr_loc "yuka.client" Attribute.Context.value_binding
+    Ast_pattern.__
+    (fun ~attr_loc payload -> (attr_loc, payload))
+
+let is_client vb = Attribute.get client ~mark_as_seen:false vb <> None
+
+let check_attributes (attrs : attribute list) =
+  List.iter
+    (fun (a : attribute) ->
+      let n = a.attr_name.txt in
+      if String.starts_with ~prefix:"yuka." n then
+        fail ~loc:a.attr_loc "unknown attribute [@%s] on a let[@client] binding" n)
+    attrs
+
+let expand (item : structure_item) =
+  let loc = item.pstr_loc in
+  let file = loc.loc_start.pos_fname in
+  if file <> "" && file <> "_none_" && not (Filename.check_suffix file ".mlx") then
+    fail ~loc "let[@client] is allowed only in .mlx files: rename %s to %s.mlx"
+      (Filename.basename file)
+      (Filename.remove_extension (Filename.basename file));
+  match item.pstr_desc with
+  | Pstr_value (Nonrecursive, [ vb ]) -> (
+      let vb, (attr_loc, payload) = Option.get (Attribute.consume client vb) in
+      (match payload with
+       | PStr [] -> ()
+       | _ -> fail ~loc:attr_loc "[@client] takes no options yet: write let[@client] make");
+      check_attributes vb.pvb_attributes;
+      let item = { item with pstr_desc = Pstr_value (Nonrecursive, [ vb ]) } in
       (match vb.pvb_pat.ppat_desc with
        | Ppat_var { txt = "make"; _ } -> ()
-       | _ -> fail ~loc "let%%client must define 'make'");
+       | _ -> fail ~loc "let[@client] must define 'make'");
       match vb.pvb_expr.pexp_desc with
       | Pexp_function (params, _, Pfunction_body _) ->
           let rev = List.rev params in
@@ -64,7 +90,7 @@ let expand ~ctxt (items : structure) =
                match last.pparam_desc with
                | Pparam_val (Nolabel, None, p) when unit_pattern p -> ()
                | _ -> fail ~loc:last.pparam_loc "the last parameter must be ()")
-           | [] -> fail ~loc "let%%client needs arguments");
+           | [] -> fail ~loc "let[@client] needs arguments");
           let args =
             List.filter_map
               (fun p ->
@@ -76,7 +102,7 @@ let expand ~ctxt (items : structure) =
                     | _ -> fail ~loc:p.pparam_loc "only labelled arguments are supported"))
               params
           in
-          let name = estring ~loc (module_path ctxt) in
+          let name = estring ~loc (module_path file) in
           let label_of a = if a.optional then Optional a.label else Labelled a.label in
           let call =
             pexp_apply ~loc (evar ~loc "make")
@@ -140,52 +166,32 @@ let expand ~ctxt (items : structure) =
           let name_item = [%stri let name = [%e name]] in
           pstr_include ~loc
             (include_infos ~loc (pmod_structure ~loc [ item; name_item; island; register ]))
-      | _ -> fail ~loc "let%%client needs a function")
-  | _ -> fail ~loc "let%%client takes one non-recursive let binding"
-
-let extension =
-  Extension.V3.declare "yuka.client" Extension.Context.structure_item
-    Ast_pattern.(pstr __)
-    expand
-
-let check_attributes (attrs : attribute list) =
-  List.iter
-    (fun (a : attribute) ->
-      let n = a.attr_name.txt in
-      if String.starts_with ~prefix:"yuka." n then
-        fail ~loc:a.attr_loc "unknown attribute [@%s] on a let%%client binding" n)
-    attrs
+      | _ -> fail ~loc "let[@client] needs a function")
+  | _ -> fail ~loc "let[@client] takes one non-recursive let binding"
 
 let check_placement (top : structure) =
+  let top =
+    List.map
+      (fun i ->
+        match i.pstr_desc with
+        | Pstr_value (_, vbs) when List.exists is_client vbs -> expand i
+        | _ -> i)
+      top
+  in
   let checker =
     object
       inherit Ast_traverse.iter as super
 
-      method! structure_item i =
-        (match i.pstr_desc with
-         | Pstr_extension (({ txt = "client" | "yuka.client"; _ }, payload), attrs) ->
-             let file = i.pstr_loc.loc_start.pos_fname in
-             if
-               file <> "" && file <> "_none_"
-               && not (Filename.check_suffix file ".mlx")
-             then
-               fail ~loc:i.pstr_loc
-                 "let%%client is allowed only in .mlx files: rename %s to %s.mlx"
-                 (Filename.basename file)
-                 (Filename.remove_extension (Filename.basename file));
-             if not (List.memq i top) then
-               fail ~loc:i.pstr_loc
-                 "let%%client is allowed only at the top level of a file, not inside a module or a function";
-             check_attributes attrs;
-             (match payload with
-              | PStr [ { pstr_desc = Pstr_value (_, vbs); _ } ] ->
-                  List.iter
-                    (fun (vb : value_binding) ->
-                      check_attributes vb.pvb_attributes)
-                    vbs
-              | _ -> ())
-         | _ -> ());
-        super#structure_item i
+      method! value_binding vb =
+        if is_client vb then
+          fail ~loc:vb.pvb_loc
+            "let[@client] is allowed only at the top level of a file, not inside a module or a function";
+        super#value_binding vb
+
+      method! extension (({ txt; loc }, _) as e) =
+        if txt = "client" || txt = "yuka.client" then
+          fail ~loc "let%%%s is now let[@%s]" txt txt;
+        super#extension e
     end
   in
   checker#structure top;

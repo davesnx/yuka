@@ -1,6 +1,6 @@
 open Yuka
 
-let%client make () =
+let[@client] make () =
   let close () = State.set Ui.dialog_open false in
   let open_ () =
     State.set Ui.dialog_open true;

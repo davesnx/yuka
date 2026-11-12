@@ -161,36 +161,36 @@ Unsupported type:
 Slots:
 
   $ cat > h3.mlx <<'X'
-  > let%client make ~(children : int) () = <p />
+  > let[@client] make ~(children : int) () = <p />
   > X
   $ run h3
-  File "h3.mlx", line 1, characters 16-33:
-  1 | let%client make ~(children : int) () = <p />
-                      ^^^^^^^^^^^^^^^^^
+  File "h3.mlx", line 1, characters 18-35:
+  1 | let[@client] make ~(children : int) () = <p />
+                        ^^^^^^^^^^^^^^^^^
   Error: [yuka] ~children must be written ~(children : Yuka.slot)
   [1]
 
 Missing annotation:
 
   $ cat > h4.mlx <<'X'
-  > let%client make ~a () = <p />
+  > let[@client] make ~a () = <p />
   > X
   $ run h4
-  File "h4.mlx", line 1, characters 16-18:
-  1 | let%client make ~a () = <p />
-                      ^^
+  File "h4.mlx", line 1, characters 18-20:
+  1 | let[@client] make ~a () = <p />
+                        ^^
   Error: [yuka] the argument 'a' needs a type annotation
   [1]
 
 Last parameter:
 
   $ cat > h5.mlx <<'X'
-  > let%client make ~(a : int) = <p />
+  > let[@client] make ~(a : int) = <p />
   > X
   $ run h5
-  File "h5.mlx", line 1, characters 16-26:
-  1 | let%client make ~(a : int) = <p />
-                      ^^^^^^^^^^
+  File "h5.mlx", line 1, characters 18-28:
+  1 | let[@client] make ~(a : int) = <p />
+                        ^^^^^^^^^^
   Error: [yuka] the last parameter must be ()
   [1]
 
@@ -242,15 +242,15 @@ Yuka.Client with a tag child:
   Error: [yuka] Yuka.Client needs exactly one child, a component tag such as <M a=1 />
   [1]
 
-let%client with a reserved argument:
+let[@client] with a reserved argument:
 
   $ cat > h10.mlx <<'X'
-  > let%client make ~(start : int) () = <p />
+  > let[@client] make ~(start : int) () = <p />
   > X
   $ run h10
-  File "h10.mlx", line 1, characters 16-30:
-  1 | let%client make ~(start : int) () = <p />
-                      ^^^^^^^^^^^^^^
+  File "h10.mlx", line 1, characters 18-32:
+  1 | let[@client] make ~(start : int) () = <p />
+                        ^^^^^^^^^^^^^^
   Error: [yuka] the argument 'start' is reserved for the start strategy
   [1]
 
@@ -463,83 +463,172 @@ Await with an unknown prop:
   Error: [yuka] Yuka.Await takes async, loading and failed
   [1]
 
-Nested let%client in a module:
+Nested let[@client] in a module:
 
   $ cat > n0.mlx <<'X'
   > module M = struct
-  >   let%client make ~(a : int) () = <p />
+  >   let[@client] make ~(a : int) () = <p />
   > end
   > X
   $ run n0
-  File "n0.mlx", line 2, characters 2-39:
-  2 |   let%client make ~(a : int) () = <p />
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] let%client is allowed only at the top level of a file, not inside a module or a function
+  File "n0.mlx", line 2, characters 2-41:
+  2 |   let[@client] make ~(a : int) () = <p />
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] is allowed only at the top level of a file, not inside a module or a function
   [1]
 
-Nested let%client in a local module:
+Nested let[@client] in a local module:
 
   $ cat > n1.mlx <<'X'
   > let f () =
   >   let module M = struct
-  >     let%client make ~(a : int) () = <p />
+  >     let[@client] make ~(a : int) () = <p />
   >   end in
   >   ()
   > X
   $ run n1
-  File "n1.mlx", line 3, characters 4-41:
-  3 |     let%client make ~(a : int) () = <p />
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] let%client is allowed only at the top level of a file, not inside a module or a function
+  File "n1.mlx", line 3, characters 4-43:
+  3 |     let[@client] make ~(a : int) () = <p />
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] is allowed only at the top level of a file, not inside a module or a function
   [1]
 
-Unknown yuka attribute on let%client:
+Unknown yuka attribute on let[@client]:
 
   $ cat > n2.mlx <<'X'
-  > let%client[@yuka.eager] make ~(a : int) () = <p />
+  > let[@client][@yuka.eager] make ~(a : int) () = <p />
   > X
   $ run n2
-  File "n2.mlx", line 1, characters 10-23:
-  1 | let%client[@yuka.eager] make ~(a : int) () = <p />
-                ^^^^^^^^^^^^^
-  Error: [yuka] unknown attribute [@yuka.eager] on a let%client binding
+  File "n2.mlx", line 1, characters 12-25:
+  1 | let[@client][@yuka.eager] make ~(a : int) () = <p />
+                  ^^^^^^^^^^^^^
+  Error: [yuka] unknown attribute [@yuka.eager] on a let[@client] binding
   [1]
 
-let%client in a .ml file:
+let[@client] in a .ml file:
 
   $ cat > island.ml <<'X'
-  > let%client make ~(a : int) () = Yuka.text (string_of_int a)
+  > let[@client] make ~(a : int) () = Yuka.text (string_of_int a)
   > X
   $ ./pp.exe --impl island.ml
-  File "island.ml", line 1, characters 0-59:
-  1 | let%client make ~(a : int) () = Yuka.text (string_of_int a)
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] let%client is allowed only in .mlx files: rename island.ml to island.mlx
+  File "island.ml", line 1, characters 0-61:
+  1 | let[@client] make ~(a : int) () = Yuka.text (string_of_int a)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] is allowed only in .mlx files: rename island.ml to island.mlx
   [1]
 
-let%client in a file with another extension (OCaml syntax in a .re name):
+let[@client] in a file with another extension (OCaml syntax in a .re name):
 
   $ cat > island.re <<'X'
-  > let%client make ~(a : int) () = Yuka.text (string_of_int a)
+  > let[@client] make ~(a : int) () = Yuka.text (string_of_int a)
   > X
   $ ./pp.exe --impl island.re
-  File "island.re", line 1, characters 0-59:
-  1 | let%client make ~(a : int) () = Yuka.text (string_of_int a)
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] let%client is allowed only in .mlx files: rename island.re to island.mlx
+  File "island.re", line 1, characters 0-61:
+  1 | let[@client] make ~(a : int) () = Yuka.text (string_of_int a)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] is allowed only in .mlx files: rename island.re to island.mlx
   [1]
 
 Unknown yuka attribute on the binding:
 
   $ cat > n3.mlx <<'X'
-  > let%client make ~(a : int) () = <p /> [@@yuka.other]
+  > let[@client] make ~(a : int) () = <p /> [@@yuka.other]
   > X
   $ run n3
-  File "n3.mlx", line 1, characters 38-52:
-  1 | let%client make ~(a : int) () = <p /> [@@yuka.other]
-                                            ^^^^^^^^^^^^^^
-  Error: [yuka] unknown attribute [@yuka.other] on a let%client binding
+  File "n3.mlx", line 1, characters 40-54:
+  1 | let[@client] make ~(a : int) () = <p /> [@@yuka.other]
+                                              ^^^^^^^^^^^^^^
+  Error: [yuka] unknown attribute [@yuka.other] on a let[@client] binding
   [1]
+
+[@client] takes no payload:
+
+  $ cat > p0.mlx <<'X'
+  > let[@client { lazy_ = true }] make ~(a : int) () = <p />
+  > X
+  $ run p0
+  File "p0.mlx", line 1, characters 3-29:
+  1 | let[@client { lazy_ = true }] make ~(a : int) () = <p />
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] [@client] takes no options yet: write let[@client] make
+  [1]
+
+Nested [@client] on a local binding in a function:
+
+  $ cat > p1.mlx <<'X'
+  > let f () =
+  >   let[@client] make ~(a : int) () = <p /> in
+  >   make
+  > X
+  $ run p1
+  File "p1.mlx", line 2, characters 2-41:
+  2 |   let[@client] make ~(a : int) () = <p /> in
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] is allowed only at the top level of a file, not inside a module or a function
+  [1]
+
+[@client] on a binding not named make:
+
+  $ cat > p2.mlx <<'X'
+  > let[@client] view ~(a : int) () = <p />
+  > X
+  $ run p2
+  File "p2.mlx", line 1, characters 0-39:
+  1 | let[@client] view ~(a : int) () = <p />
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] must define 'make'
+  [1]
+
+[@client] on let rec and on several bindings:
+
+  $ cat > p3.mlx <<'X'
+  > let[@client] rec make ~(a : int) () = <p />
+  > X
+  $ run p3
+  File "p3.mlx", line 1, characters 0-43:
+  1 | let[@client] rec make ~(a : int) () = <p />
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] takes one non-recursive let binding
+  [1]
+  $ cat > p4.mlx <<'X'
+  > let[@client] make ~(a : int) () = <p />
+  > and other = 1
+  > X
+  $ run p4
+  File "p4.mlx", lines 1-2, characters 0-13:
+  1 | let[@client] make ~(a : int) () = <p />
+  2 | and other = 1
+  Error: [yuka] let[@client] takes one non-recursive let binding
+  [1]
+
+The old extension form is refused:
+
+  $ cat > p5.mlx <<'X'
+  > let%client make ~(a : int) () = <p />
+  > X
+  $ run p5
+  File "p5.mlx", line 1, characters 4-10:
+  1 | let%client make ~(a : int) () = <p />
+          ^^^^^^
+  Error: [yuka] let%client is now let[@client]
+  [1]
+  $ cat > p6.mlx <<'X'
+  > let%yuka.client make ~(a : int) () = <p />
+  > X
+  $ run p6
+  File "p6.mlx", line 1, characters 4-15:
+  1 | let%yuka.client make ~(a : int) () = <p />
+          ^^^^^^^^^^^
+  Error: [yuka] let%yuka.client is now let[@yuka.client]
+  [1]
+
+The item attribute [@@client] is the same attribute:
+
+  $ cat > p7.mlx <<'X'
+  > let make ~(a : int) () = <p /> [@@client]
+  > X
+  $ run p7 | grep -c 'Yuka.runtime_entry'
+  1
 
 deriving form needs a record:
 
@@ -720,22 +809,22 @@ A literal base href is kept:
   $ run base1 | grep -o 'href=[^ ]*'
   href=\"/app/\">"
 
-The namespaced and the short names are the same: let%yuka.client and
-let%client, [@@shared] and [@@yuka.shared]:
+The namespaced and the short names are the same: let[@yuka.client] and
+let[@client], [@@shared] and [@@yuka.shared]:
 
   $ cat > ns1.mlx <<'Y'
-  > let%yuka.client make ~(n : int) () = <b>(Yuka.text (string_of_int n))</b>
+  > let[@yuka.client] make ~(n : int) () = <b>(Yuka.text (string_of_int n))</b>
   > Y
   $ run ns1 | grep -c 'Yuka.runtime_entry'
   1
   $ cat > ns2.ml <<'Y'
-  > let%yuka.client make () = ()
+  > let[@yuka.client] make () = ()
   > Y
   $ ./pp.exe --impl ns2.ml
-  File "ns2.ml", line 1, characters 0-28:
-  1 | let%yuka.client make () = ()
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] let%client is allowed only in .mlx files: rename ns2.ml to ns2.mlx
+  File "ns2.ml", line 1, characters 0-30:
+  1 | let[@yuka.client] make () = ()
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let[@client] is allowed only in .mlx files: rename ns2.ml to ns2.mlx
   [1]
   $ cat > ns3.mlx <<'Y'
   > let count = State.make 0 [@@shared]
@@ -746,12 +835,12 @@ let%client, [@@shared] and [@@yuka.shared]:
 An island prop named make is refused:
 
   $ cat > mk.mlx <<'Y'
-  > let%client make ~(make : int) () = <b>(Yuka.text (string_of_int make))</b>
+  > let[@client] make ~(make : int) () = <b>(Yuka.text (string_of_int make))</b>
   > Y
   $ run mk
-  File "mk.mlx", line 1, characters 16-29:
-  1 | let%client make ~(make : int) () = <b>(Yuka.text (string_of_int make))</b>
-                      ^^^^^^^^^^^^^
+  File "mk.mlx", line 1, characters 18-31:
+  1 | let[@client] make ~(make : int) () = <b>(Yuka.text (string_of_int make))</b>
+                        ^^^^^^^^^^^^^
   Error: [yuka] the argument 'make' would hide the component make; give the prop another name
   [1]
 

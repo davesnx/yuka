@@ -52,13 +52,13 @@ module Derived = struct
   type refers = { s : status; p : point } [@@deriving codec]
 end
 
-let%client make ~(a : int) ?(b : string option) ?(c : int = 1) () = <p>"hi"</p>
+let[@client] make ~(a : int) ?(b : string option) ?(c : int = 1) () = <p>"hi"</p>
 
 module Async_codec = struct
   type r = { a : int list Yuka.Async.t; b : string Async.t } [@@deriving codec]
 end
 
-let%client make ~(items : int list Yuka.Async.t) () = <p />
+let[@client] make ~(items : int list Yuka.Async.t) () = <p />
 
 module Recursive = struct
   type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree [@@deriving codec]
@@ -80,7 +80,7 @@ end
 let shared = State.make 0 [@@yuka.shared]
 let in_function () = State.make 0
 
-let%client make ~(label : string) ~(children : Yuka.slot) () = <div>(Yuka.slot children)</div>
+let[@client] make ~(label : string) ~(children : Yuka.slot) () = <div>(Yuka.slot children)</div>
 module Slotted = struct end
 
 let slot_one = <Yuka.Client><Slotted label="a"><p>"x"</p></Slotted></Yuka.Client>

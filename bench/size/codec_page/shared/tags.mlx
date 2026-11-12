@@ -1,4 +1,4 @@
-let%client make ~(title : string option) ~(tags : string list) ~(score : float) () =
+let[@client] make ~(title : string option) ~(tags : string list) ~(score : float) () =
   <p>
     (Yuka.text (Option.value title ~default:""))
     (Yuka.fragment (List.map Yuka.text tags))

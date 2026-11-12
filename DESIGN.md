@@ -46,7 +46,7 @@ Current layout:
 | `yuka` | native, melange | `src/` | everything users call: State, Effect, elements, Json, Codec, Async, Action, `Yuka.Server`, `Yuka.Client` (islands and browser runtime), `Yuka.Router`, `Yuka.Await`; the virtual DOM module `Web` |
 | `yuka.js` | melange | `dom/js/` | the browser implementation of `Web` (a Melange entry lists it) |
 | `yuka.native` | native | `dom/native/` | the default implementation of `Web` (raises "browser only"); a Melange build that does not list `yuka.js` fails to build |
-| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let%client`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.render ~islands` |
+| `yuka.ppx` | native | `ppx/` | mlx to element calls, attribute checks, holes, lints, `let[@client]`, `[@@deriving codec]`, `<Yuka.Client>`, `<Yuka.Await>`, templates, `Yuka.render ~islands` |
 
 The executable `yuka` (`gen/`, package `yuka`) has the commands `routes`,
 `islands`, `css` and `dev`.
@@ -111,8 +111,8 @@ markers everywhere: the client hydrates their output.
 
 ## Islands
 
-- `let%client make ~(a : int) ~(b : Issue.t) () = ...` in a module `M`
-  declares a client component. Every labelled argument has a type. The ppx
+- `let[@client] make ~(a : int) ~(b : Issue.t) () = ...` in a module `M`
+  declares a client component (`[@yuka.client]` is the long name). Every labelled argument has a type. The ppx
   adds `M.island` (server side: encodes the props, returns a
   `server element`) and `M.register` (client side: decodes the props and
   mounts).
@@ -288,7 +288,7 @@ Current names: `Yuka_server` is now `Yuka.Server`; `Yuka.list` and `Yuka.array` 
 
 ## v0.2: the rest of Yuka (decided 2026-11-06)
 
-Current names: `Yuka_server` and `Yuka_client` are now `Yuka.Server` and `Yuka.Client`; the island strategy `loading` is now the `start` prop of `<Yuka.Client>` (`type start`); `Client.island` is now `runtime_island`, which only the ppx calls; `Yuka_client.start` is now `Yuka.render ~islands ()`.
+Current names: `Yuka_server` and `Yuka_client` are now `Yuka.Server` and `Yuka.Client`; the island strategy `loading` is now the `start` prop of `<Yuka.Client>` (`type start`); `Client.island` is now `runtime_island`, which only the ppx calls; `Yuka_client.start` is now `Yuka.render ~islands ()`; `let%client` is now `let[@client]` (see "`[@client]` attribute").
 
 Goal: everything left in `.workplace/plans/yuka-v0.1_PLAN.md` "Remaining
 work", except the items listed as out of scope there.
@@ -351,7 +351,7 @@ work", except the items listed as out of scope there.
 
 ## v0.3: router, early islands, chunks, templates, typed errors (decided 2026-11-06)
 
-Current names: `Action.declare` is now `Action.mutation`; `Router.start` is now `Yuka.render ~islands ()` and `Router.navigate` is `Browser.navigate`; `Client.entry` and `Client.lazy_entry` are now `runtime_entry` and `runtime_lazy_entry`, which `yuka islands` writes; `Yuka_server` and `Yuka_client` are `Yuka.Server` and `Yuka.Client`.
+Current names: `Action.declare` is now `Action.mutation`; `Router.start` is now `Yuka.render ~islands ()` and `Router.navigate` is `Browser.navigate`; `Client.entry` and `Client.lazy_entry` are now `runtime_entry` and `runtime_lazy_entry`, which `yuka islands` writes; `Yuka_server` and `Yuka_client` are `Yuka.Server` and `Yuka.Client`; `let%client` is now `let[@client]` (see "`[@client]` attribute").
 
 The user put these in scope: "all of this is on scope!".
 
@@ -589,7 +589,7 @@ Lwt bridges live in the app). `Yuka.await` is now `<Yuka.Await>`.
 
 ## v0.3 addendum: generated island registry and `Yuka.mount ()` (decided by the user, 2026-11-06)
 
-Current names: `yuka-islands --library NAME DIR` is now `yuka islands --dir DIR` (the library name comes from `DIR/dune`); `Client.entry`, `Client.lazy_entry`, `Client.promise`, `Client.promise_map` and the value `Client.registry` are now `runtime_entry`, `runtime_lazy_entry`, `runtime_promise`, `runtime_promise_map` and `runtime_registry` (the type `Client.registry` stays); `Router.start` and `Router.navigate` are `Yuka.render ~islands ()` and `Browser.navigate`.
+Current names: `yuka-islands --library NAME DIR` is now `yuka islands --dir DIR` (the library name comes from `DIR/dune`); `Client.entry`, `Client.lazy_entry`, `Client.promise`, `Client.promise_map` and the value `Client.registry` are now `runtime_entry`, `runtime_lazy_entry`, `runtime_promise`, `runtime_promise_map` and `runtime_registry` (the type `Client.registry` stays); `Router.start` and `Router.navigate` are `Yuka.render ~islands ()` and `Browser.navigate`; `let%client` is now `let[@client]` (see "`[@client]` attribute").
 
 `Yuka.mount` is now `Yuka.render ~islands`: see "`Yuka.render`, one client
 start".
@@ -798,7 +798,7 @@ Changes from the design above, found in implementation and review:
 
 ## v1: lazy as a value of `loading` (decided by the user, 2026-11-06)
 
-Current names: The island prop `loading` and `type loading` are now `start` and `type start`; an island may have its own prop named `loading`. `yuka-islands` is now `yuka islands`.
+Current names: The island prop `loading` and `type loading` are now `start` and `type start`; an island may have its own prop named `loading`. `yuka-islands` is now `yuka islands`; `let%client` is now `let[@client]` (see "`[@client]` attribute").
 
 Replaces "Lazy islands" above and `let%client[@yuka.lazy]`. Source:
 `.workplace/plans/lazy-islands_PLAN.md` (measurement: all six demo islands
@@ -840,7 +840,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
 
 ## Only `.mlx` (2026-11-10)
 
-Current names: `yuka-islands` is now `yuka islands`.
+Current names: `yuka-islands` is now `yuka islands`; `let%client` is now `let[@client]` (see "`[@client]` attribute").
 
 - Components and islands are written in `.mlx`. Plain logic modules
   (model, store, actions without JSX) stay `.ml`.
@@ -2152,7 +2152,7 @@ Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
 
 ## CSS per module (2026-11-10)
 
-Current names: `yuka-css DIR` is now `yuka css --dir DIR`; `Server.css_files` is `Server.Prerender.css_files`; `Immutable` is `Server.immutable` (`Server.cache` is abstract); `Yuka.stylesheet` is `runtime_stylesheet`.
+Current names: `yuka-css DIR` is now `yuka css --dir DIR`; `Server.css_files` is `Server.Prerender.css_files`; `Immutable` is `Server.immutable` (`Server.cache` is abstract); `Yuka.stylesheet` is `runtime_stylesheet`; `let%client` is now `let[@client]` (see "`[@client]` attribute").
 
 Ticket 23; `.workplace/docs/app-spec.md` section 23, option B built
 through A.
@@ -2635,7 +2635,8 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 - `yuka.native` is native only, so a Melange build without `yuka.js` fails
   at build time.
 - `[@@deriving form]` field types are polymorphic variants.
-- `let%yuka.client` is the same as `let%client`. After a top-level
+- `let%yuka.client` is the same as `let%client` (now `let[@yuka.client]`
+  and `let[@client]`, see "`[@client]` attribute"). After a top-level
   `open Yuka`, `<Await>`, `<Show>`, `<Catch>` and `<Client>` work
   unqualified.
 
@@ -2672,6 +2673,7 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 | `Immutable` and the other `cache` constructors | `Server.immutable`, `no_store`, `no_cache`, `private_`, `public` |
 | `/_yuka/<file>` | `/_yuka/app/<file>` |
 | `yuka-routes`, `yuka-islands`, `yuka-css`, `yuka dev --dune` | `yuka routes`, `yuka islands`, `yuka css`, `yuka dev --build` |
+| `let%client`, `let%yuka.client` | `let[@client]`, `let[@yuka.client]` |
 
 ## Navigation code on first use (2026-11-11)
 
@@ -2863,3 +2865,26 @@ that the first click requests it once; with the first stub it fails
 
 No test makes `boot` throw: the stub's handling of it was checked by
 reading only.
+
+## `[@client]` attribute (2026-11-12)
+
+Decided by the user: the island mark is the attribute `let[@client] make
+... = ...` instead of the extension `let%client make ... = ...`. Reason: an
+attribute can carry options later, for example `let[@client { x = 1 }]`.
+
+- `[@yuka.client]` is the long name. `let make ... = ... [@@client]` is the
+  same attribute on the same binding; the docs show only `let[@client]`.
+- The payload must be empty: no option exists yet, and any payload is a
+  ppx error.
+- `let%client` and `let%yuka.client` are removed, with no compatibility
+  path. The ppx refuses them with "let%client is now let[@client]".
+- The ppx expands the attribute in its whole-file pass before the other
+  rules, with the same checks and errors as before. OCaml does not report an
+  attribute that no ppx reads, so the ppx refuses `[@client]` on a binding
+  nested in a module or a function, in a file that is not `.mlx`, on a
+  binding not named `make`, on `let rec` and on more than one binding.
+  ppxlib declares the attribute for value bindings, so its `-check` mode
+  reports one in another place.
+- `yuka islands` finds an island by text: a line that starts with
+  `let[@client]` or `let[@yuka.client]`. A `make` marked only with
+  `[@@client]` is not found.

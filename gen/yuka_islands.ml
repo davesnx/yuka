@@ -24,7 +24,7 @@ let has_island src =
         let whole = p + k >= n || not (is_ident_char code.[p + k] || code.[p + k] = '.') in
         (at_line_start && whole) || go keyword (p + k)
   in
-  go "let%client" 0 || go "let%yuka.client" 0
+  go "let[@client]" 0 || go "let[@yuka.client]" 0
 
 type sexp = Atom of string | List of sexp list
 

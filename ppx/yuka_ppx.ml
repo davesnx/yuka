@@ -801,7 +801,6 @@ let () =
   Form_gen.register ();
   Driver.register_transformation "yuka"
     ~preprocess_impl:Island.check_placement
-    ~rules:[ Context_free.Rule.extension Island.extension ]
     ~impl:(fun s ->
       scope := empty_scope;
       depth := 0;

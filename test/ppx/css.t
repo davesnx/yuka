@@ -113,11 +113,11 @@ that is not a function gets a warning, another make is left alone:
                                                                 "[yuka] this make is not a function, so [%yuka.css] cannot add its sheet; call Yuka.use_css Css.stylesheet in the component"]
     end
 
-The island of a let%client gets the sheet:
+The island of a let[@client] gets the sheet:
 
   $ cat > b.mlx <<'X'
   > module Css = [%yuka.css "a.css"]
-  > let%client make ~(n : int) () = Yuka.int n
+  > let[@client] make ~(n : int) () = Yuka.int n
   > X
   $ mlx-pp b.mlx > b.ml && run b | grep -c "Yuka.use_css Css.stylesheet"
   1

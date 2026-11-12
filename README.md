@@ -29,7 +29,7 @@ Melange compiles to JavaScript. A page with no island loads no JavaScript.
 ```ocaml
 open Yuka
 
-let%client make ~(initial : int) () =
+let[@client] make ~(initial : int) () =
   let n = State.make initial in
   <button on_click=(fun _ -> State.update n succ)>
     "Clicks: "
@@ -127,7 +127,7 @@ open Yuka
 
 module Css = [%yuka.css "counter.css"]
 
-let%client make ~(initial : int) () =
+let[@client] make ~(initial : int) () =
   let n = State.make initial in
   <button class_=Css.button on_click=(fun _ -> State.update n succ)>
     "Clicks: "

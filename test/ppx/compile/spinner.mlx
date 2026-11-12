@@ -1,1 +1,1 @@
-let%client make ~(loading : bool) () = <p>(Yuka.text (if loading then "loading" else "ready"))</p>
+let[@client] make ~(loading : bool) () = <p>(Yuka.text (if loading then "loading" else "ready"))</p>

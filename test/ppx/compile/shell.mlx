@@ -1,4 +1,4 @@
-let%client make ~(title : string) ~(children : Yuka.slot) () =
+let[@client] make ~(title : string) ~(children : Yuka.slot) () =
   <section>
     <h2>(Yuka.text title)</h2>
     (Yuka.slot children)

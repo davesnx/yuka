@@ -10,7 +10,7 @@ let index_of id items =
   in
   go 0 items
 
-let%client make ~(title : string) ~(view : Queries.view) () =
+let[@client] make ~(title : string) ~(view : Queries.view) () =
   let source = Live.use Topics.issues (fun () -> view) in
   let issues =
     State.memo (fun () -> Option.value (Status.data (Live.status source)) ~default:[])

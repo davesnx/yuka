@@ -43,7 +43,7 @@ order:
 
 yuka islands and yuka css take --dir, once per directory:
 
-  $ mkdir lib && printf '(library (name app))\n' > lib/dune && printf 'let%%client make () = ()\n' > lib/c.mlx
+  $ mkdir lib && printf '(library (name app))\n' > lib/dune && printf 'let[@client] make () = ()\n' > lib/c.mlx
   $ yuka islands --dir lib --manifest
   {
     "App.C": "./lib/c.js"

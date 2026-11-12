@@ -1,6 +1,6 @@
 open Yuka
 
-let%client make ~(initial : int) () =
+let[@client] make ~(initial : int) () =
   let n = State.make initial in
   <button on_click=(fun _ -> State.update n succ)>
     (Yuka.int (State.get n))

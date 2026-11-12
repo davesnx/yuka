@@ -1,4 +1,4 @@
-let%client make ~(initial : int) () =
+let[@client] make ~(initial : int) () =
   let n = Yuka.State.make initial in
   <div>
     <span id="idle">(Yuka.int (Yuka.State.get n))</span>
