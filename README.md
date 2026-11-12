@@ -70,3 +70,9 @@ Router.make ~not_found:Pages.not_found
 - [`docs/state.md`](docs/state.md): state, memos and effects.
 - [`docs/router.md`](docs/router.md): routes, params and links.
 - [`docs/security.md`](docs/security.md): what Yuka escapes and blocks.
+
+## For coding agents
+
+[`skills/yuka`](skills/yuka) is a skill that teaches Yuka to a coding agent.
+Its references are copies of `docs/`: `make skill` updates them, and
+`make test` fails when they differ.

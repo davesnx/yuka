@@ -125,6 +125,11 @@ PAGES_THROTTLE ?= 4
 measure-pages: demo-bundle ## Measure JS bytes, TBT and LCP of each demo page, and LCP as plain HTML (PAGES_RUNS, PAGES_THROTTLE, CHROME_PATH)
 	node bench/pages/measure.ts --build-dir $(BUILD_DIR) --runs $(PAGES_RUNS) --throttle $(PAGES_THROTTLE)
 
+.PHONY: skill
+skill: ## Copy docs/ to the references of the agent skill in skills/yuka (make test fails when they differ)
+	rm -rf skills/yuka/references
+	cp -r docs skills/yuka/references
+
 .PHONY: install-npm
 install-npm: ## Install npm dependencies (esbuild, jsdom)
 	npm install

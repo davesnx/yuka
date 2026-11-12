@@ -1,0 +1,8 @@
+(rule
+ (alias runtest)
+ (deps
+  (source_tree references)
+  (source_tree ../../docs))
+ (action
+  (system
+   "diff -r ../../docs references || { echo 'skills/yuka/references differs from docs/. Run: make skill'; exit 1; }")))
