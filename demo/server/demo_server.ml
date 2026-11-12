@@ -18,6 +18,7 @@ let read_file path = In_channel.with_open_bin path In_channel.input_all
 let () =
   let here = Filename.dirname Sys.executable_name in
   let port = ref 8080 in
+  let interface = ref "localhost" in
   let js_dir = ref (Filename.concat here "../client/out") in
   let static_dir = ref (Filename.concat here "../static") in
   let manifest = ref (Filename.concat here "../client/yuka_islands.json") in
@@ -33,6 +34,7 @@ let () =
   Arg.parse
     [
       ("--port", Arg.Set_int port, "Port to listen on (default 8080)");
+      ("--interface", Arg.Set_string interface, "Network interface to listen on (default localhost)");
       ("--js-dir", Arg.Set_string js_dir, "Melange output directory");
       ("--bundle", Arg.Set bundle, "Serve the esbuild bundle instead of the module tree");
       ("--manifest", Arg.Set_string manifest, "Island manifest (yuka_islands.json)");
@@ -47,7 +49,7 @@ let () =
       ("--bus", Arg.Set_string bus, "With --second-node: memory (default) or pg:CONNINFO (yuka-live-pg)");
     ]
     (fun _ -> ())
-    "demo_server [--port N] [--bundle] [--prerender DIR] [--prerendered DIR]";
+    "demo_server [--port N] [--interface ADDRESS] [--bundle] [--prerender DIR] [--prerendered DIR]";
   let manifest = read_file !manifest in
   let client = Filename.concat !js_dir "demo/client" in
   let assets =
@@ -70,7 +72,7 @@ let () =
   let app = Demo_app.Routes_server.app in
   if !prerender <> "" then Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app)
   else if !second = 0 then
-    Dream.run ~port:!port @@ Dream.logger @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
+    Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
     @@ Yuka_dream.handler config app
   else begin
     let make_bus =
@@ -85,7 +87,7 @@ let () =
     in
     let other = Yuka.Server.Live.node () in
     let serve ?node port =
-      Dream.serve ~port @@ Dream.logger @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
+      Dream.serve ~interface:!interface ~port @@ Dream.logger @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
       @@ Yuka_dream.handler ?node config app
     in
     Lwt_main.run

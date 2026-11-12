@@ -13,9 +13,10 @@ the build directory):
 `make demo-dev` runs it under `yuka dev`: it rebuilds, restarts the server
 and reloads the browser on change.
 
-Flags: `--port`, `--js-dir` (Melange output), `--static-dir` (`style.css`),
-`--manifest`, `--metafile`, `--bundle`, `--prerender DIR` (write the
-prerendered pages to `DIR` and exit), `--prerendered DIR` (serve them).
+Flags: `--port`, `--interface` (default `localhost`), `--js-dir` (Melange
+output), `--static-dir` (`style.css`), `--manifest`, `--metafile`,
+`--bundle`, `--prerender DIR` (write the prerendered pages to `DIR` and
+exit), `--prerendered DIR` (serve them).
 Defaults are relative to the executable, so any build directory works.
 
 ## URLs
@@ -52,6 +53,18 @@ server on `PORT` (default 8123), runs the check and stops the server:
     make e2e
 
 Use a fresh server for each run: the check creates an issue and a comment.
+
+## Docker
+
+From the repository root:
+
+    docker build -f demo/Dockerfile -t yuka-demo .
+    docker run --rm -p 8080:8080 -e YUKA_DEMO_SECRET=<secret> yuka-demo
+
+The image has the server, the production bundle and `style.css`. The server
+listens on `0.0.0.0:8080`; add `--port N` after the image name to change the
+port. `YUKA_DEMO_SECRET` signs the session cookies: without it the server
+uses the development secret.
 
 ## Production bundle
 

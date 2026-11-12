@@ -1,0 +1,33 @@
+FROM ocaml/opam:debian-12-ocaml-5.4 AS build
+WORKDIR /home/opam/yuka
+COPY --chown=opam *.opam ./
+RUN sudo apt-get update \
+ && opam install . --deps-only --yes \
+ && sudo rm -rf /var/lib/apt/lists/* \
+ && opam clean --download-cache --repo-cache
+COPY --chown=opam . .
+RUN sudo chown opam . \
+ && opam exec -- dune build --root . --profile=release \
+      demo/server/demo_server.exe @demo/client/demo-client demo/client/yuka_islands.json
+
+FROM node:22-bookworm-slim AS bundle
+WORKDIR /yuka
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY scripts scripts
+COPY demo/bundle.sh demo/bundle.sh
+COPY --from=build /home/opam/yuka/_build/default/demo/client _build/default/demo/client
+RUN demo/bundle.sh
+
+FROM debian:12-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libev4 libpq5 libssl3 \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /home/opam/yuka/_build/default/demo/server/demo_server.exe /app/server/demo_server.exe
+COPY --from=build /home/opam/yuka/_build/default/demo/client/yuka_islands.json /app/client/yuka_islands.json
+COPY --from=bundle /yuka/_build/default/demo/client/meta.json /app/client/meta.json
+COPY --from=bundle /yuka/_build/default/demo/client/out/demo/client/bundle /app/client/out/demo/client/bundle
+COPY demo/static/style.css /app/static/style.css
+USER nobody
+EXPOSE 8080
+ENTRYPOINT ["/app/server/demo_server.exe", "--bundle", "--interface", "0.0.0.0"]

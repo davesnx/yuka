@@ -1,0 +1,11 @@
+.git
+.workplace
+.claude
+.idea
+.vscode
+_build*
+_opam
+_b
+_gate
+node_modules
+vendor
