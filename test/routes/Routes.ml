@@ -18,15 +18,15 @@ Router.make ~layout:Layouts.root ~not_found:Pages.not_found ~error:Pages.error
           ~loader:Loaders.post;
         Router.route New_post ~path:"/new" ~page:Pages.new_post;
       ];
-    Router.group ~path:"/issue/:id<Params.Issue_id>" ~loader:Loaders.issue
+    Router.group ~path:"/issue/:id<Params.issue_id>" ~loader:Loaders.issue
       ~guard:Guards.signed_in
       [
         Router.route Issue ~path:"/" ~page:Pages.issue
           ~search:
             {
-              tab = optional Params.Tab;
+              tab = optional Params.Tab.t;
               seen = many int;
-              view = default Params.Tab Params.Tab.Overview;
+              view = default Params.Tab.t Params.Tab.Overview;
             };
         Router.action Close_issue ~path:"/close" ~method_:`POST
           ~handler:Actions.close;
@@ -42,7 +42,7 @@ Router.make ~layout:Layouts.root ~not_found:Pages.not_found ~error:Pages.error
     Router.action Clear_feed ~path:"/feed.xml" ~method_:`DELETE
       ~handler:Actions.clear;
     Router.endpoint Missing ~path:"/missing" ~method_:`GET ~handler:Api.missing;
-    Router.redirect ~path:"/i/:id<Params.Issue_id>" ~to_:(Permanent "/issue/:id");
+    Router.redirect ~path:"/i/:id<Params.issue_id>" ~to_:(Permanent "/issue/:id");
     Router.redirect ~path:"/old-docs/:parts<string...>"
       ~to_:(Temporary "/docs/:parts");
     Router.redirect ~path:"/legacy-blog" ~to_:(Temporary "/blog");

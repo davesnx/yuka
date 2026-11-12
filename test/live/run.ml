@@ -9,7 +9,7 @@ module Astring_like = struct
 end
 
 let logged = ref []
-let () = Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged)
+let () = Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged)
 
 type fake = {
   mutable inbox : string option list;

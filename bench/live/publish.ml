@@ -37,7 +37,7 @@ let connect key bytes =
        ~token:(fun () -> "t") connection)
 
 let () =
-  Yuka.Server.Testing.set_log ignore;
+  Yuka.Server.Testing.set_log (fun _ _ -> ());
   List.iter
     (fun n ->
       let key = n in

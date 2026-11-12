@@ -240,6 +240,7 @@ let find_cases =
     t "custom param None is Missing" (fun () ->
         check lookup "abc" Router.Missing (find "/issue/abc");
         check lookup "zero" Router.Missing (find "/issue/YUK-0");
+        check lookup "not canonical" Router.Missing (find "/issue/YUK-01");
         check lookup "action" Router.Missing (find ~meth:`POST "/issue/abc/close"));
     t "wrong method lists the methods of the path" (fun () ->
         check lookup "page" (Router.Wrong_method [ `GET ]) (find ~meth:`POST "/");
@@ -305,6 +306,21 @@ let router_cases =
         List.iter
           (fun s -> check (option int) s None (Router.int_param s))
           [ "01"; "-0"; "+1"; "0x10"; "1_0"; "-01" ]);
+    t "Param" (fun () ->
+        let p = Router.Param.(decode int) in
+        check (option int) "int" (Some (-12)) (p "-12");
+        List.iter (fun s -> check (option int) s None (p s)) [ "01"; "-0"; "+1"; "" ];
+        check string "int encode" "-12" (Router.Param.(encode int) (-12));
+        check (option string) "string" (Some "a b") (Router.Param.(decode string) "a b");
+        check string "string encode" "a b" (Router.Param.(encode string) "a b");
+        check (option bool) "true" (Some true) (Router.Param.(decode bool) "true");
+        check (option bool) "false" (Some false) (Router.Param.(decode bool) "false");
+        check (option bool) "other" None (Router.Param.(decode bool) "1");
+        check string "bool encode" "false" (Router.Param.(encode bool) false);
+        let made = Router.Param.make ~decode:(fun s -> if s = "x" then Some () else None) ~encode:(fun () -> "x") in
+        check (option unit) "make decode" (Some ()) (Router.Param.decode made "x");
+        check (option unit) "make decode None" None (Router.Param.decode made "y");
+        check string "make encode" "x" (Router.Param.encode made ()));
     t "search" (fun () ->
         check (list string) "all values" [ "1"; "3" ]
           (Router.search [ ("a", "1"); ("b", "2"); ("a", "3") ] "a");
