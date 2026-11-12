@@ -664,7 +664,7 @@ let rewrite_jsx self e =
                  (start @ cprops @ slot @ [ (Nolabel, [%expr ()]) ])
            | _ ->
                Location.raise_errorf ~loc:fnloc
-                 "[yuka] Yuka.Client needs exactly one child, a component tag such as <M a=1 />")
+                 "[yuka] Yuka.Client needs exactly one child, a component tag such as <Counter a=1 />")
       | Ldot (path, "createElement") ->
           let props = List.map (fun (l, v) -> (l, self#expression v)) props in
           let kids = List.map (rewrite_child ~self) children in

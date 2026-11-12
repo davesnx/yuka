@@ -114,7 +114,18 @@ let tree_digest dir =
   in
   Digest.to_hex (Digest.string (String.concat "\n" (files "")))
 
-let handler ?node config app request = to_lwt (Cycle.handler ?node config app request)
+let dream_log = Dream.sub_log "yuka"
+
+let log level message =
+  match level with
+  | `Error -> dream_log.error (fun k -> k "%s" message)
+  | `Warn -> dream_log.warning (fun k -> k "%s" message)
+  | `Info -> dream_log.info (fun k -> k "%s" message)
+  | `Debug -> dream_log.debug (fun k -> k "%s" message)
+
+let handler ?node config app =
+  let config = Yuka.Server.Adapter.default_log log config in
+  fun request -> to_lwt (Cycle.handler ?node config app request)
 
 let rec make_dirs dir =
   if not (Sys.file_exists dir) then begin

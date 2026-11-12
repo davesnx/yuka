@@ -42,7 +42,7 @@ val async : 'a t -> 'a Async.t t
     [{"$async":"aN","ok":v}] or [{"$async":"aN","error":"server error"}].
     In a streaming render, a pending value is written as [{"$async":"aN"}]
     and the stream writes its value later, or [{"error":"server error"}] if
-    it fails. A failure message goes to the [log_error] of
+    it fails. A failure message goes to the [log] of
     [Yuka.Server.config] and never into the page, except for a
     [Server.Action.reject] message, which is sent in place of
     ["server error"]. This is the rule of [Yuka.Await], so an [Await] in an
@@ -53,8 +53,8 @@ val async : 'a t -> 'a Async.t t
     [Async]. *)
 
 val encode : 'a t -> 'a -> Json.t
-(** [encode c v] is [c.encode v]. *)
+(** [encode codec value] is [codec.encode value]. *)
 
 val decode : 'a t -> Json.t -> ('a, string) result
-(** [decode c j] is [c.decode j]. The error of a codec of this module
+(** [decode codec json] is [codec.decode json]. The error of a codec of this module
     names the expected kind and the start of the JSON text. *)

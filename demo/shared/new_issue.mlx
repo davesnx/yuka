@@ -1,32 +1,30 @@
-open Yuka
-
 let[@client] make () =
-  let close () = State.set Ui.dialog_open false in
+  let close () = Yuka.State.set Ui.dialog_open false in
   let open_ () =
-    State.set Ui.dialog_open true;
-    Browser.focus "dialog-title"
+    Yuka.State.set Ui.dialog_open true;
+    Yuka.Browser.focus "dialog-title"
   in
-  Effect.run (fun () ->
-      Browser.on_window "keydown" (fun e ->
-          match Event.key e with
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "keydown" (fun e ->
+          match Yuka.Event.key e with
           | "Escape" -> close ()
           | "c"
             when not
-                   (Ui.typing e || State.peek Ui.dialog_open
-                  || Event.ctrl_key e || Event.meta_key e) ->
-              Event.prevent_default e;
+                   (Ui.typing e || Yuka.State.peek Ui.dialog_open
+                  || Yuka.Event.ctrl_key e || Yuka.Event.meta_key e) ->
+              Yuka.Event.prevent_default e;
               open_ ()
           | _ -> ()));
   <div class_="new-issue">
     <button class_="new-issue-button" on_click=(fun _ -> open_ ())>"+ New issue (c)"</button>
-    (if State.get Ui.dialog_open then
+    (if Yuka.State.get Ui.dialog_open then
        <div class_="dialog-wrap">
          <div class_="backdrop dim" on_click=(fun _ -> close ()) />
          <div class_="dialog">
            <h2>"New issue"</h2>
            <Yuka.Form action=Actions.create_issue
              on_ok=(fun _ ->
-               Remote.invalidate Queries.labels;
+               Yuka.Remote.invalidate Queries.labels;
                close ())>
              (fun form ->
                <div>
@@ -34,7 +32,7 @@ let[@client] make () =
                  <div class_="dialog-actions">
                    <button class_="button" type_=`button on_click=(fun _ -> close ())>"Cancel"</button>
                    (Yuka.hole (fun () ->
-                      <button class_="button primary" type_=`submit disabled=(Form.pending form)>"Create issue"</button>))
+                      <button class_="button primary" type_=`submit disabled=(Yuka.Form.pending form)>"Create issue"</button>))
                  </div>
                </div>)
            </Yuka.Form>

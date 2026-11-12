@@ -329,7 +329,7 @@ let empty_context () : Types.context =
     path = "";
     header = (fun _ -> None);
     session = (fun () -> None);
-    log = (fun m -> !Types.default_log m);
+    log = (fun level m -> !Types.default_log level m);
     live = (fun name key -> !Bridge.live_state name key);
   }
 
@@ -380,7 +380,7 @@ let send name input k =
         | Error (Bad m) -> Error (Status.Rejected ("invalid input: " ^ m))
         | Error (Refused m) -> Error (Status.Rejected m)
         | Error (Broke m) ->
-            context.log ("action " ^ name ^ " failed: " ^ m);
+            context.log `Error ("action " ^ name ^ " failed: " ^ m);
             Error Status.Server))
 
 let transport name input =
@@ -511,14 +511,14 @@ let answer_action ?origins ~(context : Types.context) ~live ~name handler body =
             if local_location ?origins ~host location then
               resolve (200, Json.to_string (`Assoc (("ok", with_redirect j location) :: live ())))
             else begin
-              context.log ("form " ^ name ^ " redirect to " ^ String.escaped location ^ " is not a path on this site");
+              context.log `Error ("form " ^ name ^ " redirect to " ^ String.escaped location ^ " is not a path on this site");
               resolve (action_error 500 "action failed")
             end
         | Async.Failed m -> (
             match rejection m with
             | Some message -> resolve (action_error 400 message)
             | None ->
-                context.log ("action " ^ name ^ " failed: " ^ m);
+                context.log `Error ("action " ^ name ^ " failed: " ^ m);
                 resolve (action_error 500 "action failed"))
         | Async.Pending -> ());
       result

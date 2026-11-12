@@ -167,8 +167,8 @@ let () =
   in
   check ("await failed: " ^ failed_html) (contains failed_html "<p>server error</p>");
   let html e = Yuka.Private.to_html (Yuka.Private.node e) in
-  let saved = prerr_endline in
-  Yuka.Server.Testing.set_log ignore;
+  let saved = fun _ m -> prerr_endline m in
+  Yuka.Server.Testing.set_log (fun _ _ -> ());
   check "catch children" (html (Catching.view ~fail:false) = "<div><!--[--><span>before</span><b>ok</b><!--]--></div>");
   check "catch fallback" (html (Catching.view ~fail:true) = "<div><!--[!--><p>server error</p><!--]--></div>");
   Yuka.Server.Testing.set_log saved;

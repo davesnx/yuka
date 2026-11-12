@@ -203,7 +203,7 @@ type config = {
   timeout : float;
   prerendered : string option;
   origins : string list option;
-  log_error : string -> unit;
+  log : (Types.log_level -> string -> unit) option;
   prerendering : bool;
   warned : string list ref;
 }
@@ -221,11 +221,11 @@ let public_prefix (prefix, dir) =
   | segments -> (segments, dir)
 
 let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
-    ?(dev = false) ?origins ?(log_error = prerr_endline) () =
+    ?(dev = false) ?origins ?log () =
   {
     dev = (if dev then Some (dev_state ()) else None);
     origins;
-    log_error;
+    log;
     prerendering = false;
     warned = ref [];
     assets;
@@ -246,6 +246,9 @@ let build_id config (App a) =
   match config.assets with
   | None -> a.build
   | Some assets -> a.build ^ assets.digest
+
+let log config = match config.log with Some f -> f | None -> fun level m -> !Types.default_log level m
+let default_log sink config = match config.log with Some _ -> config | None -> { config with log = Some sink }
 
 let prerender_config config = { config with dev = None; prerendering = true }
 
@@ -425,7 +428,7 @@ let render env ~status ~headers layers (page : page) =
       Async.on_settled finished (function
         | Async.Done () -> Async.on_settled (write "</body></html>") (fun _ -> resolve ())
         | Async.Failed m ->
-            env.config.log_error m;
+            log env.config `Error m;
             Async.on_settled flushed (fun _ -> resolve ())
         | Async.Pending -> ());
       result
@@ -433,12 +436,12 @@ let render env ~status ~headers layers (page : page) =
     Async.return { status; headers; body = Stream stream }
 
 let internal_error () = plain 500 "Internal Server Error" []
-let log_quietly config m = try config.log_error m with _ -> ()
+let log_quietly config level m = try log config level m with _ -> ()
 
 let recover_with config ~last a f =
   let r, resolve, _ = Async.make () in
   let give_up m =
-    log_quietly config m;
+    log_quietly config `Error m;
     resolve (last ())
   in
   Async.on_settled a (function
@@ -459,7 +462,7 @@ let recover env a f = recover_with env.config ~last:internal_error a f
 let error_page env (fallback : fallback) =
   let headers = html_headers env.root_headers [ no_store_header ] in
   let give_up m =
-    env.config.log_error m;
+    log env.config `Error m;
     Async.return (internal_error ())
   in
     match render env ~status:500 ~headers fallback.layers (fallback.error ()) with
@@ -467,7 +470,7 @@ let error_page env (fallback : fallback) =
     | exception e -> give_up (Web.exn_to_string e)
 
 let fail_page env fallback message =
-  env.config.log_error message;
+  log env.config `Error message;
   error_page env fallback
 
 let show env ~status ~headers ~fallback layers (page : unit -> page) =
@@ -613,7 +616,7 @@ let live_checked env fallback ~path (resp : response) =
     | Some (_, v) when shared_cache v ->
         if not (List.mem path !(env.config.warned)) then begin
           env.config.warned := path :: !(env.config.warned);
-          log_quietly env.config
+          log_quietly env.config `Warn
             ("page " ^ path ^ " renders a Live.use under a shared cache rule (" ^ v
            ^ "); it is sent with private, no-store")
         end;
@@ -751,7 +754,7 @@ let dev_events ~log ~state ~sleep write =
   let rec step last idle =
     match state () with
     | exception e ->
-        (try log ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e) with _ -> ());
+        (try log `Error ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e) with _ -> ());
         resolve ()
     | now ->
     let message =
@@ -781,7 +784,7 @@ let checked_headers config outcome =
   match List.find_opt bad_header headers with
   | None -> outcome
   | Some (name, _) ->
-      log_quietly config ("response header " ^ String.escaped name ^ " holds CR, LF or NUL; answered 500");
+      log_quietly config `Error ("response header " ^ String.escaped name ^ " holds CR, LF or NUL; answered 500");
       Respond (internal_error ())
 
 let live_answer env (r : request) =
@@ -793,7 +796,7 @@ let live_answer env (r : request) =
       else (
         match r.session () with
         | exception e ->
-            log_quietly env.config
+            log_quietly env.config `Error
               ("live socket refused: the request has no session (" ^ Web.exn_to_string e
              ^ "); the live socket needs session middleware");
             reply (plain 500 "Internal Server Error" [])
@@ -808,7 +811,7 @@ let live_answer env (r : request) =
 let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists req (r : request) =
   Web.seal_states ();
   let path, query = Router.split_target r.target in
-  Live_server.use_log node config.log_error;
+  Live_server.use_log node (log config);
   let live_used = ref false in
   let rec context : Types.context =
     {
@@ -816,7 +819,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
       path;
       header = r.header;
       session = (fun () -> Some (r.session ()));
-      log = config.log_error;
+      log = log config;
       live =
         (fun name key ->
           live_used := true;
@@ -865,7 +868,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
                   {
                     status = 200;
                     headers;
-                    body = Stream (dev_events ~log:config.log_error ~state:dev.state ~sleep);
+                    body = Stream (dev_events ~log:(log config) ~state:dev.state ~sleep);
                   }
             | `HEAD -> reply { status = 200; headers; body = String "" }
             | _ -> reply (method_not_allowed "GET, HEAD"))
@@ -930,10 +933,10 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
     match run () with
     | a ->
         recover_with config ~last a (fun m ->
-            config.log_error m;
+            log config `Error m;
             reply (internal_error ()))
     | exception e ->
-        log_quietly config (Web.exn_to_string e);
+        log_quietly config `Error (Web.exn_to_string e);
         Async.return (last ())
   in
   Async.map (fun o -> checked_headers config (bodyless o)) answer
@@ -956,23 +959,23 @@ module type ADAPTER = sig
   val sleep : float -> unit Async.t
 end
 
-module Make (A : ADAPTER) = struct
-  let handler ?node config app (req : A.request) =
+module Make (Backend : ADAPTER) = struct
+  let handler ?node config app (req : Backend.request) =
     let view =
       {
-        meth = A.meth req;
-        target = A.target req;
-        header = A.header req;
-        body = (fun ~limit -> A.body req ~limit);
-        session = (fun () -> A.session req);
-        csrf_token = (fun () -> A.csrf_token req);
-        verify_csrf = A.verify_csrf req;
+        meth = Backend.meth req;
+        target = Backend.target req;
+        header = Backend.header req;
+        body = (fun ~limit -> Backend.body req ~limit);
+        session = (fun () -> Backend.session req);
+        csrf_token = (fun () -> Backend.csrf_token req);
+        verify_csrf = Backend.verify_csrf req;
       }
     in
-    Async.bind (handle ?node config app ~sleep:A.sleep ~exists:A.exists req view) (function
-      | Respond r -> A.respond r
-      | File { root; path; headers } -> A.file req ~root ~path ~headers
-      | Upgrade run -> A.upgrade req run)
+    Async.bind (handle ?node config app ~sleep:Backend.sleep ~exists:Backend.exists req view) (function
+      | Respond r -> Backend.respond r
+      | File { root; path; headers } -> Backend.file req ~root ~path ~headers
+      | Upgrade run -> Backend.upgrade req run)
 end
 
 let prerender_seeds (App a) = a.prerender

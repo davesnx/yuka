@@ -62,55 +62,68 @@ let post (_ : Dream.request) ~slug =
 ## Paths
 
 - `:id<string>`: one segment, as a `string`.
-- `:n<int>`: an `int`. Only the form `string_of_int` writes matches, so
+- `:n<int>`: an `int`. Only the form `Int.to_string` writes matches, so
   `01` and `+1` do not.
-- `:id<Issue_id>`: your own type, named by its module. See below.
+- `:tab<Model.tab>`: your own type, written with its module path. See
+  below.
 - `:parts<string...>`: a catch-all, the last segment of a route path, as
   a `string list` with one element or more. A group path cannot have one.
 
 ### Your own param types
 
-The name between `<` and `>` can be a module that decodes and encodes the
-param. The module has a type `t` and two functions:
+The name between `<` and `>` can be your own type, written with its
+module path. The router finds the value that decodes and encodes it by
+the rule of codecs: a type `foo` uses `foo_param`, a
+`Yuka.Router.Param.t`.
 
 ```ocaml
-(* shared/issue_id.ml *)
-type t = int
+(* shared/model.ml *)
+type tab = Overview | Activity
 
-let of_string s =
-  match String.split_on_char '-' s with
-  | [ "YUK"; n ] -> Yuka.Router.int_param n
-  | _ -> None
-
-let to_string n = "YUK-" ^ string_of_int n
+let tab_param =
+  Yuka.Router.Param.make
+    ~decode:(function
+      | "overview" -> Some Overview | "activity" -> Some Activity | _ -> None)
+    ~encode:(function Overview -> "overview" | Activity -> "activity")
 ```
 
 ```ocaml
-Router.route Issue ~path:"/issue/:id<Issue_id>" ~page:Pages.issue
+Router.route Issue ~path:"/issue/:id<string>/:tab<Model.tab>" ~page:Pages.issue
 ```
 
-- The page gets the decoded value: `Pages.issue ~id ()` with `id : int`.
-- The link function takes the same type: `Routes.issue ~id:8 ()` gives
-  `"/issue/YUK-8"`.
-- `of_string` gets the segment after percent-decoding. When it returns
+`Issue_id.t` uses `Issue_id.param`: with `type t = int` and `let param = ...` in
+`issue_id.ml`, write `:id<Issue_id.t>`.
+
+- The page gets the decoded value: `Pages.issue ~id ~tab ()` with
+  `tab : Model.tab`.
+- The link function takes the same type:
+  `Routes.issue ~id:"YUK-8" ~tab:Activity ()` gives
+  `"/issue/YUK-8/activity"`.
+- `decode` gets the segment after percent-decoding. When it returns
   `None`, the path does not match and the answer is the not-found page.
-- `to_string` must be the inverse of `of_string`. The router
-  percent-encodes its result, so it can return any text.
-- The module must be in the shared library, because the browser builds
-  links too. A path such as `Params.Issue_id` works as well.
-- The same modules work for search fields: `tab = optional Tab`. There, a
-  value that does not decode counts as absent.
+- `encode` must be the inverse of `decode`. The router percent-encodes its
+  result, so it can return any text.
+- `Yuka.Router.Param.int`, `string` and `bool` decode and encode as the
+  built-in types do, so you can build on them:
+  `~decode:(fun s -> Yuka.Router.Param.(decode int) s)`.
+- The type and its value must be in the shared library, because the
+  browser builds links too.
+- Write the module path: the generated `Routes` module opens nothing, so
+  `:tab<tab>` is a build error. So is a module (`:tab<Model>`; write
+  `:tab<Model.t>`) and a type with a parameter (`int list`).
+- When the value is missing, the build fails with
+  `Unbound value Model.tab_param` in the generated `routes.ml`.
 
 ## Search params
 
 ```ocaml
-~search:{ tag = optional string; page = default int 1; label = many string }
+~search:{ tag = optional string; page = default int 1; tab = optional Model.tab }
 ```
 
 `optional T` gives a `T option`, `default T d` gives a `T` (`d` when the
 param is absent), and `many T` gives a `T list`. `T` is `string`, `int`,
-`bool` or a module with `of_string` and `to_string`. A value that does not
-decode counts as absent. Search fields go on a route or a group.
+`bool` or your own type with its module path, as in a path. A value that
+does not decode counts as absent. Search fields go on a route or a group.
 
 ## Attachments
 
@@ -190,7 +203,7 @@ page with no island, links load full pages. In an island,
 on_click=(fun _ -> Yuka.Browser.navigate (Routes.blog ~tag:"bug" ()))
 ```
 
-## What the router does not do
+## Limitations
 
 - An island cannot read the current route or search params as a State.
   Pass what it needs as props.
@@ -200,5 +213,5 @@ on_click=(fun _ -> Yuka.Browser.navigate (Routes.blog ~tag:"bug" ()))
 
 ```
 File "Routes.ml", line 3, characters 28-45:
-Error: param :id in path "/post/:id<uuid>" has type "uuid"; the types are int, string, string... and a module path
+Error: param :id in path "/post/:id<uuid>" has type "uuid"; the types are int, string, string... and a type with its module path, such as Model.issue_id
 ```

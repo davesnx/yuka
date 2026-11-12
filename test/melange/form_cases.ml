@@ -107,11 +107,11 @@ let entry_of name view =
 
 let entries =
   [
-    entry_of "A" (plain_view "a");
-    entry_of "B" (plain_view "b");
+    entry_of "First" (plain_view "a");
+    entry_of "Second" (plain_view "b");
     entry_of "Btn" button_view;
-    entry_of "R" redirect_view;
-    entry_of "T" toggled_view;
+    entry_of "Redirect" redirect_view;
+    entry_of "Toggled" toggled_view;
   ]
 
 let island_of name view = runtime_island ~name ~props:`Null view
@@ -142,8 +142,8 @@ let submit_with_button : unit -> bool =
 let set_input_in : string -> string -> unit =
   [%mel.raw "function (key, v) { document.querySelector('form[data-yuka-key=\"' + key + '\"] input[name=body]').value = v }"]
 
-let entry = runtime_entry ~name:"F" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
-let island () = runtime_island ~name:"F" ~props:`Null view
+let entry = runtime_entry ~name:"Form" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
+let island () = runtime_island ~name:"Form" ~props:`Null view
 
 let start html =
   Yuka.stop ();
@@ -203,7 +203,7 @@ let async =
                 Yuka.stop ())) );
     ( "form: two pending forms each follow their own redirect",
       fun finish ->
-        start (Server.to_string (fun () -> fragment [ island_of "A" (plain_view "a"); island_of "B" (plain_view "b") ]));
+        start (Server.to_string (fun () -> fragment [ island_of "First" (plain_view "a"); island_of "Second" (plain_view "b") ]));
         set_input_in "a" "one";
         set_input_in "b" "two";
         submit_in "a";
@@ -217,7 +217,7 @@ let async =
                     Yuka.stop ()))) );
     ( "form: a redirect to another site is refused",
       fun finish ->
-        start (Server.to_string (fun () -> island_of "R" redirect_view));
+        start (Server.to_string (fun () -> island_of "Redirect" redirect_view));
         let answers =
           [ "javascript:alert(1)"; " JavaScript:alert(1)"; "https://evil.example/"; "//evil.example/x"; "data:text/html,x" ]
         in
@@ -236,7 +236,7 @@ let async =
         go 0 answers );
     ( "form: with no redirect and no on_ok, reload the page URL",
       fun finish ->
-        start (Server.to_string (fun () -> island_of "A" (plain_view "a")));
+        start (Server.to_string (fun () -> island_of "First" (plain_view "a")));
         set_input_in "a" "x";
         submit_in "a";
         respond 0 200 {|{"ok":{"value":1}}|};
@@ -258,7 +258,7 @@ let async =
             (let s = Private.session ~streaming:false ~islands_only:true in
              Private.set_form s ("jot", "", [ ("body", "sent") ], [ (Some "body", "Too short") ]);
              s)
-            (fun () -> Private.node (island_of "T" toggled_view))
+            (fun () -> Private.node (island_of "Toggled" toggled_view))
         in
         start html;
         let first = text_of "b" in

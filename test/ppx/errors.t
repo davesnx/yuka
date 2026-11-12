@@ -2,11 +2,11 @@
 
 Unknown attribute:
 
-  $ cat > a.mlx <<'X'
+  $ cat > attr.mlx <<'X'
   > let x = <div href="/x" />
   > X
-  $ run a
-  File "a.mlx", line 1, characters 18-22:
+  $ run attr
+  File "attr.mlx", line 1, characters 18-22:
   1 | let x = <div href="/x" />
                         ^^^^
   Error: [yuka] The attribute 'href' is not valid on a 'div' element.
@@ -14,11 +14,11 @@ Unknown attribute:
 
 Unknown tag:
 
-  $ cat > b.mlx <<'X'
+  $ cat > tag.mlx <<'X'
   > let x = <blorp />
   > X
-  $ run b
-  File "b.mlx", line 1, characters 8-14:
+  $ run tag
+  File "tag.mlx", line 1, characters 8-14:
   1 | let x = <blorp />
               ^^^^^^
   Error: [yuka] HTML tag 'blorp' does not exist.
@@ -26,11 +26,11 @@ Unknown tag:
 
 Lint, open:
 
-  $ cat > c.mlx <<'X'
+  $ cat > lint_open.mlx <<'X'
   > open Yuka.State
   > X
-  $ run c
-  File "c.mlx", line 1, characters 0-15:
+  $ run lint_open
+  File "lint_open.mlx", line 1, characters 0-15:
   1 | open Yuka.State
       ^^^^^^^^^^^^^^^
   Error: [yuka] open Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
@@ -38,11 +38,11 @@ Lint, open:
 
 Lint, local open:
 
-  $ cat > d.mlx <<'X'
+  $ cat > local_open.mlx <<'X'
   > let x = Yuka.State.(get s)
   > X
-  $ run d
-  File "d.mlx", line 1, characters 8-26:
+  $ run local_open
+  File "local_open.mlx", line 1, characters 8-26:
   1 | let x = Yuka.State.(get s)
               ^^^^^^^^^^^^^^^^^^
   Error: [yuka] a local open of Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
@@ -50,11 +50,11 @@ Lint, local open:
 
 Lint, let open:
 
-  $ cat > e.mlx <<'X'
+  $ cat > let_open.mlx <<'X'
   > let x = let open Yuka.State in get s
   > X
-  $ run e
-  File "e.mlx", line 1, characters 8-36:
+  $ run let_open
+  File "let_open.mlx", line 1, characters 8-36:
   1 | let x = let open Yuka.State in get s
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] a local open of Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
@@ -62,22 +62,22 @@ Lint, let open:
 
 Lint, module alias:
 
-  $ cat > f.mlx <<'X'
-  > module S = Yuka.State
+  $ cat > alias.mlx <<'X'
+  > module Store = Yuka.State
   > X
-  $ run f
-  File "f.mlx", line 1, characters 0-21:
-  1 | module S = Yuka.State
-      ^^^^^^^^^^^^^^^^^^^^^
+  $ run alias
+  File "alias.mlx", line 1, characters 0-25:
+  1 | module Store = Yuka.State
+      ^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] a module alias of Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
   [1]
 
 Allowed alias named State:
 
-  $ cat > g.mlx <<'X'
+  $ cat > state_alias.mlx <<'X'
   > module State = Yuka.State
   > X
-  $ run g
+  $ run state_alias
   module State = Yuka.State
 
 Polymorphic variant:
@@ -155,11 +155,11 @@ Last parameter:
 Yuka.Client with another prop:
 
   $ cat > h6.mlx <<'X'
-  > let x = <Yuka.Client other=1><M a=1 /></Yuka.Client>
+  > let x = <Yuka.Client other=1><Counter a=1 /></Yuka.Client>
   > X
   $ run h6
   File "h6.mlx", line 1, characters 8-20:
-  1 | let x = <Yuka.Client other=1><M a=1 /></Yuka.Client>
+  1 | let x = <Yuka.Client other=1><Counter a=1 /></Yuka.Client>
               ^^^^^^^^^^^^
   Error: [yuka] Yuka.Client takes no props except start
   [1]
@@ -173,19 +173,19 @@ Yuka.Client without child:
   File "h7.mlx", line 1, characters 8-20:
   1 | let x = <Yuka.Client></Yuka.Client>
               ^^^^^^^^^^^^
-  Error: [yuka] Yuka.Client needs exactly one child, a component tag such as <M a=1 />
+  Error: [yuka] Yuka.Client needs exactly one child, a component tag such as <Counter a=1 />
   [1]
 
 Yuka.Client with two children:
 
   $ cat > h8.mlx <<'X'
-  > let x = <Yuka.Client><M /><N /></Yuka.Client>
+  > let x = <Yuka.Client><Counter /><Related /></Yuka.Client>
   > X
   $ run h8
   File "h8.mlx", line 1, characters 8-20:
-  1 | let x = <Yuka.Client><M /><N /></Yuka.Client>
+  1 | let x = <Yuka.Client><Counter /><Related /></Yuka.Client>
               ^^^^^^^^^^^^
-  Error: [yuka] Yuka.Client needs exactly one child, a component tag such as <M a=1 />
+  Error: [yuka] Yuka.Client needs exactly one child, a component tag such as <Counter a=1 />
   [1]
 
 Yuka.Client with a tag child:
@@ -197,7 +197,7 @@ Yuka.Client with a tag child:
   File "h9.mlx", line 1, characters 8-20:
   1 | let x = <Yuka.Client><p /></Yuka.Client>
               ^^^^^^^^^^^^
-  Error: [yuka] Yuka.Client needs exactly one child, a component tag such as <M a=1 />
+  Error: [yuka] Yuka.Client needs exactly one child, a component tag such as <Counter a=1 />
   [1]
 
 let[@client] with a reserved argument:
@@ -287,19 +287,19 @@ Optional camelCase prop:
 Templates are values at the top of the module; their names carry the module name, not the directory:
 
   $ mkdir d1 d2
-  $ printf 'let x = <ul><li>"a"</li><li>"b"</li></ul>\nlet y = <ol><li>"a"</li><li>"b"</li></ol>\n' > d1/t.mlx
-  $ cp d1/t.mlx d2/t.mlx
-  $ ids() { mlx-pp $1/t.mlx > $1/t.ml && ./pp.exe --impl $1/t.ml | grep -o '__yuka_template_[a-z0-9_]*'; }
+  $ printf 'let x = <ul><li>"a"</li><li>"b"</li></ul>\nlet y = <ol><li>"a"</li><li>"b"</li></ol>\n' > d1/view.mlx
+  $ cp d1/view.mlx d2/view.mlx
+  $ ids() { mlx-pp $1/view.mlx > $1/view.ml && ./pp.exe --impl $1/view.ml | grep -o '__yuka_template_[a-z0-9_]*'; }
   $ ids d1
-  __yuka_template_t_0
-  __yuka_template_t_0
-  __yuka_template_t_1
-  __yuka_template_t_1
+  __yuka_template_view_0
+  __yuka_template_view_0
+  __yuka_template_view_1
+  __yuka_template_view_1
   $ ids d2
-  __yuka_template_t_0
-  __yuka_template_t_0
-  __yuka_template_t_1
-  __yuka_template_t_1
+  __yuka_template_view_0
+  __yuka_template_view_0
+  __yuka_template_view_1
+  __yuka_template_view_1
 
 Catch without fallback:
 
@@ -424,7 +424,7 @@ Await with an unknown prop:
 Nested let[@client] in a module:
 
   $ cat > n0.mlx <<'X'
-  > module M = struct
+  > module Inner = struct
   >   let[@client] make ~(a : int) () = <p />
   > end
   > X
@@ -439,7 +439,7 @@ Nested let[@client] in a local module:
 
   $ cat > n1.mlx <<'X'
   > let f () =
-  >   let module M = struct
+  >   let module Inner = struct
   >     let[@client] make ~(a : int) () = <p />
   >   end in
   >   ()
@@ -609,7 +609,7 @@ deriving form refuses a field type it cannot read:
   File "form2.mlx", line 1, characters 16-25:
   1 | type t = { at : int * int } [@@deriving form]
                       ^^^^^^^^^
-  Error: [yuka] a form field must be string, int, float, bool, an option or list of those, or M.t with M.of_string and M.to_string
+  Error: [yuka] a form field must be string, int, float, bool, an option or list of those, or Email.t with Email.of_string and Email.to_string
   [1]
 
 deriving form refuses type parameters and labels that start with an underscore:

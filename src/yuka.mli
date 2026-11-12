@@ -71,27 +71,46 @@ val batch : (unit -> 'a) -> 'a
     exception of the update go to the {!Catch} or island around it. *)
 
 module Effect : sig
-  val run : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
-  (** Runs the body now, and again when a State it read with [State.get]
-      changes. During a server render it does nothing: the body and
-      [cleanup] do not run. Before each re-run and when its owner is disposed, [cleanup]
+  val after : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
+  (** Runs the body after the DOM is up to date, and again after each change
+      of a State it read with [State.get]. Use it for code that reads or
+      changes the DOM, and for most other effects. The first run waits for the
+      end of the current {!batch} or update; {!render}, hydration and the
+      creation of a list row run in one, so the first run of an effect created
+      in a component finds the elements of the component in the document.
+      Outside a batch or an update, as at the top level of {!owner}, the first
+      run is at once. A later run comes after the holes, the attributes, the
+      lists and the {!before} effects that the same change runs. An effect
+      whose owner is disposed before its first run never runs.
+
+      During a server render it does nothing: the body and [cleanup] do not
+      run. Before each re-run and when its owner is disposed, [cleanup]
       receives the result of the previous run, and effects created inside the
       previous run are disposed. Inside a {!Catch} or an island, an exception
       in the body, or in a cleanup that runs during a State change or an
       event handler, goes to that boundary. A cleanup that raises when its
       owner is disposed by a direct call (the function returned by {!owner},
-      or {!stop}) raises to that
-      caller. Elsewhere, an exception in one effect does not stop other
-      effects; the first one is raised again after all pending effects
-      ran. If effects and memos keep changing States they read for more than
-      100 update rounds, the pending work is dropped and [Failure] is
-      raised. *)
+      or {!stop}) raises to that caller. Elsewhere, an exception in one
+      effect does not stop other effects; the first one is raised again after
+      all pending effects ran. If effects and memos keep changing States they
+      read for more than 100 update rounds, the pending work is dropped and
+      [Failure] is raised. *)
+
+  val before : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
+  (** As {!after}, with other timing. The first run is at once, in the
+      component body, before the elements of the component exist. A later run
+      comes together with the holes, attributes and lists of the same change,
+      parent effects first, so it can see the DOM before that change. Use it
+      to compute a value that the markup of the component needs, or to read
+      the DOM before it changes. An exception in the first run, outside a
+      {!Catch} or an island, stops the effect and is raised to the caller. *)
 
   val on_change :
     ?equal:('a -> 'a -> bool) -> ('a, _) State.signal -> (prev:'a -> next:'a -> unit) -> unit
   (** Calls the function when the value changes, with the previous and the
-      next value. Not called on the first run, and never during a server
-      render. Default [equal]: as in {!State.make}. *)
+      next value, with the timing of {!after}: the DOM is up to date. Not
+      called for the value at creation, and never during a server render.
+      Default [equal]: as in {!State.make}. *)
 end
 
 type slot = Slot_value.t
@@ -269,7 +288,7 @@ val attr : string -> string -> 'kind attribute
     open a document ([href] of [a], [area] and [use], [action],
     [formaction], [xlink:href], [src] of [iframe], [frame], [embed] and
     [object], [data] of [object]). A [data:] image or media URL stays. The server logs the
-    first block with the [log_error] of {!Server.val-config}; a dev build logs the first one in
+    first block with the [log] of {!Server.val-config} (level [`Warn]); a dev build logs the first one in
     the console. [data:] is also blocked on [src] of [script] and [href] of
     [script]. [srcdoc] of [iframe] and [href] of
     [base] become [""] and are logged the same way; only a literal one in
@@ -309,7 +328,7 @@ module Await : sig
       a hole over [Async.watch]. On the server it is printed as a hole; see
       DESIGN.md. In a server render, [message] is the message of a
       {!Server.Action.reject}, else ["server error"], and the failure
-      message goes to the [log_error] of {!Server.val-config}, so the HTML never has the
+      message goes to the [log] of {!Server.val-config}, so the HTML never has the
       detail. *)
 end
 
@@ -352,7 +371,7 @@ module Catch : sig
 
       On the server, an exception in the children prints the fallback with
       [~error:"server error"] and sends the exception to
-      the [log_error] of {!Server.val-config}; the HTML never has the detail. In an island, the
+      the [log] of {!Server.val-config}; the HTML never has the detail. In an island, the
       client then hydrates the fallback, and [reset] renders the children in
       the browser. *)
 end
@@ -476,7 +495,7 @@ module Form = Form
 module Browser : sig
   val on_window : string -> (Event.t -> unit) -> unit
   (** Listens on [window] until the current owner is disposed. The handler
-      runs in a {!batch}. Browser only: call it inside [Effect.run]. *)
+      runs in a {!batch}. Browser only: call it inside [Effect.after]. *)
 
   val navigate : string -> unit
   (** Browser only: raises [Failure] on native. Loads the URL. After [render ~islands] with navigation (the default), it
@@ -495,6 +514,30 @@ module Browser : sig
   (** Scrolls the element with this id into view; does nothing when no
       element has it. Inside a {!batch}, it runs as {!focus} does. Browser
       only: raises [Failure] on native. *)
+end
+
+module Console : sig
+  (** Messages for the developer, from code that runs on the server and in
+      the browser. In the browser, each function calls the [console] method
+      of its name. On the server, it sends the level and the message to the
+      [log] of {!Server.val-config} during a server render of a request, and
+      to the default sink otherwise ({!Server.Testing.set_log}). A prototype:
+      the API can change. *)
+
+  val log : string -> unit
+  (** [console.log]; level [`Info] on the server. *)
+
+  val info : string -> unit
+  (** [console.info]; level [`Info] on the server. *)
+
+  val warn : string -> unit
+  (** [console.warn]; level [`Warn] on the server. *)
+
+  val error : string -> unit
+  (** [console.error]; level [`Error] on the server. *)
+
+  val debug : string -> unit
+  (** [console.debug]; level [`Debug] on the server. *)
 end
 
 (**/**)
@@ -817,7 +860,7 @@ module Private : sig
       before it raises [Failure]. *)
 
   val server_rendering : bool ref
-  (** When true, [Effect.run] does nothing. *)
+  (** When true, [Effect.after] and [Effect.before] do nothing. *)
 
   type platform = {
     target_value : Event.t -> string;
@@ -934,7 +977,7 @@ module Router : sig
       turns a [Routes.t] (for example from [find]) into a URL; and [find]. A
       node name whose link function is an OCaml keyword or [href], [find] or
       [with_query] is a build error. Then
-      [yuka routes --server --shared-module M --source Routes.ml] writes the
+      [yuka routes --server --shared-module Routes --source Routes.ml] writes the
       server module with [app]. *)
 
   type meth =
@@ -953,19 +996,12 @@ module Router : sig
             substituted and encoded. *)
     | Missing  (** No node matches, or a param does not decode. *)
 
-  (** A custom param or search type, written [:id<M>] in a path. *)
-  module type PARAM = sig
-    type t
-
-    val of_string : string -> t option
-    (** For a path param, [None] means the path does not match. For a
-        search field, the value is dropped: an optional field gets [None],
-        a field with a default gets the default, and a list field leaves
-        the value out. *)
-
-    val to_string : t -> string
-    (** The inverse of [of_string]. [href] encodes the result. *)
-  end
+  (** How a path param or a search field turns into a value and back. A
+      custom type is written with its module path, [:tab<Model.tab>] in a
+      path or [optional Model.tab] in a search, and uses the value of the
+      codec rule: [Issue_id.t] uses [Issue_id.param], and [Model.tab] uses
+      [Model.tab_param]. *)
+  module Param = Router_param
 
   (**/**)
 
@@ -988,9 +1024,8 @@ module Router : sig
       more, and on an element that {!segment} refuses. *)
 
   val int_param : string -> int option
-  (** Decodes an [int] param in the form [string_of_int] writes: [0], or an
-      optional [-] and digits without a leading [0], within the range of
-      [int]. So each value has one URL: [01], [-0] and [+1] give [None]. *)
+  (** [Param.decode Param.int], which the generated code calls inline. Use
+      {!Param.int}. *)
 
   val search : (string * string) list -> string -> string list
   (** [search query key] is every value of [key] in the decoded query pairs,
@@ -1164,6 +1199,9 @@ module Server : sig
   type context
   (** The request that runs an action, a form action or a live [allow]. *)
 
+  type log_level = [ `Error | `Warn | `Info | `Debug ]
+  (** The level of a message to the server log ([log] of {!val-config}). *)
+
   module Context : sig
     val header : context -> string -> string option
     (** A request header, case-insensitive. For a live [allow], the
@@ -1220,12 +1258,12 @@ module Server : sig
         [seq] counter, limits and bus. A process has one default node, which
         every function uses when [?node] is not given. *)
 
-    val node : ?log_error:(string -> unit) -> ?per_session:int -> ?total:int -> unit -> node
+    val node : ?log:(log_level -> string -> unit) -> ?per_session:int -> ?total:int -> unit -> node
     (** A new, empty node, for example for a second handler in one process.
-        [log_error] gets the failures of loaders and of the bus. Without it
-        (and for the default node), the node logs to the [log_error] of the
+        [log] gets the failures of loaders and of the bus. Without it
+        (and for the default node), the node logs to the [log] of the
         config of the last request that a handler served on this node, and
-        to [prerr_endline] before the first request. [per_session] (default 16) and [total] (default
+        to the default sink (see {!Testing.set_log}) before the first request. [per_session] (default 16) and [total] (default
         10,000) are the most open live sockets per session and on this node;
         a socket over a limit is closed with 1013 before its [hello], and
         the page tries again later. *)
@@ -1262,7 +1300,7 @@ module Server : sig
     (** Closes, with code 4401, every live socket of the node whose context
         matches. The page reconnects, and [allow] decides again for each
         key. Call it on logout
-        ([revoke (fun c -> Context.session c = Some id)]) and after a
+        ([revoke (fun context -> Context.session context = Some id)]) and after a
         permission change. It does not go over the bus: with more than one
         node, the app must call it on every node (for example from its own
         message between nodes). *)
@@ -1366,7 +1404,7 @@ module Server : sig
 
       The types and functions that a [Routes.ml] and its loaders, guards
       and handlers use. The cycle has no server dependency: a server
-      implements {!Adapter.S}. See "Request cycle" in DESIGN.md. *)
+      implements {!Adapter.Backend}. See "Request cycle" in DESIGN.md. *)
 
   (** Why a guard or a loader stops a request. *)
   type stop =
@@ -1386,7 +1424,7 @@ module Server : sig
             example to another site's login page. Do not give it a value
             from the request. *)
     | Fail of string
-        (** The error page, status 500. The message goes to [log_error],
+        (** The error page, status 500. The message goes to [log],
             never to the page. *)
 
   type page
@@ -1488,7 +1526,7 @@ module Server : sig
     ?timeout:float ->
     ?dev:bool ->
     ?origins:string list ->
-    ?log_error:(string -> unit) ->
+    ?log:(log_level -> string -> unit) ->
     unit ->
     config
   (** [public] maps URL prefixes to directories ([("/static", "static")]).
@@ -1522,15 +1560,19 @@ module Server : sig
       [Sec-Fetch-Site] is [same-origin], so a request with neither header
       (an old browser, a client that is not a browser) is refused.
 
-      [log_error] (default [prerr_endline]) gets what the client must not
-      see: an action that failed, a failed render, a failed async value, a
-      refused redirect or header. *)
+      [log] gets what the client must not see, as [`Error] (an action that
+      failed, a failed render, a failed async value, a refused redirect or
+      header) or [`Warn], and the {!Yuka.Console} calls of a server render
+      of a request. Without it, the adapter may give its own log
+      ({!Adapter.default_log}); else messages go to the default sink: one
+      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. This is a
+      prototype: the sink type can change. *)
 
   (** {2 Adapters} *)
 
   module Adapter : sig
     (** What a server provides to run the cycle. *)
-    module type S = sig
+    module type Backend = sig
       type request
 
       type reply
@@ -1592,9 +1634,9 @@ module Server : sig
           and the live socket for its timeouts. *)
     end
 
-    (** A request handler for the server of [A]. *)
-    module Make (A : S) : sig
-      val handler : ?node:Live.node -> config -> A.request app -> A.request -> A.reply Async.t
+    (** A request handler for the server of [Backend]. *)
+    module Make (Backend : Backend) : sig
+      val handler : ?node:Live.node -> config -> Backend.request app -> Backend.request -> Backend.reply Async.t
       (** Answers one request. [node] (default: the process node) is the
           live node of the sockets of [/_yuka/live] and of the server render
           of {!Yuka.Live.use}; a second handler in one process with its own
@@ -1606,13 +1648,13 @@ module Server : sig
             (403, see [config ~origins]), the action name (404) and the
             content type (415); then at most 1 MiB of body (413).
             [/_yuka/csrf]: for [GET] and [HEAD] with the same origin rule,
-            [{"csrf":TOKEN}] from {!S.csrf_token} with [no-store] (the live
+            [{"csrf":TOKEN}] from {!Backend.csrf_token} with [no-store] (the live
             client renews an expired token with it); 403 for another
             origin, 405 for another method. [/_yuka/live]: for [GET] with
-            the same origin rule and [Upgrade: websocket], [A.upgrade] with
+            the same origin rule and [Upgrade: websocket], [Backend.upgrade] with
             the live protocol; 403 for another origin, 426 without the
             upgrade header, 405 for another method, and a 500 with a log
-            message when {!S.session} raises (no session middleware). [/_yuka/app/<file>]: the
+            message when {!Backend.session} raises (no session middleware). [/_yuka/app/<file>]: the
             file of [assets] for [GET] and [HEAD], else 405; a [.] or [..]
             segment, or no [assets], gives a plain 404 with [no-store]. A
             path under a [public] prefix: the file of its directory, by the
@@ -1661,7 +1703,7 @@ module Server : sig
           A 404 or 500 page has the root [headers] and [no-store]. A
           failure before the response is returned (shell, or a fill that
           already failed) gives the 500 page. After it the status is sent:
-          the failure goes to [log_error], nothing more is written (no
+          the failure goes to [log], nothing more is written (no
           [</body></html>]), and the [Stream] function's [Async] succeeds
           once the writes already started have finished, so the adapter
           ends the response normally. When the error page itself fails, the
@@ -1678,6 +1720,12 @@ module Server : sig
           backslash is the 404 page. An answer with a header name or value
           that holds CR, LF or NUL becomes a plain 500 and a log message. *)
     end
+
+    val default_log : (log_level -> string -> unit) -> config -> config
+    (** [default_log sink config] is [config] with [log] set to [sink]
+        when [config] has no [log], else [config]. An adapter calls it to
+        send messages to the log of its server ([Yuka_dream.handler] uses
+        [Dream.sub_log "yuka"]). *)
 
     val build_id : config -> 'req app -> string
     (** The build id: a digest of the route tree and, with [assets], of the
@@ -1857,10 +1905,12 @@ module Server : sig
         that settles on another node waits until that node has heard those
         notes and loaded the key again. *)
 
-    val set_log : (string -> unit) -> unit
-    (** Where messages go outside a request: a render without the cycle,
-        an [Action.call] on the server outside a render, and the default
-        log of a {!Live.node}. Default: [prerr_endline]. *)
+    val set_log : (log_level -> string -> unit) -> unit
+    (** Replaces the default sink: where messages go outside a request (a
+        render without the cycle, an [Action.call] on the server outside a
+        render, a {!Yuka.Console} call outside a render), and the log of a
+        config without [log] and of a {!Live.node} without [log]. Default:
+        one line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
 
     val memory_down : Live.memory -> bool -> unit
     (** [memory_down m true] drops notes; [false] brings the bus back and

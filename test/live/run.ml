@@ -9,7 +9,7 @@ module Astring_like = struct
 end
 
 let logged = ref []
-let () = Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged)
+let () = Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged)
 
 type fake = {
   mutable inbox : string option list;
@@ -486,7 +486,7 @@ let ssr_cases =
           let show t = match Yuka.Live.status t with Status.Ready { data; _ } -> string_of_int data | _ -> "?" in
           element "p" [] [ text (show a ^ "," ^ show b) ]
         in
-        let html = Private.print s (fun () -> Private.node (runtime_island ~name:"L" ~props:`Null view)) in
+        let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Live" ~props:`Null view)) in
         let has part = Astring_like.contains html part in
         Alcotest.(check bool) "data" true (has "3,5");
         Alcotest.(check bool) "state answer" true (has {|data-yuka-answer="l:count &quot;ssr&quot;">{"ok":3}|});
@@ -497,7 +497,7 @@ let ssr_cases =
         let s = Private.session ~streaming:false ~islands_only:true in
         let asked = ref 0 in
         Private.set_csrf s (fun () -> incr asked; "tok");
-        let html = Private.print s (fun () -> Private.node (runtime_island ~name:"N" ~props:`Null (fun () -> text "x"))) in
+        let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Plain" ~props:`Null (fun () -> text "x"))) in
         Alcotest.(check bool) "no token" false (Astring_like.contains html "l:csrf");
         Alcotest.(check int) "not asked" 0 !asked );
   ]

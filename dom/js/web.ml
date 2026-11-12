@@ -49,6 +49,10 @@ external get_attribute : node -> string -> string option = "getAttribute"
 [@@mel.send] [@@mel.return nullable]
 external text_content : node -> string = "textContent" [@@mel.get]
 external console_error : string -> unit = "error" [@@mel.scope "console"]
+external console_warn : string -> unit = "warn" [@@mel.scope "console"]
+external console_info : string -> unit = "info" [@@mel.scope "console"]
+external console_log : string -> unit = "log" [@@mel.scope "console"]
+external console_debug : string -> unit = "debug" [@@mel.scope "console"]
 
 let exn_to_string : exn -> string =
   [%mel.raw

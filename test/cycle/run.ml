@@ -58,7 +58,7 @@ module Test_adapter = struct
     a
 end
 
-module H = Server.Adapter.Make (Test_adapter)
+module Cycle = Server.Adapter.Make (Test_adapter)
 
 let held_writes : (string * (unit -> unit)) list ref = ref []
 let stream_ended = ref false
@@ -106,11 +106,11 @@ module Raw = Server.Adapter.Make (struct
 end)
 
 let logged = ref []
-let log_hook = ref (fun m -> logged := m :: !logged)
-let config_with = Server.config ~log_error:(fun m -> !log_hook m)
+let log_hook = ref (fun (_ : Server.log_level) m -> logged := m :: !logged)
+let config_with = Server.config ~log:(fun level m -> !log_hook level m)
 
 let modules =
-  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"A":"./a.js"}|} ~digest:"d1"
+  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"Counter":"./counter.js"}|} ~digest:"d1"
     ~packages:[ "pkg" ]
 
 let config =
@@ -120,12 +120,12 @@ let request ?(meth = `GET) ?(headers = []) ?(body = "") target =
   App.reset ();
   logged := [];
   file_calls := [];
-  log_hook := (fun m -> logged := m :: !logged);
+  log_hook := (fun _ m -> logged := m :: !logged);
   { App.meth; target; headers; body }
 
 let fst3 (a, _, _) = a
 
-let call ?(config = config) r = H.handler config Cycle_server.Routes_server.app r
+let call ?(config = config) r = Cycle.handler config Cycle_server.Routes_server.app r
 
 let get ?config ?meth ?headers ?body target =
   let a = call ?config (request ?meth ?headers ?body target) in
@@ -728,10 +728,10 @@ let reviewed =
         in
         let r = request ~headers:[ ("x-user", "ann") ] "/live" in
         check_true "the node's state"
-          (contains (page (H.handler ~node config Cycle_server.Routes_server.app r)) "data published on the node");
+          (contains (page (Cycle.handler ~node config Cycle_server.Routes_server.app r)) "data published on the node");
         let r = request ~headers:[ ("x-user", "ann") ] "/live" in
         check_true "the default node loads"
-          (contains (page (H.handler config Cycle_server.Routes_server.app r)) "data secret of ann") );
+          (contains (page (Cycle.handler config Cycle_server.Routes_server.app r)) "data secret of ann") );
     ( "a live upgrade without a session is a 500 and a log, before the upgrade",
       fun () ->
         let r =
@@ -789,7 +789,7 @@ let reviewed =
         ignore (Server.Live.use_bus ~node ~name:"second" (Server.Live.memory_bus (Server.Live.memory ())));
         let headers = [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ] in
         let r = request ~meth:`POST ~headers ~body:"null" "/_yuka/action/whoami" in
-        match Async.status (H.handler ~node config Cycle_server.Routes_server.app r) with
+        match Async.status (Cycle.handler ~node config Cycle_server.Routes_server.app r) with
         | Async.Done r -> check_true "mark" (contains r.body {|"live":["second",0]|})
         | _ -> Alcotest.fail "pending" );
   ]
@@ -799,7 +799,7 @@ let loaders =
     ( "a fallback that fails still answers 500",
       fun () ->
         let a = call (request "/later") in
-        log_hook := (fun _ -> failwith "log down");
+        log_hook := (fun _ _ -> failwith "log down");
         App.finish_slow "explode";
         match Async.status a with
         | Async.Done r ->
@@ -855,8 +855,38 @@ let loaders =
         Alcotest.(check (list string)) "log" [ "loader secret" ] !logged );
   ]
 
+let console_calls () =
+  Yuka.Console.log "l";
+  Yuka.Console.info "i";
+  Yuka.Console.warn "w";
+  Yuka.Console.error "e";
+  Yuka.Console.debug "d"
+
+let leveled got level m =
+  let name = match level with `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug" in
+  got := (name ^ " " ^ m) :: !got
+
+let console_levels = [ "info l"; "info i"; "warn w"; "error e"; "debug d" ]
+
 let render =
   [
+    ( "Console during a request goes to the log of the config",
+      fun () ->
+        let r = request "/" in
+        let got = ref [] in
+        log_hook := leveled got;
+        App.in_home := console_calls;
+        (match Async.status (call r) with
+        | Async.Done r -> check_status r 200
+        | _ -> Alcotest.fail "no response");
+        Alcotest.(check (list string)) "levels" console_levels (List.rev !got) );
+    ( "Console outside a request goes to the default sink",
+      fun () ->
+        let got = ref [] in
+        Server.Testing.set_log (leveled got);
+        console_calls ();
+        Server.Testing.set_log (fun _ m -> prerr_endline m);
+        Alcotest.(check (list string)) "levels" console_levels (List.rev !got) );
     ( "a failed render waits for the writes in flight",
       fun () ->
         held_writes := [];
@@ -935,14 +965,14 @@ let render =
         check_true "found" (script >= 0);
         check_true "before the island" (script < index r.body "<yuka-island");
         check_true "after the content before it" (script > index r.body "before");
-        check_true "preload" (contains r.body {|<link rel="modulepreload" href="/_yuka/app/app/a.js">|}) );
+        check_true "preload" (contains r.body {|<link rel="modulepreload" href="/_yuka/app/app/counter.js">|}) );
     ( "the module script stays when a Catch drops the first island",
       fun () ->
         let req = request "/islands" in
         App.fail_first := true;
         let r = match Async.status (call req) with Async.Done v -> v | _ -> Alcotest.fail "pending" in
         check_true "fallback" (contains r.body "lost server error");
-        check_true "island A dropped" (not (contains r.body {|data-name="A"|}));
+        check_true "island Counter dropped" (not (contains r.body {|data-name="Counter"|}));
         Alcotest.(check int) "one module script" 1 (count r.body "<script type=\"module\"");
         check_true "before the island" (index r.body "<script type=\"module\"" < index r.body "<yuka-island");
         Alcotest.(check int) "logged" 1 (List.length !logged) );
@@ -1107,9 +1137,9 @@ let navigation =
             ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest)
             ()
         in
-        let other = with_assets ~manifest:{|{"A":"./b.js"}|} ~digest:"d1" in
+        let other = with_assets ~manifest:{|{"Counter":"./related.js"}|} ~digest:"d1" in
         check_true "differs" (Server.Adapter.build_id other app <> build);
-        let new_code = with_assets ~manifest:{|{"A":"./a.js"}|} ~digest:"d2" in
+        let new_code = with_assets ~manifest:{|{"Counter":"./counter.js"}|} ~digest:"d2" in
         check_true "new file content, new id" (Server.Adapter.build_id new_code app <> build);
         check_true "stable" (Server.Adapter.build_id config app = build) );
   ]
@@ -1400,10 +1430,10 @@ let dev =
           if !calls = 1 then {|{"build":1}|} else failwith "state gone"
         in
         let logged = ref [] in
-        Server.Testing.set_log (fun m -> logged := m :: !logged);
+        Server.Testing.set_log (fun _ m -> logged := m :: !logged);
         let ended = Yuka.Private.dev_events ~state ~sleep (fun _ -> Async.return ()) in
         (try tick () with _ -> ());
-        Server.Testing.set_log prerr_endline;
+        Server.Testing.set_log (fun _ m -> prerr_endline m);
         check_true "ended" (Async.status ended = Async.Done ());
         Alcotest.(check int) "logged once" 1 (List.length !logged);
         Alcotest.(check int) "no timer left" 0 (List.length !timers) );

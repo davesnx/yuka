@@ -52,18 +52,18 @@ let fill id html =
     id html id
 
 let island a =
-  Yuka.runtime_island ~name:"I"
+  Yuka.runtime_island ~name:"Widget"
     ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
     (fun () -> Yuka.text "")
 
 let island_wrap id content =
   Printf.sprintf
-    "<yuka-island data-name=\"I\" data-id=\"%s\" style=\"display:contents\">%s</yuka-island><script type=\"application/json\" data-yuka-props=\"%s\">null</script>"
+    "<yuka-island data-name=\"Widget\" data-id=\"%s\" style=\"display:contents\">%s</yuka-island><script type=\"application/json\" data-yuka-props=\"%s\">null</script>"
     id content id
 
 let island_html id props =
   Printf.sprintf
-    "<yuka-island data-name=\"I\" data-id=\"%s\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"%s\">%s</script>"
+    "<yuka-island data-name=\"Widget\" data-id=\"%s\" style=\"display:contents\"></yuka-island><script type=\"application/json\" data-yuka-props=\"%s\">%s</script>"
     id id props
 
 let value_script id json =
@@ -180,7 +180,7 @@ let page_cases =
          "i1"
          "<p>a<!---->b<!--[-->h<!--]--><!--[--><!--[-->x<!--]--><!--[-->y<!--]--><!--]--><!--[-->s1<!--]--><!--[-->Ll<!--]--></p>")
       (Server.to_string (fun () ->
-           Yuka.runtime_island ~name:"I" ~props:`Null content))
+           Yuka.runtime_island ~name:"Widget" ~props:`Null content))
   in
   let respond () =
     let write, chunks = recorder () in
@@ -193,7 +193,8 @@ let page_cases =
   let component_effect () =
     let runs = ref 0 in
     let component () =
-      Yuka.Effect.run (fun () -> incr runs);
+      Yuka.Effect.after (fun () -> incr runs);
+      Yuka.Effect.before (fun () -> incr runs);
       Yuka.element "p" [] []
     in
     check string "html" "<p></p>" (Server.to_string component);
@@ -255,8 +256,8 @@ let post ?content_type ?origin ?host ?fetch_site name body =
 
 let logged f =
   let messages = ref [] in
-  let saved = prerr_endline in
-  Yuka.Server.Testing.set_log (fun m -> messages := m :: !messages);
+  let saved = fun _ m -> prerr_endline m in
+  Yuka.Server.Testing.set_log (fun _ m -> messages := m :: !messages);
   let result = (try f () with e -> Yuka.Server.Testing.set_log saved; raise e) in
   Yuka.Server.Testing.set_log saved;
   (result, List.rev !messages)
@@ -557,8 +558,8 @@ let stream_cases =
     let b = Async.bind gate (fun () -> Server.Action.reject "title is empty") in
     let write, chunks = recorder () in
     let logged = ref [] in
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged);
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
     let p = stream (fun () -> Yuka.fragment [ island a; island b ]) write in
     fail_a "db password wrong";
     open_b ();
@@ -573,8 +574,8 @@ let stream_cases =
   in
   let async_errors_inline () =
     let logged = ref [] in
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged);
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
     let html =
       Server.to_string (fun () ->
           Yuka.fragment
@@ -1031,7 +1032,7 @@ let settled_cases =
     let sleep, fire, _ = manual_sleep () in
     let p =
       render ~sleep (fun () ->
-          Yuka.runtime_island ~name:"I" ~props:`Null (fun () ->
+          Yuka.runtime_island ~name:"Widget" ~props:`Null (fun () ->
               Yuka.element "p" []
                 [ Yuka.text "t";
                   Yuka.Await.make ~async:outer
@@ -1318,7 +1319,7 @@ let loading_cases =
     List.nth (chunks ()) 1
   in
   let data_start () =
-    let html start = Yuka.Server.to_string (fun () -> isl ~start "A") in
+    let html start = Yuka.Server.to_string (fun () -> isl ~start "Counter") in
     check bool "lazy visible" true
       (contains (html (`Lazy `Visible)) "data-start=\"visible\"");
     check bool "lazy idle" true
@@ -1330,26 +1331,26 @@ let loading_cases =
   let once () =
     let out =
       shell ~preload (fun () ->
-          Yuka.fragment [ isl "A"; isl ~start:`Visible "A"; isl "B" ])
+          Yuka.fragment [ isl "Counter"; isl ~start:`Visible "Counter"; isl "Related" ])
     in
-    check int "A once" 1 (count out (link "/js/A.js"));
-    check int "B once" 1 (count out (link "/js/B.js"));
+    check int "Counter once" 1 (count out (link "/js/Counter.js"));
+    check int "Related once" 1 (count out (link "/js/Related.js"));
     check bool "before the island" true
-      (contains out (link "/js/A.js" ^ "<yuka-island data-name=\"A\""))
+      (contains out (link "/js/Counter.js" ^ "<yuka-island data-name=\"Counter\""))
   in
   let lazy_none () =
-    let out = shell ~preload (fun () -> isl ~start:(`Lazy `Idle) "A") in
+    let out = shell ~preload (fun () -> isl ~start:(`Lazy `Idle) "Counter") in
     check bool "no link" false (contains out "modulepreload");
     let out =
       shell ~preload (fun () ->
-          Yuka.fragment [ isl ~start:(`Lazy `Visible) "A"; isl "A" ])
+          Yuka.fragment [ isl ~start:(`Lazy `Visible) "Counter"; isl "Counter" ])
     in
     check int "a later non-lazy use gets the link" 1
-      (count out (link "/js/A.js"))
+      (count out (link "/js/Counter.js"))
   in
   let catch_keeps_link () =
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log ignore;
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           Yuka.fragment
@@ -1357,25 +1358,25 @@ let loading_cases =
                 ~fallback:(fun ~error:_ ~reset:_ -> Yuka.text "f")
                 ~children:(fun () ->
                   Yuka.fragment
-                    [ isl "A";
+                    [ isl "Counter";
                       Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
                 ();
-              isl "A" ])
+              isl "Counter" ])
     in
     Yuka.Server.Testing.set_log saved;
-    check int "the link of a dropped island is printed again" 1 (count out (link "/js/A.js"))
+    check int "the link of a dropped island is printed again" 1 (count out (link "/js/Counter.js"))
   in
   let no_function () =
     check bool "no link" false
-      (contains (shell (fun () -> isl "A")) "modulepreload")
+      (contains (shell (fun () -> isl "Counter")) "modulepreload")
   in
   let none_result () =
-    let out = shell ~preload:(fun _ -> None) (fun () -> isl "A") in
+    let out = shell ~preload:(fun _ -> None) (fun () -> isl "Counter") in
     check bool "no url, no link" false (contains out "modulepreload")
   in
   let escaped () =
     let out =
-      shell ~preload:(fun _ -> Some "/a\"b&c.js") (fun () -> isl "A")
+      shell ~preload:(fun _ -> Some "/a\"b&c.js") (fun () -> isl "Counter")
     in
     check bool "escaped" true (contains out (link "/a&quot;b&amp;c.js"))
   in
@@ -1385,23 +1386,23 @@ let loading_cases =
     let p =
       Yuka.Private.stream ~preload ~sleep:never_sleep ~write (fun () ->
           Yuka.fragment
-            [ isl "A";
+            [ isl "Counter";
               Yuka.Await.make ~async:a ~loading:Yuka.empty
-                ~children:(fun _ -> Yuka.fragment [ isl "A"; isl "B" ])
+                ~children:(fun _ -> Yuka.fragment [ isl "Counter"; isl "Related" ])
                 () ])
     in
     resolve 0;
     get p;
     let all = chunks () in
     let shell = List.nth all 1 and fills = String.concat "" (List.tl (List.tl all)) in
-    check int "A in the shell" 1 (count shell (link "/js/A.js"));
-    check int "A not repeated in the part" 0 (count fills (link "/js/A.js"));
-    check int "B first appears in the part" 1 (count fills (link "/js/B.js"));
-    check bool "B not in the shell" false (contains shell "/js/B.js")
+    check int "Counter in the shell" 1 (count shell (link "/js/Counter.js"));
+    check int "Counter not repeated in the part" 0 (count fills (link "/js/Counter.js"));
+    check int "Related first appears in the part" 1 (count fills (link "/js/Related.js"));
+    check bool "Related not in the shell" false (contains shell "/js/Related.js")
   in
   let respond_navigating () =
     check int "link in the settled body" 1
-      (count (get (Yuka.Private.settled ~preload ~sleep:never_sleep (fun () -> isl "A"))) (link "/js/A.js"))
+      (count (get (Yuka.Private.settled ~preload ~sleep:never_sleep (fun () -> isl "Counter"))) (link "/js/Counter.js"))
   in
   let outer_open = "<yuka-island data-name=\"Outer\"" in
   let between out =
@@ -1450,8 +1451,8 @@ let loading_cases =
     check int "inner link once" 1 (count out (link "/js/Inner.js"))
   in
   let nested_in_failed_catch () =
-    let saved = prerr_endline in
-    Yuka.Server.Testing.set_log ignore;
+    let saved = fun _ m -> prerr_endline m in
+    Yuka.Server.Testing.set_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           outer_with (fun () ->
@@ -1506,33 +1507,33 @@ let loading_cases =
     check bool "link before the template" true
       (contains joined (link "/js/Inner.js" ^ "<template"))
   in
-  let manifest = {|{"Demo_shared.A":"./islands/a.js","Demo_shared.B":"demo/shared/b.js"}|} in
+  let manifest = {|{"Demo_shared.Counter":"./islands/counter.js","Demo_shared.Related":"demo/shared/related.js"}|} in
   let urls () =
     let f = Yuka.Private.preload_urls ~manifest ~base:"/assets/" () in
-    check (option string) "leading ./ removed" (Some "/assets/islands/a.js")
-      (f "Demo_shared.A");
-    check (option string) "plain path" (Some "/assets/demo/shared/b.js")
-      (f "Demo_shared.B");
+    check (option string) "leading ./ removed" (Some "/assets/islands/counter.js")
+      (f "Demo_shared.Counter");
+    check (option string) "plain path" (Some "/assets/demo/shared/related.js")
+      (f "Demo_shared.Related");
     check (option string) "unknown" None (f "Nope")
   in
   let metafile =
-    {|{"inputs":{},"outputs":{"dist/a-3F2A.js":{"entryPoint":"islands/a.js","bytes":10},"dist/chunk-X.js":{"bytes":5},"dist/b-9.js":{"entryPoint":"app/demo/shared/b.js"}}}|}
+    {|{"inputs":{},"outputs":{"dist/counter-3F2A.js":{"entryPoint":"islands/counter.js","bytes":10},"dist/chunk-X.js":{"bytes":5},"dist/related-9.js":{"entryPoint":"app/demo/shared/related.js"}}}|}
   in
   let urls_metafile () =
     let f = Yuka.Private.preload_urls ~manifest ~base:"/" ~metafile () in
-    check (option string) "exact" (Some "/dist/a-3F2A.js") (f "Demo_shared.A");
-    check (option string) "suffix only is no match" None (f "Demo_shared.B");
+    check (option string) "exact" (Some "/dist/counter-3F2A.js") (f "Demo_shared.Counter");
+    check (option string) "suffix only is no match" None (f "Demo_shared.Related");
     let g =
-      Yuka.Private.preload_urls ~manifest:{|{"X":"other.js"}|} ~base:"/" ~metafile ()
+      Yuka.Private.preload_urls ~manifest:{|{"Other":"other.js"}|} ~base:"/" ~metafile ()
     in
-    check (option string) "no output" None (g "X")
+    check (option string) "no output" None (g "Other")
   in
   let urls_exact_wins () =
     let metafile =
-      {|{"outputs":{"o/long.js":{"entryPoint":"x/islands/a.js"},"o/exact.js":{"entryPoint":"./islands/a.js"}}}|}
+      {|{"outputs":{"o/long.js":{"entryPoint":"x/islands/counter.js"},"o/exact.js":{"entryPoint":"./islands/counter.js"}}}|}
     in
     let f = Yuka.Private.preload_urls ~manifest ~base:"" ~metafile () in
-    check (option string) "exact first" (Some "o/exact.js") (f "Demo_shared.A")
+    check (option string) "exact first" (Some "o/exact.js") (f "Demo_shared.Counter")
   in
   let urls_bad () =
     let bad f = match f () with _ -> false | exception Invalid_argument _ -> true in
@@ -1614,16 +1615,16 @@ let css_cases =
     let p, chunks =
       shell ~preload (fun () ->
           Yuka.fragment
-            [ isl "A"
+            [ isl "Counter"
                 (Yuka.use_css x (Yuka.element "div" [] [ span "a"; Yuka.use_css y (span "b") ]));
               Yuka.use_css y (span "c") ])
     in
     get p;
     let out = List.nth (chunks ()) 1 in
-    check bool "the sheets of A before A, after its modulepreload" true
+    check bool "the sheets of Counter before Counter, after its modulepreload" true
       (contains out
-         ("<link rel=\"modulepreload\" href=\"/js/A.js\">" ^ link "x" ^ link "y"
-        ^ "<yuka-island data-name=\"A\""));
+         ("<link rel=\"modulepreload\" href=\"/js/Counter.js\">" ^ link "x" ^ link "y"
+        ^ "<yuka-island data-name=\"Counter\""));
     check int "x once" 1 (count out "x.css");
     check int "y once" 1 (count out "y.css");
     let inside =
@@ -1636,7 +1637,7 @@ let css_cases =
   let rows () =
     let p, chunks =
       shell (fun () ->
-          Yuka.runtime_island ~name:"A" ~props:`Null (fun () ->
+          Yuka.runtime_island ~name:"Counter" ~props:`Null (fun () ->
               Yuka.element "ul" []
                 [ Yuka.each ~key:Fun.id (fun () -> [| "1"; "2" |])
                     (fun k -> Yuka.use_css x (Yuka.element "li" [] [ Yuka.text k ])) ]))
@@ -1660,7 +1661,7 @@ let css_cases =
     in
     let p, chunks = run (fun () -> await ()) in
     let q, island_chunks =
-      run (fun () -> Yuka.runtime_island ~name:"A" ~props:`Null (fun () -> await ()))
+      run (fun () -> Yuka.runtime_island ~name:"Counter" ~props:`Null (fun () -> await ()))
     in
     resolve 1;
     get p;
@@ -1688,7 +1689,7 @@ let css_cases =
     resolve 2;
     get p;
     let p, island_chunks =
-      shell (fun () -> Yuka.runtime_island ~name:"A" ~props:`Null (fun () -> await ()))
+      shell (fun () -> Yuka.runtime_island ~name:"Counter" ~props:`Null (fun () -> await ()))
     in
     get p;
     check bool "inside an island, before the island" true
@@ -1700,7 +1701,7 @@ let css_cases =
           Yuka.Private.node
             (Yuka.fragment
                [ Yuka.use_css x (span "a");
-                 Yuka.runtime_island ~name:"A" ~props:`Null (fun () -> Yuka.use_css y (span "b")) ]))
+                 Yuka.runtime_island ~name:"Counter" ~props:`Null (fun () -> Yuka.use_css y (span "b")) ]))
     in
     check bool "no link in a whole-tree render" false (contains out "data-yuka-css")
   in

@@ -96,7 +96,7 @@ Elm has no memo for derived state. Two options:
 After a `Msg`, `update` runs, then the whole `view model` function runs, then the new virtual tree is diffed against the old one, then patches go to the DOM (src: Browser.js: `diff(currNode, nextNode)`, `applyPatches`). There is no dependency tracking.
 
 - `lazy` skips both `f` and the diff for a subtree when its arguments are `===` (src). `f` runs only during diff or render, not while building the tree.
-- Putting `lazy` at the root gives nearly "skip view when model is unchanged". A nested update such as `{ model | x = X.update m model.x }` always builds a new record, so a root `lazy` misses. Move `lazy` down to sub-views taking sub-models. (src: jfmengels "make your roots lazy", via `elm.md`)
+- Putting `lazy` at the root gives nearly "skip view when model is unchanged". A nested update such as `{ model | x = Page.update m model.x }` always builds a new record, so a root `lazy` misses. Move `lazy` down to sub-views taking sub-models. (src: jfmengels "make your roots lazy", via `elm.md`)
 - Events: handlers are compared by their decoder structure; if the tag is the same, the DOM listener stays and only the stored handler is replaced (src: VirtualDom.js `_VirtualDom_equalEvents`, `applyEvents`).
 
 ### P6 One-shot effects
@@ -252,12 +252,12 @@ import Html.Attributes exposing (disabled, style, value)
 import Html.Events exposing (onClick, onInput)
 import Html.Keyed as Keyed
 import Http
-import Json.Decode as D
-import Json.Encode as E
+import Json.Decode as Decode
+import Json.Encode as Encode
 
 port joinRoom : String -> Cmd msg
-port sendMessage : E.Value -> Cmd msg
-port received : (E.Value -> msg) -> Sub msg
+port sendMessage : Encode.Value -> Cmd msg
+port received : (Encode.Value -> msg) -> Sub msg
 
 type alias Message = { clientId : String, text : String }
 type History = Loading | Failed Http.Error | Loaded
@@ -268,7 +268,7 @@ type alias Model =
 
 type Msg
     = SelectRoom String | GotHistory String (Result Http.Error (List Message))
-    | Received E.Value | Draft String | Send
+    | Received Encode.Value | Draft String | Send
 
 main : Program String Model Msg
 main = Browser.element { init = init, update = update, view = view, subscriptions = \_ -> received Received }
@@ -285,10 +285,10 @@ fetchHistory : String -> Cmd Msg
 fetchHistory room =
     Http.request
         { method = "GET", headers = [], url = "/api/rooms/" ++ room ++ "/messages", body = Http.emptyBody
-        , expect = Http.expectJson (GotHistory room) (D.list messageDecoder), timeout = Nothing, tracker = Just "history" }
+        , expect = Http.expectJson (GotHistory room) (Decode.list messageDecoder), timeout = Nothing, tracker = Just "history" }
 
-messageDecoder : D.Decoder Message
-messageDecoder = D.map2 Message (D.field "clientId" D.string) (D.field "text" D.string)
+messageDecoder : Decode.Decoder Message
+messageDecoder = Decode.map2 Message (Decode.field "clientId" Decode.string) (Decode.field "text" Decode.string)
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -300,7 +300,7 @@ update msg model =
                 Ok ms -> ( { model | history = Loaded, messages = merge ms model.messages }, Cmd.none )
                 Err e -> ( { model | history = Failed e }, Cmd.none )
         Received value ->
-            case D.decodeValue (D.map2 Tuple.pair (D.field "room" D.string) messageDecoder) value of
+            case Decode.decodeValue (Decode.map2 Tuple.pair (Decode.field "room" Decode.string) messageDecoder) value of
                 Ok ( room, m ) ->
                     if room /= model.room then ( model, Cmd.none )
                     else ( { model | messages = merge model.messages [ m ], pending = List.filter (\p -> p.clientId /= m.clientId) model.pending }, Cmd.none )
@@ -309,7 +309,7 @@ update msg model =
         Send ->
             let m = { clientId = model.session ++ "-" ++ String.fromInt model.counter, text = model.draft }
             in ( { model | pending = model.pending ++ [ m ], draft = "", counter = model.counter + 1 }
-               , sendMessage (E.object [ ( "room", E.string model.room ), ( "clientId", E.string m.clientId ), ( "text", E.string m.text ) ]) )
+               , sendMessage (Encode.object [ ( "room", Encode.string model.room ), ( "clientId", Encode.string m.clientId ), ( "text", Encode.string m.text ) ]) )
 
 merge : List Message -> List Message -> List Message
 merge a b = a ++ List.filter (\m -> not (List.any (\x -> x.clientId == m.clientId) a)) b
@@ -355,7 +355,7 @@ Awkward points:
 - `ws.send` throws if the socket is still connecting, and nothing reports a send failure back. A pending message can stay pending forever. A real version needs buffering in JS, an ack timeout, and a `Failed` state per pending item.
 - The client id counter needs a session id from `flags` so ids do not collide after a reload.
 - Messages that arrive on the socket before the history loads are merged by `clientId`. This merge is written by hand.
-- Incoming port values are decoded in `update`. Using `E.Value` avoids the runtime crash that a mistyped port gives.
+- Incoming port values are decoded in `update`. Using `Encode.Value` avoids the runtime crash that a mistyped port gives.
 - Untested: this code was not compiled (no Elm compiler in this sandbox).
 
 ## Sources

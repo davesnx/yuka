@@ -86,15 +86,13 @@ each route such as `Routes.home ()`, `Routes.href` and `Routes.find`). `preproce
 `shared/counter.mlx` is an island that uses it:
 
 ```ocaml
-open Yuka
-
 module Css = [%yuka.css "counter.css"]
 
 let[@client] make ~(initial : int) () =
-  let n = State.make initial in
-  <button class_=Css.button on_click=(fun _ -> State.update n succ)>
+  let count = Yuka.State.make initial in
+  <button class_=Css.button on_click=(fun _ -> Yuka.State.update count succ)>
     "Clicks: "
-    (Yuka.int (State.get n))
+    (Yuka.int (Yuka.State.get count))
   </button>
 ```
 
@@ -167,13 +165,16 @@ let () =
   let config =
     Yuka.Server.config ~assets ~css:Yuka_css.sheets
       ~dev:(Sys.getenv_opt "YUKA_DEV" = Some "1")
-      ~log_error:(fun m -> Dream.error (fun log -> log "%s" m))
       ()
   in
   Dream.run @@ Dream.logger @@ Dream.set_secret "change-me"
   @@ Dream.cookie_sessions
   @@ Yuka_dream.handler config Routes_server.app
 ```
+
+The config has no `~log`, so `Yuka_dream.handler` sends the messages of
+Yuka, and of `Yuka.Console` during a request, to the Dream log under the
+name `yuka`.
 
 `client/dune` builds the browser entry and writes the island registry
 (`Yuka_islands`) and its manifest. The client lists `yuka.js`, the browser

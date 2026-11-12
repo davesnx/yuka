@@ -1,12 +1,11 @@
 open Yuka
-module D = Dom_cases
 
 let check = Cases.check
 
 let start_islands ?lazy_entries entries =
   Yuka.render ~islands:(Yuka.runtime_registry ?lazy_entries entries) ~navigation:false ()
 let ints = string_of_int
-let same = D.same
+let same = Dom_cases.same
 
 let capture_errors : unit -> unit =
   [%mel.raw
@@ -63,25 +62,25 @@ let counter_entry =
         (Codec.decode Codec.int json))
 
 let page islands = element "main" [] islands
-let spans c = String.concat "," (Array.to_list (Array.map D.text_content (D.query_all c "span")))
+let spans c = String.concat "," (Array.to_list (Array.map Dom_cases.text_content (Dom_cases.query_all c "span")))
 
 let setup_page tree =
   reset_body ();
-  D.container (D.server tree)
+  Dom_cases.container (Dom_cases.server tree)
 
 let islands_start () =
   let c = setup_page (page [ counter_island 5; counter_island 10 ]) in
-  let buttons = D.query_all c "button" in
-  let roots = D.query_all c "yuka-island > div" in
+  let buttons = Dom_cases.query_all c "button" in
+  let roots = Dom_cases.query_all c "yuka-island > div" in
   start_islands [ counter_entry ];
-  same "button 1 adopted" buttons.(0) (D.query_all c "button").(0);
-  same "button 2 adopted" buttons.(1) (D.query_all c "button").(1);
-  same "root 1 adopted" roots.(0) (D.query_all c "yuka-island > div").(0);
+  same "button 1 adopted" buttons.(0) (Dom_cases.query_all c "button").(0);
+  same "button 2 adopted" buttons.(1) (Dom_cases.query_all c "button").(1);
+  same "root 1 adopted" roots.(0) (Dom_cases.query_all c "yuka-island > div").(0);
   check "props decoded" "5,10" (spans c);
-  D.click (D.query_all c "button").(0);
+  Dom_cases.click (Dom_cases.query_all c "button").(0);
   check "only island 1 changes" "6,10" (spans c);
-  D.click (D.query_all c "button").(1);
-  D.click (D.query_all c "button").(1);
+  Dom_cases.click (Dom_cases.query_all c "button").(1);
+  Dom_cases.click (Dom_cases.query_all c "button").(1);
   check "only island 2 changes" "6,12" (spans c)
 
 let islands_start_in_document_order () =
@@ -102,20 +101,20 @@ let unknown_island () =
   let c =
     setup_page (page [ counter_island ~name:"Nope" 1; counter_island 10 ])
   in
-  let before = D.html (D.query_all c "yuka-island").(0) in
+  let before = Dom_cases.html (Dom_cases.query_all c "yuka-island").(0) in
   capture_errors ();
   start_islands [ counter_entry ];
   let logged = errors () in
   check "logged" "yuka island i1 (Nope): unknown island name" logged;
-  check "server html kept" before (D.html (D.query_all c "yuka-island").(0));
-  D.click (D.query_all c "button").(0);
-  D.click (D.query_all c "button").(1);
+  check "server html kept" before (Dom_cases.html (Dom_cases.query_all c "yuka-island").(0));
+  Dom_cases.click (Dom_cases.query_all c "button").(0);
+  Dom_cases.click (Dom_cases.query_all c "button").(1);
   check "other island started" "1,11" (spans c)
 
 let broken_islands () =
   reset_body ();
   let c =
-    D.container
+    Dom_cases.container
       {|<yuka-island data-name="Counter" data-id="i1"><span>x</span></yuka-island><script type="application/json" data-yuka-props="i1">"text"</script><yuka-island data-name="Counter" data-id="i2"><span>y</span></yuka-island><yuka-island data-name="Counter" data-id="i3"><span>z</span></yuka-island><script type="application/json" data-yuka-props="i3">{oops</script>|}
   in
   capture_errors ();
@@ -135,7 +134,7 @@ let start_twice () =
   let c = setup_page (page [ counter_island 0 ]) in
   start_islands [ counter_entry ];
   start_islands [ counter_entry ];
-  D.click (D.query_all c "button").(0);
+  Dom_cases.click (Dom_cases.query_all c "button").(0);
   check "one handler" "1" (spans c)
 
 let action = Action.mutation ~name:"create issue" ~input:Codec.string ~output:Codec.int
@@ -192,24 +191,24 @@ let lazy_island ?(start = "[s1") ?(body = "<span>loading</span>") id props =
     {|<yuka-island data-name="Lazy" data-id="%s"><!--%s-->%s<!--]--></yuka-island><script type="application/json" data-yuka-props="%s">%s</script>|}
     id start body id props
 
-let island_html c = D.html (D.query_all c "yuka-island").(0)
+let island_html c = Dom_cases.html (Dom_cases.query_all c "yuka-island").(0)
 
 let async_prop_value () =
   reset_body ();
   let c =
-    D.container
+    Dom_cases.container
       (lazy_island ~body:"<b>5</b>" "i1" {|{"$async":"a1"}|}
       ^ {|<script type="application/json" data-yuka-async="a1">{"ok":5}</script>|})
   in
-  let b = D.query c "b" in
+  let b = Dom_cases.query c "b" in
   start_islands [ lazy_entry ];
   check "value rendered" "<!--[s1--><b>5</b><!--]-->" (island_html c);
-  same "settled content adopted" b (D.query c "b")
+  same "settled content adopted" b (Dom_cases.query c "b")
 
 let async_prop_mismatch () =
   reset_body ();
   let c =
-    D.container
+    Dom_cases.container
       (lazy_island "i1" {|{"$async":"a1"}|}
       ^ {|<script type="application/json" data-yuka-async="a1">{"ok":5}</script>|})
   in
@@ -219,7 +218,7 @@ let async_prop_mismatch () =
 let async_prop_error () =
   reset_body ();
   let c =
-    D.container
+    Dom_cases.container
       (lazy_island "i1" {|{"$async":"a1"}|}
       ^ {|<script type="application/json" data-yuka-async="a1">{"error":"nope"}</script>|})
   in
@@ -229,7 +228,7 @@ let async_prop_error () =
 let async_prop_inline () =
   reset_body ();
   let c =
-    D.container
+    Dom_cases.container
       (lazy_island ~start:"[" "i1" {|{"$async":"a1","ok":8}|})
   in
   start_islands [ lazy_entry ];
@@ -237,7 +236,7 @@ let async_prop_inline () =
 
 let hole_start_marker () =
   reset_body ();
-  let c = D.container (lazy_island "i1" {|{"$async":"a1","ok":1}|}) in
+  let c = Dom_cases.container (lazy_island "i1" {|{"$async":"a1","ok":1}|}) in
   start_islands [ lazy_entry ];
   check "start marker kept" "<!--[s1--><b>1</b><!--]-->" (island_html c)
 
@@ -248,7 +247,7 @@ let add_script : string -> unit =
   [%mel.raw
     {|function (json) { const s = document.createElement("script"); s.type = "application/json"; s.setAttribute("data-yuka-async", "a1"); s.textContent = json; document.body.appendChild(s); }|}]
 
-let fresh_doc : string -> D.node =
+let fresh_doc : string -> Dom_cases.node =
   [%mel.raw
     {|function (scripts) {
   const { JSDOM } = require("jsdom");
@@ -256,10 +255,10 @@ let fresh_doc : string -> D.node =
   return dom.window.document;
 }|}]
 
-let eval_in : D.node -> string -> unit =
+let eval_in : Dom_cases.node -> string -> unit =
   [%mel.raw "function (doc, js) { doc.defaultView.eval(js) }"]
 
-let doc_body : D.node -> D.node = [%mel.raw "function (doc) { return doc.body }"]
+let doc_body : Dom_cases.node -> Dom_cases.node = [%mel.raw "function (doc) { return doc.body }"]
 
 let fill_js =
   let s = Private.fill_script in
@@ -302,14 +301,14 @@ let fill_runs () =
   let doc = fresh_doc "outside-only" in
   let body = doc_body doc in
   eval_in doc fill_js;
-  D.set_html body (shell ^ {|<template data-yuka-fill="|} ^ id ^ {|">|} ^ chunk ^ "</template>");
+  Dom_cases.set_html body (shell ^ {|<template data-yuka-fill="|} ^ id ^ {|">|} ^ chunk ^ "</template>");
   eval_in doc ({|window.__yukaFill("|} ^ id ^ {|")|});
   check "filled"
     "<div>x<!--[s1--><section><!--[-->4<!--]--><!--[--><i>z</i><!--]-->t</section><!--]--><p></p></div>"
-    (D.html body);
+    (Dom_cases.html body);
   ignore a
 
-let run_scripts : D.node -> string -> unit =
+let run_scripts : Dom_cases.node -> string -> unit =
   [%mel.raw
     {|function (doc, html) {
   const holder = doc.createElement("div");
@@ -326,32 +325,32 @@ let fill_script_removed () =
   let _, shell, (id, chunk) = streamed () in
   let doc = fresh_doc "dangerously" in
   run_scripts doc Private.fill_script;
-  D.set_html (doc_body doc) shell;
+  Dom_cases.set_html (doc_body doc) shell;
   run_scripts doc
     ({|<template data-yuka-fill="|} ^ id ^ {|">|} ^ chunk ^ {|</template><script>__yukaFill("|} ^ id ^ {|")</script>|});
   check "no template, no script"
     "<div>x<!--[s1--><section><!--[-->4<!--]--><!--[--><i>z</i><!--]-->t</section><!--]--><p></p></div>"
-    (D.html (doc_body doc))
+    (Dom_cases.html (doc_body doc))
 
 let fill_then_hydrate () =
   let a, shell, (id, chunk) = streamed () in
   let doc = fresh_doc "outside-only" in
   let body = doc_body doc in
   eval_in doc fill_js;
-  D.set_html body
+  Dom_cases.set_html body
     (shell ^ {|<template data-yuka-fill="|} ^ id ^ {|">|} ^ chunk ^ "</template>");
   eval_in doc ({|window.__yukaFill("|} ^ id ^ {|")|});
-  let section = D.query body "section" in
-  let p = D.query body "p" in
-  let i = D.query body "i" in
-  let before = D.html body in
+  let section = Dom_cases.query body "section" in
+  let p = Dom_cases.query body "p" in
+  let i = Dom_cases.query body "i" in
+  let before = Dom_cases.html body in
   let dispose =
-    Yuka.Private.hydrate (D.as_element body) (fun () -> fill_view a)
+    Yuka.Private.hydrate (Dom_cases.as_element body) (fun () -> fill_view a)
   in
-  same "section adopted" section (D.query body "section");
-  same "i adopted" i (D.query body "i");
-  same "p adopted" p (D.query body "p");
-  check "html unchanged" before (D.html body);
+  same "section adopted" section (Dom_cases.query body "section");
+  same "i adopted" i (Dom_cases.query body "i");
+  same "p adopted" p (Dom_cases.query body "p");
+  check "html unchanged" before (Dom_cases.html body);
   dispose ()
 
 let empty_slot () =
@@ -359,7 +358,7 @@ let empty_slot () =
   | Ok s -> s
   | Error m -> raise (Cases.Failed m)
 
-let slot_node p = D.query p "p"
+let slot_node p = Dom_cases.query p "p"
 
 let slot_page_tree slot =
   element "div" []
@@ -371,19 +370,19 @@ let slot_page_tree slot =
 
 let slot_adopted () =
   let content = Slot.make (element "p" [] [ text "x"; element "b" [] [ text "y" ] ]) in
-  let server_html = D.server (element "div" [] [ text "a"; Yuka.slot content ]) in
+  let server_html = Dom_cases.server (element "div" [] [ text "a"; Yuka.slot content ]) in
   check "server html"
     "<div>a<!--[$--><p>x<b>y</b></p><!--]--></div>" server_html;
-  let c = D.container server_html in
+  let c = Dom_cases.container server_html in
   let p = slot_node c in
   let client = empty_slot () in
   let dispose =
-    Yuka.Private.hydrate (D.as_element c) (fun () ->
+    Yuka.Private.hydrate (Dom_cases.as_element c) (fun () ->
         element "div" [] [ text "a"; Yuka.slot client ])
   in
   same "slot node adopted" p (slot_node c);
   check "captured" "1" (ints (List.length !(Private.slot_dom client)));
-  check "html unchanged" server_html (D.html c);
+  check "html unchanged" server_html (Dom_cases.html c);
   dispose ()
 
 let slot_moves_with_hole () =
@@ -397,30 +396,30 @@ let slot_moves_with_hole () =
             else element "section" [] [ Yuka.slot slot ]);
       ]
   in
-  let c = D.container (D.server (view content)) in
+  let c = Dom_cases.container (Dom_cases.server (view content)) in
   let p = slot_node c in
   let client = empty_slot () in
-  let dispose = Yuka.Private.hydrate (D.as_element c) (fun () -> view client) in
+  let dispose = Yuka.Private.hydrate (Dom_cases.as_element c) (fun () -> view client) in
   same "adopted" p (slot_node c);
   State.set wrap false;
   check "moved into section"
     "<main><section><!--[$--><p>x</p><!--]--></section></main>"
-    (D.html c);
+    (Dom_cases.html c);
   same "same node after move" p (slot_node c);
   State.set wrap true;
   same "same node after second move" p (slot_node c);
   check "back"
     "<main><div><!--[$--><p>x</p><!--]--></div></main>"
-    (D.html c);
+    (Dom_cases.html c);
   dispose ()
 
 let slot_never_captured () =
-  let c = D.container "" in
+  let c = Dom_cases.container "" in
   let dispose =
-    Yuka.Private.render (D.as_element c) (fun () ->
+    Yuka.Private.render (Dom_cases.as_element c) (fun () ->
         element "div" [] [ Yuka.slot (empty_slot ()) ])
   in
-  check "markers only" "<div><!--[$--><!--]--></div>" (D.html c);
+  check "markers only" "<div><!--[$--><!--]--></div>" (Dom_cases.html c);
   dispose ()
 
 let outer_view slot =
@@ -447,43 +446,43 @@ let nested_island ~outer_loading () =
       ]
   in
   reset_body ();
-  let c = D.container (D.server tree) in
-  let counter_button = D.query c "yuka-island yuka-island button" in
+  let c = Dom_cases.container (Dom_cases.server tree) in
+  let counter_button = Dom_cases.query c "yuka-island yuka-island button" in
   start_islands [ outer_entry; counter_entry ];
   (c, counter_button)
 
-let click_outer c = D.click (D.query c "#outer")
+let click_outer c = Dom_cases.click (Dom_cases.query c "#outer")
 
 let slot_island_outer_first () =
   let c, button = nested_island ~outer_loading:None () in
-  same "inner button kept" button (D.query c "yuka-island yuka-island button");
-  D.click (D.query c "yuka-island yuka-island button");
-  check "inner works" "6" (D.text_content (D.query c "yuka-island yuka-island span"));
+  same "inner button kept" button (Dom_cases.query c "yuka-island yuka-island button");
+  Dom_cases.click (Dom_cases.query c "yuka-island yuka-island button");
+  check "inner works" "6" (Dom_cases.text_content (Dom_cases.query c "yuka-island yuka-island span"));
   click_outer c;
-  same "inner button kept after move" button (D.query c "yuka-island yuka-island button");
-  D.click (D.query c "yuka-island yuka-island button");
+  same "inner button kept after move" button (Dom_cases.query c "yuka-island yuka-island button");
+  Dom_cases.click (Dom_cases.query c "yuka-island yuka-island button");
   check "inner state kept after move" "7"
-    (D.text_content (D.query c "yuka-island yuka-island span"))
+    (Dom_cases.text_content (Dom_cases.query c "yuka-island yuka-island span"))
 
-let fire : D.node -> string -> unit =
+let fire : Dom_cases.node -> string -> unit =
   [%mel.raw "function (el, name) { el.dispatchEvent(new window.Event(name, { bubbles: true })) }"]
 
 let slot_island_inner_first () =
   let c, button = nested_island ~outer_loading:(Some `Interaction) () in
-  D.click (D.query c "yuka-island yuka-island button");
-  check "inner started first" "6" (D.text_content (D.query c "yuka-island yuka-island span"));
+  Dom_cases.click (Dom_cases.query c "yuka-island yuka-island button");
+  check "inner started first" "6" (Dom_cases.text_content (Dom_cases.query c "yuka-island yuka-island span"));
   click_outer c;
   check "outer still server html" "0"
-    (ints (Array.length (D.query_all c "section")));
-  fire (D.query c "#outer") "pointerover";
-  check "recorded click replayed at start" "1" (ints (Array.length (D.query_all c "section")));
+    (ints (Array.length (Dom_cases.query_all c "section")));
+  fire (Dom_cases.query c "#outer") "pointerover";
+  check "recorded click replayed at start" "1" (ints (Array.length (Dom_cases.query_all c "section")));
   click_outer c;
-  check "outer works after start" "0" (ints (Array.length (D.query_all c "section")));
+  check "outer works after start" "0" (ints (Array.length (Dom_cases.query_all c "section")));
   click_outer c;
-  check "and again" "1" (ints (Array.length (D.query_all c "section")));
-  same "inner button kept" button (D.query c "yuka-island yuka-island button");
-  D.click (D.query c "yuka-island yuka-island button");
-  check "inner state kept" "7" (D.text_content (D.query c "yuka-island yuka-island span"))
+  check "and again" "1" (ints (Array.length (Dom_cases.query_all c "section")));
+  same "inner button kept" button (Dom_cases.query c "yuka-island yuka-island button");
+  Dom_cases.click (Dom_cases.query c "yuka-island yuka-island button");
+  check "inner state kept" "7" (Dom_cases.text_content (Dom_cases.query c "yuka-island yuka-island span"))
 
 let stub_browser : unit -> unit =
   [%mel.raw
@@ -506,65 +505,65 @@ let io_disconnected : unit -> bool = [%mel.raw "function () { return globalThis.
 
 let one_island loading =
   reset_body ();
-  let c = D.container (D.server (page [ counter_island ?start:loading 0 ])) in
+  let c = Dom_cases.container (Dom_cases.server (page [ counter_island ?start:loading 0 ])) in
   stub_browser ();
   c
 
-let btn c = D.query c "button"
+let btn c = Dom_cases.query c "button"
 
 let strategy_load_default () =
   let c = one_island None in
   start_islands [ counter_entry ];
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "started at once" "1" (spans c)
 
 let strategy_data_attribute () =
   let c = one_island (Some `Idle) in
   check "written" "idle"
-    (Option.value (D.get_attribute (D.query c "yuka-island") "data-start") ~default:"");
+    (Option.value (Dom_cases.get_attribute (Dom_cases.query c "yuka-island") "data-start") ~default:"");
   check "style" "display:contents"
-    (Option.value (D.get_attribute (D.query c "yuka-island") "style") ~default:"")
+    (Option.value (Dom_cases.get_attribute (Dom_cases.query c "yuka-island") "style") ~default:"")
 
 let strategy_idle () =
   let c = one_island (Some `Idle) in
   start_islands [ counter_entry ];
   start_islands [ counter_entry ];
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "not started before idle" "0" (spans c);
   check "one callback" "1" (ints (run_idle ()));
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "the click before idle is replayed, the new one is live" "2" (spans c)
 
 let strategy_visible () =
   let c = one_island (Some `Visible) in
   start_islands [ counter_entry ];
   check "observes first child" "true" (string_of_bool (io_target_is_first_child ()));
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "not started" "0" (spans c);
   io_report false;
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "not visible yet" "0" (spans c);
   io_report true;
   check "disconnected" "true" (string_of_bool (io_disconnected ()));
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "two recorded clicks replayed, one live" "3" (spans c)
 
 let strategy_visible_without_observer () =
   let c = one_island (Some `Visible) in
   unstub_io ();
   start_islands [ counter_entry ];
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "started at once" "1" (spans c)
 
 let strategy_interaction () =
   let c = one_island (Some `Interaction) in
   start_islands [ counter_entry ];
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "not started" "0" (spans c);
   fire (btn c) "focusin";
   fire (btn c) "pointerover";
   fire (btn c) "touchstart";
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "recorded click replayed once, listeners removed" "2" (spans c)
 
 let strategy_interaction_each_event () =
@@ -573,11 +572,11 @@ let strategy_interaction_each_event () =
       let c = one_island (Some `Interaction) in
       start_islands [ counter_entry ];
       fire (btn c) name;
-      D.click (btn c);
+      Dom_cases.click (btn c);
       check ("started by " ^ name) "1" (spans c))
     [ "pointerover"; "focusin"; "touchstart" ]
 
-let body_node : unit -> D.node = D.body
+let body_node : unit -> Dom_cases.node = Dom_cases.body
 
 let set_ready : string -> unit =
   [%mel.raw "function (v) { Object.defineProperty(document, 'readyState', { configurable: true, get: function () { return v } }) }"]
@@ -607,14 +606,14 @@ let after_ms : int -> (unit -> unit) -> unit =
 let stop_disposes () =
   let c = one_island None in
   start_islands [ counter_entry ];
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "running" "1" (spans c);
   Yuka.stop ();
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "handlers removed" "1" (spans c);
   let c2 = one_island None in
   start_islands [ counter_entry ];
-  D.click (btn c2);
+  Dom_cases.click (btn c2);
   check "start works again on a new body" "1" (spans c2);
   Yuka.stop ()
 
@@ -623,7 +622,7 @@ let stop_restarts_same_body () =
   start_islands [ counter_entry ];
   Yuka.stop ();
   start_islands [ counter_entry ];
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "island started again" "1" (spans c);
   Yuka.stop ()
 
@@ -632,7 +631,7 @@ let stop_cancels_idle () =
   start_islands [ counter_entry ];
   Yuka.stop ();
   check "no callback left" "0" (ints (run_idle ()));
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "not started" "0" (spans c)
 
 let stop_cancels_visible () =
@@ -641,7 +640,7 @@ let stop_cancels_visible () =
   Yuka.stop ();
   check "observer disconnected" "true" (string_of_bool (io_disconnected ()));
   io_report true;
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "not started" "0" (spans c)
 
 let stop_cancels_interaction () =
@@ -649,7 +648,7 @@ let stop_cancels_interaction () =
   start_islands [ counter_entry ];
   Yuka.stop ();
   fire (btn c) "pointerover";
-  D.click (btn c);
+  Dom_cases.click (btn c);
   check "not started" "0" (spans c)
 
 external of_js : 'a Js.Promise.t -> 'a Yuka.runtime_promise = "%identity"
@@ -675,7 +674,7 @@ let dynamic_import_emitted () =
 let lazy_page loading = page [ Counter_island.island ?start:loading 3; Counter_island.island ?start:loading 4 ]
 
 let lazy_click_started c i =
-  D.click (D.query_all c "button").(i)
+  Dom_cases.click (Dom_cases.query_all c "button").(i)
 
 let count_queries : unit -> unit =
   [%mel.raw
@@ -726,10 +725,10 @@ let replay_entry =
 let replay_island ?start () =
   runtime_island ?start ~name:"Replay" ~props:`Null (fun () -> replay_view ())
 
-let key_event : D.node -> string -> unit =
+let key_event : Dom_cases.node -> string -> unit =
   [%mel.raw "function (el, key) { el.dispatchEvent(new window.KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true })) }"]
 
-let choose : D.node -> string -> unit =
+let choose : Dom_cases.node -> string -> unit =
   [%mel.raw "function (el, v) { el.value = v; el.dispatchEvent(new window.Event('change', { bubbles: true })) }"]
 
 let slow_lazy () =
@@ -763,12 +762,12 @@ let select_island () =
 
 let replay_select_with_value_hole () =
   reset_body ();
-  let c = D.container (D.server (page [ select_island () ])) in
+  let c = Dom_cases.container (Dom_cases.server (page [ select_island () ])) in
   start_islands [ select_entry ];
-  choose (D.query c "select") "b";
-  fire (D.query c "select") "pointerover";
-  check "handler saw the new value" "b" (D.text_content (D.query c "#chosen"));
-  check "select shows it" "b" (D.value (D.query c "select"));
+  choose (Dom_cases.query c "select") "b";
+  fire (Dom_cases.query c "select") "pointerover";
+  check "handler saw the new value" "b" (Dom_cases.text_content (Dom_cases.query c "#chosen"));
+  check "select shows it" "b" (Dom_cases.value (Dom_cases.query c "select"));
   Yuka.stop ()
 
 let navigations : string list ref = ref []
@@ -776,26 +775,26 @@ let navigations : string list ref = ref []
 let platform_override_survives () =
   reset_body ();
   navigations := [];
-  let c = D.container (D.server (page [ select_island () ])) in
+  let c = Dom_cases.container (Dom_cases.server (page [ select_island () ])) in
   start_islands [ select_entry ];
   Private.platform :=
     { !Private.platform with navigate = (fun url -> navigations := url :: !navigations) };
-  fire (D.query c "select") "pointerover";
+  fire (Dom_cases.query c "select") "pointerover";
   Browser.navigate "/next";
   check "the override is still installed after an island started" "/next"
     (String.concat "," !navigations);
   Yuka.stop ();
   reset_body ();
-  let c2 = D.container (D.server (page [ select_island () ])) in
+  let c2 = Dom_cases.container (Dom_cases.server (page [ select_island () ])) in
   start_islands [ select_entry ];
-  fire (D.query c2 "select") "pointerover";
+  fire (Dom_cases.query c2 "select") "pointerover";
   Browser.navigate "/again";
   check "still there after stop and start" "/again,/next" (String.concat "," !navigations);
-  choose (D.query c2 "select") "b";
-  check "islands still work" "b" (D.text_content (D.query c2 "#chosen"));
+  choose (Dom_cases.query c2 "select") "b";
+  check "islands still work" "b" (Dom_cases.text_content (Dom_cases.query c2 "#chosen"));
   Yuka.stop ()
 
-let texts_of c = String.concat "," (List.map (fun s -> D.text_content (D.query c s)) [ "#count"; "#chosen"; "#keys" ])
+let texts_of c = String.concat "," (List.map (fun s -> Dom_cases.text_content (Dom_cases.query c s)) [ "#count"; "#chosen"; "#keys" ])
 
 let async =
   [
@@ -803,18 +802,18 @@ let async =
       fun finish ->
         reset_body ();
         replay_log := [];
-        let c = D.container (D.server (page [ replay_island () ])) in
+        let c = Dom_cases.container (Dom_cases.server (page [ replay_island () ])) in
         let entry, release = slow_lazy () in
         start_islands ~lazy_entries:[ entry ] [];
-        D.click (D.query c "button");
-        choose (D.query c "select") "b";
-        key_event (D.query c "input") "x";
-        D.click (D.query c "button");
+        Dom_cases.click (Dom_cases.query c "button");
+        choose (Dom_cases.query c "select") "b";
+        key_event (Dom_cases.query c "input") "x";
+        Dom_cases.click (Dom_cases.query c "button");
         let before = texts_of c in
         release ();
         after_ms 30 (fun () ->
             let applied = texts_of c in
-            D.click (D.query c "button");
+            Dom_cases.click (Dom_cases.query c "button");
             let again = texts_of c in
             finish (fun () ->
                 check "nothing applied before the load" "0,,"  before;
@@ -826,14 +825,14 @@ let async =
       fun finish ->
         reset_body ();
         replay_log := [];
-        let c = D.container (D.server (page [ replay_island () ])) in
+        let c = Dom_cases.container (Dom_cases.server (page [ replay_island () ])) in
         let entry, release = slow_lazy () in
         start_islands ~lazy_entries:[ entry ] [];
-        D.click (D.query c "button");
+        Dom_cases.click (Dom_cases.query c "button");
         Yuka.stop ();
         release ();
         after_ms 30 (fun () ->
-            D.click (D.query c "button");
+            Dom_cases.click (Dom_cases.query c "button");
             finish (fun () ->
                 check "nothing replayed or started" "0,," (texts_of c);
                 check "no handler ran" "" (String.concat "," !replay_log))) );
@@ -843,13 +842,13 @@ let async =
         reset_body ();
         set_ready "loading";
         start_islands [ counter_entry ];
-        let html = D.server (counter_island 0) in
+        let html = Dom_cases.server (counter_island 0) in
         append_html html;
         tick (fun () ->
-            D.click (D.query (body_node ()) "button");
+            Dom_cases.click (Dom_cases.query (body_node ()) "button");
             clear_ready ();
             finish (fun () ->
-                check "started on arrival" "1" (D.text_content (D.query (body_node ()) "span"));
+                check "started on arrival" "1" (Dom_cases.text_content (Dom_cases.query (body_node ()) "span"));
                 Yuka.stop ())) );
     ( "early start: island waits for its props script",
       fun finish ->
@@ -857,15 +856,15 @@ let async =
         set_ready "loading";
         capture_errors ();
         start_islands [ counter_entry ];
-        let island, script = split_island (D.server (counter_island 0)) in
+        let island, script = split_island (Dom_cases.server (counter_island 0)) in
         append_html island;
         tick (fun () ->
-            D.click (D.query (body_node ()) "button");
-            let early = D.text_content (D.query (body_node ()) "span") in
+            Dom_cases.click (Dom_cases.query (body_node ()) "button");
+            let early = Dom_cases.text_content (Dom_cases.query (body_node ()) "span") in
             append_html script;
             tick (fun () ->
-                D.click (D.query (body_node ()) "button");
-                let late = D.text_content (D.query (body_node ()) "span") in
+                Dom_cases.click (Dom_cases.query (body_node ()) "button");
+                let late = Dom_cases.text_content (Dom_cases.query (body_node ()) "span") in
                 let logged = errors () in
                 clear_ready ();
                 finish (fun () ->
@@ -879,20 +878,20 @@ let async =
         set_ready "loading";
         capture_errors ();
         start_islands [ counter_entry ];
-        let island, script = split_island (D.server (counter_island 7)) in
+        let island, script = split_island (Dom_cases.server (counter_island 7)) in
         let partial =
           String.concat "" [ island; {|<script type="application/json" data-yuka-props="i1">|} ]
         in
         ignore script;
         append_html partial;
         tick (fun () ->
-            D.click (D.query (body_node ()) "button");
-            let early = D.text_content (D.query (body_node ()) "span") in
+            Dom_cases.click (Dom_cases.query (body_node ()) "button");
+            let early = Dom_cases.text_content (Dom_cases.query (body_node ()) "span") in
             set_script_text "i1" "";
             set_script_text "i1" "7";
             tick (fun () ->
-                D.click (D.query (body_node ()) "button");
-                let late = D.text_content (D.query (body_node ()) "span") in
+                Dom_cases.click (Dom_cases.query (body_node ()) "button");
+                let late = Dom_cases.text_content (Dom_cases.query (body_node ()) "span") in
                 let logged = errors () in
                 clear_ready ();
                 finish (fun () ->
@@ -921,16 +920,16 @@ let async =
         start_islands [ counter_entry ];
         dispatch_ready ();
         count_queries ();
-        append_html (D.server (counter_island 0));
+        append_html (Dom_cases.server (counter_island 0));
         tick (fun () ->
             let n = queries () in
             uncount_queries ();
-            D.click (D.query (body_node ()) "button");
+            Dom_cases.click (Dom_cases.query (body_node ()) "button");
             clear_ready ();
             finish (fun () ->
                 check "no scan after the final one" "0" (ints n);
                 check "island added later is not started by the observer" "0"
-                  (D.text_content (D.query (body_node ()) "span"));
+                  (Dom_cases.text_content (Dom_cases.query (body_node ()) "span"));
                 Yuka.stop ())) );
     ( "early start: async value watcher ignores other mutations",
       fun finish ->
@@ -938,7 +937,7 @@ let async =
         set_ready "loading";
         let value = Async.make () in
         ignore value;
-        let c = D.container (D.server (page [ Counter_island.island 0 ])) in
+        let c = Dom_cases.container (Dom_cases.server (page [ Counter_island.island 0 ])) in
         ignore c;
         let pending =
           match
@@ -969,32 +968,32 @@ let async =
         reset_body ();
         start_islands [ counter_entry ];
         Yuka.stop ();
-        append_html (D.server (counter_island 0));
+        append_html (Dom_cases.server (counter_island 0));
         tick (fun () ->
-            D.click (D.query (body_node ()) "button");
+            Dom_cases.click (Dom_cases.query (body_node ()) "button");
             finish (fun () ->
-                check "not started after stop" "0" (D.text_content (D.query (body_node ()) "span")))) );
+                check "not started after stop" "0" (Dom_cases.text_content (Dom_cases.query (body_node ()) "span")))) );
     ( "early start: a fill brings an island",
       fun finish ->
         reset_body ();
         eval_global fill_js;
         set_ready "loading";
-        let html = D.server (counter_island 0) in
+        let html = Dom_cases.server (counter_island 0) in
         append_html ({|<div><!--[s1-->loading<!--]--></div>|});
         start_islands [ counter_entry ];
         append_html ({|<template data-yuka-fill="s1">|} ^ html ^ "</template>");
         eval_global {|__yukaFill("s1")|};
         tick (fun () ->
-            D.click (D.query (body_node ()) "button");
+            Dom_cases.click (Dom_cases.query (body_node ()) "button");
             clear_ready ();
             finish (fun () ->
-                check "island from the fill started" "1" (D.text_content (D.query (body_node ()) "span"));
+                check "island from the fill started" "1" (Dom_cases.text_content (Dom_cases.query (body_node ()) "span"));
                 Yuka.stop ())) );
     ( "lazy entry loads on start",
       fun finish ->
         import_calls := 0;
         reset_body ();
-        let c = D.container (D.server (lazy_page None)) in
+        let c = Dom_cases.container (Dom_cases.server (lazy_page None)) in
         start_islands ~lazy_entries:[ lazy_counter () ] [];
         check "import called once for two islands" "1" (ints !import_calls);
         after_ms 100 (fun () ->
@@ -1009,7 +1008,7 @@ let async =
         ignore c;
         reset_body ();
         stub_browser ();
-        let c = D.container (D.server (lazy_page (Some `Idle))) in
+        let c = Dom_cases.container (Dom_cases.server (lazy_page (Some `Idle))) in
         start_islands ~lazy_entries:[ lazy_counter () ] [];
         let before = !import_calls in
         ignore (run_idle ());
@@ -1023,7 +1022,7 @@ let async =
     ( "lazy entry that fails to load",
       fun finish ->
         reset_body ();
-        let c = D.container (D.server (lazy_page None)) in
+        let c = Dom_cases.container (Dom_cases.server (lazy_page None)) in
         let bad =
           Yuka.runtime_lazy_entry ~name:"LazyCounter" (fun () -> of_js (Js.Promise.reject (Failure "no chunk")))
         in
@@ -1060,10 +1059,10 @@ let async =
         unstub_idle ();
         start_islands [ counter_entry ];
         after_ms 50 (fun () ->
-            D.click (btn c);
+            Dom_cases.click (btn c);
             let early = spans c in
             after_ms 300 (fun () ->
-                D.click (btn c);
+                Dom_cases.click (btn c);
                 finish (fun () ->
                     check "not started before the timeout" "0" early;
                     check "started after the timeout: replayed click plus live click" "2" (spans c)))) );
@@ -1071,11 +1070,11 @@ let async =
       fun finish ->
         reset_body ();
         let c =
-          D.container (lazy_island ~start:"[s1" "i1" {|{"$async":"a1"}|})
+          Dom_cases.container (lazy_island ~start:"[s1" "i1" {|{"$async":"a1"}|})
         in
-        let span = D.query c "span" in
+        let span = Dom_cases.query c "span" in
         start_islands [ lazy_entry ];
-        same "loading adopted" span (D.query c "span");
+        same "loading adopted" span (Dom_cases.query c "span");
         let before = island_html c in
         add_script {|{"ok":11}|};
         after (fun () ->
@@ -1107,7 +1106,7 @@ let ready_final_scan () =
   reset_body ();
   set_ready "loading";
   capture_errors ();
-  append_html (fst (split_island (D.server (counter_island 0))));
+  append_html (fst (split_island (Dom_cases.server (counter_island 0))));
   start_islands [ counter_entry ];
   let during = errors () in
   capture_errors ();
@@ -1121,14 +1120,14 @@ let ready_final_scan () =
 let replay_interaction () =
   reset_body ();
   replay_log := [];
-  let c = D.container (D.server (page [ replay_island ~start:`Interaction () ])) in
+  let c = Dom_cases.container (Dom_cases.server (page [ replay_island ~start:`Interaction () ])) in
   start_islands [ replay_entry ];
-  D.click (D.query c "button");
-  D.click (D.query c "button");
+  Dom_cases.click (Dom_cases.query c "button");
+  Dom_cases.click (Dom_cases.query c "button");
   check "not started" "0,," (texts_of c);
-  fire (D.query c "button") "pointerover";
+  fire (Dom_cases.query c "button") "pointerover";
   check "replayed after the start" "2,," (texts_of c);
-  D.click (D.query c "button");
+  Dom_cases.click (Dom_cases.query c "button");
   check "live afterwards, once" "3,," (texts_of c);
   Yuka.stop ()
 

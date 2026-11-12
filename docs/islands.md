@@ -8,10 +8,10 @@ JavaScript.
 ```ocaml
 (* shared/counter.mlx *)
 let[@client] make ~(initial : int) () =
-  let n = Yuka.State.make initial in
-  <button on_click=(fun _ -> Yuka.State.update n succ)>
+  let count = Yuka.State.make initial in
+  <button on_click=(fun _ -> Yuka.State.update count succ)>
     "Clicks: "
-    (Yuka.int (Yuka.State.get n))
+    (Yuka.int (Yuka.State.get count))
   </button>
 ```
 
@@ -60,7 +60,7 @@ a codec:
 
 - `int`, `float`, `string`, `bool`, `unit`, tuples, and `list`,
   `array`, `option` and `result` of types with a codec.
-- `M.t` uses `M.codec`, and a type `foo` uses `foo_codec`.
+- `Issue.t` uses `Issue.codec`, and a type `foo` uses `foo_codec`.
   `[@@deriving codec]` on a record or a variant writes them.
 - `'a Yuka.Async.t`: the server sends the value when it is ready, in the
   same streamed response. Show it with `<Yuka.Await>`.
@@ -80,13 +80,13 @@ end
 let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   let all = Yuka.State.make false in
   let shown () =
-    if Yuka.State.get all then tags else List.filteri (fun i _ -> i < limit) tags
+    if Yuka.State.get all then tags else List.filteri (fun index _ -> index < limit) tags
   in
   <div>
     <ul>
       (Yuka.hole (fun () ->
          Yuka.fragment
-           (List.map (fun (t : Model.Tag.t) -> <li>(Yuka.text t.name)</li>) (shown ()))))
+           (List.map (fun (tag : Model.Tag.t) -> <li>(Yuka.text tag.name)</li>) (shown ()))))
     </ul>
     <button hidden=(Yuka.State.get all) on_click=(fun _ -> Yuka.State.set all true)>
       "Show all"
@@ -153,7 +153,7 @@ let[@client] make ~(title : string) ~(children : Yuka.slot) () =
 
 A `<Yuka.Client>` in a slot is its own island.
 
-## What an island cannot do
+## Limitations
 
 - An event handler or a hole outside an island does not compile: "Type
   Yuka.client is not compatible with type Yuka.server".

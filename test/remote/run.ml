@@ -25,7 +25,7 @@ let show (s : string Status.t) =
 
 let check_status msg expected r = Alcotest.(check string) msg expected (show (Remote.status r))
 let logged = ref []
-let () = Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged)
+let () = Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged)
 
 let gates : (string * (string Async.t * (string -> unit) * (string -> unit))) list ref = ref []
 let calls = ref []
@@ -158,7 +158,7 @@ let transport =
   ]
 
 let island q input =
-  runtime_island ~name:"Q" ~props:`Null (fun () ->
+  runtime_island ~name:"Query" ~props:`Null (fun () ->
       let r = Remote.use q (fun () -> input) in
       element "b" [] [ text (show (Remote.status r)) ])
 
@@ -262,7 +262,7 @@ let fill_and_rollback =
         let value, resolve, _ = Async.make () in
         let p =
           Private.stream ~sleep:never ~write (fun () ->
-              runtime_island ~name:"F" ~props:`Null (fun () ->
+              runtime_island ~name:"Fill" ~props:`Null (fun () ->
                   Await.make ~async:value ~loading:(text "wait")
                     ~children:(fun v ->
                       let r = Remote.use echo (fun () -> v) in
@@ -280,7 +280,7 @@ let fill_and_rollback =
         reset ();
         let s = Private.session ~streaming:false ~islands_only:true in
         let broken () =
-          runtime_island ~name:"B" ~props:`Null (fun () ->
+          runtime_island ~name:"Broken" ~props:`Null (fun () ->
               ignore (Remote.use echo (fun () -> "r"));
               failwith "island broke")
         in
@@ -300,7 +300,7 @@ let fill_and_rollback =
                   Catch.make
                     ~fallback:(fun ~error:_ ~reset:_ -> text "caught")
                     ~children:(fun () ->
-                      runtime_island ~name:"B" ~props:`Null (fun () ->
+                      runtime_island ~name:"Broken" ~props:`Null (fun () ->
                           ignore (Remote.use echo (fun () -> "c"));
                           failwith "island broke"))
                     ();

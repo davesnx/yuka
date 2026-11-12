@@ -124,7 +124,7 @@ let handler_batched () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        Effect.run (fun () ->
+        Effect.after (fun () ->
             ignore (State.get a + State.get b);
             incr runs);
         element "div" []
@@ -181,7 +181,7 @@ let on_window_batched () =
   let a = State.make 0 and b = State.make 0 and runs = ref 0 in
   let (), stop =
     owner (fun () ->
-        Effect.run (fun () ->
+        Effect.after (fun () ->
             ignore (State.get a + State.get b);
             incr runs);
         Browser.on_window "yuka-test" (fun _ ->
@@ -404,7 +404,7 @@ let dynamic_attributes () =
 let item_view log (id, label) =
   li id [ hole (fun () -> text label); element "b" [] [] ]
   |> fun el ->
-  Effect.run ~cleanup:(fun () -> log := ("gone " ^ id) :: !log) (fun () -> ());
+  Effect.after ~cleanup:(fun () -> log := ("gone " ^ id) :: !log) (fun () -> ());
   el
 
 let order c = texts c "li"
@@ -1138,7 +1138,7 @@ let list_clear_disposes () =
             ([ each ~key:ints
                  (fun () -> State.get items)
                  (fun i ->
-                   Effect.run ~cleanup:(fun () -> incr gone) (fun () -> ());
+                   Effect.after ~cleanup:(fun () -> incr gone) (fun () -> ());
                    li (ints i) [ text (ints i) ]) ]
             @ if sibling then [ element "i" [] [] ] else []))
     in
@@ -1270,9 +1270,26 @@ let warnings : unit -> string =
   [%mel.raw
     {|function () { console.warn = globalThis.__console_warn; return globalThis.__warnings.join("|"); }|}]
 
+let capture_console : unit -> unit =
+  [%mel.raw
+    {|function () { globalThis.__console = []; globalThis.__saved_console = {}; ["log", "info", "warn", "error", "debug"].forEach(function (k) { globalThis.__saved_console[k] = console[k]; console[k] = function (m) { globalThis.__console.push(k + " " + m); }; }); }|}]
+
+let console_calls : unit -> string =
+  [%mel.raw
+    {|function () { Object.assign(console, globalThis.__saved_console); return globalThis.__console.join("|"); }|}]
+
+let console_methods () =
+  capture_console ();
+  Console.log "l";
+  Console.info "i";
+  Console.warn "w";
+  Console.error "e";
+  Console.debug "d";
+  check "each function calls its console method" "log l|info i|warn w|error e|debug d" (console_calls ())
+
 let hydrate_logged server_html tree =
   let island = create (document ()) "yuka-island" in
-  set_attribute island "data-name" "T.Island";
+  set_attribute island "data-name" "Board.Island";
   append (body ()) island;
   set_html island server_html;
   capture_warnings ();
@@ -1293,37 +1310,37 @@ let mismatch_log () =
     hydrate_logged "<div><b>a</b></div>" (fun () -> div [] [ span [ text "a" ] ])
   in
   check "different tag"
-    "yuka: hydration mismatch in island T.Island at div: expected <span>, found <b>"
+    "yuka: hydration mismatch in island Board.Island at div: expected <span>, found <b>"
     logged;
   check "different tag: new node, the old one stays" "<div><span>a</span><b>a</b></div>" after;
   let logged, after = hydrate_logged "<div>old</div>" (fun () -> div [] [ text "new" ]) in
   check "different text"
-    {|yuka: hydration mismatch in island T.Island at div: expected "new", found "old"|}
+    {|yuka: hydration mismatch in island Board.Island at div: expected "new", found "old"|}
     logged;
   check "different text repaired" "<div>new</div>" after;
   let logged, _ = hydrate_logged "<div></div>" (fun () -> div [] [ span [] ]) in
   check "missing node"
-    "yuka: hydration mismatch in island T.Island at div: expected <span>, found nothing"
+    "yuka: hydration mismatch in island Board.Island at div: expected <span>, found nothing"
     logged;
   let logged, _ =
     hydrate_logged "<div><span></span><i></i><!--x--></div>" (fun () -> div [] [ span [] ])
   in
   check "extra nodes"
-    "yuka: hydration mismatch in island T.Island at div: expected nothing, found <i>|\
-     yuka: hydration mismatch in island T.Island at div: expected nothing, found <!--x-->"
+    "yuka: hydration mismatch in island Board.Island at div: expected nothing, found <i>|\
+     yuka: hydration mismatch in island Board.Island at div: expected nothing, found <!--x-->"
     logged;
   let logged, _ =
     hydrate_logged "<span></span><p></p>" (fun () -> span [])
   in
   check "extra node at the root"
-    "yuka: hydration mismatch in island T.Island at root: expected nothing, found <p>"
+    "yuka: hydration mismatch in island Board.Island at root: expected nothing, found <p>"
     logged;
   let logged, _ =
     hydrate_logged "<section><div><p>x</p><p>y</p></div></section>" (fun () ->
         element "section" [] [ div [] [ p [ text "x" ]; p [ text "z" ] ] ])
   in
   check "short path"
-    {|yuka: hydration mismatch in island T.Island at section > div > p:2: expected "z", found "y"|}
+    {|yuka: hydration mismatch in island Board.Island at section > div > p:2: expected "z", found "y"|}
     logged
 
 let head_sheets : unit -> string =
@@ -1667,9 +1684,92 @@ let client_raw_text_namespaces () =
       ("two texts in SCRIPT", fun () -> element "SCRIPT" [] [ text "a"; text "b" ]);
     ]
 
+let present : node -> bool = [%mel.raw "function (n) { return n != null }"]
+let by_id : string -> node = [%mel.raw "function (id) { return document.getElementById(id) }"]
+let span_text c = if present (query c "span") then text_content (query c "span") else "none"
+
+let after_sees_dom () =
+  let count = State.make 0 and seen = ref [] in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        Effect.after (fun () ->
+            ignore (State.get count);
+            seen := span_text c :: !seen);
+        let double = State.memo (fun () -> State.get count * 2) in
+        span [ hole (fun () -> text (ints (State.get double))) ])
+  in
+  State.set count 5;
+  check "an after effect reads the DOM of the same change" "0 10"
+    (String.concat " " (List.rev !seen));
+  dispose ()
+
+let after_finds_own_element () =
+  let show = State.make false and items = State.make [||] and seen = ref [] in
+  let probe id = Effect.after (fun () -> seen := (id ^ "=" ^ string_of_bool (present (by_id id))) :: !seen) in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        probe "after-root";
+        element "div" [ attr "id" "after-root" ]
+          [ hole (fun () ->
+                if State.get show then begin
+                  probe "after-hole";
+                  element "p" [ attr "id" "after-hole" ] []
+                end
+                else empty);
+            element "ul" []
+              [ each ~key:Fun.id (fun () -> State.get items) (fun id ->
+                    probe id;
+                    element "li" [ attr "id" id ] []) ] ])
+  in
+  check "render: the first run finds the element" "after-root=true" (String.concat " " (List.rev !seen));
+  State.set show true;
+  State.set items [| "after-row" |];
+  check "a hole and a new row: the first run finds the element"
+    "after-root=true after-hole=true after-row=true" (String.concat " " (List.rev !seen));
+  dispose ()
+
+let on_change_sees_dom () =
+  let count = State.make 0 and seen = ref [] in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        Effect.on_change count (fun ~prev ~next ->
+            seen := Printf.sprintf "%d->%d:%s" prev next (span_text c) :: !seen);
+        let double = State.memo (fun () -> State.get count * 2) in
+        span [ hole (fun () -> text (ints (State.get double))) ])
+  in
+  check "not called for the first value" "" (String.concat " " !seen);
+  State.set count 5;
+  check "called with the new DOM" "0->5:10" (String.concat " " !seen);
+  dispose ()
+
+let after_in_handler () =
+  let count = State.make 0 and seen = ref "" in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        let double = State.memo (fun () -> State.get count * 2) in
+        div []
+          [ span [ hole (fun () -> text (ints (State.get double))) ];
+            element "button"
+              [ on "click" (fun _ ->
+                    State.set count 1;
+                    Effect.after (fun () -> seen := span_text c)) ]
+              [] ])
+  in
+  click (query c "button");
+  check "an after effect created in a handler runs after its update" "2" !seen;
+  dispose ()
+
 let all =
   [
     ("handlers run in a batch", handler_batched);
+    ("after: reads the DOM of the same change", after_sees_dom);
+    ("after: the first run finds the element", after_finds_own_element);
+    ("on_change: sees the DOM", on_change_sees_dom);
+    ("after: created in a handler", after_in_handler);
     ("container by id", container_by_id);
     ("focus after the update of a handler", focus_after_update);
     ("window handlers run in a batch", on_window_batched);
@@ -1689,6 +1789,7 @@ let all =
     ("client: a style hole hydrates as one text node and updates", style_hole_hydrates);
     ("client: script takes one text or one hole", client_script_children);
     ("dom hydration mismatch log", mismatch_log);
+    ("Console calls the console method of its name", console_methods);
     ("dom template select value", template_select_value);
     ("dom template parser changes", parser_changes);
     ("dom create", create_tree);

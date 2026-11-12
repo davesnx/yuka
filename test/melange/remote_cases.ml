@@ -74,7 +74,7 @@ let view () =
 let later = State.make false
 
 let late_entry =
-  runtime_entry ~name:"L" (fun json ->
+  runtime_entry ~name:"Late" (fun json ->
       Result.map
         (fun () () ->
           element "i" []
@@ -91,12 +91,12 @@ let shown_late : unit -> string =
   [%mel.raw "function () { const u = document.querySelector('yuka-island u'); return u ? u.textContent : 'none' }"]
 
 let entry =
-  runtime_entry ~name:"Q" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
+  runtime_entry ~name:"Query" (fun json -> Result.map (fun () () -> view ()) (Codec.decode Codec.unit json))
 
 let start () = Yuka.render ~islands:(runtime_registry [ entry ]) ~navigation:false ()
 
 let island_html ?(shown = "loading") ?answer () =
-  {|<yuka-island data-name="Q" data-id="i1" style="display:contents"><b>|} ^ shown ^ {|</b></yuka-island>|}
+  {|<yuka-island data-name="Query" data-id="i1" style="display:contents"><b>|} ^ shown ^ {|</b></yuka-island>|}
   ^ Option.value answer ~default:""
   ^ {|<script type="application/json" data-yuka-props="i1">null</script>|}
 
@@ -241,7 +241,7 @@ let async =
         setup_fetch false;
         State.set later false;
         set_body
-          {|<yuka-island data-name="L" data-id="i1" style="display:contents"><i></i></yuka-island><script type="application/json" data-yuka-props="i1">null</script>|};
+          {|<yuka-island data-name="Late" data-id="i1" style="display:contents"><i></i></yuka-island><script type="application/json" data-yuka-props="i1">null</script>|};
         Yuka.render ~islands:(runtime_registry [ late_entry ]) ~navigation:false ();
         append_html (answer_for "late" {|{"ok":"L"}|});
         State.set later true;

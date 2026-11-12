@@ -47,8 +47,8 @@ server logs its starts and stops. The session is random per run:
   > rm static/a.js
   > echo "Success, waiting for filesystem changes..."; step
   > echo "Success, waiting for filesystem changes..."; step
-  > echo "********** NEW BUILD (a.ml changed) **********"
-  > echo 'File "a.ml", line 1:'
+  > echo "********** NEW BUILD (page.ml changed) **********"
+  > echo 'File "page.ml", line 1:'
   > echo 'Error: "boom"'
   > echo "Had 1 error, waiting for filesystem changes..."; step
   > perl -e '$t = time + 1 * 3600; utime $t, $t, @ARGV' server
@@ -70,7 +70,7 @@ server logs its starts and stops. The session is random per run:
   start 1 {"session":S,"build":4,"page":4,"error":null}
   state {"session":S,"build":4,"page":4,"error":null}
   state {"session":S,"build":4,"page":4,"error":null}
-  state {"session":S,"build":4,"page":4,"error":"File \"a.ml\", line 1:\u000aError: \"boom\""}
+  state {"session":S,"build":4,"page":4,"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
   stop
   start 1 {"session":S,"build":5,"page":5,"error":null}
   state {"session":S,"build":5,"page":5,"error":null}

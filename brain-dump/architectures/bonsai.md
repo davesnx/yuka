@@ -293,11 +293,11 @@ open! Bonsai_web
 open Bonsai.Let_syntax
 
 module Key = struct
-  module T = struct
+  module Key_type = struct
     type t = Confirmed of int | Pending of int [@@deriving sexp, compare]
   end
-  include T
-  include Comparator.Make (T)
+  include Key_type
+  include Comparator.Make (Key_type)
 end
 
 module Model = struct

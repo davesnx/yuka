@@ -63,13 +63,6 @@ type 'r lookup =
   | Redirect of { permanent : bool; location : string }
   | Missing
 
-module type PARAM = sig
-  type t
-
-  val of_string : string -> t option
-  val to_string : t -> string
-end
-
 let cut text c =
   match String.index_opt text c with
   | Some i -> (String.sub text 0 i, Some (String.sub text (i + 1) (String.length text - i - 1)))
