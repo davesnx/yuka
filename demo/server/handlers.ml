@@ -7,20 +7,20 @@ let publish_issue (i : Model.Issue.t) =
   List.iter (fun v -> Yuka.Server.Live.publish Topics.issues v (view_issues v)) [ Queries.All; Queries.Mine ]
 
 let register () =
-  Yuka.Server.Action.implement Queries.labels (fun () -> Yuka.Async.return (Store.label_counts ()));
+  Yuka.Server.Action.implement Queries.labels (fun _ () -> Yuka.Async.return (Store.label_counts ()));
   Yuka.Server.Live.serve Topics.issues (fun view -> Yuka.Async.return (view_issues view));
   Yuka.Server.Live.serve Topics.issue (fun id ->
-      match Store.find id with Some i -> Yuka.Async.return i | None -> Yuka.Server.Action.rejected ("No issue " ^ id));
+      match Store.find id with Some i -> Yuka.Async.return i | None -> Yuka.Server.Action.reject ("No issue " ^ id));
   Yuka.Server.Action.implement Actions.update_issue
-    (fun ({ id; status; priority } : Actions.update_input) ->
+    (fun _ ({ id; status; priority } : Actions.update_input) ->
       match Store.update ~id ?status ?priority () with
       | Some i ->
           publish_issue i;
           Yuka.Async.return i
-      | None -> Yuka.Server.Action.rejected ("No issue " ^ id));
+      | None -> Yuka.Server.Action.reject ("No issue " ^ id));
   Yuka.Server.Form.implement Actions.create_issue
     ~redirect:(fun (i : Model.Issue.t) -> Routes.href (Issue { id = i.id }))
-    (fun { title; description; status; priority } ->
+    (fun _ { title; description; status; priority } ->
       let title = String.trim title in
       let title_error m = Yuka.Async.return (Error [ (Some Actions.Title, m) ]) in
       if title = "" then title_error "Title is required"
@@ -33,11 +33,11 @@ let register () =
             publish_issue i;
             Yuka.Async.return (Ok i));
   Yuka.Server.Action.implement Actions.add_comment
-    (fun { issue_id; body } ->
+    (fun _ { issue_id; body } ->
       match Store.find issue_id with
       | Some _ when String.trim body <> "" -> Yuka.Async.return (Store.add_comment ~issue_id ~body)
-      | Some _ -> Yuka.Server.Action.rejected "Comment is empty"
-      | None -> Yuka.Server.Action.rejected "No such issue")
+      | Some _ -> Yuka.Server.Action.reject "Comment is empty"
+      | None -> Yuka.Server.Action.reject "No such issue")
 
 let issues_json (_ : Dream.request) =
   Yuka.Server.json (Yuka.Codec.encode (Yuka.Codec.list Model.Issue.codec) !Store.issues)

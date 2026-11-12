@@ -288,6 +288,16 @@ let check_prerender props =
       ()
   | Some v -> fail v.pexp_loc "~prerender must be true or false"
 
+let check_cross_origin props =
+  match List.assoc_opt "cross_origin" props with
+  | Some { pexp_desc = Pexp_construct ({ txt = Lident ("true" | "false"); _ }, None); _ } | None -> ()
+  | Some v -> fail v.pexp_loc "~cross_origin must be true or false"
+
+let cross_origin level =
+  match List.assoc_opt "cross_origin" level.props with
+  | Some { pexp_desc = Pexp_construct ({ txt = Lident "true"; _ }, None); _ } -> true
+  | _ -> false
+
 let takes_loader levels =
   List.exists (fun l -> List.mem_assoc "loader" l.props) levels
 
@@ -404,7 +414,8 @@ let read ~server names e =
           }
     | "endpoint" | "action" ->
         check_props tag loc props ~required:[ "path"; "method_"; "handler" ]
-          ~optional:("guard" :: rules);
+          ~optional:((if tag = "endpoint" then [ "guard"; "cross_origin" ] else [ "guard" ]) @ rules);
+        check_cross_origin props;
         let name = name () in
         let meth = parse_method tag (List.assoc "method_" props) in
         let text, ploc, segs = own_path () in
@@ -807,7 +818,7 @@ let loader_labels levels =
   List.filter_map (fun l -> Option.map loader_label (prop "loader" l)) levels
 
 let layer_text ~loaders level =
-  sprintf "{ Yuka.Server.key = %s; data = %b; wrap = (fun children -> %s%s ~children ()) }"
+  sprintf "{ Yuka.Server.Generated.key = %s; data = %b; wrap = (fun children -> %s%s ~children ()) }"
     (key_text level) (loaders <> [])
     (expr (Option.get (prop "layout" level)))
     (args loaders)
@@ -864,9 +875,9 @@ let rules_text levels =
   let last name =
     List.fold_left (fun acc l -> match prop name l with Some v -> Some v | None -> acc) None levels
   in
-  sprintf "Yuka.Server.rules ~headers:[ %s ]%s ~prerender:%s ()"
+  sprintf "Yuka.Server.Generated.rules ~headers:[ %s ]%s ~prerender:%s ()"
     (String.concat "; " headers)
-    (match last "cache" with Some c -> " ~cache:" ^ paren c | None -> "")
+    (match last "cache" with Some c -> " ~cache:Yuka.Server." ^ paren c | None -> "")
     (match last "prerender" with Some p -> expr p | None -> "false")
 
 let fallback_levels levels =
@@ -893,18 +904,19 @@ let fallback_uses_params levels =
 let fallback_text levels =
   let upto = fallback_levels levels in
   let call name label default =
-    match nearest_fallback name levels with
-    | Some (f, l) ->
+    match (nearest_fallback name levels, label) with
+    | Some (f, l), Some label ->
         if List.mem label (seg_labels l.scope) then
           fail f.pexp_loc "%s takes ~%s, so no param of its path can be named %s" name label label;
         sprintf "(fun %s -> %s%s ~%s ())" label (expr f) (args (seg_labels l.scope)) label
-    | None -> default
+    | Some (f, l), None -> sprintf "(fun () -> %s%s ())" (expr f) (args (seg_labels l.scope))
+    | None, _ -> default
   in
   String.concat "\n"
-    (("{" :: "  Yuka.Server.layers =" :: indent 4 (layers_lines upto))
+    (("{" :: "  Yuka.Server.Generated.layers =" :: indent 4 (layers_lines upto))
     @ [
-        sprintf "  not_found = %s;" (call "not_found" "target" "Yuka.Server.default_not_found");
-        sprintf "  error = %s;" (call "error" "status" "Yuka.Server.default_error");
+        sprintf "  not_found = %s;" (call "not_found" (Some "path") "Yuka.Server.Generated.default_not_found");
+        sprintf "  error = %s;" (call "error" None "Yuka.Server.Generated.default_error");
         "}";
       ])
 
@@ -979,7 +991,7 @@ let server_arm ~shared ~rule ~fallback n =
               (args (labels @ List.map fst loaders))
           in
           let plan =
-            [ "Yuka.Async.return"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.layers =" ]
+            [ "Yuka.Async.return"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.Generated.layers =" ]
             @ indent 9 (layers_lines n.levels)
             @ [
                 sprintf "       page = %s;" page;
@@ -990,7 +1002,7 @@ let server_arm ~shared ~rule ~fallback n =
             (fun l -> sprintf "let %s = %s in" (layer_name l) (layer_binding l))
             (List.filter (fun l -> not (static_key l)) (loader_free_layers n.levels))
           @ [
-            "Yuka.Server.Page";
+            "Yuka.Server.Generated.Page";
             "  {";
             sprintf "    rules = %s;" rules;
             sprintf "    guards = %s;" guards;
@@ -999,15 +1011,16 @@ let server_arm ~shared ~rule ~fallback n =
             "      (fun () ->";
           ]
           @ List.map (fun (l, call) -> sprintf "        let %s = %s in" l call) loaders
-          @ List.map (fun (l, _) -> sprintf "        Yuka.Server.loaded %s (fun %s ->" l l) loaders
+          @ List.map (fun (l, _) -> sprintf "        Yuka.Server.Generated.loaded %s (fun %s ->" l l) loaders
           @ indent 8 plan
           @ [ "  }" ]
         else
           [
-            "Yuka.Server.Handler";
+            "Yuka.Server.Generated.Handler";
             "  {";
             sprintf "    rules = %s;" rules;
-            sprintf "    same_origin = %b;" (n.tag = "action");
+            sprintf "    action = %b;" (n.tag = "action");
+            sprintf "    cross_origin = %b;" (cross_origin leaf);
             sprintf "    guards = %s;" guards;
             sprintf "    run = (fun () -> %s req%s);"
               (expr (Option.get (prop "handler" leaf)))
@@ -1038,20 +1051,20 @@ let generate_server ~shared ~digest (nodes, root) =
   String.concat "\n"
     (List.map (fun (n, t) -> sprintf "let %s =\n  %s\n" n t) (rules ())
     @ List.map
-        (fun l -> sprintf "let %s : Yuka.Server.layer =\n  %s\n" (layer_name l) (layer_binding l))
+        (fun l -> sprintf "let %s : Yuka.Server.Generated.layer =\n  %s\n" (layer_name l) (layer_binding l))
         static_layers
     @ List.map
         (fun (n, t) ->
-          sprintf "let %s : Yuka.Server.fallback =\n%s\n" n
+          sprintf "let %s : Yuka.Server.Generated.fallback =\n%s\n" n
             (String.concat "\n" (indent 2 (String.split_on_char '\n' t))))
         (fallbacks ())
-    @ [ sprintf "let resolve %s (route : %s.t) : Yuka.Server.target =" req shared;
+    @ [ sprintf "let resolve %s (route : %s.t) : Yuka.Server.Generated.target =" req shared;
         "  match route with" ]
     @ indent 2 arms
     @ [
         "";
         sprintf "let app =";
-        sprintf "  Yuka.Server.app ~build:%S" digest;
+        sprintf "  Yuka.Server.Generated.app ~build:%S" digest;
         sprintf "    ~headers:%s"
           (match prop "headers" root with Some h -> paren h | None -> "[]");
         sprintf "    ~prerender:[ %s ]"

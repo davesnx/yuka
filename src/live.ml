@@ -268,7 +268,11 @@ let csrf_answer () =
   | _ -> ()
 
 let on_server (topic : (_, _) Topic.t) key base =
-  let loaded = !server_state topic.name key in
+  let loaded =
+    match !Types.current_session with
+    | Some { context = Some c; _ } -> c.live topic.name key
+    | _ -> !server_state topic.name key
+  in
   let settle r = State.set base (match r with Ok j -> decode topic None j | Error error -> Status.Failed { error; last = None }) in
   Async.on_result loaded (function Ok r -> settle r | Error m -> settle (Error (Status.Network m)));
   if !Base.server_rendering then begin

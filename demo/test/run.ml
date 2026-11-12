@@ -39,7 +39,7 @@ let index () =
   has html "<yuka-island data-name=\"Demo_shared.Issue_list\" data-id=\"i";
   has html "<yuka-island data-name=\"Demo_shared.New_issue\"";
   has html "<yuka-island data-name=\"Demo_shared.Counter\"";
-  has html "<script type=\"module\" async src=\"/_yuka/demo/client/main.js\"></script>";
+  has html "<script type=\"module\" async src=\"/_yuka/app/demo/client/main.js\"></script>";
   has html "data-start=\"idle\"";
   lacks html "data-start=\"interaction\"";
   has html "\"id\":\"YUK-1\"";
@@ -274,24 +274,22 @@ let live_answers () =
 
 let live_publish () =
   let out = ref [] in
-  let connection : Yuka.Server.Live.connection =
+  let connection =
     let pending = ref [ {|{"t":"hello","v":1,"csrf":""}|}; {|{"t":"sub","id":1,"topic":"issues","key":"All"}|};
                         {|{"t":"sub","id":2,"topic":"issues","key":"Mine"}|}; {|{"t":"sub","id":3,"topic":"issue","key":"YUK-5"}|} ] in
-    {
-      send = (fun t -> out := t :: !out; Yuka.Async.return ());
-      receive =
-        (fun () ->
-          match !pending with
-          | x :: rest ->
-              pending := rest;
-              Yuka.Async.return (Some x)
-          | [] -> fst3 (Yuka.Async.make ()));
-      close = (fun _ -> Yuka.Async.return ());
-    }
+    Yuka.Server.Live.connection
+      ~send:(fun t -> out := t :: !out; Yuka.Async.return ())
+      ~receive:(fun () ->
+        match !pending with
+        | x :: rest ->
+            pending := rest;
+            Yuka.Async.return (Some x)
+        | [] -> fst3 (Yuka.Async.make ()))
+      ~close:(fun _ -> Yuka.Async.return ())
   in
   let _ =
-    Yuka.Server.Live.run ~sleep:(fun _ -> fst3 (Yuka.Async.make ()))
-      { Yuka.Server.Live.session = "s"; header = (fun _ -> None) }
+    Yuka.Server.Testing.live_run ~sleep:(fun _ -> fst3 (Yuka.Async.make ()))
+      (Yuka.Server.Testing.context ~session:"s" ())
       ~verify_csrf:(fun _ -> Yuka.Async.return true) ~token:(fun () -> "t") connection
   in
   out := [];

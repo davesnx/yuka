@@ -28,8 +28,11 @@
   in `.mlx` or `Yuka.on`; a string handler in `.mlx` does not build.
 - `Yuka.Browser.navigate` does nothing with a `javascript:`, `vbscript:`
   or `data:` URL (a dev build logs it once). A form follows only a
-  `redirect` on this site: the server answers 500 and logs one that is
-  not, and the browser refuses one from another origin and shows an error.
+  `redirect` on this site (the request `Host`, or an origin of
+  `Yuka.Server.config ~origins`): the server answers 500 and logs one that
+  is not, and the browser refuses one from another origin and shows an
+  error. The same check applies to a guard's `Redirect` stop; only
+  `Redirect_off_site` leaves the site.
 - Hand-written templates go through `Yuka.template_of_shape`, which checks
   their tags and fixed attributes as above.
 - `<script>` and `<style>` take one text (the ppx joins the texts and

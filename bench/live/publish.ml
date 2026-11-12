@@ -11,36 +11,33 @@ let issues n =
 
 let connect key bytes =
   let pending = ref [ {|{"t":"hello","v":1,"csrf":""}|}; Printf.sprintf {|{"t":"sub","id":1,"topic":"bench","key":%d}|} key ] in
-  let connection : Yuka.Server.Live.connection =
-    {
-      send =
-        (fun text ->
-          bytes := !bytes + String.length text;
-          Yuka.Async.return ());
-      receive =
-        (fun () ->
-          match !pending with
-          | x :: rest ->
-              pending := rest;
-              Yuka.Async.return (Some x)
-          | [] ->
-              let a, _, _ = Yuka.Async.make () in
-              a);
-      close = (fun _ -> Yuka.Async.return ());
-    }
+  let connection =
+    Yuka.Server.Live.connection
+      ~send:(fun text ->
+        bytes := !bytes + String.length text;
+        Yuka.Async.return ())
+      ~receive:(fun () ->
+        match !pending with
+        | x :: rest ->
+            pending := rest;
+            Yuka.Async.return (Some x)
+        | [] ->
+            let a, _, _ = Yuka.Async.make () in
+            a)
+      ~close:(fun _ -> Yuka.Async.return ())
   in
   let never _ =
     let a, _, _ = Yuka.Async.make () in
     a
   in
   ignore
-    (Yuka.Server.Live.run ~sleep:never
-       { Yuka.Server.Live.session = "bench"; header = (fun _ -> None) }
+    (Yuka.Server.Testing.live_run ~sleep:never
+       (Yuka.Server.Testing.context ~session:"bench" ())
        ~verify_csrf:(fun _ -> Yuka.Async.return true)
        ~token:(fun () -> "t") connection)
 
 let () =
-  Yuka.Server.log_error := ignore;
+  Yuka.Server.Testing.set_log ignore;
   List.iter
     (fun n ->
       let key = n in

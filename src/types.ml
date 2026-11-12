@@ -109,6 +109,15 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     | Pending_async of { id : string; async : Json.t Async.t }
     | Pending_answer of { key : string; answer : Json.t Async.t }
 
+  type context = {
+    meth : Router.meth;
+    path : string;
+    header : string -> string option;
+    session : unit -> string option;
+    log : string -> unit;
+    live : string -> Json.t -> (Json.t, Status_error.t) result Async.t;
+  }
+
   type session = {
     streaming : bool;
     mutable islands : int;
@@ -131,6 +140,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     mutable csrf : (unit -> string) option;
     mutable sheets : string list;
     mutable held : string list;
+    mutable context : context option;
   }
 
   let snapshot s = { s with streaming = s.streaming }
@@ -138,7 +148,7 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held } =
+        csrf; sheets; held; context } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -157,7 +167,8 @@ type loading = [ `Load | trigger | `Lazy of trigger ]
     s.form <- form;
     s.csrf <- csrf;
     s.sheets <- sheets;
-    s.held <- held
+    s.held <- held;
+    s.context <- context
 
 let warned = ref false
 
@@ -168,20 +179,32 @@ let log name value =
   end
 
 let current_session : session option ref = ref None
-let log_error : (string -> unit) ref = ref (fun m -> prerr_endline m)
-let reject_prefix = "yuka.reject:"
+
+let default_log : (string -> unit) ref = ref prerr_endline
+
+let log_in session message =
+  match session with Some { context = Some c; _ } -> c.log message | _ -> !default_log message
+
+let log_message message = log_in !current_session message
+
+let reject_prefix = lazy ("yuka.reject." ^ Web.nonce () ^ ":")
+
+let reject message = Lazy.force reject_prefix ^ message
 
 let rejection message =
-  let n = String.length reject_prefix in
-  if String.length message >= n && String.sub message 0 n = reject_prefix then
+  let prefix = Lazy.force reject_prefix in
+  let n = String.length prefix in
+  if String.length message >= n && String.sub message 0 n = prefix then
     Some (String.sub message n (String.length message - n))
   else None
 
-let async_error id message =
+let shown message = match rejection message with Some m -> m | None -> message
+
+let async_error ?(session = !current_session) id message =
   match rejection message with
   | Some shown -> shown
   | None ->
-      !log_error ("async value " ^ id ^ " failed: " ^ message);
+      log_in session ("async value " ^ id ^ " failed: " ^ message);
       "failed"
 
 let async_source : (string -> Json.t Async.t) ref =

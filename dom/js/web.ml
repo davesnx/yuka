@@ -511,6 +511,7 @@ let on_online : (unit -> unit) -> unit -> unit =
 }|}]
 
 let random : unit -> float = [%mel.raw "function () { return Math.random() }"]
+let nonce : unit -> string = [%mel.raw "function () { return String(Math.random()).slice(2) }"]
 
 let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
   [%mel.raw

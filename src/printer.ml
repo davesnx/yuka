@@ -10,7 +10,7 @@ open Base
   let log_blocked name value =
     if not !blocked_logged then begin
       blocked_logged := true;
-      !log_error ("yuka: printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name ^ ": " ^ String.escaped value)
+      log_message ("yuka: printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name ^ ": " ^ String.escaped value)
     end
 
   let add_attr b ?(literal = false) ~tag name value =
@@ -79,7 +79,7 @@ open Base
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
-      csrf = None; sheets = []; held = [] }
+      csrf = None; sheets = []; held = []; context = None }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -236,7 +236,7 @@ open Base
           let body () =
             match Async.status async with
             | Async.Done v -> render v
-            | Async.Failed m -> failed m
+            | Async.Failed m -> failed (shown m)
             | Async.Pending -> loading
           in
           match Async.status async with
@@ -268,7 +268,7 @@ open Base
                       (fun cb -> Async.on_settled async (fun _ -> cb ()));
                     fill = (fun () -> held (fun () -> print s body));
                     fill_failed =
-                      (fun m -> held (fun () -> print s (fun () -> failed m)));
+                      (fun m -> held (fun () -> print s (fun () -> failed (shown m))));
                     inside_island = inside;
                   }
                 :: s.pending;
@@ -342,7 +342,7 @@ open Base
             after_text := text;
             foreign := context;
             restore s saved;
-            !log_error ("Yuka.Catch: " ^ Web.exn_to_string e);
+            log_message ("Yuka.Catch: " ^ Web.exn_to_string e);
             marker "<!--[!-->";
             go (fallback ~error:"server error" ~reset:ignore);
             marker "<!--]-->")

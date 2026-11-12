@@ -61,10 +61,18 @@ module Server = struct
   include Server
   include Cycle
 
+  type context = Types.context
+
+  module Context = struct
+    let header (c : context) = c.header
+    let session (c : context) = c.session ()
+    let meth (c : context) = c.meth
+    let path (c : context) = c.path
+  end
+
   module Action = struct
     let implement = Server.implement
     let reject = Server.reject
-    let rejected = Server.rejected
   end
 
   module Form = struct
@@ -72,6 +80,67 @@ module Server = struct
   end
 
   module Live = Live_server
+  module Generated = struct
+    type rules = Cycle.rules
+    type layer = Cycle.layer = { key : string; data : bool; wrap : Types.node -> Types.node }
+    type plan = Cycle.plan = { layers : layer list; page : Cycle.page }
+
+    type fallback = Cycle.fallback = {
+      layers : layer list;
+      not_found : string -> Cycle.page;
+      error : unit -> Cycle.page;
+    }
+
+    type target = Cycle.target =
+      | Page of {
+          rules : rules;
+          guards : (unit -> (unit, Cycle.stop) result Async.t) list;
+          load : unit -> (plan, Cycle.stop) result Async.t;
+          fallback : fallback;
+        }
+      | Handler of {
+          rules : rules;
+          action : bool;
+          cross_origin : bool;
+          guards : (unit -> (unit, Cycle.stop) result Async.t) list;
+          run : unit -> Cycle.response Async.t;
+        }
+
+    let rules = Cycle.rules
+    let default_not_found = Cycle.default_not_found
+    let default_error = Cycle.default_error
+    let loaded = Cycle.loaded
+    let app = Cycle.app
+  end
+
+  module Adapter = struct
+    module type S = Cycle.ADAPTER
+
+    module Make = Cycle.Make
+
+    let build_id = Cycle.build_id
+  end
+
+  module Prerender = struct
+    let config = Cycle.prerender_config
+    let seeds = Cycle.prerender_seeds
+    let prerenderable = Cycle.prerenderable
+    let links = Cycle.links
+    let file = Cycle.prerender_file
+    let missing_page = Cycle.missing_page
+    let css_files = Cycle.css_files
+    let served_dirs = Cycle.served_dirs
+  end
+
+  module Testing = struct
+    let live_run = Live_server.run
+    let live_mark = Live_server.mark
+    let memory_down = Live_server.memory_down
+    let set_log f = Types.default_log := f
+
+    let context ?(header = fun _ -> None) ?session () : context =
+      { (Server.empty_context ()) with header; session = (fun () -> session) }
+  end
 end
 
 let render ?islands ?navigation ?prefetch ?transitions ?on_error ?root () =
@@ -100,11 +169,12 @@ module Private = struct
   let set_csrf (s : session) f = s.csrf <- Some f
   let reset_live () = Live.manager := None
   let query = Router.query
-  let preload_urls = Server.preload_urls
-  let handle_action = Server.handle_action
+  let preload_urls ~manifest ~base ?metafile () = Server.preload_urls ~manifest ~base ?metafile ()
+  let handle_action ~name ~header ~body =
+    Server.handle_action ~live:(Live_server.mark_json (Live_server.main ())) ~name ~header ~body
 
   let dev_script = Cycle.dev_script
-  let dev_events = Cycle.dev_events
+  let dev_events = Cycle.dev_events ~log:(fun m -> !Types.default_log m)
   let node n = n
   let template_shape (t : template) = Template.shape t
   let template = template_of_shape

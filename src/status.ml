@@ -1,4 +1,4 @@
-type error =
+type error = Status_error.t =
   | Rejected of string
   | Forbidden
   | Not_found

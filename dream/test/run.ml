@@ -67,8 +67,8 @@ let pages () =
   let req = Dream.request ~target:"/" "" in
   List.iter
     (fun (path, expected) ->
-      Alcotest.(check bool) path expected (Yuka.Server.prerenderable config Routes_server.app req path))
-    [ ("/guide", true); ("/static/s.css", false); ("/_yuka/app.js", false); ("/_yuka", false) ]
+      Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Routes_server.app req path))
+    [ ("/guide", true); ("/static/s.css", false); ("/_yuka/app/main.js", false); ("/_yuka", false) ]
 
 let twice () =
   let out = Filename.temp_dir "yuka_out" "" in
@@ -90,6 +90,7 @@ let serve () =
   let response, body = call "/docs" in
   Alcotest.(check string) "file" "from disk" body;
   Alcotest.(check (option string)) "rule header" (Some "test") (Dream.header response "x-site");
+  Alcotest.(check (list string)) "a repeated rule header, both values" [ "a"; "b" ] (Dream.headers response "x-twice");
   Alcotest.(check (option string)) "type" (Some "text/html; charset=utf-8")
     (Dream.header response "content-type");
   let _, body = call "/docs?x=1" in
@@ -100,14 +101,26 @@ let serve () =
   Alcotest.(check int) "missing file renders" 404 (Dream.status_to_int (Dream.status response));
   check_true "not found" (contains body "missing /post/nope")
 
-let prerender_without_dev () =
+let dev_env_ignored () =
   Unix.putenv "YUKA_DEV" "1";
   let config = Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> Yuka.Server.config ()) in
-  let out = Filename.temp_dir "yuka_out" "" in
-  ignore (with_stderr (fun () -> Lwt_main.run (Yuka_dream.prerender ~out config Routes_server.app)));
-  let index = In_channel.with_open_bin (Filename.concat out "index.html") In_channel.input_all in
+  let handler = Yuka_dream.handler config Routes_server.app in
+  let response = Dream.test handler (Dream.request ~target:"/" "") in
+  let index = Lwt_main.run (Dream.body response) in
   check_true "a page" (contains index "<title>Home</title>");
-  check_true "no dev script in a prerendered page" (not (contains index "EventSource"))
+  check_true "no dev script" (not (contains index "EventSource"));
+  let dev = Dream.test handler (Dream.request ~target:"/_yuka/dev" "") in
+  Alcotest.(check int) "no dev events" 404 (Dream.status_to_int (Dream.status dev))
+
+let prerender_dev_off () =
+  Unix.putenv "YUKA_DEV_FILE" "/nonexistent/yuka-dev";
+  let out = Filename.temp_dir "yuka_out" "" in
+  ignore
+    (with_stderr (fun () -> Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ~dev:true ()) Routes_server.app)));
+  let read name = In_channel.with_open_bin (Filename.concat out name) In_channel.input_all in
+  check_true "a page" (contains (read "index.html") "<title>Home</title>");
+  check_true "no dev script in a page" (not (contains (read "index.html") "EventSource"));
+  check_true "no dev script in 404.html" (not (contains (read "404.html") "EventSource"))
 
 let out_inside_a_served_dir () =
   let dir = Filename.temp_dir "yuka_static" "" in
@@ -138,7 +151,7 @@ let tree_digest () =
   check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
 
 let echo = Yuka.Action.declare ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
-let () = Yuka.Server.Action.implement echo (fun s -> Yuka.Async.return (String.length s))
+let () = Yuka.Server.Action.implement echo (fun _ s -> Yuka.Async.return (String.length s))
 
 let body_limit () =
   let handler = Yuka_dream.handler config Routes_server.app in
@@ -167,7 +180,8 @@ let () =
           Alcotest.test_case "seeds, crawled links, 404.html, assets" `Quick pages;
           Alcotest.test_case "twice gives the same files" `Quick twice;
           Alcotest.test_case "the handler serves prerendered files" `Quick serve;
-          Alcotest.test_case "a prerender with YUKA_DEV=1 writes no dev script" `Quick prerender_without_dev;
+          Alcotest.test_case "YUKA_DEV=1 does not turn on dev mode" `Quick dev_env_ignored;
+          Alcotest.test_case "a prerender with ~dev:true writes no dev script" `Quick prerender_dev_off;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
           Alcotest.test_case "tree digest follows file contents" `Quick tree_digest;
         ] );

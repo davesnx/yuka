@@ -9,7 +9,7 @@ module Astring_like = struct
 end
 
 let logged = ref []
-let () = Server.log_error := fun m -> logged := m :: !logged
+let () = Yuka.Server.Testing.set_log (fun m -> logged := m :: !logged)
 
 type fake = {
   mutable inbox : string option list;
@@ -23,31 +23,29 @@ type fake = {
 
 let fake () = { inbox = []; waiter = None; out = []; closed = None; closes = 0; gate = None; broken = false }
 
-let connection f : Live.connection =
-  {
-    send =
-      (fun text ->
-        if f.broken then Async.failed "broken pipe"
-        else begin
-          f.out <- f.out @ [ text ];
-          match f.gate with Some g -> g | None -> Async.return ()
-        end);
-    receive =
-      (fun () ->
-        match f.inbox with
-        | x :: rest ->
-            f.inbox <- rest;
-            Async.return x
-        | [] ->
-            let a, resolve, _ = Async.make () in
-            f.waiter <- Some resolve;
-            a);
-    close =
-      (fun code ->
-        f.closed <- Some code;
-        f.closes <- f.closes + 1;
-        Async.return ());
-  }
+let receive f () =
+  match f.inbox with
+  | x :: rest ->
+      f.inbox <- rest;
+      Async.return x
+  | [] ->
+      let a, resolve, _ = Async.make () in
+      f.waiter <- Some resolve;
+      a
+
+let connection ?(receive = receive) f =
+  Live.connection
+    ~send:(fun text ->
+      if f.broken then Async.failed "broken pipe"
+      else begin
+        f.out <- f.out @ [ text ];
+        match f.gate with Some g -> g | None -> Async.return ()
+      end)
+    ~receive:(receive f)
+    ~close:(fun code ->
+      f.closed <- Some code;
+      f.closes <- f.closes + 1;
+      Async.return ())
 
 let deliver f x =
   match f.waiter with
@@ -71,10 +69,10 @@ let fresh_session () =
   incr sessions;
   "s" ^ string_of_int !sessions
 
-let start ?(csrf = "good") ?(fresh = "next") ?(session = fresh_session ()) () =
+let start ?node ?(csrf = "good") ?(fresh = "next") ?(session = fresh_session ()) () =
   let f = fake () in
   let finished =
-    Live.run ~sleep { Live.session; header = (fun _ -> None) }
+    Server.Testing.live_run ?node ~sleep (Server.Testing.context ~session ())
       ~verify_csrf:(fun t -> Async.return (t = csrf))
       ~token:(fun () -> fresh)
       (connection f)
@@ -83,8 +81,8 @@ let start ?(csrf = "good") ?(fresh = "next") ?(session = fresh_session ()) () =
 
 let hello = {|{"t":"hello","v":1,"csrf":"good"}|}
 let sub id topic key = Printf.sprintf {|{"t":"sub","id":%d,"topic":"%s","key":%s}|} id topic key
-let open_ ?session () =
-  let f, finished = start ?session () in
+let open_ ?node ?session () =
+  let f, finished = start ?node ?session () in
   push f hello;
   f.out <- [];
   (f, finished)
@@ -138,7 +136,7 @@ let () =
       | k -> Async.return (String.length k))
 
 let forbidden = Topic.declare ~name:"private" ~key:Codec.string ~state:Codec.int
-let () = Live.serve ~allow:(fun p k -> p.Live.session = k) forbidden (fun _ -> Async.return 1)
+let () = Live.serve ~allow:(fun p k -> Server.Context.session p = Some k) forbidden (fun _ -> Async.return 1)
 
 let gate key = List.find (fun (k, _, _) -> k = key) !gates
 
@@ -170,7 +168,7 @@ let hello_cases =
         let f = fake () in
         f.inbox <- [ Some hello; Some (sub 1 "count" {|"abcd"|}) ];
         let verify, accept, _ = Async.make () in
-        let _ = Live.run ~sleep { Live.session = "pipe"; header = (fun _ -> None) } ~verify_csrf:(fun _ -> verify) ~token:(fun () -> "T2") (connection f) in
+        let _ = Server.Testing.live_run ~sleep (Server.Testing.context ~session:("pipe") ()) ~verify_csrf:(fun _ -> verify) ~token:(fun () -> "T2") (connection f) in
         Alcotest.(check (list string)) "nothing before the check" [] f.out;
         accept true;
         Alcotest.(check (list string)) "messages" [ "hello"; "state" ] (kinds f);
@@ -394,19 +392,19 @@ let review_cases =
         hang_up a );
     ( "connection limits per session and in total close 1013",
       fun () ->
-        Live.set_limits ~per_session:2 ~total:1_000_000 ();
-        let a, _ = open_ ~session:"limited" () in
-        let b, _ = open_ ~session:"limited" () in
-        let c, _ = open_ ~session:"limited" () in
-        let d, _ = open_ ~session:"another" () in
-        Alcotest.(check (list (option int))) "third of a session" [ None; None; Some 1013; None ]
-          [ a.closed; b.closed; c.closed; d.closed ];
-        List.iter hang_up [ a; b; d ];
-        let e, _ = open_ () in
-        Live.set_limits ~total:1 ();
-        let f, _ = open_ () in
+        let node = Live.node ~per_session:2 ~total:1_000_000 () in
+        let a, _ = open_ ~node ~session:"limited" () in
+        let b, _ = open_ ~node ~session:"limited" () in
+        let c, _ = open_ ~node ~session:"limited" () in
+        let d, _ = open_ ~node ~session:"another" () in
+        let x, _ = open_ ~session:"limited" () in
+        Alcotest.(check (list (option int))) "third of a session" [ None; None; Some 1013; None; None ]
+          [ a.closed; b.closed; c.closed; d.closed; x.closed ];
+        List.iter hang_up [ a; b; d; x ];
+        let node = Live.node ~total:1 () in
+        let e, _ = open_ ~node () in
+        let f, _ = open_ ~node () in
         Alcotest.(check (option int)) "over the total" (Some 1013) f.closed;
-        Live.set_limits ~per_session:16 ~total:10_000 ();
         hang_up e );
     ( "a failed send ends the connection and its subscriptions",
       fun () ->
@@ -448,7 +446,7 @@ let review_cases =
         let b, _ = open_ ~session:"staying" () in
         push a (sub 1 "count" {|"rev"|});
         push b (sub 1 "count" {|"rev"|});
-        Live.revoke (fun p -> p.Live.session = "leaving");
+        Live.revoke (fun p -> Server.Context.session p = Some "leaving");
         a.out <- [];
         b.out <- [];
         Live.publish count "rev" 9;
@@ -465,9 +463,9 @@ let review_cases =
         let b = fake () in
         b.inbox <- [ Some hello ];
         let _ =
-          Live.run ~sleep { Live.session = "err"; header = (fun _ -> None) }
+          Server.Testing.live_run ~sleep (Server.Testing.context ~session:("err") ())
             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t")
-            { (connection b) with receive = (fun () -> if b.inbox = [] then Async.failed "reset" else (connection b).receive ()) }
+            (connection ~receive:(fun b () -> if b.inbox = [] then Async.failed "reset" else receive b ()) b)
         in
         Alcotest.(check int) "receive error: one" 1 b.closes;
         sleeps := [];
@@ -476,37 +474,6 @@ let review_cases =
         List.iter (fun w -> w ()) !sleeps;
         push c (String.make 70_000 ' ');
         Alcotest.(check int) "revoke, then the deadline: one" 1 c.closes );
-  ]
-
-type handled = Refused of int | Upgraded
-
-module Socket = struct
-  type request = (string * string) list
-  type response = handled
-
-  let header r name = List.assoc_opt name r
-  let session _ = "s"
-  let csrf_token _ = "t"
-  let verify_csrf _ _ = Async.return true
-  let refuse ~status _ = Async.return (Refused status)
-  let upgrade _ _ = Async.return Upgraded
-  let sleep = sleep
-end
-
-module H = Live.Handle (Socket)
-
-let handle_cases =
-  [
-    ( "the handshake checks the origin and the upgrade",
-      fun () ->
-        let answer r = match Async.status (H.live r) with Async.Done h -> h | _ -> Alcotest.fail "pending" in
-        let ws = [ ("upgrade", "websocket"); ("host", "app.example") ] in
-        Alcotest.(check bool) "no origin" true (answer ws = Refused 403);
-        Alcotest.(check bool) "foreign" true (answer (("origin", "https://evil.example") :: ws) = Refused 403);
-        Alcotest.(check bool) "same origin" true (answer (("origin", "https://app.example") :: ws) = Upgraded);
-        Alcotest.(check bool) "fetch site" true (answer (("sec-fetch-site", "same-origin") :: ws) = Upgraded);
-        Alcotest.(check bool) "no upgrade header" true
-          (answer [ ("origin", "https://app.example"); ("host", "app.example") ] = Refused 426) );
   ]
 
 let ssr_cases =
@@ -556,7 +523,7 @@ let () =
 let open_on node =
   let f = fake () in
   let _ =
-    Live.run ~instance:node ~sleep { Live.session = fresh_session (); header = (fun _ -> None) }
+    Server.Testing.live_run ~node ~sleep (Server.Testing.context ~session:(fresh_session ()) ())
       ~verify_csrf:(fun t -> Async.return (t = "good"))
       ~token:(fun () -> "next")
       (connection f)
@@ -567,25 +534,23 @@ let open_on node =
 
 let two_nodes () =
   let m = Live.memory () in
-  let a = Live.instance () and b = Live.instance () in
-  ignore (Live.use_bus ~instance:a ~node:"A" (Live.memory_bus m));
-  ignore (Live.use_bus ~instance:b ~node:"B" (Live.memory_bus m));
+  let a = Live.node () and b = Live.node () in
+  ignore (Live.use_bus ~node:a ~name:"A" (Live.memory_bus m));
+  ignore (Live.use_bus ~node:b ~name:"B" (Live.memory_bus m));
   (m, a, b)
 
 let queued_bus () =
   let listeners = ref [] and queue = ref [] in
   let bus =
-    {
-      Live.send =
-        (fun text ->
-          queue := !queue @ [ text ];
-          Async.return ());
-      listen =
-        (fun l ->
-          listeners := !listeners @ [ l ];
-          Async.return ());
-      on_restart = (fun _ -> ());
-    }
+    Live.bus
+      ~send:(fun text ->
+        queue := !queue @ [ text ];
+        Async.return ())
+      ~listen:(fun l ->
+        listeners := !listeners @ [ l ];
+        Async.return ())
+      ~on_restart:(fun _ -> ())
+      ~close:(fun () -> Async.return ())
   in
   let deliver () =
     let q = !queue in
@@ -605,13 +570,13 @@ let node_cases =
     ( "two instances do not share entries",
       fun () ->
         reset_shared ();
-        let a = Live.instance () and b = Live.instance () in
+        let a = Live.node () and b = Live.node () in
         let fa = open_on a and fb = open_on b in
         shared := 1;
         push fa (sub 1 "shared" {|"k"|});
         shared := 2;
         push fb (sub 1 "shared" {|"k"|});
-        Live.publish ~instance:a shared_topic "k" 9;
+        Live.publish ~node:a shared_topic "k" 9;
         check_states "a gets its publish" [ (1, "1"); (1, "9") ] fa;
         check_states "b, no bus: only its own load" [ (1, "2") ] fb );
     ( "a publish on A reaches a subscriber on B, which loads the key",
@@ -622,7 +587,7 @@ let node_cases =
         push fb (sub 3 "shared" {|"k"|});
         check_states "first state" [ (3, "0") ] fb;
         shared := 5;
-        Live.publish ~instance:a shared_topic "k" 5;
+        Live.publish ~node:a shared_topic "k" 5;
         check_states "B loaded again" [ (3, "0"); (3, "5") ] fb;
         Alcotest.(check (list string)) "two loads on B, none on A" [ "k"; "k" ] !shared_loads );
     ( "a node with no subscriber for the key does not load",
@@ -632,8 +597,8 @@ let node_cases =
         let fb = open_on b in
         push fb (sub 3 "shared" {|"other"|});
         shared_loads := [];
-        Live.publish ~instance:a shared_topic "k" 5;
-        Live.changed ~instance:a shared_topic "k";
+        Live.publish ~node:a shared_topic "k" 5;
+        Live.changed ~node:a shared_topic "k";
         Alcotest.(check (list string)) "no load" [] !shared_loads );
     ( "notes during a load give exactly one more load",
       fun () ->
@@ -645,7 +610,7 @@ let node_cases =
         shared_loads := [];
         for i = 1 to 10 do
           shared := i;
-          Live.publish ~instance:a shared_topic "k" i
+          Live.publish ~node:a shared_topic "k" i
         done;
         Alcotest.(check int) "one load running" 1 (List.length !shared_loads);
         (List.hd !shared_gates) 1;
@@ -660,7 +625,7 @@ let node_cases =
         let fa = open_on a in
         push fa (sub 3 "shared" {|"k"|});
         shared_loads := [];
-        Live.publish ~instance:a shared_topic "k" 4;
+        Live.publish ~node:a shared_topic "k" 4;
         check_states "the publish only" [ (3, "0"); (3, "4") ] fa;
         Alcotest.(check (list string)) "no load" [] !shared_loads );
     ( "after the bus reconnects, every subscribed key loads again",
@@ -669,26 +634,26 @@ let node_cases =
         let m, a, b = two_nodes () in
         let fb = open_on b in
         push fb (sub 3 "shared" {|"k"|});
-        Live.memory_down m true;
+        Server.Testing.memory_down m true;
         shared := 7;
-        Live.publish ~instance:a shared_topic "k" 7;
+        Live.publish ~node:a shared_topic "k" 7;
         check_states "the note is lost" [ (3, "0") ] fb;
-        Live.memory_down m false;
+        Server.Testing.memory_down m false;
         check_states "the current state after the restart" [ (3, "0"); (3, "7") ] fb );
     ( "Live.mutate settles on B only after B loaded the change of A",
       fun () ->
         reset_shared ();
         let bus, deliver = queued_bus () in
-        let a = Live.instance () and b = Live.instance () in
-        ignore (Live.use_bus ~instance:a ~node:"A" bus);
-        ignore (Live.use_bus ~instance:b ~node:"B" bus);
+        let a = Live.node () and b = Live.node () in
+        ignore (Live.use_bus ~node:a ~name:"A" bus);
+        ignore (Live.use_bus ~node:b ~name:"B" bus);
         let fb = open_on b in
         push fb (sub 3 "shared" {|"k"|});
         fb.out <- [];
         slow_shared := true;
         shared := 8;
-        Live.publish ~instance:a shared_topic "k" 8;
-        let n, p = Option.get (Live.mark ~instance:a ()) in
+        Live.publish ~node:a shared_topic "k" 8;
+        let n, p = Option.get (Server.Testing.live_mark ~node:a ()) in
         Alcotest.(check (pair string int)) "mark" ("A", 1) (n, p);
         push fb (Printf.sprintf {|{"t":"sync","id":3,"ref":1,"after":[["%s",%d]]}|} n p);
         Alcotest.(check (list string)) "no synced before the note" [] (kinds fb);
@@ -701,8 +666,8 @@ let node_cases =
       fun () ->
         reset_shared ();
         let bus, _ = queued_bus () in
-        let b = Live.instance () in
-        ignore (Live.use_bus ~instance:b ~node:"B" bus);
+        let b = Live.node () in
+        ignore (Live.use_bus ~node:b ~name:"B" bus);
         let fb = open_on b in
         push fb (sub 3 "shared" {|"k"|});
         fb.out <- [];
@@ -715,23 +680,23 @@ let node_cases =
       fun () ->
         let _, a, b = two_nodes () in
         let fa = open_on a and fb = open_on b in
-        Live.revoke ~instance:a (fun _ -> true);
+        Live.revoke ~node:a (fun _ -> true);
         Alcotest.(check (option int)) "A closed" (Some 4401) fa.closed;
         Alcotest.(check (option int)) "B open" None fb.closed );
     ( "use_bus twice, and an empty node name, are refused",
       fun () ->
         let _, a, _ = two_nodes () in
         Alcotest.check_raises "twice" (Invalid_argument "Yuka.Server.Live.use_bus: this node already has a bus")
-          (fun () -> ignore (Live.use_bus ~instance:a ~node:"A" (Live.memory_bus (Live.memory ()))));
+          (fun () -> ignore (Live.use_bus ~node:a ~name:"A" (Live.memory_bus (Live.memory ()))));
         Alcotest.check_raises "empty" (Invalid_argument "Yuka.Server.Live.use_bus: the node name is empty")
-          (fun () -> ignore (Live.use_bus ~instance:(Live.instance ()) ~node:"" (Live.memory_bus (Live.memory ())))) );
+          (fun () -> ignore (Live.use_bus ~node:(Live.node ()) ~name:"" (Live.memory_bus (Live.memory ())))) );
     ( "a key too long for the bus is not sent and is logged",
       fun () ->
         reset_shared ();
         logged := [];
         let _, a, _ = two_nodes () in
-        Live.publish ~instance:a shared_topic (String.make 8000 'x') 1;
-        Alcotest.(check (option (pair string int))) "no note counted" (Some ("A", 0)) (Live.mark ~instance:a ());
+        Live.publish ~node:a shared_topic (String.make 8000 'x') 1;
+        Alcotest.(check (option (pair string int))) "no note counted" (Some ("A", 0)) (Server.Testing.live_mark ~node:a ());
         Alcotest.(check bool) "logged" true
           (List.exists (fun m -> Astring_like.contains m "too long for the bus") !logged) );
   ]
@@ -741,7 +706,7 @@ let action_mark_cases =
     ( "an action answer carries the mark of the node",
       fun () ->
         let echo = Action.declare ~name:"mark-echo" ~input:Codec.int ~output:Codec.int in
-        Server.Action.implement echo (fun n ->
+        Server.Action.implement echo (fun _ n ->
             Live.publish shared_topic "m" n;
             Async.return n);
         let header = function
@@ -753,7 +718,7 @@ let action_mark_cases =
         let before = Private.handle_action ~name:"mark-echo" ~header ~body:"3" in
         Alcotest.(check (option (pair int string))) "no bus: no mark" (Some (200, {|{"ok":3}|}))
           (match Async.status before with Async.Done r -> Some r | _ -> None);
-        ignore (Live.use_bus ~node:"main" (Live.memory_bus (Live.memory ())));
+        ignore (Live.use_bus ~name:"main" (Live.memory_bus (Live.memory ())));
         let after = Private.handle_action ~name:"mark-echo" ~header ~body:"4" in
         Alcotest.(check (option (pair int string))) "mark" (Some (200, {|{"ok":4,"live":["main",1]}|}))
           (match Async.status after with Async.Done r -> Some r | _ -> None) );
@@ -767,7 +732,6 @@ let () =
       ("hello", cases hello_cases);
       ("subscriptions", cases sub_cases);
       ("sync", cases sync_cases);
-      ("handshake", cases handle_cases);
       ("server render", cases ssr_cases);
       ("review", cases review_cases);
       ("nodes", cases node_cases);

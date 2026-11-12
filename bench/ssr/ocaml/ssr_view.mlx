@@ -22,19 +22,23 @@ let view issues () : Yuka.server Yuka.element =
     <ul class_="issues">(Yuka.list (List.map (fun issue -> <Row issue />) issues))</ul>
   </main>
 
+let document ~title ~styles view =
+  "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>" ^ title ^ "</title>"
+  ^ String.concat "" (List.map (fun s -> "<link rel=\"stylesheet\" href=\"" ^ s ^ "\">") styles)
+  ^ "</head><body>" ^ Yuka.Server.to_string view ^ "</body></html>"
+
 let stream_app issues : Dream.request Yuka.Server.app =
-  let fallback : Yuka.Server.fallback =
-    { layers = []; not_found = Yuka.Server.default_not_found; error = Yuka.Server.default_error }
-  in
-  let rules = Yuka.Server.rules ~headers:[] ~prerender:false () in
-  let plan : Yuka.Server.plan = { layers = []; page = Yuka.Server.page ~title:"Issues" (view issues) } in
-  Yuka.Server.app ~build:"ssr" ~headers:[] ~prerender:[]
+  let open Yuka.Server.Generated in
+  let fallback : fallback = { layers = []; not_found = default_not_found; error = default_error } in
+  let rules = rules ~headers:[] ~prerender:false () in
+  let plan : plan = { layers = []; page = Yuka.Server.page ~title:"Issues" (view issues) } in
+  app ~build:"ssr" ~headers:[] ~prerender:[]
     ~find:(fun meth segments _ ->
       match (meth, segments) with
       | (`GET | `HEAD), [ "stream" ] -> Yuka.Router.Found ()
       | _, [ "stream" ] -> Yuka.Router.Wrong_method [ `GET ]
       | _ -> Yuka.Router.Missing)
     ~resolve:(fun _ () ->
-      Yuka.Server.Page { rules; guards = []; fallback; load = (fun () -> Yuka.Async.return (Ok plan)) })
+      Page { rules; guards = []; fallback; load = (fun () -> Yuka.Async.return (Ok plan)) })
     ~missing:fallback
 

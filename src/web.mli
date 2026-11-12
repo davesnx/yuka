@@ -141,6 +141,7 @@ val live_url : unit -> string
 val online : unit -> bool
 val on_online : (unit -> unit) -> unit -> unit
 val random : unit -> float
+val nonce : unit -> string
 val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val adopt_stylesheets : unit -> unit

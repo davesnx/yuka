@@ -18,7 +18,7 @@ let time name n f =
 
 let () =
   let n = try int_of_string Sys.argv.(1) with _ -> 3000 in
-  time "document" n (fun () -> Yuka.Server.document ~title:"Issues" ~styles (Ssr_view.view issues));
+  time "document" n (fun () -> Ssr_view.document ~title:"Issues" ~styles (Ssr_view.view issues));
   let handler = Yuka_dream.handler (Yuka.Server.config ~styles ()) (Ssr_view.stream_app issues) in
   time "stream" n (fun () ->
       Lwt_main.run (Dream.body (Dream.test handler (Dream.request ~target:"/stream" ""))))

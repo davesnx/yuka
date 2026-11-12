@@ -1398,9 +1398,9 @@ let late () : _ element = Private.element (Private.hole (fun () -> failwith "sec
 let fallback ~error ~reset:_ = lower "p" [] [ text ("caught " ^ error) ]
 
 let logged f =
-  let saved = !Server.log_error and messages = ref [] in
-  Server.log_error := (fun m -> messages := m :: !messages);
-  let result = Fun.protect ~finally:(fun () -> Server.log_error := saved) f in
+  let saved = prerr_endline and messages = ref [] in
+  Yuka.Server.Testing.set_log (fun m -> messages := m :: !messages);
+  let result = Fun.protect ~finally:(fun () -> Yuka.Server.Testing.set_log saved) f in
   (result, List.rev !messages)
 
 let in_island tree =

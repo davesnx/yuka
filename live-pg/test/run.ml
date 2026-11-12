@@ -66,6 +66,22 @@ let restart () =
   check_true "notes arrive again" ok;
   Lwt.return_unit
 
+let close () =
+  let ch = channel () in
+  let a = bus ch and b = bus ch in
+  let heard = ref [] in
+  let* _ = wait (b.listen (fun n -> heard := n :: !heard)) in
+  let* _ = wait (a.send "before") in
+  let* ok = until (fun () -> !heard = [ "before" ]) in
+  check_true "heard before close" ok;
+  let* _ = wait (Live.close_bus b) in
+  let* _ = wait (a.send "after") in
+  let* () = Lwt_unix.sleep 0.3 in
+  Alcotest.(check (list string)) "nothing after close" [ "before" ] !heard;
+  let* r = wait (b.send "x") in
+  check_true "a closed bus does not send" (match r with Async.Failed _ -> true | _ -> false);
+  Lwt.return_unit
+
 let topic = Yuka.Topic.declare ~name:"pg-count" ~key:Yuka.Codec.string ~state:Yuka.Codec.int
 let truth = ref 0
 let () = Live.serve topic (fun _ -> Async.return !truth)
@@ -80,38 +96,35 @@ let lwt_sleep s =
 
 let two_nodes () =
   let ch = channel () in
-  let na = Live.instance () and nb = Live.instance () in
-  let* _ = wait (Live.use_bus ~instance:na ~node:"A" (bus ch)) in
-  let* _ = wait (Live.use_bus ~instance:nb ~node:"B" (bus ch)) in
+  let na = Live.node () and nb = Live.node () in
+  let* _ = wait (Live.use_bus ~node:na ~name:"A" (bus ch)) in
+  let* _ = wait (Live.use_bus ~node:nb ~name:"B" (bus ch)) in
   let out = ref [] in
   let inbox = ref [ Some {|{"t":"hello","v":1,"csrf":"ok"}|}; Some {|{"t":"sub","id":1,"topic":"pg-count","key":"k"}|} ] in
-  let connection : Live.connection =
-    {
-      send =
-        (fun t ->
-          out := !out @ [ t ];
-          Async.return ());
-      receive =
-        (fun () ->
-          match !inbox with
-          | x :: rest ->
-              inbox := rest;
-              Async.return x
-          | [] ->
-              let a, _, _ = Async.make () in
-              a);
-      close = (fun _ -> Async.return ());
-    }
+  let connection =
+    Live.connection
+      ~send:(fun t ->
+        out := !out @ [ t ];
+        Async.return ())
+      ~receive:(fun () ->
+        match !inbox with
+        | x :: rest ->
+            inbox := rest;
+            Async.return x
+        | [] ->
+            let a, _, _ = Async.make () in
+            a)
+      ~close:(fun _ -> Async.return ())
   in
   ignore
-    (Live.run ~instance:nb ~sleep:lwt_sleep { Live.session = "s"; header = (fun _ -> None) }
+    (Yuka.Server.Testing.live_run ~node:nb ~sleep:lwt_sleep (Yuka.Server.Testing.context ~session:"s" ())
        ~verify_csrf:(fun _ -> Async.return true)
        ~token:(fun () -> "t")
        connection);
   let has v = List.exists (String.ends_with ~suffix:(Printf.sprintf {|"state":%d}|} v)) !out in
   check_true "the first state on B" (has 0);
   truth := 42;
-  Live.publish ~instance:na topic "k" 42;
+  Live.publish ~node:na topic "k" 42;
   let* ok = until (fun () -> has 42) in
   check_true "a publish on A reaches the subscriber on B through Postgres" ok;
   Lwt.return_unit
@@ -130,6 +143,7 @@ let () =
               case "a note from one connection reaches a listener on another" notes_cross;
               case "a note over 8,000 bytes is refused" too_long;
               case "a killed listener connects again and calls on_restart" restart;
+              case "close stops listening and sending" close;
               case "two nodes: a publish on A reaches a subscriber on B" two_nodes;
             ] );
         ]

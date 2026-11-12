@@ -494,7 +494,7 @@ The root must be Router.make
 Valid input, every node kind, exits 0
 
   $ gen <<'EOF' > /dev/null
-  > Router.make ~layout:L.root ~headers:[ ("x", "y") ] ~cache:No_store ~prerender:false
+  > Router.make ~layout:L.root ~headers:[ ("x", "y") ] ~cache:no_store ~prerender:false
   >   [
   >     Router.group ~path:"/g/:id<M.Id>" ~layout:L.g ~loader:L.load ~guard:G.ok
   >       ~not_found:P.nf ~error:P.err ~search:{ q = optional string } ~prerender:true
