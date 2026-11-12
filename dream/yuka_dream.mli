@@ -6,7 +6,7 @@ val handler :
     ([Yuka.Server.Adapter.Make]), the WebSocket of {!Yuka.Live} at
     [/_yuka/live] included. Put Dream middleware (logger, sessions) around
     it. To send the cycle's error messages to the Dream log, give the
-    config [~log_error:(fun m -> Dream.error (fun log -> log "%s" m))].
+    config [~log_error:(fun message -> Dream.error (fun log -> log "%s" message))].
 
     The live socket needs Dream sessions shared by every process and stable
     across restarts ([Dream.cookie_sessions] with [Dream.set_secret]).
