@@ -217,7 +217,7 @@ let probe_entry =
   runtime_entry ~name:"Probe" (fun json ->
       Result.map
         (fun n () ->
-          Effect.run (fun () ->
+          Effect.after (fun () ->
               log ("g" ^ ints (State.get probe_runs) ^ "/" ^ ints n));
           element "span" [] [ text "p" ])
         (Codec.decode Codec.int json))

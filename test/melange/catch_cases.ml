@@ -21,17 +21,43 @@ let catch_first_effect () =
         Dom_cases.div []
           [ text "a";
             boundary (fun () ->
-                Effect.run (fun () -> failwith "first");
+                Effect.before (fun () -> failwith "first");
                 Dom_cases.span [ text "x" ]);
             text "b" ])
   in
   check "an error in the first run of an effect" {|acaught Failure(first)b|} (shown c);
   dispose ()
 
+let catch_first_after () =
+  let c, dispose =
+    render (fun () ->
+        Dom_cases.div []
+          [ text "a";
+            boundary (fun () ->
+                Effect.after (fun () -> failwith "first");
+                Dom_cases.span [ text "x" ]);
+            text "b" ])
+  in
+  check "an error in the first run of an after effect" {|acaught Failure(first)b|} (shown c);
+  dispose ()
+
+let after_of_failed_children () =
+  let runs = ref 0 in
+  let c, dispose =
+    render (fun () ->
+        Dom_cases.div []
+          [ boundary (fun () ->
+                Effect.after (fun () -> incr runs);
+                failwith "render") ])
+  in
+  check "fallback" {|caught Failure(render)|} (shown c);
+  check "an after effect of children that failed never runs" "0" (ints !runs);
+  dispose ()
+
 let flush_tree s ~wrap =
   Dom_cases.div []
     [ wrap (fun () ->
-          Effect.run (fun () -> State.set s 1);
+          Effect.before (fun () -> State.set s 1);
           Dom_cases.span [ text "ok" ]) ]
 
 let render_error tree =
@@ -45,7 +71,7 @@ let render_error tree =
 let catch_other_effect_error () =
   let run ~wrap =
     let s = State.make 0 in
-    let (), stop_b = owner (fun () -> Effect.run (fun () -> if State.get s = 1 then failwith "B")) in
+    let (), stop_b = owner (fun () -> Effect.after (fun () -> if State.get s = 1 then failwith "B")) in
     let result = render_error (fun () -> flush_tree s ~wrap) in
     stop_b ();
     result
@@ -68,8 +94,8 @@ let catch_render () =
 let catch_effect () =
   let n = State.make 0 and cleaned = ref 0 and runs = ref 0 in
   let child () =
-    Effect.run ~cleanup:(fun () -> incr cleaned) (fun () -> ignore (State.get n));
-    Effect.run (fun () ->
+    Effect.after ~cleanup:(fun () -> incr cleaned) (fun () -> ignore (State.get n));
+    Effect.after (fun () ->
         incr runs;
         if State.get n = 1 then failwith "effect");
     Dom_cases.span [ text "ok" ]
@@ -86,7 +112,7 @@ let catch_effect () =
 let catch_cleanup () =
   let n = State.make 0 in
   let child () =
-    Effect.run
+    Effect.after
       ~cleanup:(fun () -> if State.peek n > 0 then failwith "cleanup")
       (fun () -> ignore (State.get n));
     Dom_cases.span [ text "ok" ]
@@ -299,7 +325,7 @@ let show_hydrate () =
 
 let effect_view () =
   let n = State.make 0 in
-  Effect.run (fun () -> if State.get n = 2 then failwith "effect");
+  Effect.after (fun () -> if State.get n = 2 then failwith "effect");
   element "div" []
     [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
       element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
@@ -407,8 +433,8 @@ let handler_error_stops_event () =
 let cleanup_on_dispose () =
   let items = State.make [| "a" |] and cleaned = ref 0 in
   let row _ =
-    Effect.run ~cleanup:(fun () -> incr cleaned) ignore;
-    Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
+    Effect.after ~cleanup:(fun () -> incr cleaned) ignore;
+    Effect.after ~cleanup:(fun () -> failwith "cleanup") ignore;
     Dom_cases.span [ text "r" ]
   in
   let c, dispose =
@@ -423,7 +449,7 @@ let cleanup_on_dispose () =
 let looping_view () =
   boundary (fun () ->
       let s = State.make 0 in
-      Effect.run (fun () -> if State.get s > 0 then State.set s (State.peek s + 1));
+      Effect.after (fun () -> if State.get s > 0 then State.set s (State.peek s + 1));
       element "button" [ on "click" (fun _ -> State.set s 1; failwith "x") ] [ text "go" ])
 
 let flush_error_reported () =
@@ -464,8 +490,8 @@ let on_error_raises () =
 
 let cleanup_raises_view () =
   let n = State.make 0 in
-  Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
-  Effect.run (fun () -> if State.get n = 1 then failwith "effect");
+  Effect.after ~cleanup:(fun () -> failwith "cleanup") ignore;
+  Effect.after (fun () -> if State.get n = 1 then failwith "effect");
   element "div" []
     [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
       element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
@@ -477,8 +503,8 @@ let island_dispose_raises () =
 
 let island_start_dispose_raises () =
   let view () =
-    Effect.run ~cleanup:(fun () -> failwith "cleanup") ignore;
-    Effect.run (fun () -> failwith "first");
+    Effect.after ~cleanup:(fun () -> failwith "cleanup") ignore;
+    Effect.after (fun () -> failwith "first");
     Dom_cases.span [ text "x" ]
   in
   let c = Island_cases.setup_page (Island_cases.page [ runtime_island ~name:"Bad" ~props:(`Int 0) view; Island_cases.counter_island 10 ]) in
@@ -495,6 +521,8 @@ let all =
     ("catch: render", catch_render);
     ("catch: an error of another effect in the first flush", catch_other_effect_error);
     ("catch: first run of an effect", catch_first_effect);
+    ("catch: first run of an after effect", catch_first_after);
+    ("catch: an after effect of children that failed", after_of_failed_children);
     ("catch: effect after mount", catch_effect);
     ("catch: effect cleanup", catch_cleanup);
     ("catch: memo", catch_memo);

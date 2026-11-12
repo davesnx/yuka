@@ -120,7 +120,7 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
             stop := release
     in
     let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
-    Base.Effect.run (fun () ->
+    Base.run_effect Scheduler.queue (fun () ->
         if enabled () then begin
           let input = (Action.input q).encode (args ()) in
           let key = Answers.key (Action.name q) input in

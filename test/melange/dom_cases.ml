@@ -124,7 +124,7 @@ let handler_batched () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        Effect.run (fun () ->
+        Effect.after (fun () ->
             ignore (State.get a + State.get b);
             incr runs);
         element "div" []
@@ -181,7 +181,7 @@ let on_window_batched () =
   let a = State.make 0 and b = State.make 0 and runs = ref 0 in
   let (), stop =
     owner (fun () ->
-        Effect.run (fun () ->
+        Effect.after (fun () ->
             ignore (State.get a + State.get b);
             incr runs);
         Browser.on_window "yuka-test" (fun _ ->
@@ -404,7 +404,7 @@ let dynamic_attributes () =
 let item_view log (id, label) =
   li id [ hole (fun () -> text label); element "b" [] [] ]
   |> fun el ->
-  Effect.run ~cleanup:(fun () -> log := ("gone " ^ id) :: !log) (fun () -> ());
+  Effect.after ~cleanup:(fun () -> log := ("gone " ^ id) :: !log) (fun () -> ());
   el
 
 let order c = texts c "li"
@@ -1138,7 +1138,7 @@ let list_clear_disposes () =
             ([ each ~key:ints
                  (fun () -> State.get items)
                  (fun i ->
-                   Effect.run ~cleanup:(fun () -> incr gone) (fun () -> ());
+                   Effect.after ~cleanup:(fun () -> incr gone) (fun () -> ());
                    li (ints i) [ text (ints i) ]) ]
             @ if sibling then [ element "i" [] [] ] else []))
     in
@@ -1667,9 +1667,92 @@ let client_raw_text_namespaces () =
       ("two texts in SCRIPT", fun () -> element "SCRIPT" [] [ text "a"; text "b" ]);
     ]
 
+let present : node -> bool = [%mel.raw "function (n) { return n != null }"]
+let by_id : string -> node = [%mel.raw "function (id) { return document.getElementById(id) }"]
+let span_text c = if present (query c "span") then text_content (query c "span") else "none"
+
+let after_sees_dom () =
+  let count = State.make 0 and seen = ref [] in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        Effect.after (fun () ->
+            ignore (State.get count);
+            seen := span_text c :: !seen);
+        let double = State.memo (fun () -> State.get count * 2) in
+        span [ hole (fun () -> text (ints (State.get double))) ])
+  in
+  State.set count 5;
+  check "an after effect reads the DOM of the same change" "0 10"
+    (String.concat " " (List.rev !seen));
+  dispose ()
+
+let after_finds_own_element () =
+  let show = State.make false and items = State.make [||] and seen = ref [] in
+  let probe id = Effect.after (fun () -> seen := (id ^ "=" ^ string_of_bool (present (by_id id))) :: !seen) in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        probe "after-root";
+        element "div" [ attr "id" "after-root" ]
+          [ hole (fun () ->
+                if State.get show then begin
+                  probe "after-hole";
+                  element "p" [ attr "id" "after-hole" ] []
+                end
+                else empty);
+            element "ul" []
+              [ each ~key:Fun.id (fun () -> State.get items) (fun id ->
+                    probe id;
+                    element "li" [ attr "id" id ] []) ] ])
+  in
+  check "render: the first run finds the element" "after-root=true" (String.concat " " (List.rev !seen));
+  State.set show true;
+  State.set items [| "after-row" |];
+  check "a hole and a new row: the first run finds the element"
+    "after-root=true after-hole=true after-row=true" (String.concat " " (List.rev !seen));
+  dispose ()
+
+let on_change_sees_dom () =
+  let count = State.make 0 and seen = ref [] in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        Effect.on_change count (fun ~prev ~next ->
+            seen := Printf.sprintf "%d->%d:%s" prev next (span_text c) :: !seen);
+        let double = State.memo (fun () -> State.get count * 2) in
+        span [ hole (fun () -> text (ints (State.get double))) ])
+  in
+  check "not called for the first value" "" (String.concat " " !seen);
+  State.set count 5;
+  check "called with the new DOM" "0->5:10" (String.concat " " !seen);
+  dispose ()
+
+let after_in_handler () =
+  let count = State.make 0 and seen = ref "" in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        let double = State.memo (fun () -> State.get count * 2) in
+        div []
+          [ span [ hole (fun () -> text (ints (State.get double))) ];
+            element "button"
+              [ on "click" (fun _ ->
+                    State.set count 1;
+                    Effect.after (fun () -> seen := span_text c)) ]
+              [] ])
+  in
+  click (query c "button");
+  check "an after effect created in a handler runs after its update" "2" !seen;
+  dispose ()
+
 let all =
   [
     ("handlers run in a batch", handler_batched);
+    ("after: reads the DOM of the same change", after_sees_dom);
+    ("after: the first run finds the element", after_finds_own_element);
+    ("on_change: sees the DOM", on_change_sees_dom);
+    ("after: created in a handler", after_in_handler);
     ("container by id", container_by_id);
     ("focus after the update of a handler", focus_after_update);
     ("window handlers run in a batch", on_window_batched);

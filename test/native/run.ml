@@ -154,7 +154,8 @@ let page_cases =
   let component_effect () =
     let runs = ref 0 in
     let component () =
-      Yuka.Effect.run (fun () -> incr runs);
+      Yuka.Effect.after (fun () -> incr runs);
+      Yuka.Effect.before (fun () -> incr runs);
       Yuka.element "p" [] []
     in
     check string "html" "<p></p>" (Server.to_string component);

@@ -15,13 +15,13 @@ let log () =
 let first_run () =
   let add, read = log () in
   let count = State.make 0 in
-  Effect.run (fun () -> add (string_of_int (State.get count)));
+  Effect.before (fun () -> add (string_of_int (State.get count)));
   check "runs once at creation" "0" (read ())
 
 let rerun_on_change () =
   let add, read = log () in
   let count = State.make 0 in
-  Effect.run (fun () -> add (string_of_int (State.get count)));
+  Effect.before (fun () -> add (string_of_int (State.get count)));
   State.set count 1;
   State.update count (fun c -> c + 1);
   check "runs again on each change" "0 1 2" (read ())
@@ -30,8 +30,8 @@ let no_rerun_on_equal_write () =
   let add, read = log () in
   let count = State.make 0 in
   let name = State.make ~equal:String.equal "a" in
-  Effect.run (fun () -> add (string_of_int (State.get count)));
-  Effect.run (fun () -> add (State.get name));
+  Effect.before (fun () -> add (string_of_int (State.get count)));
+  Effect.before (fun () -> add (State.get name));
   State.set count 0;
   State.set name (String.make 1 'a');
   check "no run for an equal write" "0 a" (read ())
@@ -39,7 +39,7 @@ let no_rerun_on_equal_write () =
 let cleanup_receives_previous_result () =
   let add, read = log () in
   let count = State.make 0 in
-  Effect.run
+  Effect.before
     ~cleanup:(fun id -> add ("clear" ^ string_of_int id))
     (fun () ->
       let id = State.get count * 10 in
@@ -54,9 +54,9 @@ let nested_disposed_on_rerun () =
   let runs = ref 0 in
   let a = State.make 0 in
   let b = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       ignore (State.get a);
-      Effect.run (fun () ->
+      Effect.before (fun () ->
           ignore (State.get b);
           incr runs));
   State.set a 1;
@@ -70,11 +70,11 @@ let mount_dispose () =
   let count = State.make 0 in
   let (), dispose =
     owner (fun () ->
-        Effect.run
+        Effect.before
           ~cleanup:(fun () -> add "outer-clean")
           (fun () ->
             ignore (State.get count);
-            Effect.run
+            Effect.before
               ~cleanup:(fun () -> add "inner-clean")
               (fun () -> add ("inner" ^ string_of_int (State.get count)))))
   in
@@ -86,8 +86,8 @@ let mount_dispose () =
 let error_isolation () =
   let add, read = log () in
   let count = State.make 0 in
-  Effect.run (fun () -> if State.get count = 1 then failwith "boom");
-  Effect.run (fun () -> add (string_of_int (State.get count)));
+  Effect.before (fun () -> if State.get count = 1 then failwith "boom");
+  Effect.before (fun () -> add (string_of_int (State.get count)));
   let raised = try State.set count 1; "no" with Failure m -> m in
   State.set count 2;
   check "other effect still runs" "0 1 2" (read ());
@@ -125,7 +125,7 @@ let memo_recomputes_on_input_change () =
 let peek_does_not_track () =
   let runs = ref 0 in
   let count = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       ignore (State.peek count);
       incr runs);
   State.set count 1;
@@ -135,9 +135,9 @@ let outer_keeps_dependency_after_inner () =
   let outer = ref 0 in
   let count = State.make 0 in
   let other = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       ignore (State.get other);
-      Effect.run (fun () -> ignore (State.get count));
+      Effect.before (fun () -> ignore (State.get count));
       ignore (State.get count);
       incr outer);
   State.set count 1;
@@ -148,7 +148,7 @@ let effect_sees_consistent_memo () =
   let add, read = log () in
   let count = State.make 1 in
   let double = State.memo (fun () -> State.get count * 2) in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       add (Printf.sprintf "%d/%d" (State.get count) (State.get double)));
   State.set count 2;
   check "one run per write, no stale memo" "1/2 2/4" (read ())
@@ -157,13 +157,13 @@ let memo_equal_by_default () =
   let add, read = log () in
   let n = State.make 1 in
   let parity = State.memo (fun () -> State.get n mod 2) in
-  Effect.run (fun () -> add (string_of_int (State.get parity)));
+  Effect.before (fun () -> add (string_of_int (State.get parity)));
   State.set n 3;
   check "same memo value does not re-run effects" "1" (read ())
 
 let effect_writing_own_state_settles () =
   let s = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       let v = State.get s in
       if v < 3 then State.set s (v + 1));
   check "a write that settles still works" "3" (string_of_int (State.peek s))
@@ -179,7 +179,7 @@ let effect_writing_own_state_stops () =
   let s = State.make 0 in
   let result =
     match
-      Effect.run (fun () ->
+      Effect.before (fun () ->
           let v = State.get s in
           if v < 1000 then State.set s (v + 1))
     with
@@ -190,7 +190,7 @@ let effect_writing_own_state_stops () =
   check "a write that does not settle stops with an error" "limit" result;
   let after = State.make 0 in
   let runs = ref 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       ignore (State.get after);
       incr runs);
   State.set after 1;
@@ -274,7 +274,8 @@ let html_nested () =
 let html_effect_skipped () =
   let runs = ref 0 in
   let component () =
-    Effect.run (fun () -> incr runs);
+    Effect.after (fun () -> incr runs);
+    Effect.before (fun () -> incr runs);
     element "p" [] []
   in
   let in_hole = element "div" [] [ hole (fun () -> component () |> fun e -> (Private.element (Private.node e) : client element)) ] in
@@ -293,7 +294,7 @@ let html_effect_skipped () =
     (string_of_bool !Private.server_rendering);
   let (), dispose = owner (fun () -> ignore (component ())) in
   dispose ();
-  check "runs in mount" "1" (string_of_int !runs)
+  check "runs in mount" "2" (string_of_int !runs)
 
 let show_json = Json.to_string
 
@@ -471,7 +472,7 @@ let async_watch () =
   let add, read = log () in
   let a, resolve, _ = Async.make () in
   let w = Async.watch a in
-  Effect.run (fun () -> add (status_text string_of_int (State.get w)));
+  Effect.before (fun () -> add (status_text string_of_int (State.get w)));
   resolve 7;
   check "effect sees the update" "pending done 7" (read ());
   let w2 = Async.watch (Async.return 1) in
@@ -516,7 +517,8 @@ let html_island () =
     runtime_island ~name
       ~props:(`Assoc [ ("t", `String "</script>") ])
       (fun () ->
-        Effect.run (fun () -> failwith "effect ran on the server");
+        Effect.after (fun () -> failwith "after ran on the server");
+        Effect.before (fun () -> failwith "before ran on the server");
         element "b" [] [ hole (fun () -> text "") ])
   in
   check "island"
@@ -546,7 +548,7 @@ let island_entry () =
 let untracked_no_dependency () =
   let runs = ref 0 in
   let s = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       ignore (State.untrack (fun () -> State.get s));
       incr runs);
   State.set s 1;
@@ -717,7 +719,7 @@ let default_equality () =
   let runs name make set =
     let count = ref 0 in
     let s = State.make make in
-    Effect.run (fun () -> ignore (State.get s); incr count);
+    Effect.before (fun () -> ignore (State.get s); incr count);
     set s;
     ignore name;
     !count
@@ -754,7 +756,7 @@ let default_equality () =
   let memo_runs = ref 0 in
   let n = State.make 1 in
   let parity = State.memo (fun () -> [ State.get n mod 2 ]) in
-  Effect.run (fun () -> ignore (State.get parity); incr memo_runs);
+  Effect.before (fun () -> ignore (State.get parity); incr memo_runs);
   State.set n 3;
   check "memo with a new list re-runs" "2" (string_of_int !memo_runs);
   let seen = ref 0 in
@@ -767,7 +769,7 @@ let default_equality () =
 let structural_equal_option () =
   let runs = ref 0 in
   let s = State.make ~equal:( = ) [ 1; 2 ] in
-  Effect.run (fun () -> ignore (State.get s); incr runs);
+  Effect.before (fun () -> ignore (State.get s); incr runs);
   State.set s (List.map succ [ 0; 1 ]);
   check "~equal:( = ) skips an equal list" "1" (string_of_int !runs);
   State.set s [ 3 ];
@@ -775,7 +777,7 @@ let structural_equal_option () =
   let memo_runs = ref 0 in
   let n = State.make 1 in
   let parity = State.memo ~equal:( = ) (fun () -> [ State.get n mod 2 ]) in
-  Effect.run (fun () -> ignore (State.get parity); incr memo_runs);
+  Effect.before (fun () -> ignore (State.get parity); incr memo_runs);
   State.set n 3;
   check "memo ~equal:( = ) skips an equal list" "1" (string_of_int !memo_runs);
   let seen = ref 0 in
@@ -788,14 +790,14 @@ let structural_equal_option () =
 let closure_state () =
   let runs = ref 0 in
   let f = State.make (fun x -> x + 1) in
-  Effect.run (fun () -> ignore (State.get f : int -> int); incr runs);
+  Effect.before (fun () -> ignore (State.get f : int -> int); incr runs);
   let g = fun x -> x * 2 in
   State.set f g;
   State.set f g;
   check "a closure in a State compares by identity" "2" (string_of_int !runs);
   let pair = State.make ((fun x -> x), 1) in
   let pair_runs = ref 0 in
-  Effect.run (fun () -> ignore (State.get pair : (int -> int) * int); incr pair_runs);
+  Effect.before (fun () -> ignore (State.get pair : (int -> int) * int); incr pair_runs);
   State.set pair ((fun x -> x + 1), 1);
   check "a tuple with a closure does not raise" "2" (string_of_int !pair_runs);
   check "closure kept" "6" (string_of_int ((State.peek f) 3))
@@ -805,7 +807,7 @@ let batch_delays () =
   let a = State.make 0 in
   let b = State.make 0 in
   let double = State.memo (fun () -> State.get a * 2) in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       add (Printf.sprintf "%d/%d" (State.get a) (State.get b)));
   let result =
     batch (fun () ->
@@ -822,7 +824,7 @@ let batch_delays () =
 let batch_nests () =
   let add, read = log () in
   let a = State.make 0 in
-  Effect.run (fun () -> add (string_of_int (State.get a)));
+  Effect.before (fun () -> add (string_of_int (State.get a)));
   batch (fun () ->
       State.set a 1;
       batch (fun () -> State.set a 2);
@@ -832,17 +834,17 @@ let batch_nests () =
   let trigger = State.make 0 in
   let inside = State.make 0 in
   let seen = ref [] in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       if State.get trigger = 1 then
         batch (fun () -> State.set inside 1; State.set inside 2));
-  Effect.run (fun () -> seen := State.get inside :: !seen);
+  Effect.before (fun () -> seen := State.get inside :: !seen);
   State.set trigger 1;
   check "batch inside an effect" "2,0" (String.concat "," (List.map string_of_int !seen))
 
 let batch_raises () =
   let add, read = log () in
   let a = State.make 0 in
-  Effect.run (fun () -> add (string_of_int (State.get a)));
+  Effect.before (fun () -> add (string_of_int (State.get a)));
   let raised =
     match
       batch (fun () ->
@@ -874,9 +876,9 @@ let disposal_order () =
   let add, read = log () in
   let (), dispose =
     owner (fun () ->
-        Effect.run ~cleanup:(fun () -> add "first") (fun () -> ());
-        Effect.run ~cleanup:(fun () -> add "second") (fun () -> ());
-        Effect.run ~cleanup:(fun () -> add "third") (fun () -> ()))
+        Effect.before ~cleanup:(fun () -> add "first") (fun () -> ());
+        Effect.before ~cleanup:(fun () -> add "second") (fun () -> ());
+        Effect.before ~cleanup:(fun () -> add "third") (fun () -> ()))
   in
   dispose ();
   check "last created is cleaned first" "third second first" (read ())
@@ -885,9 +887,9 @@ let effect_run_order () =
   let add, read = log () in
   let count = State.make 0 in
   let double = State.memo (fun () -> State.get count * 2) in
-  Effect.run (fun () -> add ("m" ^ string_of_int (State.get double)));
-  Effect.run (fun () -> add ("a" ^ string_of_int (State.get count)));
-  Effect.run (fun () -> add ("b" ^ string_of_int (State.get count)));
+  Effect.before (fun () -> add ("m" ^ string_of_int (State.get double)));
+  Effect.before (fun () -> add ("a" ^ string_of_int (State.get count)));
+  Effect.before (fun () -> add ("b" ^ string_of_int (State.get count)));
   State.set count 1;
   State.set count 2;
   check "lower level first, then the last created first"
@@ -897,19 +899,19 @@ let disposal_order_after_removal () =
   let add, read = log () in
   let (), dispose =
     owner (fun () ->
-        Effect.run ~cleanup:(fun () -> add "a") (fun () -> ());
+        Effect.before ~cleanup:(fun () -> add "a") (fun () -> ());
         let (), dispose_b =
           Private.owned (fun () ->
-              Effect.run ~cleanup:(fun () -> add "b1") (fun () -> ());
-              Effect.run ~cleanup:(fun () -> add "b2") (fun () -> ()))
+              Effect.before ~cleanup:(fun () -> add "b1") (fun () -> ());
+              Effect.before ~cleanup:(fun () -> add "b2") (fun () -> ()))
         in
-        Effect.run ~cleanup:(fun () -> add "c") (fun () -> ());
+        Effect.before ~cleanup:(fun () -> add "c") (fun () -> ());
         let (), dispose_d =
-          Private.owned (fun () -> Effect.run ~cleanup:(fun () -> add "d") (fun () -> ()))
+          Private.owned (fun () -> Effect.before ~cleanup:(fun () -> add "d") (fun () -> ()))
         in
-        Effect.run ~cleanup:(fun () -> add "e") (fun () -> ());
+        Effect.before ~cleanup:(fun () -> add "e") (fun () -> ());
         dispose_d ();
-        Effect.run
+        Effect.before
           ~cleanup:(fun () ->
             add "f";
             dispose_b ())
@@ -929,7 +931,7 @@ let owned_removed_from_parent () =
         for i = 1 to 200 do
           let (), dispose =
             Private.owned (fun () ->
-                Effect.run ~cleanup:(fun () -> add ("gone" ^ string_of_int i)) (fun () -> ()))
+                Effect.before ~cleanup:(fun () -> add ("gone" ^ string_of_int i)) (fun () -> ()))
           in
           dispose ()
         done;
@@ -937,11 +939,11 @@ let owned_removed_from_parent () =
           (string_of_int (Private.owner_size ()));
         let (), dispose_a =
           Private.owned (fun () ->
-              Effect.run ~cleanup:(fun () -> add "a") (fun () -> ()))
+              Effect.before ~cleanup:(fun () -> add "a") (fun () -> ()))
         in
         let (), _dispose_b =
           Private.owned (fun () ->
-              Effect.run ~cleanup:(fun () -> add "b") (fun () -> ()))
+              Effect.before ~cleanup:(fun () -> add "b") (fun () -> ()))
         in
         check "two live children" "2" (string_of_int (Private.owner_size ()));
         dispose_a ();
@@ -1151,7 +1153,7 @@ let mount_raises_disposes () =
   let result =
     match
       owner (fun () ->
-          Effect.run ~cleanup:(fun () -> add "cleaned") (fun () -> add "ran");
+          Effect.before ~cleanup:(fun () -> add "cleaned") (fun () -> add "ran");
           failwith "boom")
     with
     | _ -> "no error"
@@ -1163,7 +1165,7 @@ let mount_raises_disposes () =
   let runs = ref 0 in
   (match
      owner (fun () ->
-         Effect.run (fun () -> ignore (State.get count); incr runs);
+         Effect.before (fun () -> ignore (State.get count); incr runs);
          failwith "again")
    with
   | _ -> ()
@@ -1177,7 +1179,7 @@ let owned_raises_disposes () =
     owner (fun () ->
         (match
            Private.owned (fun () ->
-               Effect.run ~cleanup:(fun () -> add "cleaned") (fun () -> ());
+               Effect.before ~cleanup:(fun () -> add "cleaned") (fun () -> ());
                failwith "boom")
          with
         | _ -> ()
@@ -1228,9 +1230,9 @@ let memo_diamond () =
   let b = State.memo (fun () -> State.get n * 3) in
   let sum = State.memo (fun () -> State.get a + State.get b) in
   let parity = State.memo (fun () -> State.get sum mod 2) in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       add (Printf.sprintf "%d=%d+%d" (State.get sum) (State.get a) (State.get b)));
-  Effect.run (fun () -> add ("p" ^ string_of_int (State.get parity)));
+  Effect.before (fun () -> add ("p" ^ string_of_int (State.get parity)));
   State.set n 2;
   State.set n 4;
   check "one consistent run per write; an unchanged memo stops the update"
@@ -1241,7 +1243,7 @@ let dynamic_dependencies () =
   let cond = State.make true in
   let a = State.make 0 in
   let b = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       incr runs;
       ignore (if State.get cond then State.get a else State.get b));
   State.set b 1;
@@ -1255,7 +1257,7 @@ let dependency_order_changes () =
   let flip = State.make false in
   let a = State.make 0 in
   let b = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       incr runs;
       if State.get flip then (ignore (State.get b); ignore (State.get a))
       else (ignore (State.get a); ignore (State.get b)));
@@ -1270,7 +1272,7 @@ let memo_raises_reader_recovers () =
     State.memo (fun () -> if State.get n = 1 then failwith "bad" else State.get n)
   in
   let seen = ref [] in
-  Effect.run (fun () -> seen := State.get m :: !seen);
+  Effect.before (fun () -> seen := State.get m :: !seen);
   (try State.set n 1 with Failure _ -> ());
   (try State.set n 2 with Failure _ -> ());
   check "the effect sees the memo again after it raised" "2,0"
@@ -1281,7 +1283,7 @@ let loop_limit_recovers () =
   let m = State.memo (fun () -> State.get s) in
   let loop = State.make false in
   let seen = ref 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       let v = State.get m in
       seen := v;
       if State.peek loop then State.set s (v + 1));
@@ -1296,7 +1298,7 @@ let raise_keeps_unread_dependencies () =
   let runs = ref 0 in
   let a = State.make 0 in
   let b = State.make 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       incr runs;
       if State.get a = 1 then failwith "stop";
       ignore (State.get b));
@@ -1308,10 +1310,10 @@ let raise_keeps_unread_dependencies () =
 let parent_runs_before_child () =
   let add, read = log () in
   let o = State.make (Some 1) in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       match State.get o with
       | Some _ ->
-          Effect.run (fun () -> add (string_of_int (Option.get (State.get o))))
+          Effect.before (fun () -> add (string_of_int (Option.get (State.get o))))
       | None -> add "none");
   State.set o None;
   check "the parent re-runs and disposes the child first" "1 none" (read ())
@@ -1322,7 +1324,7 @@ let disposed_during_run () =
   let dispose = ref ignore in
   let (), d =
     owner (fun () ->
-        Effect.run (fun () ->
+        Effect.before (fun () ->
             if State.get s = 1 then begin
               !dispose ();
               ignore (State.get t)
@@ -1348,9 +1350,9 @@ let disposed_while_pending () =
   let add, read = log () in
   let s = State.make 0 in
   let (), dispose =
-    owner (fun () -> Effect.run (fun () -> add ("b" ^ string_of_int (State.get s))))
+    owner (fun () -> Effect.before (fun () -> add ("b" ^ string_of_int (State.get s))))
   in
-  Effect.run (fun () -> if State.get s = 1 then dispose ());
+  Effect.before (fun () -> if State.get s = 1 then dispose ());
   State.set s 1;
   check "a pending effect disposed in the same flush does not run" "b0" (read ())
 
@@ -1369,8 +1371,8 @@ let memo_raises () =
 let batch_in_first_run () =
   let add, read = log () in
   let s = State.make 0 in
-  Effect.run (fun () -> add ("e" ^ string_of_int (State.get s)));
-  Effect.run (fun () ->
+  Effect.before (fun () -> add ("e" ^ string_of_int (State.get s)));
+  Effect.before (fun () ->
       batch (fun () -> State.set s 1);
       add "end");
   check "a batch in an effect runs pending effects when the effect ends"
@@ -1380,7 +1382,7 @@ let first_run_raises_stops () =
   let runs = ref 0 in
   let s = State.make 0 in
   (try
-     Effect.run (fun () ->
+     Effect.before (fun () ->
          incr runs;
          ignore (State.get s);
          failwith "first")
@@ -1396,7 +1398,7 @@ let caught_memo_error_keeps_reader () =
   in
   let t = State.make 0 in
   let runs = ref 0 in
-  Effect.run (fun () ->
+  Effect.before (fun () ->
       incr runs;
       (try ignore (State.get m) with Failure _ -> ());
       ignore (State.get t));
@@ -1406,6 +1408,152 @@ let caught_memo_error_keeps_reader () =
   State.set t 2;
   check "a read after a caught memo error still tracks the effect" "3"
     (string_of_int !runs)
+
+let after_sees_before_writes () =
+  let count = State.make 0 in
+  let dom = ref 0 in
+  let seen = ref [] in
+  Effect.after (fun () -> seen := Printf.sprintf "%d/%d" (State.get count) !dom :: !seen);
+  let double = State.memo (fun () -> State.get count * 2) in
+  Effect.before (fun () -> dom := State.get double);
+  State.set count 5;
+  check "an after effect sees the writes of the before effects of the same change"
+    "0/0 5/10" (String.concat " " (List.rev !seen))
+
+let after_waits_for_settled_before () =
+  let add, read = log () in
+  let s = State.make 0 and t = State.make 0 in
+  Effect.after (fun () -> add (Printf.sprintf "a%d/%d" (State.get s) (State.peek t)));
+  Effect.before (fun () -> State.set t (State.get s * 10));
+  Effect.before (fun () -> add ("t" ^ string_of_int (State.get t)));
+  State.set s 1;
+  check "after effects wait until no before effect is pending" "a0/0 t0 t10 a1/10" (read ())
+
+let after_outside_a_mount () =
+  let add, read = log () in
+  let s = State.make 0 in
+  Effect.after (fun () -> add ("top" ^ string_of_int (State.get s)));
+  check "at the top level the first run is at once" "top0" (read ());
+  let (), dispose =
+    owner (fun () ->
+        Effect.after (fun () -> add ("owner" ^ string_of_int (State.get s)));
+        add "body")
+  in
+  check "in an owner the first run is at once" "top0 owner0 body" (read ());
+  batch (fun () ->
+      Effect.after (fun () -> add ("batch" ^ string_of_int (State.get s)));
+      add "end");
+  check "in a batch the first run is at the end of the batch" "top0 owner0 body end batch0"
+    (read ());
+  State.set s 1;
+  check "all of them run again, the newest first" "top0 owner0 body end batch0 batch1 owner1 top1"
+    (read ());
+  dispose ()
+
+let after_disposed_before_first_run () =
+  let runs = ref 0 and cleaned = ref 0 in
+  let s = State.make 0 in
+  batch (fun () ->
+      let (), dispose =
+        owner (fun () ->
+            Effect.after ~cleanup:(fun () -> incr cleaned) (fun () -> ignore (State.get s); incr runs))
+      in
+      dispose ());
+  State.set s 1;
+  check "an after effect disposed before its first run never runs" "0 0"
+    (Printf.sprintf "%d %d" !runs !cleaned)
+
+let after_cleanup () =
+  let add, read = log () in
+  let count = State.make 0 in
+  let (), dispose =
+    batch (fun () ->
+        owner (fun () ->
+            Effect.after
+              ~cleanup:(fun id -> add ("clear" ^ string_of_int id))
+              (fun () ->
+                let id = State.get count * 10 in
+                add ("start" ^ string_of_int id);
+                id)))
+  in
+  State.set count 1;
+  dispose ();
+  State.set count 2;
+  check "cleanup gets the previous result, and runs at dispose" "start0 clear0 start10 clear10"
+    (read ())
+
+let after_nested () =
+  let add, read = log () in
+  let a = State.make 0 and b = State.make 0 in
+  Effect.after (fun () ->
+      add ("o" ^ string_of_int (State.get a));
+      Effect.after ~cleanup:(fun () -> add "c") (fun () -> add ("i" ^ string_of_int (State.get b))));
+  State.set a 1;
+  State.set b 1;
+  check "an inner effect runs after its outer one and is disposed before it runs again"
+    "o0 i0 c o1 i0 c i1" (read ())
+
+let after_in_before_and_before_in_after () =
+  let add, read = log () in
+  let s = State.make 0 in
+  Effect.before (fun () ->
+      let v = State.get s in
+      Effect.after (fun () -> add ("a" ^ string_of_int v));
+      add ("b" ^ string_of_int v));
+  Effect.after (fun () ->
+      let v = State.get s in
+      Effect.before (fun () -> add ("inner" ^ string_of_int v));
+      add ("outer" ^ string_of_int v));
+  State.set s 1;
+  check "each kind keeps its timing inside the other"
+    "b0 a0 inner0 outer0 b1 inner1 outer1 a1" (read ())
+
+let after_error_isolation () =
+  let add, read = log () in
+  let count = State.make 0 in
+  Effect.after (fun () -> if State.get count = 1 then failwith "boom");
+  Effect.after (fun () -> add (string_of_int (State.get count)));
+  let raised = try State.set count 1; "no" with Failure m -> m in
+  State.set count 2;
+  check "other after effects still run" "0 1 2" (read ());
+  check "first error raised after the flush" "boom" raised;
+  let failed = try batch (fun () -> Effect.after (fun () -> failwith "first")); "no" with Failure m -> m in
+  check "an error in a deferred first run is raised at the end of the batch" "first" failed
+
+let after_writing_own_state_stops () =
+  let s = State.make 0 in
+  let result =
+    match
+      Effect.after (fun () ->
+          let v = State.get s in
+          if v < 1000 then State.set s (v + 1))
+    with
+    | () -> "no error, value " ^ string_of_int (State.peek s)
+    | exception Failure m when contains m "keeps changing a State it reads" -> "limit"
+  in
+  check "an after effect that does not settle stops with an error" "limit" result;
+  let rounds = State.make 0 in
+  let settles =
+    match
+      Effect.after (fun () ->
+          let v = State.get rounds in
+          if v < 99 then State.set rounds (v + 1))
+    with
+    | () -> string_of_int (State.peek rounds)
+    | exception Failure _ -> "limit"
+  in
+  check "99 rounds of after effects are below the limit" "99" settles
+
+let on_change_after () =
+  let add, read = log () in
+  let count = State.make 0 in
+  let dom = ref 0 in
+  Effect.on_change count (fun ~prev ~next -> add (Printf.sprintf "%d->%d/%d" prev next !dom));
+  let double = State.memo (fun () -> State.get count * 2) in
+  Effect.before (fun () -> dom := State.get double);
+  check "not called for the first value" "" (read ());
+  State.set count 5;
+  check "called after the before effects of the change" "0->5/10" (read ())
 
 let boom () : _ element = failwith "secret detail"
 let late () : _ element = Private.element (Private.hole (fun () -> failwith "secret detail"))
@@ -1575,6 +1723,16 @@ let all =
     ("batch in the first run of an effect", batch_in_first_run);
     ("a first run that raises stops the effect", first_run_raises_stops);
     ("a caught memo error keeps the reader", caught_memo_error_keeps_reader);
+    ("after: sees the writes of before effects", after_sees_before_writes);
+    ("after: waits until before effects settle", after_waits_for_settled_before);
+    ("after: outside a mount", after_outside_a_mount);
+    ("after: disposed before its first run", after_disposed_before_first_run);
+    ("after: cleanup", after_cleanup);
+    ("after: nested", after_nested);
+    ("after: inside before, and before inside after", after_in_before_and_before_in_after);
+    ("after: error isolation", after_error_isolation);
+    ("after: writing its own State stops at a limit", after_writing_own_state_stops);
+    ("on_change: after timing", on_change_after);
     ("first run", first_run);
     ("re-run on change", rerun_on_change);
     ("no re-run on an equal write", no_rerun_on_equal_write);

@@ -23,7 +23,7 @@ runs it again. You do not write a list of dependencies.
 let[@client] make ~(initial : int) () =
   let count = Yuka.State.make initial in
   let double = Yuka.State.memo (fun () -> Yuka.State.get count * 2) in
-  Yuka.Effect.run (fun () -> Printf.printf "count is %d\n" (Yuka.State.get count));
+  Yuka.Effect.after (fun () -> Printf.printf "count is %d\n" (Yuka.State.get count));
   <button on_click=(fun _ -> Yuka.State.update count succ)>
     "Double: "
     (Yuka.int (Yuka.State.get double))
@@ -102,24 +102,38 @@ let visible =
 
 ## Effects
 
-An effect connects a component to something outside Yuka: a timer, a
-socket, a browser API, a log.
+An effect connects a component to something outside Yuka: the DOM, a
+timer, a socket, a browser API, a log. There are two kinds. They differ
+only in when they run.
 
-`Effect.run f` runs `f` now, and again each time a State it read changes.
+`Effect.after f` runs `f` after the DOM is up to date, and again each time
+a State it read changes. Use it for most effects.
+
+- The first run comes after Yuka puts the elements of the component in
+  the page, so `f` can find them.
+- A later run comes after the holes, the lists and the `Effect.before`
+  effects of the same change, so `f` sees the new DOM.
+
+`Effect.before f` runs `f` at once, in the component body, before the
+elements of the component exist. A later run comes together with the
+holes and the lists of the same change, a parent before its children. Use
+it when `f` must run before the DOM changes, for example to read a scroll
+position before new rows push it.
 
 `~cleanup` receives the result of the previous run. Yuka calls it before
 the next run and when the component is removed. Here `connect` and
 `close` are your own functions:
 
 ```ocaml
-Yuka.Effect.run ~cleanup:close (fun () -> connect (Yuka.State.get room))
+Yuka.Effect.after ~cleanup:close (fun () -> connect (Yuka.State.get room))
 ```
 
 When `room` changes, Yuka closes the old connection and opens a new one.
-When the component is removed, Yuka closes the last connection.
+When the component is removed, Yuka closes the last connection. When Yuka
+removes the component before the first run, the effect never runs.
 
-`Effect.on_change s f` calls `f ~prev ~next` when `s` changes. It does not
-call `f` for the first value.
+`Effect.on_change s f` calls `f ~prev ~next` when `s` changes, with the
+timing of `Effect.after`. It does not call `f` for the first value.
 
 To read a State in an effect without a re-run when it changes, use
 `State.peek`, or wrap the code in `State.untrack`.
@@ -130,8 +144,10 @@ stops and raises `Failure`.
 
 ## When updates run
 
-A write updates the page before `State.set` returns: the holes and the
-effects that read the State have run.
+A write updates the page before `State.set` returns. Yuka does the work in
+rounds. In a round, the holes, the lists and the `Effect.before` effects
+that read the State run first. The `Effect.after` effects run when none of
+them is left. A write inside an effect starts a new round.
 
 `Yuka.batch f` delays that work to the end of `f`, so readers run one time
 for several writes:
@@ -143,7 +159,12 @@ Yuka.batch (fun () ->
 ```
 
 Each event handler already runs in a batch. Two writes in one `on_click`
-update the page one time.
+update the page one time. `Yuka.render` and hydration also run in a batch,
+so a write in a component body updates the page when the render ends.
+
+The first run of an `Effect.after` effect also waits for the end of the
+batch or the update that creates it. Outside both, for example at the top
+level of `Yuka.owner`, it runs at once.
 
 ## Lifetime
 
@@ -161,8 +182,8 @@ The server calls the component one time to print HTML.
 
 - A hole prints its current value.
 - A memo computes one time.
-- `Effect.run` and `Effect.on_change` do nothing: the body and the cleanup
-  do not run. Code that needs the browser belongs in an effect or an
+- `Effect.after`, `Effect.before` and `Effect.on_change` do nothing: the
+  body and the cleanup do not run. Code that needs the browser belongs in an effect or an
   event handler.
 
 A State that you create inside a component is new for each request. A
