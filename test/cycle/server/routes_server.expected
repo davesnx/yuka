@@ -216,7 +216,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      Yuka.Server.Generated.layers =
                        [
                          layer_0;
-                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; data = true; wrap = (fun children -> App.Layouts.team ~squad ~children ()) };
+                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~squad ~children ()) };
                        ];
                      page = App.Pages.member ~team ~user ~squad ~profile ();
                    }))));
@@ -237,7 +237,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      Yuka.Server.Generated.layers =
                        [
                          layer_0;
-                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Params.Team.to_string team) ]; data = true; wrap = (fun children -> App.Layouts.team ~squad ~children ()) };
+                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~squad ~children ()) };
                        ];
                      page = App.Pages.team_form ~team ~squad ();
                    })));
@@ -436,7 +436,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"a20163bcd752d2d52285dfac221adae9"
+  Yuka.Server.Generated.app ~build:"f13190aaefeb403c06e62e4b659690c2"
     ~headers:([("x-frame-options", "DENY"); ("x-a", "root")])
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

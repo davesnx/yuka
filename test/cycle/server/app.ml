@@ -1,6 +1,5 @@
 module Async = Yuka.Async
 module Server = Yuka.Server
-open Cycle_shared
 
 type req = {
   meth : Yuka.Router.meth;
@@ -176,7 +175,7 @@ module Pages = struct
     Server.page ~title:"Member" (fun () ->
         text
           (String.concat " "
-             [ Params.Team.to_string team; string_of_int user; squad; profile ]))
+             [ team; string_of_int user; squad; profile ]))
 
   let org_item ~org ~n ~org_item () =
     Server.page (fun () -> text (String.concat " " [ org; string_of_int n; org_item ]))
@@ -205,13 +204,13 @@ end
 module Loaders = struct
   let squad _req ~team =
     note "squad start";
-    match Params.Team.to_string team with
+    match team with
     | "wait" -> later ()
     | t -> Async.return (Ok ("of " ^ t))
 
   let profile req ~team ~user =
     note "profile start";
-    match (Params.Team.to_string team, user) with
+    match (team, user) with
     | "wait", _ -> later ()
     | _, 404 -> Async.return (Error Server.Not_found)
     | _, 500 -> Async.failed "loader secret"
@@ -227,7 +226,7 @@ module Guards = struct
   let outer _req ~team =
     note "outer";
     Async.return
-      (match Params.Team.to_string team with
+      (match team with
       | "nobody" -> Error Server.Not_found
       | "away" -> Error (Server.Redirect { location = "/"; kind = `See_other })
       | "offsite" -> Error (Server.Redirect { location = "https://evil.example/"; kind = `See_other })
@@ -250,11 +249,11 @@ end
 module Api = struct
   let team req ~team =
     note "team json";
-    if Params.Team.to_string team = "gone" then Server.text ~status:404 "gone" else
+    if team = "gone" then Server.text ~status:404 "gone" else
     Server.json
       (`Assoc
         [
-          ("team", `String (Params.Team.to_string team));
+          ("team", `String (team));
           ("user", `String (Option.value (header req "x-user") ~default:"anonymous"));
         ])
 

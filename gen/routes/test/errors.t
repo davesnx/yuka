@@ -210,7 +210,61 @@ An unknown param type
   > Router.make [ Router.route A ~path:"/a/:x<float>" ~page:P.a ]
   > EOF
   File "Routes.ml", line 1, characters 35-49:
-  Error: param :x in path "/a/:x<float>" has type "float"; the types are int, string, string... and a module path
+  Error: param :x in path "/a/:x<float>" has type "float"; the types are int, string, string... and a type with its module path, such as Model.issue_id
+  [1]
+
+A param type that names a module
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a/:id<Issue_id>" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 35-53:
+  Error: param :id in path "/a/:id<Issue_id>" names the module Issue_id; write its type: :id<Issue_id.t>
+  [1]
+
+A param type without its module
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a/:id<issue_id>" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 35-53:
+  Error: param :id in path "/a/:id<issue_id>" has type "issue_id"; the types are int, string, string... and a type with its module path, such as Model.issue_id
+  [1]
+
+A param type with a parameter
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a/:x<int list>" ~page:P.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 35-52:
+  Error: param :x in path "/a/:x<int list>" has type "int list"; the types are int, string, string... and a type with its module path, such as Model.issue_id
+  [1]
+
+A search type that names a module
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:P.a ~search:{ tab = optional Tab } ]
+  > EOF
+  File "Routes.ml", line 1, characters 75-78:
+  Error: search field tab names the module Tab; write its type: optional Tab.t
+  [1]
+
+A search type without its module
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:P.a ~search:{ sort = default sort Newest } ]
+  > EOF
+  File "Routes.ml", line 1, characters 75-79:
+  Error: search field sort has type "sort"; the types are int, string, bool and a type with its module path, such as Model.issue_id
+  [1]
+
+A search type with a parameter
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:P.a ~search:{ ids = many (int list) } ]
+  > EOF
+  File "Routes.ml", line 1, characters 71-81:
+  Error: search field ids has type "int list"; the types are int, string, bool and a type with its module path, such as Model.issue_id
   [1]
 
 A param without a type
@@ -558,7 +612,7 @@ Valid input, every node kind, exits 0
   $ gen <<'EOF' > /dev/null
   > Router.make ~layout:L.root ~headers:[ ("x", "y") ] ~cache:no_store ~prerender:false
   >   [
-  >     Router.group ~path:"/g/:id<M.Id>" ~layout:L.g ~loader:L.load ~guard:G.ok
+  >     Router.group ~path:"/g/:id<M.id>" ~layout:L.g ~loader:L.load ~guard:G.ok
   >       ~not_found:P.nf ~error:P.err ~search:{ q = optional string } ~prerender:true
   >       [
   >         Router.route A ~path:"/" ~page:P.a;

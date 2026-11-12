@@ -5,7 +5,7 @@ exception Fail of Location.t * string
 let fail loc fmt = Printf.ksprintf (fun s -> raise (Fail (loc, s))) fmt
 let sprintf = Printf.sprintf
 
-type ty = Int | String | Bool | Custom of string
+type ty = Int | String | Bool | Custom of { ty : string; param : string }
 type seg = Static of string | Param of string * ty | Rest of string
 type search_kind = Optional | Default of string | Many
 type field = { fname : string; fty : ty; fkind : search_kind }
@@ -73,6 +73,18 @@ let is_module_path s =
       && String.for_all is_ident_char c)
     (String.split_on_char '.' s)
 
+let custom loc ~what ~fix ~types ty =
+  match List.rev (String.split_on_char '.' ty) with
+  | last :: (_ :: _ as m) when is_module_path (String.concat "." (List.rev m)) && is_label last ->
+      let value = if last = "t" then "param" else last ^ "_param" in
+      Custom { ty; param = String.concat "." (List.rev (value :: m)) }
+  | _ when is_module_path ty ->
+      fail loc "%s names the module %s; write its type: %s" what ty (fix (ty ^ ".t"))
+  | _ ->
+      fail loc "%s has type %S; the types are %s and a type with its module path, such as \
+         Model.issue_id"
+        what ty types
+
 let line (loc : Location.t) = loc.loc_start.pos_lnum
 let has_rest = List.exists (function Rest _ -> true | _ -> false)
 
@@ -93,12 +105,12 @@ let segment loc path part =
         | "int" -> Param (name, Int)
         | "string" -> Param (name, String)
         | "string..." -> Rest name
-        | _ when is_module_path ty -> Param (name, Custom ty)
         | _ ->
-            fail loc
-              "param :%s in path %S has type %S; the types are int, string, \
-               string... and a module path"
-              name path ty)
+            Param
+              ( name,
+                custom loc
+                  ~what:(sprintf "param :%s in path %S" name path)
+                  ~fix:(sprintf ":%s<%s>" name) ~types:"int, string, string..." ty ))
     | _ -> fail loc "param %S in path %S must be written :name<type>" part path
   else if String.exists (fun c -> c = '%' || c = '?' || c = '#') part then
     fail loc "segment %S in path %S holds %% ? or #; write segments decoded" part
@@ -189,13 +201,21 @@ let string_lit name v =
   | Pexp_constant (Pconst_string (s, _, _)) -> s
   | _ -> fail v.pexp_loc "%s must be a string literal" name
 
-let parse_ty e =
+let parse_ty fname kind e =
   match e.pexp_desc with
   | Pexp_ident { txt = Lident "int"; _ } -> Int
   | Pexp_ident { txt = Lident "string"; _ } -> String
   | Pexp_ident { txt = Lident "bool"; _ } -> Bool
-  | Pexp_construct ({ txt; _ }, None) -> Custom (String.concat "." (Longident.flatten_exn txt))
-  | _ -> fail e.pexp_loc "a search type is int, string, bool or a module path"
+  | _ ->
+      let ty =
+        match e.pexp_desc with
+        | Pexp_ident { txt; _ } | Pexp_construct ({ txt; _ }, None) ->
+            String.concat "." (Longident.flatten_exn txt)
+        | _ -> Pprintast.string_of_expression e
+      in
+      custom e.pexp_loc
+        ~what:(sprintf "search field %s" fname)
+        ~fix:(sprintf "%s %s" kind) ~types:"int, string, bool" ty
 
 let parse_search v =
   match v.pexp_desc with
@@ -215,12 +235,12 @@ let parse_search v =
           | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident kind; _ }; _ }, args)
             when List.for_all (fun (l, _) -> l = Nolabel) args -> (
               match (kind, List.map snd args) with
-              | "optional", [ t ] -> { fname; fty = parse_ty t; fkind = Optional }
-              | "many", [ t ] -> { fname; fty = parse_ty t; fkind = Many }
+              | "optional", [ t ] -> { fname; fty = parse_ty fname kind t; fkind = Optional }
+              | "many", [ t ] -> { fname; fty = parse_ty fname kind t; fkind = Many }
               | "default", [ t; d ] ->
                   {
                     fname;
-                    fty = parse_ty t;
+                    fty = parse_ty fname kind t;
                     fkind = Default (Pprintast.string_of_expression d);
                   }
               | _ -> bad ())
@@ -503,7 +523,7 @@ let ty_text = function
   | Int -> "int"
   | String -> "string"
   | Bool -> "bool"
-  | Custom m -> m ^ ".t"
+  | Custom { ty; _ } -> ty
 
 let fields segs search =
   List.filter_map
@@ -567,12 +587,15 @@ let concat pieces =
   in
   go (merge pieces)
 
+let custom_encode p v = sprintf "Yuka.Router.Param.encode %s %s" p v
+let custom_decode p = sprintf "Yuka.Router.Param.decode %s" p
+
 let to_url ty v =
   match ty with
   | Int -> "Stdlib.string_of_int " ^ v
   | Bool -> "Stdlib.string_of_bool " ^ v
   | String -> "Yuka.Router.encode " ^ v
-  | Custom m -> sprintf "Yuka.Router.encode (%s.to_string %s)" m v
+  | Custom { param = m; _ } -> sprintf "Yuka.Router.encode (%s)" (custom_encode m v)
 
 let path_pieces segs =
   match segs with
@@ -583,8 +606,8 @@ let path_pieces segs =
           | Static s -> [ Lit ("/" ^ encode s) ]
           | Param (n, Int) -> [ Lit "/"; Code ("Stdlib.string_of_int " ^ n) ]
           | Param (n, String) -> [ Lit "/"; Code ("Yuka.Router.segment " ^ n) ]
-          | Param (n, Custom m) ->
-              [ Lit "/"; Code (sprintf "Yuka.Router.segment (%s.to_string %s)" m n) ]
+          | Param (n, Custom { param = m; _ }) ->
+              [ Lit "/"; Code (sprintf "Yuka.Router.segment (%s)" (custom_encode m n)) ]
           | Param (_, Bool) -> assert false
           | Rest n -> [ Code ("Yuka.Router.segments " ^ n) ])
         segs
@@ -596,7 +619,8 @@ let search_pairs f =
   | Default d ->
       let eq =
         match f.fty with
-        | Custom m -> sprintf "Stdlib.( = ) (%s.to_string %s) (%s.to_string (%s))" m f.fname m d
+        | Custom { param = m; _ } ->
+            sprintf "Stdlib.( = ) (%s) (%s)" (custom_encode m f.fname) (custom_encode m ("(" ^ d ^ ")"))
         | _ -> sprintf "Stdlib.( = ) %s (%s)" f.fname d
       in
       sprintf "(if %s then [] else %s)" eq (pair f.fname)
@@ -686,7 +710,7 @@ let decode_search f =
     | String -> "Some " ^ v
     | Int -> "Yuka.Router.int_param " ^ v
     | Bool -> sprintf "(match %s with \"true\" -> Some true | \"false\" -> Some false | _ -> None)" v
-    | Custom m -> sprintf "%s.of_string %s" m v
+    | Custom { param = m; _ } -> sprintf "%s %s" (custom_decode m) v
   in
   match (f.fkind, f.fty) with
   | Optional, _ -> sprintf "(match %s with v :: _ -> %s | [] -> None)" values (dec "v")
@@ -701,7 +725,7 @@ let rec decode_params params k =
   match params with
   | [] -> k
   | (i, ty) :: rest -> (
-      let fn = match ty with Int -> Some "Yuka.Router.int_param" | Custom m -> Some (m ^ ".of_string") | _ -> None in
+      let fn = match ty with Int -> Some "Yuka.Router.int_param" | Custom { param = m; _ } -> Some (custom_decode m) | _ -> None in
       match fn with
       | None -> decode_params rest k
       | Some fn ->
@@ -841,7 +865,7 @@ let key_text level =
       (function
         | Param (n, Int) -> Some ("Stdlib.string_of_int " ^ n)
         | Param (n, (String | Bool)) -> Some ("Yuka.Router.encode " ^ n)
-        | Param (n, Custom m) -> Some (sprintf "Yuka.Router.encode (%s.to_string %s)" m n)
+        | Param (n, Custom { param = m; _ }) -> Some (sprintf "Yuka.Router.encode (%s)" (custom_encode m n))
         | Rest _ | Static _ -> None)
       level.scope
   in

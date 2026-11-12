@@ -29,7 +29,10 @@ module Live = Live
 module Form = Form
 module Event = Platform.Event
 module Browser = Platform.Browser
-module Router = Router
+module Router = struct
+  include Router
+  module Param = Router_param
+end
 
 module Server = struct
   include Server

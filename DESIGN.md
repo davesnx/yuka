@@ -1593,7 +1593,7 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   route has search fields), `href` and `find`.
 - `href`: static segments are encoded when the generator runs; params with
   `Yuka.Router.segment` (`int` with `string_of_int`, a custom type through
-  `M.to_string`); a catch-all with `Yuka.Router.segments` (`/` and one
+  `Yuka.Router.Param.encode` of its value, see "Param values"); a catch-all with `Yuka.Router.segments` (`/` and one
   segment per element). `segment` raises `Invalid_argument` on `""`, `.`
   and `..`, and `segments` also on `[]`: the cycle drops empty segments and
   browsers resolve dot segments, even as `%2E`, so `find` could not give
@@ -1628,7 +1628,7 @@ and navigation come later. The GADT `Yuka.Router` stays until then.
   (`Stdlib.List.map`, `Stdlib.( ^ )`, `Stdlib.( = )`), so a sibling `List`
   module or `-open Base` does not change it. `test/routes/shadowed`
   compiles the fixture with `-open Shadow`, which shadows them all.
-- New in `Yuka.Router`: `meth`, `lookup`, `PARAM`, `encode`, `segment`,
+- New in `Yuka.Router`: `meth`, `lookup`, `Param`, `encode`, `segment`,
   `segments`, `int_param`, `search`.
 - Size: `find` is a top-level function that a client which calls only
   `href` does not name, so esbuild drops it (checked by
@@ -2925,3 +2925,45 @@ as a call, with the same checks.
   standard library value: its defaults are `[]` or the copied `default`
   values.
 - `test/cycle/Routes.ml` renames its route `Find` to `Search`.
+
+## Param values (2026-11-12)
+
+Decided by the user: a param type is a value, as a codec is.
+`Yuka.Router.Param` has an abstract `'a t`, `make ~decode ~encode`,
+`int`, `string`, `bool`, `decode` and `encode`. The module type `PARAM`
+(`of_string`, `to_string`) is gone, with no compatibility path: 1.0 is
+not released. Reason: one shape for codecs and params, and a user can
+build a param on `Param.int` and the others.
+
+- `Routes.ml` names the type of a param, with its module path:
+  `:id<Model.issue_id>`, `optional Tab.t`,
+  `default Model.sort Model.Newest`. The value comes from the rule of
+  `[@@deriving codec]`: `M.t` uses `M.param`, `M.foo` uses `M.foo_param`.
+  Reason: the generator reads only `Routes.ml` and sees no types, but it
+  must write each field type in `type t` of `Routes`; a type path gives
+  it that name, and the value follows by the codec rule.
+- Build errors with a location in `Routes.ml`: a capitalised last name
+  (`:id<Issue_id>`) gives what to write (`:id<Issue_id.t>`); a type
+  without a module (`issue_id`) and a type with a parameter (`int list`)
+  are bad types. A bare type could resolve only through an `-open` flag
+  on the shared library, since the generated module opens nothing.
+- The generated `type t` writes the type path as given. The generated
+  code calls `Yuka.Router.Param.decode Model.issue_id_param s` and
+  `Yuka.Router.Param.encode Model.issue_id_param v` where it called
+  `M.of_string s` and `M.to_string v`. Percent-encoding does not change.
+- The built-in `int`, `string`, `string...` and `bool` keep their inline
+  code: `Yuka.Router.int_param p` is shorter than
+  `Yuka.Router.Param.decode Yuka.Router.Param.int p`, which also goes
+  through `Curry._2` in JavaScript. `int_param` stays for the generated
+  code.
+- `Param` is its own compilation unit, `src/router_param.ml`, and
+  `yuka.mli` declares it as the alias `module Param = Router_param` inside
+  `Router`. `Yuka.Router` is one JavaScript object that a client keeps
+  whole when it uses the router; a member there cost the demo start
+  about 120 B gzip. An alias has no field in that object, and code that
+  names `Yuka.Router.Param` imports `router_param.js` itself, so a client
+  with no custom param type does not grow.
+- `int`, `string` and `bool` are record literals, so they are free of
+  side effects. A module that calls `Param.make` at its top level is not:
+  esbuild keeps it when the bundle imports it. A missing value fails with
+  `Unbound value Model.issue_id_param` in the generated `routes.ml`.
