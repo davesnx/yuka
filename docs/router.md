@@ -190,7 +190,7 @@ page with no island, links load full pages. In an island,
 on_click=(fun _ -> Yuka.Browser.navigate (Routes.blog ~tag:"bug" ()))
 ```
 
-## What the router does not do
+## Limitations
 
 - An island cannot read the current route or search params as a State.
   Pass what it needs as props.

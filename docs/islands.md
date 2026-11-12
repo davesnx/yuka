@@ -153,7 +153,7 @@ let[@client] make ~(title : string) ~(children : Yuka.slot) () =
 
 A `<Yuka.Client>` in a slot is its own island.
 
-## What an island cannot do
+## Limitations
 
 - An event handler or a hole outside an island does not compile: "Type
   Yuka.client is not compatible with type Yuka.server".
