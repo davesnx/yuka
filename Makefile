@@ -16,51 +16,51 @@ help: ## Print this help message
 
 .PHONY: build
 build: ## Build everything (native and Melange)
-	$(DUNE) build --profile=dev
+	$(DUNE) build --root . --profile=dev
 
 .PHONY: build-prod
 build-prod: ## Build with --profile=release
-	$(DUNE) build --profile=release
+	$(DUNE) build --root . --profile=release
 
 .PHONY: dev
 dev: ## Build in watch mode
-	$(DUNE) build -w --profile=dev
+	$(DUNE) build --root . -w --profile=dev
 
 .PHONY: clean
 clean: ## Clean artifacts
-	$(DUNE) clean
+	$(DUNE) clean --root .
 
 .PHONY: test
 test: ## Run all tests
-	$(DUNE) build @runtest
+	$(DUNE) build --root . @runtest
 
 .PHONY: test-watch
 test-watch: ## Run all tests in watch mode
-	$(DUNE) build @runtest -w
+	$(DUNE) build --root . @runtest -w
 
 .PHONY: test-promote
 test-promote: ## Run all tests and promote snapshots
-	$(DUNE) build @runtest --auto-promote
+	$(DUNE) build --root . @runtest --auto-promote
 
 .PHONY: ppx-test
 ppx-test: ## Run ppx tests
-	$(DUNE) build @test/ppx/runtest
+	$(DUNE) build --root . @test/ppx/runtest
 
 .PHONY: ppx-test-watch
 ppx-test-watch: ## Run ppx tests in watch mode
-	$(DUNE) build @test/ppx/runtest -w
+	$(DUNE) build --root . @test/ppx/runtest -w
 
 .PHONY: ppx-test-promote
 ppx-test-promote: ## Run ppx tests and promote snapshots
-	$(DUNE) build @test/ppx/runtest --auto-promote
+	$(DUNE) build --root . @test/ppx/runtest --auto-promote
 
 .PHONY: demo-build
 demo-build: ## Build the demo (server and client)
-	$(DUNE) build --profile=dev @demo/all
+	$(DUNE) build --root . --profile=dev @demo/all
 
 .PHONY: demo-build-watch
 demo-build-watch: ## Build the demo in watch mode
-	$(DUNE) build --profile=dev @demo/all -w
+	$(DUNE) build --root . --profile=dev @demo/all -w
 
 .PHONY: demo-bundle
 demo-bundle: demo-build ## Bundle the demo client with esbuild
@@ -72,15 +72,15 @@ demo-serve: demo-build ## Serve the demo on PORT
 
 .PHONY: demo-dev
 demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
-	$(DUNE) build --profile=dev ./gen/yuka_cli.exe
+	$(DUNE) build --root . --profile=dev ./gen/yuka_cli.exe
 	opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- $(BUILD_DIR)/default/gen/yuka_cli.exe dev \
-	  --build 'dune build --watch --profile=dev @demo/all' \
+	  --build 'dune build --root . --watch --profile=dev @demo/all' \
 	  --assets $(BUILD_DIR)/default/demo/static --assets $(BUILD_DIR)/default/demo/client/out \
 	  -- $(BUILD_DIR)/default/demo/server/demo_server.exe --port $(PORT)
 
 .PHONY: demo-test
 demo-test: ## Run the demo tests
-	$(DUNE) build @demo/runtest --force
+	$(DUNE) build --root . @demo/runtest --force
 
 .PHONY: e2e
 e2e: ## Browser check of the demo (native ES modules)
@@ -92,7 +92,7 @@ e2e-bundle: ## Browser check of the demo (esbuild bundle)
 
 .PHONY: bench
 bench: ## Build and run the browser benchmark
-	$(DUNE) build --profile=release @bench/bench
+	$(DUNE) build --root . --profile=release @bench/bench
 	node bench/run.ts $(BUILD_DIR)/default/bench/out
 
 BENCH_RUNS ?= 10
@@ -100,13 +100,13 @@ BENCH_OUT ?= $(BUILD_DIR)/bench-keyed/result.json
 
 .PHONY: bench-keyed
 bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUNS, BENCH_OUT, CHROME_PATH)
-	$(DUNE) build --profile=release @bench/keyed/bench-keyed
+	$(DUNE) build --root . --profile=release @bench/keyed/bench-keyed
 	BUILD_DIR=$(BUILD_DIR) bench/keyed/build.sh
 	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --out $(BENCH_OUT)
 
 .PHONY: size
 size: ## Bundle the keyed benchmark app, the demo and three one-island pages, print raw and gzip bytes and the JavaScript each page loads at start, check the budget in bench/size/budget.json
-	$(DUNE) build --profile=release @bench/keyed/bench-keyed @demo/all @bench/size/page/client/size-page @bench/size/codec_page/client/size-codec-page @bench/size/remote_page/client/size-remote-page
+	$(DUNE) build --root . --profile=release @bench/keyed/bench-keyed @demo/all @bench/size/page/client/size-page @bench/size/codec_page/client/size-codec-page @bench/size/remote_page/client/size-remote-page
 	node bench/size/size.ts --build-dir $(BUILD_DIR)
 
 SSR_ROWS ?= 100
@@ -114,7 +114,7 @@ SSR_CONNECTIONS ?= 32
 
 .PHONY: bench-ssr
 bench-ssr: ## SSR throughput of the same issue list page: yuka, dream, server-reason-react, react, solid (SSR_ROWS, SSR_CONNECTIONS)
-	$(DUNE) build --profile=release @bench/ssr/ocaml/all
+	$(DUNE) build --root . --profile=release @bench/ssr/ocaml/all
 	[ -d bench/ssr/node/node_modules ] || npm ci --prefix bench/ssr/node --no-audit --no-fund
 	node bench/ssr/run.ts --build-dir $(BUILD_DIR) --rows $(SSR_ROWS) --connections $(SSR_CONNECTIONS)
 
