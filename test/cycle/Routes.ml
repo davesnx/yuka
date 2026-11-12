@@ -14,7 +14,7 @@ Router.make ~layout:App.Layouts.root ~not_found:App.Pages.not_found
     Router.route Broken ~path:"/broken" ~page:App.Pages.broken;
     Router.route Boom ~path:"/boom" ~page:App.Pages.boom
       ~loader:App.Loaders.exploding;
-    Router.group ~path:"/team/:team<Params.Team>" ~layout:App.Layouts.team
+    Router.group ~path:"/team/:team<Params.Team.t>" ~layout:App.Layouts.team
       ~guard:App.Guards.outer ~loader:App.Loaders.squad
       ~headers:[ ("X-A", "team") ]
       ~cache:(private_ ~max_age:5)

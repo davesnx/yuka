@@ -29,7 +29,10 @@ module Live = Live
 module Form = Form
 module Event = Platform.Event
 module Browser = Platform.Browser
-module Router = Router
+module Router = struct
+  include Router
+  module Param = Router_param
+end
 
 module Console = struct
   let send level browser message = if Web.in_browser then browser message else Types.log_message level message

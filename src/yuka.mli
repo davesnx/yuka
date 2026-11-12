@@ -975,19 +975,12 @@ module Router : sig
             substituted and encoded. *)
     | Missing  (** No node matches, or a param does not decode. *)
 
-  (** A custom param or search type, written [:id<Issue_id>] in a path. *)
-  module type PARAM = sig
-    type t
-
-    val of_string : string -> t option
-    (** For a path param, [None] means the path does not match. For a
-        search field, the value is dropped: an optional field gets [None],
-        a field with a default gets the default, and a list field leaves
-        the value out. *)
-
-    val to_string : t -> string
-    (** The inverse of [of_string]. [href] encodes the result. *)
-  end
+  (** How a path param or a search field turns into a value and back. A
+      custom type is written with its module path, [:tab<Model.tab>] in a
+      path or [optional Model.tab] in a search, and uses the value of the
+      codec rule: [Issue_id.t] uses [Issue_id.param], and [Model.tab] uses
+      [Model.tab_param]. *)
+  module Param = Router_param
 
   (**/**)
 
@@ -1010,9 +1003,8 @@ module Router : sig
       more, and on an element that {!segment} refuses. *)
 
   val int_param : string -> int option
-  (** Decodes an [int] param in the form [string_of_int] writes: [0], or an
-      optional [-] and digits without a leading [0], within the range of
-      [int]. So each value has one URL: [01], [-0] and [+1] give [None]. *)
+  (** [Param.decode Param.int], which the generated code calls inline. Use
+      {!Param.int}. *)
 
   val search : (string * string) list -> string -> string list
   (** [search query key] is every value of [key] in the decoded query pairs,
