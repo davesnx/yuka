@@ -955,23 +955,23 @@ module type ADAPTER = sig
   val sleep : float -> unit Async.t
 end
 
-module Make (A : ADAPTER) = struct
-  let handler ?node config app (req : A.request) =
+module Make (Backend : ADAPTER) = struct
+  let handler ?node config app (req : Backend.request) =
     let view =
       {
-        meth = A.meth req;
-        target = A.target req;
-        header = A.header req;
-        body = (fun ~limit -> A.body req ~limit);
-        session = (fun () -> A.session req);
-        csrf_token = (fun () -> A.csrf_token req);
-        verify_csrf = A.verify_csrf req;
+        meth = Backend.meth req;
+        target = Backend.target req;
+        header = Backend.header req;
+        body = (fun ~limit -> Backend.body req ~limit);
+        session = (fun () -> Backend.session req);
+        csrf_token = (fun () -> Backend.csrf_token req);
+        verify_csrf = Backend.verify_csrf req;
       }
     in
-    Async.bind (handle ?node config app ~sleep:A.sleep ~exists:A.exists req view) (function
-      | Respond r -> A.respond r
-      | File { root; path; headers } -> A.file req ~root ~path ~headers
-      | Upgrade run -> A.upgrade req run)
+    Async.bind (handle ?node config app ~sleep:Backend.sleep ~exists:Backend.exists req view) (function
+      | Respond r -> Backend.respond r
+      | File { root; path; headers } -> Backend.file req ~root ~path ~headers
+      | Upgrade run -> Backend.upgrade req run)
 end
 
 let prerender_seeds (App a) = a.prerender

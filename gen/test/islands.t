@@ -79,14 +79,14 @@ Nested directory with include_subdirs unqualified, file without island
 Two libraries, sorted output
 
   $ mkdir lib_b lib_a
-  $ printf '(library (name b))\n' > lib_b/dune
-  $ printf '(library (name a))\n' > lib_a/dune
+  $ printf '(library (name beta))\n' > lib_b/dune
+  $ printf '(library (name alpha))\n' > lib_a/dune
   $ printf 'let[@client] make () = ()\n' > lib_b/same.mlx
   $ printf 'let[@client] make () = ()\n' > lib_a/same.mlx
   $ yuka islands --manifest --dir lib_b --dir lib_a
   {
-    "A.Same": "./lib_a/same.js",
-    "B.Same": "./lib_b/same.js"
+    "Alpha.Same": "./lib_a/same.js",
+    "Beta.Same": "./lib_b/same.js"
   }
   $ yuka islands --dir lib_b --dir lib_a | grep -c lazy_entry
   2
@@ -94,19 +94,19 @@ Two libraries, sorted output
 Only .mlx files are scanned
 
   $ mkdir plain
-  $ printf '(library (name p))\n' > plain/dune
+  $ printf '(library (name plain))\n' > plain/dune
   $ printf 'let[@client] make () = ()\n' > plain/old.ml
   $ printf 'let[@client] make () = ()\n' > plain/new.mlx
   $ yuka islands --manifest --dir plain
   {
-    "P.New": "./plain/new.js"
+    "Plain.New": "./plain/new.js"
   }
 
 No island at all
 
   $ mkdir empty
-  $ printf '(library (name e))\n' > empty/dune
-  $ printf 'let x = 1\n' > empty/x.mlx
+  $ printf '(library (name empty))\n' > empty/dune
+  $ printf 'let x = 1\n' > empty/blank.mlx
   $ yuka islands --dir empty | tail -2
       ~navigation:(fun () -> Yuka.runtime_promise_map router (import "yuka/navigation.js"))
       []
@@ -116,8 +116,8 @@ No island at all
 include_subdirs qualified is rejected
 
   $ mkdir -p q/sub
-  $ printf '(include_subdirs qualified)\n(library (name q))\n' > q/dune
-  $ printf 'let[@client] make () = ()\n' > q/sub/a.mlx
+  $ printf '(include_subdirs qualified)\n(library (name qualified))\n' > q/dune
+  $ printf 'let[@client] make () = ()\n' > q/sub/counter.mlx
   $ yuka islands --dir q
   yuka islands: q/dune: include_subdirs qualified is not supported; use include_subdirs unqualified
   [1]
@@ -126,7 +126,7 @@ include_subdirs qualified is rejected
   [1]
 
   $ mkdir -p q2/sub
-  $ printf '(include_subdirs unqualified)\n(library (name q))\n' > q2/dune
+  $ printf '(include_subdirs unqualified)\n(library (name qualified))\n' > q2/dune
   $ printf '(include_subdirs\n qualified)\n' > q2/sub/dune
   $ yuka islands --dir q2
   yuka islands: q2/sub/dune: include_subdirs qualified is not supported; use include_subdirs unqualified
@@ -140,11 +140,11 @@ Errors
 
 The library name comes from the dune file of the directory:
 
-  $ mkdir nodune && printf 'let[@client] make () = ()\n' > nodune/a.mlx
+  $ mkdir nodune && printf 'let[@client] make () = ()\n' > nodune/counter.mlx
   $ yuka islands --dir nodune
   yuka islands: nodune/dune: no dune file; yuka islands reads the library name from it
   [1]
-  $ mkdir two && printf '(library (name a))\n(library (name b))\n' > two/dune
+  $ mkdir two && printf '(library (name alpha))\n(library (name beta))\n' > two/dune
   $ yuka islands --dir two
   yuka islands: two/dune: yuka islands needs one library stanza in this file, not 2
   [1]
@@ -157,24 +157,24 @@ Like dune, a library without (name ...) takes its public_name when that is a
 library name:
 
   $ mkdir pub && printf '(library (public_name app))\n' > pub/dune
-  $ printf 'let[@client] make () = ()\n' > pub/a.mlx
+  $ printf 'let[@client] make () = ()\n' > pub/counter.mlx
   $ yuka islands --manifest --dir pub
   {
-    "App.A": "./pub/a.js"
+    "App.Counter": "./pub/counter.js"
   }
   $ printf '(library (public_name my-app.sub))\n' > pub/dune
   $ yuka islands --manifest --dir pub
   yuka islands: pub/dune: the library has no (name ...), and its public_name my-app.sub is not a library name
   [1]
   $ mkdir comments && printf '; (library (name wrong))\n#| (library (name wrong)) |#\n#;(library (name wrong))\n(rule (targets x) (action (with-stdout-to x (echo "(library (name wrong))"))))\n(library\n (name right))\n' > comments/dune
-  $ printf 'let[@client] make () = ()\n' > comments/a.mlx
+  $ printf 'let[@client] make () = ()\n' > comments/counter.mlx
   $ yuka islands --manifest --dir comments
   {
-    "Right.A": "./comments/a.js"
+    "Right.Counter": "./comments/counter.js"
   }
 Block strings end at the end of the line, and can hold ( and ":
 
-  $ mkdir block && printf 'let[@client] make () = ()\n' > block/a.mlx
+  $ mkdir block && printf 'let[@client] make () = ()\n' > block/counter.mlx
   $ cat > block/dune <<'X'
   > (rule (with-stdout-to x.txt (echo "\| a ( " (library (name wrong))
   >   "\> b )
@@ -183,10 +183,10 @@ Block strings end at the end of the line, and can hold ( and ":
   > X
   $ yuka islands --manifest --dir block
   {
-    "Right.A": "./block/a.js"
+    "Right.Counter": "./block/counter.js"
   }
 
-  $ mkdir broken && printf '(library (name x)\n' > broken/dune
+  $ mkdir broken && printf '(library (name broken)\n' > broken/dune
   $ yuka islands --dir broken
   yuka islands: broken/dune: a ( has no )
   [1]
@@ -194,7 +194,7 @@ Block strings end at the end of the line, and can hold ( and ":
 A let[@client] inside a comment or string is not an island
 
   $ mkdir text
-  $ printf '(library (name t))\n' > text/dune
+  $ printf '(library (name text))\n' > text/dune
   $ cat > text/comment.mlx <<'EOT'
   > (* doc
   > let[@client] make () = 1
@@ -224,62 +224,62 @@ A let[@client] inside a comment or string is not an island
   > EOT
   $ yuka islands --manifest --dir text
   {
-    "T.Real": "./text/real.js"
+    "Text.Real": "./text/real.js"
   }
 
 Subdirectories belong to the library only with include_subdirs unqualified
 
   $ mkdir -p scope/sub
-  $ printf '(library (name s))\n' > scope/dune
+  $ printf '(library (name scope))\n' > scope/dune
   $ printf 'let[@client] make () = 1\n' > scope/top.mlx
   $ printf 'let[@client] make () = 1\n' > scope/sub/other.mlx
   $ yuka islands --manifest --dir scope
   {
-    "S.Top": "./scope/top.js"
+    "Scope.Top": "./scope/top.js"
   }
-  $ printf '; (include_subdirs unqualified)\n(library (name s))\n' > scope/dune
+  $ printf '; (include_subdirs unqualified)\n(library (name scope))\n' > scope/dune
   $ yuka islands --manifest --dir scope
   {
-    "S.Top": "./scope/top.js"
+    "Scope.Top": "./scope/top.js"
   }
-  $ printf '(include_subdirs unqualified)\n(library (name s))\n' > scope/dune
+  $ printf '(include_subdirs unqualified)\n(library (name scope))\n' > scope/dune
   $ yuka islands --manifest --dir scope
   {
-    "S.Other": "./scope/sub/other.js",
-    "S.Top": "./scope/top.js"
+    "Scope.Other": "./scope/sub/other.js",
+    "Scope.Top": "./scope/top.js"
   }
 
 A modules field limits the islands to the listed modules
 
   $ mkdir mods
-  $ printf 'let[@client] make () = 1\n' > mods/a.mlx
-  $ printf 'let[@client] make () = 1\n' > mods/b.mlx
-  $ printf 'let[@client] make () = 1\n' > mods/c.mlx
-  $ printf '(library (name m) (modules a c))\n' > mods/dune
+  $ printf 'let[@client] make () = 1\n' > mods/alpha.mlx
+  $ printf 'let[@client] make () = 1\n' > mods/beta.mlx
+  $ printf 'let[@client] make () = 1\n' > mods/gamma.mlx
+  $ printf '(library (name mods) (modules alpha gamma))\n' > mods/dune
   $ yuka islands --manifest --dir mods
   {
-    "M.A": "./mods/a.js",
-    "M.C": "./mods/c.js"
+    "Mods.Alpha": "./mods/alpha.js",
+    "Mods.Gamma": "./mods/gamma.js"
   }
-  $ printf '(library (name m) (modules :standard \\ b))\n' > mods/dune
+  $ printf '(library (name mods) (modules :standard \\ beta))\n' > mods/dune
   $ yuka islands --manifest --dir mods
   {
-    "M.A": "./mods/a.js",
-    "M.C": "./mods/c.js"
+    "Mods.Alpha": "./mods/alpha.js",
+    "Mods.Gamma": "./mods/gamma.js"
   }
-  $ printf '(library (name m) (modules (:standard \\ a) \\ c))\n' > mods/dune
+  $ printf '(library (name mods) (modules (:standard \\ alpha) \\ gamma))\n' > mods/dune
   $ yuka islands --manifest --dir mods
   {
-    "M.B": "./mods/b.js"
+    "Mods.Beta": "./mods/beta.js"
   }
-  $ printf '(library (name m) (modules_without_implementation a))\n' > mods/dune
+  $ printf '(library (name mods) (modules_without_implementation alpha))\n' > mods/dune
   $ yuka islands --manifest --dir mods
   {
-    "M.A": "./mods/a.js",
-    "M.B": "./mods/b.js",
-    "M.C": "./mods/c.js"
+    "Mods.Alpha": "./mods/alpha.js",
+    "Mods.Beta": "./mods/beta.js",
+    "Mods.Gamma": "./mods/gamma.js"
   }
-  $ printf '(library (name m) (modules (:include mods.sexp)))\n' > mods/dune
+  $ printf '(library (name mods) (modules (:include mods.sexp)))\n' > mods/dune
   $ yuka islands --dir mods
   yuka islands: mods/dune: (:include ...) in (modules ...) is not supported; list the modules
   [1]
@@ -287,31 +287,31 @@ A modules field limits the islands to the listed modules
 The manifest is valid JSON for non-ASCII and space characters
 
   $ mkdir "café dir"
-  $ printf '(library (name l))\n' > "café dir/dune"
+  $ printf '(library (name cafe))\n' > "café dir/dune"
   $ printf 'let[@client] make () = 1\n' > "café dir/uno.mlx"
   $ yuka islands --manifest --dir "café dir"
   {
-    "L.Uno": "./café dir/uno.js"
+    "Cafe.Uno": "./café dir/uno.js"
   }
   $ yuka islands --manifest --dir "café dir" | node -e 'console.log(JSON.stringify(JSON.parse(require("fs").readFileSync(0,"utf8"))))'
-  {"L.Uno":"./café dir/uno.js"}
+  {"Cafe.Uno":"./café dir/uno.js"}
 
   $ mkdir "$(printf 'a\tb\\c')"
-  $ printf '(library (name l))\n' > "$(printf 'a\tb\\c')/dune"
-  $ printf 'let[@client] make () = 1\n' > "$(printf 'a\tb\\c')/x.mlx"
+  $ printf '(library (name escaped))\n' > "$(printf 'a\tb\\c')/dune"
+  $ printf 'let[@client] make () = 1\n' > "$(printf 'a\tb\\c')/widget.mlx"
   $ yuka islands --manifest --dir "$(printf 'a\tb\\c')"
   {
-    "L.X": "./a\u0009b\\c/x.js"
+    "Escaped.Widget": "./a\u0009b\\c/widget.js"
   }
-  $ yuka islands --manifest --dir "$(printf 'a\tb\\c')" | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8"))["L.X"] === "./a\tb\\c/x.js")'
+  $ yuka islands --manifest --dir "$(printf 'a\tb\\c')" | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8"))["Escaped.Widget"] === "./a\tb\\c/widget.js")'
   true
 
 let[@yuka.client] is an island too:
 
   $ mkdir ns && printf '(library (name ns))\n' > ns/dune
-  $ printf 'let[@yuka.client] make () = ()\n' > ns/a.mlx
-  $ printf 'let[@yuka.clientx] make () = ()\n' > ns/b.mlx
+  $ printf 'let[@yuka.client] make () = ()\n' > ns/counter.mlx
+  $ printf 'let[@yuka.clientx] make () = ()\n' > ns/other.mlx
   $ yuka islands --manifest --dir ns
   {
-    "Ns.A": "./ns/a.js"
+    "Ns.Counter": "./ns/counter.js"
   }

@@ -62,7 +62,7 @@ let post (_ : Dream.request) ~slug =
 ## Paths
 
 - `:id<string>`: one segment, as a `string`.
-- `:n<int>`: an `int`. Only the form `string_of_int` writes matches, so
+- `:n<int>`: an `int`. Only the form `Int.to_string` writes matches, so
   `01` and `+1` do not.
 - `:tab<Model.tab>`: your own type, written with its module path. See
   below.
@@ -91,7 +91,7 @@ let tab_param =
 Router.route Issue ~path:"/issue/:id<string>/:tab<Model.tab>" ~page:Pages.issue
 ```
 
-`M.t` uses `M.param`: with `type t = int` and `let param = ...` in
+`Issue_id.t` uses `Issue_id.param`: with `type t = int` and `let param = ...` in
 `issue_id.ml`, write `:id<Issue_id.t>`.
 
 - The page gets the decoded value: `Pages.issue ~id ~tab ()` with
@@ -203,7 +203,7 @@ page with no island, links load full pages. In an island,
 on_click=(fun _ -> Yuka.Browser.navigate (Routes.blog ~tag:"bug" ()))
 ```
 
-## What the router does not do
+## Limitations
 
 - An island cannot read the current route or search params as a State.
   Pass what it needs as props.

@@ -86,15 +86,13 @@ each route such as `Routes.home ()`, `Routes.href` and `Routes.find`). `preproce
 `shared/counter.mlx` is an island that uses it:
 
 ```ocaml
-open Yuka
-
 module Css = [%yuka.css "counter.css"]
 
 let[@client] make ~(initial : int) () =
-  let n = State.make initial in
-  <button class_=Css.button on_click=(fun _ -> State.update n succ)>
+  let n = Yuka.State.make initial in
+  <button class_=Css.button on_click=(fun _ -> Yuka.State.update n succ)>
     "Clicks: "
-    (Yuka.int (State.get n))
+    (Yuka.int (Yuka.State.get n))
   </button>
 ```
 

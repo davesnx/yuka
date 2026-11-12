@@ -10,11 +10,11 @@ Class names are scoped with a hash of the file, one value per class:
   > [data-x=".in-attr"] .open { }
   > @keyframes spin { 12.5% { opacity: 1 } }
   > X
-  $ cat > a.ml <<'X'
+  $ cat > card.ml <<'X'
   > module Css = [%yuka.css "a.css"]
   > let make ~x () : Yuka.client Yuka.element = Yuka.text x
   > X
-  $ run a
+  $ run card
   module Css =
     struct
       let stylesheet = Yuka.runtime_stylesheet "/_yuka/css/a-705346f1.css"
@@ -44,10 +44,10 @@ Escapes, quoted url(), @scope and @supports selector():
   > @supports selector(:has(.kid)) { .p { } }
   > @supports (display: grid) { .q { } }
   > X
-  $ cat > e/e.ml <<'X'
+  $ cat > e/escapes.ml <<'X'
   > module Css = [%yuka.css "e.css"]
   > X
-  $ run e/e
+  $ run e/escapes
   module Css =
     struct
       let stylesheet = Yuka.runtime_stylesheet "/_yuka/css/e-25e1fa53.css"
@@ -70,9 +70,9 @@ Escapes, quoted url(), @scope and @supports selector():
 
 A class that cannot be an OCaml name:
 
-  $ mkdir n && printf '.caf\303\251 { }\n' > n/n.css && echo 'module Css = [%yuka.css "n.css"]' > n/n.ml
-  $ run n/n
-  File "n/n.ml", line 1, characters 13-32:
+  $ mkdir n && printf '.caf\303\251 { }\n' > n/n.css && echo 'module Css = [%yuka.css "n.css"]' > n/name.ml
+  $ run n/name
+  File "n/name.ml", line 1, characters 13-32:
   1 | module Css = [%yuka.css "n.css"]
                    ^^^^^^^^^^^^^^^^^^^
   Error: [yuka] n.css: the class "caf\195\169" has characters an OCaml name cannot have; rename it
@@ -81,7 +81,7 @@ A class that cannot be an OCaml name:
 Only functions that return an element get the sheet; a component make
 that is not a function gets a warning, another make is left alone:
 
-  $ cat > w.ml <<'X'
+  $ cat > wrap.ml <<'X'
   > module Css = [%yuka.css "a.css"]
   > type t = A | B
   > let make = function A -> (Yuka.text "a" : _ Yuka.element) | B -> Yuka.text "b"
@@ -92,7 +92,7 @@ that is not a function gets a warning, another make is left alone:
   > module Alias = struct let make = Typed.make end
   > module Typed_alias = struct let make : unit -> Yuka.client Yuka.element = Typed.make end
   > X
-  $ run w | sed -n '/^type t/,$p'
+  $ run wrap | sed -n '/^type t/,$p'
   type t =
     | A 
     | B 
@@ -115,11 +115,11 @@ that is not a function gets a warning, another make is left alone:
 
 The island of a let[@client] gets the sheet:
 
-  $ cat > b.mlx <<'X'
+  $ cat > island.mlx <<'X'
   > module Css = [%yuka.css "a.css"]
   > let[@client] make ~(n : int) () = Yuka.int n
   > X
-  $ mlx-pp b.mlx > b.ml && run b | grep -c "Yuka.use_css Css.stylesheet"
+  $ mlx-pp island.mlx > island.ml && run island | grep -c "Yuka.use_css Css.stylesheet"
   1
 
 A class that the file does not have is a compile error:
@@ -130,38 +130,38 @@ A class that the file does not have is a compile error:
   > let use_css _ e = e
   > let stylesheet s = s
   > X
-  $ cat > c.ml <<'X'
+  $ cat > missing.ml <<'X'
   > module Css = [%yuka.css "a.css"]
   > let make () = (Yuka.text Css.missing : _ Yuka.element)
   > X
-  $ run c > c.pp.ml && ocamlfind ocamlc -c yuka.ml c.pp.ml 2>&1 | grep -v '^ *[0-9]* |\|^ *\^'
-  File "c.pp.ml", line 3, characters 21-44:
+  $ run missing > missing.pp.ml && ocamlfind ocamlc -c yuka.ml missing.pp.ml 2>&1 | grep -v '^ *[0-9]* |\|^ *\^'
+  File "missing.pp.ml", line 3, characters 21-44:
   Error: Unbound value Yuka.runtime_stylesheet
 
 Errors:
 
-  $ cat > d.ml <<'X'
+  $ cat > unread.ml <<'X'
   > module Css = [%yuka.css "nope.css"]
   > X
-  $ run d
-  File "d.ml", line 1, characters 13-35:
+  $ run unread
+  File "unread.ml", line 1, characters 13-35:
   1 | module Css = [%yuka.css "nope.css"]
                    ^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] cannot read nope.css; list it in the dune file of this library: (preprocessor_deps nope.css)
   [1]
-  $ mkdir m && cp d.ml m/ && yuka css --dir m
-  yuka css: m/d.ml: [%yuka.css "nope.css"]: cannot read m/nope.css
+  $ mkdir m && cp unread.ml m/ && yuka css --dir m
+  yuka css: m/unread.ml: [%yuka.css "nope.css"]: cannot read m/nope.css
   [1]
 
 Preprocessed copies that dune leaves in the build directory are skipped:
 
-  $ mkdir pp && echo 'module Css = [%yuka.css "gone.css"]' > pp/v.mlx.pp.ml && yuka css --dir pp
+  $ mkdir pp && echo 'module Css = [%yuka.css "gone.css"]' > pp/view.mlx.pp.ml && yuka css --dir pp
   let sheets = [
   ]
 
 Comments and strings that mention [%yuka.css] are not declarations:
 
-  $ mkdir k && cp a.css k/ && cat > k/k.ml <<'X'
+  $ mkdir k && cp a.css k/ && cat > k/comments.ml <<'X'
   > (** Use [%yuka.css "doc.css"] (* nested [%yuka.css "nested.css"] *) *)
   > let s = "[%yuka.css \"str.css\"]"
   > let q = {|[%yuka.css "quoted.css"]|}
@@ -172,11 +172,11 @@ Comments and strings that mention [%yuka.css] are not declarations:
     ("a-705346f1.css", "/*
   ]
 
-  $ cat > e.ml <<'X'
+  $ cat > literal.ml <<'X'
   > module Css = [%yuka.css 1]
   > X
-  $ run e
-  File "e.ml", line 1, characters 13-26:
+  $ run literal
+  File "literal.ml", line 1, characters 13-26:
   1 | module Css = [%yuka.css 1]
                    ^^^^^^^^^^^^^
   Error: [yuka] [%yuka.css] takes a file name: module Css = [%yuka.css "file.css"]
@@ -185,22 +185,22 @@ Comments and strings that mention [%yuka.css] are not declarations:
   $ cat > f.css <<'X'
   > .a-b { } .a_b { }
   > X
-  $ cat > f.ml <<'X'
+  $ cat > clash.ml <<'X'
   > module Css = [%yuka.css "f.css"]
   > X
-  $ run f
-  File "f.ml", line 1, characters 13-32:
+  $ run clash
+  File "clash.ml", line 1, characters 13-32:
   1 | module Css = [%yuka.css "f.css"]
                    ^^^^^^^^^^^^^^^^^^^
   Error: [yuka] f.css: two classes have the OCaml name a_b; rename one of them
   [1]
 
-  $ cat > g.ml <<'X'
+  $ cat > twice.ml <<'X'
   > module Css = [%yuka.css "a.css"]
   > module Other = [%yuka.css "f.css"]
   > X
-  $ run g
-  File "g.ml", line 2, characters 0-34:
+  $ run twice
+  File "twice.ml", line 2, characters 0-34:
   2 | module Other = [%yuka.css "f.css"]
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] only one [%yuka.css] per file
@@ -209,11 +209,11 @@ Comments and strings that mention [%yuka.css] are not declarations:
 Only [%yuka.css] is a declaration: [%css "..."] (for example from styled-ppx)
 is left alone by the ppx and by yuka css:
 
-  $ mkdir short && cat > short/s.ml <<'X'
+  $ mkdir short && cat > short/short.ml <<'X'
   > let cls = [%css "display: block"]
   > let other = [%yuka.cssx "no.css"]
   > X
-  $ ./pp.exe --impl short/s.ml
+  $ ./pp.exe --impl short/short.ml
   let cls = [%css "display: block"]
   let other = [%yuka.cssx "no.css"]
   $ yuka css --dir short

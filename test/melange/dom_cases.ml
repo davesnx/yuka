@@ -1272,7 +1272,7 @@ let warnings : unit -> string =
 
 let hydrate_logged server_html tree =
   let island = create (document ()) "yuka-island" in
-  set_attribute island "data-name" "T.Island";
+  set_attribute island "data-name" "Board.Island";
   append (body ()) island;
   set_html island server_html;
   capture_warnings ();
@@ -1293,37 +1293,37 @@ let mismatch_log () =
     hydrate_logged "<div><b>a</b></div>" (fun () -> div [] [ span [ text "a" ] ])
   in
   check "different tag"
-    "yuka: hydration mismatch in island T.Island at div: expected <span>, found <b>"
+    "yuka: hydration mismatch in island Board.Island at div: expected <span>, found <b>"
     logged;
   check "different tag: new node, the old one stays" "<div><span>a</span><b>a</b></div>" after;
   let logged, after = hydrate_logged "<div>old</div>" (fun () -> div [] [ text "new" ]) in
   check "different text"
-    {|yuka: hydration mismatch in island T.Island at div: expected "new", found "old"|}
+    {|yuka: hydration mismatch in island Board.Island at div: expected "new", found "old"|}
     logged;
   check "different text repaired" "<div>new</div>" after;
   let logged, _ = hydrate_logged "<div></div>" (fun () -> div [] [ span [] ]) in
   check "missing node"
-    "yuka: hydration mismatch in island T.Island at div: expected <span>, found nothing"
+    "yuka: hydration mismatch in island Board.Island at div: expected <span>, found nothing"
     logged;
   let logged, _ =
     hydrate_logged "<div><span></span><i></i><!--x--></div>" (fun () -> div [] [ span [] ])
   in
   check "extra nodes"
-    "yuka: hydration mismatch in island T.Island at div: expected nothing, found <i>|\
-     yuka: hydration mismatch in island T.Island at div: expected nothing, found <!--x-->"
+    "yuka: hydration mismatch in island Board.Island at div: expected nothing, found <i>|\
+     yuka: hydration mismatch in island Board.Island at div: expected nothing, found <!--x-->"
     logged;
   let logged, _ =
     hydrate_logged "<span></span><p></p>" (fun () -> span [])
   in
   check "extra node at the root"
-    "yuka: hydration mismatch in island T.Island at root: expected nothing, found <p>"
+    "yuka: hydration mismatch in island Board.Island at root: expected nothing, found <p>"
     logged;
   let logged, _ =
     hydrate_logged "<section><div><p>x</p><p>y</p></div></section>" (fun () ->
         element "section" [] [ div [] [ p [ text "x" ]; p [ text "z" ] ] ])
   in
   check "short path"
-    {|yuka: hydration mismatch in island T.Island at section > div > p:2: expected "z", found "y"|}
+    {|yuka: hydration mismatch in island Board.Island at section > div > p:2: expected "z", found "y"|}
     logged
 
 let head_sheets : unit -> string =

@@ -19,7 +19,7 @@ let rec kind (t : core_type) =
       [%expr Yuka.Form.custom [%e of_string] [%e to_string]]
   | _ ->
       fail ~loc
-        "a form field must be string, int, float, bool, an option or list of those, or M.t with M.of_string and M.to_string"
+        "a form field must be string, int, float, bool, an option or list of those, or Email.t with Email.of_string and Email.to_string"
 
 let labels (td : type_declaration) =
   (match td.ptype_params with

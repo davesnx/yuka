@@ -94,7 +94,7 @@ module Server = struct
   end
 
   module Adapter = struct
-    module type S = Cycle.ADAPTER
+    module type Backend = Cycle.ADAPTER
 
     module Make = Cycle.Make
 
