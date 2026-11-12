@@ -62,7 +62,7 @@ let post (_ : Dream.request) ~slug =
 ## Paths
 
 - `:id<string>`: one segment, as a `string`.
-- `:n<int>`: an `int`. Only the form `string_of_int` writes matches, so
+- `:n<int>`: an `int`. Only the form `Int.to_string` writes matches, so
   `01` and `+1` do not.
 - `:id<Issue_id>`: your own type, named by its module. See below.
 - `:parts<string...>`: a catch-all, the last segment of a route path, as
@@ -82,7 +82,7 @@ let of_string s =
   | [ "YUK"; n ] -> Yuka.Router.int_param n
   | _ -> None
 
-let to_string n = "YUK-" ^ string_of_int n
+let to_string n = "YUK-" ^ Int.to_string n
 ```
 
 ```ocaml

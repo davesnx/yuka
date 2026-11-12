@@ -28,7 +28,7 @@ module Priority_icon = struct
       | Issue.Urgent -> 4 | High -> 3 | Medium -> 2 | Low -> 1 | No_priority -> 0 in
     let bar i =
       let h = 3 + (i * 3) in
-      <rect x=(string_of_int ((i - 1) * 4 + 1)) y=(string_of_int (14 - h)) width="3" height=(string_of_int h) rx="1"
+      <rect x=(Int.to_string ((i - 1) * 4 + 1)) y=(Int.to_string (14 - h)) width="3" height=(Int.to_string h) rx="1"
         class_=(if i <= level then "bar on" else "bar") />
     in
     <svg class_=("icon priority-" ^ Issue.priority_slug priority) view_box="0 0 14 14" width="14" height="14">
@@ -82,7 +82,7 @@ end
 module Skeleton = struct
   let make ~lines () : _ Yuka.element =
     <div class_="skeleton">
-      (Yuka.fragment (List.init lines (fun i -> <div class_=("skeleton-line w" ^ string_of_int (i mod 3)) />)))
+      (Yuka.fragment (List.init lines (fun i -> <div class_=("skeleton-line w" ^ Int.to_string (i mod 3)) />)))
     </div>
 end
 
