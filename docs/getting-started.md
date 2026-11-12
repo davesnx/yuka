@@ -319,3 +319,4 @@ let assets =
 - [`router.md`](router.md): routes, params, loaders, guards and links.
 - [`islands.md`](islands.md): `<Yuka.Client>`, props, start strategies and
   slots.
+- [`state.md`](state.md): State, memos, effects and when updates run.
