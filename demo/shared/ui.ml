@@ -1,4 +1,4 @@
-let dialog_open = Yuka.State.make false [@@yuka.shared]
+let dialog_open = Yuka.State.make false
 
 let typing e =
   match Yuka.Event.target_tag e with

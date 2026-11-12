@@ -170,21 +170,20 @@ The server calls the component one time to print HTML.
 
 A State that you create inside a component is new for each request. A
 State at the top level of a module is different: the server process has
-one copy, and every request reads and writes that copy. One user could see
-the data of another. For that reason this is a compile error:
+one copy for every request. If a request wrote it, one user could see the
+data of another.
 
 ```ocaml
 let dialog_open = State.make false
 ```
 
-Create the State inside a function. When a State must be global in the
-browser, for example one flag that several islands read, mark it:
+The browser accepts this State. On the server, Yuka counts a State as
+module-level when it was made before the first server render or request.
+After that point, `State.set` or `State.update` on such a State raises
+`Invalid_argument`. A read is allowed, so a render can show its value.
+Writes before the first render or request are allowed, for example to set
+a start value.
 
-```ocaml
-let dialog_open = State.make false [@@yuka.shared]
-```
-
-`[@@yuka.shared]` is your statement that only code that runs in the
-browser (event handlers and effects) writes this State. The compiler does
-not check the statement. On the server the State keeps its first value for
-every request.
+When only the browser writes the State (event handlers and effects), the
+server never writes it, and every request sees its first value. In all
+other cases, create the State inside a component.

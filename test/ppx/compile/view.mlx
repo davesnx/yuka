@@ -8,7 +8,7 @@ module Card = struct
     <section aria_label=title>(children)</section>
 end
 
-let count : int Yuka.State.t = Yuka.State.make 0 [@@yuka.shared]
+let count : int Yuka.State.t = Yuka.State.make 0
 
 let static_view : Yuka.server Yuka.element =
   <div class_="a" data_id="1" tabindex=2 hidden=false>

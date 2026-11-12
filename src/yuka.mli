@@ -36,7 +36,9 @@ module State : sig
   (** Reads the value without tracking. *)
 
   val set : 'a t -> 'a -> unit
-  (** Writes the value. *)
+  (** Writes the value. On the server, raises [Invalid_argument] for a
+      State made before the first server render or request of the process
+      (a module-level State): the process has one copy for every request. *)
 
   val update : 'a t -> ('a -> 'a) -> unit
   (** Like [set], with a function of the current value. *)

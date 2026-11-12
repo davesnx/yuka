@@ -104,48 +104,6 @@ GADT:
   Error: [yuka] GADT constructors are not supported
   [1]
 
-Module-level State:
-
-  $ cat > s0.mlx <<'X'
-  > let count = State.make 0
-  > X
-  $ run s0
-  File "s0.mlx", line 1, characters 0-24:
-  1 | let count = State.make 0
-      ^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
-  [1]
-
-  $ cat > s1.mlx <<'X'
-  > let total = Yuka.State.memo (fun () -> 1)
-  > X
-  $ run s1
-  File "s1.mlx", line 1, characters 0-41:
-  1 | let total = Yuka.State.memo (fun () -> 1)
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.memo is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
-  [1]
-
-  $ cat > s2.mlx <<'X'
-  > module M = struct let c : int Yuka.State.t = Yuka.State.make 0 end
-  > X
-  $ run s2
-  File "s2.mlx", line 1, characters 18-62:
-  1 | module M = struct let c : int Yuka.State.t = Yuka.State.make 0 end
-                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
-  [1]
-
-Module-level State marked shared, and State inside a function:
-
-  $ cat > s3.mlx <<'X'
-  > let count = State.make 0 [@@yuka.shared]
-  > let make () = State.make 0
-  > X
-  $ run s3
-  let count = State.make 0[@@yuka.shared ]
-  let make () = State.make 0
-
 Unsupported type:
 
   $ cat > h2.mlx <<'X'
@@ -810,7 +768,7 @@ A literal base href is kept:
   href=\"/app/\">"
 
 The namespaced and the short names are the same: let[@yuka.client] and
-let[@client], [@@shared] and [@@yuka.shared]:
+let[@client]:
 
   $ cat > ns1.mlx <<'Y'
   > let[@yuka.client] make ~(n : int) () = <b>(Yuka.text (string_of_int n))</b>
@@ -826,11 +784,6 @@ let[@client], [@@shared] and [@@yuka.shared]:
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] let[@client] is allowed only in .mlx files: rename ns2.ml to ns2.mlx
   [1]
-  $ cat > ns3.mlx <<'Y'
-  > let count = State.make 0 [@@shared]
-  > Y
-  $ run ns3
-  let count = State.make 0[@@shared ]
 
 An island prop named make is refused:
 
@@ -946,16 +899,6 @@ Yuka.State:
   let view () =
     Yuka.runtime_instance __yuka_template_st1_0
       [|(Yuka.runtime_child (State.get initial))|]
-  $ cat > st2.mlx <<'Y'
-  > module State = Yuka.State
-  > let initial = State.make 0
-  > Y
-  $ run st2
-  File "st2.mlx", line 2, characters 0-26:
-  2 | let initial = State.make 0
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
-  [1]
 
 The islands binding counts only where it is in scope:
 
@@ -1004,38 +947,3 @@ open Yuka counts from its place to the next top-level open:
   let other x =
     Show.make ~status:x ~loading:(text "l") ~children:(fun v -> v) ()
   let r2 () = render ~islands ()
-
-Only a top-level module State counts, and only after it; open Yuka brings
-Yuka.State back:
-
-  $ cat > sc3.mlx <<'Y'
-  > module Inner = struct module State = struct let make x = x end end
-  > let s = State.make 0
-  > Y
-  $ run sc3
-  File "sc3.mlx", line 2, characters 0-20:
-  2 | let s = State.make 0
-      ^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
-  [1]
-  $ cat > sc4.mlx <<'Y'
-  > let s = State.make 0
-  > module State = struct let make x = x end
-  > Y
-  $ run sc4
-  File "sc4.mlx", line 1, characters 0-20:
-  1 | let s = State.make 0
-      ^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
-  [1]
-  $ cat > sc5.mlx <<'Y'
-  > module State = struct let make x = x end
-  > open Yuka
-  > let s = State.make 0
-  > Y
-  $ run sc5
-  File "sc5.mlx", line 3, characters 0-20:
-  3 | let s = State.make 0
-      ^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] A module-level State.make is one value for the whole server process: every request would read and write the same State. Create the State inside a function. If only client code paths write it, mark the binding with [@@yuka.shared]. The check goes by name: it reads State as Yuka.State unless this file defines a top-level module State above this line.
-  [1]

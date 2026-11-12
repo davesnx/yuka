@@ -3,6 +3,8 @@ type event
 type 'a promise = 'a Js.Promise.t
 
 let in_browser = true
+let check_state_write _ = ()
+let seal_states () = ()
 
 let window () : node = [%mel.raw "window"]
 external owner_document : node -> node = "ownerDocument" [@@mel.get]

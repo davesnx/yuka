@@ -806,6 +806,7 @@ let live_answer env (r : request) =
   | _ -> reply (method_not_allowed "GET")
 
 let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists req (r : request) =
+  Web.seal_states ();
   let path, query = Router.split_target r.target in
   Live_server.use_log node config.log_error;
   let live_used = ref false in
