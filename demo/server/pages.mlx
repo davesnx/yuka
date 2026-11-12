@@ -67,6 +67,14 @@ let about () =
         <a href=(Routes.issues ())>"Back to issues"</a>
       </main>)
 
+let before_hydration () =
+  Yuka.Server.page ~title:"Type before hydration" (fun () ->
+      <main class_="about">
+        <h1>"Type before the script loads"</h1>
+        <p>"The server sends the script of this page 3 seconds late. Type, tick and choose before the status says Interactive: what you did stays, and each State shows it."</p>
+        <Yuka.Client><Before_hydration /></Yuka.Client>
+      </main>)
+
 let create () =
   Yuka.Server.page ~title:"New issue" (fun () ->
       <main class_="new-issue-page">

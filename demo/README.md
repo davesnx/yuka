@@ -27,6 +27,11 @@ Defaults are relative to the executable, so any build directory works.
 - `http://localhost:8080/about`: a page with no island, outside the shell
   layout, for the 0 bytes of JavaScript check of `make measure-pages`. It
   is the one `~prerender:true` page.
+- `http://localhost:8080/before-hydration`: a text input, a checkbox, a
+  select and a textarea in an island, each with the value of its State. The
+  server sends the script of this page 3 s late (to this page only), so you
+  can change the fields before the island starts. Open the URL directly or
+  reload: a client navigation has the script already.
 - `http://localhost:8080/issues.json`: the issues as JSON (an endpoint).
 - `http://localhost:8080/issues`: a permanent redirect to `/`.
 

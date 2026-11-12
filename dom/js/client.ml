@@ -639,6 +639,8 @@ and mount_each :
       Scheduler.untrack (fun () -> reconcile next));
   on_dispose (fun () -> dispose_all !entries)
 
+let keep_hook : (Web.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
+
 let mount_element pos tag attrs children =
   let svg = pos.svg || tag = "svg" in
   let raw = Web.lowercase tag in
@@ -655,6 +657,7 @@ let mount_element pos tag attrs children =
     else if svg then Web.create_element_ns pos.doc svg_ns tag
     else Web.create_element pos.doc tag
   in
+  let attrs = if is_adopted then (!keep_hook) el tag attrs [@u] else attrs in
   let inner_svg = svg && tag <> "foreignObject" in
   let inner =
     if is_adopted then { pos with parent = el; cur = first_child el; svg = inner_svg }
@@ -705,12 +708,36 @@ let start ~adopt container f =
   dispose
 
 let render container f = start ~adopt:false container (Kind.fn f)
+let changed : Web.node list ref = ref []
+
+let rec keep el = function
+  | Dynamic (("value" | "checked" | "selected") as name, f) :: rest ->
+      let first = ref true in
+      Base.run_effect Scheduler.queue (fun () ->
+          let v = f () in
+          if !first then first := false else set_attr false el name v);
+      keep el rest
+  | a :: rest -> a :: keep el rest
+  | [] -> []
+
 let hydrate container f =
   use_element ();
+  keep_hook :=
+    (fun [@u] el tag attrs ->
+      match Web.touched el tag with
+      | 0 -> attrs
+      | k ->
+          if k = 2 then changed := el :: !changed;
+          keep el attrs);
   drop_rest := (fun [@u] pos -> walk_region pos (fun [@u] n -> Web.remove n));
   adopt_slot := (fun [@u] pos slot -> adopt_slot_now pos slot);
   Template.expander := (fun t p -> Template.expand t p);
-  start ~adopt:true container (Kind.fn f)
+  changed := [];
+  let dispose = start ~adopt:true container (Kind.fn f) in
+  let els = !changed in
+  changed := [];
+  List.iter Web.fire (List.rev els);
+  dispose
 
 let roots : (unit -> unit [@u]) ref = ref (fun [@u] () -> ())
 

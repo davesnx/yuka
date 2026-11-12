@@ -5,6 +5,14 @@ let packages dir =
       Array.to_list names
   | exception Sys_error _ -> []
 
+let late_script inner req =
+  match Dream.header req "referer" with
+  | Some r
+    when String.ends_with ~suffix:"/before-hydration" r
+         && String.ends_with ~suffix:"/main.js" (Dream.target req) ->
+      Lwt.bind (Lwt_unix.sleep 3.) (fun () -> inner req)
+  | _ -> inner req
+
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let () =
@@ -62,7 +70,7 @@ let () =
   let app = Demo_app.Routes_server.app in
   if !prerender <> "" then Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app)
   else if !second = 0 then
-    Dream.run ~port:!port @@ Dream.logger @@ Dream.set_secret !secret @@ Dream.cookie_sessions
+    Dream.run ~port:!port @@ Dream.logger @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
     @@ Yuka_dream.handler config app
   else begin
     let make_bus =
@@ -77,7 +85,7 @@ let () =
     in
     let other = Yuka.Server.Live.node () in
     let serve ?node port =
-      Dream.serve ~port @@ Dream.logger @@ Dream.set_secret !secret @@ Dream.cookie_sessions
+      Dream.serve ~port @@ Dream.logger @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
       @@ Yuka_dream.handler ?node config app
     in
     Lwt_main.run

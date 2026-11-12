@@ -889,6 +889,143 @@ let selected_property () =
   check "state false" "false" (string_of_bool (selected options.(1)));
   dispose ()
 
+external set_checked : node -> bool -> unit = "checked" [@@mel.set]
+
+let focus_range : node -> int -> int -> unit =
+  [%mel.raw "function (el, a, b) { el.focus(); el.setSelectionRange(a, b) }"]
+
+let focus_state : node -> string =
+  [%mel.raw
+    "function (el) { return (document.activeElement === el) + ',' + el.selectionStart + ',' + el.selectionEnd }"]
+
+let hydrate_keeps_user_input () =
+  let calls = ref [] in
+  let log s _ = calls := s :: !calls in
+  let count s = ints (List.length (List.filter (String.equal s) !calls)) in
+  let typed = State.make "server" and untouched = State.make "same" and box = State.make false in
+  let pick = State.make "a" and note = State.make "first" and fed = State.make "" in
+  let opt = State.make "x" and shown = State.make "kept" in
+  let echo id s = element "span" [ attr "id" id ] [ hole (fun () -> text (s ())) ] in
+  let tree () =
+    div []
+      [
+        element "input"
+          [
+            attr "id" "typed";
+            hole_attr "value" (fun () -> Some (State.get typed));
+            on "input" (fun e -> log "typed:input" e; State.set typed (Event.target_value e));
+            on "change" (log "typed:change");
+          ]
+          [];
+        echo "typed-state" (fun () -> State.get typed);
+        element "input"
+          [
+            attr "id" "untouched";
+            hole_attr "value" (fun () -> Some (State.get untouched));
+            on "input" (fun e -> log "untouched:input" e; State.set untouched (Event.target_value e));
+            on "change" (log "untouched:change");
+          ]
+          [];
+        element "input"
+          [
+            attr "type" "checkbox";
+            hole_attr "checked" (fun () -> if State.get box then Some "" else None);
+            on "change" (fun e -> log "box:change" e; State.set box (Event.target_checked e));
+          ]
+          [];
+        echo "box-state" (fun () -> string_of_bool @@ State.get box);
+        element "select"
+          [
+            attr "id" "pick";
+            hole_attr "value" (fun () -> Some (State.get pick));
+            on "change" (fun e -> log "pick:change" e; State.set pick (Event.target_value e));
+          ]
+          [
+            element "option" [ attr "value" "a" ] [ text "A" ];
+            element "option" [ attr "value" "b" ] [ text "B" ];
+            element "option" [ attr "value" "c" ] [ text "C" ];
+          ];
+        echo "pick-state" (fun () -> State.get pick);
+        element "textarea"
+          [
+            hole_attr "value" (fun () -> Some (State.get note));
+            on "input" (fun e -> log "note:input" e; State.set note (Event.target_value e));
+          ]
+          [];
+        echo "note-state" (fun () -> State.get note);
+        element "input"
+          [ attr "id" "fed"; on "input" (fun e -> log "fed:input" e; State.set fed (Event.target_value e)) ]
+          [];
+        echo "fed-state" (fun () -> State.get fed);
+        element "select"
+          [ attr "id" "opt"; on "change" (fun e -> log "opt:change" e; State.set opt (Event.target_value e)) ]
+          (List.map
+             (fun k ->
+               element "option"
+                 [ attr "value" k; hole_attr "selected" (fun () -> if State.get opt = k then Some "" else None) ]
+                 [ text k ])
+             [ "x"; "y" ]);
+        element "input" [ attr "id" "shown"; hole_attr "value" (fun () -> Some (State.get shown)) ] [];
+      ]
+  in
+  let c = container (server (tree ())) in
+  let typed_input = query c "#typed" in
+  set_value typed_input "typed by hand";
+  set_checked (query c "input[type=checkbox]") true;
+  set_value (query c "#pick") "c";
+  set_value (query c "textarea") "a note";
+  set_value (query c "#fed") "fed by hand";
+  set_value (query c "#opt") "y";
+  set_value (query c "#shown") "no handler";
+  focus_range typed_input 2 5;
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
+  check "input keeps what the user typed" "typed by hand" (value typed_input);
+  check "the State learned it" "typed by hand" (text_content (query c "#typed-state"));
+  check "focus and selection kept" "true,2,5" (focus_state typed_input);
+  check "checkbox kept" "true" (string_of_bool (checked (query c "input[type=checkbox]")));
+  check "checkbox State" "true" (text_content (query c "#box-state"));
+  check "select kept" "c" (value (query c "#pick"));
+  check "select State" "c" (text_content (query c "#pick-state"));
+  check "textarea kept" "a note" (value (query c "textarea"));
+  check "textarea State" "a note" (text_content (query c "#note-state"));
+  check "handler without a value hole gets the input" "fed by hand" (text_content (query c "#fed-state"));
+  check "option selected holes keep the choice" "y" (value (query c "#opt"));
+  check "a value hole without a handler keeps the DOM value" "no handler" (value (query c "#shown"));
+  check "untouched input" "same" (value (query c "#untouched"));
+  check "each handler once"
+    "1,1,1,1,1,1,1,0,0"
+    (String.concat ","
+       (List.map count
+          [ "typed:input"; "typed:change"; "box:change"; "pick:change"; "note:input"; "fed:input";
+            "opt:change"; "untouched:input"; "untouched:change" ]));
+  State.set typed "later";
+  check "a later State.set updates the input" "later" (value typed_input);
+  State.set pick "a";
+  check "and the select" "a" (value (query c "#pick"));
+  State.set shown "from state";
+  check "and the input without a handler" "from state" (value (query c "#shown"));
+  dispose ()
+
+let hydrate_untouched_radio () =
+  let calls = ref [] in
+  let radio v =
+    element "input"
+      [
+        attr "type" "radio"; attr "name" "r"; attr "value" v;
+        hole_attr "checked" (fun () -> if v = "x" then Some "" else None);
+        on "change" (fun _ -> calls := v :: !calls);
+      ]
+      []
+  in
+  let tree () = div [] [ radio "x"; radio "y" ] in
+  let c = container (server (tree ())) in
+  set_checked (query c "input[value=y]") true;
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
+  check "the radio the user checked stays checked" "false,true"
+    (String.concat "," (Array.to_list (Array.map (fun r -> string_of_bool (checked r)) (query_all c "input"))));
+  check "only the checked radio fires" "y" (String.concat "," !calls);
+  dispose ()
+
 let count_templates : unit -> unit =
   [%mel.raw
     "function () { globalThis.__templates = 0; if (!document.__create) { document.__create = document.createElement; document.createElement = function (t) { if (String(t).toLowerCase() === 'template') globalThis.__templates++; return document.__create.apply(document, arguments) } } }"]
@@ -1825,6 +1962,8 @@ let all =
     ("dom modifier keys", modifiers);
     ("dom browser functions", browser_functions);
     ("dom textarea hydrate", textarea_hydrate);
+    ("hydrate keeps what the user changed and the State learns it", hydrate_keeps_user_input);
+    ("hydrate fires only the checked radio", hydrate_untouched_radio);
     ("dom select hydrate", select_hydrate);
     ("dom checked property", checked_property);
     ("dom selected property", selected_property);

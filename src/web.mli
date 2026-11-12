@@ -83,6 +83,8 @@ val on_visible : node -> (unit -> unit) -> unit -> unit
 val ready_state : unit -> string
 val on_dom_ready : (unit -> unit) -> unit -> unit
 val record_events : node -> (unit -> unit) * (unit -> unit)
+val touched : node -> string -> int
+val fire : node -> unit
 val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
 val promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit
 

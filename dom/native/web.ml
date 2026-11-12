@@ -80,6 +80,8 @@ let on_visible : node -> (unit -> unit) -> unit -> unit = fun _ _ _ -> browser_o
 let ready_state : unit -> string = fun _ -> browser_only ()
 let on_dom_ready : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let record_events : node -> (unit -> unit) * (unit -> unit) = fun _ -> browser_only ()
+let touched : node -> string -> int = fun _ _ -> browser_only ()
+let fire : node -> unit = fun _ -> browser_only ()
 let promise_map : ('a -> 'b) -> 'a promise -> 'b promise = fun _ _ -> browser_only ()
 let promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit = fun _ _ _ -> browser_only ()
 

@@ -3080,3 +3080,33 @@ the component existed. Ticket 35.
   the deferral and a second copy of the `on_change` logic in the keyed
   list: a one-island page +90 to +102 B, the demo start +108 B, the demo
   pages +118 to +124 B.
+
+## Input made before hydration (2026-11-12)
+
+Decided by the user: when hydration adopts a form control that the user
+changed before the island started, the DOM wins, and Yuka fires the change
+again so the State learns it. Before, the first run of a reactive `value`
+wrote the server value back. Ticket 34.
+
+- `Web.touched el tag` decides, for an adopted element only: 2 for a
+  changed `input`, `textarea` or `select`; 1 for an `option` of a changed
+  `select`, a radio the user unchecked, or a control whose events the
+  island already recorded; 0 else. `input` and `textarea` compare with
+  `defaultValue` or `defaultChecked`, which hold what the server printed.
+  `select` compares with a `cloneNode` copy: the copy does not keep the
+  user's choice, so the browser's default rules give the server state. The
+  result is kept on the `select` for its options, which mount after it is
+  adopted.
+- The hook runs in `mount_element` before the children and the
+  attributes. For 1 or 2, it takes the reactive `value`, `checked` and
+  `selected` out of the attribute list and makes their effect itself; the
+  first run reads the State and writes nothing. The hook is a ref that
+  only `hydrate` sets, so a client-only render does not bundle it.
+- `hydrate` dispatches `input` then `change` on each element with 2 after
+  `start` returns, so handlers are attached and the batch has flushed.
+  The handlers run through the normal delegation, each in its own batch.
+- `record_events` marks the target of a recorded `input` or `change`;
+  `touched` gives 1 for it, so the replay is the only source of those
+  events. The mark is removed when the recording stops.
+- Size (`make size`, gzip): keyed app 0 B; one-island pages +343 to +364
+  B; demo start +363 B.

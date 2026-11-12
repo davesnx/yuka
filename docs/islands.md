@@ -128,6 +128,11 @@ The `start` prop says when the browser downloads and starts the island:
 
 `` `Lazy `` records the events before the start and replays them.
 
+A user can type, tick or choose in an island before it starts. The control
+keeps what the user did. When the island starts, Yuka sends `input` and
+`change` to that control, so your `on_input` and `on_change` handlers update
+the State. A click before the script runs is lost.
+
 ## Slots
 
 A slot is server-rendered content that you pass to an island as children.
