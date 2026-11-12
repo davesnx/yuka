@@ -174,11 +174,17 @@ action, named as the node in lowercase:
 Routes.hello ~name:"Yuka" ()            (* "/hello/Yuka" *)
 Routes.blog ~tag:"ocaml" ~page:2 ()     (* "/blog?tag=ocaml&page=2" *)
 Routes.blog ()                          (* "/blog" *)
+Routes.blog ~page:2 ~fragment:"top" ()  (* "/blog?page=2#top" *)
 ```
 
 Path params are required labelled arguments. Search fields are optional
 arguments. Every function ends with `()`. A missing or wrong param does
 not compile.
+
+The last optional argument, `?fragment`, adds `#` and the encoded
+fragment; `~fragment:""` adds `#` alone. A param, search field or loader
+named `fragment` is a build error. The server never receives the fragment,
+and Yuka gives an island no way to read it.
 
 `Routes.t` has one constructor for each named node. `Routes.href` turns
 one into a URL, and `Routes.find` reads a method, the path segments and

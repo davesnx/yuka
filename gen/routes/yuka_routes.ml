@@ -39,8 +39,8 @@ type ctx = {
 }
 
 let rules = [ "headers"; "cache"; "prerender" ]
-let reserved = [ "with_query"; "href"; "req"; "children" ]
-let generated_values = [ "href"; "find"; "with_query" ]
+let reserved = [ "with_query"; "with_fragment"; "href"; "fragment"; "req"; "children" ]
+let generated_values = [ "href"; "find"; "with_query"; "with_fragment" ]
 
 let encode text =
   let b = Buffer.create (String.length text) in
@@ -678,7 +678,13 @@ let href nodes =
          (named nodes)
 
 let helpers nodes =
-  List.concat_map
+  [
+    "";
+    "let with_fragment path fragment =";
+    "  Stdlib.( ^ ) path";
+    "    (match fragment with None -> \"\" | Some fragment -> Stdlib.( ^ ) \"#\" (Yuka.Router.encode fragment))";
+  ]
+  @ List.concat_map
     (fun (name, segs, search) ->
       let required = List.map (fun n -> "~" ^ n) (seg_labels segs) in
       let optional =
@@ -689,6 +695,7 @@ let helpers nodes =
             | Default d -> sprintf "?(%s = %s)" f.fname d
             | Many -> sprintf "?(%s = [])" f.fname)
           search
+        @ [ "?fragment" ]
       in
       let value =
         match fields segs search with
@@ -697,7 +704,7 @@ let helpers nodes =
       in
       [
         "";
-        sprintf "let %s %s() = href %s" (String.uncapitalize_ascii name)
+        sprintf "let %s %s() = with_fragment (href %s) fragment" (String.uncapitalize_ascii name)
           (String.concat "" (List.map (fun a -> a ^ " ") (required @ optional)))
           value;
       ])

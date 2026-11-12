@@ -2952,6 +2952,21 @@ as a call, with the same checks.
   values.
 - `test/cycle/Routes.ml` renames its route `Find` to `Search`.
 
+Fragment (2026-11-12): each link function takes `?fragment` as its last
+optional argument: `Routes.issue ~id ~fragment:"comments" ()` is
+`/issue/YUK-8#comments`. `None` adds nothing; `Some f` adds `#` and `f`
+encoded with `Yuka.Router.encode`, as a search value, which
+`scroll_to_hash` decodes with `decodeURIComponent`; `Some ""` adds `#`
+alone. One generated `with_fragment` adds it, so `Yuka.Router` gets no
+member. `type t`, `href` and `find` do not change: the server never sees
+a fragment, so it is not part of a route. `fragment` and `with_fragment`
+are reserved labels, and `With_fragment` is a reserved node name.
+`with_fragment` uses `path` once (`path ^ ""` when there is no fragment):
+with a `match` that returns `path` in one arm, swc kept a temporary and
+the demo start grew 68 B gzip, against 56 B now. The demo main and its
+imports do not change; the rest is `href`, which swc no longer folds into
+the link function when it inlines it.
+
 ## Module-level State (2026-11-12)
 
 Decided by the user: the server checks a module-level State at run time,

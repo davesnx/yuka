@@ -975,11 +975,14 @@ module Router : sig
       [yuka routes --shared --source Routes.ml] writes the shared [Routes]
       module: the route type [t]; a link function for each named node, named
       as the node in lowercase, that takes each path param as a labelled
-      argument, each search field as an optional argument, and [()]
-      ([Routes.issue ~id:"YUK-1" ()] is ["/issue/YUK-1"]); [href], which
+      argument, each search field as an optional argument, then
+      [?fragment], and [()] ([Routes.issue ~id:"YUK-1" ()] is
+      ["/issue/YUK-1"]; [Routes.issue ~id:"YUK-1" ~fragment:"comments" ()]
+      is ["/issue/YUK-1#comments"]; [~fragment:""] adds [#] alone); [href], which
       turns a [Routes.t] (for example from [find]) into a URL; and [find]. A
-      node name whose link function is an OCaml keyword or [href], [find] or
-      [with_query] is a build error. Then
+      node name whose link function is an OCaml keyword or [href], [find],
+      [with_query] or [with_fragment] is a build error, and so is a param,
+      search field or loader named [fragment]. Then
       [yuka routes --server --shared-module Routes --source Routes.ml] writes the
       server module with [app]. *)
 
