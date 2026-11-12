@@ -107,6 +107,8 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
 - Make a State inside `make`. A State made at the top level of a module is
   a ppx error, because every request of the server would share it.
 
+[`state.md`](state.md) explains State, memos and effects.
+
 ## Start strategies
 
 The `start` prop says when the browser downloads and starts the island:

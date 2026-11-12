@@ -85,6 +85,21 @@ let document ?head ?early ?import_map ?title ?styles ?scripts build =
   ignore (Yuka.Private.stream ?head ?early ?import_map ?title ?styles ?scripts ~sleep:never_sleep ~write build);
   Buffer.contents b
 
+let memo_released () =
+  let shared = Yuka.State.make 1 in
+  let weak = Weak.create 1 in
+  let render () =
+    let held = Bytes.create 16 in
+    Weak.set weak 0 (Some held);
+    Server.to_string (fun () ->
+        let m = Yuka.State.memo (fun () -> Bytes.length held + Yuka.State.get shared) in
+        Yuka.int (Yuka.State.get m))
+  in
+  Alcotest.(check string) "html" "17" (render ());
+  Gc.full_major ();
+  Alcotest.(check bool) "the memo of a finished render is not kept" false (Weak.check weak 0);
+  Alcotest.(check int) "the State lives on" 1 (Yuka.State.get shared)
+
 let page_cases =
   let open Alcotest in
   let page () =
@@ -149,7 +164,8 @@ let page_cases =
     test_case "page" `Quick page;
     test_case "to_string" `Quick to_string;
     test_case "markers only in islands" `Quick markers_only_in_islands;
-    test_case "respond" `Quick respond ]
+    test_case "respond" `Quick respond;
+    test_case "a memo is released after the render" `Quick memo_released ]
 
 type issue = { title : string; n : int }
 

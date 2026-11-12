@@ -1,6 +1,3 @@
-(* Adapted from Solid (solid-js/src/reactive/signal.ts, version 1.9).
-   Copyright (c) 2016-2023 Ryan Carniato. MIT licence: see LICENSE.solid. *)
-
 type cell = {
   mutable dispose : unit -> unit;
   mutable prev : cell option;

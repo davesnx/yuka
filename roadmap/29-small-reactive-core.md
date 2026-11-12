@@ -11,7 +11,7 @@ Build: a reactive core (signals, memos, effects, owners, batch) with the same pu
 
 ## Resolution
 
-Done (2026-11-10). The reactive core is now a graph adapted from Solid (`solid-js/src/reactive/signal.ts`; notice in `src/LICENSE.solid`). A write marks its readers dirty and their readers "check". A read, and the flush, pull a node up to date before it runs. Each node keeps its subscribers in one doubly linked list and its dependencies in read order. A re-run keeps the links it reads in the same order. Effects run parents first, then by level, then the last created first. `src/core.ml` and `src/LICENSE.reativa` are removed; no reativa code remains.
+Done (2026-11-10). The reactive core is now a graph. A write marks its readers dirty and their readers "check". A read, and the flush, pull a node up to date before it runs. Each node keeps its subscribers in one doubly linked list and its dependencies in read order. A re-run keeps the links it reads in the same order. Effects run parents first, then by level, then the last created first. `src/core.ml` and `src/LICENSE.reativa` are removed; no reativa code remains.
 
 A code review found bugs; these are fixed, each with a test that fails before the fix. Three were old-core bugs too: a memo that raised, and work dropped at the 100-round limit, blocked later updates for good; a raising effect lost dependencies it had not read yet. Also fixed: a child effect ran before the parent that disposes it; an effect disposed during its run, or a memo whose first compute raised, stayed linked; a changed read order cost O(n^2).
 

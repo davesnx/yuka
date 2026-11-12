@@ -1,4 +1,3 @@
-(* Copied from html_of_jsx (MIT, see LICENSE.html_of_jsx). Copyright 2024 David Sancho. *)
 (* List of attributes that bring type-safety and attribute validation based on the tag. Used at compile-time by the ppx *)
 
 open Html_attributes
