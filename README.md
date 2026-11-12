@@ -22,6 +22,8 @@ Melange compiles to JavaScript. A page with no island loads no JavaScript.
 
 ## Example
 
+An island, in `counter.mlx`. It runs on the server and in the browser:
+
 ```ocaml
 open Yuka
 
@@ -31,6 +33,33 @@ let[@client] make ~(initial : int) () =
     "Clicks: "
     (Yuka.int (State.get n))
   </button>
+```
+
+Two pages, in `pages.mlx`. They run on the server only. A path param is an
+argument of the page, and `Routes.href` builds a link from a route:
+
+```ocaml
+let home () =
+  Yuka.Server.page ~title:"Home" (fun () ->
+      <main>
+        <a href=(Routes.href (Hello { name = "Yuka" }))>"Say hello"</a>
+        <Yuka.Client><Counter initial=0 /></Yuka.Client>
+      </main>)
+
+let hello ~name () =
+  Yuka.Server.page ~title:"Hello" (fun () ->
+      <h1>(Yuka.text ("Hello, " ^ name))</h1>)
+```
+
+The routes, in `Routes.ml`. A link to a route that does not exist, or with
+a wrong param, does not compile:
+
+```ocaml
+Router.make ~not_found:Pages.not_found
+  [
+    Router.route Home ~path:"/" ~page:Pages.home;
+    Router.route Hello ~path:"/hello/:name<string>" ~page:Pages.hello;
+  ]
 ```
 
 ## Learn more
