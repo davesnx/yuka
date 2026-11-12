@@ -64,11 +64,42 @@ let post (_ : Dream.request) ~slug =
 - `:id<string>`: one segment, as a `string`.
 - `:n<int>`: an `int`. Only the form `string_of_int` writes matches, so
   `01` and `+1` do not.
-- `:id<Issue_id>`: your own type. The module has `of_string : string -> t
-  option` and `to_string : t -> string`. `None` means the path does not
-  match.
+- `:id<Issue_id>`: your own type, named by its module. See below.
 - `:parts<string...>`: a catch-all, the last segment of a route path, as
   a `string list` with one element or more. A group path cannot have one.
+
+### Your own param types
+
+The name between `<` and `>` can be a module that decodes and encodes the
+param. The module has a type `t` and two functions:
+
+```ocaml
+(* shared/issue_id.ml *)
+type t = int
+
+let of_string s =
+  match String.split_on_char '-' s with
+  | [ "YUK"; n ] -> Yuka.Router.int_param n
+  | _ -> None
+
+let to_string n = "YUK-" ^ string_of_int n
+```
+
+```ocaml
+Router.route Issue ~path:"/issue/:id<Issue_id>" ~page:Pages.issue
+```
+
+- The page gets the decoded value: `Pages.issue ~id ()` with `id : int`.
+- The link function takes the same type: `Routes.issue ~id:8 ()` gives
+  `"/issue/YUK-8"`.
+- `of_string` gets the segment after percent-decoding. When it returns
+  `None`, the path does not match and the answer is the not-found page.
+- `to_string` must be the inverse of `of_string`. The router
+  percent-encodes its result, so it can return any text.
+- The module must be in the shared library, because the browser builds
+  links too. A path such as `Params.Issue_id` works as well.
+- The same modules work for search fields: `tab = optional Tab`. There, a
+  value that does not decode counts as absent.
 
 ## Search params
 
