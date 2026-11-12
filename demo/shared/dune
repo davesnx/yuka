@@ -12,6 +12,4 @@
  (action
   (with-stdout-to
    routes.ml
-   (with-stdin-from
-    %{dep:../Routes.ml}
-    (run %{bin:yuka-routes} --shared --source %{dep:../Routes.ml})))))
+   (run %{bin:yuka} routes --shared --source %{dep:../Routes.ml}))))

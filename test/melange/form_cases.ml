@@ -58,9 +58,9 @@ let view () =
     ~children:(fun form ->
       fragment
         [
-          lower "input" [ attr "name" "body"; attr "value" (Form.value form Body) ] [];
+          lower "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
           lower "i" [] [ hole (fun () -> text (if Form.pending form then "pending" else "idle")) ];
-          Form.error_view form Body (fun m -> lower "b" [] [ text m ]);
+          Form.error_view form `Body (fun m -> lower "b" [] [ text m ]);
           Form.form_error_view form (fun m -> lower "u" [] [ text m ]);
         ])
     ()
@@ -74,8 +74,8 @@ let plain_view key () =
     ~children:(fun form ->
       fragment
         [
-          lower "input" [ attr "name" "body"; attr "value" (Form.value form Body) ] [];
-          Form.error_view form Body (fun m -> lower "b" [] [ text m ]);
+          lower "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
+          Form.error_view form `Body (fun m -> lower "b" [] [ text m ]);
         ])
     ()
 
@@ -84,7 +84,7 @@ let redirect_view () =
     ~children:(fun form ->
       fragment
         [
-          lower "input" [ attr "name" "body"; attr "value" (Form.value form Body) ] [];
+          lower "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
           Form.form_error_view form (fun m -> lower "u" [] [ text m ]);
         ])
     ()

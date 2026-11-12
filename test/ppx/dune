@@ -27,4 +27,4 @@
 
 (cram
  (package yuka)
- (deps pp.exe %{bin:mlx-pp} %{bin:yuka-css}))
+ (deps pp.exe %{bin:mlx-pp} %{bin:yuka}))

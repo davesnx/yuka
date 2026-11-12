@@ -59,7 +59,7 @@ island on the page, except those used with `` `Lazy _ ``. Comments, Issue props
 and Related are used with `` `Lazy `Idle ``, `` `Lazy `Interaction `` and
 `` `Lazy `Visible ``.
 
-Routes are defined once in `Routes.ml`. `yuka-routes` writes the shared
+Routes are defined once in `Routes.ml`. `yuka routes` writes the shared
 `Routes` module (in `shared/`, for `Routes.href` in islands) and
 `Routes_server` (in `server/`); `server/demo_server.ml` gives
 `Routes_server.app` to `Yuka_dream.handler`. `client/main.ml` is

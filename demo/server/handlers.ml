@@ -22,7 +22,7 @@ let register () =
     ~redirect:(fun (i : Model.Issue.t) -> Routes.href (Issue { id = i.id }))
     (fun { title; description; status; priority } ->
       let title = String.trim title in
-      let title_error m = Yuka.Async.return (Error [ (Some Actions.Title, m) ]) in
+      let title_error m = Yuka.Async.return (Error [ (Some `Title, m) ]) in
       if title = "" then title_error "Title is required"
       else if String.length title > 80 then title_error "Title is too long (at most 80 characters)"
       else

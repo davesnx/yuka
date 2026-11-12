@@ -422,7 +422,7 @@ let read ~server names e =
     | _ ->
         fail loc
           "unknown node Router.%s; the nodes are Router.make, Router.group, Router.route, \
-           Router.endpoint, Router.action and Router.redirect"
+           Router.endpoint, Router.action and Router.redirect (names of the route file syntax, not OCaml values)"
           tag
   in
   let tag, args, props, loc = element e in
@@ -1061,7 +1061,10 @@ let generate_server ~shared ~digest (nodes, root) =
   ^ "\n"
 
 let manifest source structure =
-  let only = "the route file must hold one expression, Router.make ..., and nothing else" in
+  let only =
+    "the route file must hold one expression, Router.make ..., and nothing else (yuka routes reads it; it is not \
+     compiled, so it has no open and no let)"
+  in
   match structure with
   | [ { pstr_desc = Pstr_eval (e, _); _ } ] -> e
   | [] -> fail (Location.in_file source) "%s" only
@@ -1078,33 +1081,29 @@ let report (loc : Location.t) msg =
         e.pos_lnum (s.pos_cnum - s.pos_bol) (e.pos_cnum - e.pos_bol);
   Printf.eprintf "Error: %s\n" msg
 
-let usage =
-  "usage: yuka-routes --shared --source FILE < FILE\n\
-  \       yuka-routes --server --shared-module MODULE --source FILE < FILE"
-
 let run ~server source output =
-  let lexbuf = Lexing.from_channel stdin in
-  Location.init lexbuf source;
-  try
-    let e = manifest source (Parse.implementation lexbuf) in
-    print_string (output e (read ~server (Hashtbl.create 16) e))
-  with
-  | Fail (loc, msg) ->
-      report loc msg;
+  match In_channel.with_open_bin source In_channel.input_all with
+  | exception Sys_error m ->
+      prerr_endline ("yuka routes: " ^ m);
       exit 1
-  | exn when Option.is_some (Location.Error.of_exn exn) ->
-      Location.report_exception Format.err_formatter exn;
-      exit 1
+  | text -> (
+      let lexbuf = Lexing.from_string text in
+      Location.init lexbuf source;
+      try
+        let e = manifest source (Parse.implementation lexbuf) in
+        print_string (output e (read ~server (Hashtbl.create 16) e))
+      with
+      | Fail (loc, msg) ->
+          report loc msg;
+          exit 1
+      | exn when Option.is_some (Location.Error.of_exn exn) ->
+          Location.report_exception Format.err_formatter exn;
+          exit 1)
 
-let () =
-  match Array.to_list Sys.argv with
-  | [ _; "--shared"; "--source"; source ] ->
-      run ~server:false source (fun _ (nodes, _) -> generate source nodes)
-  | [ _; "--server"; "--shared-module"; shared; "--source"; source ] when is_module_path shared ->
-      run ~server:true source (fun e tree ->
-          generate_server ~shared
-            ~digest:(Digest.to_hex (Digest.string (Pprintast.string_of_expression e)))
-            tree)
-  | _ ->
-      prerr_endline usage;
-      exit 2
+let shared source = run ~server:false source (fun _ (nodes, _) -> generate source nodes)
+
+let server ~shared_module source =
+  run ~server:true source (fun e tree ->
+      generate_server ~shared:shared_module
+        ~digest:(Digest.to_hex (Digest.string (Pprintast.string_of_expression e)))
+        tree)

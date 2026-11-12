@@ -16,8 +16,8 @@ let round_trip () =
 
 let names () =
   Alcotest.(check (list string)) "field names" [ "title"; "count"; "level" ]
-    (List.map entry_field_name [ Title; Count; Level ]);
-  Alcotest.(check string) "Form.name" "tags" (Yuka.Form.name entry_form Tags)
+    (List.map entry_field_name [ `Title; `Count; `Level ]);
+  Alcotest.(check string) "Form.name" "tags" (Yuka.Form.name entry_form `Tags)
 
 let () =
   Alcotest.run "forms"

@@ -9,15 +9,14 @@
  (action
   (with-stdout-to
    routes_server.ml
-   (with-stdin-from
-    %{dep:../Routes.ml}
-    (run
-     %{bin:yuka-routes}
-     --server
-     --shared-module
-     Cycle_shared.Routes
-     --source
-     %{dep:../Routes.ml})))))
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Cycle_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
 
 (rule
  (alias runtest)
