@@ -241,10 +241,14 @@ let record_events : node -> (unit -> unit) * (unit -> unit) =
     if (owner !== island) return;
     const t = ev.target;
     const field = (ev.type === "input" || ev.type === "change") && t && "value" in t;
+    if (field) t.__yukaRecorded = 1;
     queue.push({ type: ev.type, target: t, ev: ev, field: field, value: field ? t.value : undefined, checked: field ? t.checked : undefined });
   };
   types.forEach(function (t) { island.addEventListener(t, listener, true); });
-  const stop = function () { types.forEach(function (t) { island.removeEventListener(t, listener, true); }); };
+  const stop = function () {
+    types.forEach(function (t) { island.removeEventListener(t, listener, true); });
+    queue.forEach(function (i) { delete i.target.__yukaRecorded; });
+  };
   const drop = function () { stop(); queue = []; };
   const replay = function () {
     stop();
@@ -273,6 +277,28 @@ let record_events : node -> (unit -> unit) * (unit -> unit) =
     });
   };
   return [drop, replay];
+}|}]
+
+let touched : node -> string -> int =
+  [%mel.raw
+    {|function (n, tag) {
+  const t = n.type;
+  let c;
+  if (tag === "option") return (n = n.closest("select")) && n.__yukaKept ? 1 : 0;
+  if (tag === "select") {
+    const d = n.cloneNode(true).options;
+    c = n.__yukaKept = [].some.call(n.options, function (o, i) { return o.selected !== d[i].selected; });
+  } else if (tag === "input" || tag === "textarea")
+    c = t === "checkbox" || t === "radio" ? n.checked !== n.defaultChecked : n.value !== n.defaultValue;
+  return c ? (n.__yukaRecorded || (t === "radio" && !n.checked) ? 1 : 2) : 0;
+}|}]
+
+let fire : node -> unit =
+  [%mel.raw
+    {|function (n) {
+  const w = n.ownerDocument.defaultView;
+  n.dispatchEvent(new w.Event("input", { bubbles: true }));
+  n.dispatchEvent(new w.Event("change", { bubbles: true }));
 }|}]
 
 let location_assign : string -> unit =

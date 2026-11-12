@@ -97,7 +97,7 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
 
 ## State, events and holes
 
-- `Yuka.State.make v` makes a State. `Yuka.State.get` reads it,
+- `Yuka.State.make value` makes a State. `Yuka.State.get` reads it,
   `Yuka.State.set` and `Yuka.State.update` write it.
 - An event handler is a function: `on_click=(fun event -> ...)`.
 - A hole is a part of the markup that updates when a State it reads
@@ -120,7 +120,7 @@ The `start` prop says when the browser downloads and starts the island:
 | `` `Idle `` | when the page opens | when the browser is idle |
 | `` `Visible `` | when the page opens | when the island is visible |
 | `` `Interaction `` | when the page opens | at the first pointer, focus or touch event inside it |
-| `` `Lazy t `` | at the trigger `t` | at the trigger `t` |
+| `` `Lazy trigger `` | at `trigger` | at `trigger` |
 
 ```ocaml
 <Yuka.Client start=`Idle><Counter initial=0 /></Yuka.Client>
@@ -128,6 +128,11 @@ The `start` prop says when the browser downloads and starts the island:
 ```
 
 `` `Lazy `` records the events before the start and replays them.
+
+A user can type, tick or choose in an island before it starts. The control
+keeps what the user did. When the island starts, Yuka sends `input` and
+`change` to that control, so your `on_input` and `on_change` handlers update
+the State. A click before the script runs is lost.
 
 ## Children
 

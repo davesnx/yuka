@@ -9,13 +9,13 @@ let users : User.t list =
   ]
 
 let me = List.hd users
-let user id = List.find (fun (u : User.t) -> u.id = id) users
+let user id = List.find (fun (user : User.t) -> user.id = id) users
 
 let seed =
   let open Issue in
-  let mk n title status priority assignee labels created_at description =
+  let mk number title status priority assignee labels created_at description =
     {
-      id = Printf.sprintf "YUK-%d" n;
+      id = Printf.sprintf "YUK-%d" number;
       title;
       description;
       status;
@@ -56,7 +56,7 @@ let seed =
 let issues = ref seed
 
 let comments : (string, Comment.t list) Hashtbl.t =
-  let c id author body created_at : Comment.t =
+  let comment id author body created_at : Comment.t =
     { id; author = user author; body; created_at }
   in
   Hashtbl.of_seq
@@ -64,23 +64,23 @@ let comments : (string, Comment.t list) Hashtbl.t =
        [
          ( "YUK-1",
            [
-             c "c1" "dev" "I can reproduce it. The marker after the empty item is missing." "Nov 2";
-             c "c2" "maya" "Found it: the printer skips the closing marker. Working on a fix." "Nov 3";
-             c "c3" "tomas" "Please add a test with an empty filter result." "Nov 3";
+             comment "c1" "dev" "I can reproduce it. The marker after the empty item is missing." "Nov 2";
+             comment "c2" "maya" "Found it: the printer skips the closing marker. Working on a fix." "Nov 3";
+             comment "c3" "tomas" "Please add a test with an empty filter result." "Nov 3";
            ] );
          ( "YUK-2",
            [
-             c "c4" "sofia" "Should the loading state keep the height of the list?" "Nov 3";
-             c "c5" "dev" "Yes, a fixed height avoids a jump." "Nov 3";
+             comment "c4" "sofia" "Should the loading state keep the height of the list?" "Nov 3";
+             comment "c5" "dev" "Yes, a fixed height avoids a jump." "Nov 3";
            ] );
-         ("YUK-3", [ c "c6" "maya" "Works well. Shipping it." "Oct 30" ]);
-         ("YUK-19", [ c "c7" "tomas" "Profile shows 80 ms spent waiting on the comments query." "Nov 5" ]);
+         ("YUK-3", [ comment "c6" "maya" "Works well. Shipping it." "Oct 30" ]);
+         ("YUK-19", [ comment "c7" "tomas" "Profile shows 80 ms spent waiting on the comments query." "Nov 5" ]);
        ])
 
-let find id = List.find_opt (fun (i : Issue.t) -> i.id = id) !issues
+let find id = List.find_opt (fun (issue : Issue.t) -> issue.id = id) !issues
 let find_title title =
-  let t = String.lowercase_ascii title in
-  List.find_opt (fun (i : Issue.t) -> String.lowercase_ascii i.title = t) !issues
+  let wanted = String.lowercase_ascii title in
+  List.find_opt (fun (issue : Issue.t) -> String.lowercase_ascii issue.title = wanted) !issues
 
 let comments_of id = Option.value (Hashtbl.find_opt comments id) ~default:[]
 let today = "Nov 6"
@@ -95,33 +95,33 @@ let comments_async ~delay id = after delay (fun () -> comments_of id)
 let related_async ~delay (issue : Issue.t) =
   after delay (fun () ->
       List.filter
-        (fun (i : Issue.t) ->
-          i.id <> issue.id && List.exists (fun l -> List.mem l issue.labels) i.labels)
+        (fun (other : Issue.t) ->
+          other.id <> issue.id && List.exists (fun label -> List.mem label issue.labels) other.labels)
         !issues
-      |> List.filteri (fun n _ -> n < 4))
+      |> List.filteri (fun index _ -> index < 4))
 
 let update ~id ?status ?priority () =
   match find id with
   | None -> None
-  | Some i ->
-      let i =
+  | Some issue ->
+      let updated =
         {
-          i with
-          status = Option.value status ~default:i.status;
-          priority = Option.value priority ~default:i.priority;
+          issue with
+          status = Option.value status ~default:issue.status;
+          priority = Option.value priority ~default:issue.priority;
         }
       in
-      issues := List.map (fun (x : Issue.t) -> if x.id = id then i else x) !issues;
-      Some i
+      issues := List.map (fun (existing : Issue.t) -> if existing.id = id then updated else existing) !issues;
+      Some updated
 
 let create ~title ~description ~status ~priority =
   let next =
     1
     + List.fold_left
-        (fun m (i : Issue.t) -> max m (int_of_string (String.sub i.id 4 (String.length i.id - 4))))
+        (fun highest (issue : Issue.t) -> max highest (int_of_string (String.sub issue.id 4 (String.length issue.id - 4))))
         0 !issues
   in
-  let i : Issue.t =
+  let issue : Issue.t =
     {
       id = Printf.sprintf "YUK-%d" next;
       title;
@@ -133,11 +133,11 @@ let create ~title ~description ~status ~priority =
       created_at = today;
     }
   in
-  issues := i :: !issues;
-  i
+  issues := issue :: !issues;
+  issue
 
 let add_comment ~issue_id ~body =
-  let c : Comment.t =
+  let comment : Comment.t =
     {
       id = Printf.sprintf "c%d" (Hashtbl.length comments * 1000 + List.length (comments_of issue_id) + 100);
       author = me;
@@ -145,19 +145,19 @@ let add_comment ~issue_id ~body =
       created_at = today;
     }
   in
-  Hashtbl.replace comments issue_id (comments_of issue_id @ [ c ]);
-  c
+  Hashtbl.replace comments issue_id (comments_of issue_id @ [ comment ]);
+  comment
 
 let mine () =
   List.filter
-    (fun (i : Issue.t) ->
-      match i.assignee with Some u -> u.id = me.id | None -> false)
+    (fun (issue : Issue.t) ->
+      match issue.assignee with Some user -> user.id = me.id | None -> false)
     !issues
 
 let label_counts () =
-  let open_ (i : Issue.t) = match i.status with Issue.Done | Issue.Canceled -> false | _ -> true in
-  let labels = List.sort_uniq compare (List.concat_map (fun (i : Issue.t) -> i.labels) !issues) in
+  let open_ (issue : Issue.t) = match issue.status with Issue.Done | Issue.Canceled -> false | _ -> true in
+  let labels = List.sort_uniq compare (List.concat_map (fun (issue : Issue.t) -> issue.labels) !issues) in
   List.map
     (fun label ->
-      { Demo_shared.Queries.label; open_ = List.length (List.filter (fun i -> open_ i && List.mem label i.Issue.labels) !issues) })
+      { Demo_shared.Queries.label; open_ = List.length (List.filter (fun issue -> open_ issue && List.mem label issue.Issue.labels) !issues) })
     labels

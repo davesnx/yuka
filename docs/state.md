@@ -38,12 +38,12 @@ order of the calls.
 
 ## State
 
-`State.make v` creates a State that holds `v`.
+`State.make value` creates a State that holds `value`.
 
-- `State.get s` reads the value. Inside a hole, a memo or an effect, the
+- `State.get state` reads the value. Inside a hole, a memo or an effect, the
   read is recorded.
-- `State.peek s` reads the value and records nothing.
-- `State.set s v` writes a value. `State.update s f` writes `f` of the
+- `State.peek state` reads the value and records nothing.
+- `State.set state value` writes a value. `State.update state change` writes `change` of the
   current value.
 
 A write is a change only when the new value differs from the old one.
@@ -82,7 +82,7 @@ State deeper in the tree, so that less is created again.
 
 ## Memos
 
-`State.memo f` is a value computed from other States. Use it when a
+`State.memo compute` is a value computed from other States. Use it when a
 computation is costly, or when several readers need the same result.
 
 ```ocaml
@@ -106,18 +106,18 @@ An effect connects a component to something outside Yuka: the DOM, a
 timer, a socket, a browser API, a log. There are two kinds. They differ
 only in when they run.
 
-`Effect.after f` runs `f` after the DOM is up to date, and again each time
+`Effect.after body` runs `body` after the DOM is up to date, and again each time
 a State it read changes. Use it for most effects.
 
 - The first run comes after Yuka puts the elements of the component in
-  the page, so `f` can find them.
+  the page, so `body` can find them.
 - A later run comes after the holes, the lists and the `Effect.before`
-  effects of the same change, so `f` sees the new DOM.
+  effects of the same change, so `body` sees the new DOM.
 
-`Effect.before f` runs `f` at once, in the component body, before the
+`Effect.before body` runs `body` at once, in the component body, before the
 elements of the component exist. A later run comes together with the
 holes and the lists of the same change, a parent before its children. Use
-it when `f` must run before the DOM changes, for example to read a scroll
+it when `body` must run before the DOM changes, for example to read a scroll
 position before new rows push it.
 
 `~cleanup` receives the result of the previous run. Yuka calls it before
@@ -132,8 +132,8 @@ When `room` changes, Yuka closes the old connection and opens a new one.
 When the component is removed, Yuka closes the last connection. When Yuka
 removes the component before the first run, the effect never runs.
 
-`Effect.on_change s f` calls `f ~prev ~next` when `s` changes, with the
-timing of `Effect.after`. It does not call `f` for the first value.
+`Effect.on_change state handler` calls `handler ~prev ~next` when `state` changes, with the
+timing of `Effect.after`. It does not call `handler` for the first value.
 
 To read a State in an effect without a re-run when it changes, use
 `State.peek`, or wrap the code in `State.untrack`.
@@ -149,7 +149,7 @@ rounds. In a round, the holes, the lists and the `Effect.before` effects
 that read the State run first. The `Effect.after` effects run when none of
 them is left. A write inside an effect starts a new round.
 
-`Yuka.batch f` delays that work to the end of `f`, so readers run one time
+`Yuka.batch body` delays that work to the end of `body`, so readers run one time
 for several writes:
 
 ```ocaml
@@ -173,7 +173,7 @@ them. When Yuka removes that part of the page, it stops its effects, runs
 their cleanups and drops its memos. An effect created inside another
 effect is stopped before the outer effect runs again.
 
-`Yuka.owner f` runs `f` and returns a function that stops everything `f`
+`Yuka.owner body` runs `body` and returns a function that stops everything `body`
 created. Use it for effects that must live outside a component.
 
 ## On the server

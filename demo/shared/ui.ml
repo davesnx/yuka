@@ -1,6 +1,6 @@
 let dialog_open = Yuka.State.make false
 
-let typing e =
-  match Yuka.Event.target_tag e with
+let typing event =
+  match Yuka.Event.target_tag event with
   | "input" | "textarea" | "select" -> true
   | _ -> false

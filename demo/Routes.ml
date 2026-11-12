@@ -3,6 +3,7 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
   ~cache:no_store
   [
     Router.route About ~path:"/about" ~page:Pages.about ~prerender:true;
+    Router.route Before_hydration ~path:"/before-hydration" ~page:Pages.before_hydration;
     Router.group ~path:"/" ~layout:Pages.shell ~not_found:Pages.not_found
       ~error:Pages.error
       [

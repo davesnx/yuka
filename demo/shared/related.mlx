@@ -6,17 +6,17 @@ let[@client] make ~(related : Model.Issue.t list Yuka.Async.t) () =
     <h2 class_="section-title">"Related issues"</h2>
     <Yuka.Await async=related
        loading=(<Views.Skeleton lines=3 />)
-       failed=(fun m -> <p class_="error">(Yuka.text ("Could not load: " ^ m))</p>)>
+       failed=(fun message -> <p class_="error">(Yuka.text ("Could not load: " ^ message))</p>)>
        (fun issues ->
          if issues = [] then <p class_="muted">"None."</p>
          else
            <ul class_=Css.related_list>
              (Yuka.fragment
                 (List.map
-                   (fun (i : Issue.t) ->
+                   (fun (issue : Issue.t) ->
                      <li>
-                       <Views.Status_icon status=i.status />
-                       <a href=(Routes.issue ~id:i.id ())>(Yuka.text (i.id ^ " " ^ i.title))</a>
+                       <Views.Status_icon status=issue.status />
+                       <a href=(Routes.issue ~id:issue.id ())>(Yuka.text (issue.id ^ " " ^ issue.title))</a>
                      </li>)
                    issues))
            </ul>)

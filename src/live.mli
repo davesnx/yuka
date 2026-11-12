@@ -45,7 +45,7 @@ val mutate :
   change:('s -> 's) ->
   (unit -> ('r, Status.error) result Async.t) ->
   ('r, Status.error) result Async.t
-(** [mutate t ~change run] shows [change] at once and calls [run ()],
+(** [mutate live ~change run] shows [change] at once and calls [run ()],
     which should call an action that publishes the new state. On [Error]
     or a failed [Async], the change is removed. On [Ok result], the change
     becomes [commit result] (default [change]) and stays until

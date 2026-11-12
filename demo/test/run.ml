@@ -72,11 +72,11 @@ let issue_page () =
 let streaming () =
   let html = get "/issue/YUK-1" in
   let index_of needle =
-    let n = String.length needle in
-    let rec go i =
-      if i + n > String.length html then Alcotest.failf "no %S" needle
-      else if String.sub html i n = needle then i
-      else go (i + 1)
+    let needle_length = String.length needle in
+    let rec go index =
+      if index + needle_length > String.length html then Alcotest.failf "no %S" needle
+      else if String.sub html index needle_length = needle then index
+      else go (index + 1)
     in
     go 0
   in
@@ -174,21 +174,21 @@ let action_route () =
   let status, _, _ = call "/_yuka/action/add_comment" in
   Alcotest.(check int) "GET" 405 status
 
-let fst3 (a, _, _) = a
+let fst3 (first, _, _) = first
 
 module Yojson_like = struct
   let id text =
     match Yuka.Json.of_string text with
-    | Ok (`Assoc f) -> ( match List.assoc_opt "id" f with Some (`Int i) -> Some i | _ -> None)
+    | Ok (`Assoc fields) -> ( match List.assoc_opt "id" fields with Some (`Int value) -> Some value | _ -> None)
     | _ -> None
 end
 
 let settle async =
   Lwt_main.run (Lwt.pause ());
   match Yuka.Async.status async with
-  | Yuka.Async.Done (Ok v) -> Ok v
-  | Done (Error e) -> Error (Yuka.Status.error_to_string e)
-  | Failed m -> Error m
+  | Yuka.Async.Done (Ok value) -> Ok value
+  | Done (Error error) -> Error (Yuka.Status.error_to_string error)
+  | Failed message -> Error message
   | Pending -> Error "pending"
 
 let actions () =
@@ -197,11 +197,11 @@ let actions () =
        (Yuka.Action.call Actions.update_issue
           { Actions.id = "YUK-4"; status = Some Model.Issue.Done; priority = None })
    with
-  | Ok (i : Model.Issue.t) ->
-      Alcotest.(check bool) "status changed" true (i.status = Model.Issue.Done);
+  | Ok (issue : Model.Issue.t) ->
+      Alcotest.(check bool) "status changed" true (issue.status = Model.Issue.Done);
       Alcotest.(check bool) "stored" true
         ((Option.get (Store.find "YUK-4")).status = Model.Issue.Done)
-  | Error m -> Alcotest.failf "update failed: %s" m);
+  | Error message -> Alcotest.failf "update failed: %s" message);
   (match
      settle
        (Yuka.Action.call Actions.create_issue
@@ -250,8 +250,8 @@ let actions () =
             priority = Model.Issue.High;
           })
    with
-  | Ok (Ok (i : Model.Issue.t)) ->
-      Alcotest.(check bool) "id" true (String.length i.id > 4 && String.sub i.id 0 4 = "YUK-");
+  | Ok (Ok (issue : Model.Issue.t)) ->
+      Alcotest.(check bool) "id" true (String.length issue.id > 4 && String.sub issue.id 0 4 = "YUK-");
       has (get "/") "Brand new"
   | _ -> Alcotest.fail "create failed");
   match
@@ -259,10 +259,10 @@ let actions () =
       (Yuka.Action.call Actions.add_comment
          { Actions.issue_id = "YUK-3"; body = "Nice work" })
   with
-  | Ok (c : Model.Comment.t) ->
-      Alcotest.(check string) "author" "Maya Chen" c.author.name;
+  | Ok (comment : Model.Comment.t) ->
+      Alcotest.(check string) "author" "Maya Chen" comment.author.name;
       Alcotest.(check int) "stored" 2 (List.length (Store.comments_of "YUK-3"))
-  | Error m -> Alcotest.failf "comment failed: %s" m
+  | Error message -> Alcotest.failf "comment failed: %s" message
 
 let live_answers () =
   let html = get "/" in
@@ -279,12 +279,12 @@ let live_publish () =
     let pending = ref [ {|{"t":"hello","v":1,"csrf":""}|}; {|{"t":"sub","id":1,"topic":"issues","key":"All"}|};
                         {|{"t":"sub","id":2,"topic":"issues","key":"Mine"}|}; {|{"t":"sub","id":3,"topic":"issue","key":"YUK-5"}|} ] in
     Yuka.Server.Live.connection
-      ~send:(fun t -> out := t :: !out; Yuka.Async.return ())
+      ~send:(fun frame -> out := frame :: !out; Yuka.Async.return ())
       ~receive:(fun () ->
         match !pending with
-        | x :: rest ->
+        | frame :: rest ->
             pending := rest;
-            Yuka.Async.return (Some x)
+            Yuka.Async.return (Some frame)
         | [] -> fst3 (Yuka.Async.make ()))
       ~close:(fun _ -> Yuka.Async.return ())
   in
@@ -300,17 +300,17 @@ let live_publish () =
           { Actions.id = "YUK-5"; status = Some Model.Issue.Canceled; priority = None })
    with
   | Ok _ -> ()
-  | Error m -> Alcotest.failf "update failed: %s" m);
+  | Error message -> Alcotest.failf "update failed: %s" message);
   let ids =
     List.sort compare
       (List.filter_map
-         (fun t ->
-           match Yojson_like.id t with Some id when Model.Issue.contains ~sub:{|"t":"state"|} t -> Some id | _ -> None)
+         (fun frame ->
+           match Yojson_like.id frame with Some id when Model.Issue.contains ~sub:{|"t":"state"|} frame -> Some id | _ -> None)
          !out)
   in
   Alcotest.(check (list int)) "published to both views and the issue" [ 1; 2; 3 ] ids;
   Alcotest.(check bool) "the new status" true
-    (List.exists (fun t -> Yojson_like.id t = Some 3 && Model.Issue.contains ~sub:"Canceled" t) !out)
+    (List.exists (fun frame -> Yojson_like.id frame = Some 3 && Model.Issue.contains ~sub:"Canceled" frame) !out)
 
 let () =
   Handlers.register ();

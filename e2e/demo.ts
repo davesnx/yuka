@@ -308,6 +308,44 @@ await step("3d. a page with no island loads no script", async () => {
   await pg.close();
 });
 
+await step("3i. input made before hydration", async () => {
+  const pg = await browser.newPage();
+  const errors: string[] = [];
+  pg.on("console", (m) => (m.type() === "error" || m.text().includes("hydration mismatch")) && errors.push(m.text()));
+  pg.on("pageerror", (e) => errors.push(String(e)));
+  const t0 = Date.now();
+  await pg.goto(base + "/before-hydration", { waitUntil: "commit" });
+  await pg.waitForSelector("#early-note", { timeout: 3000 });
+  const early = await pg.textContent("yuka-island p");
+  await pg.locator("#early-name").pressSequentially("typed early");
+  await pg.locator("#early-agreed").check();
+  await pg.locator("#early-size").selectOption("large");
+  await pg.locator("#early-note").pressSequentially("a note");
+  await pg.locator("#early-name").evaluate((el: HTMLInputElement) => { el.focus(); el.setSelectionRange(2, 5); });
+  const typedAt = Date.now() - t0;
+  await pg.waitForFunction(() => document.querySelector("yuka-island p")?.textContent?.startsWith("Interactive"), null, { timeout: 8000 });
+  const readyAt = Date.now() - t0;
+  const got = await pg.evaluate(() => {
+    const v = (id: string) => (document.getElementById(id) as HTMLInputElement).value;
+    const t = (id: string) => document.getElementById(id)!.textContent;
+    const name = document.getElementById("early-name") as HTMLInputElement;
+    return {
+      values: [v("early-name"), String((document.getElementById("early-agreed") as HTMLInputElement).checked), v("early-size"), v("early-note")].join("|"),
+      states: ["early-name-state", "early-agreed-state", "early-size-state", "early-note-state"].map(t).join("|"),
+      focus: [document.activeElement === name, name.selectionStart, name.selectionEnd].join(","),
+    };
+  });
+  check("3i.1 the fields were changed before the late script ran", (early ?? "").startsWith("Not interactive") && typedAt < 2500 && readyAt >= 3000, `status=${early} typed by ${typedAt}ms, interactive at ${readyAt}ms`);
+  check("3i.2 hydration keeps what the user did", got.values === "typed early|true|large|a note", got.values);
+  check("3i.3 each State learned it", got.states === "State: typed early|State: true|State: large|State: a note", got.states);
+  check("3i.4 focus and selection did not move", got.focus === "true,2,5", got.focus);
+  await pg.locator("#early-name").press("End");
+  await pg.locator("#early-name").pressSequentially("!");
+  check("3i.5 the input works after hydration", (await pg.textContent("#early-name-state")) === "State: typed early!", (await pg.textContent("#early-name-state")) ?? "");
+  check("3i.6 no console error and no hydration mismatch", errors.length === 0, errors.join(" | "));
+  await pg.close();
+});
+
 await step("3e. live data is embedded", async () => {
   const pg = await browser.newPage();
   const posts: string[] = [];

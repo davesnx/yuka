@@ -8,11 +8,11 @@ let[@client] make ~(issue : Model.Issue.t) ~children () =
   let error : string option Yuka.State.t = Yuka.State.make None in
   let change ?status ?priority () =
     Yuka.State.set error None;
-    let edit (i : Issue.t) =
+    let edit (cached : Issue.t) =
       {
-        i with
-        status = Option.value status ~default:i.status;
-        priority = Option.value priority ~default:i.priority;
+        cached with
+        status = Option.value status ~default:cached.status;
+        priority = Option.value priority ~default:cached.priority;
       }
     in
     Yuka.Async.on_result
@@ -22,12 +22,12 @@ let[@client] make ~(issue : Model.Issue.t) ~children () =
   in
   let select label items slug to_label of_slug selected on_pick =
     <select class_="select" aria_label=label value=(slug (Yuka.State.get selected))
-      on_change=(fun e -> Option.iter on_pick (of_slug (Yuka.Event.target_value e)))>
+      on_change=(fun event -> Option.iter on_pick (of_slug (Yuka.Event.target_value event)))>
       (Yuka.fragment
          (List.map
-            (fun x ->
-              <option value=(slug x)>
-                (Yuka.text (to_label x))
+            (fun item ->
+              <option value=(slug item)>
+                (Yuka.text (to_label item))
               </option>)
             items))
     </select>
@@ -43,21 +43,21 @@ let[@client] make ~(issue : Model.Issue.t) ~children () =
       <Views.Property name="Status">
         (Views.Status_icon.make ~status:(Yuka.State.get status) ())
         (select "Status" Issue.all_statuses Issue.status_slug Issue.status_label
-           Issue.status_of_slug status (fun s -> change ~status:s ()))
+           Issue.status_of_slug status (fun status -> change ~status ()))
       </Views.Property>
       <Views.Property name="Priority">
         (Views.Priority_icon.make ~priority:(Yuka.State.get priority) ())
         (select "Priority" Issue.all_priorities Issue.priority_slug Issue.priority_label
-           Issue.priority_of_slug priority (fun p -> change ~priority:p ()))
+           Issue.priority_of_slug priority (fun priority -> change ~priority ()))
       </Views.Property>
       <Views.Property name="Assignee">
         <Views.Avatar user=issue.assignee />
-        (Yuka.text (match issue.assignee with Some u -> u.User.name | None -> "Unassigned"))
+        (Yuka.text (match issue.assignee with Some user -> user.User.name | None -> "Unassigned"))
       </Views.Property>
       <Views.Property name="Labels"><Views.Labels labels=issue.labels /></Views.Property>
       <Views.Property name="Created">(Yuka.text issue.created_at)</Views.Property>
       (match Yuka.State.get error with
-       | Some m -> <p class_="error">(Yuka.text m)</p>
+       | Some message -> <p class_="error">(Yuka.text message)</p>
        | None -> Yuka.empty)
       (Yuka.hole (fun () ->
          match Yuka.Live.status live with

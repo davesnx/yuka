@@ -9,8 +9,8 @@ type error = Status_error.t =
   | Network of string  (** No answer: offline, aborted, timeout. *)
   | Protocol of string  (** The answer did not decode. *)
 
-(** The state of data that loads. [Loading (Some x)]: a new load runs and
-    [x] is the last good data. *)
+(** The state of data that loads. [Loading (Some previous)]: a new load runs and
+    [previous] is the last good data. *)
 type 'a t =
   | Idle  (** Not enabled. *)
   | Loading of 'a option  (** A request runs; the option is the last good data. *)
@@ -23,7 +23,7 @@ val data : 'a t -> 'a option
 val map : ('a -> 'b) -> 'a t -> 'b t
 
 val error_to_string : error -> string
-(** [Rejected m] is [m]; the others are short English text. *)
+(** [Rejected message] is [message]; the others are short English text. *)
 
 val error_codec : error Codec.t
-(** [{"kind": "rejected", "message": m}], [{"kind": "server"}], ... *)
+(** [{"kind": "rejected", "message": message}], [{"kind": "server"}], ... *)

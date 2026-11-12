@@ -1,0 +1,37 @@
+module Css = [%yuka.css "before_hydration.css"]
+
+let shown value = Yuka.text ("State: " ^ value)
+
+let[@client] make () =
+  let name = Yuka.State.make "" in
+  let agreed = Yuka.State.make false in
+  let size = Yuka.State.make "medium" in
+  let note = Yuka.State.make "" in
+  let ready = Yuka.State.make false in
+  Yuka.Effect.after (fun () -> Yuka.State.set ready true);
+  <div>
+    (if Yuka.State.get ready then <p class_=(Css.status ^ " " ^ Css.ready)>"Interactive: the island has hydrated."</p>
+     else <p class_=Css.status>"Not interactive yet: the script is still loading."</p>)
+    <div class_=Css.fields>
+      <label for_="early-name">"Text"</label>
+      <input id="early-name" type_=`text value=(Yuka.State.get name)
+        on_input=(fun event -> Yuka.State.set name (Yuka.Event.target_value event)) />
+      <span class_=Css.state id="early-name-state">(shown (Yuka.State.get name))</span>
+      <label for_="early-agreed">"Checkbox"</label>
+      <input id="early-agreed" type_=`checkbox checked=(Yuka.State.get agreed)
+        on_change=(fun event -> Yuka.State.set agreed (Yuka.Event.target_checked event)) />
+      <span class_=Css.state id="early-agreed-state">(shown (string_of_bool (Yuka.State.get agreed)))</span>
+      <label for_="early-size">"Select"</label>
+      <select id="early-size" value=(Yuka.State.get size)
+        on_change=(fun event -> Yuka.State.set size (Yuka.Event.target_value event))>
+        <option value="small">"Small"</option>
+        <option value="medium">"Medium"</option>
+        <option value="large">"Large"</option>
+      </select>
+      <span class_=Css.state id="early-size-state">(shown (Yuka.State.get size))</span>
+      <label for_="early-note">"Textarea"</label>
+      <textarea id="early-note" rows=3 value=(Yuka.State.get note)
+        on_input=(fun event -> Yuka.State.set note (Yuka.Event.target_value event)) />
+      <span class_=Css.state id="early-note-state">(shown (Yuka.State.get note))</span>
+    </div>
+  </div>

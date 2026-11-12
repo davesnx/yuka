@@ -26,10 +26,10 @@ module Priority_icon = struct
   let make ~priority () : _ Yuka.element =
     let level = match priority with
       | Issue.Urgent -> 4 | High -> 3 | Medium -> 2 | Low -> 1 | No_priority -> 0 in
-    let bar i =
-      let h = 3 + (i * 3) in
-      <rect x=(Int.to_string ((i - 1) * 4 + 1)) y=(Int.to_string (14 - h)) width="3" height=(Int.to_string h) rx="1"
-        class_=(if i <= level then "bar on" else "bar") />
+    let bar index =
+      let height = 3 + (index * 3) in
+      <rect x=(Int.to_string ((index - 1) * 4 + 1)) y=(Int.to_string (14 - height)) width="3" height=(Int.to_string height) rx="1"
+        class_=(if index <= level then "bar on" else "bar") />
     in
     <svg class_=("icon priority-" ^ Issue.priority_slug priority) view_box="0 0 14 14" width="14" height="14">
       (Yuka.fragment (List.map bar [ 1; 2; 3 ]))
@@ -39,7 +39,7 @@ end
 module Avatar = struct
   let make ~user () : _ Yuka.element =
     match user with
-    | Some u -> <span class_="avatar" title=u.User.name>(Yuka.text (User.initials u))</span>
+    | Some user -> <span class_="avatar" title=user.User.name>(Yuka.text (User.initials user))</span>
     | None -> <span class_="avatar empty" title="Unassigned">"?"</span>
 end
 
@@ -47,7 +47,7 @@ module Labels = struct
   let make ~labels () : _ Yuka.element =
     <span class_="labels">
       (Yuka.fragment
-         (List.map (fun l -> <span class_=("label label-" ^ l)>(Yuka.text l)</span>) labels))
+         (List.map (fun label -> <span class_=("label label-" ^ label)>(Yuka.text label)</span>) labels))
     </span>
 end
 
@@ -82,7 +82,7 @@ end
 module Skeleton = struct
   let make ~lines () : _ Yuka.element =
     <div class_="skeleton">
-      (Yuka.fragment (List.init lines (fun i -> <div class_=("skeleton-line w" ^ Int.to_string (i mod 3)) />)))
+      (Yuka.fragment (List.init lines (fun index -> <div class_=("skeleton-line w" ^ Int.to_string (index mod 3)) />)))
     </div>
 end
 
@@ -125,34 +125,34 @@ end
 
 module Issue_form = struct
   let make ~form () : _ Yuka.element =
-    let sent_status = match Yuka.Form.value form `Status with "" -> "todo" | v -> v in
-    let sent_priority = match Yuka.Form.value form `Priority with "" -> "no-priority" | v -> v in
+    let sent_status = match Yuka.Form.value form `Status with "" -> "todo" | value -> value in
+    let sent_priority = match Yuka.Form.value form `Priority with "" -> "no-priority" | value -> value in
     <div class_="issue-form">
       <input class_="dialog-title" type_=`text id="dialog-title" name="title" placeholder="Issue title"
         autofocus=true value=(Yuka.Form.value form `Title) />
-      (Yuka.Form.error_view form `Title (fun m -> <p class_="error">(Yuka.text m)</p>))
+      (Yuka.Form.error_view form `Title (fun message -> <p class_="error">(Yuka.text message)</p>))
       <textarea class_="dialog-description" name="description" placeholder="Description" rows=4
         value=(Yuka.Form.value form `Description) />
       <div class_="dialog-row">
         <select class_="select" aria_label="Status" name="status">
           (Yuka.fragment
              (List.map
-                (fun s ->
-                  <option value=(Issue.status_slug s) selected=(Issue.status_slug s = sent_status)>
-                    (Yuka.text (Issue.status_label s))
+                (fun status ->
+                  <option value=(Issue.status_slug status) selected=(Issue.status_slug status = sent_status)>
+                    (Yuka.text (Issue.status_label status))
                   </option>)
                 Issue.all_statuses))
         </select>
         <select class_="select" aria_label="Priority" name="priority">
           (Yuka.fragment
              (List.map
-                (fun p ->
-                  <option value=(Issue.priority_slug p) selected=(Issue.priority_slug p = sent_priority)>
-                    (Yuka.text (Issue.priority_label p))
+                (fun priority ->
+                  <option value=(Issue.priority_slug priority) selected=(Issue.priority_slug priority = sent_priority)>
+                    (Yuka.text (Issue.priority_label priority))
                   </option>)
                 Issue.all_priorities))
         </select>
       </div>
-      (Yuka.Form.errors_view form (fun m -> <p class_="error">(Yuka.text m)</p>))
+      (Yuka.Form.errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
     </div>
 end
