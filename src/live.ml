@@ -321,7 +321,7 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
     Platform.live_mark := (fun fields -> last_mark := List.assoc_opt "live" fields);
     let m = get () in
     let first = ref true in
-    Base.Effect.run (fun () ->
+    Base.run_effect Scheduler.queue (fun () ->
         let key = (Topic.key topic).encode (args ()) in
         match u.key with
         | Some k when Json.to_string k = Json.to_string key -> ()

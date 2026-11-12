@@ -2011,6 +2011,8 @@ Spec: `.workplace/docs/data-spec.md` section 3 (ticket 13).
 
 ## Error boundaries (2026-11-10)
 
+Current names: `Effect.run` is now `Effect.before`; the client's holes, attributes and lists call `Base.run_effect Scheduler.queue` (see "`Effect.after` and `Effect.before`").
+
 Ticket 21; `.workplace/docs/app-spec.md` section 21, option A.
 
 - An owner has `catch : (exn -> unit) option`. A new owner takes the catch
@@ -2632,6 +2634,9 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 - `Yuka.element` builds an element; `Yuka.list` and `Yuka.array` are
   removed (use `fragment`).
 - Event handlers run in a batch (see "Equality and batch").
+- `Effect.run` is replaced by `Effect.after` and `Effect.before`;
+  `Effect.on_change` has the timing of `after` (see "`Effect.after` and
+  `Effect.before`").
 - An `Async.map` or `Async.bind` function that raises gives `Failed`.
 - A failed `<Yuka.Await>`, `suspend` or `Async` prop shows the message of
   a `Server.Action.reject`, else `"server error"`; the detail goes to
@@ -2678,6 +2683,7 @@ unless it says otherwise; `CHANGES.md` lists them one by one.
 | `Yuka.stylesheet` | `runtime_stylesheet` |
 | `Template.make`, `template_of_shape`, `Client.hydrate` | `Private.Template.make`, `Private.template`, `Private.hydrate` |
 | `Form.form_errors`, `Form.form_error_view` | `Form.errors`, `Form.errors_view` |
+| `Effect.run` | `Effect.after` (DOM up to date) or `Effect.before` (the old timing) |
 | `Optimistic` | internal |
 | `Server.ADAPTER`, `Server.Make`, `Server.handle` | `Server.Adapter.Backend`, `Server.Adapter.Make`, internal |
 | `Server.Live.SOCKET`, `Server.Live.Handle` | the adapter's `upgrade` and `Server.Live.connection` |
@@ -3034,3 +3040,61 @@ build a param on `Param.int` and the others.
   side effects. A module that calls `Param.make` at its top level is not:
   esbuild keeps it when the bundle imports it. A missing value fails with
   `Unbound value Model.issue_id_param` in the generated `routes.ml`.
+
+## `Effect.after` and `Effect.before` (2026-11-12)
+
+Decided by the user. Before, the DOM bindings (holes, reactive attributes,
+keyed lists) and the bodies of `Effect.run` were in one queue, ordered by
+depth, level and id. After a write, a user effect could run before the DOM
+update of the same change and read the old DOM: an effect that reads
+`count` has level 1, a hole that reads `memo (count * 2)` has level 2. The
+first run of `Effect.run` was in the component body, before the nodes of
+the component existed. Ticket 35.
+
+- `Effect.run` is removed, with no alias. Two functions with its type
+  replace it: `Effect.after` and `Effect.before`. There is no timing
+  parameter and no `Effect.sync`.
+- `Effect.before` is the old `Effect.run`: first run at creation, later
+  runs in the queue of the DOM bindings, parents first.
+- `Effect.after` is the common case. A later run comes after the DOM
+  bindings and `before` effects of the same change. First run: when the
+  effect is created inside a batch or a flush (`Scheduler.depth > 0`), it
+  is put in the second queue and runs in the flush that ends that batch;
+  else it runs at once, as `before` does. `render` and hydration (the
+  client's `start`) now run in a `batch`, and the creation of a list row
+  or of a component in a hole that runs again is inside a flush, so a
+  component's `after` effect finds its elements. At the top level of
+  `Yuka.owner` (not a batch) the first run is at once; in an event
+  handler it is at the end of the handler's batch.
+- `Effect.on_change` has the timing of `after`. Its previous value is the
+  value at creation, so a change between the creation and a deferred first
+  run calls it.
+- Scheduler: a node's `eff` is the queue it goes to (`Some queue`,
+  `Some late`, `None` for a State or a memo). `flush` takes the `queue`
+  while it is not empty; when it is empty it takes `late`. So each round
+  runs either `before`-kind nodes or `after` effects, in the old order
+  (depth, level, id), and the `after` effects run only when no
+  `before`-kind node is pending. A write in an `after` effect starts new
+  rounds. Each round counts toward the limit of 100; at the limit both
+  queues are dropped. Errors, cleanups and disposal do not change: a
+  deferred first run that raises goes to the catch of the effect's owner
+  through `flush`, as a later run does; outside a boundary it is raised at
+  the end of the batch, and the effect is not stopped. An `after` effect
+  whose owner is disposed before its first run has state 3 and never runs.
+- `flush` lost its empty-queue check: it is only called at depth 0, and
+  an empty flush does nothing.
+- Internal callers keep the old timing through `Base.run_effect
+  Scheduler.queue`: the holes, reactive attributes and keyed lists in
+  `dom/js/client.ml`, and the effects of `Remote.use` and `Live.use`.
+  Their first run reads the answer that the server embedded and sets the
+  status State before the markup reads it; deferred, hydration would see
+  `Loading` where the server printed the data. The keyed list no longer uses `on_change`: an effect
+  calls `reconcile` on each run, as `on_change ~equal:(fun _ _ -> false)`
+  did. The client does not reference `Base.Effect`, so an app that does
+  not use effects does not bundle it.
+- Demo: the two `on_window "keydown"` effects are `after`.
+- Size (`make size`, gzip): the keyed benchmark app goes from 7,967 to
+  7,962 B. A page that bundles `Base.Effect` pays for the two wrappers,
+  the deferral and a second copy of the `on_change` logic in the keyed
+  list: a one-island page +90 to +102 B, the demo start +108 B, the demo
+  pages +118 to +124 B.

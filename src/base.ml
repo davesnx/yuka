@@ -80,55 +80,64 @@ let mount f =
 
 let server_rendering = ref false
 
+let run_effect queue ?cleanup body =
+  if !server_rendering then () else
+  let child = new_owner () in
+  let last = ref None in
+  let teardown () =
+    dispose_owner child;
+    match !last with
+    | None -> ()
+    | Some finish ->
+        last := None;
+        finish ()
+  in
+  let node =
+    Scheduler.make (Some queue) (fun () ->
+        teardown ();
+        let result = with_owner child body in
+        (match cleanup with
+        | Some cleanup -> last := Some (fun () -> cleanup result)
+        | None -> ());
+        false)
+  in
+  let stop () =
+    Scheduler.dispose node;
+    teardown ()
+  in
+  node.owner <- Some child;
+  if queue == Scheduler.late && !Scheduler.depth > 0 then begin
+    node.state <- 2;
+    Scheduler.late := node :: !Scheduler.late;
+    own stop
+  end
+  else
+  let first = ref None in
+  let later =
+    match Scheduler.batch (fun () -> try Scheduler.run node with e -> first := Some e) with
+    | () -> None
+    | exception e -> Some e
+  in
+  match !first with
+  | Some e -> (
+      match child.catch with
+      | Some _ ->
+          fail child e;
+          own stop
+      | None ->
+          stop ();
+          raise e)
+  | None -> (
+      own stop;
+      match later with Some e -> raise e | None -> ())
+
 module Effect = struct
-  let run ?cleanup body =
-    if !server_rendering then () else
-    let child = new_owner () in
-    let last = ref None in
-    let teardown () =
-      dispose_owner child;
-      match !last with
-      | None -> ()
-      | Some finish ->
-          last := None;
-          finish ()
-    in
-    let node =
-      Scheduler.make true (fun () ->
-          teardown ();
-          let result = with_owner child body in
-          (match cleanup with
-          | Some cleanup -> last := Some (fun () -> cleanup result)
-          | None -> ());
-          false)
-    in
-    let stop () =
-      Scheduler.dispose node;
-      teardown ()
-    in
-    node.owner <- Some child;
-    let first = ref None in
-    let later =
-      match Scheduler.batch (fun () -> try Scheduler.run node with e -> first := Some e) with
-      | () -> None
-      | exception e -> Some e
-    in
-    match !first with
-    | Some e -> (
-        match child.catch with
-        | Some _ ->
-            fail child e;
-            own stop
-        | None ->
-            stop ();
-            raise e)
-    | None -> (
-        own stop;
-        match later with Some e -> raise e | None -> ())
+  let before ?cleanup body = run_effect Scheduler.queue ?cleanup body
+  let after ?cleanup body = run_effect Scheduler.late ?cleanup body
 
   let on_change ?equal state f =
     let prev = ref (Signal.peek state) in
-    run (fun () ->
+    after (fun () ->
         let next = Signal.get state in
         if Signal.differs equal !prev next then begin
           let p = !prev in

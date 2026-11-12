@@ -476,7 +476,7 @@ and instantiate pos (template : template) c parts =
 
 and mount_attr doc svg el adopted = function
   | Static (name, value) -> if not adopted then set_attr svg el name (Some value)
-  | Dynamic (name, f) -> Base.Effect.run (fun () -> set_attr svg el name (f ()))
+  | Dynamic (name, f) -> Base.run_effect Scheduler.queue (fun () -> set_attr svg el name (f ()))
   | Handler (event, handler) -> add_handler doc el event handler
 
 and mount_hole pos owned f =
@@ -491,7 +491,7 @@ and mount_hole pos owned f =
         text_node := Js.null;
         mount_node pos (ref false) n
   in
-  Base.Effect.run (fun () ->
+  Base.run_effect Scheduler.queue (fun () ->
       let n = f () in
       if not !mounted then begin
         mounted := true;
@@ -634,10 +634,9 @@ and mount_each :
     done;
     entries := next
   in
-  Base.Effect.on_change
-    ~equal:(fun _ _ -> false)
-    source
-    (fun ~prev:_ ~next -> reconcile next);
+  Base.run_effect Scheduler.queue (fun () ->
+      let next = State.get source in
+      Scheduler.untrack (fun () -> reconcile next));
   on_dispose (fun () -> dispose_all !entries)
 
 let mount_element pos tag attrs children =
@@ -692,15 +691,16 @@ let use_catch () = catch_hook := fun [@u] pos last client -> mount_catch pos las
 let start ~adopt container f =
   let doc = Web.owner_document container in
   let (), dispose =
-    Base.mount (fun () ->
-        let n = f () in
-        if not adopt then Web.clear container "";
-        let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
-        if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then begin
-          mount_node pos (ref false) n;
-          if adopt then walk_region pos (fun [@u] x -> Dev.mismatch container "nothing" (Some x))
-        end
-        else mount_node pos (ref false) n)
+    Scheduler.batch (fun () ->
+        Base.mount (fun () ->
+            let n = f () in
+            if not adopt then Web.clear container "";
+            let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
+            if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then begin
+              mount_node pos (ref false) n;
+              if adopt then walk_region pos (fun [@u] x -> Dev.mismatch container "nothing" (Some x))
+            end
+            else mount_node pos (ref false) n))
   in
   dispose
 

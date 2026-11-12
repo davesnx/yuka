@@ -4,7 +4,7 @@ let[@client] make () =
     Yuka.State.set Ui.dialog_open true;
     Yuka.Browser.focus "dialog-title"
   in
-  Yuka.Effect.run (fun () ->
+  Yuka.Effect.after (fun () ->
       Yuka.Browser.on_window "keydown" (fun e ->
           match Yuka.Event.key e with
           | "Escape" -> close ()

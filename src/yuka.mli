@@ -69,27 +69,46 @@ val batch : (unit -> 'a) -> 'a
     exception of the update go to the {!Catch} or island around it. *)
 
 module Effect : sig
-  val run : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
-  (** Runs the body now, and again when a State it read with [State.get]
-      changes. During a server render it does nothing: the body and
-      [cleanup] do not run. Before each re-run and when its owner is disposed, [cleanup]
+  val after : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
+  (** Runs the body after the DOM is up to date, and again after each change
+      of a State it read with [State.get]. Use it for code that reads or
+      changes the DOM, and for most other effects. The first run waits for the
+      end of the current {!batch} or update; {!render}, hydration and the
+      creation of a list row run in one, so the first run of an effect created
+      in a component finds the elements of the component in the document.
+      Outside a batch or an update, as at the top level of {!owner}, the first
+      run is at once. A later run comes after the holes, the attributes, the
+      lists and the {!before} effects that the same change runs. An effect
+      whose owner is disposed before its first run never runs.
+
+      During a server render it does nothing: the body and [cleanup] do not
+      run. Before each re-run and when its owner is disposed, [cleanup]
       receives the result of the previous run, and effects created inside the
       previous run are disposed. Inside a {!Catch} or an island, an exception
       in the body, or in a cleanup that runs during a State change or an
       event handler, goes to that boundary. A cleanup that raises when its
       owner is disposed by a direct call (the function returned by {!owner},
-      or {!stop}) raises to that
-      caller. Elsewhere, an exception in one effect does not stop other
-      effects; the first one is raised again after all pending effects
-      ran. If effects and memos keep changing States they read for more than
-      100 update rounds, the pending work is dropped and [Failure] is
-      raised. *)
+      or {!stop}) raises to that caller. Elsewhere, an exception in one
+      effect does not stop other effects; the first one is raised again after
+      all pending effects ran. If effects and memos keep changing States they
+      read for more than 100 update rounds, the pending work is dropped and
+      [Failure] is raised. *)
+
+  val before : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
+  (** As {!after}, with other timing. The first run is at once, in the
+      component body, before the elements of the component exist. A later run
+      comes together with the holes, attributes and lists of the same change,
+      parent effects first, so it can see the DOM before that change. Use it
+      to compute a value that the markup of the component needs, or to read
+      the DOM before it changes. An exception in the first run, outside a
+      {!Catch} or an island, stops the effect and is raised to the caller. *)
 
   val on_change :
     ?equal:('a -> 'a -> bool) -> ('a, _) State.signal -> (prev:'a -> next:'a -> unit) -> unit
   (** Calls the function when the value changes, with the previous and the
-      next value. Not called on the first run, and never during a server
-      render. Default [equal]: as in {!State.make}. *)
+      next value, with the timing of {!after}: the DOM is up to date. Not
+      called for the value at creation, and never during a server render.
+      Default [equal]: as in {!State.make}. *)
 end
 
 type trigger = [ `Idle | `Visible | `Interaction ]
@@ -462,7 +481,7 @@ module Form = Form
 module Browser : sig
   val on_window : string -> (Event.t -> unit) -> unit
   (** Listens on [window] until the current owner is disposed. The handler
-      runs in a {!batch}. Browser only: call it inside [Effect.run]. *)
+      runs in a {!batch}. Browser only: call it inside [Effect.after]. *)
 
   val navigate : string -> unit
   (** Browser only: raises [Failure] on native. Loads the URL. After [render ~islands] with navigation (the default), it
@@ -842,7 +861,7 @@ module Private : sig
       before it raises [Failure]. *)
 
   val server_rendering : bool ref
-  (** When true, [Effect.run] does nothing. *)
+  (** When true, [Effect.after] and [Effect.before] do nothing. *)
 
   type platform = {
     target_value : Event.t -> string;

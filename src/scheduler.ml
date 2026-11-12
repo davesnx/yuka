@@ -27,7 +27,7 @@ type node = {
   mutable owner : owner option;
   depth : int;
   id : int;
-  eff : bool;
+  eff : node list ref option;
 }
 
 and link = {
@@ -43,6 +43,7 @@ let ids = ref 0
 let stack = ref 0
 let listener = ref None
 let queue = ref []
+let late = ref []
 let depth = ref 0
 let never () = false
 
@@ -133,7 +134,8 @@ let rec mark skip n state =
         if o.state < state && o != skip then begin
           let was = o.state in
           o.state <- (if was < 0 then 2 else state);
-          if was <= 0 then if o.eff then queue := o :: !queue else mark skip o 1
+          if was <= 0 then
+            match o.eff with Some q -> q := o :: !q | None -> mark skip o 1
         end;
         go l.next
     | None -> ()
@@ -178,7 +180,7 @@ let rec fresh n =
       end;
       if n.state = 2 || n.state < 0 then run n
     with e ->
-      n.state <- (if n.eff then 0 else -1);
+      n.state <- (if n.eff = None then -1 else 0);
       raise e
 
 let rec stale n =
@@ -219,52 +221,54 @@ let rec sort = function
       merge [] (sort a) (sort b)
 
 let flush () =
-  match !queue with
-  | [] -> ()
-  | _ ->
-      depth := 1;
-      let error = ref None and rounds = ref 0 in
-      let fail e = match !error with None -> error := Some e | Some _ -> () in
-      let rec loop () =
-        match !queue with
-        | [] -> ()
-        | q ->
-            queue := [];
-            if !rounds >= 100 then begin
-              let rec drop = function
-                | [] -> ()
-                | n :: rest ->
-                    if n.state <> 3 then begin
-                      n.state <- 0;
-                      stale n
-                    end;
-                    drop rest
-              in
-              drop q;
-              fail
-                (Failure
-                   "Yuka: an effect or a memo keeps changing a State it reads \
-                    (more than 100 update rounds in one flush)")
-            end
-            else begin
-              incr rounds;
-              let rec run_all = function
-                | [] -> ()
-                | n :: rest ->
-                    (try fresh n
-                     with e -> (
-                       match n.owner with
-                       | Some o -> ( try catch o e with e -> fail e)
-                       | None -> fail e));
-                    run_all rest
-              in
-              run_all (if sorted q then q else sort q)
-            end;
-            loop ()
-      in
-      loop ();
-      depth := 0;
-      match !error with Some e -> raise e | None -> ()
+  depth := 1;
+  let error = ref None and rounds = ref 0 in
+  let fail e = match !error with None -> error := Some e | Some _ -> () in
+  let rec loop () =
+    (match !queue with
+    | [] ->
+        queue := !late;
+        late := []
+    | _ -> ());
+    match !queue with
+    | [] -> ()
+    | q ->
+        queue := [];
+        if !rounds >= 100 then begin
+          let rec drop = function
+            | [] -> ()
+            | n :: rest ->
+                if n.state <> 3 then begin
+                  n.state <- 0;
+                  stale n
+                end;
+                drop rest
+          in
+          drop q;
+          fail
+            (Failure
+               "Yuka: an effect or a memo keeps changing a State it reads \
+                (more than 100 update rounds in one flush)")
+        end
+        else begin
+          incr rounds;
+          let rec run_all = function
+            | [] -> ()
+            | n :: rest ->
+                (try fresh n
+                 with e -> (
+                   match n.owner with
+                   | Some o -> ( try catch o e with e -> fail e)
+                   | None -> fail e));
+                run_all rest
+          in
+          run_all (if sorted q then q else sort q)
+        end;
+        loop ()
+  in
+  loop ();
+  depth := 0;
+  match !error with Some e -> raise e | None -> ()
 
 let later = ref ignore
 

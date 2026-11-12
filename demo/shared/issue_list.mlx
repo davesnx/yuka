@@ -75,7 +75,7 @@ let[@client] make ~(title : string) ~(view : Queries.view) () =
           | None -> ())
       | _ -> ()
   in
-  Yuka.Effect.run (fun () -> Yuka.Browser.on_window "keydown" on_key);
+  Yuka.Effect.after (fun () -> Yuka.Browser.on_window "keydown" on_key);
   let popup items : Yuka.client Yuka.element =
     Yuka.fragment
       [

@@ -26,7 +26,7 @@ let differs equal a b =
   | None -> not (same a b)
   | Some equal -> ( try not (equal a b) with _ -> true)
 
-let make ?equal value = { value; equal; node = Scheduler.make false Scheduler.never }
+let make ?equal value = { value; equal; node = Scheduler.make None Scheduler.never }
 
 let peek s =
   Scheduler.fresh s.node;
@@ -46,7 +46,7 @@ let set s value =
 let update s f = set s (f s.value)
 
 let computed ?equal compute =
-  let node = Scheduler.make false Scheduler.never in
+  let node = Scheduler.make None Scheduler.never in
   let value =
     match Scheduler.with_listener (Some node) compute with
     | v -> v
