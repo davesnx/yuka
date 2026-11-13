@@ -1,12 +1,10 @@
-let link href : Yuka.server Yuka.element = <a href>(Yuka.text href)</a>
-
 let home () =
   Yuka.Server.page ~title:"Home" (fun () ->
       <main>
         <h1>"Yuka on tapak"</h1>
-        (link "/slow")
-        (link "/hello.json")
-        (link "/api/time")
+        <a href="/slow">"/slow"</a>
+        <a href="/hello.json">"/hello.json"</a>
+        <a href="/api/time">"/api/time"</a>
       </main>)
 
 let slow () =
