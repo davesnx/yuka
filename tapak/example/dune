@@ -1,0 +1,25 @@
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka} routes --shared --source %{dep:tree/Routes.ml}))))
+
+(rule
+ (targets routes_server.ml)
+ (action
+  (with-stdout-to
+   routes_server.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Routes
+    --source
+    %{dep:tree/Routes.ml}))))
+
+(executable
+ (name main)
+ (modules app routes routes_server main)
+ (libraries yuka yuka-tapak tapak eio eio_main eio.unix logs logs.fmt unix))

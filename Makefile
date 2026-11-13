@@ -170,7 +170,9 @@ dev-packages: ## List opam packages the benchmarks need that are not in the opam
 
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
-	@:
+	@echo "cows git+https://github.com/syaiful6/cows.git#fc74ab9f372adf6b19d00feec60e4bc669ea10a8"
+	@echo "sch git+https://github.com/syaiful6/tapak.git#49f77d6"
+	@echo "tapak git+https://github.com/syaiful6/tapak.git#49f77d6"
 
 .PHONY: pin
 pin: ## Pin dependencies

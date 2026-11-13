@@ -63,6 +63,26 @@
   (odoc :with-doc)))
 
 (package
+ (name yuka-tapak)
+ (synopsis "Run a Yuka app on the tapak web server (Eio)")
+ (description
+  "The request cycle of Yuka on tapak: one handler that serves the routes of Routes.ml, the client JavaScript, public files and the live socket, in direct style on Eio.")
+ (depends
+  (ocaml
+   (>= 5.4))
+  (yuka
+   (= :version))
+  tapak
+  cows
+  eio
+  bytesrw
+  http
+  logs
+  (eio_main :with-test)
+  (alcotest :with-test)
+  (odoc :with-doc)))
+
+(package
  (name yuka-live-pg)
  (synopsis "A Postgres LISTEN/NOTIFY bus for the live data of Yuka")
  (description
