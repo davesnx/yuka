@@ -25,8 +25,9 @@ The demo has two workspaces, each with its own issues, labels, new issue
 form and live updates:
 
 - `yuka` (shown as Home): 25 issues, `YUK-1` to `YUK-25`, at the root URLs below.
-- `stress`: 200 issues, `STR-1` to `STR-200`, with 30 labels and 200
-  comments on each issue, under `/w/stress`. `server/stress.ml` makes them
+- `stress`: 2000 issues, `STR-1` to `STR-2000`, with 30 labels and 200
+  comments on each issue, under `/w/stress`. The issue list shows all 2000
+  rows, with no paging. `server/stress.ml` makes them
   from the issue number, with no randomness, so each start has the same
   data. The comments are made when a page asks for them; comments that a
   visitor adds are stored after them.
@@ -94,7 +95,9 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   filters, the date range or the live issues. The "Created" control in the
   filter row opens the From and To sliders of the date range, with a "Full
   range" reset. The stress control (1x, 10x, 100x) makes copies of the
-  issues in the browser, up to 20 000 points on `stress`; Animate, at the
+  issues in the browser, at most 20 000 points (`Insights_data.max_points`):
+  on `stress`, 100x stops at 20 000 and the header says "capped at 20,000
+  points"; Animate, at the
   right of the page header, moves the date range on each frame. A panel at
   the bottom right shows what the browser measures: frames per second, the
   time of the last update (from the change to the updated DOM), updates per
@@ -113,7 +116,9 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   page glides into place. Drag the background to pan; the buttons zoom,
   shuffle the board and add a note (at most 140 characters, 100 notes per
   board). The first positions come from the issue numbers; Shuffle and
-  new notes use random positions.
+  new notes use random positions. A board shows at most 200 issues
+  (`Board.card_limit`), the first ones of the workspace; on `stress` the
+  header says so.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
   issues stream in after a delay. An issue with more than 12 comments
   shows the first 3 and the last 5; a band between them gives the number

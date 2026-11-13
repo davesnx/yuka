@@ -235,6 +235,8 @@ let seeded_spot number =
   ( Insights_data.hash number mod (Board.width - Board.item_width + 1),
     Insights_data.hash (number + 50021) mod (Board.height - Board.item_height + 1) )
 
+let carded issues = List.filteri (fun index _ -> index < Board.card_limit) issues
+
 let board workspace : Board.t =
   let saved = (cell workspace).saved in
   let spots = Hashtbl.of_seq (List.to_seq saved.spots) in
@@ -244,7 +246,7 @@ let board workspace : Board.t =
       (fun (issue : Issue.t) ->
         let x, y = at issue.id (seeded_spot (Issue.number issue)) in
         { Board.id = issue.id; x; y; content = Card { title = issue.title; status = issue.status } })
-      saved.issues
+      (carded saved.issues)
   in
   let notes =
     List.filter_map
@@ -254,7 +256,7 @@ let board workspace : Board.t =
   cards @ notes
 
 let on_board workspace id =
-  List.exists (fun (issue : Issue.t) -> issue.id = id) (issues workspace) || List.mem_assoc id (cell workspace).saved.notes
+  List.exists (fun (issue : Issue.t) -> issue.id = id) (carded (issues workspace)) || List.mem_assoc id (cell workspace).saved.notes
 
 let move_item workspace ~id ~x ~y =
   let cell = cell workspace in

@@ -886,7 +886,7 @@ await step("6g. workspaces", async () => {
   await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
   const current = () => page.evaluate(() => [...document.querySelectorAll(".workspace-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("6g.1 the stress list has 200 rows", (await page.locator(".row").count()) === 200, String(await page.locator(".row").count()));
+  check("6g.1 the stress list has 2000 rows", (await page.locator(".row").count()) === 2000, String(await page.locator(".row").count()));
   check("6g.2 the stress list has 30 label chips", (await page.locator(".chip").count()) === 30, String(await page.locator(".chip").count()));
   check("6g.3 the switcher marks Stress", (await current()) === "/=false /w/stress=true", await current());
   const github = page.locator('.topbar-link[href="https://github.com/davesnx/yuka"]');
@@ -911,7 +911,7 @@ await step("6g. workspaces", async () => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.locator(".filter").fill("speed up");
   const filtered = await page.locator(".row").count();
-  check("6g.8 the filter works on 200 issues", filtered > 0 && filtered < 200, String(filtered));
+  check("6g.8 the filter works on 2000 issues", filtered > 0 && filtered < 2000, String(filtered));
   await page.locator(".filter").fill("");
   await page.locator(".page-header").first().click();
   await page.keyboard.press("j");
@@ -934,20 +934,20 @@ await step("6g. workspaces", async () => {
   await page.fill(".dialog-title", title);
   await page.evaluate(() => ((window as any).__created = "stress"));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/, { timeout: 3000 });
+  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/, { timeout: 30000 });
   await page.waitForSelector(".issue-title");
   const landed = { path: new URL(page.url()).pathname, title: await page.locator(".issue-title").textContent(), marker: await page.evaluate(() => (window as any).__created) };
   check("6g.12a creating in stress opens /w/stress/issue/STR-n with a client navigation", landed.title === title && landed.marker === "stress", JSON.stringify(landed));
   await page.goBack();
   await page.waitForURL("**/w/stress");
-  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
+  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 30000 });
   const created = await page.locator(".row", { hasText: title }).getAttribute("data-id");
   check("6g.12b the issue page is the created issue", landed.path === `/w/stress/issue/${created}`, `${landed.path} ${created}`);
-  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 201, `${created} rows=${await page.locator(".row").count()}`);
+  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 2001, `${created} rows=${await page.locator(".row").count()}`);
   await page.evaluate(() => ((window as any).__workspace = "alive"));
   await page.locator('.workspace-link[href="/"]').click();
   await page.waitForURL(base + "/");
-  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 30000 });
   await page.waitForSelector(".row");
   check("6g.13 switching workspace is a client navigation", (await page.evaluate(() => (window as any).__workspace)) === "alive");
   check("6g.14 the switcher marks Home", (await current()) === "/=true /w/stress=false", await current());
@@ -955,7 +955,7 @@ await step("6g. workspaces", async () => {
   check("6g.15 the yuka list has no stress issue", yukaIds.length > 0 && yukaIds.every((id) => id.startsWith("YUK-")) && (await page.locator(".row", { hasText: title }).count()) === 0, String(yukaIds.length));
   await page.locator('.workspace-link[href="/w/stress"]').click();
   await page.waitForURL("**/w/stress");
-  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 30000 });
   await page.waitForSelector(".row");
   check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
   const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
@@ -965,7 +965,7 @@ await step("6g. workspaces", async () => {
 await step("6i. the label menu", async () => {
   const pg = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await pg.goto(base + "/w/stress", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 5000 });
+  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 30000 });
   const sideways = () => pg.evaluate(() => { const chips = document.querySelector(".chips")!; return chips.scrollWidth - chips.clientWidth; });
   const shown = () => pg.evaluate(() => {
     const bottom = document.querySelector(".chips")!.getBoundingClientRect().bottom;
@@ -987,7 +987,7 @@ await step("6i. the label menu", async () => {
   await pg.waitForSelector(`#labels-menu [data-label="${hidden}"][aria-checked="true"]`);
   const rows = await pg.locator(".row").evaluateAll((nodes, label) => nodes.map((node) => !!node.querySelector(".label-" + label)), hidden);
   check("6i.3 End and Space choose a hidden label: the URL and the rows follow, the menu stays open",
-    lastFocused === hidden && rows.length > 0 && rows.length < 200 && rows.every(Boolean) && (await pg.locator("#labels-menu:popover-open").count()) === 1, `${hidden} ${lastFocused} ${rows.length}`);
+    lastFocused === hidden && rows.length > 0 && rows.length < 2000 && rows.every(Boolean) && (await pg.locator("#labels-menu:popover-open").count()) === 1, `${hidden} ${lastFocused} ${rows.length}`);
   const chosenShown = (await shown()).includes(hidden) && (await pg.locator(`.chips .chip.on[data-label="${hidden}"]`).count()) === 1;
   check("6i.4 the chosen hidden label moves into the visible row", chosenShown, (await shown()).join(","));
   await pg.keyboard.press("Escape");
@@ -1050,9 +1050,9 @@ await step("6h. insights", async () => {
   await pickStatus(other, id, before === "done" ? "Done" : before === "todo" ? "Todo" : before === "in-progress" ? "In Progress" : before === "backlog" ? "Backlog" : "Canceled");
   await other.close();
   await pg.goto(base + "/w/stress/insights", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
-  const stress = Number(await pg.locator('[data-metric="points"]').textContent());
-  check("6h.8 stress has a point per issue", stress >= 200 && (await points()) === stress, `${await points()} of ${stress}`);
+  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 30000 });
+  const stress = Number(((await pg.locator('[data-metric="points"]').textContent()) ?? "").replace(/,/g, ""));
+  check("6h.8 stress has a point per issue", stress >= 2000 && (await points()) === stress, `${await points()} of ${stress}`);
   const dates = pg.locator("[data-filters] button[data-dates]");
   const timeNote = () => pg.locator('section:has([data-chart="time"]) header > span').textContent();
   const datesText = async () => ((await dates.textContent()) ?? "").replace(/^Created/, "");
@@ -1087,9 +1087,12 @@ await step("6h. insights", async () => {
   });
   check("6h.18 Animate is at the right of the Insights header and is not pressed", placement.gap < 40 && placement.left > placement.half && placement.left > placement.others && (await animate.getAttribute("aria-pressed")) === "false", JSON.stringify(placement));
   await pg.locator("button", { hasText: /^100x$/ }).click();
-  const hundred = (stress * 100).toLocaleString("en-US");
+  const maxPoints = 20000;
+  const hundredPoints = Math.min(stress * 100, maxPoints);
+  const hundred = hundredPoints.toLocaleString("en-US");
   await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, hundred, { timeout: 10000 });
-  check("6h.9 the 100x stress control makes 100 times the points", (await points()) === stress * 100, `${await points()} (${hundred})`);
+  const cappedNote = (await pg.locator("[data-capped]").textContent()) ?? "";
+  check("6h.9 the 100x stress control makes 100 times the points, capped at 20,000 with a note", (await points()) === hundredPoints && cappedNote === "capped at 20,000 points", `${await points()} (${hundred}) ${cappedNote}`);
   const metric = (name: string) => pg.locator(`[data-metric="${name}"]`).textContent();
   await animate.click();
   check("6h.19 Animate is a toggle with aria-pressed", (await animate.getAttribute("aria-pressed")) === "true");
@@ -1113,7 +1116,7 @@ await step("6h. insights", async () => {
   });
   await pg.waitForFunction(() => Number((document.querySelector('[data-metric="nodes"]')?.textContent ?? "").replace(/,/g, "")) === document.querySelectorAll("[data-chart] *").length, null, { timeout: 5000 }).catch(() => {});
   const nodeCounts = await counted();
-  check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > stress * 100 && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
+  check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > hundredPoints && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
   const hud = pg.locator("aside[data-hud]");
   const toggle = hud.locator("button[aria-controls]");
   await pg.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -1132,7 +1135,7 @@ await step("6h. insights", async () => {
   await pg.waitForSelector("#insights-metrics");
   check("6h.25 Enter on the focused toggle expands the panel again", (await toggle.getAttribute("aria-expanded")) === "true" && (await metric("points")) === hundred, `${await toggle.getAttribute("aria-expanded")} ${await metric("points")}`);
   await pg.locator("button", { hasText: /^1x$/ }).click();
-  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, String(stress), { timeout: 10000 });
+  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, stress.toLocaleString("en-US"), { timeout: 10000 });
   await pg.setViewportSize({ width: 390, height: 800 });
   await pg.evaluate(() => window.scrollTo(0, 0));
   await dates.click();
@@ -1277,7 +1280,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   const html = await (await page.request.get(base + shared)).text();
   const titles = [...html.matchAll(/class="row-title" href="[^"]*">([^<]*)</g)].map((m) => m[1]);
   check("6h.11 a URL with q and label renders the filtered list on the server",
-    titles.length > 0 && titles.length < 200 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
+    titles.length > 0 && titles.length < 2000 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
     String(titles.length));
   const mine = await (await page.request.get(base + "/my?label=feature")).text();
   const mineRows = [...mine.matchAll(/class="row" data-id="([^"]*)"/g)].length;

@@ -137,14 +137,14 @@ let stress_list () =
   let html = get "/w/stress" in
   has html "<title>Issues</title>";
   has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Stress&quot;,&quot;view&quot;:&quot;All&quot;}">|};
-  Alcotest.(check int) "200 issues" 200 (count html {|{"id":"STR-|});
+  Alcotest.(check int) "2000 issues" 2000 (count html {|{"id":"STR-|});
   lacks html "YUK-1\"";
   has html {|<a class="row-title" href="/w/stress/issue/STR-1">|};
   Alcotest.(check int) "30 labels" 30 (List.length (Store.label_counts Model.Workspace.Stress));
   Alcotest.(check bool) "the same data each time" true (Stress.issues ~users:(Array.of_list Store.users) = Store.issues Model.Workspace.Stress);
   let mine = get "/w/stress/my" in
   Alcotest.(check bool) "my issues is a part" true
-    (count mine {|{"id":"STR-|} = List.length (Store.mine Model.Workspace.Stress) && count mine {|{"id":"STR-|} < 200);
+    (count mine {|{"id":"STR-|} = List.length (Store.mine Model.Workspace.Stress) && count mine {|{"id":"STR-|} < 2000);
   lacks (get "/") "STR-"
 
 let stress_issue () =
@@ -192,14 +192,19 @@ let insights () =
   Alcotest.(check int) "two date sliders in the filters" 2 (count html {|type="range"|});
   let html = get "/w/stress/insights" in
   has html {|<a class="nav-link" href="/w/stress/insights" aria-current="page">Insights</a>|};
-  Alcotest.(check int) "a point per stress issue" 200 (count html {| r="2"|});
-  has html {|<dd data-metric="points">200</dd>|};
-  has html "of 200 issues";
+  Alcotest.(check int) "a point per stress issue" 2000 (count html {| r="2"|});
+  has html {|<dd data-metric="points">2,000</dd>|};
+  has html "of 2,000 issues";
   Alcotest.(check string) "thousands" "20,000" (Insights_data.format_int 20000);
   Alcotest.(check string) "a date and back" "Nov 6" (Insights_data.date_of_day (Insights_data.day_of_date "Nov 6"));
   Alcotest.(check (list int)) "ticks" [ 0; 20; 40; 60 ] (Insights_data.ticks ~count:4 59);
-  Alcotest.(check int) "100 times the issues" 20000
-    (List.length (Insights_data.expand ~multiplier:100 (Store.issues Model.Workspace.Stress)))
+  let stress_issues = Store.issues Model.Workspace.Stress in
+  Alcotest.(check int) "10 times the issues" 20000 (List.length (Insights_data.expand ~multiplier:10 stress_issues));
+  Alcotest.(check int) "100 times the issues, capped" Insights_data.max_points
+    (List.length (Insights_data.expand ~multiplier:100 stress_issues));
+  Alcotest.(check (list bool)) "the cap shows at 100x only" [ false; false; true ]
+    (List.map (fun multiplier -> Insights_data.capped ~multiplier (List.length stress_issues)) [ 1; 10; 100 ]);
+  Alcotest.(check int) "the yuka issues are not capped" 2500 (List.length (Insights_data.expand ~multiplier:100 (Store.issues Model.Workspace.Yuka)))
 
 let report () =
   let html = get "/report" in
@@ -211,7 +216,7 @@ let report () =
   lacks html "data-yuka-answer";
   let html = get "/w/stress/report" in
   has html {|<a class="nav-link" href="/w/stress/report" aria-current="page">Report</a>|};
-  Alcotest.(check int) "a point per stress issue" 200 (count html {| r="2"|})
+  Alcotest.(check int) "a point per stress issue" 2000 (count html {| r="2"|})
 
 let canvas () =
   let html = get "/canvas" in
@@ -221,9 +226,11 @@ let canvas () =
   has html {|data-yuka-answer="l:board &quot;Yuka&quot;"|};
   Alcotest.(check int) "a card per issue" 25 (count html {|<div data-id="YUK-|});
   has html {|href="/issue/YUK-1">Hydration mismatch on nested holes</a>|};
+  lacks html "The board shows at most";
   let html = get "/w/stress/canvas" in
   has html {|<a class="nav-link" href="/w/stress/canvas" aria-current="page">Canvas</a>|};
-  Alcotest.(check int) "a card per stress issue" 200 (count html {|<div data-id="STR-|});
+  Alcotest.(check int) "a card per stress issue, up to the limit" Board.card_limit (count html {|<div data-id="STR-|});
+  has html {|The board shows at most 200 issues|};
   List.iter
     (fun (item : Board.item) -> if not (Board.inside ~x:item.x ~y:item.y) then Alcotest.failf "%s is outside the board" item.id)
     (Store.board Model.Workspace.Stress)
@@ -427,9 +434,9 @@ let stress_actions () =
     | Ok (Ok (issue : Model.Issue.t)) -> issue
     | _ -> Alcotest.fail "create in stress failed: a title of another workspace is not a duplicate"
   in
-  Alcotest.(check string) "next stress id" "STR-201" created.id;
-  has (get "/w/stress") "STR-201";
-  lacks (get "/") "STR-201";
+  Alcotest.(check string) "next stress id" "STR-2001" created.id;
+  has (get "/w/stress") "STR-2001";
+  lacks (get "/") "STR-2001";
   (match settle (Yuka.Action.call Comment.add { Comment.issue_id = "STR-3"; body = "Kept" }) with
   | Ok _ -> ()
   | Error message -> Alcotest.failf "comment failed: %s" message);
@@ -441,7 +448,7 @@ let stress_actions () =
     call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=stress&title=From+a+stress+form&description=&status=todo&priority=low" "/w/stress/new"
   in
   Alcotest.(check int) "303" 303 status;
-  Alcotest.(check (option string)) "to the new stress issue" (Some "/w/stress/issue/STR-202") (header response "location")
+  Alcotest.(check (option string)) "to the new stress issue" (Some "/w/stress/issue/STR-2002") (header response "location")
 
 let rejected name async =
   match settle async with Ok _ -> Alcotest.failf "%s: expected a rejection" name | Error _ -> ()

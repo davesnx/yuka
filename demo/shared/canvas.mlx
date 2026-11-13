@@ -137,6 +137,10 @@ let[@client] make ~(workspace : Workspace.t) () =
     <header class_="page-header">
       <span>"Canvas"</span>
       <span class_="group-count">(Yuka.int (List.length (Yuka.State.get items)))</span>
+      (if List.length (List.filter (fun (item : Board.item) -> match item.content with Card _ -> true | Note _ -> false) (Yuka.State.get items))
+          >= Board.card_limit
+       then <span class_=Css.limit data_limit="true">(Yuka.text ("The board shows at most " ^ px Board.card_limit ^ " issues"))</span>
+       else Yuka.empty)
       (Yuka.hole (fun () ->
          match Yuka.Live.status live with
          | Yuka.Status.Ready { stale = true; _ } -> <span class_="offline">"Offline"</span>

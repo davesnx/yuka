@@ -1,6 +1,7 @@
 .canvas { display: flex; flex-direction: column; height: calc(100vh - 48px); min-height: 420px; }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 19px; border-bottom: 1px solid var(--border); }
 .note-input { flex: 0 1 260px; min-width: 0; }
+.limit { color: var(--muted); font-size: 13px; font-weight: 400; }
 .zoom { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .viewport {
   position: relative; flex: 1; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
