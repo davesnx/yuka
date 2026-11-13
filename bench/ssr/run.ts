@@ -75,8 +75,8 @@ const toMs = (v: string, unit: string) => Number(v) * ({ us: 0.001, ms: 1, s: 10
 function wrk(url: string, seconds: string): Round {
   const text = execFileSync("wrk", [`-t${options.threads}`, `-c${options.connections}`, `-d${seconds}s`, "--latency", url], { encoding: "utf8" });
   const rps = /Requests\/sec:\s+([\d.]+)/.exec(text);
-  const p50 = /^\s+50%\s+([\d.]+)(us|ms|s)$/m.exec(text);
-  const p99 = /^\s+99%\s+([\d.]+)(us|ms|s)$/m.exec(text);
+  const p50 = /^\s+50%\s+([\d.]+)(us|ms|s)\s*$/m.exec(text);
+  const p99 = /^\s+99%\s+([\d.]+)(us|ms|s)\s*$/m.exec(text);
   if (rps === null || p50 === null || p99 === null) throw new Error(`cannot read wrk output:\n${text}`);
   const non2xx = /Non-2xx or 3xx responses:\s+(\d+)/.exec(text);
   const socket = /Socket errors:.*?(\d+).*?(\d+).*?(\d+).*?(\d+)/.exec(text);
