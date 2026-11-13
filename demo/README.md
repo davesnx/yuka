@@ -36,14 +36,23 @@ repository on GitHub and to `@davesnx` on X.
 
 ## Themes and the progress bar
 
-The Theme button in the header picks one of four themes: dark, light,
-gray and pale. The choice is kept in `localStorage` (`yuka-demo-theme`).
-Without a choice, the theme follows `prefers-color-scheme` (light or
-dark). A small script in the head of each page, before the stylesheet,
-sets `data-theme` on `<html>`, so the first paint has the right theme, also
-on the prerendered `/about`. A cookie read on the server cannot do this for
-a prerendered page, and Yuka has no attribute for `<html>`. Each theme is a
-set of CSS variables in `static/style.css`.
+The Theme button in the header opens one menu with two groups. Theme picks
+one of four themes: dark, light, gray and pale. Code picks the colours of
+highlighted code: Auto, or one of six styles (Dark+, One Dark, Nord, Tokyo
+Night, Gruvbox, Light+). Auto, the default, uses the style that goes with
+the theme (dark: Dark+, light: Light+, gray: One Dark, pale: Light+) on the
+background and text colour of the theme; a CSS rule for each theme does
+this, with no script. Another style keeps its own background for every
+theme until Auto is chosen again.
+
+The choices are kept in `localStorage` (`yuka-demo-theme` and
+`yuka-demo-code-theme`; Auto removes the second key). Without a choice, the
+theme follows `prefers-color-scheme` (light or dark). A small script in the
+head of each page, before the stylesheet, sets `data-theme` and
+`data-code-theme` on `<html>`, so the first paint has the right colours,
+also on the prerendered `/about`. A cookie read on the server cannot do this
+for a prerendered page, and Yuka has no attribute for `<html>`. Each theme
+is a set of CSS variables in `static/style.css`.
 
 During a client navigation that takes more than 120 ms, a thin bar at the
 top of the window grows; it fills and fades out when the new page is shown.
@@ -60,12 +69,10 @@ and relative URLs. Code in OCaml, JavaScript, TypeScript, shell, JSON and
 CSS is highlighted; another language is plain text. A new comment shows its
 text at once and its rendered form when the server answers.
 
-The code style select on the issue page sets `data-code-theme` on `<html>`
-and keeps the choice in `localStorage`; each code token carries the colours
-of every style, so a change needs no request. A script in the document head
-sets the attribute before the page paints. The demo needs the opam packages
-`cmarkit`, `ochre` and `tm-grammars` (`make install` installs them) and the
-oniguruma library (`conf-oniguruma`).
+Each code token carries the colours of every code style, so a change of
+theme or code style (in the Theme menu) needs no request. The demo needs
+the opam packages `cmarkit`, `ochre` and `tm-grammars` (`make install`
+installs them) and the oniguruma library (`conf-oniguruma`).
 
 ## URLs
 

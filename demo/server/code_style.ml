@@ -1,16 +1,14 @@
 open Demo_shared
 
-type theme = { slug : string; label : string; colors : Ochre.Theme.theme }
+let colors = function
+  | Theme.Code.Dark_plus -> Ochre.Theme.dark
+  | One_dark -> Ochre.Theme.one_dark
+  | Nord -> Ochre.Theme.nord
+  | Tokyo_night -> Ochre.Theme.tokyonight
+  | Gruvbox -> Ochre.Theme.gruvbox
+  | Light_plus -> Ochre.Theme.light
 
-let themes =
-  [
-    { slug = "dark"; label = "Dark+"; colors = Ochre.Theme.dark };
-    { slug = "one-dark"; label = "One Dark"; colors = Ochre.Theme.one_dark };
-    { slug = "nord"; label = "Nord"; colors = Ochre.Theme.nord };
-    { slug = "tokyonight"; label = "Tokyo Night"; colors = Ochre.Theme.tokyonight };
-    { slug = "gruvbox"; label = "Gruvbox"; colors = Ochre.Theme.gruvbox };
-    { slug = "light"; label = "Light+"; colors = Ochre.Theme.light };
-  ]
+let themes = List.map colors Theme.Code.all
 
 let grammars =
   [
@@ -38,10 +36,10 @@ let normalize color =
   let color = String.lowercase_ascii color in
   if String.length color = 9 && String.ends_with ~suffix:"ff" color then String.sub color 0 7 else color
 
-let declarations index (theme : theme) (token : Ochre.Token.styled_token) =
+let declarations index (theme : Ochre.Theme.theme) (token : Ochre.Token.styled_token) =
   let color =
     match token.foreground with
-    | Some color when normalize color <> normalize theme.colors.fg ->
+    | Some color when normalize color <> normalize theme.fg ->
         [ Printf.sprintf "--c%d:%s" index (normalize color) ]
     | _ -> []
   in
@@ -67,7 +65,7 @@ let rec merge_spans = function
 let rec transpose = function [] | [] :: _ -> [] | rows -> List.map List.hd rows :: transpose (List.map List.tl rows)
 
 let highlight grammar source =
-  match List.map (fun theme -> Ochre.to_tokens highlighter ~theme:theme.colors ~lang:grammar source) themes with
+  match List.map (fun theme -> Ochre.to_tokens highlighter ~theme ~lang:grammar source) themes with
   | lines_per_theme ->
       Some (merge_spans (List.concat_map (fun lines -> List.map token_node (transpose lines)) (transpose lines_per_theme)))
   | exception (Failure _ | Invalid_argument _ | Not_found) -> None
@@ -86,27 +84,27 @@ let block ~language source =
       Hashtbl.replace cache key node;
       node
 
+let index_of code = Option.value (List.find_index (fun candidate -> candidate = code) Theme.Code.all) ~default:0
+let token_style index = Printf.sprintf "color:var(--c%d);font-style:var(--i%d);font-weight:var(--b%d)" index index index
+
+let keyword (theme : Ochre.Theme.theme) =
+  match List.concat (Ochre.to_tokens highlighter ~theme ~lang:"ocaml" "let") with
+  | { foreground = Some color; _ } :: _ -> normalize color
+  | _ -> normalize theme.fg
+
 let style_sheet =
-  let first = List.hd themes in
-  let rule index theme =
-    Printf.sprintf
-      "[data-code-theme=%s] .code-block{background:%s;color:%s}[data-code-theme=%s] .code-block span{color:var(--c%d);font-style:var(--i%d);font-weight:var(--b%d)}"
-      theme.slug theme.colors.bg theme.colors.fg theme.slug index index index
+  let auto theme =
+    Printf.sprintf "[data-theme=%s]:not([data-code-theme]) .code-block span{%s}" (Theme.slug theme)
+      (token_style (index_of (Theme.Code.auto theme)))
   in
-  Printf.sprintf ".code-block{background:%s;color:%s}.code-block span{color:var(--c0);font-style:var(--i0);font-weight:var(--b0)}%s"
-    first.colors.bg first.colors.fg
-    (String.concat "" (List.mapi rule themes))
+  let explicit index code =
+    let theme = colors code and slug = Theme.Code.slug code in
+    Printf.sprintf "[data-code-theme=%s] .code-block{background:%s;color:%s}[data-code-theme=%s] .code-block span{%s}[data-code=%s]{--swatch-bg:%s;--swatch-key:%s}"
+      slug theme.bg theme.fg slug (token_style index) slug theme.bg (keyword theme)
+  in
+  Printf.sprintf ".code-block{background:var(--bg-sidebar);color:var(--text)}.code-block span{%s}%s%s"
+    (token_style (index_of (Theme.Code.auto Theme.Dark)))
+    (String.concat "" (List.map auto Theme.all))
+    (String.concat "" (List.mapi explicit Theme.Code.all))
 
-let script =
-  Printf.sprintf
-    {|(function(){var root=document.documentElement,key="yuka-demo-code-theme",themes=[%s];try{var saved=localStorage.getItem(key);if(themes.indexOf(saved)>=0)root.setAttribute("data-code-theme",saved)}catch(error){}customElements.define("code-style-picker",class extends HTMLElement{connectedCallback(){var picker=this;var bind=function(){var select=picker.querySelector("select");if(!select)return false;if(!select.onchange)select.onchange=function(){root.setAttribute("data-code-theme",select.value);try{localStorage.setItem(key,select.value)}catch(error){}};var wanted=root.getAttribute("data-code-theme");if(wanted)select.value=wanted;return !wanted||select.value===wanted};if(!bind()){var observer=new MutationObserver(function(){if(bind())observer.disconnect()});observer.observe(picker,{childList:true,subtree:true})}}})})()|}
-    (String.concat "," (List.map (fun theme -> "\"" ^ theme.slug ^ "\"") themes))
-
-let head = "<style>" ^ style_sheet ^ "</style><script data-code-style>" ^ script ^ "</script>"
-
-let picker () : Yuka.server Yuka.element =
-  Yuka.element "code-style-picker" [ Yuka.attr "class" "code-style" ]
-    [
-      Yuka.element "select" [ Yuka.attr "class" "code-style-select"; Yuka.attr "aria-label" "Code style"; Yuka.attr "title" "Code style" ]
-        (List.map (fun theme -> Yuka.element "option" [ Yuka.attr "value" theme.slug ] [ Yuka.text theme.label ]) themes);
-    ]
+let head = "<style>" ^ style_sheet ^ "</style>"

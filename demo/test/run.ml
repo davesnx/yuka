@@ -440,7 +440,7 @@ let markdown_page () =
   has html "<blockquote><p>The client looks";
   has html {|<a href="https://github.com/davesnx/yuka/blob/main/docs/islands.md" rel="nofollow noopener">hydration notes</a>|};
   has html {|<pre class="code-block" tabindex="0" data-language="ocaml"><code><span style="--c0:|};
-  has html {|<select class="code-style-select" aria-label="Code style"|};
+  lacks html "code-style";
   has html {|<code>print_hole</code> skips the closing marker when the item is <strong>empty</strong>|};
   has html {|["code",{},"print_hole"]|};
   let html = get "/issue/YUK-19" in

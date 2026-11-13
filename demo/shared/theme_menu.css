@@ -1,10 +1,17 @@
 .theme { position: relative; display: flex; }
 .button { font: inherit; background: none; border: 0; cursor: pointer; }
 .button[aria-expanded=true] { background: var(--bg-hover); color: var(--text); }
-.menu { left: auto; right: 0; top: 34px; min-width: 168px; }
+.menu {
+  left: auto; right: 0; top: 34px; min-width: 168px;
+  max-height: calc(100vh - 56px); max-width: calc(100vw - 32px); overflow-y: auto; overscroll-behavior: contain;
+}
+.heading { padding: 6px 10px 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.group + .group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
 .swatch {
   width: 16px; height: 16px; border-radius: 50%; flex: none; display: grid; place-items: center;
   background: var(--bg); border: 1px solid var(--border-strong);
 }
 .swatch::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.code-swatch { border-radius: 4px; background: var(--swatch-bg); border-color: var(--border-strong); }
+.code-swatch::after { width: 8px; height: 2px; border-radius: 1px; background: var(--swatch-key); }
 .check { margin-left: auto; color: var(--accent); }

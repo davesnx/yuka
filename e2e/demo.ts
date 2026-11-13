@@ -303,8 +303,8 @@ await step("3d. a page with no island loads no script", async () => {
   const scripts: string[] = [];
   pg.on("request", (r) => { if (r.resourceType() === "script") scripts.push(r.url()); });
   await pg.goto(base + "/about", { waitUntil: "networkidle" });
-  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && !s.textContent!.includes("yuka-demo-theme") && !s.hasAttribute("data-code-style")).length);
-  check("3d.1 /about requests no script and has no inline script but the theme and code style scripts", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
+  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && !s.textContent!.includes("yuka-demo-theme")).length);
+  check("3d.1 /about requests no script and has no inline script but the theme script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
   await pg.close();
 });
 
@@ -349,19 +349,28 @@ await step("3i. input made before hydration", async () => {
 await step("3j. themes and the navigation progress bar", async () => {
   const themeAtBody = `
     new MutationObserver((records, observer) => {
-      if (document.body) { window.__themeAtBody = document.documentElement.getAttribute("data-theme"); observer.disconnect(); }
+      if (document.body) {
+        window.__themeAtBody = document.documentElement.getAttribute("data-theme");
+        window.__codeAtBody = document.documentElement.getAttribute("data-code-theme");
+        observer.disconnect();
+      }
     }).observe(document, { childList: true, subtree: true });
   `;
   for (const scheme of ["dark", "light"] as const) {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: scheme });
     const p = await ctx.newPage();
     await p.goto(base + "/", { waitUntil: "networkidle" });
-    check(`3j.1 no choice: prefers-color-scheme ${scheme} gives the ${scheme} theme`, (await p.getAttribute("html", "data-theme")) === scheme);
+    check(`3j.1 no choice: prefers-color-scheme ${scheme} gives the ${scheme} theme and the Auto code style`, (await p.getAttribute("html", "data-theme")) === scheme && (await p.getAttribute("html", "data-code-theme")) === null);
     await ctx.close();
   }
   const html = await (await fetch(base + "/")).text();
   const at = (needle: string) => html.indexOf(needle);
-  check("3j.2 the theme script is in the head, before the stylesheet and the body", at("yuka-demo-theme") > 0 && at("yuka-demo-theme") < at('rel="stylesheet"') && at("yuka-demo-theme") < at("<body"));
+  const script = html.slice(html.lastIndexOf("<script", at("yuka-demo-theme")), html.indexOf("</script>", at("yuka-demo-theme")));
+  check(
+    "3j.2 one script in the head, before the stylesheet and the body, restores the theme and the code style",
+    at("yuka-demo-theme") > 0 && at("yuka-demo-theme") < at('rel="stylesheet"') && at("yuka-demo-theme") < at("<body") && script.includes("yuka-demo-code-theme") && script.length < 600 && !html.includes("data-code-style"),
+    `${script.length} ${script}`,
+  );
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: "dark" });
   await ctx.addInitScript(themeAtBody);
   const p = await ctx.newPage();
@@ -406,12 +415,36 @@ await step("3j. themes and the navigation progress bar", async () => {
   check("3j.12 back: the bar is not left loading", true);
   await p.reload({ waitUntil: "networkidle" });
   check("3j.13 the theme stays after a reload, set before the body is parsed", (await p.getAttribute("html", "data-theme")) === "pale" && (await p.evaluate(() => (window as any).__themeAtBody)) === "pale", String(await p.evaluate(() => (window as any).__themeAtBody)));
+  await p.click("#theme-button");
+  await p.click("#code-nord");
   for (const path of ["/about", "/before-hydration"]) {
     await p.goto(base + path, { waitUntil: "networkidle" });
-    check(`3j.14 ${path} follows the theme`, (await p.evaluate(() => (window as any).__themeAtBody)) === "pale" && (await p.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(247, 245, 251)");
+    check(
+      `3j.14 ${path} follows the theme and the code style`,
+      (await p.evaluate(() => (window as any).__themeAtBody)) === "pale" && (await p.evaluate(() => (window as any).__codeAtBody)) === "nord" &&
+        (await p.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(247, 245, 251)",
+    );
   }
   check("3j.15 no page errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
+  const small = await browser.newContext({ viewport: { width: 390, height: 560 } });
+  const s = await small.newPage();
+  await s.goto(base + "/issue/YUK-2", { waitUntil: "networkidle" });
+  await s.click("#theme-button");
+  await s.waitForSelector("[role=menu]");
+  await s.keyboard.press("End");
+  await s.waitForFunction(() => document.activeElement?.id === "code-light");
+  const box = await s.evaluate(() => {
+    const menu = document.querySelector("[role=menu]")!.getBoundingClientRect();
+    const last = document.activeElement!.getBoundingClientRect();
+    return { left: menu.left, right: menu.right, top: menu.top, bottom: menu.bottom, lastTop: last.top, lastBottom: last.bottom, width: innerWidth, height: innerHeight };
+  });
+  check(
+    "3j.16 at 390 px the menu stays in the viewport and scrolls to its last item",
+    box.left >= 0 && box.right <= box.width && box.bottom <= box.height && box.lastTop >= box.top && box.lastBottom <= box.bottom,
+    JSON.stringify(box),
+  );
+  await small.close();
 });
 
 await step("3e. live data is embedded", async () => {
@@ -1545,37 +1578,97 @@ await step("7k. markdown and code style", async () => {
   }));
   check("7k.1 the description is markdown with highlighted code", markdown.heading === "Measurements" && markdown.cells === 6 && markdown.tokens > 0 && markdown.scripts === 0, JSON.stringify(markdown));
   check("7k.2 a stored comment has highlighted code", markdown.commentTokens > 0, String(markdown.commentTokens));
+  const pairs: Record<string, number> = { dark: 0, light: 5, gray: 1, pale: 5 };
   const look = () =>
     page.evaluate(() => {
       const block = document.querySelector(".issue-description .code-block") as HTMLElement;
-      const token = block.querySelector("span[style]") as HTMLElement;
+      const token = [...block.querySelectorAll<HTMLElement>("span[style]")].find((span) => [0, 1, 2, 3, 4, 5].every((index) => span.style.getPropertyValue(`--c${index}`)))!;
+      const resolve = (color: string) => {
+        const probe = document.createElement("span");
+        probe.style.color = color;
+        document.body.append(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      };
       return {
-        attribute: document.documentElement.getAttribute("data-code-theme"),
-        selected: (document.querySelector(".code-style-select") as HTMLSelectElement).value,
+        theme: document.documentElement.getAttribute("data-theme"),
+        code: document.documentElement.getAttribute("data-code-theme"),
+        stored: localStorage.getItem("yuka-demo-code-theme"),
         background: getComputedStyle(block).backgroundColor,
+        surface: resolve("var(--bg-sidebar)"),
         token: getComputedStyle(token).color,
+        variants: [0, 1, 2, 3, 4, 5].map((index) => resolve(token.style.getPropertyValue(`--c${index}`))),
       };
     });
-  const before = await look();
+  const pick = async (id: string) => {
+    await page.click("#theme-button");
+    await page.waitForSelector("[role=menu]");
+    await page.click(`#${id}`);
+    await page.waitForSelector("[role=menu]", { state: "detached" });
+  };
+  await page.click("#theme-button");
+  await page.waitForSelector("[role=menu]");
+  const menu = await page.evaluate(() => {
+    const groups = [...document.querySelectorAll("[role=menu] [role=group]")];
+    return {
+      groups: groups.map((group) => document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent),
+      items: groups.map((group) => group.querySelectorAll("[role=menuitemradio]").length),
+      checked: [...document.querySelectorAll("[role=menuitemradio][aria-checked=true]")].map((item) => item.id),
+    };
+  });
+  await page.keyboard.press("Escape");
+  check(
+    "7k.3 one menu has a Theme and a Code radio group, with the theme and Auto checked",
+    JSON.stringify(menu.groups) === '["Theme","Code"]' && JSON.stringify(menu.items) === "[4,7]" && menu.checked.length === 2 && menu.checked[0].startsWith("theme-") && menu.checked[1] === "code-auto",
+    JSON.stringify(menu),
+  );
   await page.evaluate(() => ((window as any).__codeStyleMarker = "kept"));
   const mark = allRequests.length;
-  await page.selectOption(".code-style-select", "light");
-  const light = await look();
+  for (const theme of Object.keys(pairs)) {
+    await pick(`theme-${theme}`);
+    const state = await look();
+    check(
+      `7k.4 Auto: the ${theme} theme gives its code style on the theme surface`,
+      state.theme === theme && state.code === null && state.token === state.variants[pairs[theme]] && state.background === state.surface,
+      JSON.stringify(state),
+    );
+  }
+  await pick("code-nord");
+  const nord = await look();
   const requestsAfter = allRequests.slice(mark).filter((r) => !r.url.includes("/_yuka/live"));
   check(
-    "7k.3 choosing a code style changes the colours with no request and no reload",
-    light.attribute === "light" && light.background === "rgb(255, 255, 255)" && light.token !== before.token && before.background !== light.background &&
+    "7k.5 a code style overrides the pairing, with no request and no reload",
+    nord.code === "nord" && nord.stored === "nord" && nord.token === nord.variants[2] && nord.background === "rgb(46, 52, 64)" &&
       requestsAfter.length === 0 && (await page.evaluate(() => (window as any).__codeStyleMarker)) === "kept",
-    `${JSON.stringify(before)} -> ${JSON.stringify(light)} requests=${requestsAfter.map((r) => r.url).join(",")}`,
+    `${JSON.stringify(nord)} requests=${requestsAfter.map((r) => r.url).join(",")}`,
   );
-  await page.locator(".code-style-select").focus();
+  await pick("theme-light");
+  const kept = await look();
+  check("7k.6 the code style stays when the theme changes", kept.theme === "light" && kept.code === "nord" && kept.token === nord.token && kept.background === nord.background, JSON.stringify(kept));
+  await page.focus("#theme-button");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("[role=menu]");
+  const checked = await page.evaluate(() => [...document.querySelectorAll("[role=menuitemradio][aria-checked=true]")].map((item) => item.id).join(","));
+  await page.keyboard.press("End");
+  const last = await page.evaluate(() => document.activeElement?.id);
   await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("[role=menu]", { state: "detached" });
   const keyboard = await look();
-  check("7k.4 the select works with the keyboard", keyboard.attribute === keyboard.selected && keyboard.attribute !== "light", JSON.stringify(keyboard));
-  await page.selectOption(".code-style-select", "light");
+  check(
+    "7k.7 the menu checks the theme and the code style and works with the keyboard",
+    checked === "theme-light,code-nord" && last === "code-light" && keyboard.code === "gruvbox" && keyboard.token === keyboard.variants[4] &&
+      (await page.evaluate(() => document.activeElement?.id)) === "theme-button",
+    `${checked} ${last} ${JSON.stringify(keyboard)}`,
+  );
   await page.reload({ waitUntil: "domcontentloaded" });
   const firstPaint = await look();
-  check("7k.5 the choice is kept after a reload, before the scripts run", firstPaint.attribute === "light" && firstPaint.selected === "light" && firstPaint.background === "rgb(255, 255, 255)", JSON.stringify(firstPaint));
+  check(
+    "7k.8 both choices are kept after a reload, before the scripts run",
+    firstPaint.theme === "light" && firstPaint.code === "gruvbox" && firstPaint.token === firstPaint.variants[4] && firstPaint.background === keyboard.background,
+    JSON.stringify(firstPaint),
+  );
   await page.waitForLoadState("networkidle");
   await page.locator(".crumb").click();
   await page.waitForSelector(".row");
@@ -1583,7 +1676,23 @@ await step("7k. markdown and code style", async () => {
   await page.waitForURL("**/issue/YUK-1");
   await page.waitForSelector(".comment-input");
   const navigated = await look();
-  check("7k.6 the choice is kept after a client navigation", navigated.attribute === "light" && navigated.selected === "light" && navigated.background === "rgb(255, 255, 255)", JSON.stringify(navigated));
+  check(
+    "7k.9 both choices are kept after a client navigation",
+    navigated.theme === "light" && navigated.code === "gruvbox" && navigated.token === navigated.variants[4] && navigated.background === keyboard.background,
+    JSON.stringify(navigated),
+  );
+  await pick("code-auto");
+  const auto = await look();
+  check(
+    "7k.10 Auto restores the pairing and forgets the code style",
+    auto.code === null && auto.stored === null && auto.token === auto.variants[pairs.light] && auto.background === auto.surface,
+    JSON.stringify(auto),
+  );
+  await page.evaluate(() => localStorage.setItem("yuka-demo-code-theme", "tokyonight"));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const former = await look();
+  check("7k.11 a code style stored by the former select is honoured", former.code === "tokyonight" && former.token === former.variants[3], JSON.stringify(former));
+  await page.waitForLoadState("networkidle");
   await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
   await page.waitForSelector(".comment-input");
   const body = `**Bold ${run}** and \`code\`\n\n\`\`\`ocaml\nlet answer = 42\n\`\`\``;
@@ -1595,7 +1704,7 @@ await step("7k. markdown and code style", async () => {
   await page.getByRole("button", { name: "Comment" }).click();
   await page.waitForTimeout(150);
   const pending = await page.locator(".comment", { hasText: `**Bold ${run}**` }).count();
-  check("7k.7 the new comment shows its text at once", pending === 1, String(pending));
+  check("7k.12 the new comment shows its text at once", pending === 1, String(pending));
   await page.waitForSelector(`.comment strong:text("Bold ${run}")`, { timeout: 5000 });
   await page.unroute("**/_yuka/action/**");
   const saved = await page.evaluate((run) => {
@@ -1603,8 +1712,11 @@ await step("7k. markdown and code style", async () => {
     const comment = strong?.closest(".comment");
     return { code: comment?.querySelector("p code")?.textContent, tokens: comment?.querySelectorAll(".code-block span[style]").length ?? 0 };
   }, run);
-  check("7k.8 the saved comment is markdown with highlighted code, with no reload", saved.code === "code" && saved.tokens > 0, JSON.stringify(saved));
-  await page.evaluate(() => localStorage.removeItem("yuka-demo-code-theme"));
+  check("7k.13 the saved comment is markdown with highlighted code, with no reload", saved.code === "code" && saved.tokens > 0, JSON.stringify(saved));
+  await page.evaluate(() => {
+    localStorage.removeItem("yuka-demo-code-theme");
+    localStorage.removeItem("yuka-demo-theme");
+  });
 });
 
 await step("8. 404", async () => {

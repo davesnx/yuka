@@ -139,13 +139,12 @@ module Property = struct
 end
 
 module Issue_page = struct
-  let make ~issue ~description ~code_style ~comments ~props () : _ Yuka.element =
+  let make ~issue ~description ~comments ~props () : _ Yuka.element =
     <div class_="issue-page">
       <header class_="page-header">
         <a href=(Links.issues issue.Issue.workspace) class_="crumb">"Issues"</a>
         <span class_="muted">"/"</span>
         <span>(Yuka.text issue.id)</span>
-        code_style
       </header>
       <div class_="issue-layout">
         <article class_="issue-main">
