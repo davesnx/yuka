@@ -472,7 +472,7 @@ let add_stylesheet : string -> unit =
 
 let read_file (_ : string) : string option = None
 
-let buffers : Buffer.t list ref = ref []
+let buffers : Stdlib.Buffer.t list ref = ref []
 
 let take_buffer () =
   match !buffers with

@@ -130,7 +130,7 @@ val nonce : unit -> string
 val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val read_file : string -> string option
-val take_buffer : unit -> Buffer.t option
-val give_buffer : Buffer.t -> unit
+val take_buffer : unit -> Stdlib.Buffer.t option
+val give_buffer : Stdlib.Buffer.t -> unit
 val lowercase : string -> string
 val refuse_url_name : string -> unit

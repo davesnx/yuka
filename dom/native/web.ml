@@ -145,7 +145,7 @@ let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
 let add_stylesheet : string -> unit = fun _ -> browser_only ()
 let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None
 
-let buffers : Buffer.t list ref = ref []
+let buffers : Stdlib.Buffer.t list ref = ref []
 let buffers_lock = Mutex.create ()
 
 let take_buffer () =
