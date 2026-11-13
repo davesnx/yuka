@@ -73,6 +73,9 @@ as a Function ([Container Runtime](https://vercel.com/docs/functions/runtimes/co
 Set two environment variables in the project: `PORT=8080` (Vercel sends
 traffic to port 80 without it) and `YUKA_DEMO_SECRET`.
 
+The project `yuka-demo` is connected to this repository: a push to `main`
+deploys to https://yuka-demo.vercel.app.
+
 An instance stops after 5 minutes with no traffic, and its data goes with
 it. Vercel can run more than one instance, each with its own data.
 
