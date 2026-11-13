@@ -32,8 +32,13 @@
  (action
   (diff golden.expected golden.out)))
 
-(executable
- (name srr)
- (modules srr)
- (optional)
- (libraries ssr_data dream server-reason-react.react server-reason-react.reactDom))
+; The server-reason-react candidate (srr.ml) is out of the build: its
+; dependency quickjs does not build with dune 3.25, and opam bounds every
+; quickjs release to dune < 3.25. Restore this stanza, and DEV_PACKAGES and
+; pin-list in the Makefile, when a quickjs release supports dune 3.25:
+;
+; (executable
+;  (name srr)
+;  (modules srr)
+;  (optional)
+;  (libraries ssr_data dream server-reason-react.react server-reason-react.reactDom))

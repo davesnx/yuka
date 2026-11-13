@@ -161,7 +161,8 @@ install: ## Install the opam dependencies, the dev packages, ocaml-lsp-server an
 	opam install . --deps-only --with-test --with-doc -y
 	opam install -y $(DEV_PACKAGES) ocaml-lsp-server ocamlmerlin-mlx
 
-DEV_PACKAGES = server-reason-react
+# server-reason-react is out until quickjs supports dune 3.25: see bench/ssr/ocaml/dune
+DEV_PACKAGES =
 
 .PHONY: dev-packages
 dev-packages: ## List opam packages the benchmarks need that are not in the opam files
@@ -169,8 +170,7 @@ dev-packages: ## List opam packages the benchmarks need that are not in the opam
 
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
-	@echo "server-reason-react git+https://github.com/ml-in-barcelona/server-reason-react.git#5be562689712124c1f7344c09f9de4ea9582d13a"
-	@echo "quickjs 0.4.2"
+	@:
 
 .PHONY: pin
 pin: ## Pin dependencies
