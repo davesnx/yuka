@@ -174,19 +174,27 @@ let show ~dir ~push ~restore url a =
   | Some None -> assign final
   | _ when stale || (not shown) || not (html a.header) -> assign final
   | target ->
-      if push then begin
-        let key = Web.fresh_key () in
-        Navigation_web.history_push_key key final;
-        current_key := key
-      end;
-      loaded := Web.current_url ();
+      let pushed =
+        if push then begin
+          let key = Web.fresh_key () in
+          Navigation_web.history_push_key key final;
+          current_key := key;
+          Some key
+        end
+        else None
+      in
+      let gen = !nav in
       let apply () =
-        Navigation_state.set false;
-        swap (Option.join target) final a.header a.text;
-        (match restore with
-        | Some y -> Navigation_web.scroll_to y
-        | None -> Navigation_web.scroll_to_hash (hash_of final));
-        !start_islands ()
+        if !nav = gen then begin
+          loaded := Web.current_url ();
+          Navigation_state.set false;
+          swap (Option.join target) final a.header a.text;
+          (match restore with
+          | Some y -> Navigation_web.scroll_to y
+          | None -> Navigation_web.scroll_to_hash (hash_of final));
+          !start_islands ()
+        end
+        else Option.iter (Web.table_delete (scrolls ())) pushed
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 

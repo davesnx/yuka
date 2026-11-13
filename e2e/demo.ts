@@ -1262,6 +1262,24 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   await page.waitForSelector(".row");
   check("6h.16 back from an issue shows the filtered list",
     (await page.inputValue(".filter")) === "router" && (await page.locator(".row").count()) === count, String(await page.locator(".row").count()));
+  await page.evaluate(() => {
+    const shown: string[] = ((window as any).__issueShownAt = []);
+    let before = !!document.querySelector(".issue-title");
+    new MutationObserver(() => {
+      const now = !!document.querySelector(".issue-title");
+      if (now && !before) shown.push(location.pathname + location.search);
+      before = now;
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+  await page.locator(".row .row-title").first().click();
+  await page.waitForURL("**/w/stress/issue/**", { waitUntil: "commit" });
+  await page.goBack({ waitUntil: "commit" });
+  await page.waitForURL("**" + shared, { waitUntil: "commit" });
+  await page.waitForFunction(() =>
+    !!document.querySelector(".row") && !document.querySelector(".issue-title") && !document.documentElement.hasAttribute("data-yuka-nav"));
+  const shownAt: string[] = await page.evaluate(() => (window as any).__issueShownAt);
+  check("6h.27 back at once from an issue never shows the issue page under the list URL",
+    shownAt.every((url) => url.includes("/issue/")) && (await page.locator(".row").count()) === count, shownAt.join(" "));
 });
 
 await step("7a. streaming", async () => {

@@ -1326,6 +1326,95 @@ let transition_token finish =
                   check "removed by the last one" "null" (nav_attr ());
                   finish ()))))
 
+let race_page body n = page ({|<a id="l" href="/two">two</a><a id="m" href="/three">three</a>|} ^ body ^ island n)
+
+let race_start () =
+  State.set probe_runs 0;
+  setup (race_page "<p>start</p>" 1);
+  deferred_transitions ();
+  render ~islands:(runtime_registry [ probe_entry ]) ~transitions:true ();
+  set_scroll 300.;
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page ("<p>two</p>" ^ island 2))) ""
+
+let back_before_transition finish =
+  race_start ();
+  let start = race_page "<p>start</p>" 1 in
+  tick (fun () ->
+      check "the URL of the page that waits for its transition" "/two" (location_ ());
+      log_clear ();
+      back ();
+      tick (fun () ->
+          run_transition 0;
+          check "the abandoned page is never put in the DOM" start (body_html ());
+          check "location" "/start?x=1" (location_ ());
+          check "title" "start" (title ());
+          check "the shown page is not fetched again" "1" (ints (calls ()));
+          check "scroll of the entry restored, no island started" "scroll:300" (log_read ());
+          check "not navigating" "false" (navigating ());
+          finish_transition 0;
+          tick (fun () ->
+              check "attribute removed" "null" (nav_attr ());
+              forward ();
+              tick (fun () ->
+                  check "forward loads the abandoned entry" "/two" (call_url 1);
+                  resolve_call 1 (doc "Two" (page ("<p>two</p>" ^ island 2))) "";
+                  tick (fun () ->
+                      run_transition 1;
+                      tick (fun () ->
+                          check "shown" (page ("<p>two</p>" ^ island 2)) (body_html ());
+                          check "an entry that was never shown starts at the top, its island starts"
+                            "scroll:300|scroll:0|g0/2" (log_read ());
+                          finish ()))))))
+
+let newer_before_transition fetched (start_newer : unit -> unit) finish =
+  race_start ();
+  tick (fun () ->
+      log_clear ();
+      start_newer ();
+      check "the newer navigation fetches" fetched (call_url 1);
+      run_transition 0;
+      check "the abandoned page is never put in the DOM" (race_page "<p>start</p>" 1) (body_html ());
+      check "still navigating" "true" (navigating ());
+      check "no scroll, no island started" "" (log_read ());
+      resolve_call 1 (doc "Three" (page ("<p>three</p>" ^ island 3))) "";
+      tick (fun () ->
+          check "one transition per shown navigation" "2" (ints (transitions_count ()));
+          run_transition 1;
+          tick (fun () ->
+              check "the newer page" (page ("<p>three</p>" ^ island 3)) (body_html ());
+              check "location" "/three" (location_ ());
+              check "title" "Three" (title ());
+              check "scrolled to the top, its island started" "scroll:0|g0/3" (log_read ());
+              check "not navigating" "false" (navigating ());
+              finish_transition 0;
+              finish_transition 1;
+              tick (fun () ->
+                  check "attribute removed" "null" (nav_attr ());
+                  log_clear ();
+                  back ();
+                  tick (fun () ->
+                      check "back to the abandoned entry loads it" "/two" (call_url 2);
+                      resolve_call 2 (doc "Two" (page ("<p>two</p>" ^ island 2))) "";
+                      tick (fun () ->
+                          run_transition 2;
+                          tick (fun () ->
+                              check "shown" (page ("<p>two</p>" ^ island 2)) (body_html ());
+                              check "an entry that was never shown starts at the top" "scroll:0|g0/2" (log_read ());
+                              finish ())))))))
+
+let stop_before_transition finish =
+  race_start ();
+  tick (fun () ->
+      log_clear ();
+      stop ();
+      run_transition 0;
+      check "no swap after stop" (race_page "<p>start</p>" 1) (body_html ());
+      check "not navigating" "false" (navigating ());
+      tick (fun () ->
+          check "no scroll, no island started" "" (log_read ());
+          finish ()))
+
 let transition_error finish =
   setup links;
   raising_transition ();
@@ -1742,6 +1831,10 @@ let all =
     ("a popstate to the shown page cancels a waiting navigation", popstate_cancels_waiter);
     ("transitions: state first, one attribute owner", transition_token);
     ("transitions: an error in the update is reported", transition_error);
+    ("transitions: back before the update runs keeps the shown page", back_before_transition);
+    ("transitions: a click before the update runs drops the older page", newer_before_transition "http://localhost/three" (fun () -> ignore (click "#m" "")));
+    ("transitions: a popstate before the update runs drops the older page", newer_before_transition "/three" (fun () -> popstate_to "/three"));
+    ("transitions: stop before the update runs drops the page", stop_before_transition);
     ("an evicted prefetch is aborted", eviction);
     ("replacing an entry evicts nothing", replace_keeps_others);
     ("pointer down prefetches only for the primary button", pointer_buttons);
