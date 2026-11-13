@@ -9,7 +9,7 @@ let () =
   let socket =
     Eio.Net.listen ~reuse_addr:true ~backlog:128 ~sw (Eio.Stdenv.net env) (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
   in
-  let yuka = Yuka_tapak.handler ~sw ~fs:(Eio.Stdenv.fs env) (Yuka.Server.config ()) Routes_server.app in
+  let yuka = Yuka_tapak.handler ~sw ~fs:(Eio.Stdenv.fs env) (Yuka.Server.config ()) Yuka_routes.app in
   let app =
     Tapak.Router.(of_list ~not_found:yuka [ get (s "api" / s "time") |> handle_request time ])
     |> Tapak.pipe ~through:[ Yuka_tapak.sessions ]

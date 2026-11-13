@@ -179,13 +179,13 @@ let bad_cookies make () =
 let request_switch_ends ~fs () =
   let start = Unix.gettimeofday () in
   Eio.Switch.run (fun sw ->
-      let response, body = call (Yuka_tapak.sessions (Yuka_tapak.handler ~sw ~fs config Routes_server.app)) "/lingering" in
+      let response, body = call (Yuka_tapak.sessions (Yuka_tapak.handler ~sw ~fs config Yuka_routes.app)) "/lingering" in
       Alcotest.(check int) "status" 200 (status response);
       check_true "answered" (contains body "answered"));
   check_true "the fiber on the request switch ends with the response" (Unix.gettimeofday () -. start < 1.)
 
 let no_sessions ~sw ~fs () =
-  let handler = Yuka_tapak.handler ~sw ~fs config Routes_server.app in
+  let handler = Yuka_tapak.handler ~sw ~fs config Yuka_routes.app in
   let response, _ = call ~headers:same_origin handler "/_yuka/csrf" in
   Alcotest.(check int) "csrf without the middleware" 500 (status response);
   let response, _ =
@@ -321,7 +321,7 @@ let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let fs = Eio.Stdenv.fs env and net = Eio.Stdenv.net env in
-  let make config = Yuka_tapak.sessions (Yuka_tapak.handler ~sw ~fs config Routes_server.app) in
+  let make config = Yuka_tapak.sessions (Yuka_tapak.handler ~sw ~fs config Yuka_routes.app) in
   Alcotest.run ~and_exit:false "yuka-tapak"
     [
       ( "cycle",

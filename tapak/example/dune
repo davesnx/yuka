@@ -6,10 +6,10 @@
    (run %{bin:yuka} routes --shared --source %{dep:tree/Routes.ml}))))
 
 (rule
- (targets routes_server.ml)
+ (targets yuka_routes.ml)
  (action
   (with-stdout-to
-   routes_server.ml
+   yuka_routes.ml
    (run
     %{bin:yuka}
     routes
@@ -21,7 +21,7 @@
 
 (executable
  (name main)
- (modules app routes routes_server main)
+ (modules app routes yuka_routes main)
  (libraries yuka yuka-tapak tapak jsonkit eio eio_main eio.unix logs logs.fmt unix)
  (preprocess
   (pps yuka.ppx jsonkit.ppx)))
