@@ -12,6 +12,7 @@ let routes =
         [
           Router.route Issues ~path:"/" ~page:Pages.index;
           Router.route My_issues ~path:"/my" ~page:Pages.my_issues;
+          Router.route Insights ~path:"/insights" ~page:Pages.insights;
           Router.route Create ~path:"/new" ~page:Pages.create;
           Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
             ~not_found:Pages.issue_not_found
@@ -21,6 +22,7 @@ let routes =
         [
           Router.route Workspace_issues ~path:"/" ~page:Pages.Workspace.index;
           Router.route Workspace_my_issues ~path:"/my" ~page:Pages.Workspace.my_issues;
+          Router.route Workspace_insights ~path:"/insights" ~page:Pages.Workspace.insights;
           Router.route Workspace_create ~path:"/new" ~page:Pages.Workspace.create;
           Router.group ~path:"/issue/:id<string>" ~loader:Loaders.Workspace.issue
             ~not_found:Pages.Workspace.issue_not_found

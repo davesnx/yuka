@@ -78,6 +78,8 @@ val focus : string -> unit
 val scroll_into_view : string -> unit
 val has_intersection_observer : node -> bool
 val on_idle : (unit -> unit) -> unit -> unit
+val on_frame : (float -> unit) -> unit -> unit
+val now : unit -> float
 val set_timeout : int -> (unit -> unit) -> unit -> unit
 val microtask : (unit -> unit) -> unit
 val form_values : event -> (string * string) array

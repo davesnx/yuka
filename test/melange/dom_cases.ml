@@ -1898,6 +1898,55 @@ let after_in_handler () =
   check "an after effect created in a handler runs after its update" "2" !seen;
   dispose ()
 
+let stub_frames : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const w = document.defaultView;
+  globalThis.__frames = new Map(); globalThis.__frame_id = 0;
+  w.requestAnimationFrame = function (f) { const id = ++globalThis.__frame_id; globalThis.__frames.set(id, f); return id; };
+  w.cancelAnimationFrame = function (id) { globalThis.__frames.delete(id); };
+}|}]
+
+let run_frame : float -> unit =
+  [%mel.raw
+    {|function (time) {
+  const due = [...globalThis.__frames.values()];
+  globalThis.__frames.clear();
+  for (const f of due) f(time);
+}|}]
+
+let pending_frames : unit -> int = [%mel.raw "function () { return globalThis.__frames.size }"]
+
+let frames_batched_until_dispose () =
+  stub_frames ();
+  let a = State.make 0. and b = State.make 0. and runs = ref 0 and times = ref [] in
+  let (), stop =
+    owner (fun () ->
+        Effect.after (fun () ->
+            ignore (State.get a +. State.get b);
+            incr runs);
+        Browser.on_frame (fun time ->
+            times := time :: !times;
+            State.set a time;
+            State.set b time))
+  in
+  run_frame 16.;
+  run_frame 32.;
+  check "a handler for each frame, with its time" "32 16" (String.concat " " (List.map (fun time -> ints (int_of_float time)) !times));
+  check "one effect run for two writes in a frame" "3" (ints !runs);
+  stop ();
+  check "no frame requested after dispose" "0" (ints (pending_frames ()));
+  run_frame 48.;
+  check "no call after dispose" "2" (ints (List.length !times))
+
+let now_and_count_elements () =
+  let first = Browser.now () in
+  let second = Browser.now () in
+  check "now does not go back" "true" (string_of_bool (first >= 0. && second >= first));
+  let c = container {|<p class="yuka-count"><span></span><span></span><b></b></p>|} in
+  check "count_elements counts the matches in the document" "2" (ints (Browser.count_elements ".yuka-count span"));
+  set_html c ""
+
 let all =
   [
     ("handlers run in a batch", handler_batched);
@@ -1908,6 +1957,8 @@ let all =
     ("container by id", container_by_id);
     ("focus after the update of a handler", focus_after_update);
     ("window handlers run in a batch", on_window_batched);
+    ("frame handlers run in a batch until dispose", frames_batched_until_dispose);
+    ("now and count_elements", now_and_count_elements);
     ("client: attribute names are refused", client_attribute_names);
     ("client: srcdoc is empty", client_srcdoc);
     ("client: script src and href", client_script_src);

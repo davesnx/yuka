@@ -18,6 +18,11 @@ let issue_list workspace view =
 let index () = issue_list Model.Workspace.default Queries.All
 let my_issues () = issue_list Model.Workspace.default Queries.Mine
 
+let insights_in workspace =
+  Yuka.Server.page ~title:"Insights" (fun () -> <Yuka.Client><Insights workspace /></Yuka.Client>)
+
+let insights () = insights_in Model.Workspace.default
+
 let issue_view ?(delay = 0.6) (issue : Model.Issue.t) : Yuka.server Yuka.element =
   let comments =
     <Yuka.Await async=(Store.comments_async ~delay issue.id)
@@ -95,6 +100,7 @@ module Workspace = struct
   let shell ~workspace ~children () = shell_of workspace children
   let index ~workspace () = issue_list workspace Queries.All
   let my_issues ~workspace () = issue_list workspace Queries.Mine
+  let insights ~workspace () = insights_in workspace
   let create ~workspace () = create_in workspace
   let issue ~workspace:_ ~id ~issue:found () = Yuka.Server.page ~title:id (fun () -> issue_view found)
   let issue_not_found ~workspace ~id ~path:_ () = issue_not_found_in workspace ~id

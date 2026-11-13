@@ -166,6 +166,19 @@ The first run of an `Effect.after` effect also waits for the end of the
 batch or the update that creates it. Outside both, for example at the top
 level of `Yuka.owner`, it runs at once.
 
+`Yuka.Browser.on_frame handler` calls `handler` before each repaint, in a
+batch, until its owner is disposed. Call it in an effect: when the effect
+runs again or its component goes away, the calls stop. This effect animates
+while `playing` is true:
+
+```ocaml
+Yuka.Effect.after (fun () ->
+    if Yuka.State.get playing then
+      Yuka.Browser.on_frame (fun time -> Yuka.State.set angle (time /. 10.)))
+```
+
+`Yuka.Browser.now ()` gives the time on the same clock, in milliseconds.
+
 ## Lifetime
 
 Effects and memos belong to the component, hole or list row that created

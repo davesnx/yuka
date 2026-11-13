@@ -54,9 +54,17 @@ The `Nav_progress` island reads `Yuka.Browser.navigating`.
 - `http://localhost:8080/`: all issues of `yuka`, grouped by status.
 - `http://localhost:8080/my`: issues of `yuka` assigned to the current user.
 - `http://localhost:8080/new`: the new issue form of `yuka`.
+- `http://localhost:8080/insights`: charts of the issues of `yuka`, drawn
+  in SVG by one island (`shared/insights.mlx`). The server prints them, and
+  the browser computes them again on each change of the measure, the
+  filters, the date range or the live issues. The stress control (1x, 10x,
+  100x) makes copies of the issues in the browser, up to 20 000 points on
+  `stress`; Animate moves the date range on each frame. The readout shows
+  frames per second, the time of the last update (from the change to the
+  updated DOM), the SVG nodes and the points.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
   issues stream in after a delay.
-- `http://localhost:8080/w/stress`, `/w/stress/my`, `/w/stress/new` and
+- `http://localhost:8080/w/stress`, `/w/stress/my`, `/w/stress/insights`, `/w/stress/new` and
   `/w/stress/issue/STR-1`: the same pages for `stress`. An unknown
   workspace, or an issue of another workspace, is a not-found page.
 - `http://localhost:8080/about`: a page with no island, outside the shell

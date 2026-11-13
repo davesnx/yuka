@@ -108,7 +108,7 @@ end
 
 module Shell = struct
   let make ~workspace ~sidebar ~children () : _ Yuka.element =
-    let links = [ (Links.issues workspace, "Issues"); (Links.my_issues workspace, "My issues") ] in
+    let links = [ (Links.issues workspace, "Issues"); (Links.my_issues workspace, "My issues"); (Links.insights workspace, "Insights") ] in
     <div class_="app">
       <Header workspace />
       <div class_="app-body">

@@ -162,6 +162,25 @@ let stress_issue () =
   Alcotest.(check int) "unknown page in a workspace" 404 status;
   has html "Page not found"
 
+let insights () =
+  let html = get "/insights" in
+  has html "<title>Insights</title>";
+  has html {|<a class="nav-link" href="/insights" aria-current="page">Insights</a>|};
+  has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Yuka&quot;,&quot;view&quot;:&quot;All&quot;}">|};
+  Alcotest.(check int) "seven charts" 7 (count html "data-chart=");
+  Alcotest.(check int) "a point per issue" 25 (count html {| r="2"|});
+  has html {|<dd data-points="true">25</dd>|};
+  let html = get "/w/stress/insights" in
+  has html {|<a class="nav-link" href="/w/stress/insights" aria-current="page">Insights</a>|};
+  Alcotest.(check int) "a point per stress issue" 200 (count html {| r="2"|});
+  has html {|<dd data-points="true">200</dd>|};
+  has html "of 200 issues";
+  Alcotest.(check string) "thousands" "20,000" (Insights_data.format_int 20000);
+  Alcotest.(check string) "a date and back" "Nov 6" (Insights_data.date_of_day (Insights_data.day_of_date "Nov 6"));
+  Alcotest.(check (list int)) "ticks" [ 0; 20; 40; 60 ] (Insights_data.ticks ~count:4 59);
+  Alcotest.(check int) "100 times the issues" 20000
+    (List.length (Insights_data.expand ~multiplier:100 (Store.issues Model.Workspace.Stress)))
+
 let about () =
   let html = get "/about" in
   has html "<title>About</title>";
@@ -428,6 +447,7 @@ let () =
           Alcotest.test_case "header" `Quick header_links;
           Alcotest.test_case "stress workspace list" `Quick stress_list;
           Alcotest.test_case "stress issue page" `Quick stress_issue;
+          Alcotest.test_case "insights" `Quick insights;
           Alcotest.test_case "about has no JavaScript" `Quick about;
           Alcotest.test_case "redirect, 405, HEAD, endpoint, assets" `Quick rules;
           Alcotest.test_case "prerendered /about, GET and HEAD" `Quick prerendered;

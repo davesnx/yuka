@@ -513,6 +513,20 @@ module Browser : sig
   (** Scrolls the element with this id into view; does nothing when no
       element has it. Inside a {!batch}, it runs as {!focus} does. Browser
       only: raises [Failure] on native. *)
+
+  val on_frame : (float -> unit) -> unit
+  (** Calls the handler before each repaint of the browser
+      ([requestAnimationFrame]) until the current owner is disposed, with the
+      time of the frame in milliseconds, on the clock of {!now}. The handler
+      runs in a {!batch}. Browser only: call it inside [Effect.after]. *)
+
+  val now : unit -> float
+  (** Milliseconds since the page opened, with a fraction
+      ([performance.now]). Browser only: raises [Failure] on native. *)
+
+  val count_elements : string -> int
+  (** The number of elements in the document that match the CSS selector
+      ([querySelectorAll]). Browser only: raises [Failure] on native. *)
 end
 
 module Console : sig

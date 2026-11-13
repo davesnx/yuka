@@ -8,6 +8,9 @@ let issues workspace =
 let my_issues workspace =
   if default workspace then Routes.my_issues () else Routes.workspace_my_issues ~workspace ()
 
+let insights workspace =
+  if default workspace then Routes.insights () else Routes.workspace_insights ~workspace ()
+
 let create workspace =
   if default workspace then Routes.create () else Routes.workspace_create ~workspace ()
 

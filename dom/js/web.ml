@@ -166,6 +166,18 @@ let on_idle : (unit -> unit) -> unit -> unit =
   return function () { w.clearTimeout(id); };
 }|}]
 
+let on_frame : (float -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (f) {
+  const w = document.defaultView;
+  let live = true, id = 0;
+  const tick = function (time) { if (!live) return; id = w.requestAnimationFrame(tick); f(time); };
+  id = w.requestAnimationFrame(tick);
+  return function () { live = false; w.cancelAnimationFrame(id); };
+}|}]
+
+let now : unit -> float = [%mel.raw "function () { return document.defaultView.performance.now() }"]
+
 let on_visible : node -> (unit -> unit) -> unit -> unit =
   [%mel.raw
     {|function (el, f) {
