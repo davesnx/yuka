@@ -58,6 +58,25 @@ let script_schemes () =
     (one "animate" "values" "https://a;  javascript:alert(1)");
   Alcotest.(check string) "to on another element is not a URL" (kept "p" "to" "javascript:x" ^ "</p>") (one "p" "to" "javascript:x")
 
+let scheme_table () =
+  List.iter
+    (fun (tag, name, v, is_blocked) ->
+      let expected = (if is_blocked then blocked tag name else kept tag name v) ^ close tag in
+      Alcotest.(check string) (tag ^ " " ^ name ^ " " ^ String.escaped v) expected (one tag name v))
+    [ ("a", "href", "javascript:", true); ("a", "href", " JaVa\tScript:", true); ("a", "href", "\x01javascript:", true);
+      ("a", "href", "\tjavascript:x", true); ("a", "href", "j\navascript:x", true); ("a", "href", "vbscript:", true);
+      ("a", "href", "VBScript:x", true); ("a", "href", "data:", true); ("a", "href", "Data:x", true);
+      ("img", "src", "data:", false); ("img", "src", "javascript:x", true); ("a", "href", "/path", false);
+      ("a", "href", "#x", false); ("a", "href", "?q", false); ("a", "href", "https://x", false); ("a", "href", "d", false);
+      ("a", "href", "j", false); ("a", "href", "v", false); ("a", "href", "", false); ("a", "href", "   ", false);
+      ("a", "href", "\x01\x02", false); ("a", "href", "x javascript:x", false); ("a", "href", "javascript", false);
+      ("a", "href", "data", false); ("a", "title", "javascript:x", false); ("animate", "values", "/a;javascript:x", true);
+      ("animate", "values", ";javascript:x", true); ("animate", "values", "javascript:x;", true);
+      ("animate", "values", "a;\x01 VBScript:x", true); ("animate", "values", "a; j\tavascript:x", true);
+      ("animate", "values", "java;script:x", false); ("animate", "values", "a;;b", false); ("animate", "values", ";", false);
+      ("animate", "values", "", false); ("animate", "values", "data:x", false); ("set", "to", "a;data:x", false);
+      ("set", "to", "x;javascript:", true) ]
+
 let data_scheme () =
   List.iter
     (fun v ->
@@ -98,6 +117,29 @@ let attribute_names () =
       raises ("template: " ^ String.escaped name) (fun () -> Private.template Private.Template.(element "a" [ fixed name "x" ] [])))
     [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
   check_html "a valid name" {|<a data-x:y_z.1="x"></a>|} (element "a" [ attr "data-x:y_z.1" "x" ] [])
+
+let unchecked_names () =
+  List.iter
+    (fun name -> raises ("refused: " ^ String.escaped name) (fun () -> runtime_attr name "x"))
+    [ ""; "href"; "HREF"; "Src"; "action"; "FormAction"; "xlink:href"; "XLink:Href"; "xlinkhref"; "poster"; "cite";
+      "data"; "DATA"; "background"; "longdesc"; "manifest"; "codebase"; "icon"; "srcdoc"; "SrcDoc"; "on"; "onclick";
+      "ONCLICK"; "oNload"; "On"; "a b"; "a\tb"; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb"; "A B" ];
+  check_html "accepted names"
+    {|<p title="x" TITLE="x" Class="x" data-x="x" aria-label="x" o="x" no="x" hrefx="x" xhref="x" srcset="x" data-href="x"></p>|}
+    (element "p"
+       (List.map
+          (fun name -> runtime_attr name "x")
+          [ "title"; "TITLE"; "Class"; "data-x"; "aria-label"; "o"; "no"; "hrefx"; "xhref"; "srcset"; "data-href" ])
+       []);
+  List.iter
+    (fun (tag, name) ->
+      let t =
+        Private.Template.make
+          (Private.Template.element tag [ Private.Template.fixed name "x" ] [])
+          ~html:"" ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||]
+      in
+      raises ("printed: " ^ tag ^ " " ^ String.escaped name) (fun () -> html (runtime_instance t [||])))
+    [ ("p", "onclick"); ("p", "ONCLICK"); ("p", "a b"); ("p", "a\"b"); ("p", ""); ("a", "onclick"); ("a", "a>b"); ("A", "On") ]
 
 let srcdoc () =
   let v = "<script>alert(1)</script>" in
@@ -179,6 +221,45 @@ let mlx () =
   check_client "a hole from mlx" {|<a href="about:blank#blocked">x</a>|} <a href=(State.get state)>"x"</a>;
   let data = "data:image/png;base64,iVBORw0KGgo=" in
   check_html "a data image in mlx" {|<img src="data:image/png;base64,iVBORw0KGgo=">|} <img src=data />
+
+let escape_reference ~quote s =
+  String.concat ""
+    (List.map
+       (function
+         | '&' -> "&amp;"
+         | '<' -> "&lt;"
+         | '>' when not quote -> "&gt;"
+         | '"' when quote -> "&quot;"
+         | c -> String.make 1 c)
+       (List.of_seq (String.to_seq s)))
+
+let escape_inputs =
+  let fills = [ 'a'; '\xa6'; '\xbc'; '\xbe'; '\xa2'; '\''; '='; '$'; '?'; '\x00'; '\xff' ] in
+  let one_special =
+    List.concat_map
+      (fun fill ->
+        List.concat_map
+          (fun c ->
+            List.concat_map
+              (fun n -> List.init n (fun at -> String.init n (fun i -> if i = at then c else fill)))
+              (List.init 25 Fun.id))
+          [ '&'; '<'; '>'; '"' ])
+      fills
+  in
+  List.init 25 (fun n -> String.make n 'a')
+  @ one_special
+  @ [ "a&b<c>d\"e"; "&&&&&&&&&&&&&&&&&"; "<<>>\"\"&&"; "caf\xc3\xa9 & th\xc3\xa9 <b>"; "\xe2\x80\x94\"quoted\"\xe2\x80\x94";
+      "0123456&89abcdef<123456>89abcde\"" ^ String.make 40 'x' ^ "&";
+      String.init 256 Char.chr; String.init 512 (fun i -> Char.chr (255 - (i mod 256))) ]
+
+let escapes () =
+  List.iter
+    (fun s ->
+      Alcotest.(check string) ("text " ^ String.escaped s) (escape_reference ~quote:false s) (html (text s));
+      Alcotest.(check string) ("attribute " ^ String.escaped s)
+        ({|<p title="|} ^ escape_reference ~quote:true s ^ {|"></p>|})
+        (html (element "p" [ attr "title" s ] [])))
+    escape_inputs
 
 let raw_text () =
   check_html "script text is not HTML-escaped, its end tag and <!-- are made safe"
@@ -278,9 +359,11 @@ let () =
         [
           Alcotest.test_case "script schemes, any case and clean-up, any URL attribute" `Quick script_schemes;
           Alcotest.test_case "data: only where it loads a document" `Quick data_scheme;
+          Alcotest.test_case "the scheme check, value by value" `Quick scheme_table;
           Alcotest.test_case "unchecked constructors, dynamic and template attributes" `Quick printer_paths;
           Alcotest.test_case "mlx attributes and holes" `Quick mlx;
           Alcotest.test_case "attribute names" `Quick attribute_names;
+          Alcotest.test_case "names of unchecked attributes, and hand-built names at print" `Quick unchecked_names;
           Alcotest.test_case "srcdoc" `Quick srcdoc;
           Alcotest.test_case "values, to, from and by outside animations" `Quick animation_names;
           Alcotest.test_case "hand-written templates" `Quick hand_written_template;
@@ -291,6 +374,7 @@ let () =
       ( "raw text",
         [
           Alcotest.test_case "script and style" `Quick raw_text;
+          Alcotest.test_case "text and attribute escapes" `Quick escapes;
           Alcotest.test_case "only one text or one hole" `Quick raw_text_children;
         ] );
     ]

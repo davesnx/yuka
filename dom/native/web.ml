@@ -159,12 +159,45 @@ let take_buffer () =
       | [] -> None)
 
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
-let lowercase = String.lowercase_ascii
+let rec has_upper s i = i < String.length s && match String.unsafe_get s i with 'A' .. 'Z' -> true | _ -> has_upper s (i + 1)
+let lowercase s = if has_upper s 0 then String.lowercase_ascii s else s
+
+external get64 : string -> int -> int64 = "%caml_string_get64u"
+
+let skip_clean s from =
+  let n = String.length s in
+  let i = ref from in
+  while
+    !i + 8 <= n
+    &&
+    let w = get64 s !i in
+    let a = Int64.logxor (Int64.logor w 0x0404040404040404L) 0x2626262626262626L
+    and l = Int64.logxor (Int64.logor w 0x0202020202020202L) 0x3e3e3e3e3e3e3e3eL in
+    Int64.equal 0L
+      (Int64.logand 0x8080808080808080L
+         (Int64.logor
+            (Int64.logand (Int64.sub a 0x0101010101010101L) (Int64.lognot a))
+            (Int64.logand (Int64.sub l 0x0101010101010101L) (Int64.lognot l))))
+  do
+    i := !i + 8
+  done;
+  while !i < n && match String.unsafe_get s !i with '&' | '<' | '>' | '"' -> false | _ -> true do
+    incr i
+  done;
+  !i
+
+let rec refused_byte s i =
+  i < String.length s
+  && match String.unsafe_get s i with
+     | '\000' .. ' ' | '\127' | '"' | '\'' | '>' | '/' | '=' | '<' -> true
+     | _ -> refused_byte s (i + 1)
+
 let refuse_url_name name =
-  let bad c = c <= ' ' || c = '\127' || c = '"' || c = '\'' || c = '>' || c = '/' || c = '=' || c = '<' in
-  match String.lowercase_ascii name with
+  let lname = lowercase name in
+  match lname with
   | "" | "href" | "src" | "action" | "formaction" | "xlink:href" | "xlinkhref" | "poster" | "cite" | "data"
   | "background" | "longdesc" | "manifest" | "codebase" | "icon" | "srcdoc" ->
       invalid_arg ("Yuka: refused attribute name " ^ name)
-  | _ when String.exists bad name || String.starts_with ~prefix:"on" (String.lowercase_ascii name) -> invalid_arg ("Yuka: refused attribute name " ^ name)
+  | _ when refused_byte name 0 || (String.length lname > 1 && lname.[0] = 'o' && lname.[1] = 'n') ->
+      invalid_arg ("Yuka: refused attribute name " ^ name)
   | _ -> ()

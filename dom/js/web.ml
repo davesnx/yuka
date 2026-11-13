@@ -486,6 +486,7 @@ let take_buffer () =
 let give_buffer b = buffers := b :: !buffers
 
 external lowercase : string -> string = "toLowerCase" [@@mel.send]
+let skip_clean (_ : string) i = i
 
 let refuse_url_name : string -> unit =
   [%mel.raw
