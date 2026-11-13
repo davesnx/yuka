@@ -52,7 +52,15 @@ let () =
   let prerendered = ref "" in
   let second = ref 0 in
   let bus = ref "memory" in
-  let database = ref (Option.value (Sys.getenv_opt "YUKA_DEMO_DATABASE") ~default:"") in
+  let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
+  let database =
+    ref
+      (match variable "YUKA_DEMO_DATABASE" with
+      | Some conninfo -> conninfo
+      | None when Sys.getenv_opt "VERCEL_ENV" = Some "production" ->
+          Option.value (List.find_map variable [ "DATABASE_URL_UNPOOLED"; "POSTGRES_URL_NON_POOLING" ]) ~default:""
+      | None -> "")
+  in
   let reset_days =
     ref
       (match Sys.getenv_opt "YUKA_DEMO_RESET_DAYS" with
@@ -83,7 +91,7 @@ let () =
       ("--bus", Arg.Set_string bus, "With --second-node: memory (default) or pg:CONNINFO (yuka-live-pg)");
       ( "--database",
         Arg.Set_string database,
-        "Postgres connection string of the shared store, a direct (not pooled) one (default: $YUKA_DEMO_DATABASE; empty: in memory)" );
+        "Postgres connection string of the shared store, a direct (not pooled) one (default: $YUKA_DEMO_DATABASE, or on Vercel production $DATABASE_URL_UNPOOLED or $POSTGRES_URL_NON_POOLING; empty: in memory)" );
       ( "--reset-days",
         Arg.Set_int reset_days,
         "The data starts again from the seed when it is older than this many days (default: $YUKA_DEMO_RESET_DAYS, or 7)" );

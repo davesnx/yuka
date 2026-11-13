@@ -234,10 +234,13 @@ the development secret.
 Vercel builds `Dockerfile.vercel` at the repository root and runs the image
 as a Function ([Container Runtime](https://vercel.com/docs/functions/runtimes/container)).
 Set these environment variables in the project: `PORT=8080` (Vercel sends
-traffic to port 80 without it), `YUKA_DEMO_SECRET`, and
-`YUKA_DEMO_DATABASE`, the direct (unpooled) URL of a Postgres database. With
-Neon, it is the URL without `-pooler` in the host name.
-`YUKA_DEMO_RESET_DAYS` is optional.
+traffic to port 80 without it) and `YUKA_DEMO_SECRET`. For the shared data,
+connect a Neon database to the project: in production (`VERCEL_ENV` is
+`production`) the server uses the direct URL that the integration adds,
+`DATABASE_URL_UNPOOLED` or `POSTGRES_URL_NON_POOLING`. A preview deployment
+keeps its data in memory. `YUKA_DEMO_DATABASE`, when set, is used in every
+environment; give it a direct URL (with Neon, no `-pooler` in the host
+name). `YUKA_DEMO_RESET_DAYS` is optional.
 
 The project `yuka-demo` is connected to this repository: a push to `main`
 deploys to https://yuka-demo.vercel.app.

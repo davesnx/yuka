@@ -163,11 +163,19 @@ module Json : sig
       element. Non-finite floats are written as [null]. *)
 
   val of_string : string -> (t, string) result
-  (** A number without ['.'], ['e'] or ['E'] that fits an [int] is [`Int];
-      any other number is [`Float]. An [int] has 63 bits on native and 32
-      bits in the browser, so a number such as [5000000000] is [`Int] on the
-      server and [`Float] in the browser; {!Codec.int} accepts both. Arrays
-      and objects nested more than 512 levels are an error. *)
+  (** On native, a number without ['.'], ['e'] or ['E'] that fits an [int]
+      (63 bits) is [`Int]; any other number is [`Float]. In the browser the
+      text is parsed by [JSON.parse]: a whole number that fits a 32-bit
+      [int] is [`Int], also when written [1.0], [1e2] or [-0.0]; any other
+      number is [`Float]. Object keys that are array indices, such as ["2"],
+      come first in increasing order; a duplicate key stays once, at its
+      first place with its last value, where native keeps every pair; a
+      [\u] escape gives the same string as the character itself, and a lone
+      surrogate is not an error. So [5000000000] is [`Int] on the server and
+      [`Float] in the browser, and [1.0] is [`Float] on the server and
+      [`Int] in the browser; {!Codec.int} and {!Codec.float} accept both.
+      On both, arrays and objects nested more than 512 levels are an
+      error. *)
 end
 
 module Async : sig
