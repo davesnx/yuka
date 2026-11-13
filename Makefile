@@ -90,6 +90,10 @@ e2e: ## Browser check of the demo (native ES modules)
 e2e-bundle: ## Browser check of the demo (esbuild bundle)
 	SWITCH=$(SWITCH) BUILD_DIR=$(BUILD_DIR) BUNDLE=1 e2e/run.sh
 
+.PHONY: e2e-shared
+e2e-shared: ## Two server processes on one database (YUKA_DEMO_DATABASE): a change through one shows on the other
+	SWITCH=$(SWITCH) BUILD_DIR=$(BUILD_DIR) e2e/shared_store.sh
+
 .PHONY: bench
 bench: ## Build and run the browser benchmark
 	$(DUNE) build --root . --profile=release @bench/bench

@@ -1,7 +1,8 @@
 (rule
  (targets yuka_islands.ml)
  (deps
-  (source_tree islands))
+  (source_tree islands)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_islands.ml
