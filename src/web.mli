@@ -119,6 +119,17 @@ val shortest_float : float -> string
 val parse_float : string -> float
 val parse_int : string -> int option
 
+type json =
+  [ `Null
+  | `Bool of bool
+  | `Int of int
+  | `Float of float
+  | `String of string
+  | `List of json list
+  | `Assoc of (string * json) list ]
+
+val parse_json : string -> (json, string) result
+
 type socket
 
 val socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket
