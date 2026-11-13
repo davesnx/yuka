@@ -74,5 +74,5 @@ Router.make ~not_found:Pages.not_found
 ## For coding agents
 
 [`skills/yuka`](skills/yuka) is a skill that teaches Yuka to a coding agent.
-Its references are copies of `docs/`: `make skill` updates them, and
+Its references are copies of `docs/`: `make docs` updates them, and
 `make test` fails when they differ.

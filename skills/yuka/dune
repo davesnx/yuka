@@ -5,4 +5,4 @@
   (source_tree ../../docs))
  (action
   (system
-   "diff -r ../../docs references || { echo 'skills/yuka/references differs from docs/. Run: make skill'; exit 1; }")))
+   "diff -r ../../docs references || { echo 'skills/yuka/references differs from docs/. Run: make docs'; exit 1; }")))
