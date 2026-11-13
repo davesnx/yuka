@@ -17,7 +17,15 @@ let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let () =
   let here = Filename.dirname Sys.executable_name in
-  let port = ref 8080 in
+  let port =
+    ref
+      (match Sys.getenv_opt "PORT" with
+      | None -> 8080
+      | Some value -> (
+          match int_of_string_opt value with
+          | Some port -> port
+          | None -> failwith ("demo_server: PORT is not a number: " ^ value)))
+  in
   let interface = ref "localhost" in
   let js_dir = ref (Filename.concat here "../client/out") in
   let static_dir = ref (Filename.concat here "../static") in
@@ -33,7 +41,7 @@ let () =
   in
   Arg.parse
     [
-      ("--port", Arg.Set_int port, "Port to listen on (default 8080)");
+      ("--port", Arg.Set_int port, "Port to listen on (default: $PORT, or 8080)");
       ("--interface", Arg.Set_string interface, "Network interface to listen on (default localhost)");
       ("--js-dir", Arg.Set_string js_dir, "Melange output directory");
       ("--bundle", Arg.Set bundle, "Serve the esbuild bundle instead of the module tree");
