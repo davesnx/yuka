@@ -254,6 +254,14 @@ module Event : sig
 
   val alt_key : t -> bool
   (** Whether the Alt key was down. *)
+
+  val client_x : t -> float
+  (** The horizontal position of the pointer, in CSS pixels from the left
+      edge of the viewport ([clientX]). For a mouse or pointer event only. *)
+
+  val client_y : t -> float
+  (** The vertical position of the pointer, in CSS pixels from the top edge
+      of the viewport ([clientY]). For a mouse or pointer event only. *)
 end
 
 val text : string -> 'kind element
@@ -924,6 +932,8 @@ module Private : sig
     target_tag : Event.t -> string;
     shift_key : Event.t -> bool;
     alt_key : Event.t -> bool;
+    client_x : Event.t -> float;
+    client_y : Event.t -> float;
     navigate : string -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;

@@ -1,0 +1,171 @@
+open Model
+module Css = [%yuka.css "canvas.css"]
+
+type held = { id : string; x : int; y : int }
+
+let px = Int.to_string
+let zooms = [ 25; 50; 75; 100; 150 ]
+let clamp low high value = max low (min high value)
+let scale_text percent = px (percent / 100) ^ "." ^ (if percent mod 100 < 10 then "0" else "") ^ px (percent mod 100)
+
+let[@client] make ~(workspace : Workspace.t) () =
+  let live = Yuka.Live.use Topics.board (fun () -> workspace) in
+  let items = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:[]) in
+  let spots =
+    Yuka.State.memo (fun () ->
+        let table = Hashtbl.create 256 in
+        List.iter (fun (item : Board.item) -> Hashtbl.replace table item.id (item.x, item.y)) (Yuka.State.get items);
+        table)
+  in
+  let held : held option Yuka.State.t = Yuka.State.make ~equal:( = ) None in
+  let zoom = Yuka.State.make 50 in
+  let pan = Yuka.State.make ~equal:( = ) (16., 16.) in
+  let draft = Yuka.State.make "" in
+  let error : string option Yuka.State.t = Yuka.State.make None in
+  let grab = ref None and panning = ref None in
+  let report = function
+    | Ok (Ok _) -> ()
+    | Ok (Error status) -> Yuka.State.set error (Some (Yuka.Status.error_to_string status))
+    | Error message -> Yuka.State.set error (Some message)
+  in
+  let call action input = Yuka.State.set error None; Yuka.Async.on_result (Yuka.Action.call action input) report in
+  let release ~send =
+    let moved = Yuka.State.peek held in
+    let start = !grab in
+    grab := None;
+    panning := None;
+    match (moved, start) with
+    | Some { id; x; y }, Some (_, _, _, from_x, from_y) when send && (x, y) <> (from_x, from_y) ->
+        Yuka.State.set error None;
+        Yuka.Async.on_result
+          (Yuka.Live.optimistic live
+             ~change:(List.map (fun (item : Board.item) -> if item.id = id then { item with x; y } else item))
+             (fun () -> Yuka.Action.call Board.move { Board.workspace; id; x; y }))
+          report;
+        Yuka.State.set held None
+    | _ -> Yuka.State.set held None
+  in
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "pointermove" (fun event ->
+          let pointer_x = Yuka.Event.client_x event and pointer_y = Yuka.Event.client_y event in
+          (match !grab with
+          | Some (id, start_x, start_y, from_x, from_y) ->
+              let scale = float_of_int (Yuka.State.peek zoom) /. 100. in
+              let shift start now = int_of_float ((now -. start) /. scale) in
+              Yuka.State.set held
+                (Some
+                   {
+                     id;
+                     x = clamp 0 (Board.width - Board.item_width) (from_x + shift start_x pointer_x);
+                     y = clamp 0 (Board.height - Board.item_height) (from_y + shift start_y pointer_y);
+                   })
+          | None -> ());
+          match !panning with
+          | Some (start_x, start_y, from_x, from_y) -> Yuka.State.set pan (from_x +. pointer_x -. start_x, from_y +. pointer_y -. start_y)
+          | None -> ());
+      Yuka.Browser.on_window "pointerup" (fun _ -> release ~send:true);
+      Yuka.Browser.on_window "pointercancel" (fun _ -> release ~send:false);
+      Yuka.Browser.on_window "contextmenu" (fun _ -> release ~send:false));
+  let start_pan event =
+    let from_x, from_y = Yuka.State.peek pan in
+    panning := Some (Yuka.Event.client_x event, Yuka.Event.client_y event, from_x, from_y)
+  in
+  let start_drag id event =
+    Yuka.Event.stop_propagation event;
+    match Yuka.Event.target_tag event with
+    | "a" | "button" -> ()
+    | _ -> (
+        match Hashtbl.find_opt (Yuka.State.peek spots) id with
+        | Some (x, y) ->
+            grab := Some (id, Yuka.Event.client_x event, Yuka.Event.client_y event, x, y);
+            Yuka.State.set held (Some { id; x; y })
+        | None -> ())
+  in
+  let item (item : Board.item) : Yuka.client Yuka.element =
+    let spot =
+      Yuka.State.memo ~equal:( = ) (fun () ->
+          match Yuka.State.get held with
+          | Some held when held.id = item.id -> (held.x, held.y, true)
+          | _ -> (
+              match Hashtbl.find_opt (Yuka.State.get spots) item.id with
+              | Some (x, y) -> (x, y, false)
+              | None -> (item.x, item.y, false)))
+    in
+    let kind = match item.content with Card _ -> Css.item | Note _ -> Css.item ^ " " ^ Css.note in
+    let body =
+      match item.content with
+      | Card { title; status } ->
+          <div>
+            <div class_=Css.item_head><Views.Status_icon status />(Yuka.text item.id)</div>
+            <a class_=Css.item_title href=(Links.issue workspace ~id:item.id)>(Yuka.text title)</a>
+          </div>
+      | Note text ->
+          <div>
+            <div class_=Css.item_head>
+              "Note"
+              <button class_=Css.remove type_=`button aria_label="Remove note"
+                on_click=(fun _ -> call Board.remove_note { Board.workspace; note_id = item.id })>
+                "x"
+              </button>
+            </div>
+            <p class_=Css.note_text>(Yuka.text text)</p>
+          </div>
+    in
+    <div data_id=item.id
+      class_=(let _, _, dragging = Yuka.State.get spot in if dragging then kind ^ " " ^ Css.dragging else kind)
+      style=(let x, y, _ = Yuka.State.get spot in "transform:translate(" ^ px x ^ "px," ^ px y ^ "px)")
+      on_pointerdown=(start_drag item.id)>
+      body
+    </div>
+  in
+  let zoom_by step _ =
+    let current = Yuka.State.peek zoom in
+    let rec pick = function
+      | [] -> current
+      | level :: rest -> if (step > 0 && level > current) || (step < 0 && level < current) then level else pick rest
+    in
+    Yuka.State.set zoom (pick (if step > 0 then zooms else List.rev zooms))
+  in
+  let add_note () =
+    let text = String.trim (Yuka.State.peek draft) in
+    if text <> "" then begin
+      Yuka.State.set draft "";
+      call Board.add_note { Board.workspace; text }
+    end
+  in
+  <div class_=Css.canvas data_canvas="true">
+    <header class_="page-header">
+      <span>"Canvas"</span>
+      <span class_="group-count">(Yuka.int (List.length (Yuka.State.get items)))</span>
+      (Yuka.hole (fun () ->
+         match Yuka.Live.status live with
+         | Yuka.Status.Ready { stale = true; _ } -> <span class_="offline">"Offline"</span>
+         | _ -> Yuka.empty))
+    </header>
+    <div class_=Css.tools>
+      <button class_="button" type_=`button on_click=(fun _ -> call Board.shuffle workspace)>"Shuffle"</button>
+      <input class_=("filter " ^ Css.note_input) type_=`text placeholder="Note text" aria_label="Note text"
+        maxlength=Board.note_length value=(Yuka.State.get draft)
+        on_input=(fun event -> Yuka.State.set draft (Yuka.Event.target_value event))
+        on_keydown=(fun event -> if Yuka.Event.key event = "Enter" then add_note ()) />
+      <button class_="button" type_=`button disabled=(String.trim (Yuka.State.get draft) = "") on_click=(fun _ -> add_note ())>
+        "Add note"
+      </button>
+      (match Yuka.State.get error with Some message -> <span class_="error">(Yuka.text message)</span> | None -> Yuka.empty)
+      <div class_=Css.zoom>
+        <button class_="button" type_=`button aria_label="Zoom out" on_click=(zoom_by (-1))>"-"</button>
+        <span data_zoom="true">(Yuka.text (px (Yuka.State.get zoom) ^ "%"))</span>
+        <button class_="button" type_=`button aria_label="Zoom in" on_click=(zoom_by 1)>"+"</button>
+      </div>
+    </div>
+    <div class_=Css.viewport on_pointerdown=start_pan>
+      <div class_=Css.surface
+        style=(let x, y = Yuka.State.get pan in
+               "width:" ^ px Board.width ^ "px;height:" ^ px Board.height ^ "px;transform:translate("
+               ^ px (int_of_float x) ^ "px," ^ px (int_of_float y) ^ "px) scale("
+               ^ scale_text (Yuka.State.get zoom) ^ ")")>
+        (Yuka.each ~equal:(fun (a : Board.item) b -> a.id = b.id && a.content = b.content) ~key:(fun (item : Board.item) -> item.id)
+           (fun () -> Array.of_list (Yuka.State.get items)) item)
+      </div>
+    </div>
+  </div>

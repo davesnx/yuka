@@ -22,6 +22,8 @@ let platform =
       target_tag = (fun e -> Web.local_name (Web.target e));
       shift_key = Web.shift_key;
       alt_key = Web.alt_key;
+      client_x = Web.client_x;
+      client_y = Web.client_y;
       navigate = (fun url -> match !client_navigate with Some f -> f url | None -> Web.navigate url);
       focus = Web.focus;
       scroll_into_view = Web.scroll_into_view;
@@ -44,4 +46,6 @@ module Event = struct
   let target_tag e = !platform.target_tag e
   let shift_key e = !platform.shift_key e
   let alt_key e = !platform.alt_key e
+  let client_x e = !platform.client_x e
+  let client_y e = !platform.client_y e
 end

@@ -94,6 +94,8 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     target_tag : event -> string;
     shift_key : event -> bool;
     alt_key : event -> bool;
+    client_x : event -> float;
+    client_y : event -> float;
     navigate : string -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
