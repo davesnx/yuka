@@ -1,0 +1,27 @@
+let link href : Yuka.server Yuka.element = <a href>(Yuka.text href)</a>
+
+let home () =
+  Yuka.Server.page ~title:"Home" (fun () ->
+      <main>
+        <h1>"Yuka on tapak"</h1>
+        (link "/slow")
+        (link "/hello.json")
+        (link "/api/time")
+      </main>)
+
+let slow () =
+  Yuka.Server.page ~title:"Slow" (fun () ->
+      let data =
+        Yuka_tapak.async ~sw:(Yuka_tapak.switch ()) (fun () ->
+            Eio_unix.sleep 1.;
+            "loaded after one second")
+      in
+      <main>
+        <h1>"Slow"</h1>
+        <Yuka.Await async=data loading=(<p>"loading..."</p>)>
+          (fun text -> <p>(Yuka.text text)</p>)
+        </Yuka.Await>
+      </main>)
+
+let hello (_ : Tapak.Request.t) = Yuka.Server.json (`Assoc [ ("from", `String "yuka endpoint") ])
+let not_found ~path () = Yuka.Server.page ~title:"Missing" (fun () -> <p>(Yuka.text ("missing " ^ path))</p>)
