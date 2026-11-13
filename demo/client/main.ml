@@ -1,14 +1,15 @@
-let read_theme : unit -> string =
-  [%mel.raw {|function () { return document.documentElement.getAttribute("data-theme") || "dark" }|}]
+let read_attribute : string -> string =
+  [%mel.raw {|function (name) { return document.documentElement.getAttribute(name) || "" }|}]
 
-let write_theme : string -> unit =
+let write_attribute : string -> string -> string -> unit =
   [%mel.raw
-    {|function (theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  try { localStorage.setItem("yuka-demo-theme", theme) } catch (error) {}
+    {|function (name, key, value) {
+  if (value) document.documentElement.setAttribute(name, value);
+  else document.documentElement.removeAttribute(name);
+  try { if (value) localStorage.setItem(key, value); else localStorage.removeItem(key) } catch (error) {}
 }|}]
 
 let () =
-  Demo_shared.Theme.read := read_theme;
-  Demo_shared.Theme.write := write_theme;
+  Demo_shared.Theme.read := read_attribute;
+  Demo_shared.Theme.write := write_attribute;
   Yuka.render ~islands ~transitions:true ()

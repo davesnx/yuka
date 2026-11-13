@@ -33,12 +33,3 @@
 .comment-body { flex: 1; min-width: 0; }
 .comment-text { margin-top: 2px; }
 .comment-text .code-block { font-size: 13px; }
-
-.code-style { margin-left: auto; display: flex; }
-.code-style-select {
-  font: inherit; font-size: 13px; font-weight: 400; color: var(--muted); background: transparent;
-  border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; cursor: pointer; outline: none;
-}
-.code-style-select:hover { color: var(--text); background: var(--bg-hover); }
-.code-style-select:focus-visible { border-color: var(--accent); color: var(--text); }
-.code-style-select option { background: var(--bg); color: var(--text); }

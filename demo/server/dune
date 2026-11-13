@@ -1,6 +1,6 @@
 (library
  (name demo_app)
- (modules code_style markdown description stress store pages loaders handlers yuka_routes yuka_css)
+ (modules code_style markdown description stress store report pages loaders handlers yuka_routes yuka_css)
  (libraries
   demo_shared
   yuka

@@ -104,6 +104,131 @@ let horizontal_bars ~sums ~names ~keys ~tones ~on =
 
 let label_rows count = 8 + (count * 18)
 
+let bounds_of = function
+  | [] -> (0, 0)
+  | first :: rest -> List.fold_left (fun (low, high) item -> (min low item.day, max high item.day)) (first.day, first.day) rest
+
+let status_bars ~measure ~chosen items =
+  vertical_bars
+    ~sums:(totals ~measure ~categories:statuses ~category:(fun item -> item.status) items)
+    ~names:(List.map Issue.status_label statuses) ~keys:(List.map Issue.status_slug statuses)
+    ~tones:(List.map status_tone statuses) ~on:(List.map (fun status -> keeps chosen status) statuses)
+
+let priority_bars ~measure ~chosen items =
+  horizontal_bars
+    ~sums:(totals ~measure ~categories:priorities ~category:(fun item -> item.priority) items)
+    ~names:(List.map Issue.priority_label priorities) ~keys:(List.map Issue.priority_slug priorities)
+    ~tones:(List.map priority_tone priorities) ~on:(List.map (fun priority -> keeps chosen priority) priorities)
+
+let label_names_of (issues : Issue.t list) = List.sort_uniq compare (List.concat_map (fun (issue : Issue.t) -> issue.labels) issues)
+
+let label_bars ~measure ~chosen ~labels items =
+  let sums = label_totals ~measure ~labels items in
+  let order =
+    List.stable_sort (fun (_, left) (_, right) -> compare right left) (List.mapi (fun index label -> (label, sums.(index))) labels)
+  in
+  horizontal_bars ~sums:(Array.of_list (List.map snd order)) ~names:(List.map fst order) ~keys:(List.map fst order)
+    ~tones:(List.map (fun _ -> Css.accent) order) ~on:(List.map (fun (label, _) -> keeps chosen label) order)
+
+let assignee_names_of (issues : Issue.t list) =
+  let names = List.sort_uniq compare (List.map (fun (issue : Issue.t) -> assignee_name issue.assignee) issues) in
+  List.filter (( <> ) unassigned) names @ if List.mem unassigned names then [ unassigned ] else []
+
+let workload ~measure ~chosen ~names ~stack_by items =
+  let columns, keys, tones =
+    match stack_by with
+    | By_status ->
+        ( Array.to_list (Array.map Array.to_list (grid ~measure ~rows:names ~row:(fun item -> item.assignee) ~columns:statuses ~column:(fun item -> item.status) items)),
+          List.map Issue.status_label statuses,
+          List.map status_tone statuses )
+    | By_priority ->
+        ( Array.to_list (Array.map Array.to_list (grid ~measure ~rows:names ~row:(fun item -> item.assignee) ~columns:priorities ~column:(fun item -> item.priority) items)),
+          List.map Issue.priority_label priorities,
+          List.map priority_tone priorities )
+  in
+  let sums = Array.of_list (List.map (List.fold_left ( + ) 0) columns) in
+  let rows = horizontal_bars ~sums ~names ~keys:names ~tones:(List.map (fun _ -> "") names) ~on:(List.map (keeps chosen) names) in
+  let highest = max 1 (Array.fold_left max 0 sums) in
+  Array.mapi
+    (fun index row ->
+      let _, segments =
+        List.fold_left
+          (fun (start, segments) (amount, (name, tone)) ->
+            let next = start + amount in
+            let from_x = scale ~highest ~length:bar_room start and to_x = scale ~highest ~length:bar_room next in
+            ( next,
+              if amount = 0 then segments
+              else
+                { segment_label = name; segment_tone = tone; segment_start = bar_start + from_x; segment_length = to_x - from_x; segment_amount = amount }
+                :: segments ))
+          (0, [])
+          (List.combine (List.nth columns index) (List.combine keys tones))
+      in
+      { row; segments = List.rev segments })
+    rows
+
+let heat_cells ~measure items =
+  let cells = grid ~measure ~rows:statuses ~row:(fun item -> item.status) ~columns:priorities ~column:(fun item -> item.priority) items in
+  let highest = max 1 (Array.fold_left (Array.fold_left max) 0 cells) in
+  Array.concat
+    (List.mapi
+       (fun row_index status ->
+         Array.of_list
+           (List.mapi
+              (fun column_index priority ->
+                let amount = cells.(row_index).(column_index) in
+                {
+                  cell_key = Issue.status_slug status ^ "-" ^ Issue.priority_slug priority;
+                  cell_x = 92 + (column_index * 60);
+                  cell_y = 22 + (row_index * 26);
+                  cell_amount = amount;
+                  opacity = (if amount = 0 then 4 else 15 + (amount * 85 / highest));
+                  cell_text = Issue.status_label status ^ ", " ^ Issue.priority_label priority ^ ": " ^ unit_label measure amount;
+                })
+              priorities))
+       statuses)
+
+let timeline_of ~measure bounds items =
+  let first, last = bounds in
+  let sums = days ~measure ~first ~last items in
+  let marks = ticks ~count:4 (Array.fold_left max 0 sums) in
+  let highest = List.fold_left max 1 marks in
+  let y amount = time_bottom - scale ~highest ~length:(time_bottom - time_top) amount in
+  let points = Array.to_list (Array.mapi (fun index amount -> (day_x bounds (first + index), y amount)) sums) in
+  let line = String.concat " " (List.mapi (fun index (x, y) -> (if index = 0 then "M" else "L") ^ px x ^ " " ^ px y) points) in
+  let step = max 1 ((time_right - time_left) / max 1 (last - first)) in
+  {
+    line;
+    area = line ^ " L" ^ px time_right ^ " " ^ px time_bottom ^ " L" ^ px time_left ^ " " ^ px time_bottom ^ " Z";
+    time_ticks = Array.of_list (List.map (fun value -> { tick_value = value; tick_offset = y value }) marks);
+    columns =
+      Array.mapi
+        (fun index amount ->
+          { column_day = first + index; column_x = day_x bounds (first + index) - (step / 2); column_amount = amount; column_width = step })
+        sums;
+  }
+
+let day_ticks_of bounds =
+  let first, last = bounds in
+  let step = max 1 (((last - first) / 4) + 1) in
+  Array.of_list
+    (List.filter_map
+       (fun index -> let day = first + (index * step) in if day <= last then Some (day, day_x bounds day) else None)
+       (List.init 5 Fun.id))
+
+let scatter_points (first, last) items =
+  let span = max 1 (last - first) in
+  Array.of_list
+    (List.map
+       (fun (item : item) ->
+         {
+           point_key = item.key;
+           cx = time_left + ((((item.day - first) * 100) + item.offset) * (time_right - time_left) / ((span + 1) * 100));
+           cy = 170 - (item.cycle * 150 / 30);
+           point_tone = status_tone item.status;
+         })
+       items)
+
 let tooltip (hover : hover option Yuka.State.read) : Yuka.client Yuka.element =
   Yuka.hole (fun () ->
       match Yuka.State.get hover with
@@ -133,28 +258,30 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let fps : int option Yuka.State.t = Yuka.State.make None in
   let update_time : int option Yuka.State.t = Yuka.State.make None in
   let nodes : int option Yuka.State.t = Yuka.State.make None in
-  let items = Yuka.State.memo (fun () -> expand ~multiplier:(Yuka.State.get multiplier) (Yuka.State.get issues)) in
-  let bounds =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        match Yuka.State.get items with
-        | [] -> (0, 0)
-        | first :: rest ->
-            List.fold_left (fun (low, high) item -> (min low item.day, max high item.day)) (first.day, first.day) rest)
-  in
-  let window =
+  let shown_multiplier = Yuka.State.deferred multiplier in
+  let shown_statuses = Yuka.State.deferred statuses_on in
+  let shown_priorities = Yuka.State.deferred priorities_on in
+  let shown_labels = Yuka.State.deferred labels_on in
+  let shown_assignees = Yuka.State.deferred assignees_on in
+  let shown_range = Yuka.State.deferred range in
+  let items = Yuka.State.memo (fun () -> expand ~multiplier:(Yuka.State.get shown_multiplier) (Yuka.State.get issues)) in
+  let bounds = Yuka.State.memo ~equal:( = ) (fun () -> bounds_of (Yuka.State.get items)) in
+  let window_of range =
     Yuka.State.memo ~equal:( = ) (fun () ->
         let first, last = Yuka.State.get bounds in
         match Yuka.State.get range with
         | None -> (first, last)
         | Some (from_day, to_day) -> (max first from_day, min last to_day))
   in
+  let window = window_of range in
+  let shown_window = window_of shown_range in
   let subset ?(status = true) ?(priority = true) ?(label = true) ?(assignee = true) ?(dated = true) () =
     Yuka.State.memo (fun () ->
-        let statuses = if status then Yuka.State.get statuses_on else [] in
-        let priorities = if priority then Yuka.State.get priorities_on else [] in
-        let labels = if label then Yuka.State.get labels_on else [] in
-        let assignees = if assignee then Yuka.State.get assignees_on else [] in
-        let first, last = if dated then Yuka.State.get window else (min_int, max_int) in
+        let statuses = if status then Yuka.State.get shown_statuses else [] in
+        let priorities = if priority then Yuka.State.get shown_priorities else [] in
+        let labels = if label then Yuka.State.get shown_labels else [] in
+        let assignees = if assignee then Yuka.State.get shown_assignees else [] in
+        let first, last = if dated then Yuka.State.get shown_window else (min_int, max_int) in
         List.filter
           (fun (item : item) ->
             item.day >= first && item.day <= last && keeps statuses item.status && keeps priorities item.priority
@@ -204,149 +331,30 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let leave _ = Yuka.State.set hover None in
   let status_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get statuses_on in
-        vertical_bars
-          ~sums:(totals ~measure ~categories:statuses ~category:(fun item -> item.status) (Yuka.State.get for_status))
-          ~names:(List.map Issue.status_label statuses) ~keys:(List.map Issue.status_slug statuses)
-          ~tones:(List.map status_tone statuses) ~on:(List.map (fun status -> keeps chosen status) statuses))
+        status_bars ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_statuses) (Yuka.State.get for_status))
   in
   let priority_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get priorities_on in
-        horizontal_bars
-          ~sums:(totals ~measure ~categories:priorities ~category:(fun item -> item.priority) (Yuka.State.get for_priority))
-          ~names:(List.map Issue.priority_label priorities) ~keys:(List.map Issue.priority_slug priorities)
-          ~tones:(List.map priority_tone priorities) ~on:(List.map (fun priority -> keeps chosen priority) priorities))
+        priority_bars ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_priorities) (Yuka.State.get for_priority))
   in
-  let label_names =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        List.sort_uniq compare (List.concat_map (fun (issue : Issue.t) -> issue.labels) (Yuka.State.get issues)))
-  in
+  let label_names = Yuka.State.memo ~equal:( = ) (fun () -> label_names_of (Yuka.State.get issues)) in
   let label_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get labels_on and labels = Yuka.State.get label_names in
-        let sums = label_totals ~measure ~labels (Yuka.State.get for_label) in
-        let order =
-          List.stable_sort (fun (_, left) (_, right) -> compare right left) (List.mapi (fun index label -> (label, sums.(index))) labels)
-        in
-        horizontal_bars ~sums:(Array.of_list (List.map snd order)) ~names:(List.map fst order) ~keys:(List.map fst order)
-          ~tones:(List.map (fun _ -> Css.accent) order) ~on:(List.map (fun (label, _) -> keeps chosen label) order))
+        label_bars ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_labels) ~labels:(Yuka.State.get label_names)
+          (Yuka.State.get for_label))
   in
-  let assignee_names =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let names = List.sort_uniq compare (List.map (fun (issue : Issue.t) -> assignee_name issue.assignee) (Yuka.State.get issues)) in
-        List.filter (( <> ) unassigned) names @ if List.mem unassigned names then [ unassigned ] else [])
-  in
+  let assignee_names = Yuka.State.memo ~equal:( = ) (fun () -> assignee_names_of (Yuka.State.get issues)) in
   let workload_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get assignees_on and names = Yuka.State.get assignee_names in
-        let items = Yuka.State.get for_assignee in
-        let columns, keys, tones =
-          match Yuka.State.get stack_by with
-          | By_status ->
-              ( Array.to_list (Array.map Array.to_list (grid ~measure ~rows:names ~row:(fun item -> item.assignee) ~columns:statuses ~column:(fun item -> item.status) items)),
-                List.map Issue.status_label statuses,
-                List.map status_tone statuses )
-          | By_priority ->
-              ( Array.to_list (Array.map Array.to_list (grid ~measure ~rows:names ~row:(fun item -> item.assignee) ~columns:priorities ~column:(fun item -> item.priority) items)),
-                List.map Issue.priority_label priorities,
-                List.map priority_tone priorities )
-        in
-        let sums = Array.of_list (List.map (List.fold_left ( + ) 0) columns) in
-        let rows = horizontal_bars ~sums ~names ~keys:names ~tones:(List.map (fun _ -> "") names) ~on:(List.map (keeps chosen) names) in
-        let highest = max 1 (Array.fold_left max 0 sums) in
-        Array.mapi
-          (fun index row ->
-            let _, segments =
-              List.fold_left
-                (fun (start, segments) (amount, (name, tone)) ->
-                  let next = start + amount in
-                  let from_x = scale ~highest ~length:bar_room start and to_x = scale ~highest ~length:bar_room next in
-                  ( next,
-                    if amount = 0 then segments
-                    else
-                      { segment_label = name; segment_tone = tone; segment_start = bar_start + from_x; segment_length = to_x - from_x; segment_amount = amount }
-                      :: segments ))
-                (0, [])
-                (List.combine (List.nth columns index) (List.combine keys tones))
-            in
-            { row; segments = List.rev segments })
-          rows)
+        workload ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_assignees) ~names:(Yuka.State.get assignee_names)
+          ~stack_by:(Yuka.State.get stack_by) (Yuka.State.get for_assignee))
   in
-  let heatmap =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure in
-        let cells =
-          grid ~measure ~rows:statuses ~row:(fun item -> item.status) ~columns:priorities ~column:(fun item -> item.priority)
-            (Yuka.State.get selected)
-        in
-        let highest = max 1 (Array.fold_left (Array.fold_left max) 0 cells) in
-        Array.concat
-          (List.mapi
-             (fun row_index status ->
-               Array.of_list
-                 (List.mapi
-                    (fun column_index priority ->
-                      let amount = cells.(row_index).(column_index) in
-                      {
-                        cell_key = Issue.status_slug status ^ "-" ^ Issue.priority_slug priority;
-                        cell_x = 92 + (column_index * 60);
-                        cell_y = 22 + (row_index * 26);
-                        cell_amount = amount;
-                        opacity = (if amount = 0 then 4 else 15 + (amount * 85 / highest));
-                        cell_text =
-                          Issue.status_label status ^ ", " ^ Issue.priority_label priority ^ ": " ^ unit_label measure amount;
-                      })
-                    priorities))
-             statuses))
-  in
+  let heatmap = Yuka.State.memo ~equal:( = ) (fun () -> heat_cells ~measure:(Yuka.State.get measure) (Yuka.State.get selected)) in
   let timeline =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let bounds = Yuka.State.get bounds in
-        let first, last = bounds in
-        let sums = days ~measure:(Yuka.State.get measure) ~first ~last (Yuka.State.get for_time) in
-        let marks = ticks ~count:4 (Array.fold_left max 0 sums) in
-        let highest = List.fold_left max 1 marks in
-        let y amount = time_bottom - scale ~highest ~length:(time_bottom - time_top) amount in
-        let points = Array.to_list (Array.mapi (fun index amount -> (day_x bounds (first + index), y amount)) sums) in
-        let line = String.concat " " (List.mapi (fun index (x, y) -> (if index = 0 then "M" else "L") ^ px x ^ " " ^ px y) points) in
-        let step = max 1 ((time_right - time_left) / max 1 (last - first)) in
-        {
-          line;
-          area = line ^ " L" ^ px time_right ^ " " ^ px time_bottom ^ " L" ^ px time_left ^ " " ^ px time_bottom ^ " Z";
-          time_ticks = Array.of_list (List.map (fun value -> { tick_value = value; tick_offset = y value }) marks);
-          columns =
-            Array.mapi
-              (fun index amount ->
-                { column_day = first + index; column_x = day_x bounds (first + index) - (step / 2); column_amount = amount; column_width = step })
-              sums;
-        })
+    Yuka.State.memo ~equal:( = ) (fun () -> timeline_of ~measure:(Yuka.State.get measure) (Yuka.State.get bounds) (Yuka.State.get for_time))
   in
-  let day_ticks =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let bounds = Yuka.State.get bounds in
-        let first, last = bounds in
-        let step = max 1 (((last - first) / 4) + 1) in
-        Array.of_list
-          (List.filter_map
-             (fun index -> let day = first + (index * step) in if day <= last then Some (day, day_x bounds day) else None)
-             (List.init 5 Fun.id)))
-  in
-  let scatter =
-    Yuka.State.memo (fun () ->
-        let first, last = Yuka.State.get bounds in
-        let span = max 1 (last - first) in
-        Array.of_list
-          (List.map
-             (fun (item : item) ->
-               {
-                 point_key = item.key;
-                 cx = time_left + ((((item.day - first) * 100) + item.offset) * (time_right - time_left) / ((span + 1) * 100));
-                 cy = 170 - (item.cycle * 150 / 30);
-                 point_tone = status_tone item.status;
-               })
-             (Yuka.State.get selected)))
-  in
+  let day_ticks = Yuka.State.memo ~equal:( = ) (fun () -> day_ticks_of (Yuka.State.get bounds)) in
+  let scatter = Yuka.State.memo (fun () -> scatter_points (Yuka.State.get bounds) (Yuka.State.get selected)) in
   let toggle_status status _ = change (fun () -> Yuka.State.update statuses_on (toggle status)) in
   let toggle_priority priority _ = change (fun () -> Yuka.State.update priorities_on (toggle priority)) in
   let toggle_label label _ = change (fun () -> Yuka.State.update labels_on (toggle label)) in
@@ -359,6 +367,16 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
         Yuka.State.set assignees_on [];
         Yuka.State.set range None)
   in
+  let started = ref false in
+  Yuka.Effect.before (fun () ->
+      ignore
+        ( Yuka.State.get shown_multiplier,
+          Yuka.State.get shown_statuses,
+          Yuka.State.get shown_priorities,
+          Yuka.State.get shown_labels,
+          Yuka.State.get shown_assignees,
+          Yuka.State.get shown_range );
+      if !started then mark () else started := true);
   Yuka.Effect.after (fun () ->
       ignore
         ( Yuka.State.get status_chart,

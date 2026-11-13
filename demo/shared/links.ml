@@ -11,8 +11,15 @@ let my_issues ?q ?label workspace =
 let insights workspace =
   if default workspace then Routes.insights () else Routes.workspace_insights ~workspace ()
 
+let report workspace =
+  if default workspace then Routes.report () else Routes.workspace_report ~workspace ()
+
+let canvas workspace =
+  if default workspace then Routes.canvas () else Routes.workspace_canvas ~workspace ()
+
 let create workspace =
   if default workspace then Routes.create () else Routes.workspace_create ~workspace ()
 
-let issue workspace ~id =
-  if default workspace then Routes.issue ~id () else Routes.workspace_issue ~workspace ~id ()
+let issue ?comments ?fragment workspace ~id =
+  if default workspace then Routes.issue ~id ?comments ?fragment ()
+  else Routes.workspace_issue ~workspace ~id ?comments ?fragment ()

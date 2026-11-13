@@ -1,0 +1,16 @@
+.gap { padding: 10px 0; border-top: 1px solid var(--border); background: var(--bg-sidebar); }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.band::before, .band::after { content: ""; flex: 1 1 16px; border-top: 1px dashed var(--border-strong); }
+.summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; font-size: 13px; }
+.count { color: var(--muted); }
+.action {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 10px; cursor: pointer; white-space: nowrap;
+}
+.action:hover { border-color: var(--border-hover); background: var(--bg-hover); }
+.action[aria-disabled="true"] { cursor: progress; opacity: 0.6; }
+.failure { order: 1; flex-basis: 100%; margin: 0; font-size: 13px; text-align: center; }
+@media (max-width: 480px) {
+  .band::before, .band::after { display: none; }
+  .summary { flex: 1; }
+}

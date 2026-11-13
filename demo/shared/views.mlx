@@ -108,7 +108,7 @@ end
 
 module Shell = struct
   let make ~workspace ~sidebar ~children () : _ Yuka.element =
-    let links = [ (Links.issues workspace, "Issues"); (Links.my_issues workspace, "My issues"); (Links.insights workspace, "Insights") ] in
+    let links = [ (Links.issues workspace, "Issues"); (Links.my_issues workspace, "My issues"); (Links.insights workspace, "Insights"); (Links.report workspace, "Report"); (Links.canvas workspace, "Canvas") ] in
     <div class_="app">
       <Header workspace />
       <div class_="app-body">
@@ -139,13 +139,12 @@ module Property = struct
 end
 
 module Issue_page = struct
-  let make ~issue ~description ~code_style ~comments ~props () : _ Yuka.element =
+  let make ~issue ~description ~comments ~props () : _ Yuka.element =
     <div class_="issue-page">
       <header class_="page-header">
         <a href=(Links.issues issue.Issue.workspace) class_="crumb">"Issues"</a>
         <span class_="muted">"/"</span>
         <span>(Yuka.text issue.id)</span>
-        code_style
       </header>
       <div class_="issue-layout">
         <article class_="issue-main">

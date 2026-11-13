@@ -139,6 +139,25 @@ let module_state_cases =
     test_case "a write after the first render raises" `Quick write;
     test_case "a State made in a component" `Quick local ]
 
+let deferred_cases =
+  let open Alcotest in
+  let follows () =
+    let source = Yuka.State.make 1 in
+    let d = Yuka.State.deferred source in
+    check int "the value of the source" 1 (Yuka.State.get d);
+    Yuka.State.set source 2;
+    check int "the new value at once" 2 (Yuka.State.get d)
+  in
+  let server () =
+    check string "the html of the source" "<b>3</b>"
+      (Server.to_string (fun () ->
+           let source = Yuka.State.make 3 in
+           let d = Yuka.State.deferred source in
+           Yuka.element "b" [] [ Yuka.int (Yuka.State.get d) ]))
+  in
+  [ test_case "follows the source at once" `Quick follows;
+    test_case "a server render prints the value of the source" `Quick server ]
+
 let page_cases =
   let open Alcotest in
   let page () =
@@ -1760,6 +1779,7 @@ let () =
           Cases.all );
       ("server", page_cases);
       ("module-level State", module_state_cases);
+      ("deferred", deferred_cases);
       ("actions", action_cases);
       ("streaming", stream_cases);
       ("page extras", page_extra_cases);

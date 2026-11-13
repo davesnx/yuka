@@ -1,5 +1,18 @@
-let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Comment.t list) () =
-  let comments = Yuka.State.make comments in
+module Css = [%yuka.css "comments.css"]
+
+type load = More | All
+type row = Shown of Comment.t | Gap
+
+let page_size = 50
+let more_button = "load-more-comments"
+let dom_id (comment : Comment.t) = "comment-" ^ comment.id
+
+let plural count = Int.to_string count ^ if count = 1 then " hidden comment" else " hidden comments"
+
+let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(thread : Comment.thread) ~(whole_thread : string) () =
+  let first = Yuka.State.make thread.first in
+  let hidden = Yuka.State.make thread.hidden in
+  let last = Yuka.State.make thread.last in
   let draft = Yuka.State.make "" in
   let error : string option Yuka.State.t = Yuka.State.make None in
   let pending = Yuka.State.make 0 in
@@ -12,13 +25,13 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Comment
           Yuka.State.set pending count;
           Yuka.State.set error None;
           Yuka.State.set draft "";
-          Yuka.State.set comments (Yuka.State.peek comments @ [ tmp ]));
+          Yuka.State.set last (Yuka.State.peek last @ [ tmp ]));
       let swap with_ =
-        Yuka.State.set comments
+        Yuka.State.set last
           (List.filter_map
              (fun (comment : Comment.t) ->
                if comment.id <> tmp.id then Some comment else with_)
-             (Yuka.State.peek comments))
+             (Yuka.State.peek last))
       in
       let failed message =
         Yuka.batch (fun () ->
@@ -30,13 +43,13 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Comment
         (Yuka.Action.call Comment.add { Comment.issue_id; body })
         (function
           | Ok (Ok saved) ->
-              Yuka.State.set comments
-                (List.map (fun (existing : Comment.t) -> if existing.id = tmp.id then saved else existing) (Yuka.State.peek comments))
+              Yuka.State.set last
+                (List.map (fun (existing : Comment.t) -> if existing.id = tmp.id then saved else existing) (Yuka.State.peek last))
           | Ok (Error status) -> failed (Yuka.Status.error_to_string status)
           | Error message -> failed message))
   in
   let comment (entry : Comment.t) : Yuka.client Yuka.element =
-    <li class_="comment">
+    <li class_="comment" id=(dom_id entry) tabindex=(-1)>
       <Views.Avatar user=(Some entry.author) />
       <div class_="comment-body">
         <div class_="comment-meta">
@@ -47,9 +60,85 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Comment
       </div>
     </li>
   in
+  let started = Yuka.State.make false in
+  let loading : load option Yuka.State.t = Yuka.State.make None in
+  let load_error : (string * load) option Yuka.State.t = Yuka.State.make None in
+  let failing = Yuka.State.memo (fun () -> Option.is_some (Yuka.State.get load_error)) in
+  Yuka.Effect.after (fun () -> Yuka.State.set started true);
+  let load kind =
+    if Option.is_none (Yuka.State.peek loading) then (
+      let offset = List.length (Yuka.State.peek first) in
+      let limit = match kind with More -> min page_size (Yuka.State.peek hidden) | All -> Yuka.State.peek hidden in
+      Yuka.State.set loading (Some kind);
+      let failed message =
+        Yuka.batch (fun () ->
+            Yuka.State.set loading None;
+            Yuka.State.set load_error (Some (message, kind)))
+      in
+      Yuka.Async.on_result
+        (Yuka.Action.call Comment.range { Comment.issue = issue_id; offset; limit })
+        (function
+          | Ok (Ok loaded) ->
+              let left = if List.length loaded < limit then 0 else Yuka.State.peek hidden - limit in
+              let shown (comment : Comment.t) =
+                List.exists (fun (existing : Comment.t) -> existing.id = comment.id) (Yuka.State.peek first @ Yuka.State.peek last)
+              in
+              let loaded = List.filter (fun comment -> not (shown comment)) loaded in
+              Yuka.batch (fun () ->
+                  Yuka.State.set loading None;
+                  Yuka.State.set load_error None;
+                  Yuka.State.set first (Yuka.State.peek first @ loaded);
+                  Yuka.State.set hidden left);
+              (match loaded with
+               | comment :: _ when left = 0 -> Yuka.Browser.focus (dom_id comment)
+               | _ -> Yuka.Browser.focus more_button)
+          | Ok (Error status) -> failed (Yuka.Status.error_to_string status)
+          | Error message -> failed message))
+  in
+  let gap () : Yuka.client Yuka.element =
+    <li class_=Css.gap>
+      <div class_=Css.band role=`region aria_label="Hidden comments">
+        <div class_=Css.summary>
+          <span class_=Css.count aria_live=`polite>(Yuka.text (plural (Yuka.State.get hidden)))</span>
+          (if Yuka.State.get started then
+             <button id=more_button class_=Css.action type_=`button aria_disabled=(Yuka.State.get loading = Some More)
+               on_click=(fun _ -> load More)>
+               (Yuka.text
+                  (if Yuka.State.get loading = Some More then "Loading..."
+                   else "Load " ^ Int.to_string (min page_size (Yuka.State.get hidden)) ^ " more"))
+             </button>
+           else Yuka.empty)
+          <a class_=Css.action href=whole_thread aria_disabled=(Yuka.State.get loading = Some All)
+            on_click=(fun event ->
+              if not (Yuka.Event.meta_key event || Yuka.Event.ctrl_key event || Yuka.Event.shift_key event) then (
+                Yuka.Event.prevent_default event;
+                load All))>
+            (Yuka.text (if Yuka.State.get loading = Some All then "Loading..." else "Load all"))
+          </a>
+        </div>
+        (if Yuka.State.get failing then
+           <p class_=("error " ^ Css.failure) role=`alert>
+             (Yuka.text
+                (match Yuka.State.get load_error with
+                 | Some (message, _) -> "Could not load comments: " ^ message ^ " "
+                 | None -> ""))
+             <button class_=Css.action type_=`button
+               on_click=(fun _ -> Option.iter (fun (_, kind) -> load kind) (Yuka.State.peek load_error))>"Retry"</button>
+           </p>
+         else Yuka.empty)
+      </div>
+    </li>
+  in
+  let rows () =
+    let shown comments = List.map (fun comment -> Shown comment) comments in
+    Array.of_list
+      (shown (Yuka.State.get first) @ (if Yuka.State.get hidden > 0 then [ Gap ] else []) @ shown (Yuka.State.get last))
+  in
+  let same_row before after = match (before, after) with Shown before, Shown after -> before == after | Gap, Gap -> true | _ -> false in
+  let key = function Shown (comment : Comment.t) -> comment.id | Gap -> "gap" in
   <div class_="activity">
     <ul class_="comments">
-      (Yuka.each ~key:(fun (comment : Comment.t) -> comment.id) (fun () -> Array.of_list (Yuka.State.get comments)) comment)
+      (Yuka.each ~equal:same_row ~key rows (function Shown entry -> comment entry | Gap -> gap ()))
     </ul>
     <div class_="comment-box">
       <textarea class_="comment-input" placeholder="Leave a comment" rows=3

@@ -46,6 +46,8 @@ val meta_key : event -> bool
 val ctrl_key : event -> bool
 val shift_key : event -> bool
 val alt_key : event -> bool
+val client_x : event -> float
+val client_y : event -> float
 val prevent_default : event -> unit
 val stop_propagation : event -> unit
 val set_flag : event -> string -> bool -> unit

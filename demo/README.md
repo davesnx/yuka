@@ -36,14 +36,23 @@ repository on GitHub and to `@davesnx` on X.
 
 ## Themes and the progress bar
 
-The Theme button in the header picks one of four themes: dark, light,
-gray and pale. The choice is kept in `localStorage` (`yuka-demo-theme`).
-Without a choice, the theme follows `prefers-color-scheme` (light or
-dark). A small script in the head of each page, before the stylesheet,
-sets `data-theme` on `<html>`, so the first paint has the right theme, also
-on the prerendered `/about`. A cookie read on the server cannot do this for
-a prerendered page, and Yuka has no attribute for `<html>`. Each theme is a
-set of CSS variables in `static/style.css`.
+The Theme button in the header opens one menu with two groups. Theme picks
+one of four themes: dark, light, gray and pale. Code picks the colours of
+highlighted code: Auto, or one of six styles (Dark+, One Dark, Nord, Tokyo
+Night, Gruvbox, Light+). Auto, the default, uses the style that goes with
+the theme (dark: Dark+, light: Light+, gray: One Dark, pale: Light+) on the
+background and text colour of the theme; a CSS rule for each theme does
+this, with no script. Another style keeps its own background for every
+theme until Auto is chosen again.
+
+The choices are kept in `localStorage` (`yuka-demo-theme` and
+`yuka-demo-code-theme`; Auto removes the second key). Without a choice, the
+theme follows `prefers-color-scheme` (light or dark). A small script in the
+head of each page, before the stylesheet, sets `data-theme` and
+`data-code-theme` on `<html>`, so the first paint has the right colours,
+also on the prerendered `/about`. A cookie read on the server cannot do this
+for a prerendered page, and Yuka has no attribute for `<html>`. Each theme
+is a set of CSS variables in `static/style.css`.
 
 During a client navigation that takes more than 120 ms, a thin bar at the
 top of the window grows; it fills and fades out when the new page is shown.
@@ -60,12 +69,10 @@ and relative URLs. Code in OCaml, JavaScript, TypeScript, shell, JSON and
 CSS is highlighted; another language is plain text. A new comment shows its
 text at once and its rendered form when the server answers.
 
-The code style select on the issue page sets `data-code-theme` on `<html>`
-and keeps the choice in `localStorage`; each code token carries the colours
-of every style, so a change needs no request. A script in the document head
-sets the attribute before the page paints. The demo needs the opam packages
-`cmarkit`, `ochre` and `tm-grammars` (`make install` installs them) and the
-oniguruma library (`conf-oniguruma`).
+Each code token carries the colours of every code style, so a change of
+theme or code style (in the Theme menu) needs no request. The demo needs
+the opam packages `cmarkit`, `ochre` and `tm-grammars` (`make install`
+installs them) and the oniguruma library (`conf-oniguruma`).
 
 ## URLs
 
@@ -76,6 +83,8 @@ oniguruma library (`conf-oniguruma`).
   list page reads `q` and `label`, and the server renders the filtered
   list. Typing in the filter or a click on a label changes the URL with
   `Yuka.Browser.replace_url`, so a reload, back and a shared link keep it.
+  The label row shows the labels that fit on one line, chosen labels
+  first; the dots button opens a popover menu with all labels.
 - `http://localhost:8080/new`: the new issue form of `yuka`.
 - `http://localhost:8080/insights`: charts of the issues of `yuka`, drawn
   in SVG by one island (`shared/insights.mlx`). The server prints them, and
@@ -85,9 +94,29 @@ oniguruma library (`conf-oniguruma`).
   `stress`; Animate moves the date range on each frame. The readout shows
   frames per second, the time of the last update (from the change to the
   updated DOM), the SVG nodes and the points.
+- `http://localhost:8080/report`: the same seven charts at 1x, drawn in SVG
+  by the server only (`server/report.mlx`, with the geometry of
+  `shared/insights.mlx`). The page has no island of its own and sends no
+  data for the charts, so you can compare its HTML with `/insights`.
+- `http://localhost:8080/canvas`: a whiteboard with a card for each issue
+  and notes (`shared/canvas.mlx`). The board is in the server store, one
+  per workspace, and each open page gets its changes over `Yuka.Live`. Drag
+  a card to move it: the move is sent on release, and a move from another
+  page glides into place. Drag the background to pan; the buttons zoom,
+  shuffle the board and add a note (at most 140 characters, 100 notes per
+  board). The first positions come from the issue numbers; Shuffle and
+  new notes use random positions.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
-  issues stream in after a delay.
-- `http://localhost:8080/w/stress`, `/w/stress/my`, `/w/stress/insights`, `/w/stress/new` and
+  issues stream in after a delay. An issue with more than 12 comments
+  shows the first 3 and the last 5; a band between them gives the number
+  of hidden comments, "Load 50 more" (the next ones after the first group)
+  and "Load all". The page does not send the hidden comments: the island
+  gets them with the `comment_range` query (`shared/comment.ml`).
+  "Load all" is a link to `?comments=all`, which the server renders with
+  the whole thread, so the link also works before the island starts, and
+  can be shared.
+- `http://localhost:8080/w/stress`, `/w/stress/my`, `/w/stress/insights`,
+  `/w/stress/report`, `/w/stress/canvas`, `/w/stress/new` and
   `/w/stress/issue/STR-1`: the same pages for `stress`. An unknown
   workspace, or an issue of another workspace, is a not-found page.
 - `http://localhost:8080/about`: a page with no island, outside the shell

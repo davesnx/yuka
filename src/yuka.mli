@@ -48,6 +48,19 @@ module State : sig
       recompute is a change only if [equal] says the new value differs.
       Default: the same equality as {!make}. *)
 
+  val deferred : ?equal:('a -> 'a -> bool) -> ('a, _) signal -> 'a read
+  (** A copy of a State that changes after the next paint. It starts with the
+      value of the source. In the browser, after a change of the source, it
+      takes the latest value of the source after the browser paints the next
+      frame; values in between are skipped. A change made in a
+      {!Browser.on_frame} handler waits for the paint of that frame. All
+      deferred States that wait change in one {!batch}. Read it for a slow
+      part of the page, and read the source for a fast part: the fast part
+      paints first. The slow update is not shorter and not interruptible; it
+      only comes later. When its owner is disposed, a waiting change is
+      dropped. On the server and on native it always has the value of the
+      source. [equal] is as in {!make}. *)
+
   external read_only : 'a t -> 'a read = "%identity"
   (** The same State, typed so that {!set} and {!update} on it do not
       compile. *)
@@ -241,6 +254,14 @@ module Event : sig
 
   val alt_key : t -> bool
   (** Whether the Alt key was down. *)
+
+  val client_x : t -> float
+  (** The horizontal position of the pointer, in CSS pixels from the left
+      edge of the viewport ([clientX]). For a mouse or pointer event only. *)
+
+  val client_y : t -> float
+  (** The vertical position of the pointer, in CSS pixels from the top edge
+      of the viewport ([clientY]). For a mouse or pointer event only. *)
 end
 
 val text : string -> 'kind element
@@ -911,6 +932,8 @@ module Private : sig
     target_tag : Event.t -> string;
     shift_key : Event.t -> bool;
     alt_key : Event.t -> bool;
+    client_x : Event.t -> float;
+    client_y : Event.t -> float;
     navigate : string -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;

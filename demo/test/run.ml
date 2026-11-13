@@ -62,6 +62,8 @@ let issue_page () =
   has html "Urgent";
   has html "<yuka-island data-name=\"Demo_shared.Comments\"";
   has html "Please add a test with an empty filter result.";
+  has html {|"hidden":0|};
+  lacks html {|aria-label="Hidden comments"|};
   has html "\"issue_id\":\"YUK-1\"";
   has html "<yuka-island data-name=\"Demo_shared.Related\"";
   has html "<yuka-island data-name=\"Demo_shared.Issue_props\"";
@@ -147,7 +149,17 @@ let stress_issue () =
   let html = get "/w/stress/issue/STR-200" in
   has html "<title>STR-200</title>";
   has html {|<a href="/w/stress" class="crumb">Issues</a>|};
-  Alcotest.(check int) "200 comments" 200 (count html {|{"id":"STR-200-c|});
+  Alcotest.(check int) "the first 3 and the last 5 comments" 8 (count html {|{"id":"STR-200-c|});
+  has html {|{"id":"STR-200-c3"|};
+  has html {|{"id":"STR-200-c196"|};
+  lacks html {|"STR-200-c4"|};
+  has html {|"hidden":192|};
+  has html {|aria-label="Hidden comments"|};
+  has html {|href="/w/stress/issue/STR-200?comments=all#comment-STR-200-c3"|};
+  let whole = get "/w/stress/issue/STR-200?comments=all" in
+  Alcotest.(check int) "the whole thread" 200 (count whole {|{"id":"STR-200-c|});
+  has whole {|"hidden":0|};
+  lacks whole {|aria-label="Hidden comments"|};
   Alcotest.(check bool) "comments are the same each time" true (Store.comments_of "STR-7" = Store.comments_of "STR-7");
   let status, _, html = call "/w/stress/issue/YUK-1" in
   Alcotest.(check int) "an issue of another workspace" 404 status;
@@ -180,6 +192,33 @@ let insights () =
   Alcotest.(check (list int)) "ticks" [ 0; 20; 40; 60 ] (Insights_data.ticks ~count:4 59);
   Alcotest.(check int) "100 times the issues" 20000
     (List.length (Insights_data.expand ~multiplier:100 (Store.issues Model.Workspace.Stress)))
+
+let report () =
+  let html = get "/report" in
+  has html "<title>Report</title>";
+  has html {|<a class="nav-link" href="/report" aria-current="page">Report</a>|};
+  Alcotest.(check int) "seven charts" 7 (count html "data-chart=");
+  Alcotest.(check int) "a point per issue" 25 (count html {| r="2"|});
+  lacks html "Demo_shared.Insights";
+  lacks html "data-yuka-answer";
+  let html = get "/w/stress/report" in
+  has html {|<a class="nav-link" href="/w/stress/report" aria-current="page">Report</a>|};
+  Alcotest.(check int) "a point per stress issue" 200 (count html {| r="2"|})
+
+let canvas () =
+  let html = get "/canvas" in
+  has html "<title>Canvas</title>";
+  has html {|<a class="nav-link" href="/canvas" aria-current="page">Canvas</a>|};
+  has html {|data-name="Demo_shared.Canvas"|};
+  has html {|data-yuka-answer="l:board &quot;Yuka&quot;"|};
+  Alcotest.(check int) "a card per issue" 25 (count html {|<div data-id="YUK-|});
+  has html {|href="/issue/YUK-1">Hydration mismatch on nested holes</a>|};
+  let html = get "/w/stress/canvas" in
+  has html {|<a class="nav-link" href="/w/stress/canvas" aria-current="page">Canvas</a>|};
+  Alcotest.(check int) "a card per stress issue" 200 (count html {|<div data-id="STR-|});
+  List.iter
+    (fun (item : Board.item) -> if not (Board.inside ~x:item.x ~y:item.y) then Alcotest.failf "%s is outside the board" item.id)
+    (Store.board Model.Workspace.Stress)
 
 let about () =
   let html = get "/about" in
@@ -341,6 +380,29 @@ let actions () =
       Alcotest.(check int) "stored" 2 (List.length (Store.comments_of "YUK-3"))
   | Error message -> Alcotest.failf "comment failed: %s" message
 
+let comment_range () =
+  let range offset limit =
+    match settle (Yuka.Action.call Comment.range { Comment.issue = "STR-9"; offset; limit }) with
+    | Ok comments -> comments
+    | Error message -> Alcotest.failf "comment_range failed: %s" message
+  in
+  let ids comments = List.map (fun (comment : Comment.t) -> comment.id) comments in
+  Alcotest.(check (list string)) "the 50 after the first 3"
+    (List.init 50 (fun index -> Printf.sprintf "STR-9-c%d" (index + 4)))
+    (ids (range 3 50));
+  let thread = Store.thread ~all:false "STR-9" in
+  Alcotest.(check int) "hidden" 192 thread.hidden;
+  Alcotest.(check bool) "the first response has the same comments as the query" true
+    (range 0 3 = thread.first && range 195 5 = thread.last);
+  Alcotest.(check (list string)) "the rest of the hidden range ends before the last 5"
+    (List.init 142 (fun index -> Printf.sprintf "STR-9-c%d" (index + 54)))
+    (ids (range 53 142));
+  let headers = [ ("Content-Type", "application/json"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
+  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"STR-9","offset":-1,"limit":5}|} "/_yuka/action/comment_range" in
+  Alcotest.(check int) "a negative offset is refused" 400 status;
+  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"NOPE-1","offset":0,"limit":5}|} "/_yuka/action/comment_range" in
+  Alcotest.(check int) "an unknown issue is refused" 400 status
+
 let stress_actions () =
   let created =
     match
@@ -372,6 +434,64 @@ let stress_actions () =
   in
   Alcotest.(check int) "303" 303 status;
   Alcotest.(check (option string)) "to the new stress issue" (Some "/w/stress/issue/STR-202") (header response "location")
+
+let rejected name async =
+  match settle async with Ok _ -> Alcotest.failf "%s: expected a rejection" name | Error _ -> ()
+
+let spot workspace id =
+  match List.find_opt (fun (item : Board.item) -> item.id = id) (Store.board workspace) with
+  | Some item -> Some (item.x, item.y)
+  | None -> None
+
+let board_actions () =
+  let yuka = Model.Workspace.Yuka in
+  (match settle (Yuka.Action.call Board.move { Board.workspace = yuka; id = "YUK-1"; x = 10; y = 20 }) with
+  | Ok _ -> Alcotest.(check (option (pair int int))) "moved" (Some (10, 20)) (spot yuka "YUK-1")
+  | Error message -> Alcotest.failf "move failed: %s" message);
+  rejected "an issue of another workspace" (Yuka.Action.call Board.move { Board.workspace = yuka; id = "STR-1"; x = 0; y = 0 });
+  rejected "an unknown item" (Yuka.Action.call Board.move { Board.workspace = yuka; id = "NOPE"; x = 0; y = 0 });
+  rejected "left of the board" (Yuka.Action.call Board.move { Board.workspace = yuka; id = "YUK-1"; x = -1; y = 0 });
+  rejected "right of the board"
+    (Yuka.Action.call Board.move { Board.workspace = yuka; id = "YUK-1"; x = Board.width - Board.item_width + 1; y = 0 });
+  rejected "below the board"
+    (Yuka.Action.call Board.move { Board.workspace = yuka; id = "YUK-1"; x = 0; y = Board.height - Board.item_height + 1 });
+  Alcotest.(check (option (pair int int))) "a refused move changes nothing" (Some (10, 20)) (spot yuka "YUK-1");
+  rejected "an empty note" (Yuka.Action.call Board.add_note { Board.workspace = yuka; text = "  " });
+  rejected "a long note" (Yuka.Action.call Board.add_note { Board.workspace = yuka; text = String.make (Board.note_length + 1) 'x' });
+  rejected "a note that is not UTF-8" (Yuka.Action.call Board.add_note { Board.workspace = yuka; text = "a" ^ String.make 1000 '\x80' });
+  let note =
+    match settle (Yuka.Action.call Board.add_note { Board.workspace = yuka; text = "<b onclick=alert(1)>hi</b>" }) with
+    | Ok board -> (
+        match List.find_opt (fun (item : Board.item) -> item.content = Note "<b onclick=alert(1)>hi</b>") board with
+        | Some item -> item
+        | None -> Alcotest.fail "the note is not on the board")
+    | Error message -> Alcotest.failf "add_note failed: %s" message
+  in
+  Alcotest.(check bool) "the note is inside the board" true (Board.inside ~x:note.x ~y:note.y);
+  let html = get "/canvas" in
+  has html "&lt;b onclick=alert(1)&gt;hi&lt;/b&gt;";
+  lacks html "<b onclick";
+  rejected "a note of another workspace"
+    (Yuka.Action.call Board.remove_note { Board.workspace = Model.Workspace.Stress; note_id = note.id });
+  rejected "a card is not a note" (Yuka.Action.call Board.remove_note { Board.workspace = yuka; note_id = "YUK-1" });
+  (match settle (Yuka.Action.call Board.remove_note { Board.workspace = yuka; note_id = note.id }) with
+  | Ok board -> Alcotest.(check bool) "removed" false (List.exists (fun (item : Board.item) -> item.id = note.id) board)
+  | Error message -> Alcotest.failf "remove_note failed: %s" message);
+  for index = 1 to Board.note_limit do
+    match settle (Yuka.Action.call Board.add_note { Board.workspace = yuka; text = "Note " ^ Int.to_string index }) with
+    | Ok _ -> ()
+    | Error message -> Alcotest.failf "note %d: %s" index message
+  done;
+  rejected "one note over the limit" (Yuka.Action.call Board.add_note { Board.workspace = yuka; text = "One more" });
+  let before = Store.board yuka in
+  match settle (Yuka.Action.call Board.shuffle yuka) with
+  | Ok board ->
+      Alcotest.(check int) "the same items" (List.length before) (List.length board);
+      Alcotest.(check bool) "new positions" true (board <> before);
+      List.iter
+        (fun (item : Board.item) -> if not (Board.inside ~x:item.x ~y:item.y) then Alcotest.failf "%s is outside the board" item.id)
+        board
+  | Error message -> Alcotest.failf "shuffle failed: %s" message
 
 let live_answers () =
   let html = get "/" in
@@ -440,7 +560,7 @@ let markdown_page () =
   has html "<blockquote><p>The client looks";
   has html {|<a href="https://github.com/davesnx/yuka/blob/main/docs/islands.md" rel="nofollow noopener">hydration notes</a>|};
   has html {|<pre class="code-block" tabindex="0" data-language="ocaml"><code><span style="--c0:|};
-  has html {|<select class="code-style-select" aria-label="Code style"|};
+  lacks html "code-style";
   has html {|<code>print_hole</code> skips the closing marker when the item is <strong>empty</strong>|};
   has html {|["code",{},"print_hole"]|};
   let html = get "/issue/YUK-19" in
@@ -544,6 +664,8 @@ let () =
           Alcotest.test_case "stress workspace list" `Quick stress_list;
           Alcotest.test_case "stress issue page" `Quick stress_issue;
           Alcotest.test_case "insights" `Quick insights;
+          Alcotest.test_case "report" `Quick report;
+          Alcotest.test_case "canvas" `Quick canvas;
           Alcotest.test_case "about has no JavaScript" `Quick about;
           Alcotest.test_case "redirect, 405, HEAD, endpoint, assets" `Quick rules;
           Alcotest.test_case "prerendered /about, GET and HEAD" `Quick prerendered;
@@ -556,7 +678,9 @@ let () =
       ( "actions",
         [
           Alcotest.test_case "store through actions" `Quick actions;
+          Alcotest.test_case "hidden comments through the range query" `Quick comment_range;
           Alcotest.test_case "workspaces are kept apart" `Quick stress_actions;
+          Alcotest.test_case "board moves, notes and shuffle" `Quick board_actions;
         ] );
       ( "live",
         [

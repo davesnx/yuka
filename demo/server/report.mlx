@@ -1,0 +1,153 @@
+open Demo_shared
+open Model
+open Insights_data
+module Css = Insights.Css
+
+let px = Int.to_string
+
+let card ~title ~note ~children : Yuka.server Yuka.element =
+  <section class_=Css.card>
+    <header class_=Css.card_header>
+      <h2 class_=Css.card_title>(Yuka.text title)</h2>
+      <span class_=Css.note>(Yuka.text note)</span>
+    </header>
+    children
+  </section>
+
+let chart ~name ~height children : Yuka.server Yuka.element =
+  <svg class_=Css.chart view_box=("0 0 400 " ^ px height) data_chart=name>(Yuka.fragment children)</svg>
+
+let grid_line (tick : Insights.tick) : Yuka.server Yuka.element =
+  <g>
+    <line class_=Css.grid x1="40" x2="396" y1=(px tick.tick_offset) y2=(px tick.tick_offset) />
+    <text class_=Css.axis x="34" y=(px (tick.tick_offset + 4)) text_anchor="end">(Yuka.text (format_int tick.tick_value))</text>
+  </g>
+
+let day_label ~y ((day, x) : int * int) : Yuka.server Yuka.element =
+  <text class_=Css.axis x=(px x) y=(px y) text_anchor="middle">(Yuka.text (date_of_day day))</text>
+
+let status_bar (bar : Insights.bar) : Yuka.server Yuka.element =
+  let center = bar.position + (bar.thickness / 2) in
+  <g data_key=bar.key>
+    <rect class_=bar.tone x=(px bar.position) y=(px bar.start) width=(px bar.thickness) height=(px (max 1 bar.length)) rx="2" />
+    <text class_=Css.amount x=(px center) y=(px (bar.start - 4)) text_anchor="middle">(Yuka.text (format_int bar.amount))</text>
+    <text class_=Css.axis x=(px center) y="184" text_anchor="middle">(Yuka.text bar.label)</text>
+  </g>
+
+let row_label (bar : Insights.bar) : Yuka.server Yuka.element =
+  <text class_=Css.axis x=(px (Insights.bar_start - 6)) y=(px (bar.position + 10)) text_anchor="end">(Yuka.text bar.label)</text>
+
+let row_amount (bar : Insights.bar) : Yuka.server Yuka.element =
+  <text class_=Css.amount x=(px (bar.start + bar.length + 5)) y=(px (bar.position + 10))>(Yuka.text (format_int bar.amount))</text>
+
+let horizontal_bar (bar : Insights.bar) : Yuka.server Yuka.element =
+  <g data_key=bar.key>
+    (row_label bar)
+    <rect class_=bar.tone x=(px bar.start) y=(px bar.position) width=(px (max 1 bar.length)) height=(px bar.thickness) rx="2" />
+    (row_amount bar)
+  </g>
+
+let stacked_row (stack : Insights.stack) : Yuka.server Yuka.element =
+  let bar = stack.row in
+  <g data_key=bar.key>
+    (row_label bar)
+    (Yuka.fragment
+       (List.map
+          (fun (segment : Insights.segment) ->
+            <rect class_=segment.segment_tone x=(px segment.segment_start) y=(px bar.position)
+              width=(px (max 1 segment.segment_length)) height=(px bar.thickness) />)
+          stack.segments))
+    (row_amount bar)
+  </g>
+
+let heat_cell (cell : Insights.cell) : Yuka.server Yuka.element =
+  <g>
+    <rect class_=Css.heat x=(px cell.cell_x) y=(px cell.cell_y) width="58" height="24" rx="3" fill_opacity=(Insights.opacity_text cell.opacity) />
+    <text class_=Css.amount x=(px (cell.cell_x + 29)) y=(px (cell.cell_y + 16)) text_anchor="middle">(Yuka.text (format_int cell.cell_amount))</text>
+  </g>
+
+let view (issues : Issue.t list) : Yuka.server Yuka.element =
+  let items = expand ~multiplier:1 issues in
+  let bounds = Insights.bounds_of items in
+  let first, last = bounds in
+  let timeline = Insights.timeline_of ~measure:Count bounds items in
+  let day_ticks = Array.to_list (Insights.day_ticks_of bounds) in
+  let label_names = Insights.label_names_of issues in
+  let assignee_names = Insights.assignee_names_of issues in
+  let map f array = List.map f (Array.to_list array) in
+  Yuka.use_css Css.stylesheet
+    <div class_=Css.insights data_report="true">
+      <header class_="page-header">
+        <span>"Report"</span>
+        <span class_="group-count">(Yuka.text (format_int (List.length items)))</span>
+        <span class_=Css.note>"issues, drawn by the server"</span>
+      </header>
+      <div class_=Css.dashboard>
+        (card ~title:"Created over time" ~note:(date_of_day first ^ " to " ^ date_of_day last)
+           ~children:
+             (chart ~name:"time" ~height:172
+                (map grid_line timeline.time_ticks
+                @ [ <path class_=Css.area d=timeline.area />; <path class_=Css.line d=timeline.line /> ]
+                @ List.map (day_label ~y:166) day_ticks)))
+        (card ~title:"Issues by status" ~note:"Issues"
+           ~children:
+             (let chart_data = Insights.status_bars ~measure:Count ~chosen:[] items in
+              chart ~name:"status" ~height:192 (map grid_line chart_data.ticks @ map status_bar chart_data.bars)))
+        (card ~title:"Issues by priority" ~note:"Issues"
+           ~children:
+             (chart ~name:"priority" ~height:(Insights.label_rows (List.length priorities))
+                (map horizontal_bar (Insights.priority_bars ~measure:Count ~chosen:[] items))))
+        (card ~title:"Workload by assignee" ~note:"Stacked by status"
+           ~children:
+             (chart ~name:"workload" ~height:(Insights.label_rows (List.length assignee_names))
+                (map stacked_row (Insights.workload ~measure:Count ~chosen:[] ~names:assignee_names ~stack_by:By_status items))))
+        (card ~title:"Status by priority" ~note:"Issues"
+           ~children:
+             (chart ~name:"heatmap" ~height:154
+                (List.mapi
+                   (fun index priority ->
+                     <text class_=Css.axis x=(px (121 + (index * 60))) y="14" text_anchor="middle">(Yuka.text (Issue.priority_label priority))</text>)
+                   priorities
+                @ List.mapi
+                    (fun index status ->
+                      <text class_=Css.axis x="86" y=(px (38 + (index * 26))) text_anchor="end">(Yuka.text (Issue.status_label status))</text>)
+                    statuses
+                @ map heat_cell (Insights.heat_cells ~measure:Count items))))
+        (card ~title:"Cycle time by created date" ~note:(format_int (List.length items) ^ " points")
+           ~children:
+             <div>
+               (chart ~name:"scatter" ~height:190
+                  (List.map
+                     (fun days ->
+                       let y = 170 - (days * 150 / 30) in
+                       <g>
+                         <line class_=Css.grid x1="40" x2="396" y1=(px y) y2=(px y) />
+                         <text class_=Css.axis x="34" y=(px (y + 4)) text_anchor="end">(Yuka.text (px days ^ "d"))</text>
+                       </g>)
+                     [ 0; 10; 20; 30 ]
+                  @ List.map (day_label ~y:186) day_ticks
+                  @ [
+                      <g class_=Css.points>
+                        (Yuka.fragment
+                           (map
+                              (fun (point : Insights.point) -> <circle class_=point.point_tone cx=(px point.cx) cy=(px point.cy) r="2" />)
+                              (Insights.scatter_points bounds items)))
+                      </g>;
+                    ]))
+               <p class_=Css.legend>
+                 (Yuka.fragment
+                    (List.map
+                       (fun status ->
+                         <span class_=Css.key>
+                           <span class_=(Css.swatch ^ " " ^ Insights.status_tone status) />
+                           (Yuka.text (Issue.status_label status))
+                         </span>)
+                       statuses))
+               </p>
+             </div>)
+        (card ~title:"Issues by label" ~note:(px (List.length label_names) ^ " labels")
+           ~children:
+             (chart ~name:"label" ~height:(Insights.label_rows (List.length label_names))
+                (map horizontal_bar (Insights.label_bars ~measure:Count ~chosen:[] ~labels:label_names items))))
+      </div>
+    </div>

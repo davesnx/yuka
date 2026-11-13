@@ -1,11 +1,22 @@
 module Css = [%yuka.css "theme_menu.css"]
 
-let item_id theme = "theme-" ^ Theme.slug theme
-let index_of theme = Option.value (List.find_index (fun candidate -> candidate = theme) Theme.all) ~default:0
+type choice = Ui of Theme.t | Code of Theme.Code.t option
+
+let theme_choices = List.map (fun theme -> Ui theme) Theme.all
+let code_choices = Code None :: List.map (fun code -> Code (Some code)) Theme.Code.all
+let choices = theme_choices @ code_choices
+
+let item_id = function
+  | Ui theme -> "theme-" ^ Theme.slug theme
+  | Code None -> "code-auto"
+  | Code (Some code) -> "code-" ^ Theme.Code.slug code
+
+let index_of choice = Option.value (List.find_index (fun candidate -> candidate = choice) choices) ~default:0
 
 let[@client] make () =
   let opened = Yuka.State.make false in
   let current = Yuka.State.make Theme.Dark in
+  let code = Yuka.State.make None in
   let active = Yuka.State.make 0 in
   let close ~refocus =
     Yuka.State.set opened false;
@@ -14,19 +25,25 @@ let[@client] make () =
   let open_menu () =
     let theme = Theme.current () in
     Yuka.State.set current theme;
-    Yuka.State.set active (index_of theme);
+    Yuka.State.set code (Theme.current_code ());
+    Yuka.State.set active (index_of (Ui theme));
     Yuka.State.set opened true;
-    Yuka.Browser.focus (item_id theme)
+    Yuka.Browser.focus (item_id (Ui theme))
   in
   let move step =
-    let count = List.length Theme.all in
+    let count = List.length choices in
     let next = (Yuka.State.peek active + step + count) mod count in
     Yuka.State.set active next;
-    Yuka.Browser.focus (item_id (List.nth Theme.all next))
+    Yuka.Browser.focus (item_id (List.nth choices next))
   in
-  let choose theme =
-    Theme.apply theme;
-    Yuka.State.set current theme;
+  let choose choice =
+    (match choice with
+    | Ui theme ->
+        Theme.apply theme;
+        Yuka.State.set current theme
+    | Code choice ->
+        Theme.apply_code choice;
+        Yuka.State.set code choice);
     close ~refocus:true
   in
   Yuka.Effect.after (fun () ->
@@ -46,21 +63,37 @@ let[@client] make () =
                 move (- Yuka.State.peek active)
             | "End" ->
                 Yuka.Event.prevent_default event;
-                move (List.length Theme.all - 1 - Yuka.State.peek active)
+                move (List.length choices - 1 - Yuka.State.peek active)
             | _ -> ()));
-  let item theme =
-    <button id=(item_id theme) class_="menu-item" type_=`button role=`menuitemradio
-      tabindex=(if Yuka.State.get active = index_of theme then 0 else -1)
-      aria_checked=(if Yuka.State.get current = theme then `true_ else `false_)
-      on_click=(fun _ -> choose theme)>
-      <span class_=Css.swatch data_theme=(Theme.slug theme) />
-      (Yuka.text (Theme.label theme))
-      (if Yuka.State.get current = theme then
+  let item choice =
+    let checked =
+      match choice with Ui theme -> Yuka.State.get current = theme | Code choice -> Yuka.State.get code = choice
+    in
+    <button id=(item_id choice) class_="menu-item" type_=`button role=`menuitemradio
+      tabindex=(if Yuka.State.get active = index_of choice then 0 else -1)
+      aria_checked=(if checked then `true_ else `false_)
+      on_click=(fun _ -> choose choice)>
+      (match choice with
+      | Ui theme -> <span class_=Css.swatch data_theme=(Theme.slug theme) />
+      | Code None -> <span class_=Css.swatch data_theme=(Theme.slug (Yuka.State.get current)) />
+      | Code (Some code) -> <span class_=(Css.swatch ^ " " ^ Css.code_swatch) data_code=(Theme.Code.slug code) />)
+      (Yuka.text
+         (match choice with
+         | Ui theme -> Theme.label theme
+         | Code None -> "Auto"
+         | Code (Some code) -> Theme.Code.label code))
+      (if checked then
          <svg class_=Css.check view_box="0 0 14 14" width="14" height="14" aria_hidden=true>
            <path d="M3 7.5 L6 10.5 L11 4" fill="none" stroke="currentColor" stroke_width="1.75" />
          </svg>
        else Yuka.empty)
     </button>
+  in
+  let group ~id ~label items =
+    <div class_=Css.group role=`group aria_labelledby=id>
+      <div id class_=Css.heading role=`presentation>(Yuka.text label)</div>
+      (Yuka.fragment (List.map item items))
+    </div>
   in
   <div class_=Css.theme>
     <button id="theme-button" class_=("topbar-link " ^ Css.button) type_=`button aria_label="Theme" aria_haspopup=`menu
@@ -75,8 +108,9 @@ let[@client] make () =
     (if Yuka.State.get opened then
        <div>
          <div class_="backdrop" on_click=(fun _ -> close ~refocus:false) />
-         <div class_=("menu " ^ Css.menu) role=`menu aria_label="Theme">
-           (Yuka.fragment (List.map item Theme.all))
+         <div class_=("menu " ^ Css.menu) role=`menu aria_label="Theme and code style">
+           (group ~id:"theme-group" ~label:"Theme" theme_choices)
+           (group ~id:"code-group" ~label:"Code" code_choices)
          </div>
        </div>
      else Yuka.empty)

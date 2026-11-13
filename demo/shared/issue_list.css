@@ -1,0 +1,34 @@
+.bar { display: flex; gap: 6px; flex: 1 1 100%; min-width: 0; }
+.more {
+  position: relative; flex: none; display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--bg-hover); color: var(--text-soft); font: inherit; font-size: 13px; cursor: pointer;
+}
+.more:hover { background: var(--bg-selected); border-color: var(--border-hover); color: var(--text); }
+.more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.more:not([data-chosen="0"])::after {
+  content: ""; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--bg);
+}
+.total { color: var(--muted); font-variant-numeric: tabular-nums; }
+.menu {
+  inset: auto; margin: 6px 0; box-sizing: border-box; width: 240px; max-width: calc(100vw - 16px);
+  max-height: min(360px, 60vh); overflow-y: auto; padding: 5px;
+  background: var(--bg-menu); color: var(--text); border: 1px solid var(--border-strong); border-radius: 7px;
+  box-shadow: 0 10px 29px var(--shadow);
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+}
+.option { font-size: 14px; }
+.option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.box {
+  flex: none; width: 14px; height: 14px; box-sizing: border-box; display: grid; place-items: center;
+  border: 1px solid var(--border-hover); border-radius: 4px;
+}
+.option[aria-checked="true"] .box { background: var(--accent); border-color: var(--accent); }
+.option[aria-checked="true"] .box::after {
+  content: ""; width: 3px; height: 7px; margin-top: -2px;
+  border: solid var(--on-accent); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.count { color: var(--muted); font-variant-numeric: tabular-nums; }

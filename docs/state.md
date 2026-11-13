@@ -100,6 +100,39 @@ let visible =
 - A reader never sees a memo that is out of date. In the example at the
   top, no code can observe the new `count` together with the old `double`.
 
+## Deferred State
+
+`State.deferred source` is a read-only copy of `source` that changes after
+the next paint. Use it when a click must show at once, but part of the page
+is slow to update.
+
+```ocaml
+let filter = Yuka.State.make All in
+let shown = Yuka.State.deferred filter in
+```
+
+The filter chips read `filter` and the chart reads `shown`. A click writes
+`filter`. The chips update and the browser paints them. Then `shown` takes
+the new value and the chart updates.
+
+- It starts with the value of `source`.
+- After a change of `source`, it waits for the next frame, then the browser
+  paints, then it takes the latest value of `source`. Values in between are
+  skipped.
+- A change of `source` in a `Browser.on_frame` handler waits for the paint
+  of that frame.
+- All deferred States that wait change in one batch, so a reader of
+  several of them runs one time.
+- A change of `source` that comes after the frame and before the slow
+  update joins that update.
+- The slow update is not shorter, and Yuka cannot stop it. It only comes
+  after the paint of the fast one.
+- When its owner goes away, a waiting change is dropped.
+- A tab in the background gets no frame, so the change waits until the tab
+  shows again.
+- On the server it has the value of `source`, so the HTML is the same as
+  without it.
+
 ## Effects
 
 An effect connects a component to something outside Yuka: the DOM, a
@@ -178,6 +211,9 @@ Yuka.Effect.after (fun () ->
 ```
 
 `Yuka.Browser.now ()` gives the time on the same clock, in milliseconds.
+
+A `State.deferred` changes later than the rest: after the next paint, in
+its own batch. See [Deferred State](#deferred-state).
 
 ## Lifetime
 

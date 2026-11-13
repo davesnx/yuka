@@ -390,11 +390,22 @@ h1, h2, p { margin: 0; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 .chips {
-  display: flex; gap: 7px; flex: 1 1 100%; min-width: 0; overflow-x: auto; scrollbar-width: thin;
-  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; min-width: 0; height: 30px; overflow: hidden;
 }
-.chip { flex: none; white-space: nowrap; border: 1px solid var(--border); border-radius: 14px; background: none; color: var(--muted); font-size: 14px; padding: 2px 10px; cursor: pointer; }
-.chip.on { color: inherit; border-color: currentColor; }
+.chip {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; box-sizing: border-box;
+  white-space: nowrap; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-hover);
+  color: var(--text-soft); font: inherit; font-size: 13px; padding: 0 10px; cursor: pointer;
+}
+.chip:hover { background: var(--bg-selected); border-color: var(--border-hover); color: var(--text); }
+.chip:active { background: var(--border-strong); }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.chip-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip.on { background: var(--bg-selected); border-color: var(--accent); color: var(--text); }
+.chip.on::before {
+  content: ""; width: 3px; height: 7px; margin: -2px 1px 0 0;
+  border: solid var(--accent); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
 
 @media (max-width: 720px) {
   .app-body { flex-direction: column; }

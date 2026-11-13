@@ -1,4 +1,5 @@
 open Model
+module Css = [%yuka.css "issue_list.css"]
 
 type menu = Status of string | Priority of string
 
@@ -16,8 +17,18 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
     Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
   in
   let labels = Yuka.Remote.use Queries.labels (fun () -> workspace) in
+  let label_counts =
+    Yuka.State.memo ~equal:( = ) (fun () ->
+        match Yuka.Remote.status labels with
+        | Yuka.Status.Ready { data; _ } | Yuka.Status.Loading (Some data) -> data
+        | _ -> [])
+  in
+  let has_labels = Yuka.State.memo (fun () -> Yuka.State.get label_counts <> []) in
   let filter = Yuka.State.make query in
   let chosen_labels = Yuka.State.make chosen in
+  let pinned = Yuka.State.make chosen in
+  let menu_rendered = Yuka.State.make false in
+  let active_option = Yuka.State.make "" in
   let selected : string option Yuka.State.t = Yuka.State.make None in
   let menu : menu option Yuka.State.t = Yuka.State.make None in
   let toast : string option Yuka.State.t = Yuka.State.make None in
@@ -36,6 +47,69 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
         match view with Queries.All -> Links.issues ?q ~label workspace | Mine -> Links.my_issues ?q ~label workspace)
   in
   Yuka.Effect.on_change url (fun ~prev:_ ~next -> Yuka.Browser.replace_url next);
+  let arranged =
+    Yuka.State.memo ~equal:( = ) (fun () ->
+        let counts = Yuka.State.get label_counts and first = Yuka.State.get pinned in
+        List.filter_map
+          (fun label -> List.find_opt (fun (count : Queries.label_count) -> count.label = label) counts)
+          first
+        @ List.filter (fun (count : Queries.label_count) -> not (List.mem count.label first)) counts)
+  in
+  let toggle label =
+    Yuka.State.update chosen_labels (fun current ->
+        if List.mem label current then List.filter (fun other -> other <> label) current else current @ [ label ])
+  in
+  let toggle_from_menu label =
+    toggle label;
+    if List.mem label (Yuka.State.peek chosen_labels) then
+      Yuka.State.update pinned (fun current -> label :: List.filter (fun other -> other <> label) current)
+  in
+  let option_id label = "label-option-" ^ label in
+  let more_label ~total ~on =
+    "All labels, " ^ Int.to_string total ^ if on = 0 then "" else ", " ^ Int.to_string on ^ " chosen"
+  in
+  let chip (count : Queries.label_count) : Yuka.client Yuka.element =
+    <button
+      class_=(if List.mem count.label (Yuka.State.get chosen_labels) then "chip on" else "chip")
+      aria_pressed=(if List.mem count.label (Yuka.State.get chosen_labels) then `true_ else `false_)
+      data_label=count.label type_=`button
+      on_click=(fun _ -> toggle count.label)>
+      (Yuka.text count.label)
+      " "
+      <span class_="chip-count">(Yuka.int count.open_)</span>
+    </button>
+  in
+  let menu_item (count : Queries.label_count) : Yuka.client Yuka.element =
+    <button id=(option_id count.label) class_=("menu-item " ^ Css.option) type_=`button role=`menuitemcheckbox
+      data_label=count.label
+      autofocus=(match Yuka.State.get label_counts with first :: _ -> first.label = count.label | [] -> false)
+      aria_checked=(if List.mem count.label (Yuka.State.get chosen_labels) then `true_ else `false_)
+      on_focus=(fun _ -> Yuka.State.set active_option count.label)
+      on_click=(fun _ -> toggle_from_menu count.label)>
+      <span class_=Css.box aria_hidden=true />
+      <span class_=Css.name>(Yuka.text count.label)</span>
+      <span class_=Css.count>(Yuka.int count.open_)</span>
+    </button>
+  in
+  let menu_key event =
+    let counts = Yuka.State.peek label_counts in
+    let total = List.length counts in
+    let current =
+      Option.value ~default:0
+        (List.find_index (fun (count : Queries.label_count) -> count.label = Yuka.State.peek active_option) counts)
+    in
+    let go index =
+      Yuka.Event.prevent_default event;
+      Yuka.Browser.focus (option_id (List.nth counts index).label)
+    in
+    if total > 0 then
+      match Yuka.Event.key event with
+      | "ArrowDown" -> go ((current + 1) mod total)
+      | "ArrowUp" -> go ((current + total - 1) mod total)
+      | "Home" -> go 0
+      | "End" -> go (total - 1)
+      | _ -> ()
+  in
   let groups = Yuka.State.memo ~equal:( = ) (fun () -> Issue.group (Yuka.State.get visible)) in
   let ordered = Yuka.State.memo ~equal:( = ) (fun () -> List.concat_map snd (Yuka.State.get groups)) in
   let change ~id ?status ?priority () =
@@ -165,27 +239,32 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
     <div class_="toolbar">
       <input class_="filter" type_=`text placeholder="Filter issues (j/k to move, Enter to open)" value=query
         on_input=(fun event -> Yuka.State.set filter (Yuka.Event.target_value event)) />
-      (Yuka.hole (fun () ->
-         match Yuka.Remote.status labels with
-         | Yuka.Status.Ready { data; _ } | Yuka.Status.Loading (Some data) ->
-             <div class_="chips">
-               (Yuka.fragment
-                 (List.map
-                    (fun (count : Queries.label_count) ->
-                      let on = List.mem count.label (Yuka.State.get chosen_labels) in
-                      <button
-                        class_=(if on then "chip on" else "chip")
-                        aria_pressed=(if on then `true_ else `false_)
-                        data_label=count.label
-                        on_click=(fun _ ->
-                          Yuka.State.update chosen_labels (fun current ->
-                              if List.mem count.label current then List.filter (fun label -> label <> count.label) current
-                              else current @ [ count.label ]))>
-                        (Yuka.text (count.label ^ " " ^ Int.to_string count.open_))
-                      </button>)
-                    data))
-             </div>
-         | _ -> Yuka.empty))
+      (if Yuka.State.get has_labels then
+         <div class_=Css.bar>
+           <div class_="chips">
+             (Yuka.each ~equal:( = ) ~key:(fun (count : Queries.label_count) -> count.label)
+                (fun () -> Array.of_list (Yuka.State.get arranged)) chip)
+           </div>
+           <button id="labels-button" class_=Css.more type_=`button popovertarget="labels-menu" aria_haspopup=`menu
+             aria_label=(more_label ~total:(List.length (Yuka.State.get label_counts))
+                           ~on:(List.length (Yuka.State.get chosen_labels)))
+             data_chosen=(Int.to_string (List.length (Yuka.State.get chosen_labels)))
+             on_click=(fun _ -> Yuka.State.set menu_rendered true)>
+             <svg class_="icon" view_box="0 0 16 16" width="16" height="16" aria_hidden=true>
+               <circle cx="3" cy="8" r="1.5" fill="currentColor" />
+               <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+               <circle cx="13" cy="8" r="1.5" fill="currentColor" />
+             </svg>
+             <span class_=Css.total aria_hidden=true>(Yuka.int (List.length (Yuka.State.get label_counts)))</span>
+           </button>
+           (if Yuka.State.get menu_rendered then
+              <div id="labels-menu" popover=`auto role=`menu aria_label="Labels" class_=Css.menu on_keydown=menu_key>
+                (Yuka.each ~equal:( = ) ~key:(fun (count : Queries.label_count) -> count.label)
+                   (fun () -> Array.of_list (Yuka.State.get label_counts)) menu_item)
+              </div>
+            else Yuka.empty)
+         </div>
+       else Yuka.empty)
     </div>
     (match Yuka.State.get toast with
      | Some message ->

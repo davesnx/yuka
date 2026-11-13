@@ -14,10 +14,11 @@ let late_script inner req =
   | _ -> inner req
 
 let theme_script =
-  let themes = String.concat "|" (List.map Demo_shared.Theme.slug Demo_shared.Theme.all) in
-  {|<script>(function(){var theme;try{theme=localStorage.getItem("yuka-demo-theme")}catch(error){}if(!/^(|}
-  ^ themes
-  ^ {|)$/.test(theme))theme=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",theme)})()</script>|}
+  let open Demo_shared.Theme in
+  let pattern slugs = "/^(" ^ String.concat "|" slugs ^ ")$/" in
+  Printf.sprintf
+    {|<script>(function(){var root=document.documentElement,theme,code;try{theme=localStorage.getItem("%s");code=localStorage.getItem("%s")}catch(error){}if(!%s.test(theme))theme=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";root.setAttribute("%s",theme);if(%s.test(code))root.setAttribute("%s",code)})()</script>|}
+    storage_key Code.storage_key (pattern (List.map slug all)) attribute (pattern (List.map Code.slug Code.all)) Code.attribute
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 

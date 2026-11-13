@@ -55,13 +55,18 @@ let seed =
     mk 25 "Write the release notes" Todo No_priority (Some "maya") [ "docs" ] "Nov 6" Description.yuk_25;
   ]
 
-type space = { issues : Issue.t list ref; generated_comments : Issue.t -> Comment.t list }
+type space = {
+  issues : Issue.t list ref;
+  generated_comments : Issue.t -> Comment.t list;
+  spots : (string, int * int) Hashtbl.t;
+  notes : (string * string) list ref;
+}
 
-let yuka = { issues = ref seed; generated_comments = (fun _ -> []) }
+let yuka = { issues = ref seed; generated_comments = (fun _ -> []); spots = Hashtbl.create 64; notes = ref [] }
 
 let stress =
   let users = Array.of_list users in
-  { issues = ref (Stress.issues ~users); generated_comments = Stress.comments ~users }
+  { issues = ref (Stress.issues ~users); generated_comments = Stress.comments ~users; spots = Hashtbl.create 256; notes = ref [] }
 
 let space = function Workspace.Yuka -> yuka | Stress -> stress
 let issues workspace = !((space workspace).issues)
@@ -110,7 +115,25 @@ let after delay compute =
   else
     Yuka_dream.to_async (Lwt.map compute (Lwt_unix.sleep delay))
 
-let comments_async ~delay id = after delay (fun () -> comments_of id)
+let first_shown = 3
+let last_shown = 5
+let collapse_above = 12
+
+let thread ~all id : Comment.thread =
+  let comments = comments_of id in
+  let total = List.length comments in
+  if all || total <= collapse_above then { first = comments; hidden = 0; last = [] }
+  else
+    {
+      first = List.filteri (fun index _ -> index < first_shown) comments;
+      hidden = total - first_shown - last_shown;
+      last = List.filteri (fun index _ -> index >= total - last_shown) comments;
+    }
+
+let comment_range ({ issue; offset; limit } : Comment.range) =
+  List.filteri (fun index _ -> index >= offset && index < offset + limit) (comments_of issue)
+
+let thread_async ~delay ~all id = after delay (fun () -> thread ~all id)
 
 let related_async ~delay (issue : Issue.t) =
   after delay (fun () ->
@@ -189,3 +212,60 @@ let user_stats workspace user_id =
     in_progress = count [ In_progress ];
     done_ = count [ Done ];
   }
+
+let random = Random.State.make [| 7 |]
+let random_spot () = (Random.State.int random (Board.width - Board.item_width + 1), Random.State.int random (Board.height - Board.item_height + 1))
+
+let seeded_spot number =
+  ( Insights_data.hash number mod (Board.width - Board.item_width + 1),
+    Insights_data.hash (number + 50021) mod (Board.height - Board.item_height + 1) )
+
+let board workspace : Board.t =
+  let space = space workspace in
+  let at id default = Option.value (Hashtbl.find_opt space.spots id) ~default in
+  let cards =
+    List.rev_map
+      (fun (issue : Issue.t) ->
+        let x, y = at issue.id (seeded_spot (Issue.number issue)) in
+        { Board.id = issue.id; x; y; content = Card { title = issue.title; status = issue.status } })
+      !(space.issues)
+  in
+  let notes =
+    List.filter_map
+      (fun (id, text) ->
+        Option.map (fun (x, y) -> { Board.id; x; y; content = Note text }) (Hashtbl.find_opt space.spots id))
+      !(space.notes)
+  in
+  cards @ notes
+
+let on_board workspace id =
+  List.exists (fun (issue : Issue.t) -> issue.id = id) (issues workspace) || List.mem_assoc id !((space workspace).notes)
+
+let move_item workspace ~id ~x ~y = Hashtbl.replace (space workspace).spots id (x, y)
+
+let note_count = ref 0
+
+let add_note workspace ~text =
+  let space = space workspace in
+  incr note_count;
+  let id = Printf.sprintf "note-%d" !note_count in
+  Hashtbl.replace space.spots id (random_spot ());
+  space.notes := !(space.notes) @ [ (id, text) ]
+
+let note_total workspace = List.length !((space workspace).notes)
+
+let remove_note workspace ~id =
+  let space = space workspace in
+  if List.mem_assoc id !(space.notes) then begin
+    space.notes := List.remove_assoc id !(space.notes);
+    Hashtbl.remove space.spots id;
+    true
+  end
+  else false
+
+let shuffle workspace =
+  List.iter
+    (fun (item : Board.item) ->
+      let x, y = random_spot () in
+      move_item workspace ~id:item.id ~x ~y)
+    (board workspace)

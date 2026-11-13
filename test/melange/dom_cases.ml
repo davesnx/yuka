@@ -727,7 +727,7 @@ let stop_propagation_and_tag () =
 
 let modifier_event : unit -> node =
   [%mel.raw
-    "function () { return new window.MouseEvent('click', { bubbles: true, shiftKey: true, altKey: false }) }"]
+    "function () { return new window.MouseEvent('click', { bubbles: true, shiftKey: true, altKey: false, clientX: 12, clientY: 34 }) }"]
 
 let active_id : unit -> string =
   [%mel.raw "function () { return document.activeElement ? document.activeElement.id : '' }"]
@@ -749,14 +749,15 @@ let modifiers () =
             on "click" (fun e ->
                 seen :=
                   string_of_bool (Event.shift_key e)
-                  ^ string_of_bool (Event.alt_key e));
+                  ^ string_of_bool (Event.alt_key e)
+                  ^ Printf.sprintf " %g,%g" (Event.client_x e) (Event.client_y e));
           ]
           [])
   in
   dispatch (query c "button") (modifier_event ());
-  check "shift and alt" "truefalse" !seen;
+  check "shift, alt and position" "truefalse 12,34" !seen;
   click (query c "button");
-  check "plain click" "falsefalse" !seen;
+  check "plain click" "falsefalse 0,0" !seen;
   dispose ()
 
 let browser_functions () =
