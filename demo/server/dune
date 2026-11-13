@@ -41,7 +41,8 @@
 (rule
  (targets yuka_css.ml)
  (deps
-  (source_tree ../shared))
+  (source_tree ../shared)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_css.ml
