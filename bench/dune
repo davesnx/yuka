@@ -5,4 +5,4 @@
  (preprocess
   (pps melange.ppx))
  (module_systems
-  (es6 js)))
+  (esm js)))

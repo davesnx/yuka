@@ -9,7 +9,7 @@ license: "MIT"
 homepage: "https://github.com/davesnx/yuka"
 bug-reports: "https://github.com/davesnx/yuka/issues"
 depends: [
-  "dune" {>= "3.16"}
+  "dune" {>= "3.25"}
   "ocaml" {>= "5.4"}
   "yuka" {= version}
   "tapak"
@@ -37,3 +37,4 @@ build: [
   ]
 ]
 dev-repo: "git+https://github.com/davesnx/yuka.git"
+x-maintenance-intent: ["(latest)"]

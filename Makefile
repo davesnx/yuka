@@ -172,9 +172,11 @@ DEV_PACKAGES = cmarkit ochre tm-grammars jsonkit
 dev-packages: ## List opam packages the benchmarks and the demo need that are not in the opam files
 	@echo "$(DEV_PACKAGES)"
 
+# dune 3.25.0 with the compilation-mode cookie of https://github.com/ocaml/dune/pull/16699
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
 	@echo "cows git+https://github.com/syaiful6/cows.git#fc74ab9f372adf6b19d00feec60e4bc669ea10a8"
+	@echo "dune.3.25.0 git+https://github.com/davesnx/dune.git#da4d4b8861650358b598c5454629ae212430e9b2"
 	@echo "sch git+https://github.com/syaiful6/tapak.git#874cb1b6e1b54019d3425550d8c471621aa59f17"
 	@echo "tapak git+https://github.com/syaiful6/tapak.git#874cb1b6e1b54019d3425550d8c471621aa59f17"
 
