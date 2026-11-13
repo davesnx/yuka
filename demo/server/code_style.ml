@@ -1,4 +1,4 @@
-open Demo_shared.Model
+open Demo_shared
 
 type theme = { slug : string; label : string; colors : Ochre.Theme.theme }
 

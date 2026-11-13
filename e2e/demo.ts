@@ -386,13 +386,15 @@ await step("3j. themes and the navigation progress bar", async () => {
   await p.keyboard.press("Escape");
   check("3j.8 Escape closes without a change", (await p.locator("[role=menu]").count()) === 0 && (await p.getAttribute("html", "data-theme")) === "pale");
   await p.evaluate(() => ((window as any).__alive = true));
-  const started = Date.now();
   await p.locator('.row[data-id="YUK-1"] .row-title').click();
   await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 });
   await p.waitForTimeout(300);
-  const width = await p.evaluate(() => document.querySelector("[data-nav-progress]")!.getBoundingClientRect().width);
-  const top = await p.evaluate(() => document.querySelector("[data-nav-progress]")!.getBoundingClientRect().top);
-  check("3j.9 a slow navigation shows the progress bar at the top", width > 0 && top === 0 && Date.now() - started < 600, `width=${width} top=${top}`);
+  const bar = await p.evaluate(() => {
+    const element = document.querySelector("[data-nav-progress]")!;
+    const box = element.getBoundingClientRect();
+    return { width: box.width, top: box.top, state: element.getAttribute("data-nav-progress"), path: location.pathname };
+  });
+  check("3j.9 a slow navigation shows the progress bar at the top while the old page is shown", bar.width > 0 && bar.top === 0 && bar.state === "loading" && bar.path === "/", JSON.stringify(bar));
   await p.waitForURL("**/issue/YUK-1");
   await p.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
   await p.waitForTimeout(700);

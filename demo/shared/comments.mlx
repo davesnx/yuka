@@ -1,6 +1,4 @@
-open Model
-
-let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.Comment.t list) () =
+let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Comment.t list) () =
   let comments = Yuka.State.make comments in
   let draft = Yuka.State.make "" in
   let error : string option Yuka.State.t = Yuka.State.make None in
@@ -29,7 +27,7 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.C
             Yuka.State.set error (Some message))
       in
       Yuka.Async.on_result
-        (Yuka.Action.call Actions.add_comment { Actions.issue_id; body })
+        (Yuka.Action.call Comment.add { Comment.issue_id; body })
         (function
           | Ok (Ok saved) ->
               Yuka.State.set comments

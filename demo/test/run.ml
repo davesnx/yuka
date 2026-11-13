@@ -333,10 +333,10 @@ let actions () =
   | _ -> Alcotest.fail "create failed");
   match
     settle
-      (Yuka.Action.call Actions.add_comment
-         { Actions.issue_id = "YUK-3"; body = "Nice work" })
+      (Yuka.Action.call Comment.add
+         { Comment.issue_id = "YUK-3"; body = "Nice work" })
   with
-  | Ok (comment : Model.Comment.t) ->
+  | Ok (comment : Comment.t) ->
       Alcotest.(check string) "author" "Maya Chen" comment.author.name;
       Alcotest.(check int) "stored" 2 (List.length (Store.comments_of "YUK-3"))
   | Error message -> Alcotest.failf "comment failed: %s" message
@@ -360,12 +360,12 @@ let stress_actions () =
   Alcotest.(check string) "next stress id" "STR-201" created.id;
   has (get "/w/stress") "STR-201";
   lacks (get "/") "STR-201";
-  (match settle (Yuka.Action.call Actions.add_comment { Actions.issue_id = "STR-3"; body = "Kept" }) with
+  (match settle (Yuka.Action.call Comment.add { Comment.issue_id = "STR-3"; body = "Kept" }) with
   | Ok _ -> ()
   | Error message -> Alcotest.failf "comment failed: %s" message);
   let comments = Store.comments_of "STR-3" in
   Alcotest.(check int) "generated and added" 201 (List.length comments);
-  Alcotest.(check bool) "the added one is last" true ((List.nth comments 200).body = Model.Markup.of_text "Kept");
+  Alcotest.(check bool) "the added one is last" true ((List.nth comments 200).body = Markup.of_text "Kept");
   let headers = [ ("Content-Type", "application/x-www-form-urlencoded"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
   let status, response, _ =
     call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=stress&title=From+a+stress+form&description=&status=todo&priority=low" "/w/stress/new"
@@ -455,12 +455,12 @@ let markdown_page () =
   let issue = Option.get (Store.find "YUK-1") in
   let rendered = Markdown.render issue.description in
   Alcotest.(check bool) "markup survives the codec" true
-    (Yuka.Codec.decode (Yuka.Codec.list Model.Markup.node_codec) (Yuka.Codec.encode (Yuka.Codec.list Model.Markup.node_codec) rendered) = Ok rendered)
+    (Yuka.Codec.decode (Yuka.Codec.list Markup.node_codec) (Yuka.Codec.encode (Yuka.Codec.list Markup.node_codec) rendered) = Ok rendered)
 
-let rec highlighted (node : Model.Markup.node) =
+let rec highlighted (node : Markup.node) =
   match node with
   | Element { tag = "pre"; attributes; children = [ Element { children; _ } ] } when List.mem_assoc "data-language" attributes ->
-      List.exists (function Model.Markup.Element { tag = "span"; _ } -> true | _ -> false) children
+      List.exists (function Markup.Element { tag = "span"; _ } -> true | _ -> false) children
   | Element { children; _ } -> List.for_all highlighted children
   | Text _ -> true
 
