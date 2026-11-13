@@ -10,7 +10,8 @@
 (rule
  (targets yuka_islands.ml)
  (deps
-  (source_tree ../shared))
+  (source_tree ../shared)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_islands.ml
@@ -19,7 +20,8 @@
 (rule
  (targets yuka_islands.json)
  (deps
-  (source_tree ../shared))
+  (source_tree ../shared)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_islands.json
