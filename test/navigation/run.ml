@@ -350,6 +350,32 @@ let failure_falls_back finish =
       check "not pushed" "/start?x=1" (location_ ());
       finish ())
 
+let navigating () = bools (State.peek Browser.navigating)
+
+let navigating_flag finish =
+  setup (page {|<a id="a" href="/a">a</a><a id="b" href="/b">b</a>|});
+  plain_start ();
+  check "not navigating at start" "false" (navigating ());
+  ignore (click "#a" "");
+  check "navigating while the page loads" "true" (navigating ());
+  ignore (click "#b" "");
+  check "a newer navigation keeps it" "true" (navigating ());
+  resolve_call 1 (doc "B" (page {|<a id="c" href="/c">c</a><a id="d" href="/d">d</a>|})) "";
+  tick (fun () ->
+      check "not navigating once the page is shown" "false" (navigating ());
+      log_clear ();
+      ignore (click "#c" "");
+      check "navigating again" "true" (navigating ());
+      reject_call 2;
+      tick (fun () ->
+          check "a failed request is a full load" "assign" (log_read ());
+          check "not navigating after the failure" "false" (navigating ());
+          ignore (click "#d" "");
+          check "navigating before stop" "true" (navigating ());
+          stop ();
+          check "not navigating after stop" "false" (navigating ());
+          finish ()))
+
 let sync_failure_falls_back finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -1551,10 +1577,12 @@ let stalled_import finish =
   render ~islands:(runtime_registry []) ~prefetch:`Visible ();
   wait 1000 (fun () ->
       check "the click is prevented while the code loads" "true" (bools (click "#l" ""));
+      check "navigating while the code loads" "true" (navigating ());
       wait 2500 (fun () ->
           check "no full load 2.5 s after the click (the timer starts at the click)" "" (log_read ());
           wait 700 (fun () ->
               check "3.2 s after the click the waiting click is a full page load" "assign" (log_read ());
+              check "not navigating after the full load starts" "false" (navigating ());
               check "one error" "1" (ints (load_errors ()));
               check "a later click is not prevented" "false" (bools (click "#m" ""));
               finish ())))
@@ -1625,6 +1653,7 @@ let all =
     ("superseded navigation aborts", superseded);
     ("late response of an aborted request", superseded_late_response);
     ("fetch failure falls back", failure_falls_back);
+    ("Browser.navigating follows the navigation in flight", navigating_flag);
     ("fetch throwing falls back", sync_failure_falls_back);
     ("redirects", redirect);
     ("navigate", navigate_api);

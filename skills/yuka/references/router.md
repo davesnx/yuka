@@ -251,6 +251,17 @@ page with no island, links load full pages. In an island,
 on_click=(fun _ -> Yuka.Browser.navigate (Routes.blog ~tag:"bug" ()))
 ```
 
+`Yuka.Browser.navigating` is a read-only State: `true` from the click
+until the new page is shown (or a full page load starts in its place). An
+island can read it to show a progress bar:
+
+```ocaml
+let[@client] make () =
+  <div class_=(if State.get Yuka.Browser.navigating then "progress on" else "progress") />
+```
+
+It is always `false` on the server.
+
 ## Limitations
 
 - An island cannot read the current route or search params as a State.

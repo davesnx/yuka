@@ -34,6 +34,21 @@ form and live updates:
 The header links to each workspace (the current one is marked), to the
 repository on GitHub and to `@davesnx` on X.
 
+## Themes and the progress bar
+
+The Theme button in the header picks one of four themes: dark, light,
+gray and pale. The choice is kept in `localStorage` (`yuka-demo-theme`).
+Without a choice, the theme follows `prefers-color-scheme` (light or
+dark). A small script in the head of each page, before the stylesheet,
+sets `data-theme` on `<html>`, so the first paint has the right theme, also
+on the prerendered `/about`. A cookie read on the server cannot do this for
+a prerendered page, and Yuka has no attribute for `<html>`. Each theme is a
+set of CSS variables in `static/style.css`.
+
+During a client navigation that takes more than 120 ms, a thin bar at the
+top of the window grows; it fills and fades out when the new page is shown.
+The `Nav_progress` island reads `Yuka.Browser.navigating`.
+
 ## URLs
 
 - `http://localhost:8080/`: all issues of `yuka`, grouped by status.
@@ -45,8 +60,9 @@ repository on GitHub and to `@davesnx` on X.
   `/w/stress/issue/STR-1`: the same pages for `stress`. An unknown
   workspace, or an issue of another workspace, is a not-found page.
 - `http://localhost:8080/about`: a page with no island, outside the shell
-  layout, for the 0 bytes of JavaScript check of `make measure-pages`. It
-  is the one `~prerender:true` page.
+  layout, for the JavaScript check of `make measure-pages`: it loads no
+  script file, and only the inline theme script runs. It is the one
+  `~prerender:true` page.
 - `http://localhost:8080/before-hydration`: a text input, a checkbox, a
   select and a textarea in an island, each with the value of its State. The
   server sends the script of this page 3 s late (to this page only), so you

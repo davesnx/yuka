@@ -21,6 +21,10 @@ let cancel_pending () =
       Navigation_web.abort c
   | None -> ()
 
+let assign url =
+  Navigation_state.set false;
+  Web.location_assign url
+
 let save_scroll () = Web.table_set (scrolls ()) !current_key (Navigation_web.scroll_y ())
 
 let hash_of = Navigation_web.hash_of
@@ -167,8 +171,8 @@ let show ~dir ~push ~restore url a =
   let stale = match a.header "yuka-build" with Some b -> not (is b (build ())) | None -> false in
   let shown = (a.status >= 200 && a.status < 300) || a.status >= 400 in
   match outlet a.header with
-  | Some None -> Web.location_assign final
-  | _ when stale || (not shown) || not (html a.header) -> Web.location_assign final
+  | Some None -> assign final
+  | _ when stale || (not shown) || not (html a.header) -> assign final
   | target ->
       if push then begin
         let key = Web.fresh_key () in
@@ -177,6 +181,7 @@ let show ~dir ~push ~restore url a =
       end;
       loaded := Web.current_url ();
       let apply () =
+        Navigation_state.set false;
         swap (Option.join target) final a.header a.text;
         (match restore with
         | Some y -> Navigation_web.scroll_to y
@@ -186,7 +191,7 @@ let show ~dir ~push ~restore url a =
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 
 let load ~dir ~push ~restore url =
-  if not !started then Web.location_assign url
+  if not !started then assign url
   else begin
     cancel_pending ();
     !hover ();
@@ -196,7 +201,7 @@ let load ~dir ~push ~restore url =
     let apply = function
       | _ when !nav <> gen -> ()
       | Some a -> show ~dir ~push ~restore url a
-      | None -> Web.location_assign url
+      | None -> assign url
     in
     let key = page_key url in
     match lookup key with
@@ -221,7 +226,7 @@ let load ~dir ~push ~restore url =
             apply (Some a))
           (fun () ->
             pending := None;
-            Web.location_assign url)
+            assign url)
   end
 
 let navigate url =
@@ -272,6 +277,7 @@ let on_popstate _ =
   if Web.current_url () = !loaded then begin
     cancel_pending ();
     incr nav;
+    Navigation_state.set false;
     Navigation_web.scroll_to y
   end
   else load ~dir ~push:false ~restore:(Some y) (Web.current_url ())
@@ -301,6 +307,7 @@ let boot (prefetch, transitions, islands) =
 let stop () =
   cancel_pending ();
   started := false;
+  Navigation_state.set false;
   start_islands := (fun () -> ());
   on_out ();
   !unwatch ();

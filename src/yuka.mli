@@ -494,6 +494,15 @@ module Browser : sig
       URL (read as {!attr} reads a URL) does nothing; a dev build logs the
       first one. *)
 
+  val navigating : bool State.read
+  (** [true] while a client navigation is in flight: from the click on a
+      link, [popstate] or {!navigate} (also while the navigation code
+      loads) until the new page is shown, a full page load starts in its
+      place, or {!stop}. A navigation that a newer one aborts leaves it
+      [true] for the newer one. Read it with {!State.get} in an island, for
+      example to show a progress bar. Always [false] on the server and
+      without client navigation. *)
+
   val focus : string -> unit
   (** Focuses the element with this id; does nothing when no element has
       it. Inside a {!batch} (an event handler), it runs after the batch

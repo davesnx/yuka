@@ -13,6 +13,12 @@ let late_script inner req =
       Lwt.bind (Lwt_unix.sleep 3.) (fun () -> inner req)
   | _ -> inner req
 
+let theme_script =
+  let themes = String.concat "|" (List.map Demo_shared.Theme.slug Demo_shared.Theme.all) in
+  {|<script>(function(){var theme;try{theme=localStorage.getItem("yuka-demo-theme")}catch(error){}if(!/^(|}
+  ^ themes
+  ^ {|)$/.test(theme))theme=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",theme)})()</script>|}
+
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let () =
@@ -73,7 +79,8 @@ let () =
       ~public:[ ("/static", !static_dir) ]
       ?prerendered:(if !prerendered = "" then None else Some !prerendered)
       ~head:
-        {|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="/static/favicon.svg">|}
+        ({|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="/static/favicon.svg">|}
+        ^ theme_script)
       ~styles:[ "/static/style.css" ] ~css:Demo_app.Yuka_css.sheets
       ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
       ()

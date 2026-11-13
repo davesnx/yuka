@@ -1,5 +1,4 @@
 open Types
-open Base
 
 let stopped_key = "__yuka_stopped"
 let acted : (unit -> unit) ref = ref ignore
@@ -44,11 +43,4 @@ module Event = struct
   let target_tag e = !platform.target_tag e
   let shift_key e = !platform.shift_key e
   let alt_key e = !platform.alt_key e
-end
-
-module Browser = struct
-  let on_window name handler = own (!platform.on_window name (fun e -> Scheduler.batch (fun () -> handler e)))
-  let navigate url = if Url.unsafe ~tag:"a" "href" url then Types.log "navigate" url else !platform.navigate url
-  let focus id = Scheduler.after (fun () -> !platform.focus id)
-  let scroll_into_view id = Scheduler.after (fun () -> !platform.scroll_into_view id)
 end

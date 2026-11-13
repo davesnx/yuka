@@ -90,7 +90,10 @@ module Header = struct
       </a>
       <nav class_="workspaces" aria_label="Workspaces">(Yuka.fragment (List.map switch Workspace.all))</nav>
       <div class_="topbar-end">
-        <div class_="topbar-tools" />
+        <div class_="topbar-tools">
+          <Yuka.Client><Theme_menu /></Yuka.Client>
+          <Yuka.Client><Nav_progress /></Yuka.Client>
+        </div>
         <a class_="topbar-link" href="https://github.com/davesnx/yuka" target=`_blank rel="noopener" aria_label="Yuka on GitHub">
           <Github_icon />
           <span class_="topbar-label">"GitHub"</span>

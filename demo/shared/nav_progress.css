@@ -1,0 +1,12 @@
+.bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50; height: 2px; pointer-events: none;
+  background: var(--accent); box-shadow: 0 0 6px var(--accent);
+  transform-origin: 0 50%; transform: scaleX(0); opacity: 0;
+}
+.loading { opacity: 1; animation: grow 8s cubic-bezier(0.1, 0.6, 0.2, 1) 120ms both; }
+.finished { transform: scaleX(1); transition: transform 200ms ease-out, opacity 250ms ease 200ms; }
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(0.92); } }
+@media (prefers-reduced-motion: reduce) {
+  .loading { animation-duration: 1ms; animation-timing-function: step-end; }
+  .finished { transition: none; }
+}

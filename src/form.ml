@@ -140,8 +140,8 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
   let follow = function
     | Some location when not (Web.same_origin location) ->
         State.set form.failed [ (None, "Yuka: refused a redirect to another site: " ^ location) ]
-    | Some location -> Platform.Browser.navigate location
-    | None -> Platform.Browser.navigate (Web.current_url ())
+    | Some location -> Browser.navigate location
+    | None -> Browser.navigate (Web.current_url ())
   in
   let finish result redirect =
     State.set form.busy false;

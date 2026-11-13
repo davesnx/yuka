@@ -303,8 +303,8 @@ await step("3d. a page with no island loads no script", async () => {
   const scripts: string[] = [];
   pg.on("request", (r) => { if (r.resourceType() === "script") scripts.push(r.url()); });
   await pg.goto(base + "/about", { waitUntil: "networkidle" });
-  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap").length);
-  check("3d.1 /about requests no script and has no inline script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
+  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && !s.textContent!.includes("yuka-demo-theme")).length);
+  check("3d.1 /about requests no script and has no inline script but the theme script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
   await pg.close();
 });
 
@@ -344,6 +344,72 @@ await step("3i. input made before hydration", async () => {
   check("3i.5 the input works after hydration", (await pg.textContent("#early-name-state")) === "State: typed early!", (await pg.textContent("#early-name-state")) ?? "");
   check("3i.6 no console error and no hydration mismatch", errors.length === 0, errors.join(" | "));
   await pg.close();
+});
+
+await step("3j. themes and the navigation progress bar", async () => {
+  const themeAtBody = `
+    new MutationObserver((records, observer) => {
+      if (document.body) { window.__themeAtBody = document.documentElement.getAttribute("data-theme"); observer.disconnect(); }
+    }).observe(document, { childList: true, subtree: true });
+  `;
+  for (const scheme of ["dark", "light"] as const) {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: scheme });
+    const p = await ctx.newPage();
+    await p.goto(base + "/", { waitUntil: "networkidle" });
+    check(`3j.1 no choice: prefers-color-scheme ${scheme} gives the ${scheme} theme`, (await p.getAttribute("html", "data-theme")) === scheme);
+    await ctx.close();
+  }
+  const html = await (await fetch(base + "/")).text();
+  const at = (needle: string) => html.indexOf(needle);
+  check("3j.2 the theme script is in the head, before the stylesheet and the body", at("yuka-demo-theme") > 0 && at("yuka-demo-theme") < at('rel="stylesheet"') && at("yuka-demo-theme") < at("<body"));
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: "dark" });
+  await ctx.addInitScript(themeAtBody);
+  const p = await ctx.newPage();
+  const errors: string[] = [];
+  p.on("pageerror", (e) => errors.push(String(e)));
+  await p.goto(base + "/", { waitUntil: "networkidle" });
+  await p.click("#theme-button");
+  await p.waitForSelector("[role=menu]");
+  check("3j.3 the menu opens with the current theme checked and focused", (await p.getAttribute("#theme-dark", "aria-checked")) === "true" && (await p.evaluate(() => document.activeElement?.id)) === "theme-dark");
+  await p.click("#theme-gray");
+  check("3j.4 a click on Gray applies and stores it", (await p.getAttribute("html", "data-theme")) === "gray" && (await p.evaluate(() => localStorage.getItem("yuka-demo-theme"))) === "gray" && (await p.locator("[role=menu]").count()) === 0);
+  check("3j.5 the colours follow the theme", (await p.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(43, 44, 48)", await p.evaluate(() => getComputedStyle(document.body).backgroundColor));
+  await p.focus("#theme-button");
+  await p.keyboard.press("Enter");
+  await p.waitForSelector("[role=menu]");
+  await p.keyboard.press("ArrowDown");
+  check("3j.6 ArrowDown moves the focus", (await p.evaluate(() => document.activeElement?.id)) === "theme-pale");
+  await p.keyboard.press("Enter");
+  check("3j.7 Enter chooses, the menu closes and the button has the focus", (await p.getAttribute("html", "data-theme")) === "pale" && (await p.locator("[role=menu]").count()) === 0 && (await p.evaluate(() => document.activeElement?.id)) === "theme-button");
+  await p.keyboard.press("Enter");
+  await p.waitForSelector("[role=menu]");
+  await p.keyboard.press("Escape");
+  check("3j.8 Escape closes without a change", (await p.locator("[role=menu]").count()) === 0 && (await p.getAttribute("html", "data-theme")) === "pale");
+  await p.evaluate(() => ((window as any).__alive = true));
+  const started = Date.now();
+  await p.locator('.row[data-id="YUK-1"] .row-title').click();
+  await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 });
+  await p.waitForTimeout(300);
+  const width = await p.evaluate(() => document.querySelector("[data-nav-progress]")!.getBoundingClientRect().width);
+  const top = await p.evaluate(() => document.querySelector("[data-nav-progress]")!.getBoundingClientRect().top);
+  check("3j.9 a slow navigation shows the progress bar at the top", width > 0 && top === 0 && Date.now() - started < 600, `width=${width} top=${top}`);
+  await p.waitForURL("**/issue/YUK-1");
+  await p.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
+  await p.waitForTimeout(700);
+  check("3j.10 the bar goes away when the page is shown", (await p.evaluate(() => getComputedStyle(document.querySelector("[data-nav-progress]")!).opacity)) === "0");
+  check("3j.11 the theme stays after a client navigation", (await p.evaluate(() => (window as any).__alive)) === true && (await p.getAttribute("html", "data-theme")) === "pale");
+  await p.goBack();
+  await p.waitForSelector(".row");
+  await p.waitForFunction(() => document.querySelector("[data-nav-progress]")?.getAttribute("data-nav-progress") !== "loading", null, { timeout: 5000 });
+  check("3j.12 back: the bar is not left loading", true);
+  await p.reload({ waitUntil: "networkidle" });
+  check("3j.13 the theme stays after a reload, set before the body is parsed", (await p.getAttribute("html", "data-theme")) === "pale" && (await p.evaluate(() => (window as any).__themeAtBody)) === "pale", String(await p.evaluate(() => (window as any).__themeAtBody)));
+  for (const path of ["/about", "/before-hydration"]) {
+    await p.goto(base + path, { waitUntil: "networkidle" });
+    check(`3j.14 ${path} follows the theme`, (await p.evaluate(() => (window as any).__themeAtBody)) === "pale" && (await p.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(247, 245, 251)");
+  }
+  check("3j.15 no page errors", errors.length === 0, errors.join(" | "));
+  await ctx.close();
 });
 
 await step("3e. live data is embedded", async () => {
@@ -1147,7 +1213,7 @@ await step("7i. modulepreload", async () => {
   await p.waitForTimeout(500);
   const pre = await preloads();
   const preNames = pre.map((l) => nameOf(l.path)).filter((n) => n !== "chunk").sort();
-  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "new_issue"]), JSON.stringify(pre));
+  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "nav_progress", "new_issue", "theme_menu"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
   else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/_yuka\/app\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
@@ -1199,7 +1265,7 @@ await step("7j. css per module", async () => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const p = await ctx.newPage();
   const sheetsIn = (where: string) =>
-    p.evaluate((w) => [...document.querySelectorAll(w + " link[data-yuka-css]")].map((l) => l.getAttribute("href")), where);
+    p.evaluate((w) => [...document.querySelectorAll(w + " link[data-yuka-css][href*='/related-']")].map((l) => l.getAttribute("href")), where);
   const styled = () =>
     p.evaluate(() => {
       const r = document.querySelector('[class^=related_]');
@@ -1223,7 +1289,7 @@ await step("7j. css per module", async () => {
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
   await p.waitForSelector('[class^=related-list_] li');
   const order = await p.evaluate(() => {
-    const l = document.querySelector("link[data-yuka-css]");
+    const l = document.querySelector("link[data-yuka-css][href*='/related-']");
     const island = document.querySelector('yuka-island[data-name="Demo_shared.Issue_props"]');
     return !!l && !!island && l.compareDocumentPosition(island) === Node.DOCUMENT_POSITION_FOLLOWING && !island.contains(l);
   });
