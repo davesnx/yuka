@@ -149,11 +149,51 @@ first opens).
 Keys: `j` and `k` move, Enter opens, `c` opens the new issue dialog,
 Escape closes menus and the dialog.
 
-The data is in memory. Restart the server to reset it.
+With no database, the data is in memory. Restart the server to reset it.
+
+## Shared data
+
+With a Postgres database, every server process reads and writes the same
+data:
+
+    _build/default/demo/server/demo_server.exe --database postgresql://user:password@host/db
+
+- `--database CONNINFO`, default `$YUKA_DEMO_DATABASE`: the connection
+  string (libpq syntax or a URL). Empty means memory. Use a direct
+  connection, not a pooled one: Live updates between processes use
+  `LISTEN`.
+- `--reset-days N`, default `$YUKA_DEMO_RESET_DAYS`, or 7: the data starts
+  again from the seed when it is older than N days, by the clock of the
+  database. N is at least 1. A page that is open at that time shows the old
+  data until the next change. To reset by hand, set `started` of the rows
+  to an old date; do not delete the rows.
+
+At start the server makes the table `yuka_demo_state` if it is not there.
+The table has one row for each workspace, with all of its data as JSON and
+a version. Each process keeps a copy in memory. Before each request, and
+before each Live load, it reads the versions and loads the rows that
+changed. An action locks the row, runs its check and its change, and writes
+the row with the next version. A refused action writes nothing. The
+processes tell each other about changes over `LISTEN`/`NOTIFY`
+(`yuka-live-pg`, channel `yuka_demo`), so a page on one process gets the
+changes made on another.
+
+The queries block the server for the time of a round trip to the database.
+This is fine for a demo, not for a busy site. So that a slow database does
+not stop a process for long, the server sets `PGCONNECT_TIMEOUT=5` and
+`PGOPTIONS` (a lock wait of 5 s, a statement of 10 s, an idle transaction
+of 15 s) when they are not set.
+
+The server does not start when the database does not answer. When a read
+fails later, the server logs the error and shows the data it has. When a
+write fails, the action is refused with a message.
 
 ## Tests
 
     make demo-test
+
+With `YUKA_DEMO_DATABASE` set, the tests also check the shared data in a new
+schema of that database, and remove the schema after.
 
 ## Browser check
 
@@ -163,6 +203,13 @@ server on `PORT` (default 8123), runs the check and stops the server:
     make e2e
 
 Use a fresh server for each run: the check creates an issue and a comment.
+
+    YUKA_DEMO_DATABASE=<conninfo> make e2e-shared
+
+starts two server processes on one database, on `PORT` and the next port. A
+note made through the first is moved through the second, and the pages on
+both get the changes. It adds one note and removes it. With no database,
+each process has its own data and the check fails.
 
 ## Docker
 
@@ -180,14 +227,19 @@ the development secret.
 
 Vercel builds `Dockerfile.vercel` at the repository root and runs the image
 as a Function ([Container Runtime](https://vercel.com/docs/functions/runtimes/container)).
-Set two environment variables in the project: `PORT=8080` (Vercel sends
-traffic to port 80 without it) and `YUKA_DEMO_SECRET`.
+Set these environment variables in the project: `PORT=8080` (Vercel sends
+traffic to port 80 without it), `YUKA_DEMO_SECRET`, and
+`YUKA_DEMO_DATABASE`, the direct (unpooled) URL of a Postgres database. With
+Neon, it is the URL without `-pooler` in the host name.
+`YUKA_DEMO_RESET_DAYS` is optional.
 
 The project `yuka-demo` is connected to this repository: a push to `main`
 deploys to https://yuka-demo.vercel.app.
 
-An instance stops after 5 minutes with no traffic, and its data goes with
-it. Vercel can run more than one instance, each with its own data.
+Vercel can run more than one instance. With `YUKA_DEMO_DATABASE`, they all
+share the data in the database (see [Shared data](#shared-data)). Without
+it, each instance has its own data, and the data goes when the instance
+stops.
 
 ## Production bundle
 
