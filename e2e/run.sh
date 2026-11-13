@@ -4,7 +4,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 port=${PORT:-8123}
 build=${BUILD_DIR:-_build}
 cd "$root" || exit 2
-opam exec ${SWITCH:+--switch=$SWITCH} -- dune build --build-dir "$build" @demo/all || { echo "build failed"; exit 2; }
+opam exec ${SWITCH:+--switch=$SWITCH} -- dune build --root . --build-dir "$build" @demo/all || { echo "build failed"; exit 2; }
 mode=modules
 flags=
 if [ "${BUNDLE:-}" = 1 ]; then
