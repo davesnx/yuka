@@ -29,14 +29,17 @@ let report () = report_in Model.Workspace.default
 let canvas_in workspace = Yuka.Server.page ~title:"Canvas" (fun () -> <Yuka.Client><Canvas workspace /></Yuka.Client>)
 let canvas () = canvas_in Model.Workspace.default
 
-let issue_view ?(delay = 0.6) (issue : Model.Issue.t) : Yuka.server Yuka.element =
+let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
+  let all = comments = Some "all" in
   let comments =
-    <Yuka.Await async=(Store.comments_async ~delay issue.id)
+    <Yuka.Await async=(Store.thread_async ~delay ~all issue.id)
       loading=(<Views.Skeleton lines=3 />)
       failed=(fun message -> <p class_="error">(Yuka.text ("Could not load comments: " ^ message))</p>)>
-      (fun comments ->
+      (fun (thread : Comment.thread) ->
+        let fragment = match List.rev thread.first with comment :: _ -> Some (Comments.dom_id comment) | [] -> None in
+        let whole_thread = Links.issue issue.workspace ~id:issue.id ~comments:"all" ?fragment in
         <Yuka.Client start=(`Lazy `Idle)>
-          <Comments issue_id=issue.id me=Store.me comments />
+          <Comments issue_id=issue.id me=Store.me thread whole_thread />
         </Yuka.Client>)
     </Yuka.Await>
   in
@@ -52,7 +55,7 @@ let issue_view ?(delay = 0.6) (issue : Model.Issue.t) : Yuka.server Yuka.element
   let description = Markup_view.nodes (Markdown.render issue.description) in
   <Views.Issue_page issue description comments props />
 
-let issue ~id ~issue () = Yuka.Server.page ~title:id (fun () -> issue_view issue)
+let issue ~id ~issue ~comments () = Yuka.Server.page ~title:id (fun () -> issue_view ~comments issue)
 
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
@@ -111,7 +114,7 @@ module Workspace = struct
   let report ~workspace () = report_in workspace
   let canvas ~workspace () = canvas_in workspace
   let create ~workspace () = create_in workspace
-  let issue ~workspace:_ ~id ~issue:found () = Yuka.Server.page ~title:id (fun () -> issue_view found)
+  let issue ~workspace:_ ~id ~issue:found ~comments () = Yuka.Server.page ~title:id (fun () -> issue_view ~comments found)
   let issue_not_found ~workspace ~id ~path:_ () = issue_not_found_in workspace ~id
 
 end

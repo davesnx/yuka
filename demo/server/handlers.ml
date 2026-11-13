@@ -50,6 +50,11 @@ let register () =
       | Some _ when String.trim body <> "" -> Yuka.Async.return (Store.add_comment ~issue_id ~body)
       | Some _ -> Yuka.Server.Action.reject "Comment is empty"
       | None -> Yuka.Server.Action.reject "No such issue");
+  Yuka.Server.Action.make Comment.range (fun _ (range : Comment.range) ->
+      match Store.find range.issue with
+      | Some _ when range.offset >= 0 && range.limit >= 0 -> Yuka.Async.return (Store.comment_range range)
+      | Some _ -> Yuka.Server.Action.reject "Offset and limit must not be negative"
+      | None -> Yuka.Server.Action.reject "No such issue");
   Yuka.Server.Live.serve Topics.board (fun workspace -> Yuka.Async.return (Store.board workspace));
   Yuka.Server.Action.make Board.move (fun _ { workspace; id; x; y } ->
       if not (Store.on_board workspace id) then Yuka.Server.Action.reject ("No item " ^ id)

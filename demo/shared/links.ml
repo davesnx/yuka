@@ -20,5 +20,6 @@ let canvas workspace =
 let create workspace =
   if default workspace then Routes.create () else Routes.workspace_create ~workspace ()
 
-let issue workspace ~id =
-  if default workspace then Routes.issue ~id () else Routes.workspace_issue ~workspace ~id ()
+let issue ?comments ?fragment workspace ~id =
+  if default workspace then Routes.issue ~id ?comments ?fragment ()
+  else Routes.workspace_issue ~workspace ~id ?comments ?fragment ()

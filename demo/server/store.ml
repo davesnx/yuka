@@ -115,7 +115,25 @@ let after delay compute =
   else
     Yuka_dream.to_async (Lwt.map compute (Lwt_unix.sleep delay))
 
-let comments_async ~delay id = after delay (fun () -> comments_of id)
+let first_shown = 3
+let last_shown = 5
+let collapse_above = 12
+
+let thread ~all id : Comment.thread =
+  let comments = comments_of id in
+  let total = List.length comments in
+  if all || total <= collapse_above then { first = comments; hidden = 0; last = [] }
+  else
+    {
+      first = List.filteri (fun index _ -> index < first_shown) comments;
+      hidden = total - first_shown - last_shown;
+      last = List.filteri (fun index _ -> index >= total - last_shown) comments;
+    }
+
+let comment_range ({ issue; offset; limit } : Comment.range) =
+  List.filteri (fun index _ -> index >= offset && index < offset + limit) (comments_of issue)
+
+let thread_async ~delay ~all id = after delay (fun () -> thread ~all id)
 
 let related_async ~delay (issue : Issue.t) =
   after delay (fun () ->

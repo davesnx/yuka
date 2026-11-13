@@ -877,7 +877,8 @@ await step("6g. workspaces", async () => {
   await page.waitForURL(`**/w/stress/issue/${selected}`);
   await page.waitForSelector(".comment-input");
   check("6g.9 j, j, Enter opens a stress issue", /^STR-\d+$/.test(selected ?? ""), String(selected));
-  check("6g.10 a stress issue streams 200 comments", (await page.locator(".comment").count()) === 200, String(await page.locator(".comment").count()));
+  const streamed = { comments: await page.locator(".comment").count(), hidden: await page.locator("[aria-label='Hidden comments'] [aria-live]").textContent() };
+  check("6g.10 a stress issue streams its first 3 and last 5 comments and hides 192", streamed.comments === 8 && streamed.hidden === "192 hidden comments", JSON.stringify(streamed));
   check("6g.11 the crumb goes back to the stress list", (await page.locator(".crumb").getAttribute("href")) === "/w/stress");
   await page.locator(".crumb").click();
   await page.waitForURL("**/w/stress");
@@ -1632,6 +1633,78 @@ await step("7. comment", async () => {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector(".comment-input");
   check("7e.4 comment present after reload", (await page.locator(".comment", { hasText: body }).count()) === 1);
+});
+
+await step("7l. long comment threads", async () => {
+  const issue = "STR-60";
+  const url = base + "/w/stress/issue/" + issue;
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const pg = await ctx.newPage();
+  const errors: string[] = [];
+  pg.on("console", (m) => m.type() === "error" && !m.text().includes("Failed to load resource") && errors.push(m.text()));
+  pg.on("pageerror", (e) => errors.push(String(e)));
+  const html = await (await pg.request.get(url)).text();
+  const sent = {
+    html: (html.match(new RegExp(`id="comment-${issue}-c\\d+"`, "g")) ?? []).length,
+    props: (html.match(new RegExp(`\\{"id":"${issue}-c\\d+"`, "g")) ?? []).length,
+    hidden: html.includes('"hidden":192'),
+  };
+  check("7l.1 the first response has only the first 3 and the last 5 comments, as HTML and as props", sent.html === 8 && sent.props === 8 && sent.hidden, JSON.stringify(sent));
+  const number = (id: string) => Number(id.replace(`comment-${issue}-c`, ""));
+  const ids = () => pg.$$eval(".comments .comment", (items) => items.map((item) => item.id));
+  const counter = pg.locator("[aria-label='Hidden comments'] [aria-live=polite]");
+  const inOrder = (list: string[], expected: number[]) => list.length === expected.length && list.every((id, index) => number(id) === expected[index]);
+  const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => from + index);
+  await pg.goto(url, { waitUntil: "networkidle" });
+  await pg.waitForSelector("#load-more-comments");
+  const region = await pg.evaluate(() => {
+    const element = document.querySelector("[aria-label='Hidden comments']");
+    return { role: element?.getAttribute("role"), button: document.querySelector("#load-more-comments")?.tagName, link: element?.querySelector("a")?.getAttribute("href") };
+  });
+  check("7l.2 the control is a labelled region with a button and a link to the whole thread", region.role === "region" && region.button === "BUTTON" && region.link === `/w/stress/issue/${issue}?comments=all#comment-${issue}-c3`, JSON.stringify(region));
+  check("7l.3 collapsed: the first 3 and the last 5 in order, 192 hidden", inOrder(await ids(), [1, 2, 3, 196, 197, 198, 199, 200]) && (await counter.textContent()) === "192 hidden comments", (await ids()).join(","));
+  const body = `Long thread comment ${run}`;
+  await pg.fill(".comment-input", body);
+  await pg.getByRole("button", { name: "Comment" }).click();
+  await pg.waitForFunction((text) => document.querySelector(".comments .comment:last-child")?.textContent?.includes(text) && !document.querySelector(".comments .comment:last-child")?.id.includes("tmp-"), body);
+  check("7l.4 a new comment goes last and the hidden count stays", (await counter.textContent()) === "192 hidden comments" && (await ids()).length === 9, (await ids()).join(","));
+  await pg.evaluate(() => document.querySelectorAll(".comments .comment").forEach((item) => ((item as any).__kept = true)));
+  await pg.route("**/_yuka/action/comment_range", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
+  await pg.click("#load-more-comments");
+  await pg.waitForFunction(() => document.querySelector("#load-more-comments")?.textContent === "Loading...");
+  check("7l.5 the button shows a pending state", (await pg.getAttribute("#load-more-comments", "aria-disabled")) === "true");
+  await pg.waitForFunction(() => document.querySelector("[aria-label='Hidden comments'] [aria-live]")?.textContent === "142 hidden comments");
+  await pg.unroute("**/_yuka/action/comment_range");
+  const afterMore = await ids();
+  check("7l.6 Load 50 more inserts comments 4 to 53 in order", inOrder(afterMore.slice(0, 58), [...range(1, 53), 196, 197, 198, 199, 200]) && afterMore.length === 59, afterMore.map(number).join(","));
+  const kept = await pg.evaluate(() => [...document.querySelectorAll(".comments .comment")].filter((item) => (item as any).__kept).length);
+  check("7l.7 the comments already shown keep their DOM nodes", kept === 9, String(kept));
+  check("7l.8 focus stays on the Load more button", (await pg.evaluate(() => document.activeElement?.id)) === "load-more-comments");
+  await pg.route("**/_yuka/action/comment_range", (route) => route.abort());
+  await pg.click("#load-more-comments");
+  await pg.waitForSelector("[aria-label='Hidden comments'] [role=alert]");
+  await pg.unroute("**/_yuka/action/comment_range");
+  check("7l.9 a failed load shows an error and keeps the count", (await counter.textContent()) === "142 hidden comments" && (await ids()).length === 59);
+  await pg.getByRole("button", { name: "Retry" }).click();
+  await pg.waitForFunction(() => document.querySelector("[aria-label='Hidden comments'] [aria-live]")?.textContent === "92 hidden comments");
+  check("7l.10 Retry loads the next 50 and clears the error", (await pg.locator("[role=alert]").count()) === 0 && (await ids()).length === 109);
+  await pg.getByRole("link", { name: "Load all" }).click();
+  await pg.waitForSelector("[aria-label='Hidden comments']", { state: "detached" });
+  const whole = await ids();
+  check("7l.11 Load all shows the 200 comments in order, then the new one, with no duplicate", inOrder(whole.slice(0, 200), range(1, 200)) && whole.length === 201 && new Set(whole).size === 201, `${whole.length} ${new Set(whole).size}`);
+  check("7l.12 the new comment is still last", (await pg.locator(".comments .comment").last().textContent())?.includes(body) === true);
+  check("7l.13 Load all stays on the page and focuses the first loaded comment", pg.url() === url && (await pg.evaluate(() => document.activeElement?.id)) === `comment-${issue}-c104`, `${pg.url()} ${await pg.evaluate(() => document.activeElement?.id)}`);
+  check("7l.14 no console error", errors.length === 0, errors.join(" | "));
+  await pg.goto(url + "?comments=all", { waitUntil: "networkidle" });
+  await pg.waitForSelector(".comment-input");
+  const shared = await ids();
+  check("7l.15 a shared link with comments=all shows the whole thread", shared.length === 201 && inOrder(shared.slice(0, 200), range(1, 200)) && (await pg.locator("[aria-label='Hidden comments']").count()) === 0, String(shared.length));
+  await ctx.close();
+  const link = new RegExp(`<a class="[^"]*" href="/w/stress/issue/${issue}[?]comments=all#comment-${issue}-c3"[^>]*>Load all</a>`);
+  check("7l.16 the server prints the control as a plain link to the whole thread, with no Load more button", link.test(html) && !html.includes('id="load-more-comments"'));
 });
 
 await step("7k. markdown and code style", async () => {

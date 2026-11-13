@@ -107,7 +107,14 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   board). The first positions come from the issue numbers; Shuffle and
   new notes use random positions.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
-  issues stream in after a delay.
+  issues stream in after a delay. An issue with more than 12 comments
+  shows the first 3 and the last 5; a band between them gives the number
+  of hidden comments, "Load 50 more" (the next ones after the first group)
+  and "Load all". The page does not send the hidden comments: the island
+  gets them with the `comment_range` query (`shared/comment.ml`).
+  "Load all" is a link to `?comments=all`, which the server renders with
+  the whole thread, so the link also works before the island starts, and
+  can be shared.
 - `http://localhost:8080/w/stress`, `/w/stress/my`, `/w/stress/insights`,
   `/w/stress/report`, `/w/stress/canvas`, `/w/stress/new` and
   `/w/stress/issue/STR-1`: the same pages for `stress`. An unknown

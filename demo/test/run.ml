@@ -62,6 +62,8 @@ let issue_page () =
   has html "Urgent";
   has html "<yuka-island data-name=\"Demo_shared.Comments\"";
   has html "Please add a test with an empty filter result.";
+  has html {|"hidden":0|};
+  lacks html {|aria-label="Hidden comments"|};
   has html "\"issue_id\":\"YUK-1\"";
   has html "<yuka-island data-name=\"Demo_shared.Related\"";
   has html "<yuka-island data-name=\"Demo_shared.Issue_props\"";
@@ -147,7 +149,17 @@ let stress_issue () =
   let html = get "/w/stress/issue/STR-200" in
   has html "<title>STR-200</title>";
   has html {|<a href="/w/stress" class="crumb">Issues</a>|};
-  Alcotest.(check int) "200 comments" 200 (count html {|{"id":"STR-200-c|});
+  Alcotest.(check int) "the first 3 and the last 5 comments" 8 (count html {|{"id":"STR-200-c|});
+  has html {|{"id":"STR-200-c3"|};
+  has html {|{"id":"STR-200-c196"|};
+  lacks html {|"STR-200-c4"|};
+  has html {|"hidden":192|};
+  has html {|aria-label="Hidden comments"|};
+  has html {|href="/w/stress/issue/STR-200?comments=all#comment-STR-200-c3"|};
+  let whole = get "/w/stress/issue/STR-200?comments=all" in
+  Alcotest.(check int) "the whole thread" 200 (count whole {|{"id":"STR-200-c|});
+  has whole {|"hidden":0|};
+  lacks whole {|aria-label="Hidden comments"|};
   Alcotest.(check bool) "comments are the same each time" true (Store.comments_of "STR-7" = Store.comments_of "STR-7");
   let status, _, html = call "/w/stress/issue/YUK-1" in
   Alcotest.(check int) "an issue of another workspace" 404 status;
@@ -367,6 +379,29 @@ let actions () =
       Alcotest.(check string) "author" "Maya Chen" comment.author.name;
       Alcotest.(check int) "stored" 2 (List.length (Store.comments_of "YUK-3"))
   | Error message -> Alcotest.failf "comment failed: %s" message
+
+let comment_range () =
+  let range offset limit =
+    match settle (Yuka.Action.call Comment.range { Comment.issue = "STR-9"; offset; limit }) with
+    | Ok comments -> comments
+    | Error message -> Alcotest.failf "comment_range failed: %s" message
+  in
+  let ids comments = List.map (fun (comment : Comment.t) -> comment.id) comments in
+  Alcotest.(check (list string)) "the 50 after the first 3"
+    (List.init 50 (fun index -> Printf.sprintf "STR-9-c%d" (index + 4)))
+    (ids (range 3 50));
+  let thread = Store.thread ~all:false "STR-9" in
+  Alcotest.(check int) "hidden" 192 thread.hidden;
+  Alcotest.(check bool) "the first response has the same comments as the query" true
+    (range 0 3 = thread.first && range 195 5 = thread.last);
+  Alcotest.(check (list string)) "the rest of the hidden range ends before the last 5"
+    (List.init 142 (fun index -> Printf.sprintf "STR-9-c%d" (index + 54)))
+    (ids (range 53 142));
+  let headers = [ ("Content-Type", "application/json"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
+  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"STR-9","offset":-1,"limit":5}|} "/_yuka/action/comment_range" in
+  Alcotest.(check int) "a negative offset is refused" 400 status;
+  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"NOPE-1","offset":0,"limit":5}|} "/_yuka/action/comment_range" in
+  Alcotest.(check int) "an unknown issue is refused" 400 status
 
 let stress_actions () =
   let created =
@@ -643,6 +678,7 @@ let () =
       ( "actions",
         [
           Alcotest.test_case "store through actions" `Quick actions;
+          Alcotest.test_case "hidden comments through the range query" `Quick comment_range;
           Alcotest.test_case "workspaces are kept apart" `Quick stress_actions;
           Alcotest.test_case "board moves, notes and shuffle" `Quick board_actions;
         ] );
