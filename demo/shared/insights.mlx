@@ -133,7 +133,13 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let fps : int option Yuka.State.t = Yuka.State.make None in
   let update_time : int option Yuka.State.t = Yuka.State.make None in
   let nodes : int option Yuka.State.t = Yuka.State.make None in
-  let items = Yuka.State.memo (fun () -> expand ~multiplier:(Yuka.State.get multiplier) (Yuka.State.get issues)) in
+  let shown_multiplier = Yuka.State.deferred multiplier in
+  let shown_statuses = Yuka.State.deferred statuses_on in
+  let shown_priorities = Yuka.State.deferred priorities_on in
+  let shown_labels = Yuka.State.deferred labels_on in
+  let shown_assignees = Yuka.State.deferred assignees_on in
+  let shown_range = Yuka.State.deferred range in
+  let items = Yuka.State.memo (fun () -> expand ~multiplier:(Yuka.State.get shown_multiplier) (Yuka.State.get issues)) in
   let bounds =
     Yuka.State.memo ~equal:( = ) (fun () ->
         match Yuka.State.get items with
@@ -141,20 +147,22 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
         | first :: rest ->
             List.fold_left (fun (low, high) item -> (min low item.day, max high item.day)) (first.day, first.day) rest)
   in
-  let window =
+  let window_of range =
     Yuka.State.memo ~equal:( = ) (fun () ->
         let first, last = Yuka.State.get bounds in
         match Yuka.State.get range with
         | None -> (first, last)
         | Some (from_day, to_day) -> (max first from_day, min last to_day))
   in
+  let window = window_of range in
+  let shown_window = window_of shown_range in
   let subset ?(status = true) ?(priority = true) ?(label = true) ?(assignee = true) ?(dated = true) () =
     Yuka.State.memo (fun () ->
-        let statuses = if status then Yuka.State.get statuses_on else [] in
-        let priorities = if priority then Yuka.State.get priorities_on else [] in
-        let labels = if label then Yuka.State.get labels_on else [] in
-        let assignees = if assignee then Yuka.State.get assignees_on else [] in
-        let first, last = if dated then Yuka.State.get window else (min_int, max_int) in
+        let statuses = if status then Yuka.State.get shown_statuses else [] in
+        let priorities = if priority then Yuka.State.get shown_priorities else [] in
+        let labels = if label then Yuka.State.get shown_labels else [] in
+        let assignees = if assignee then Yuka.State.get shown_assignees else [] in
+        let first, last = if dated then Yuka.State.get shown_window else (min_int, max_int) in
         List.filter
           (fun (item : item) ->
             item.day >= first && item.day <= last && keeps statuses item.status && keeps priorities item.priority
@@ -204,7 +212,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let leave _ = Yuka.State.set hover None in
   let status_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get statuses_on in
+        let measure = Yuka.State.get measure and chosen = Yuka.State.get shown_statuses in
         vertical_bars
           ~sums:(totals ~measure ~categories:statuses ~category:(fun item -> item.status) (Yuka.State.get for_status))
           ~names:(List.map Issue.status_label statuses) ~keys:(List.map Issue.status_slug statuses)
@@ -212,7 +220,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   in
   let priority_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get priorities_on in
+        let measure = Yuka.State.get measure and chosen = Yuka.State.get shown_priorities in
         horizontal_bars
           ~sums:(totals ~measure ~categories:priorities ~category:(fun item -> item.priority) (Yuka.State.get for_priority))
           ~names:(List.map Issue.priority_label priorities) ~keys:(List.map Issue.priority_slug priorities)
@@ -224,7 +232,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   in
   let label_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get labels_on and labels = Yuka.State.get label_names in
+        let measure = Yuka.State.get measure and chosen = Yuka.State.get shown_labels and labels = Yuka.State.get label_names in
         let sums = label_totals ~measure ~labels (Yuka.State.get for_label) in
         let order =
           List.stable_sort (fun (_, left) (_, right) -> compare right left) (List.mapi (fun index label -> (label, sums.(index))) labels)
@@ -239,7 +247,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   in
   let workload_chart =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let measure = Yuka.State.get measure and chosen = Yuka.State.get assignees_on and names = Yuka.State.get assignee_names in
+        let measure = Yuka.State.get measure and chosen = Yuka.State.get shown_assignees and names = Yuka.State.get assignee_names in
         let items = Yuka.State.get for_assignee in
         let columns, keys, tones =
           match Yuka.State.get stack_by with
@@ -359,6 +367,16 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
         Yuka.State.set assignees_on [];
         Yuka.State.set range None)
   in
+  let started = ref false in
+  Yuka.Effect.before (fun () ->
+      ignore
+        ( Yuka.State.get shown_multiplier,
+          Yuka.State.get shown_statuses,
+          Yuka.State.get shown_priorities,
+          Yuka.State.get shown_labels,
+          Yuka.State.get shown_assignees,
+          Yuka.State.get shown_range );
+      if !started then mark () else started := true);
   Yuka.Effect.after (fun () ->
       ignore
         ( Yuka.State.get status_chart,

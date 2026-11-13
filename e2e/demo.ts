@@ -894,11 +894,13 @@ await step("6h. insights", async () => {
   const all = await amounts();
   const allPoints = await points();
   await pg.locator("button.chip", { hasText: /^Urgent$/ }).click();
+  await pg.waitForFunction((previous) => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(",") !== previous, all, { timeout: 5000 }).catch(() => undefined);
   const urgent = await amounts();
   check("6h.3 a priority filter changes the status bars", urgent !== all && (await points()) < allPoints, `${all} -> ${urgent}`);
   await pg.locator('[data-chart="status"] g[data-key="done"] rect').click();
   check("6h.4 a click on a bar toggles its filter", (await pg.locator("button.chip", { hasText: /^Done$/ }).getAttribute("aria-pressed")) === "true");
   await pg.locator("button", { hasText: "Clear filters" }).click();
+  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, allPoints, { timeout: 5000 }).catch(() => undefined);
   check("6h.5 clearing the filters restores the bars", (await amounts()) === all && (await points()) === allPoints, `${await amounts()} points=${await points()}`);
   await pg.locator('[data-chart="status"] g[data-key="todo"] rect').hover();
   const tip = await pg.locator('[data-chart="status"] g:last-child text').last().textContent();

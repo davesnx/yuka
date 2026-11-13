@@ -13,6 +13,14 @@ let replace_url url =
 
 let focus id = Scheduler.after (fun () -> !platform.focus id)
 let scroll_into_view id = Scheduler.after (fun () -> !platform.scroll_into_view id)
-let on_frame handler = Base.own (Web.on_frame (fun time -> Scheduler.batch (fun () -> handler time)))
+let on_frame handler =
+  Base.own
+    (Web.on_frame (fun time ->
+         Base.in_frame := true;
+         match Scheduler.batch (fun () -> handler time) with
+         | () -> Base.in_frame := false
+         | exception e ->
+             Base.in_frame := false;
+             raise e))
 let now () = Web.now ()
 let count_elements selector = Array.length (Web.query_all (Web.document ()) selector)
