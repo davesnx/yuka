@@ -24,7 +24,7 @@ Defaults are relative to the executable, so any build directory works.
 The demo has two workspaces, each with its own issues, labels, new issue
 form and live updates:
 
-- `yuka`: 25 issues, `YUK-1` to `YUK-25`, at the root URLs below.
+- `yuka` (shown as Home): 25 issues, `YUK-1` to `YUK-25`, at the root URLs below.
 - `stress`: 200 issues, `STR-1` to `STR-200`, with 30 labels and 200
   comments on each issue, under `/w/stress`. `server/stress.ml` makes them
   from the issue number, with no randomness, so each start has the same
@@ -56,7 +56,9 @@ is a set of CSS variables in `static/style.css`.
 
 During a client navigation that takes more than 120 ms, a thin bar at the
 top of the window grows; it fills and fades out when the new page is shown.
-The `Nav_progress` island reads `Yuka.Browser.navigating`.
+The `Nav_progress` island reads `Yuka.Browser.navigating`. It is used with
+`` `Idle ``: it starts when the browser is idle after the page load, as no
+bar is needed before the first navigation.
 
 ## Markdown
 
@@ -199,8 +201,9 @@ and writes no import map. At start it reads `yuka_islands.json` (and
 `meta.json` with `--bundle`) and prints `<link rel="modulepreload">` for each
 island on the page, except those used with `` `Lazy _ ``. With `--bundle` it
 also prints one for each chunk that those islands and `main.js` import
-statically. Comments, Issue props and Related are used with `` `Lazy `Idle ``,
-`` `Lazy `Interaction `` and `` `Lazy `Visible ``.
+statically. Nav_progress is used with `` `Idle ``; Comments, Issue props and
+Related are used with `` `Lazy `Idle ``, `` `Lazy `Interaction `` and
+`` `Lazy `Visible ``.
 
 Routes are defined once in `Routes.ml`. `yuka routes` writes the shared
 `Routes` module (in `shared/`, for links such as `Routes.issue ~id ()` in islands) and

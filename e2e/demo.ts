@@ -256,11 +256,14 @@ await step("3c. partial navigation", async () => {
   await page.waitForSelector(".row");
   await page.evaluate(() => ((window as any).__marker = "alive"));
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
-  const counter = page.locator(".counter-button");
-  await page.waitForFunction(() => !!(document.querySelector(".counter-button") as any)?.__yuka_click, null, { timeout: 5000 });
-  await counter.click();
-  await counter.click();
-  check("3c.1 counter counts", (await counter.textContent()) === "Clicks: 2", String(await counter.textContent()));
+  const bar = () =>
+    page.evaluate(() => {
+      const element = document.querySelector("[data-nav-progress]") as any;
+      return { state: element?.getAttribute("data-nav-progress"), kept: element?.__kept as boolean | undefined };
+    });
+  await page.waitForFunction(() => !!(document.querySelector("[data-nav-progress]") as any)?.__yuka_animationstart, null, { timeout: 5000 });
+  await page.evaluate(() => ((document.querySelector("[data-nav-progress]") as any).__kept = true));
+  check("3c.1 the progress bar (Idle) started without interaction and is idle", (await bar()).state === "idle", JSON.stringify(await bar()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
   check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null", await current());
   const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
@@ -269,7 +272,8 @@ await step("3c. partial navigation", async () => {
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
   check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
-  check("3c.4 sidebar counter kept its state", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive", String(await counter.textContent()));
+  await page.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
+  check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
   check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null", await current());
   await page.locator(".new-issue-button").click();
@@ -280,7 +284,7 @@ await step("3c. partial navigation", async () => {
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
   check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null", await current());
-  check("3c.9 counter still kept", (await counter.textContent()) === "Clicks: 2");
+  check("3c.9 progress bar still kept", (await bar()).kept === true, JSON.stringify(await bar()));
   const y0 = await page.evaluate(() => Math.round(window.scrollY));
   check("3c.10 a new page starts at the top", y0 === 0, String(y0));
   await page.route("**/my", async (route) => {
@@ -290,12 +294,12 @@ await step("3c. partial navigation", async () => {
   await page.goBack();
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
-  check("3c.11 back is partial too (counter kept)", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive");
+  check("3c.11 back is partial too (progress bar kept)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
   await page.unroute("**/my");
-  check("3c.12 another Yuka-Build is a full page load", (await marker()) === undefined && (await counter.textContent()) === "Clicks: 0", `marker=${await marker()} ${await counter.textContent()}`);
+  check("3c.12 another Yuka-Build is a full page load", (await marker()) === undefined && (await bar()).kept === undefined, `marker=${await marker()} ${JSON.stringify(await bar())}`);
 });
 
 await step("3d. a page with no island loads no script", async () => {
@@ -864,6 +868,14 @@ await step("6g. workspaces", async () => {
   check("6g.6 no horizontal overflow at 1280 px", (await overflow()) <= 0, String(await overflow()));
   await page.setViewportSize({ width: 390, height: 800 });
   check("6g.7 no horizontal overflow at 390 px", (await overflow()) <= 0, String(await overflow()));
+  const navLines = await page.locator(".nav-link").evaluateAll((links) =>
+    links.map((link) => {
+      const range = document.createRange();
+      range.selectNodeContents(link);
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+    }),
+  );
+  check("6g.7b at 390 px each nav link stays on one line", navLines.length === 5 && navLines.every((lines) => lines === 1), navLines.join(","));
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.locator(".filter").fill("speed up");
   const filtered = await page.locator(".row").count();
@@ -899,7 +911,7 @@ await step("6g. workspaces", async () => {
   await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 5000 });
   await page.waitForSelector(".row");
   check("6g.13 switching workspace is a client navigation", (await page.evaluate(() => (window as any).__workspace)) === "alive");
-  check("6g.14 the switcher marks Yuka", (await current()) === "/=true /w/stress=false", await current());
+  check("6g.14 the switcher marks Home", (await current()) === "/=true /w/stress=false", await current());
   const yukaIds = await page.locator(".row").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-id") ?? ""));
   check("6g.15 the yuka list has no stress issue", yukaIds.length > 0 && yukaIds.every((id) => id.startsWith("YUK-")) && (await page.locator(".row", { hasText: title }).count()) === 0, String(yukaIds.length));
   await page.locator('.workspace-link[href="/w/stress"]').click();
@@ -1320,7 +1332,7 @@ await step("7b. start strategies", async () => {
       const related = document.querySelector("[class^=related_]") as Element;
       const box = related.getBoundingClientRect();
       return {
-        counter: handler(".counter-button", "click"),
+        navProgress: handler("[data-nav-progress]", "animationstart"),
         props: handler(".props select", "change"),
         io: ((window as any).__ioFired as { cls: string; t: number }[]).filter((x) => /related/.test(x.cls)),
         relatedTop: Math.round(box.top),
@@ -1351,16 +1363,14 @@ await step("7b. start strategies", async () => {
     props: (document.querySelector(".props") as any)?.__tag === "server",
   }));
   check("7b.7 slot nodes inside Issue_props are the server nodes", slot.related && slot.props && slot.total === 4 && slot.items === 4, JSON.stringify(slot));
-  const counterText = async () => ((await p.locator(".counter-button").textContent()) ?? "").trim();
-  const countBefore = await counterText();
-  await p.locator(".counter-button").click();
-  await p.waitForTimeout(100);
-  const countAfter = await counterText();
-  check(
-    "7b.1 Counter (idle) started without interaction: click changes the count",
-    before.counter && countBefore !== countAfter,
-    `handler=${before.counter} "${countBefore}" -> "${countAfter}"`,
-  );
+  await p.route(base + "/", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  await p.locator('.nav-link[href="/"]').click();
+  const barShown = await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 }).then(() => true, () => false);
+  await p.waitForURL(base + "/");
+  check("7b.1 Nav_progress (idle) started without interaction: a slow navigation shows the bar", before.navProgress && barShown, `handler=${before.navProgress} shown=${barShown}`);
   check("7b.8 no errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
 });
@@ -1471,7 +1481,7 @@ await step("7g. generated island registry", async () => {
   const errors: string[] = [];
   p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   p.on("pageerror", (e) => errors.push(String(e)));
-  const islandModuleRe = /\/(counter|new_issue|issue_list|comments|issue_props|related)(-[^/]*)?\.js$/;
+  const islandModuleRe = /\/(nav_progress|new_issue|issue_list|comments|issue_props|related)(-[^/]*)?\.js$/;
   const seen: string[] = [];
   p.on("request", (r) => {
     const m = islandModuleRe.exec(new URL(r.url()).pathname);
@@ -1486,12 +1496,12 @@ await step("7g. generated island registry", async () => {
   await p.waitForTimeout(500);
 
   check("7g.1 eager New_issue hydrated", await has(".new-issue-button", "click"));
-  check("7g.2 eager Counter (Idle) hydrated", await has(".counter-button", "click"));
+  check("7g.2 eager Nav_progress (Idle) hydrated", await has("[data-nav-progress]", "animationstart"));
   check("7g.5 lazy Comments (Load) hydrated", await has(".comment-input", "input"));
   check("7g.7 lazy Issue_props not started before interaction", !(await has(".props select", "change")));
   check("7g.8 only the comments chunk is requested before interaction", lazyNames() === "comments", lazyNames());
 
-  check("7g.9 non-lazy Counter and New_issue modules requested at load", seen.includes("counter") && seen.includes("new_issue"), seen.join(","));
+  check("7g.9 non-lazy Nav_progress and New_issue modules requested at load", seen.includes("nav_progress") && seen.includes("new_issue"), seen.join(","));
   check("7g.9b Issue_list module not requested on a page without it", !seen.includes("issue_list"), seen.join(","));
 
   await p.locator(".props .property").first().hover();
@@ -1505,10 +1515,6 @@ await step("7g. generated island registry", async () => {
   await p.locator("[class^=related_]").scrollIntoViewIfNeeded();
   await p.waitForTimeout(400);
   check("7g.13 related chunk requested after scroll", lazyNames() === "comments,issue_props,related", lazyNames());
-  const c0 = ((await p.locator(".counter-button").textContent()) ?? "").trim();
-  await p.locator(".counter-button").click();
-  await p.waitForTimeout(100);
-  check("7g.3 Counter is live: click changes the count", ((await p.locator(".counter-button").textContent()) ?? "").trim() !== c0);
   await p.locator("body").click({ position: { x: 5, y: 5 } });
   await p.keyboard.press("c");
   await p.waitForSelector(".dialog", { timeout: 2000 });
@@ -1528,6 +1534,14 @@ await step("7g. generated island registry", async () => {
     const chunkFiles = requested.filter((u) => /\/(comments|issue_props|related)-[^/]*\.js$/.test(u));
     check("7g.15 bundle: three distinct lazy chunks, not main.js", new Set(chunkFiles).size === 3 && !chunkFiles.some((u) => u.endsWith("/main.js")), chunkFiles.join(","));
   }
+  await p.route(base + "/", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  await p.locator('.nav-link[href="/"]').click();
+  const barShown = await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 }).then(() => true, () => false);
+  await p.waitForURL(base + "/");
+  check("7g.3 Nav_progress is live: a slow navigation shows the bar", barShown);
   check("7g.16 no 'no entry for island' or other errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
 });
@@ -1591,7 +1605,7 @@ await step("7i. modulepreload", async () => {
   await p.waitForTimeout(500);
   const pre = await preloads();
   const preNames = pre.map((l) => nameOf(l.path)).filter((n) => n !== "chunk").sort();
-  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "nav_progress", "new_issue", "theme_menu"]), JSON.stringify(pre));
+  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["nav_progress", "new_issue", "theme_menu"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
   else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/_yuka\/app\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));

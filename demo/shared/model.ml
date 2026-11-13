@@ -14,7 +14,7 @@ module Workspace = struct
   let default = Yuka
 
   let slug = function Yuka -> "yuka" | Stress -> "stress"
-  let name = function Yuka -> "Yuka" | Stress -> "Stress"
+  let name = function Yuka -> "Home" | Stress -> "Stress"
   let issue_prefix = function Yuka -> "YUK" | Stress -> "STR"
   let of_slug text = List.find_opt (fun workspace -> slug workspace = text) all
   let param = Yuka.Router.Param.make ~decode:of_slug ~encode:slug
