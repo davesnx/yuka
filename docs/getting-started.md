@@ -322,20 +322,6 @@ let assets =
     ~metafile:(read "_build/default/client/meta.json")
 ```
 
-## Large pages and the minor heap
-
-A server that renders large pages (more than about 100 KB of HTML) is faster
-with a larger OCaml minor heap. A page tree that does not fit in the minor heap
-is promoted to the major heap during the render. Yuka does not set the size;
-set it when you start the server, for example:
-
-```sh
-OCAMLRUNPARAM=s=2M ./main.exe
-```
-
-`s=2M` is 2M words: 16 MB for each domain. With it, a 189 KB and a 360 KB page
-took 10% to 16% less time to render, and a 36 KB page about 3% to 10% less.
-
 ## Next
 
 - [`router.md`](router.md): routes, params, loaders, guards and links.
