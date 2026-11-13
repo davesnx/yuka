@@ -6,7 +6,7 @@ let config =
     ~public:[ ("/static", "static") ]
     ~styles:[ "/static/style.css" ] ~css:Yuka_css.sheets ()
 
-let handler = Dream.set_secret "test" @@ Dream.cookie_sessions @@ Yuka_dream.handler config Routes_server.app
+let handler = Dream.set_secret "test" @@ Dream.cookie_sessions @@ Yuka_dream.handler config Yuka_routes.app
 
 let mask text =
   let marker = {|data-yuka-answer="l:csrf">{"ok":"|} in

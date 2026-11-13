@@ -14,7 +14,7 @@ let config =
     ~public:[ ("/static", "static") ]
     ~styles:[ "/static/style.css" ] ()
 
-let handler = Dream.set_secret "test" @@ Dream.cookie_sessions @@ Yuka_dream.handler config Routes_server.app
+let handler = Dream.set_secret "test" @@ Dream.cookie_sessions @@ Yuka_dream.handler config Yuka_routes.app
 
 let call ?(meth = `GET) ?(headers = []) ?(body = "") target =
   let response = Dream.test handler (Dream.request ~method_:meth ~target ~headers body) in
@@ -207,8 +207,8 @@ let form_post () =
 
 let prerendered () =
   let out = Filename.temp_dir "yuka_demo" "" in
-  Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ()) Routes_server.app);
-  let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ()) Routes_server.app
+  Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ()) Yuka_routes.app);
+  let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ()) Yuka_routes.app
   in
   let call meth =
     let response = Dream.test handler (Dream.request ~method_:meth ~target:"/about" "") in

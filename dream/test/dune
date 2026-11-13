@@ -6,10 +6,10 @@
    (run %{bin:yuka} routes --shared --source %{dep:tree/Routes.ml}))))
 
 (rule
- (targets routes_server.ml)
+ (targets yuka_routes.ml)
  (action
   (with-stdout-to
-   routes_server.ml
+   yuka_routes.ml
    (run
     %{bin:yuka}
     routes
@@ -22,5 +22,5 @@
 (test
  (name run)
  (package yuka-dream)
- (modules app routes routes_server run)
+ (modules app routes yuka_routes run)
  (libraries alcotest yuka yuka-dream dream lwt lwt.unix unix))

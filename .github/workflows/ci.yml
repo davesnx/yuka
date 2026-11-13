@@ -49,6 +49,10 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "PKG_CONFIG_PATH=$(brew --prefix)/opt/libpq/lib/pkgconfig" >> "$GITHUB_ENV"
 
+      - name: Install Oniguruma
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libonig-dev
+
       - name: List pins
         id: pins
         shell: bash
