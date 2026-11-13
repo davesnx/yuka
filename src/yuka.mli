@@ -313,8 +313,8 @@ module Await : sig
     'k element
   (** Shows [loading] until the value is settled, then [children] applied to
       the value, or [failed message] (default: nothing). On the client it is
-      a hole over [Async.watch]. On the server it is printed as a hole; see
-      DESIGN.md. In a server render, [message] is the message of a
+      a hole over [Async.watch]. On the server it is printed as a hole.
+      In a server render, [message] is the message of a
       {!Server.Action.reject}, else ["server error"], and the failure
       message goes to the [log] of {!Server.val-config}, so the HTML never has the
       detail. *)
@@ -540,8 +540,7 @@ end
 
 type runtime_template
 (** A compiled element tree: the ppx makes one per lowercase JSX tree, at
-    the top of the module. See "Compiled templates and fewer markers" in
-    DESIGN.md. *)
+    the top of the module. *)
 
 type 'kind runtime_part
 (** The value of one part of a {!type-runtime_template}. *)
@@ -826,7 +825,7 @@ module Private : sig
       so effects in component bodies do nothing. *)
 
   val to_html : node -> string
-  (** Prints the tree as HTML with the hydration markers of DESIGN.md. Holes
+  (** Prints the tree as HTML with its hydration markers. Holes
       and lists run once. [server_rendering] is true during the call. *)
 
   val entry_name : runtime_entry -> string
@@ -936,7 +935,7 @@ module Private : sig
 
   val hydrate : Client.container -> (unit -> 'k element) -> unit -> unit
   (** [hydrate container app] adopts the server DOM in [container] (written
-      with the markers of DESIGN.md), attaches handlers and starts holes.
+      with the markers of {!to_html}), attaches handlers and starts holes.
       Where the DOM does not match, it creates the missing nodes. In a dev
       build (see {!render}), each mismatch (a missing node, another tag,
       another text, an extra node) logs one [console.warn] with the island
@@ -1414,7 +1413,7 @@ module Server : sig
 
       The types and functions that a [Routes.ml] and its loaders, guards
       and handlers use. The cycle has no server dependency: a server
-      implements {!Adapter.Backend}. See "Request cycle" in DESIGN.md. *)
+      implements {!Adapter.Backend}. *)
 
   (** Why a guard or a loader stops a request. *)
   type stop =
