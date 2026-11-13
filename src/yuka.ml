@@ -60,7 +60,7 @@ module Server = struct
   let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
 
   module Action = struct
-    let implement = Server.implement
+    let make = Server.implement
     let reject = Server.reject
   end
 

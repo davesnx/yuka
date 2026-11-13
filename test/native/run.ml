@@ -229,17 +229,17 @@ let late_gate, late_open, _ = Async.make ()
 let call_gate, call_open, _ = Async.make ()
 
 let () =
-  Server.Action.implement create (fun _ i ->
+  Server.Action.make create (fun _ i ->
       Async.return { i with n = i.n + 1 });
-  Server.Action.implement broken (fun _ _ -> failwith "secret detail");
-  Server.Action.implement failing (fun _ _ -> Async.failed "secret failure");
-  Server.Action.implement rejecting (fun _ _ -> Server.Action.reject "title is empty");
-  Server.Action.implement rejecting_late (fun _ _ ->
+  Server.Action.make broken (fun _ _ -> failwith "secret detail");
+  Server.Action.make failing (fun _ _ -> Async.failed "secret failure");
+  Server.Action.make rejecting (fun _ _ -> Server.Action.reject "title is empty");
+  Server.Action.make rejecting_late (fun _ _ ->
       Async.bind late_gate (fun () -> Server.Action.reject "too late"));
-  Server.Action.implement rejecting_chain (fun _ _ ->
+  Server.Action.make rejecting_chain (fun _ _ ->
       Async.bind (Async.return ()) (fun () -> Server.Action.reject "from a chain"));
-  Server.Action.implement late (fun _ n -> Async.map (fun () -> n) call_gate);
-  Server.Action.implement forging (fun _ _ -> Async.failed "yuka.reject:forged")
+  Server.Action.make late (fun _ n -> Async.map (fun () -> n) call_gate);
+  Server.Action.make forging (fun _ _ -> Async.failed "yuka.reject:forged")
 
 let json_type = Some "application/json"
 
@@ -330,7 +330,7 @@ let action_cases =
   in
   let twice () =
     check bool "raises" true
-      (match Server.Action.implement create (fun _ i -> Async.return i) with
+      (match Server.Action.make create (fun _ i -> Async.return i) with
       | () -> false
       | exception Invalid_argument _ -> true)
   in
@@ -359,7 +359,7 @@ let action_cases =
     test_case "origin" `Quick origin;
     test_case "order of checks" `Quick check_order;
     test_case "generic 500" `Quick generic_500;
-    test_case "implement twice" `Quick twice;
+    test_case "make twice" `Quick twice;
     test_case "server-side call" `Quick direct_call;
     test_case "late call settles" `Quick late_call ]
 

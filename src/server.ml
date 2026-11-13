@@ -391,7 +391,7 @@ let transport name input =
 let register action f encode =
   let name = Action.name action in
   if Option.is_some (find_action name) then
-    invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
+    invalid_arg ("Yuka.Server.Action.make: already implemented: " ^ name);
   let input = Action.input action in
   registry :=
     ( name,

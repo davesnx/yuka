@@ -167,7 +167,7 @@ let dream_log () =
   check_true "not in the Dream log" (not (contains output "warned page"))
 
 let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
-let () = Yuka.Server.Action.implement echo (fun _ s -> Yuka.Async.return (String.length s))
+let () = Yuka.Server.Action.make echo (fun _ s -> Yuka.Async.return (String.length s))
 
 let body_limit () =
   let handler = Yuka_dream.handler config Routes_server.app in

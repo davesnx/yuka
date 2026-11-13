@@ -435,7 +435,7 @@ module Action : sig
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Mutation ]) t
   (** An action named [name] that can change data: the server and the client
       must declare it with the same name and codecs. The server runs it
-      after {!Server.Action.implement}. *)
+      after {!Server.Action.make}. *)
 
   val query :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Query ]) t
@@ -1231,7 +1231,7 @@ module Server : sig
   end
 
   module Action : sig
-    val implement : ('i, 'o, _) Action.t -> (context -> 'i -> 'o Async.t) -> unit
+    val make : ('i, 'o, _) Action.t -> (context -> 'i -> 'o Async.t) -> unit
     (** Registers the implementation of a declared action, and makes
         [Action.call] run it directly on the server. Raises
         [Invalid_argument] if the name is already implemented.
@@ -1386,7 +1386,7 @@ module Server : sig
       (context -> 'i -> ('o, 'f Form.errors) result Async.t) ->
       unit
     (** Registers a form action (see {!Yuka.Form}). It answers the island
-        path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
+        path ([POST /_yuka/action/<name>], JSON) like {!Action.make},
         with [redirect output] in the answer (checked as for the 303 below: a
         bad one answers 500 [action failed] and is logged), and the form
         post of a page. The request cycle checks the origin (403), runs the
@@ -1398,7 +1398,7 @@ module Server : sig
         [Error], a decode error or {!Action.reject}. The form field
         [_yuka_action] names the action, so a post to any [GET] page can run
         any form action: the function checks permissions itself, as for
-        {!Action.implement}. Only [application/x-www-form-urlencoded] posts
+        {!Action.make}. Only [application/x-www-form-urlencoded] posts
         reach a form action; a [multipart/form-data] post (a file input) is
         a 405. The 303, 403 and 413 carry the page's rule headers. A
         [redirect output] that is not a path ([/x], not [//x]) or an [http:] or

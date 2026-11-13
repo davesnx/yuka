@@ -704,7 +704,7 @@ let action_mark_cases =
     ( "an action answer carries the mark of the node",
       fun () ->
         let echo = Action.mutation ~name:"mark-echo" ~input:Codec.int ~output:Codec.int in
-        Server.Action.implement echo (fun _ n ->
+        Server.Action.make echo (fun _ n ->
             Live.publish shared_topic "m" n;
             Async.return n);
         let header = function

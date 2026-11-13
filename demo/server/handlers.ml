@@ -7,11 +7,11 @@ let publish_issue (issue : Model.Issue.t) =
   List.iter (fun view -> Yuka.Server.Live.publish Topics.issues view (view_issues view)) [ Queries.All; Queries.Mine ]
 
 let register () =
-  Yuka.Server.Action.implement Queries.labels (fun _ () -> Yuka.Async.return (Store.label_counts ()));
+  Yuka.Server.Action.make Queries.labels (fun _ () -> Yuka.Async.return (Store.label_counts ()));
   Yuka.Server.Live.serve Topics.issues (fun view -> Yuka.Async.return (view_issues view));
   Yuka.Server.Live.serve Topics.issue (fun id ->
       match Store.find id with Some issue -> Yuka.Async.return issue | None -> Yuka.Server.Action.reject ("No issue " ^ id));
-  Yuka.Server.Action.implement Actions.update_issue
+  Yuka.Server.Action.make Actions.update_issue
     (fun _ ({ id; status; priority } : Actions.update_input) ->
       match Store.update ~id ?status ?priority () with
       | Some issue ->
@@ -32,7 +32,7 @@ let register () =
             let issue = Store.create ~title ~description ~status ~priority in
             publish_issue issue;
             Yuka.Async.return (Ok issue));
-  Yuka.Server.Action.implement Actions.add_comment
+  Yuka.Server.Action.make Actions.add_comment
     (fun _ { issue_id; body } ->
       match Store.find issue_id with
       | Some _ when String.trim body <> "" -> Yuka.Async.return (Store.add_comment ~issue_id ~body)

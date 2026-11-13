@@ -293,7 +293,7 @@ let saved = ref []
 let whoami = Yuka.Action.mutation ~name:"whoami" ~input:Yuka.Codec.unit ~output:Yuka.Codec.string
 
 let () =
-  Server.Action.implement whoami (fun ctx () ->
+  Server.Action.make whoami (fun ctx () ->
       Async.return
         (String.concat " "
            [
