@@ -3,7 +3,24 @@ open Base
 
   let escape = Template_build.escape
 
-  let add_escaped = Template_build.add_escaped
+  let put b s start i entity =
+    Buffer.add_substring b s start (i - start);
+    Buffer.add_string b entity;
+    i + 1
+
+  let add_escaped b ~quote s =
+    let n = String.length s in
+    let start = ref 0 and i = ref (Web.skip_clean s 0) in
+    while !i < n do
+      (match String.unsafe_get s !i with
+      | '&' -> start := put b s !start !i "&amp;"
+      | '<' -> start := put b s !start !i "&lt;"
+      | '>' when not quote -> start := put b s !start !i "&gt;"
+      | '"' when quote -> start := put b s !start !i "&quot;"
+      | _ -> ());
+      i := Web.skip_clean s (!i + 1)
+    done;
+    Buffer.add_substring b s !start (n - !start)
 
   let blocked_logged = ref false
 
@@ -15,7 +32,7 @@ open Base
 
   let add_attr b ?(literal = false) ~tag name value =
     if not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ String.escaped name);
-    let tag = String.lowercase_ascii tag and lname = String.lowercase_ascii name in
+    let tag = Web.lowercase tag and lname = Web.lowercase name in
     let value = if literal && Url.html_sink ~tag lname then value else Url.check ~tag ~log:log_blocked lname value in
     Buffer.add_char b ' ';
     Buffer.add_string b name;
@@ -125,7 +142,7 @@ open Base
     l
 
   let needs_special tag =
-    match String.lowercase_ascii tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
+    match Web.lowercase tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
 
   type namespace = Html | Svg | Math | Select
 
@@ -182,7 +199,7 @@ open Base
     if Array.length t.ops = 0 then t.ops <- compile (Template.shape t);
     t.ops
 
-  let kept_buffer = 262_144
+  let kept_buffer = 1_048_576
 
   let rec print s build =
     let b = match Web.take_buffer () with Some b -> b | None -> Buffer.create 4096 in
@@ -314,17 +331,36 @@ open Base
               | Open (tag, attrs) ->
                   Buffer.add_char b '<';
                   Buffer.add_string b tag;
-                  (if needs_special tag then ignore (special tag (Template.expand_attrs parts attrs))
-                   else
-                     List.iter
-                       (function
-                         | Fixed (n, v) -> add_attr b ~literal:true ~tag n v
-                         | Part_attr i -> (
-                             match parts.(i) with
-                             | Attribute (Static (n, v)) -> add_attr b ~tag n v
-                             | Attribute (Dynamic (n, f)) -> Option.iter (add_attr b ~tag n) (f ())
-                             | Attribute (Handler _) | Child _ | No_attribute -> ()))
-                       attrs);
+                  (match s.current with
+                  | Some path when needs_special tag && not (hydrating ()) ->
+                      let href = ref None and current = ref false in
+                      let add n v =
+                        if n = "href" then (if Option.is_none !href then href := Some v)
+                        else if n = "aria-current" then current := true;
+                        add_attr b ~tag n v
+                      in
+                      List.iter
+                        (function
+                          | Fixed (n, v) -> add n v
+                          | Part_attr i -> (
+                              match parts.(i) with
+                              | Attribute (Static (n, v)) -> add n v
+                              | Attribute (Dynamic (n, f)) -> Option.iter (add n) (f ())
+                              | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                        attrs;
+                      (match !href with
+                      | Some h when String.equal h path && not !current -> add_attr b ~tag "aria-current" "page"
+                      | _ -> ())
+                  | _ ->
+                      List.iter
+                        (function
+                          | Fixed (n, v) -> add_attr b ~literal:true ~tag n v
+                          | Part_attr i -> (
+                              match parts.(i) with
+                              | Attribute (Static (n, v)) -> add_attr b ~tag n v
+                              | Attribute (Dynamic (n, f)) -> Option.iter (add_attr b ~tag n) (f ())
+                              | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                        attrs);
                   Buffer.add_char b '>';
                   after_text := false
               | Subtree shape -> go (Template.expand_shape parts shape)

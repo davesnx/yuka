@@ -46,6 +46,9 @@ cycle); `dune build @runtest` compares it, so a speed change cannot change
 the bytes. `ocaml/render.exe [N]` times N renders in process, with no HTTP,
 and prints microseconds and words allocated per page.
 
+The bench does not set the OCaml minor heap (`OCAMLRUNPARAM=s=...`); see
+"Large pages and the minor heap" in `docs/getting-started.md`.
+
 Needs `wrk` on the `PATH`. `server-reason-react` is out of the build
 until `quickjs` supports dune 3.25 (see `ocaml/dune`); the numbers below for
 it are from before.
