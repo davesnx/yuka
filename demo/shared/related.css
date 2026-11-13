@@ -1,4 +1,4 @@
-.related { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--border); }
-.related-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.related-list li { display: flex; gap: 6px; align-items: center; }
+.related { margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--border); }
+.related-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.related-list li { display: flex; gap: 7px; align-items: center; }
 .related-list a:hover { text-decoration: underline; }

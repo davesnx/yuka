@@ -72,6 +72,8 @@ let () =
     Yuka.Server.config ~assets
       ~public:[ ("/static", !static_dir) ]
       ?prerendered:(if !prerendered = "" then None else Some !prerendered)
+      ~head:
+        {|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="/static/favicon.svg">|}
       ~styles:[ "/static/style.css" ] ~css:Demo_app.Yuka_css.sheets
       ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
       ()

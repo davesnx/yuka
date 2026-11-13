@@ -1,8 +1,8 @@
-.fields { display: grid; grid-template-columns: max-content 1fr max-content; gap: 10px 14px; align-items: center; max-width: 640px; }
+.fields { display: grid; grid-template-columns: max-content 1fr max-content; gap: 12px 17px; align-items: center; max-width: 768px; }
 .fields input[type="text"], .fields textarea, .fields select {
   font: inherit; color: inherit; background: none;
-  border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
 }
 .state { color: var(--muted); font-variant-numeric: tabular-nums; }
-.status { margin: 0 0 16px; color: var(--muted); }
+.status { margin: 0 0 19px; color: var(--muted); }
 .status.ready { color: inherit; }
