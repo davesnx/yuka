@@ -162,10 +162,10 @@ install: ## Install the opam dependencies, the dev packages, ocaml-lsp-server an
 	opam install -y $(DEV_PACKAGES) ocaml-lsp-server ocamlmerlin-mlx
 
 # server-reason-react is out until quickjs supports dune 3.25: see bench/ssr/ocaml/dune
-DEV_PACKAGES =
+DEV_PACKAGES = cmarkit ochre tm-grammars
 
 .PHONY: dev-packages
-dev-packages: ## List opam packages the benchmarks need that are not in the opam files
+dev-packages: ## List opam packages the benchmarks and the demo need that are not in the opam files
 	@echo "$(DEV_PACKAGES)"
 
 .PHONY: pin-list

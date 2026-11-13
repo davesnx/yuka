@@ -94,6 +94,31 @@ let date seed =
   let last_day = if month = "Nov" then 6 else 28 in
   Printf.sprintf "%s %d" month (1 + (mix (seed + 1) mod last_day))
 
+let snippets =
+  [|
+    ("ocaml", "let rec retry ~attempts run =\n  match run () with\n  | Ok value -> Ok value\n  | Error _ when attempts > 1 -> retry ~attempts:(attempts - 1) run\n  | Error message -> Error message");
+    ("typescript", "const started = performance.now();\nawait page.goto(url, { waitUntil: \"networkidle\" });\nconsole.log(`loaded in ${performance.now() - started} ms`);");
+    ("javascript", "document.querySelectorAll(\"yuka-island\").forEach((island) => {\n  console.log(island.dataset.name, island.dataset.start);\n});");
+    ("shell", "make build && make test\nPORT=8220 make e2e");
+    ("json", "{\n  \"status\": \"In_progress\",\n  \"priority\": \"High\",\n  \"labels\": [\"perf\", \"server\"]\n}");
+    ("css", ".row:hover {\n  background: var(--bg-hover);\n}");
+  |]
+
+let code_block seed =
+  let language, code = pick seed snippets in
+  Printf.sprintf "```%s\n%s\n```" language code
+
+let markdown_description seed =
+  Printf.sprintf "%s\n\n## Steps\n\n1. %s\n2. %s\n\n%s\n\n| Browser | Result |\n| --- | --- |\n| Chrome | %s |\n| Firefox | %s |"
+    (pick (seed 1) findings) (pick (seed 2) next_steps) (pick (seed 3) next_steps) (code_block (seed 4))
+    (pick (seed 5) [| "fails"; "passes" |]) (pick (seed 6) [| "fails"; "passes"; "not tested" |])
+
+let markdown_comment seed =
+  match mix (seed 1) mod 3 with
+  | 0 -> Printf.sprintf "%s\n\n%s" (pick (seed 2) remarks) (code_block (seed 3))
+  | 1 -> Printf.sprintf "Two notes:\n\n- %s\n- %s" (pick (seed 2) remarks) (pick (seed 3) remarks)
+  | _ -> Printf.sprintf "**%s** See `%s` in the [docs](https://github.com/davesnx/yuka)." (pick (seed 2) remarks) (pick (seed 3) [| "Yuka.Await"; "Yuka.each"; "Yuka.State.set" |])
+
 let issue ~(users : User.t array) number : Issue.t =
   let seed salt = (number * 7919) + salt in
   let title =
@@ -107,7 +132,9 @@ let issue ~(users : User.t array) number : Issue.t =
     id = Printf.sprintf "%s-%d" (Workspace.issue_prefix Stress) number;
     workspace = Stress;
     title;
-    description = pick (seed 6) findings ^ " " ^ pick (seed 7) next_steps;
+    description =
+      (if mix (seed 13) mod 4 = 0 then markdown_description (fun salt -> seed (20 + salt))
+       else pick (seed 6) findings ^ " " ^ pick (seed 7) next_steps);
     status = pick (seed 8) statuses;
     priority = pick (seed 9) priorities;
     assignee = (if mix (seed 10) mod 4 = 0 then None else Some (pick (seed 11) users));
@@ -126,12 +153,14 @@ let comments ~(users : User.t array) (issue : Issue.t) : Comment.t list =
         let sentences = 1 + (mix (seed 1) mod 3) in
         let first = mix (seed 2) in
         let body =
-          String.concat " "
-            (List.init sentences (fun sentence -> remarks.((first + (sentence * 7)) mod Array.length remarks)))
+          if mix (seed 6) mod 8 = 0 then markdown_comment (fun salt -> seed (10 + salt))
+          else
+            String.concat " "
+              (List.init sentences (fun sentence -> remarks.((first + (sentence * 7)) mod Array.length remarks)))
         in
         {
           Comment.id = Printf.sprintf "%s-c%d" issue.id (index + 1);
           author = pick (seed 5) users;
-          body;
+          body = Markdown.render body;
           created_at = Printf.sprintf "Nov %d" (1 + (index * 6 / comments_per_issue));
         })

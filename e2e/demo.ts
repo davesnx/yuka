@@ -303,8 +303,8 @@ await step("3d. a page with no island loads no script", async () => {
   const scripts: string[] = [];
   pg.on("request", (r) => { if (r.resourceType() === "script") scripts.push(r.url()); });
   await pg.goto(base + "/about", { waitUntil: "networkidle" });
-  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && !s.textContent!.includes("yuka-demo-theme")).length);
-  check("3d.1 /about requests no script and has no inline script but the theme script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
+  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && !s.textContent!.includes("yuka-demo-theme") && !s.hasAttribute("data-code-style")).length);
+  check("3d.1 /about requests no script and has no inline script but the theme and code style scripts", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
   await pg.close();
 });
 
@@ -1484,6 +1484,80 @@ await step("7. comment", async () => {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector(".comment-input");
   check("7e.4 comment present after reload", (await page.locator(".comment", { hasText: body }).count()) === 1);
+});
+
+await step("7k. markdown and code style", async () => {
+  await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
+  await page.waitForSelector(".comment-input");
+  const markdown = await page.evaluate(() => ({
+    heading: document.querySelector(".issue-description h4")?.textContent,
+    cells: document.querySelectorAll(".issue-description td").length,
+    tokens: document.querySelectorAll(".issue-description .code-block span[style]").length,
+    commentTokens: document.querySelectorAll(".comment .code-block span[style]").length,
+    scripts: document.querySelectorAll(".issue-description script, .comment script").length,
+  }));
+  check("7k.1 the description is markdown with highlighted code", markdown.heading === "Measurements" && markdown.cells === 6 && markdown.tokens > 0 && markdown.scripts === 0, JSON.stringify(markdown));
+  check("7k.2 a stored comment has highlighted code", markdown.commentTokens > 0, String(markdown.commentTokens));
+  const look = () =>
+    page.evaluate(() => {
+      const block = document.querySelector(".issue-description .code-block") as HTMLElement;
+      const token = block.querySelector("span[style]") as HTMLElement;
+      return {
+        attribute: document.documentElement.getAttribute("data-code-theme"),
+        selected: (document.querySelector(".code-style-select") as HTMLSelectElement).value,
+        background: getComputedStyle(block).backgroundColor,
+        token: getComputedStyle(token).color,
+      };
+    });
+  const before = await look();
+  await page.evaluate(() => ((window as any).__codeStyleMarker = "kept"));
+  const mark = allRequests.length;
+  await page.selectOption(".code-style-select", "light");
+  const light = await look();
+  const requestsAfter = allRequests.slice(mark).filter((r) => !r.url.includes("/_yuka/live"));
+  check(
+    "7k.3 choosing a code style changes the colours with no request and no reload",
+    light.attribute === "light" && light.background === "rgb(255, 255, 255)" && light.token !== before.token && before.background !== light.background &&
+      requestsAfter.length === 0 && (await page.evaluate(() => (window as any).__codeStyleMarker)) === "kept",
+    `${JSON.stringify(before)} -> ${JSON.stringify(light)} requests=${requestsAfter.map((r) => r.url).join(",")}`,
+  );
+  await page.locator(".code-style-select").focus();
+  await page.keyboard.press("ArrowUp");
+  const keyboard = await look();
+  check("7k.4 the select works with the keyboard", keyboard.attribute === keyboard.selected && keyboard.attribute !== "light", JSON.stringify(keyboard));
+  await page.selectOption(".code-style-select", "light");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const firstPaint = await look();
+  check("7k.5 the choice is kept after a reload, before the scripts run", firstPaint.attribute === "light" && firstPaint.selected === "light" && firstPaint.background === "rgb(255, 255, 255)", JSON.stringify(firstPaint));
+  await page.waitForLoadState("networkidle");
+  await page.locator(".crumb").click();
+  await page.waitForSelector(".row");
+  await page.locator('.row[data-id="YUK-1"] .row-title').click();
+  await page.waitForURL("**/issue/YUK-1");
+  await page.waitForSelector(".comment-input");
+  const navigated = await look();
+  check("7k.6 the choice is kept after a client navigation", navigated.attribute === "light" && navigated.selected === "light" && navigated.background === "rgb(255, 255, 255)", JSON.stringify(navigated));
+  await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
+  await page.waitForSelector(".comment-input");
+  const body = `**Bold ${run}** and \`code\`\n\n\`\`\`ocaml\nlet answer = 42\n\`\`\``;
+  await page.route("**/_yuka/action/**", async (route) => {
+    await new Promise((r) => setTimeout(r, 600));
+    await route.continue();
+  });
+  await page.fill(".comment-input", body);
+  await page.getByRole("button", { name: "Comment" }).click();
+  await page.waitForTimeout(150);
+  const pending = await page.locator(".comment", { hasText: `**Bold ${run}**` }).count();
+  check("7k.7 the new comment shows its text at once", pending === 1, String(pending));
+  await page.waitForSelector(`.comment strong:text("Bold ${run}")`, { timeout: 5000 });
+  await page.unroute("**/_yuka/action/**");
+  const saved = await page.evaluate((run) => {
+    const strong = [...document.querySelectorAll(".comment strong")].find((element) => element.textContent === `Bold ${run}`);
+    const comment = strong?.closest(".comment");
+    return { code: comment?.querySelector("p code")?.textContent, tokens: comment?.querySelectorAll(".code-block span[style]").length ?? 0 };
+  }, run);
+  check("7k.8 the saved comment is markdown with highlighted code, with no reload", saved.code === "code" && saved.tokens > 0, JSON.stringify(saved));
+  await page.evaluate(() => localStorage.removeItem("yuka-demo-code-theme"));
 });
 
 await step("8. 404", async () => {

@@ -365,7 +365,7 @@ let stress_actions () =
   | Error message -> Alcotest.failf "comment failed: %s" message);
   let comments = Store.comments_of "STR-3" in
   Alcotest.(check int) "generated and added" 201 (List.length comments);
-  Alcotest.(check string) "the added one is last" "Kept" (List.nth comments 200).body;
+  Alcotest.(check bool) "the added one is last" true ((List.nth comments 200).body = Model.Markup.of_text "Kept");
   let headers = [ ("Content-Type", "application/x-www-form-urlencoded"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
   let status, response, _ =
     call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=stress&title=From+a+stress+form&description=&status=todo&priority=low" "/w/stress/new"
@@ -432,6 +432,102 @@ let live_publish () =
   | Error message -> Alcotest.failf "update failed: %s" message);
   Alcotest.(check (list int)) "a stress change goes to the stress list only" [ 4 ] (state_ids ())
 
+let markdown_page () =
+  let html = get "/issue/YUK-1" in
+  has html {|<div class="issue-description markdown"><p>A hole inside an <code>each</code> item|};
+  has html "<h3>Steps</h3><ol><li>Open the issue list.</li>";
+  has html "<strong>first hole</strong>";
+  has html "<blockquote><p>The client looks";
+  has html {|<a href="https://github.com/davesnx/yuka/blob/main/docs/islands.md" rel="nofollow noopener">hydration notes</a>|};
+  has html {|<pre class="code-block" tabindex="0" data-language="ocaml"><code><span style="--c0:|};
+  has html {|<select class="code-style-select" aria-label="Code style"|};
+  has html {|<code>print_hole</code> skips the closing marker when the item is <strong>empty</strong>|};
+  has html {|["code",{},"print_hole"]|};
+  let html = get "/issue/YUK-19" in
+  has html {|<div class="table-scroll"><table><thead><tr><th style="text-align:left">Page</th>|};
+  has html {|<td style="text-align:right">82 ms</td>|};
+  has html "<hr>";
+  has html {|data-language="sh"|};
+  let html = get "/issue/YUK-25" in
+  has html {|<li class="task"><input type="checkbox" disabled="" checked=""> Collect the changes|};
+  let html = get "/issue/YUK-2" in
+  has html {|<pre class="code-block" tabindex="0" data-language="css"><code><span style="--c0:|};
+  let issue = Option.get (Store.find "YUK-1") in
+  let rendered = Markdown.render issue.description in
+  Alcotest.(check bool) "markup survives the codec" true
+    (Yuka.Codec.decode (Yuka.Codec.list Model.Markup.node_codec) (Yuka.Codec.encode (Yuka.Codec.list Model.Markup.node_codec) rendered) = Ok rendered)
+
+let rec highlighted (node : Model.Markup.node) =
+  match node with
+  | Element { tag = "pre"; attributes; children = [ Element { children; _ } ] } when List.mem_assoc "data-language" attributes ->
+      List.exists (function Model.Markup.Element { tag = "span"; _ } -> true | _ -> false) children
+  | Element { children; _ } -> List.for_all highlighted children
+  | Text _ -> true
+
+let seed_code_is_highlighted () =
+  let sources =
+    List.map (fun (issue : Model.Issue.t) -> issue.description) (Store.seed @ Stress.issues ~users:(Array.of_list Store.users))
+    @ Array.to_list (Array.map (fun (language, code) -> Printf.sprintf "```%s\n%s\n```" language code) Stress.snippets)
+  in
+  List.iter
+    (fun source -> if not (List.for_all highlighted (Markdown.render source)) then Alcotest.failf "a code block is not highlighted in@.%s" source)
+    sources;
+  Alcotest.(check bool) "an unknown language is plain text" true
+    (Markdown.render "```cobol\nDISPLAY 'HI'.\n```"
+    = [ Element { tag = "pre"; attributes = [ ("class", "code-block"); ("tabindex", "0"); ("data-language", "cobol") ]; children = [ Element { tag = "code"; attributes = []; children = [ Text "DISPLAY 'HI'." ] } ] } ])
+
+let hostile =
+  String.concat "\n"
+    [
+      "<script>alert('block')</script>";
+      "";
+      "Inline <img src=\"x\" onerror=\"alert('inline')\"> html and <b onclick=alert(1)>bold</b>.";
+      "";
+      "[js](javascript:alert('link')) [upper](JAVASCRIPT:alert(2)) [tab](java&#9;script:alert(3)) [data](data:text/html,<b>x</b>) <javascript:alert(4)>";
+      "";
+      "[web](https://example.com/a?b=1) [page](/w/stress) [mail](mailto:team@example.com) [anchor](#steps)";
+      "";
+      "```html";
+      "<script>alert('code')</script>";
+      "```";
+    ]
+
+let unsafe_markdown html =
+  List.iter (lacks html)
+    [ "<script>alert"; "<img src=\"x\""; "<b onclick"; {|href="java|}; {|href="JAVA|}; {|href="data|}; {|"href":"java|}; {|"href":"JAVA|}; {|"href":"data|} ];
+  has html "<p>js upper tab data javascript:alert(4)</p>";
+  has html "&lt;b onclick=alert(1)&gt;bold&lt;/b&gt;";
+  has html {|<a href="https://example.com/a?b=1" rel="nofollow noopener">web</a>|};
+  has html {|<a href="/w/stress" rel="nofollow noopener">page</a>|};
+  has html {|<a href="mailto:team@example.com" rel="nofollow noopener">mail</a>|};
+  has html {|<a href="#steps" rel="nofollow noopener">anchor</a>|};
+  has html {|<pre class="code-block" tabindex="0" data-language="html"><code>&lt;script&gt;alert('code')&lt;/script&gt;</code></pre>|}
+
+let markdown_safety () =
+  let created =
+    match
+      settle
+        (Yuka.Action.call Actions.create_issue
+           { Actions.workspace = Model.Workspace.Yuka; title = "Hostile markdown"; description = hostile; status = Model.Issue.Todo; priority = Model.Issue.Low })
+    with
+    | Ok (Ok (issue : Model.Issue.t)) -> issue
+    | _ -> Alcotest.fail "create failed"
+  in
+  let page = "/issue/" ^ created.id in
+  let html = get page in
+  unsafe_markdown html;
+  Alcotest.(check int) "raw HTML shown as text in the description" 1 (count html {|&lt;img src="x" onerror="alert('inline')"&gt;|});
+  let status, _, answer =
+    call ~meth:`POST ~headers:[ ("Content-Type", "application/json"); ("Origin", "http://demo.test"); ("Host", "demo.test") ]
+      ~body:(Yuka.Json.to_string (`Assoc [ ("issue_id", `String created.id); ("body", `String hostile) ])) "/_yuka/action/add_comment"
+  in
+  Alcotest.(check int) "comment status" 200 status;
+  List.iter (lacks answer) [ {|"href":"java|}; {|"href":"JAVA|}; {|"href":"data|}; "<script" ];
+  has answer {|["a",{"href":"https://example.com/a?b=1","rel":"nofollow noopener"},"web"]|};
+  let html = get page in
+  unsafe_markdown html;
+  Alcotest.(check int) "raw HTML shown as text in the description and the comment" 2 (count html {|&lt;img src="x" onerror="alert('inline')"&gt;|})
+
 let () =
   Handlers.register ();
   Alcotest.run "demo"
@@ -453,6 +549,9 @@ let () =
           Alcotest.test_case "prerendered /about, GET and HEAD" `Quick prerendered;
           Alcotest.test_case "the new issue form posts with no JavaScript" `Quick form_post;
           Alcotest.test_case "action route" `Quick action_route;
+          Alcotest.test_case "markdown in the issue page" `Quick markdown_page;
+          Alcotest.test_case "markdown keeps out HTML and unsafe links" `Quick markdown_safety;
+          Alcotest.test_case "code in the seed data is highlighted" `Quick seed_code_is_highlighted;
         ] );
       ( "actions",
         [

@@ -49,6 +49,24 @@ During a client navigation that takes more than 120 ms, a thin bar at the
 top of the window grows; it fills and fades out when the new page is shown.
 The `Nav_progress` island reads `Yuka.Browser.navigating`.
 
+## Markdown
+
+Issue descriptions and comments are markdown (CommonMark with tables, task
+lists and strikethrough). The server renders them with `cmarkit` and
+highlights fenced code with `ochre` (`server/markdown.ml`,
+`server/code_style.ml`); no markdown code goes to the browser. Raw HTML is
+shown as text, and a link keeps its URL only for `http`, `https`, `mailto`
+and relative URLs. Code in OCaml, JavaScript, TypeScript, shell, JSON and
+CSS is highlighted; another language is plain text. A new comment shows its
+text at once and its rendered form when the server answers.
+
+The code style select on the issue page sets `data-code-theme` on `<html>`
+and keeps the choice in `localStorage`; each code token carries the colours
+of every style, so a change needs no request. A script in the document head
+sets the attribute before the page paints. The demo needs the opam packages
+`cmarkit`, `ochre` and `tm-grammars` (`make install` installs them) and the
+oniguruma library (`conf-oniguruma`).
+
 ## URLs
 
 - `http://localhost:8080/`: all issues of `yuka`, grouped by status.

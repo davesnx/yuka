@@ -80,8 +80,8 @@ let () =
       ?prerendered:(if !prerendered = "" then None else Some !prerendered)
       ~head:
         ({|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="/static/favicon.svg">|}
-        ^ theme_script)
-      ~styles:[ "/static/style.css" ] ~css:Demo_app.Yuka_css.sheets
+        ^ theme_script ^ Demo_app.Code_style.head)
+      ~styles:[ "/static/style.css"; "/static/markdown.css" ] ~css:Demo_app.Yuka_css.sheets
       ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
       ()
   in

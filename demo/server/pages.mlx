@@ -45,7 +45,8 @@ let issue_view ?(delay = 0.6) (issue : Model.Issue.t) : Yuka.server Yuka.element
       </Issue_props>
     </Yuka.Client>
   in
-  <Views.Issue_page issue comments props />
+  let description = Markup_view.nodes (Markdown.render issue.description) in
+  <Views.Issue_page issue description code_style=(Code_style.picker ()) comments props />
 
 let issue ~id ~issue () = Yuka.Server.page ~title:id (fun () -> issue_view issue)
 
