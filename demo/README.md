@@ -76,6 +76,8 @@ oniguruma library (`conf-oniguruma`).
   list page reads `q` and `label`, and the server renders the filtered
   list. Typing in the filter or a click on a label changes the URL with
   `Yuka.Browser.replace_url`, so a reload, back and a shared link keep it.
+  The label row shows the labels that fit on one line, chosen labels
+  first; the dots button opens a popover menu with all labels.
 - `http://localhost:8080/new`: the new issue form of `yuka`.
 - `http://localhost:8080/insights`: charts of the issues of `yuka`, drawn
   in SVG by one island (`shared/insights.mlx`). The server prints them, and

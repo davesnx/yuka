@@ -877,6 +877,51 @@ await step("6g. workspaces", async () => {
   check("6g.17 the sidebar links stay in the workspace", nav === "/w/stress=page /w/stress/my=null /w/stress/insights=null", nav);
 });
 
+await step("6i. the label menu", async () => {
+  const pg = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await pg.goto(base + "/w/stress", { waitUntil: "networkidle" });
+  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 5000 });
+  const sideways = () => pg.evaluate(() => { const chips = document.querySelector(".chips")!; return chips.scrollWidth - chips.clientWidth; });
+  const shown = () => pg.evaluate(() => {
+    const bottom = document.querySelector(".chips")!.getBoundingClientRect().bottom;
+    return [...document.querySelectorAll(".chips .chip")].filter((chip) => chip.getBoundingClientRect().top < bottom).map((chip) => chip.getAttribute("data-label") ?? "");
+  });
+  const visibleAt1280 = await shown();
+  check("6i.1 the stress chip row is one line that does not scroll sideways at 1280 px", (await sideways()) <= 0 && visibleAt1280.length > 0 && visibleAt1280.length < 30, `${await sideways()} ${visibleAt1280.length}`);
+  const menuLabels = await pg.locator("#labels-menu [data-label]").count();
+  await pg.locator("#labels-button").click();
+  await pg.waitForSelector("#labels-menu:popover-open");
+  const items = await pg.locator('#labels-menu [role="menuitemcheckbox"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-label") ?? ""));
+  const firstFocused = await pg.evaluate(() => document.activeElement?.getAttribute("data-label"));
+  check("6i.2 the dots button opens a menu with every label, the first one focused", menuLabels === 0 && items.length === 30 && firstFocused === items[0], `${items.length} ${firstFocused}`);
+  const hidden = items.filter((label) => !visibleAt1280.includes(label)).at(-1) ?? "";
+  await pg.keyboard.press("End");
+  const lastFocused = await pg.evaluate(() => document.activeElement?.getAttribute("data-label"));
+  await pg.keyboard.press("Space");
+  await pg.waitForURL(`**/w/stress?label=${hidden}`);
+  await pg.waitForSelector(`#labels-menu [data-label="${hidden}"][aria-checked="true"]`);
+  const rows = await pg.locator(".row").evaluateAll((nodes, label) => nodes.map((node) => !!node.querySelector(".label-" + label)), hidden);
+  check("6i.3 End and Space choose a hidden label: the URL and the rows follow, the menu stays open",
+    lastFocused === hidden && rows.length > 0 && rows.length < 200 && rows.every(Boolean) && (await pg.locator("#labels-menu:popover-open").count()) === 1, `${hidden} ${lastFocused} ${rows.length}`);
+  const chosenShown = (await shown()).includes(hidden) && (await pg.locator(`.chips .chip.on[data-label="${hidden}"]`).count()) === 1;
+  check("6i.4 the chosen hidden label moves into the visible row", chosenShown, (await shown()).join(","));
+  await pg.keyboard.press("Escape");
+  await pg.waitForSelector("#labels-menu:popover-open", { state: "detached" });
+  check("6i.5 Escape closes the menu and focus goes back to the dots button", (await pg.evaluate(() => document.activeElement?.id)) === "labels-button");
+  await pg.locator("#labels-button").click();
+  await pg.waitForSelector("#labels-menu:popover-open");
+  await pg.locator(".page-header").first().click();
+  await pg.waitForSelector("#labels-menu:popover-open", { state: "detached" });
+  check("6i.6 a click outside closes the menu", (await pg.locator("#labels-menu:popover-open").count()) === 0);
+  await pg.setViewportSize({ width: 390, height: 800 });
+  await pg.waitForFunction((label) => {
+    const bottom = document.querySelector(".chips")!.getBoundingClientRect().bottom;
+    return document.querySelector(`.chips .chip[data-label="${label}"]`)!.getBoundingClientRect().top < bottom;
+  }, hidden, { timeout: 5000 }).catch(() => {});
+  check("6i.7 at 390 px the row does not scroll sideways and keeps the chosen label", (await sideways()) <= 0 && (await shown()).includes(hidden), `${await sideways()} ${(await shown()).join(",")}`);
+  await pg.close();
+});
+
 await step("6h. insights", async () => {
   const errors: string[] = [];
   const pg = await browser.newPage({ viewport: { width: 1280, height: 800 } });
