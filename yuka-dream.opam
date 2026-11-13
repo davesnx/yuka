@@ -9,7 +9,7 @@ license: "MIT"
 homepage: "https://github.com/davesnx/yuka"
 bug-reports: "https://github.com/davesnx/yuka/issues"
 depends: [
-  "dune" {>= "3.26"}
+  "dune" {>= "3.25"}
   "ocaml" {>= "5.4"}
   "yuka" {= version}
   "dream" {>= "1.0.0~alpha8"}

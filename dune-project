@@ -1,4 +1,4 @@
-(lang dune 3.26)
+(lang dune 3.25)
 
 (using melange 1.0)
 
