@@ -1,7 +1,7 @@
 # Yuka v0.1 design
 
 Status: decided by the agent on 2026-11-06, as the user asked. Earlier
-decisions: `brain-dump/DECISIONS.md`. Each item here can change; a change is
+decisions: `.workplace/docs/brain-dump/DECISIONS.md`. Each item here can change; a change is
 recorded here first.
 
 This file is a log. The sections up to "Demo: mini Linear" describe the
