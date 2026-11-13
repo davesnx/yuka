@@ -1077,7 +1077,16 @@ await step("6i. report and canvas", async () => {
     { timeout: 2000 },
   ).then(() => true, () => false);
   check("6i.6 the second page gets the move over Live", seen, `${grip.id} in B: ${await card(B).getAttribute("style")}`);
-  check("6i.7 no console error and no hydration mismatch on /report and /canvas", errors.length === 0, errors.join(" | "));
+  await A.locator('[aria-label="Note text"]').fill("e2e note");
+  await A.locator("button", { hasText: /^Add note$/ }).click();
+  const note = A.locator("[data-canvas] [data-id^='note-']", { hasText: "e2e note" });
+  await note.waitFor({ timeout: 5000 });
+  await note.locator("button").click();
+  await note.waitFor({ state: "detached", timeout: 5000 });
+  await A.waitForTimeout(300);
+  const noteErrors = await A.locator("[data-canvas] .error").allTextContents();
+  check("6i.7 a note is added and removed with no error message", noteErrors.length === 0, noteErrors.join(" | "));
+  check("6i.8 no console error and no hydration mismatch on /report and /canvas", errors.length === 0, errors.join(" | "));
   await A.close();
   await B.close();
 });
