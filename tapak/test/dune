@@ -1,0 +1,26 @@
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka} routes --shared --source %{dep:tree/Routes.ml}))))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Routes
+    --source
+    %{dep:tree/Routes.ml}))))
+
+(test
+ (name run)
+ (package yuka-tapak)
+ (modules app routes yuka_routes run)
+ (libraries alcotest yuka yuka-tapak tapak cows eio eio_main eio.unix http bytesrw logs unix))
