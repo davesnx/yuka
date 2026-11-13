@@ -91,7 +91,7 @@ module Header = struct
       <nav class_="workspaces" aria_label="Workspaces">(Yuka.fragment (List.map switch Workspace.all))</nav>
       <div class_="topbar-end">
         <div class_="topbar-tools">
-          <Yuka.Client><Theme_menu /></Yuka.Client>
+          <Yuka.Client start=`Idle><Theme_menu /></Yuka.Client>
           <Yuka.Client start=`Idle><Nav_progress /></Yuka.Client>
         </div>
         <span class_="topbar-divider" aria_hidden=true />
@@ -108,12 +108,18 @@ module Header = struct
 end
 
 module Shell = struct
-  let make ~workspace ~sidebar ~children () : _ Yuka.element =
+  let make ~workspace ~commit ~sidebar ~children () : _ Yuka.element =
     let links = [ (Links.issues workspace, "Issues"); (Links.my_issues workspace, "My issues"); (Links.insights workspace, "Insights"); (Links.report workspace, "Report"); (Links.canvas workspace, "Canvas") ] in
     <div class_="app">
       <Header workspace />
       <div class_="app-body">
         <aside class_="sidebar">
+          (match commit with
+           | Some hash ->
+               <a class_="version" href=("https://github.com/davesnx/yuka/commit/" ^ hash) target=`_blank rel="noopener">
+                 (Yuka.text (String.sub hash 0 (min 7 (String.length hash))))
+               </a>
+           | None -> <span class_="version">"dev"</span>)
           <nav class_="nav">
             (Yuka.fragment (List.map (fun (href, label) -> <a class_="nav-link" href>(Yuka.text label)</a>) links))
           </nav>

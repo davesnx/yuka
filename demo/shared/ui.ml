@@ -1,4 +1,5 @@
 let dialog_open = Yuka.State.make false
+let dialog_asked = Yuka.State.make false
 
 let typing event =
   match Yuka.Event.target_tag event with

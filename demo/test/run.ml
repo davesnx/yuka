@@ -37,11 +37,11 @@ let index () =
   has html "My issues";
   has html "<a class=\"nav-link\" href=\"/\" aria-current=\"page\">Issues</a>";
   has html "<yuka-island data-name=\"Demo_shared.Issue_list\" data-id=\"i";
-  has html "<yuka-island data-name=\"Demo_shared.New_issue\"";
+  has html "<yuka-island data-name=\"Demo_shared.New_issue\" data-id=\"i3\" style=\"display:contents\" data-start=\"interaction\">";
   has html "<yuka-island data-name=\"Demo_shared.Nav_progress\" data-id=\"i2\" style=\"display:contents\" data-start=\"idle\">";
   has html "<script type=\"module\" async src=\"/_yuka/app/demo/client/main.js\"></script>";
   has html "data-start=\"idle\"";
-  lacks html "data-start=\"interaction\"";
+  lacks html "Demo_shared.Issue_props";
   has html "\"id\":\"YUK-1\"";
   has html "\"status\":\"In_progress\"";
   has html "Hydration mismatch on nested holes";
@@ -107,6 +107,7 @@ let not_found () =
   let _, _, html = call "/issue/a%20b" in
   has html "There is no issue a b.";
   has html "class=\"sidebar\"";
+  has html {|<span class="version">dev</span>|};
   let status, _, html = call "/nowhere" in
   Alcotest.(check int) "status" 404 status;
   has html "Page not found"
@@ -214,6 +215,7 @@ let report () =
   Alcotest.(check int) "a point per issue" 25 (count html {| r="2"|});
   lacks html "Demo_shared.Insights";
   lacks html "data-yuka-answer";
+  has html {|The server draws these charts and sends them as SVG in the HTML of the page.|};
   let html = get "/w/stress/report" in
   has html {|<a class="nav-link" href="/w/stress/report" aria-current="page">Report</a>|};
   Alcotest.(check int) "a point per stress issue" 2000 (count html {| r="2"|})
@@ -227,6 +229,7 @@ let canvas () =
   Alcotest.(check int) "a card per issue" 25 (count html {|<div data-id="YUK-|});
   has html {|href="/issue/YUK-1">Hydration mismatch on nested holes</a>|};
   lacks html "The board shows at most";
+  has html "<dd>In the memory of this server process</dd>";
   let html = get "/w/stress/canvas" in
   has html {|<a class="nav-link" href="/w/stress/canvas" aria-current="page">Canvas</a>|};
   Alcotest.(check int) "a card per stress issue, up to the limit" Board.card_limit (count html {|<div data-id="STR-|});
@@ -663,6 +666,12 @@ let markdown_safety () =
   unsafe_markdown html;
   Alcotest.(check int) "raw HTML shown as text in the description and the comment" 2 (count html {|&lt;img src="x" onerror="alert('inline')"&gt;|})
 
+let region_of_host () =
+  Alcotest.(check (option string)) "neon" (Some "eu-central-1, aws") (Store.region_of_host "ep-name-123456.eu-central-1.aws.neon.tech");
+  Alcotest.(check (option string)) "neon with a cell" (Some "us-east-1, aws")
+    (Store.region_of_host "ep-name-123456.c-2.us-east-1.aws.neon.tech");
+  Alcotest.(check (option string)) "other host" None (Store.region_of_host "db.example.com")
+
 let () =
   Handlers.register ();
   Alcotest.run "demo"
@@ -697,6 +706,7 @@ let () =
           Alcotest.test_case "workspaces are kept apart" `Quick stress_actions;
           Alcotest.test_case "board moves, notes and shuffle" `Quick board_actions;
         ] );
+      ("store", [ Alcotest.test_case "region of a database host" `Quick region_of_host ]);
       ( "live",
         [
           Alcotest.test_case "pages embed the live state and a token" `Quick live_answers;

@@ -33,7 +33,10 @@ form and live updates:
   visitor adds are stored after them.
 
 The header links to each workspace (the current one is marked), to the
-repository on GitHub and to `@davesnx` on X.
+repository on GitHub and to `@davesnx` on X. The sidebar starts with the
+version of the running build: the first 7 characters of the commit in
+`VERCEL_GIT_COMMIT_SHA`, linked to the commit on GitHub, or `dev` when the
+variable is not set.
 
 ## Themes and the progress bar
 
@@ -118,7 +121,12 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   board). The first positions come from the issue numbers; Shuffle and
   new notes use random positions. A board shows at most 200 issues
   (`Board.card_limit`), the first ones of the workspace; on `stress` the
-  header says so.
+  header says so. A bar under the board says where the
+  data is: in the memory of the server process, or the Postgres database
+  (provider, version, region and name). With a database, it says that
+  the servers send changes to each other over `LISTEN`/`NOTIFY`. It also
+  shows the Vercel region of the server (`VERCEL_REGION`) and a random id
+  of the server process, so you can see when another instance answers.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
   issues stream in after a delay. An issue with more than 12 comments
   shows the first 3 and the last 5; a band between them gives the number
@@ -153,7 +161,10 @@ first opens).
 
 Keys: `j` and `k` move, Enter opens, `c` opens the new issue dialog,
 Escape closes menus and the dialog. A created issue opens on its page, as
-after the form at `/new`.
+after the form at `/new`. `New_issue` starts at the first pointer, focus or
+touch event on it, so `Nav_progress` listens for `c`: it asks for the
+dialog and moves the focus to the New issue button, which starts the
+island.
 
 With no database, the data is in memory. Restart the server to reset it.
 
@@ -262,9 +273,9 @@ and writes no import map. At start it reads `yuka_islands.json` (and
 `meta.json` with `--bundle`) and prints `<link rel="modulepreload">` for each
 island on the page, except those used with `` `Lazy _ ``. With `--bundle` it
 also prints one for each chunk that those islands and `main.js` import
-statically. Nav_progress is used with `` `Idle ``; Comments, Issue props and
-Related are used with `` `Lazy `Idle ``, `` `Lazy `Interaction `` and
-`` `Lazy `Visible ``.
+statically. Nav_progress and Theme_menu are used with `` `Idle ``, Comments
+with `` `Lazy `Idle ``, Issue props and New_issue with
+`` `Lazy `Interaction ``, and Related with `` `Lazy `Visible ``.
 
 Routes are defined once in `Routes.ml`. `yuka routes` writes the shared
 `Routes` module (in `shared/`, for links such as `Routes.issue ~id ()` in islands) and

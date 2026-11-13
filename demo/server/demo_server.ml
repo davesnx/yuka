@@ -27,7 +27,7 @@ let refresh_store inner req =
   inner req
 
 let node_name () =
-  Printf.sprintf "%s-%d-%x" (Unix.gethostname ()) (Unix.getpid ()) (Random.State.bits (Random.State.make_self_init ()))
+  Printf.sprintf "%s-%d-%s" (Unix.gethostname ()) (Unix.getpid ()) Demo_app.Store.process_id
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
@@ -133,10 +133,12 @@ let () =
     | Error message ->
         prerr_endline ("demo_server: the database is not available: " ^ message);
         exit 1);
-    if !second = 0 then
+    if !second = 0 then begin
+      Demo_app.Store.notifies := true;
       Lwt_main.run
         (Yuka_dream.to_lwt
            (Yuka.Server.Live.use_bus ~name:(node_name ()) (Yuka_live_pg.bus ~conninfo:!database ~channel:"yuka_demo" ())))
+    end
   end;
   let app = Demo_app.Yuka_routes.app in
   if !prerender <> "" then Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app)
@@ -148,6 +150,7 @@ let () =
       match String.index_opt !bus ':' with
       | Some colon when String.sub !bus 0 colon = "pg" ->
           let conninfo = String.sub !bus (colon + 1) (String.length !bus - colon - 1) in
+          Demo_app.Store.notifies := true;
           fun () -> Yuka_live_pg.bus ~conninfo ~channel:"yuka_demo" ()
       | _ when !bus = "memory" ->
           let memory = Yuka.Server.Live.memory () in

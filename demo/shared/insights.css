@@ -45,6 +45,8 @@
 .dashboard {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; padding: 14px 19px 180px;
 }
+.lead { max-width: 720px; padding: 14px 19px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.lead a { color: var(--accent); }
 .card { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px 10px; background: var(--bg); }
 .card-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .card-title { font-size: 14px; font-weight: 500; }
@@ -124,6 +126,7 @@
 
 @media (max-width: 720px) {
   .controls { padding: 10px 16px; }
+  .lead { padding: 12px 16px 0; }
   .dashboard { grid-template-columns: minmax(0, 1fr); padding: 12px 16px 180px; }
   .chart { font-size: 13px; }
   .hud-note { display: none; }

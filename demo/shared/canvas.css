@@ -9,6 +9,10 @@
   background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 24px 24px;
 }
 .viewport:active { cursor: grabbing; }
+.facts { padding: 6px 19px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.facts dl { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; }
+.facts dl div { display: flex; gap: 6px; }
+.facts dd { margin: 0; color: var(--text); }
 .surface { position: absolute; top: 0; left: 0; transform-origin: 0 0; border: 1px dashed var(--border); }
 .item {
   position: absolute; top: 0; left: 0; width: 200px; height: 72px; box-sizing: border-box; padding: 8px 10px;
@@ -29,5 +33,6 @@
 
 @media (max-width: 720px) {
   .tools { padding: 10px 16px; }
+  .facts { padding: 6px 16px; }
   .zoom { margin-left: 0; }
 }

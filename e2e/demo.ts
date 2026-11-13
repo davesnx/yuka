@@ -266,6 +266,20 @@ await step("3c. partial navigation", async () => {
   check("3c.1 the progress bar (Idle) started without interaction and is idle", (await bar()).state === "idle", JSON.stringify(await bar()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
   check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null", await current());
+  const buttonInView = () =>
+    page.evaluate(() => {
+      const rect = document.querySelector(".new-issue-button")!.getBoundingClientRect();
+      return { top: Math.round(rect.top), bottom: Math.round(rect.bottom), scrollY: Math.round(scrollY), height: innerHeight };
+    });
+  const atTop = await buttonInView();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const atEnd = await buttonInView();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check(
+    "3c.2b the new issue button stays in the viewport on a long list",
+    [atTop, atEnd].every((box) => box.top >= 0 && box.bottom <= box.height) && atEnd.scrollY > 0,
+    JSON.stringify({ atTop, atEnd }),
+  );
   const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
   await page.locator('.row[data-id="YUK-3"] .row-title').click();
   const response = await outlet;
@@ -1502,9 +1516,9 @@ await step("7f. early start", async () => {
       },
     });
     const poll = setInterval(() => {
-      const b = document.querySelector(".new-issue-button") as any;
+      const b = document.querySelector("#theme-button") as any;
       if (b && b.__yuka_click) {
-        w.__newIssueStarted = Math.round(performance.now());
+        w.__themeMenuStarted = Math.round(performance.now());
         clearInterval(poll);
       }
     }, 5);
@@ -1513,14 +1527,14 @@ await step("7f. early start", async () => {
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
   await p.waitForTimeout(300);
   const r = await p.evaluate(() => ({
-    started: (window as any).__newIssueStarted as number | undefined,
+    started: (window as any).__themeMenuStarted as number | undefined,
     fills: (window as any).__fills as number[],
   }));
   const last = Math.max(...r.fills, 0);
   check(
-    "7f eager island starts before the last fill chunk arrives",
+    "7f an island that starts at idle starts before the last fill chunk arrives",
     r.fills.length >= 2 && r.started !== undefined && r.started + 100 < last,
-    `New_issue started at ${r.started}ms, fills at ${r.fills.join(",")}ms`,
+    `Theme_menu started at ${r.started}ms, fills at ${r.fills.join(",")}ms`,
   );
   await ctx.close();
 });
@@ -1538,7 +1552,7 @@ await step("7g. generated island registry", async () => {
     const m = islandModuleRe.exec(new URL(r.url()).pathname);
     if (m) seen.push(m[1]);
   });
-  const lazyNames = () => ["comments", "issue_props", "related"].filter((n) => seen.includes(n)).join(",");
+  const lazyNames = () => ["comments", "issue_props", "related", "new_issue"].filter((n) => seen.includes(n)).join(",");
   const has = (sel: string, ev: string) =>
     p.evaluate(([s, e]) => !!(document.querySelector(s) as any)?.["__yuka_" + e], [sel, ev]);
 
@@ -1546,13 +1560,13 @@ await step("7g. generated island registry", async () => {
   await p.waitForSelector("[class^=related-list_] li");
   await p.waitForTimeout(500);
 
-  check("7g.1 eager New_issue hydrated", await has(".new-issue-button", "click"));
+  check("7g.1 lazy New_issue not started before interaction", !(await has(".new-issue-button", "click")));
   check("7g.2 eager Nav_progress (Idle) hydrated", await has("[data-nav-progress]", "animationstart"));
   check("7g.5 lazy Comments (Load) hydrated", await has(".comment-input", "input"));
   check("7g.7 lazy Issue_props not started before interaction", !(await has(".props select", "change")));
   check("7g.8 only the comments chunk is requested before interaction", lazyNames() === "comments", lazyNames());
 
-  check("7g.9 non-lazy Nav_progress and New_issue modules requested at load", seen.includes("nav_progress") && seen.includes("new_issue"), seen.join(","));
+  check("7g.9 non-lazy Nav_progress module requested at load", seen.includes("nav_progress"), seen.join(","));
   check("7g.9b Issue_list module not requested on a page without it", !seen.includes("issue_list"), seen.join(","));
 
   await p.locator(".props .property").first().hover();
@@ -1569,7 +1583,7 @@ await step("7g. generated island registry", async () => {
   await p.locator("body").click({ position: { x: 5, y: 5 } });
   await p.keyboard.press("c");
   await p.waitForSelector(".dialog", { timeout: 2000 });
-  check("7g.4 New_issue is live: c opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue");
+  check("7g.4 c starts New_issue and opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue" && seen.includes("new_issue"), seen.join(","));
   await p.keyboard.press("Escape");
   await p.locator(".comment-input").fill("probe");
   check("7g.6 Comments is live: send enabled after typing", !(await p.locator(".comment-box button.primary").isDisabled()));
@@ -1656,7 +1670,7 @@ await step("7i. modulepreload", async () => {
   await p.waitForTimeout(500);
   const pre = await preloads();
   const preNames = pre.map((l) => nameOf(l.path)).filter((n) => n !== "chunk").sort();
-  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["nav_progress", "new_issue", "theme_menu"]), JSON.stringify(pre));
+  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["nav_progress", "theme_menu"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
   else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/_yuka\/app\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
