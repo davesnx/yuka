@@ -181,11 +181,17 @@ let insights () =
   has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Yuka&quot;,&quot;view&quot;:&quot;All&quot;}">|};
   Alcotest.(check int) "seven charts" 7 (count html "data-chart=");
   Alcotest.(check int) "a point per issue" 25 (count html {| r="2"|});
-  has html {|<dd data-points="true">25</dd>|};
+  has html {|<dd data-metric="points">25</dd>|};
+  has html {|<span data-metric="fps">-</span>|};
+  has html {|<dd data-metric="dom-nodes">-</dd>|};
+  has html {|aria-expanded="true" aria-label="Hide metrics"|};
+  has html {|<button class="chip animate_|};
+  has html {|data-dates="true"><span class="dates-label_|};
+  Alcotest.(check int) "two date sliders in the filters" 2 (count html {|type="range"|});
   let html = get "/w/stress/insights" in
   has html {|<a class="nav-link" href="/w/stress/insights" aria-current="page">Insights</a>|};
   Alcotest.(check int) "a point per stress issue" 200 (count html {| r="2"|});
-  has html {|<dd data-points="true">200</dd>|};
+  has html {|<dd data-metric="points">200</dd>|};
   has html "of 200 issues";
   Alcotest.(check string) "thousands" "20,000" (Insights_data.format_int 20000);
   Alcotest.(check string) "a date and back" "Nov 6" (Insights_data.date_of_day (Insights_data.day_of_date "Nov 6"));
