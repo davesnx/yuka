@@ -22,6 +22,6 @@
 (executable
  (name main)
  (modules app routes routes_server main)
- (libraries yuka yuka-tapak tapak eio eio_main eio.unix logs logs.fmt unix)
+ (libraries yuka yuka-tapak tapak jsonkit eio eio_main eio.unix logs logs.fmt unix)
  (preprocess
-  (pps yuka.ppx)))
+  (pps yuka.ppx jsonkit.ppx)))

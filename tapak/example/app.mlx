@@ -1,3 +1,5 @@
+open Jsonkit.Primitives
+
 let home () =
   Yuka.Server.page ~title:"Home" (fun () ->
       <main>
@@ -21,5 +23,7 @@ let slow () =
         </Yuka.Await>
       </main>)
 
-let hello (_ : Tapak.Request.t) = Yuka.Server.json (`Assoc [ ("from", `String "yuka endpoint") ])
+type hello = { from : string } [@@deriving json]
+
+let hello (_ : Tapak.Request.t) = Yuka.Server.json (hello_to_json { from = "yuka endpoint" })
 let not_found ~path () = Yuka.Server.page ~title:"Missing" (fun () -> <p>(Yuka.text ("missing " ^ path))</p>)
