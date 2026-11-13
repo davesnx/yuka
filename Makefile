@@ -168,9 +168,14 @@ DEV_PACKAGES = cmarkit ochre tm-grammars jsonkit
 dev-packages: ## List opam packages the benchmarks and the demo need that are not in the opam files
 	@echo "$(DEV_PACKAGES)"
 
+# (lang dune 3.26) is not in a dune release: https://github.com/ocaml/dune/pull/16699
+DUNE_PIN = git+https://github.com/ocaml/dune.git\#4a044042df2998839ce86b96ee28594ed64aa60d
+DUNE_PACKAGES = chrome-trace dune dune-build-info dune-configurator dune-private-libs dune-rpc dune-site dyn fs-io ocamlc-loc ordering stdune top-closure xdg
+
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
 	@echo "cows git+https://github.com/syaiful6/cows.git#fc74ab9f372adf6b19d00feec60e4bc669ea10a8"
+	@for p in $(DUNE_PACKAGES); do echo "$$p.3.26.0~dev $(DUNE_PIN)"; done
 	@echo "sch git+https://github.com/syaiful6/tapak.git#874cb1b6e1b54019d3425550d8c471621aa59f17"
 	@echo "tapak git+https://github.com/syaiful6/tapak.git#874cb1b6e1b54019d3425550d8c471621aa59f17"
 

@@ -1,6 +1,6 @@
-(lang dune 3.16)
+(lang dune 3.26)
 
-(using melange 0.1)
+(using melange 1.0)
 
 (generate_opam_files true)
 

@@ -5,7 +5,7 @@
  (preprocess
   (pps yuka.ppx melange.ppx))
  (module_systems
-  (es6 js)))
+  (esm js)))
 
 (rule
  (targets yuka_islands.ml)
