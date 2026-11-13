@@ -1,0 +1,83 @@
+module Css = [%yuka.css "theme_menu.css"]
+
+let item_id theme = "theme-" ^ Theme.slug theme
+let index_of theme = Option.value (List.find_index (fun candidate -> candidate = theme) Theme.all) ~default:0
+
+let[@client] make () =
+  let opened = Yuka.State.make false in
+  let current = Yuka.State.make Theme.Dark in
+  let active = Yuka.State.make 0 in
+  let close ~refocus =
+    Yuka.State.set opened false;
+    if refocus then Yuka.Browser.focus "theme-button"
+  in
+  let open_menu () =
+    let theme = Theme.current () in
+    Yuka.State.set current theme;
+    Yuka.State.set active (index_of theme);
+    Yuka.State.set opened true;
+    Yuka.Browser.focus (item_id theme)
+  in
+  let move step =
+    let count = List.length Theme.all in
+    let next = (Yuka.State.peek active + step + count) mod count in
+    Yuka.State.set active next;
+    Yuka.Browser.focus (item_id (List.nth Theme.all next))
+  in
+  let choose theme =
+    Theme.apply theme;
+    Yuka.State.set current theme;
+    close ~refocus:true
+  in
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "keydown" (fun event ->
+          if Yuka.State.peek opened then
+            match Yuka.Event.key event with
+            | "Escape" -> close ~refocus:true
+            | "Tab" -> close ~refocus:false
+            | "ArrowDown" ->
+                Yuka.Event.prevent_default event;
+                move 1
+            | "ArrowUp" ->
+                Yuka.Event.prevent_default event;
+                move (-1)
+            | "Home" ->
+                Yuka.Event.prevent_default event;
+                move (- Yuka.State.peek active)
+            | "End" ->
+                Yuka.Event.prevent_default event;
+                move (List.length Theme.all - 1 - Yuka.State.peek active)
+            | _ -> ()));
+  let item theme =
+    <button id=(item_id theme) class_="menu-item" type_=`button role=`menuitemradio
+      tabindex=(if Yuka.State.get active = index_of theme then 0 else -1)
+      aria_checked=(if Yuka.State.get current = theme then `true_ else `false_)
+      on_click=(fun _ -> choose theme)>
+      <span class_=Css.swatch data_theme=(Theme.slug theme) />
+      (Yuka.text (Theme.label theme))
+      (if Yuka.State.get current = theme then
+         <svg class_=Css.check view_box="0 0 14 14" width="14" height="14" aria_hidden=true>
+           <path d="M3 7.5 L6 10.5 L11 4" fill="none" stroke="currentColor" stroke_width="1.75" />
+         </svg>
+       else Yuka.empty)
+    </button>
+  in
+  <div class_=Css.theme>
+    <button id="theme-button" class_=("topbar-link " ^ Css.button) type_=`button aria_label="Theme" aria_haspopup=`menu
+      aria_expanded=(Yuka.State.get opened)
+      on_click=(fun _ -> if Yuka.State.peek opened then close ~refocus:false else open_menu ())>
+      <svg class_="icon" view_box="0 0 16 16" width="16" height="16" aria_hidden=true>
+        <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke_width="1.5" />
+        <path d="M8 1.75 A6.25 6.25 0 0 1 8 14.25 Z" fill="currentColor" />
+      </svg>
+      <span class_="topbar-label">"Theme"</span>
+    </button>
+    (if Yuka.State.get opened then
+       <div>
+         <div class_="backdrop" on_click=(fun _ -> close ~refocus:false) />
+         <div class_=("menu " ^ Css.menu) role=`menu aria_label="Theme">
+           (Yuka.fragment (List.map item Theme.all))
+         </div>
+       </div>
+     else Yuka.empty)
+  </div>

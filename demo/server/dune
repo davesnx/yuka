@@ -1,7 +1,21 @@
 (library
  (name demo_app)
- (modules store pages loaders handlers routes_server yuka_css)
- (libraries demo_shared yuka yuka-dream dream lwt lwt.unix)
+ (modules code_style markdown description stress store pages loaders handlers routes_server yuka_css)
+ (libraries
+  demo_shared
+  yuka
+  yuka-dream
+  dream
+  lwt
+  lwt.unix
+  cmarkit
+  ochre
+  tm-grammars.ocaml
+  tm-grammars.javascript
+  tm-grammars.typescript
+  tm-grammars.shellscript
+  tm-grammars.json
+  tm-grammars.less)
  (preprocess
   (pps yuka.ppx)))
 

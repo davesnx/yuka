@@ -1,7 +1,7 @@
 open Types
 
 let current_key = ref ""
-let loaded = ref ""
+let loaded = Platform.loaded
 let on = ref false
 let router : router option ref = ref None
 let loader : (unit -> router Web.promise) ref = ref (fun () -> failwith "Yuka: navigation is off")
@@ -30,6 +30,7 @@ let rec cancel () =
 
 and on_unload _ =
   waiting := [];
+  Navigation_state.set false;
   cancel ()
 
 let give_up message =
@@ -81,6 +82,11 @@ let use f =
       end
 
 let go f fail =
+  Navigation_state.set true;
+  let fail () =
+    Navigation_state.set false;
+    fail ()
+  in
   match !router with
   | Some r -> f r
   | None when !failed -> fail ()
@@ -146,6 +152,7 @@ let start ~load ?lazy_entries ?(prefetch = `Hover) ?(transitions = false) entrie
 
 let stop () =
   Platform.client_navigate := None;
+  Navigation_state.set false;
   on := false;
   cancel ();
   incr attempt;

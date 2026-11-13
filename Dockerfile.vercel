@@ -3,6 +3,7 @@ WORKDIR /home/opam/yuka
 COPY --chown=opam *.opam ./
 RUN sudo apt-get update \
  && opam install . --deps-only --yes \
+ && opam install --yes cmarkit ochre tm-grammars \
  && sudo rm -rf /var/lib/apt/lists/* \
  && opam clean --download-cache --repo-cache
 COPY --chown=opam . .
@@ -21,13 +22,13 @@ RUN demo/bundle.sh
 
 FROM debian:12-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libev4 libpq5 libssl3 \
+ && apt-get install -y --no-install-recommends libev4 libpq5 libssl3 libonig5 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /home/opam/yuka/_build/default/demo/server/demo_server.exe /app/server/demo_server.exe
 COPY --from=build /home/opam/yuka/_build/default/demo/client/yuka_islands.json /app/client/yuka_islands.json
 COPY --from=bundle /yuka/_build/default/demo/client/meta.json /app/client/meta.json
 COPY --from=bundle /yuka/_build/default/demo/client/out/demo/client/bundle /app/client/out/demo/client/bundle
-COPY demo/static/style.css demo/static/favicon.svg /app/static/
+COPY demo/static/style.css demo/static/markdown.css demo/static/favicon.svg demo/static/davesnx.jpg /app/static/
 RUN /app/server/demo_server.exe --bundle --prerender /app/prerendered
 USER nobody
 EXPOSE 8080

@@ -9,7 +9,7 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.C
     let body = String.trim (Yuka.State.peek draft) in
     if body <> "" then (
       let count = Yuka.State.peek pending + 1 in
-      let tmp : Comment.t = { id = "tmp-" ^ Int.to_string count; author = me; body; created_at = "Just now" } in
+      let tmp : Comment.t = { id = "tmp-" ^ Int.to_string count; author = me; body = Markup.of_text body; created_at = "Just now" } in
       Yuka.batch (fun () ->
           Yuka.State.set pending count;
           Yuka.State.set error None;
@@ -45,7 +45,7 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(comments : Model.C
           <b>(Yuka.text entry.author.name)</b>
           <span class_="muted">(Yuka.text entry.created_at)</span>
         </div>
-        <p>(Yuka.text entry.body)</p>
+        <div class_="comment-text markdown">(Markup_view.nodes entry.body)</div>
       </div>
     </li>
   in

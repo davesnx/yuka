@@ -1,0 +1,10 @@
+.theme { position: relative; display: flex; }
+.button { font: inherit; background: none; border: 0; cursor: pointer; }
+.button[aria-expanded=true] { background: var(--bg-hover); color: var(--text); }
+.menu { left: auto; right: 0; top: 34px; min-width: 168px; }
+.swatch {
+  width: 16px; height: 16px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: var(--bg); border: 1px solid var(--border-strong);
+}
+.swatch::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.check { margin-left: auto; color: var(--accent); }

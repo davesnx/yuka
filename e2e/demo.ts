@@ -262,7 +262,7 @@ await step("3c. partial navigation", async () => {
   await counter.click();
   check("3c.1 counter counts", (await counter.textContent()) === "Clicks: 2", String(await counter.textContent()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null", await current());
+  check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null", await current());
   const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
   await page.locator('.row[data-id="YUK-3"] .row-title').click();
   const response = await outlet;
@@ -271,7 +271,7 @@ await step("3c. partial navigation", async () => {
   check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
   check("3c.4 sidebar counter kept its state", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive", String(await counter.textContent()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
-  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null", await current());
+  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null", await current());
   await page.locator(".new-issue-button").click();
   await page.waitForSelector(".dialog", { timeout: 2000 });
   check("3c.7 New_issue in the kept sidebar still opens", (await page.locator(".dialog").count()) === 1);
@@ -279,7 +279,7 @@ await step("3c. partial navigation", async () => {
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
-  check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page", await current());
+  check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null", await current());
   check("3c.9 counter still kept", (await counter.textContent()) === "Clicks: 2");
   const y0 = await page.evaluate(() => Math.round(window.scrollY));
   check("3c.10 a new page starts at the top", y0 === 0, String(y0));
@@ -303,8 +303,8 @@ await step("3d. a page with no island loads no script", async () => {
   const scripts: string[] = [];
   pg.on("request", (r) => { if (r.resourceType() === "script") scripts.push(r.url()); });
   await pg.goto(base + "/about", { waitUntil: "networkidle" });
-  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap").length);
-  check("3d.1 /about requests no script and has no inline script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
+  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && !s.textContent!.includes("yuka-demo-theme") && !s.hasAttribute("data-code-style")).length);
+  check("3d.1 /about requests no script and has no inline script but the theme and code style scripts", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
   await pg.close();
 });
 
@@ -344,6 +344,72 @@ await step("3i. input made before hydration", async () => {
   check("3i.5 the input works after hydration", (await pg.textContent("#early-name-state")) === "State: typed early!", (await pg.textContent("#early-name-state")) ?? "");
   check("3i.6 no console error and no hydration mismatch", errors.length === 0, errors.join(" | "));
   await pg.close();
+});
+
+await step("3j. themes and the navigation progress bar", async () => {
+  const themeAtBody = `
+    new MutationObserver((records, observer) => {
+      if (document.body) { window.__themeAtBody = document.documentElement.getAttribute("data-theme"); observer.disconnect(); }
+    }).observe(document, { childList: true, subtree: true });
+  `;
+  for (const scheme of ["dark", "light"] as const) {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: scheme });
+    const p = await ctx.newPage();
+    await p.goto(base + "/", { waitUntil: "networkidle" });
+    check(`3j.1 no choice: prefers-color-scheme ${scheme} gives the ${scheme} theme`, (await p.getAttribute("html", "data-theme")) === scheme);
+    await ctx.close();
+  }
+  const html = await (await fetch(base + "/")).text();
+  const at = (needle: string) => html.indexOf(needle);
+  check("3j.2 the theme script is in the head, before the stylesheet and the body", at("yuka-demo-theme") > 0 && at("yuka-demo-theme") < at('rel="stylesheet"') && at("yuka-demo-theme") < at("<body"));
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: "dark" });
+  await ctx.addInitScript(themeAtBody);
+  const p = await ctx.newPage();
+  const errors: string[] = [];
+  p.on("pageerror", (e) => errors.push(String(e)));
+  await p.goto(base + "/", { waitUntil: "networkidle" });
+  await p.click("#theme-button");
+  await p.waitForSelector("[role=menu]");
+  check("3j.3 the menu opens with the current theme checked and focused", (await p.getAttribute("#theme-dark", "aria-checked")) === "true" && (await p.evaluate(() => document.activeElement?.id)) === "theme-dark");
+  await p.click("#theme-gray");
+  check("3j.4 a click on Gray applies and stores it", (await p.getAttribute("html", "data-theme")) === "gray" && (await p.evaluate(() => localStorage.getItem("yuka-demo-theme"))) === "gray" && (await p.locator("[role=menu]").count()) === 0);
+  check("3j.5 the colours follow the theme", (await p.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(43, 44, 48)", await p.evaluate(() => getComputedStyle(document.body).backgroundColor));
+  await p.focus("#theme-button");
+  await p.keyboard.press("Enter");
+  await p.waitForSelector("[role=menu]");
+  await p.keyboard.press("ArrowDown");
+  check("3j.6 ArrowDown moves the focus", (await p.evaluate(() => document.activeElement?.id)) === "theme-pale");
+  await p.keyboard.press("Enter");
+  check("3j.7 Enter chooses, the menu closes and the button has the focus", (await p.getAttribute("html", "data-theme")) === "pale" && (await p.locator("[role=menu]").count()) === 0 && (await p.evaluate(() => document.activeElement?.id)) === "theme-button");
+  await p.keyboard.press("Enter");
+  await p.waitForSelector("[role=menu]");
+  await p.keyboard.press("Escape");
+  check("3j.8 Escape closes without a change", (await p.locator("[role=menu]").count()) === 0 && (await p.getAttribute("html", "data-theme")) === "pale");
+  await p.evaluate(() => ((window as any).__alive = true));
+  const started = Date.now();
+  await p.locator('.row[data-id="YUK-1"] .row-title').click();
+  await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 });
+  await p.waitForTimeout(300);
+  const width = await p.evaluate(() => document.querySelector("[data-nav-progress]")!.getBoundingClientRect().width);
+  const top = await p.evaluate(() => document.querySelector("[data-nav-progress]")!.getBoundingClientRect().top);
+  check("3j.9 a slow navigation shows the progress bar at the top", width > 0 && top === 0 && Date.now() - started < 600, `width=${width} top=${top}`);
+  await p.waitForURL("**/issue/YUK-1");
+  await p.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
+  await p.waitForTimeout(700);
+  check("3j.10 the bar goes away when the page is shown", (await p.evaluate(() => getComputedStyle(document.querySelector("[data-nav-progress]")!).opacity)) === "0");
+  check("3j.11 the theme stays after a client navigation", (await p.evaluate(() => (window as any).__alive)) === true && (await p.getAttribute("html", "data-theme")) === "pale");
+  await p.goBack();
+  await p.waitForSelector(".row");
+  await p.waitForFunction(() => document.querySelector("[data-nav-progress]")?.getAttribute("data-nav-progress") !== "loading", null, { timeout: 5000 });
+  check("3j.12 back: the bar is not left loading", true);
+  await p.reload({ waitUntil: "networkidle" });
+  check("3j.13 the theme stays after a reload, set before the body is parsed", (await p.getAttribute("html", "data-theme")) === "pale" && (await p.evaluate(() => (window as any).__themeAtBody)) === "pale", String(await p.evaluate(() => (window as any).__themeAtBody)));
+  for (const path of ["/about", "/before-hydration"]) {
+    await p.goto(base + path, { waitUntil: "networkidle" });
+    check(`3j.14 ${path} follows the theme`, (await p.evaluate(() => (window as any).__themeAtBody)) === "pale" && (await p.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(247, 245, 251)");
+  }
+  check("3j.15 no page errors", errors.length === 0, errors.join(" | "));
+  await ctx.close();
 });
 
 await step("3e. live data is embedded", async () => {
@@ -616,6 +682,7 @@ await step("4. status change", async () => {
     .then(() => true, () => false);
   await page.locator(`.row[data-id="${id}"] button[aria-label="Change status"]`).click();
   await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
+  await page.mouse.move(0, 0);
   const start = Date.now();
   await page.waitForFunction(
     ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
@@ -741,6 +808,219 @@ await step("6f. new issue form with JavaScript off", async () => {
   await pg.waitForURL("**/issue/YUK-*");
   check("6f.4 created: 303 to the issue page", statuses.includes(303) && (await pg.locator(".issue-title").textContent()) === title, `${statuses} ${pg.url()}`);
   await ctx.close();
+});
+
+await step("6g. workspaces", async () => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  const current = () => page.evaluate(() => [...document.querySelectorAll(".workspace-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
+  check("6g.1 the stress list has 200 rows", (await page.locator(".row").count()) === 200, String(await page.locator(".row").count()));
+  check("6g.2 the stress list has 30 label chips", (await page.locator(".chip").count()) === 30, String(await page.locator(".chip").count()));
+  check("6g.3 the switcher marks Stress", (await current()) === "/=false /w/stress=true", await current());
+  const github = page.locator('.topbar-link[href="https://github.com/davesnx/yuka"]');
+  const x = page.locator('.topbar-link[href="https://x.com/davesnx"]');
+  check("6g.4 GitHub and X links open apart with rel=noopener",
+    (await github.getAttribute("rel")) === "noopener" && (await github.getAttribute("target")) === "_blank" &&
+    (await x.getAttribute("rel")) === "noopener" && (await x.getAttribute("target")) === "_blank" && (await x.textContent()) === "@davesnx");
+  const avatar = await page.evaluate(() => (document.querySelector(".profile-avatar") as HTMLImageElement | null)?.naturalWidth ?? 0);
+  check("6g.5 the avatar loads from /static", avatar > 0, String(avatar));
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check("6g.6 no horizontal overflow at 1280 px", (await overflow()) <= 0, String(await overflow()));
+  await page.setViewportSize({ width: 390, height: 800 });
+  check("6g.7 no horizontal overflow at 390 px", (await overflow()) <= 0, String(await overflow()));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.locator(".filter").fill("speed up");
+  const filtered = await page.locator(".row").count();
+  check("6g.8 the filter works on 200 issues", filtered > 0 && filtered < 200, String(filtered));
+  await page.locator(".filter").fill("");
+  await page.locator(".page-header").first().click();
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  const selected = await page.locator(".row.selected").getAttribute("data-id");
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`**/w/stress/issue/${selected}`);
+  await page.waitForSelector(".comment-input");
+  check("6g.9 j, j, Enter opens a stress issue", /^STR-\d+$/.test(selected ?? ""), String(selected));
+  check("6g.10 a stress issue streams 200 comments", (await page.locator(".comment").count()) === 200, String(await page.locator(".comment").count()));
+  check("6g.11 the crumb goes back to the stress list", (await page.locator(".crumb").getAttribute("href")) === "/w/stress");
+  await page.locator(".crumb").click();
+  await page.waitForURL("**/w/stress");
+  await page.waitForSelector(".filter");
+  await page.locator(".page-header").first().click();
+  await page.keyboard.press("c");
+  await page.waitForSelector(".dialog", { timeout: 2000 });
+  const title = `Stress issue ${run}`;
+  await page.fill(".dialog-title", title);
+  await page.locator(".dialog .button.primary").click();
+  await page.waitForSelector(".dialog", { state: "detached", timeout: 3000 });
+  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
+  const created = await page.locator(".row", { hasText: title }).getAttribute("data-id");
+  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 201, `${created} rows=${await page.locator(".row").count()}`);
+  await page.evaluate(() => ((window as any).__workspace = "alive"));
+  await page.locator('.workspace-link[href="/"]').click();
+  await page.waitForURL(base + "/");
+  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector(".row");
+  check("6g.13 switching workspace is a client navigation", (await page.evaluate(() => (window as any).__workspace)) === "alive");
+  check("6g.14 the switcher marks Yuka", (await current()) === "/=true /w/stress=false", await current());
+  const yukaIds = await page.locator(".row").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-id") ?? ""));
+  check("6g.15 the yuka list has no stress issue", yukaIds.length > 0 && yukaIds.every((id) => id.startsWith("YUK-")) && (await page.locator(".row", { hasText: title }).count()) === 0, String(yukaIds.length));
+  await page.locator('.workspace-link[href="/w/stress"]').click();
+  await page.waitForURL("**/w/stress");
+  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector(".row");
+  check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
+  const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
+  check("6g.17 the sidebar links stay in the workspace", nav === "/w/stress=page /w/stress/my=null /w/stress/insights=null", nav);
+});
+
+await step("6h. insights", async () => {
+  const errors: string[] = [];
+  const pg = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  pg.on("console", (m) => { if (m.type() === "error" || m.text().includes("hydration mismatch")) errors.push(m.text()); });
+  pg.on("pageerror", (e) => errors.push(String(e)));
+  const html = await (await pg.request.get(base + "/insights")).text();
+  const served = Number(/<dd data-points="true">(\d+)<\/dd>/.exec(html)?.[1] ?? "0");
+  check("6h.1 the server HTML has the seven charts and a point per issue", (html.match(/data-chart="/g) ?? []).length === 7 && served >= 25 && (html.match(/ r="2"/g) ?? []).length === served, `charts=${(html.match(/data-chart="/g) ?? []).length} points=${(html.match(/<circle /g) ?? []).length} issues=${served}`);
+  await pg.goto(base + "/insights", { waitUntil: "networkidle" });
+  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
+  const nav = await pg.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
+  check("6h.2 the sidebar marks Insights", nav === "/=null /my=null /insights=page", nav);
+  const amounts = () => pg.evaluate(() => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(","));
+  const points = () => pg.locator('[data-chart="scatter"] circle').count();
+  const all = await amounts();
+  const allPoints = await points();
+  await pg.locator("button.chip", { hasText: /^Urgent$/ }).click();
+  const urgent = await amounts();
+  check("6h.3 a priority filter changes the status bars", urgent !== all && (await points()) < allPoints, `${all} -> ${urgent}`);
+  await pg.locator('[data-chart="status"] g[data-key="done"] rect').click();
+  check("6h.4 a click on a bar toggles its filter", (await pg.locator("button.chip", { hasText: /^Done$/ }).getAttribute("aria-pressed")) === "true");
+  await pg.locator("button", { hasText: "Clear filters" }).click();
+  check("6h.5 clearing the filters restores the bars", (await amounts()) === all && (await points()) === allPoints, `${await amounts()} points=${await points()}`);
+  await pg.locator('[data-chart="status"] g[data-key="todo"] rect').hover();
+  const tip = await pg.locator('[data-chart="status"] g:last-child text').last().textContent();
+  check("6h.6 hover shows a tooltip", /^Todo: \d+ issues?$/.test(tip ?? ""), String(tip));
+  await pg.mouse.move(5, 790);
+  const other = await browser.newPage();
+  await other.goto(base + "/", { waitUntil: "networkidle" });
+  await other.waitForFunction(() => !!(document.querySelector(".icon-button") as any)?.__yuka_click, null, { timeout: 5000 });
+  const id = (await other.locator(".row").first().getAttribute("data-id")) ?? "";
+  const before = await statusIn(other, id);
+  const target = before === "done" ? "Todo" : "Done";
+  await pickStatus(other, id, target);
+  const live = await pg.waitForFunction((previous) => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(",") !== previous, all, { timeout: 5000 }).then(() => true, () => false);
+  check("6h.7 a status change in another page updates the charts", live, `${id} ${before} -> ${target}: ${await amounts()}`);
+  await pickStatus(other, id, before === "done" ? "Done" : before === "todo" ? "Todo" : before === "in-progress" ? "In Progress" : before === "backlog" ? "Backlog" : "Canceled");
+  await other.close();
+  await pg.goto(base + "/w/stress/insights", { waitUntil: "networkidle" });
+  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
+  const stress = Number(await pg.locator("[data-points]").textContent());
+  check("6h.8 stress has a point per issue", stress >= 200 && (await points()) === stress, `${await points()} of ${stress}`);
+  await pg.locator("button", { hasText: /^100x$/ }).click();
+  const hundred = (stress * 100).toLocaleString("en-US");
+  await pg.waitForFunction((text) => document.querySelector("[data-points]")?.textContent === text, hundred, { timeout: 10000 });
+  check("6h.9 the 100x stress control makes 100 times the points", (await points()) === stress * 100, `${await points()} (${hundred})`);
+  await pg.locator("button[data-animate]").click();
+  await pg.waitForTimeout(1500);
+  const fps = Number(await pg.locator("[data-fps]").textContent());
+  const update = (await pg.locator("[data-update]").textContent()) ?? "";
+  await pg.locator("button[data-animate]").click();
+  check("6h.10 animate runs and the readout shows frames per second and the update time", fps > 0 && / ms$/.test(update), `fps=${fps} update=${update}`);
+  await pg.locator("button", { hasText: /^1x$/ }).click();
+  await pg.waitForFunction((text) => document.querySelector("[data-points]")?.textContent === text, String(stress), { timeout: 10000 });
+  check("6h.11 no console error and no hydration mismatch", errors.length === 0, errors.join(" | "));
+  await pg.close();
+});
+
+await step("6h. issue list: row link, user popup, filter in the URL", async () => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const started = () => page.waitForFunction(() => [...document.querySelectorAll("yuka-island")].every((i) => (i as any).__yuka_started));
+  const openCard = () => page.evaluate(() => document.querySelector("[popover]:popover-open")?.getAttribute("id") ?? "");
+  await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
+  await started();
+  await page.evaluate(() => ((window as any).__list = "alive"));
+  const row = page.locator('.row[data-id="STR-2"]');
+  const box = (await row.boundingBox())!;
+  await row.click({ position: { x: box.width - 20, y: box.height / 2 } });
+  await page.waitForURL("**/w/stress/issue/STR-2");
+  check("6h.1 a click on the row outside the title opens the issue, client navigation", (await page.evaluate(() => (window as any).__list)) === "alive");
+  await page.goBack();
+  await page.waitForURL(/\/w\/stress$/);
+  await page.waitForSelector('.row[data-id="STR-2"]');
+  await started();
+  await page.locator('.row[data-id="STR-2"] button[aria-label="Change status"]').click();
+  check("6h.2 the status button in a row opens its menu and does not navigate", (await page.locator(".menu").count()) === 1 && page.url().endsWith("/w/stress"), page.url());
+  await page.keyboard.press("Escape");
+  const unassigned = await page.evaluate(() => [...document.querySelectorAll(".row")].filter((r) => r.querySelector(".avatar.empty")).map((r) => !!r.querySelector("[popovertarget]")));
+  check("6h.3 unassigned rows have no user popup", unassigned.length > 0 && unassigned.every((has) => !has), String(unassigned.length));
+  const trigger = page.locator('.row[data-id="STR-2"] [popovertarget]');
+  check("6h.4 the closed popups are not in the HTML", (await page.locator("[popover]").count()) === 0, String(await page.locator("[popover]").count()));
+  await trigger.click();
+  await page.waitForSelector("[popover]:popover-open dd");
+  const card = page.locator("[popover]:popover-open");
+  const text = await card.innerText();
+  check("6h.5 the avatar opens a card with the user and numbers, no navigation",
+    page.url().endsWith("/w/stress") && /@\w+/.test(text) && /Open\s+\d+/.test(text) && /Done\s+\d+/.test(text) && (await card.getAttribute("role")) === "dialog",
+    text.replace(/\s+/g, " "));
+  check("6h.6 the trigger names the dialog it opens", (await trigger.getAttribute("aria-haspopup")) === "dialog" && (await trigger.getAttribute("popovertarget")) === (await openCard()));
+  await page.keyboard.press("Escape");
+  check("6h.7 Escape closes the card", (await openCard()) === "");
+  await trigger.click();
+  await page.mouse.click(640, 20);
+  check("6h.8 a click outside closes the card", (await openCard()) === "" && page.url().endsWith("/w/stress"));
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  check("6h.9 Enter on the focused avatar opens the card", (await openCard()) === "user-STR-2");
+  await page.keyboard.press("Escape");
+  const last = page.locator(".row:has([popovertarget])").last();
+  await last.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await last.locator("[popovertarget]").click();
+  await page.waitForSelector("[popover]:popover-open dd");
+  const inside = await page.evaluate(() => {
+    const r = document.querySelector("[popover]:popover-open")!.getBoundingClientRect();
+    return r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth;
+  });
+  check("6h.10 a card at the bottom right stays in the viewport", inside);
+  await page.keyboard.press("Escape");
+  const shared = "/w/stress?q=router&label=router";
+  const html = await (await page.request.get(base + shared)).text();
+  const titles = [...html.matchAll(/class="row-title" href="[^"]*">([^<]*)</g)].map((m) => m[1]);
+  check("6h.11 a URL with q and label renders the filtered list on the server",
+    titles.length > 0 && titles.length < 200 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
+    String(titles.length));
+  const mine = await (await page.request.get(base + "/my?label=feature")).text();
+  const mineRows = [...mine.matchAll(/class="row" data-id="([^"]*)"/g)].length;
+  check("6h.12 My issues reads the label from the URL too", mineRows > 0 && /class="chip on" aria-pressed="true" data-label="feature"/.test(mine), String(mineRows));
+  await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
+  await started();
+  const entries = await page.evaluate(() => history.length);
+  await page.locator(".filter").fill("router");
+  await page.locator('.chip[data-label="router"]').click();
+  await page.waitForURL("**" + shared);
+  check("6h.13 typing and a chip update the URL without a new history entry", (await page.evaluate(() => history.length)) === entries, page.url());
+  await page.locator(".filter").fill("");
+  await page.locator('.chip[data-label="bug"]').click();
+  await page.waitForURL("**/w/stress?label=router&label=bug");
+  const both = await page.locator(".row").evaluateAll((rows) => rows.map((r) => !!(r.querySelector(".label-router") && r.querySelector(".label-bug"))));
+  check("6h.14 two chips keep the issues that have both labels", both.length > 0 && both.every(Boolean), `${both.length} rows`);
+  await page.locator('.chip[data-label="bug"]').click();
+  await page.locator(".filter").fill("router");
+  await page.waitForURL("**" + shared);
+  await page.reload({ waitUntil: "networkidle" });
+  await started();
+  const count = await page.locator(".row").count();
+  check("6h.15 a reload keeps the filter, the chip and the rows",
+    (await page.inputValue(".filter")) === "router" && (await page.locator(".chip.on").count()) === 1 && count === titles.length, `${count} rows`);
+  await page.locator(".row .row-title").first().click();
+  await page.waitForURL("**/w/stress/issue/**");
+  await page.waitForSelector(".issue-title");
+  await page.goBack();
+  await page.waitForURL("**" + shared);
+  await page.waitForSelector(".row");
+  check("6h.16 back from an issue shows the filtered list",
+    (await page.inputValue(".filter")) === "router" && (await page.locator(".row").count()) === count, String(await page.locator(".row").count()));
 });
 
 await step("7a. streaming", async () => {
@@ -1082,7 +1362,7 @@ await step("7i. modulepreload", async () => {
   await p.waitForTimeout(500);
   const pre = await preloads();
   const preNames = pre.map((l) => nameOf(l.path)).filter((n) => n !== "chunk").sort();
-  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "new_issue"]), JSON.stringify(pre));
+  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "nav_progress", "new_issue", "theme_menu"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
   else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/_yuka\/app\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
@@ -1134,7 +1414,7 @@ await step("7j. css per module", async () => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const p = await ctx.newPage();
   const sheetsIn = (where: string) =>
-    p.evaluate((w) => [...document.querySelectorAll(w + " link[data-yuka-css]")].map((l) => l.getAttribute("href")), where);
+    p.evaluate((w) => [...document.querySelectorAll(w + " link[data-yuka-css][href*='/related-']")].map((l) => l.getAttribute("href")), where);
   const styled = () =>
     p.evaluate(() => {
       const r = document.querySelector('[class^=related_]');
@@ -1158,7 +1438,7 @@ await step("7j. css per module", async () => {
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
   await p.waitForSelector('[class^=related-list_] li');
   const order = await p.evaluate(() => {
-    const l = document.querySelector("link[data-yuka-css]");
+    const l = document.querySelector("link[data-yuka-css][href*='/related-']");
     const island = document.querySelector('yuka-island[data-name="Demo_shared.Issue_props"]');
     return !!l && !!island && l.compareDocumentPosition(island) === Node.DOCUMENT_POSITION_FOLLOWING && !island.contains(l);
   });
@@ -1206,12 +1486,90 @@ await step("7. comment", async () => {
   check("7e.4 comment present after reload", (await page.locator(".comment", { hasText: body }).count()) === 1);
 });
 
+await step("7k. markdown and code style", async () => {
+  await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
+  await page.waitForSelector(".comment-input");
+  const markdown = await page.evaluate(() => ({
+    heading: document.querySelector(".issue-description h4")?.textContent,
+    cells: document.querySelectorAll(".issue-description td").length,
+    tokens: document.querySelectorAll(".issue-description .code-block span[style]").length,
+    commentTokens: document.querySelectorAll(".comment .code-block span[style]").length,
+    scripts: document.querySelectorAll(".issue-description script, .comment script").length,
+  }));
+  check("7k.1 the description is markdown with highlighted code", markdown.heading === "Measurements" && markdown.cells === 6 && markdown.tokens > 0 && markdown.scripts === 0, JSON.stringify(markdown));
+  check("7k.2 a stored comment has highlighted code", markdown.commentTokens > 0, String(markdown.commentTokens));
+  const look = () =>
+    page.evaluate(() => {
+      const block = document.querySelector(".issue-description .code-block") as HTMLElement;
+      const token = block.querySelector("span[style]") as HTMLElement;
+      return {
+        attribute: document.documentElement.getAttribute("data-code-theme"),
+        selected: (document.querySelector(".code-style-select") as HTMLSelectElement).value,
+        background: getComputedStyle(block).backgroundColor,
+        token: getComputedStyle(token).color,
+      };
+    });
+  const before = await look();
+  await page.evaluate(() => ((window as any).__codeStyleMarker = "kept"));
+  const mark = allRequests.length;
+  await page.selectOption(".code-style-select", "light");
+  const light = await look();
+  const requestsAfter = allRequests.slice(mark).filter((r) => !r.url.includes("/_yuka/live"));
+  check(
+    "7k.3 choosing a code style changes the colours with no request and no reload",
+    light.attribute === "light" && light.background === "rgb(255, 255, 255)" && light.token !== before.token && before.background !== light.background &&
+      requestsAfter.length === 0 && (await page.evaluate(() => (window as any).__codeStyleMarker)) === "kept",
+    `${JSON.stringify(before)} -> ${JSON.stringify(light)} requests=${requestsAfter.map((r) => r.url).join(",")}`,
+  );
+  await page.locator(".code-style-select").focus();
+  await page.keyboard.press("ArrowUp");
+  const keyboard = await look();
+  check("7k.4 the select works with the keyboard", keyboard.attribute === keyboard.selected && keyboard.attribute !== "light", JSON.stringify(keyboard));
+  await page.selectOption(".code-style-select", "light");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const firstPaint = await look();
+  check("7k.5 the choice is kept after a reload, before the scripts run", firstPaint.attribute === "light" && firstPaint.selected === "light" && firstPaint.background === "rgb(255, 255, 255)", JSON.stringify(firstPaint));
+  await page.waitForLoadState("networkidle");
+  await page.locator(".crumb").click();
+  await page.waitForSelector(".row");
+  await page.locator('.row[data-id="YUK-1"] .row-title').click();
+  await page.waitForURL("**/issue/YUK-1");
+  await page.waitForSelector(".comment-input");
+  const navigated = await look();
+  check("7k.6 the choice is kept after a client navigation", navigated.attribute === "light" && navigated.selected === "light" && navigated.background === "rgb(255, 255, 255)", JSON.stringify(navigated));
+  await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
+  await page.waitForSelector(".comment-input");
+  const body = `**Bold ${run}** and \`code\`\n\n\`\`\`ocaml\nlet answer = 42\n\`\`\``;
+  await page.route("**/_yuka/action/**", async (route) => {
+    await new Promise((r) => setTimeout(r, 600));
+    await route.continue();
+  });
+  await page.fill(".comment-input", body);
+  await page.getByRole("button", { name: "Comment" }).click();
+  await page.waitForTimeout(150);
+  const pending = await page.locator(".comment", { hasText: `**Bold ${run}**` }).count();
+  check("7k.7 the new comment shows its text at once", pending === 1, String(pending));
+  await page.waitForSelector(`.comment strong:text("Bold ${run}")`, { timeout: 5000 });
+  await page.unroute("**/_yuka/action/**");
+  const saved = await page.evaluate((run) => {
+    const strong = [...document.querySelectorAll(".comment strong")].find((element) => element.textContent === `Bold ${run}`);
+    const comment = strong?.closest(".comment");
+    return { code: comment?.querySelector("p code")?.textContent, tokens: comment?.querySelectorAll(".code-block span[style]").length ?? 0 };
+  }, run);
+  check("7k.8 the saved comment is markdown with highlighted code, with no reload", saved.code === "code" && saved.tokens > 0, JSON.stringify(saved));
+  await page.evaluate(() => localStorage.removeItem("yuka-demo-code-theme"));
+});
+
 await step("8. 404", async () => {
   expectedFailures = 404;
   const res = await page.goto(base + "/issue/NOPE", { waitUntil: "networkidle" });
   expectedFailures = 0;
   check("8a status 404", res?.status() === 404, String(res?.status()));
   check("8b not found page", (await page.locator(".not-found h1").textContent()) === "Issue not found");
+  expectedFailures = 404;
+  const unknown = await page.goto(base + "/w/nope", { waitUntil: "networkidle" });
+  expectedFailures = 0;
+  check("8d unknown workspace is 404", unknown?.status() === 404 && (await page.locator(".not-found h1").textContent()) === "Page not found", String(unknown?.status()));
 });
 
 

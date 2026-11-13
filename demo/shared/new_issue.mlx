@@ -1,4 +1,4 @@
-let[@client] make () =
+let[@client] make ~(workspace : Model.Workspace.t) () =
   let close () = Yuka.State.set Ui.dialog_open false in
   let open_ () =
     Yuka.State.set Ui.dialog_open true;
@@ -28,7 +28,7 @@ let[@client] make () =
                close ())>
              (fun form ->
                <div>
-                 <Views.Issue_form form />
+                 <Views.Issue_form workspace form />
                  <div class_="dialog-actions">
                    <button class_="button" type_=`button on_click=(fun _ -> close ())>"Cancel"</button>
                    (Yuka.hole (fun () ->

@@ -78,6 +78,8 @@ val focus : string -> unit
 val scroll_into_view : string -> unit
 val has_intersection_observer : node -> bool
 val on_idle : (unit -> unit) -> unit -> unit
+val on_frame : (float -> unit) -> unit -> unit
+val now : unit -> float
 val set_timeout : int -> (unit -> unit) -> unit -> unit
 val microtask : (unit -> unit) -> unit
 val form_values : event -> (string * string) array
@@ -96,6 +98,7 @@ val same_origin : string -> bool
 val fresh_key : unit -> string
 val history_key : unit -> string
 val history_replace_key : string -> unit
+val history_replace_url : string -> unit
 val manual_scroll : unit -> unit
 val plain_click : event -> bool
 val link_href : bool -> node -> string

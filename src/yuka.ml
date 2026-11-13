@@ -27,7 +27,7 @@ module Topic = Topic
 module Live = Live
 module Form = Form
 module Event = Platform.Event
-module Browser = Platform.Browser
+module Browser = Browser
 module Router = struct
   include Router
   module Param = Router_param

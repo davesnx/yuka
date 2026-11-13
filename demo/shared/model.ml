@@ -7,12 +7,26 @@ module User = struct
     |> String.concat ""
 end
 
+module Workspace = struct
+  type t = Yuka | Stress [@@deriving codec]
+
+  let all = [ Yuka; Stress ]
+  let default = Yuka
+
+  let slug = function Yuka -> "yuka" | Stress -> "stress"
+  let name = function Yuka -> "Yuka" | Stress -> "Stress"
+  let issue_prefix = function Yuka -> "YUK" | Stress -> "STR"
+  let of_slug text = List.find_opt (fun workspace -> slug workspace = text) all
+  let param = Yuka.Router.Param.make ~decode:of_slug ~encode:slug
+end
+
 module Issue = struct
   type status = Backlog | Todo | In_progress | Done | Canceled [@@deriving codec]
   type priority = No_priority | Urgent | High | Medium | Low [@@deriving codec]
 
   type t = {
     id : string;
+    workspace : Workspace.t;
     title : string;
     description : string;
     status : status;
@@ -22,6 +36,11 @@ module Issue = struct
     created_at : string;
   }
   [@@deriving codec]
+
+  let number issue =
+    match String.index_opt issue.id '-' with
+    | Some dash -> Option.value (int_of_string_opt (String.sub issue.id (dash + 1) (String.length issue.id - dash - 1))) ~default:0
+    | None -> 0
 
   let all_statuses = [ In_progress; Todo; Backlog; Done; Canceled ]
 
@@ -75,7 +94,32 @@ module Issue = struct
     contains ~sub:(String.lowercase_ascii query) (String.lowercase_ascii issue.title)
 end
 
+module Markup = struct
+  type node = Text of string | Element of { tag : string; attributes : (string * string) list; children : node list }
+
+  let rec to_json = function
+    | Text text -> `String text
+    | Element { tag; attributes; children } ->
+        `List (`String tag :: `Assoc (List.map (fun (name, value) -> (name, `String value)) attributes) :: List.map to_json children)
+
+  let rec all = function [] -> Some [] | Some value :: rest -> Option.map (fun values -> value :: values) (all rest) | None :: _ -> None
+
+  let rec of_json = function
+    | `String text -> Some (Text text)
+    | `List (`String tag :: `Assoc attributes :: children) -> (
+        let attribute = function name, `String value -> Some (name, value) | _ -> None in
+        match (all (List.map attribute attributes), all (List.map of_json children)) with
+        | Some attributes, Some children -> Some (Element { tag; attributes; children })
+        | _ -> None)
+    | _ -> None
+
+  let node_codec =
+    Yuka.Codec.make ~encode:to_json ~decode:(fun json -> Option.to_result ~none:"markup: expected a text or [tag, attributes, ...children]" (of_json json))
+
+  let of_text text = [ Element { tag = "p"; attributes = []; children = [ Text text ] } ]
+end
+
 module Comment = struct
-  type t = { id : string; author : User.t; body : string; created_at : string }
+  type t = { id : string; author : User.t; body : Markup.node list; created_at : string }
   [@@deriving codec]
 end

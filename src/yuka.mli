@@ -494,6 +494,25 @@ module Browser : sig
       URL (read as {!attr} reads a URL) does nothing; a dev build logs the
       first one. *)
 
+  val navigating : bool State.read
+  (** [true] while a client navigation is in flight: from the click on a
+      link, [popstate] or {!navigate} (also while the navigation code
+      loads) until the new page is shown, a full page load starts in its
+      place, or {!stop}. A navigation that a newer one aborts leaves it
+      [true] for the newer one. Read it with {!State.get} in an island, for
+      example to show a progress bar. Always [false] on the server and
+      without client navigation. *)
+
+  val replace_url : string -> unit
+  (** Browser only: raises [Failure] on native. Sets the URL of the current
+      history entry ([history.replaceState]) and loads nothing: no request,
+      no new entry, the page and its islands stay. A reload, back and
+      forward to this entry, and a client navigation back to it load the
+      new URL. Use it to keep the state of a page, such as a filter, in its
+      query, so the URL can be shared. A URL on another origin, or a
+      [javascript:], [vbscript:] or [data:] URL, does nothing; a dev build
+      logs the first one. *)
+
   val focus : string -> unit
   (** Focuses the element with this id; does nothing when no element has
       it. Inside a {!batch} (an event handler), it runs after the batch
@@ -504,6 +523,20 @@ module Browser : sig
   (** Scrolls the element with this id into view; does nothing when no
       element has it. Inside a {!batch}, it runs as {!focus} does. Browser
       only: raises [Failure] on native. *)
+
+  val on_frame : (float -> unit) -> unit
+  (** Calls the handler before each repaint of the browser
+      ([requestAnimationFrame]) until the current owner is disposed, with the
+      time of the frame in milliseconds, on the clock of {!now}. The handler
+      runs in a {!batch}. Browser only: call it inside [Effect.after]. *)
+
+  val now : unit -> float
+  (** Milliseconds since the page opened, with a fraction
+      ([performance.now]). Browser only: raises [Failure] on native. *)
+
+  val count_elements : string -> int
+  (** The number of elements in the document that match the CSS selector
+      ([querySelectorAll]). Browser only: raises [Failure] on native. *)
 end
 
 module Console : sig

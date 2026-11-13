@@ -225,7 +225,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      Yuka.Server.Generated.layers =
                        [
                          layer_0;
-                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~squad ~children ()) };
+                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
                        ];
                      page = App.Pages.member ~team ~user ~squad ~profile ();
                    }))));
@@ -246,7 +246,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      Yuka.Server.Generated.layers =
                        [
                          layer_0;
-                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~squad ~children ()) };
+                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
                        ];
                      page = App.Pages.team_form ~team ~squad ();
                    })));
@@ -387,7 +387,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
           run = (fun () -> App.Api.hook req);
         }
   | Cycle_shared.Routes.Org_item { org; n } ->
-      let layer_2 = { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L2"; Yuka.Router.encode org ]; data = false; wrap = (fun children -> App.Layouts.org ~children ()) } in
+      let layer_2 = { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L2"; Yuka.Router.encode org ]; data = false; wrap = (fun children -> App.Layouts.org ~org ~children ()) } in
       Yuka.Server.Generated.Page
         {
           rules = rules_0;

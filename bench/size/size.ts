@@ -14,7 +14,7 @@ const { values: options } = parseArgs({
     "build-dir": { type: "string", default: process.env.BUILD_DIR ?? "_build" },
     budget: { type: "string", default: "bench/size/budget.json" },
     modules: { type: "boolean", default: false },
-    pages: { type: "string", default: "/,/my,/new,/issue/YUK-1,/about" },
+    pages: { type: "string", default: "/,/my,/new,/issue/YUK-1,/about,/insights" },
   },
 });
 

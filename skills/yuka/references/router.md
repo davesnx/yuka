@@ -135,14 +135,16 @@ adapter, such as `Dream.request`.
 | Attachment | On | Shape |
 |---|---|---|
 | `~page` | route | `~params ~search ~loaded () -> Yuka.Server.page` |
-| `~layout` | make, group | `~loaded ~children () -> Yuka.server Yuka.element` |
+| `~layout` | make, group | `~params ~loaded ~children () -> Yuka.server Yuka.element` |
 | `~loader` | group, route | `req -> ~params -> ('a, Yuka.Server.stop) result Yuka.Async.t` |
 | `~guard` | all but redirect | `req -> ~params -> (unit, Yuka.Server.stop) result Yuka.Async.t` |
 | `~handler` | endpoint, action | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
 | `~not_found` | make, group | `~params ~path () -> Yuka.Server.page` |
 | `~error` | make, group | `~params () -> Yuka.Server.page` |
 
-- `~params` are the path params of the node and the groups above it.
+- `~params` are the path params of the node and the groups above it. A
+  layout gets those of its group, and a client navigation keeps it only
+  while they do not change.
 - `~loaded` are the loader results. Each result is labelled with the last
   name of the loader: `~loader:Loaders.post` gives `~post`. A layout gets
   the results of the loaders on its group and above.
@@ -249,10 +251,45 @@ page with no island, links load full pages. In an island,
 on_click=(fun _ -> Yuka.Browser.navigate (Routes.blog ~tag:"bug" ()))
 ```
 
+`Yuka.Browser.navigating` is a read-only State: `true` from the click
+until the new page is shown (or a full page load starts in its place). An
+island can read it to show a progress bar:
+
+```ocaml
+let[@client] make () =
+  <div class_=(if State.get Yuka.Browser.navigating then "progress on" else "progress") />
+```
+
+It is always `false` on the server.
+
+To keep the state of a page in its URL, such as a filter that a user can
+share, give the state to the page as search fields and change the URL with
+`Yuka.Browser.replace_url`. It replaces the URL of the current history
+entry and loads nothing; a reload, back and forward load the page with the
+new query, and the server renders it with that state:
+
+```ocaml
+(* Routes.ml *)
+Router.route Blog ~path:"/" ~page:Pages.blog ~search:{ tag = optional string }
+
+(* pages.mlx: the island gets the search field as a prop *)
+let blog ~tag () =
+  Yuka.Server.page ~title:"Blog" (fun () ->
+      <Yuka.Client><Posts tag=(Option.value tag ~default:"") /></Yuka.Client>)
+
+(* posts.mlx *)
+let[@client] make ~(tag : string) () =
+  let tag = Yuka.State.make tag in
+  Yuka.Effect.on_change tag (fun ~prev:_ ~next ->
+      Yuka.Browser.replace_url (Routes.blog ?tag:(if next = "" then None else Some next) ()));
+  ...
+```
+
 ## Limitations
 
 - An island cannot read the current route or search params as a State.
-  Pass what it needs as props.
+  Pass what it needs as props, and write them back with
+  `Yuka.Browser.replace_url`.
 - There is no base path: the app is served at the root of its origin.
 - An editor does not check `Routes.ml`. `yuka routes` reports each error
   with its location:

@@ -1,0 +1,21 @@
+module Css = [%yuka.css "nav_progress.css"]
+
+type phase = Idle | Loading | Finished
+
+let[@client] make () =
+  let phase = Yuka.State.make Idle in
+  let shown = ref false in
+  Yuka.Effect.after (fun () ->
+      if Yuka.State.get Yuka.Browser.navigating then begin
+        shown := false;
+        Yuka.State.set phase Loading
+      end
+      else Yuka.State.set phase (if !shown then Finished else Idle));
+  <div
+    class_=(match Yuka.State.get phase with
+      | Idle -> Css.bar
+      | Loading -> Css.bar ^ " " ^ Css.loading
+      | Finished -> Css.bar ^ " " ^ Css.finished)
+    data_nav_progress=(match Yuka.State.get phase with Idle -> "idle" | Loading -> "loading" | Finished -> "finished")
+    aria_hidden=true
+    on_animationstart=(fun _ -> shown := true) />

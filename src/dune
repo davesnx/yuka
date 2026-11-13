@@ -5,10 +5,12 @@
  (virtual_modules web dev client navigation_web)
  (private_modules
   answers
+  browser
   cycle
   element
   live_server
   navigation
+  navigation_state
   navigation_stub
   optimistic
   printer

@@ -1,0 +1,25 @@
+.wrap { position: relative; z-index: 1; display: inline-flex; flex: none; }
+.trigger {
+  display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
+  background: none; color: inherit; cursor: pointer;
+}
+.trigger:hover, .trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.card {
+  inset: auto; margin: 6px 0; box-sizing: border-box; width: 288px; max-width: calc(100vw - 16px);
+  padding: 16px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--bg-hover); color: var(--text); font-size: 14px; cursor: auto;
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+}
+.head { display: flex; align-items: center; gap: 12px; }
+.picture {
+  width: 40px; height: 40px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: var(--bg-selected); border: 1px solid var(--border); font-size: 15px; font-weight: 600;
+}
+.name { font-weight: 600; }
+.handle, .note { color: var(--muted); }
+.note { margin: 14px 0 0; }
+.stats { display: grid; grid-template-columns: repeat(3, auto); gap: 8px; margin: 14px 0 0; }
+.stat { padding: 8px; border: 1px solid var(--border); border-radius: 7px; }
+.stat dt { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.stat dd { margin: 2px 0 0; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
