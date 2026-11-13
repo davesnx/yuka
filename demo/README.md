@@ -169,8 +169,8 @@ statically. Comments, Issue props and Related are used with `` `Lazy `Idle ``,
 
 Routes are defined once in `Routes.ml`. `yuka routes` writes the shared
 `Routes` module (in `shared/`, for links such as `Routes.issue ~id ()` in islands) and
-`Routes_server` (in `server/`); `server/demo_server.ml` gives
-`Routes_server.app` to `Yuka_dream.handler`. `client/main.ml` is
+`Yuka_routes` (in `server/`); `server/demo_server.ml` gives
+`Yuka_routes.app` to `Yuka_dream.handler`. `client/main.ml` is
 `let () = Yuka.render ~islands ~transitions:true ()`, so links navigate
 without a full page load. The rules
 in `client/dune` generate `yuka_islands.ml` (the list of islands) and

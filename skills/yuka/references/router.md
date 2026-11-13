@@ -2,7 +2,7 @@
 
 `Routes.ml` holds the route tree of an app, `Router.make ...`, which is
 never compiled: `yuka routes` reads it and writes two modules, the shared
-`Routes` and the server `Routes_server`. Items before the tree are
+`Routes` and the server `Yuka_routes`. Items before the tree are
 allowed; see "Code before the tree".
 [`getting-started.md`](getting-started.md) has the dune rules.
 
@@ -171,7 +171,7 @@ Rules, on any node except a redirect:
 ## Code before the tree
 
 Items before the tree (`open`, `let`, `module`, `type`) go, as written,
-to the top of the server module `Routes_server`. A file with items binds
+to the top of the server module `Yuka_routes`. A file with items binds
 the tree as `let routes = Router.make ...`:
 
 ```ocaml
@@ -191,7 +191,7 @@ let routes =
 `~not_found` is `~not_found:not_found`. `let routes` is the tree, not a
 value: it is not copied. `Yuka.Server` is opened only inside `~cache`, so
 an item writes `Yuka.Server.public`, or opens `Yuka.Server`. Error messages from the compiler
-for these items point to the same line in `routes_server.ml` as in
+for these items point to the same line in `yuka_routes.ml` as in
 `Routes.ml`.
 
 Two limits:

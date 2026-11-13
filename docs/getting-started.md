@@ -24,7 +24,7 @@ JavaScript (components and islands), the server, and the client entry.
 dune-project
 Routes.ml
 shared/   dune, counter.mlx, counter.css
-server/   dune, pages.mlx, routes_server.mli, main.ml
+server/   dune, pages.mlx, yuka_routes.mli, main.ml
 client/   dune, main.ml
 ```
 
@@ -96,7 +96,7 @@ let[@client] make ~(initial : int) () =
   </button>
 ```
 
-`server/dune` writes the server routes (`Routes_server.app`) and the
+`server/dune` writes the server routes (`Yuka_routes.app`) and the
 sheets of every `[%yuka.css]` (`Yuka_css.sheets`):
 
 ```
@@ -107,10 +107,10 @@ sheets of every `[%yuka.css]` (`Yuka_css.sheets`):
   (pps yuka.ppx)))
 
 (rule
- (targets routes_server.ml)
+ (targets yuka_routes.ml)
  (action
   (with-stdout-to
-   routes_server.ml
+   yuka_routes.ml
    (run %{bin:yuka} routes --server --shared-module App_shared.Routes
     --source %{dep:../Routes.ml}))))
 
@@ -141,9 +141,9 @@ let not_found ~path () =
       <p>(Yuka.text ("No page at " ^ path))</p>)
 ```
 
-`Routes_server.app` takes the request type of the adapter from a loader,
+`Yuka_routes.app` takes the request type of the adapter from a loader,
 guard or handler. When none of them names it, give it in
-`server/routes_server.mli`:
+`server/yuka_routes.mli`:
 
 ```ocaml
 val app : Dream.request Yuka.Server.app
@@ -169,7 +169,7 @@ let () =
   in
   Dream.run @@ Dream.logger @@ Dream.set_secret "change-me"
   @@ Dream.cookie_sessions
-  @@ Yuka_dream.handler config Routes_server.app
+  @@ Yuka_dream.handler config Yuka_routes.app
 ```
 
 The config has no `~log`, so `Yuka_dream.handler` sends the messages of

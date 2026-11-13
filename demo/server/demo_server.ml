@@ -86,7 +86,7 @@ let () =
       ()
   in
   Demo_app.Handlers.register ();
-  let app = Demo_app.Routes_server.app in
+  let app = Demo_app.Yuka_routes.app in
   if !prerender <> "" then Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app)
   else if !second = 0 then
     Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
