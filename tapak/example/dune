@@ -1,0 +1,27 @@
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka} routes --shared --source %{dep:tree/Routes.ml}))))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Routes
+    --source
+    %{dep:tree/Routes.ml}))))
+
+(executable
+ (name main)
+ (modules app routes yuka_routes main)
+ (libraries yuka yuka-tapak tapak jsonkit eio eio_main eio.unix logs logs.fmt unix)
+ (preprocess
+  (pps yuka.ppx jsonkit.ppx)))

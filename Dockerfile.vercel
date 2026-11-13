@@ -1,6 +1,6 @@
 FROM ocaml/opam:debian-12-ocaml-5.4 AS build
 WORKDIR /home/opam/yuka
-COPY --chown=opam *.opam ./
+COPY --chown=opam yuka.opam yuka-dream.opam yuka-live-pg.opam ./
 RUN sudo apt-get update \
  && opam install . --deps-only --yes \
  && opam install --yes cmarkit ochre tm-grammars \
