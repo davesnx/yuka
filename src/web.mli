@@ -133,4 +133,6 @@ val read_file : string -> string option
 val take_buffer : unit -> Stdlib.Buffer.t option
 val give_buffer : Stdlib.Buffer.t -> unit
 val lowercase : string -> string
+val sub : string -> int -> int -> string
+val of_char : char -> string
 val refuse_url_name : string -> unit

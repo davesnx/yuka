@@ -8,10 +8,30 @@ let json_wide_strings () =
   check "printed" ("\"" ^ wide ^ "\\u003c\\\"\"") s;
   check "read back" (wide ^ "<\"") (match Json.of_string s with Ok (`String x) -> x | _ -> "bad")
 
+let json_after_wide_strings () =
+  let s = "[\"" ^ wide ^ "\",123,true,\"" ^ wide ^ "\\u00e9\",-2.5e1]" in
+  check "parsed" ("[\"" ^ wide ^ "\",123,true,\"" ^ wide ^ "\xc3\xa9\",-25.0]")
+    (match Json.of_string s with Ok j -> Json.to_string j | Error m -> m);
+  check "expected char" "expected ':' at 5" (match Json.of_string "{\"a\" 1}" with Ok _ -> "ok" | Error m -> m)
+
+let codec_cuts_wide_strings () =
+  let tens = wide ^ wide ^ wide in
+  check "cut at 40"
+    ("expected int, got \"ab" ^ tens ^ tens ^ tens ^ {js|é|js} ^ "...")
+    (match Codec.decode Codec.int (`String ("ab" ^ tens ^ tens ^ tens ^ tens)) with
+    | Ok _ -> "ok"
+    | Error m -> m)
+
 let template_wide_strings () =
   check "escaped"
     ("<p title=\"" ^ wide ^ "&quot;&amp;\">&amp;" ^ wide ^ "&lt;</p>")
     (Cases.shape_html
        Private.Template.(element "p" [ fixed "title" (wide ^ "\"&") ] [ text ("&" ^ wide ^ "<") ]))
 
-let all = [ ("json: UTF-16 strings", json_wide_strings); ("template: UTF-16 strings", template_wide_strings) ]
+let all =
+  [
+    ("json: UTF-16 strings", json_wide_strings);
+    ("json: values after UTF-16 strings", json_after_wide_strings);
+    ("codec: error cut in UTF-16 strings", codec_cuts_wide_strings);
+    ("template: UTF-16 strings", template_wide_strings);
+  ]

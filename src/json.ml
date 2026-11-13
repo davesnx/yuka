@@ -97,11 +97,11 @@
     in
     let expect c =
       if !i < n && s.[!i] = c then incr i
-      else fail ("expected '" ^ String.make 1 c ^ "'")
+      else fail ("expected '" ^ Web.of_char c ^ "'")
     in
     let literal word v =
       let l = String.length word in
-      if !i + l <= n && String.sub s !i l = word then (i := !i + l; v)
+      if !i + l <= n && Web.sub s !i l = word then (i := !i + l; v)
       else fail "invalid literal"
     in
     let hex4 () =
@@ -180,7 +180,7 @@
         incr i;
         if peek () = '+' || peek () = '-' then incr i;
         digits ());
-      let text = String.sub s start (!i - start) in
+      let text = Web.sub s start (!i - start) in
       if !is_float then `Float (Web.parse_float text)
       else
         match Web.parse_int text with
@@ -243,5 +243,5 @@
 
 let mismatch what (j : t) =
   let s = to_string j in
-  let s = if String.length s > 40 then String.sub s 0 40 ^ "..." else s in
+  let s = if String.length s > 40 then Web.sub s 0 40 ^ "..." else s in
   Error ("expected " ^ what ^ ", got " ^ s)
