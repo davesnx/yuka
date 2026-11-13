@@ -24,7 +24,7 @@ let with_stderr f =
     f;
   In_channel.with_open_bin file In_channel.input_all
 
-let prerender out = Lwt_main.run (Yuka_dream.prerender ~out config Routes_server.app)
+let prerender out = Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app)
 
 let contains text part =
   let n = String.length part in
@@ -67,7 +67,7 @@ let pages () =
   let req = Dream.request ~target:"/" "" in
   List.iter
     (fun (path, expected) ->
-      Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Routes_server.app req path))
+      Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Yuka_routes.app req path))
     [ ("/guide", true); ("/static/s.css", false); ("/_yuka/app/main.js", false); ("/_yuka", false) ]
 
 let twice () =
@@ -82,7 +82,7 @@ let serve () =
   ignore (with_stderr (fun () -> prerender out));
   Out_channel.with_open_bin (Filename.concat out "docs/index.html") (fun oc ->
       output_string oc "from disk");
-  let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ()) Routes_server.app in
+  let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ()) Yuka_routes.app in
   let call target =
     let response = Dream.test handler (Dream.request ~target "") in
     (response, Lwt_main.run (Dream.body response))
@@ -104,7 +104,7 @@ let serve () =
 let dev_env_ignored () =
   Unix.putenv "YUKA_DEV" "1";
   let config = Fun.protect ~finally:(fun () -> Unix.putenv "YUKA_DEV" "") (fun () -> Yuka.Server.config ()) in
-  let handler = Yuka_dream.handler config Routes_server.app in
+  let handler = Yuka_dream.handler config Yuka_routes.app in
   let response = Dream.test handler (Dream.request ~target:"/" "") in
   let index = Lwt_main.run (Dream.body response) in
   check_true "a page" (contains index "<title>Home</title>");
@@ -116,7 +116,7 @@ let prerender_dev_off () =
   Unix.putenv "YUKA_DEV_FILE" "/nonexistent/yuka-dev";
   let out = Filename.temp_dir "yuka_out" "" in
   ignore
-    (with_stderr (fun () -> Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ~dev:true ()) Routes_server.app)));
+    (with_stderr (fun () -> Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ~dev:true ()) Yuka_routes.app)));
   let read name = In_channel.with_open_bin (Filename.concat out name) In_channel.input_all in
   check_true "a page" (contains (read "index.html") "<title>Home</title>");
   check_true "no dev script in a page" (not (contains (read "index.html") "EventSource"));
@@ -128,7 +128,7 @@ let out_inside_a_served_dir () =
   let config = Yuka.Server.config ~public:[ ("/static", dir) ] () in
   List.iter
     (fun out ->
-      match Lwt_main.run (Yuka_dream.prerender ~out config Routes_server.app) with
+      match Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app) with
       | () -> Alcotest.failf "%s accepted" out
       | exception Invalid_argument m -> check_true "names the directory" (contains m dir))
     [ Filename.concat dir "site"; dir; Filename.concat dir "a/../site" ];
@@ -152,7 +152,7 @@ let tree_digest () =
 
 let dream_log () =
   let get handler = ignore (Lwt_main.run (Dream.body (Dream.test handler (Dream.request ~target:"/warned" "")))) in
-  let output = with_stderr (fun () -> get (Dream.logger (Yuka_dream.handler (Yuka.Server.config ()) Routes_server.app))) in
+  let output = with_stderr (fun () -> get (Dream.logger (Yuka_dream.handler (Yuka.Server.config ()) Yuka_routes.app))) in
   (match List.find_opt (fun l -> contains l "warned page") (String.split_on_char '\n' output) with
   | None -> Alcotest.failf "not in the Dream log: %s" output
   | Some line ->
@@ -161,7 +161,7 @@ let dream_log () =
       check_true "the request id" (contains line "REQ "));
   let got = ref [] in
   let output =
-    with_stderr (fun () -> get (Yuka_dream.handler (Yuka.Server.config ~log:(fun _ m -> got := m :: !got) ()) Routes_server.app))
+    with_stderr (fun () -> get (Yuka_dream.handler (Yuka.Server.config ~log:(fun _ m -> got := m :: !got) ()) Yuka_routes.app))
   in
   Alcotest.(check (list string)) "a config log is kept" [ "warned page" ] !got;
   check_true "not in the Dream log" (not (contains output "warned page"))
@@ -170,7 +170,7 @@ let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yu
 let () = Yuka.Server.Action.make echo (fun _ s -> Yuka.Async.return (String.length s))
 
 let body_limit () =
-  let handler = Yuka_dream.handler config Routes_server.app in
+  let handler = Yuka_dream.handler config Yuka_routes.app in
   let post ?length body =
     let headers =
       [ ("Content-Type", "application/json"); ("Origin", "http://app.test"); ("Host", "app.test") ]

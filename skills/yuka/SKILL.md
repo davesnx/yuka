@@ -23,7 +23,7 @@ of the `docs/` directory of the Yuka repository.
 - An app has three parts: a shared library (native and Melange) for
   components and islands, a server executable for pages, and a client
   entry. `Routes.ml` holds the route tree; `yuka routes` reads it and
-  writes the `Routes` and `Routes_server` modules.
+  writes the `Routes` and `Yuka_routes` modules.
 
 ## References
 

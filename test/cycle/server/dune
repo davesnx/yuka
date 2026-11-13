@@ -5,10 +5,10 @@
   (:standard -open Cycle_shared)))
 
 (rule
- (targets routes_server.ml)
+ (targets yuka_routes.ml)
  (action
   (with-stdout-to
-   routes_server.ml
+   yuka_routes.ml
    (run
     %{bin:yuka}
     routes
@@ -22,4 +22,4 @@
  (alias runtest)
  (package yuka)
  (action
-  (diff routes_server.expected routes_server.ml)))
+  (diff yuka_routes.expected yuka_routes.ml)))

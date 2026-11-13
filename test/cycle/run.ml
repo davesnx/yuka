@@ -125,7 +125,7 @@ let request ?(meth = `GET) ?(headers = []) ?(body = "") target =
 
 let fst3 (a, _, _) = a
 
-let call ?(config = config) r = Cycle.handler config Cycle_server.Routes_server.app r
+let call ?(config = config) r = Cycle.handler config Cycle_server.Yuka_routes.app r
 
 let get ?config ?meth ?headers ?body target =
   let a = call ?config (request ?meth ?headers ?body target) in
@@ -330,7 +330,7 @@ let assets =
 
 let prerender =
   let prerendered = config_with ~assets:modules ~public:[ ("/static", "pub") ] ~prerendered:"pre" () in
-  let app = Cycle_server.Routes_server.app in
+  let app = Cycle_server.Yuka_routes.app in
   [
     ( "a prerendered page is its file, after the guards",
       fun () ->
@@ -750,10 +750,10 @@ let reviewed =
         in
         let r = request ~headers:[ ("x-user", "ann") ] "/live" in
         check_true "the node's state"
-          (contains (page (Cycle.handler ~node config Cycle_server.Routes_server.app r)) "data published on the node");
+          (contains (page (Cycle.handler ~node config Cycle_server.Yuka_routes.app r)) "data published on the node");
         let r = request ~headers:[ ("x-user", "ann") ] "/live" in
         check_true "the default node loads"
-          (contains (page (Cycle.handler config Cycle_server.Routes_server.app r)) "data secret of ann") );
+          (contains (page (Cycle.handler config Cycle_server.Yuka_routes.app r)) "data secret of ann") );
     ( "a live upgrade without a session is a 500 and a log, before the upgrade",
       fun () ->
         let r =
@@ -811,7 +811,7 @@ let reviewed =
         ignore (Server.Live.use_bus ~node ~name:"second" (Server.Live.memory_bus (Server.Live.memory ())));
         let headers = [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ] in
         let r = request ~meth:`POST ~headers ~body:"null" "/_yuka/action/whoami" in
-        match Async.status (Cycle.handler ~node config Cycle_server.Routes_server.app r) with
+        match Async.status (Cycle.handler ~node config Cycle_server.Yuka_routes.app r) with
         | Async.Done r -> check_true "mark" (contains r.body {|"live":["second",0]|})
         | _ -> Alcotest.fail "pending" );
   ]
@@ -831,7 +831,7 @@ let loaders =
     ( "loader-free layers are built once",
       fun () ->
         let first_layer route =
-          match Cycle_server.Routes_server.resolve (request "/") route with
+          match Cycle_server.Yuka_routes.resolve (request "/") route with
           | Server.Generated.Page { load; _ } -> (
               match Async.status (load ()) with
               | Async.Done (Ok plan) -> List.hd plan.layers
@@ -912,7 +912,7 @@ let render =
     ( "a failed render waits for the writes in flight",
       fun () ->
         held_writes := [];
-        let a = Held.handler config Cycle_server.Routes_server.app (request "/slow") in
+        let a = Held.handler config Cycle_server.Yuka_routes.app (request "/slow") in
         let ended =
           match Async.status a with
           | Async.Done r ->
@@ -931,7 +931,7 @@ let render =
         held_writes := [];
         stream_ended := false;
         late_writes := 0;
-        let a = Held.handler config Cycle_server.Routes_server.app (request "/twice") in
+        let a = Held.handler config Cycle_server.Yuka_routes.app (request "/twice") in
         let ended =
           match Async.status a with
           | Async.Done r -> r.Held_adapter.ended
@@ -1050,7 +1050,7 @@ let render =
       fun () ->
         let kind target =
           raw_sleep := (fun _ -> fst3 (Async.make ()));
-          match Async.status (Raw.handler config Cycle_server.Routes_server.app (request target)) with
+          match Async.status (Raw.handler config Cycle_server.Yuka_routes.app (request target)) with
           | Async.Done { body = Server.String text; status; _ } ->
               Printf.sprintf "string %d %b" status (String.ends_with ~suffix:"</body></html>" text)
           | Async.Done { body = Server.Stream _; status; _ } -> Printf.sprintf "stream %d" status
@@ -1061,7 +1061,7 @@ let render =
     ( "a render failure before the shell is written is the 500 page",
       fun () ->
         raw_sleep := (fun _ -> Async.return ());
-        let a = Raw.handler config Cycle_server.Routes_server.app (request "/slow") in
+        let a = Raw.handler config Cycle_server.Yuka_routes.app (request "/slow") in
         match Async.status a with
         | Async.Done r ->
             check_status { status = r.status; headers = r.headers; body = "" } 500;
@@ -1090,7 +1090,7 @@ let render =
 
 let navigation =
   let nav keys target = get ~headers:[ ("Yuka-Navigate", keys) ] target in
-  let build = Server.Adapter.build_id config Cycle_server.Routes_server.app in
+  let build = Server.Adapter.build_id config Cycle_server.Yuka_routes.app in
   [
     ( "shared root layout: partial with the page body",
       fun () ->
@@ -1153,7 +1153,7 @@ let navigation =
         check_header r "yuka-build" [] );
     ( "the build id follows the assets",
       fun () ->
-        let app = Cycle_server.Routes_server.app in
+        let app = Cycle_server.Yuka_routes.app in
         let with_assets ~manifest ~digest =
           config_with
             ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest)
@@ -1387,7 +1387,7 @@ let dev =
   in
   let stream ?(meth = `GET) ?(write = fun _ -> Async.return ()) config target =
     raw_sleep := sleep;
-    match Async.status (Raw.handler config Cycle_server.Routes_server.app (request ~meth target)) with
+    match Async.status (Raw.handler config Cycle_server.Yuka_routes.app (request ~meth target)) with
     | Async.Done { status; headers; body = Server.Stream f } ->
         let written = ref [] in
         ignore (f (fun s -> written := !written @ [ s ]; write s));

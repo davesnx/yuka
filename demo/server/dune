@@ -1,6 +1,6 @@
 (library
  (name demo_app)
- (modules code_style markdown description stress store pages loaders handlers routes_server yuka_css)
+ (modules code_style markdown description stress store pages loaders handlers yuka_routes yuka_css)
  (libraries
   demo_shared
   yuka
@@ -20,10 +20,10 @@
   (pps yuka.ppx)))
 
 (rule
- (targets routes_server.ml)
+ (targets yuka_routes.ml)
  (action
   (with-stdout-to
-   routes_server.ml
+   yuka_routes.ml
    (run
     %{bin:yuka}
     routes

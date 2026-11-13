@@ -14,10 +14,10 @@
     (cat %{dep:../Routes.ml})))))
 
 (rule
- (targets routes_server.ml)
+ (targets yuka_routes.ml)
  (action
   (with-stdout-to
-   routes_server.ml
+   yuka_routes.ml
    (run
     %{bin:yuka}
     routes
