@@ -38,7 +38,7 @@ let register () =
             let issue = Store.create workspace ~title ~description ~status ~priority in
             publish_issue issue;
             Yuka.Async.return (Ok issue));
-  Yuka.Server.Action.make Actions.add_comment
+  Yuka.Server.Action.make Comment.add
     (fun _ { issue_id; body } ->
       match Store.find issue_id with
       | Some _ when String.trim body <> "" -> Yuka.Async.return (Store.add_comment ~issue_id ~body)

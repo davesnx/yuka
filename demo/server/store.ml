@@ -1,4 +1,5 @@
-open Demo_shared.Model
+open Demo_shared
+open Model
 
 let users : User.t list =
   [

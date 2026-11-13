@@ -37,14 +37,8 @@ type new_issue = {
 }
 [@@deriving form]
 
-type comment_input = { issue_id : string; body : string } [@@deriving codec]
-
 let update_issue =
   Yuka.Action.mutation ~name:"update_issue" ~input:update_input_codec
     ~output:Issue.codec
 
 let create_issue = Yuka.Form.action ~name:"create_issue" ~fields:new_issue_form ~output:Issue.codec
-
-let add_comment =
-  Yuka.Action.mutation ~name:"add_comment" ~input:comment_input_codec
-    ~output:Comment.codec

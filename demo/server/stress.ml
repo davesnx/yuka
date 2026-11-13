@@ -1,4 +1,5 @@
-open Demo_shared.Model
+open Demo_shared
+open Model
 
 let issue_count = 200
 let comments_per_issue = 200
