@@ -10,8 +10,8 @@ let routes =
       Router.group ~path:"/" ~layout:Pages.shell ~not_found:Pages.not_found
         ~error:Pages.error
         [
-          Router.route Issues ~path:"/" ~page:Pages.index;
-          Router.route My_issues ~path:"/my" ~page:Pages.my_issues;
+          Router.route Issues ~path:"/" ~page:Pages.index ~search:{ q = optional string; label = many string };
+          Router.route My_issues ~path:"/my" ~page:Pages.my_issues ~search:{ q = optional string; label = many string };
           Router.route Insights ~path:"/insights" ~page:Pages.insights;
           Router.route Create ~path:"/new" ~page:Pages.create;
           Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
@@ -20,8 +20,10 @@ let routes =
         ];
       Router.group ~path:"/w/:workspace<Model.Workspace.t>" ~layout:Pages.Workspace.shell
         [
-          Router.route Workspace_issues ~path:"/" ~page:Pages.Workspace.index;
-          Router.route Workspace_my_issues ~path:"/my" ~page:Pages.Workspace.my_issues;
+          Router.route Workspace_issues ~path:"/" ~page:Pages.Workspace.index
+            ~search:{ q = optional string; label = many string };
+          Router.route Workspace_my_issues ~path:"/my" ~page:Pages.Workspace.my_issues
+            ~search:{ q = optional string; label = many string };
           Router.route Workspace_insights ~path:"/insights" ~page:Pages.Workspace.insights;
           Router.route Workspace_create ~path:"/new" ~page:Pages.Workspace.create;
           Router.group ~path:"/issue/:id<string>" ~loader:Loaders.Workspace.issue

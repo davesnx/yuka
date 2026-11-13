@@ -2,11 +2,11 @@ open Model
 
 let default workspace = workspace = Workspace.default
 
-let issues workspace =
-  if default workspace then Routes.issues () else Routes.workspace_issues ~workspace ()
+let issues ?q ?label workspace =
+  if default workspace then Routes.issues ?q ?label () else Routes.workspace_issues ~workspace ?q ?label ()
 
-let my_issues workspace =
-  if default workspace then Routes.my_issues () else Routes.workspace_my_issues ~workspace ()
+let my_issues ?q ?label workspace =
+  if default workspace then Routes.my_issues ?q ?label () else Routes.workspace_my_issues ~workspace ?q ?label ()
 
 let insights workspace =
   if default workspace then Routes.insights () else Routes.workspace_insights ~workspace ()

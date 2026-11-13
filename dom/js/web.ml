@@ -337,6 +337,10 @@ let history_replace_key : string -> unit =
   [%mel.raw
     "function (k) { window.history.replaceState({ yukaKey: k }, '', window.location.href) }"]
 
+let history_replace_url : string -> unit =
+  [%mel.raw
+    "function (url) { window.history.replaceState(window.history.state, '', url) }"]
+
 let manual_scroll : unit -> unit =
   [%mel.raw
     "function () { try { window.history.scrollRestoration = 'manual' } catch (e) {} }"]

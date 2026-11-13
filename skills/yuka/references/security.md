@@ -27,7 +27,8 @@
   exception. Event handlers are functions: `on_click=(fun event -> ...)`
   in `.mlx` or `Yuka.on`; a string handler in `.mlx` does not build.
 - `Yuka.Browser.navigate` does nothing with a `javascript:`, `vbscript:`
-  or `data:` URL (a dev build logs it once). A form follows only a
+  or `data:` URL (a dev build logs it once), and `Yuka.Browser.replace_url`
+  does nothing with those or with a URL on another origin. A form follows only a
   `redirect` on this site (the request `Host`, or an origin of
   `Yuka.Server.config ~origins`): the server answers 500 and logs one that
   is not, and the browser refuses one from another origin and shows an

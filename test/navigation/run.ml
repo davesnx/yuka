@@ -1494,6 +1494,44 @@ let cold_back_forward finish =
             100))
     100
 
+let history_state_key : unit -> string =
+  [%mel.raw "function () { const s = window.history.state; return (s && s.yukaKey) || '' }"]
+
+let replace_url finish =
+  setup (page {|<a id="a" href="/a">a</a>|});
+  plain_start ();
+  let length = history_length () and key = history_state_key () in
+  Browser.replace_url "/start?q=router&label=bug";
+  check "url replaced" "/start?q=router&label=bug" (location_ ());
+  check "no new entry" (ints length) (ints (history_length ()));
+  check "history key kept" key (history_state_key ());
+  check "no fetch, no page load" "0," (ints (calls ()) ^ "," ^ log_read ());
+  List.iter Browser.replace_url ("https://other.example/x" :: script_urls);
+  check "another origin and script URLs do nothing" "/start?q=router&label=bug" (location_ ());
+  popstate_to "/start?x=1";
+  until "a popstate to the URL before the replace loads it" (fun () -> calls () > 0)
+    (fun () ->
+      check "fetches the first URL" "/start?x=1" (call_url 0);
+      finish ())
+    100
+
+let replace_url_back finish =
+  setup (page {|<a id="a" href="/a">a</a>|});
+  plain_start ();
+  Browser.replace_url "/start?q=router";
+  ignore (click "#a" "");
+  until "the click fetches" (fun () -> calls () > 0)
+    (fun () ->
+      resolve_call 0 (doc "A" (page "<p>a</p>")) "";
+      tick (fun () ->
+          back ();
+          until "back fetches" (fun () -> calls () > 1)
+            (fun () ->
+              check "back loads the replaced URL" "/start?q=router" (call_url 1);
+              finish ())
+            100))
+    100
+
 let fire_touch : string -> string -> unit =
   [%mel.raw
     "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
@@ -1660,6 +1698,8 @@ let all =
     ("start twice", start_twice);
     ("Browser.navigate", browser_navigate);
     ("Browser.navigate refuses script URLs, navigation off and on", navigate_refuses_scripts);
+    ("Browser.replace_url", replace_url);
+    ("back to an entry loads its replaced URL", replace_url_back);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);

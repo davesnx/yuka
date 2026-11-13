@@ -260,6 +260,9 @@ h1, h2, p { margin: 0; }
 .row-id { width: 70px; color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-title:hover { text-decoration: underline; }
+.row-title::after { content: ""; position: absolute; inset: 0; }
+.row .status-wrap { z-index: 1; }
+.row .status-wrap:has(.menu) { z-index: 2; }
 .row-date { width: 58px; text-align: right; color: var(--muted); flex: none; }
 
 .icon { flex: none; width: 17px; height: 17px; }

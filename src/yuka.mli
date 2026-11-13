@@ -503,6 +503,16 @@ module Browser : sig
       example to show a progress bar. Always [false] on the server and
       without client navigation. *)
 
+  val replace_url : string -> unit
+  (** Browser only: raises [Failure] on native. Sets the URL of the current
+      history entry ([history.replaceState]) and loads nothing: no request,
+      no new entry, the page and its islands stay. A reload, back and
+      forward to this entry, and a client navigation back to it load the
+      new URL. Use it to keep the state of a page, such as a filter, in its
+      query, so the URL can be shared. A URL on another origin, or a
+      [javascript:], [vbscript:] or [data:] URL, does nothing; a dev build
+      logs the first one. *)
+
   val focus : string -> unit
   (** Focuses the element with this id; does nothing when no element has
       it. Inside a {!batch} (an event handler), it runs after the batch

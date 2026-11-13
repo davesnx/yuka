@@ -9,25 +9,33 @@ let index_of id items =
   in
   go 0 items
 
-let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Queries.view) () =
+let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Queries.view) ~(query : string)
+    ~(chosen : string list) () =
   let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view }) in
   let issues =
     Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
   in
   let labels = Yuka.Remote.use Queries.labels (fun () -> workspace) in
-  let filter = Yuka.State.make "" in
-  let label : string option Yuka.State.t = Yuka.State.make None in
+  let filter = Yuka.State.make query in
+  let chosen_labels = Yuka.State.make chosen in
   let selected : string option Yuka.State.t = Yuka.State.make None in
   let menu : menu option Yuka.State.t = Yuka.State.make None in
   let toast : string option Yuka.State.t = Yuka.State.make None in
   let visible =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        let query = Yuka.State.get filter and only = Yuka.State.get label in
+        let query = Yuka.State.get filter and only = Yuka.State.get chosen_labels in
         List.filter
           (fun (issue : Issue.t) ->
-            Issue.matches ~query issue && match only with Some chosen -> List.mem chosen issue.labels | None -> true)
+            Issue.matches ~query issue && List.for_all (fun chosen -> List.mem chosen issue.labels) only)
           (Yuka.State.get issues))
   in
+  let url =
+    Yuka.State.memo (fun () ->
+        let q = match Yuka.State.get filter with "" -> None | text -> Some text
+        and label = Yuka.State.get chosen_labels in
+        match view with Queries.All -> Links.issues ?q ~label workspace | Mine -> Links.my_issues ?q ~label workspace)
+  in
+  Yuka.Effect.on_change url (fun ~prev:_ ~next -> Yuka.Browser.replace_url next);
   let groups = Yuka.State.memo ~equal:( = ) (fun () -> Issue.group (Yuka.State.get visible)) in
   let ordered = Yuka.State.memo ~equal:( = ) (fun () -> List.concat_map snd (Yuka.State.get groups)) in
   let change ~id ?status ?priority () =
@@ -46,7 +54,11 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
       (Yuka.Live.optimistic source ~change:(List.map edit) (fun () ->
            Yuka.Action.call Actions.update_issue { Actions.id; status; priority }))
       (function
-        | Ok (Ok _) -> if status <> None then Yuka.Remote.invalidate Queries.labels
+        | Ok (Ok _) ->
+            if status <> None then begin
+              Yuka.Remote.invalidate Queries.labels;
+              Yuka.Remote.invalidate User_popup.stats
+            end
         | Ok (Error _) | Error _ -> Yuka.State.set toast (Some ("Could not update " ^ id ^ ".")))
   in
   let move step =
@@ -129,7 +141,9 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
       </span>
       <a class_="row-title" href=(Links.issue workspace ~id:issue.id)>(Yuka.text issue.title)</a>
       <Views.Labels labels=issue.labels />
-      <Views.Avatar user=issue.assignee />
+      (match issue.assignee with
+       | Some user -> <User_popup workspace user row=issue.id />
+       | None -> <Views.Avatar user=None />)
       <span class_="row-date">(Yuka.text issue.created_at)</span>
     </div>
   in
@@ -149,7 +163,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
          | _ -> Yuka.empty))
     </header>
     <div class_="toolbar">
-      <input class_="filter" type_=`text placeholder="Filter issues (j/k to move, Enter to open)"
+      <input class_="filter" type_=`text placeholder="Filter issues (j/k to move, Enter to open)" value=query
         on_input=(fun event -> Yuka.State.set filter (Yuka.Event.target_value event)) />
       (Yuka.hole (fun () ->
          match Yuka.Remote.status labels with
@@ -158,11 +172,15 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
                (Yuka.fragment
                  (List.map
                     (fun (count : Queries.label_count) ->
+                      let on = List.mem count.label (Yuka.State.get chosen_labels) in
                       <button
-                        class_=(if Yuka.State.get label = Some count.label then "chip on" else "chip")
+                        class_=(if on then "chip on" else "chip")
+                        aria_pressed=(if on then `true_ else `false_)
                         data_label=count.label
                         on_click=(fun _ ->
-                          Yuka.State.set label (if Yuka.State.peek label = Some count.label then None else Some count.label))>
+                          Yuka.State.update chosen_labels (fun current ->
+                              if List.mem count.label current then List.filter (fun label -> label <> count.label) current
+                              else current @ [ count.label ]))>
                         (Yuka.text (count.label ^ " " ^ Int.to_string count.open_))
                       </button>)
                     data))

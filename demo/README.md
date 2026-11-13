@@ -53,6 +53,11 @@ The `Nav_progress` island reads `Yuka.Browser.navigating`.
 
 - `http://localhost:8080/`: all issues of `yuka`, grouped by status.
 - `http://localhost:8080/my`: issues of `yuka` assigned to the current user.
+- `http://localhost:8080/?q=hydration&label=bug&label=client`: the list
+  filtered by title and by labels (an issue must have each label). Each
+  list page reads `q` and `label`, and the server renders the filtered
+  list. Typing in the filter or a click on a label changes the URL with
+  `Yuka.Browser.replace_url`, so a reload, back and a shared link keep it.
 - `http://localhost:8080/new`: the new issue form of `yuka`.
 - `http://localhost:8080/insights`: charts of the issues of `yuka`, drawn
   in SVG by one island (`shared/insights.mlx`). The server prints them, and
@@ -79,6 +84,12 @@ The `Nav_progress` island reads `Yuka.Browser.navigating`.
 - `http://localhost:8080/issues.json`: the issues of `yuka` as JSON (an
   endpoint).
 - `http://localhost:8080/issues`: a permanent redirect to `/`.
+
+A click anywhere on a row opens the issue: the title link covers the row,
+and the buttons of the row are above it. The avatar of a row opens a card
+with the user and the number of their open, in-progress and done issues
+(`User_popup`; the numbers come from the `user_stats` query when the card
+first opens).
 
 Keys: `j` and `k` move, Enter opens, `c` opens the new issue dialog,
 Escape closes menus and the dialog.

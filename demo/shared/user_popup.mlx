@@ -1,0 +1,48 @@
+open Model
+module Css = [%yuka.css "user_popup.css"]
+
+type input = { workspace : Workspace.t; user : string } [@@deriving codec]
+type stats = { open_ : int; in_progress : int; done_ : int } [@@deriving codec]
+
+let stats = Yuka.Action.query ~name:"user_stats" ~input:input_codec ~output:stats_codec
+
+module Card = struct
+  let make ~workspace ~(user : User.t) ~id () : Yuka.client Yuka.element =
+    let stats = Yuka.Remote.use stats (fun () -> { workspace; user = user.id }) in
+    let stat name value =
+      <div class_=Css.stat>
+        <dt>(Yuka.text name)</dt>
+        <dd>(Yuka.int value)</dd>
+      </div>
+    in
+    <div id popover=`auto role=`dialog aria_label=user.name class_=Css.card>
+      <div class_=Css.head>
+        <span class_=Css.picture aria_hidden=true>(Yuka.text (User.initials user))</span>
+        <div>
+          <div class_=Css.name>(Yuka.text user.name)</div>
+          <div class_=Css.handle>(Yuka.text ("@" ^ user.id))</div>
+        </div>
+      </div>
+      <Yuka.Show status=(fun () -> Yuka.Remote.status stats)
+        loading=(<p class_=Css.note>"Loading..."</p>)
+        failed=(fun _ -> <p class_=Css.note>"Could not load the numbers."</p>)>
+        (fun (stats : stats) ->
+          <dl class_=Css.stats>
+            (stat "Open" stats.open_)
+            (stat "In progress" stats.in_progress)
+            (stat "Done" stats.done_)
+          </dl>)
+      </Yuka.Show>
+    </div>
+end
+
+let[@client] make ~(workspace : Workspace.t) ~(user : User.t) ~(row : string) () =
+  let opened = Yuka.State.make false in
+  let id = "user-" ^ row in
+  <span class_=Css.wrap>
+    <button class_=Css.trigger popovertarget=id aria_haspopup=`dialog aria_label=user.name
+      on_click=(fun _ -> Yuka.State.set opened true)>
+      <Views.Avatar user=(Some user) />
+    </button>
+    (if Yuka.State.get opened then <Card workspace user id /> else Yuka.empty)
+  </span>

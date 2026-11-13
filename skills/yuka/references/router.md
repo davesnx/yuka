@@ -262,10 +262,34 @@ let[@client] make () =
 
 It is always `false` on the server.
 
+To keep the state of a page in its URL, such as a filter that a user can
+share, give the state to the page as search fields and change the URL with
+`Yuka.Browser.replace_url`. It replaces the URL of the current history
+entry and loads nothing; a reload, back and forward load the page with the
+new query, and the server renders it with that state:
+
+```ocaml
+(* Routes.ml *)
+Router.route Blog ~path:"/" ~page:Pages.blog ~search:{ tag = optional string }
+
+(* pages.mlx: the island gets the search field as a prop *)
+let blog ~tag () =
+  Yuka.Server.page ~title:"Blog" (fun () ->
+      <Yuka.Client><Posts tag=(Option.value tag ~default:"") /></Yuka.Client>)
+
+(* posts.mlx *)
+let[@client] make ~(tag : string) () =
+  let tag = Yuka.State.make tag in
+  Yuka.Effect.on_change tag (fun ~prev:_ ~next ->
+      Yuka.Browser.replace_url (Routes.blog ?tag:(if next = "" then None else Some next) ()));
+  ...
+```
+
 ## Limitations
 
 - An island cannot read the current route or search params as a State.
-  Pass what it needs as props.
+  Pass what it needs as props, and write them back with
+  `Yuka.Browser.replace_url`.
 - There is no base path: the app is served at the root of its origin.
 - An editor does not check `Routes.ml`. `yuka routes` reports each error
   with its location:

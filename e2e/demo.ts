@@ -682,6 +682,7 @@ await step("4. status change", async () => {
     .then(() => true, () => false);
   await page.locator(`.row[data-id="${id}"] button[aria-label="Change status"]`).click();
   await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
+  await page.mouse.move(0, 0);
   const start = Date.now();
   await page.waitForFunction(
     ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
@@ -930,6 +931,96 @@ await step("6h. insights", async () => {
   await pg.waitForFunction((text) => document.querySelector("[data-points]")?.textContent === text, String(stress), { timeout: 10000 });
   check("6h.11 no console error and no hydration mismatch", errors.length === 0, errors.join(" | "));
   await pg.close();
+});
+
+await step("6h. issue list: row link, user popup, filter in the URL", async () => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const started = () => page.waitForFunction(() => [...document.querySelectorAll("yuka-island")].every((i) => (i as any).__yuka_started));
+  const openCard = () => page.evaluate(() => document.querySelector("[popover]:popover-open")?.getAttribute("id") ?? "");
+  await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
+  await started();
+  await page.evaluate(() => ((window as any).__list = "alive"));
+  const row = page.locator('.row[data-id="STR-2"]');
+  const box = (await row.boundingBox())!;
+  await row.click({ position: { x: box.width - 20, y: box.height / 2 } });
+  await page.waitForURL("**/w/stress/issue/STR-2");
+  check("6h.1 a click on the row outside the title opens the issue, client navigation", (await page.evaluate(() => (window as any).__list)) === "alive");
+  await page.goBack();
+  await page.waitForURL(/\/w\/stress$/);
+  await page.waitForSelector('.row[data-id="STR-2"]');
+  await started();
+  await page.locator('.row[data-id="STR-2"] button[aria-label="Change status"]').click();
+  check("6h.2 the status button in a row opens its menu and does not navigate", (await page.locator(".menu").count()) === 1 && page.url().endsWith("/w/stress"), page.url());
+  await page.keyboard.press("Escape");
+  const unassigned = await page.evaluate(() => [...document.querySelectorAll(".row")].filter((r) => r.querySelector(".avatar.empty")).map((r) => !!r.querySelector("[popovertarget]")));
+  check("6h.3 unassigned rows have no user popup", unassigned.length > 0 && unassigned.every((has) => !has), String(unassigned.length));
+  const trigger = page.locator('.row[data-id="STR-2"] [popovertarget]');
+  check("6h.4 the closed popups are not in the HTML", (await page.locator("[popover]").count()) === 0, String(await page.locator("[popover]").count()));
+  await trigger.click();
+  await page.waitForSelector("[popover]:popover-open dd");
+  const card = page.locator("[popover]:popover-open");
+  const text = await card.innerText();
+  check("6h.5 the avatar opens a card with the user and numbers, no navigation",
+    page.url().endsWith("/w/stress") && /@\w+/.test(text) && /Open\s+\d+/.test(text) && /Done\s+\d+/.test(text) && (await card.getAttribute("role")) === "dialog",
+    text.replace(/\s+/g, " "));
+  check("6h.6 the trigger names the dialog it opens", (await trigger.getAttribute("aria-haspopup")) === "dialog" && (await trigger.getAttribute("popovertarget")) === (await openCard()));
+  await page.keyboard.press("Escape");
+  check("6h.7 Escape closes the card", (await openCard()) === "");
+  await trigger.click();
+  await page.mouse.click(640, 20);
+  check("6h.8 a click outside closes the card", (await openCard()) === "" && page.url().endsWith("/w/stress"));
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  check("6h.9 Enter on the focused avatar opens the card", (await openCard()) === "user-STR-2");
+  await page.keyboard.press("Escape");
+  const last = page.locator(".row:has([popovertarget])").last();
+  await last.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await last.locator("[popovertarget]").click();
+  await page.waitForSelector("[popover]:popover-open dd");
+  const inside = await page.evaluate(() => {
+    const r = document.querySelector("[popover]:popover-open")!.getBoundingClientRect();
+    return r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth;
+  });
+  check("6h.10 a card at the bottom right stays in the viewport", inside);
+  await page.keyboard.press("Escape");
+  const shared = "/w/stress?q=router&label=router";
+  const html = await (await page.request.get(base + shared)).text();
+  const titles = [...html.matchAll(/class="row-title" href="[^"]*">([^<]*)</g)].map((m) => m[1]);
+  check("6h.11 a URL with q and label renders the filtered list on the server",
+    titles.length > 0 && titles.length < 200 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
+    String(titles.length));
+  const mine = await (await page.request.get(base + "/my?label=feature")).text();
+  const mineRows = [...mine.matchAll(/class="row" data-id="([^"]*)"/g)].length;
+  check("6h.12 My issues reads the label from the URL too", mineRows > 0 && /class="chip on" aria-pressed="true" data-label="feature"/.test(mine), String(mineRows));
+  await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
+  await started();
+  const entries = await page.evaluate(() => history.length);
+  await page.locator(".filter").fill("router");
+  await page.locator('.chip[data-label="router"]').click();
+  await page.waitForURL("**" + shared);
+  check("6h.13 typing and a chip update the URL without a new history entry", (await page.evaluate(() => history.length)) === entries, page.url());
+  await page.locator(".filter").fill("");
+  await page.locator('.chip[data-label="bug"]').click();
+  await page.waitForURL("**/w/stress?label=router&label=bug");
+  const both = await page.locator(".row").evaluateAll((rows) => rows.map((r) => !!(r.querySelector(".label-router") && r.querySelector(".label-bug"))));
+  check("6h.14 two chips keep the issues that have both labels", both.length > 0 && both.every(Boolean), `${both.length} rows`);
+  await page.locator('.chip[data-label="bug"]').click();
+  await page.locator(".filter").fill("router");
+  await page.waitForURL("**" + shared);
+  await page.reload({ waitUntil: "networkidle" });
+  await started();
+  const count = await page.locator(".row").count();
+  check("6h.15 a reload keeps the filter, the chip and the rows",
+    (await page.inputValue(".filter")) === "router" && (await page.locator(".chip.on").count()) === 1 && count === titles.length, `${count} rows`);
+  await page.locator(".row .row-title").first().click();
+  await page.waitForURL("**/w/stress/issue/**");
+  await page.waitForSelector(".issue-title");
+  await page.goBack();
+  await page.waitForURL("**" + shared);
+  await page.waitForSelector(".row");
+  check("6h.16 back from an issue shows the filtered list",
+    (await page.inputValue(".filter")) === "router" && (await page.locator(".row").count()) === count, String(await page.locator(".row").count()));
 });
 
 await step("7a. streaming", async () => {

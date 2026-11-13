@@ -11,12 +11,14 @@ let shell_of workspace children : Yuka.server Yuka.element =
 
 let shell ~children () = shell_of Model.Workspace.default children
 
-let issue_list workspace view =
+let issue_list ~q ~label workspace view =
   let page_title, title = match view with Queries.All -> ("Issues", "All issues") | Mine -> ("My issues", "My issues") in
-  Yuka.Server.page ~title:page_title (fun () -> <Yuka.Client><Issue_list workspace title view /></Yuka.Client>)
+  let query = Option.value q ~default:"" in
+  Yuka.Server.page ~title:page_title (fun () ->
+      <Yuka.Client><Issue_list workspace title view query chosen=label /></Yuka.Client>)
 
-let index () = issue_list Model.Workspace.default Queries.All
-let my_issues () = issue_list Model.Workspace.default Queries.Mine
+let index ~q ~label () = issue_list ~q ~label Model.Workspace.default Queries.All
+let my_issues ~q ~label () = issue_list ~q ~label Model.Workspace.default Queries.Mine
 
 let insights_in workspace =
   Yuka.Server.page ~title:"Insights" (fun () -> <Yuka.Client><Insights workspace /></Yuka.Client>)
@@ -98,8 +100,8 @@ let create () = create_in Model.Workspace.default
 
 module Workspace = struct
   let shell ~workspace ~children () = shell_of workspace children
-  let index ~workspace () = issue_list workspace Queries.All
-  let my_issues ~workspace () = issue_list workspace Queries.Mine
+  let index ~workspace ~q ~label () = issue_list ~q ~label workspace Queries.All
+  let my_issues ~workspace ~q ~label () = issue_list ~q ~label workspace Queries.Mine
   let insights ~workspace () = insights_in workspace
   let create ~workspace () = create_in workspace
   let issue ~workspace:_ ~id ~issue:found () = Yuka.Server.page ~title:id (fun () -> issue_view found)

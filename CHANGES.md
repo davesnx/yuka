@@ -90,6 +90,7 @@
 - The `State` checks of the ppx do not apply after a top-level `module State` of the file; the error says that the check goes by name (@davesnx)
 - Template values that the ppx hoists no longer show in a module's inferred interface (@davesnx)
 - `ppxlib` has the upper bound `< 0.40.0`, and `mlx` (`>= 0.12`, `< 0.13`) is a normal dependency (@davesnx)
+- `Yuka.Browser.replace_url url` sets the URL of the current history entry (`history.replaceState`, keeping Yuka's entry key) and loads nothing, so an island can keep its state, such as a filter, in the query: a reload, back and forward load the new URL. A URL on another origin or a script URL does nothing (@davesnx)
 
 ### yuka-dream
 

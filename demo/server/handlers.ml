@@ -13,6 +13,7 @@ let publish_issue (issue : Model.Issue.t) =
 
 let register () =
   Yuka.Server.Action.make Queries.labels (fun _ workspace -> Yuka.Async.return (Store.label_counts workspace));
+  Yuka.Server.Action.make User_popup.stats (fun _ { workspace; user } -> Yuka.Async.return (Store.user_stats workspace user));
   Yuka.Server.Live.serve Topics.issues (fun list -> Yuka.Async.return (view_issues list));
   Yuka.Server.Live.serve Topics.issue (fun id ->
       match Store.find id with Some issue -> Yuka.Async.return issue | None -> Yuka.Server.Action.reject ("No issue " ^ id));

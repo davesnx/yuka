@@ -98,6 +98,7 @@ val same_origin : string -> bool
 val fresh_key : unit -> string
 val history_key : unit -> string
 val history_replace_key : string -> unit
+val history_replace_url : string -> unit
 val manual_scroll : unit -> unit
 val plain_click : event -> bool
 val link_href : bool -> node -> string

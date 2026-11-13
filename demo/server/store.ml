@@ -174,3 +174,16 @@ let label_counts workspace =
     (fun label ->
       { Demo_shared.Queries.label; open_ = List.length (List.filter (fun issue -> open_ issue && List.mem label issue.Issue.labels) issues) })
     labels
+
+let user_stats workspace user_id =
+  let assigned =
+    List.filter
+      (fun (issue : Issue.t) -> match issue.assignee with Some user -> user.id = user_id | None -> false)
+      (issues workspace)
+  in
+  let count statuses = List.length (List.filter (fun (issue : Issue.t) -> List.mem issue.status statuses) assigned) in
+  {
+    Demo_shared.User_popup.open_ = count [ Issue.Backlog; Todo; In_progress ];
+    in_progress = count [ In_progress ];
+    done_ = count [ Done ];
+  }

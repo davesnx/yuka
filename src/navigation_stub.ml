@@ -1,7 +1,7 @@
 open Types
 
 let current_key = ref ""
-let loaded = ref ""
+let loaded = Platform.loaded
 let on = ref false
 let router : router option ref = ref None
 let loader : (unit -> router Web.promise) ref = ref (fun () -> failwith "Yuka: navigation is off")
