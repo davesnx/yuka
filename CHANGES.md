@@ -105,6 +105,10 @@
 
 - New package `yuka-live-pg`: a `Server.Live.bus` over Postgres `LISTEN`/`NOTIFY` (postgresql-ocaml, waits on the socket with Lwt, reconnects and calls `on_restart`); `Server.Live.close_bus` stops its listener and closes its connections (@davesnx)
 
+### yuka-tapak
+
+- New package `yuka-tapak` (experiment, not released): the request cycle on [tapak](https://github.com/syaiful6/tapak), in direct style on Eio, on one domain. `Yuka_tapak.handler ~sw ~fs` is a `Tapak.handler` and goes in the `~not_found` of a tapak router; `Yuka_tapak.sessions` is the middleware for the session and CSRF cookies; `await` and `async` convert between `Yuka.Async.t` and fibers. No `prerender`. `tapak`, `sch` and `cows` are not in opam: `make pin` pins them (@davesnx)
+
 ## 0.2 (YYYY-MM-DD)
 
 First release on opam.
