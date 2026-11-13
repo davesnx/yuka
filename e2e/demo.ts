@@ -672,6 +672,9 @@ await step("3g. live data", async () => {
   await A.p.locator(".dialog .button.primary").click();
   const created = await B.p.locator(".row", { hasText: title }).waitFor({ timeout: 2000 }).then(() => true, () => false);
   check("3g.2 an issue created in page A shows in page B", created);
+  await A.p.waitForURL(/\/issue\/YUK-\d+$/);
+  await A.p.goBack();
+  await A.p.waitForSelector(`.row:has-text("${title}")`);
 
   await B.routes[B.routes.length - 1].close({ code: 4001, reason: "dropped by the test" });
   const offline = await B.p.waitForSelector(".offline", { timeout: 1000 }).then(() => true, () => false);
@@ -779,6 +782,7 @@ await step("5. failure path", async () => {
 });
 
 await step("6. new issue dialog", async () => {
+  const listUrl = page.url();
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("c");
   await page.waitForSelector(".dialog", { timeout: 2000 });
@@ -807,15 +811,43 @@ await step("6. new issue dialog", async () => {
   await page.waitForFunction(() => /already exists/.test(document.querySelector(".dialog .error")?.textContent ?? ""), null, { timeout: 3000 });
   check("6c0e duplicate title shows the existing id", (await errText()) === "An issue with this title already exists: YUK-25", await errText());
   check("6c0f typed errors cause no console error", consoleErrors.length === 0, consoleErrors.join(" | "));
+  check("6c0g typed errors do not navigate", page.url() === listUrl, `${listUrl} -> ${page.url()}`);
   const headerBefore = Number((await page.locator(".page-header .group-count").first().textContent()) ?? "NaN");
   const title = `E2E issue ${run}`;
   await page.fill(".dialog-title", title);
   await page.fill(".dialog-description", "Created by the browser check.");
   const before = await page.locator(".row").count();
+  await page.evaluate(() => ((window as any).__created = "alive"));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForSelector(".dialog", { state: "detached", timeout: 3000 });
-  await page.waitForTimeout(200);
+  await page.waitForURL(/\/issue\/YUK-\d+$/, { timeout: 3000 });
+  await page.waitForSelector(".issue-title");
+  const landed = {
+    path: new URL(page.url()).pathname,
+    title: await page.locator(".issue-title").textContent(),
+    description: (await page.locator(".issue-description").textContent())?.trim(),
+    marker: await page.evaluate(() => (window as any).__created),
+    dialogs: await page.locator(".dialog").count(),
+    focus: await page.evaluate(() => !!document.activeElement?.isConnected && !document.activeElement.closest(".dialog")),
+  };
+  check("6c issue opens its page with a client navigation", /^\/issue\/YUK-\d+$/.test(landed.path) && landed.title === title && landed.description === "Created by the browser check." && landed.marker === "alive" && landed.dialogs === 0, JSON.stringify(landed));
+  check("6c3 focus is on a connected element outside the dialog", landed.focus, JSON.stringify(landed));
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("c");
+  await page.waitForSelector(".dialog", { timeout: 2000 });
+  const fresh = {
+    title: await page.inputValue(".dialog-title"),
+    description: await page.inputValue(".dialog-description"),
+    errors: await page.locator(".dialog .error").count(),
+    disabled: await page.locator(".dialog .button.primary").isDisabled(),
+  };
+  check("6c4 c on the new issue opens an empty dialog", fresh.title === "" && fresh.description === "" && fresh.errors === 0 && !fresh.disabled, JSON.stringify(fresh));
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".dialog", { state: "detached", timeout: 2000 });
+  await page.goBack();
+  await page.waitForURL(listUrl);
+  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
   const row = page.locator(".row", { hasText: title });
+  check("6c5 Back is a client navigation to the list", (await page.evaluate(() => (window as any).__created)) === "alive");
   check("6c issue appears without reload", (await row.count()) === 1 && (await page.locator(".row").count()) === before + 1);
   const headerAfter = Number((await page.locator(".page-header .group-count").first().textContent()) ?? "NaN");
   check("6c2 header count follows the list", headerAfter === headerBefore + 1 && headerAfter === before + 1, `${headerBefore} -> ${headerAfter}, rows ${before + 1}`);
@@ -900,10 +932,17 @@ await step("6g. workspaces", async () => {
   await page.waitForSelector(".dialog", { timeout: 2000 });
   const title = `Stress issue ${run}`;
   await page.fill(".dialog-title", title);
+  await page.evaluate(() => ((window as any).__created = "stress"));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForSelector(".dialog", { state: "detached", timeout: 3000 });
+  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/, { timeout: 3000 });
+  await page.waitForSelector(".issue-title");
+  const landed = { path: new URL(page.url()).pathname, title: await page.locator(".issue-title").textContent(), marker: await page.evaluate(() => (window as any).__created) };
+  check("6g.12a creating in stress opens /w/stress/issue/STR-n with a client navigation", landed.title === title && landed.marker === "stress", JSON.stringify(landed));
+  await page.goBack();
+  await page.waitForURL("**/w/stress");
   await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
   const created = await page.locator(".row", { hasText: title }).getAttribute("data-id");
+  check("6g.12b the issue page is the created issue", landed.path === `/w/stress/issue/${created}`, `${landed.path} ${created}`);
   check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 201, `${created} rows=${await page.locator(".row").count()}`);
   await page.evaluate(() => ((window as any).__workspace = "alive"));
   await page.locator('.workspace-link[href="/"]').click();
