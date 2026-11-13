@@ -24,7 +24,7 @@ let[@client] make ~(workspace : Workspace.t) () =
   let error : string option Yuka.State.t = Yuka.State.make None in
   let grab = ref None and panning = ref None in
   let report = function
-    | Ok (Ok _) -> ()
+    | Ok (Ok _) | Ok (Error (Yuka.Status.Network "cancelled")) -> ()
     | Ok (Error status) -> Yuka.State.set error (Some (Yuka.Status.error_to_string status))
     | Error message -> Yuka.State.set error (Some message)
   in
