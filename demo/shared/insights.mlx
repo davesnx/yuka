@@ -35,6 +35,16 @@ let time_bottom = 150
 let bar_start = 124
 let bar_room = 220
 
+let frame_samples = 60
+let long_frame = 50.
+let frame_y gap = 24 - int_of_float (Float.min gap long_frame *. 22. /. long_frame)
+
+let frame_path gaps count =
+  let start = if count >= frame_samples then count mod frame_samples else 0 in
+  String.concat " "
+    (List.init (min count frame_samples) (fun index ->
+         (if index = 0 then "M" else "L") ^ px (index * 2) ^ " " ^ px (frame_y gaps.((start + index) mod frame_samples))))
+
 let day_x (first, last) day = time_left + ((day - first) * (time_right - time_left) / max 1 (last - first))
 
 let status_tone = function
@@ -258,6 +268,12 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let fps : int option Yuka.State.t = Yuka.State.make None in
   let update_time : int option Yuka.State.t = Yuka.State.make None in
   let nodes : int option Yuka.State.t = Yuka.State.make None in
+  let expanded = Yuka.State.make true in
+  let worst_frame : int option Yuka.State.t = Yuka.State.make None in
+  let long_frames : int option Yuka.State.t = Yuka.State.make None in
+  let updates_per_second : int option Yuka.State.t = Yuka.State.make None in
+  let dom_nodes : int option Yuka.State.t = Yuka.State.make None in
+  let frame_line = Yuka.State.make "" in
   let shown_multiplier = Yuka.State.deferred multiplier in
   let shown_statuses = Yuka.State.deferred statuses_on in
   let shown_priorities = Yuka.State.deferred priorities_on in
@@ -298,19 +314,44 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
     Yuka.State.memo ~equal:( = ) (fun () ->
         match Yuka.State.get hover with Some hover when hover.chart = chart -> Some hover | _ -> None)
   in
-  let pending = ref None in
-  let mark () = pending := Some (Yuka.Browser.now ()) in
-  let count_nodes () = Yuka.State.set nodes (Some (Yuka.Browser.count_elements "[data-insights] svg *")) in
-  let frames = ref 0 and since = ref 0. in
+  let pending = ref None and frame_number = ref 0 in
+  let mark () = if !pending = None then pending := Some (Yuka.Browser.now (), !frame_number) in
+  let count_nodes () =
+    if Yuka.State.peek expanded then begin
+      Yuka.State.set nodes (Some (Yuka.Browser.count_elements "[data-chart] *"));
+      Yuka.State.set dom_nodes (Some (Yuka.Browser.count_elements "*"))
+    end
+  in
+  let frames = ref 0 and since = ref 0. and previous = ref 0. and worst = ref 0. and updates = ref 0 in
+  let long_times = ref [] and gaps = Array.make frame_samples 0. and next_gap = ref 0 in
+  Yuka.Effect.after (fun () -> if Yuka.State.get expanded then count_nodes ());
   Yuka.Effect.after (fun () ->
-      count_nodes ();
       Yuka.Browser.on_frame (fun time ->
           incr frames;
           if !since = 0. then since := time;
-          pending := None;
+          if !previous > 0. then begin
+            let gap = time -. !previous in
+            worst := Float.max !worst gap;
+            if gap > long_frame then long_times := time :: !long_times;
+            gaps.(!next_gap mod frame_samples) <- gap;
+            incr next_gap
+          end;
+          previous := time;
+          incr frame_number;
+          (match !pending with Some (_, marked) when !frame_number - marked > 3 -> pending := None | _ -> ());
           if time -. !since >= 1000. then begin
-            Yuka.State.set fps (Some (int_of_float (Float.round (float_of_int !frames *. 1000. /. (time -. !since)))));
+            let elapsed = time -. !since in
+            Yuka.State.set fps (Some (int_of_float (Float.round (float_of_int !frames *. 1000. /. elapsed))));
+            long_times := List.filter (fun long_time -> time -. long_time <= 10_000.) !long_times;
+            if Yuka.State.peek expanded then begin
+              Yuka.State.set worst_frame (Some (int_of_float (!worst *. 10.)));
+              Yuka.State.set long_frames (Some (List.length !long_times));
+              Yuka.State.set updates_per_second (Some (int_of_float (Float.round (float_of_int !updates *. 1000. /. elapsed))));
+              Yuka.State.set frame_line (frame_path gaps !next_gap)
+            end;
             frames := 0;
+            worst := 0.;
+            updates := 0;
             since := time;
             if Yuka.State.peek animate then count_nodes ()
           end));
@@ -367,16 +408,6 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
         Yuka.State.set assignees_on [];
         Yuka.State.set range None)
   in
-  let started = ref false in
-  Yuka.Effect.before (fun () ->
-      ignore
-        ( Yuka.State.get shown_multiplier,
-          Yuka.State.get shown_statuses,
-          Yuka.State.get shown_priorities,
-          Yuka.State.get shown_labels,
-          Yuka.State.get shown_assignees,
-          Yuka.State.get shown_range );
-      if !started then mark () else started := true);
   Yuka.Effect.after (fun () ->
       ignore
         ( Yuka.State.get status_chart,
@@ -386,8 +417,9 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
           Yuka.State.get heatmap,
           Yuka.State.get timeline,
           Yuka.State.get scatter );
+      incr updates;
       match !pending with
-      | Some start ->
+      | Some (start, _) ->
           pending := None;
           Yuka.State.set update_time (Some (int_of_float ((Yuka.Browser.now () -. start) *. 10.)));
           if not (Yuka.State.peek animate) then count_nodes ()
@@ -501,15 +533,39 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   in
   let range_input ~label ~pick ~apply : Yuka.client Yuka.element =
     <label class_=Css.bound>
-      (Yuka.text label)
-      <input class_=Css.slider type_=`range
+      <span class_=Css.bound_label>(Yuka.text label)</span>
+      <input class_=Css.slider type_=`range data_bound=label
         min=(px (fst (Yuka.State.get bounds))) max=(px (snd (Yuka.State.get bounds)))
         value=(px (pick (Yuka.State.get window)))
+        aria_valuetext=(date_of_day (pick (Yuka.State.get window)))
         on_input=(fun event ->
           match int_of_string_opt (Yuka.Event.target_value event) with
           | Some day -> change (fun () -> Yuka.State.set range (Some (apply day (Yuka.State.peek window))))
           | None -> ()) />
+      <span class_=Css.bound_date>(Yuka.text (date_of_day (pick (Yuka.State.get window))))</span>
     </label>
+  in
+  let date_filter : Yuka.client Yuka.element =
+    <div class_=Css.dates>
+      <button id="insights-dates-button" class_=(if Yuka.State.get range = None then "chip" else "chip on") type_=`button
+        popovertarget="insights-dates" aria_haspopup=`dialog data_dates="true">
+        <span class_=Css.dates_label>"Created"</span>
+        <span>(Yuka.text (date_of_day (fst (Yuka.State.get window))))</span>
+        <span class_=Css.arrow>" to "</span>
+        <span>(Yuka.text (date_of_day (snd (Yuka.State.get window))))</span>
+      </button>
+      <div id="insights-dates" popover=`auto role=`dialog aria_label="Created date range" class_=Css.dates_menu>
+        (range_input ~label:"From" ~pick:fst ~apply:(fun day (_, to_day) -> (min day to_day, to_day)))
+        (range_input ~label:"To" ~pick:snd ~apply:(fun day (from_day, _) -> (from_day, max day from_day)))
+        <button class_=Css.clear type_=`button disabled=(Yuka.State.get range = None)
+          on_click=(fun _ -> change (fun () -> Yuka.State.set range None))>
+          "Full range"
+        </button>
+      </div>
+    </div>
+  in
+  let shown ~metric state show : Yuka.client Yuka.element =
+    <dd data_metric=metric>(Yuka.hole (fun () -> Yuka.text (match Yuka.State.get state with Some value -> show value | None -> "-")))</dd>
   in
   let measure_text () = match Yuka.State.get measure with Count -> "Issues" | Points -> "Points" in
   <div class_=Css.insights data_insights="true">
@@ -517,6 +573,12 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
       <span>"Insights"</span>
       <span class_="group-count">(Yuka.text (format_int (List.length (Yuka.State.get selected))))</span>
       <span class_=Css.note>(Yuka.text ("of " ^ format_int (List.length (Yuka.State.get items)) ^ " issues"))</span>
+      <button class_=("chip " ^ Css.animate) type_=`button data_animate="true"
+        aria_pressed=(if Yuka.State.get animate then `true_ else `false_)
+        on_click=(fun _ -> Yuka.State.update animate not)>
+        <span class_=Css.animate_icon aria_hidden=true />
+        "Animate"
+      </button>
     </header>
     <div class_=Css.controls>
       <div class_=Css.control_row>
@@ -527,19 +589,9 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
         (segmented ~label:"Stress"
            ~options:(List.map (fun multiplier -> (multiplier, px multiplier ^ "x")) multipliers)
            ~current:multiplier ~choose:(Yuka.State.set multiplier))
-        <button class_=Css.segment type_=`button data_animate="true"
-          aria_pressed=(if Yuka.State.get animate then `true_ else `false_)
-          on_click=(fun _ -> Yuka.State.update animate not)>
-          (Yuka.text (if Yuka.State.get animate then "Stop" else "Animate"))
-        </button>
-        <dl class_=Css.readout>
-          <div><dt>"FPS"</dt><dd data_fps="true">(Yuka.text (match Yuka.State.get fps with Some value -> px value | None -> "-"))</dd></div>
-          <div><dt>"Update"</dt><dd data_update="true">(Yuka.text (match Yuka.State.get update_time with Some tenths -> format_tenths tenths ^ " ms" | None -> "-"))</dd></div>
-          <div><dt>"SVG nodes"</dt><dd data_nodes="true">(Yuka.text (match Yuka.State.get nodes with Some count -> format_int count | None -> "-"))</dd></div>
-          <div><dt>"Points"</dt><dd data_points="true">(Yuka.text (format_int (List.length (Yuka.State.get items))))</dd></div>
-        </dl>
       </div>
-      <div class_=Css.control_row>
+      <div class_=Css.control_row data_filters="true">
+        date_filter
         <div class_=Css.chips>
           (Yuka.fragment
              (List.map
@@ -575,24 +627,18 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
       (card ~title:"Created over time"
          ~note:(Yuka.hole (fun () -> let first, last = Yuka.State.get window in Yuka.text (date_of_day first ^ " to " ^ date_of_day last)))
          ~children:
-           <div>
-             <svg class_=Css.chart view_box="0 0 400 172" data_chart="time">
-               (Yuka.each ~equal:( = ) ~key:(fun (tick : tick) -> px tick.tick_value) (fun () -> (Yuka.State.get timeline).time_ticks) grid_line)
-               <rect class_=Css.brush
-                 x=(px (day_x (Yuka.State.get bounds) (fst (Yuka.State.get window))))
-                 width=(px (max 1 (day_x (Yuka.State.get bounds) (snd (Yuka.State.get window)) - day_x (Yuka.State.get bounds) (fst (Yuka.State.get window)))))
-                 y="12" height="138" />
-               <path class_=Css.area d=(Yuka.State.get timeline).area />
-               <path class_=Css.line d=(Yuka.State.get timeline).line />
-               (Yuka.each ~equal:( = ) ~key:(fun (day, _) -> px day) (fun () -> Yuka.State.get day_ticks) (day_label ~y:166))
-               (Yuka.each ~equal:( = ) ~key:(fun (column : column) -> px column.column_day) (fun () -> (Yuka.State.get timeline).columns) time_column)
-               crosshair
-             </svg>
-             <div class_=Css.range>
-               (range_input ~label:"From" ~pick:fst ~apply:(fun day (_, to_day) -> (min day to_day, to_day)))
-               (range_input ~label:"To" ~pick:snd ~apply:(fun day (from_day, _) -> (from_day, max day from_day)))
-             </div>
-           </div>)
+           <svg class_=Css.chart view_box="0 0 400 172" data_chart="time">
+             (Yuka.each ~equal:( = ) ~key:(fun (tick : tick) -> px tick.tick_value) (fun () -> (Yuka.State.get timeline).time_ticks) grid_line)
+             <rect class_=Css.brush
+               x=(px (day_x (Yuka.State.get bounds) (fst (Yuka.State.get window))))
+               width=(px (max 1 (day_x (Yuka.State.get bounds) (snd (Yuka.State.get window)) - day_x (Yuka.State.get bounds) (fst (Yuka.State.get window)))))
+               y="12" height="138" />
+             <path class_=Css.area d=(Yuka.State.get timeline).area />
+             <path class_=Css.line d=(Yuka.State.get timeline).line />
+             (Yuka.each ~equal:( = ) ~key:(fun (day, _) -> px day) (fun () -> Yuka.State.get day_ticks) (day_label ~y:166))
+             (Yuka.each ~equal:( = ) ~key:(fun (column : column) -> px column.column_day) (fun () -> (Yuka.State.get timeline).columns) time_column)
+             crosshair
+           </svg>)
       (card ~title:"Issues by status" ~note:(Yuka.text "Click a bar to filter")
          ~children:
            <svg class_=Css.chart view_box="0 0 400 192" data_chart="status">
@@ -661,4 +707,36 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
              (tooltip (hover_in "label"))
            </svg>)
     </div>
+    <aside class_=Css.hud role=`status aria_live=`off aria_label="Performance" data_hud="true">
+      <div class_=Css.hud_head>
+        <span class_=Css.hud_fps>
+          <span class_=Css.hud_label>"FPS"</span>
+          <span data_metric="fps">(Yuka.text (match Yuka.State.get fps with Some value -> px value | None -> "-"))</span>
+        </span>
+        <button class_=Css.hud_toggle type_=`button aria_controls="insights-metrics"
+          aria_expanded=(Yuka.State.get expanded)
+          aria_label=(if Yuka.State.get expanded then "Hide metrics" else "Show metrics")
+          on_click=(fun _ -> Yuka.State.update expanded not)>
+          <span class_=Css.chevron aria_hidden=true />
+        </button>
+      </div>
+      (if Yuka.State.get expanded then
+         <div id="insights-metrics" class_=Css.hud_body>
+           <dl class_=Css.metrics>
+             <div><dt>"Update"</dt>(shown ~metric:"update" update_time (fun tenths -> format_tenths tenths ^ " ms"))</div>
+             <div><dt>"Updates/s"</dt>(shown ~metric:"updates" updates_per_second format_int)</div>
+             <div><dt>"Worst frame"</dt>(shown ~metric:"worst-frame" worst_frame (fun tenths -> format_tenths tenths ^ " ms"))</div>
+             <div><dt>"Long frames"</dt>(shown ~metric:"long-frames" long_frames format_int)</div>
+             <div><dt>"SVG nodes"</dt>(shown ~metric:"nodes" nodes format_int)</div>
+             <div><dt>"DOM nodes"</dt>(shown ~metric:"dom-nodes" dom_nodes format_int)</div>
+             <div><dt>"Points"</dt><dd data_metric="points">(Yuka.text (format_int (List.length (Yuka.State.get items))))</dd></div>
+           </dl>
+           <svg class_=Css.frames view_box="0 0 118 24" preserve_aspect_ratio="none" aria_hidden=true data_frames="true">
+             <line class_=Css.budget x1="0" x2="118" y1=(px (frame_y 16.7)) y2=(px (frame_y 16.7)) />
+             <path d=(Yuka.State.get frame_line) />
+           </svg>
+           <p class_=Css.hud_note>"Last 60 frames. Long frames: over 50 ms in the last 10 s."</p>
+         </div>
+       else Yuka.empty)
+    </aside>
   </div>

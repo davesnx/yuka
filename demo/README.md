@@ -89,11 +89,17 @@ installs them) and the oniguruma library (`conf-oniguruma`).
 - `http://localhost:8080/insights`: charts of the issues of `yuka`, drawn
   in SVG by one island (`shared/insights.mlx`). The server prints them, and
   the browser computes them again on each change of the measure, the
-  filters, the date range or the live issues. The stress control (1x, 10x,
-  100x) makes copies of the issues in the browser, up to 20 000 points on
-  `stress`; Animate moves the date range on each frame. The readout shows
-  frames per second, the time of the last update (from the change to the
-  updated DOM), the SVG nodes and the points.
+  filters, the date range or the live issues. The "Created" control in the
+  filter row opens the From and To sliders of the date range, with a "Full
+  range" reset. The stress control (1x, 10x, 100x) makes copies of the
+  issues in the browser, up to 20 000 points on `stress`; Animate, at the
+  right of the page header, moves the date range on each frame. A panel at
+  the bottom right shows what the browser measures: frames per second, the
+  time of the last update (from the change to the updated DOM), updates per
+  second, the longest frame of the last second, the frames over 50 ms in
+  the last 10 seconds, the SVG and DOM nodes, the points and a line of the
+  last 60 frame times. It refreshes once per second, and after each change.
+  Its button collapses it to the frames per second.
 - `http://localhost:8080/report`: the same seven charts at 1x, drawn in SVG
   by the server only (`server/report.mlx`, with the geometry of
   `shared/insights.mlx`). The page has no island of its own and sends no
