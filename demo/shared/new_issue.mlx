@@ -23,9 +23,10 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
          <div class_="dialog">
            <h2>"New issue"</h2>
            <Yuka.Form action=Actions.create_issue
-             on_ok=(fun _ ->
+             on_ok=(fun (issue : Model.Issue.t) ->
                Yuka.Remote.invalidate Queries.labels;
-               close ())>
+               close ();
+               Yuka.Browser.navigate (Links.issue issue.workspace ~id:issue.id))>
              (fun form ->
                <div>
                  <Views.Issue_form workspace form />

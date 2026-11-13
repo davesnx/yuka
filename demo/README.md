@@ -147,7 +147,8 @@ with the user and the number of their open, in-progress and done issues
 first opens).
 
 Keys: `j` and `k` move, Enter opens, `c` opens the new issue dialog,
-Escape closes menus and the dialog.
+Escape closes menus and the dialog. A created issue opens on its page, as
+after the form at `/new`.
 
 The data is in memory. Restart the server to reset it.
 
