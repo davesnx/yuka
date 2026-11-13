@@ -1312,7 +1312,7 @@ let loading_cases =
     in
     go 0 0
   in
-  let preload name = Some ("/js/" ^ name ^ ".js") in
+  let preload name = [ "/js/" ^ name ^ ".js" ] in
   let shell ?preload build =
     let write, chunks = recorder () in
     get (Yuka.Private.stream ?preload ~sleep:never_sleep ~write build);
@@ -1371,12 +1371,12 @@ let loading_cases =
       (contains (shell (fun () -> isl "Counter")) "modulepreload")
   in
   let none_result () =
-    let out = shell ~preload:(fun _ -> None) (fun () -> isl "Counter") in
+    let out = shell ~preload:(fun _ -> []) (fun () -> isl "Counter") in
     check bool "no url, no link" false (contains out "modulepreload")
   in
   let escaped () =
     let out =
-      shell ~preload:(fun _ -> Some "/a\"b&c.js") (fun () -> isl "Counter")
+      shell ~preload:(fun _ -> [ "/a\"b&c.js" ]) (fun () -> isl "Counter")
     in
     check bool "escaped" true (contains out (link "/a&quot;b&amp;c.js"))
   in
@@ -1509,30 +1509,66 @@ let loading_cases =
   let manifest = {|{"Demo_shared.Counter":"./islands/counter.js","Demo_shared.Related":"demo/shared/related.js"}|} in
   let urls () =
     let f = Yuka.Private.preload_urls ~manifest ~base:"/assets/" () in
-    check (option string) "leading ./ removed" (Some "/assets/islands/counter.js")
+    check (list string) "leading ./ removed" [ "/assets/islands/counter.js" ]
       (f "Demo_shared.Counter");
-    check (option string) "plain path" (Some "/assets/demo/shared/related.js")
+    check (list string) "plain path" [ "/assets/demo/shared/related.js" ]
       (f "Demo_shared.Related");
-    check (option string) "unknown" None (f "Nope")
+    check (list string) "unknown" [] (f "Nope")
   in
   let metafile =
     {|{"inputs":{},"outputs":{"dist/counter-3F2A.js":{"entryPoint":"islands/counter.js","bytes":10},"dist/chunk-X.js":{"bytes":5},"dist/related-9.js":{"entryPoint":"app/demo/shared/related.js"}}}|}
   in
   let urls_metafile () =
     let f = Yuka.Private.preload_urls ~manifest ~base:"/" ~metafile () in
-    check (option string) "exact" (Some "/dist/counter-3F2A.js") (f "Demo_shared.Counter");
-    check (option string) "suffix only is no match" None (f "Demo_shared.Related");
+    check (list string) "exact" [ "/dist/counter-3F2A.js" ] (f "Demo_shared.Counter");
+    check (list string) "suffix only is no match" [] (f "Demo_shared.Related");
     let g =
       Yuka.Private.preload_urls ~manifest:{|{"Other":"other.js"}|} ~base:"/" ~metafile ()
     in
-    check (option string) "no output" None (g "Other")
+    check (list string) "no output" [] (g "Other")
   in
   let urls_exact_wins () =
     let metafile =
       {|{"outputs":{"o/long.js":{"entryPoint":"x/islands/counter.js"},"o/exact.js":{"entryPoint":"./islands/counter.js"}}}|}
     in
     let f = Yuka.Private.preload_urls ~manifest ~base:"" ~metafile () in
-    check (option string) "exact first" (Some "o/exact.js") (f "Demo_shared.Counter")
+    check (list string) "exact first" [ "o/exact.js" ] (f "Demo_shared.Counter")
+  in
+  let chain_metafile =
+    {|{"outputs":{
+      "b/main.js":{"entryPoint":"main.js","imports":[{"path":"b/chunk-E.js","kind":"import-statement"},{"path":"b/a-1.js","kind":"dynamic-import"},{"path":"b/lazy-1.js","kind":"dynamic-import"}]},
+      "b/chunk-E.js":{"imports":[{"path":"b/chunk-C.js","kind":"import-statement"}]},
+      "b/a-1.js":{"entryPoint":"islands/a.js","imports":[{"path":"b/chunk-A.js","kind":"import-statement"},{"path":"b/dyn-1.js","kind":"dynamic-import"},{"path":"pkg","kind":"import-statement","external":true}]},
+      "b/chunk-A.js":{"imports":[{"path":"b/chunk-B.js","kind":"import-statement"}]},
+      "b/chunk-B.js":{"imports":[{"path":"b/chunk-C.js","kind":"import-statement"}]},
+      "b/chunk-C.js":{"imports":[]},
+      "b/dyn-1.js":{"entryPoint":"dyn.js","imports":[]},
+      "b/other-1.js":{"entryPoint":"islands/other.js","imports":[{"path":"b/chunk-C.js","kind":"import-statement"}]},
+      "b/lazy-1.js":{"entryPoint":"islands/lazy.js","imports":[{"path":"b/chunk-L.js","kind":"import-statement"}]},
+      "b/chunk-L.js":{"imports":[]}}}|}
+  in
+  let chain_manifest = {|{"A":"islands/a.js","Other":"islands/other.js","Lazy":"islands/lazy.js"}|} in
+  let urls_static_imports () =
+    let f = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" () in
+    check (list string) "the island, its static closure, then the rest of the entry closure"
+      [ "/b/a-1.js"; "/b/chunk-A.js"; "/b/chunk-B.js"; "/b/chunk-C.js"; "/b/chunk-E.js" ]
+      (f "A");
+    let g = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile () in
+    check (list string) "without an entry" [ "/b/a-1.js"; "/b/chunk-A.js"; "/b/chunk-B.js"; "/b/chunk-C.js" ]
+      (g "A")
+  in
+  let static_imports_on_page () =
+    let preload = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" () in
+    let out =
+      shell ~preload (fun () ->
+          Yuka.fragment [ isl ~start:(`Lazy `Idle) "Lazy"; isl "A"; isl "Other"; isl ~start:`Visible "A" ])
+    in
+    List.iter
+      (fun file -> check int (file ^ " once") 1 (count out (link file)))
+      [ "/b/a-1.js"; "/b/chunk-A.js"; "/b/chunk-B.js"; "/b/chunk-C.js"; "/b/chunk-E.js"; "/b/other-1.js" ];
+    List.iter
+      (fun file -> check bool (file ^ " not preloaded") false (contains out file))
+      [ "/b/main.js"; "/b/dyn-1.js"; "/b/lazy-1.js"; "/b/chunk-L.js" ]
   in
   let urls_bad () =
     let bad f = match f () with _ -> false | exception Invalid_argument _ -> true in
@@ -1562,7 +1598,9 @@ let loading_cases =
     test_case "preload_urls without metafile" `Quick urls;
     test_case "preload_urls with metafile" `Quick urls_metafile;
     test_case "preload_urls matches only equal paths" `Quick urls_exact_wins;
-    test_case "preload_urls bad input" `Quick urls_bad ]
+    test_case "preload_urls bad input" `Quick urls_bad;
+    test_case "preload_urls follows static imports" `Quick urls_static_imports;
+    test_case "preload the static imports of the islands and the entry" `Quick static_imports_on_page ]
 
 let css_cases =
   let open Alcotest in
@@ -1610,7 +1648,7 @@ let css_cases =
     let isl name content =
       Yuka.runtime_island ~name ~props:`Null (fun () -> content)
     in
-    let preload name = Some ("/js/" ^ name ^ ".js") in
+    let preload name = [ "/js/" ^ name ^ ".js" ] in
     let p, chunks =
       shell ~preload (fun () ->
           Yuka.fragment

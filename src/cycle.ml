@@ -125,7 +125,7 @@ type assets = {
   entry : string;
   digest : string;
   import_map : (string * string) list;
-  preload : string -> string option;
+  preload : string -> string list;
   immutable : string -> bool;
 }
 
@@ -168,7 +168,7 @@ let bundle ~dir ~entry ~manifest ~metafile =
     entry;
     digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
     import_map = [];
-    preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ();
+    preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry ();
     immutable = (fun path -> List.exists (String.equal path) hashed);
   }
 

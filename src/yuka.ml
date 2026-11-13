@@ -202,7 +202,7 @@ module Private = struct
   let set_csrf (s : session) f = s.csrf <- Some f
   let reset_live () = !Bridge.reset_live ()
   let query = Router.query
-  let preload_urls ~manifest ~base ?metafile () = Server.preload_urls ~manifest ~base ?metafile ()
+  let preload_urls ~manifest ~base ?metafile ?entry () = Server.preload_urls ~manifest ~base ?metafile ?entry ()
   let handle_action ~name ~header ~body =
     Server.handle_action ~live:(Live_server.mark_json (Live_server.main ())) ~name ~header ~body
 

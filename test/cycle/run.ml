@@ -280,6 +280,28 @@ let assets =
         check_header r "cache-control" [ "public, max-age=31536000, immutable" ];
         let r = get ~config "/_yuka/app/bundle/main.js" in
         check_header r "cache-control" [ "no-cache" ] );
+    ( "a bundle preloads the static imports of each island and of the entry once",
+      fun () ->
+        let bundle =
+          Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:{|{"Counter":"counter.js","Related":"related.js"}|}
+            ~metafile:
+              {|{"outputs":{
+                "bundle/main.js":{"entryPoint":"main.js","imports":[{"path":"bundle/chunk-E.js","kind":"import-statement"},{"path":"bundle/counter-1.js","kind":"dynamic-import"},{"path":"bundle/related-1.js","kind":"dynamic-import"}]},
+                "bundle/chunk-E.js":{"imports":[{"path":"bundle/chunk-C.js","kind":"import-statement"}]},
+                "bundle/counter-1.js":{"entryPoint":"counter.js","imports":[{"path":"bundle/chunk-A.js","kind":"import-statement"},{"path":"bundle/dyn-1.js","kind":"dynamic-import"}]},
+                "bundle/chunk-A.js":{"imports":[{"path":"bundle/chunk-B.js","kind":"import-statement"}]},
+                "bundle/chunk-B.js":{"imports":[{"path":"bundle/chunk-C.js","kind":"import-statement"}]},
+                "bundle/chunk-C.js":{"imports":[]},
+                "bundle/dyn-1.js":{"entryPoint":"dyn.js","imports":[]},
+                "bundle/related-1.js":{"entryPoint":"related.js","imports":[{"path":"bundle/chunk-C.js","kind":"import-statement"}]}}}|}
+        in
+        let r = get ~config:(config_with ~assets:bundle ()) "/islands" in
+        let link file = {|<link rel="modulepreload" href="/_yuka/app/bundle/|} ^ file ^ {|">|} in
+        List.iter
+          (fun file -> Alcotest.(check int) file 1 (count r.body (link file)))
+          [ "counter-1.js"; "chunk-A.js"; "chunk-B.js"; "chunk-C.js"; "chunk-E.js"; "related-1.js" ];
+        check_true "no dynamic import" (not (contains r.body "dyn-1.js"));
+        check_true "the entry is a script, not a preload" (not (contains r.body (link "main.js"))) );
     ( "GET /_yuka/csrf gives a fresh token to the same origin only",
       fun () ->
         let r = get ~headers:[ ("sec-fetch-site", "same-origin") ] "/_yuka/csrf" in

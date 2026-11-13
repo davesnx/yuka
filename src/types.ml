@@ -132,7 +132,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable asyncs : int;
     mutable awaits : int;
     mutable pending : pending list;
-    mutable preload : (string -> string option) option;
+    mutable preload : (string -> string list) option;
     mutable preloaded : string list;
     mutable depth : int;
     islands_only : bool;

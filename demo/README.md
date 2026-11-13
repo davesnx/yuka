@@ -86,9 +86,10 @@ it. Vercel can run more than one instance, each with its own data.
 per island. The server serves them from `/_yuka/app/bundle/`
 and writes no import map. At start it reads `yuka_islands.json` (and
 `meta.json` with `--bundle`) and prints `<link rel="modulepreload">` for each
-island on the page, except those used with `` `Lazy _ ``. Comments, Issue props
-and Related are used with `` `Lazy `Idle ``, `` `Lazy `Interaction `` and
-`` `Lazy `Visible ``.
+island on the page, except those used with `` `Lazy _ ``. With `--bundle` it
+also prints one for each chunk that those islands and `main.js` import
+statically. Comments, Issue props and Related are used with `` `Lazy `Idle ``,
+`` `Lazy `Interaction `` and `` `Lazy `Visible ``.
 
 Routes are defined once in `Routes.ml`. `yuka routes` writes the shared
 `Routes` module (in `shared/`, for links such as `Routes.issue ~id ()` in islands) and

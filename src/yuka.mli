@@ -129,7 +129,9 @@ type start = [ `Load | trigger | `Lazy of trigger ]
 
     The early download of a non-lazy island happens through the
     [<link rel="modulepreload">] that the server prints from the manifest
-    given to [Server.modules] or [Server.bundle]. An island without a
+    given to [Server.modules] or [Server.bundle]. With [Server.bundle], the
+    server also preloads each chunk that the island or the entry imports
+    statically, directly or through other chunks. An island without a
     manifest entry downloads when it starts. *)
 
 module Json : sig
@@ -893,7 +895,7 @@ module Private : sig
     ?title:string ->
     ?styles:string list ->
     ?scripts:string list ->
-    ?preload:(string -> string option) ->
+    ?preload:(string -> string list) ->
     sleep:(float -> unit Async.t) ->
     write:(string -> unit Async.t) ->
     (unit -> server element) ->
@@ -902,7 +904,7 @@ module Private : sig
 
   val settled :
     ?timeout:float ->
-    ?preload:(string -> string option) ->
+    ?preload:(string -> string list) ->
     sleep:(float -> unit Async.t) ->
     (unit -> server element) ->
     string Async.t
@@ -923,7 +925,11 @@ module Private : sig
       ([+] is a space). *)
 
   val preload_urls :
-    manifest:string -> base:string -> ?metafile:string -> unit -> string -> string option
+    manifest:string -> base:string -> ?metafile:string -> ?entry:string -> unit -> string -> string list
+  (** The URLs to preload for an island name. Without [metafile]: the
+      manifest path under [base]. With [metafile]: the output of the island
+      and every output it reaches through static imports, then the outputs
+      that [entry] reaches the same way, without [entry] itself. *)
 
   val handle_action :
     name:string -> header:(string -> string option) -> body:string -> (int * string) Async.t
@@ -1517,7 +1523,7 @@ module Server : sig
     dir:string -> entry:string -> manifest:string -> metafile:string -> assets
   (** An esbuild bundle. [metafile] is the text of the JSON report that
       esbuild writes with [--metafile=FILE]: the server reads the hashed
-      name of each output from it. [dir] is the directory esbuild ran in, so that the
+      name of each output and its static imports from it. [dir] is the directory esbuild ran in, so that the
       [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
       the path of the entry output. Outputs other than [entry] get
       {!immutable}; other files get {!no_cache}. Raises [Invalid_argument]

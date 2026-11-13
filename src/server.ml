@@ -268,7 +268,7 @@ let normalize path =
   in
   go path
 
-let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile () =
+let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile ?entry () =
   let parse what text =
     match Json.of_string text with
     | Ok j -> j
@@ -301,10 +301,26 @@ let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile () 
                   (List.filter_map
                      (fun (file, v) ->
                        match v with
-                       | `Assoc o -> (
-                           match List.assoc_opt "entryPoint" o with
-                           | Some (`String e) -> Some (file, normalize e)
-                           | _ -> None)
+                       | `Assoc o ->
+                           let entry_point =
+                             match List.assoc_opt "entryPoint" o with
+                             | Some (`String e) -> Some (normalize e)
+                             | _ -> None
+                           in
+                           let static_imports =
+                             match List.assoc_opt "imports" o with
+                             | Some (`List imports) ->
+                                 List.filter_map
+                                   (function
+                                     | `Assoc import -> (
+                                         match (List.assoc_opt "path" import, List.assoc_opt "kind" import) with
+                                         | Some (`String path), Some (`String "import-statement") -> Some path
+                                         | _ -> None)
+                                     | _ -> None)
+                                   imports
+                             | _ -> []
+                           in
+                           Some (file, entry_point, static_imports)
                        | _ -> None)
                      outs)
             | _ ->
@@ -314,12 +330,26 @@ let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile () 
   in
   fun name ->
     match List.assoc_opt name paths with
-    | None -> None
+    | None -> []
     | Some path -> (
         match outputs with
-        | None -> Some (base ^ path)
+        | None -> [ base ^ path ]
         | Some outs -> (
-            match List.find_opt (fun (_, e) -> e = path) outs with Some (file, _) -> Some (base ^ file) | None -> None))
+            match List.find_opt (fun (_, entry_point, _) -> entry_point = Some path) outs with
+            | None -> []
+            | Some (file, _, _) ->
+                let rec reach seen file =
+                  if List.mem file seen then seen
+                  else
+                    match List.find_opt (fun (output, _, _) -> output = file) outs with
+                    | None -> seen
+                    | Some (_, _, static_imports) -> List.fold_left reach (file :: seen) static_imports
+                in
+                let island = reach [] file in
+                let files = match entry with None -> island | Some entry -> reach island entry in
+                List.rev files
+                |> List.filter (fun output -> Some output <> entry)
+                |> List.map (fun output -> base ^ output)))
 
 let reject message = Async.failed (Types.reject message)
 

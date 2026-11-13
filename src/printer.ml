@@ -359,24 +359,17 @@ open Base
               s.entry <- None;
               if direct then Buffer.add_string b tag else s.queued <- tag :: s.queued
           | None -> ());
-          let link =
-            match (strategy, s.preload) with
-            | `Lazy _, _ | _, None -> None
-            | _, Some f ->
-                if List.mem name s.preloaded then None
-                else begin
-                  s.preloaded <- name :: s.preloaded;
-                  Option.map
-                    (fun url ->
-                      "<link rel=\"modulepreload\" href=\""
-                      ^ escape ~quote:true url ^ "\">")
-                    (f name)
-                end
-          in
-          (match link with
-          | Some l when direct -> Buffer.add_string b l
-          | Some l -> s.queued <- l :: s.queued
-          | None -> ());
+          (match (strategy, s.preload) with
+          | `Lazy _, _ | _, None -> ()
+          | _, Some f ->
+              List.iter
+                (fun url ->
+                  if not (List.mem url s.preloaded) then begin
+                    s.preloaded <- url :: s.preloaded;
+                    let link = "<link rel=\"modulepreload\" href=\"" ^ escape ~quote:true url ^ "\">" in
+                    if direct then Buffer.add_string b link else s.queued <- link :: s.queued
+                  end)
+                (f name));
           let outermost = s.depth = 0 and start = Buffer.length b in
           Buffer.add_string b
             ("<yuka-island data-name=\"" ^ escape ~quote:true name

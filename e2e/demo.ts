@@ -1081,7 +1081,7 @@ await step("7i. modulepreload", async () => {
   await p.waitForSelector("[class^=related-list_] li");
   await p.waitForTimeout(500);
   const pre = await preloads();
-  const preNames = pre.map((l) => nameOf(l.path)).sort();
+  const preNames = pre.map((l) => nameOf(l.path)).filter((n) => n !== "chunk").sort();
   check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "new_issue"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
