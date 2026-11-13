@@ -38,14 +38,16 @@ let index () =
   has html "<a class=\"nav-link\" href=\"/\" aria-current=\"page\">Issues</a>";
   has html "<yuka-island data-name=\"Demo_shared.Issue_list\" data-id=\"i";
   has html "<yuka-island data-name=\"Demo_shared.New_issue\"";
-  has html "<yuka-island data-name=\"Demo_shared.Counter\"";
+  has html "<yuka-island data-name=\"Demo_shared.Nav_progress\" data-id=\"i2\" style=\"display:contents\" data-start=\"idle\">";
   has html "<script type=\"module\" async src=\"/_yuka/app/demo/client/main.js\"></script>";
   has html "data-start=\"idle\"";
   lacks html "data-start=\"interaction\"";
   has html "\"id\":\"YUK-1\"";
   has html "\"status\":\"In_progress\"";
   has html "Hydration mismatch on nested holes";
-  has html "Clicks: <!--[-->0<!--]-->";
+  has html "data-nav-progress=\"idle\"";
+  has html "<span class=\"brand-name\">Yuka's Linear demo</span>";
+  has html "<span class=\"workspace-logo\">H</span><span>Home</span>";
   has html "<a class=\"row-title\" href=\"/issue/YUK-1\">"
 
 let my_issues () =

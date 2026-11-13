@@ -84,16 +84,17 @@ module Header = struct
       </a>
     in
     <header class_="topbar">
-      <a class_="brand" href=(Links.issues Workspace.default) aria_label="Yuka">
+      <a class_="brand" href=(Links.issues Workspace.default) aria_label="Yuka's Linear demo">
         <Logo />
-        <span class_="brand-name">"Yuka"</span>
+        <span class_="brand-name">"Yuka's Linear demo"</span>
       </a>
       <nav class_="workspaces" aria_label="Workspaces">(Yuka.fragment (List.map switch Workspace.all))</nav>
       <div class_="topbar-end">
         <div class_="topbar-tools">
           <Yuka.Client><Theme_menu /></Yuka.Client>
-          <Yuka.Client><Nav_progress /></Yuka.Client>
+          <Yuka.Client start=`Idle><Nav_progress /></Yuka.Client>
         </div>
+        <span class_="topbar-divider" aria_hidden=true />
         <a class_="topbar-link" href="https://github.com/davesnx/yuka" target=`_blank rel="noopener" aria_label="Yuka on GitHub">
           <Github_icon />
           <span class_="topbar-label">"GitHub"</span>

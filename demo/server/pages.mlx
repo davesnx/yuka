@@ -1,10 +1,6 @@
 open Demo_shared
 
-let sidebar workspace : Yuka.server Yuka.element =
-  <div>
-    <Yuka.Client><New_issue workspace /></Yuka.Client>
-    <Yuka.Client start=`Idle><Counter initial=0 /></Yuka.Client>
-  </div>
+let sidebar workspace : Yuka.server Yuka.element = <Yuka.Client><New_issue workspace /></Yuka.Client>
 
 let shell_of workspace children : Yuka.server Yuka.element =
   <Views.Shell workspace sidebar=(sidebar workspace)>children</Views.Shell>
