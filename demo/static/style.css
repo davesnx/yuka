@@ -163,8 +163,8 @@ h1, h2, p { margin: 0; }
 .comment { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
 .comment-meta { display: flex; gap: 8px; margin-bottom: 2px; }
 
-.not-found { padding: 48px; display: flex; flex-direction: column; gap: 10px; }
-.not-found a { color: var(--accent); }
+.not-found, .about { padding: 48px; display: flex; flex-direction: column; gap: 10px; }
+.not-found a, .about a { color: var(--accent); }
 
 .new-issue-button {
   width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--bg-selected);

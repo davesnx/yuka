@@ -28,6 +28,7 @@ COPY --from=build /home/opam/yuka/_build/default/demo/client/yuka_islands.json /
 COPY --from=bundle /yuka/_build/default/demo/client/meta.json /app/client/meta.json
 COPY --from=bundle /yuka/_build/default/demo/client/out/demo/client/bundle /app/client/out/demo/client/bundle
 COPY demo/static/style.css /app/static/style.css
+RUN /app/server/demo_server.exe --bundle --prerender /app/prerendered
 USER nobody
 EXPOSE 8080
-ENTRYPOINT ["/app/server/demo_server.exe", "--bundle", "--interface", "0.0.0.0"]
+ENTRYPOINT ["/app/server/demo_server.exe", "--bundle", "--interface", "0.0.0.0", "--prerendered", "/app/prerendered"]

@@ -61,9 +61,10 @@ From the repository root:
     docker build -f Dockerfile.vercel -t yuka-demo .
     docker run --rm -p 8080:8080 -e YUKA_DEMO_SECRET=<secret> yuka-demo
 
-The image has the server, the production bundle and `style.css`. The server
-listens on `0.0.0.0`, on `$PORT` or 8080. `YUKA_DEMO_SECRET` signs the
-session cookies: without it the server uses the development secret.
+The image has the server, the production bundle, `style.css` and the
+prerendered pages. The server listens on `0.0.0.0`, on `$PORT` or 8080.
+`YUKA_DEMO_SECRET` signs the session cookies: without it the server uses
+the development secret.
 
 ## Vercel
 

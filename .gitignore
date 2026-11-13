@@ -16,3 +16,5 @@ e2e/screenshots/
 .idea
 .vscode
 /vendor/
+.vercel
+.env*
