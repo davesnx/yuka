@@ -1,7 +1,10 @@
 FROM ocaml/opam:debian-12-ocaml-5.4 AS build
 WORKDIR /home/opam/yuka
-COPY --chown=opam yuka.opam yuka-dream.opam yuka-live-pg.opam ./
+COPY --chown=opam Makefile yuka.opam yuka-dream.opam yuka-live-pg.opam ./
 RUN sudo apt-get update \
+ && make -s pin-list | grep ocaml/dune | while read -r name target; do \
+      opam pin add "$name" "$target" --yes --no-action || exit 1; \
+    done \
  && opam install . --deps-only --yes \
  && opam install --yes cmarkit ochre tm-grammars \
  && sudo rm -rf /var/lib/apt/lists/* \
