@@ -1,6 +1,6 @@
 (library
  (name demo_app)
- (modules store pages loaders handlers routes_server yuka_css)
+ (modules stress store pages loaders handlers routes_server yuka_css)
  (libraries demo_shared yuka yuka-dream dream lwt lwt.unix)
  (preprocess
   (pps yuka.ppx)))

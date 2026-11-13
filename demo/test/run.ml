@@ -107,6 +107,61 @@ let not_found () =
   Alcotest.(check int) "status" 404 status;
   has html "Page not found"
 
+let count html needle =
+  let needle_length = String.length needle in
+  let rec go index found =
+    if index + needle_length > String.length html then found
+    else if String.sub html index needle_length = needle then go (index + needle_length) (found + 1)
+    else go (index + 1) found
+  in
+  go 0 0
+
+let header_links () =
+  let html = get "/" in
+  has html {|<a class="workspace-link" href="/" aria-current="true">|};
+  has html {|<a class="workspace-link" href="/w/stress" aria-current="false">|};
+  has html {|<a class="topbar-link" href="https://github.com/davesnx/yuka" target="_blank" rel="noopener"|};
+  has html {|<a class="topbar-link" href="https://x.com/davesnx" target="_blank" rel="noopener">|};
+  has html {|src="/static/davesnx.jpg"|};
+  has html "@davesnx";
+  let html = get "/w/stress/my" in
+  has html {|<a class="workspace-link" href="/w/stress" aria-current="true">|};
+  has html {|<a class="nav-link" href="/w/stress">Issues</a>|};
+  has html {|<a class="nav-link" href="/w/stress/my" aria-current="page">My issues</a>|}
+
+let stress_list () =
+  let html = get "/w/stress" in
+  has html "<title>Issues</title>";
+  has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Stress&quot;,&quot;view&quot;:&quot;All&quot;}">|};
+  Alcotest.(check int) "200 issues" 200 (count html {|{"id":"STR-|});
+  lacks html "YUK-1\"";
+  has html {|<a class="row-title" href="/w/stress/issue/STR-1">|};
+  Alcotest.(check int) "30 labels" 30 (List.length (Store.label_counts Model.Workspace.Stress));
+  Alcotest.(check bool) "the same data each time" true (Stress.issues ~users:(Array.of_list Store.users) = Store.issues Model.Workspace.Stress);
+  let mine = get "/w/stress/my" in
+  Alcotest.(check bool) "my issues is a part" true
+    (count mine {|{"id":"STR-|} = List.length (Store.mine Model.Workspace.Stress) && count mine {|{"id":"STR-|} < 200);
+  lacks (get "/") "STR-"
+
+let stress_issue () =
+  let html = get "/w/stress/issue/STR-200" in
+  has html "<title>STR-200</title>";
+  has html {|<a href="/w/stress" class="crumb">Issues</a>|};
+  Alcotest.(check int) "200 comments" 200 (count html {|{"id":"STR-200-c|});
+  Alcotest.(check bool) "comments are the same each time" true (Store.comments_of "STR-7" = Store.comments_of "STR-7");
+  let status, _, html = call "/w/stress/issue/YUK-1" in
+  Alcotest.(check int) "an issue of another workspace" 404 status;
+  has html "There is no issue YUK-1.";
+  has html {|<a href="/w/stress">Back to issues</a>|};
+  let status, _, _ = call "/issue/STR-1" in
+  Alcotest.(check int) "a stress issue under /issue" 404 status;
+  let status, _, html = call "/w/nope" in
+  Alcotest.(check int) "unknown workspace" 404 status;
+  has html "Page not found";
+  let status, _, html = call "/w/stress/nowhere" in
+  Alcotest.(check int) "unknown page in a workspace" 404 status;
+  has html "Page not found"
+
 let about () =
   let html = get "/about" in
   has html "<title>About</title>";
@@ -117,14 +172,14 @@ let about () =
 let form_post () =
   let headers = [ ("Content-Type", "application/x-www-form-urlencoded"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
   let status, _, html =
-    call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&title=&description=kept+text&status=done&priority=high" "/new"
+    call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=yuka&title=&description=kept+text&status=done&priority=high" "/new"
   in
   Alcotest.(check int) "422" 422 status;
   has html "Title is required";
   has html "kept text";
   has html {|<option value="done" selected="">|};
   let status, response, _ =
-    call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&title=From+a+form&description=&status=todo&priority=low" "/new"
+    call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=yuka&title=From+a+form&description=&status=todo&priority=low" "/new"
   in
   Alcotest.(check int) "303" 303 status;
   let location = Option.value (header response "location") ~default:"" in
@@ -205,7 +260,7 @@ let actions () =
   (match
      settle
        (Yuka.Action.call Actions.create_issue
-          { Actions.title = " "; description = ""; status = Model.Issue.Todo; priority = Model.Issue.Low })
+          { Actions.workspace = Model.Workspace.Yuka; title = " "; description = ""; status = Model.Issue.Todo; priority = Model.Issue.Low })
    with
   | Ok (Error [ (Some `Title, "Title is required") ]) -> ()
   | _ -> Alcotest.fail "expected Title is required");
@@ -213,7 +268,8 @@ let actions () =
      settle
        (Yuka.Action.call Actions.create_issue
           {
-            Actions.title = String.make 81 'x';
+            Actions.workspace = Model.Workspace.Yuka;
+            title = String.make 81 'x';
             description = "";
             status = Model.Issue.Todo;
             priority = Model.Issue.Low;
@@ -225,7 +281,8 @@ let actions () =
      settle
        (Yuka.Action.call Actions.create_issue
           {
-            Actions.title = "write the release notes";
+            Actions.workspace = Model.Workspace.Yuka;
+            title = "write the release notes";
             description = "";
             status = Model.Issue.Todo;
             priority = Model.Issue.Low;
@@ -244,7 +301,8 @@ let actions () =
      settle
        (Yuka.Action.call Actions.create_issue
           {
-            Actions.title = "Brand new";
+            Actions.workspace = Model.Workspace.Yuka;
+            title = "Brand new";
             description = "d";
             status = Model.Issue.Todo;
             priority = Model.Issue.High;
@@ -264,9 +322,41 @@ let actions () =
       Alcotest.(check int) "stored" 2 (List.length (Store.comments_of "YUK-3"))
   | Error message -> Alcotest.failf "comment failed: %s" message
 
+let stress_actions () =
+  let created =
+    match
+      settle
+        (Yuka.Action.call Actions.create_issue
+           {
+             Actions.workspace = Model.Workspace.Stress;
+             title = "Write the release notes";
+             description = "";
+             status = Model.Issue.Todo;
+             priority = Model.Issue.Low;
+           })
+    with
+    | Ok (Ok (issue : Model.Issue.t)) -> issue
+    | _ -> Alcotest.fail "create in stress failed: a title of another workspace is not a duplicate"
+  in
+  Alcotest.(check string) "next stress id" "STR-201" created.id;
+  has (get "/w/stress") "STR-201";
+  lacks (get "/") "STR-201";
+  (match settle (Yuka.Action.call Actions.add_comment { Actions.issue_id = "STR-3"; body = "Kept" }) with
+  | Ok _ -> ()
+  | Error message -> Alcotest.failf "comment failed: %s" message);
+  let comments = Store.comments_of "STR-3" in
+  Alcotest.(check int) "generated and added" 201 (List.length comments);
+  Alcotest.(check string) "the added one is last" "Kept" (List.nth comments 200).body;
+  let headers = [ ("Content-Type", "application/x-www-form-urlencoded"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
+  let status, response, _ =
+    call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=stress&title=From+a+stress+form&description=&status=todo&priority=low" "/w/stress/new"
+  in
+  Alcotest.(check int) "303" 303 status;
+  Alcotest.(check (option string)) "to the new stress issue" (Some "/w/stress/issue/STR-202") (header response "location")
+
 let live_answers () =
   let html = get "/" in
-  has html {|data-yuka-answer="l:issues &quot;All&quot;">{"ok":[{"id":"YUK-|};
+  has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Yuka&quot;,&quot;view&quot;:&quot;All&quot;}">{"ok":[{"id":"YUK-|};
   has html {|data-yuka-answer="l:csrf">{"ok":"|};
   has html "<a class=\"row-title\" href=\"/issue/YUK-1\">";
   let html = get "/issue/YUK-2" in
@@ -276,8 +366,9 @@ let live_answers () =
 let live_publish () =
   let out = ref [] in
   let connection =
-    let pending = ref [ {|{"t":"hello","v":1,"csrf":""}|}; {|{"t":"sub","id":1,"topic":"issues","key":"All"}|};
-                        {|{"t":"sub","id":2,"topic":"issues","key":"Mine"}|}; {|{"t":"sub","id":3,"topic":"issue","key":"YUK-5"}|} ] in
+    let pending = ref [ {|{"t":"hello","v":1,"csrf":""}|}; {|{"t":"sub","id":1,"topic":"issues","key":{"workspace":"Yuka","view":"All"}}|};
+                        {|{"t":"sub","id":2,"topic":"issues","key":{"workspace":"Yuka","view":"Mine"}}|}; {|{"t":"sub","id":3,"topic":"issue","key":"YUK-5"}|};
+                        {|{"t":"sub","id":4,"topic":"issues","key":{"workspace":"Stress","view":"All"}}|} ] in
     Yuka.Server.Live.connection
       ~send:(fun frame -> out := frame :: !out; Yuka.Async.return ())
       ~receive:(fun () ->
@@ -301,16 +392,26 @@ let live_publish () =
    with
   | Ok _ -> ()
   | Error message -> Alcotest.failf "update failed: %s" message);
-  let ids =
+  let state_ids () =
     List.sort compare
       (List.filter_map
          (fun frame ->
            match Yojson_like.id frame with Some id when Model.Issue.contains ~sub:{|"t":"state"|} frame -> Some id | _ -> None)
          !out)
   in
+  let ids = state_ids () in
   Alcotest.(check (list int)) "published to both views and the issue" [ 1; 2; 3 ] ids;
   Alcotest.(check bool) "the new status" true
-    (List.exists (fun frame -> Yojson_like.id frame = Some 3 && Model.Issue.contains ~sub:"Canceled" frame) !out)
+    (List.exists (fun frame -> Yojson_like.id frame = Some 3 && Model.Issue.contains ~sub:"Canceled" frame) !out);
+  out := [];
+  (match
+     settle
+       (Yuka.Action.call Actions.update_issue
+          { Actions.id = "STR-5"; status = Some Model.Issue.Canceled; priority = None })
+   with
+  | Ok _ -> ()
+  | Error message -> Alcotest.failf "update failed: %s" message);
+  Alcotest.(check (list int)) "a stress change goes to the stress list only" [ 4 ] (state_ids ())
 
 let () =
   Handlers.register ();
@@ -324,13 +425,20 @@ let () =
           Alcotest.test_case "streaming order" `Quick streaming;
           Alcotest.test_case "navigation" `Quick navigation;
           Alcotest.test_case "not found" `Quick not_found;
+          Alcotest.test_case "header" `Quick header_links;
+          Alcotest.test_case "stress workspace list" `Quick stress_list;
+          Alcotest.test_case "stress issue page" `Quick stress_issue;
           Alcotest.test_case "about has no JavaScript" `Quick about;
           Alcotest.test_case "redirect, 405, HEAD, endpoint, assets" `Quick rules;
           Alcotest.test_case "prerendered /about, GET and HEAD" `Quick prerendered;
           Alcotest.test_case "the new issue form posts with no JavaScript" `Quick form_post;
           Alcotest.test_case "action route" `Quick action_route;
         ] );
-      ("actions", [ Alcotest.test_case "store through actions" `Quick actions ]);
+      ( "actions",
+        [
+          Alcotest.test_case "store through actions" `Quick actions;
+          Alcotest.test_case "workspaces are kept apart" `Quick stress_actions;
+        ] );
       ( "live",
         [
           Alcotest.test_case "pages embed the live state and a token" `Quick live_answers;

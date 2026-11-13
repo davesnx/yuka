@@ -75,7 +75,7 @@ the param is bound
   $ grep -c '^let fallback' out.ml
   1
   $ grep 'let layer_0' out.ml
-        let layer_0 = { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L0"; Yuka.Router.encode team ]; data = false; wrap = (fun children -> Layouts.team ~children ()) } in
+        let layer_0 = { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L0"; Yuka.Router.encode team ]; data = false; wrap = (fun children -> Layouts.team ~team ~children ()) } in
   $ grep -A 8 'fallback = {' out.ml
             fallback = {
               Yuka.Server.Generated.layers =

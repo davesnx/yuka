@@ -1,5 +1,5 @@
 (rule
  (alias all)
- (deps style.css favicon.svg)
+ (deps style.css favicon.svg davesnx.jpg)
  (action
   (progn)))

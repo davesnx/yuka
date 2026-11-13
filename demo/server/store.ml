@@ -15,7 +15,8 @@ let seed =
   let open Issue in
   let mk number title status priority assignee labels created_at description =
     {
-      id = Printf.sprintf "YUK-%d" number;
+      id = Printf.sprintf "%s-%d" (Workspace.issue_prefix Yuka) number;
+      workspace = Yuka;
       title;
       description;
       status;
@@ -53,7 +54,16 @@ let seed =
     mk 25 "Write the release notes" Todo No_priority (Some "maya") [ "docs" ] "Nov 6" "Summarize what v0.1 includes.";
   ]
 
-let issues = ref seed
+type space = { issues : Issue.t list ref; generated_comments : Issue.t -> Comment.t list }
+
+let yuka = { issues = ref seed; generated_comments = (fun _ -> []) }
+
+let stress =
+  let users = Array.of_list users in
+  { issues = ref (Stress.issues ~users); generated_comments = Stress.comments ~users }
+
+let space = function Workspace.Yuka -> yuka | Stress -> stress
+let issues workspace = !((space workspace).issues)
 
 let comments : (string, Comment.t list) Hashtbl.t =
   let comment id author body created_at : Comment.t =
@@ -77,12 +87,20 @@ let comments : (string, Comment.t list) Hashtbl.t =
          ("YUK-19", [ comment "c7" "tomas" "Profile shows 80 ms spent waiting on the comments query." "Nov 5" ]);
        ])
 
-let find id = List.find_opt (fun (issue : Issue.t) -> issue.id = id) !issues
-let find_title title =
-  let wanted = String.lowercase_ascii title in
-  List.find_opt (fun (issue : Issue.t) -> String.lowercase_ascii issue.title = wanted) !issues
+let find id =
+  List.find_map (fun workspace -> List.find_opt (fun (issue : Issue.t) -> issue.id = id) (issues workspace)) Workspace.all
 
-let comments_of id = Option.value (Hashtbl.find_opt comments id) ~default:[]
+let find_title workspace title =
+  let wanted = String.lowercase_ascii title in
+  List.find_opt (fun (issue : Issue.t) -> String.lowercase_ascii issue.title = wanted) (issues workspace)
+
+let added_comments id = Option.value (Hashtbl.find_opt comments id) ~default:[]
+
+let comments_of id =
+  match find id with
+  | Some issue -> (space issue.workspace).generated_comments issue @ added_comments id
+  | None -> []
+
 let today = "Nov 6"
 
 let after delay compute =
@@ -97,7 +115,7 @@ let related_async ~delay (issue : Issue.t) =
       List.filter
         (fun (other : Issue.t) ->
           other.id <> issue.id && List.exists (fun label -> List.mem label issue.labels) other.labels)
-        !issues
+        (issues issue.workspace)
       |> List.filteri (fun index _ -> index < 4))
 
 let update ~id ?status ?priority () =
@@ -111,19 +129,17 @@ let update ~id ?status ?priority () =
           priority = Option.value priority ~default:issue.priority;
         }
       in
-      issues := List.map (fun (existing : Issue.t) -> if existing.id = id then updated else existing) !issues;
+      let stored = (space issue.workspace).issues in
+      stored := List.map (fun (existing : Issue.t) -> if existing.id = id then updated else existing) !stored;
       Some updated
 
-let create ~title ~description ~status ~priority =
-  let next =
-    1
-    + List.fold_left
-        (fun highest (issue : Issue.t) -> max highest (int_of_string (String.sub issue.id 4 (String.length issue.id - 4))))
-        0 !issues
-  in
+let create workspace ~title ~description ~status ~priority =
+  let stored = (space workspace).issues in
+  let next = 1 + List.fold_left (fun highest issue -> max highest (Issue.number issue)) 0 !stored in
   let issue : Issue.t =
     {
-      id = Printf.sprintf "YUK-%d" next;
+      id = Printf.sprintf "%s-%d" (Workspace.issue_prefix workspace) next;
+      workspace;
       title;
       description;
       status;
@@ -133,31 +149,28 @@ let create ~title ~description ~status ~priority =
       created_at = today;
     }
   in
-  issues := issue :: !issues;
+  stored := issue :: !stored;
   issue
 
+let comment_count = ref 0
+
 let add_comment ~issue_id ~body =
-  let comment : Comment.t =
-    {
-      id = Printf.sprintf "c%d" (Hashtbl.length comments * 1000 + List.length (comments_of issue_id) + 100);
-      author = me;
-      body;
-      created_at = today;
-    }
-  in
-  Hashtbl.replace comments issue_id (comments_of issue_id @ [ comment ]);
+  incr comment_count;
+  let comment : Comment.t = { id = Printf.sprintf "c%d" (100 + !comment_count); author = me; body; created_at = today } in
+  Hashtbl.replace comments issue_id (added_comments issue_id @ [ comment ]);
   comment
 
-let mine () =
+let mine workspace =
   List.filter
     (fun (issue : Issue.t) ->
       match issue.assignee with Some user -> user.id = me.id | None -> false)
-    !issues
+    (issues workspace)
 
-let label_counts () =
+let label_counts workspace =
+  let issues = issues workspace in
   let open_ (issue : Issue.t) = match issue.status with Issue.Done | Issue.Canceled -> false | _ -> true in
-  let labels = List.sort_uniq compare (List.concat_map (fun (issue : Issue.t) -> issue.labels) !issues) in
+  let labels = List.sort_uniq compare (List.concat_map (fun (issue : Issue.t) -> issue.labels) issues) in
   List.map
     (fun label ->
-      { Demo_shared.Queries.label; open_ = List.length (List.filter (fun issue -> open_ issue && List.mem label issue.Issue.labels) !issues) })
+      { Demo_shared.Queries.label; open_ = List.length (List.filter (fun issue -> open_ issue && List.mem label issue.Issue.labels) issues) })
     labels

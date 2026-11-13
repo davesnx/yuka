@@ -486,7 +486,7 @@ let matching =
       fun () ->
         let r = get "/org/acme/x/404" in
         check_status r 404;
-        check_true "org layout" (contains r.body {|<section class="org">|});
+        check_true "org layout with the param" (contains r.body {|<section class="org" data-org="acme">|});
         check_true "org outlet" (contains r.body {|data-k="L2/acme"|});
         check_true "page with the param" (contains r.body "no org page /org/acme/x/404 in acme");
         let r = get "/org/acme/x/1" in

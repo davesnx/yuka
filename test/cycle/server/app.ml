@@ -71,9 +71,9 @@ module Layouts = struct
         children;
       ]
 
-  let org ~children () = el "section" ~attrs:[ ("class", "org") ] [ children ]
+  let org ~org ~children () = el "section" ~attrs:[ ("class", "org"); ("data-org", org) ] [ children ]
 
-  let team ~squad ~children () =
+  let team ~team:_ ~squad ~children () =
     el "section" ~attrs:[ ("class", "team") ] [ text ("squad " ^ squad); children ]
 end
 

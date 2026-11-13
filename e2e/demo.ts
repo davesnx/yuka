@@ -743,6 +743,71 @@ await step("6f. new issue form with JavaScript off", async () => {
   await ctx.close();
 });
 
+await step("6g. workspaces", async () => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  const current = () => page.evaluate(() => [...document.querySelectorAll(".workspace-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
+  check("6g.1 the stress list has 200 rows", (await page.locator(".row").count()) === 200, String(await page.locator(".row").count()));
+  check("6g.2 the stress list has 30 label chips", (await page.locator(".chip").count()) === 30, String(await page.locator(".chip").count()));
+  check("6g.3 the switcher marks Stress", (await current()) === "/=false /w/stress=true", await current());
+  const github = page.locator('.topbar-link[href="https://github.com/davesnx/yuka"]');
+  const x = page.locator('.topbar-link[href="https://x.com/davesnx"]');
+  check("6g.4 GitHub and X links open apart with rel=noopener",
+    (await github.getAttribute("rel")) === "noopener" && (await github.getAttribute("target")) === "_blank" &&
+    (await x.getAttribute("rel")) === "noopener" && (await x.getAttribute("target")) === "_blank" && (await x.textContent()) === "@davesnx");
+  const avatar = await page.evaluate(() => (document.querySelector(".profile-avatar") as HTMLImageElement | null)?.naturalWidth ?? 0);
+  check("6g.5 the avatar loads from /static", avatar > 0, String(avatar));
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check("6g.6 no horizontal overflow at 1280 px", (await overflow()) <= 0, String(await overflow()));
+  await page.setViewportSize({ width: 390, height: 800 });
+  check("6g.7 no horizontal overflow at 390 px", (await overflow()) <= 0, String(await overflow()));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.locator(".filter").fill("speed up");
+  const filtered = await page.locator(".row").count();
+  check("6g.8 the filter works on 200 issues", filtered > 0 && filtered < 200, String(filtered));
+  await page.locator(".filter").fill("");
+  await page.locator(".page-header").first().click();
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  const selected = await page.locator(".row.selected").getAttribute("data-id");
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`**/w/stress/issue/${selected}`);
+  await page.waitForSelector(".comment-input");
+  check("6g.9 j, j, Enter opens a stress issue", /^STR-\d+$/.test(selected ?? ""), String(selected));
+  check("6g.10 a stress issue streams 200 comments", (await page.locator(".comment").count()) === 200, String(await page.locator(".comment").count()));
+  check("6g.11 the crumb goes back to the stress list", (await page.locator(".crumb").getAttribute("href")) === "/w/stress");
+  await page.locator(".crumb").click();
+  await page.waitForURL("**/w/stress");
+  await page.waitForSelector(".filter");
+  await page.locator(".page-header").first().click();
+  await page.keyboard.press("c");
+  await page.waitForSelector(".dialog", { timeout: 2000 });
+  const title = `Stress issue ${run}`;
+  await page.fill(".dialog-title", title);
+  await page.locator(".dialog .button.primary").click();
+  await page.waitForSelector(".dialog", { state: "detached", timeout: 3000 });
+  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
+  const created = await page.locator(".row", { hasText: title }).getAttribute("data-id");
+  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 201, `${created} rows=${await page.locator(".row").count()}`);
+  await page.evaluate(() => ((window as any).__workspace = "alive"));
+  await page.locator('.workspace-link[href="/"]').click();
+  await page.waitForURL(base + "/");
+  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector(".row");
+  check("6g.13 switching workspace is a client navigation", (await page.evaluate(() => (window as any).__workspace)) === "alive");
+  check("6g.14 the switcher marks Yuka", (await current()) === "/=true /w/stress=false", await current());
+  const yukaIds = await page.locator(".row").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-id") ?? ""));
+  check("6g.15 the yuka list has no stress issue", yukaIds.length > 0 && yukaIds.every((id) => id.startsWith("YUK-")) && (await page.locator(".row", { hasText: title }).count()) === 0, String(yukaIds.length));
+  await page.locator('.workspace-link[href="/w/stress"]').click();
+  await page.waitForURL("**/w/stress");
+  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector(".row");
+  check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
+  const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
+  check("6g.17 the sidebar links stay in the workspace", nav === "/w/stress=page /w/stress/my=null", nav);
+});
+
 await step("7a. streaming", async () => {
   const early = await browser.newPage();
   const earlyErrors: string[] = [];
@@ -1212,6 +1277,10 @@ await step("8. 404", async () => {
   expectedFailures = 0;
   check("8a status 404", res?.status() === 404, String(res?.status()));
   check("8b not found page", (await page.locator(".not-found h1").textContent()) === "Issue not found");
+  expectedFailures = 404;
+  const unknown = await page.goto(base + "/w/nope", { waitUntil: "networkidle" });
+  expectedFailures = 0;
+  check("8d unknown workspace is 404", unknown?.status() === 404 && (await page.locator(".not-found h1").textContent()) === "Page not found", String(unknown?.status()));
 });
 
 

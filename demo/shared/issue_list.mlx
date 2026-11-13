@@ -9,12 +9,12 @@ let index_of id items =
   in
   go 0 items
 
-let[@client] make ~(title : string) ~(view : Queries.view) () =
-  let source = Yuka.Live.use Topics.issues (fun () -> view) in
+let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Queries.view) () =
+  let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view }) in
   let issues =
     Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
   in
-  let labels = Yuka.Remote.use Queries.labels (fun () -> ()) in
+  let labels = Yuka.Remote.use Queries.labels (fun () -> workspace) in
   let filter = Yuka.State.make "" in
   let label : string option Yuka.State.t = Yuka.State.make None in
   let selected : string option Yuka.State.t = Yuka.State.make None in
@@ -71,7 +71,7 @@ let[@client] make ~(title : string) ~(view : Queries.view) () =
       | "Escape" -> Yuka.State.set menu None
       | "Enter" -> (
           match Yuka.State.peek selected with
-          | Some id -> Yuka.Browser.navigate (Routes.issue ~id ())
+          | Some id -> Yuka.Browser.navigate (Links.issue workspace ~id)
           | None -> ())
       | _ -> ()
   in
@@ -127,7 +127,7 @@ let[@client] make ~(title : string) ~(view : Queries.view) () =
         </button>
         (if Yuka.State.get menu = Some (Status issue.id) then status_menu issue else Yuka.empty)
       </span>
-      <a class_="row-title" href=(Routes.issue ~id:issue.id ())>(Yuka.text issue.title)</a>
+      <a class_="row-title" href=(Links.issue workspace ~id:issue.id)>(Yuka.text issue.title)</a>
       <Views.Labels labels=issue.labels />
       <Views.Avatar user=issue.assignee />
       <span class_="row-date">(Yuka.text issue.created_at)</span>
@@ -154,17 +154,19 @@ let[@client] make ~(title : string) ~(view : Queries.view) () =
       (Yuka.hole (fun () ->
          match Yuka.Remote.status labels with
          | Yuka.Status.Ready { data; _ } | Yuka.Status.Loading (Some data) ->
-             Yuka.fragment
-               (List.map
-                  (fun (count : Queries.label_count) ->
-                    <button
-                      class_=(if Yuka.State.get label = Some count.label then "chip on" else "chip")
-                      data_label=count.label
-                      on_click=(fun _ ->
-                        Yuka.State.set label (if Yuka.State.peek label = Some count.label then None else Some count.label))>
-                      (Yuka.text (count.label ^ " " ^ Int.to_string count.open_))
-                    </button>)
-                  data)
+             <div class_="chips">
+               (Yuka.fragment
+                 (List.map
+                    (fun (count : Queries.label_count) ->
+                      <button
+                        class_=(if Yuka.State.get label = Some count.label then "chip on" else "chip")
+                        data_label=count.label
+                        on_click=(fun _ ->
+                          Yuka.State.set label (if Yuka.State.peek label = Some count.label then None else Some count.label))>
+                        (Yuka.text (count.label ^ " " ^ Int.to_string count.open_))
+                      </button>)
+                    data))
+             </div>
          | _ -> Yuka.empty))
     </div>
     (match Yuka.State.get toast with

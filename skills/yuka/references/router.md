@@ -135,14 +135,16 @@ adapter, such as `Dream.request`.
 | Attachment | On | Shape |
 |---|---|---|
 | `~page` | route | `~params ~search ~loaded () -> Yuka.Server.page` |
-| `~layout` | make, group | `~loaded ~children () -> Yuka.server Yuka.element` |
+| `~layout` | make, group | `~params ~loaded ~children () -> Yuka.server Yuka.element` |
 | `~loader` | group, route | `req -> ~params -> ('a, Yuka.Server.stop) result Yuka.Async.t` |
 | `~guard` | all but redirect | `req -> ~params -> (unit, Yuka.Server.stop) result Yuka.Async.t` |
 | `~handler` | endpoint, action | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
 | `~not_found` | make, group | `~params ~path () -> Yuka.Server.page` |
 | `~error` | make, group | `~params () -> Yuka.Server.page` |
 
-- `~params` are the path params of the node and the groups above it.
+- `~params` are the path params of the node and the groups above it. A
+  layout gets those of its group, and a client navigation keeps it only
+  while they do not change.
 - `~loaded` are the loader results. Each result is labelled with the last
   name of the loader: `~loader:Loaders.post` gives `~post`. A layout gets
   the results of the loaders on its group and above.

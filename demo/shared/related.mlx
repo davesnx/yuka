@@ -16,7 +16,7 @@ let[@client] make ~(related : Model.Issue.t list Yuka.Async.t) () =
                    (fun (issue : Issue.t) ->
                      <li>
                        <Views.Status_icon status=issue.status />
-                       <a href=(Routes.issue ~id:issue.id ())>(Yuka.text (issue.id ^ " " ^ issue.title))</a>
+                       <a href=(Links.issue issue.workspace ~id:issue.id)>(Yuka.text (issue.id ^ " " ^ issue.title))</a>
                      </li>)
                    issues))
            </ul>)

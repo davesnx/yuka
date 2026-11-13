@@ -904,7 +904,7 @@ let layer_text ~loaders level =
   sprintf "{ Yuka.Server.Generated.key = %s; data = %b; wrap = (fun children -> %s%s ~children ()) }"
     (key_text level) (loaders <> [])
     (expr (Option.get (prop "layout" level)))
-    (args loaders)
+    (args (seg_labels level.scope @ loaders))
 
 let layer_name level = sprintf "layer_%d" (Option.get level.layout)
 

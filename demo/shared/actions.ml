@@ -21,7 +21,15 @@ module Priority_field = struct
   let to_string = Issue.priority_slug
 end
 
+module Workspace_field = struct
+  type t = Workspace.t
+
+  let of_string = Workspace.of_slug
+  let to_string = Workspace.slug
+end
+
 type new_issue = {
+  workspace : Workspace_field.t;
   title : string;
   description : string;
   status : Status_field.t;

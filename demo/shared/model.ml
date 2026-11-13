@@ -7,12 +7,26 @@ module User = struct
     |> String.concat ""
 end
 
+module Workspace = struct
+  type t = Yuka | Stress [@@deriving codec]
+
+  let all = [ Yuka; Stress ]
+  let default = Yuka
+
+  let slug = function Yuka -> "yuka" | Stress -> "stress"
+  let name = function Yuka -> "Yuka" | Stress -> "Stress"
+  let issue_prefix = function Yuka -> "YUK" | Stress -> "STR"
+  let of_slug text = List.find_opt (fun workspace -> slug workspace = text) all
+  let param = Yuka.Router.Param.make ~decode:of_slug ~encode:slug
+end
+
 module Issue = struct
   type status = Backlog | Todo | In_progress | Done | Canceled [@@deriving codec]
   type priority = No_priority | Urgent | High | Medium | Low [@@deriving codec]
 
   type t = {
     id : string;
+    workspace : Workspace.t;
     title : string;
     description : string;
     status : status;
@@ -22,6 +36,11 @@ module Issue = struct
     created_at : string;
   }
   [@@deriving codec]
+
+  let number issue =
+    match String.index_opt issue.id '-' with
+    | Some dash -> Option.value (int_of_string_opt (String.sub issue.id (dash + 1) (String.length issue.id - dash - 1))) ~default:0
+    | None -> 0
 
   let all_statuses = [ In_progress; Todo; Backlog; Done; Canceled ]
 
