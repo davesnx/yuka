@@ -95,19 +95,17 @@ module Base = struct
     | Some n when n > limit -> Yuka.Async.return None
     | _ ->
         guard (fun () ->
-            let reader = Tapak.Request.body request and buffer = Buffer.create 1024 in
-            let rec read () =
-              let slice = Bytesrw.Bytes.Reader.read reader in
-              if Bytesrw.Bytes.Slice.is_eod slice then begin
-                Option.iter (fun c -> c.read <- true) (Eio.Fiber.get current);
-                Some (Buffer.contents buffer)
-              end
-              else begin
-                Bytesrw.Bytes.Slice.add_to_buffer buffer slice;
-                if Buffer.length buffer > limit then None else read ()
-              end
+            let over = ref false in
+            let text =
+              Tapak.Request.body request
+              |> Bytesrw.Bytes.Reader.limit ~action:(fun _ _ -> over := true) limit
+              |> Bytesrw.Bytes.Reader.to_string
             in
-            read ())
+            if !over then None
+            else begin
+              Option.iter (fun c -> c.read <- true) (Eio.Fiber.get current);
+              Some text
+            end)
 
   let session request = required request session_cookie
 
