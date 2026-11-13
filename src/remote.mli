@@ -37,7 +37,7 @@ val use :
       implementation directly. *)
 
 val status : 'o t -> 'o Status.t
-(** Tracked read, with the pending {!mutate} changes applied to the data. *)
+(** Tracked read, with the pending {!optimistic} changes applied to the data. *)
 
 val refetch : 'o t -> unit
 (** Sends the request again (the manual retry after [Failed]). *)
@@ -45,13 +45,13 @@ val refetch : 'o t -> unit
 val invalidate : (_, _, [ `Query ]) Action.t -> unit
 (** {!refetch} every mounted use of this query, for every input. *)
 
-val mutate :
+val optimistic :
   ?commit:('r -> 'o -> 'o) ->
   'o t ->
   change:('o -> 'o) ->
   (unit -> ('r, Status.error) result Async.t) ->
   ('r, Status.error) result Async.t
-(** [mutate remote ~change run] shows [change] on the data at once, then calls
+(** [optimistic remote ~change run] shows [change] on the data at once, then calls
     [run ()], for example an {!Action.call}. On [Ok result] the change is
     removed and the data becomes [commit result data] (default
     [change data]); on [Error] or a failed [Async] the change is removed

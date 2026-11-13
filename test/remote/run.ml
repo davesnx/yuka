@@ -331,32 +331,32 @@ let fail_edit i =
 
 let optimistic =
   [
-    ( "mutate: shown at once, commit on Ok, rollback on Error",
+    ( "optimistic: shown at once, commit on Ok, rollback on Error",
       fun () ->
         reset ();
         edits := [];
         let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "m")) in
         settle 0 "base";
-        let a = Remote.mutate r ~change:(fun d -> d ^ "+x") (fun () -> Action.call edit "x") in
+        let a = Remote.optimistic r ~change:(fun d -> d ^ "+x") (fun () -> Action.call edit "x") in
         check_status "shown before the call settles" "ready base+x" r;
         settle_edit 0 "server";
         Alcotest.(check bool) "settled" true (Async.status a = Async.Done (Ok "server"));
         check_status "change kept as the base" "ready base+x" r;
-        let _ = Remote.mutate ~commit:(fun v d -> d ^ "|" ^ v) r ~change:(fun d -> d ^ "+y") (fun () -> Action.call edit "y") in
+        let _ = Remote.optimistic ~commit:(fun v d -> d ^ "|" ^ v) r ~change:(fun d -> d ^ "+y") (fun () -> Action.call edit "y") in
         settle_edit 1 "Y";
         check_status "commit" "ready base+x|Y" r;
-        let b = Remote.mutate r ~change:(fun d -> d ^ "+z") (fun () -> Action.call edit "z") in
+        let b = Remote.optimistic r ~change:(fun d -> d ^ "+z") (fun () -> Action.call edit "z") in
         check_status "shown" "ready base+x|Y+z" r;
         fail_edit 2;
         Alcotest.(check bool) "failed" true (Async.status b = Async.Done (Error Status.Server));
         check_status "rolled back" "ready base+x|Y" r );
-    ( "mutate: a commit while a refetch runs keeps Loading and asks again",
+    ( "optimistic: a commit while a refetch runs keeps Loading and asks again",
       fun () ->
         reset ();
         edits := [];
         let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "k")) in
         settle 0 "old";
-        let _ = Remote.mutate r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        let _ = Remote.optimistic r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         Remote.refetch r;
         settle_edit 0 "ok";
         check_status "still loading, with the change" "loading old+c" r;
@@ -365,7 +365,7 @@ let optimistic =
         check_status "the request from before the commit is dropped" "loading old+c" r;
         settle 2 "fresh";
         check_status "fresh" "ready fresh" r );
-    ( "mutate: a commit after a failure keeps the error",
+    ( "optimistic: a commit after a failure keeps the error",
       fun () ->
         reset ();
         edits := [];
@@ -373,16 +373,16 @@ let optimistic =
         settle 0 "base";
         Remote.refetch r;
         fail 1 "down";
-        let _ = Remote.mutate r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        let _ = Remote.optimistic r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         settle_edit 0 "ok";
         check_status "failed with the new last" "failed server error last base+c" r );
-    ( "mutate: a refetch during a pending change keeps the change",
+    ( "optimistic: a refetch during a pending change keeps the change",
       fun () ->
         reset ();
         edits := [];
         let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "p")) in
         settle 0 "old";
-        let _ = Remote.mutate r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
+        let _ = Remote.optimistic r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         Remote.refetch r;
         check_status "loading keeps last data with the change" "loading old+c" r;
         settle 1 "fresh";
@@ -399,5 +399,5 @@ let () =
       ("transport", cases transport);
       ("answers", cases answers);
       ("fill and rollback", cases fill_and_rollback);
-      ("mutate", cases optimistic);
+      ("optimistic", cases optimistic);
     ]

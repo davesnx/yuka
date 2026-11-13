@@ -1876,7 +1876,7 @@ Spec: `.workplace/docs/routes-spec.md`, section 4 and increment 4
 
 ## Remote data (2026-11-10)
 
-Current names: `Action.declare` is now `Action.mutation`; `Optimistic` is internal; `Remote.mutate` and `Live.mutate` take `?commit` and a function that gives `('r, Status.error) result Async.t`, and an `Error` rolls back; `Action.call` gives `('o, Status.error) result Async.t`.
+Current names: `Action.declare` is now `Action.mutation`; `Optimistic` is internal; `Remote.mutate` and `Live.mutate` are now `Remote.optimistic` and `Live.optimistic`, which take `?commit` and a function that gives `('r, Status.error) result Async.t`, and an `Error` rolls back; `Action.call` gives `('o, Status.error) result Async.t`.
 
 Spec: `.workplace/docs/data-spec.md`, sections 1 and 2, increments R1 to
 R3 (ticket 12); its "Changes during build" section lists the differences.
@@ -1924,7 +1924,7 @@ R3 (ticket 12); its "Changes during build" section lists the differences.
 
 ## Live data (2026-11-10)
 
-Current names: `SOCKET` and `Handle` are gone: the adapter's `upgrade` gives a `Server.Live.connection` and `Server.Adapter.Make(Backend).handler` answers `/_yuka/live`. `ADAPTER.csrf_token` is `Server.Adapter.Backend.csrf_token`. `Live.set_limits` is now `Server.Live.node ?per_session ?total`. `allow` and `revoke` take a `Server.context`. A server render of `Live.use` runs `allow` with the page request.
+Current names: `SOCKET` and `Handle` are gone: the adapter's `upgrade` gives a `Server.Live.connection` and `Server.Adapter.Make(Backend).handler` answers `/_yuka/live`. `ADAPTER.csrf_token` is `Server.Adapter.Backend.csrf_token`. `Live.set_limits` is now `Server.Live.node ?per_session ?total`. `allow` and `revoke` take a `Server.context`. A server render of `Live.use` runs `allow` with the page request. `Live.mutate` is now `Live.optimistic`.
 
 Spec: `.workplace/docs/data-spec.md` section 3 (ticket 13).
 
@@ -2129,7 +2129,7 @@ Spec: `.workplace/docs/app-spec.md`, section 20, option B (ticket 20); its
 
 ## Prefetch, navigation cache and view transitions (2026-11-10)
 
-Current names: `Yuka.unmount` is now `Yuka.stop`.
+Current names: `Yuka.unmount` is now `Yuka.stop`. `Remote.mutate` is now `Remote.optimistic`.
 
 Ticket 22; `.workplace/docs/app-spec.md` section 22, option A.
 
@@ -2488,7 +2488,7 @@ val suspend :
 
 ## Live data on more than one node (2026-11-10)
 
-Current names: `Server.Live.instance` and `?instance` are now `Server.Live.node` and `?node`; `use_bus ~node` is `use_bus ~name`; `Yuka_dream.handler ?live` is `?node`; `Server.live_mark` is internal.
+Current names: `Server.Live.instance` and `?instance` are now `Server.Live.node` and `?node`; `use_bus ~node` is `use_bus ~name`; `Yuka_dream.handler ?live` is `?node`; `Server.live_mark` is internal. `Live.mutate` is now `Live.optimistic`.
 
 Ticket 25; `.workplace/docs/app-spec.md` section 25, option B; settle rule
 in `.workplace/docs/data-spec.md` section 8 ("More nodes").
@@ -2581,6 +2581,8 @@ val render :
   `pos.adopt` at run time), so esbuild keeps it.
 
 ## API for 1.0 (2026-11-11)
+
+Current names: `Remote.mutate` and `Live.mutate` are now `Remote.optimistic` and `Live.optimistic`.
 
 Source: the API reviews of 2026-11-11 (server, client, and the surface:
 `Private`, ppx, packages, command line). Each change below is breaking

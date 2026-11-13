@@ -207,8 +207,8 @@ let synced_covers_older () =
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state 1 [ "x" ]);
-  let _ = Live.mutate a ~change:(fun s -> s @ [ "p" ]) (fun () -> Async.return (Ok ())) in
-  let _ = Live.mutate a ~change:(fun s -> s @ [ "q" ]) (fun () -> Async.return (Ok ())) in
+  let _ = Live.optimistic a ~change:(fun s -> s @ [ "p" ]) (fun () -> Async.return (Ok ())) in
+  let _ = Live.optimistic a ~change:(fun s -> s @ [ "q" ]) (fun () -> Async.return (Ok ())) in
   check "both pending" "ready x,p,q" (show a);
   ws_message 0 {|{"t":"synced","id":1,"ref":1}|};
   check "both settled" "ready x" (show a);
@@ -292,13 +292,13 @@ let heartbeat () =
 
 let edit (s : string list) = s @ [ "mine" ]
 
-let mutate_settles_on_synced () =
+let optimistic_settles_on_synced () =
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state ~seq:1 1 [ "x" ]);
   clear_sent 0;
   let result, resolve, _ = Async.make () in
-  let _ = Live.mutate a ~change:edit (fun () -> result) in
+  let _ = Live.optimistic a ~change:edit (fun () -> result) in
   check "shown at once" "ready x,mine" (show a);
   ws_message 0 (state ~seq:2 1 [ "x"; "mine" ]);
   check "published state first" "ready x,mine,mine" (show a);
@@ -309,30 +309,30 @@ let mutate_settles_on_synced () =
   check "settled" "ready x,mine" (show a);
   stop ()
 
-let mutate_rolls_back () =
+let optimistic_rolls_back () =
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state 1 [ "x" ]);
   let result, _, fail = Async.make () in
-  let _ = Live.mutate a ~change:edit (fun () -> result) in
+  let _ = Live.optimistic a ~change:edit (fun () -> result) in
   fail "no";
   check "rolled back" "ready x" (show a);
   stop ()
 
-let mutate_error_rolls_back () =
+let optimistic_error_rolls_back () =
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state 1 [ "x" ]);
-  let _ = Live.mutate a ~change:edit (fun () -> Async.return (Error Status.Server)) in
+  let _ = Live.optimistic a ~change:edit (fun () -> Async.return (Error Status.Server)) in
   check "rolled back on Error" "ready x" (show a);
   stop ()
 
-let mutate_commit () =
+let optimistic_commit () =
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state ~seq:1 1 [ "x" ]);
   let result, resolve, _ = Async.make () in
-  let _ = Live.mutate ~commit:(fun v s -> s @ [ v ]) a ~change:edit (fun () -> result) in
+  let _ = Live.optimistic ~commit:(fun v s -> s @ [ v ]) a ~change:edit (fun () -> result) in
   check "the change first" "ready x,mine" (show a);
   resolve (Ok "server");
   check "the commit until synced" "ready x,server" (show a);
@@ -340,12 +340,12 @@ let mutate_commit () =
   check "settled" "ready x" (show a);
   stop ()
 
-let mutate_while_down () =
+let optimistic_while_down () =
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state 1 [ "x" ]);
   let result, resolve, _ = Async.make () in
-  let _ = Live.mutate a ~change:edit (fun () -> result) in
+  let _ = Live.optimistic a ~change:edit (fun () -> result) in
   ws_close 0 1006;
   resolve (Ok ());
   check "kept while down" "stale x,mine" (show a);
@@ -390,11 +390,11 @@ let all =
       ("an error message fails the use and it does not subscribe again", error_message);
       ("offline waits for the online event", offline);
       ("heartbeat: ping after 25 s, close after 10 s of silence", heartbeat);
-      ("mutate settles on synced, after a state that came first", mutate_settles_on_synced);
-      ("mutate rolls back on failure", mutate_rolls_back);
-      ("mutate rolls back on Error", mutate_error_rolls_back);
-      ("mutate with commit", mutate_commit);
-      ("mutate while the socket is down syncs after the next sub", mutate_while_down);
+      ("optimistic settles on synced, after a state that came first", optimistic_settles_on_synced);
+      ("optimistic rolls back on failure", optimistic_rolls_back);
+      ("optimistic rolls back on Error", optimistic_error_rolls_back);
+      ("optimistic with commit", optimistic_commit);
+      ("optimistic while the socket is down syncs after the next sub", optimistic_while_down);
       ("a key change unsubscribes and subscribes", key_change);
     ]
 
@@ -459,14 +459,14 @@ let second_forbidden finish =
 
 let marked_action = Action.mutation ~name:"live-mark" ~input:Codec.int ~output:Codec.int
 
-let mutate_sync_carries_mark finish =
+let optimistic_sync_carries_mark finish =
   fresh ();
   Yuka.render ~islands:(runtime_registry []) ~navigation:false ();
   let a, stop = use "a" in
   ws_open 0;
   ws_message 0 (state ~seq:1 1 [ "x" ]);
   clear_sent 0;
-  let _ = Live.mutate a ~change:edit (fun () -> Action.call marked_action 1) in
+  let _ = Live.optimistic a ~change:edit (fun () -> Action.call marked_action 1) in
   fetch_respond 0 200 {|{"ok":1,"live":["A",3]}|};
   later (fun () ->
       let sync = sent 0 in
@@ -482,7 +482,7 @@ let mutate_sync_carries_mark finish =
 
 let async =
   [
-    ("live: the sync of a mutate carries the mark of the action answer", mutate_sync_carries_mark);
+    ("live: the sync of an optimistic change carries the mark of the action answer", optimistic_sync_carries_mark);
     ("live: an expired token is renewed once through /_yuka/csrf", expired_token);
     ("live: a second 4403 gives up until a new use brings a fresh token", second_forbidden);
   ]

@@ -638,7 +638,7 @@ let node_cases =
         check_states "the note is lost" [ (3, "0") ] fb;
         Server.Testing.memory_down m false;
         check_states "the current state after the restart" [ (3, "0"); (3, "7") ] fb );
-    ( "Live.mutate settles on B only after B loaded the change of A",
+    ( "Live.optimistic settles on B only after B loaded the change of A",
       fun () ->
         reset_shared ();
         let bus, deliver = queued_bus () in

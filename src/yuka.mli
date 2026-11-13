@@ -1911,7 +1911,7 @@ module Server : sig
 
     val live_mark : ?node:Live.node -> unit -> (string * int) option
     (** The node name and the number of notes it sent. An action answer
-        carries the mark of the handler's node as [live]: a [Live.mutate]
+        carries the mark of the handler's node as [live]: a [Live.optimistic]
         that settles on another node waits until that node has heard those
         notes and loaded the key again. *)
 

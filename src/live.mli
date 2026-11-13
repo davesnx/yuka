@@ -37,15 +37,15 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
       again with the token of its page. *)
 
 val status : 's t -> 's Status.t
-(** Tracked read, with the pending {!mutate} changes applied. *)
+(** Tracked read, with the pending {!optimistic} changes applied. *)
 
-val mutate :
+val optimistic :
   ?commit:('r -> 's -> 's) ->
   's t ->
   change:('s -> 's) ->
   (unit -> ('r, Status.error) result Async.t) ->
   ('r, Status.error) result Async.t
-(** [mutate live ~change run] shows [change] at once and calls [run ()],
+(** [optimistic live ~change run] shows [change] at once and calls [run ()],
     which should call an action that publishes the new state. On [Error]
     or a failed [Async], the change is removed. On [Ok result], the change
     becomes [commit result] (default [change]) and stays until

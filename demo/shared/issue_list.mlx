@@ -43,7 +43,7 @@ let[@client] make ~(title : string) ~(view : Queries.view) () =
         }
     in
     Yuka.Async.on_result
-      (Yuka.Live.mutate source ~change:(List.map edit) (fun () ->
+      (Yuka.Live.optimistic source ~change:(List.map edit) (fun () ->
            Yuka.Action.call Actions.update_issue { Actions.id; status; priority }))
       (function
         | Ok (Ok _) -> if status <> None then Yuka.Remote.invalidate Queries.labels

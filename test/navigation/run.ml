@@ -1160,7 +1160,7 @@ let down_cancels_hover finish =
 
 let lookup_q = Action.query ~name:"lookup" ~input:Codec.string ~output:Codec.string
 
-let remote_mutate_clears finish =
+let remote_optimistic_clears finish =
   setup links;
   plain_start ();
   ignore (click "#l" "");
@@ -1176,18 +1176,18 @@ let remote_mutate_clears finish =
           tick (fun () ->
               fire "#l" "pointerdown";
               check "a query read keeps the cache" "3" (ints (calls ()));
-              let failed = Remote.mutate r ~change:(fun d -> d ^ "!") (fun () -> Action.call act "x") in
+              let failed = Remote.optimistic r ~change:(fun d -> d ^ "!") (fun () -> Action.call act "x") in
               resolve_with 3 {|{"error":"no"}|} "" 400 "application/json";
               tick (fun () ->
-                  check "mutate failed" "true" (bools (Async.status failed = Async.Done (Error (Status.Rejected "no"))));
+                  check "optimistic failed" "true" (bools (Async.status failed = Async.Done (Error (Status.Rejected "no"))));
                   fire "#l" "pointerdown";
-                  check "a failed mutate keeps the cache" "4" (ints (calls ()));
-                  let ok = Remote.mutate r ~change:(fun d -> d ^ "!") (fun () -> Action.call act "y") in
+                  check "a failed optimistic call keeps the cache" "4" (ints (calls ()));
+                  let ok = Remote.optimistic r ~change:(fun d -> d ^ "!") (fun () -> Action.call act "y") in
                   resolve_with 4 {|{"ok":"y"}|} "" 200 "application/json";
                   tick (fun () ->
-                      check "mutate done" "true" (bools (Async.status ok = Async.Done (Ok "y")));
+                      check "optimistic done" "true" (bools (Async.status ok = Async.Done (Ok "y")));
                       fire "#l" "pointerdown";
-                      check "a successful mutate empties the cache" "6" (ints (calls ()));
+                      check "a successful optimistic call empties the cache" "6" (ints (calls ()));
                       dispose ();
                       finish ())))))
 
@@ -1666,7 +1666,7 @@ let all =
     ("stop aborts prefetches and clears the cache", unmount_clears);
     ("a navigation cancels the hover timer", down_cancels_hover);
     ("at most 30 entries, the oldest goes first", thirty_entries);
-    ("Remote.mutate empties the cache when it succeeds", remote_mutate_clears);
+    ("Remote.optimistic empties the cache when it succeeds", remote_optimistic_clears);
     ("an answer requested before an action is not kept", action_after_navigation_started);
     ("emptying the cache aborts its prefetches", clear_aborts_prefetch);
     ("a waiting navigation does not swap after stop", waiter_after_unmount);

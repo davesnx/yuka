@@ -16,7 +16,7 @@ let[@client] make ~(issue : Model.Issue.t) ~children () =
       }
     in
     Yuka.Async.on_result
-      (Yuka.Live.mutate live ~change:edit (fun () ->
+      (Yuka.Live.optimistic live ~change:edit (fun () ->
            Yuka.Action.call Actions.update_issue { Actions.id = issue.id; status; priority }))
       (function Ok (Ok _) -> () | Ok (Error _) | Error _ -> Yuka.State.set error (Some "Could not update the issue."))
   in

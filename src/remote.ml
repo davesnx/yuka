@@ -156,7 +156,7 @@ let status r =
 let refetch r = r.refetch ()
 let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed (Action.name q))
 
-let mutate ?commit r ~change run =
+let optimistic ?commit r ~change run =
   let added, id = Optimistic.add (State.peek r.changes) change in
   State.set r.changes added;
   let drop () = State.set r.changes (Optimistic.remove (State.peek r.changes) id) in
