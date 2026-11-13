@@ -79,6 +79,7 @@ let mount f =
       raise e
 
 let server_rendering = ref false
+let in_frame = ref false
 
 let run_effect queue ?cleanup body =
   if !server_rendering then () else

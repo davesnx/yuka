@@ -30,7 +30,7 @@
 .card-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .card-title { font-size: 14px; font-weight: 500; }
 
-.chart { display: block; width: 100%; height: auto; overflow: visible; font-size: 11px; }
+.chart { display: block; width: 100%; height: auto; overflow: visible; font-size: 11px; will-change: transform; }
 .chart text { fill: var(--muted); }
 .axis { fill: var(--muted); }
 .chart .amount { fill: var(--text); font-variant-numeric: tabular-nums; }

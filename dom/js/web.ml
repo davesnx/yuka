@@ -114,6 +114,8 @@ let watch_added : (node array -> bool) -> unit -> unit =
 
 external shift_key : event -> bool = "shiftKey" [@@mel.get]
 external alt_key : event -> bool = "altKey" [@@mel.get]
+external client_x : event -> float = "clientX" [@@mel.get]
+external client_y : event -> float = "clientY" [@@mel.get]
 external stop_propagation : event -> unit = "stopPropagation" [@@mel.send]
 external set_flag : event -> string -> bool -> unit = "" [@@mel.set_index]
 external get_flag : event -> string -> bool option = "" [@@mel.get_index] [@@mel.return nullable]

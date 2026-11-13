@@ -262,7 +262,7 @@ await step("3c. partial navigation", async () => {
   await counter.click();
   check("3c.1 counter counts", (await counter.textContent()) === "Clicks: 2", String(await counter.textContent()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null", await current());
+  check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null", await current());
   const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
   await page.locator('.row[data-id="YUK-3"] .row-title').click();
   const response = await outlet;
@@ -271,7 +271,7 @@ await step("3c. partial navigation", async () => {
   check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
   check("3c.4 sidebar counter kept its state", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive", String(await counter.textContent()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
-  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null", await current());
+  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null", await current());
   await page.locator(".new-issue-button").click();
   await page.waitForSelector(".dialog", { timeout: 2000 });
   check("3c.7 New_issue in the kept sidebar still opens", (await page.locator(".dialog").count()) === 1);
@@ -279,7 +279,7 @@ await step("3c. partial navigation", async () => {
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
-  check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null", await current());
+  check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null", await current());
   check("3c.9 counter still kept", (await counter.textContent()) === "Clicks: 2");
   const y0 = await page.evaluate(() => Math.round(window.scrollY));
   check("3c.10 a new page starts at the top", y0 === 0, String(y0));
@@ -907,7 +907,7 @@ await step("6g. workspaces", async () => {
   await page.waitForSelector(".row");
   check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
   const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("6g.17 the sidebar links stay in the workspace", nav === "/w/stress=page /w/stress/my=null /w/stress/insights=null", nav);
+  check("6g.17 the sidebar links stay in the workspace", nav === "/w/stress=page /w/stress/my=null /w/stress/insights=null /w/stress/report=null /w/stress/canvas=null", nav);
 });
 
 await step("6i. the label menu", async () => {
@@ -966,17 +966,19 @@ await step("6h. insights", async () => {
   await pg.goto(base + "/insights", { waitUntil: "networkidle" });
   await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
   const nav = await pg.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("6h.2 the sidebar marks Insights", nav === "/=null /my=null /insights=page", nav);
+  check("6h.2 the sidebar marks Insights", nav === "/=null /my=null /insights=page /report=null /canvas=null", nav);
   const amounts = () => pg.evaluate(() => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(","));
   const points = () => pg.locator('[data-chart="scatter"] circle').count();
   const all = await amounts();
   const allPoints = await points();
   await pg.locator("button.chip", { hasText: /^Urgent$/ }).click();
+  await pg.waitForFunction((previous) => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(",") !== previous, all, { timeout: 5000 }).catch(() => undefined);
   const urgent = await amounts();
   check("6h.3 a priority filter changes the status bars", urgent !== all && (await points()) < allPoints, `${all} -> ${urgent}`);
   await pg.locator('[data-chart="status"] g[data-key="done"] rect').click();
   check("6h.4 a click on a bar toggles its filter", (await pg.locator("button.chip", { hasText: /^Done$/ }).getAttribute("aria-pressed")) === "true");
   await pg.locator("button", { hasText: "Clear filters" }).click();
+  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, allPoints, { timeout: 5000 }).catch(() => undefined);
   check("6h.5 clearing the filters restores the bars", (await amounts()) === all && (await points()) === allPoints, `${await amounts()} points=${await points()}`);
   await pg.locator('[data-chart="status"] g[data-key="todo"] rect').hover();
   const tip = await pg.locator('[data-chart="status"] g:last-child text').last().textContent();
@@ -1011,6 +1013,72 @@ await step("6h. insights", async () => {
   await pg.waitForFunction((text) => document.querySelector("[data-points]")?.textContent === text, String(stress), { timeout: 10000 });
   check("6h.11 no console error and no hydration mismatch", errors.length === 0, errors.join(" | "));
   await pg.close();
+});
+
+await step("6i. report and canvas", async () => {
+  const errors: string[] = [];
+  const open = async (path: string) => {
+    const p = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    p.on("console", (m) => { if (m.type() === "error" || m.text().includes("hydration mismatch")) errors.push(m.text()); });
+    p.on("pageerror", (e) => errors.push(String(e)));
+    await p.addInitScript(recordSockets);
+    await p.goto(base + path, { waitUntil: "networkidle" });
+    return p;
+  };
+  const nav = (p: Page) => p.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
+  const report = await open("/report");
+  const html = await (await report.request.get(base + "/report")).text();
+  const charts = (html.match(/data-chart="/g) ?? []).length;
+  check("6i.1 /report has the seven charts in the server HTML, with no island or data for them", charts === 7 && !html.includes("data-yuka-answer") && !html.includes("Demo_shared.Insights") && (await report.locator('[data-chart="scatter"] circle').count()) >= 25, `charts=${charts} bytes=${html.length}`);
+  check("6i.2 the sidebar marks Report", (await nav(report)) === "/=null /my=null /insights=null /report=page /canvas=null", await nav(report));
+  await report.close();
+  const A = await open("/canvas");
+  const B = await open("/canvas");
+  await liveOpen(A);
+  await liveOpen(B);
+  await A.waitForFunction(() => !!(document.querySelector("[data-canvas] [data-id]") as any)?.__yuka_pointerdown, null, { timeout: 5000 });
+  check("6i.3 the sidebar marks Canvas", (await nav(A)) === "/=null /my=null /insights=null /report=null /canvas=page", await nav(A));
+  const at = (style: string | null) => (/translate\((-?\d+)px, ?(-?\d+)px\)/.exec(style ?? "") ?? []).slice(1).map(Number);
+  const grip = await A.evaluate(() => {
+    for (const card of document.querySelectorAll<HTMLElement>("[data-canvas] [data-id]")) {
+      const box = card.getBoundingClientRect();
+      const x = box.left + 40, y = box.top + 8;
+      const hit = document.elementFromPoint(x, y);
+      if (x > 0 && y > 0 && x + 80 < innerWidth && y + 60 < innerHeight && hit && hit.localName !== "a" && hit.closest("[data-id]") === card)
+        return { id: card.dataset.id ?? "", x, y };
+    }
+    return null;
+  });
+  if (!grip) throw new Error("no card to grab in the viewport");
+  const card = (p: Page) => p.locator(`[data-canvas] [data-id="${grip.id}"]`);
+  const [x0, y0] = at(await card(A).getAttribute("style"));
+  const moves: string[] = [];
+  A.on("request", (r) => { if (r.url().endsWith("/_yuka/action/move_item")) moves.push(r.url()); });
+  const url = A.url();
+  await A.mouse.move(grip.x, grip.y);
+  await A.mouse.down();
+  await A.mouse.move(grip.x + 60, grip.y + 40, { steps: 6 });
+  const during = at(await card(A).getAttribute("style"));
+  const sentDuring = moves.length;
+  await A.mouse.up();
+  const want = [Math.min(2200, x0 + 120), Math.min(1528, y0 + 80)];
+  const moved = await A.waitForFunction(
+    ([sel, x, y]) => (document.querySelector(sel as string)?.getAttribute("style") ?? "").includes(`translate(${x}px,${y}px)`),
+    [`[data-canvas] [data-id="${grip.id}"]`, want[0], want[1]] as const,
+    { timeout: 2000 },
+  ).then(() => true, () => false);
+  check("6i.4 a drag moves the card with the pointer and sends one move on release", during.join(",") === want.join(",") && moved && sentDuring === 0 && A.url() === url, `${grip.id} ${x0},${y0} -> during ${during.join(",")}, after ${at(await card(A).getAttribute("style")).join(",")}, want ${want.join(",")}; moves sent during the drag ${sentDuring}`);
+  await A.waitForTimeout(300);
+  check("6i.5 one move_item call", moves.length === 1, String(moves.length));
+  const seen = await B.waitForFunction(
+    ([sel, x, y]) => (document.querySelector(sel as string)?.getAttribute("style") ?? "").includes(`translate(${x}px,${y}px)`),
+    [`[data-canvas] [data-id="${grip.id}"]`, want[0], want[1]] as const,
+    { timeout: 2000 },
+  ).then(() => true, () => false);
+  check("6i.6 the second page gets the move over Live", seen, `${grip.id} in B: ${await card(B).getAttribute("style")}`);
+  check("6i.7 no console error and no hydration mismatch on /report and /canvas", errors.length === 0, errors.join(" | "));
+  await A.close();
+  await B.close();
 });
 
 await step("6h. issue list: row link, user popup, filter in the URL", async () => {

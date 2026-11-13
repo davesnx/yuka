@@ -100,6 +100,11 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
 - `Yuka.State.make value` makes a State. `Yuka.State.get` reads it,
   `Yuka.State.set` and `Yuka.State.update` write it.
 - An event handler is a function: `on_click=(fun event -> ...)`.
+  `Yuka.Event` reads the event: `target_value`, `target_checked`,
+  `target_tag`, `key`, the modifier keys (`shift_key`, `ctrl_key`,
+  `alt_key`, `meta_key`) and the pointer position in the viewport
+  (`client_x`, `client_y`). `prevent_default` and `stop_propagation`
+  act on it.
 - A hole is a part of the markup that updates when a State it reads
   changes. The ppx makes a hole of each child or attribute of an HTML tag
   whose expression contains `Yuka.State.get`: `hidden=(Yuka.State.get all)`

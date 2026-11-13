@@ -94,9 +94,22 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   `stress`; Animate moves the date range on each frame. The readout shows
   frames per second, the time of the last update (from the change to the
   updated DOM), the SVG nodes and the points.
+- `http://localhost:8080/report`: the same seven charts at 1x, drawn in SVG
+  by the server only (`server/report.mlx`, with the geometry of
+  `shared/insights.mlx`). The page has no island of its own and sends no
+  data for the charts, so you can compare its HTML with `/insights`.
+- `http://localhost:8080/canvas`: a whiteboard with a card for each issue
+  and notes (`shared/canvas.mlx`). The board is in the server store, one
+  per workspace, and each open page gets its changes over `Yuka.Live`. Drag
+  a card to move it: the move is sent on release, and a move from another
+  page glides into place. Drag the background to pan; the buttons zoom,
+  shuffle the board and add a note (at most 140 characters, 100 notes per
+  board). The first positions come from the issue numbers; Shuffle and
+  new notes use random positions.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
   issues stream in after a delay.
-- `http://localhost:8080/w/stress`, `/w/stress/my`, `/w/stress/insights`, `/w/stress/new` and
+- `http://localhost:8080/w/stress`, `/w/stress/my`, `/w/stress/insights`,
+  `/w/stress/report`, `/w/stress/canvas`, `/w/stress/new` and
   `/w/stress/issue/STR-1`: the same pages for `stress`. An unknown
   workspace, or an issue of another workspace, is a not-found page.
 - `http://localhost:8080/about`: a page with no island, outside the shell
