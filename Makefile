@@ -170,7 +170,7 @@ dev-packages: ## List opam packages the benchmarks and the demo need that are no
 
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
-	@:
+	@echo "melange git+https://github.com/jongleb/melange#7c961fbdfebac142347fa2e924e0957cd97e6d53"
 
 .PHONY: pin
 pin: ## Pin dependencies
