@@ -147,7 +147,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable answered : string list;
     mutable select_value : string option;
     mutable form : (string * string * (string * string) list * (string option * string) list) option;
-    mutable csrf : (unit -> string) option;
+    mutable csrf : (unit -> string option) option;
     mutable sheets : string list;
     mutable held : string list;
     mutable context : context option;

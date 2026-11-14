@@ -185,13 +185,20 @@ let request_switch_ends ~fs () =
   check_true "the fiber on the request switch ends with the response" (Unix.gettimeofday () -. start < 1.)
 
 let no_sessions ~sw ~fs () =
+  let logged = ref [] in
+  let config = Yuka.Server.config ~log:(fun _ m -> logged := m :: !logged) () in
   let handler = Yuka_tapak.handler ~sw ~fs config Yuka_routes.app in
   let response, _ = call ~headers:same_origin handler "/_yuka/csrf" in
   Alcotest.(check int) "csrf without the middleware" 500 (status response);
+  check_true "the csrf log names the path and the middleware"
+    (match !logged with [ m ] -> contains m "/_yuka/csrf" && contains m "session middleware" | _ -> false);
+  logged := [];
   let response, _ =
     call ~headers:(("Upgrade", "websocket") :: same_origin) handler "/_yuka/live"
   in
-  Alcotest.(check int) "live without the middleware" 500 (status response)
+  Alcotest.(check int) "live without the middleware" 500 (status response);
+  check_true "the live log names the middleware"
+    (match !logged with [ m ] -> contains m "the live socket needs session middleware" | _ -> false)
 
 let csrf_secret = String.make 32 'k'
 

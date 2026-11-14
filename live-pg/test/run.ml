@@ -119,7 +119,7 @@ let two_nodes () =
   ignore
     (Yuka.Server.Testing.live_run ~node:nb ~sleep:lwt_sleep (Yuka.Server.Testing.context ~session:"s" ())
        ~verify_csrf:(fun _ -> Async.return true)
-       ~token:(fun () -> "t")
+       ~token:(fun () -> Some "t")
        connection);
   let has v = List.exists (String.ends_with ~suffix:(Printf.sprintf {|"state":%d}|} v)) !out in
   check_true "the first state on B" (has 0);

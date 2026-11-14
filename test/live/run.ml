@@ -69,7 +69,7 @@ let fresh_session () =
   incr sessions;
   "s" ^ string_of_int !sessions
 
-let start ?node ?(csrf = "good") ?(fresh = "next") ?(session = fresh_session ()) () =
+let start ?node ?(csrf = "good") ?(fresh = Some "next") ?(session = fresh_session ()) () =
   let f = fake () in
   let finished =
     Server.Testing.live_run ?node ~sleep (Server.Testing.context ~session ())
@@ -168,13 +168,23 @@ let hello_cases =
         let f = fake () in
         f.inbox <- [ Some hello; Some (sub 1 "count" {|"abcd"|}) ];
         let verify, accept, _ = Async.make () in
-        let _ = Server.Testing.live_run ~sleep (Server.Testing.context ~session:("pipe") ()) ~verify_csrf:(fun _ -> verify) ~token:(fun () -> "T2") (connection f) in
+        let _ = Server.Testing.live_run ~sleep (Server.Testing.context ~session:("pipe") ()) ~verify_csrf:(fun _ -> verify) ~token:(fun () -> Some "T2") (connection f) in
         Alcotest.(check (list string)) "nothing before the check" [] f.out;
         accept true;
         Alcotest.(check (list string)) "messages" [ "hello"; "state" ] (kinds f);
         Alcotest.(check (option string)) "token" (Some {|"T2"|})
           (Option.map Json.to_string (field "csrf" (List.hd f.out)));
         check_states "state" [ (1, "4") ] f;
+        hang_up f );
+    ( "with no token, hello and pong have no csrf field",
+      fun () ->
+        let f, _ = start ~fresh:None () in
+        push f hello;
+        push f {|{"t":"ping"}|};
+        Alcotest.(check (list string)) "messages" [ "hello"; "pong" ] (kinds f);
+        Alcotest.(check (list (option string))) "no token" [ None; None ]
+          (List.map (fun t -> Option.map Json.to_string (field "csrf" t)) f.out);
+        Alcotest.(check (option int)) "open" None f.closed;
         hang_up f );
   ]
 
@@ -462,7 +472,7 @@ let review_cases =
         b.inbox <- [ Some hello ];
         let _ =
           Server.Testing.live_run ~sleep (Server.Testing.context ~session:("err") ())
-            ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t")
+            ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t")
             (connection ~receive:(fun b () -> if b.inbox = [] then Async.failed "reset" else receive b ()) b)
         in
         Alcotest.(check int) "receive error: one" 1 b.closes;
@@ -480,7 +490,7 @@ let ssr_cases =
       fun () ->
         let s = Private.session ~streaming:false ~islands_only:true in
         let asked = ref 0 in
-        Private.set_csrf s (fun () -> incr asked; "tok");
+        Private.set_csrf s (fun () -> incr asked; Some "tok");
         let view () =
           let a = Yuka.Live.use count (fun () -> "ssr") and b = Yuka.Live.use count (fun () -> "other") in
           let show t = match Yuka.Live.status t with Status.Ready { data; _ } -> string_of_int data | _ -> "?" in
@@ -496,7 +506,7 @@ let ssr_cases =
       fun () ->
         let s = Private.session ~streaming:false ~islands_only:true in
         let asked = ref 0 in
-        Private.set_csrf s (fun () -> incr asked; "tok");
+        Private.set_csrf s (fun () -> incr asked; Some "tok");
         let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Plain" ~props:`Null (fun () -> text "x"))) in
         Alcotest.(check bool) "no token" false (Astring_like.contains html "l:csrf");
         Alcotest.(check int) "not asked" 0 !asked );
@@ -523,7 +533,7 @@ let open_on node =
   let _ =
     Server.Testing.live_run ~node ~sleep (Server.Testing.context ~session:(fresh_session ()) ())
       ~verify_csrf:(fun t -> Async.return (t = "good"))
-      ~token:(fun () -> "next")
+      ~token:(fun () -> Some "next")
       (connection f)
   in
   push f hello;

@@ -976,7 +976,7 @@ module Private : sig
 
   val import_map : url:string -> string list -> (string * string) list
 
-  val set_csrf : session -> (unit -> string) -> unit
+  val set_csrf : session -> (unit -> string option) -> unit
   val reset_live : unit -> unit
 
   val set_form :
@@ -1288,9 +1288,9 @@ module Server : sig
 
     val session : context -> string option
     (** The session id of the request, from the adapter ([Dream.session_id]
-        for Dream). [None] outside a request: an {!Yuka.Action.call} on the
-        server that no request runs (for example in a test). With Dream,
-        raises when the app has no session middleware. *)
+        for Dream). [None] outside a request (an {!Yuka.Action.call} on the
+        server that no request runs, for example in a test) and when the
+        request has no session (with Dream: no session middleware). *)
 
     val meth : context -> Router.meth
     (** The request method. *)
@@ -1672,16 +1672,22 @@ module Server : sig
           else stop reading past [limit + 1] bytes. With [None], close the
           request body so the server drops the rest. *)
 
-      val session : request -> string
-      (** The session id of the request (Dream: [Dream.session_id]). Called
-          only by {!Context.session}, and by the live socket to count the
-          sockets of a session. *)
+      val session : request -> string option
+      (** The session id of the request (Dream: [Dream.session_id]), or
+          [None] when the request has no session (Dream: no session
+          middleware). Called only by {!Context.session}, and by the live
+          socket, which refuses a request with [None] and counts the sockets
+          of a session. Must not raise. *)
 
-      val csrf_token : request -> string
+      val csrf_token : request -> string option
       (** A CSRF token bound to the session of the request (Dream:
-          [Dream.csrf_token]). It is written in a page only when the page
-          has a {!Yuka.Live.use}, answers [GET /_yuka/csrf], and renews the
-          token of the live socket; raise when the request has no session. *)
+          [Dream.csrf_token]), or [None] when the request has no session. It
+          is written in a page only when the page has a {!Yuka.Live.use}
+          ([None] writes the error [Forbidden] in its place and logs one
+          line: the uses of the page get [Forbidden] and the client opens
+          no socket), answers
+          [GET /_yuka/csrf], and renews the token of the live socket ([None]
+          leaves out the [csrf] field). Must not raise. *)
 
       val verify_csrf : request -> string -> bool Async.t
       (** Whether a token from {!csrf_token} is valid for the session of
@@ -1729,11 +1735,12 @@ module Server : sig
             [/_yuka/csrf]: for [GET] and [HEAD] with the same origin rule,
             [{"csrf":TOKEN}] from {!Backend.csrf_token} with [no-store] (the live
             client renews an expired token with it); 403 for another
-            origin, 405 for another method. [/_yuka/live]: for [GET] with
+            origin, 405 for another method, and a 500 with a log message
+            when {!Backend.csrf_token} gives [None] (no session middleware). [/_yuka/live]: for [GET] with
             the same origin rule and [Upgrade: websocket], [Backend.upgrade] with
             the live protocol; 403 for another origin, 426 without the
             upgrade header, 405 for another method, and a 500 with a log
-            message when {!Backend.session} raises (no session middleware). [/_yuka/app/<file>]: the
+            message when {!Backend.session} gives [None] (no session middleware). [/_yuka/app/<file>]: the
             file of [assets] for [GET] and [HEAD], else 405; a [.] or [..]
             segment, or no [assets], gives a plain 404 with [no-store]. A
             path under a [public] prefix: the file of its directory, by the
@@ -1943,7 +1950,7 @@ module Server : sig
       sleep:(float -> unit Async.t) ->
       context ->
       verify_csrf:(string -> bool Async.t) ->
-      token:(unit -> string) ->
+      token:(unit -> string option) ->
       Live.connection ->
       unit Async.t
     (** Runs the live protocol on one socket until it closes, as
@@ -1953,7 +1960,8 @@ module Server : sig
           version closes with 4426, a token that [verify_csrf] refuses with
           4403, any other first message with 4400. The answer
           [{"t":"hello","v":1,"csrf":T'}] carries [token ()] for the next
-          [hello] of the page.
+          [hello] of the page; when [token ()] is [None], the answer has no
+          [csrf] field.
         - [sub] ([id], [topic], [key]), [unsub] ([id]), [sync] ([id],
           [ref]) and [ping]. A subscription gets [state] messages ([id],
           [seq], [state]), or one [error] ([id], [code]: [unknown_topic],
@@ -1966,7 +1974,8 @@ module Server : sig
           subscriptions gives [limit]; a message out over 1 MiB is sent and
           logged; more than 256 replies waiting on a slow socket close it
           with 1008. No [hello] within 10 s, or no message for 60 to 120 s
-          after it, closes with 4408. A [pong] carries a fresh token too.
+          after it, closes with 4408. A [pong] carries a fresh token too
+          (no [csrf] field when [token ()] is [None]).
         - [synced] with [ref] [R] answers every [sync] of the subscription
           with a [ref] up to [R].
         - A [sync] with [after] ([[[NODE, N], ...]], from the [live] mark of

@@ -100,6 +100,16 @@ let rec connect m =
   m.wait ();
   m.wait <- ignore;
   m.waiting <- false;
+  let refused =
+    if Option.is_none m.token && Option.is_none m.socket then
+      match Answers.find "l:csrf" with Answers.Found (Error e) -> Some e | _ -> None
+    else None
+  in
+  match refused with
+  | Some error ->
+      give_up m error;
+      List.iter (fun u -> u.ended <- true) m.uses
+  | None ->
   if m.uses != [] && Option.is_none m.dead && Option.is_none m.socket then
     match Web.socket_open (Web.live_url ()) (fun () -> opened m) (fun text -> heard m text) (fun code -> closed m code) with
     | s -> m.socket <- Some s
@@ -262,7 +272,9 @@ let decode (topic : (_, 's) Topic.t) last j =
 
 let csrf_answer () =
   match !Types.current_session with
-  | Some { csrf = Some token; _ } -> Answers.record_value "l:csrf" (fun () -> Ok (`String (token ())))
+  | Some { csrf = Some token; _ } ->
+      Answers.record_value "l:csrf" (fun () ->
+          match token () with Some t -> Ok (`String t) | None -> Error Status.Forbidden)
   | _ -> ()
 
 let on_server (topic : (_, _) Topic.t) key base =

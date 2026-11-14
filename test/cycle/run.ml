@@ -27,8 +27,9 @@ module Test_adapter = struct
     Async.return (read 0)
 
   let session (r : request) =
-    if App.header r "x-no-session" <> None then failwith "no session middleware" else "cycle-session"
-  let csrf_token (_ : request) = "cycle-token"
+    if App.header r "x-no-session" <> None then None else Some "cycle-session"
+  let csrf_token (r : request) =
+    if App.header r "x-no-session" <> None then None else Some "cycle-token"
   let verify_csrf (_ : request) token = Async.return (token = "cycle-token")
   let upgrade (_ : request) _ = Async.return { status = 101; headers = []; body = "upgraded" }
 
@@ -743,7 +744,7 @@ let reviewed =
         let ann = Server.Testing.context ~header:(function "x-user" -> Some "ann" | _ -> None) ~session:"s" () in
         ignore
           (Server.Testing.live_run ~node ~sleep:(fun _ -> fst3 (Async.make ())) ann
-             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t") connection);
+             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t") connection);
         Server.Live.publish ~node App.mine "ann" "published on the node";
         let page handler =
           match Async.status handler with Async.Done (r : reply) -> r.body | _ -> Alcotest.fail "pending"
@@ -762,7 +763,37 @@ let reviewed =
         in
         check_status r 500;
         Alcotest.(check int) "one log" 1 (List.length !logged);
-        check_true "names the session" (contains (List.hd !logged) "no session") );
+        check_true "names the session" (contains (List.hd !logged) "no session");
+        check_true "names the middleware" (contains (List.hd !logged) "the live socket needs session middleware") );
+    ( "an action reads no session as None",
+      fun () ->
+        let r =
+          get ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example");
+                ("x-user", "ana"); ("x-no-session", "1") ]
+            ~body:"null" "/_yuka/action/whoami"
+        in
+        check_status r 200;
+        Alcotest.(check string) "body" {|{"ok":"ana - POST /_yuka/action/whoami"}|} r.body;
+        Alcotest.(check (list string)) "no log" [] !logged );
+    ( "GET /_yuka/csrf without a session is a 500 and a log",
+      fun () ->
+        let r = get ~headers:[ ("sec-fetch-site", "same-origin"); ("x-no-session", "1") ] "/_yuka/csrf" in
+        check_status r 500;
+        Alcotest.(check string) "body" "Internal Server Error" r.body;
+        Alcotest.(check int) "one log" 1 (List.length !logged);
+        check_true "names the path and the middleware"
+          (contains (List.hd !logged) "/_yuka/csrf" && contains (List.hd !logged) "session middleware") );
+    ( "a page with Live.use and no session writes the token as an error",
+      fun () ->
+        let r = get ~headers:[ ("x-user", "ann"); ("x-no-session", "1") ] "/live" in
+        check_status r 200;
+        check_true "the state" (contains r.body "data secret of ann");
+        check_true "no token"
+          (contains r.body {|data-yuka-answer="l:csrf">{"error":{"kind":"forbidden"}}</script>|});
+        Alcotest.(check (list string)) "one log"
+          [ "page with a Live.use: the request has no session; live data needs session middleware" ] !logged );
     ( "a page with live state under a shared cache rule is sent private, no-store",
       fun () ->
         let r = get ~headers:[ ("x-user", "ann") ] "/live-public" in
@@ -803,7 +834,7 @@ let reviewed =
         in
         ignore
           (Server.Testing.live_run ~sleep:(fun _ -> fst3 (Async.make ())) (Server.Testing.context ~session:"s" ())
-             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t") connection);
+             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t") connection);
         check_true "in the config log" (List.exists (fun m -> contains m "boom secret") !logged) );
     ( "the handler's live node marks its action answers",
       fun () ->

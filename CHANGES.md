@@ -4,6 +4,7 @@
 
 ### yuka
 
+- Breaking: `Server.Adapter.Backend.session` and `Server.Adapter.Backend.csrf_token` give `string option` (were `string`), `None` when the request has no session (with Dream: no session middleware), in place of a raise. `Server.Context.session` gives `None` for such a request and never raises. `GET /_yuka/csrf` and `GET /_yuka/live` without a session are a 500 with a log line, as before. A page with a `Live.use` and no session renders, with the CSRF answer as the error `Forbidden` and one log line, in place of the 500 error page; in the browser its uses get `Forbidden` and the client opens no socket. The `hello` and `pong` of the live socket leave out `csrf` when there is no token. `Server.Testing.live_run ~token` and `Private.set_csrf` take `unit -> string option`. To migrate, an adapter gives `Some` of its value, and `None` where it raised (@davesnx)
 - Breaking: in the browser, `Json.of_string` parses with `JSON.parse` and turns the result into a `Json.t`; the hand-written parser is native only. The counter island page goes from 17,946 to 16,779 B gzip and the demo start page from 61,050 to 59,932 B gzip; the keyed benchmark app does not change. In the browser a whole number that fits a 32-bit `int` is `` `Int `` also when written `1.0` or `-0.0`, object keys that are array indices come first, a duplicate key stays once, at its first place with its last value (native keeps every pair), a `\u` escape gives the same string as the character itself, a lone surrogate is not an error, and the error messages for invalid JSON are those of `JSON.parse`. Arrays and objects nested more than 512 levels are an error on both. `Json.to_string`, the codecs and the server do not change. To migrate, a custom codec that reads a `` `Float `` in the browser accepts `` `Int `` too, as `Codec.float` does (@davesnx)
 - `State.deferred source` is a read-only copy of `source` that changes after the next paint: after a change of `source`, it waits for a `requestAnimationFrame` and then a task (only the task, when the change comes from a `Browser.on_frame` handler), and takes the latest value of `source`. All deferred States that wait change in one batch. Read it for a slow part of the page, so that the part that reads `source` paints first; the slow update is not shorter. On the server and on native it has the value of `source`. The demo's insights charts read deferred copies of the inputs (@davesnx)
 - `Yuka.Event.client_x` and `Yuka.Event.client_y` give the position of the pointer of a mouse or pointer event, in CSS pixels of the viewport (`clientX`, `clientY`), as a `float`. The demo's canvas page uses them to drag cards (@davesnx)
@@ -99,6 +100,7 @@
 
 ### yuka-dream
 
+- `Yuka_dream` gives `None` for the session and the CSRF token of a request that no session middleware runs: it catches the `Failure "Missing session middleware"` of `Dream.session_id` and `Dream.csrf_token`. Dream still logs that error (@davesnx)
 - `Yuka_dream.handler ?node` serves `GET /_yuka/live` (live data) for a live node; it needs Dream sessions that every server process shares and that survive a restart (`Dream.cookie_sessions` with `Dream.set_secret`) (@davesnx)
 - `Yuka_dream.handler` sends the server log to `Dream.sub_log "yuka"` (`` `Warn `` is Dream's `` `Warning ``) when the config has no `log`; remove a `~log_error` that called `Dream.error` (@davesnx)
 - Fix: `Yuka_dream` sends every value of a repeated rule header on a prerendered file (@davesnx)
@@ -109,7 +111,7 @@
 
 ### yuka-tapak
 
-- New package `yuka-tapak` (experiment, not released): the request cycle on [tapak](https://github.com/syaiful6/tapak), in direct style on Eio, on one domain. `Yuka_tapak.handler ~sw ~fs` is a `Tapak.handler` and goes in the `~not_found` of a tapak router; `Yuka_tapak.sessions` is the middleware for the session and CSRF cookies; `await` and `async` convert between `Yuka.Async.t` and fibers. No `prerender`. `tapak`, `sch` and `cows` are not in opam: `make pin` pins them (@davesnx)
+- New package `yuka-tapak` (experiment, not released): the request cycle on [tapak](https://github.com/syaiful6/tapak), in direct style on Eio, on one domain. `Yuka_tapak.handler ~sw ~fs` is a `Tapak.handler` and goes in the `~not_found` of a tapak router; `Yuka_tapak.sessions` is the middleware for the session and CSRF cookies (without it, the request has no session); `await` and `async` convert between `Yuka.Async.t` and fibers. No `prerender`. `tapak`, `sch` and `cows` are not in opam: `make pin` pins them (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

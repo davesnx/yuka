@@ -71,11 +71,6 @@ let sessions next request =
       Tapak.Response.add_header name value response)
     (next request) fresh
 
-let required request name =
-  match cookie request name with
-  | Some v -> v
-  | None -> failwith ("no " ^ name ^ " cookie: put Yuka_tapak.sessions around the handler")
-
 module Base = struct
   type request = Tapak.Request.t
   type reply = Tapak.Response.t
@@ -107,11 +102,10 @@ module Base = struct
               Some text
             end)
 
-  let session request = required request session_cookie
+  let session request = cookie request session_cookie
 
   let csrf_token request =
-    ignore (required request csrf_cookie);
-    fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request)
+    Option.map (fun _ -> fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request)) (cookie request csrf_cookie)
 
   let verify_csrf request token =
     Yuka.Async.return (Tapak.Csrf.verify_token ~cookie_name:csrf_cookie ~token request)

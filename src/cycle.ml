@@ -263,8 +263,8 @@ type request = {
   target : string;
   header : string -> string option;
   body : limit:int -> string option Async.t;
-  session : unit -> string;
-  csrf_token : unit -> string;
+  session : unit -> string option;
+  csrf_token : unit -> string option;
   verify_csrf : string -> bool Async.t;
 }
 
@@ -316,7 +316,7 @@ type env = {
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
-  csrf : (unit -> string) option;
+  csrf : (unit -> string option) option;
   context : Types.context;
   node : Live_server.node;
   live_used : bool ref;
@@ -559,14 +559,20 @@ let serve_file meth ~root ~headers raw =
 let csrf_answer env (r : request) =
   match r.meth with
   | `GET | `HEAD ->
-      if Server.trusted_origin ?origins:env.config.origins r.header then
-        reply
-          {
-            status = 200;
-            headers = [ ("content-type", "application/json"); no_store_header ];
-            body = String (Json.to_string (`Assoc [ ("csrf", `String (r.csrf_token ())) ]));
-          }
-      else reply (plain 403 "Forbidden" [])
+      if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden" [])
+      else (
+        match r.csrf_token () with
+        | None ->
+            log_quietly env.config `Error
+              "/_yuka/csrf refused: the request has no session; the CSRF token needs session middleware";
+            reply (internal_error ())
+        | Some token ->
+            reply
+              {
+                status = 200;
+                headers = [ ("content-type", "application/json"); no_store_header ];
+                body = String (Json.to_string (`Assoc [ ("csrf", `String token) ]));
+              })
   | _ -> reply (method_not_allowed "GET, HEAD")
 
 let action env (r : request) raw =
@@ -795,12 +801,11 @@ let live_answer env (r : request) =
         reply (plain 426 "Upgrade Required" [ ("upgrade", "websocket") ])
       else (
         match r.session () with
-        | exception e ->
+        | None ->
             log_quietly env.config `Error
-              ("live socket refused: the request has no session (" ^ Web.exn_to_string e
-             ^ "); the live socket needs session middleware");
+              "live socket refused: the request has no session; the live socket needs session middleware";
             reply (plain 500 "Internal Server Error" [])
-        | session ->
+        | Some session ->
             let context = { env.context with session = (fun () -> Some session) } in
             Async.return
               (Upgrade
@@ -818,7 +823,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
       meth = r.meth;
       path;
       header = r.header;
-      session = (fun () -> Some (r.session ()));
+      session = r.session;
       log = log config;
       live =
         (fun name key ->
@@ -840,7 +845,14 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
       root_headers = a.headers;
       exists;
       form = None;
-      csrf = Some r.csrf_token;
+      csrf =
+        Some
+          (fun () ->
+            let token = r.csrf_token () in
+            if token = None then
+              log_quietly config `Error
+                "page with a Live.use: the request has no session; live data needs session middleware";
+            token);
       context;
       node;
       live_used;
@@ -949,8 +961,8 @@ module type ADAPTER = sig
   val target : request -> string
   val header : request -> string -> string option
   val body : request -> limit:int -> string option Async.t
-  val session : request -> string
-  val csrf_token : request -> string
+  val session : request -> string option
+  val csrf_token : request -> string option
   val verify_csrf : request -> string -> bool Async.t
   val respond : response -> reply Async.t
   val file : request -> root:string -> path:string -> headers:(string * string) list -> reply Async.t

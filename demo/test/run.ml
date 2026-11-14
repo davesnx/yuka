@@ -539,7 +539,7 @@ let live_publish () =
   let _ =
     Yuka.Server.Testing.live_run ~sleep:(fun _ -> fst3 (Yuka.Async.make ()))
       (Yuka.Server.Testing.context ~session:"s" ())
-      ~verify_csrf:(fun _ -> Yuka.Async.return true) ~token:(fun () -> "t") connection
+      ~verify_csrf:(fun _ -> Yuka.Async.return true) ~token:(fun () -> Some "t") connection
   in
   out := [];
   (match
