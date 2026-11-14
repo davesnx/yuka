@@ -1238,7 +1238,9 @@ val render :
     [data-yuka-nav="push"], ["back"] or ["forward"] until the last one
     ends. The URL, history and navigation state change before the
     transition starts; an exception in the update is thrown again in a
-    task, as an uncaught error.
+    task, as an uncaught error. When a newer navigation, [popstate] or
+    {!stop} comes before the update runs, the update does nothing: that
+    page is not shown, and its history entry loads it again.
 
     The code that fetches and swaps pages is not in the JavaScript that the
     page loads at start. It is loaded with a dynamic [import] of
