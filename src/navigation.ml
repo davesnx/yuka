@@ -1,5 +1,6 @@
 let current_key = Navigation_stub.current_key
 let loaded = Navigation_stub.loaded
+let shown_key = ref ""
 let started = ref false
 let pending : Navigation_web.controller option ref = ref None
 
@@ -27,7 +28,7 @@ let assign url =
   Navigation_state.set false;
   Web.location_assign url
 
-let save_scroll () = Web.table_set (scrolls ()) !current_key (Navigation_web.scroll_y ())
+let save_scroll () = Web.table_set (scrolls ()) !shown_key (Navigation_web.scroll_y ())
 
 let hash_of = Navigation_web.hash_of
 let outlets () = Web.query_all (Web.document ()) "yuka-outlet"
@@ -243,19 +244,16 @@ let show ~dir ~push ~restore url a =
   match swappable a with
   | None -> assign final
   | Some target ->
-      let pushed =
-        if push then begin
-          let key = Web.fresh_key () in
-          Navigation_web.history_push_key key final;
-          current_key := key;
-          Some key
-        end
-        else None
-      in
+      if push then begin
+        let key = Web.fresh_key () in
+        Navigation_web.history_push_key key final;
+        current_key := key
+      end;
       let gen = !nav in
       let apply () =
         if !nav = gen then begin
           loaded := Web.current_url ();
+          shown_key := !current_key;
           Navigation_state.set false;
           swap target final a.header a.text;
           (match restore with
@@ -263,7 +261,6 @@ let show ~dir ~push ~restore url a =
           | None -> Navigation_web.scroll_to_hash (hash_of final));
           !start_islands ()
         end
-        else Option.iter (Web.table_delete (scrolls ())) pushed
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 
@@ -356,6 +353,7 @@ let on_popstate _ =
   current_key := next;
   let y = Option.value (Web.table_get (scrolls ()) !current_key) ~default:0. in
   if Web.current_url () = !loaded then begin
+    shown_key := next;
     cancel_pending ();
     incr nav;
     Navigation_state.set false;
@@ -374,6 +372,7 @@ let handle e =
 let boot (transitions, islands) =
   cancel_pending ();
   started := true;
+  shown_key := !current_key;
   Web.table_clear (limits ());
   (prefetching :=
      match Web.query_all (Web.document ()) "meta[name=yuka-prefetch]" with
