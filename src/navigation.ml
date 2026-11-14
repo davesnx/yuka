@@ -2,15 +2,17 @@ let current_key = Navigation_stub.current_key
 let loaded = Navigation_stub.loaded
 let started = ref false
 let pending : Navigation_web.controller option ref = ref None
-let scroll_table : float Web.table option ref = ref None
 
-let scrolls () =
-  match !scroll_table with
+let table r =
+  match !r with
   | Some t -> t
   | None ->
       let t = Web.table () in
-      scroll_table := Some t;
+      r := Some t;
       t
+
+let scroll_table : float Web.table option ref = ref None
+let scrolls () = table scroll_table
 
 let start_islands : (unit -> unit) ref = ref (fun () -> ())
 
@@ -99,14 +101,10 @@ type entry = {
 }
 
 let cache_table : entry Web.table option ref = ref None
+let cache () = table cache_table
 
-let cache () =
-  match !cache_table with
-  | Some t -> t
-  | None ->
-      let t = Web.table () in
-      cache_table := Some t;
-      t
+let limit_table : Prefetch.level Web.table option ref = ref None
+let limits () = table limit_table
 
 let max_age header = Navigation_web.max_age (Option.value (header "cache-control") ~default:"")
 
@@ -143,7 +141,7 @@ let add e =
 
 let page_key url = Navigation_web.absolute url ^ " " ^ keys ()
 
-let prefetching : [ `Hover | `Visible | `Off ] ref = ref `Hover
+let prefetching = ref Prefetch.default
 let transitions_on = ref false
 let nav = ref 0
 let hover = ref ignore
@@ -165,7 +163,10 @@ let allowed () =
   !started && (match !prefetching with `Off -> false | _ -> true) && not (Navigation_web.save_data ())
 
 let rec start ~low key url =
-  if Option.is_none (lookup key) then begin
+  let trigger = if low then `Visible else `Hover in
+  let page = Navigation_web.absolute url in
+  let under = match Web.table_get (limits ()) page with Some l -> Prefetch.rank trigger <= Prefetch.rank l | None -> true in
+  if under && Option.is_none (lookup key) then begin
     let e =
       { key; answer = None; waiters = []; controller = Navigation_web.new_controller (); at = 0.;
         prefetched = true; warm = not low }
@@ -177,13 +178,25 @@ let rec start ~low key url =
       List.iter (fun f -> f a) (List.rev w);
       pump ()
     in
-    Navigation_web.fetch_page (url, keys (), true, low, e.controller)
+    Navigation_web.fetch_page (url, keys (), Prefetch.name trigger, low, e.controller)
       (fun final status header text ->
         let a = { final; status; header; text } and waited = match e.waiters with [] -> false | _ -> true in
-        e.at <- Navigation_web.now ();
-        e.answer <- Some a;
-        settle e.answer;
-        if e.warm && not waited then warm a)
+        if status = 204 then begin
+          drop e;
+          Option.iter
+            (fun l ->
+              let t = limits () in
+              if Web.table_size t >= 200 then Web.table_clear t;
+              Web.table_set t page l)
+            (Option.bind (header "yuka-prefetch") Prefetch.of_name);
+          settle (Some a)
+        end
+        else begin
+          e.at <- Navigation_web.now ();
+          e.answer <- Some a;
+          settle e.answer;
+          if e.warm && not waited then warm a
+        end)
       (fun () ->
         drop e;
         settle None)
@@ -261,31 +274,35 @@ let load ~dir ~push ~restore url =
     in
     let key = page_key url in
     take key;
+    let fetch () =
+      let controller = Navigation_web.new_controller () in
+      let asked = !era in
+      pending := Some controller;
+      Navigation_web.fetch_page (url, keys (), "", false, controller)
+        (fun final status header text ->
+          pending := None;
+          let a = { final; status; header; text } in
+          if max_age header > 0 && asked = !era then begin
+            add { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false; warm = false };
+            pump ()
+          end;
+          apply (Some a))
+        (fun () ->
+          pending := None;
+          assign url)
+    in
     match lookup key with
     | Some e -> (
-        let use a =
-          (match a with Some a when max_age a.header = 0 -> drop e | _ -> ());
-          apply a
+        let use = function
+          | Some a when e.prefetched && a.status = 204 -> if !nav = gen then fetch ()
+          | a ->
+              (match a with Some a when max_age a.header = 0 -> drop e | _ -> ());
+              apply a
         in
         match e.answer with
         | Some _ -> use e.answer
         | None -> e.waiters <- use :: e.waiters)
-    | None ->
-        let controller = Navigation_web.new_controller () in
-        let asked = !era in
-        pending := Some controller;
-        Navigation_web.fetch_page (url, keys (), false, false, controller)
-          (fun final status header text ->
-            pending := None;
-            let a = { final; status; header; text } in
-            if max_age header > 0 && asked = !era then begin
-              add { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false; warm = false };
-              pump ()
-            end;
-            apply (Some a))
-          (fun () ->
-            pending := None;
-            assign url)
+    | None -> fetch ()
   end
 
 let navigate url =
@@ -315,13 +332,8 @@ let watch () =
   unwatch := ignore;
   queued := [];
   match !prefetching with
-  | `Off -> ()
-  | mode ->
-    unwatch :=
-      Navigation_web.observe
-        (Web.query_all (Web.document ())
-           (match mode with `Visible -> "a[href]" | _ -> "a[data-yuka-prefetch=visible]"))
-        seen
+  | `Visible -> unwatch := Navigation_web.observe (Web.query_all (Web.document ()) "a[href]") seen
+  | `Off | `Hover -> ()
 
 let clear () =
   incr era;
@@ -351,10 +363,14 @@ let handle e =
   | "touchstart" -> on_touch e
   | _ -> on_out e
 
-let boot (prefetch, transitions, islands) =
+let boot (transitions, islands) =
   cancel_pending ();
   started := true;
-  prefetching := prefetch;
+  Web.table_clear (limits ());
+  (prefetching :=
+     match Web.query_all (Web.document ()) "meta[name=yuka-prefetch]" with
+     | [| m |] -> Option.value (Option.bind (Web.get_attribute m "content") Prefetch.of_name) ~default:Prefetch.default
+     | _ -> Prefetch.default);
   transitions_on := transitions;
   (Platform.acted :=
      fun () ->

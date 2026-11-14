@@ -93,7 +93,7 @@ let streaming () =
 
 let navigation () =
   let _, response, html = call ~headers:[ ("Yuka-Navigate", "1") ] "/issue/YUK-1" in
-  Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate") (header response "vary");
+  Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate, Yuka-Prefetch") (header response "vary");
   has html "Please add a test with an empty filter result.";
   lacks html "skeleton";
   lacks html "__yukaFill"

@@ -47,9 +47,9 @@ page.on("response", (r) => {
   responses.push(r);
   if (r.status() >= 400 && r.status() !== expectedFailures) failedRequests.push(`${r.status()} ${r.url()}`);
 });
-const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch: boolean }[] = [];
+const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch?: string }[] = [];
 page.on("request", (r) =>
-  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"], prefetch: r.headers()["yuka-prefetch"] === "1" }),
+  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"], prefetch: r.headers()["yuka-prefetch"] }),
 );
 const chunkRe = /\/(issue_props|related|comments)(-[^/]*)?\.js$/;
 const chunkRequests = (from: number) =>
@@ -496,7 +496,7 @@ await step("3f. prefetch and the navigation cache", async () => {
   await link("YUK-5").hover();
   await page.waitForTimeout(300);
   const pre = requestsTo(from, "/issue/YUK-5");
-  check("3f.1 hover sends one prefetch", pre.length === 1 && pre[0].prefetch && pre[0].navigate, JSON.stringify(pre));
+  check("3f.1 hover sends one prefetch that names its trigger", pre.length === 1 && pre[0].prefetch === "hover" && pre[0].navigate, JSON.stringify(pre));
   await page.evaluate(() => {
     const w = window as any;
     w.__vt = [];
@@ -549,6 +549,11 @@ await step("3f. prefetch and the navigation cache", async () => {
   failedRequests.splice(failedBefore, failedRequests.length - failedBefore, ...failedRequests.slice(failedBefore).filter((f) => !dropped(f)));
   check("3f.6 emptying the cache aborts at most the one prefetch in flight", aborted <= 1, String(aborted));
   check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.slice(posts).filter((p) => p.url.endsWith("/update_issue")).length === 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
+  const refused = await page.evaluate(async () => {
+    const r = await fetch("/issue/YUK-5", { headers: { "Yuka-Navigate": "-", "Yuka-Prefetch": "visible" }, cache: "no-store" });
+    return [r.status, r.headers.get("yuka-prefetch"), await r.text(), document.querySelector("meta[name=yuka-prefetch]") === null];
+  });
+  check("3f.7 a visible prefetch of a Hover route gets 204 with the level, and the demo page prints no level", JSON.stringify(refused) === '[204,"hover","",true]', JSON.stringify(refused));
   await page.goto(base + "/", { waitUntil: "networkidle" });
 });
 

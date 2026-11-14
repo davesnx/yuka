@@ -11,7 +11,7 @@ let history_push_key : string -> string -> unit = fun _ _ -> browser_only ()
 let new_controller : unit -> controller = fun _ -> browser_only ()
 let abort : controller -> unit = fun _ -> browser_only ()
 let fetch_page :
-    string * string * bool * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
  fun _ _ _ -> browser_only ()
 let hash_of : string -> string = fun _ -> browser_only ()
 let no_hash : string -> string = fun _ -> browser_only ()

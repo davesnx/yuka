@@ -455,7 +455,7 @@ An unknown argument
   > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~layout:Layouts.a ]
   > EOF
   File "Routes.ml", line 1, characters 62-71:
-  Error: Router.route has no argument ~layout; its labelled arguments are ~path, ~page, ~loader, ~guard, ~search, ~headers, ~cache, ~prerender
+  Error: Router.route has no argument ~layout; its labelled arguments are ~path, ~page, ~loader, ~guard, ~search, ~prefetch, ~headers, ~cache, ~prerender
   [1]
 
 A missing argument
@@ -838,4 +838,43 @@ No named node
   > EOF
   File "Routes.ml", line 1:
   Error: the route tree has no named node
+  [1]
+
+~prefetch takes `Off, `Hover or `Visible
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Eager ]
+  > EOF
+  File "Routes.ml", line 1, characters 64-70:
+  Error: ~prefetch must be `Off, `Hover or `Visible
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make ~prefetch:true [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 22-26:
+  Error: ~prefetch must be `Off, `Hover or `Visible
+  [1]
+
+~prefetch is for pages: an endpoint, an action and a redirect have none
+
+  $ gen <<'EOF'
+  > Router.make [ Router.endpoint A ~path:"/a" ~method_:`GET ~handler:Handlers.a ~prefetch:`Off ]
+  > EOF
+  File "Routes.ml", line 1, characters 87-91:
+  Error: Router.endpoint has no argument ~prefetch; its labelled arguments are ~path, ~method_, ~handler, ~guard, ~cross_origin, ~headers, ~cache, ~prerender
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.action A ~path:"/a" ~method_:`POST ~handler:Handlers.a ~prefetch:`Off ]
+  > EOF
+  File "Routes.ml", line 1, characters 86-90:
+  Error: Router.action has no argument ~prefetch; its labelled arguments are ~path, ~method_, ~handler, ~guard, ~headers, ~cache, ~prerender
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a; Router.redirect ~path:"/b" ~to_:(Permanent "/a") ~prefetch:`Off ]
+  > EOF
+  File "Routes.ml", line 1, characters 114-118:
+  Error: Router.redirect has no argument ~prefetch; its labelled arguments are ~path, ~to_
   [1]

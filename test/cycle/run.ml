@@ -541,7 +541,7 @@ let head_and_rules =
         let r = get "/plain" in
         check_status r 200;
         check_header r "content-type" [ "text/html; charset=utf-8" ];
-        check_header r "vary" [ "Yuka-Navigate" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
         check_header r "cache-control" [ "no-store" ];
         check_header r "x-frame-options" [ "DENY" ] );
     ( "header inheritance and override by name",
@@ -565,9 +565,9 @@ let head_and_rules =
     ( "vary values are joined",
       fun () ->
         let r = get "/varied" in
-        check_header r "vary" [ "Cookie, Yuka-Navigate" ];
+        check_header r "vary" [ "Cookie, Yuka-Navigate, Yuka-Prefetch" ];
         let r = get "/plain" in
-        check_header r "vary" [ "Yuka-Navigate" ] );
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
     ( "an Action is always no-store",
       fun () ->
         let r = get ~meth:`DELETE ~headers:[ ("sec-fetch-site", "same-origin") ] "/feed.xml" in
@@ -600,10 +600,10 @@ let guards =
         check_header r "cache-control" [ "no-store" ];
         check_header r "x-frame-options" [ "DENY" ];
         check_events [ "outer" ] );
-    ( "a prefetch gets the same answer as a navigation",
+    ( "a prefetch allowed by the route gets the same answer as a navigation",
       fun () ->
         let plain = get ~headers:[ ("yuka-navigate", "-") ] "/team/a/1" in
-        let pre = get ~headers:[ ("yuka-navigate", "-"); ("yuka-prefetch", "1") ] "/team/a/1" in
+        let pre = get ~headers:[ ("yuka-navigate", "-"); ("yuka-prefetch", "hover") ] "/team/a/1" in
         check_status pre plain.status;
         Alcotest.(check string) "same body" plain.body pre.body );
     ( "a stop Redirect stays on the site and needs a clean location",
@@ -1150,7 +1150,7 @@ let navigation =
         check_header r "yuka-build" [ build ];
         check_header r "yuka-title" [ "Plain" ];
         check_header r "content-type" [ "text/html; charset=utf-8" ];
-        check_header r "vary" [ "Yuka-Navigate" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
         check_header r "x-frame-options" [ "DENY" ];
         Alcotest.(check string) "body" "<p>plain</p>" r.body );
     ( "the deepest shared layout is the outlet",
@@ -1533,6 +1533,79 @@ let dev =
             check_true "no script in a navigation answer" (not (contains full.body "EventSource"))) );
   ]
 
+let prefetch =
+  let nav ?(trigger = []) target = get ~headers:([ ("yuka-navigate", "-") ] @ trigger) target in
+  let trigger v = [ ("yuka-prefetch", v) ] in
+  let refused r level =
+    check_status r 204;
+    check_header r "yuka-prefetch" [ level ];
+    Alcotest.(check string) "no body" "" r.body;
+    check_header r "cache-control" [ "no-store" ];
+    check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+    check_events []
+  in
+  let highest pages =
+    let app =
+      Server.Generated.app ~build:"b" ~headers:[] ~prerender:[]
+        ~pages:(List.map (fun prefetch -> Server.Generated.rules ~headers:[] ?prefetch ~prerender:false ()) pages)
+        ~find:Cycle_shared.Routes.find ~resolve:Cycle_server.Yuka_routes.resolve
+        ~missing:{ layers = []; not_found = Server.Generated.default_not_found; error = Server.Generated.default_error }
+    in
+    let page = Cycle.handler config app (request "/plain") in
+    match Async.status page with Async.Done r -> r.body | _ -> Alcotest.fail "no page"
+  in
+  [
+    ( "a visible trigger on a Hover route: 204 with the level, before guards and loaders",
+      fun () -> refused (nav ~trigger:(trigger "visible") "/team/a/1") "hover" );
+    ( "a hover trigger on a Hover route is answered",
+      fun () ->
+        let r = nav ~trigger:(trigger "hover") "/team/a/1" in
+        check_status r 200;
+        check_events [ "outer"; "inner"; "squad start"; "profile start" ] );
+    ( "any trigger on an Off route: 204 off",
+      fun () ->
+        refused (nav ~trigger:(trigger "hover") "/team/a/form") "off";
+        refused (nav ~trigger:(trigger "visible") "/team/a/form") "off" );
+    ( "no Yuka-Prefetch is never refused",
+      fun () ->
+        check_status (nav "/team/a/form") 200;
+        check_status (get "/team/a/form") 200 );
+    ( "an unknown trigger counts as the most eager",
+      fun () ->
+        List.iter (fun v -> refused (nav ~trigger:(trigger v) "/team/a/1") "hover") [ "1"; ""; "off"; "Hover"; "idle" ];
+        check_status (nav ~trigger:(trigger "1") "/plain-public") 200;
+        check_status (nav ~trigger:(trigger "visible") "/plain-public") 200 );
+    ( "an endpoint, a redirect and a 404 are answered as today",
+      fun () ->
+        check_status (nav ~trigger:(trigger "visible") "/team/a/json") 200;
+        check_status (nav ~trigger:(trigger "visible") "/old") 308;
+        check_status (nav ~trigger:(trigger "visible") "/nowhere") 404 );
+    ( "a page answer varies on Yuka-Prefetch",
+      fun () ->
+        check_header (nav ~trigger:(trigger "hover") "/team/a/1") "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+        check_header (get "/plain") "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
+    ( "a prerendered file: a refused trigger gets 204, an allowed one the file",
+      fun () ->
+        let prerendered = config_with ~assets:modules ~prerendered:"pre" () in
+        let r = get ~config:prerendered ~headers:(trigger "visible") "/plain" in
+        check_status r 204;
+        Alcotest.(check (list string)) "no file" [] !file_calls;
+        let r = get ~config:prerendered ~headers:(trigger "hover") "/plain" in
+        Alcotest.(check string) "the file" "prerendered plain" r.body;
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
+    ( "the page prints the highest level of the tree",
+      fun () ->
+        check_true "visible" (contains (get "/plain").body {|<meta name="yuka-prefetch" content="visible">|});
+        check_true "in a navigation document"
+          (contains (get ~headers:[ ("Yuka-Navigate", "-") ] "/plain").body {|<meta name="yuka-prefetch" content="visible">|});
+        check_true "off" (contains (highest [ Some `Off; Some `Off ]) {|<meta name="yuka-prefetch" content="off">|});
+        check_true "no page route: off" (contains (highest []) {|<meta name="yuka-prefetch" content="off">|});
+        List.iter
+          (fun pages -> check_true "hover is not printed" (not (contains (highest pages) "yuka-prefetch")))
+          [ [ Some `Off; None ]; [ Some `Hover; Some `Off ] ];
+        check_true "visible wins" (contains (highest [ Some `Off; Some `Visible; None ]) {|content="visible"|}) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -1550,4 +1623,5 @@ let () =
       ("render", cases render);
       ("navigation", cases navigation);
       ("forms", cases forms);
+      ("prefetch", cases prefetch);
     ]

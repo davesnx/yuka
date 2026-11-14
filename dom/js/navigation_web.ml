@@ -34,13 +34,13 @@ let abort : controller -> unit =
     "function (c) { c.abort() }"]
 
 let fetch_page :
-    string * string * bool * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
   [%mel.raw
     {|function (a, ok, fail) {
   const url = a[0], keys = a[1], prefetch = a[2], low = a[3], controller = a[4];
   const signal = controller.signal;
   const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
-  if (prefetch) { init.headers["Yuka-Prefetch"] = "1"; init.cache = "no-store"; }
+  if (prefetch) { init.headers["Yuka-Prefetch"] = prefetch; init.cache = "no-store"; }
   if (low) init.priority = "low";
   let request;
   try {

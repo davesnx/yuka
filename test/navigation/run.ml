@@ -907,6 +907,7 @@ let prefetch_cache : int -> string =
 
 let wait ms f = set_timeout (fun () -> try f () with e -> !fail_hook e) ms
 let links = page {|<a id="l" href="/two">two</a><a id="m" href="/three">three</a>|}
+let level l = {|<meta name="yuka-prefetch" content="|} ^ l ^ {|">|}
 let cached text max_age = (text, [| ("cache-control", "private, max-age=" ^ ints max_age) |])
 
 let hover_prefetch finish =
@@ -917,7 +918,7 @@ let hover_prefetch finish =
       check "no fetch before 50 ms" "0" (ints (calls ()));
       wait 60 (fun () ->
           check "one prefetch" "1" (ints (calls ()));
-          check "prefetch header" "1" (prefetch_header 0);
+          check "prefetch header" "hover" (prefetch_header 0);
           check "a prefetch skips the HTTP cache" "no-store" (prefetch_cache 0);
           check "outlet keys" "-" (call_header 0);
           check "click is intercepted" "true" (bools (click "#l" ""));
@@ -959,8 +960,8 @@ let not_prefetched finish =
   plain_start ();
   fire "#l" "pointerdown";
   check "save data: no prefetch" "0" (ints (calls ()));
-  setup links;
-  render ~islands:(runtime_registry []) ~prefetch:`Off ();
+  setup (level "off" ^ links);
+  plain_start ();
   fire "#l" "pointerdown";
   check "prefetch off: no prefetch" "0" (ints (calls ()));
   check "prefetch off: click still navigates" "true" (bools (click "#l" ""));
@@ -976,25 +977,27 @@ let visible finish =
   setup (page {|<a id="v" href="/two" data-yuka-prefetch="visible">v</a><a id="h" href="/three">h</a>|});
   stub_observer ();
   plain_start ();
-  check "only marked links observed" "v" (observed ());
-  intersect "v";
-  check "a visible link prefetches" "1" (ints (calls ()));
-  intersect "v";
-  check "a link in flight is not prefetched again" "1" (ints (calls ()));
-  setup (page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
+  check "below Visible no link is observed, data-yuka-prefetch=visible included" "" (observed ());
+  check "and nothing is fetched" "0" (ints (calls ()));
+  setup (level "visible" ^ page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
   stub_observer ();
-  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  plain_start ();
   check "visible mode observes every link" "v,o" (observed ());
   intersect "o";
   check "off still wins" "0" (ints (calls ()));
+  intersect "v";
+  check "a visible link prefetches" "1" (ints (calls ()));
+  check "a visible prefetch names its trigger" "visible" (prefetch_header 0);
+  intersect "v";
+  check "a link in flight is not prefetched again" "1" (ints (calls ()));
   finish ()
 
 let numbered n = List.init n (fun i -> "p" ^ ints i)
 
 let visible_page ids =
-  setup (page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  setup (level "visible" ^ page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
   stub_observer ();
-  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  plain_start ();
   List.iter intersect ids
 
 let urls from = String.concat "," (List.init (calls () - from) (fun i -> call_url (from + i)))
@@ -1031,9 +1034,9 @@ let visible_no_eviction finish =
   finish ()
 
 let intent_skips_limit finish =
-  setup (page ({|<a id="x" href="/x">x</a>|} ^ String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) (numbered 4))));
+  setup (level "visible" ^ page ({|<a id="x" href="/x">x</a>|} ^ String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) (numbered 4))));
   stub_observer ();
-  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  plain_start ();
   List.iter intersect (numbered 4);
   fire "#x" "pointerdown";
   check "an intent prefetch starts with 4 open" "http://localhost/x" (urls 4);
@@ -1089,6 +1092,153 @@ let action_rewatches finish =
       tick (fun () ->
           check "2 wait, the newest starts next" "http://localhost/p5" (urls 9);
           finish ()))
+
+let page_level finish =
+  List.iter
+    (fun (meta, expected) ->
+      setup (meta ^ page {|<a id="v" href="/two">v</a><a id="h" href="/three">h</a>|});
+      stub_observer ();
+      plain_start ();
+      check (meta ^ ": observed") expected (observed ()))
+    [ ("", ""); (level "hover", ""); (level "eager", ""); (level "visible", "v,h"); (level "off", "") ];
+  finish ()
+
+let refusal level = [| ("yuka-prefetch", level) |]
+
+let refused_then_click finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_headers 0 "" 204 (refusal "off");
+  tick (fun () ->
+      check "a refusal is not shown and loads nothing" "/start?x=1|" (location_ () ^ "|" ^ log_read ());
+      ignore (click "#l" "");
+      check "the click fetches" "2" (ints (calls ()));
+      check "as a navigation" "undefined" (prefetch_header 1);
+      resolve_call 1 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          check "shown" "/two" (location_ ());
+          check "body" (page "<p>two</p>") (body_html ());
+          check "a client navigation, no full load" "scroll:0" (log_read ());
+          finish ()))
+
+let refused_while_waiting finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  check "the click waits for the prefetch" "1" (ints (calls ()));
+  resolve_headers 0 "" 204 (refusal "off");
+  tick (fun () ->
+      check "then fetches as a navigation" "2|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+      resolve_call 1 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          check "shown" "/two" (location_ ());
+          check "a client navigation, no full load" "scroll:0" (log_read ());
+          finish ()))
+
+let refused_off finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_headers 0 "" 204 (refusal "off");
+  tick (fun () ->
+      fire "#l" "pointerdown";
+      fire "#l" "focusin";
+      wait 60 (fun () ->
+          check "no trigger fetches an off URL again" "1" (ints (calls ()));
+          fire "#m" "pointerdown";
+          check "another URL still prefetches" "http://localhost/three" (urls 1);
+          let _ = Action.call act "x" in
+          resolve_with 2 {|{"ok":"y"}|} "" 200 "application/json";
+          tick (fun () ->
+              fire "#l" "pointerdown";
+              check "also after an action" "3" (ints (calls ()));
+              finish ())))
+
+let refused_visible finish =
+  setup (level "visible" ^ links);
+  stub_observer ();
+  plain_start ();
+  intersect "l";
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      intersect "l";
+      check "no visible prefetch above the level" "1" (ints (calls ()));
+      fire "#l" "pointerdown";
+      check "a press at the level fetches" "2|hover" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+      finish ())
+
+let refused_pumps finish =
+  visible_page (numbered 6);
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      check "a refusal starts the newest waiting link" "http://localhost/p5" (urls 4);
+      finish ())
+
+let refused_kept_after_action finish =
+  setup (level "visible" ^ links);
+  stub_observer ();
+  plain_start ();
+  intersect "l";
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      let _ = Action.call act "x" in
+      resolve_with 1 {|{"ok":"y"}|} "" 200 "application/json";
+      tick (fun () ->
+          intersect "l";
+          check "after an action the refused link is not fetched again" "2" (ints (calls ()));
+          finish ()))
+
+let refused_kept_across_outlets finish =
+  setup (level "visible" ^ links);
+  stub_observer ();
+  plain_start ();
+  intersect "l";
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      ignore (click "#m" "");
+      resolve_call 1 (doc "Three" {|<yuka-outlet data-k="L0"><a id="l" href="/two">two</a></yuka-outlet>|}) "";
+      tick (fun () ->
+          intersect "l";
+          check "the refused link is not fetched again" "2" (ints (calls ()));
+          fire "#l" "pointerdown";
+          check "a press still fetches, with the new outlet keys" "3|L0" (ints (calls ()) ^ "|" ^ call_header 2);
+          finish ()))
+
+let refused_bound finish =
+  let ids = List.init 201 (fun i -> "q" ^ ints i) in
+  setup (page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  plain_start ();
+  let rec refuse i = function
+    | [] ->
+        fire "#q0" "pointerdown";
+        check "after 200 remembered levels the table starts again" "http://localhost/q0" (urls 201);
+        finish ()
+    | id :: rest ->
+        fire ("#" ^ id) "pointerdown";
+        resolve_headers i "" 204 (refusal "off");
+        tick (fun () -> refuse (i + 1) rest)
+  in
+  refuse 0 ids
+
+let empty_204 finish =
+  setup links;
+  plain_start ();
+  fire "#m" "pointerdown";
+  resolve_headers 0 "" 204 [||];
+  tick (fun () ->
+      fire "#l" "pointerdown";
+      ignore (click "#l" "");
+      resolve_headers 1 "" 204 [||];
+      tick (fun () ->
+          check "a 204 with no level: the waiting click fetches as a navigation" "3|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 2);
+          resolve_call 2 (doc "Two" (page "<p>two</p>")) "";
+          tick (fun () ->
+              check "shown, no full load" "/two|scroll:0" (location_ () ^ "|" ^ log_read ());
+              Browser.navigate "/three";
+              check "a 204 with no level is not kept" "4|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 3);
+              finish ())))
 
 let warmed : unit -> string =
   [%mel.raw
@@ -1200,9 +1350,9 @@ let press_then_click finish =
       finish ())
 
 let visible_warms_on_intent finish =
-  setup links;
+  setup (level "visible" ^ links);
   stub_observer ();
-  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  plain_start ();
   intersect "l";
   intersect "m";
   resolve_call 0 (assets [ preload "/a.js" ]) "";
@@ -1692,6 +1842,13 @@ let router_loaded : unit -> bool =
   [%mel.raw
     {|function () { return Object.keys(require.cache).some(function (k) { return k.endsWith("/yuka/navigation.js") }) }|}]
 
+let marked_link_loads_nothing finish =
+  setup (page {|<a id="l" href="/two" data-yuka-prefetch="visible">x</a>|});
+  plain_start ();
+  wait 30 (fun () ->
+      check "a data-yuka-prefetch=visible link does not load the navigation code at start" "false" (bools (router_loaded ()));
+      finish ())
+
 let rec until name cond f n =
   tick (fun () -> if cond () then f () else if n = 0 then check name "true" "false" else until name cond f (n - 1))
 
@@ -1820,7 +1977,7 @@ let hover_loads_and_prefetches finish =
     (fun () ->
       wait 80 (fun () ->
           check "the hover prefetches once the code loads" "1" (ints (calls ()));
-          check "prefetch header" "1" (prefetch_header 0);
+          check "prefetch header" "hover" (prefetch_header 0);
           finish ()))
     100
 
@@ -1877,8 +2034,8 @@ let leaving_drops_waiting finish =
       finish ())
 
 let stalled_import finish =
-  setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
-  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  setup (level "visible" ^ page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
+  plain_start ();
   wait 1000 (fun () ->
       check "the click is prevented while the code loads" "true" (bools (click "#l" ""));
       check "navigating while the code loads" "true" (navigating ());
@@ -1990,6 +2147,16 @@ let all =
     ("leaving before 50 ms sends nothing; focus prefetches", hover_out);
     ("links and settings that do not prefetch", not_prefetched);
     ("visible links prefetch", visible);
+    ("the page gives the level", page_level);
+    ("a refused prefetch is not kept; the click fetches", refused_then_click);
+    ("a click that waits for a refused prefetch fetches", refused_while_waiting);
+    ("after a refusal with off no trigger fetches, also after an action", refused_off);
+    ("after a refused visible prefetch a press fetches", refused_visible);
+    ("a refusal settles the queue", refused_pumps);
+    ("a refused level is kept after an action", refused_kept_after_action);
+    ("a refused level is kept when the outlet keys change", refused_kept_across_outlets);
+    ("at most 200 remembered levels", refused_bound);
+    ("a 204 with no level is not kept; a waiting click fetches", empty_204);
     ("visible: 4 open, the newest waiting link starts when one settles", visible_limit);
     ("visible: a waiting link that leaves the view is not fetched", visible_leaves);
     ("visible: waiting links are not in the cache", visible_no_eviction);
@@ -2074,7 +2241,9 @@ let () =
   run
     (match argument () with
     | "back" -> [ ("back and forward before the navigation code loads", cold_back_forward) ]
-    | "hover" -> [ ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
+    | "hover" ->
+        [ ("a data-yuka-prefetch=visible link does not load the navigation code", marked_link_loads_nothing);
+          ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
     | "replay" -> [ ("an error while the waiting events run", replay_error) ]
     | "stall" ->
         block_router "stall";

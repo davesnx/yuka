@@ -167,6 +167,8 @@ Rules, on any node except a redirect:
   file (see `Yuka.Server.Prerender`).
 - `~cross_origin:true`, on an endpoint only: skip the origin check that a
   method other than `GET`, `HEAD` and `OPTIONS` gets. Use it for webhooks.
+- `~prefetch`, on make, group and route only: when the browser loads the
+  page before the click (see "Prefetch").
 
 ## Code before the tree
 
@@ -284,6 +286,49 @@ let[@client] make ~(tag : string) () =
       Yuka.Browser.replace_url (Routes.blog ?tag:(if next = "" then None else Some next) ()));
   ...
 ```
+
+## Prefetch
+
+A client navigation can load a page before the click: a prefetch.
+`~prefetch` on `Router.make`, a group or a route sets when it starts:
+
+| Value | The request starts |
+|---|---|
+| `` `Off `` | only at the click |
+| `` `Hover `` (default) | 50 ms after the pointer or the focus is on the link, and at once on a press |
+| `` `Visible `` | also when the link comes within 200 px of the view |
+
+Each level includes the ones before it. The nearest `~prefetch` wins, as
+for `~cache`. An endpoint, an action and a redirect take no `~prefetch`;
+another value is an error.
+
+```ocaml
+Router.make ~not_found
+  [
+    Router.route Home ~path:"/" ~page:home;
+    Router.group ~path:"/docs" ~prefetch:`Visible [ Router.route Doc ~path:"/:slug<string>" ~page:doc ];
+    Router.route Export ~path:"/export" ~page:export ~prefetch:`Off;
+  ]
+```
+
+The browser does not have the route tree. Each page carries the highest
+level of the tree (`<meta name="yuka-prefetch" content="visible">`, no
+meta for `` `Hover ``), and the browser runs the triggers up to that
+level. A prefetch request has the header `Yuka-Prefetch: hover` (hover,
+focus or press) or `Yuka-Prefetch: visible`. When the trigger is above the
+level of the route, the server answers `204` with `Yuka-Prefetch: LEVEL`
+(`off` or `hover`) before guards and loaders run. The browser keeps no
+answer for that URL, and for the life of the page it sends no prefetch
+above that level for it (it keeps at most 200 URLs). A click always loads
+the page. So an app that mixes levels pays one small refused request for
+each URL of a route with a lower level, once per page load. The server counts a value it does not know as
+`visible`. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch`.
+
+On a link, `data-yuka-prefetch="off"` stops its prefetch.
+`navigator.connection.saveData` stops all prefetch.
+
+A prefetch runs the guards and loaders of the page for a link that the
+user may never click: they must have no side effects.
 
 ## Limitations
 

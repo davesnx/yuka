@@ -10,7 +10,7 @@ val history_push_key : string -> string -> unit
 val new_controller : unit -> controller
 val abort : controller -> unit
 val fetch_page :
-  string * string * bool * bool * controller ->
+  string * string * string * bool * controller ->
   (string -> int -> (string -> string option) -> string -> unit) ->
   (unit -> unit) ->
   unit
