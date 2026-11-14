@@ -45,6 +45,7 @@ let listener = ref None
 let queue = ref []
 let late = ref []
 let depth = ref 0
+let writes = ref 0
 let never () = false
 
 let make eff fn =
@@ -182,6 +183,7 @@ and settle left n =
   if n.state <> 0 && n.state <> 3 then
     try
       if n.state = 1 then begin
+        let before = !writes in
         let rec check = function
           | Some l when n.state = 1 ->
               (try settle 100 l.src with _ -> n.state <- 2);
@@ -189,13 +191,18 @@ and settle left n =
           | _ -> ()
         in
         check n.head;
-        if n.state = 1 then n.state <- 0
+        if n.state = 1 && !writes = before then n.state <- 0
       end;
-      if n.state = 2 || n.state < 0 then begin
-        run n;
-        if n.eff = None && n.state > 0 then
-          if left = 0 then raise loop else settle (left - 1) n
-      end
+      let again =
+        n.state = 1
+        ||
+        if n.state = 2 || n.state < 0 then begin
+          run n;
+          n.eff = None && n.state > 0
+        end
+        else false
+      in
+      if again then if left = 0 then raise loop else settle (left - 1) n
     with e ->
       n.state <- -1;
       raise e
@@ -299,6 +306,7 @@ let flush_all () =
   g ()
 
 let changed n =
+  incr writes;
   mark n 2;
   if !depth = 0 then flush_all ()
 

@@ -693,6 +693,24 @@ let cleanup_raises_on_rerun () =
   check "a raising inner cleanup stops the re-run and its sibling" "o0 i0/0 o1 i1/0 o3 i3/1"
     (read ())
 
+let memos_write_each_other () =
+  let x = State.make 0 and y = State.make 0 and z = State.make 0 in
+  let m1 =
+    State.memo (fun () ->
+        if State.get z > 0 then State.set x (State.get y + 1);
+        0)
+  in
+  let m2 =
+    State.memo (fun () ->
+        if State.get z > 0 then State.set y (State.get x + 1);
+        0)
+  in
+  Effect.before (fun () ->
+      ignore (State.get m1);
+      ignore (State.get m2));
+  check "two memos that keep writing the State the other reads reach the limit" "true"
+    (bools (limit_message (raises (fun () -> State.set z 1))))
+
 let many_after_writers () =
   let s = State.make 0 and t = State.make 0 in
   let seen = ref 0 in
@@ -944,6 +962,7 @@ let all =
     ("edge: memo that keeps writing its source", memo_self_write_reaches_the_limit);
     ("edge: memo that clamps its source", memo_self_write_settles);
     ("edge: many after effects write one State", many_after_writers);
+    ("edge: two memos write the State the other reads", memos_write_each_other);
     ("edge: failed effect dropped at the limit", dropped_failed_effect_reacts);
     ("edge: raising cleanup at dispose", raising_cleanup_disposes_the_rest);
     ("edge: on_change with an equal that is never true", on_change_not_at_creation);

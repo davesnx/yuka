@@ -60,10 +60,14 @@ let computed ?equal compute =
   in
   let s = { value; equal; node } in
   Scheduler.set_level node;
+  let running = ref false in
   node.fn <-
     (fun () ->
+      let failed = !running in
+      running := true;
       let next = compute () in
-      differs equal s.value next
+      running := false;
+      (failed || differs equal s.value next)
       && begin
            s.value <- next;
            true
