@@ -58,7 +58,7 @@ let swap target final header text =
   match target with
   | Some el ->
       let title =
-        Option.map (fun t -> try Web.decode_uri t with _ -> t) (header "yuka-title")
+        Option.map (fun t -> match Web.decode_uri t with Some d -> d | None -> t) (header "yuka-title")
       in
       Client.stop_within el;
       Navigation_web.adopt_stylesheets ();

@@ -11,12 +11,14 @@ let switch () =
 
 let await async =
   match Yuka.Async.status async with
-  | Yuka.Async.Done v -> v
-  | Yuka.Async.Failed m -> failwith m
-  | Yuka.Async.Pending -> (
+  | Yuka.Async.Done v -> Ok v
+  | Yuka.Async.Failed m -> Error m
+  | Yuka.Async.Pending ->
       let p, r = Eio.Promise.create () in
       Yuka.Async.on_result async (Eio.Promise.resolve r);
-      match Eio.Promise.await p with Ok v -> v | Error m -> failwith m)
+      Eio.Promise.await p
+
+let await_exn async = match await async with Ok v -> v | Error m -> failwith m
 
 let async ~sw f =
   let a, ok, fail = Yuka.Async.make () in
@@ -117,7 +119,7 @@ module Base = struct
       | Yuka.Server.String text -> Tapak.Response.of_string ~headers ~status text
       | Yuka.Server.Stream f ->
           Tapak.Response.stream ~headers ~status (fun write flush ->
-              await
+              await_exn
                 (f (fun text ->
                      guard (fun () ->
                          write text;
@@ -157,7 +159,7 @@ module Base = struct
                        ~finally:(fun () -> ignore (Eio.Promise.try_resolve closing ()))
                        (fun () -> try Cows.close ~code conn with Cows.Connection_closed -> ())))
            in
-           Eio.Fiber.first (fun () -> Eio.Promise.await closed) (fun () -> await (run connection)))
+           Eio.Fiber.first (fun () -> Eio.Promise.await closed) (fun () -> await_exn (run connection)))
          request)
 
   let sleep seconds =
@@ -221,7 +223,7 @@ let handler ~sw ~fs ?node config app =
     let close () = ignore (Eio.Promise.try_resolve close ()) in
     let bound run = Eio.Fiber.with_binding current state run in
     let later run = Fun.protect ~finally:close (fun () -> bound run) in
-    match bound (fun () -> await (Cycle.handler ?node config app request)) with
+    match bound (fun () -> await_exn (Cycle.handler ?node config app request)) with
     | exception e ->
         close ();
         raise e

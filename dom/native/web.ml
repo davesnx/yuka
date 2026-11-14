@@ -73,7 +73,29 @@ let console_log : string -> unit = fun _ -> browser_only ()
 let console_debug : string -> unit = fun _ -> browser_only ()
 let exn_to_string = Printexc.to_string
 let encode_uri : string -> string = fun _ -> browser_only ()
-let decode_uri : string -> string = fun _ -> browser_only ()
+let decode_uri s =
+  let n = String.length s and out = Buffer.create (String.length s) and run = Buffer.create 4 in
+  let hex i =
+    if i >= n then -1
+    else match s.[i] with '0' .. '9' as c -> Char.code c - 48 | 'a' .. 'f' as c -> Char.code c - 87 | 'A' .. 'F' as c -> Char.code c - 55 | _ -> -1
+  in
+  let rec go i =
+    if i < n && s.[i] = '%' then
+      let h = hex (i + 1) and l = hex (i + 2) in
+      h >= 0 && l >= 0
+      && begin
+           Buffer.add_char run (Char.chr ((h * 16) + l));
+           go (i + 3)
+         end
+    else
+      String.is_valid_utf_8 (Buffer.contents run)
+      && begin
+           Buffer.add_buffer out run;
+           Buffer.clear run;
+           i = n || (Buffer.add_char out s.[i]; go (i + 1))
+         end
+  in
+  if go 0 then Some (Buffer.contents out) else None
 let contains : node -> node -> bool = fun _ _ -> browser_only ()
 let fetch_post : string -> string -> (int -> string -> unit) -> (bool -> string -> unit) -> unit -> unit = fun _ _ _ _ _ -> browser_only ()
 let watch_added : (node array -> bool) -> unit -> unit = fun _ _ -> browser_only ()

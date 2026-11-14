@@ -63,7 +63,8 @@ let exn_to_string : exn -> string =
     }|}]
 
 external encode_uri : string -> string = "encodeURIComponent"
-external decode_uri : string -> string = "decodeURIComponent"
+let decode_uri : string -> string option =
+  [%mel.raw "function (s) { try { return decodeURIComponent(s) } catch (e) { return undefined } }"]
 
 let contains : node -> node -> bool = [%mel.raw "function (a, b) { return a.contains(b) }"]
 

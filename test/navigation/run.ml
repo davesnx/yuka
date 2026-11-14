@@ -309,6 +309,22 @@ let fragment_scroll finish =
       check "fragment in location" "/a#sec" (location_ ());
       finish ())
 
+let malformed_fragment finish =
+  setup (page {|<a id="a" href="/a#100%">a</a>|});
+  plain_start ();
+  ignore (click "#a" "");
+  resolve_call 0 (doc "A" (page {|<h2 id="100%">s</h2><a id="b" href="/b#%E0%A4%A">b</a>|})) "";
+  tick (fun () ->
+      check "scrolls to the undecoded fragment" "into:100%" (log_read ());
+      check "fragment in location" "/a#100%" (location_ ());
+      log_clear ();
+      ignore (click "#b" "");
+      resolve_call 1 (doc "B" (page {|<p id="b">b</p>|})) "";
+      tick (fun () ->
+          check "no element: scrolls to the top" "scroll:0" (log_read ());
+          check "page shown" (page {|<p id="b">b</p>|}) (body_html ());
+          finish ()))
+
 let superseded finish =
   setup (page {|<a id="a" href="/a">a</a><a id="b" href="/b">b</a>|});
   plain_start ();
@@ -1688,6 +1704,7 @@ let all =
     ("history and popstate", history_and_popstate);
     ("scroll top and restore", scrolling);
     ("scroll to fragment", fragment_scroll);
+    ("a fragment that does not decode", malformed_fragment);
     ("superseded navigation aborts", superseded);
     ("late response of an aborted request", superseded_late_response);
     ("fetch failure falls back", failure_falls_back);

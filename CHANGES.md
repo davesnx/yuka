@@ -97,6 +97,7 @@
 - `ppxlib` has the upper bound `< 0.40.0`, and `mlx` (`>= 0.12`, `< 0.13`) is a normal dependency (@davesnx)
 - The docs and examples name the server module that `yuka routes --server` writes `Yuka_routes` (file `yuka_routes.ml`), as `Yuka_islands` and `Yuka_css`; it was `Routes_server`. The name comes from the dune rule of the app, so an app that keeps `routes_server.ml` keeps working (@davesnx)
 - `Yuka.Browser.replace_url url` sets the URL of the current history entry (`history.replaceState`, keeping Yuka's entry key) and loads nothing, so an island can keep its state, such as a filter, in the query: a reload, back and forward load the new URL. A URL on another origin or a script URL does nothing (@davesnx)
+- Fix: a client navigation to a URL whose fragment is not valid percent-encoding, such as `#100%`, scrolls to the element with that fragment as its id, or to the top, and starts the islands of the new page; before, it threw `URIError` and the islands did not start (@davesnx)
 
 ### yuka-dream
 
@@ -107,11 +108,11 @@
 
 ### yuka-live-pg
 
-- New package `yuka-live-pg`: a `Server.Live.bus` over Postgres `LISTEN`/`NOTIFY` (postgresql-ocaml, waits on the socket with Lwt, reconnects and calls `on_restart`); `Server.Live.close_bus` stops its listener and closes its connections (@davesnx)
+- New package `yuka-live-pg`: a `Server.Live.bus` over Postgres `LISTEN`/`NOTIFY` (postgresql-ocaml, waits on the socket with Lwt, reconnects and calls `on_restart`; a `listen` that fails gives a failed `Async`, and the next `listen` connects again); `Server.Live.close_bus` stops its listener and closes its connections (@davesnx)
 
 ### yuka-tapak
 
-- New package `yuka-tapak` (experiment, not released): the request cycle on [tapak](https://github.com/syaiful6/tapak), in direct style on Eio, on one domain. `Yuka_tapak.handler ~sw ~fs` is a `Tapak.handler` and goes in the `~not_found` of a tapak router; `Yuka_tapak.sessions` is the middleware for the session and CSRF cookies (without it, the request has no session); `await` and `async` convert between `Yuka.Async.t` and fibers. No `prerender`. `tapak`, `sch` and `cows` are not in opam: `make pin` pins them (@davesnx)
+- New package `yuka-tapak` (experiment, not released): the request cycle on [tapak](https://github.com/syaiful6/tapak), in direct style on Eio, on one domain. `Yuka_tapak.handler ~sw ~fs` is a `Tapak.handler` and goes in the `~not_found` of a tapak router; `Yuka_tapak.sessions` is the middleware for the session and CSRF cookies (without it, the request has no session); `await` (an `Error` with the message for a failed `Async`), `await_exn` (a `Failure` in its place) and `async` convert between `Yuka.Async.t` and fibers. No `prerender`. `tapak`, `sch` and `cows` are not in opam: `make pin` pins them (@davesnx)
 
 ## 0.2 (YYYY-MM-DD)
 

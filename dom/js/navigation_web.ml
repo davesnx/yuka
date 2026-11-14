@@ -15,7 +15,9 @@ let scroll_to : float -> unit =
 let scroll_to_hash : string -> unit =
   [%mel.raw
     {|function (hash) {
-  const el = hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  let id = hash.slice(1);
+  try { id = decodeURIComponent(id) } catch (e) {}
+  const el = id ? document.getElementById(id) : null;
   if (el) el.scrollIntoView(); else window.scrollTo(0, 0);
 }|}]
 
