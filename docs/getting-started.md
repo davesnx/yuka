@@ -162,10 +162,16 @@ let read file = In_channel.with_open_bin file In_channel.input_all
 let () =
   let dir = "_build/default/client/out" in
   let assets =
-    Yuka.Server.modules ~dir ~entry:"client/main.js"
-      ~manifest:(read "_build/default/client/yuka_islands.json")
-      ~packages:(Array.to_list (Sys.readdir (Filename.concat dir "node_modules")))
-      ~digest:(Yuka_dream.tree_digest dir)
+    match
+      Yuka.Server.modules ~dir ~entry:"client/main.js"
+        ~manifest:(read "_build/default/client/yuka_islands.json")
+        ~packages:(Array.to_list (Sys.readdir (Filename.concat dir "node_modules")))
+        ~digest:(Yuka_dream.tree_digest dir)
+    with
+    | Ok assets -> assets
+    | Error message ->
+        prerr_endline message;
+        exit 1
   in
   let config =
     Yuka.Server.config ~assets ~css:Yuka_css.sheets
@@ -316,10 +322,16 @@ assets (build it before you bundle):
 
 ```ocaml
 let assets =
-  Yuka.Server.bundle ~dir:"_build/default/client/out/client"
-    ~entry:"bundle/main.js"
-    ~manifest:(read "_build/default/client/yuka_islands.json")
-    ~metafile:(read "_build/default/client/meta.json")
+  match
+    Yuka.Server.bundle ~dir:"_build/default/client/out/client"
+      ~entry:"bundle/main.js"
+      ~manifest:(read "_build/default/client/yuka_islands.json")
+      ~metafile:(read "_build/default/client/meta.json")
+  with
+  | Ok assets -> assets
+  | Error message ->
+      prerr_endline message;
+      exit 1
 ```
 
 ## Next

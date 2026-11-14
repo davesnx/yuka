@@ -1,7 +1,5 @@
 type sheet = { file : string; classes : (string * string) list; text : string }
 
-exception Error of string
-
 let hash text = String.sub (Digest.to_hex (Digest.string text)) 0 8
 
 let is_letter c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -209,27 +207,30 @@ let keywords =
 
 let value_name ~path name =
   if String.exists (fun c -> Char.code c >= 0x80) name then
-    raise
-      (Error
-         (Printf.sprintf "%s: the class %S has characters an OCaml name cannot have; rename it" path name));
-  let s = String.map (fun c -> if is_letter c || is_digit c || c = '_' then c else '_') name in
-  let s = if is_digit s.[0] then "_" ^ s else String.uncapitalize_ascii s in
-  if List.mem s keywords || s = "stylesheet" then s ^ "_" else s
+    Error (Printf.sprintf "%s: the class %S has characters an OCaml name cannot have; rename it" path name)
+  else
+    let s = String.map (fun c -> if is_letter c || is_digit c || c = '_' then c else '_') name in
+    let s = if is_digit s.[0] then "_" ^ s else String.uncapitalize_ascii s in
+    Ok (if List.mem s keywords || s = "stylesheet" then s ^ "_" else s)
 
 let sheet ~path text =
+  let ( let* ) = Result.bind in
   let h, names, rewritten = rewrite text in
   let base = Filename.remove_extension (Filename.basename path) in
-  let classes = List.map (fun name -> (value_name ~path name, scoped ~hash:h name)) names in
-  let rec check = function
-    | [] -> ()
-    | (v, _) :: rest ->
-        (match List.find_opt (fun (w, _) -> String.equal v w) rest with
-         | Some _ ->
-             raise
-               (Error
-                  (Printf.sprintf "%s: two classes have the OCaml name %s; rename one of them" path v))
-         | None -> ());
-        check rest
+  let rec classes = function
+    | [] -> Ok []
+    | name :: rest ->
+        let* v = value_name ~path name in
+        let* rest = classes rest in
+        Ok ((v, scoped ~hash:h name) :: rest)
   in
-  check classes;
-  { file = base ^ "-" ^ h ^ ".css"; classes; text = rewritten }
+  let rec check = function
+    | [] -> Ok ()
+    | (v, _) :: rest ->
+        if List.exists (fun (w, _) -> String.equal v w) rest then
+          Error (Printf.sprintf "%s: two classes have the OCaml name %s; rename one of them" path v)
+        else check rest
+  in
+  let* classes = classes names in
+  let* () = check classes in
+  Ok { file = base ^ "-" ^ h ^ ".css"; classes; text = rewritten }
