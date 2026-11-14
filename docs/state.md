@@ -226,6 +226,58 @@ effect is stopped before the outer effect runs again.
 `Yuka.owner body` runs `body` and returns a function that stops everything `body`
 created. Use it for effects that must live outside a component.
 
+## Context
+
+A context gives a value to every component below one place of the page,
+with no argument on the components between. Make the context one time, at
+the top of a module, and write its type:
+
+```ocaml
+let theme : Theme.t Yuka.State.read Yuka.Context.t = Yuka.Context.make ~name:"theme" ()
+```
+
+Give a value with the `<Yuka.Context.Provide>` tag:
+
+```ocaml
+let page () =
+  <Yuka.Context.Provide of_=theme value=dark>
+    <Layout> <Save /> </Layout>
+  </Yuka.Context.Provide>
+```
+
+Read it in a component below:
+
+```ocaml
+let save () =
+  let theme = Yuka.Context.get_exn theme in
+  <button class_=(Theme.button (Yuka.State.get theme))> "Save" </button>
+```
+
+`Yuka.Context.get` gives `None` when no component above gave a value.
+`Yuka.Context.get_exn` raises `Invalid_argument` with the name of the
+context. The nearest `Provide` above wins.
+
+The value is fixed. To give a value that changes, give a State, as above.
+A change then runs the holes that read the State, and no component runs
+again.
+
+Call `get` in the component body and keep the result. A timer and an
+`Async` callback run outside the page, so `get` gives `None` there.
+
+Without mlx, `Yuka.Context.provide theme dark (fun () -> children)` is the
+same as the tag. `Yuka.Context.provide_all [ Yuka.Context.bind a x;
+Yuka.Context.bind b y ] (fun () -> children)` gives several values in one
+call.
+
+The tag passes its children as a function, so the components inside it run
+after the value is given. A component that receives `children` as an
+argument gets them already built: if it calls `provide` around them, their
+holes read the value and their component bodies do not. Use the tag at
+the place where the children are written.
+
+An island reads only what a component inside the island gave. See
+[Islands](islands.md#limitations).
+
 ## On the server
 
 The server calls the component one time to print HTML.

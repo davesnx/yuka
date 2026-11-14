@@ -25,9 +25,10 @@ type spec = {
   writes : int option;
   acts : (int * act) list;
   cacts : cact list;
+  wrap : (int * int) list list;
 }
 
-and group_spec = { memos : expr list; effects : spec list; mode : int }
+and group_spec = { memos : expr list; effects : spec list; mode : int; g_wrap : (int * int) list list }
 and act = Kill of int | Make of group_spec
 and cact = C_raise | C_write of int * int | C_peek of int | C_make of group_spec
 type item = W of int * int | R of int | Nest of item list | Nest_raise of item list
@@ -64,6 +65,7 @@ type features = {
   c_raises : bool;
   c_writes : bool;
   catches : bool;
+  contexts : bool;
 }
 
 let static =
@@ -84,11 +86,12 @@ let static =
     c_raises = false;
     c_writes = false;
     catches = false;
+    contexts = false;
   }
 
-type rng = { mutable s : int }
+type rng = { mutable s : int; side : rng option }
 
-let rng seed = { s = ((seed * 7919) + 1) land 0x3FFFFFFF }
+let rng seed = { s = ((seed * 7919) + 1) land 0x3FFFFFFF; side = None }
 
 let next g =
   g.s <- ((g.s * 1103515245) + 12345) land 0x3FFFFFFF;
@@ -100,6 +103,12 @@ let chance g p = int g 100 < p
 let list n f =
   let rec go i acc = if i = 0 then List.rev acc else go (i - 1) (f () :: acc) in
   go n []
+
+let gen_wrap g f =
+  match g.side with
+  | Some c when f.contexts && chance c 60 ->
+      list (1 + int c 2) (fun () -> list (1 + int c 3) (fun () -> (int c 2, int c 10)))
+  | _ -> []
 
 let rec reads_of = function
   | Get j | Peek j -> [ j ]
@@ -214,7 +223,7 @@ let rec gen_spec ?mk g f pool ~depth ~writes =
         (acts, cacts)
     | _ -> ([], [])
   in
-  { kind; body; cleanup; kids; writes; acts; cacts }
+  { kind; body; cleanup; kids; writes; acts; cacts; wrap = gen_wrap g f }
 
 let range a b = Array.init (b - a) (fun i -> a + i)
 
@@ -238,7 +247,7 @@ let rec gen_group g f ~nsrc ~nbase ~acts =
         else gen_spec g f pool ~depth:0 ~writes:None)
   in
   let mode = int g 3 in
-  { memos; effects; mode }
+  { memos; effects; mode; g_wrap = gen_wrap g f }
 
 let gen_graph g f =
   let nsrc = 2 + int g 3 in
@@ -287,7 +296,7 @@ let gen_graph g f =
         in
         gen_spec g f pool ~depth:0 ~writes:(Some (nsrc + k)))
   in
-  let plain body = { kind = Before; body; cleanup = false; kids = []; writes = None; acts = []; cacts = [] } in
+  let plain body = { kind = Before; body; cleanup = false; kids = []; writes = None; acts = []; cacts = []; wrap = [] } in
   let clampers =
     if f.clamps then
       let readers =
@@ -393,6 +402,7 @@ type inst = {
   mutable ran_op : int;
   mutable ok_errs : (int * int) list;
   home : grp option;
+  want : int option * int option;
 }
 
 and grp = {
@@ -439,6 +449,7 @@ type t = {
   mutable silent : bool;
   mutable rollback : int;
   mutable unresolved : (inst * int) list;
+  mutable ctx : int option * int option;
 }
 
 type reader = {
@@ -467,6 +478,36 @@ let fail t inv what expected observed =
   in
   (match t.failure with None -> t.failure <- Some m | Some _ -> ());
   raise (Cases.Failed m)
+
+let ctx_a : int Context.t = Context.make ~name:"a" ()
+let ctx_b : int Context.t = Context.make ~name:"b" ()
+
+let show_ctx (a, b) =
+  let one = function None -> "none" | Some v -> string_of_int v in
+  Printf.sprintf "a=%s b=%s" (one a) (one b)
+
+let check_ctx t what want =
+  let got = (Context.get ctx_a, Context.get ctx_b) in
+  if got <> want then fail t "10 context" what (show_ctx want) (show_ctx got)
+
+let entered t want f =
+  let outer = t.ctx in
+  t.ctx <- want;
+  match f () with
+  | r ->
+      t.ctx <- outer;
+      r
+  | exception e ->
+      t.ctx <- outer;
+      raise e
+
+let rec scoped t scopes f =
+  match scopes with
+  | [] -> f ()
+  | bs :: rest ->
+      let want = List.fold_left (fun (a, b) (c, v) -> if c = 0 then (Some v, b) else (a, Some v)) t.ctx bs in
+      let binds = List.map (fun (c, v) -> Context.bind (if c = 0 then ctx_a else ctx_b) v) bs in
+      Private.with_context binds (fun () -> entered t want (fun () -> scoped t rest f))
 
 let who i =
   Printf.sprintf "effect e%d (%s)" i.iid (match i.spec.kind with Before -> "before" | After -> "after")
@@ -738,7 +779,9 @@ let rolled t dying build () =
       t.rollback <- t.rollback + 1;
       raise e
 
-let rec start t ?grp home spec =
+let rec start t ?grp home spec = scoped t spec.wrap (fun () -> start_in t ?grp home spec)
+
+and start_in t ?grp home spec =
   t.iids <- t.iids + 1;
   let i =
     {
@@ -759,6 +802,7 @@ let rec start t ?grp home spec =
       ran_op = -1;
       ok_errs = [];
       home = grp;
+      want = t.ctx;
     }
   in
   t.insts <- i :: t.insts;
@@ -782,9 +826,12 @@ let rec start t ?grp home spec =
       if (not deferred) && i.i_failed && i.oks = 0 then kill t i;
       raise e
 
-and run t i () =
+and run t i () = entered t i.want (run_in t i)
+
+and run_in t i () =
   resolve t;
   let w = who i in
+  check_ctx t (w ^ " at the start of its run") i.want;
   if not i.i_alive then fail t "6 disposal" w "no run after its owner is disposed" "a run";
   if i.pending <> None then
     fail t "7 cleanup pairing" w "the cleanup of the previous run before this run" "no cleanup";
@@ -819,9 +866,11 @@ and run t i () =
   let obs = ref [] and vers = ref [] in
   match
     let v = eval (actual t ~vers w obs) ~tracked:true (1000 + i.iid) i.spec.body in
+    check_ctx t (w ^ " after its reads") i.want;
     List.iter (fun k -> start t ?grp:i.home (fun c -> i.children <- c :: i.children) k) i.spec.kids;
     (match i.spec.writes with Some s -> set_src t s (v mod 4) | None -> ());
     List.iter (fun (gate, a) -> if v mod 4 = gate then act t i a) i.spec.acts;
+    check_ctx t (w ^ " after its children and actions") i.want;
     v
   with
   | _ ->
@@ -908,6 +957,9 @@ and create t gs =
     { g_memos = []; g_insts = []; g_dispose = ignore; g_alive = true; g_ready = false; g_dying = false }
   in
   let build () =
+    scoped t gs.g_wrap @@ fun () ->
+    let want = t.ctx in
+    check_ctx t "the build of a group" want;
     List.iteri
       (fun k e ->
         let id = t.count in
@@ -916,7 +968,8 @@ and create t gs =
       gs.memos;
     List.iter
       (fun s -> start t ~grp:gr (fun i -> gr.g_insts <- i :: gr.g_insts) (map_spec res s))
-      gs.effects
+      gs.effects;
+    check_ctx t "the build of a group after its effects" want
   in
   match owner (rolled t (fun () -> gr.g_dying <- true) build) with
   | (), d ->
@@ -1256,6 +1309,7 @@ let finish_op t =
     if n.expr <> None && n.handle <> None && chance t.checks (if n.alive then 30 else 10) then
       top_read t j
   done;
+  check_ctx t "the top level after the operation" (None, None);
   check_failure t
 
 let dummy =
@@ -1295,6 +1349,7 @@ let make_t seed graph =
     silent = false;
     rollback = 0;
     unresolved = [];
+    ctx = (None, None);
     nodes = Array.make size dummy;
     count = 0;
     insts = [];
@@ -1376,7 +1431,7 @@ let execute seed graph ops =
       check_failure t
 
 let generate f seed =
-  let g = rng seed in
+  let g = { (rng seed) with side = Some (rng (seed + 2)) } in
   let graph = gen_graph g f in
   let ops = gen_ops g f graph in
   (graph, ops)
@@ -1401,6 +1456,7 @@ let spawns = { groups with spawns = true }
 let c_raises = { groups with c_raises = true }
 let c_writes = { groups with c_writes = true }
 let catches = { raises with catches = true }
+let contexts = { spawns with kills = true; batches = true; writers = true; contexts = true }
 
 let every =
   {
@@ -1420,6 +1476,7 @@ let every =
     c_raises = false;
     c_writes = false;
     catches = false;
+    contexts = false;
   }
 
 let everything =
@@ -1432,6 +1489,7 @@ let everything =
     c_raises = true;
     c_writes = true;
     catches = true;
+    contexts = true;
   }
 
 let seeds f ~upto () =
@@ -1604,6 +1662,7 @@ let all =
     ("fuzz: cleanup raises", seeds c_raises ~upto:100);
     ("fuzz: cleanup writes", seeds c_writes ~upto:100);
     ("fuzz: catches", seeds catches ~upto:100);
+    ("fuzz: contexts", seeds contexts ~upto:200);
     ("fuzz: every new feature", seeds everything ~upto:100);
     ("fuzz: needless re-run in one flush", needless_rerun);
     ("fuzz: missed run behind a dirty memo", missed_run);

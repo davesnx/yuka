@@ -182,6 +182,11 @@ A `<Yuka.Client>` in the children is its own island.
   type error. Pass the inner island as children, as above.
 - An island cannot read the current route or search params as a State.
   Pass what it needs as props.
+- An island does not read a context (`Yuka.Context`) that the page gave
+  outside it, and one island does not read a context of another. Give the
+  value inside the island, or pass it as a prop. The children that the
+  page passes to an island belong to the page: they read what the page
+  gave.
 
 ## Build
 

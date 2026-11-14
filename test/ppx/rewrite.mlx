@@ -151,6 +151,7 @@ module Awaiting = struct
 end
 
 let caught = <Yuka.Catch fallback=(fun ~error ~reset:_ -> <p>(Yuka.text error)</p>)><Panel /></Yuka.Catch>
+let provided = <Yuka.Context.Provide of_=theme value=dark><Panel /><b>"x"</b></Yuka.Context.Provide>
 let shown = <Yuka.Show status=s loading="l">(fun d -> <b>(Yuka.text d)</b>)</Yuka.Show>
 
 type signup = { name : string; age : int; plan : Plan.t; news : bool; tags : string list } [@@deriving form]
