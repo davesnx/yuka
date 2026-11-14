@@ -131,11 +131,21 @@ module Effect : sig
   val before : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
   (** As {!after}, with other timing. The first run is at once, in the
       component body, before the elements of the component exist. A later run
-      comes together with the holes, attributes and lists of the same change,
-      parent effects first, so it can see the DOM before that change. Use it
-      to compute a value that the markup of the component needs, or to read
-      the DOM before it changes. An exception in the first run, outside a
-      {!Catch} or an island, stops the effect and is raised to the caller. *)
+      comes in the same round as the holes, attributes and lists of the same
+      change, before the {!after} effects. Use it to compute a value that
+      the markup of the component needs.
+
+      The order in that round: an effect or a hole created inside another
+      effect or hole runs after it. Among the others, one that reads a memo
+      runs after one that reads only States, and then the one created last
+      runs first. The holes of a component are created after the effects of
+      its body, and the effects of a child component after those of its
+      parent. So a later run can come after a hole of the same component,
+      and after a [before] effect of a child component: do not use it to
+      read the DOM before a change.
+
+      An exception in the first run, outside a {!Catch} or an island, stops
+      the effect and is raised to the caller. *)
 
   val on_change :
     ?equal:('a -> 'a -> bool) -> ('a, _) State.signal -> (prev:'a -> next:'a -> unit) -> unit

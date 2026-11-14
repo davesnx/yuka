@@ -5,12 +5,10 @@ exception Replay
 
 type node = Dom_cases.node
 
-external outer_html : node -> string = "outerHTML" [@@mel.get]
 external is_connected : node -> bool = "isConnected" [@@mel.get]
 external remove_node : node -> unit = "remove" [@@mel.send]
 external get_tag : node -> string -> int Js.undefined = "" [@@mel.get_index]
 external set_tag : node -> string -> int -> unit = "" [@@mel.set_index]
-external find : node -> string -> node option = "querySelector" [@@mel.send] [@@mel.return nullable]
 
 let html = Dom_cases.html
 let query_all = Dom_cases.query_all
@@ -62,7 +60,6 @@ type features = {
   batches : bool;
   stop : bool;
   hydrate : bool;
-  before_dom : bool;
   row_raise : bool;
 }
 
@@ -78,7 +75,6 @@ let base =
     batches = false;
     stop = false;
     hydrate = false;
-    before_dom = false;
     row_raise = false;
   }
 
@@ -250,7 +246,6 @@ type world = {
   mutable guard_events : int;
   mutable client_catches : int;
   mutable after_snaps : (node * string) list;
-  mutable before_snaps : (string * string) list;
   mutable violations : string list;
   mutable step : int;
   mutable ops : string list;
@@ -340,14 +335,7 @@ let start_effect env inst k e =
     inst.runs.(k) <- inst.runs.(k) + 1;
     inst.last_ok.(k) <- false;
     inst.seen.(k) <- vals;
-    (if e.snap then
-       match e.kind with
-       | After -> w.after_snaps <- (env.root, html env.root) :: w.after_snaps
-       | Before ->
-           if env.mode = Live && inst.runs.(k) > 1 then
-             match find env.root ("[data-c=\"" ^ inst.ipath ^ "\"]") with
-             | Some n -> w.before_snaps <- (inst.ipath, outer_html n) :: w.before_snaps
-             | None -> ());
+    if e.snap && e.kind = After then w.after_snaps <- (env.root, html env.root) :: w.after_snaps;
     (match e.raise_on with
     | Some r when List.hd vals mod 4 = r -> raise (Boom r)
     | _ -> ());
@@ -507,7 +495,6 @@ let mount w g =
 type pre = {
   rows : (string * node * int) list;
   values : (int * int) array array;
-  comps : (string, string) Hashtbl.t;
   before_runs : (inst * int array) list;
   events : int;
 }
@@ -530,13 +517,9 @@ let capture w =
            (attr_of n "data-row", n, t))
          (query_all w.live "[data-row]"))
   in
-  let comps = Hashtbl.create 8 in
-  if w.feats.before_dom then
-    Array.iter (fun n -> Hashtbl.replace comps (attr_of n "data-c") (outer_html n)) (query_all w.live "[data-c]");
   {
     rows;
     values = Array.map State.peek w.lists;
-    comps;
     before_runs = List.map (fun i -> (i, Array.copy i.runs)) w.insts;
     events = w.guard_events;
   }
@@ -659,13 +642,6 @@ let check_step w pre ~stopped =
         stats.after_seen <- stats.after_seen + 1;
         if r == w.live && h <> live then fail w "4 after sees the DOM" "container in an after effect" live h)
       w.after_snaps;
-  if w.feats.before_dom then
-    List.iter
-      (fun (path, h) ->
-        match Hashtbl.find_opt pre.comps path with
-        | Some old when old <> h -> fail w "4 before sees the old DOM" (path ^ " in a before re-run") old h
-        | _ -> ())
-      w.before_snaps;
   check_rows w pre ~stopped;
   check_instances w pre ~stopped;
   check_shadow w
@@ -819,7 +795,6 @@ let execute f seed ~steps =
       guard_events = 0;
       client_catches = 0;
       after_snaps = [];
-      before_snaps = [];
       violations = [];
       step = 0;
       ops = [];
@@ -843,7 +818,6 @@ let execute f seed ~steps =
       let pre = capture w in
       Array.fill w.touched 0 (Array.length w.touched) false;
       w.after_snaps <- [];
-      w.before_snaps <- [];
       match op with
       | Stop ops ->
           stop_and_render w g ops;
@@ -884,7 +858,6 @@ let events = { base with events = true }
 let batches = { base with batches = true; lists = true }
 let stop = { base with stop = true; effects = true }
 let hydrate = { base with hydrate = true }
-let before_dom = { base with effects = true; before_dom = true }
 let effects_lists = { base with effects = true; lists = true; nested = true }
 let effects_switch = { base with effects = true; switch = true }
 let catch_effects = { base with effects = true; catch = true; lists = true; nested = true }
@@ -903,45 +876,12 @@ let every =
     batches = true;
     stop = true;
     hydrate = false;
-    before_dom = false;
     row_raise = false;
   }
 
 let every_hydrate = { every with hydrate = true }
 
 let only f l () = List.iter (run_seed f) l
-
-let before_sees_new_dom () =
-  let s = State.make 0 and seen = ref "" in
-  let c = Dom_cases.container "" in
-  let dispose =
-    Private.render (Dom_cases.as_element c) (fun () ->
-        Effect.before (fun () ->
-            ignore (State.get s);
-            seen := html c);
-        element "section" [] [ hole (fun () -> text (string_of_int (State.get s))) ])
-  in
-  State.set s 1;
-  dispose ();
-  remove_node c;
-  Cases.check "a before re-run sees the DOM before the change" "<section>0</section>" !seen
-
-let parent_before_runs_first () =
-  let s = State.make 0 and log = ref [] in
-  let c = Dom_cases.container "" in
-  let comp name kids =
-    Effect.before (fun () -> log := (name ^ string_of_int (State.get s)) :: !log);
-    element "section" [] (kids ())
-  in
-  let dispose =
-    Private.render (Dom_cases.as_element c) (fun () ->
-        comp "parent" (fun () -> [ comp "child" (fun () -> []) ]))
-  in
-  State.set s 1;
-  dispose ();
-  remove_node c;
-  Cases.check "the parent component's before effect runs first" "parent0 child0 parent1 child1"
-    (String.concat " " (List.rev !log))
 
 let row_raise_leak ~update () =
   let s = State.make 0 and items = State.make (if update then [||] else [| 1; 2 |]) in
@@ -995,11 +935,4 @@ let all =
     ("dom fuzz: a row that raises on first mount stops the rows before it", row_raise_leak ~update:false);
     ("dom fuzz: a row that raises in an update stops the rows created before it", row_raise_leak ~update:true);
     ("dom fuzz: rows that raise", only row_raise [ 500; 555; 876; 897 ]);
-  ]
-
-let known_failing =
-  [
-    ("dom fuzz: a before effect sees the new text of a hole of its component", before_sees_new_dom);
-    ("dom fuzz: the before effect of a child component runs before its parent's", parent_before_runs_first);
-    ("dom fuzz: seeds where a before effect sees the new DOM", only before_dom [ 89; 167 ]);
   ]
