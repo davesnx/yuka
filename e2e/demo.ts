@@ -47,9 +47,9 @@ page.on("response", (r) => {
   responses.push(r);
   if (r.status() >= 400 && r.status() !== expectedFailures) failedRequests.push(`${r.status()} ${r.url()}`);
 });
-const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch: boolean }[] = [];
+const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch?: string }[] = [];
 page.on("request", (r) =>
-  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"], prefetch: r.headers()["yuka-prefetch"] === "1" }),
+  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"], prefetch: r.headers()["yuka-prefetch"] }),
 );
 const chunkRe = /\/(issue_props|related|comments)(-[^/]*)?\.js$/;
 const chunkRequests = (from: number) =>
@@ -94,6 +94,15 @@ const installProbes = () => {
   } as typeof IntersectionObserver;
 };
 await page.addInitScript(installProbes);
+
+const routerLoaded = async (p: Page) => {
+  const loaded = p.waitForResponse((r) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url()).pathname), { timeout: 3000 }).then(() => true, () => false);
+  await p.mouse.move(1270, 790);
+  await p.mouse.move(1272, 792);
+  const ok = await loaded;
+  await p.waitForTimeout(300);
+  return ok;
+};
 
 const statusOf = async (id: string) =>
   page.locator(`.row[data-id="${id}"] button[aria-label="Change status"] svg`).first().getAttribute("class");
@@ -182,6 +191,9 @@ await step("3b. router", async () => {
   const opened = allRequests.length;
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
+  const routerCode = (r: { url: string }) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url).pathname);
+  const loadedAtStart = allRequests.slice(opened).filter(routerCode).length;
+  const moved = allRequests.length;
   await page.locator(".filter").hover();
   await page.locator(".filter").focus();
   await page.waitForTimeout(200);
@@ -192,13 +204,12 @@ await step("3b. router", async () => {
   await page.evaluate(() => window.scrollTo(0, 250));
   const y = await page.evaluate(() => Math.round(window.scrollY));
   const mark = allRequests.length;
-  const routerCode = (r: { url: string }) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url).pathname);
-  const loadedAtStart = allRequests.slice(opened, mark).filter(routerCode).length;
+  const loadedAtMove = allRequests.slice(moved, mark).filter(routerCode).length;
   await page.locator('.row[data-id="YUK-8"] .row-title').click();
   await page.waitForURL("**/issue/YUK-8");
   await page.waitForSelector(".comment-input");
   const navReq = allRequests.slice(mark).filter((r) => r.url.endsWith("/issue/YUK-8"));
-  check("3b.0 the navigation code loads on first use, not at start nor on pointer or focus off links", loadedAtStart === 0 && allRequests.slice(mark).filter(routerCode).length === 1, `at start=${loadedAtStart} after=${allRequests.slice(mark).filter(routerCode).length}`);
+  check("3b.0 the navigation code is not loaded at start and loads once, at the first mouse movement (level trajectory)", loadedAtStart === 0 && loadedAtMove === 1 && allRequests.slice(mark).filter(routerCode).length === 0, `at start=${loadedAtStart} at the first movement=${loadedAtMove} after=${allRequests.slice(mark).filter(routerCode).length}`);
   check("3b.1 click is a client navigation (marker survives)", (await marker()) === "alive", String(await marker()));
   check("3b.2 request has Yuka-Navigate with the outlet keys", navReq.length >= 1 && navReq.every((r) => r.keys === "L0"), JSON.stringify(navReq.map((r) => r.keys)));
   const titleAfter = await page.title();
@@ -256,20 +267,38 @@ await step("3c. partial navigation", async () => {
   await page.waitForSelector(".row");
   await page.evaluate(() => ((window as any).__marker = "alive"));
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
-  const counter = page.locator(".counter-button");
-  await page.waitForFunction(() => !!(document.querySelector(".counter-button") as any)?.__yuka_click, null, { timeout: 5000 });
-  await counter.click();
-  await counter.click();
-  check("3c.1 counter counts", (await counter.textContent()) === "Clicks: 2", String(await counter.textContent()));
+  const bar = () =>
+    page.evaluate(() => {
+      const element = document.querySelector("[data-nav-progress]") as any;
+      return { state: element?.getAttribute("data-nav-progress"), kept: element?.__kept as boolean | undefined };
+    });
+  await page.waitForFunction(() => !!(document.querySelector("[data-nav-progress]") as any)?.__yuka_animationstart, null, { timeout: 5000 });
+  await page.evaluate(() => ((document.querySelector("[data-nav-progress]") as any).__kept = true));
+  check("3c.1 the progress bar (Idle) started without interaction and is idle", (await bar()).state === "idle", JSON.stringify(await bar()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
   check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null", await current());
+  const buttonInView = () =>
+    page.evaluate(() => {
+      const rect = document.querySelector(".new-issue-button")!.getBoundingClientRect();
+      return { top: Math.round(rect.top), bottom: Math.round(rect.bottom), scrollY: Math.round(scrollY), height: innerHeight };
+    });
+  const atTop = await buttonInView();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const atEnd = await buttonInView();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check(
+    "3c.2b the new issue button stays in the viewport on a long list",
+    [atTop, atEnd].every((box) => box.top >= 0 && box.bottom <= box.height) && atEnd.scrollY > 0,
+    JSON.stringify({ atTop, atEnd }),
+  );
   const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
   await page.locator('.row[data-id="YUK-3"] .row-title').click();
   const response = await outlet;
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
   check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
-  check("3c.4 sidebar counter kept its state", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive", String(await counter.textContent()));
+  await page.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
+  check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
   check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null", await current());
   await page.locator(".new-issue-button").click();
@@ -280,7 +309,7 @@ await step("3c. partial navigation", async () => {
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
   check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null", await current());
-  check("3c.9 counter still kept", (await counter.textContent()) === "Clicks: 2");
+  check("3c.9 progress bar still kept", (await bar()).kept === true, JSON.stringify(await bar()));
   const y0 = await page.evaluate(() => Math.round(window.scrollY));
   check("3c.10 a new page starts at the top", y0 === 0, String(y0));
   await page.route("**/my", async (route) => {
@@ -290,12 +319,12 @@ await step("3c. partial navigation", async () => {
   await page.goBack();
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
-  check("3c.11 back is partial too (counter kept)", (await counter.textContent()) === "Clicks: 2" && (await marker()) === "alive");
+  check("3c.11 back is partial too (progress bar kept)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
   await page.unroute("**/my");
-  check("3c.12 another Yuka-Build is a full page load", (await marker()) === undefined && (await counter.textContent()) === "Clicks: 0", `marker=${await marker()} ${await counter.textContent()}`);
+  check("3c.12 another Yuka-Build is a full page load", (await marker()) === undefined && (await bar()).kept === undefined, `marker=${await marker()} ${JSON.stringify(await bar())}`);
 });
 
 await step("3d. a page with no island loads no script", async () => {
@@ -478,7 +507,7 @@ await step("3f. prefetch and the navigation cache", async () => {
   await link("YUK-5").hover();
   await page.waitForTimeout(300);
   const pre = requestsTo(from, "/issue/YUK-5");
-  check("3f.1 hover sends one prefetch", pre.length === 1 && pre[0].prefetch && pre[0].navigate, JSON.stringify(pre));
+  check("3f.1 hover sends one prefetch that names its trigger", pre.length === 1 && pre[0].prefetch === "hover" && pre[0].navigate, JSON.stringify(pre));
   await page.evaluate(() => {
     const w = window as any;
     w.__vt = [];
@@ -531,6 +560,89 @@ await step("3f. prefetch and the navigation cache", async () => {
   failedRequests.splice(failedBefore, failedRequests.length - failedBefore, ...failedRequests.slice(failedBefore).filter((f) => !dropped(f)));
   check("3f.6 emptying the cache aborts at most the one prefetch in flight", aborted <= 1, String(aborted));
   check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.slice(posts).filter((p) => p.url.endsWith("/update_issue")).length === 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
+  const refused = await page.evaluate(async () => {
+    const r = await fetch("/issue/YUK-5", { headers: { "Yuka-Navigate": "-", "Yuka-Prefetch": "visible" }, cache: "no-store" });
+    return [r.status, r.headers.get("yuka-prefetch"), await r.text(), document.querySelector("meta[name=yuka-prefetch]") === null];
+  });
+  check("3f.7 a visible prefetch of a Trajectory route (the default) gets 204 with the level, and the demo page prints no level", JSON.stringify(refused) === '[204,"trajectory","",true]', JSON.stringify(refused));
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+});
+
+await step("3k. trajectory prefetch (scripted mouse paths, not user data)", async () => {
+  type Box = { x: number; y: number; w: number; h: number };
+  const fresh = async () => {
+    await page.goto(base + "/", { waitUntil: "networkidle" });
+    await page.waitForSelector(".row");
+    return routerLoaded(page);
+  };
+  const box = async (sel: string): Promise<Box> => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error("no box for " + sel);
+    return { x: b.x, y: b.y, w: b.width, h: b.height };
+  };
+  const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+  const glide = async (x0: number, y0: number, x1: number, y1: number, pxPerS: number, target?: Box) => {
+    const dist = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.round(dist / (pxPerS / 60)));
+    let entered = 0;
+    const started = Date.now();
+    for (let i = 1; i <= n; i++) {
+      const x = x0 + ((x1 - x0) * i) / n, y = y0 + ((y1 - y0) * i) / n;
+      const due = started + (i * 1000) / 60;
+      if (Date.now() < due) await page.waitForTimeout(due - Date.now());
+      await page.mouse.move(x, y);
+      if (target && !entered && inside(target, x, y)) entered = Date.now();
+    }
+    return { entered, ms: Date.now() - started, speed: Math.round(dist / ((Date.now() - started) / 1000)) };
+  };
+  const prefetches = (from: number) =>
+    allRequests.slice(from).filter((r) => r.prefetch !== undefined).map((r) => ({ path: new URL(r.url).pathname, prefetch: r.prefetch, t: r.t }));
+  const show = (l: { path: string; prefetch?: string }[]) => l.map((r) => `${r.path}:${r.prefetch}`).join(", ");
+
+  check("3k.0 the first mouse movement loads the navigation code", await fresh());
+  const menuBoxes = () =>
+    page.locator(".nav-link").evaluateAll((els) =>
+      els.map((e) => {
+        const r = e.getBoundingClientRect();
+        return { href: e.getAttribute("href") ?? "", x: r.x, y: r.y, w: r.width, h: r.height };
+      }),
+    );
+  const onLink = (x: number, y: number) =>
+    page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("a[href]")?.getAttribute("href") ?? "none", [x, y]);
+  const t = (await menuBoxes()).at(-1)!;
+  const tx = t.x + t.w / 2, startY = Math.min(t.y + t.h / 2 + 400, 795);
+  const startA = await onLink(tx, startY);
+  let from = allRequests.length;
+  const toward = await glide(tx, startY, tx, t.y + t.h / 2, 800, t);
+  await page.waitForTimeout(300);
+  const a = prefetches(from);
+  const first = a.find((r) => r.path === t.href);
+  const lead = first && toward.entered ? toward.entered + 50 - first.t : NaN;
+  check("3k.1 a straight path toward a link prefetches it before the pointer enters it, as trajectory", !!first && first.prefetch === "trajectory" && first.t < toward.entered, `${show(a)} start on link: ${startA}`);
+  console.log(`MEASURE 3k.1 scripted: ${Math.round(startY - t.y - t.h / 2)} px straight up at ${toward.speed} px/s toward ${t.href} (start on link: ${startA}); trajectory request ${lead} ms before a hover prefetch would start (pointer enters + 50 ms); requests: ${a.length} (${show(a)})`);
+
+  await fresh();
+  const n = (await menuBoxes()).at(-1)!;
+  const ny = n.y + n.h + 50, nx0 = 5, nx1 = n.x + n.w - 10;
+  const startB = await onLink(nx0, ny), endB = await onLink(nx1, 795);
+  from = allRequests.length;
+  await glide(nx0, ny, nx1, ny, 800);
+  await glide(nx1, ny, nx1, 795, 800);
+  await page.waitForTimeout(300);
+  const b = prefetches(from);
+  check("3k.2 a path near one link and away from the others sends at most one request, for that link", b.length <= 1 && b.every((r) => r.path === n.href), show(b));
+  console.log(`MEASURE 3k.2 scripted: a path 50 px under ${n.href}, left to right, then down to the bottom of the window (start on link: ${startB}, end on link: ${endB}): ${b.length} requests (${show(b)})`);
+
+  await fresh();
+  const menu = await menuBoxes();
+  const last = menu[menu.length - 1];
+  const head = menu[0];
+  from = allRequests.length;
+  const cross = await glide(head.x + head.w / 2, head.y - 150, last.x + last.w / 2, last.y + last.h / 2, 800, { x: last.x, y: last.y, w: last.w, h: last.h });
+  await page.waitForTimeout(300);
+  const c = prefetches(from);
+  const passed = menu.slice(1, -1).map((m) => m.href);
+  check("3k.3 a path across the menu sends nothing for the links it passes", !c.some((r) => passed.includes(r.path)), `passed ${passed.join(" ")}: ${show(c)}`);
+  console.log(`MEASURE 3k.3 scripted: a path across the menu (${menu.map((m) => m.href).join(" ")}) toward ${last.href} at ${cross.speed} px/s: ${c.length} requests (${show(c)})`);
   await page.goto(base + "/", { waitUntil: "networkidle" });
 });
 
@@ -668,6 +780,9 @@ await step("3g. live data", async () => {
   await A.p.locator(".dialog .button.primary").click();
   const created = await B.p.locator(".row", { hasText: title }).waitFor({ timeout: 2000 }).then(() => true, () => false);
   check("3g.2 an issue created in page A shows in page B", created);
+  await A.p.waitForURL(/\/issue\/YUK-\d+$/);
+  await A.p.goBack();
+  await A.p.waitForSelector(`.row:has-text("${title}")`);
 
   await B.routes[B.routes.length - 1].close({ code: 4001, reason: "dropped by the test" });
   const offline = await B.p.waitForSelector(".offline", { timeout: 1000 }).then(() => true, () => false);
@@ -775,6 +890,7 @@ await step("5. failure path", async () => {
 });
 
 await step("6. new issue dialog", async () => {
+  const listUrl = page.url();
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("c");
   await page.waitForSelector(".dialog", { timeout: 2000 });
@@ -803,15 +919,43 @@ await step("6. new issue dialog", async () => {
   await page.waitForFunction(() => /already exists/.test(document.querySelector(".dialog .error")?.textContent ?? ""), null, { timeout: 3000 });
   check("6c0e duplicate title shows the existing id", (await errText()) === "An issue with this title already exists: YUK-25", await errText());
   check("6c0f typed errors cause no console error", consoleErrors.length === 0, consoleErrors.join(" | "));
+  check("6c0g typed errors do not navigate", page.url() === listUrl, `${listUrl} -> ${page.url()}`);
   const headerBefore = Number((await page.locator(".page-header .group-count").first().textContent()) ?? "NaN");
   const title = `E2E issue ${run}`;
   await page.fill(".dialog-title", title);
   await page.fill(".dialog-description", "Created by the browser check.");
   const before = await page.locator(".row").count();
+  await page.evaluate(() => ((window as any).__created = "alive"));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForSelector(".dialog", { state: "detached", timeout: 3000 });
-  await page.waitForTimeout(200);
+  await page.waitForURL(/\/issue\/YUK-\d+$/, { timeout: 3000 });
+  await page.waitForSelector(".issue-title");
+  const landed = {
+    path: new URL(page.url()).pathname,
+    title: await page.locator(".issue-title").textContent(),
+    description: (await page.locator(".issue-description").textContent())?.trim(),
+    marker: await page.evaluate(() => (window as any).__created),
+    dialogs: await page.locator(".dialog").count(),
+    focus: await page.evaluate(() => !!document.activeElement?.isConnected && !document.activeElement.closest(".dialog")),
+  };
+  check("6c issue opens its page with a client navigation", /^\/issue\/YUK-\d+$/.test(landed.path) && landed.title === title && landed.description === "Created by the browser check." && landed.marker === "alive" && landed.dialogs === 0, JSON.stringify(landed));
+  check("6c3 focus is on a connected element outside the dialog", landed.focus, JSON.stringify(landed));
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("c");
+  await page.waitForSelector(".dialog", { timeout: 2000 });
+  const fresh = {
+    title: await page.inputValue(".dialog-title"),
+    description: await page.inputValue(".dialog-description"),
+    errors: await page.locator(".dialog .error").count(),
+    disabled: await page.locator(".dialog .button.primary").isDisabled(),
+  };
+  check("6c4 c on the new issue opens an empty dialog", fresh.title === "" && fresh.description === "" && fresh.errors === 0 && !fresh.disabled, JSON.stringify(fresh));
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".dialog", { state: "detached", timeout: 2000 });
+  await page.goBack();
+  await page.waitForURL(listUrl);
+  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
   const row = page.locator(".row", { hasText: title });
+  check("6c5 Back is a client navigation to the list", (await page.evaluate(() => (window as any).__created)) === "alive");
   check("6c issue appears without reload", (await row.count()) === 1 && (await page.locator(".row").count()) === before + 1);
   const headerAfter = Number((await page.locator(".page-header .group-count").first().textContent()) ?? "NaN");
   check("6c2 header count follows the list", headerAfter === headerBefore + 1 && headerAfter === before + 1, `${headerBefore} -> ${headerAfter}, rows ${before + 1}`);
@@ -850,7 +994,7 @@ await step("6g. workspaces", async () => {
   await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
   const current = () => page.evaluate(() => [...document.querySelectorAll(".workspace-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("6g.1 the stress list has 200 rows", (await page.locator(".row").count()) === 200, String(await page.locator(".row").count()));
+  check("6g.1 the stress list has 2000 rows", (await page.locator(".row").count()) === 2000, String(await page.locator(".row").count()));
   check("6g.2 the stress list has 30 label chips", (await page.locator(".chip").count()) === 30, String(await page.locator(".chip").count()));
   check("6g.3 the switcher marks Stress", (await current()) === "/=false /w/stress=true", await current());
   const github = page.locator('.topbar-link[href="https://github.com/davesnx/yuka"]');
@@ -864,10 +1008,18 @@ await step("6g. workspaces", async () => {
   check("6g.6 no horizontal overflow at 1280 px", (await overflow()) <= 0, String(await overflow()));
   await page.setViewportSize({ width: 390, height: 800 });
   check("6g.7 no horizontal overflow at 390 px", (await overflow()) <= 0, String(await overflow()));
+  const navLines = await page.locator(".nav-link").evaluateAll((links) =>
+    links.map((link) => {
+      const range = document.createRange();
+      range.selectNodeContents(link);
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+    }),
+  );
+  check("6g.7b at 390 px each nav link stays on one line", navLines.length === 5 && navLines.every((lines) => lines === 1), navLines.join(","));
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.locator(".filter").fill("speed up");
   const filtered = await page.locator(".row").count();
-  check("6g.8 the filter works on 200 issues", filtered > 0 && filtered < 200, String(filtered));
+  check("6g.8 the filter works on 2000 issues", filtered > 0 && filtered < 2000, String(filtered));
   await page.locator(".filter").fill("");
   await page.locator(".page-header").first().click();
   await page.keyboard.press("j");
@@ -888,23 +1040,30 @@ await step("6g. workspaces", async () => {
   await page.waitForSelector(".dialog", { timeout: 2000 });
   const title = `Stress issue ${run}`;
   await page.fill(".dialog-title", title);
+  await page.evaluate(() => ((window as any).__created = "stress"));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForSelector(".dialog", { state: "detached", timeout: 3000 });
-  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
+  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/, { timeout: 30000 });
+  await page.waitForSelector(".issue-title");
+  const landed = { path: new URL(page.url()).pathname, title: await page.locator(".issue-title").textContent(), marker: await page.evaluate(() => (window as any).__created) };
+  check("6g.12a creating in stress opens /w/stress/issue/STR-n with a client navigation", landed.title === title && landed.marker === "stress", JSON.stringify(landed));
+  await page.goBack();
+  await page.waitForURL("**/w/stress");
+  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 30000 });
   const created = await page.locator(".row", { hasText: title }).getAttribute("data-id");
-  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 201, `${created} rows=${await page.locator(".row").count()}`);
+  check("6g.12b the issue page is the created issue", landed.path === `/w/stress/issue/${created}`, `${landed.path} ${created}`);
+  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 2001, `${created} rows=${await page.locator(".row").count()}`);
   await page.evaluate(() => ((window as any).__workspace = "alive"));
   await page.locator('.workspace-link[href="/"]').click();
   await page.waitForURL(base + "/");
-  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 30000 });
   await page.waitForSelector(".row");
   check("6g.13 switching workspace is a client navigation", (await page.evaluate(() => (window as any).__workspace)) === "alive");
-  check("6g.14 the switcher marks Yuka", (await current()) === "/=true /w/stress=false", await current());
+  check("6g.14 the switcher marks Home", (await current()) === "/=true /w/stress=false", await current());
   const yukaIds = await page.locator(".row").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-id") ?? ""));
   check("6g.15 the yuka list has no stress issue", yukaIds.length > 0 && yukaIds.every((id) => id.startsWith("YUK-")) && (await page.locator(".row", { hasText: title }).count()) === 0, String(yukaIds.length));
   await page.locator('.workspace-link[href="/w/stress"]').click();
   await page.waitForURL("**/w/stress");
-  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 30000 });
   await page.waitForSelector(".row");
   check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
   const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
@@ -914,7 +1073,7 @@ await step("6g. workspaces", async () => {
 await step("6i. the label menu", async () => {
   const pg = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await pg.goto(base + "/w/stress", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 5000 });
+  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 30000 });
   const sideways = () => pg.evaluate(() => { const chips = document.querySelector(".chips")!; return chips.scrollWidth - chips.clientWidth; });
   const shown = () => pg.evaluate(() => {
     const bottom = document.querySelector(".chips")!.getBoundingClientRect().bottom;
@@ -936,7 +1095,7 @@ await step("6i. the label menu", async () => {
   await pg.waitForSelector(`#labels-menu [data-label="${hidden}"][aria-checked="true"]`);
   const rows = await pg.locator(".row").evaluateAll((nodes, label) => nodes.map((node) => !!node.querySelector(".label-" + label)), hidden);
   check("6i.3 End and Space choose a hidden label: the URL and the rows follow, the menu stays open",
-    lastFocused === hidden && rows.length > 0 && rows.length < 200 && rows.every(Boolean) && (await pg.locator("#labels-menu:popover-open").count()) === 1, `${hidden} ${lastFocused} ${rows.length}`);
+    lastFocused === hidden && rows.length > 0 && rows.length < 2000 && rows.every(Boolean) && (await pg.locator("#labels-menu:popover-open").count()) === 1, `${hidden} ${lastFocused} ${rows.length}`);
   const chosenShown = (await shown()).includes(hidden) && (await pg.locator(`.chips .chip.on[data-label="${hidden}"]`).count()) === 1;
   check("6i.4 the chosen hidden label moves into the visible row", chosenShown, (await shown()).join(","));
   await pg.keyboard.press("Escape");
@@ -962,8 +1121,10 @@ await step("6h. insights", async () => {
   pg.on("console", (m) => { if (m.type() === "error" || m.text().includes("hydration mismatch")) errors.push(m.text()); });
   pg.on("pageerror", (e) => errors.push(String(e)));
   const html = await (await pg.request.get(base + "/insights")).text();
-  const served = Number(/<dd data-points="true">(\d+)<\/dd>/.exec(html)?.[1] ?? "0");
+  const served = Number(/<dd data-metric="points">(\d+)<\/dd>/.exec(html)?.[1] ?? "0");
   check("6h.1 the server HTML has the seven charts and a point per issue", (html.match(/data-chart="/g) ?? []).length === 7 && served >= 25 && (html.match(/ r="2"/g) ?? []).length === served, `charts=${(html.match(/data-chart="/g) ?? []).length} points=${(html.match(/<circle /g) ?? []).length} issues=${served}`);
+  const placeholders = ["fps", "update", "updates", "worst-frame", "long-frames", "nodes", "dom-nodes"].filter((metric) => !new RegExp(`data-metric="${metric}">-<`).test(html));
+  check("6h.1b the server HTML has the panel with a placeholder for each measured metric", placeholders.length === 0 && html.includes('aria-live="off"'), placeholders.join(","));
   await pg.goto(base + "/insights", { waitUntil: "networkidle" });
   await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
   const nav = await pg.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
@@ -997,21 +1158,102 @@ await step("6h. insights", async () => {
   await pickStatus(other, id, before === "done" ? "Done" : before === "todo" ? "Todo" : before === "in-progress" ? "In Progress" : before === "backlog" ? "Backlog" : "Canceled");
   await other.close();
   await pg.goto(base + "/w/stress/insights", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
-  const stress = Number(await pg.locator("[data-points]").textContent());
-  check("6h.8 stress has a point per issue", stress >= 200 && (await points()) === stress, `${await points()} of ${stress}`);
+  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 30000 });
+  const stress = Number(((await pg.locator('[data-metric="points"]').textContent()) ?? "").replace(/,/g, ""));
+  check("6h.8 stress has a point per issue", stress >= 2000 && (await points()) === stress, `${await points()} of ${stress}`);
+  const dates = pg.locator("[data-filters] button[data-dates]");
+  const timeNote = () => pg.locator('section:has([data-chart="time"]) header > span').textContent();
+  const datesText = async () => ((await dates.textContent()) ?? "").replace(/^Created/, "");
+  const fullRange = await datesText();
+  check("6h.12 the date range is a control in the filter band that shows the dates of the time chart", (await dates.count()) === 1 && fullRange === (await timeNote()) && / to /.test(fullRange), `${fullRange} / ${await timeNote()}`);
+  const stressAmounts = await amounts();
+  const reset = pg.locator("#insights-dates button", { hasText: "Full range" });
+  await dates.click();
+  await pg.waitForSelector("#insights-dates:popover-open");
+  check("6h.13 the range control opens a dialog with the two dates; reset is off at the full range", (await pg.locator("#insights-dates").getAttribute("role")) === "dialog" && (await pg.locator('#insights-dates input[type="range"]').count()) === 2 && (await reset.isDisabled()));
+  const from = pg.locator('#insights-dates input[data-bound="From"]');
+  await from.focus();
+  for (let press = 0; press < 20; press++) await pg.keyboard.press("ArrowRight");
+  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") !== full, fullRange, { timeout: 5000 }).catch(() => {});
+  const narrowed = await datesText();
+  check("6h.14 arrow keys on From narrow the range; the control, the slider and the time chart show the same dates", narrowed !== fullRange && narrowed === (await timeNote()) && narrowed.startsWith((await from.getAttribute("aria-valuetext")) ?? "-"), `${narrowed} / ${await timeNote()} / ${await from.getAttribute("aria-valuetext")}`);
+  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length < count, stress, { timeout: 5000 }).catch(() => undefined);
+  check("6h.15 the narrower range changes the charts", (await amounts()) !== stressAmounts && (await points()) < stress, `${stressAmounts} -> ${await amounts()} points=${await points()}`);
+  await reset.click();
+  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") === full, fullRange, { timeout: 5000 }).catch(() => {});
+  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, stress, { timeout: 5000 }).catch(() => undefined);
+  check("6h.16 Full range restores the dates and the charts", (await datesText()) === fullRange && (await amounts()) === stressAmounts && (await points()) === stress && (await reset.isDisabled()), `${await datesText()} ${await amounts()} points=${await points()}`);
+  await pg.keyboard.press("Escape");
+  await pg.waitForSelector("#insights-dates:popover-open", { state: "detached" });
+  check("6h.17 Escape closes the range dialog", (await pg.locator("#insights-dates:popover-open").count()) === 0);
+  const animate = pg.locator(".page-header button[data-animate]");
+  const placement = await pg.evaluate(() => {
+    const header = document.querySelector(".page-header")!.getBoundingClientRect();
+    const button = document.querySelector(".page-header button[data-animate]")!.getBoundingClientRect();
+    const others = [...document.querySelectorAll(".page-header > :not([data-animate])")].map((element) => element.getBoundingClientRect().right);
+    return { gap: header.right - button.right, left: button.left, others: Math.max(...others), half: header.left + header.width / 2 };
+  });
+  check("6h.18 Animate is at the right of the Insights header and is not pressed", placement.gap < 40 && placement.left > placement.half && placement.left > placement.others && (await animate.getAttribute("aria-pressed")) === "false", JSON.stringify(placement));
   await pg.locator("button", { hasText: /^100x$/ }).click();
-  const hundred = (stress * 100).toLocaleString("en-US");
-  await pg.waitForFunction((text) => document.querySelector("[data-points]")?.textContent === text, hundred, { timeout: 10000 });
-  check("6h.9 the 100x stress control makes 100 times the points", (await points()) === stress * 100, `${await points()} (${hundred})`);
-  await pg.locator("button[data-animate]").click();
-  await pg.waitForTimeout(1500);
-  const fps = Number(await pg.locator("[data-fps]").textContent());
-  const update = (await pg.locator("[data-update]").textContent()) ?? "";
-  await pg.locator("button[data-animate]").click();
-  check("6h.10 animate runs and the readout shows frames per second and the update time", fps > 0 && / ms$/.test(update), `fps=${fps} update=${update}`);
+  const maxPoints = 20000;
+  const hundredPoints = Math.min(stress * 100, maxPoints);
+  const hundred = hundredPoints.toLocaleString("en-US");
+  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, hundred, { timeout: 10000 });
+  const cappedNote = (await pg.locator("[data-capped]").textContent()) ?? "";
+  check("6h.9 the 100x stress control makes 100 times the points, capped at 20,000 with a note", (await points()) === hundredPoints && cappedNote === "capped at 20,000 points", `${await points()} (${hundred}) ${cappedNote}`);
+  const metric = (name: string) => pg.locator(`[data-metric="${name}"]`).textContent();
+  await animate.click();
+  check("6h.19 Animate is a toggle with aria-pressed", (await animate.getAttribute("aria-pressed")) === "true");
+  const measured = await pg.waitForFunction(() => {
+    const text = (name: string) => document.querySelector(`[data-metric="${name}"]`)?.textContent ?? "-";
+    return Number(text("fps")) > 0 && / ms$/.test(text("update")) && Number(text("updates")) > 0 && / ms$/.test(text("worst-frame"))
+      && /^\d+$/.test(text("long-frames")) && Number(text("nodes").replace(/,/g, "")) > 0 && Number(text("dom-nodes").replace(/,/g, "")) > 0
+      && (document.querySelector("[data-frames] path")?.getAttribute("d") ?? "").startsWith("M");
+  }, null, { timeout: 15000 }).then(() => true, () => false);
+  const readings = Object.fromEntries(await Promise.all(["fps", "update", "updates", "worst-frame", "long-frames", "nodes", "dom-nodes", "points"].map(async (name) => [name, await metric(name)])));
+  check("6h.10 animate runs and the panel shows a measured value for each metric", measured && readings.points === hundred, JSON.stringify(readings));
+  const swept = await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") !== full, fullRange, { timeout: 5000 }).then(() => true, () => false);
+  check("6h.21 Animate sweeps the same range the control shows", swept && (await datesText()) !== fullRange, await datesText());
+  await animate.click();
+  check("6h.22 a second click stops Animate", (await animate.getAttribute("aria-pressed")) === "false");
+  await reset.evaluate((button: HTMLButtonElement) => button.click());
+  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") === full, fullRange, { timeout: 5000 }).catch(() => {});
+  const counted = () => pg.evaluate(() => {
+    const shown = (name: string) => Number((document.querySelector(`[data-metric="${name}"]`)?.textContent ?? "").replace(/,/g, ""));
+    return { svg: shown("nodes"), svgPage: document.querySelectorAll("[data-chart] *").length, dom: shown("dom-nodes"), domPage: document.querySelectorAll("*").length };
+  });
+  await pg.waitForFunction(() => Number((document.querySelector('[data-metric="nodes"]')?.textContent ?? "").replace(/,/g, "")) === document.querySelectorAll("[data-chart] *").length, null, { timeout: 5000 }).catch(() => {});
+  const nodeCounts = await counted();
+  check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > hundredPoints && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
+  const hud = pg.locator("aside[data-hud]");
+  const toggle = hud.locator("button[aria-controls]");
+  await pg.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const pinned = await hud.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { style: getComputedStyle(element).position, live: element.getAttribute("aria-live"), right: innerWidth - box.right, bottom: innerHeight - box.bottom };
+  });
+  check("6h.23 the panel stays at the bottom right while scrolling and does not announce each frame", pinned.style === "fixed" && pinned.live === "off" && pinned.right >= 0 && pinned.right < 40 && pinned.bottom >= 0 && pinned.bottom < 40, JSON.stringify(pinned));
+  const expandedHeight = (await hud.boundingBox())!.height;
+  await toggle.click();
+  await pg.waitForSelector("#insights-metrics", { state: "detached" });
+  const collapsedHeight = (await hud.boundingBox())!.height;
+  check("6h.24 the panel collapses to one line with FPS", (await toggle.getAttribute("aria-expanded")) === "false" && collapsedHeight < 40 && collapsedHeight < expandedHeight && Number(await metric("fps")) > 0, `${expandedHeight} -> ${collapsedHeight} fps=${await metric("fps")}`);
+  await toggle.focus();
+  await pg.keyboard.press("Enter");
+  await pg.waitForSelector("#insights-metrics");
+  check("6h.25 Enter on the focused toggle expands the panel again", (await toggle.getAttribute("aria-expanded")) === "true" && (await metric("points")) === hundred, `${await toggle.getAttribute("aria-expanded")} ${await metric("points")}`);
   await pg.locator("button", { hasText: /^1x$/ }).click();
-  await pg.waitForFunction((text) => document.querySelector("[data-points]")?.textContent === text, String(stress), { timeout: 10000 });
+  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, stress.toLocaleString("en-US"), { timeout: 10000 });
+  await pg.setViewportSize({ width: 390, height: 800 });
+  await pg.evaluate(() => window.scrollTo(0, 0));
+  await dates.click();
+  await pg.waitForSelector("#insights-dates:popover-open");
+  const narrow = await pg.evaluate(() => {
+    const inside = (selector: string) => { const box = document.querySelector(selector)!.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; };
+    return { overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hud: inside("aside[data-hud]"), dialog: inside("#insights-dates"), animate: inside("button[data-animate]") };
+  });
+  check("6h.26 at 390 px nothing scrolls sideways and the panel, the range dialog and Animate fit", narrow.overflow <= 0 && narrow.hud && narrow.dialog && narrow.animate, JSON.stringify(narrow));
+  await pg.keyboard.press("Escape");
   check("6h.11 no console error and no hydration mismatch", errors.length === 0, errors.join(" | "));
   await pg.close();
 });
@@ -1077,7 +1319,16 @@ await step("6i. report and canvas", async () => {
     { timeout: 2000 },
   ).then(() => true, () => false);
   check("6i.6 the second page gets the move over Live", seen, `${grip.id} in B: ${await card(B).getAttribute("style")}`);
-  check("6i.7 no console error and no hydration mismatch on /report and /canvas", errors.length === 0, errors.join(" | "));
+  await A.locator('[aria-label="Note text"]').fill("e2e note");
+  await A.locator("button", { hasText: /^Add note$/ }).click();
+  const note = A.locator("[data-canvas] [data-id^='note-']", { hasText: "e2e note" });
+  await note.waitFor({ timeout: 5000 });
+  await note.locator("button").click();
+  await note.waitFor({ state: "detached", timeout: 5000 });
+  await A.waitForTimeout(300);
+  const noteErrors = await A.locator("[data-canvas] .error").allTextContents();
+  check("6i.7 a note is added and removed with no error message", noteErrors.length === 0, noteErrors.join(" | "));
+  check("6i.8 no console error and no hydration mismatch on /report and /canvas", errors.length === 0, errors.join(" | "));
   await A.close();
   await B.close();
 });
@@ -1137,7 +1388,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   const html = await (await page.request.get(base + shared)).text();
   const titles = [...html.matchAll(/class="row-title" href="[^"]*">([^<]*)</g)].map((m) => m[1]);
   check("6h.11 a URL with q and label renders the filtered list on the server",
-    titles.length > 0 && titles.length < 200 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
+    titles.length > 0 && titles.length < 2000 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
     String(titles.length));
   const mine = await (await page.request.get(base + "/my?label=feature")).text();
   const mineRows = [...mine.matchAll(/class="row" data-id="([^"]*)"/g)].length;
@@ -1170,6 +1421,24 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   await page.waitForSelector(".row");
   check("6h.16 back from an issue shows the filtered list",
     (await page.inputValue(".filter")) === "router" && (await page.locator(".row").count()) === count, String(await page.locator(".row").count()));
+  await page.evaluate(() => {
+    const shown: string[] = ((window as any).__issueShownAt = []);
+    let before = !!document.querySelector(".issue-title");
+    new MutationObserver(() => {
+      const now = !!document.querySelector(".issue-title");
+      if (now && !before) shown.push(location.pathname + location.search);
+      before = now;
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+  await page.locator(".row .row-title").first().click();
+  await page.waitForURL("**/w/stress/issue/**", { waitUntil: "commit" });
+  await page.goBack({ waitUntil: "commit" });
+  await page.waitForURL("**" + shared, { waitUntil: "commit" });
+  await page.waitForFunction(() =>
+    !!document.querySelector(".row") && !document.querySelector(".issue-title") && !document.documentElement.hasAttribute("data-yuka-nav"));
+  const shownAt: string[] = await page.evaluate(() => (window as any).__issueShownAt);
+  check("6h.27 back at once from an issue never shows the issue page under the list URL",
+    shownAt.every((url) => url.includes("/issue/")) && (await page.locator(".row").count()) === count, shownAt.join(" "));
 });
 
 await step("7a. streaming", async () => {
@@ -1240,7 +1509,7 @@ await step("7b. start strategies", async () => {
       const related = document.querySelector("[class^=related_]") as Element;
       const box = related.getBoundingClientRect();
       return {
-        counter: handler(".counter-button", "click"),
+        navProgress: handler("[data-nav-progress]", "animationstart"),
         props: handler(".props select", "change"),
         io: ((window as any).__ioFired as { cls: string; t: number }[]).filter((x) => /related/.test(x.cls)),
         relatedTop: Math.round(box.top),
@@ -1271,16 +1540,14 @@ await step("7b. start strategies", async () => {
     props: (document.querySelector(".props") as any)?.__tag === "server",
   }));
   check("7b.7 slot nodes inside Issue_props are the server nodes", slot.related && slot.props && slot.total === 4 && slot.items === 4, JSON.stringify(slot));
-  const counterText = async () => ((await p.locator(".counter-button").textContent()) ?? "").trim();
-  const countBefore = await counterText();
-  await p.locator(".counter-button").click();
-  await p.waitForTimeout(100);
-  const countAfter = await counterText();
-  check(
-    "7b.1 Counter (idle) started without interaction: click changes the count",
-    before.counter && countBefore !== countAfter,
-    `handler=${before.counter} "${countBefore}" -> "${countAfter}"`,
-  );
+  await p.route(base + "/", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  await p.locator('.nav-link[href="/"]').click();
+  const barShown = await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 }).then(() => true, () => false);
+  await p.waitForURL(base + "/");
+  check("7b.1 Nav_progress (idle) started without interaction: a slow navigation shows the bar", before.navProgress && barShown, `handler=${before.navProgress} shown=${barShown}`);
   check("7b.8 no errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
 });
@@ -1361,9 +1628,9 @@ await step("7f. early start", async () => {
       },
     });
     const poll = setInterval(() => {
-      const b = document.querySelector(".new-issue-button") as any;
+      const b = document.querySelector("#theme-button") as any;
       if (b && b.__yuka_click) {
-        w.__newIssueStarted = Math.round(performance.now());
+        w.__themeMenuStarted = Math.round(performance.now());
         clearInterval(poll);
       }
     }, 5);
@@ -1372,14 +1639,14 @@ await step("7f. early start", async () => {
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
   await p.waitForTimeout(300);
   const r = await p.evaluate(() => ({
-    started: (window as any).__newIssueStarted as number | undefined,
+    started: (window as any).__themeMenuStarted as number | undefined,
     fills: (window as any).__fills as number[],
   }));
   const last = Math.max(...r.fills, 0);
   check(
-    "7f eager island starts before the last fill chunk arrives",
+    "7f an island that starts at idle starts before the last fill chunk arrives",
     r.fills.length >= 2 && r.started !== undefined && r.started + 100 < last,
-    `New_issue started at ${r.started}ms, fills at ${r.fills.join(",")}ms`,
+    `Theme_menu started at ${r.started}ms, fills at ${r.fills.join(",")}ms`,
   );
   await ctx.close();
 });
@@ -1391,13 +1658,13 @@ await step("7g. generated island registry", async () => {
   const errors: string[] = [];
   p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   p.on("pageerror", (e) => errors.push(String(e)));
-  const islandModuleRe = /\/(counter|new_issue|issue_list|comments|issue_props|related)(-[^/]*)?\.js$/;
+  const islandModuleRe = /\/(nav_progress|new_issue|issue_list|comments|issue_props|related)(-[^/]*)?\.js$/;
   const seen: string[] = [];
   p.on("request", (r) => {
     const m = islandModuleRe.exec(new URL(r.url()).pathname);
     if (m) seen.push(m[1]);
   });
-  const lazyNames = () => ["comments", "issue_props", "related"].filter((n) => seen.includes(n)).join(",");
+  const lazyNames = () => ["comments", "issue_props", "related", "new_issue"].filter((n) => seen.includes(n)).join(",");
   const has = (sel: string, ev: string) =>
     p.evaluate(([s, e]) => !!(document.querySelector(s) as any)?.["__yuka_" + e], [sel, ev]);
 
@@ -1405,13 +1672,13 @@ await step("7g. generated island registry", async () => {
   await p.waitForSelector("[class^=related-list_] li");
   await p.waitForTimeout(500);
 
-  check("7g.1 eager New_issue hydrated", await has(".new-issue-button", "click"));
-  check("7g.2 eager Counter (Idle) hydrated", await has(".counter-button", "click"));
+  check("7g.1 lazy New_issue not started before interaction", !(await has(".new-issue-button", "click")));
+  check("7g.2 eager Nav_progress (Idle) hydrated", await has("[data-nav-progress]", "animationstart"));
   check("7g.5 lazy Comments (Load) hydrated", await has(".comment-input", "input"));
   check("7g.7 lazy Issue_props not started before interaction", !(await has(".props select", "change")));
   check("7g.8 only the comments chunk is requested before interaction", lazyNames() === "comments", lazyNames());
 
-  check("7g.9 non-lazy Counter and New_issue modules requested at load", seen.includes("counter") && seen.includes("new_issue"), seen.join(","));
+  check("7g.9 non-lazy Nav_progress module requested at load", seen.includes("nav_progress"), seen.join(","));
   check("7g.9b Issue_list module not requested on a page without it", !seen.includes("issue_list"), seen.join(","));
 
   await p.locator(".props .property").first().hover();
@@ -1425,14 +1692,10 @@ await step("7g. generated island registry", async () => {
   await p.locator("[class^=related_]").scrollIntoViewIfNeeded();
   await p.waitForTimeout(400);
   check("7g.13 related chunk requested after scroll", lazyNames() === "comments,issue_props,related", lazyNames());
-  const c0 = ((await p.locator(".counter-button").textContent()) ?? "").trim();
-  await p.locator(".counter-button").click();
-  await p.waitForTimeout(100);
-  check("7g.3 Counter is live: click changes the count", ((await p.locator(".counter-button").textContent()) ?? "").trim() !== c0);
   await p.locator("body").click({ position: { x: 5, y: 5 } });
   await p.keyboard.press("c");
   await p.waitForSelector(".dialog", { timeout: 2000 });
-  check("7g.4 New_issue is live: c opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue");
+  check("7g.4 c starts New_issue and opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue" && seen.includes("new_issue"), seen.join(","));
   await p.keyboard.press("Escape");
   await p.locator(".comment-input").fill("probe");
   check("7g.6 Comments is live: send enabled after typing", !(await p.locator(".comment-box button.primary").isDisabled()));
@@ -1448,6 +1711,14 @@ await step("7g. generated island registry", async () => {
     const chunkFiles = requested.filter((u) => /\/(comments|issue_props|related)-[^/]*\.js$/.test(u));
     check("7g.15 bundle: three distinct lazy chunks, not main.js", new Set(chunkFiles).size === 3 && !chunkFiles.some((u) => u.endsWith("/main.js")), chunkFiles.join(","));
   }
+  await p.route(base + "/", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  await p.locator('.nav-link[href="/"]').click();
+  const barShown = await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 }).then(() => true, () => false);
+  await p.waitForURL(base + "/");
+  check("7g.3 Nav_progress is live: a slow navigation shows the bar", barShown);
   check("7g.16 no 'no entry for island' or other errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
 });
@@ -1511,7 +1782,7 @@ await step("7i. modulepreload", async () => {
   await p.waitForTimeout(500);
   const pre = await preloads();
   const preNames = pre.map((l) => nameOf(l.path)).filter((n) => n !== "chunk").sort();
-  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["counter", "nav_progress", "new_issue", "theme_menu"]), JSON.stringify(pre));
+  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["nav_progress", "theme_menu"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
   else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/_yuka\/app\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
@@ -1541,16 +1812,30 @@ await step("7i. modulepreload", async () => {
 
   const r = await ctx.newPage();
   const rReqs: string[] = [];
+  const warnings: string[] = [];
+  r.on("console", (m) => m.type() === "warning" && warnings.push(m.text()));
   r.on("request", (x) => rReqs.push(nameOf(new URL(x.url()).pathname)));
+  const cdp = await ctx.newCDPSession(r);
+  await cdp.send("Network.enable");
+  const sheetLoads: string[] = [];
+  cdp.on("Network.responseReceived", (e: any) => {
+    if (/issue_list[^/]*\.css$/.test(new URL(e.response.url).pathname))
+      sheetLoads.push(e.response.fromDiskCache || e.response.fromPrefetchCache ? "cache" : "network");
+  });
   await r.goto(base + "/issue/YUK-3", { waitUntil: "networkidle" });
   await r.waitForSelector("[class^=related-list_] li");
   await r.evaluate(() => ((window as any).__nav = "alive"));
   check("7i.10 Issue_list not loaded before navigation", !rReqs.includes("issue_list"));
+  await r.locator('a[href="/"]').first().hover();
+  await r.waitForTimeout(3500);
+  check("7i.10b a hover on a link warms the chunk and the sheet of the target before the click", rReqs.includes("issue_list") && sheetLoads.join(",") === "network", `${rReqs.filter((n) => n.includes("issue_list")).join(",")} sheet=${sheetLoads.join(",")}`);
+  check("7i.10c no preload warning", !warnings.some((w) => /preload/i.test(w)), warnings.join(" | "));
   await r.locator('a[href="/"]').first().click();
   await r.waitForSelector(".row");
   await r.waitForTimeout(500);
   check("7i.11 navigation was client-side", (await r.evaluate(() => (window as any).__nav)) === "alive");
-  check("7i.12 new non-lazy island module requested once after navigation", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
+  check("7i.12 new non-lazy island module requested once", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
+  check("7i.12b the sheet of the new page comes from the HTTP cache", sheetLoads[0] === "network" && sheetLoads.slice(1).every((l) => l === "cache"), sheetLoads.join(","));
   const total = await r.locator(".row").count();
   await r.fill(".filter", "keyboard");
   await r.waitForTimeout(100);
@@ -1710,6 +1995,7 @@ await step("7l. long comment threads", async () => {
 await step("7k. markdown and code style", async () => {
   await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
   await page.waitForSelector(".comment-input");
+  await routerLoaded(page);
   const markdown = await page.evaluate(() => ({
     heading: document.querySelector(".issue-description h4")?.textContent,
     cells: document.querySelectorAll(".issue-description td").length,

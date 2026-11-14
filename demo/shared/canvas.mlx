@@ -8,7 +8,7 @@ let zooms = [ 25; 50; 75; 100; 150 ]
 let clamp low high value = max low (min high value)
 let scale_text percent = px (percent / 100) ^ "." ^ (if percent mod 100 < 10 then "0" else "") ^ px (percent mod 100)
 
-let[@client] make ~(workspace : Workspace.t) () =
+let[@client] make ~(workspace : Workspace.t) ~children () =
   let live = Yuka.Live.use Topics.board (fun () -> workspace) in
   let items = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:[]) in
   let spots =
@@ -24,7 +24,7 @@ let[@client] make ~(workspace : Workspace.t) () =
   let error : string option Yuka.State.t = Yuka.State.make None in
   let grab = ref None and panning = ref None in
   let report = function
-    | Ok (Ok _) -> ()
+    | Ok (Ok _) | Ok (Error (Yuka.Status.Network "cancelled")) -> ()
     | Ok (Error status) -> Yuka.State.set error (Some (Yuka.Status.error_to_string status))
     | Error message -> Yuka.State.set error (Some message)
   in
@@ -137,6 +137,10 @@ let[@client] make ~(workspace : Workspace.t) () =
     <header class_="page-header">
       <span>"Canvas"</span>
       <span class_="group-count">(Yuka.int (List.length (Yuka.State.get items)))</span>
+      (if List.length (List.filter (fun (item : Board.item) -> match item.content with Card _ -> true | Note _ -> false) (Yuka.State.get items))
+          >= Board.card_limit
+       then <span class_=Css.limit data_limit="true">(Yuka.text ("The board shows at most " ^ px Board.card_limit ^ " issues"))</span>
+       else Yuka.empty)
       (Yuka.hole (fun () ->
          match Yuka.Live.status live with
          | Yuka.Status.Ready { stale = true; _ } -> <span class_="offline">"Offline"</span>
@@ -168,4 +172,5 @@ let[@client] make ~(workspace : Workspace.t) () =
            (fun () -> Array.of_list (Yuka.State.get items)) item)
       </div>
     </div>
+    <footer class_=Css.facts>children</footer>
   </div>

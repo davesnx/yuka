@@ -4,6 +4,12 @@
  (package yuka-dream)
  (libraries alcotest demo_app demo_shared yuka yuka-dream dream lwt lwt.unix))
 
+(test
+ (name store_pg)
+ (modules store_pg)
+ (package yuka-dream)
+ (libraries alcotest demo_app demo_shared yuka postgresql lwt lwt.unix unix))
+
 (executable
  (name pages)
  (modules pages)

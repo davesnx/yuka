@@ -97,7 +97,11 @@ let[@client] make ~(initial : int) () =
 ```
 
 `server/dune` writes the server routes (`Yuka_routes.app`) and the
-sheets of every `[%yuka.css]` (`Yuka_css.sheets`):
+sheets of every `[%yuka.css]` (`Yuka_css.sheets`). A rule that runs
+`yuka css` or `yuka islands` over a directory needs `(sandbox always)`:
+without it, the command reads the build directory of `shared`, where
+dune deletes and writes other files during the same build, and the build
+can fail now and then:
 
 ```
 (executable
@@ -117,7 +121,8 @@ sheets of every `[%yuka.css]` (`Yuka_css.sheets`):
 (rule
  (targets yuka_css.ml)
  (deps
-  (source_tree ../shared))
+  (source_tree ../shared)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_css.ml
@@ -157,10 +162,16 @@ let read file = In_channel.with_open_bin file In_channel.input_all
 let () =
   let dir = "_build/default/client/out" in
   let assets =
-    Yuka.Server.modules ~dir ~entry:"client/main.js"
-      ~manifest:(read "_build/default/client/yuka_islands.json")
-      ~packages:(Array.to_list (Sys.readdir (Filename.concat dir "node_modules")))
-      ~digest:(Yuka_dream.tree_digest dir)
+    match
+      Yuka.Server.modules ~dir ~entry:"client/main.js"
+        ~manifest:(read "_build/default/client/yuka_islands.json")
+        ~packages:(Array.to_list (Sys.readdir (Filename.concat dir "node_modules")))
+        ~digest:(Yuka_dream.tree_digest dir)
+    with
+    | Ok assets -> assets
+    | Error message ->
+        prerr_endline message;
+        exit 1
   in
   let config =
     Yuka.Server.config ~assets ~css:Yuka_css.sheets
@@ -193,7 +204,8 @@ yuka.native ... not compatible with melange"):
 (rule
  (targets yuka_islands.ml)
  (deps
-  (source_tree ../shared))
+  (source_tree ../shared)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_islands.ml
@@ -202,7 +214,8 @@ yuka.native ... not compatible with melange"):
 (rule
  (targets yuka_islands.json)
  (deps
-  (source_tree ../shared))
+  (source_tree ../shared)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_islands.json
@@ -309,10 +322,16 @@ assets (build it before you bundle):
 
 ```ocaml
 let assets =
-  Yuka.Server.bundle ~dir:"_build/default/client/out/client"
-    ~entry:"bundle/main.js"
-    ~manifest:(read "_build/default/client/yuka_islands.json")
-    ~metafile:(read "_build/default/client/meta.json")
+  match
+    Yuka.Server.bundle ~dir:"_build/default/client/out/client"
+      ~entry:"bundle/main.js"
+      ~manifest:(read "_build/default/client/yuka_islands.json")
+      ~metafile:(read "_build/default/client/meta.json")
+  with
+  | Ok assets -> assets
+  | Error message ->
+      prerr_endline message;
+      exit 1
 ```
 
 ## Next

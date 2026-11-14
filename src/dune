@@ -13,6 +13,7 @@
   navigation_state
   navigation_stub
   optimistic
+  prefetch
   printer
   router
   server

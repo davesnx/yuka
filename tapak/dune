@@ -1,0 +1,4 @@
+(library
+ (name yuka_tapak)
+ (public_name yuka-tapak)
+ (libraries yuka tapak cows eio eio.unix bytesrw http logs))

@@ -1,3 +1,7 @@
 (cram
  (package yuka)
  (deps %{bin:yuka}))
+
+(cram
+ (applies_to dune-rules)
+ (deps ../../docs/getting-started.md))

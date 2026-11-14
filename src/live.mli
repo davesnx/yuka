@@ -14,7 +14,9 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
       the state (the current one of the handler's node, else the topic's
       loader) and, inside an island, writes it in the page with
       a CSRF token for the socket; the client starts from it with no
-      wait. A page that has such a use holds a per-session token and
+      wait. When the request has no session, the page holds no token:
+      the uses get [Failed Forbidden] in the browser and the client opens
+      no socket. A page that has such a use holds a per-session token and
       state that [allow] passed for this request, so its route must not
       use a shared cache (the cycle sends [private, no-store] when the
       shell has such a use), and it cannot be prerendered.

@@ -27,8 +27,9 @@ module Test_adapter = struct
     Async.return (read 0)
 
   let session (r : request) =
-    if App.header r "x-no-session" <> None then failwith "no session middleware" else "cycle-session"
-  let csrf_token (_ : request) = "cycle-token"
+    if App.header r "x-no-session" <> None then None else Some "cycle-session"
+  let csrf_token (r : request) =
+    if App.header r "x-no-session" <> None then None else Some "cycle-token"
   let verify_csrf (_ : request) token = Async.return (token = "cycle-token")
   let upgrade (_ : request) _ = Async.return { status = 101; headers = []; body = "upgraded" }
 
@@ -109,9 +110,12 @@ let logged = ref []
 let log_hook = ref (fun (_ : Server.log_level) m -> logged := m :: !logged)
 let config_with = Server.config ~log:(fun level m -> !log_hook level m)
 
+let ok = function Ok v -> v | Error m -> Alcotest.fail m
+
 let modules =
-  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"Counter":"./counter.js"}|} ~digest:"d1"
-    ~packages:[ "pkg" ]
+  ok
+    (Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"Counter":"./counter.js"}|} ~digest:"d1"
+       ~packages:[ "pkg" ])
 
 let config =
   config_with ~assets:modules ~public:[ ("/static", "pub") ] ~styles:[ "/static/s.css" ] ()
@@ -183,16 +187,31 @@ let assets =
             | _ -> Alcotest.failf "prefix %S accepted" prefix
             | exception Invalid_argument _ -> ())
           [ "/"; ""; "//" ] );
-    ( "a bad manifest names Yuka.Server.modules",
+    ( "a bad manifest is an Error that names Yuka.Server.modules",
       fun () ->
-        match Server.modules ~dir:"js" ~entry:"main.js" ~manifest:"[]" ~packages:[] ~digest:"" with
-        | _ -> Alcotest.fail "accepted"
-        | exception Invalid_argument m -> check_true m (String.starts_with ~prefix:"Yuka.Server.modules:" m) );
-    ( "a metafile without outputs is rejected",
+        let error manifest =
+          match Server.modules ~dir:"js" ~entry:"main.js" ~manifest ~packages:[] ~digest:"" with
+          | Ok _ -> Alcotest.failf "manifest %S accepted" manifest
+          | Error m -> m
+        in
+        Alcotest.(check string) "not an object" "Yuka.Server.modules: manifest is not an object" (error "[]");
+        Alcotest.(check string) "entry not a string" "Yuka.Server.modules: manifest entry A is not a string"
+          (error {|{"A":1}|});
+        let m = error {|{"A":"a.js"|} in
+        check_true m (String.starts_with ~prefix:"Yuka.Server.modules: bad manifest JSON: " m) );
+    ( "a bad metafile or manifest is an Error that names Yuka.Server.bundle",
       fun () ->
-        match Server.bundle ~dir:"b" ~entry:"main.js" ~manifest:"{}" ~metafile:"{}" with
-        | _ -> Alcotest.fail "accepted"
-        | exception Invalid_argument m -> check_true "context" (contains m "metafile") );
+        let error ?(manifest = "{}") metafile =
+          match Server.bundle ~dir:"b" ~entry:"main.js" ~manifest ~metafile with
+          | Ok _ -> Alcotest.failf "metafile %S accepted" metafile
+          | Error m -> m
+        in
+        Alcotest.(check string) "no outputs" "Yuka.Server.bundle: metafile has no outputs object" (error "{}");
+        Alcotest.(check string) "not an object" "Yuka.Server.bundle: metafile is not an object" (error "[]");
+        let m = error {|{"outputs":{"main.js":{}|} in
+        check_true m (String.starts_with ~prefix:"Yuka.Server.bundle: bad metafile JSON: " m);
+        Alcotest.(check string) "bad manifest" "Yuka.Server.bundle: manifest is not an object"
+          (error ~manifest:"[]" {|{"outputs":{}}|}) );
     ( "asset miss is 404 no-store and never routed",
       fun () ->
         let r = get "/_yuka/app/nope.js" in
@@ -272,8 +291,9 @@ let assets =
     ( "bundle outputs other than the entry are immutable",
       fun () ->
         let bundle =
-          Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:"{}"
-            ~metafile:{|{"outputs":{"bundle/main.js":{"entryPoint":"main.js"},"bundle/chunk-X1.js":{}}}|}
+          ok
+            (Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:"{}"
+               ~metafile:{|{"outputs":{"bundle/main.js":{"entryPoint":"main.js"},"bundle/chunk-X1.js":{}}}|})
         in
         let config = config_with ~assets:bundle () in
         let r = get ~config "/_yuka/app/bundle/chunk-X1.js" in
@@ -283,7 +303,7 @@ let assets =
     ( "a bundle preloads the static imports of each island and of the entry once",
       fun () ->
         let bundle =
-          Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:{|{"Counter":"counter.js","Related":"related.js"}|}
+          ok @@ Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:{|{"Counter":"counter.js","Related":"related.js"}|}
             ~metafile:
               {|{"outputs":{
                 "bundle/main.js":{"entryPoint":"main.js","imports":[{"path":"bundle/chunk-E.js","kind":"import-statement"},{"path":"bundle/counter-1.js","kind":"dynamic-import"},{"path":"bundle/related-1.js","kind":"dynamic-import"}]},
@@ -521,7 +541,7 @@ let head_and_rules =
         let r = get "/plain" in
         check_status r 200;
         check_header r "content-type" [ "text/html; charset=utf-8" ];
-        check_header r "vary" [ "Yuka-Navigate" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
         check_header r "cache-control" [ "no-store" ];
         check_header r "x-frame-options" [ "DENY" ] );
     ( "header inheritance and override by name",
@@ -545,9 +565,9 @@ let head_and_rules =
     ( "vary values are joined",
       fun () ->
         let r = get "/varied" in
-        check_header r "vary" [ "Cookie, Yuka-Navigate" ];
+        check_header r "vary" [ "Cookie, Yuka-Navigate, Yuka-Prefetch" ];
         let r = get "/plain" in
-        check_header r "vary" [ "Yuka-Navigate" ] );
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
     ( "an Action is always no-store",
       fun () ->
         let r = get ~meth:`DELETE ~headers:[ ("sec-fetch-site", "same-origin") ] "/feed.xml" in
@@ -580,10 +600,10 @@ let guards =
         check_header r "cache-control" [ "no-store" ];
         check_header r "x-frame-options" [ "DENY" ];
         check_events [ "outer" ] );
-    ( "a prefetch gets the same answer as a navigation",
+    ( "a prefetch allowed by the route gets the same answer as a navigation",
       fun () ->
         let plain = get ~headers:[ ("yuka-navigate", "-") ] "/team/a/1" in
-        let pre = get ~headers:[ ("yuka-navigate", "-"); ("yuka-prefetch", "1") ] "/team/a/1" in
+        let pre = get ~headers:[ ("yuka-navigate", "-"); ("yuka-prefetch", "hover") ] "/team/a/1" in
         check_status pre plain.status;
         Alcotest.(check string) "same body" plain.body pre.body );
     ( "a stop Redirect stays on the site and needs a clean location",
@@ -743,7 +763,7 @@ let reviewed =
         let ann = Server.Testing.context ~header:(function "x-user" -> Some "ann" | _ -> None) ~session:"s" () in
         ignore
           (Server.Testing.live_run ~node ~sleep:(fun _ -> fst3 (Async.make ())) ann
-             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t") connection);
+             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t") connection);
         Server.Live.publish ~node App.mine "ann" "published on the node";
         let page handler =
           match Async.status handler with Async.Done (r : reply) -> r.body | _ -> Alcotest.fail "pending"
@@ -762,7 +782,37 @@ let reviewed =
         in
         check_status r 500;
         Alcotest.(check int) "one log" 1 (List.length !logged);
-        check_true "names the session" (contains (List.hd !logged) "no session") );
+        check_true "names the session" (contains (List.hd !logged) "no session");
+        check_true "names the middleware" (contains (List.hd !logged) "the live socket needs session middleware") );
+    ( "an action reads no session as None",
+      fun () ->
+        let r =
+          get ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example");
+                ("x-user", "ana"); ("x-no-session", "1") ]
+            ~body:"null" "/_yuka/action/whoami"
+        in
+        check_status r 200;
+        Alcotest.(check string) "body" {|{"ok":"ana - POST /_yuka/action/whoami"}|} r.body;
+        Alcotest.(check (list string)) "no log" [] !logged );
+    ( "GET /_yuka/csrf without a session is a 500 and a log",
+      fun () ->
+        let r = get ~headers:[ ("sec-fetch-site", "same-origin"); ("x-no-session", "1") ] "/_yuka/csrf" in
+        check_status r 500;
+        Alcotest.(check string) "body" "Internal Server Error" r.body;
+        Alcotest.(check int) "one log" 1 (List.length !logged);
+        check_true "names the path and the middleware"
+          (contains (List.hd !logged) "/_yuka/csrf" && contains (List.hd !logged) "session middleware") );
+    ( "a page with Live.use and no session writes the token as an error",
+      fun () ->
+        let r = get ~headers:[ ("x-user", "ann"); ("x-no-session", "1") ] "/live" in
+        check_status r 200;
+        check_true "the state" (contains r.body "data secret of ann");
+        check_true "no token"
+          (contains r.body {|data-yuka-answer="l:csrf">{"error":{"kind":"forbidden"}}</script>|});
+        Alcotest.(check (list string)) "one log"
+          [ "page with a Live.use: the request has no session; live data needs session middleware" ] !logged );
     ( "a page with live state under a shared cache rule is sent private, no-store",
       fun () ->
         let r = get ~headers:[ ("x-user", "ann") ] "/live-public" in
@@ -803,7 +853,7 @@ let reviewed =
         in
         ignore
           (Server.Testing.live_run ~sleep:(fun _ -> fst3 (Async.make ())) (Server.Testing.context ~session:"s" ())
-             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> "t") connection);
+             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t") connection);
         check_true "in the config log" (List.exists (fun m -> contains m "boom secret") !logged) );
     ( "the handler's live node marks its action answers",
       fun () ->
@@ -1100,7 +1150,7 @@ let navigation =
         check_header r "yuka-build" [ build ];
         check_header r "yuka-title" [ "Plain" ];
         check_header r "content-type" [ "text/html; charset=utf-8" ];
-        check_header r "vary" [ "Yuka-Navigate" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
         check_header r "x-frame-options" [ "DENY" ];
         Alcotest.(check string) "body" "<p>plain</p>" r.body );
     ( "the deepest shared layout is the outlet",
@@ -1156,7 +1206,7 @@ let navigation =
         let app = Cycle_server.Yuka_routes.app in
         let with_assets ~manifest ~digest =
           config_with
-            ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest)
+            ~assets:(ok (Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest))
             ()
         in
         let other = with_assets ~manifest:{|{"Counter":"./related.js"}|} ~digest:"d1" in
@@ -1483,6 +1533,95 @@ let dev =
             check_true "no script in a navigation answer" (not (contains full.body "EventSource"))) );
   ]
 
+let prefetch =
+  let nav ?(trigger = []) target = get ~headers:([ ("yuka-navigate", "-") ] @ trigger) target in
+  let trigger v = [ ("yuka-prefetch", v) ] in
+  let refused r level =
+    check_status r 204;
+    check_header r "yuka-prefetch" [ level ];
+    Alcotest.(check string) "no body" "" r.body;
+    check_header r "cache-control" [ "no-store" ];
+    check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+    check_events []
+  in
+  let highest pages =
+    let app =
+      Server.Generated.app ~build:"b" ~headers:[] ~prerender:[]
+        ~pages:(List.map (fun prefetch -> Server.Generated.rules ~headers:[] ?prefetch ~prerender:false ()) pages)
+        ~find:Cycle_shared.Routes.find ~resolve:Cycle_server.Yuka_routes.resolve
+        ~missing:{ layers = []; not_found = Server.Generated.default_not_found; error = Server.Generated.default_error }
+    in
+    let page = Cycle.handler config app (request "/plain") in
+    match Async.status page with Async.Done r -> r.body | _ -> Alcotest.fail "no page"
+  in
+  [
+    ( "a visible trigger on a Hover route: 204 with the level, before guards and loaders",
+      fun () -> refused (nav ~trigger:(trigger "visible") "/team/a/1") "hover" );
+    ( "a trajectory trigger on a Hover route: 204 hover, no guard or loader",
+      fun () -> refused (nav ~trigger:(trigger "trajectory") "/team/a/1") "hover" );
+    ( "a trajectory trigger on a Trajectory or a Visible route is answered",
+      fun () ->
+        check_status (nav ~trigger:(trigger "trajectory") "/plain") 200;
+        check_status (nav ~trigger:(trigger "trajectory") "/plain-public") 200 );
+    ( "a route with no ~prefetch in the tree has level Trajectory",
+      fun () -> refused (nav ~trigger:(trigger "visible") "/plain") "trajectory" );
+    ( "a hover trigger on a Hover route is answered",
+      fun () ->
+        let r = nav ~trigger:(trigger "hover") "/team/a/1" in
+        check_status r 200;
+        check_events [ "outer"; "inner"; "squad start"; "profile start" ] );
+    ( "any trigger on an Off route: 204 off",
+      fun () ->
+        refused (nav ~trigger:(trigger "hover") "/team/a/form") "off";
+        refused (nav ~trigger:(trigger "visible") "/team/a/form") "off" );
+    ( "no Yuka-Prefetch is never refused",
+      fun () ->
+        check_status (nav "/team/a/form") 200;
+        check_status (get "/team/a/form") 200 );
+    ( "an unknown trigger counts as the most eager",
+      fun () ->
+        List.iter (fun v -> refused (nav ~trigger:(trigger v) "/team/a/1") "hover") [ "1"; ""; "off"; "Hover"; "idle" ];
+        check_status (nav ~trigger:(trigger "1") "/plain-public") 200;
+        check_status (nav ~trigger:(trigger "visible") "/plain-public") 200 );
+    ( "a prefetch of an endpoint or an action: 204 off, no guard or handler",
+      fun () ->
+        List.iter (fun v -> refused (nav ~trigger:(trigger v) "/team/a/json") "off") [ "hover"; "trajectory"; "visible" ];
+        refused (get ~meth:`POST ~headers:(trigger "hover") "/team/a/rename") "off" );
+    ( "an endpoint with no Yuka-Prefetch is answered",
+      fun () ->
+        check_status (nav "/team/a/json") 200;
+        check_events [ "outer"; "team json" ] );
+    ( "a redirect and a 404 are answered as today",
+      fun () ->
+        check_status (nav ~trigger:(trigger "visible") "/old") 308;
+        check_status (nav ~trigger:(trigger "visible") "/nowhere") 404 );
+    ( "a page answer varies on Yuka-Prefetch",
+      fun () ->
+        check_header (nav ~trigger:(trigger "hover") "/team/a/1") "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+        check_header (get "/plain") "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
+    ( "a prerendered file: a refused trigger gets 204, an allowed one the file",
+      fun () ->
+        let prerendered = config_with ~assets:modules ~prerendered:"pre" () in
+        let r = get ~config:prerendered ~headers:(trigger "visible") "/plain" in
+        check_status r 204;
+        Alcotest.(check (list string)) "no file" [] !file_calls;
+        let r = get ~config:prerendered ~headers:(trigger "hover") "/plain" in
+        Alcotest.(check string) "the file" "prerendered plain" r.body;
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
+    ( "the page prints the highest level of the tree",
+      fun () ->
+        check_true "visible" (contains (get "/plain").body {|<meta name="yuka-prefetch" content="visible">|});
+        check_true "in a navigation document"
+          (contains (get ~headers:[ ("Yuka-Navigate", "-") ] "/plain").body {|<meta name="yuka-prefetch" content="visible">|});
+        check_true "off" (contains (highest [ Some `Off; Some `Off ]) {|<meta name="yuka-prefetch" content="off">|});
+        check_true "no page route: off" (contains (highest []) {|<meta name="yuka-prefetch" content="off">|});
+        List.iter
+          (fun pages -> check_true "trajectory is not printed" (not (contains (highest pages) "yuka-prefetch")))
+          [ [ None ]; [ Some `Off; None ]; [ Some `Trajectory; Some `Off ] ];
+        check_true "hover" (contains (highest [ Some `Hover; Some `Off ]) {|<meta name="yuka-prefetch" content="hover">|});
+        check_true "visible wins" (contains (highest [ Some `Off; Some `Visible; None ]) {|content="visible"|}) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -1500,4 +1639,5 @@ let () =
       ("render", cases render);
       ("navigation", cases navigation);
       ("forms", cases forms);
+      ("prefetch", cases prefetch);
     ]

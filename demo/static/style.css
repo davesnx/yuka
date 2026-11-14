@@ -179,11 +179,12 @@ h1, h2, p { margin: 0; }
   display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px;
   background: var(--bg-sidebar); border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 6px; border-radius: 6px; font-weight: 600; }
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px 4px 6px; border-radius: 6px; font-weight: 600; }
+.brand-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .brand:hover { background: var(--bg-hover); }
 .logo { flex: none; }
 .workspaces {
-  display: flex; align-items: center; gap: 2px; min-width: 0;
+  display: flex; flex: none; align-items: center; gap: 2px;
   padding-left: 10px; border-left: 1px solid var(--border);
 }
 .workspace-link, .topbar-link {
@@ -200,6 +201,7 @@ h1, h2, p { margin: 0; }
 .topbar-end { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .topbar-tools { display: flex; align-items: center; gap: 2px; }
 .topbar-tools:empty { display: none; }
+.topbar-divider { flex: none; width: 1px; height: 28px; margin: 0 6px; background: var(--border); }
 .profile-avatar { width: 22px; height: 22px; border-radius: 50%; flex: none; }
 
 .sidebar {
@@ -213,17 +215,17 @@ h1, h2, p { margin: 0; }
   gap: 14px;
 }
 
+.version { padding: 0 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+a.version:hover { color: var(--text); }
 .nav { display: flex; flex-direction: column; gap: 1px; }
 .nav-link { padding: 6px 10px; border-radius: 6px; color: var(--muted); }
 .nav-link:hover { background: var(--bg-hover); color: var(--text); }
 .nav-link[aria-current=page] { background: var(--bg-selected); color: var(--text); }
 
-.sidebar-extra { margin-top: auto; padding: 5px 10px; }
-.counter-button {
-  font: inherit; color: var(--muted); background: none;
-  border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+.sidebar-extra {
+  margin-top: auto; padding: 5px 10px; display: flex; flex-direction: column; gap: 10px;
+  position: sticky; bottom: 12px; z-index: 20;
 }
-.counter-button:hover { color: var(--text); background: var(--bg-hover); }
 
 .main { flex: 1; min-width: 0; }
 
@@ -341,7 +343,6 @@ h1, h2, p { margin: 0; }
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer;
 }
 .new-issue-button:hover { border-color: var(--accent); }
-.sidebar-extra { display: flex; flex-direction: column; gap: 10px; }
 
 .toast {
   position: fixed; right: 19px; bottom: 19px; z-index: 30; max-width: 432px;
@@ -417,9 +418,10 @@ h1, h2, p { margin: 0; }
     width: auto; flex-direction: row; flex-wrap: wrap; align-items: center;
     border-right: 0; border-bottom: 1px solid var(--border);
   }
-  .nav { flex-direction: row; }
-  .sidebar-extra { margin-top: 0; margin-left: auto; flex-direction: row; align-items: center; }
-  .sidebar-extra > div { display: flex; align-items: center; gap: 10px; }
+  .nav { flex-direction: row; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .nav-link { white-space: nowrap; }
+  .version { order: 1; }
+  .sidebar-extra { order: 2; margin-top: 0; margin-left: auto; flex-direction: row; align-items: center; }
   .new-issue-button { width: auto; }
   .row .labels, .row-date { display: none; }
   .issue-layout { flex-direction: column; align-items: stretch; }

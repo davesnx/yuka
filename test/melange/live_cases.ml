@@ -374,6 +374,18 @@ let key_change () =
   check "new" "ready y" (show a);
   stop ()
 
+let token_error () =
+  set_body {|<script type="application/json" data-yuka-answer="l:csrf">{"error":{"kind":"forbidden"}}</script>|};
+  let a, stop_a = use "a" in
+  let b, stop_b = use "b" in
+  check "no socket" "0" (string_of_int (sockets ()));
+  check "no timer" "" (timers ());
+  check "no fetch" "" (fetched ());
+  check "the first use fails" "failed forbidden" (show a);
+  check "the second use fails" "failed forbidden" (show b);
+  stop_a ();
+  stop_b ()
+
 let all =
   List.map
     (fun (name, f) -> ("live: " ^ name, with_env f))
@@ -396,6 +408,7 @@ let all =
       ("optimistic with commit", optimistic_commit);
       ("optimistic while the socket is down syncs after the next sub", optimistic_while_down);
       ("a key change unsubscribes and subscribes", key_change);
+      ("a page token error opens no socket and fails the uses", token_error);
     ]
 
 let expired_token finish =

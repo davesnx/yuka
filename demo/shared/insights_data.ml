@@ -45,10 +45,13 @@ let story_points = [| 1; 2; 3; 5; 8 |]
 
 let assignee_name (user : User.t option) = match user with Some user -> user.name | None -> unassigned
 
+let max_points = 20_000
+let capped ~multiplier count = count * multiplier > max count max_points
+
 let expand ~multiplier (issues : Issue.t list) =
   let base = Array.of_list issues in
   let count = Array.length base in
-  List.init (count * multiplier) (fun index ->
+  List.init (min (count * multiplier) (max count max_points)) (fun index ->
       let copy = index / count and position = index mod count in
       let issue = base.(position) in
       let pick step = base.((position + (copy * step)) mod count) in

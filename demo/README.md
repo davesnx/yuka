@@ -24,15 +24,19 @@ Defaults are relative to the executable, so any build directory works.
 The demo has two workspaces, each with its own issues, labels, new issue
 form and live updates:
 
-- `yuka`: 25 issues, `YUK-1` to `YUK-25`, at the root URLs below.
-- `stress`: 200 issues, `STR-1` to `STR-200`, with 30 labels and 200
-  comments on each issue, under `/w/stress`. `server/stress.ml` makes them
+- `yuka` (shown as Home): 25 issues, `YUK-1` to `YUK-25`, at the root URLs below.
+- `stress`: 2000 issues, `STR-1` to `STR-2000`, with 30 labels and 200
+  comments on each issue, under `/w/stress`. The issue list shows all 2000
+  rows, with no paging. `server/stress.ml` makes them
   from the issue number, with no randomness, so each start has the same
   data. The comments are made when a page asks for them; comments that a
   visitor adds are stored after them.
 
 The header links to each workspace (the current one is marked), to the
-repository on GitHub and to `@davesnx` on X.
+repository on GitHub and to `@davesnx` on X. The sidebar starts with the
+version of the running build: the first 7 characters of the commit in
+`VERCEL_GIT_COMMIT_SHA`, linked to the commit on GitHub, or `dev` when the
+variable is not set.
 
 ## Themes and the progress bar
 
@@ -56,7 +60,9 @@ is a set of CSS variables in `static/style.css`.
 
 During a client navigation that takes more than 120 ms, a thin bar at the
 top of the window grows; it fills and fades out when the new page is shown.
-The `Nav_progress` island reads `Yuka.Browser.navigating`.
+The `Nav_progress` island reads `Yuka.Browser.navigating`. It is used with
+`` `Idle ``: it starts when the browser is idle after the page load, as no
+bar is needed before the first navigation.
 
 ## Markdown
 
@@ -89,11 +95,19 @@ installs them) and the oniguruma library (`conf-oniguruma`).
 - `http://localhost:8080/insights`: charts of the issues of `yuka`, drawn
   in SVG by one island (`shared/insights.mlx`). The server prints them, and
   the browser computes them again on each change of the measure, the
-  filters, the date range or the live issues. The stress control (1x, 10x,
-  100x) makes copies of the issues in the browser, up to 20 000 points on
-  `stress`; Animate moves the date range on each frame. The readout shows
-  frames per second, the time of the last update (from the change to the
-  updated DOM), the SVG nodes and the points.
+  filters, the date range or the live issues. The "Created" control in the
+  filter row opens the From and To sliders of the date range, with a "Full
+  range" reset. The stress control (1x, 10x, 100x) makes copies of the
+  issues in the browser, at most 20 000 points (`Insights_data.max_points`):
+  on `stress`, 100x stops at 20 000 and the header says "capped at 20,000
+  points"; Animate, at the
+  right of the page header, moves the date range on each frame. A panel at
+  the bottom right shows what the browser measures: frames per second, the
+  time of the last update (from the change to the updated DOM), updates per
+  second, the longest frame of the last second, the frames over 50 ms in
+  the last 10 seconds, the SVG and DOM nodes, the points and a line of the
+  last 60 frame times. It refreshes once per second, and after each change.
+  Its button collapses it to the frames per second.
 - `http://localhost:8080/report`: the same seven charts at 1x, drawn in SVG
   by the server only (`server/report.mlx`, with the geometry of
   `shared/insights.mlx`). The page has no island of its own and sends no
@@ -105,7 +119,14 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   page glides into place. Drag the background to pan; the buttons zoom,
   shuffle the board and add a note (at most 140 characters, 100 notes per
   board). The first positions come from the issue numbers; Shuffle and
-  new notes use random positions.
+  new notes use random positions. A board shows at most 200 issues
+  (`Board.card_limit`), the first ones of the workspace; on `stress` the
+  header says so. A bar under the board says where the
+  data is: in the memory of the server process, or the Postgres database
+  (provider, version, region and name). With a database, it says that
+  the servers send changes to each other over `LISTEN`/`NOTIFY`. It also
+  shows the Vercel region of the server (`VERCEL_REGION`) and a random id
+  of the server process, so you can see when another instance answers.
 - `http://localhost:8080/issue/YUK-1`: an issue; comments and related
   issues stream in after a delay. An issue with more than 12 comments
   shows the first 3 and the last 5; a band between them gives the number
@@ -139,13 +160,57 @@ with the user and the number of their open, in-progress and done issues
 first opens).
 
 Keys: `j` and `k` move, Enter opens, `c` opens the new issue dialog,
-Escape closes menus and the dialog.
+Escape closes menus and the dialog. A created issue opens on its page, as
+after the form at `/new`. `New_issue` starts at the first pointer, focus or
+touch event on it, so `Nav_progress` listens for `c`: it asks for the
+dialog and moves the focus to the New issue button, which starts the
+island.
 
-The data is in memory. Restart the server to reset it.
+With no database, the data is in memory. Restart the server to reset it.
+
+## Shared data
+
+With a Postgres database, every server process reads and writes the same
+data:
+
+    _build/default/demo/server/demo_server.exe --database postgresql://user:password@host/db
+
+- `--database CONNINFO`, default `$YUKA_DEMO_DATABASE`: the connection
+  string (libpq syntax or a URL). Empty means memory. Use a direct
+  connection, not a pooled one: Live updates between processes use
+  `LISTEN`.
+- `--reset-days N`, default `$YUKA_DEMO_RESET_DAYS`, or 7: the data starts
+  again from the seed when it is older than N days, by the clock of the
+  database. N is at least 1. A page that is open at that time shows the old
+  data until the next change. To reset by hand, set `started` of the rows
+  to an old date; do not delete the rows.
+
+At start the server makes the table `yuka_demo_state` if it is not there.
+The table has one row for each workspace, with all of its data as JSON and
+a version. Each process keeps a copy in memory. Before each request, and
+before each Live load, it reads the versions and loads the rows that
+changed. An action locks the row, runs its check and its change, and writes
+the row with the next version. A refused action writes nothing. The
+processes tell each other about changes over `LISTEN`/`NOTIFY`
+(`yuka-live-pg`, channel `yuka_demo`), so a page on one process gets the
+changes made on another.
+
+The queries block the server for the time of a round trip to the database.
+This is fine for a demo, not for a busy site. So that a slow database does
+not stop a process for long, the server sets `PGCONNECT_TIMEOUT=5` and
+`PGOPTIONS` (a lock wait of 5 s, a statement of 10 s, an idle transaction
+of 15 s) when they are not set.
+
+The server does not start when the database does not answer. When a read
+fails later, the server logs the error and shows the data it has. When a
+write fails, the action is refused with a message.
 
 ## Tests
 
     make demo-test
+
+With `YUKA_DEMO_DATABASE` set, the tests also check the shared data in a new
+schema of that database, and remove the schema after.
 
 ## Browser check
 
@@ -155,6 +220,13 @@ server on `PORT` (default 8123), runs the check and stops the server:
     make e2e
 
 Use a fresh server for each run: the check creates an issue and a comment.
+
+    YUKA_DEMO_DATABASE=<conninfo> make e2e-shared
+
+starts two server processes on one database, on `PORT` and the next port. A
+note made through the first is moved through the second, and the pages on
+both get the changes. It adds one note and removes it. With no database,
+each process has its own data and the check fails.
 
 ## Docker
 
@@ -172,14 +244,22 @@ the development secret.
 
 Vercel builds `Dockerfile.vercel` at the repository root and runs the image
 as a Function ([Container Runtime](https://vercel.com/docs/functions/runtimes/container)).
-Set two environment variables in the project: `PORT=8080` (Vercel sends
-traffic to port 80 without it) and `YUKA_DEMO_SECRET`.
+Set these environment variables in the project: `PORT=8080` (Vercel sends
+traffic to port 80 without it) and `YUKA_DEMO_SECRET`. For the shared data,
+connect a Neon database to the project: in production (`VERCEL_ENV` is
+`production`) the server uses the direct URL that the integration adds,
+`DATABASE_URL_UNPOOLED` or `POSTGRES_URL_NON_POOLING`. A preview deployment
+keeps its data in memory. `YUKA_DEMO_DATABASE`, when set, is used in every
+environment; give it a direct URL (with Neon, no `-pooler` in the host
+name). `YUKA_DEMO_RESET_DAYS` is optional.
 
 The project `yuka-demo` is connected to this repository: a push to `main`
 deploys to https://yuka-demo.vercel.app.
 
-An instance stops after 5 minutes with no traffic, and its data goes with
-it. Vercel can run more than one instance, each with its own data.
+Vercel can run more than one instance. With `YUKA_DEMO_DATABASE`, they all
+share the data in the database (see [Shared data](#shared-data)). Without
+it, each instance has its own data, and the data goes when the instance
+stops.
 
 ## Production bundle
 
@@ -193,8 +273,9 @@ and writes no import map. At start it reads `yuka_islands.json` (and
 `meta.json` with `--bundle`) and prints `<link rel="modulepreload">` for each
 island on the page, except those used with `` `Lazy _ ``. With `--bundle` it
 also prints one for each chunk that those islands and `main.js` import
-statically. Comments, Issue props and Related are used with `` `Lazy `Idle ``,
-`` `Lazy `Interaction `` and `` `Lazy `Visible ``.
+statically. Nav_progress and Theme_menu are used with `` `Idle ``, Comments
+with `` `Lazy `Idle ``, Issue props and New_issue with
+`` `Lazy `Interaction ``, and Related with `` `Lazy `Visible ``.
 
 Routes are defined once in `Routes.ml`. `yuka routes` writes the shared
 `Routes` module (in `shared/`, for links such as `Routes.issue ~id ()` in islands) and

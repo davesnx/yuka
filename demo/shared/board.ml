@@ -10,6 +10,7 @@ let item_width = 200
 let item_height = 72
 let note_length = 140
 let note_limit = 100
+let card_limit = 200
 let inside ~x ~y = x >= 0 && y >= 0 && x <= width - item_width && y <= height - item_height
 
 type move = { workspace : Workspace.t; id : string; x : int; y : int } [@@deriving codec]

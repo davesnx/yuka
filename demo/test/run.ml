@@ -10,7 +10,7 @@ let lacks html needle =
 
 let config =
   Yuka.Server.config
-    ~assets:(Yuka.Server.modules ~dir:"js" ~entry:"demo/client/main.js" ~manifest:"{}" ~packages:[] ~digest:"")
+    ~assets:(Result.get_ok (Yuka.Server.modules ~dir:"js" ~entry:"demo/client/main.js" ~manifest:"{}" ~packages:[] ~digest:""))
     ~public:[ ("/static", "static") ]
     ~styles:[ "/static/style.css" ] ()
 
@@ -37,15 +37,17 @@ let index () =
   has html "My issues";
   has html "<a class=\"nav-link\" href=\"/\" aria-current=\"page\">Issues</a>";
   has html "<yuka-island data-name=\"Demo_shared.Issue_list\" data-id=\"i";
-  has html "<yuka-island data-name=\"Demo_shared.New_issue\"";
-  has html "<yuka-island data-name=\"Demo_shared.Counter\"";
+  has html "<yuka-island data-name=\"Demo_shared.New_issue\" data-id=\"i3\" style=\"display:contents\" data-start=\"interaction\">";
+  has html "<yuka-island data-name=\"Demo_shared.Nav_progress\" data-id=\"i2\" style=\"display:contents\" data-start=\"idle\">";
   has html "<script type=\"module\" async src=\"/_yuka/app/demo/client/main.js\"></script>";
   has html "data-start=\"idle\"";
-  lacks html "data-start=\"interaction\"";
+  lacks html "Demo_shared.Issue_props";
   has html "\"id\":\"YUK-1\"";
   has html "\"status\":\"In_progress\"";
   has html "Hydration mismatch on nested holes";
-  has html "Clicks: <!--[-->0<!--]-->";
+  has html "data-nav-progress=\"idle\"";
+  has html "<span class=\"brand-name\">Yuka's Linear demo</span>";
+  has html "<span class=\"workspace-logo\">H</span><span>Home</span>";
   has html "<a class=\"row-title\" href=\"/issue/YUK-1\">"
 
 let my_issues () =
@@ -91,7 +93,7 @@ let streaming () =
 
 let navigation () =
   let _, response, html = call ~headers:[ ("Yuka-Navigate", "1") ] "/issue/YUK-1" in
-  Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate") (header response "vary");
+  Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate, Yuka-Prefetch") (header response "vary");
   has html "Please add a test with an empty filter result.";
   lacks html "skeleton";
   lacks html "__yukaFill"
@@ -105,6 +107,7 @@ let not_found () =
   let _, _, html = call "/issue/a%20b" in
   has html "There is no issue a b.";
   has html "class=\"sidebar\"";
+  has html {|<span class="version">dev</span>|};
   let status, _, html = call "/nowhere" in
   Alcotest.(check int) "status" 404 status;
   has html "Page not found"
@@ -135,14 +138,14 @@ let stress_list () =
   let html = get "/w/stress" in
   has html "<title>Issues</title>";
   has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Stress&quot;,&quot;view&quot;:&quot;All&quot;}">|};
-  Alcotest.(check int) "200 issues" 200 (count html {|{"id":"STR-|});
+  Alcotest.(check int) "2000 issues" 2000 (count html {|{"id":"STR-|});
   lacks html "YUK-1\"";
   has html {|<a class="row-title" href="/w/stress/issue/STR-1">|};
   Alcotest.(check int) "30 labels" 30 (List.length (Store.label_counts Model.Workspace.Stress));
   Alcotest.(check bool) "the same data each time" true (Stress.issues ~users:(Array.of_list Store.users) = Store.issues Model.Workspace.Stress);
   let mine = get "/w/stress/my" in
   Alcotest.(check bool) "my issues is a part" true
-    (count mine {|{"id":"STR-|} = List.length (Store.mine Model.Workspace.Stress) && count mine {|{"id":"STR-|} < 200);
+    (count mine {|{"id":"STR-|} = List.length (Store.mine Model.Workspace.Stress) && count mine {|{"id":"STR-|} < 2000);
   lacks (get "/") "STR-"
 
 let stress_issue () =
@@ -181,17 +184,28 @@ let insights () =
   has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Yuka&quot;,&quot;view&quot;:&quot;All&quot;}">|};
   Alcotest.(check int) "seven charts" 7 (count html "data-chart=");
   Alcotest.(check int) "a point per issue" 25 (count html {| r="2"|});
-  has html {|<dd data-points="true">25</dd>|};
+  has html {|<dd data-metric="points">25</dd>|};
+  has html {|<span data-metric="fps">-</span>|};
+  has html {|<dd data-metric="dom-nodes">-</dd>|};
+  has html {|aria-expanded="true" aria-label="Hide metrics"|};
+  has html {|<button class="chip animate_|};
+  has html {|data-dates="true"><span class="dates-label_|};
+  Alcotest.(check int) "two date sliders in the filters" 2 (count html {|type="range"|});
   let html = get "/w/stress/insights" in
   has html {|<a class="nav-link" href="/w/stress/insights" aria-current="page">Insights</a>|};
-  Alcotest.(check int) "a point per stress issue" 200 (count html {| r="2"|});
-  has html {|<dd data-points="true">200</dd>|};
-  has html "of 200 issues";
+  Alcotest.(check int) "a point per stress issue" 2000 (count html {| r="2"|});
+  has html {|<dd data-metric="points">2,000</dd>|};
+  has html "of 2,000 issues";
   Alcotest.(check string) "thousands" "20,000" (Insights_data.format_int 20000);
   Alcotest.(check string) "a date and back" "Nov 6" (Insights_data.date_of_day (Insights_data.day_of_date "Nov 6"));
   Alcotest.(check (list int)) "ticks" [ 0; 20; 40; 60 ] (Insights_data.ticks ~count:4 59);
-  Alcotest.(check int) "100 times the issues" 20000
-    (List.length (Insights_data.expand ~multiplier:100 (Store.issues Model.Workspace.Stress)))
+  let stress_issues = Store.issues Model.Workspace.Stress in
+  Alcotest.(check int) "10 times the issues" 20000 (List.length (Insights_data.expand ~multiplier:10 stress_issues));
+  Alcotest.(check int) "100 times the issues, capped" Insights_data.max_points
+    (List.length (Insights_data.expand ~multiplier:100 stress_issues));
+  Alcotest.(check (list bool)) "the cap shows at 100x only" [ false; false; true ]
+    (List.map (fun multiplier -> Insights_data.capped ~multiplier (List.length stress_issues)) [ 1; 10; 100 ]);
+  Alcotest.(check int) "the yuka issues are not capped" 2500 (List.length (Insights_data.expand ~multiplier:100 (Store.issues Model.Workspace.Yuka)))
 
 let report () =
   let html = get "/report" in
@@ -201,9 +215,10 @@ let report () =
   Alcotest.(check int) "a point per issue" 25 (count html {| r="2"|});
   lacks html "Demo_shared.Insights";
   lacks html "data-yuka-answer";
+  has html {|The server draws these charts and sends them as SVG in the HTML of the page.|};
   let html = get "/w/stress/report" in
   has html {|<a class="nav-link" href="/w/stress/report" aria-current="page">Report</a>|};
-  Alcotest.(check int) "a point per stress issue" 200 (count html {| r="2"|})
+  Alcotest.(check int) "a point per stress issue" 2000 (count html {| r="2"|})
 
 let canvas () =
   let html = get "/canvas" in
@@ -213,9 +228,12 @@ let canvas () =
   has html {|data-yuka-answer="l:board &quot;Yuka&quot;"|};
   Alcotest.(check int) "a card per issue" 25 (count html {|<div data-id="YUK-|});
   has html {|href="/issue/YUK-1">Hydration mismatch on nested holes</a>|};
+  lacks html "The board shows at most";
+  has html "<dd>In the memory of this server process</dd>";
   let html = get "/w/stress/canvas" in
   has html {|<a class="nav-link" href="/w/stress/canvas" aria-current="page">Canvas</a>|};
-  Alcotest.(check int) "a card per stress issue" 200 (count html {|<div data-id="STR-|});
+  Alcotest.(check int) "a card per stress issue, up to the limit" Board.card_limit (count html {|<div data-id="STR-|});
+  has html {|The board shows at most 200 issues|};
   List.iter
     (fun (item : Board.item) -> if not (Board.inside ~x:item.x ~y:item.y) then Alcotest.failf "%s is outside the board" item.id)
     (Store.board Model.Workspace.Stress)
@@ -419,9 +437,9 @@ let stress_actions () =
     | Ok (Ok (issue : Model.Issue.t)) -> issue
     | _ -> Alcotest.fail "create in stress failed: a title of another workspace is not a duplicate"
   in
-  Alcotest.(check string) "next stress id" "STR-201" created.id;
-  has (get "/w/stress") "STR-201";
-  lacks (get "/") "STR-201";
+  Alcotest.(check string) "next stress id" "STR-2001" created.id;
+  has (get "/w/stress") "STR-2001";
+  lacks (get "/") "STR-2001";
   (match settle (Yuka.Action.call Comment.add { Comment.issue_id = "STR-3"; body = "Kept" }) with
   | Ok _ -> ()
   | Error message -> Alcotest.failf "comment failed: %s" message);
@@ -433,7 +451,7 @@ let stress_actions () =
     call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=stress&title=From+a+stress+form&description=&status=todo&priority=low" "/w/stress/new"
   in
   Alcotest.(check int) "303" 303 status;
-  Alcotest.(check (option string)) "to the new stress issue" (Some "/w/stress/issue/STR-202") (header response "location")
+  Alcotest.(check (option string)) "to the new stress issue" (Some "/w/stress/issue/STR-2002") (header response "location")
 
 let rejected name async =
   match settle async with Ok _ -> Alcotest.failf "%s: expected a rejection" name | Error _ -> ()
@@ -521,7 +539,7 @@ let live_publish () =
   let _ =
     Yuka.Server.Testing.live_run ~sleep:(fun _ -> fst3 (Yuka.Async.make ()))
       (Yuka.Server.Testing.context ~session:"s" ())
-      ~verify_csrf:(fun _ -> Yuka.Async.return true) ~token:(fun () -> "t") connection
+      ~verify_csrf:(fun _ -> Yuka.Async.return true) ~token:(fun () -> Some "t") connection
   in
   out := [];
   (match
@@ -648,6 +666,12 @@ let markdown_safety () =
   unsafe_markdown html;
   Alcotest.(check int) "raw HTML shown as text in the description and the comment" 2 (count html {|&lt;img src="x" onerror="alert('inline')"&gt;|})
 
+let region_of_host () =
+  Alcotest.(check (option string)) "neon" (Some "eu-central-1, aws") (Store.region_of_host "ep-name-123456.eu-central-1.aws.neon.tech");
+  Alcotest.(check (option string)) "neon with a cell" (Some "us-east-1, aws")
+    (Store.region_of_host "ep-name-123456.c-2.us-east-1.aws.neon.tech");
+  Alcotest.(check (option string)) "other host" None (Store.region_of_host "db.example.com")
+
 let () =
   Handlers.register ();
   Alcotest.run "demo"
@@ -682,6 +706,7 @@ let () =
           Alcotest.test_case "workspaces are kept apart" `Quick stress_actions;
           Alcotest.test_case "board moves, notes and shuffle" `Quick board_actions;
         ] );
+      ("store", [ Alcotest.test_case "region of a database host" `Quick region_of_host ]);
       ( "live",
         [
           Alcotest.test_case "pages embed the live state and a token" `Quick live_answers;

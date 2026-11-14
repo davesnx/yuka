@@ -66,6 +66,15 @@ yuka islands and yuka css take --dir, once per directory:
   $ yuka css --dir nope; echo $?
   yuka css: nope: No such file or directory
   1
+  $ mkdir css && printf 'module Css = [%%yuka.css "f.css"]\n' > css/f.ml
+  $ printf '.a-b { } .a_b { }\n' > css/f.css
+  $ yuka css --dir css; echo $?
+  yuka css: css/f.ml: f.css: two classes have the OCaml name a_b; rename one of them
+  1
+  $ printf '.caf\303\251 { }\n' > css/f.css
+  $ yuka css --dir css; echo $?
+  yuka css: css/f.ml: f.css: the class "caf\195\169" has characters an OCaml name cannot have; rename it
+  1
 
 yuka dev: usage errors exit 2:
 

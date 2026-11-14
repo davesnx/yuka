@@ -8,6 +8,7 @@
   dream
   lwt
   lwt.unix
+  postgresql
   cmarkit
   ochre
   tm-grammars.ocaml
@@ -36,12 +37,13 @@
 (executable
  (name demo_server)
  (modules demo_server)
- (libraries demo_app yuka yuka-dream yuka-live-pg dream lwt))
+ (libraries demo_app yuka yuka-dream yuka-live-pg dream lwt unix))
 
 (rule
  (targets yuka_css.ml)
  (deps
-  (source_tree ../shared))
+  (source_tree ../shared)
+  (sandbox always))
  (action
   (with-stdout-to
    yuka_css.ml
