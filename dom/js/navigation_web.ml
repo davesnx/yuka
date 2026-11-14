@@ -15,7 +15,9 @@ let scroll_to : float -> unit =
 let scroll_to_hash : string -> unit =
   [%mel.raw
     {|function (hash) {
-  const el = hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  let id = hash.slice(1);
+  try { id = decodeURIComponent(id) } catch (e) {}
+  const el = id ? document.getElementById(id) : null;
   if (el) el.scrollIntoView(); else window.scrollTo(0, 0);
 }|}]
 
@@ -32,13 +34,14 @@ let abort : controller -> unit =
     "function (c) { c.abort() }"]
 
 let fetch_page :
-    string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
   [%mel.raw
     {|function (a, ok, fail) {
-  const url = a[0], keys = a[1], prefetch = a[2], controller = a[3];
+  const url = a[0], keys = a[1], prefetch = a[2], low = a[3], controller = a[4];
   const signal = controller.signal;
   const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
-  if (prefetch) { init.headers["Yuka-Prefetch"] = "1"; init.cache = "no-store"; }
+  if (prefetch) { init.headers["Yuka-Prefetch"] = prefetch; init.cache = "no-store"; }
+  if (low) init.priority = "low";
   let request;
   try {
     request = fetch(url, init);
@@ -99,16 +102,33 @@ let save_data : unit -> bool =
   [%mel.raw
     "function () { const c = window.navigator.connection; return !!(c && c.saveData) }"]
 
-let observe : node array -> (node -> unit) -> unit -> unit =
+let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit =
   [%mel.raw
     {|function (els, f) {
   const O = window.IntersectionObserver;
   if (typeof O !== "function") return function () {};
   const observer = new O(function (entries) {
-    for (const e of entries) if (e.isIntersecting) { observer.unobserve(e.target); f(e.target); }
-  });
+    for (const e of entries) f(e.target, e.isIntersecting, function () { observer.unobserve(e.target); });
+  }, { rootMargin: "200px" });
   for (const el of els) observer.observe(el);
   return function () { observer.disconnect(); };
+}|}]
+
+let warm : string -> string -> unit =
+  [%mel.raw
+    {|function (final, text) {
+  const d = document, seen = d.__yukaWarm || (d.__yukaWarm = new Set()), base = new URL(window.location.origin + final);
+  d.querySelectorAll("link[href]").forEach(function (l) { seen.add(l.href); });
+  for (const m of text.matchAll(/<link rel="(?:modulepreload" href="([^"]*)">|stylesheet" href="([^"]*)" data-yuka-css>)/g)) {
+    let href;
+    try { href = new URL((m[1] === undefined ? m[2] : m[1]).replace(/&lt;/g, "<").replace(/&quot;/g, '"').replace(/&amp;/g, "&"), base).href; } catch (e) { continue; }
+    if (seen.has(href)) continue;
+    seen.add(href);
+    const l = d.createElement("link");
+    l.rel = m[1] === undefined ? "prefetch" : "modulepreload";
+    l.href = href;
+    d.head.appendChild(l);
+  }
 }|}]
 
 let transition : string -> (unit -> unit) -> unit =

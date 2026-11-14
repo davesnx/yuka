@@ -269,66 +269,63 @@ let normalize path =
   go path
 
 let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile ?entry () =
+  let ( let* ) = Result.bind in
   let parse what text =
-    match Json.of_string text with
-    | Ok j -> j
-    | Error m ->
-        invalid_arg (caller ^ ": bad " ^ what ^ " JSON: " ^ m)
+    Result.map_error (fun m -> caller ^ ": bad " ^ what ^ " JSON: " ^ m) (Json.of_string text)
   in
-  let paths =
-    match parse "manifest" manifest with
-    | `Assoc fields ->
-        List.map
-          (fun (name, v) ->
-            match v with
-            | `String p -> (name, normalize p)
-            | _ ->
-                invalid_arg
-                  (caller ^ ": manifest entry " ^ name
-                 ^ " is not a string"))
-          fields
-    | _ -> invalid_arg (caller ^ ": manifest is not an object")
+  let rec strings = function
+    | [] -> Ok []
+    | (name, `String p) :: rest ->
+        let* rest = strings rest in
+        Ok ((name, normalize p) :: rest)
+    | (name, _) :: _ -> Error (caller ^ ": manifest entry " ^ name ^ " is not a string")
   in
-  let outputs =
+  let* paths =
+    let* json = parse "manifest" manifest in
+    match json with
+    | `Assoc fields -> strings fields
+    | _ -> Error (caller ^ ": manifest is not an object")
+  in
+  let* outputs =
     match metafile with
-    | None -> None
+    | None -> Ok None
     | Some text -> (
-        match parse "metafile" text with
+        let* json = parse "metafile" text in
+        match json with
         | `Assoc top -> (
             match List.assoc_opt "outputs" top with
             | Some (`Assoc outs) ->
-                Some
-                  (List.filter_map
-                     (fun (file, v) ->
-                       match v with
-                       | `Assoc o ->
-                           let entry_point =
-                             match List.assoc_opt "entryPoint" o with
-                             | Some (`String e) -> Some (normalize e)
-                             | _ -> None
-                           in
-                           let static_imports =
-                             match List.assoc_opt "imports" o with
-                             | Some (`List imports) ->
-                                 List.filter_map
-                                   (function
-                                     | `Assoc import -> (
-                                         match (List.assoc_opt "path" import, List.assoc_opt "kind" import) with
-                                         | Some (`String path), Some (`String "import-statement") -> Some path
-                                         | _ -> None)
-                                     | _ -> None)
-                                   imports
-                             | _ -> []
-                           in
-                           Some (file, entry_point, static_imports)
-                       | _ -> None)
-                     outs)
-            | _ ->
-                invalid_arg
-                  (caller ^ ": metafile has no outputs object"))
-        | _ -> invalid_arg (caller ^ ": metafile is not an object"))
+                Ok
+                  (Some
+                     (List.filter_map
+                        (fun (file, v) ->
+                          match v with
+                          | `Assoc o ->
+                              let entry_point =
+                                match List.assoc_opt "entryPoint" o with
+                                | Some (`String e) -> Some (normalize e)
+                                | _ -> None
+                              in
+                              let static_imports =
+                                match List.assoc_opt "imports" o with
+                                | Some (`List imports) ->
+                                    List.filter_map
+                                      (function
+                                        | `Assoc import -> (
+                                            match (List.assoc_opt "path" import, List.assoc_opt "kind" import) with
+                                            | Some (`String path), Some (`String "import-statement") -> Some path
+                                            | _ -> None)
+                                        | _ -> None)
+                                      imports
+                                | _ -> []
+                              in
+                              Some (file, entry_point, static_imports)
+                          | _ -> None)
+                        outs))
+            | _ -> Error (caller ^ ": metafile has no outputs object"))
+        | _ -> Error (caller ^ ": metafile is not an object"))
   in
-  fun name ->
+  Ok (fun name ->
     match List.assoc_opt name paths with
     | None -> []
     | Some path -> (
@@ -349,7 +346,7 @@ let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile ?en
                 let files = match entry with None -> island | Some entry -> reach island entry in
                 List.rev files
                 |> List.filter (fun output -> Some output <> entry)
-                |> List.map (fun output -> base ^ output)))
+                |> List.map (fun output -> base ^ output))))
 
 let reject message = Async.failed (Types.reject message)
 

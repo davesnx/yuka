@@ -5,18 +5,14 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
     Yuka.Browser.focus "dialog-title"
   in
   Yuka.Effect.after (fun () ->
-      Yuka.Browser.on_window "keydown" (fun event ->
-          match Yuka.Event.key event with
-          | "Escape" -> close ()
-          | "c"
-            when not
-                   (Ui.typing event || Yuka.State.peek Ui.dialog_open
-                  || Yuka.Event.ctrl_key event || Yuka.Event.meta_key event) ->
-              Yuka.Event.prevent_default event;
-              open_ ()
-          | _ -> ()));
+      Yuka.Browser.on_window "keydown" (fun event -> if Yuka.Event.key event = "Escape" then close ()));
+  Yuka.Effect.after (fun () ->
+      if Yuka.State.get Ui.dialog_asked then begin
+        Yuka.State.set Ui.dialog_asked false;
+        open_ ()
+      end);
   <div class_="new-issue">
-    <button class_="new-issue-button" on_click=(fun _ -> open_ ())>"+ New issue (c)"</button>
+    <button id="new-issue-button" class_="new-issue-button" on_click=(fun _ -> open_ ())>"+ New issue (c)"</button>
     (if Yuka.State.get Ui.dialog_open then
        <div class_="dialog-wrap">
          <div class_="backdrop dim" on_click=(fun _ -> close ()) />

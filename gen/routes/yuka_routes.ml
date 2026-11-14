@@ -334,6 +334,11 @@ let check_prerender props =
       ()
   | Some v -> fail v.pexp_loc "~prerender must be true or false"
 
+let check_prefetch props =
+  match List.assoc_opt "prefetch" props with
+  | Some { pexp_desc = Pexp_variant (("Off" | "Hover" | "Visible"), None); _ } | None -> ()
+  | Some v -> fail v.pexp_loc "~prefetch must be `Off, `Hover or `Visible"
+
 let check_cross_origin props =
   match List.assoc_opt "cross_origin" props with
   | Some { pexp_desc = Pexp_construct ({ txt = Lident ("true" | "false"); _ }, None); _ } | None -> ()
@@ -384,6 +389,7 @@ let read ~server ~items names e =
     let tag, args, props, loc = element e in
     let prop l = List.assoc_opt l props in
     check_prerender props;
+    check_prefetch props;
     let name () =
       parse_name names (unlabelled tag loc "the route name (such as Issue)" args)
     in
@@ -407,7 +413,7 @@ let read ~server ~items names e =
     match tag with
     | "group" ->
         check_props tag loc props ~required:[ "path" ]
-          ~optional:([ "layout"; "loader"; "guard"; "not_found"; "error"; "search" ] @ rules);
+          ~optional:([ "layout"; "loader"; "guard"; "not_found"; "error"; "search"; "prefetch" ] @ rules);
         let children = list_items (unlabelled tag loc "a list of child nodes" args) in
         let text, ploc, segs = own_path () in
         if has_rest segs then fail ploc "a Router.group path cannot hold a catch-all";
@@ -444,7 +450,7 @@ let read ~server ~items names e =
           }
     | "route" ->
         check_props tag loc props ~required:[ "path"; "page" ]
-          ~optional:([ "loader"; "guard"; "search" ] @ rules);
+          ~optional:([ "loader"; "guard"; "search"; "prefetch" ] @ rules);
         let name = name () in
         let text, ploc, segs = own_path () in
         let labels = add_labels ploc ctx.labels (seg_labels segs) |> with_loader in
@@ -485,9 +491,10 @@ let read ~server ~items names e =
   let tag, args, props, loc = element e in
   if tag <> "make" then fail loc "the root must be Router.make";
   check_props tag loc props ~required:[]
-    ~optional:([ "layout"; "not_found"; "error"; "guard" ] @ rules);
+    ~optional:([ "layout"; "not_found"; "error"; "guard"; "prefetch" ] @ rules);
   let children = list_items (unlabelled tag loc "a list of child nodes" args) in
   check_prerender props;
+  check_prefetch props;
   let root = [ level props [] loc ] in
   if server then check_fallback root;
   List.iter (walk { prefix = []; text = "/"; search = []; labels = []; levels = root }) children;
@@ -958,9 +965,10 @@ let rules_text levels =
   let last name =
     List.fold_left (fun acc l -> match prop name l with Some v -> Some v | None -> acc) None levels
   in
-  sprintf "Yuka.Server.Generated.rules ~headers:[ %s ]%s ~prerender:%s ()"
+  sprintf "Yuka.Server.Generated.rules ~headers:[ %s ]%s%s ~prerender:%s ()"
     (String.concat "; " headers)
     (match last "cache" with Some c -> sprintf " ~cache:(Yuka.Server.%s [@warning \"-33\"])" (paren c) | None -> "")
+    (match last "prefetch" with Some p -> " ~prefetch:" ^ expr p | None -> "")
     (match last "prerender" with Some p -> expr p | None -> "false")
 
 let fallback_levels levels =
@@ -1171,6 +1179,15 @@ let generate_server ~shared ~digest (nodes, root) =
   in
   let missing = fallback (fallback_text [ root ]) in
   let arms = List.concat_map (server_arm ~shared ~rule ~fallback) nodes in
+  let pages =
+    List.fold_left
+      (fun acc n ->
+        if n.tag <> "route" then acc
+        else
+          let r = rule (rules_text n.levels) in
+          if List.mem r acc then acc else acc @ [ r ])
+      [] nodes
+  in
   let req = if uses_req nodes then "req" else "_req" in
   String.concat "\n"
     (List.map (fun (n, t) -> sprintf "let %s =\n  %s\n" n t) (rules ())
@@ -1193,6 +1210,7 @@ let generate_server ~shared ~digest (nodes, root) =
           (match prop "headers" root with Some h -> paren h | None -> "[]");
         sprintf "    ~prerender:[ %s ]"
           (String.concat "; " (List.map (sprintf "%S") (List.filter_map seed nodes)));
+        sprintf "    ~pages:[ %s ]" (String.concat "; " pages);
         sprintf "    ~find:%s.find ~resolve ~missing:%s" shared missing;
       ])
   ^ "\n"

@@ -11,12 +11,14 @@ let switch () =
 
 let await async =
   match Yuka.Async.status async with
-  | Yuka.Async.Done v -> v
-  | Yuka.Async.Failed m -> failwith m
-  | Yuka.Async.Pending -> (
+  | Yuka.Async.Done v -> Ok v
+  | Yuka.Async.Failed m -> Error m
+  | Yuka.Async.Pending ->
       let p, r = Eio.Promise.create () in
       Yuka.Async.on_result async (Eio.Promise.resolve r);
-      match Eio.Promise.await p with Ok v -> v | Error m -> failwith m)
+      Eio.Promise.await p
+
+let await_exn async = match await async with Ok v -> v | Error m -> failwith m
 
 let async ~sw f =
   let a, ok, fail = Yuka.Async.make () in
@@ -71,11 +73,6 @@ let sessions next request =
       Tapak.Response.add_header name value response)
     (next request) fresh
 
-let required request name =
-  match cookie request name with
-  | Some v -> v
-  | None -> failwith ("no " ^ name ^ " cookie: put Yuka_tapak.sessions around the handler")
-
 module Base = struct
   type request = Tapak.Request.t
   type reply = Tapak.Response.t
@@ -107,11 +104,10 @@ module Base = struct
               Some text
             end)
 
-  let session request = required request session_cookie
+  let session request = cookie request session_cookie
 
   let csrf_token request =
-    ignore (required request csrf_cookie);
-    fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request)
+    Option.map (fun _ -> fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request)) (cookie request csrf_cookie)
 
   let verify_csrf request token =
     Yuka.Async.return (Tapak.Csrf.verify_token ~cookie_name:csrf_cookie ~token request)
@@ -123,7 +119,7 @@ module Base = struct
       | Yuka.Server.String text -> Tapak.Response.of_string ~headers ~status text
       | Yuka.Server.Stream f ->
           Tapak.Response.stream ~headers ~status (fun write flush ->
-              await
+              await_exn
                 (f (fun text ->
                      guard (fun () ->
                          write text;
@@ -163,7 +159,7 @@ module Base = struct
                        ~finally:(fun () -> ignore (Eio.Promise.try_resolve closing ()))
                        (fun () -> try Cows.close ~code conn with Cows.Connection_closed -> ())))
            in
-           Eio.Fiber.first (fun () -> Eio.Promise.await closed) (fun () -> await (run connection)))
+           Eio.Fiber.first (fun () -> Eio.Promise.await closed) (fun () -> await_exn (run connection)))
          request)
 
   let sleep seconds =
@@ -227,7 +223,7 @@ let handler ~sw ~fs ?node config app =
     let close () = ignore (Eio.Promise.try_resolve close ()) in
     let bound run = Eio.Fiber.with_binding current state run in
     let later run = Fun.protect ~finally:close (fun () -> bound run) in
-    match bound (fun () -> await (Cycle.handler ?node config app request)) with
+    match bound (fun () -> await_exn (Cycle.handler ?node config app request)) with
     | exception e ->
         close ();
         raise e

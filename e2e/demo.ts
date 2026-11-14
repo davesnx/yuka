@@ -47,9 +47,9 @@ page.on("response", (r) => {
   responses.push(r);
   if (r.status() >= 400 && r.status() !== expectedFailures) failedRequests.push(`${r.status()} ${r.url()}`);
 });
-const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch: boolean }[] = [];
+const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch?: string }[] = [];
 page.on("request", (r) =>
-  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"], prefetch: r.headers()["yuka-prefetch"] === "1" }),
+  allRequests.push({ url: r.url(), t: Date.now(), navigate: r.headers()["yuka-navigate"] !== undefined, keys: r.headers()["yuka-navigate"], prefetch: r.headers()["yuka-prefetch"] }),
 );
 const chunkRe = /\/(issue_props|related|comments)(-[^/]*)?\.js$/;
 const chunkRequests = (from: number) =>
@@ -266,6 +266,20 @@ await step("3c. partial navigation", async () => {
   check("3c.1 the progress bar (Idle) started without interaction and is idle", (await bar()).state === "idle", JSON.stringify(await bar()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
   check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null", await current());
+  const buttonInView = () =>
+    page.evaluate(() => {
+      const rect = document.querySelector(".new-issue-button")!.getBoundingClientRect();
+      return { top: Math.round(rect.top), bottom: Math.round(rect.bottom), scrollY: Math.round(scrollY), height: innerHeight };
+    });
+  const atTop = await buttonInView();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const atEnd = await buttonInView();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check(
+    "3c.2b the new issue button stays in the viewport on a long list",
+    [atTop, atEnd].every((box) => box.top >= 0 && box.bottom <= box.height) && atEnd.scrollY > 0,
+    JSON.stringify({ atTop, atEnd }),
+  );
   const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
   await page.locator('.row[data-id="YUK-3"] .row-title').click();
   const response = await outlet;
@@ -482,7 +496,7 @@ await step("3f. prefetch and the navigation cache", async () => {
   await link("YUK-5").hover();
   await page.waitForTimeout(300);
   const pre = requestsTo(from, "/issue/YUK-5");
-  check("3f.1 hover sends one prefetch", pre.length === 1 && pre[0].prefetch && pre[0].navigate, JSON.stringify(pre));
+  check("3f.1 hover sends one prefetch that names its trigger", pre.length === 1 && pre[0].prefetch === "hover" && pre[0].navigate, JSON.stringify(pre));
   await page.evaluate(() => {
     const w = window as any;
     w.__vt = [];
@@ -535,6 +549,11 @@ await step("3f. prefetch and the navigation cache", async () => {
   failedRequests.splice(failedBefore, failedRequests.length - failedBefore, ...failedRequests.slice(failedBefore).filter((f) => !dropped(f)));
   check("3f.6 emptying the cache aborts at most the one prefetch in flight", aborted <= 1, String(aborted));
   check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.slice(posts).filter((p) => p.url.endsWith("/update_issue")).length === 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
+  const refused = await page.evaluate(async () => {
+    const r = await fetch("/issue/YUK-5", { headers: { "Yuka-Navigate": "-", "Yuka-Prefetch": "visible" }, cache: "no-store" });
+    return [r.status, r.headers.get("yuka-prefetch"), await r.text(), document.querySelector("meta[name=yuka-prefetch]") === null];
+  });
+  check("3f.7 a visible prefetch of a Hover route gets 204 with the level, and the demo page prints no level", JSON.stringify(refused) === '[204,"hover","",true]', JSON.stringify(refused));
   await page.goto(base + "/", { waitUntil: "networkidle" });
 });
 
@@ -886,7 +905,7 @@ await step("6g. workspaces", async () => {
   await page.goto(base + "/w/stress", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
   const current = () => page.evaluate(() => [...document.querySelectorAll(".workspace-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("6g.1 the stress list has 200 rows", (await page.locator(".row").count()) === 200, String(await page.locator(".row").count()));
+  check("6g.1 the stress list has 2000 rows", (await page.locator(".row").count()) === 2000, String(await page.locator(".row").count()));
   check("6g.2 the stress list has 30 label chips", (await page.locator(".chip").count()) === 30, String(await page.locator(".chip").count()));
   check("6g.3 the switcher marks Stress", (await current()) === "/=false /w/stress=true", await current());
   const github = page.locator('.topbar-link[href="https://github.com/davesnx/yuka"]');
@@ -911,7 +930,7 @@ await step("6g. workspaces", async () => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.locator(".filter").fill("speed up");
   const filtered = await page.locator(".row").count();
-  check("6g.8 the filter works on 200 issues", filtered > 0 && filtered < 200, String(filtered));
+  check("6g.8 the filter works on 2000 issues", filtered > 0 && filtered < 2000, String(filtered));
   await page.locator(".filter").fill("");
   await page.locator(".page-header").first().click();
   await page.keyboard.press("j");
@@ -934,20 +953,20 @@ await step("6g. workspaces", async () => {
   await page.fill(".dialog-title", title);
   await page.evaluate(() => ((window as any).__created = "stress"));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/, { timeout: 3000 });
+  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/, { timeout: 30000 });
   await page.waitForSelector(".issue-title");
   const landed = { path: new URL(page.url()).pathname, title: await page.locator(".issue-title").textContent(), marker: await page.evaluate(() => (window as any).__created) };
   check("6g.12a creating in stress opens /w/stress/issue/STR-n with a client navigation", landed.title === title && landed.marker === "stress", JSON.stringify(landed));
   await page.goBack();
   await page.waitForURL("**/w/stress");
-  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
+  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 30000 });
   const created = await page.locator(".row", { hasText: title }).getAttribute("data-id");
   check("6g.12b the issue page is the created issue", landed.path === `/w/stress/issue/${created}`, `${landed.path} ${created}`);
-  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 201, `${created} rows=${await page.locator(".row").count()}`);
+  check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 2001, `${created} rows=${await page.locator(".row").count()}`);
   await page.evaluate(() => ((window as any).__workspace = "alive"));
   await page.locator('.workspace-link[href="/"]').click();
   await page.waitForURL(base + "/");
-  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 30000 });
   await page.waitForSelector(".row");
   check("6g.13 switching workspace is a client navigation", (await page.evaluate(() => (window as any).__workspace)) === "alive");
   check("6g.14 the switcher marks Home", (await current()) === "/=true /w/stress=false", await current());
@@ -955,7 +974,7 @@ await step("6g. workspaces", async () => {
   check("6g.15 the yuka list has no stress issue", yukaIds.length > 0 && yukaIds.every((id) => id.startsWith("YUK-")) && (await page.locator(".row", { hasText: title }).count()) === 0, String(yukaIds.length));
   await page.locator('.workspace-link[href="/w/stress"]').click();
   await page.waitForURL("**/w/stress");
-  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 5000 });
+  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 30000 });
   await page.waitForSelector(".row");
   check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
   const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
@@ -965,7 +984,7 @@ await step("6g. workspaces", async () => {
 await step("6i. the label menu", async () => {
   const pg = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await pg.goto(base + "/w/stress", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 5000 });
+  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 30000 });
   const sideways = () => pg.evaluate(() => { const chips = document.querySelector(".chips")!; return chips.scrollWidth - chips.clientWidth; });
   const shown = () => pg.evaluate(() => {
     const bottom = document.querySelector(".chips")!.getBoundingClientRect().bottom;
@@ -987,7 +1006,7 @@ await step("6i. the label menu", async () => {
   await pg.waitForSelector(`#labels-menu [data-label="${hidden}"][aria-checked="true"]`);
   const rows = await pg.locator(".row").evaluateAll((nodes, label) => nodes.map((node) => !!node.querySelector(".label-" + label)), hidden);
   check("6i.3 End and Space choose a hidden label: the URL and the rows follow, the menu stays open",
-    lastFocused === hidden && rows.length > 0 && rows.length < 200 && rows.every(Boolean) && (await pg.locator("#labels-menu:popover-open").count()) === 1, `${hidden} ${lastFocused} ${rows.length}`);
+    lastFocused === hidden && rows.length > 0 && rows.length < 2000 && rows.every(Boolean) && (await pg.locator("#labels-menu:popover-open").count()) === 1, `${hidden} ${lastFocused} ${rows.length}`);
   const chosenShown = (await shown()).includes(hidden) && (await pg.locator(`.chips .chip.on[data-label="${hidden}"]`).count()) === 1;
   check("6i.4 the chosen hidden label moves into the visible row", chosenShown, (await shown()).join(","));
   await pg.keyboard.press("Escape");
@@ -1050,9 +1069,9 @@ await step("6h. insights", async () => {
   await pickStatus(other, id, before === "done" ? "Done" : before === "todo" ? "Todo" : before === "in-progress" ? "In Progress" : before === "backlog" ? "Backlog" : "Canceled");
   await other.close();
   await pg.goto(base + "/w/stress/insights", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
-  const stress = Number(await pg.locator('[data-metric="points"]').textContent());
-  check("6h.8 stress has a point per issue", stress >= 200 && (await points()) === stress, `${await points()} of ${stress}`);
+  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 30000 });
+  const stress = Number(((await pg.locator('[data-metric="points"]').textContent()) ?? "").replace(/,/g, ""));
+  check("6h.8 stress has a point per issue", stress >= 2000 && (await points()) === stress, `${await points()} of ${stress}`);
   const dates = pg.locator("[data-filters] button[data-dates]");
   const timeNote = () => pg.locator('section:has([data-chart="time"]) header > span').textContent();
   const datesText = async () => ((await dates.textContent()) ?? "").replace(/^Created/, "");
@@ -1087,9 +1106,12 @@ await step("6h. insights", async () => {
   });
   check("6h.18 Animate is at the right of the Insights header and is not pressed", placement.gap < 40 && placement.left > placement.half && placement.left > placement.others && (await animate.getAttribute("aria-pressed")) === "false", JSON.stringify(placement));
   await pg.locator("button", { hasText: /^100x$/ }).click();
-  const hundred = (stress * 100).toLocaleString("en-US");
+  const maxPoints = 20000;
+  const hundredPoints = Math.min(stress * 100, maxPoints);
+  const hundred = hundredPoints.toLocaleString("en-US");
   await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, hundred, { timeout: 10000 });
-  check("6h.9 the 100x stress control makes 100 times the points", (await points()) === stress * 100, `${await points()} (${hundred})`);
+  const cappedNote = (await pg.locator("[data-capped]").textContent()) ?? "";
+  check("6h.9 the 100x stress control makes 100 times the points, capped at 20,000 with a note", (await points()) === hundredPoints && cappedNote === "capped at 20,000 points", `${await points()} (${hundred}) ${cappedNote}`);
   const metric = (name: string) => pg.locator(`[data-metric="${name}"]`).textContent();
   await animate.click();
   check("6h.19 Animate is a toggle with aria-pressed", (await animate.getAttribute("aria-pressed")) === "true");
@@ -1113,7 +1135,7 @@ await step("6h. insights", async () => {
   });
   await pg.waitForFunction(() => Number((document.querySelector('[data-metric="nodes"]')?.textContent ?? "").replace(/,/g, "")) === document.querySelectorAll("[data-chart] *").length, null, { timeout: 5000 }).catch(() => {});
   const nodeCounts = await counted();
-  check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > stress * 100 && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
+  check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > hundredPoints && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
   const hud = pg.locator("aside[data-hud]");
   const toggle = hud.locator("button[aria-controls]");
   await pg.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -1132,7 +1154,7 @@ await step("6h. insights", async () => {
   await pg.waitForSelector("#insights-metrics");
   check("6h.25 Enter on the focused toggle expands the panel again", (await toggle.getAttribute("aria-expanded")) === "true" && (await metric("points")) === hundred, `${await toggle.getAttribute("aria-expanded")} ${await metric("points")}`);
   await pg.locator("button", { hasText: /^1x$/ }).click();
-  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, String(stress), { timeout: 10000 });
+  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, stress.toLocaleString("en-US"), { timeout: 10000 });
   await pg.setViewportSize({ width: 390, height: 800 });
   await pg.evaluate(() => window.scrollTo(0, 0));
   await dates.click();
@@ -1277,7 +1299,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   const html = await (await page.request.get(base + shared)).text();
   const titles = [...html.matchAll(/class="row-title" href="[^"]*">([^<]*)</g)].map((m) => m[1]);
   check("6h.11 a URL with q and label renders the filtered list on the server",
-    titles.length > 0 && titles.length < 200 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
+    titles.length > 0 && titles.length < 2000 && titles.every((t) => /router/i.test(t)) && html.includes('value="router"') && /class="chip on" aria-pressed="true" data-label="router"/.test(html),
     String(titles.length));
   const mine = await (await page.request.get(base + "/my?label=feature")).text();
   const mineRows = [...mine.matchAll(/class="row" data-id="([^"]*)"/g)].length;
@@ -1517,9 +1539,9 @@ await step("7f. early start", async () => {
       },
     });
     const poll = setInterval(() => {
-      const b = document.querySelector(".new-issue-button") as any;
+      const b = document.querySelector("#theme-button") as any;
       if (b && b.__yuka_click) {
-        w.__newIssueStarted = Math.round(performance.now());
+        w.__themeMenuStarted = Math.round(performance.now());
         clearInterval(poll);
       }
     }, 5);
@@ -1528,14 +1550,14 @@ await step("7f. early start", async () => {
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
   await p.waitForTimeout(300);
   const r = await p.evaluate(() => ({
-    started: (window as any).__newIssueStarted as number | undefined,
+    started: (window as any).__themeMenuStarted as number | undefined,
     fills: (window as any).__fills as number[],
   }));
   const last = Math.max(...r.fills, 0);
   check(
-    "7f eager island starts before the last fill chunk arrives",
+    "7f an island that starts at idle starts before the last fill chunk arrives",
     r.fills.length >= 2 && r.started !== undefined && r.started + 100 < last,
-    `New_issue started at ${r.started}ms, fills at ${r.fills.join(",")}ms`,
+    `Theme_menu started at ${r.started}ms, fills at ${r.fills.join(",")}ms`,
   );
   await ctx.close();
 });
@@ -1553,7 +1575,7 @@ await step("7g. generated island registry", async () => {
     const m = islandModuleRe.exec(new URL(r.url()).pathname);
     if (m) seen.push(m[1]);
   });
-  const lazyNames = () => ["comments", "issue_props", "related"].filter((n) => seen.includes(n)).join(",");
+  const lazyNames = () => ["comments", "issue_props", "related", "new_issue"].filter((n) => seen.includes(n)).join(",");
   const has = (sel: string, ev: string) =>
     p.evaluate(([s, e]) => !!(document.querySelector(s) as any)?.["__yuka_" + e], [sel, ev]);
 
@@ -1561,13 +1583,13 @@ await step("7g. generated island registry", async () => {
   await p.waitForSelector("[class^=related-list_] li");
   await p.waitForTimeout(500);
 
-  check("7g.1 eager New_issue hydrated", await has(".new-issue-button", "click"));
+  check("7g.1 lazy New_issue not started before interaction", !(await has(".new-issue-button", "click")));
   check("7g.2 eager Nav_progress (Idle) hydrated", await has("[data-nav-progress]", "animationstart"));
   check("7g.5 lazy Comments (Load) hydrated", await has(".comment-input", "input"));
   check("7g.7 lazy Issue_props not started before interaction", !(await has(".props select", "change")));
   check("7g.8 only the comments chunk is requested before interaction", lazyNames() === "comments", lazyNames());
 
-  check("7g.9 non-lazy Nav_progress and New_issue modules requested at load", seen.includes("nav_progress") && seen.includes("new_issue"), seen.join(","));
+  check("7g.9 non-lazy Nav_progress module requested at load", seen.includes("nav_progress"), seen.join(","));
   check("7g.9b Issue_list module not requested on a page without it", !seen.includes("issue_list"), seen.join(","));
 
   await p.locator(".props .property").first().hover();
@@ -1584,7 +1606,7 @@ await step("7g. generated island registry", async () => {
   await p.locator("body").click({ position: { x: 5, y: 5 } });
   await p.keyboard.press("c");
   await p.waitForSelector(".dialog", { timeout: 2000 });
-  check("7g.4 New_issue is live: c opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue");
+  check("7g.4 c starts New_issue and opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue" && seen.includes("new_issue"), seen.join(","));
   await p.keyboard.press("Escape");
   await p.locator(".comment-input").fill("probe");
   check("7g.6 Comments is live: send enabled after typing", !(await p.locator(".comment-box button.primary").isDisabled()));
@@ -1671,7 +1693,7 @@ await step("7i. modulepreload", async () => {
   await p.waitForTimeout(500);
   const pre = await preloads();
   const preNames = pre.map((l) => nameOf(l.path)).filter((n) => n !== "chunk").sort();
-  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["nav_progress", "new_issue", "theme_menu"]), JSON.stringify(pre));
+  check("7i.1 issue page: one modulepreload per non-lazy island, none for lazy uses", JSON.stringify(preNames) === JSON.stringify(["nav_progress", "theme_menu"]), JSON.stringify(pre));
   check("7i.2 no duplicate modulepreload hrefs", new Set(pre.map((l) => l.path)).size === pre.length);
   if (!bundleMode) check("7i.3 dev hrefs keep the /../ form and resolve to the served module URL", pre.every((l) => l.raw.includes("/../") && reqs.includes(l.path)), JSON.stringify(pre.map((l) => [l.raw, reqs.includes(l.path)])));
   else check("7i.3 bundle hrefs name the hashed chunk and are requested", pre.every((l) => /\/_yuka\/app\/bundle\/[a-z_]+-[A-Z0-9]+\.js$/.test(l.path) && reqs.includes(l.path)), JSON.stringify(pre));
@@ -1701,16 +1723,30 @@ await step("7i. modulepreload", async () => {
 
   const r = await ctx.newPage();
   const rReqs: string[] = [];
+  const warnings: string[] = [];
+  r.on("console", (m) => m.type() === "warning" && warnings.push(m.text()));
   r.on("request", (x) => rReqs.push(nameOf(new URL(x.url()).pathname)));
+  const cdp = await ctx.newCDPSession(r);
+  await cdp.send("Network.enable");
+  const sheetLoads: string[] = [];
+  cdp.on("Network.responseReceived", (e: any) => {
+    if (/issue_list[^/]*\.css$/.test(new URL(e.response.url).pathname))
+      sheetLoads.push(e.response.fromDiskCache || e.response.fromPrefetchCache ? "cache" : "network");
+  });
   await r.goto(base + "/issue/YUK-3", { waitUntil: "networkidle" });
   await r.waitForSelector("[class^=related-list_] li");
   await r.evaluate(() => ((window as any).__nav = "alive"));
   check("7i.10 Issue_list not loaded before navigation", !rReqs.includes("issue_list"));
+  await r.locator('a[href="/"]').first().hover();
+  await r.waitForTimeout(3500);
+  check("7i.10b a hover on a link warms the chunk and the sheet of the target before the click", rReqs.includes("issue_list") && sheetLoads.join(",") === "network", `${rReqs.filter((n) => n.includes("issue_list")).join(",")} sheet=${sheetLoads.join(",")}`);
+  check("7i.10c no preload warning", !warnings.some((w) => /preload/i.test(w)), warnings.join(" | "));
   await r.locator('a[href="/"]').first().click();
   await r.waitForSelector(".row");
   await r.waitForTimeout(500);
   check("7i.11 navigation was client-side", (await r.evaluate(() => (window as any).__nav)) === "alive");
-  check("7i.12 new non-lazy island module requested once after navigation", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
+  check("7i.12 new non-lazy island module requested once", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
+  check("7i.12b the sheet of the new page comes from the HTTP cache", sheetLoads[0] === "network" && sheetLoads.slice(1).every((l) => l === "cache"), sheetLoads.join(","));
   const total = await r.locator(".row").count();
   await r.fill(".filter", "keyboard");
   await r.waitForTimeout(100);

@@ -41,7 +41,7 @@ let sheet src file =
   let path = Filename.concat (Filename.dirname src) file in
   match read path with
   | text -> (
-      try Css_scan.sheet ~path:file text with Css_scan.Error m -> fail "%s: %s" src m)
+      match Css_scan.sheet ~path:file text with Ok sheet -> sheet | Error m -> fail "%s: %s" src m)
   | exception Sys_error _ -> fail "%s: [%%yuka.css %S]: cannot read %s" src file path
 
 let command =

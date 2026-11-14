@@ -185,13 +185,20 @@ let request_switch_ends ~fs () =
   check_true "the fiber on the request switch ends with the response" (Unix.gettimeofday () -. start < 1.)
 
 let no_sessions ~sw ~fs () =
+  let logged = ref [] in
+  let config = Yuka.Server.config ~log:(fun _ m -> logged := m :: !logged) () in
   let handler = Yuka_tapak.handler ~sw ~fs config Yuka_routes.app in
   let response, _ = call ~headers:same_origin handler "/_yuka/csrf" in
   Alcotest.(check int) "csrf without the middleware" 500 (status response);
+  check_true "the csrf log names the path and the middleware"
+    (match !logged with [ m ] -> contains m "/_yuka/csrf" && contains m "session middleware" | _ -> false);
+  logged := [];
   let response, _ =
     call ~headers:(("Upgrade", "websocket") :: same_origin) handler "/_yuka/live"
   in
-  Alcotest.(check int) "live without the middleware" 500 (status response)
+  Alcotest.(check int) "live without the middleware" 500 (status response);
+  check_true "the live log names the middleware"
+    (match !logged with [ m ] -> contains m "the live socket needs session middleware" | _ -> false)
 
 let csrf_secret = String.make 32 'k'
 
@@ -317,6 +324,22 @@ let live ~sw ~net make () =
           | `Close (code, _) -> Alcotest.(check int) "a bad token" 4403 code
           | _ -> Alcotest.fail "not a close"))
 
+let await_result () =
+  let check = Alcotest.(check (result int string)) in
+  check "done" (Ok 1) (Yuka_tapak.await (Yuka.Async.return 1));
+  check "failed" (Error "down") (Yuka_tapak.await (Yuka.Async.failed "down"));
+  let a, _, fail = Yuka.Async.make () in
+  Eio.Fiber.both (fun () -> check "failed while waiting" (Error "later") (Yuka_tapak.await a)) (fun () -> fail "later")
+
+let await_exn () =
+  Alcotest.(check int) "done" 2 (Yuka_tapak.await_exn (Yuka.Async.return 2));
+  Alcotest.check_raises "failed" (Failure "down") (fun () -> ignore (Yuka_tapak.await_exn (Yuka.Async.failed "down")));
+  let a, _, fail = Yuka.Async.make () in
+  Eio.Fiber.both
+    (fun () ->
+      Alcotest.check_raises "failed while waiting" (Failure "later") (fun () -> ignore (Yuka_tapak.await_exn a)))
+    (fun () -> fail "later")
+
 let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -339,6 +362,11 @@ let () =
           Alcotest.test_case "HEAD then GET on one connection" `Quick (head_then_get ~net make);
         ] );
       ("log", [ Alcotest.test_case "Console reaches Logs" `Quick (tapak_log make) ]);
+      ( "await",
+        [
+          Alcotest.test_case "await gives a result" `Quick await_result;
+          Alcotest.test_case "await_exn raises Failure" `Quick await_exn;
+        ] );
       ( "session",
         [
           Alcotest.test_case "sessions gives the cookies" `Quick (csrf_cookies make);

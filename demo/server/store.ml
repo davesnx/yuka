@@ -235,6 +235,8 @@ let seeded_spot number =
   ( Insights_data.hash number mod (Board.width - Board.item_width + 1),
     Insights_data.hash (number + 50021) mod (Board.height - Board.item_height + 1) )
 
+let carded issues = List.filteri (fun index _ -> index < Board.card_limit) issues
+
 let board workspace : Board.t =
   let saved = (cell workspace).saved in
   let spots = Hashtbl.of_seq (List.to_seq saved.spots) in
@@ -244,7 +246,7 @@ let board workspace : Board.t =
       (fun (issue : Issue.t) ->
         let x, y = at issue.id (seeded_spot (Issue.number issue)) in
         { Board.id = issue.id; x; y; content = Card { title = issue.title; status = issue.status } })
-      saved.issues
+      (carded saved.issues)
   in
   let notes =
     List.filter_map
@@ -254,7 +256,7 @@ let board workspace : Board.t =
   cards @ notes
 
 let on_board workspace id =
-  List.exists (fun (issue : Issue.t) -> issue.id = id) (issues workspace) || List.mem_assoc id (cell workspace).saved.notes
+  List.exists (fun (issue : Issue.t) -> issue.id = id) (carded (issues workspace)) || List.mem_assoc id (cell workspace).saved.notes
 
 let move_item workspace ~id ~x ~y =
   let cell = cell workspace in
@@ -291,6 +293,38 @@ let shuffle workspace =
     (board workspace)
 
 type database = { conninfo : string; reset_days : int; mutable connection : Postgresql.connection option }
+
+let process_id = Printf.sprintf "%06x" (Random.State.bits random land 0xffffff)
+let notifies = ref false
+let store_facts = ref [ ("Data", "In the memory of this server process") ]
+
+let region_of_host host =
+  let cell label =
+    String.starts_with ~prefix:"c-" label && Option.is_some (int_of_string_opt (String.sub label 2 (String.length label - 2)))
+  in
+  match Filename.chop_suffix_opt ~suffix:".neon.tech" host with
+  | None -> None
+  | Some name -> (
+      match String.split_on_char '.' name with
+      | _endpoint :: labels -> (
+          match List.filter (fun label -> not (cell label)) labels with [] -> None | kept -> Some (String.concat ", " kept))
+      | [] -> None)
+
+let place_facts (connection : Postgresql.connection) =
+  let host = connection#host in
+  let major, _, _ = connection#server_version in
+  let region = region_of_host host in
+  let version = Printf.sprintf "Postgres %d" major in
+  [ ("Data", if String.ends_with ~suffix:".neon.tech" host then "Neon, " ^ version else version) ]
+  @ Option.fold region ~none:[] ~some:(fun region -> [ ("Region", region) ])
+  @ [ ("Database", connection#db) ]
+
+let facts () =
+  let server_region = match Sys.getenv_opt "VERCEL_REGION" with Some "" | None -> [] | Some region -> [ ("Server region", region) ] in
+  !store_facts
+  @ (if !notifies then [ ("Live updates", "Changes go to the other servers over Postgres LISTEN/NOTIFY") ] else [])
+  @ server_region
+  @ [ ("Server process", process_id) ]
 
 let database = ref None
 let unavailable = "The data store is not available. Try again."
@@ -433,7 +467,8 @@ let connect ~conninfo ~reset_days =
         ignore
           (exec db
              "CREATE TABLE IF NOT EXISTS yuka_demo_state (workspace text PRIMARY KEY, version bigint NOT NULL, started timestamptz NOT NULL, state text NOT NULL)");
-        ignore (exec db "COMMIT"))
+        ignore (exec db "COMMIT");
+        Option.iter (fun connection -> store_facts := place_facts connection) db.connection)
   in
   Result.map
     (fun () ->

@@ -63,7 +63,8 @@ let exn_to_string : exn -> string =
     }|}]
 
 external encode_uri : string -> string = "encodeURIComponent"
-external decode_uri : string -> string = "decodeURIComponent"
+let decode_uri : string -> string option =
+  [%mel.raw "function (s) { try { return decodeURIComponent(s) } catch (e) { return undefined } }"]
 
 let contains : node -> node -> bool = [%mel.raw "function (a, b) { return a.contains(b) }"]
 
@@ -410,6 +411,38 @@ external parse_float : string -> float = "Number"
 
 let parse_int : string -> int option =
   [%mel.raw "function (t) { const n = Number(t); return (n | 0) === n ? n | 0 : undefined }"]
+
+type json =
+  [ `Null
+  | `Bool of bool
+  | `Int of int
+  | `Float of float
+  | `String of string
+  | `List of json list
+  | `Assoc of (string * json) list ]
+
+let parse_json : string -> (json, string) result =
+  [%mel.raw
+    {|function (s) {
+  function c(v, d) {
+    if (v === null) return "Null";
+    switch (typeof v) {
+      case "boolean": return { NAME: "Bool", VAL: v };
+      case "number": return (v | 0) === v ? { NAME: "Int", VAL: v | 0 } : { NAME: "Float", VAL: v };
+      case "string": return { NAME: "String", VAL: v };
+    }
+    if (d > 512) throw new Error("nesting too deep");
+    let l = 0, i, k;
+    if (Array.isArray(v)) {
+      for (i = v.length; i--; ) l = { hd: c(v[i], d + 1), tl: l };
+      return { NAME: "List", VAL: l };
+    }
+    k = Object.keys(v);
+    for (i = k.length; i--; ) l = { hd: [k[i], c(v[k[i]], d + 1)], tl: l };
+    return { NAME: "Assoc", VAL: l };
+  }
+  try { return { TAG: 0, _0: c(JSON.parse(s), 1) } } catch (e) { return { TAG: 1, _0: String(e && e.message) } }
+}|}]
 
 type socket
 

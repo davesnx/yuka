@@ -27,9 +27,13 @@ let refresh_store inner req =
   inner req
 
 let node_name () =
-  Printf.sprintf "%s-%d-%x" (Unix.gethostname ()) (Unix.getpid ()) (Random.State.bits (Random.State.make_self_init ()))
+  Printf.sprintf "%s-%d-%s" (Unix.gethostname ()) (Unix.getpid ()) Demo_app.Store.process_id
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
+
+let stop message =
+  prerr_endline ("demo_server: " ^ message);
+  exit 1
 
 let () =
   let here = Filename.dirname Sys.executable_name in
@@ -40,7 +44,7 @@ let () =
       | Some value -> (
           match int_of_string_opt value with
           | Some port -> port
-          | None -> failwith ("demo_server: PORT is not a number: " ^ value)))
+          | None -> stop ("PORT is not a number: " ^ value)))
   in
   let interface = ref "localhost" in
   let js_dir = ref (Filename.concat here "../client/out") in
@@ -52,7 +56,15 @@ let () =
   let prerendered = ref "" in
   let second = ref 0 in
   let bus = ref "memory" in
-  let database = ref (Option.value (Sys.getenv_opt "YUKA_DEMO_DATABASE") ~default:"") in
+  let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
+  let database =
+    ref
+      (match variable "YUKA_DEMO_DATABASE" with
+      | Some conninfo -> conninfo
+      | None when Sys.getenv_opt "VERCEL_ENV" = Some "production" ->
+          Option.value (List.find_map variable [ "DATABASE_URL_UNPOOLED"; "POSTGRES_URL_NON_POOLING" ]) ~default:""
+      | None -> "")
+  in
   let reset_days =
     ref
       (match Sys.getenv_opt "YUKA_DEMO_RESET_DAYS" with
@@ -60,7 +72,7 @@ let () =
       | Some value -> (
           match int_of_string_opt value with
           | Some days -> days
-          | None -> failwith ("demo_server: YUKA_DEMO_RESET_DAYS is not a number: " ^ value)))
+          | None -> stop ("YUKA_DEMO_RESET_DAYS is not a number: " ^ value)))
   in
   let secret =
     ref (Option.value (Sys.getenv_opt "YUKA_DEMO_SECRET") ~default:"yuka-demo-secret-for-development-only")
@@ -83,7 +95,7 @@ let () =
       ("--bus", Arg.Set_string bus, "With --second-node: memory (default) or pg:CONNINFO (yuka-live-pg)");
       ( "--database",
         Arg.Set_string database,
-        "Postgres connection string of the shared store, a direct (not pooled) one (default: $YUKA_DEMO_DATABASE; empty: in memory)" );
+        "Postgres connection string of the shared store, a direct (not pooled) one (default: $YUKA_DEMO_DATABASE, or on Vercel production $DATABASE_URL_UNPOOLED or $POSTGRES_URL_NON_POOLING; empty: in memory)" );
       ( "--reset-days",
         Arg.Set_int reset_days,
         "The data starts again from the seed when it is older than this many days (default: $YUKA_DEMO_RESET_DAYS, or 7)" );
@@ -93,12 +105,16 @@ let () =
   let manifest = read_file !manifest in
   let client = Filename.concat !js_dir "demo/client" in
   let assets =
-    if !bundle then
-      Yuka.Server.bundle ~dir:client ~entry:"bundle/main.js" ~manifest
-        ~metafile:(read_file !metafile)
-    else
-      Yuka.Server.modules ~dir:!js_dir ~entry:"demo/client/main.js" ~manifest
-        ~packages:(packages !js_dir) ~digest:(Yuka_dream.tree_digest !js_dir)
+    match
+      if !bundle then
+        Yuka.Server.bundle ~dir:client ~entry:"bundle/main.js" ~manifest
+          ~metafile:(read_file !metafile)
+      else
+        Yuka.Server.modules ~dir:!js_dir ~entry:"demo/client/main.js" ~manifest
+          ~packages:(packages !js_dir) ~digest:(Yuka_dream.tree_digest !js_dir)
+    with
+    | Ok assets -> assets
+    | Error message -> stop message
   in
   let config =
     Yuka.Server.config ~assets
@@ -112,7 +128,7 @@ let () =
       ()
   in
   Demo_app.Handlers.register ();
-  if !reset_days < 1 then failwith "demo_server: the reset age must be at least 1 day";
+  if !reset_days < 1 then stop "the reset age must be at least 1 day";
   if !database <> "" && !prerender = "" then begin
     List.iter
       (fun (name, value) -> if Sys.getenv_opt name = None then Unix.putenv name value)
@@ -125,10 +141,12 @@ let () =
     | Error message ->
         prerr_endline ("demo_server: the database is not available: " ^ message);
         exit 1);
-    if !second = 0 then
+    if !second = 0 then begin
+      Demo_app.Store.notifies := true;
       Lwt_main.run
         (Yuka_dream.to_lwt
            (Yuka.Server.Live.use_bus ~name:(node_name ()) (Yuka_live_pg.bus ~conninfo:!database ~channel:"yuka_demo" ())))
+    end
   end;
   let app = Demo_app.Yuka_routes.app in
   if !prerender <> "" then Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app)
@@ -140,11 +158,12 @@ let () =
       match String.index_opt !bus ':' with
       | Some colon when String.sub !bus 0 colon = "pg" ->
           let conninfo = String.sub !bus (colon + 1) (String.length !bus - colon - 1) in
+          Demo_app.Store.notifies := true;
           fun () -> Yuka_live_pg.bus ~conninfo ~channel:"yuka_demo" ()
       | _ when !bus = "memory" ->
           let memory = Yuka.Server.Live.memory () in
           fun () -> Yuka.Server.Live.memory_bus memory
-      | _ -> failwith ("demo_server: unknown --bus " ^ !bus)
+      | _ -> stop ("unknown --bus " ^ !bus)
     in
     let other = Yuka.Server.Live.node () in
     let serve ?node port =

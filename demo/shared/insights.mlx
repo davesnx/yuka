@@ -573,6 +573,9 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
       <span>"Insights"</span>
       <span class_="group-count">(Yuka.text (format_int (List.length (Yuka.State.get selected))))</span>
       <span class_=Css.note>(Yuka.text ("of " ^ format_int (List.length (Yuka.State.get items)) ^ " issues"))</span>
+      (if capped ~multiplier:(Yuka.State.get shown_multiplier) (List.length (Yuka.State.get issues)) then
+         <span class_=Css.note data_capped="true">(Yuka.text ("capped at " ^ format_int max_points ^ " points"))</span>
+       else Yuka.empty)
       <button class_=("chip " ^ Css.animate) type_=`button data_animate="true"
         aria_pressed=(if Yuka.State.get animate then `true_ else `false_)
         on_click=(fun _ -> Yuka.State.update animate not)>

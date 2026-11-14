@@ -110,8 +110,9 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   whose expression contains `Yuka.State.get`: `hidden=(Yuka.State.get all)`
   above. It does not see a read inside another function, such as
   `shown ()`; write `Yuka.hole (fun () -> ...)` for it.
-- Make a State inside `make`. A State made at the top level of a module is
-  a ppx error, because every request of the server would share it.
+- Make a State inside `make`. Every request of the server shares a State
+  made at the top level of a module, so on the server `State.set` or
+  `State.update` on it raises `Invalid_argument`.
 
 [`state.md`](state.md) explains State, memos and effects.
 

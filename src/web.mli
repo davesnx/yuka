@@ -65,7 +65,7 @@ val console_log : string -> unit
 val console_debug : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
-val decode_uri : string -> string
+val decode_uri : string -> string option
 val contains : node -> node -> bool
 val fetch_post :
   string ->
@@ -118,6 +118,17 @@ val table_clear : 'a table -> unit
 val shortest_float : float -> string
 val parse_float : string -> float
 val parse_int : string -> int option
+
+type json =
+  [ `Null
+  | `Bool of bool
+  | `Int of int
+  | `Float of float
+  | `String of string
+  | `List of json list
+  | `Assoc of (string * json) list ]
+
+val parse_json : string -> (json, string) result
 
 type socket
 
