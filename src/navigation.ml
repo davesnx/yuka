@@ -78,6 +78,16 @@ let html header =
 
 type answer = { final : string; status : int; header : string -> string option; text : string }
 
+let swappable a =
+  let stale = match a.header "yuka-build" with Some b -> not (is b (build ())) | None -> false in
+  let shown = (a.status >= 200 && a.status < 300) || a.status >= 400 in
+  match outlet a.header with
+  | Some None -> None
+  | _ when stale || (not shown) || not (html a.header) -> None
+  | target -> Some (Option.join target)
+
+let warm a = if Option.is_some (swappable a) then Navigation_web.warm a.final a.text
+
 type entry = {
   key : string;
   mutable answer : answer option;
@@ -85,6 +95,7 @@ type entry = {
   controller : Navigation_web.controller;
   mutable at : float;
   prefetched : bool;
+  mutable warm : bool;
 }
 
 let cache_table : entry Web.table option ref = ref None
@@ -157,7 +168,7 @@ let rec start ~low key url =
   if Option.is_none (lookup key) then begin
     let e =
       { key; answer = None; waiters = []; controller = Navigation_web.new_controller (); at = 0.;
-        prefetched = true }
+        prefetched = true; warm = not low }
     in
     add e;
     let settle a =
@@ -168,9 +179,11 @@ let rec start ~low key url =
     in
     Navigation_web.fetch_page (url, keys (), true, low, e.controller)
       (fun final status header text ->
+        let a = { final; status; header; text } and waited = match e.waiters with [] -> false | _ -> true in
         e.at <- Navigation_web.now ();
-        e.answer <- Some { final; status; header; text };
-        settle e.answer)
+        e.answer <- Some a;
+        settle e.answer;
+        if e.warm && not waited then warm a)
       (fun () ->
         drop e;
         settle None)
@@ -189,7 +202,11 @@ let prefetch url =
   if allowed () then begin
     let key = page_key url in
     take key;
-    start ~low:false key url
+    match lookup key with
+    | Some e ->
+        e.warm <- true;
+        Option.iter warm e.answer
+    | None -> start ~low:false key url
   end
 
 let seen a inside unobserve =
@@ -210,12 +227,9 @@ let show ~dir ~push ~restore url a =
     | "" -> a.final
     | h -> Navigation_web.no_hash a.final ^ h
   in
-  let stale = match a.header "yuka-build" with Some b -> not (is b (build ())) | None -> false in
-  let shown = (a.status >= 200 && a.status < 300) || a.status >= 400 in
-  match outlet a.header with
-  | Some None -> assign final
-  | _ when stale || (not shown) || not (html a.header) -> assign final
-  | target ->
+  match swappable a with
+  | None -> assign final
+  | Some target ->
       if push then begin
         let key = Web.fresh_key () in
         Navigation_web.history_push_key key final;
@@ -224,7 +238,7 @@ let show ~dir ~push ~restore url a =
       loaded := Web.current_url ();
       let apply () =
         Navigation_state.set false;
-        swap (Option.join target) final a.header a.text;
+        swap target final a.header a.text;
         (match restore with
         | Some y -> Navigation_web.scroll_to y
         | None -> Navigation_web.scroll_to_hash (hash_of final));
@@ -265,7 +279,7 @@ let load ~dir ~push ~restore url =
             pending := None;
             let a = { final; status; header; text } in
             if max_age header > 0 && asked = !era then begin
-              add { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false };
+              add { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false; warm = false };
               pump ()
             end;
             apply (Some a))

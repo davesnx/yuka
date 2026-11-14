@@ -1700,16 +1700,30 @@ await step("7i. modulepreload", async () => {
 
   const r = await ctx.newPage();
   const rReqs: string[] = [];
+  const warnings: string[] = [];
+  r.on("console", (m) => m.type() === "warning" && warnings.push(m.text()));
   r.on("request", (x) => rReqs.push(nameOf(new URL(x.url()).pathname)));
+  const cdp = await ctx.newCDPSession(r);
+  await cdp.send("Network.enable");
+  const sheetLoads: string[] = [];
+  cdp.on("Network.responseReceived", (e: any) => {
+    if (/issue_list[^/]*\.css$/.test(new URL(e.response.url).pathname))
+      sheetLoads.push(e.response.fromDiskCache || e.response.fromPrefetchCache ? "cache" : "network");
+  });
   await r.goto(base + "/issue/YUK-3", { waitUntil: "networkidle" });
   await r.waitForSelector("[class^=related-list_] li");
   await r.evaluate(() => ((window as any).__nav = "alive"));
   check("7i.10 Issue_list not loaded before navigation", !rReqs.includes("issue_list"));
+  await r.locator('a[href="/"]').first().hover();
+  await r.waitForTimeout(3500);
+  check("7i.10b a hover on a link warms the chunk and the sheet of the target before the click", rReqs.includes("issue_list") && sheetLoads.join(",") === "network", `${rReqs.filter((n) => n.includes("issue_list")).join(",")} sheet=${sheetLoads.join(",")}`);
+  check("7i.10c no preload warning", !warnings.some((w) => /preload/i.test(w)), warnings.join(" | "));
   await r.locator('a[href="/"]').first().click();
   await r.waitForSelector(".row");
   await r.waitForTimeout(500);
   check("7i.11 navigation was client-side", (await r.evaluate(() => (window as any).__nav)) === "alive");
-  check("7i.12 new non-lazy island module requested once after navigation", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
+  check("7i.12 new non-lazy island module requested once", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
+  check("7i.12b the sheet of the new page comes from the HTTP cache", sheetLoads[0] === "network" && sheetLoads.slice(1).every((l) => l === "cache"), sheetLoads.join(","));
   const total = await r.locator(".row").count();
   await r.fill(".filter", "keyboard");
   await r.waitForTimeout(100);

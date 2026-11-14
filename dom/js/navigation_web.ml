@@ -114,6 +114,23 @@ let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> 
   return function () { observer.disconnect(); };
 }|}]
 
+let warm : string -> string -> unit =
+  [%mel.raw
+    {|function (final, text) {
+  const d = document, seen = d.__yukaWarm || (d.__yukaWarm = new Set()), base = new URL(window.location.origin + final);
+  d.querySelectorAll("link[href]").forEach(function (l) { seen.add(l.href); });
+  for (const m of text.matchAll(/<link rel="(?:modulepreload" href="([^"]*)">|stylesheet" href="([^"]*)" data-yuka-css>)/g)) {
+    let href;
+    try { href = new URL((m[1] === undefined ? m[2] : m[1]).replace(/&lt;/g, "<").replace(/&quot;/g, '"').replace(/&amp;/g, "&"), base).href; } catch (e) { continue; }
+    if (seen.has(href)) continue;
+    seen.add(href);
+    const l = d.createElement("link");
+    l.rel = m[1] === undefined ? "prefetch" : "modulepreload";
+    l.href = href;
+    d.head.appendChild(l);
+  }
+}|}]
+
 let transition : string -> (unit -> unit) -> unit =
   [%mel.raw
     {|function (dir, f) {

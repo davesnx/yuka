@@ -1211,6 +1211,10 @@ val render :
     the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
     and [`Off] turn it off, and so does [navigator.connection.saveData].
     A navigation to a URL whose prefetch is in flight waits for it.
+    When a hover, focus or press prefetch arrives, the browser starts to
+    load the island chunks ([<link rel="modulepreload">]) and the
+    [data-yuka-css] style sheets that it names, each once per page; a visible
+    prefetch does this only after such a trigger on its link.
 
     Answers are kept by URL and outlet keys, at most 30, by the
     [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or

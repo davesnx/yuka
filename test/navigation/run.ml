@@ -1090,6 +1090,134 @@ let action_rewatches finish =
           check "2 wait, the newest starts next" "http://localhost/p5" (urls 9);
           finish ()))
 
+let warmed : unit -> string =
+  [%mel.raw
+    {|function () {
+  return Array.from(document.head.querySelectorAll("link[rel=modulepreload], link[rel=prefetch]"), function (l) {
+    return l.rel + ":" + l.getAttribute("href");
+  }).join(",");
+}|}]
+
+let assets links = doc "Page" (page (String.concat "" links ^ "<p>x</p>"))
+let preload href = {|<link rel="modulepreload" href="|} ^ href ^ {|">|}
+let sheet href = {|<link rel="stylesheet" href="|} ^ href ^ {|" data-yuka-css>|}
+
+let intent_warms finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_call 0 (assets [ preload "/a.js?x=1&amp;y=2"; preload "/b.js"; sheet "/s.css" ]) "";
+  tick (fun () ->
+      check "an intent answer warms its chunks and sheets"
+        "modulepreload:http://localhost/a.js?x=1&y=2,modulepreload:http://localhost/b.js,prefetch:http://localhost/s.css"
+        (warmed ());
+      fire "#m" "pointerdown";
+      resolve_call 1 (assets [ preload "/b.js"; preload "/c.js"; sheet "/s.css" ]) "";
+      tick (fun () ->
+          check "a URL is warmed once"
+            "modulepreload:http://localhost/a.js?x=1&y=2,modulepreload:http://localhost/b.js,prefetch:http://localhost/s.css,modulepreload:http://localhost/c.js"
+            (warmed ());
+          finish ()))
+
+let nothing_to_warm finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  fire "#m" "pointerdown";
+  resolve_call 0 (assets []) "";
+  reject_call 1;
+  tick (fun () ->
+      check "an answer with no links and a failed prefetch warm nothing" "" (warmed ());
+      finish ())
+
+let warm_unescapes finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_call 0 (assets [ preload "/e.js?a=&lt;&quot;&amp;lt;" ]) "";
+  tick (fun () ->
+      check "each entity is decoded once" "modulepreload:http://localhost/e.js?a=%3C%22&lt;" (warmed ());
+      finish ())
+
+let warm_relative finish =
+  setup (page {|<a id="d" href="/dir/page">d</a>|});
+  plain_start ();
+  fire "#d" "pointerdown";
+  resolve_call 0 (assets [ preload "x.js" ]) "";
+  tick (fun () ->
+      check "a relative href is resolved against the answer URL" "modulepreload:http://localhost/dir/x.js" (warmed ());
+      finish ())
+
+let warm_skips_page_links finish =
+  setup links;
+  set_head ({|<title>start</title>|} ^ sheet "/s.css");
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_call 0 (assets [ sheet "/s.css"; preload "/a.js" ]) "";
+  tick (fun () ->
+      check "a sheet already in the page is not warmed" "modulepreload:http://localhost/a.js" (warmed ());
+      finish ())
+
+let warm_only_shown finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body (page {|<a id="a" href="/a">a</a><a id="b" href="/b">b</a><a id="c" href="/c">c</a>|});
+  plain_start ();
+  fire "#a" "pointerdown";
+  fire "#b" "pointerdown";
+  fire "#c" "pointerdown";
+  let text = assets [ preload "/x.js" ] in
+  resolve_with 0 text "" 200 "text/plain";
+  resolve_with 1 text "" 302 "text/html";
+  resolve_headers 2 text 200 [| ("yuka-build", "b2") |];
+  tick (fun () ->
+      check "text/plain, 302 and another build warm nothing" "" (warmed ());
+      finish ())
+
+let warm_bad_href finish =
+  setup links;
+  plain_start ();
+  fire "#m" "pointerdown";
+  resolve_call 0 (assets [ preload "http://["; preload "/ok.js" ]) "";
+  tick (fun () ->
+      check "a bad href is skipped, the others warm" "modulepreload:http://localhost/ok.js" (warmed ());
+      fire "#l" "pointerdown";
+      ignore (click "#l" "");
+      resolve_call 1 (doc "Two" (page {|<link rel="modulepreload" href="http://["><p>two</p>|})) "";
+      tick (fun () ->
+          check "a click that waits on an answer with a bad href completes" "/two" (location_ ());
+          finish ()))
+
+let press_then_click finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  resolve_call 0 (assets [ preload "/a.js"; sheet "/s.css" ]) "";
+  tick (fun () ->
+      check "the click completes" "/two" (location_ ());
+      check "a waited answer is not warmed" "" (warmed ());
+      finish ())
+
+let visible_warms_on_intent finish =
+  setup links;
+  stub_observer ();
+  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  intersect "l";
+  intersect "m";
+  resolve_call 0 (assets [ preload "/a.js" ]) "";
+  tick (fun () ->
+      check "a visible answer warms nothing" "" (warmed ());
+      fire "#l" "pointerdown";
+      check "an intent on an answered visible prefetch warms at once" "modulepreload:http://localhost/a.js" (warmed ());
+      fire "#m" "pointerdown";
+      check "no new request" "2" (ints (calls ()));
+      resolve_call 1 (assets [ preload "/b.js" ]) "";
+      tick (fun () ->
+          check "an intent on a visible prefetch in flight warms when it arrives"
+            "modulepreload:http://localhost/a.js,modulepreload:http://localhost/b.js" (warmed ());
+          finish ()))
+
 let waiting_save_data finish =
   visible_page (numbered 6);
   save_data ();
@@ -1870,6 +1998,15 @@ let all =
     ("a click on a waiting link navigates with one request", click_queued);
     ("after an action the visible links are observed and prefetched again", action_rewatches);
     ("a waiting link does not start under saveData", waiting_save_data);
+    ("an intent prefetch answer warms its chunks and sheets once", intent_warms);
+    ("an answer with no links or a failed prefetch warms nothing", nothing_to_warm);
+    ("a visible prefetch warms only after an intent on its link", visible_warms_on_intent);
+    ("warm: entities decoded once each", warm_unescapes);
+    ("warm: a relative href resolves against the answer URL", warm_relative);
+    ("warm: a link already in the page is not warmed again", warm_skips_page_links);
+    ("warm: an answer that is not swapped in warms nothing", warm_only_shown);
+    ("warm: a bad href is skipped and a waiting click completes", warm_bad_href);
+    ("warm: press then click before the answer warms nothing", press_then_click);
     ("max-age reuses a page", max_age_cache);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);
