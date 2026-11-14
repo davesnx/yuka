@@ -1840,6 +1840,60 @@ let stop_before_transition finish =
           check "no scroll, no island started" "" (log_read ());
           finish ()))
 
+let back_forward_before_transition finish =
+  race_start ();
+  tick (fun () ->
+      back ();
+      tick (fun () ->
+          log_clear ();
+          forward ();
+          tick (fun () ->
+              check "forward loads the entry that waits for its update" "/two" (call_url 1);
+              run_transition 0;
+              check "the older update does nothing" (race_page "<p>start</p>" 1) (body_html ());
+              resolve_call 1 (doc "Two" (page ("<p>two</p>" ^ island 2))) "";
+              tick (fun () ->
+                  run_transition 1;
+                  tick (fun () ->
+                      check "shown" (page ("<p>two</p>" ^ island 2)) (body_html ());
+                      check "an entry that was never shown starts at the top" "scroll:0|g0/2" (log_read ());
+                      finish ())))))
+
+let popstate_replaced_scroll finish =
+  setup (page {|<a id="a" href="/a">a</a>|});
+  plain_start ();
+  ignore (click "#a" "");
+  resolve_call 0 (doc "A" (page {|<a id="b" href="/b">b</a>|})) "";
+  tick (fun () ->
+      set_scroll 50.;
+      ignore (click "#b" "");
+      resolve_call 1 (doc "B" (page "b")) "";
+      tick (fun () ->
+          set_scroll 70.;
+          back ();
+          tick (fun () ->
+              check "the first popstate loads a" "/a" (call_url 2);
+              set_scroll 90.;
+              back ();
+              tick (fun () ->
+                  check "the second popstate loads the start page" "/start?x=1" (call_url 3);
+                  resolve_call 3 (doc "S" (page "s")) "";
+                  tick (fun () ->
+                      check "the start page is shown" (page "s") (body_html ());
+                      log_clear ();
+                      forward ();
+                      tick (fun () ->
+                          resolve_call 4 (doc "A" (page "a")) "";
+                          tick (fun () ->
+                              check "a, never shown in between, keeps its own scroll" "scroll:50" (log_read ());
+                              log_clear ();
+                              forward ();
+                              tick (fun () ->
+                                  resolve_call 5 (doc "B" (page "b")) "";
+                                  tick (fun () ->
+                                      check "b has the scroll of the last time it was shown" "scroll:90" (log_read ());
+                                      finish ())))))))))
+
 let transition_error finish =
   setup links;
   raising_transition ();
@@ -2593,6 +2647,8 @@ let all =
     ("transitions: a click before the update runs drops the older page", newer_before_transition "http://localhost/three" (fun () -> ignore (click "#m" "")));
     ("transitions: a popstate before the update runs drops the older page", newer_before_transition "/three" (fun () -> popstate_to "/three"));
     ("transitions: stop before the update runs drops the page", stop_before_transition);
+    ("transitions: back then forward before the update runs starts the page at the top", back_forward_before_transition);
+    ("a popstate that replaces a popstate load keeps the scroll of the shown page", popstate_replaced_scroll);
     ("an evicted prefetch is aborted", eviction);
     ("replacing an entry evicts nothing", replace_keeps_others);
     ("pointer down prefetches only for the primary button", pointer_buttons);
