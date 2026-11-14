@@ -158,7 +158,8 @@ module Pages = struct
     Server.page ~title:"Slow" (fun () ->
         Yuka.Await.make ~async:(slow ()) ~loading:(text "wait")
           ~failed:(fun _ -> failwith "timeout secret")
-          ~children:(fun v -> if v = "explode" then failwith "fill secret" else text v)
+          ~children:(fun v ->
+            if v = "explode" then failwith "fill secret" else if v = "island" then island "Late" else text v)
           ())
 
   let twice () =

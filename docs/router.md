@@ -369,6 +369,38 @@ of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
 On a link, `data-yuka-prefetch="off"` stops its prefetch.
 `navigator.connection.saveData` stops all prefetch.
 
+A page with no island loads no navigation code, so the browser prefetches
+for it. At the end of the body of such a page, the server prints one
+speculation rule (JSON, not JavaScript):
+
+```html
+<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>
+```
+
+A browser that runs speculation rules (Chrome and Edge today; a browser
+that does not ignores the element) fetches the full document of a link to this site at the
+pointer down or touch down on it, on desktop and on mobile, and uses that
+answer at the click that follows. A hover alone fetches nothing. A link
+with `data-yuka-prefetch="off"`, `download` or `target` is left out. With
+the highest level of the tree `` `Off ``, no page has the rule. A page with
+an island and a client navigation answer have none. The not-found and error
+pages have it when they have no island.
+
+Such a request is a navigation prefetch: `Sec-Purpose: prefetch` and
+`Sec-Fetch-Dest: document`. A prerender has `Sec-Purpose: prefetch;prerender`,
+and the server reads it as a prefetch. The server counts a navigation prefetch as the trigger `hover`
+(which includes a press): a page route with `` `Off ``, an endpoint and an
+action answer `503` with `Cache-Control: no-store` and `Vary:
+Yuka-Navigate, Yuka-Prefetch, Sec-Purpose`, before guards, loaders and the
+handler. The browser drops a non-2xx answer and loads the URL again at the
+click. Any other page route answers the full page. A static file is served,
+because the click follows the press at once and needs the file. A request
+with `Sec-Purpose` and another `Sec-Fetch-Dest` (such as `empty`, which
+browsers send for `<link rel="prefetch">`) is answered as a request without
+`Sec-Purpose`. Each refused prefetch shows as a `503` in the access log. To
+allow the rule under a `Content-Security-Policy`, see
+[Security](security.md).
+
 A prefetch runs the guards and loaders of the page for a link that the
 user may never click: they must have no side effects.
 

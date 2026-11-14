@@ -1016,7 +1016,9 @@ let render =
     ( "0 bytes of JavaScript without islands or fills",
       fun () ->
         let r = get "/plain" in
-        Alcotest.(check int) "only the import map script" 1 (count r.body "<script");
+        Alcotest.(check int) "no script but the import map and the speculation rules" 0
+          (count r.body "<script" - count r.body {|<script type="importmap">|}
+          - count r.body {|<script type="speculationrules">|});
         check_true "import map" (contains r.body {|<script type="importmap">|});
         check_true "no fill script" (not (contains r.body "__yukaFill"));
         check_true "no preload" (not (contains r.body "modulepreload")) );
@@ -1616,7 +1618,7 @@ let prefetch =
         check_true "off" (contains (highest [ Some `Off; Some `Off ]) {|<meta name="yuka-prefetch" content="off">|});
         check_true "no page route: off" (contains (highest []) {|<meta name="yuka-prefetch" content="off">|});
         List.iter
-          (fun pages -> check_true "trajectory is not printed" (not (contains (highest pages) "yuka-prefetch")))
+          (fun pages -> check_true "trajectory is not printed" (not (contains (highest pages) {|<meta name="yuka-prefetch"|})))
           [ [ None ]; [ Some `Off; None ]; [ Some `Trajectory; Some `Off ] ];
         check_true "hover" (contains (highest [ Some `Hover; Some `Off ]) {|<meta name="yuka-prefetch" content="hover">|});
         check_true "visible wins" (contains (highest [ Some `Off; Some `Visible; None ]) {|content="visible"|}) );
@@ -1679,6 +1681,122 @@ let prefetch =
              {|<meta name="yuka-prefetch" content="idle">|}) );
   ]
 
+let speculation =
+  let rule =
+    {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
+  in
+  let rules body = count body "speculationrules" in
+  let ends_with_rule body =
+    let tail = rule ^ "</body></html>" in
+    let n = String.length body and t = String.length tail in
+    n >= t && String.sub body (n - t) t = tail
+  in
+  let purpose v = [ ("sec-purpose", v); ("sec-fetch-dest", "document") ] in
+  let refused r =
+    check_status r 503;
+    Alcotest.(check string) "no body" "" r.body;
+    check_header r "cache-control" [ "no-store" ];
+    check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch, Sec-Purpose" ];
+    check_events []
+  in
+  let highest pages =
+    let app =
+      Server.Generated.app ~build:"b" ~headers:[] ~prerender:[]
+        ~pages:(List.map (fun prefetch -> Server.Generated.rules ~headers:[] ?prefetch ~prerender:false ()) pages)
+        ~find:Cycle_shared.Routes.find ~resolve:Cycle_server.Yuka_routes.resolve
+        ~missing:{ layers = []; not_found = Server.Generated.default_not_found; error = Server.Generated.default_error }
+    in
+    match Async.status (Cycle.handler config app (request "/plain")) with
+    | Async.Done r -> r.body
+    | _ -> Alcotest.fail "no page"
+  in
+  let settled target value =
+    let a = call (request target) in
+    App.finish_slow value;
+    match Async.status a with Async.Done r -> r.body | _ -> Alcotest.fail "not done"
+  in
+  [
+    ( "a page with no island has one rule, the last element of the body",
+      fun () ->
+        let body = (get "/plain").body in
+        Alcotest.(check int) "one rule" 1 (rules body);
+        check_true "the exact rule before </body>" (ends_with_rule body) );
+    ( "a page with an island has no rule",
+      fun () -> Alcotest.(check int) "none" 0 (rules (get "/islands").body) );
+    ( "an island printed in a fill: no rule; a fill with no island: the rule after the fill",
+      fun () ->
+        Alcotest.(check int) "island in the fill" 0 (rules (settled "/slow" "island"));
+        let body = settled "/slow" "done" in
+        check_true "after the fill" (ends_with_rule body && index body "data-yuka-fill" < index body rule) );
+    ( "a client navigation answer has no rule",
+      fun () ->
+        Alcotest.(check int) "full document" 0 (rules (get ~headers:[ ("yuka-navigate", "-") ] "/plain").body);
+        Alcotest.(check int) "outlet" 0 (rules (get ~headers:[ ("yuka-navigate", "L0") ] "/plain").body) );
+    ( "no rule when the highest level of the tree is Off; the same conservative rule for every other level",
+      fun () ->
+        Alcotest.(check int) "off" 0 (rules (highest [ Some `Off; Some `Off ]));
+        Alcotest.(check int) "no page route" 0 (rules (highest []));
+        List.iter
+          (fun pages -> check_true "conservative" (ends_with_rule (highest pages)))
+          [ [ Some `Hover; Some `Off ]; [ None ]; [ Some `Visible ] ] );
+    ( "a not-found and an error page with no island have the rule",
+      fun () ->
+        let missing = get "/nowhere" in
+        check_status missing 404;
+        check_true "404" (ends_with_rule missing.body);
+        let failed = get "/boom" in
+        check_status failed 500;
+        check_true "500" (ends_with_rule failed.body) );
+    ( "Sec-Purpose prefetch of an Off route: 503 before guards and loaders",
+      fun () ->
+        List.iter
+          (fun v -> refused (get ~headers:(purpose v) "/team/a/form"))
+          [ "prefetch"; "prefetch;prerender"; "prefetch; anonymous-client-ip"; " prefetch " ] );
+    ( "Sec-Purpose prefetch of a route above Off is a full page",
+      fun () ->
+        let r = get ~headers:(purpose "prefetch") "/team/a/1" in
+        check_status r 200;
+        check_events [ "outer"; "inner"; "squad start"; "profile start" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+        let r = get ~headers:(purpose "prefetch;prerender") "/plain" in
+        check_status r 200;
+        check_true "the page" (ends_with_rule r.body) );
+    ( "Sec-Purpose prefetch of an endpoint or an action: 503, the handler does not run",
+      fun () ->
+        refused (get ~headers:(purpose "prefetch") "/team/a/json");
+        refused (get ~meth:`POST ~headers:(purpose "prefetch") "/team/a/rename") );
+    ( "a navigation prefetch of a static file is served",
+      fun () ->
+        let css = config_with ~assets:modules ~public:[ ("/static", "pub") ] ~css:[ ("a-1.css", ".a{}") ] () in
+        let r = get ~config:css ~headers:(purpose "prefetch") "/static/s.css" in
+        Alcotest.(check string) "public file" "css" r.body;
+        let r = get ~config:css ~headers:(purpose "prefetch") "/_yuka/css/a-1.css" in
+        check_status r 200;
+        Alcotest.(check string) "css sheet" ".a{}" r.body );
+    ( "no Sec-Purpose, or one that is not the token prefetch, is never refused",
+      fun () ->
+        check_status (get "/team/a/form") 200;
+        List.iter
+          (fun v -> check_status (get ~headers:(purpose v) "/team/a/form") 200)
+          [ ""; "Prefetch"; "prefetcher"; "prerender"; "prefetch, prerender"; "\"prefetch\"" ];
+        check_status (get "/team/a/json") 200 );
+    ( "Sec-Purpose prefetch that is not a document request is answered as a normal request",
+      fun () ->
+        List.iter
+          (fun dest ->
+            let headers = ("sec-purpose", "prefetch") :: dest in
+            let r = get ~headers "/team/a/form" in
+            check_status r 200;
+            check_true "the Off page" (contains r.body "Team form");
+            let r = get ~headers "/team/a/json" in
+            check_status r 200;
+            check_events [ "outer"; "team json" ];
+            let r = get ~meth:`POST ~headers:(("sec-fetch-site", "same-origin") :: headers) "/team/a/rename" in
+            check_status r 200;
+            check_events [ "outer"; "rename" ])
+          [ [ ("sec-fetch-dest", "empty") ]; []; [ ("sec-fetch-dest", "Document") ] ] );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -1697,4 +1815,5 @@ let () =
       ("navigation", cases navigation);
       ("forms", cases forms);
       ("prefetch", cases prefetch);
+      ("speculation", cases speculation);
     ]

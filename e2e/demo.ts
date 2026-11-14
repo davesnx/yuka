@@ -332,9 +332,58 @@ await step("3d. a page with no island loads no script", async () => {
   const scripts: string[] = [];
   pg.on("request", (r) => { if (r.resourceType() === "script") scripts.push(r.url()); });
   await pg.goto(base + "/about", { waitUntil: "networkidle" });
-  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && !s.textContent!.includes("yuka-demo-theme")).length);
-  check("3d.1 /about requests no script and has no inline script but the theme script", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
+  const inline = await pg.evaluate(() => [...document.querySelectorAll("script")].filter((s) => s.type !== "importmap" && s.type !== "speculationrules" && !s.textContent!.includes("yuka-demo-theme")).length);
+  check("3d.1 /about requests no script and has no inline script but the theme script (import map and speculation rules are JSON)", scripts.length === 0 && inline === 0, `${scripts.join(",")} inline=${inline}`);
   await pg.close();
+});
+
+await step("3d2. a page with no island prefetches through speculation rules", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const pg = await ctx.newPage();
+  const cdp = await ctx.newCDPSession(pg);
+  await cdp.send("Network.enable");
+  await cdp.send("Preload.enable");
+  const ready = new Promise<string>((resolve) =>
+    cdp.on("Preload.prefetchStatusUpdated", (e: { prefetchUrl: string; status: string }) => {
+      if (e.prefetchUrl === base + "/" && (e.status === "Ready" || e.status === "Failure")) resolve(e.status);
+    }),
+  );
+  const documents: { fromPrefetchCache: boolean }[] = [];
+  cdp.on("Network.responseReceived", (e: { type: string; response: { url: string; fromPrefetchCache?: boolean } }) => {
+    if (e.type === "Document" && e.response.url === base + "/") documents.push({ fromPrefetchCache: e.response.fromPrefetchCache === true });
+  });
+  const prefetches: Promise<string>[] = [];
+  pg.on("request", (r) => {
+    if (r.url() === base + "/") prefetches.push(r.allHeaders().then((h) => `${h["sec-purpose"] ?? "none"}/${h["sec-fetch-dest"] ?? "none"}`, () => "closed"));
+  });
+  await pg.goto(base + "/about", { waitUntil: "networkidle" });
+  const rules = await pg.evaluate(() => [...document.querySelectorAll('script[type="speculationrules"]')].map((s) => JSON.parse(s.textContent!)));
+  check(
+    "3d2.1 /about has one speculation rule: prefetch, conservative, same-origin links without data-yuka-prefetch=off, download or target",
+    rules.length === 1 && JSON.stringify(rules[0]) === JSON.stringify({ prefetch: [{ where: { and: [{ href_matches: "/*" }, { not: { selector_matches: "[data-yuka-prefetch=off],[download],[target]" } }] }, eagerness: "conservative" }] }),
+    JSON.stringify(rules),
+  );
+  const link = pg.locator('a[href="/"]').first();
+  await link.hover();
+  await pg.waitForTimeout(500);
+  const afterHover = (await Promise.all(prefetches)).join(",");
+  check("3d2.2 a hover alone sends no request for the link", afterHover === "", afterHover);
+  await pg.mouse.down();
+  const status = await Promise.race([ready, new Promise<string>((r) => setTimeout(() => r("timeout"), 3000))]);
+  const afterDown = (await Promise.all(prefetches)).join(",");
+  check("3d2.2b a pointer down sends a document request with Sec-Purpose: prefetch", status === "Ready" && afterDown === "prefetch/document", `status=${status} requests=${afterDown}`);
+  const logfile = process.env.YUKA_E2E_LOG;
+  const offset = logfile ? readFileSync(logfile).length : 0;
+  await pg.mouse.up();
+  await pg.waitForURL(base + "/");
+  await pg.waitForSelector(".row");
+  const served = logfile ? readFileSync(logfile).subarray(offset).toString().split("\n").filter((l) => /\bGET \/ /.test(l)).length : -1;
+  check(
+    "3d2.3 the click uses the prefetched document: the server gets no second request for /",
+    documents.length === 1 && documents[0].fromPrefetchCache && (served === 0 || (served === -1 && !logfile)),
+    `documents=${JSON.stringify(documents)} server GET / after the click=${served}`,
+  );
+  await ctx.close();
 });
 
 await step("3i. input made before hydration", async () => {

@@ -91,7 +91,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeo
       finished := true;
       on_timeout := None;
       Async.on_settled !chain (function
-        | Async.Done () -> resolve ()
+        | Async.Done () -> resolve (session.islands > 0)
         | Async.Failed m -> fail m
         | Async.Pending -> ())
     end
@@ -206,7 +206,7 @@ let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
       >>= fun () -> write shell)
     ~on_fill:(fun id _ links html -> write (links ^ fill_chunk id html))
     ~on_value:write
-  >>= fun () -> write "</body></html>"
+  >>= fun _ -> write "</body></html>"
 
 let find_from text part from =
   let n = String.length part in
@@ -246,7 +246,7 @@ let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ?co
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
-    (fun () -> !document ^ Buffer.contents values)
+    (fun _ -> !document ^ Buffer.contents values)
     (drive ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->

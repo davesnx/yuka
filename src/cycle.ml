@@ -401,6 +401,9 @@ let rec shared sent (layers : layer list) =
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
   | _ -> 0
 
+let speculation_rules =
+  {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
+
 let render env ~status ~headers layers (page : page) =
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
@@ -462,10 +465,13 @@ let render env ~status ~headers layers (page : page) =
         ~on_value:write
     in
     let written () = String.concat "" (List.rev !early) in
+    let close islands =
+      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+    in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
-    | Async.Done () ->
-        early := "</body></html>" :: !early;
+    | Async.Done islands ->
+        early := close islands :: !early;
         Async.return { status; headers; body = String (written ()) }
     | Async.Pending ->
     let stream w =
@@ -473,7 +479,7 @@ let render env ~status ~headers layers (page : page) =
       writer := (fun text -> Async.bind flushed (fun () -> w text));
       let result, resolve, _ = Async.make () in
       Async.on_settled finished (function
-        | Async.Done () -> Async.on_settled (write "</body></html>") (fun _ -> resolve ())
+        | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
         | Async.Failed m ->
             log env.config `Error m;
             Async.on_settled flushed (fun _ -> resolve ())
@@ -758,6 +764,33 @@ let refusal headers level =
     (empty 204
        (navigation_vary (merge_headers [ headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
 
+(* A non-ok status makes the browser drop a speculative prefetch and fetch again at the click; a
+   2xx such as 204 would be kept and used for the click. "supports prefetch" in
+   https://wicg.github.io/nav-speculation/prefetch.html; 503 as in
+   https://developer.chrome.com/docs/web-platform/prerender-pages *)
+let speculation_refusal headers =
+  reply (empty 503 (add_vary "Sec-Purpose" (navigation_vary (merge_headers [ headers; [ no_store_header ] ]))))
+
+let sf_key k =
+  k <> ""
+  && (match k.[0] with 'a' .. 'z' | '*' -> true | _ -> false)
+  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '*' -> true | _ -> false) k
+
+let speculative (r : request) =
+  match (r.header "sec-purpose", Option.map String.trim (r.header "sec-fetch-dest")) with
+  | Some v, Some "document" -> (
+      match String.split_on_char ';' (String.trim v) with
+      | "prefetch" :: params ->
+          List.for_all
+            (fun p ->
+              let p = String.trim p in
+              match String.index_opt p '=' with
+              | None -> sf_key p
+              | Some i -> sf_key (String.sub p 0 i) && i + 1 < String.length p && not (String.contains p ','))
+            params
+      | _ -> false)
+  | _ -> false
+
 let route env (App a) req (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
   let suffix = query_suffix query in
@@ -782,6 +815,9 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                (r.header "yuka-prefetch") ->
           refuse rules rules.prefetch
       | Handler { rules; _ } when Option.is_some (r.header "yuka-prefetch") -> refuse rules `Off
+      | Page { rules; _ } when Prefetch.rank `Hover > Prefetch.rank rules.prefetch && speculative r ->
+          speculation_refusal rules.headers
+      | Handler { rules; _ } when speculative r -> speculation_refusal rules.headers
       | Page { rules; guards; load; fallback } ->
           serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
       | Handler { rules; action; cross_origin; guards; run } ->
