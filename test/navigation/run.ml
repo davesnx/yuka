@@ -858,10 +858,13 @@ let stub_observer : unit -> unit =
   [%mel.raw
     {|function () {
   const seen = globalThis.__observed = [];
-  window.IntersectionObserver = function (cb) {
+  const gone = globalThis.__unobserved = [];
+  globalThis.__observeCount = 0;
+  window.IntersectionObserver = function (cb, options) {
+    globalThis.__observerMargin = options && options.rootMargin;
     this.cb = cb;
-    this.observe = function (el) { seen.push({ el: el, cb: cb, o: this }); };
-    this.unobserve = function () {};
+    this.observe = function (el) { globalThis.__observeCount++; seen.push({ el: el, cb: cb, o: this }); };
+    this.unobserve = function (el) { gone.push(el.id); };
     this.disconnect = function () { seen.length = 0; };
   };
 }|}]
@@ -869,12 +872,22 @@ let stub_observer : unit -> unit =
 let observed : unit -> string =
   [%mel.raw "function () { return globalThis.__observed.map(function (x) { return x.el.id }).join(',') }"]
 
-let intersect : string -> unit =
+let observe_count : unit -> int = [%mel.raw "function () { return globalThis.__observeCount }"]
+let unobserved : unit -> string = [%mel.raw "function () { return globalThis.__unobserved.join(',') }"]
+let observer_margin : unit -> string = [%mel.raw "function () { return String(globalThis.__observerMargin) }"]
+
+let crossing : string -> bool -> unit =
   [%mel.raw
-    {|function (id) {
+    {|function (id, inside) {
   const x = globalThis.__observed.find(function (x) { return x.el.id === id; });
-  x.cb([{ isIntersecting: true, target: x.el }]);
+  x.cb([{ isIntersecting: inside, target: x.el }]);
 }|}]
+
+let intersect id = crossing id true
+let leave id = crossing id false
+
+let call_priority : int -> string =
+  [%mel.raw "function (i) { return String(globalThis.__calls[i].init.priority) }"]
 
 let stub_transition : unit -> unit =
   [%mel.raw
@@ -975,6 +988,115 @@ let visible finish =
   intersect "o";
   check "off still wins" "0" (ints (calls ()));
   finish ()
+
+let numbered n = List.init n (fun i -> "p" ^ ints i)
+
+let visible_page ids =
+  setup (page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  stub_observer ();
+  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  List.iter intersect ids
+
+let urls from = String.concat "," (List.init (calls () - from) (fun i -> call_url (from + i)))
+
+let visible_limit finish =
+  visible_page (numbered 6);
+  check "a 200px margin" "200px" (observer_margin ());
+  check "4 requests open" "http://localhost/p0,http://localhost/p1,http://localhost/p2,http://localhost/p3" (urls 0);
+  check "started links are no longer observed, waiting ones are" "p0,p1,p2,p3" (unobserved ());
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "a settled prefetch starts the newest waiting link" "http://localhost/p5" (urls 4);
+      check "observed until its request starts" "p0,p1,p2,p3,p5" (unobserved ());
+      reject_call 1;
+      tick (fun () ->
+          check "a failed prefetch starts the next" "http://localhost/p4" (urls 5);
+          finish ()))
+
+let visible_leaves finish =
+  visible_page (numbered 6);
+  leave "p5";
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "a link that left the view is not fetched" "http://localhost/p4" (urls 4);
+      resolve_call 1 (doc "P1" (page "")) "";
+      tick (fun () ->
+          check "nothing else waits" "5" (ints (calls ()));
+          finish ()))
+
+let visible_no_eviction finish =
+  visible_page (numbered 34);
+  check "4 requests open" "4" (ints (calls ()));
+  check "waiting links evict nothing" "false" (bools (call_aborted 0));
+  finish ()
+
+let intent_skips_limit finish =
+  setup (page ({|<a id="x" href="/x">x</a>|} ^ String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) (numbered 4))));
+  stub_observer ();
+  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  List.iter intersect (numbered 4);
+  fire "#x" "pointerdown";
+  check "an intent prefetch starts with 4 open" "http://localhost/x" (urls 4);
+  check "a visible request has low priority" "low" (call_priority 0);
+  check "an intent request has none" "undefined" (call_priority 4);
+  ignore (click "#p0" "");
+  ignore (click "#x" "");
+  Browser.navigate "/y";
+  check "a navigation has none" "undefined" (call_priority 5);
+  finish ()
+
+let hover_queued finish =
+  visible_page (numbered 6);
+  fire "#p4" "pointerover";
+  wait 60 (fun () ->
+      check "a hover starts a waiting link at once" "http://localhost/p4" (urls 4);
+      check "at intent priority" "undefined" (call_priority 4);
+      check "and it is no longer observed" "p0,p1,p2,p3,p4" (unobserved ());
+      reject_call 4;
+      tick (fun () ->
+          resolve_call 0 (doc "P0" (page "")) "";
+          resolve_call 1 (doc "P1" (page "")) "";
+          tick (fun () ->
+              check "it left the queue: a failed hover request is not sent again" "http://localhost/p5" (urls 5);
+              resolve_call 2 (doc "P2" (page "")) "";
+              tick (fun () ->
+                  check "no second request" "6" (ints (calls ()));
+                  finish ()))))
+
+let click_queued finish =
+  visible_page (numbered 6);
+  ignore (click "#p5" "");
+  check "the click fetches" "http://localhost/p5" (urls 4);
+  check "as a navigation" "undefined" (prefetch_header 4);
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "the clicked link left the queue" "http://localhost/p4" (urls 5);
+      resolve_call 4 (doc "P5" (page "<p>five</p>")) "";
+      tick (fun () ->
+          check "shown" "/p5" (location_ ());
+          check "one request for the click" "6" (ints (calls ()));
+          finish ()))
+
+let action_rewatches finish =
+  visible_page (numbered 6);
+  let _ = Action.call act "x" in
+  resolve_with 4 {|{"ok":"y"}|} "" 200 "application/json";
+  tick (fun () ->
+      check "the links are observed again" "12" (ints (observe_count ()));
+      List.iter intersect (numbered 6);
+      check "4 new requests" "http://localhost/p0,http://localhost/p1,http://localhost/p2,http://localhost/p3" (urls 5);
+      resolve_call 5 (doc "P0" (page "")) "";
+      tick (fun () ->
+          check "2 wait, the newest starts next" "http://localhost/p5" (urls 9);
+          finish ()))
+
+let waiting_save_data finish =
+  visible_page (numbered 6);
+  save_data ();
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "a waiting link does not start under saveData" "4" (ints (calls ()));
+      finish ())
 
 let max_age_cache finish =
   setup links;
@@ -1740,6 +1862,14 @@ let all =
     ("leaving before 50 ms sends nothing; focus prefetches", hover_out);
     ("links and settings that do not prefetch", not_prefetched);
     ("visible links prefetch", visible);
+    ("visible: 4 open, the newest waiting link starts when one settles", visible_limit);
+    ("visible: a waiting link that leaves the view is not fetched", visible_leaves);
+    ("visible: waiting links are not in the cache", visible_no_eviction);
+    ("intent starts at once with 4 open; only visible requests are low priority", intent_skips_limit);
+    ("a hover on a waiting link starts it once", hover_queued);
+    ("a click on a waiting link navigates with one request", click_queued);
+    ("after an action the visible links are observed and prefetched again", action_rewatches);
+    ("a waiting link does not start under saveData", waiting_save_data);
     ("max-age reuses a page", max_age_cache);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);

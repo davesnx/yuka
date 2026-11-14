@@ -11,7 +11,7 @@ let history_push_key : string -> string -> unit = fun _ _ -> browser_only ()
 let new_controller : unit -> controller = fun _ -> browser_only ()
 let abort : controller -> unit = fun _ -> browser_only ()
 let fetch_page :
-    string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * bool * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
  fun _ _ _ -> browser_only ()
 let hash_of : string -> string = fun _ -> browser_only ()
 let no_hash : string -> string = fun _ -> browser_only ()
@@ -25,7 +25,7 @@ let key_before : string -> string -> bool = fun _ _ -> browser_only ()
 let now : unit -> float = fun _ -> browser_only ()
 let after : int -> (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let save_data : unit -> bool = fun _ -> browser_only ()
-let observe : node array -> (node -> unit) -> unit -> unit = fun _ _ -> browser_only ()
+let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let transition : string -> (unit -> unit) -> unit = fun _ _ -> browser_only ()
 let swap_page : string -> unit = fun _ -> browser_only ()
 let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()

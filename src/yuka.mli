@@ -1196,8 +1196,12 @@ val render :
     [Yuka-Prefetch: 1]. The server answers it as any navigation, so the
     guards and loaders of a [GET] page must be safe to run for a link the
     user may never click: no side effects. [`Visible] also prefetches every such link
-    when it becomes visible; with [`Hover], only links with
-    [data-yuka-prefetch="visible"] do. [data-yuka-prefetch="off"] on a link
+    when it comes within 200 px of the view; with [`Hover], only links with
+    [data-yuka-prefetch="visible"] do. A visible prefetch is sent with
+    [priority: "low"] and only while fewer than 4 prefetches are in flight;
+    the others wait, the newest first, and a link that leaves the view
+    before its turn is not fetched. After an action call that succeeds,
+    the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
     and [`Off] turn it off, and so does [navigator.connection.saveData].
     A navigation to a URL whose prefetch is in flight waits for it.
 

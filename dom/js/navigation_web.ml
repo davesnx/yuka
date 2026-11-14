@@ -34,13 +34,14 @@ let abort : controller -> unit =
     "function (c) { c.abort() }"]
 
 let fetch_page :
-    string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * bool * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
   [%mel.raw
     {|function (a, ok, fail) {
-  const url = a[0], keys = a[1], prefetch = a[2], controller = a[3];
+  const url = a[0], keys = a[1], prefetch = a[2], low = a[3], controller = a[4];
   const signal = controller.signal;
   const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
   if (prefetch) { init.headers["Yuka-Prefetch"] = "1"; init.cache = "no-store"; }
+  if (low) init.priority = "low";
   let request;
   try {
     request = fetch(url, init);
@@ -101,14 +102,14 @@ let save_data : unit -> bool =
   [%mel.raw
     "function () { const c = window.navigator.connection; return !!(c && c.saveData) }"]
 
-let observe : node array -> (node -> unit) -> unit -> unit =
+let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit =
   [%mel.raw
     {|function (els, f) {
   const O = window.IntersectionObserver;
   if (typeof O !== "function") return function () {};
   const observer = new O(function (entries) {
-    for (const e of entries) if (e.isIntersecting) { observer.unobserve(e.target); f(e.target); }
-  });
+    for (const e of entries) f(e.target, e.isIntersecting, function () { observer.unobserve(e.target); });
+  }, { rootMargin: "200px" });
   for (const el of els) observer.observe(el);
   return function () { observer.disconnect(); };
 }|}]

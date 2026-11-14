@@ -137,30 +137,72 @@ let transitions_on = ref false
 let nav = ref 0
 let hover = ref ignore
 
-let prefetch url =
-  if !started && (match !prefetching with `Off -> false | _ -> true) && not (Navigation_web.save_data ()) then begin
-    let key = page_key url in
-    if Option.is_none (lookup key) then begin
-      let e =
-        { key; answer = None; waiters = []; controller = Navigation_web.new_controller (); at = 0.;
-          prefetched = true }
-      in
-      add e;
-      let settle a =
-        let w = e.waiters in
-        e.waiters <- [];
-        List.iter (fun f -> f a) (List.rev w)
-      in
-      Navigation_web.fetch_page (url, keys (), true, e.controller)
-        (fun final status header text ->
-          e.at <- Navigation_web.now ();
-          e.answer <- Some { final; status; header; text };
-          settle e.answer)
-        (fun () ->
-          drop e;
-          settle None)
-    end
+let queued : (Web.node * string * string * (unit -> unit)) list ref = ref []
+
+let rec without f = function [] -> [] | x :: rest -> if f x then without f rest else x :: without f rest
+
+let take key =
+  List.iter (fun (_, k, _, unobserve) -> if String.equal k key then unobserve ()) !queued;
+  queued := without (fun (_, k, _, _) -> String.equal k key) !queued
+
+let opened () =
+  let n = ref 0 in
+  Array.iter (fun e -> if Option.is_none e.answer then incr n) (Web.table_values (cache ()));
+  !n
+
+let allowed () =
+  !started && (match !prefetching with `Off -> false | _ -> true) && not (Navigation_web.save_data ())
+
+let rec start ~low key url =
+  if Option.is_none (lookup key) then begin
+    let e =
+      { key; answer = None; waiters = []; controller = Navigation_web.new_controller (); at = 0.;
+        prefetched = true }
+    in
+    add e;
+    let settle a =
+      let w = e.waiters in
+      e.waiters <- [];
+      List.iter (fun f -> f a) (List.rev w);
+      pump ()
+    in
+    Navigation_web.fetch_page (url, keys (), true, low, e.controller)
+      (fun final status header text ->
+        e.at <- Navigation_web.now ();
+        e.answer <- Some { final; status; header; text };
+        settle e.answer)
+      (fun () ->
+        drop e;
+        settle None)
   end
+
+and pump () =
+  match !queued with
+  | (_, key, url, unobserve) :: rest when opened () < 4 && allowed () ->
+      queued := rest;
+      unobserve ();
+      start ~low:true key url;
+      pump ()
+  | _ -> ()
+
+let prefetch url =
+  if allowed () then begin
+    let key = page_key url in
+    take key;
+    start ~low:false key url
+  end
+
+let seen a inside unobserve =
+  queued := without (fun (l, _, _, _) -> l == a) !queued;
+  match Web.link_href true a with
+  | href when inside && href <> "" && allowed () ->
+      let key = page_key href in
+      if opened () < 4 || Option.is_some (lookup key) then begin
+        unobserve ();
+        start ~low:true key href
+      end
+      else queued := (a, key, href, unobserve) :: !queued
+  | _ -> if inside then unobserve ()
 
 let show ~dir ~push ~restore url a =
   let final =
@@ -204,6 +246,7 @@ let load ~dir ~push ~restore url =
       | None -> assign url
     in
     let key = page_key url in
+    take key;
     match lookup key with
     | Some e -> (
         let use a =
@@ -217,12 +260,14 @@ let load ~dir ~push ~restore url =
         let controller = Navigation_web.new_controller () in
         let asked = !era in
         pending := Some controller;
-        Navigation_web.fetch_page (url, keys (), false, controller)
+        Navigation_web.fetch_page (url, keys (), false, false, controller)
           (fun final status header text ->
             pending := None;
             let a = { final; status; header; text } in
-            if max_age header > 0 && asked = !era then
+            if max_age header > 0 && asked = !era then begin
               add { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false };
+              pump ()
+            end;
             apply (Some a))
           (fun () ->
             pending := None;
@@ -254,6 +299,7 @@ let unwatch = ref ignore
 let watch () =
   !unwatch ();
   unwatch := ignore;
+  queued := [];
   match !prefetching with
   | `Off -> ()
   | mode ->
@@ -261,10 +307,11 @@ let watch () =
       Navigation_web.observe
         (Web.query_all (Web.document ())
            (match mode with `Visible -> "a[href]" | _ -> "a[data-yuka-prefetch=visible]"))
-        (fun a -> match Web.link_href true a with "" -> () | href -> prefetch href)
+        seen
 
 let clear () =
   incr era;
+  queued := [];
   Array.iter discard (Web.table_values (cache ()));
   Web.table_clear (cache ())
 
@@ -295,7 +342,10 @@ let boot (prefetch, transitions, islands) =
   started := true;
   prefetching := prefetch;
   transitions_on := transitions;
-  Platform.acted := clear;
+  (Platform.acted :=
+     fun () ->
+       clear ();
+       watch ());
   clear ();
   Navigation_web.adopt_stylesheets ();
   (start_islands :=
