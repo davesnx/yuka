@@ -1196,9 +1196,9 @@ val render :
     origin, it does [location.assign url].
 
     Prefetch: the [~prefetch] rule of [Routes.ml] sets the level of each
-    page route ([`Off], [`Hover], [`Trajectory] (default) or [`Visible]),
-    and the page has the highest level of the route tree in
-    [<meta name="yuka-prefetch" content="off|hover|visible">] (no meta for
+    page route ([`Off], [`Hover], [`Trajectory] (default), [`Visible] or
+    [`Idle]), and the page has the highest level of the route tree in
+    [<meta name="yuka-prefetch" content="off|hover|visible|idle">] (no meta for
     [`Trajectory]). From [`Hover]: 50 ms after the pointer or the focus enters
     a link that a click would navigate, or at once on [touchstart] or a
     [pointerdown] of the main button with no modifier key, the page is
@@ -1209,7 +1209,15 @@ val render :
     link on screen that the pointer moves toward is prefetched before the
     pointer is on it, with [Yuka-Prefetch: trajectory].
     [`Visible] also prefetches every such link when it comes within 200 px
-    of the view, with [Yuka-Prefetch: visible]. When the trigger is above
+    of the view, with [Yuka-Prefetch: visible].
+    [`Idle] also, once the browser is idle after the start, a client
+    navigation or an action call that succeeds, puts at most 15 links of
+    the page in the queue, in document order, one for each URL, without the
+    URLs in the cache or refused below [idle], with [Yuka-Prefetch: idle];
+    it needs a [Cache-Control] with a max-age (from [~headers], else
+    [~cache]), else the route counts as [`Visible]. A prefetch of a
+    static file gets [204] with [Yuka-Prefetch: off]. No idle prefetch starts under [saveData], on a [2g] or
+    [slow-2g] connection, or while the document is hidden. When the trigger is above
     the level of the route, the server answers [204] with
     [Yuka-Prefetch: LEVEL]; the browser keeps no answer for any [204], a
     click loads the page, and for the life of the page (until the next
@@ -1218,15 +1226,16 @@ val render :
     A visible prefetch is sent with
     [priority: "low"] and only while fewer than 4 prefetches are in flight;
     the others wait, the newest first, and a link that leaves the view
-    before its turn is not fetched. After an action call that succeeds,
+    before its turn is not fetched. An idle prefetch is also low priority
+    and starts after every waiting visible link. After an action call that succeeds,
     the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
     and the highest level [`Off] turn it off, and so does [navigator.connection.saveData].
     A navigation to a URL whose prefetch is in flight waits for it.
     When a hover, focus or press prefetch arrives, the browser starts to
     load the island chunks ([<link rel="modulepreload">]) and the
     [data-yuka-css] style sheets that it names, each once per page; a
-    trajectory or visible prefetch does this only after such a trigger on
-    its link.
+    trajectory, visible or idle prefetch does this only after such a
+    trigger on its link.
 
     Answers are kept by URL and outlet keys, at most 30, by the
     [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or
@@ -1251,7 +1260,7 @@ val render :
     [yuka/navigation.js] on the first click on such a link, [popstate],
     {!Browser.navigate}, or pointer, focus or touch on a link that it would
     prefetch, or the first mouse movement when the highest level is
-    [`Trajectory] (at once when it is [`Visible]). Until it arrives, the click is
+    [`Trajectory] (at once when it is [`Visible] or [`Idle]). Until it arrives, the click is
     already prevented and the events wait in order. If the load fails, or
     does not finish within 3 s of the first such event, it is logged once
     with [console.error], the waiting navigations do [location.assign], and
@@ -1916,7 +1925,7 @@ module Server : sig
     val rules :
       headers:(string * string) list list ->
       ?cache:cache ->
-      ?prefetch:[ `Off | `Hover | `Trajectory | `Visible ] ->
+      ?prefetch:[ `Off | `Hover | `Trajectory | `Visible | `Idle ] ->
       prerender:bool ->
       unit ->
       rules

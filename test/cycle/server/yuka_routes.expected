@@ -3,6 +3,7 @@ open Pages
 
 let root_headers = [ ("x-frame-options", "DENY"); ("x-a", "root") ]
 let minute = Yuka.Server.public ~max_age:60 ()
+let uncached = Yuka.Server.no_cache
 
 let rules_0 =
   Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:false ()
@@ -17,18 +18,27 @@ let rules_3 =
   Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Off ~prerender:false ()
 
 let rules_4 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(public ~s_max_age:600 ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Hover ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
 
 let rules_5 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("Vary", "Cookie")] ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(uncached) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
 
 let rules_6 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(immutable) [@warning "-33"]) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")]; [("Cache-Control", "no-store")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
 
 let rules_7 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(public ~s_max_age:600 ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Hover ~prerender:false ()
 
 let rules_8 =
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("Vary", "Cookie")] ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:false ()
+
+let rules_9 =
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(immutable) [@warning "-33"]) ~prerender:false ()
+
+let rules_10 =
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prerender:false ()
+
+let rules_11 =
   Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(minute) [@warning "-33"]) ~prefetch:`Visible ~prerender:false ()
 
 let layer_0 : Yuka.Server.Generated.layer =
@@ -254,10 +264,75 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      page = App.Pages.team_form ~team ~squad ();
                    })));
         }
+  | Cycle_shared.Routes.Team_idle { team; user } ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_4;
+          guards = [ (fun () -> App.Guards.outer req ~team); (fun () -> App.Guards.inner req ~team ~user) ];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let squad = App.Loaders.squad req ~team in
+              let profile = App.Loaders.profile req ~team ~user in
+              Yuka.Server.Generated.loaded squad (fun squad ->
+              Yuka.Server.Generated.loaded profile (fun profile ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
+                       ];
+                     page = App.Pages.member ~team ~user ~squad ~profile ();
+                   }))));
+        }
+  | Cycle_shared.Routes.Team_uncached { team } ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_5;
+          guards = [ (fun () -> App.Guards.outer req ~team) ];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let squad = App.Loaders.squad req ~team in
+              Yuka.Server.Generated.loaded squad (fun squad ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
+                       ];
+                     page = App.Pages.team_form ~team ~squad ();
+                   })));
+        }
+  | Cycle_shared.Routes.Team_headed { team } ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_6;
+          guards = [ (fun () -> App.Guards.outer req ~team) ];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let squad = App.Loaders.squad req ~team in
+              Yuka.Server.Generated.loaded squad (fun squad ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                         { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
+                       ];
+                     page = App.Pages.team_form ~team ~squad ();
+                   })));
+        }
   | Cycle_shared.Routes.Team_json { team } ->
       Yuka.Server.Generated.Handler
         {
-          rules = rules_4;
+          rules = rules_7;
           action = false;
           cross_origin = false;
           guards = [ (fun () -> App.Guards.outer req ~team) ];
@@ -275,7 +350,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   | Cycle_shared.Routes.Varied ->
       Yuka.Server.Generated.Page
         {
-          rules = rules_5;
+          rules = rules_8;
           guards = [];
           fallback = fallback_0;
           load =
@@ -293,7 +368,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   | Cycle_shared.Routes.Asset ->
       Yuka.Server.Generated.Handler
         {
-          rules = rules_6;
+          rules = rules_9;
           action = false;
           cross_origin = false;
           guards = [];
@@ -320,7 +395,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   | Cycle_shared.Routes.Live_public ->
       Yuka.Server.Generated.Page
         {
-          rules = rules_7;
+          rules = rules_10;
           guards = [];
           fallback = fallback_0;
           load =
@@ -338,7 +413,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   | Cycle_shared.Routes.Plain_public ->
       Yuka.Server.Generated.Page
         {
-          rules = rules_8;
+          rules = rules_11;
           guards = [];
           fallback = fallback_0;
           load =
@@ -440,7 +515,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   | Cycle_shared.Routes.Clear_feed ->
       Yuka.Server.Generated.Handler
         {
-          rules = rules_6;
+          rules = rules_9;
           action = true;
           cross_origin = false;
           guards = [];
@@ -448,8 +523,8 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"da3643aeaa8ab1c764f319acab70ff7b"
+  Yuka.Server.Generated.app ~build:"5e3fcfe3e8d8c427e722ed0153c41e51"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
-    ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_5; rules_7; rules_8 ]
+    ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11 ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

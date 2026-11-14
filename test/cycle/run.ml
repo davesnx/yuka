@@ -1544,10 +1544,10 @@ let prefetch =
     check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
     check_events []
   in
-  let highest pages =
+  let highest ?cache ?(headers = []) pages =
     let app =
       Server.Generated.app ~build:"b" ~headers:[] ~prerender:[]
-        ~pages:(List.map (fun prefetch -> Server.Generated.rules ~headers:[] ?prefetch ~prerender:false ()) pages)
+        ~pages:(List.map (fun prefetch -> Server.Generated.rules ~headers:[ headers ] ?cache ?prefetch ~prerender:false ()) pages)
         ~find:Cycle_shared.Routes.find ~resolve:Cycle_server.Yuka_routes.resolve
         ~missing:{ layers = []; not_found = Server.Generated.default_not_found; error = Server.Generated.default_error }
     in
@@ -1578,7 +1578,7 @@ let prefetch =
       fun () ->
         check_status (nav "/team/a/form") 200;
         check_status (get "/team/a/form") 200 );
-    ( "an unknown trigger counts as the most eager",
+    ( "an unknown trigger counts as visible",
       fun () ->
         List.iter (fun v -> refused (nav ~trigger:(trigger v) "/team/a/1") "hover") [ "1"; ""; "off"; "Hover"; "idle" ];
         check_status (nav ~trigger:(trigger "1") "/plain-public") 200;
@@ -1610,9 +1610,9 @@ let prefetch =
         check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
     ( "the page prints the highest level of the tree",
       fun () ->
-        check_true "visible" (contains (get "/plain").body {|<meta name="yuka-prefetch" content="visible">|});
+        check_true "idle" (contains (get "/plain").body {|<meta name="yuka-prefetch" content="idle">|});
         check_true "in a navigation document"
-          (contains (get ~headers:[ ("Yuka-Navigate", "-") ] "/plain").body {|<meta name="yuka-prefetch" content="visible">|});
+          (contains (get ~headers:[ ("Yuka-Navigate", "-") ] "/plain").body {|<meta name="yuka-prefetch" content="idle">|});
         check_true "off" (contains (highest [ Some `Off; Some `Off ]) {|<meta name="yuka-prefetch" content="off">|});
         check_true "no page route: off" (contains (highest []) {|<meta name="yuka-prefetch" content="off">|});
         List.iter
@@ -1620,6 +1620,63 @@ let prefetch =
           [ [ None ]; [ Some `Off; None ]; [ Some `Trajectory; Some `Off ] ];
         check_true "hover" (contains (highest [ Some `Hover; Some `Off ]) {|<meta name="yuka-prefetch" content="hover">|});
         check_true "visible wins" (contains (highest [ Some `Off; Some `Visible; None ]) {|content="visible"|}) );
+    ( "an idle trigger on an Idle route with a max-age is answered and runs the loader",
+      fun () ->
+        let r = nav ~trigger:(trigger "idle") "/team/a/idle/1" in
+        check_status r 200;
+        check_events [ "outer"; "inner"; "squad start"; "profile start" ] );
+    ( "hover, trajectory and visible triggers on an Idle route are answered",
+      fun () ->
+        List.iter
+          (fun v -> check_status (nav ~trigger:(trigger v) "/team/a/idle/1") 200)
+          [ "hover"; "trajectory"; "visible" ] );
+    ( "an idle trigger on a Visible or lower route: 204 with the level, no loader",
+      fun () ->
+        refused (nav ~trigger:(trigger "idle") "/plain-public") "visible";
+        refused (nav ~trigger:(trigger "idle") "/plain") "trajectory";
+        refused (nav ~trigger:(trigger "idle") "/team/a/1") "hover";
+        refused (nav ~trigger:(trigger "idle") "/team/a/form") "off" );
+    ( "a route that says Idle with a cache without max-age has level Visible",
+      fun () ->
+        refused (nav ~trigger:(trigger "idle") "/team/a/uncached") "visible";
+        check_status (nav ~trigger:(trigger "visible") "/team/a/uncached") 200;
+        let demoted cache = highest ~cache [ Some `Idle; Some `Hover ] in
+        List.iter
+          (fun cache ->
+            check_true "the meta says visible" (contains (demoted cache) {|<meta name="yuka-prefetch" content="visible">|}))
+          [ Server.no_store; Server.no_cache; Server.private_ ~max_age:0 ];
+        check_true "no cache rule: visible"
+          (contains (highest [ Some `Idle ]) {|<meta name="yuka-prefetch" content="visible">|}) );
+    ( "a Cache-Control in ~headers decides the level of an Idle route",
+      fun () ->
+        refused (nav ~trigger:(trigger "idle") "/team/a/headed") "visible";
+        check_true "no-store in ~headers over a lasting ~cache: visible"
+          (contains
+             (highest ~headers:[ ("Cache-Control", "no-store") ] ~cache:(Server.public ~max_age:60 ()) [ Some `Idle ])
+             {|<meta name="yuka-prefetch" content="visible">|});
+        check_true "a lasting Cache-Control in ~headers and no ~cache: idle"
+          (contains
+             (highest ~headers:[ ("cache-control", "public, max-age=60") ] [ Some `Idle ])
+             {|<meta name="yuka-prefetch" content="idle">|}) );
+    ( "a prefetch of a static file: 204 off, the file is not read",
+      fun () ->
+        let css = config_with ~assets:modules ~public:[ ("/static", "pub") ] ~css:[ ("a-1.css", ".a{}") ] () in
+        List.iter
+          (fun target ->
+            List.iter
+              (fun v -> refused (get ~config:css ~headers:(trigger v) target) "off")
+              [ "hover"; "idle" ];
+            Alcotest.(check (list string)) ("no file for " ^ target) [] !file_calls)
+          [ "/static/s.css"; "/_yuka/app/app/main.js"; "/_yuka/css/a-1.css" ];
+        let r = get "/static/s.css" in
+        check_status r 200;
+        Alcotest.(check string) "with no Yuka-Prefetch the file is served" "css" r.body );
+    ( "the meta says idle when an Idle route has a max-age",
+      fun () ->
+        check_true "idle wins"
+          (contains
+             (highest ~cache:(Server.public ~max_age:60 ()) [ Some `Visible; Some `Idle; None ])
+             {|<meta name="yuka-prefetch" content="idle">|}) );
   ]
 
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests

@@ -283,3 +283,23 @@ not those of an endpoint or an action
     Yuka.Server.Generated.rules ~headers:[  ] ~prerender:false ()
     Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Off ~prerender:false ()
       ~pages:[ rules_0; rules_1 ]
+
+`Idle with a ~cache that has a max-age on the route or on a node above it,
+or with a ~cache the generator cannot read (a let), is accepted
+
+  $ gen <<'EOF'
+  > let none = Yuka.Server.no_store
+  > 
+  > let routes =
+  >   Router.make ~cache:(public ~max_age:60 ())
+  >     [
+  >       Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle;
+  >       Router.group ~path:"/g" ~prefetch:`Idle
+  >         [ Router.route B ~path:"/b" ~page:Pages.b ~cache:(private_ ~max_age:5) ];
+  >       Router.route C ~path:"/c" ~page:Pages.c ~cache:none ~prefetch:`Idle;
+  >     ]
+  > EOF
+  $ grep -e 'Generated.rules' out.ml
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(none) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()

@@ -840,20 +840,20 @@ No named node
   Error: the route tree has no named node
   [1]
 
-~prefetch takes `Off, `Hover, `Trajectory or `Visible
+~prefetch takes `Off, `Hover, `Trajectory, `Visible or `Idle
 
   $ gen <<'EOF'
   > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Eager ]
   > EOF
   File "Routes.ml", line 1, characters 64-70:
-  Error: ~prefetch must be `Off, `Hover, `Trajectory or `Visible
+  Error: ~prefetch must be `Off, `Hover, `Trajectory, `Visible or `Idle
   [1]
 
   $ gen <<'EOF'
   > Router.make ~prefetch:true [ Router.route A ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 22-26:
-  Error: ~prefetch must be `Off, `Hover, `Trajectory or `Visible
+  Error: ~prefetch must be `Off, `Hover, `Trajectory, `Visible or `Idle
   [1]
 
 ~prefetch is for pages: an endpoint, an action and a redirect have none
@@ -878,3 +878,44 @@ No named node
   File "Routes.ml", line 1, characters 114-118:
   Error: Router.redirect has no argument ~prefetch; its labelled arguments are ~path, ~to_
   [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.endpoint A ~path:"/a" ~method_:`GET ~handler:Handlers.a ~prefetch:`Idle ]
+  > EOF
+  File "Routes.ml", line 1, characters 87-92:
+  Error: Router.endpoint has no argument ~prefetch; its labelled arguments are ~path, ~method_, ~handler, ~guard, ~cross_origin, ~headers, ~cache, ~prerender
+  [1]
+
+`Idle needs a ~cache with a max-age: no ~cache, no_store and no_cache are
+errors, and the nearest ~cache of the route decides
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle ]
+  > EOF
+  File "Routes.ml", line 1, characters 64-69:
+  Error: ~prefetch:`Idle needs a ~cache with a max-age; route A has no ~cache
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make ~cache:no_store
+  >   [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle ]
+  > EOF
+  File "Routes.ml", line 2, characters 54-59:
+  Error: ~prefetch:`Idle needs a ~cache with a max-age; the ~cache of route A is no_store (line 1)
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make ~prefetch:`Idle
+  >   [
+  >     Router.group ~path:"/g" ~cache:(public ~max_age:60 ())
+  >       [ Router.route A ~path:"/a" ~page:Pages.a; Router.route B ~path:"/b" ~page:Pages.b ~cache:no_cache ];
+  >   ]
+  > EOF
+  File "Routes.ml", line 1, characters 22-27:
+  Error: ~prefetch:`Idle needs a ~cache with a max-age; the ~cache of route B is no_cache (line 4)
+  [1]
+
+  $ gen > /dev/null <<'EOF'
+  > Router.make ~cache:no_store
+  >   [ Router.route A ~path:"/a" ~page:Pages.a ~cache:(private_ ~max_age:60) ~prefetch:`Idle ]
+  > EOF

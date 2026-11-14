@@ -336,8 +336,22 @@ let check_prerender props =
 
 let check_prefetch props =
   match List.assoc_opt "prefetch" props with
-  | Some { pexp_desc = Pexp_variant (("Off" | "Hover" | "Trajectory" | "Visible"), None); _ } | None -> ()
-  | Some v -> fail v.pexp_loc "~prefetch must be `Off, `Hover, `Trajectory or `Visible"
+  | Some { pexp_desc = Pexp_variant (("Off" | "Hover" | "Trajectory" | "Visible" | "Idle"), None); _ } | None -> ()
+  | Some v -> fail v.pexp_loc "~prefetch must be `Off, `Hover, `Trajectory, `Visible or `Idle"
+
+let check_idle name levels =
+  let nearest l =
+    List.fold_left (fun acc lv -> match List.assoc_opt l lv.props with Some v -> Some v | None -> acc) None levels
+  in
+  match nearest "prefetch" with
+  | Some { pexp_desc = Pexp_variant ("Idle", None); pexp_loc; _ } -> (
+      let need what = fail pexp_loc "~prefetch:`Idle needs a ~cache with a max-age; %s" what in
+      match nearest "cache" with
+      | None -> need (sprintf "route %s has no ~cache" name)
+      | Some { pexp_desc = Pexp_ident { txt = Lident (("no_store" | "no_cache") as c); _ }; pexp_loc; _ } ->
+          need (sprintf "the ~cache of route %s is %s (line %d)" name c (line pexp_loc))
+      | Some _ -> ())
+  | _ -> ()
 
 let check_cross_origin props =
   match List.assoc_opt "cross_origin" props with
@@ -455,6 +469,8 @@ let read ~server ~items names e =
         let text, ploc, segs = own_path () in
         let labels = add_labels ploc ctx.labels (seg_labels segs) |> with_loader in
         let search, _ = with_search labels in
+        let levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ] in
+        check_idle name levels;
         add
           {
             kind = Named { name; meth = "GET"; search = ctx.search @ search };
@@ -462,7 +478,7 @@ let read ~server ~items names e =
             path = join ctx.text text;
             loc;
             tag;
-            levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
+            levels;
           }
     | "endpoint" | "action" ->
         check_props tag loc props ~required:[ "path"; "method_"; "handler" ]

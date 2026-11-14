@@ -2487,6 +2487,293 @@ let move_loads_router finish =
               finish ())
             100))
 
+let stub_idle : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const queue = globalThis.__idle = new Map();
+  let id = 0;
+  window.requestIdleCallback = function (cb) { queue.set(++id, cb); return id; };
+  window.cancelIdleCallback = function (i) { queue.delete(i); };
+  Object.defineProperty(document, "hidden", { value: false, configurable: true });
+}|}]
+
+let idle_pending : unit -> int = [%mel.raw "function () { return globalThis.__idle.size }"]
+
+let run_idle : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const q = globalThis.__idle, cbs = Array.from(q.values());
+  q.clear();
+  cbs.forEach(function (cb) { cb({ didTimeout: false, timeRemaining: function () { return 50; } }); });
+}|}]
+
+let set_hidden : bool -> unit =
+  [%mel.raw "function (h) { Object.defineProperty(document, 'hidden', { value: h, configurable: true }) }"]
+
+let effective_type : string -> unit =
+  [%mel.raw "function (t) { Object.defineProperty(window.navigator, 'connection', { value: { effectiveType: t }, configurable: true }) }"]
+
+let anchors ids = String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)
+
+let idle_page body =
+  setup (level "idle" ^ page body);
+  stub_observer ();
+  stub_idle ();
+  plain_start ()
+
+let headers_from from = String.concat "," (List.init (calls () - from) (fun i -> prefetch_header (from + i)))
+
+let rec settle_all from finish =
+  let n = calls () in
+  List.iter (fun i -> resolve_call i (doc "P" (page "")) "") (List.init (n - from) (fun i -> from + i));
+  tick (fun () -> if calls () = n then finish () else settle_all n finish)
+
+let idle_pass finish =
+  idle_page (anchors (numbered 20));
+  check "nothing before the browser is idle" "0|1" (ints (calls ()) ^ "|" ^ ints (idle_pending ()));
+  run_idle ();
+  check "4 requests open, in document order"
+    "http://localhost/p0,http://localhost/p1,http://localhost/p2,http://localhost/p3" (urls 0);
+  check "an idle prefetch names its trigger" "idle,idle,idle,idle" (headers_from 0);
+  check "with low priority" "low" (call_priority 0);
+  check "no link was in view" "" (unobserved ());
+  settle_all 0 (fun () ->
+      check "at most 15, in document order"
+        (String.concat "," (List.map (fun id -> "http://localhost/" ^ id) (numbered 15)))
+        (urls 0);
+      finish ())
+
+let idle_unique finish =
+  idle_page {|<a id="a" href="/two">a</a><a id="b" href="/two">b</a><a id="c" href="/three" data-yuka-prefetch="off">c</a><a id="d" href="/two#x">d</a>|};
+  run_idle ();
+  check "one request for one URL; off links skipped" "http://localhost/two" (urls 0);
+  finish ()
+
+let idle_skips finish =
+  idle_page {|<a id="l" href="/two">l</a><a id="m" href="/three">m</a><a id="c" href="/four">c</a><a id="f" href="/five">f</a>|};
+  intersect "m";
+  resolve_headers 0 "" 204 (refusal "trajectory");
+  fire "#c" "pointerdown";
+  let text, headers = cached (doc "Four" (page "")) 60 in
+  resolve_headers 1 text 200 headers;
+  tick (fun () ->
+      fire "#l" "pointerdown";
+      run_idle ();
+      check "cached, in-flight and refused URLs are skipped" "http://localhost/five" (urls 3);
+      check "one idle request" "4|idle" (ints (calls ()) ^ "|" ^ prefetch_header 3);
+      finish ())
+
+let idle_after_visible finish =
+  idle_page (anchors (numbered 8));
+  run_idle ();
+  intersect "p7";
+  check "a visible link waits while 4 are open" "4" (ints (calls ()));
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "the waiting visible link starts before the idle ones" "http://localhost/p7|visible" (urls 4 ^ "|" ^ prefetch_header 4);
+      resolve_call 1 (doc "P1" (page "")) "";
+      tick (fun () ->
+          check "then the idle ones in document order" "http://localhost/p4|idle" (urls 5 ^ "|" ^ prefetch_header 5);
+          settle_all 2 (fun () ->
+              check "the idle entry of the visible link is not sent again" "http://localhost/p5,http://localhost/p6" (urls 6);
+              finish ())))
+
+let idle_hover finish =
+  idle_page (anchors (numbered 6));
+  run_idle ();
+  resolve_call 0 (assets [ preload "/a.js" ]) "";
+  tick (fun () ->
+      check "an idle answer warms nothing" "" (warmed ());
+      fire "#p0" "pointerdown";
+      check "a later intent on an idle answer warms at once" "modulepreload:http://localhost/a.js" (warmed ());
+      check "with no new request" "5" (ints (calls ()));
+      check "the next idle link started" "http://localhost/p4" (urls 4);
+      fire "#p5" "pointerover";
+      wait 60 (fun () ->
+          check "a hover starts a waiting idle link at once" "http://localhost/p5|hover|undefined"
+            (urls 5 ^ "|" ^ prefetch_header 5 ^ "|" ^ call_priority 5);
+          resolve_call 5 (assets [ preload "/b.js" ]) "";
+          tick (fun () ->
+              check "and warms its answer" "modulepreload:http://localhost/a.js,modulepreload:http://localhost/b.js" (warmed ());
+              settle_all 1 (fun () ->
+                  check "it left the queue" "6" (ints (calls ()));
+                  finish ()))))
+
+let idle_click finish =
+  idle_page (anchors (numbered 6));
+  run_idle ();
+  ignore (click "#p5" "");
+  check "the click fetches" "http://localhost/p5|undefined" (urls 4 ^ "|" ^ prefetch_header 4);
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "the clicked link left the queue" "http://localhost/p4" (urls 5);
+      resolve_call 4 (doc "P5" (page "<p>five</p>")) "";
+      tick (fun () ->
+          check "shown" "/p5" (location_ ());
+          check "one request for the click" "6" (ints (calls ()));
+          finish ()))
+
+let idle_action finish =
+  idle_page (anchors (numbered 6));
+  run_idle ();
+  let _ = Action.call act "x" in
+  resolve_with 4 {|{"ok":"y"}|} "" 200 "application/json";
+  tick (fun () ->
+      check "the idle queue is empty after an action" "5" (ints (calls ()));
+      check "a new pass waits for idle" "1" (ints (idle_pending ()));
+      run_idle ();
+      check "the pass runs again" "http://localhost/p0,http://localhost/p1,http://localhost/p2,http://localhost/p3" (urls 5);
+      finish ())
+
+let idle_stop finish =
+  idle_page (anchors (numbered 6));
+  stop ();
+  check "stop cancels a pass that waits for idle" "0" (ints (idle_pending ()));
+  plain_start ();
+  run_idle ();
+  check "4 open" "4" (ints (calls ()));
+  stop ();
+  check "stop aborts them" "true" (bools (call_aborted 3));
+  plain_start ();
+  check "a new start sends nothing before idle" "4" (ints (calls ()));
+  settle_all 0 (fun () ->
+      check "and the waiting links of the old pass are gone" "4" (ints (calls ()));
+      finish ())
+
+let idle_off finish =
+  List.iter
+    (fun (name, set) ->
+      idle_page (anchors (numbered 2));
+      set ();
+      run_idle ();
+      check (name ^ ": no idle prefetch") "0" (ints (calls ())))
+    [ ("saveData", save_data); ("2g", fun () -> effective_type "2g"); ("slow-2g", fun () -> effective_type "slow-2g");
+      ("hidden", fun () -> set_hidden true) ];
+  idle_page (anchors (numbered 2));
+  effective_type "3g";
+  run_idle ();
+  check "3g: idle prefetch" "2" (ints (calls ()));
+  List.iter
+    (fun meta ->
+      setup (meta ^ page (anchors (numbered 2)));
+      stub_observer ();
+      stub_idle ();
+      plain_start ();
+      run_idle ();
+      check (meta ^ ": no pass") "0|0" (ints (idle_pending ()) ^ "|" ^ ints (calls ())))
+    [ ""; level "visible"; level "hover"; level "off" ];
+  finish ()
+
+let idle_hidden_waits finish =
+  idle_page (anchors (numbered 6));
+  run_idle ();
+  set_hidden true;
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "a waiting idle link does not start while the document is hidden" "4" (ints (calls ()));
+      set_hidden false;
+      resolve_call 1 (doc "P1" (page "")) "";
+      tick (fun () ->
+          check "the waiting links start when the next prefetch settles" "http://localhost/p4,http://localhost/p5" (urls 4);
+          finish ()))
+
+let idle_after_navigation finish =
+  idle_page {|<a id="l" href="/two">two</a>|};
+  run_idle ();
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page {|<a id="x" href="/x">x</a><a id="y" href="/y">y</a>|})) "";
+  tick (fun () ->
+      check "shown with the idle answer" "/two|1" (location_ () ^ "|" ^ ints (calls ()));
+      check "a pass waits for idle" "1" (ints (idle_pending ()));
+      run_idle ();
+      check "the pass takes the links of the new content" "http://localhost/x,http://localhost/y" (urls 1);
+      finish ())
+
+let count_visibility : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const live = globalThis.__visibility = new Set(), d = document, add = d.addEventListener, remove = d.removeEventListener;
+  d.addEventListener = function (name, f) { if (name === "visibilitychange") live.add(f); return add.apply(this, arguments); };
+  d.removeEventListener = function (name, f) { if (name === "visibilitychange") live.delete(f); return remove.apply(this, arguments); };
+}|}]
+
+let visibility_listeners : unit -> int = [%mel.raw "function () { return globalThis.__visibility.size }"]
+
+let fire_doc : string -> unit = [%mel.raw "function (name) { document.dispatchEvent(new window.Event(name)) }"]
+
+let become_visible () =
+  set_hidden false;
+  fire_doc "visibilitychange"
+
+let idle_visible_pumps finish =
+  idle_page (anchors (numbered 6));
+  run_idle ();
+  set_hidden true;
+  resolve_call 0 (doc "P0" (page "")) "";
+  resolve_call 1 (doc "P1" (page "")) "";
+  tick (fun () ->
+      check "nothing starts while hidden" "4" (ints (calls ()));
+      become_visible ();
+      check "the waiting idle links start when the tab becomes visible" "http://localhost/p4,http://localhost/p5" (urls 4);
+      finish ())
+
+let idle_visible_pass finish =
+  idle_page (anchors (numbered 2));
+  set_hidden true;
+  run_idle ();
+  check "a pass that finds the tab hidden does nothing" "0" (ints (calls ()));
+  become_visible ();
+  check "it runs when the tab becomes visible" "http://localhost/p0,http://localhost/p1" (urls 0);
+  reject_call 0;
+  reject_call 1;
+  tick (fun () ->
+      become_visible ();
+      check "a second visibilitychange runs no second pass" "2" (ints (calls ()));
+      finish ())
+
+let idle_visibility_listener finish =
+  setup (level "idle" ^ page (anchors (numbered 2)));
+  stub_observer ();
+  stub_idle ();
+  count_visibility ();
+  plain_start ();
+  check "one listener at the level idle" "1" (ints (visibility_listeners ()));
+  stop ();
+  check "stop removes it" "0" (ints (visibility_listeners ()));
+  List.iter
+    (fun meta ->
+      setup (meta ^ page (anchors (numbered 2)));
+      stub_observer ();
+      stub_idle ();
+      count_visibility ();
+      plain_start ();
+      check (meta ^ ": no listener") "0" (ints (visibility_listeners ())))
+    [ ""; level "visible"; level "hover"; level "off" ];
+  finish ()
+
+let idle_current finish =
+  idle_page {|<a id="s" href="/start?x=1">here</a><a id="l" href="/two">two</a>|};
+  run_idle ();
+  check "a link to the current URL is skipped" "http://localhost/two" (urls 0);
+  finish ()
+
+let idle_filters finish =
+  idle_page ({|<a id="r" href="/r">r</a><a id="d" href="/p1">d</a>|} ^ anchors (List.init 15 (fun i -> "p" ^ ints (i + 1))));
+  intersect "r";
+  resolve_headers 0 "" 204 (refusal "trajectory");
+  tick (fun () ->
+      run_idle ();
+      settle_all 1 (fun () ->
+          check "a refused URL and a duplicate take no place: 15 URLs are queued"
+            (String.concat "," (List.init 15 (fun i -> "http://localhost/p" ^ ints (i + 1))))
+            (urls 1);
+          finish ()))
+
+let idle_loads_router finish =
+  setup (level "idle" ^ page {|<a id="l" href="/two">x</a>|});
+  plain_start ();
+  until "the page level idle loads the navigation code at start" router_loaded finish 100
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -2608,6 +2895,22 @@ let all =
     ("a link must be the best twice in a row", trajectory_dwell);
     ("an invisible link is not a candidate", trajectory_visibility);
     ("late, split and lost observer answers", trajectory_observer);
+    ("idle: at idle, 4 open, at most 15 in document order", idle_pass);
+    ("idle: one request for each URL", idle_unique);
+    ("idle: cached, in-flight and refused URLs are skipped", idle_skips);
+    ("idle: waiting visible links start before idle ones", idle_after_visible);
+    ("idle: a hover on a waiting idle link fetches it once and warms", idle_hover);
+    ("idle: a click on a waiting idle link navigates with one request", idle_click);
+    ("idle: an action empties the queue and the pass runs again", idle_action);
+    ("idle: stop cancels the pass and empties the queue", idle_stop);
+    ("idle: off under saveData, 2g, a hidden document and lower page levels", idle_off);
+    ("idle: a waiting idle link waits while the document is hidden", idle_hidden_waits);
+    ("idle: after a client navigation the pass takes the new links", idle_after_navigation);
+    ("idle: waiting idle links start when the tab becomes visible", idle_visible_pumps);
+    ("idle: a pass skipped while hidden runs once when the tab becomes visible", idle_visible_pass);
+    ("idle: the visibility listener exists only at the level idle and until stop", idle_visibility_listener);
+    ("idle: a link to the current URL is skipped", idle_current);
+    ("idle: refused and duplicate URLs take none of the 15 places", idle_filters);
   ]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]
@@ -2656,6 +2959,7 @@ let () =
         [ ("a data-yuka-prefetch=visible link does not load the navigation code", marked_link_loads_nothing);
           ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
     | "move" -> [ ("the first mouse movement loads the navigation code", move_loads_router) ]
+    | "idle" -> [ ("the page level idle loads the navigation code at start", idle_loads_router) ]
     | "replay" -> [ ("an error while the waiting events run", replay_error) ]
     | "stall" ->
         block_router "stall";

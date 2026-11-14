@@ -298,10 +298,21 @@ A client navigation can load a page before the click: a prefetch.
 | `` `Hover `` | 50 ms after the pointer or the focus is on the link, and at once on a press |
 | `` `Trajectory `` (default) | also when the mouse moves toward the link |
 | `` `Visible `` | also when the link comes within 200 px of the view |
+| `` `Idle `` | also when the page is loaded and the browser is idle |
 
 Each level includes the ones before it. The nearest `~prefetch` wins, as
 for `~cache`. An endpoint, an action and a redirect take no `~prefetch`;
 another value is an error.
+
+`` `Idle `` needs a `~cache` with a max-age: a prefetched answer without one
+can be used for 10 s only. `yuka routes` reports an error when the nearest
+`~cache` of a route with `` `Idle `` is absent, `no_store` or `no_cache`;
+it accepts a `~cache` that names a `let`. The server counts a route with
+`` `Idle `` as `` `Visible `` when the `Cache-Control` of its answers has
+no max-age above 0: the one in `~headers` when there is one, else the
+`~cache` rule. A page that renders a `Live.use` is sent with
+`private, no-store` at render time, which the level cannot know: do not
+give such a route `` `Idle ``.
 
 With `` `Trajectory `` the browser follows the mouse pointer (not touch or
 pen). Every 50 ms or more it takes the smoothed direction of the movement
@@ -310,7 +321,21 @@ the same link is found twice in a row, it is prefetched before the pointer
 is on it. This prefetch does not load the island chunks and style sheets of
 the page; a later hover, focus or press on the link does. On a page whose
 highest level is `` `Trajectory ``, the navigation code loads at the first
-mouse movement; with `` `Visible `` it loads when the page starts.
+mouse movement; with `` `Visible `` or `` `Idle `` it loads when the page
+starts.
+
+With `` `Idle ``, when the page starts and after each client navigation or
+action, the browser waits until it is idle (`requestIdleCallback`). Then
+it takes the links of the page in document order, one for each URL,
+without the URLs that are in the cache or in flight and those refused below
+`idle`, and puts at most 15 of them in the queue. An idle prefetch has
+`Yuka-Prefetch: idle` and `priority: "low"`, starts only while fewer than
+4 prefetches are in flight and after every waiting visible link, and does
+not load the island chunks and style sheets. There is no idle pass, and no
+waiting idle link starts, under `saveData`, on a `2g` or `slow-2g`
+connection, or while the document is hidden; a pass that finds the document
+hidden runs once when the document becomes visible, and the waiting idle
+links start then. A link to the URL on screen is skipped.
 
 ```ocaml
 Router.make ~not_found
@@ -325,16 +350,21 @@ The browser does not have the route tree. Each page carries the highest
 level of the tree (`<meta name="yuka-prefetch" content="visible">`, no
 meta for `` `Trajectory ``), and the browser runs the triggers up to that
 level. A prefetch request has the header `Yuka-Prefetch: hover` (hover,
-focus or press), `Yuka-Prefetch: trajectory` or `Yuka-Prefetch: visible`.
+focus or press), `trajectory`, `visible` or `idle`.
 When the trigger is above the level of the route, the server answers `204`
-with `Yuka-Prefetch: LEVEL` (`off`, `hover` or `trajectory`) before guards
+with `Yuka-Prefetch: LEVEL` (`off`, `hover`, `trajectory` or `visible`) before guards
 and loaders run. The browser keeps no
 answer for that URL, and for the life of the page it sends no prefetch
 above that level for it (it keeps at most 200 URLs). A click always loads
 the page. So an app that mixes levels pays one small refused request for
-each URL of a route with a lower level, once per page load. The server counts a value it does not know as
+each URL of a route with a lower level, once per page load. With
+`` `Visible `` or `` `Idle `` somewhere in the tree, every page observes its
+links and pays one refused request for each URL of a route with a lower
+level. The server counts a value it does not know as
 `visible`. A prefetch of an endpoint or an action gets `204` with
-`Yuka-Prefetch: off`, and its guards and handler do not run. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch`.
+`Yuka-Prefetch: off`, and its guards and handler do not run. A prefetch
+of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
+`204` with `Yuka-Prefetch: off`, and the file is not read. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch`.
 
 On a link, `data-yuka-prefetch="off"` stops its prefetch.
 `navigator.connection.saveData` stops all prefetch.
