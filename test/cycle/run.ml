@@ -1557,6 +1557,14 @@ let prefetch =
   [
     ( "a visible trigger on a Hover route: 204 with the level, before guards and loaders",
       fun () -> refused (nav ~trigger:(trigger "visible") "/team/a/1") "hover" );
+    ( "a trajectory trigger on a Hover route: 204 hover, no guard or loader",
+      fun () -> refused (nav ~trigger:(trigger "trajectory") "/team/a/1") "hover" );
+    ( "a trajectory trigger on a Trajectory or a Visible route is answered",
+      fun () ->
+        check_status (nav ~trigger:(trigger "trajectory") "/plain") 200;
+        check_status (nav ~trigger:(trigger "trajectory") "/plain-public") 200 );
+    ( "a route with no ~prefetch in the tree has level Trajectory",
+      fun () -> refused (nav ~trigger:(trigger "visible") "/plain") "trajectory" );
     ( "a hover trigger on a Hover route is answered",
       fun () ->
         let r = nav ~trigger:(trigger "hover") "/team/a/1" in
@@ -1575,9 +1583,16 @@ let prefetch =
         List.iter (fun v -> refused (nav ~trigger:(trigger v) "/team/a/1") "hover") [ "1"; ""; "off"; "Hover"; "idle" ];
         check_status (nav ~trigger:(trigger "1") "/plain-public") 200;
         check_status (nav ~trigger:(trigger "visible") "/plain-public") 200 );
-    ( "an endpoint, a redirect and a 404 are answered as today",
+    ( "a prefetch of an endpoint or an action: 204 off, no guard or handler",
       fun () ->
-        check_status (nav ~trigger:(trigger "visible") "/team/a/json") 200;
+        List.iter (fun v -> refused (nav ~trigger:(trigger v) "/team/a/json") "off") [ "hover"; "trajectory"; "visible" ];
+        refused (get ~meth:`POST ~headers:(trigger "hover") "/team/a/rename") "off" );
+    ( "an endpoint with no Yuka-Prefetch is answered",
+      fun () ->
+        check_status (nav "/team/a/json") 200;
+        check_events [ "outer"; "team json" ] );
+    ( "a redirect and a 404 are answered as today",
+      fun () ->
         check_status (nav ~trigger:(trigger "visible") "/old") 308;
         check_status (nav ~trigger:(trigger "visible") "/nowhere") 404 );
     ( "a page answer varies on Yuka-Prefetch",
@@ -1601,8 +1616,9 @@ let prefetch =
         check_true "off" (contains (highest [ Some `Off; Some `Off ]) {|<meta name="yuka-prefetch" content="off">|});
         check_true "no page route: off" (contains (highest []) {|<meta name="yuka-prefetch" content="off">|});
         List.iter
-          (fun pages -> check_true "hover is not printed" (not (contains (highest pages) "yuka-prefetch")))
-          [ [ Some `Off; None ]; [ Some `Hover; Some `Off ] ];
+          (fun pages -> check_true "trajectory is not printed" (not (contains (highest pages) "yuka-prefetch")))
+          [ [ None ]; [ Some `Off; None ]; [ Some `Trajectory; Some `Off ] ];
+        check_true "hover" (contains (highest [ Some `Hover; Some `Off ]) {|<meta name="yuka-prefetch" content="hover">|});
         check_true "visible wins" (contains (highest [ Some `Off; Some `Visible; None ]) {|content="visible"|}) );
   ]
 

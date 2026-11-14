@@ -336,8 +336,8 @@ let check_prerender props =
 
 let check_prefetch props =
   match List.assoc_opt "prefetch" props with
-  | Some { pexp_desc = Pexp_variant (("Off" | "Hover" | "Visible"), None); _ } | None -> ()
-  | Some v -> fail v.pexp_loc "~prefetch must be `Off, `Hover or `Visible"
+  | Some { pexp_desc = Pexp_variant (("Off" | "Hover" | "Trajectory" | "Visible"), None); _ } | None -> ()
+  | Some v -> fail v.pexp_loc "~prefetch must be `Off, `Hover, `Trajectory or `Visible"
 
 let check_cross_origin props =
   match List.assoc_opt "cross_origin" props with

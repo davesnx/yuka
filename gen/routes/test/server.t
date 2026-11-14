@@ -253,6 +253,7 @@ not those of an endpoint or an action
   >       [
   >         Router.route B ~path:"/b" ~page:Pages.b;
   >         Router.route C ~path:"/c" ~page:Pages.c ~prefetch:`Hover;
+  >         Router.route F ~path:"/f" ~page:Pages.f ~prefetch:`Trajectory;
   >         Router.endpoint D ~path:"/d" ~method_:`GET ~handler:Handlers.d;
   >         Router.action E ~path:"/e" ~method_:`POST ~handler:Handlers.e;
   >       ];
@@ -262,12 +263,14 @@ not those of an endpoint or an action
     Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Visible ~prerender:false ()
     Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Off ~prerender:false ()
     Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Hover ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Trajectory ~prerender:false ()
             rules = rules_0;
             rules = rules_1;
             rules = rules_2;
+            rules = rules_3;
             rules = rules_1;
             rules = rules_1;
-      ~pages:[ rules_0; rules_1; rules_2 ]
+      ~pages:[ rules_0; rules_1; rules_2; rules_3 ]
 
   $ gen <<'EOF'
   > Router.make

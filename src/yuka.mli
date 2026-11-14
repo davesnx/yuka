@@ -1196,15 +1196,18 @@ val render :
     origin, it does [location.assign url].
 
     Prefetch: the [~prefetch] rule of [Routes.ml] sets the level of each
-    page route ([`Off], [`Hover] (default) or [`Visible]), and the page has
-    the highest level of the route tree in
-    [<meta name="yuka-prefetch" content="off|visible">] (no meta for
-    [`Hover]). From [`Hover]: 50 ms after the pointer or the focus enters
+    page route ([`Off], [`Hover], [`Trajectory] (default) or [`Visible]),
+    and the page has the highest level of the route tree in
+    [<meta name="yuka-prefetch" content="off|hover|visible">] (no meta for
+    [`Trajectory]). From [`Hover]: 50 ms after the pointer or the focus enters
     a link that a click would navigate, or at once on [touchstart] or a
     [pointerdown] of the main button with no modifier key, the page is
     loaded with the navigation headers and [Yuka-Prefetch: hover]. The
     guards and loaders of a [GET] page that a prefetch can reach must be
     safe to run for a link the user may never click: no side effects.
+    [`Trajectory] also follows the mouse pointer (not touch or pen): the
+    link on screen that the pointer moves toward is prefetched before the
+    pointer is on it, with [Yuka-Prefetch: trajectory].
     [`Visible] also prefetches every such link when it comes within 200 px
     of the view, with [Yuka-Prefetch: visible]. When the trigger is above
     the level of the route, the server answers [204] with
@@ -1221,8 +1224,9 @@ val render :
     A navigation to a URL whose prefetch is in flight waits for it.
     When a hover, focus or press prefetch arrives, the browser starts to
     load the island chunks ([<link rel="modulepreload">]) and the
-    [data-yuka-css] style sheets that it names, each once per page; a visible
-    prefetch does this only after such a trigger on its link.
+    [data-yuka-css] style sheets that it names, each once per page; a
+    trajectory or visible prefetch does this only after such a trigger on
+    its link.
 
     Answers are kept by URL and outlet keys, at most 30, by the
     [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or
@@ -1244,7 +1248,8 @@ val render :
     page loads at start. It is loaded with a dynamic [import] of
     [yuka/navigation.js] on the first click on such a link, [popstate],
     {!Browser.navigate}, or pointer, focus or touch on a link that it would
-    prefetch (at once when the highest level is [`Visible]). Until it arrives, the click is
+    prefetch, or the first mouse movement when the highest level is
+    [`Trajectory] (at once when it is [`Visible]). Until it arrives, the click is
     already prevented and the events wait in order. If the load fails, or
     does not finish within 3 s of the first such event, it is logged once
     with [console.error], the waiting navigations do [location.assign], and
@@ -1909,7 +1914,7 @@ module Server : sig
     val rules :
       headers:(string * string) list list ->
       ?cache:cache ->
-      ?prefetch:[ `Off | `Hover | `Visible ] ->
+      ?prefetch:[ `Off | `Hover | `Trajectory | `Visible ] ->
       prerender:bool ->
       unit ->
       rules

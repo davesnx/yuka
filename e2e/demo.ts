@@ -95,6 +95,15 @@ const installProbes = () => {
 };
 await page.addInitScript(installProbes);
 
+const routerLoaded = async (p: Page) => {
+  const loaded = p.waitForResponse((r) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url()).pathname), { timeout: 3000 }).then(() => true, () => false);
+  await p.mouse.move(1270, 790);
+  await p.mouse.move(1272, 792);
+  const ok = await loaded;
+  await p.waitForTimeout(300);
+  return ok;
+};
+
 const statusOf = async (id: string) =>
   page.locator(`.row[data-id="${id}"] button[aria-label="Change status"] svg`).first().getAttribute("class");
 const statusSlug = (c: string | null) => (c ?? "").replace(/.*status-/, "");
@@ -182,6 +191,9 @@ await step("3b. router", async () => {
   const opened = allRequests.length;
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
+  const routerCode = (r: { url: string }) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url).pathname);
+  const loadedAtStart = allRequests.slice(opened).filter(routerCode).length;
+  const moved = allRequests.length;
   await page.locator(".filter").hover();
   await page.locator(".filter").focus();
   await page.waitForTimeout(200);
@@ -192,13 +204,12 @@ await step("3b. router", async () => {
   await page.evaluate(() => window.scrollTo(0, 250));
   const y = await page.evaluate(() => Math.round(window.scrollY));
   const mark = allRequests.length;
-  const routerCode = (r: { url: string }) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url).pathname);
-  const loadedAtStart = allRequests.slice(opened, mark).filter(routerCode).length;
+  const loadedAtMove = allRequests.slice(moved, mark).filter(routerCode).length;
   await page.locator('.row[data-id="YUK-8"] .row-title').click();
   await page.waitForURL("**/issue/YUK-8");
   await page.waitForSelector(".comment-input");
   const navReq = allRequests.slice(mark).filter((r) => r.url.endsWith("/issue/YUK-8"));
-  check("3b.0 the navigation code loads on first use, not at start nor on pointer or focus off links", loadedAtStart === 0 && allRequests.slice(mark).filter(routerCode).length === 1, `at start=${loadedAtStart} after=${allRequests.slice(mark).filter(routerCode).length}`);
+  check("3b.0 the navigation code is not loaded at start and loads once, at the first mouse movement (level trajectory)", loadedAtStart === 0 && loadedAtMove === 1 && allRequests.slice(mark).filter(routerCode).length === 0, `at start=${loadedAtStart} at the first movement=${loadedAtMove} after=${allRequests.slice(mark).filter(routerCode).length}`);
   check("3b.1 click is a client navigation (marker survives)", (await marker()) === "alive", String(await marker()));
   check("3b.2 request has Yuka-Navigate with the outlet keys", navReq.length >= 1 && navReq.every((r) => r.keys === "L0"), JSON.stringify(navReq.map((r) => r.keys)));
   const titleAfter = await page.title();
@@ -553,7 +564,85 @@ await step("3f. prefetch and the navigation cache", async () => {
     const r = await fetch("/issue/YUK-5", { headers: { "Yuka-Navigate": "-", "Yuka-Prefetch": "visible" }, cache: "no-store" });
     return [r.status, r.headers.get("yuka-prefetch"), await r.text(), document.querySelector("meta[name=yuka-prefetch]") === null];
   });
-  check("3f.7 a visible prefetch of a Hover route gets 204 with the level, and the demo page prints no level", JSON.stringify(refused) === '[204,"hover","",true]', JSON.stringify(refused));
+  check("3f.7 a visible prefetch of a Trajectory route (the default) gets 204 with the level, and the demo page prints no level", JSON.stringify(refused) === '[204,"trajectory","",true]', JSON.stringify(refused));
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+});
+
+await step("3k. trajectory prefetch (scripted mouse paths, not user data)", async () => {
+  type Box = { x: number; y: number; w: number; h: number };
+  const fresh = async () => {
+    await page.goto(base + "/", { waitUntil: "networkidle" });
+    await page.waitForSelector(".row");
+    return routerLoaded(page);
+  };
+  const box = async (sel: string): Promise<Box> => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error("no box for " + sel);
+    return { x: b.x, y: b.y, w: b.width, h: b.height };
+  };
+  const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+  const glide = async (x0: number, y0: number, x1: number, y1: number, pxPerS: number, target?: Box) => {
+    const dist = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.round(dist / (pxPerS / 60)));
+    let entered = 0;
+    const started = Date.now();
+    for (let i = 1; i <= n; i++) {
+      const x = x0 + ((x1 - x0) * i) / n, y = y0 + ((y1 - y0) * i) / n;
+      const due = started + (i * 1000) / 60;
+      if (Date.now() < due) await page.waitForTimeout(due - Date.now());
+      await page.mouse.move(x, y);
+      if (target && !entered && inside(target, x, y)) entered = Date.now();
+    }
+    return { entered, ms: Date.now() - started, speed: Math.round(dist / ((Date.now() - started) / 1000)) };
+  };
+  const prefetches = (from: number) =>
+    allRequests.slice(from).filter((r) => r.prefetch !== undefined).map((r) => ({ path: new URL(r.url).pathname, prefetch: r.prefetch, t: r.t }));
+  const show = (l: { path: string; prefetch?: string }[]) => l.map((r) => `${r.path}:${r.prefetch}`).join(", ");
+
+  check("3k.0 the first mouse movement loads the navigation code", await fresh());
+  const menuBoxes = () =>
+    page.locator(".nav-link").evaluateAll((els) =>
+      els.map((e) => {
+        const r = e.getBoundingClientRect();
+        return { href: e.getAttribute("href") ?? "", x: r.x, y: r.y, w: r.width, h: r.height };
+      }),
+    );
+  const onLink = (x: number, y: number) =>
+    page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("a[href]")?.getAttribute("href") ?? "none", [x, y]);
+  const t = (await menuBoxes()).at(-1)!;
+  const tx = t.x + t.w / 2, startY = Math.min(t.y + t.h / 2 + 400, 795);
+  const startA = await onLink(tx, startY);
+  let from = allRequests.length;
+  const toward = await glide(tx, startY, tx, t.y + t.h / 2, 800, t);
+  await page.waitForTimeout(300);
+  const a = prefetches(from);
+  const first = a.find((r) => r.path === t.href);
+  const lead = first && toward.entered ? toward.entered + 50 - first.t : NaN;
+  check("3k.1 a straight path toward a link prefetches it before the pointer enters it, as trajectory", !!first && first.prefetch === "trajectory" && first.t < toward.entered, `${show(a)} start on link: ${startA}`);
+  console.log(`MEASURE 3k.1 scripted: ${Math.round(startY - t.y - t.h / 2)} px straight up at ${toward.speed} px/s toward ${t.href} (start on link: ${startA}); trajectory request ${lead} ms before a hover prefetch would start (pointer enters + 50 ms); requests: ${a.length} (${show(a)})`);
+
+  await fresh();
+  const n = (await menuBoxes()).at(-1)!;
+  const ny = n.y + n.h + 50, nx0 = 5, nx1 = n.x + n.w - 10;
+  const startB = await onLink(nx0, ny), endB = await onLink(nx1, 795);
+  from = allRequests.length;
+  await glide(nx0, ny, nx1, ny, 800);
+  await glide(nx1, ny, nx1, 795, 800);
+  await page.waitForTimeout(300);
+  const b = prefetches(from);
+  check("3k.2 a path near one link and away from the others sends at most one request, for that link", b.length <= 1 && b.every((r) => r.path === n.href), show(b));
+  console.log(`MEASURE 3k.2 scripted: a path 50 px under ${n.href}, left to right, then down to the bottom of the window (start on link: ${startB}, end on link: ${endB}): ${b.length} requests (${show(b)})`);
+
+  await fresh();
+  const menu = await menuBoxes();
+  const last = menu[menu.length - 1];
+  const head = menu[0];
+  from = allRequests.length;
+  const cross = await glide(head.x + head.w / 2, head.y - 150, last.x + last.w / 2, last.y + last.h / 2, 800, { x: last.x, y: last.y, w: last.w, h: last.h });
+  await page.waitForTimeout(300);
+  const c = prefetches(from);
+  const passed = menu.slice(1, -1).map((m) => m.href);
+  check("3k.3 a path across the menu sends nothing for the links it passes", !c.some((r) => passed.includes(r.path)), `passed ${passed.join(" ")}: ${show(c)}`);
+  console.log(`MEASURE 3k.3 scripted: a path across the menu (${menu.map((m) => m.href).join(" ")}) toward ${last.href} at ${cross.speed} px/s: ${c.length} requests (${show(c)})`);
   await page.goto(base + "/", { waitUntil: "networkidle" });
 });
 
@@ -1888,6 +1977,7 @@ await step("7l. long comment threads", async () => {
 await step("7k. markdown and code style", async () => {
   await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
   await page.waitForSelector(".comment-input");
+  await routerLoaded(page);
   const markdown = await page.evaluate(() => ({
     heading: document.querySelector(".issue-description h4")?.textContent,
     cells: document.querySelectorAll(".issue-description td").length,

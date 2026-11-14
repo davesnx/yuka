@@ -739,6 +739,12 @@ let route env (App a) req (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
   let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
+  let refuse (rules : rules) level =
+    reply
+      (empty 204
+         (navigation_vary
+            (merge_headers [ rules.headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
+  in
   match a.find r.meth segments (Router.query r.target) with
   | Router.Redirect { permanent; location } ->
       reply (empty (if permanent then 308 else 307) [ ("location", location ^ suffix) ])
@@ -756,11 +762,8 @@ let route env (App a) req (r : request) ~path ~raw ~query =
         when Option.fold ~none:false
                ~some:(fun v -> Prefetch.rank (Prefetch.trigger v) > Prefetch.rank rules.prefetch)
                (r.header "yuka-prefetch") ->
-          reply
-            (empty 204
-               (navigation_vary
-                  (merge_headers
-                     [ rules.headers; [ ("yuka-prefetch", Prefetch.name rules.prefetch); no_store_header ] ])))
+          refuse rules rules.prefetch
+      | Handler { rules; _ } when Option.is_some (r.header "yuka-prefetch") -> refuse rules `Off
       | Page { rules; guards; load; fallback } ->
           serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
       | Handler { rules; action; cross_origin; guards; run } ->

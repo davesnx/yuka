@@ -112,6 +112,12 @@ let on_link e =
   if Option.is_some !router || Web.link_href true (Web.target e) <> "" then
     use (fun r -> r.handle e)
 
+let rec on_move e =
+  if Web.pointer_type e = "mouse" then begin
+    Web.remove_listener (Web.document ()) "pointermove" on_move;
+    use ignore
+  end
+
 let on_leave e = if !loading || Option.is_some !router then use (fun r -> r.handle e)
 
 let on_popstate e =
@@ -147,6 +153,8 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
   | Some r -> r.boot !settings
   | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch][content=visible]") > 0 ->
       use ignore
+  | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch]") = 0 ->
+      Web.add_listener doc "pointermove" on_move
   | None -> ()
 
 let stop () =
@@ -163,6 +171,7 @@ let stop () =
       Web.remove_listener doc "click" on_click;
       List.iter (fun n -> Web.remove_listener doc n on_link) link_events;
       List.iter (fun n -> Web.remove_listener doc n on_leave) leave_events;
+      Web.remove_listener doc "pointermove" on_move;
       Web.remove_listener (Web.window ()) "popstate" on_popstate
   | None -> ());
   Option.iter (fun r -> r.stop ()) !router;

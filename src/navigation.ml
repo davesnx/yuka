@@ -162,14 +162,14 @@ let opened () =
 let allowed () =
   !started && (match !prefetching with `Off -> false | _ -> true) && not (Navigation_web.save_data ())
 
-let rec start ~low key url =
-  let trigger = if low then `Visible else `Hover in
+let rec start (trigger : Prefetch.level) key url =
+  let low = match trigger with `Visible -> true | _ -> false in
   let page = Navigation_web.absolute url in
   let under = match Web.table_get (limits ()) page with Some l -> Prefetch.rank trigger <= Prefetch.rank l | None -> true in
   if under && Option.is_none (lookup key) then begin
     let e =
       { key; answer = None; waiters = []; controller = Navigation_web.new_controller (); at = 0.;
-        prefetched = true; warm = not low }
+        prefetched = true; warm = (match trigger with `Hover -> true | _ -> false) }
     in
     add e;
     let settle a =
@@ -189,7 +189,10 @@ let rec start ~low key url =
               if Web.table_size t >= 200 then Web.table_clear t;
               Web.table_set t page l)
             (Option.bind (header "yuka-prefetch") Prefetch.of_name);
-          settle (Some a)
+          settle (Some a);
+          match trigger with
+          | (`Trajectory | `Visible) when e.warm && (not waited) && allowed () -> start `Hover key url
+          | _ -> ()
         end
         else begin
           e.at <- Navigation_web.now ();
@@ -207,7 +210,7 @@ and pump () =
   | (_, key, url, unobserve) :: rest when opened () < 4 && allowed () ->
       queued := rest;
       unobserve ();
-      start ~low:true key url;
+      start `Visible key url;
       pump ()
   | _ -> ()
 
@@ -219,7 +222,14 @@ let prefetch url =
     | Some e ->
         e.warm <- true;
         Option.iter warm e.answer
-    | None -> start ~low:false key url
+    | None -> start `Hover key url
+  end
+
+let predict url =
+  if allowed () then begin
+    let key = page_key url in
+    take key;
+    start `Trajectory key url
   end
 
 let seen a inside unobserve =
@@ -229,7 +239,7 @@ let seen a inside unobserve =
       let key = page_key href in
       if opened () < 4 || Option.is_some (lookup key) then begin
         unobserve ();
-        start ~low:true key href
+        start `Visible key href
       end
       else queued := (a, key, href, unobserve) :: !queued
   | _ -> if inside then unobserve ()
@@ -326,6 +336,7 @@ let on_touch e =
 let on_down e = if Web.plain_click e then on_touch e
 
 let unwatch = ref ignore
+let untrack = ref ignore
 
 let watch () =
   !unwatch ();
@@ -333,7 +344,7 @@ let watch () =
   queued := [];
   match !prefetching with
   | `Visible -> unwatch := Navigation_web.observe (Web.query_all (Web.document ()) "a[href]") seen
-  | `Off | `Hover -> ()
+  | `Off | `Hover | `Trajectory -> ()
 
 let clear () =
   incr era;
@@ -372,6 +383,11 @@ let boot (transitions, islands) =
      | [| m |] -> Option.value (Option.bind (Web.get_attribute m "content") Prefetch.of_name) ~default:Prefetch.default
      | _ -> Prefetch.default);
   transitions_on := transitions;
+  !untrack ();
+  (untrack :=
+     match !prefetching with
+     | `Trajectory | `Visible -> Navigation_web.trajectory (Web.link_href true) predict
+     | `Off | `Hover -> ignore);
   (Platform.acted :=
      fun () ->
        clear ();
@@ -392,6 +408,8 @@ let stop () =
   on_out ();
   !unwatch ();
   unwatch := ignore;
+  !untrack ();
+  untrack := ignore;
   incr nav;
   Array.iter (fun e -> if Option.is_none e.answer then Navigation_web.abort e.controller) (Web.table_values (cache ()));
   clear ();

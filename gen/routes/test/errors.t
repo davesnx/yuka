@@ -840,20 +840,20 @@ No named node
   Error: the route tree has no named node
   [1]
 
-~prefetch takes `Off, `Hover or `Visible
+~prefetch takes `Off, `Hover, `Trajectory or `Visible
 
   $ gen <<'EOF'
   > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Eager ]
   > EOF
   File "Routes.ml", line 1, characters 64-70:
-  Error: ~prefetch must be `Off, `Hover or `Visible
+  Error: ~prefetch must be `Off, `Hover, `Trajectory or `Visible
   [1]
 
   $ gen <<'EOF'
   > Router.make ~prefetch:true [ Router.route A ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 22-26:
-  Error: ~prefetch must be `Off, `Hover or `Visible
+  Error: ~prefetch must be `Off, `Hover, `Trajectory or `Visible
   [1]
 
 ~prefetch is for pages: an endpoint, an action and a redirect have none

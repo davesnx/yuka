@@ -11,13 +11,13 @@ let rules_1 =
   Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:true ()
 
 let rules_2 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Hover ~prerender:false ()
 
 let rules_3 =
   Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Off ~prerender:false ()
 
 let rules_4 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(public ~s_max_age:600 ~max_age:60 ()) [@warning "-33"]) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(public ~s_max_age:600 ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Hover ~prerender:false ()
 
 let rules_5 =
   Yuka.Server.Generated.rules ~headers:[ root_headers; [("Vary", "Cookie")] ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:false ()
@@ -448,7 +448,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"36fe7d1e6def801df9c2e6e8613fc1f9"
+  Yuka.Server.Generated.app ~build:"da3643aeaa8ab1c764f319acab70ff7b"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_5; rules_7; rules_8 ]

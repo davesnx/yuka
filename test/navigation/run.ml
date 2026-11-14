@@ -84,12 +84,18 @@ let resolve_headers : int -> string -> int -> (string * string) array -> unit =
 let count_listeners : unit -> unit =
   [%mel.raw
     {|function () {
-  const counts = globalThis.__listeners = { click: 0, popstate: 0 };
+  const counts = globalThis.__listeners = { click: 0, popstate: 0, pointermove: 0 };
+  const live = globalThis.__moves = new Set();
   const wrap = function (target) {
-    const add = target.addEventListener;
+    const add = target.addEventListener, remove = target.removeEventListener;
     target.addEventListener = function (name) {
       if (name in counts) counts[name]++;
+      if (name === "pointermove") live.add(arguments[1]);
       return add.apply(this, arguments);
+    };
+    target.removeEventListener = function (name) {
+      if (name === "pointermove") live.delete(arguments[1]);
+      return remove.apply(this, arguments);
     };
   };
   wrap(window);
@@ -98,6 +104,9 @@ let count_listeners : unit -> unit =
 
 let listeners : unit -> string =
   [%mel.raw "function () { return globalThis.__listeners.click + ',' + globalThis.__listeners.popstate }"]
+
+let move_listeners : unit -> string =
+  [%mel.raw "function () { return globalThis.__listeners.pointermove + ',' + globalThis.__moves.size }"]
 
 let reject_call : int -> unit =
   [%mel.raw "function (i) { globalThis.__calls[i].reject(new Error('down')) }"]
@@ -2091,6 +2100,304 @@ let replay_error finish =
           finish ()))
     100
 
+let stub_io : string -> unit =
+  [%mel.raw
+    {|function (mode) {
+  globalThis.__ioMode = mode;
+  globalThis.__ioQueue = [];
+  globalThis.__ioGone = 0;
+  window.IntersectionObserver = function (cb, options) {
+    let live = !(options && options.rootMargin);
+    const o = this;
+    this.observe = function (el) {
+      if (!live || globalThis.__ioMode === "never") return;
+      const r = (el.getAttribute("data-r") || "").split(",").map(Number);
+      const entry = { target: el, isIntersecting: r.length === 4, boundingClientRect: { left: r[0], top: r[1], width: r[2], height: r[3] } };
+      if (globalThis.__ioMode === "late") globalThis.__ioQueue.push({ entry: entry, send: function (es) { if (live) cb(es, o); } });
+      else cb([entry], o);
+    };
+    this.unobserve = function () {};
+    this.disconnect = function () { if (live) globalThis.__ioGone++; live = false; };
+  };
+}|}]
+
+let stub_rects () = stub_io "sync"
+let io_mode : string -> unit = [%mel.raw "function (m) { globalThis.__ioMode = m }"]
+let io_gone : unit -> int = [%mel.raw "function () { return globalThis.__ioGone }"]
+
+let io_flush : int -> unit =
+  [%mel.raw
+    {|function (k) {
+  const q = globalThis.__ioQueue.splice(0, k);
+  if (q.length) q[0].send(q.map(function (x) { return x.entry; }));
+}|}]
+
+let glide_at : int -> string -> float -> float -> float -> float -> int -> unit =
+  [%mel.raw
+    {|function (dt, kind, x0, y0, x1, y1, n) {
+  for (let i = 1; i <= n; i++) {
+    globalThis.__now += dt;
+    document.body.dispatchEvent(new window.PointerEvent("pointermove", {
+      bubbles: true, pointerType: kind, clientX: x0 + (x1 - x0) * i / n, clientY: y0 + (y1 - y0) * i / n,
+    }));
+  }
+}|}]
+
+let glide kind = glide_at 16 kind
+let mouse x0 y0 x1 y1 n = glide "mouse" x0 y0 x1 y1 n
+
+let stub_visibility : unit -> unit =
+  [%mel.raw
+    {|function () {
+  window.Element.prototype.checkVisibility = function (o) {
+    return !(o && o.opacityProperty && o.visibilityProperty && this.hasAttribute("data-hidden"));
+  };
+}|}]
+let fire_scroll : unit -> unit = [%mel.raw "function () { window.dispatchEvent(new window.Event('scroll')) }"]
+let set_rect : string -> string -> unit =
+  [%mel.raw "function (sel, r) { document.querySelector(sel).setAttribute('data-r', r) }"]
+
+let add_link : string -> unit =
+  [%mel.raw "function (h) { document.querySelector('main').insertAdjacentHTML('beforeend', h) }"]
+
+let target_link = {|<a id="l" href="/two" data-r="400,390,100,20">two</a>|}
+
+let toward ?(meta = "") links =
+  setup (meta ^ page links);
+  stub_rects ();
+  plain_start ()
+
+let trajectory_prefetch finish =
+  toward target_link;
+  mouse 0. 400. 300. 400. 30;
+  check "a path toward a link sends one prefetch before any hover" "1" (ints (calls ()));
+  check "to that link" "http://localhost/two" (call_url 0);
+  check "it names its trigger" "trajectory" (prefetch_header 0);
+  check "with normal priority" "undefined" (call_priority 0);
+  resolve_call 0 (assets [ preload "/a.js" ]) "";
+  tick (fun () ->
+      check "a trajectory answer warms nothing" "" (warmed ());
+      fire "#l" "pointerover";
+      wait 60 (fun () ->
+          check "a hover on a predicted link sends no second request" "1" (ints (calls ()));
+          check "and warms its assets" "modulepreload:http://localhost/a.js" (warmed ());
+          toward ~meta:(level "visible") target_link;
+          mouse 0. 400. 300. 400. 30;
+          check "level visible: a path also prefetches" "1|trajectory" (ints (calls ()) ^ "|" ^ prefetch_header 0);
+          finish ()))
+
+let trajectory_misses finish =
+  toward target_link;
+  mouse 0. 400. 39. 400. 40;
+  check "a slow movement sends nothing" "0" (ints (calls ()));
+  toward target_link;
+  mouse 600. 400. 900. 400. 30;
+  check "a link behind the pointer is not chosen" "0" (ints (calls ()));
+  toward ({|<a id="f" href="/far" data-r="700,390,100,20">far</a>|} ^ {|<a id="n" href="/near" data-r="400,390,100,20">near</a>|});
+  mouse 0. 400. 200. 400. 20;
+  check "of two links on the ray the nearer wins" "http://localhost/near" (urls 0);
+  List.iter
+    (fun kind ->
+      toward target_link;
+      glide kind 0. 400. 300. 400. 30;
+      check (kind ^ ": nothing") "0" (ints (calls ())))
+    [ "pen"; "touch" ];
+  toward {|<a id="l" href="/two" data-r="400,390,100,20" data-yuka-prefetch="off">two</a>|};
+  mouse 0. 400. 300. 400. 30;
+  check "data-yuka-prefetch=off: nothing" "0" (ints (calls ()));
+  setup (page target_link);
+  stub_rects ();
+  save_data ();
+  plain_start ();
+  mouse 0. 400. 300. 400. 30;
+  check "save data: nothing" "0" (ints (calls ()));
+  finish ()
+
+let trajectory_levels finish =
+  List.iter
+    (fun l ->
+      setup (level l ^ page target_link);
+      stub_rects ();
+      count_listeners ();
+      plain_start ();
+      mouse 0. 400. 300. 400. 30;
+      check (l ^ ": nothing") "0" (ints (calls ()));
+      check (l ^ ": no movement listener") "0,0" (move_listeners ()))
+    [ "hover"; "off" ];
+  setup (page target_link);
+  stub_rects ();
+  count_listeners ();
+  plain_start ();
+  check "the router listens to movement" "1,1" (move_listeners ());
+  stop ();
+  check "stop removes the listener" "1,0" (move_listeners ());
+  mouse 0. 400. 300. 400. 30;
+  check "after stop: nothing" "0" (ints (calls ()));
+  finish ()
+
+let trajectory_refused finish =
+  toward target_link;
+  mouse 0. 400. 150. 400. 15;
+  check "one prediction" "1" (ints (calls ()));
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      mouse 150. 400. 300. 400. 15;
+      check "after a 204 hover, a new prediction sends nothing" "1" (ints (calls ()));
+      fire "#l" "pointerover";
+      wait 60 (fun () ->
+          check "a hover fetches" "2|hover" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+          finish ()))
+
+let trajectory_follows finish =
+  toward {|<a id="o" href="/old" data-r="400,90,100,20">old</a>|};
+  mouse 0. 400. 100. 400. 10;
+  add_link {|<a id="l" href="/two" data-r="400,390,100,20">two</a>|};
+  mouse 100. 400. 150. 400. 5;
+  check "a new link waits for the next refresh" "0" (ints (calls ()));
+  advance 301;
+  mouse 150. 400. 250. 400. 10;
+  check "after 300 ms a new link is a candidate" "http://localhost/two" (urls 0);
+  toward {|<a id="l" href="/two" data-r="400,90,100,20">two</a>|};
+  mouse 0. 400. 100. 400. 10;
+  set_rect "#l" "400,390,100,20";
+  fire_scroll ();
+  mouse 100. 400. 200. 400. 10;
+  check "after a scroll the rectangles are read again" "http://localhost/two" (urls 0);
+  toward {|<a id="o" href="/old" data-r="400,90,100,20">old</a>|};
+  mouse 0. 400. 100. 400. 10;
+  set_body (page {|<a id="l" href="/two" data-r="400,390,100,20">two</a>|});
+  mouse 100. 400. 200. 400. 10;
+  check "after a page swap the new links are candidates" "http://localhost/two" (urls 0);
+  finish ()
+
+let trajectory_joined_refusal finish =
+  toward target_link;
+  mouse 0. 400. 300. 400. 30;
+  check "a trajectory prefetch" "1|trajectory" (ints (calls ()) ^ "|" ^ prefetch_header 0);
+  fire "#l" "pointerover";
+  wait 60 (fun () ->
+      check "a hover joins it" "1" (ints (calls ()));
+      resolve_headers 0 "" 204 (refusal "hover");
+      tick (fun () ->
+          check "the 204 sends the hover prefetch" "2|hover" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+          tick (fun () ->
+              check "once" "2" (ints (calls ()));
+              finish ())))
+
+let trajectory_ray finish =
+  toward {|<a id="s" href="/side" data-r="160,450,20,20">s</a>|};
+  mouse 0. 400. 300. 400. 30;
+  check "a link outside the radius is not chosen" "0" (ints (calls ()));
+  toward ({|<a id="a" href="/aside" data-r="150,430,100,20">a</a>|} ^ {|<a id="b" href="/ahead" data-r="300,390,100,20">b</a>|});
+  mouse 0. 400. 100. 400. 10;
+  check "the link nearer to the ray wins" "http://localhost/ahead" (urls 0);
+  finish ()
+
+let trajectory_time finish =
+  toward target_link;
+  glide_at 1 "mouse" 0. 400. 400. 400. 40;
+  check "moves closer than 50 ms are not handled" "0" (ints (calls ()));
+  let rate dt n =
+    toward target_link;
+    glide_at dt "mouse" 0. 400. 120. 400. n;
+    urls 0
+  in
+  check "16 ms between events" "http://localhost/two" (rate 16 38);
+  check "8 ms between events" "http://localhost/two" (rate 8 75);
+  toward ({|<a id="r" href="/right" data-r="200,390,100,20">r</a>|} ^ {|<a id="u" href="/up" data-r="10,100,100,20">u</a>|});
+  mouse 0. 400. 60. 400. 6;
+  advance 300;
+  mouse 60. 400. 60. 200. 20;
+  check "after a pause and a turn the old direction is not used" "http://localhost/up" (urls 0);
+  finish ()
+
+let trajectory_dwell finish =
+  toward target_link;
+  mouse 0. 400. 80. 400. 8;
+  check "best on one handled move: nothing" "0" (ints (calls ()));
+  mouse 80. 400. 150. 400. 7;
+  check "best on two in a row: one request" "1" (ints (calls ()));
+  toward
+    (String.concat ""
+       (List.map
+          (fun x -> {|<a id="m|} ^ ints x ^ {|" href="/m|} ^ ints x ^ {|" data-r="|} ^ ints (x - 40) ^ {|,390,80,20">m</a>|})
+          [ 200; 300; 400; 500; 600 ]));
+  mouse 100. 440. 800. 440. 18;
+  check "a fast sweep across five links sends nothing" "0" (ints (calls ()));
+  finish ()
+
+let trajectory_visibility finish =
+  setup (page {|<a id="l" href="/two" data-r="400,390,100,20" data-hidden>two</a>|});
+  stub_rects ();
+  stub_visibility ();
+  plain_start ();
+  mouse 0. 400. 300. 400. 30;
+  check "an invisible link is not a candidate" "0" (ints (calls ()));
+  toward {|<a id="l" href="/two" data-r="400,390,100,20" data-hidden>two</a>|};
+  mouse 0. 400. 300. 400. 30;
+  check "with no checkVisibility it is" "1" (ints (calls ()));
+  finish ()
+
+let trajectory_observer finish =
+  setup (page target_link);
+  stub_io "late";
+  plain_start ();
+  mouse 0. 400. 100. 400. 10;
+  io_flush 0;
+  check "no rectangles yet: nothing" "0" (ints (calls ()));
+  io_flush 1;
+  mouse 100. 400. 110. 400. 1;
+  io_flush 1;
+  mouse 110. 400. 200. 400. 9;
+  check "rectangles in two late batches" "1" (ints (calls ()));
+  setup (page target_link);
+  stub_io "never";
+  plain_start ();
+  mouse 0. 400. 100. 400. 10;
+  check "an observer that never answers: nothing" "0" (ints (calls ()));
+  io_mode "sync";
+  advance 1001;
+  mouse 100. 400. 200. 400. 10;
+  check "after 1 s a new refresh replaces it" "1" (ints (calls ()));
+  setup (page target_link);
+  stub_io "never";
+  plain_start ();
+  mouse 0. 400. 100. 400. 10;
+  let gone = io_gone () in
+  stop ();
+  check "stop disconnects the observer in flight" (ints (gone + 1)) (ints (io_gone ()));
+  finish ()
+
+let move_loads_router finish =
+  setup links;
+  plain_start ();
+  stop ();
+  mouse 0. 0. 100. 0. 10;
+  wait 30 (fun () ->
+      check "after stop a movement loads nothing" "false" (bools (router_loaded ()));
+      List.iter
+        (fun l ->
+          setup (level l ^ links);
+          plain_start ();
+          mouse 0. 0. 100. 0. 10)
+        [ "off"; "hover" ];
+      setup links;
+      plain_start ();
+      glide "pen" 0. 0. 100. 0. 10;
+      glide "touch" 0. 0. 100. 0. 10;
+      wait 30 (fun () ->
+          check "levels off and hover, a pen or a touch load nothing" "false" (bools (router_loaded ()));
+          setup links;
+          stub_rects ();
+          count_listeners ();
+          plain_start ();
+          mouse 0. 0. 100. 0. 10;
+          until "the first mouse movement loads the navigation code" router_loaded
+            (fun () ->
+              check "the stub listener is removed once it fired; the router adds its own" "2,1" (move_listeners ());
+              finish ())
+            100))
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -2197,6 +2504,17 @@ let all =
     ("replacing an entry evicts nothing", replace_keeps_others);
     ("pointer down prefetches only for the primary button", pointer_buttons);
     ("no-cache and no-store are not kept", not_cacheable);
+    ("a path toward a link prefetches it; a hover warms it", trajectory_prefetch);
+    ("slow, backward, pen, touch, off and saveData: no trajectory prefetch", trajectory_misses);
+    ("levels hover and off do not listen to movement; stop removes the listener", trajectory_levels);
+    ("after a refused trajectory prefetch a hover fetches", trajectory_refused);
+    ("the rectangles follow new links, scrolling and page swaps", trajectory_follows);
+    ("a hover joined to a refused trajectory prefetch is sent at the 204", trajectory_joined_refusal);
+    ("the radius and the distance to the ray decide", trajectory_ray);
+    ("the prediction is time based", trajectory_time);
+    ("a link must be the best twice in a row", trajectory_dwell);
+    ("an invisible link is not a candidate", trajectory_visibility);
+    ("late, split and lost observer answers", trajectory_observer);
   ]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]
@@ -2244,6 +2562,7 @@ let () =
     | "hover" ->
         [ ("a data-yuka-prefetch=visible link does not load the navigation code", marked_link_loads_nothing);
           ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
+    | "move" -> [ ("the first mouse movement loads the navigation code", move_loads_router) ]
     | "replay" -> [ ("an error while the waiting events run", replay_error) ]
     | "stall" ->
         block_router "stall";

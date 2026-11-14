@@ -114,6 +114,67 @@ let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> 
   return function () { observer.disconnect(); };
 }|}]
 
+let trajectory : (node -> string) -> (string -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (href, go) {
+  const d = document, w = window, O = w.IntersectionObserver;
+  if (typeof O !== "function") return function () {};
+  let last = -Infinity, k = 0, px, py, vx = 0, vy = 0, was = "", links = [], at = -Infinity, o = null;
+  const reset = function () { links = []; at = -Infinity; };
+  const shown = { opacityProperty: true, visibilityProperty: true };
+  const refresh = function () {
+    if (o) o.disconnect();
+    o = null;
+    const els = d.querySelectorAll("a[href]"), found = [];
+    let left = els.length;
+    at = Date.now();
+    if (!left) { links = found; return; }
+    const mine = (o = new O(function (entries) {
+      for (const e of entries) {
+        const t = e.target, h = e.isIntersecting && !(t.checkVisibility && !t.checkVisibility(shown)) ? href(t) : "";
+        if (h) found.push({ el: t, h: h, r: e.boundingClientRect });
+      }
+      if ((left -= entries.length) > 0) return;
+      mine.disconnect();
+      o = null;
+      links = found;
+    }));
+    els.forEach(function (a) { mine.observe(a); });
+  };
+  const move = function (e) {
+    const t = e.timeStamp, gap = t - last;
+    if (e.pointerType !== "mouse" || gap < 50) return;
+    last = t;
+    const x = e.clientX, y = e.clientY, now = Date.now();
+    if ((!o || now - at > 1000) && (now - at > 300 || links.some(function (l) { return !l.el.isConnected; }))) refresh();
+    if (gap > 200) { px = x; py = y; vx = vy = 0; k = 0; was = ""; return; }
+    const a = ++k > 2 ? 0.6 : 0.3;
+    vx = a * vx + ((1 - a) * (x - px)) / gap;
+    vy = a * vy + ((1 - a) * (y - py)) / gap;
+    px = x;
+    py = y;
+    const s = Math.hypot(vx, vy);
+    let best = "", low = 500;
+    if (s >= 0.12)
+      for (const l of links) {
+        const r = l.r, cx = r.left + r.width / 2 - x, cy = r.top + r.height / 2 - y;
+        const along = (cx * vx + cy * vy) / s, perp = Math.abs(cx * vy - cy * vx) / s, dist = Math.hypot(cx, cy);
+        if (along < 0 || perp > (Math.max(r.width, r.height) / 2 + 30) * Math.max(0.2, 1 - dist / 1000) + 20) continue;
+        if (along + perp * 5 < low) { low = along + perp * 5; best = l.h; }
+      }
+    if (best && best === was) go(best);
+    was = best;
+  };
+  d.addEventListener("pointermove", move, { passive: true });
+  w.addEventListener("scroll", reset, { capture: true, passive: true });
+  return function () {
+    if (o) o.disconnect();
+    o = null;
+    d.removeEventListener("pointermove", move);
+    w.removeEventListener("scroll", reset, { capture: true });
+  };
+}|}]
+
 let warm : string -> string -> unit =
   [%mel.raw
     {|function (final, text) {
