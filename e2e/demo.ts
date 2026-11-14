@@ -1179,6 +1179,20 @@ await step("6h. insights", async () => {
   check("6h.14 arrow keys on From narrow the range; the control, the slider and the time chart show the same dates", narrowed !== fullRange && narrowed === (await timeNote()) && narrowed.startsWith((await from.getAttribute("aria-valuetext")) ?? "-"), `${narrowed} / ${await timeNote()} / ${await from.getAttribute("aria-valuetext")}`);
   await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length < count, stress, { timeout: 5000 }).catch(() => undefined);
   check("6h.15 the narrower range changes the charts", (await amounts()) !== stressAmounts && (await points()) < stress, `${stressAmounts} -> ${await amounts()} points=${await points()}`);
+  const datesBox = async () => ({
+    text: await datesText(),
+    width: (await dates.boundingBox())!.width,
+    next: (await pg.locator("[data-filters] .chip:not([data-dates])").first().boundingBox())!.x,
+  });
+  const datesBoxes = [await datesBox()];
+  for (let batch = 0; batch < 3; batch++) {
+    const day = Number(await from.inputValue());
+    for (let press = 0; press < 12; press++) await pg.keyboard.press("ArrowRight");
+    await pg.waitForFunction((value) => document.querySelector("[data-dates]")?.textContent?.startsWith("Created" + value), await from.getAttribute("aria-valuetext"), { timeout: 5000 }).catch(() => {});
+    if (Number(await from.inputValue()) !== day) datesBoxes.push(await datesBox());
+  }
+  const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
+  check("6h.28 the range control keeps its width and the next filter its place when the dates change", new Set(datesBoxes.map((box) => box.text)).size >= 3 && spread(datesBoxes.map((box) => box.width)) <= 0.5 && spread(datesBoxes.map((box) => box.next)) <= 0.5, JSON.stringify(datesBoxes));
   await reset.click();
   await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") === full, fullRange, { timeout: 5000 }).catch(() => {});
   await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, stress, { timeout: 5000 }).catch(() => undefined);
