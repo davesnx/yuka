@@ -31,6 +31,10 @@ let node_name () =
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
+let stop message =
+  prerr_endline ("demo_server: " ^ message);
+  exit 1
+
 let () =
   let here = Filename.dirname Sys.executable_name in
   let port =
@@ -40,7 +44,7 @@ let () =
       | Some value -> (
           match int_of_string_opt value with
           | Some port -> port
-          | None -> failwith ("demo_server: PORT is not a number: " ^ value)))
+          | None -> stop ("PORT is not a number: " ^ value)))
   in
   let interface = ref "localhost" in
   let js_dir = ref (Filename.concat here "../client/out") in
@@ -68,7 +72,7 @@ let () =
       | Some value -> (
           match int_of_string_opt value with
           | Some days -> days
-          | None -> failwith ("demo_server: YUKA_DEMO_RESET_DAYS is not a number: " ^ value)))
+          | None -> stop ("YUKA_DEMO_RESET_DAYS is not a number: " ^ value)))
   in
   let secret =
     ref (Option.value (Sys.getenv_opt "YUKA_DEMO_SECRET") ~default:"yuka-demo-secret-for-development-only")
@@ -101,12 +105,16 @@ let () =
   let manifest = read_file !manifest in
   let client = Filename.concat !js_dir "demo/client" in
   let assets =
-    if !bundle then
-      Yuka.Server.bundle ~dir:client ~entry:"bundle/main.js" ~manifest
-        ~metafile:(read_file !metafile)
-    else
-      Yuka.Server.modules ~dir:!js_dir ~entry:"demo/client/main.js" ~manifest
-        ~packages:(packages !js_dir) ~digest:(Yuka_dream.tree_digest !js_dir)
+    match
+      if !bundle then
+        Yuka.Server.bundle ~dir:client ~entry:"bundle/main.js" ~manifest
+          ~metafile:(read_file !metafile)
+      else
+        Yuka.Server.modules ~dir:!js_dir ~entry:"demo/client/main.js" ~manifest
+          ~packages:(packages !js_dir) ~digest:(Yuka_dream.tree_digest !js_dir)
+    with
+    | Ok assets -> assets
+    | Error message -> stop message
   in
   let config =
     Yuka.Server.config ~assets
@@ -120,7 +128,7 @@ let () =
       ()
   in
   Demo_app.Handlers.register ();
-  if !reset_days < 1 then failwith "demo_server: the reset age must be at least 1 day";
+  if !reset_days < 1 then stop "the reset age must be at least 1 day";
   if !database <> "" && !prerender = "" then begin
     List.iter
       (fun (name, value) -> if Sys.getenv_opt name = None then Unix.putenv name value)
@@ -155,7 +163,7 @@ let () =
       | _ when !bus = "memory" ->
           let memory = Yuka.Server.Live.memory () in
           fun () -> Yuka.Server.Live.memory_bus memory
-      | _ -> failwith ("demo_server: unknown --bus " ^ !bus)
+      | _ -> stop ("unknown --bus " ^ !bus)
     in
     let other = Yuka.Server.Live.node () in
     let serve ?node port =

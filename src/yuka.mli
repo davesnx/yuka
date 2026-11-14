@@ -1018,11 +1018,18 @@ module Private : sig
       ([+] is a space). *)
 
   val preload_urls :
-    manifest:string -> base:string -> ?metafile:string -> ?entry:string -> unit -> string -> string list
+    manifest:string ->
+    base:string ->
+    ?metafile:string ->
+    ?entry:string ->
+    unit ->
+    (string -> string list, string) result
   (** The URLs to preload for an island name. Without [metafile]: the
       manifest path under [base]. With [metafile]: the output of the island
       and every output it reaches through static imports, then the outputs
-      that [entry] reaches the same way, without [entry] itself. *)
+      that [entry] reaches the same way, without [entry] itself. [Error]
+      with a message when [manifest] or [metafile] is not valid JSON of
+      that shape. *)
 
   val handle_action :
     name:string -> header:(string -> string option) -> body:string -> (int * string) Async.t
@@ -1145,7 +1152,6 @@ end
 val render :
   ?islands:Client.registry ->
   ?navigation:bool ->
-  ?prefetch:[ `Hover | `Visible | `Off ] ->
   ?transitions:bool ->
   ?on_error:(string -> unit) ->
   ?root:Client.container * (unit -> 'k element) ->
@@ -1218,17 +1224,38 @@ val render :
     [<meta name="yuka-build">] of the page, or it was redirected to another
     origin, it does [location.assign url].
 
-    Prefetch ([prefetch], default [`Hover]): 50 ms after the pointer or the
-    focus enters a link that a click would navigate, or at once on
-    [touchstart] or a [pointerdown] of the main button with no modifier
-    key, the page is loaded with the navigation headers and
-    [Yuka-Prefetch: 1]. The server answers it as any navigation, so the
-    guards and loaders of a [GET] page must be safe to run for a link the
-    user may never click: no side effects. [`Visible] also prefetches every such link
-    when it becomes visible; with [`Hover], only links with
-    [data-yuka-prefetch="visible"] do. [data-yuka-prefetch="off"] on a link
-    and [`Off] turn it off, and so does [navigator.connection.saveData].
+    Prefetch: the [~prefetch] rule of [Routes.ml] sets the level of each
+    page route ([`Off], [`Hover], [`Trajectory] (default) or [`Visible]),
+    and the page has the highest level of the route tree in
+    [<meta name="yuka-prefetch" content="off|hover|visible">] (no meta for
+    [`Trajectory]). From [`Hover]: 50 ms after the pointer or the focus enters
+    a link that a click would navigate, or at once on [touchstart] or a
+    [pointerdown] of the main button with no modifier key, the page is
+    loaded with the navigation headers and [Yuka-Prefetch: hover]. The
+    guards and loaders of a [GET] page that a prefetch can reach must be
+    safe to run for a link the user may never click: no side effects.
+    [`Trajectory] also follows the mouse pointer (not touch or pen): the
+    link on screen that the pointer moves toward is prefetched before the
+    pointer is on it, with [Yuka-Prefetch: trajectory].
+    [`Visible] also prefetches every such link when it comes within 200 px
+    of the view, with [Yuka-Prefetch: visible]. When the trigger is above
+    the level of the route, the server answers [204] with
+    [Yuka-Prefetch: LEVEL]; the browser keeps no answer for any [204], a
+    click loads the page, and for the life of the page (until the next
+    {!render}) no prefetch above [LEVEL] is sent for that URL. At most 200
+    levels are kept; the 201st empties them.
+    A visible prefetch is sent with
+    [priority: "low"] and only while fewer than 4 prefetches are in flight;
+    the others wait, the newest first, and a link that leaves the view
+    before its turn is not fetched. After an action call that succeeds,
+    the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
+    and the highest level [`Off] turn it off, and so does [navigator.connection.saveData].
     A navigation to a URL whose prefetch is in flight waits for it.
+    When a hover, focus or press prefetch arrives, the browser starts to
+    load the island chunks ([<link rel="modulepreload">]) and the
+    [data-yuka-css] style sheets that it names, each once per page; a
+    trajectory or visible prefetch does this only after such a trigger on
+    its link.
 
     Answers are kept by URL and outlet keys, at most 30, by the
     [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or
@@ -1244,14 +1271,16 @@ val render :
     [data-yuka-nav="push"], ["back"] or ["forward"] until the last one
     ends. The URL, history and navigation state change before the
     transition starts; an exception in the update is thrown again in a
-    task, as an uncaught error.
+    task, as an uncaught error. When a newer navigation, [popstate] or
+    {!stop} comes before the update runs, the update does nothing: that
+    page is not shown, and its history entry loads it again.
 
     The code that fetches and swaps pages is not in the JavaScript that the
     page loads at start. It is loaded with a dynamic [import] of
     [yuka/navigation.js] on the first click on such a link, [popstate],
     {!Browser.navigate}, or pointer, focus or touch on a link that it would
-    prefetch (at once with [`Visible] prefetch or a
-    [data-yuka-prefetch="visible"] link). Until it arrives, the click is
+    prefetch, or the first mouse movement when the highest level is
+    [`Trajectory] (at once when it is [`Visible]). Until it arrives, the click is
     already prevented and the events wait in order. If the load fails, or
     does not finish within 3 s of the first such event, it is logged once
     with [console.error], the waiting navigations do [location.assign], and
@@ -1262,7 +1291,7 @@ val render :
     and the navigation code is never loaded. Calling [render ~islands] again is safe: the listeners are not
     added twice.
 
-    Without [~islands], [~navigation], [~prefetch], [~transitions] and
+    Without [~islands], [~navigation], [~transitions] and
     [~on_error] do nothing. Raises [Failure] outside the browser, and
     [Invalid_argument] without [~islands] and [~root]. An app that does not
     pass [~islands] contains no island, action or navigation code.
@@ -1601,7 +1630,12 @@ module Server : sig
       [/_yuka/app/]. *)
 
   val modules :
-    dir:string -> entry:string -> manifest:string -> packages:string list -> digest:string -> assets
+    dir:string ->
+    entry:string ->
+    manifest:string ->
+    packages:string list ->
+    digest:string ->
+    (assets, string) result
   (** The Melange module tree. [dir] is the emit directory, [entry] the path
       of the entry module in it (served as [/_yuka/app/<entry>]), [manifest]
       the JSON text that [yuka islands --manifest] prints (paths relative to
@@ -1609,17 +1643,17 @@ module Server : sig
       [dir/node_modules] for the import map. [digest] stands for the content
       of the files (for example [Yuka_dream.tree_digest dir]): it goes into
       the build id, so new JavaScript gives a new build id. Files get
-      [cache-control: no-cache]. Raises [Invalid_argument] when [manifest]
-      is not a JSON object of strings. *)
+      [cache-control: no-cache]. [Error] with a message when [manifest] is
+      not a JSON object of strings. *)
 
   val bundle :
-    dir:string -> entry:string -> manifest:string -> metafile:string -> assets
+    dir:string -> entry:string -> manifest:string -> metafile:string -> (assets, string) result
   (** An esbuild bundle. [metafile] is the text of the JSON report that
       esbuild writes with [--metafile=FILE]: the server reads the hashed
       name of each output and its static imports from it. [dir] is the directory esbuild ran in, so that the
       [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
       the path of the entry output. Outputs other than [entry] get
-      {!immutable}; other files get {!no_cache}. Raises [Invalid_argument]
+      {!immutable}; other files get {!no_cache}. [Error] with a message
       when [manifest] or [metafile] is not valid JSON of that shape. *)
 
   type config
@@ -1909,7 +1943,12 @@ module Server : sig
     (** The merged route rules of one node. *)
 
     val rules :
-      headers:(string * string) list list -> ?cache:cache -> prerender:bool -> unit -> rules
+      headers:(string * string) list list ->
+      ?cache:cache ->
+      ?prefetch:[ `Off | `Hover | `Trajectory | `Visible ] ->
+      prerender:bool ->
+      unit ->
+      rules
     (** [headers] holds one list per node from the root down. A header name
         (case-insensitive) of a later list replaces that name of the
         earlier ones; a name repeated in one list is kept. *)
@@ -1960,14 +1999,16 @@ module Server : sig
       build:string ->
       headers:(string * string) list ->
       prerender:string list ->
+      pages:rules list ->
       find:(Router.meth -> string list -> (string * string) list -> 'r Router.lookup) ->
       resolve:('req -> 'r -> target) ->
       missing:fallback ->
       'req app
     (** [build] is a digest of the route tree. [headers] are the rule
         headers of the root, sent with every 404 and 500 page. [prerender]
-        lists the paths where {!Prerender.seeds} starts. [missing] gives the
-        page when no route matches. *)
+        lists the paths where {!Prerender.seeds} starts. [pages] are the
+        rules of the page routes; each page prints the highest prefetch
+        level among them. [missing] gives the page when no route matches. *)
   end
 
   (** For Yuka's tests. Not covered by semantic versioning. *)

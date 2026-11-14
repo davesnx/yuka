@@ -129,14 +129,30 @@ let two_nodes () =
   check_true "a publish on A reaches the subscriber on B through Postgres" ok;
   Lwt.return_unit
 
+let failure = function Async.Failed m -> m | Async.Done () -> "done" | Async.Pending -> "pending"
+
+let no_server () =
+  let dir = Filename.temp_dir "yuka_pg" "" in
+  let b = Yuka_live_pg.bus ~conninfo:("host=" ^ dir ^ " port=5432") ~channel:"c" () in
+  let* first = wait (b.listen ignore) in
+  check_true "a failed Async" (String.starts_with ~prefix:"Failure(\"Connection failure" (failure first));
+  Out_channel.with_open_bin (Filename.concat dir ".s.PGSQL.5432") ignore;
+  let* second = wait (b.listen ignore) in
+  check_true "the second listen connects again" (failure second <> failure first);
+  check_true "and fails as an Async" (String.starts_with ~prefix:"Failure(\"Connection failure" (failure second));
+  Lwt.return_unit
+
 let case name f = Alcotest.test_case name `Quick (fun () -> Lwt_main.run (f ()))
 
 let () =
-  match conninfo with
-  | None -> print_endline "yuka-live-pg: YUKA_LIVE_PG is not set, the Postgres tests are skipped"
-  | Some _ ->
-      Random.self_init ();
-      Alcotest.run "yuka-live-pg"
+  if conninfo = None then print_endline "yuka-live-pg: YUKA_LIVE_PG is not set, the Postgres tests are skipped";
+  Random.self_init ();
+  Alcotest.run "yuka-live-pg"
+    (( "listen", [ case "a listen with no server fails, and the next one connects again" no_server ] )
+    ::
+    (match conninfo with
+    | None -> []
+    | Some _ ->
         [
           ( "bus",
             [
@@ -146,4 +162,4 @@ let () =
               case "close stops listening and sending" close;
               case "two nodes: a publish on A reaches a subscriber on B" two_nodes;
             ] );
-        ]
+        ]))

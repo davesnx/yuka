@@ -84,12 +84,18 @@ let resolve_headers : int -> string -> int -> (string * string) array -> unit =
 let count_listeners : unit -> unit =
   [%mel.raw
     {|function () {
-  const counts = globalThis.__listeners = { click: 0, popstate: 0 };
+  const counts = globalThis.__listeners = { click: 0, popstate: 0, pointermove: 0 };
+  const live = globalThis.__moves = new Set();
   const wrap = function (target) {
-    const add = target.addEventListener;
+    const add = target.addEventListener, remove = target.removeEventListener;
     target.addEventListener = function (name) {
       if (name in counts) counts[name]++;
+      if (name === "pointermove") live.add(arguments[1]);
       return add.apply(this, arguments);
+    };
+    target.removeEventListener = function (name) {
+      if (name === "pointermove") live.delete(arguments[1]);
+      return remove.apply(this, arguments);
     };
   };
   wrap(window);
@@ -98,6 +104,9 @@ let count_listeners : unit -> unit =
 
 let listeners : unit -> string =
   [%mel.raw "function () { return globalThis.__listeners.click + ',' + globalThis.__listeners.popstate }"]
+
+let move_listeners : unit -> string =
+  [%mel.raw "function () { return globalThis.__listeners.pointermove + ',' + globalThis.__moves.size }"]
 
 let reject_call : int -> unit =
   [%mel.raw "function (i) { globalThis.__calls[i].reject(new Error('down')) }"]
@@ -308,6 +317,22 @@ let fragment_scroll finish =
       check "scrolls to the fragment" "into:sec" (log_read ());
       check "fragment in location" "/a#sec" (location_ ());
       finish ())
+
+let malformed_fragment finish =
+  setup (page {|<a id="a" href="/a#100%">a</a>|});
+  plain_start ();
+  ignore (click "#a" "");
+  resolve_call 0 (doc "A" (page {|<h2 id="100%">s</h2><a id="b" href="/b#%E0%A4%A">b</a>|})) "";
+  tick (fun () ->
+      check "scrolls to the undecoded fragment" "into:100%" (log_read ());
+      check "fragment in location" "/a#100%" (location_ ());
+      log_clear ();
+      ignore (click "#b" "");
+      resolve_call 1 (doc "B" (page {|<p id="b">b</p>|})) "";
+      tick (fun () ->
+          check "no element: scrolls to the top" "scroll:0" (log_read ());
+          check "page shown" (page {|<p id="b">b</p>|}) (body_html ());
+          finish ()))
 
 let superseded finish =
   setup (page {|<a id="a" href="/a">a</a><a id="b" href="/b">b</a>|});
@@ -842,10 +867,13 @@ let stub_observer : unit -> unit =
   [%mel.raw
     {|function () {
   const seen = globalThis.__observed = [];
-  window.IntersectionObserver = function (cb) {
+  const gone = globalThis.__unobserved = [];
+  globalThis.__observeCount = 0;
+  window.IntersectionObserver = function (cb, options) {
+    globalThis.__observerMargin = options && options.rootMargin;
     this.cb = cb;
-    this.observe = function (el) { seen.push({ el: el, cb: cb, o: this }); };
-    this.unobserve = function () {};
+    this.observe = function (el) { globalThis.__observeCount++; seen.push({ el: el, cb: cb, o: this }); };
+    this.unobserve = function (el) { gone.push(el.id); };
     this.disconnect = function () { seen.length = 0; };
   };
 }|}]
@@ -853,12 +881,22 @@ let stub_observer : unit -> unit =
 let observed : unit -> string =
   [%mel.raw "function () { return globalThis.__observed.map(function (x) { return x.el.id }).join(',') }"]
 
-let intersect : string -> unit =
+let observe_count : unit -> int = [%mel.raw "function () { return globalThis.__observeCount }"]
+let unobserved : unit -> string = [%mel.raw "function () { return globalThis.__unobserved.join(',') }"]
+let observer_margin : unit -> string = [%mel.raw "function () { return String(globalThis.__observerMargin) }"]
+
+let crossing : string -> bool -> unit =
   [%mel.raw
-    {|function (id) {
+    {|function (id, inside) {
   const x = globalThis.__observed.find(function (x) { return x.el.id === id; });
-  x.cb([{ isIntersecting: true, target: x.el }]);
+  x.cb([{ isIntersecting: inside, target: x.el }]);
 }|}]
+
+let intersect id = crossing id true
+let leave id = crossing id false
+
+let call_priority : int -> string =
+  [%mel.raw "function (i) { return String(globalThis.__calls[i].init.priority) }"]
 
 let stub_transition : unit -> unit =
   [%mel.raw
@@ -878,6 +916,7 @@ let prefetch_cache : int -> string =
 
 let wait ms f = set_timeout (fun () -> try f () with e -> !fail_hook e) ms
 let links = page {|<a id="l" href="/two">two</a><a id="m" href="/three">three</a>|}
+let level l = {|<meta name="yuka-prefetch" content="|} ^ l ^ {|">|}
 let cached text max_age = (text, [| ("cache-control", "private, max-age=" ^ ints max_age) |])
 
 let hover_prefetch finish =
@@ -888,7 +927,7 @@ let hover_prefetch finish =
       check "no fetch before 50 ms" "0" (ints (calls ()));
       wait 60 (fun () ->
           check "one prefetch" "1" (ints (calls ()));
-          check "prefetch header" "1" (prefetch_header 0);
+          check "prefetch header" "hover" (prefetch_header 0);
           check "a prefetch skips the HTTP cache" "no-store" (prefetch_cache 0);
           check "outlet keys" "-" (call_header 0);
           check "click is intercepted" "true" (bools (click "#l" ""));
@@ -930,8 +969,8 @@ let not_prefetched finish =
   plain_start ();
   fire "#l" "pointerdown";
   check "save data: no prefetch" "0" (ints (calls ()));
-  setup links;
-  render ~islands:(runtime_registry []) ~prefetch:`Off ();
+  setup (level "off" ^ links);
+  plain_start ();
   fire "#l" "pointerdown";
   check "prefetch off: no prefetch" "0" (ints (calls ()));
   check "prefetch off: click still navigates" "true" (bools (click "#l" ""));
@@ -947,18 +986,404 @@ let visible finish =
   setup (page {|<a id="v" href="/two" data-yuka-prefetch="visible">v</a><a id="h" href="/three">h</a>|});
   stub_observer ();
   plain_start ();
-  check "only marked links observed" "v" (observed ());
-  intersect "v";
-  check "a visible link prefetches" "1" (ints (calls ()));
-  intersect "v";
-  check "a link in flight is not prefetched again" "1" (ints (calls ()));
-  setup (page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
+  check "below Visible no link is observed, data-yuka-prefetch=visible included" "" (observed ());
+  check "and nothing is fetched" "0" (ints (calls ()));
+  setup (level "visible" ^ page {|<a id="v" href="/two">v</a><a id="o" href="/three" data-yuka-prefetch="off">o</a>|});
   stub_observer ();
-  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  plain_start ();
   check "visible mode observes every link" "v,o" (observed ());
   intersect "o";
   check "off still wins" "0" (ints (calls ()));
+  intersect "v";
+  check "a visible link prefetches" "1" (ints (calls ()));
+  check "a visible prefetch names its trigger" "visible" (prefetch_header 0);
+  intersect "v";
+  check "a link in flight is not prefetched again" "1" (ints (calls ()));
   finish ()
+
+let numbered n = List.init n (fun i -> "p" ^ ints i)
+
+let visible_page ids =
+  setup (level "visible" ^ page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  stub_observer ();
+  plain_start ();
+  List.iter intersect ids
+
+let urls from = String.concat "," (List.init (calls () - from) (fun i -> call_url (from + i)))
+
+let visible_limit finish =
+  visible_page (numbered 6);
+  check "a 200px margin" "200px" (observer_margin ());
+  check "4 requests open" "http://localhost/p0,http://localhost/p1,http://localhost/p2,http://localhost/p3" (urls 0);
+  check "started links are no longer observed, waiting ones are" "p0,p1,p2,p3" (unobserved ());
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "a settled prefetch starts the newest waiting link" "http://localhost/p5" (urls 4);
+      check "observed until its request starts" "p0,p1,p2,p3,p5" (unobserved ());
+      reject_call 1;
+      tick (fun () ->
+          check "a failed prefetch starts the next" "http://localhost/p4" (urls 5);
+          finish ()))
+
+let visible_leaves finish =
+  visible_page (numbered 6);
+  leave "p5";
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "a link that left the view is not fetched" "http://localhost/p4" (urls 4);
+      resolve_call 1 (doc "P1" (page "")) "";
+      tick (fun () ->
+          check "nothing else waits" "5" (ints (calls ()));
+          finish ()))
+
+let visible_no_eviction finish =
+  visible_page (numbered 34);
+  check "4 requests open" "4" (ints (calls ()));
+  check "waiting links evict nothing" "false" (bools (call_aborted 0));
+  finish ()
+
+let intent_skips_limit finish =
+  setup (level "visible" ^ page ({|<a id="x" href="/x">x</a>|} ^ String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) (numbered 4))));
+  stub_observer ();
+  plain_start ();
+  List.iter intersect (numbered 4);
+  fire "#x" "pointerdown";
+  check "an intent prefetch starts with 4 open" "http://localhost/x" (urls 4);
+  check "a visible request has low priority" "low" (call_priority 0);
+  check "an intent request has none" "undefined" (call_priority 4);
+  ignore (click "#p0" "");
+  ignore (click "#x" "");
+  Browser.navigate "/y";
+  check "a navigation has none" "undefined" (call_priority 5);
+  finish ()
+
+let hover_queued finish =
+  visible_page (numbered 6);
+  fire "#p4" "pointerover";
+  wait 60 (fun () ->
+      check "a hover starts a waiting link at once" "http://localhost/p4" (urls 4);
+      check "at intent priority" "undefined" (call_priority 4);
+      check "and it is no longer observed" "p0,p1,p2,p3,p4" (unobserved ());
+      reject_call 4;
+      tick (fun () ->
+          resolve_call 0 (doc "P0" (page "")) "";
+          resolve_call 1 (doc "P1" (page "")) "";
+          tick (fun () ->
+              check "it left the queue: a failed hover request is not sent again" "http://localhost/p5" (urls 5);
+              resolve_call 2 (doc "P2" (page "")) "";
+              tick (fun () ->
+                  check "no second request" "6" (ints (calls ()));
+                  finish ()))))
+
+let click_queued finish =
+  visible_page (numbered 6);
+  ignore (click "#p5" "");
+  check "the click fetches" "http://localhost/p5" (urls 4);
+  check "as a navigation" "undefined" (prefetch_header 4);
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "the clicked link left the queue" "http://localhost/p4" (urls 5);
+      resolve_call 4 (doc "P5" (page "<p>five</p>")) "";
+      tick (fun () ->
+          check "shown" "/p5" (location_ ());
+          check "one request for the click" "6" (ints (calls ()));
+          finish ()))
+
+let action_rewatches finish =
+  visible_page (numbered 6);
+  let _ = Action.call act "x" in
+  resolve_with 4 {|{"ok":"y"}|} "" 200 "application/json";
+  tick (fun () ->
+      check "the links are observed again" "12" (ints (observe_count ()));
+      List.iter intersect (numbered 6);
+      check "4 new requests" "http://localhost/p0,http://localhost/p1,http://localhost/p2,http://localhost/p3" (urls 5);
+      resolve_call 5 (doc "P0" (page "")) "";
+      tick (fun () ->
+          check "2 wait, the newest starts next" "http://localhost/p5" (urls 9);
+          finish ()))
+
+let page_level finish =
+  List.iter
+    (fun (meta, expected) ->
+      setup (meta ^ page {|<a id="v" href="/two">v</a><a id="h" href="/three">h</a>|});
+      stub_observer ();
+      plain_start ();
+      check (meta ^ ": observed") expected (observed ()))
+    [ ("", ""); (level "hover", ""); (level "eager", ""); (level "visible", "v,h"); (level "off", "") ];
+  finish ()
+
+let refusal level = [| ("yuka-prefetch", level) |]
+
+let refused_then_click finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_headers 0 "" 204 (refusal "off");
+  tick (fun () ->
+      check "a refusal is not shown and loads nothing" "/start?x=1|" (location_ () ^ "|" ^ log_read ());
+      ignore (click "#l" "");
+      check "the click fetches" "2" (ints (calls ()));
+      check "as a navigation" "undefined" (prefetch_header 1);
+      resolve_call 1 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          check "shown" "/two" (location_ ());
+          check "body" (page "<p>two</p>") (body_html ());
+          check "a client navigation, no full load" "scroll:0" (log_read ());
+          finish ()))
+
+let refused_while_waiting finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  check "the click waits for the prefetch" "1" (ints (calls ()));
+  resolve_headers 0 "" 204 (refusal "off");
+  tick (fun () ->
+      check "then fetches as a navigation" "2|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+      resolve_call 1 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          check "shown" "/two" (location_ ());
+          check "a client navigation, no full load" "scroll:0" (log_read ());
+          finish ()))
+
+let refused_off finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_headers 0 "" 204 (refusal "off");
+  tick (fun () ->
+      fire "#l" "pointerdown";
+      fire "#l" "focusin";
+      wait 60 (fun () ->
+          check "no trigger fetches an off URL again" "1" (ints (calls ()));
+          fire "#m" "pointerdown";
+          check "another URL still prefetches" "http://localhost/three" (urls 1);
+          let _ = Action.call act "x" in
+          resolve_with 2 {|{"ok":"y"}|} "" 200 "application/json";
+          tick (fun () ->
+              fire "#l" "pointerdown";
+              check "also after an action" "3" (ints (calls ()));
+              finish ())))
+
+let refused_visible finish =
+  setup (level "visible" ^ links);
+  stub_observer ();
+  plain_start ();
+  intersect "l";
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      intersect "l";
+      check "no visible prefetch above the level" "1" (ints (calls ()));
+      fire "#l" "pointerdown";
+      check "a press at the level fetches" "2|hover" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+      finish ())
+
+let refused_pumps finish =
+  visible_page (numbered 6);
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      check "a refusal starts the newest waiting link" "http://localhost/p5" (urls 4);
+      finish ())
+
+let refused_kept_after_action finish =
+  setup (level "visible" ^ links);
+  stub_observer ();
+  plain_start ();
+  intersect "l";
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      let _ = Action.call act "x" in
+      resolve_with 1 {|{"ok":"y"}|} "" 200 "application/json";
+      tick (fun () ->
+          intersect "l";
+          check "after an action the refused link is not fetched again" "2" (ints (calls ()));
+          finish ()))
+
+let refused_kept_across_outlets finish =
+  setup (level "visible" ^ links);
+  stub_observer ();
+  plain_start ();
+  intersect "l";
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      ignore (click "#m" "");
+      resolve_call 1 (doc "Three" {|<yuka-outlet data-k="L0"><a id="l" href="/two">two</a></yuka-outlet>|}) "";
+      tick (fun () ->
+          intersect "l";
+          check "the refused link is not fetched again" "2" (ints (calls ()));
+          fire "#l" "pointerdown";
+          check "a press still fetches, with the new outlet keys" "3|L0" (ints (calls ()) ^ "|" ^ call_header 2);
+          finish ()))
+
+let refused_bound finish =
+  let ids = List.init 201 (fun i -> "q" ^ ints i) in
+  setup (page (String.concat "" (List.map (fun id -> {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|">x</a>|}) ids)));
+  plain_start ();
+  let rec refuse i = function
+    | [] ->
+        fire "#q0" "pointerdown";
+        check "after 200 remembered levels the table starts again" "http://localhost/q0" (urls 201);
+        finish ()
+    | id :: rest ->
+        fire ("#" ^ id) "pointerdown";
+        resolve_headers i "" 204 (refusal "off");
+        tick (fun () -> refuse (i + 1) rest)
+  in
+  refuse 0 ids
+
+let empty_204 finish =
+  setup links;
+  plain_start ();
+  fire "#m" "pointerdown";
+  resolve_headers 0 "" 204 [||];
+  tick (fun () ->
+      fire "#l" "pointerdown";
+      ignore (click "#l" "");
+      resolve_headers 1 "" 204 [||];
+      tick (fun () ->
+          check "a 204 with no level: the waiting click fetches as a navigation" "3|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 2);
+          resolve_call 2 (doc "Two" (page "<p>two</p>")) "";
+          tick (fun () ->
+              check "shown, no full load" "/two|scroll:0" (location_ () ^ "|" ^ log_read ());
+              Browser.navigate "/three";
+              check "a 204 with no level is not kept" "4|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 3);
+              finish ())))
+
+let warmed : unit -> string =
+  [%mel.raw
+    {|function () {
+  return Array.from(document.head.querySelectorAll("link[rel=modulepreload], link[rel=prefetch]"), function (l) {
+    return l.rel + ":" + l.getAttribute("href");
+  }).join(",");
+}|}]
+
+let assets links = doc "Page" (page (String.concat "" links ^ "<p>x</p>"))
+let preload href = {|<link rel="modulepreload" href="|} ^ href ^ {|">|}
+let sheet href = {|<link rel="stylesheet" href="|} ^ href ^ {|" data-yuka-css>|}
+
+let intent_warms finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_call 0 (assets [ preload "/a.js?x=1&amp;y=2"; preload "/b.js"; sheet "/s.css" ]) "";
+  tick (fun () ->
+      check "an intent answer warms its chunks and sheets"
+        "modulepreload:http://localhost/a.js?x=1&y=2,modulepreload:http://localhost/b.js,prefetch:http://localhost/s.css"
+        (warmed ());
+      fire "#m" "pointerdown";
+      resolve_call 1 (assets [ preload "/b.js"; preload "/c.js"; sheet "/s.css" ]) "";
+      tick (fun () ->
+          check "a URL is warmed once"
+            "modulepreload:http://localhost/a.js?x=1&y=2,modulepreload:http://localhost/b.js,prefetch:http://localhost/s.css,modulepreload:http://localhost/c.js"
+            (warmed ());
+          finish ()))
+
+let nothing_to_warm finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  fire "#m" "pointerdown";
+  resolve_call 0 (assets []) "";
+  reject_call 1;
+  tick (fun () ->
+      check "an answer with no links and a failed prefetch warm nothing" "" (warmed ());
+      finish ())
+
+let warm_unescapes finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_call 0 (assets [ preload "/e.js?a=&lt;&quot;&amp;lt;" ]) "";
+  tick (fun () ->
+      check "each entity is decoded once" "modulepreload:http://localhost/e.js?a=%3C%22&lt;" (warmed ());
+      finish ())
+
+let warm_relative finish =
+  setup (page {|<a id="d" href="/dir/page">d</a>|});
+  plain_start ();
+  fire "#d" "pointerdown";
+  resolve_call 0 (assets [ preload "x.js" ]) "";
+  tick (fun () ->
+      check "a relative href is resolved against the answer URL" "modulepreload:http://localhost/dir/x.js" (warmed ());
+      finish ())
+
+let warm_skips_page_links finish =
+  setup links;
+  set_head ({|<title>start</title>|} ^ sheet "/s.css");
+  plain_start ();
+  fire "#l" "pointerdown";
+  resolve_call 0 (assets [ sheet "/s.css"; preload "/a.js" ]) "";
+  tick (fun () ->
+      check "a sheet already in the page is not warmed" "modulepreload:http://localhost/a.js" (warmed ());
+      finish ())
+
+let warm_only_shown finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body (page {|<a id="a" href="/a">a</a><a id="b" href="/b">b</a><a id="c" href="/c">c</a>|});
+  plain_start ();
+  fire "#a" "pointerdown";
+  fire "#b" "pointerdown";
+  fire "#c" "pointerdown";
+  let text = assets [ preload "/x.js" ] in
+  resolve_with 0 text "" 200 "text/plain";
+  resolve_with 1 text "" 302 "text/html";
+  resolve_headers 2 text 200 [| ("yuka-build", "b2") |];
+  tick (fun () ->
+      check "text/plain, 302 and another build warm nothing" "" (warmed ());
+      finish ())
+
+let warm_bad_href finish =
+  setup links;
+  plain_start ();
+  fire "#m" "pointerdown";
+  resolve_call 0 (assets [ preload "http://["; preload "/ok.js" ]) "";
+  tick (fun () ->
+      check "a bad href is skipped, the others warm" "modulepreload:http://localhost/ok.js" (warmed ());
+      fire "#l" "pointerdown";
+      ignore (click "#l" "");
+      resolve_call 1 (doc "Two" (page {|<link rel="modulepreload" href="http://["><p>two</p>|})) "";
+      tick (fun () ->
+          check "a click that waits on an answer with a bad href completes" "/two" (location_ ());
+          finish ()))
+
+let press_then_click finish =
+  setup links;
+  plain_start ();
+  fire "#l" "pointerdown";
+  ignore (click "#l" "");
+  resolve_call 0 (assets [ preload "/a.js"; sheet "/s.css" ]) "";
+  tick (fun () ->
+      check "the click completes" "/two" (location_ ());
+      check "a waited answer is not warmed" "" (warmed ());
+      finish ())
+
+let visible_warms_on_intent finish =
+  setup (level "visible" ^ links);
+  stub_observer ();
+  plain_start ();
+  intersect "l";
+  intersect "m";
+  resolve_call 0 (assets [ preload "/a.js" ]) "";
+  tick (fun () ->
+      check "a visible answer warms nothing" "" (warmed ());
+      fire "#l" "pointerdown";
+      check "an intent on an answered visible prefetch warms at once" "modulepreload:http://localhost/a.js" (warmed ());
+      fire "#m" "pointerdown";
+      check "no new request" "2" (ints (calls ()));
+      resolve_call 1 (assets [ preload "/b.js" ]) "";
+      tick (fun () ->
+          check "an intent on a visible prefetch in flight warms when it arrives"
+            "modulepreload:http://localhost/a.js,modulepreload:http://localhost/b.js" (warmed ());
+          finish ()))
+
+let waiting_save_data finish =
+  visible_page (numbered 6);
+  save_data ();
+  resolve_call 0 (doc "P0" (page "")) "";
+  tick (fun () ->
+      check "a waiting link does not start under saveData" "4" (ints (calls ()));
+      finish ())
 
 let max_age_cache finish =
   setup links;
@@ -1326,6 +1751,95 @@ let transition_token finish =
                   check "removed by the last one" "null" (nav_attr ());
                   finish ()))))
 
+let race_page body n = page ({|<a id="l" href="/two">two</a><a id="m" href="/three">three</a>|} ^ body ^ island n)
+
+let race_start () =
+  State.set probe_runs 0;
+  setup (race_page "<p>start</p>" 1);
+  deferred_transitions ();
+  render ~islands:(runtime_registry [ probe_entry ]) ~transitions:true ();
+  set_scroll 300.;
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page ("<p>two</p>" ^ island 2))) ""
+
+let back_before_transition finish =
+  race_start ();
+  let start = race_page "<p>start</p>" 1 in
+  tick (fun () ->
+      check "the URL of the page that waits for its transition" "/two" (location_ ());
+      log_clear ();
+      back ();
+      tick (fun () ->
+          run_transition 0;
+          check "the abandoned page is never put in the DOM" start (body_html ());
+          check "location" "/start?x=1" (location_ ());
+          check "title" "start" (title ());
+          check "the shown page is not fetched again" "1" (ints (calls ()));
+          check "scroll of the entry restored, no island started" "scroll:300" (log_read ());
+          check "not navigating" "false" (navigating ());
+          finish_transition 0;
+          tick (fun () ->
+              check "attribute removed" "null" (nav_attr ());
+              forward ();
+              tick (fun () ->
+                  check "forward loads the abandoned entry" "/two" (call_url 1);
+                  resolve_call 1 (doc "Two" (page ("<p>two</p>" ^ island 2))) "";
+                  tick (fun () ->
+                      run_transition 1;
+                      tick (fun () ->
+                          check "shown" (page ("<p>two</p>" ^ island 2)) (body_html ());
+                          check "an entry that was never shown starts at the top, its island starts"
+                            "scroll:300|scroll:0|g0/2" (log_read ());
+                          finish ()))))))
+
+let newer_before_transition fetched (start_newer : unit -> unit) finish =
+  race_start ();
+  tick (fun () ->
+      log_clear ();
+      start_newer ();
+      check "the newer navigation fetches" fetched (call_url 1);
+      run_transition 0;
+      check "the abandoned page is never put in the DOM" (race_page "<p>start</p>" 1) (body_html ());
+      check "still navigating" "true" (navigating ());
+      check "no scroll, no island started" "" (log_read ());
+      resolve_call 1 (doc "Three" (page ("<p>three</p>" ^ island 3))) "";
+      tick (fun () ->
+          check "one transition per shown navigation" "2" (ints (transitions_count ()));
+          run_transition 1;
+          tick (fun () ->
+              check "the newer page" (page ("<p>three</p>" ^ island 3)) (body_html ());
+              check "location" "/three" (location_ ());
+              check "title" "Three" (title ());
+              check "scrolled to the top, its island started" "scroll:0|g0/3" (log_read ());
+              check "not navigating" "false" (navigating ());
+              finish_transition 0;
+              finish_transition 1;
+              tick (fun () ->
+                  check "attribute removed" "null" (nav_attr ());
+                  log_clear ();
+                  back ();
+                  tick (fun () ->
+                      check "back to the abandoned entry loads it" "/two" (call_url 2);
+                      resolve_call 2 (doc "Two" (page ("<p>two</p>" ^ island 2))) "";
+                      tick (fun () ->
+                          run_transition 2;
+                          tick (fun () ->
+                              check "shown" (page ("<p>two</p>" ^ island 2)) (body_html ());
+                              check "an entry that was never shown starts at the top" "scroll:0|g0/2" (log_read ());
+                              finish ())))))))
+
+let stop_before_transition finish =
+  race_start ();
+  tick (fun () ->
+      log_clear ();
+      stop ();
+      run_transition 0;
+      check "no swap after stop" (race_page "<p>start</p>" 1) (body_html ());
+      check "not navigating" "false" (navigating ());
+      tick (fun () ->
+          check "no scroll, no island started" "" (log_read ());
+          finish ()))
+
 let transition_error finish =
   setup links;
   raising_transition ();
@@ -1425,6 +1939,13 @@ let unmount_clears finish =
 let router_loaded : unit -> bool =
   [%mel.raw
     {|function () { return Object.keys(require.cache).some(function (k) { return k.endsWith("/yuka/navigation.js") }) }|}]
+
+let marked_link_loads_nothing finish =
+  setup (page {|<a id="l" href="/two" data-yuka-prefetch="visible">x</a>|});
+  plain_start ();
+  wait 30 (fun () ->
+      check "a data-yuka-prefetch=visible link does not load the navigation code at start" "false" (bools (router_loaded ()));
+      finish ())
 
 let rec until name cond f n =
   tick (fun () -> if cond () then f () else if n = 0 then check name "true" "false" else until name cond f (n - 1))
@@ -1554,7 +2075,7 @@ let hover_loads_and_prefetches finish =
     (fun () ->
       wait 80 (fun () ->
           check "the hover prefetches once the code loads" "1" (ints (calls ()));
-          check "prefetch header" "1" (prefetch_header 0);
+          check "prefetch header" "hover" (prefetch_header 0);
           finish ()))
     100
 
@@ -1611,8 +2132,8 @@ let leaving_drops_waiting finish =
       finish ())
 
 let stalled_import finish =
-  setup (page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
-  render ~islands:(runtime_registry []) ~prefetch:`Visible ();
+  setup (level "visible" ^ page {|<a id="l" href="/two">x</a><a id="m" href="/three">y</a>|});
+  plain_start ();
   wait 1000 (fun () ->
       check "the click is prevented while the code loads" "true" (bools (click "#l" ""));
       check "navigating while the code loads" "true" (navigating ());
@@ -1668,6 +2189,304 @@ let replay_error finish =
           finish ()))
     100
 
+let stub_io : string -> unit =
+  [%mel.raw
+    {|function (mode) {
+  globalThis.__ioMode = mode;
+  globalThis.__ioQueue = [];
+  globalThis.__ioGone = 0;
+  window.IntersectionObserver = function (cb, options) {
+    let live = !(options && options.rootMargin);
+    const o = this;
+    this.observe = function (el) {
+      if (!live || globalThis.__ioMode === "never") return;
+      const r = (el.getAttribute("data-r") || "").split(",").map(Number);
+      const entry = { target: el, isIntersecting: r.length === 4, boundingClientRect: { left: r[0], top: r[1], width: r[2], height: r[3] } };
+      if (globalThis.__ioMode === "late") globalThis.__ioQueue.push({ entry: entry, send: function (es) { if (live) cb(es, o); } });
+      else cb([entry], o);
+    };
+    this.unobserve = function () {};
+    this.disconnect = function () { if (live) globalThis.__ioGone++; live = false; };
+  };
+}|}]
+
+let stub_rects () = stub_io "sync"
+let io_mode : string -> unit = [%mel.raw "function (m) { globalThis.__ioMode = m }"]
+let io_gone : unit -> int = [%mel.raw "function () { return globalThis.__ioGone }"]
+
+let io_flush : int -> unit =
+  [%mel.raw
+    {|function (k) {
+  const q = globalThis.__ioQueue.splice(0, k);
+  if (q.length) q[0].send(q.map(function (x) { return x.entry; }));
+}|}]
+
+let glide_at : int -> string -> float -> float -> float -> float -> int -> unit =
+  [%mel.raw
+    {|function (dt, kind, x0, y0, x1, y1, n) {
+  for (let i = 1; i <= n; i++) {
+    globalThis.__now += dt;
+    document.body.dispatchEvent(new window.PointerEvent("pointermove", {
+      bubbles: true, pointerType: kind, clientX: x0 + (x1 - x0) * i / n, clientY: y0 + (y1 - y0) * i / n,
+    }));
+  }
+}|}]
+
+let glide kind = glide_at 16 kind
+let mouse x0 y0 x1 y1 n = glide "mouse" x0 y0 x1 y1 n
+
+let stub_visibility : unit -> unit =
+  [%mel.raw
+    {|function () {
+  window.Element.prototype.checkVisibility = function (o) {
+    return !(o && o.opacityProperty && o.visibilityProperty && this.hasAttribute("data-hidden"));
+  };
+}|}]
+let fire_scroll : unit -> unit = [%mel.raw "function () { window.dispatchEvent(new window.Event('scroll')) }"]
+let set_rect : string -> string -> unit =
+  [%mel.raw "function (sel, r) { document.querySelector(sel).setAttribute('data-r', r) }"]
+
+let add_link : string -> unit =
+  [%mel.raw "function (h) { document.querySelector('main').insertAdjacentHTML('beforeend', h) }"]
+
+let target_link = {|<a id="l" href="/two" data-r="400,390,100,20">two</a>|}
+
+let toward ?(meta = "") links =
+  setup (meta ^ page links);
+  stub_rects ();
+  plain_start ()
+
+let trajectory_prefetch finish =
+  toward target_link;
+  mouse 0. 400. 300. 400. 30;
+  check "a path toward a link sends one prefetch before any hover" "1" (ints (calls ()));
+  check "to that link" "http://localhost/two" (call_url 0);
+  check "it names its trigger" "trajectory" (prefetch_header 0);
+  check "with normal priority" "undefined" (call_priority 0);
+  resolve_call 0 (assets [ preload "/a.js" ]) "";
+  tick (fun () ->
+      check "a trajectory answer warms nothing" "" (warmed ());
+      fire "#l" "pointerover";
+      wait 60 (fun () ->
+          check "a hover on a predicted link sends no second request" "1" (ints (calls ()));
+          check "and warms its assets" "modulepreload:http://localhost/a.js" (warmed ());
+          toward ~meta:(level "visible") target_link;
+          mouse 0. 400. 300. 400. 30;
+          check "level visible: a path also prefetches" "1|trajectory" (ints (calls ()) ^ "|" ^ prefetch_header 0);
+          finish ()))
+
+let trajectory_misses finish =
+  toward target_link;
+  mouse 0. 400. 39. 400. 40;
+  check "a slow movement sends nothing" "0" (ints (calls ()));
+  toward target_link;
+  mouse 600. 400. 900. 400. 30;
+  check "a link behind the pointer is not chosen" "0" (ints (calls ()));
+  toward ({|<a id="f" href="/far" data-r="700,390,100,20">far</a>|} ^ {|<a id="n" href="/near" data-r="400,390,100,20">near</a>|});
+  mouse 0. 400. 200. 400. 20;
+  check "of two links on the ray the nearer wins" "http://localhost/near" (urls 0);
+  List.iter
+    (fun kind ->
+      toward target_link;
+      glide kind 0. 400. 300. 400. 30;
+      check (kind ^ ": nothing") "0" (ints (calls ())))
+    [ "pen"; "touch" ];
+  toward {|<a id="l" href="/two" data-r="400,390,100,20" data-yuka-prefetch="off">two</a>|};
+  mouse 0. 400. 300. 400. 30;
+  check "data-yuka-prefetch=off: nothing" "0" (ints (calls ()));
+  setup (page target_link);
+  stub_rects ();
+  save_data ();
+  plain_start ();
+  mouse 0. 400. 300. 400. 30;
+  check "save data: nothing" "0" (ints (calls ()));
+  finish ()
+
+let trajectory_levels finish =
+  List.iter
+    (fun l ->
+      setup (level l ^ page target_link);
+      stub_rects ();
+      count_listeners ();
+      plain_start ();
+      mouse 0. 400. 300. 400. 30;
+      check (l ^ ": nothing") "0" (ints (calls ()));
+      check (l ^ ": no movement listener") "0,0" (move_listeners ()))
+    [ "hover"; "off" ];
+  setup (page target_link);
+  stub_rects ();
+  count_listeners ();
+  plain_start ();
+  check "the router listens to movement" "1,1" (move_listeners ());
+  stop ();
+  check "stop removes the listener" "1,0" (move_listeners ());
+  mouse 0. 400. 300. 400. 30;
+  check "after stop: nothing" "0" (ints (calls ()));
+  finish ()
+
+let trajectory_refused finish =
+  toward target_link;
+  mouse 0. 400. 150. 400. 15;
+  check "one prediction" "1" (ints (calls ()));
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      mouse 150. 400. 300. 400. 15;
+      check "after a 204 hover, a new prediction sends nothing" "1" (ints (calls ()));
+      fire "#l" "pointerover";
+      wait 60 (fun () ->
+          check "a hover fetches" "2|hover" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+          finish ()))
+
+let trajectory_follows finish =
+  toward {|<a id="o" href="/old" data-r="400,90,100,20">old</a>|};
+  mouse 0. 400. 100. 400. 10;
+  add_link {|<a id="l" href="/two" data-r="400,390,100,20">two</a>|};
+  mouse 100. 400. 150. 400. 5;
+  check "a new link waits for the next refresh" "0" (ints (calls ()));
+  advance 301;
+  mouse 150. 400. 250. 400. 10;
+  check "after 300 ms a new link is a candidate" "http://localhost/two" (urls 0);
+  toward {|<a id="l" href="/two" data-r="400,90,100,20">two</a>|};
+  mouse 0. 400. 100. 400. 10;
+  set_rect "#l" "400,390,100,20";
+  fire_scroll ();
+  mouse 100. 400. 200. 400. 10;
+  check "after a scroll the rectangles are read again" "http://localhost/two" (urls 0);
+  toward {|<a id="o" href="/old" data-r="400,90,100,20">old</a>|};
+  mouse 0. 400. 100. 400. 10;
+  set_body (page {|<a id="l" href="/two" data-r="400,390,100,20">two</a>|});
+  mouse 100. 400. 200. 400. 10;
+  check "after a page swap the new links are candidates" "http://localhost/two" (urls 0);
+  finish ()
+
+let trajectory_joined_refusal finish =
+  toward target_link;
+  mouse 0. 400. 300. 400. 30;
+  check "a trajectory prefetch" "1|trajectory" (ints (calls ()) ^ "|" ^ prefetch_header 0);
+  fire "#l" "pointerover";
+  wait 60 (fun () ->
+      check "a hover joins it" "1" (ints (calls ()));
+      resolve_headers 0 "" 204 (refusal "hover");
+      tick (fun () ->
+          check "the 204 sends the hover prefetch" "2|hover" (ints (calls ()) ^ "|" ^ prefetch_header 1);
+          tick (fun () ->
+              check "once" "2" (ints (calls ()));
+              finish ())))
+
+let trajectory_ray finish =
+  toward {|<a id="s" href="/side" data-r="160,450,20,20">s</a>|};
+  mouse 0. 400. 300. 400. 30;
+  check "a link outside the radius is not chosen" "0" (ints (calls ()));
+  toward ({|<a id="a" href="/aside" data-r="150,430,100,20">a</a>|} ^ {|<a id="b" href="/ahead" data-r="300,390,100,20">b</a>|});
+  mouse 0. 400. 100. 400. 10;
+  check "the link nearer to the ray wins" "http://localhost/ahead" (urls 0);
+  finish ()
+
+let trajectory_time finish =
+  toward target_link;
+  glide_at 1 "mouse" 0. 400. 400. 400. 40;
+  check "moves closer than 50 ms are not handled" "0" (ints (calls ()));
+  let rate dt n =
+    toward target_link;
+    glide_at dt "mouse" 0. 400. 120. 400. n;
+    urls 0
+  in
+  check "16 ms between events" "http://localhost/two" (rate 16 38);
+  check "8 ms between events" "http://localhost/two" (rate 8 75);
+  toward ({|<a id="r" href="/right" data-r="200,390,100,20">r</a>|} ^ {|<a id="u" href="/up" data-r="10,100,100,20">u</a>|});
+  mouse 0. 400. 60. 400. 6;
+  advance 300;
+  mouse 60. 400. 60. 200. 20;
+  check "after a pause and a turn the old direction is not used" "http://localhost/up" (urls 0);
+  finish ()
+
+let trajectory_dwell finish =
+  toward target_link;
+  mouse 0. 400. 80. 400. 8;
+  check "best on one handled move: nothing" "0" (ints (calls ()));
+  mouse 80. 400. 150. 400. 7;
+  check "best on two in a row: one request" "1" (ints (calls ()));
+  toward
+    (String.concat ""
+       (List.map
+          (fun x -> {|<a id="m|} ^ ints x ^ {|" href="/m|} ^ ints x ^ {|" data-r="|} ^ ints (x - 40) ^ {|,390,80,20">m</a>|})
+          [ 200; 300; 400; 500; 600 ]));
+  mouse 100. 440. 800. 440. 18;
+  check "a fast sweep across five links sends nothing" "0" (ints (calls ()));
+  finish ()
+
+let trajectory_visibility finish =
+  setup (page {|<a id="l" href="/two" data-r="400,390,100,20" data-hidden>two</a>|});
+  stub_rects ();
+  stub_visibility ();
+  plain_start ();
+  mouse 0. 400. 300. 400. 30;
+  check "an invisible link is not a candidate" "0" (ints (calls ()));
+  toward {|<a id="l" href="/two" data-r="400,390,100,20" data-hidden>two</a>|};
+  mouse 0. 400. 300. 400. 30;
+  check "with no checkVisibility it is" "1" (ints (calls ()));
+  finish ()
+
+let trajectory_observer finish =
+  setup (page target_link);
+  stub_io "late";
+  plain_start ();
+  mouse 0. 400. 100. 400. 10;
+  io_flush 0;
+  check "no rectangles yet: nothing" "0" (ints (calls ()));
+  io_flush 1;
+  mouse 100. 400. 110. 400. 1;
+  io_flush 1;
+  mouse 110. 400. 200. 400. 9;
+  check "rectangles in two late batches" "1" (ints (calls ()));
+  setup (page target_link);
+  stub_io "never";
+  plain_start ();
+  mouse 0. 400. 100. 400. 10;
+  check "an observer that never answers: nothing" "0" (ints (calls ()));
+  io_mode "sync";
+  advance 1001;
+  mouse 100. 400. 200. 400. 10;
+  check "after 1 s a new refresh replaces it" "1" (ints (calls ()));
+  setup (page target_link);
+  stub_io "never";
+  plain_start ();
+  mouse 0. 400. 100. 400. 10;
+  let gone = io_gone () in
+  stop ();
+  check "stop disconnects the observer in flight" (ints (gone + 1)) (ints (io_gone ()));
+  finish ()
+
+let move_loads_router finish =
+  setup links;
+  plain_start ();
+  stop ();
+  mouse 0. 0. 100. 0. 10;
+  wait 30 (fun () ->
+      check "after stop a movement loads nothing" "false" (bools (router_loaded ()));
+      List.iter
+        (fun l ->
+          setup (level l ^ links);
+          plain_start ();
+          mouse 0. 0. 100. 0. 10)
+        [ "off"; "hover" ];
+      setup links;
+      plain_start ();
+      glide "pen" 0. 0. 100. 0. 10;
+      glide "touch" 0. 0. 100. 0. 10;
+      wait 30 (fun () ->
+          check "levels off and hover, a pen or a touch load nothing" "false" (bools (router_loaded ()));
+          setup links;
+          stub_rects ();
+          count_listeners ();
+          plain_start ();
+          mouse 0. 0. 100. 0. 10;
+          until "the first mouse movement loads the navigation code" router_loaded
+            (fun () ->
+              check "the stub listener is removed once it fired; the router adds its own" "2,1" (move_listeners ());
+              finish ())
+            100))
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -1688,6 +2507,7 @@ let all =
     ("history and popstate", history_and_popstate);
     ("scroll top and restore", scrolling);
     ("scroll to fragment", fragment_scroll);
+    ("a fragment that does not decode", malformed_fragment);
     ("superseded navigation aborts", superseded);
     ("late response of an aborted request", superseded_late_response);
     ("fetch failure falls back", failure_falls_back);
@@ -1723,6 +2543,33 @@ let all =
     ("leaving before 50 ms sends nothing; focus prefetches", hover_out);
     ("links and settings that do not prefetch", not_prefetched);
     ("visible links prefetch", visible);
+    ("the page gives the level", page_level);
+    ("a refused prefetch is not kept; the click fetches", refused_then_click);
+    ("a click that waits for a refused prefetch fetches", refused_while_waiting);
+    ("after a refusal with off no trigger fetches, also after an action", refused_off);
+    ("after a refused visible prefetch a press fetches", refused_visible);
+    ("a refusal settles the queue", refused_pumps);
+    ("a refused level is kept after an action", refused_kept_after_action);
+    ("a refused level is kept when the outlet keys change", refused_kept_across_outlets);
+    ("at most 200 remembered levels", refused_bound);
+    ("a 204 with no level is not kept; a waiting click fetches", empty_204);
+    ("visible: 4 open, the newest waiting link starts when one settles", visible_limit);
+    ("visible: a waiting link that leaves the view is not fetched", visible_leaves);
+    ("visible: waiting links are not in the cache", visible_no_eviction);
+    ("intent starts at once with 4 open; only visible requests are low priority", intent_skips_limit);
+    ("a hover on a waiting link starts it once", hover_queued);
+    ("a click on a waiting link navigates with one request", click_queued);
+    ("after an action the visible links are observed and prefetched again", action_rewatches);
+    ("a waiting link does not start under saveData", waiting_save_data);
+    ("an intent prefetch answer warms its chunks and sheets once", intent_warms);
+    ("an answer with no links or a failed prefetch warms nothing", nothing_to_warm);
+    ("a visible prefetch warms only after an intent on its link", visible_warms_on_intent);
+    ("warm: entities decoded once each", warm_unescapes);
+    ("warm: a relative href resolves against the answer URL", warm_relative);
+    ("warm: a link already in the page is not warmed again", warm_skips_page_links);
+    ("warm: an answer that is not swapped in warms nothing", warm_only_shown);
+    ("warm: a bad href is skipped and a waiting click completes", warm_bad_href);
+    ("warm: press then click before the answer warms nothing", press_then_click);
     ("max-age reuses a page", max_age_cache);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);
@@ -1742,10 +2589,25 @@ let all =
     ("a popstate to the shown page cancels a waiting navigation", popstate_cancels_waiter);
     ("transitions: state first, one attribute owner", transition_token);
     ("transitions: an error in the update is reported", transition_error);
+    ("transitions: back before the update runs keeps the shown page", back_before_transition);
+    ("transitions: a click before the update runs drops the older page", newer_before_transition "http://localhost/three" (fun () -> ignore (click "#m" "")));
+    ("transitions: a popstate before the update runs drops the older page", newer_before_transition "/three" (fun () -> popstate_to "/three"));
+    ("transitions: stop before the update runs drops the page", stop_before_transition);
     ("an evicted prefetch is aborted", eviction);
     ("replacing an entry evicts nothing", replace_keeps_others);
     ("pointer down prefetches only for the primary button", pointer_buttons);
     ("no-cache and no-store are not kept", not_cacheable);
+    ("a path toward a link prefetches it; a hover warms it", trajectory_prefetch);
+    ("slow, backward, pen, touch, off and saveData: no trajectory prefetch", trajectory_misses);
+    ("levels hover and off do not listen to movement; stop removes the listener", trajectory_levels);
+    ("after a refused trajectory prefetch a hover fetches", trajectory_refused);
+    ("the rectangles follow new links, scrolling and page swaps", trajectory_follows);
+    ("a hover joined to a refused trajectory prefetch is sent at the 204", trajectory_joined_refusal);
+    ("the radius and the distance to the ray decide", trajectory_ray);
+    ("the prediction is time based", trajectory_time);
+    ("a link must be the best twice in a row", trajectory_dwell);
+    ("an invisible link is not a candidate", trajectory_visibility);
+    ("late, split and lost observer answers", trajectory_observer);
   ]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]
@@ -1790,7 +2652,10 @@ let () =
   run
     (match argument () with
     | "back" -> [ ("back and forward before the navigation code loads", cold_back_forward) ]
-    | "hover" -> [ ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
+    | "hover" ->
+        [ ("a data-yuka-prefetch=visible link does not load the navigation code", marked_link_loads_nothing);
+          ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
+    | "move" -> [ ("the first mouse movement loads the navigation code", move_loads_router) ]
     | "replay" -> [ ("an error while the waiting events run", replay_error) ]
     | "stall" ->
         block_router "stall";

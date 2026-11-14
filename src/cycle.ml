@@ -40,10 +40,15 @@ let merge_headers lists =
     (fun acc l -> List.filter (fun (n, _) -> not (has_header n l)) acc @ l)
     [] lists
 
-type rules = { headers : (string * string) list; cache : cache option; prerender : bool }
+type rules = {
+  headers : (string * string) list;
+  cache : cache option;
+  prefetch : Prefetch.level;
+  prerender : bool;
+}
 
-let rules ~headers ?cache ~prerender () =
-  { headers = merge_headers headers; cache; prerender }
+let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
+  { headers = merge_headers headers; cache; prefetch; prerender }
 
 type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
 type response = { status : int; headers : (string * string) list; body : body }
@@ -87,14 +92,25 @@ type 'req app =
       build : string;
       headers : (string * string) list;
       prerender : string list;
+      prefetch : Prefetch.level;
       find : Router.meth -> string list -> (string * string) list -> 'r Router.lookup;
       resolve : 'req -> 'r -> target;
       missing : fallback;
     }
       -> 'req app
 
-let app ~build ~headers ~prerender ~find ~resolve ~missing =
-  App { build; headers = merge_headers [ headers ]; prerender; find; resolve; missing }
+let app ~build ~headers ~prerender ~pages ~find ~resolve ~missing =
+  let highest a (r : rules) = if Prefetch.rank r.prefetch > Prefetch.rank a then r.prefetch else a in
+  App
+    {
+      build;
+      headers = merge_headers [ headers ];
+      prerender;
+      prefetch = List.fold_left highest `Off pages;
+      find;
+      resolve;
+      missing;
+    }
 
 let failure e = Fail (Web.exn_to_string e)
 
@@ -142,35 +158,42 @@ let modules ~dir ~entry ~manifest ~packages ~digest =
     | Some i -> "/_yuka/app/" ^ String.sub entry 0 (i + 1)
     | None -> "/_yuka/app/"
   in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
-    import_map = Server.import_map ~url:"/_yuka/app" packages;
-    preload = Server.preload_urls ~manifest ~base ();
-    immutable = (fun _ -> false);
-  }
+  Result.map
+    (fun preload ->
+      {
+        dir;
+        entry;
+        digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
+        import_map = Server.import_map ~url:"/_yuka/app" packages;
+        preload;
+        immutable = (fun _ -> false);
+      })
+    (Server.preload_urls ~manifest ~base ())
 
 let outputs metafile =
   match Json.of_string metafile with
   | Ok (`Assoc top) -> (
       match List.assoc_opt "outputs" top with
-      | Some (`Assoc outs) -> List.map (fun (file, _) -> Server.normalize file) outs
-      | _ -> invalid_arg "Yuka.Server.bundle: metafile has no outputs object")
-  | Ok _ -> invalid_arg "Yuka.Server.bundle: metafile is not an object"
-  | Error m -> invalid_arg ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
+      | Some (`Assoc outs) -> Ok (List.map (fun (file, _) -> Server.normalize file) outs)
+      | _ -> Error "Yuka.Server.bundle: metafile has no outputs object")
+  | Ok _ -> Error "Yuka.Server.bundle: metafile is not an object"
+  | Error m -> Error ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
 
 let bundle ~dir ~entry ~manifest ~metafile =
+  let ( let* ) = Result.bind in
   let entry = Server.normalize entry in
-  let hashed = List.filter (fun f -> not (String.equal f entry)) (outputs metafile) in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
-    import_map = [];
-    preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry ();
-    immutable = (fun path -> List.exists (String.equal path) hashed);
-  }
+  let* outputs = outputs metafile in
+  let hashed = List.filter (fun f -> not (String.equal f entry)) outputs in
+  let* preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry () in
+  Ok
+    {
+      dir;
+      entry;
+      digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
+      import_map = [];
+      preload;
+      immutable = (fun path -> List.exists (String.equal path) hashed);
+    }
 
 type dev = { state : unit -> string }
 
@@ -312,6 +335,7 @@ type env = {
   head_only : bool;
   navigate : string list option;
   build : string;
+  prefetch : Prefetch.level;
   current : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
@@ -347,8 +371,10 @@ let add_vary value headers =
   in
   set_header ("vary", String.concat ", " values) headers
 
+let navigation_vary headers = add_vary "Yuka-Prefetch" (add_vary "Yuka-Navigate" headers)
+
 let html_headers rule_headers extra =
-  add_vary "Yuka-Navigate"
+  navigation_vary
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
 let rec shared sent (layers : layer list) =
@@ -372,6 +398,8 @@ let render env ~status ~headers layers (page : page) =
     Server.head
       ~extra:
         ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
+        ^ (if env.prefetch = Prefetch.default then ""
+           else "<meta name=\"yuka-prefetch\" content=\"" ^ Prefetch.name env.prefetch ^ "\">")
         ^ (match (env.config.dev, env.navigate) with
           | Some dev, None -> dev_script (dev.state ())
           | _ -> "")
@@ -711,6 +739,12 @@ let route env (App a) req (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
   let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
+  let refuse (rules : rules) level =
+    reply
+      (empty 204
+         (navigation_vary
+            (merge_headers [ rules.headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
+  in
   match a.find r.meth segments (Router.query r.target) with
   | Router.Redirect { permanent; location } ->
       reply (empty (if permanent then 308 else 307) [ ("location", location ^ suffix) ])
@@ -724,6 +758,12 @@ let route env (App a) req (r : request) ~path ~raw ~query =
   | Router.Found found -> (
       match a.resolve req found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
+      | Page { rules; _ }
+        when Option.fold ~none:false
+               ~some:(fun v -> Prefetch.rank (Prefetch.trigger v) > Prefetch.rank rules.prefetch)
+               (r.header "yuka-prefetch") ->
+          refuse rules rules.prefetch
+      | Handler { rules; _ } when Option.is_some (r.header "yuka-prefetch") -> refuse rules `Off
       | Page { rules; guards; load; fallback } ->
           serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
       | Handler { rules; action; cross_origin; guards; run } ->
@@ -841,6 +881,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
           (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
           (r.header "yuka-navigate");
       build = build_id config (App a);
+      prefetch = a.prefetch;
       current = path;
       root_headers = a.headers;
       exists;
@@ -1079,6 +1120,7 @@ let missing_page config (App a) ~sleep =
       head_only = false;
       navigate = None;
       build = build_id config (App a);
+      prefetch = a.prefetch;
       current = "";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);

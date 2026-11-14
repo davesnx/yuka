@@ -21,11 +21,11 @@ let routes =
       Router.group ~path:"/team/:team<Params.Team.t>" ~layout:App.Layouts.team
         ~guard:App.Guards.outer ~loader:App.Loaders.squad
         ~headers:[ ("X-A", "team") ]
-        ~cache:(private_ ~max_age:5)
+        ~cache:(private_ ~max_age:5) ~prefetch:`Hover
         [
           Router.route Member ~path:"/:user<int>" ~page:App.Pages.member
             ~loader:App.Loaders.profile ~guard:App.Guards.inner;
-          Router.route Team_form ~path:"/form" ~page:App.Pages.team_form;
+          Router.route Team_form ~path:"/form" ~page:App.Pages.team_form ~prefetch:`Off;
           Router.endpoint Team_json ~path:"/json" ~method_:`GET
             ~handler:App.Api.team
             ~cache:(public ~s_max_age:600 ~max_age:60 ());
@@ -39,7 +39,7 @@ let routes =
       Router.route Live_page ~path:"/live" ~page:App.Pages.live;
       Router.route Live_public ~path:"/live-public" ~page:App.Pages.live
         ~cache:(public ~max_age:60 ());
-      Router.route Plain_public ~path:"/plain-public" ~page:plain ~cache:minute;
+      Router.route Plain_public ~path:"/plain-public" ~page:plain ~cache:minute ~prefetch:`Visible;
       Router.endpoint Cookies ~path:"/cookies" ~method_:`GET ~handler:App.Api.cookies;
       Router.endpoint Bad_header ~path:"/bad-header" ~method_:`GET ~handler:App.Api.bad_header;
       Router.endpoint Put_thing ~path:"/thing" ~method_:`PUT ~handler:App.Api.thing

@@ -205,6 +205,25 @@ let html_escaping () =
   check "attribute" "<a href=\"x&amp;y&quot;&lt;>\"></a>"
     (html (element "a" [ attr "href" "x&y\"<>" ] []))
 
+let decode_uri () =
+  let decoded s = match Yuka__Web.decode_uri s with Some d -> d | None -> "None" in
+  let valid s = string_of_bool (Option.is_some (Yuka__Web.decode_uri s)) in
+  check "plain" "a+b" (decoded "a+b");
+  check "escapes" "a b/?#" (decoded "a%20b%2F%3f%23");
+  check "two bytes" "true" (valid "%C3%A9");
+  check "four bytes" "true" (valid "%F0%9F%98%80");
+  if not Yuka__Web.in_browser then check "two bytes, native" "\xc3\xa9" (decoded "%C3%A9");
+  check "percent at the end" "None" (decoded "100%");
+  check "one hex digit" "None" (decoded "%E0%A4%A");
+  check "not hex" "None" (decoded "%zz");
+  check "lead byte alone" "None" (decoded "%C3");
+  check "lead byte then text" "None" (decoded "%C3a");
+  check "continuation byte alone" "None" (decoded "%A9");
+  check "overlong" "None" (decoded "%C0%AF");
+  check "surrogate" "None" (decoded "%ED%A0%80");
+  check "over U+10FFFF" "None" (decoded "%F4%90%80%80");
+  check "five-byte lead" "None" (decoded "%F8%88%80%80%80")
+
 let html_adjacent_texts () =
   check "separator" "<p>a<!---->b<!---->c</p>"
     (html (element "p" [] [ text "a"; text "b"; text "c" ]));
@@ -1796,6 +1815,7 @@ let all =
     ("effect writing its own State settles", effect_writing_own_state_settles);
     ("effect writing its own State stops at a limit", effect_writing_own_state_stops);
     ("html escaping", html_escaping);
+    ("Web.decode_uri", decode_uri);
     ("html adjacent texts", html_adjacent_texts);
     ("html empty text", html_empty_text);
     ("html hole markers", html_hole);

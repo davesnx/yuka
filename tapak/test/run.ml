@@ -324,6 +324,22 @@ let live ~sw ~net make () =
           | `Close (code, _) -> Alcotest.(check int) "a bad token" 4403 code
           | _ -> Alcotest.fail "not a close"))
 
+let await_result () =
+  let check = Alcotest.(check (result int string)) in
+  check "done" (Ok 1) (Yuka_tapak.await (Yuka.Async.return 1));
+  check "failed" (Error "down") (Yuka_tapak.await (Yuka.Async.failed "down"));
+  let a, _, fail = Yuka.Async.make () in
+  Eio.Fiber.both (fun () -> check "failed while waiting" (Error "later") (Yuka_tapak.await a)) (fun () -> fail "later")
+
+let await_exn () =
+  Alcotest.(check int) "done" 2 (Yuka_tapak.await_exn (Yuka.Async.return 2));
+  Alcotest.check_raises "failed" (Failure "down") (fun () -> ignore (Yuka_tapak.await_exn (Yuka.Async.failed "down")));
+  let a, _, fail = Yuka.Async.make () in
+  Eio.Fiber.both
+    (fun () ->
+      Alcotest.check_raises "failed while waiting" (Failure "later") (fun () -> ignore (Yuka_tapak.await_exn a)))
+    (fun () -> fail "later")
+
 let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -346,6 +362,11 @@ let () =
           Alcotest.test_case "HEAD then GET on one connection" `Quick (head_then_get ~net make);
         ] );
       ("log", [ Alcotest.test_case "Console reaches Logs" `Quick (tapak_log make) ]);
+      ( "await",
+        [
+          Alcotest.test_case "await gives a result" `Quick await_result;
+          Alcotest.test_case "await_exn raises Failure" `Quick await_exn;
+        ] );
       ( "session",
         [
           Alcotest.test_case "sessions gives the cookies" `Quick (csrf_cookies make);

@@ -48,6 +48,7 @@ val shift_key : event -> bool
 val alt_key : event -> bool
 val client_x : event -> float
 val client_y : event -> float
+val pointer_type : event -> string
 val prevent_default : event -> unit
 val stop_propagation : event -> unit
 val set_flag : event -> string -> bool -> unit
@@ -65,7 +66,7 @@ val console_log : string -> unit
 val console_debug : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
-val decode_uri : string -> string
+val decode_uri : string -> string option
 val contains : node -> node -> bool
 val fetch_post :
   string ->
