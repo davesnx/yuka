@@ -60,6 +60,11 @@ let expected_html input =
     (String.concat "" (List.map (Printf.sprintf "<li>%s</li>") w))
 
 let failed = ref false
+let one_at_a_time = Mutex.create ()
+
+let overlap = function
+  | Failure m -> String.starts_with ~prefix:"Yuka.Server: two server renders overlapped" m
+  | _ -> false
 
 let check name ok detail =
   if not ok then begin
@@ -67,14 +72,15 @@ let check name ok detail =
     Printf.printf "FAIL %s: %s\n%!" name detail
   end
 
-let run mode domains threads rounds =
+let run mode lock domains threads rounds =
   let workers = domains * threads in
   Atomic.set effect_runs 0;
   let expected = Array.init (workers * inputs) render in
   Array.iteri (fun i html -> check (Printf.sprintf "%s: one thread, input %d" mode i) (html = expected_html i) html) expected;
   check (mode ^ ": one thread, effects off") (Atomic.get effect_runs = 0) (string_of_int (Atomic.get effect_runs));
   Atomic.set logged 0;
-  let wrong = Atomic.make 0 and raised = Atomic.make 0 and sample = Atomic.make None in
+  let wrong = Atomic.make 0 and raised = Atomic.make 0 and overlaps = Atomic.make 0 and sample = Atomic.make None in
+  let render i = if lock then Mutex.protect one_at_a_time (fun () -> render i) else render i in
   let worker k =
     for r = 1 to rounds do
       let i = input k r in
@@ -84,6 +90,7 @@ let run mode domains threads rounds =
             Atomic.incr wrong;
             ignore (Atomic.compare_and_set sample None (Some (Printf.sprintf "input %d: %s" i html)))
           end
+      | exception e when overlap e && not lock -> Atomic.incr overlaps
       | exception e ->
           Atomic.incr raised;
           ignore (Atomic.compare_and_set sample None (Some (Printexc.to_string e)))
@@ -101,15 +108,21 @@ let run mode domains threads rounds =
   check (mode ^ ": HTML") (Atomic.get wrong = 0) (Printf.sprintf "%d of %d renders" (Atomic.get wrong) renders);
   check (mode ^ ": exceptions") (Atomic.get raised = 0) (Printf.sprintf "%d of %d renders" (Atomic.get raised) renders);
   Option.iter (Printf.printf "  first: %s\n") (Atomic.get sample);
-  check (mode ^ ": one log per caught memo failure") (Atomic.get logged = !failing)
-    (Printf.sprintf "%d logs for %d failing renders" (Atomic.get logged) !failing);
-  Printf.printf "%s: %d renders with States and memos on %d domain(s) x %d thread(s)\n" mode renders domains threads
+  if lock then
+    check (mode ^ ": one log per caught memo failure") (Atomic.get logged = !failing)
+      (Printf.sprintf "%d logs for %d failing renders" (Atomic.get logged) !failing);
+  Printf.printf "%s: %d renders with States and memos on %d domain(s) x %d thread(s), %d reported an overlap\n" mode renders
+    domains threads (Atomic.get overlaps)
 
 let () =
   Server.Testing.set_log (fun _ _ -> Atomic.incr logged);
   (match Array.to_list Sys.argv with
-  | [ _; mode; d; t; r ] -> run mode (int_of_string d) (int_of_string t) (int_of_string r)
+  | [ _; mode; lock; d; t; r ] -> run mode (bool_of_string lock) (int_of_string d) (int_of_string t) (int_of_string r)
   | _ ->
-      run "threads" 1 16 10_000;
-      run "domains" 4 4 5_000);
+      run "threads" true 1 16 10_000;
+      run "domains" true 4 4 5_000;
+      run "threads, no lock" false 1 16 10_000;
+      run "domains, no lock" false 4 4 1_000;
+      check "after the overlaps: server_rendering" (not !Private.server_rendering) "true";
+      check "after the overlaps: a render" (render 1 = expected_html 1) (render 1));
   if !failed then exit 1

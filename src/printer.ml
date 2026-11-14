@@ -183,6 +183,7 @@ open Base
     t.ops
 
   let kept_buffer = 262_144
+  let rendering = Atomic.make 0
 
   let rec print s build =
     let b = match Web.take_buffer () with Some b -> b | None -> Buffer.create 4096 in
@@ -537,23 +538,44 @@ open Base
     in
     let previous = !server_rendering in
     let previous_session = !current_session in
+    let previous_listener = !Scheduler.listener in
+    Atomic.incr rendering;
     server_rendering := true;
     Web.seal_states ();
     current_session := Some s;
     let restore () =
-      server_rendering := previous;
-      current_session := previous_session
+      let others = Atomic.fetch_and_add rendering (-1) > 1 in
+      server_rendering := others && previous;
+      current_session := if others then previous_session else None
     in
     let owner = new_owner () in
-    (match with_owner owner (fun () -> go (build ())) with
-    | () ->
+    let owned () = match !current_owner with Some o -> o == owner | None -> false in
+    let kept () =
+      !server_rendering
+      && !Scheduler.listener == previous_listener
+      && match !current_session with Some c -> c == s | None -> false
+    in
+    let overlap () =
+      server_rendering := Atomic.fetch_and_add rendering (-1) > 1;
+      current_session := None;
+      Scheduler.listener := None;
+      current_owner := None;
+      dispose_owner owner;
+      release ();
+      failwith
+        "Yuka.Server: two server renders overlapped: while this render ran, a render or a memo on another thread or domain changed the state that they share. Run one server render at a time per process, for example under a Mutex."
+    in
+    (match with_owner owner (fun () -> go (build ()); owned ()) with
+    | true when kept () ->
         restore ();
         dispose_owner owner
-    | exception e ->
+    | _ -> overlap ()
+    | exception e when kept () ->
         restore ();
         dispose_owner owner;
         release ();
-        raise e);
+        raise e
+    | exception _ -> overlap ());
     if s.held <> [] then begin
       s.queued <- s.held @ s.queued;
       s.held <- []

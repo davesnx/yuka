@@ -1331,7 +1331,11 @@ module Server : sig
   val to_string : (unit -> server element) -> string
   (** The tree as HTML. Hydration markers are written only inside an island,
       because the browser hydrates nothing else. The function builds the tree
-      with effects off, so component bodies do not run effects. *)
+      with effects off, so component bodies do not run effects.
+
+      Run one server render at a time per process. Renders that overlap on
+      system threads or domains share state, and each of them raises
+      [Failure]. A render inside another on the same thread is allowed. *)
 
   type context
   (** The request that runs an action, a form action or a live [allow]. *)
