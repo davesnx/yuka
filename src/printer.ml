@@ -78,7 +78,7 @@ open Base
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
-      current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
+      current = None; link_level = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
       csrf = None; sheets = []; held = []; context = None }
 
   let answer_script key json =
@@ -514,6 +514,16 @@ open Base
                   | None -> false)
                && not (List.mem_assoc "aria-current" resolved) ->
             resolved @ [ ("aria-current", "page") ]
+        | _ -> resolved
+      in
+      let resolved =
+        match (lt, s.link_level) with
+        | "a", Some level
+          when (not (List.mem_assoc "data-yuka-prefetch" resolved))
+               && ((not (hydrating ())) || List.exists (function Static ("href", _) -> true | _ -> false) attrs) -> (
+            match Option.bind (List.assoc_opt "href" resolved) level with
+            | Some name -> resolved @ [ ("data-yuka-prefetch", name) ]
+            | None -> resolved)
         | _ -> resolved
       in
       List.iter (fun (name, v) -> add_attr b ~tag name v) resolved;

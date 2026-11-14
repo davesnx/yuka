@@ -126,9 +126,9 @@ let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> 
   return function () { observer.disconnect(); };
 }|}]
 
-let trajectory : (node -> string) -> (string -> unit) -> unit -> unit =
+let trajectory : string -> (node -> string) -> (string -> unit) -> unit -> unit =
   [%mel.raw
-    {|function (href, go) {
+    {|function (selector, href, go) {
   const d = document, w = window, O = w.IntersectionObserver;
   if (typeof O !== "function") return function () {};
   let last = -Infinity, k = 0, px, py, vx = 0, vy = 0, was = "", links = [], at = -Infinity, o = null;
@@ -137,7 +137,7 @@ let trajectory : (node -> string) -> (string -> unit) -> unit -> unit =
   const refresh = function () {
     if (o) o.disconnect();
     o = null;
-    const els = d.querySelectorAll("a[href]"), found = [];
+    const els = d.querySelectorAll(selector), found = [];
     let left = els.length;
     at = Date.now();
     if (!left) { links = found; return; }

@@ -251,6 +251,10 @@ let seen a inside unobserve =
       else queued := { link = a; key; url = href; trigger = `Visible; unobserve } :: !queued
   | _ -> if inside then unobserve ()
 
+let guessed = "a[href]:not([data-yuka-prefetch=hover])"
+let observed = guessed ^ ":not([data-yuka-prefetch=trajectory])"
+let idle = observed ^ ":not([data-yuka-prefetch=visible])"
+
 let rec waits key = function [] -> false | w :: rest -> String.equal w.key key || waits key rest
 
 let pass () =
@@ -270,7 +274,7 @@ let pass () =
               fresh := { link = a; key; url = href; trigger = `Idle; unobserve = ignore } :: !fresh
             end
         | _ -> ())
-      (Web.query_all (Web.document ()) "a[href]");
+      (Web.query_all (Web.document ()) idle);
     queued := List.rev_append (List.rev !queued) (List.rev !fresh);
     pump ();
     true
@@ -378,7 +382,7 @@ let watch () =
   !unwatch ();
   unwatch := ignore;
   queued := [];
-  let observe () = Navigation_web.observe (Web.query_all (Web.document ()) "a[href]") seen in
+  let observe () = Navigation_web.observe (Web.query_all (Web.document ()) observed) seen in
   match !prefetching with
   | `Visible -> unwatch := observe ()
   | `Idle ->
@@ -435,7 +439,7 @@ let boot (transitions, islands) =
   !untrack ();
   (untrack :=
      match !prefetching with
-     | `Trajectory | `Visible | `Idle -> Navigation_web.trajectory (Web.link_href true) predict
+     | `Trajectory | `Visible | `Idle -> Navigation_web.trajectory guessed (Web.link_href true) predict
      | `Off | `Hover -> ignore);
   (Platform.acted :=
      fun () ->

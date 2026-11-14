@@ -428,6 +428,42 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      page = plain ();
                    }));
         }
+  | Cycle_shared.Routes.Raising { x } ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_0;
+          guards = [];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                       ];
+                     page = App.Pages.raising ~x ();
+                   }));
+        }
+  | Cycle_shared.Routes.Raising_search { q } ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_0;
+          guards = [];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                       ];
+                     page = App.Pages.raising_search ~q ();
+                   }));
+        }
   | Cycle_shared.Routes.Cookies ->
       Yuka.Server.Generated.Handler
         {
@@ -523,7 +559,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"5e3fcfe3e8d8c427e722ed0153c41e51"
+  Yuka.Server.Generated.app ~build:"d5881da78cd338ab4066324ed70cf5c1"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11 ]

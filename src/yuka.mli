@@ -1230,6 +1230,10 @@ val render :
     and starts after every waiting visible link. After an action call that succeeds,
     the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
     and the highest level [`Off] turn it off, and so does [navigator.connection.saveData].
+    [data-yuka-prefetch="hover"], ["trajectory"] or ["visible"] on a link
+    is the highest trigger for that link; the server writes it on the
+    links it prints when the route tree mixes levels. Another value counts
+    as no attribute.
     A navigation to a URL whose prefetch is in flight waits for it.
     When a hover, focus or press prefetch arrives, the browser starts to
     load the island chunks ([<link rel="modulepreload">]) and the
@@ -1819,7 +1823,13 @@ module Server : sig
             so a page without islands or pending [await] loads no
             JavaScript. An [<a>] whose [href] is the request path gets
             [aria-current="page"], except inside an island, whose markup
-            must match the client render.
+            must match the client render. When a page route has a prefetch
+            level below the highest level of the tree, an [<a>] with no
+            [data-yuka-prefetch] whose [href] is a path on this site (with
+            a fixed value inside an island) gets
+            [data-yuka-prefetch="LEVEL"]: the level of the page route it
+            matches when it is below the highest, [off] for an endpoint or
+            an action, nothing else. This also holds for the answers below.
           + With a [Yuka-Navigate] header (the outlet keys of the page):
             let [shared] be the length of the common prefix of the sent keys and
             the layer keys of the page (or of the fallback, for a 404 or
@@ -1988,7 +1998,9 @@ module Server : sig
         headers of the root, sent with every 404 and 500 page. [prerender]
         lists the paths where {!Prerender.seeds} starts. [pages] are the
         rules of the page routes; each page prints the highest prefetch
-        level among them. [missing] gives the page when no route matches. *)
+        level among them. When one of them is lower, each printed link to
+        a route with a lower level gets the level of that route.
+        [missing] gives the page when no route matches. *)
   end
 
   (** For Yuka's tests. Not covered by semantic versioning. *)

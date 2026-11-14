@@ -142,6 +142,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable id_prefix : string;
     mutable entry : string option;
     mutable current : string option;
+    mutable link_level : (string -> string option) option;
     mutable in_fill : bool;
     mutable answers : (string * Json.t option) list;
     mutable answered : string list;
@@ -157,7 +158,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
 
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
-        preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
+        preloaded; depth; queued; id_prefix; entry; current; link_level; in_fill; select_value; answers; answered; form;
         csrf; sheets; held; context } =
     s.islands <- islands;
     s.asyncs <- asyncs;
@@ -170,6 +171,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     s.id_prefix <- id_prefix;
     s.entry <- entry;
     s.current <- current;
+    s.link_level <- link_level;
     s.in_fill <- in_fill;
     s.select_value <- select_value;
     s.answers <- answers;

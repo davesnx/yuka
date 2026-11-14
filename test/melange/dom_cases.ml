@@ -1637,6 +1637,35 @@ let style_hole_hydrates () =
   check "updated" "a{color:blue}</style>" (text_content (query box "style"));
   dispose ()
 
+let link_limit_hydrates () =
+  let a href = element "a" [ attr "href" href ] [ text href ] in
+  let logged, after =
+    hydrate_logged {|<div><a href="/x" data-yuka-prefetch="hover">/x</a></div>|} (fun () -> div [] [ a "/x" ])
+  in
+  check "a server attribute the client does not render: no mismatch" "" logged;
+  check "the attribute stays" {|<div><a href="/x" data-yuka-prefetch="hover">/x</a></div>|} after;
+  let first = State.make true in
+  let box = container {|<div><a href="/x" data-yuka-prefetch="hover">/x</a></div>|} in
+  capture_warnings ();
+  let dispose =
+    Yuka.Private.hydrate (as_element box) (fun () ->
+        div [] [ hole (fun () -> if State.get first then a "/x" else a "/y") ])
+  in
+  check "in a hole: no mismatch" "" (warnings ());
+  State.set first false;
+  check "a replaced link has no attribute" {|<div><a href="/y">/y</a></div>|} (html box);
+  dispose ();
+  let url = State.make "/x" in
+  let box = container {|<div><a href="/x" data-yuka-prefetch="hover">x</a></div>|} in
+  let dispose =
+    Yuka.Private.hydrate (as_element box) (fun () ->
+        div [] [ element "a" [ hole_attr "href" (fun () -> Some (State.get url)) ] [ text "x" ] ])
+  in
+  State.set url "/y";
+  check "an href hole that changes keeps the attribute of the old href"
+    {|<div><a href="/y" data-yuka-prefetch="hover">x</a></div>|} (html box);
+  dispose ()
+
 let client_script_children () =
   let box = container "" in
   match Yuka.Private.render (as_element box) (fun () -> element "script" [] [ text "a"; text "b" ]) with
@@ -1975,6 +2004,7 @@ let all =
     ("client: URL names in any case; data: kept on images", client_url_case);
     ("client: a style hole hydrates as one text node and updates", style_hole_hydrates);
     ("client: script takes one text or one hole", client_script_children);
+    ("client: a link level the server wrote hydrates with no mismatch", link_limit_hydrates);
     ("dom hydration mismatch log", mismatch_log);
     ("Console calls the console method of its name", console_methods);
     ("dom template select value", template_select_value);

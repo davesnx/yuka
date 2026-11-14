@@ -47,6 +47,9 @@ let routes =
       Router.route Live_public ~path:"/live-public" ~page:App.Pages.live
         ~cache:(public ~max_age:60 ());
       Router.route Plain_public ~path:"/plain-public" ~page:plain ~cache:minute ~prefetch:`Visible;
+      Router.route Raising ~path:"/raising/:x<Params.Fragile.t>" ~page:App.Pages.raising;
+      Router.route Raising_search ~path:"/raising-search" ~page:App.Pages.raising_search
+        ~search:{ q = optional Params.Fragile.t };
       Router.endpoint Cookies ~path:"/cookies" ~method_:`GET ~handler:App.Api.cookies;
       Router.endpoint Bad_header ~path:"/bad-header" ~method_:`GET ~handler:App.Api.bad_header;
       Router.endpoint Put_thing ~path:"/thing" ~method_:`PUT ~handler:App.Api.thing

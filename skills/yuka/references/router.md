@@ -356,18 +356,48 @@ with `Yuka-Prefetch: LEVEL` (`off`, `hover`, `trajectory` or `visible`) before g
 and loaders run. The browser keeps no
 answer for that URL, and for the life of the page it sends no prefetch
 above that level for it (it keeps at most 200 URLs). A click always loads
-the page. So an app that mixes levels pays one small refused request for
-each URL of a route with a lower level, once per page load. With
-`` `Visible `` or `` `Idle `` somewhere in the tree, every page observes its
-links and pays one refused request for each URL of a route with a lower
-level. The server counts a value it does not know as
+the page. The server counts a value it does not know as
 `visible`. A prefetch of an endpoint or an action gets `204` with
 `Yuka-Prefetch: off`, and its guards and handler do not run. A prefetch
 of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
 `204` with `Yuka-Prefetch: off`, and the file is not read. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch`.
 
-On a link, `data-yuka-prefetch="off"` stops its prefetch.
-`navigator.connection.saveData` stops all prefetch.
+When the tree mixes levels (a page route has a level below the highest),
+the server writes the level on the links it prints, so that the browser
+sends no trigger that the route refuses. An `<a>` whose `href` is a path
+on this site (`/...`, not `//...`, with or without a query and a fragment)
+gets `data-yuka-prefetch="LEVEL"` when the path matches a page route with a
+level below the highest (`off`, `hover`, `trajectory` or `visible`), and
+`data-yuka-prefetch="off"` when it matches an endpoint or an action. The
+path is matched as a request for it is. A link to a route at the highest
+level, a redirect, an unknown path or a static file gets no attribute. So
+does an `href` with no path of its own (`?page=2`, `#top`), an `href` with
+a `.` or `..` segment (also `%2e`), and an `href` whose match raises (for
+example in a param decoder). An `<a>` that has `data-yuka-prefetch` keeps
+it. This is true for every
+page the server prints: a full page, a client navigation answer, a
+streamed fill, the server HTML of an island, the not-found and error pages
+(not the `404.html` file of `Prerender.missing_page`). Inside an island,
+only an `href` with a fixed value gets the attribute; a link with a
+reactive `href` gets none, because a client update of that `href` keeps
+the element and its attributes, and the level of the old `href` would stay. The server matches one route for each such link.
+In a tree with one level it matches none and writes no attribute.
+
+In the browser, `data-yuka-prefetch` is the highest trigger for its link:
+
+| Value | Triggers |
+|---|---|
+| `off` | none |
+| `hover` | hover, focus, press |
+| `trajectory` | also the guess of the mouse path |
+| `visible` | also in view, not idle |
+
+Another value counts as no attribute. A link without the attribute still
+pays one refused request per URL of a route with a lower level: a link
+that an island creates or replaces in the browser, a link inside an island
+with a reactive `href`, and a link in the `404.html` file. An app can write
+the attribute on such a link itself. `navigator.connection.saveData` stops
+all prefetch.
 
 A page with no island loads no navigation code, so the browser prefetches
 for it. At the end of the body of such a page, the server prints one
@@ -381,7 +411,9 @@ A browser that runs speculation rules (Chrome and Edge today; a browser
 that does not ignores the element) fetches the full document of a link to this site at the
 pointer down or touch down on it, on desktop and on mobile, and uses that
 answer at the click that follows. A hover alone fetches nothing. A link
-with `data-yuka-prefetch="off"`, `download` or `target` is left out. With
+with `data-yuka-prefetch="off"`, `download` or `target` is left out. In a
+tree that mixes levels, this leaves out the links to an `` `Off `` route,
+an endpoint and an action, which carry `data-yuka-prefetch="off"`. With
 the highest level of the tree `` `Off ``, no page has the rule. A page with
 an island and a client navigation answer have none. The not-found and error
 pages have it when they have no island.

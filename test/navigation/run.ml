@@ -2828,6 +2828,70 @@ let idle_loads_router finish =
   plain_start ();
   until "the page level idle loads the navigation code at start" router_loaded finish 100
 
+let limited ?(rect = "") id l =
+  {|<a id="|} ^ id ^ {|" href="/|} ^ id ^ {|"|} ^ rect ^ {| data-yuka-prefetch="|} ^ l ^ {|">x</a>|}
+
+let limits = limited "h" "hover" ^ limited "t" "trajectory" ^ limited "v" "visible" ^ limited "o" "off" ^ limited "u" "Idle" ^ anchors [ "n" ]
+
+let limit_press finish =
+  List.iter
+    (fun (id, expected) ->
+      idle_page limits;
+      fire ("#" ^ id) "pointerdown";
+      check (id ^ ": a press") expected (headers_from 0))
+    [ ("h", "hover"); ("t", "hover"); ("v", "hover"); ("o", ""); ("u", "hover"); ("n", "hover") ];
+  idle_page limits;
+  fire "#h" "pointerover";
+  wait 60 (fun () ->
+      check "hover: a hover fetches" "hover" (headers_from 0);
+      finish ())
+
+let limit_visible finish =
+  idle_page limits;
+  check "only links limited at visible or above, or not limited, are observed" "v,o,u,n" (observed ());
+  List.iter intersect [ "v"; "o"; "u"; "n" ];
+  check "visible, unknown and no limit: a visible prefetch"
+    "http://localhost/v,http://localhost/u,http://localhost/n|visible,visible,visible" (urls 0 ^ "|" ^ headers_from 0);
+  finish ()
+
+let limit_idle finish =
+  idle_page limits;
+  run_idle ();
+  check "the idle pass takes no link limited below idle" "http://localhost/u,http://localhost/n|idle,idle"
+    (urls 0 ^ "|" ^ headers_from 0);
+  idle_page
+    (String.concat "" (List.map (fun l -> limited l l) [ "hover"; "trajectory"; "visible"; "off" ]) ^ anchors (numbered 16));
+  run_idle ();
+  settle_all 0 (fun () ->
+      check "limited links take none of the 15 places"
+        (String.concat "," (List.map (fun id -> "http://localhost/" ^ id) (numbered 15)))
+        (urls 0);
+      finish ())
+
+let limit_trajectory finish =
+  List.iter
+    (fun (l, expected) ->
+      setup (level "idle" ^ page (limited ~rect:{| data-r="400,390,100,20"|} "l" l));
+      stub_rects ();
+      stub_idle ();
+      plain_start ();
+      mouse 0. 400. 300. 400. 30;
+      check (l ^ ": a path toward the link") expected (headers_from 0))
+    [ ("hover", ""); ("off", ""); ("trajectory", "trajectory"); ("visible", "trajectory"); ("Idle", "trajectory") ];
+  finish ()
+
+let limit_refusal finish =
+  idle_page (limited "h" "hover" ^ anchors [ "n" ]);
+  intersect "n";
+  resolve_headers 0 "" 204 (refusal "hover");
+  tick (fun () ->
+      intersect "n";
+      run_idle ();
+      check "a refused link without a limit: no visible or idle prefetch above the refusal" "visible" (headers_from 0);
+      fire "#n" "pointerdown";
+      check "a press fetches" "visible,hover" (headers_from 0);
+      finish ())
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -2967,6 +3031,11 @@ let all =
     ("idle: the visibility listener exists only at the level idle and until stop", idle_visibility_listener);
     ("idle: a link to the current URL is skipped", idle_current);
     ("idle: refused and duplicate URLs take none of the 15 places", idle_filters);
+    ("link limit: every limit above off allows hover, focus and press", limit_press);
+    ("link limit: only links limited at visible or above are observed", limit_visible);
+    ("link limit: the idle pass skips links limited below idle", limit_idle);
+    ("link limit: no trajectory guess for a link limited to hover", limit_trajectory);
+    ("link limit: a refused link without a limit behaves as before", limit_refusal);
   ]
 
 let set_exit_code : int -> unit = [%mel.raw "function (c) { process.exitCode = c }"]

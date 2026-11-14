@@ -112,6 +112,7 @@ type 'req app =
       headers : (string * string) list;
       prerender : string list;
       prefetch : Prefetch.level;
+      mixed : bool;
       find : Router.meth -> string list -> (string * string) list -> 'r Router.lookup;
       resolve : 'req -> 'r -> target;
       missing : fallback;
@@ -120,12 +121,14 @@ type 'req app =
 
 let app ~build ~headers ~prerender ~pages ~find ~resolve ~missing =
   let highest a (r : rules) = if Prefetch.rank r.prefetch > Prefetch.rank a then r.prefetch else a in
+  let prefetch = List.fold_left highest `Off pages in
   App
     {
       build;
       headers = merge_headers [ headers ];
       prerender;
-      prefetch = List.fold_left highest `Off pages;
+      prefetch;
+      mixed = List.exists (fun (r : rules) -> Prefetch.rank r.prefetch < Prefetch.rank prefetch) pages;
       find;
       resolve;
       missing;
@@ -355,6 +358,7 @@ type env = {
   navigate : string list option;
   build : string;
   prefetch : Prefetch.level;
+  links : (string -> string option) option;
   current : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
@@ -438,7 +442,7 @@ let render env ~status ~headers layers (page : page) =
       | 0 ->
           Async.map
             (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
-            (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build)
+            (Server.settled ?preload ?entry ?link_level:env.links ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build)
       | n ->
           let outlet = List.nth keys (n - 1) in
           let headers =
@@ -447,7 +451,7 @@ let render env ~status ~headers layers (page : page) =
           in
           Async.map
             (fun body -> { status; headers; body = String body })
-            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+            (Server.settled ?preload ?link_level:env.links ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
   | None ->
     let early = ref [] in
@@ -458,7 +462,7 @@ let render env ~status ~headers layers (page : page) =
     in
     let write text = !writer text in
     let finished =
-      Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build
+      Server.drive ?preload ?entry ?link_level:env.links ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build
         ~on_shell:(fun ~fills shell ->
           Async.bind (write (head (if fills then Printer.fill_script else ""))) (fun () -> write shell))
         ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
@@ -652,6 +656,34 @@ let rec strip_prefix prefix parts =
   | [], rest -> Some rest
   | p :: prefix, x :: rest when String.equal p x -> strip_prefix prefix rest
   | _ -> None
+
+let served config raw =
+  (match raw with "_yuka" :: _ -> true | _ -> false)
+  || List.exists (fun (prefix, _) -> Option.is_some (strip_prefix prefix raw)) config.public
+
+let link_level config (App a) req href =
+  let lookup () =
+    let path, _ = Router.split_target href in
+    let raw = Router.split_path path in
+    let segments = List.map (Router.decode ~plus:false) raw in
+    match String.split_on_char '/' path with
+    | "" :: (_ :: _ as rest)
+      when (not (String.contains path '\\'))
+           && (rest = [ "" ] || not (List.exists (String.equal "") rest))
+           && (not (List.exists (fun s -> s = "." || s = "..") segments))
+           && not (served config raw) -> (
+        match a.find `GET segments (Router.query href) with
+        | Router.Found found -> (
+            match a.resolve req found with
+            | Page { rules; _ } when Prefetch.rank rules.prefetch < Prefetch.rank a.prefetch ->
+                Some (Prefetch.name rules.prefetch)
+            | Page _ -> None
+            | Handler _ -> Some (Prefetch.name `Off))
+        | Router.Wrong_method _ -> Some (Prefetch.name `Off)
+        | Router.Redirect _ | Router.Missing -> None)
+    | _ -> None
+  in
+  match lookup () with level -> level | exception _ -> None
 
 let query_suffix = function Some q when q <> "" -> "?" ^ q | _ -> ""
 
@@ -936,6 +968,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
           (r.header "yuka-navigate");
       build = build_id config (App a);
       prefetch = a.prefetch;
+      links = (if a.mixed then Some (link_level config app req) else None);
       current = path;
       root_headers = a.headers;
       exists;
@@ -1093,11 +1126,7 @@ let prerender_seeds (App a) = a.prerender
 let prerenderable config (App a) req target =
   let path, _ = Router.split_target target in
   let raw = Router.split_path path in
-  let served =
-    (match raw with "_yuka" :: _ -> true | _ -> false)
-    || List.exists (fun (prefix, _) -> Option.is_some (strip_prefix prefix raw)) config.public
-  in
-  (not served)
+  (not (served config raw))
   &&
   match a.find `GET (List.map (Router.decode ~plus:false) raw) [] with
   | Router.Found found -> (
@@ -1178,6 +1207,7 @@ let missing_page config (App a) ~sleep =
       navigate = None;
       build = build_id config (App a);
       prefetch = a.prefetch;
+      links = None;
       current = "";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);

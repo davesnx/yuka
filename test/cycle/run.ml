@@ -1063,10 +1063,10 @@ let render =
     ( "aria-current only on the exact path",
       fun () ->
         let r = get "/plain?x=1" in
-        check_true "exact" (contains r.body {|<a href="/plain" aria-current="page">|});
+        check_true "exact" (contains r.body {|<a href="/plain" aria-current="page" data-yuka-prefetch="trajectory">|});
         Alcotest.(check int) "once" 1 (count r.body "aria-current");
         let r = get "/" in
-        check_true "home" (contains r.body {|<a href="/" aria-current="page">|});
+        check_true "home" (contains r.body {|<a href="/" aria-current="page" data-yuka-prefetch="trajectory">|});
         Alcotest.(check int) "once" 1 (count r.body "aria-current") );
     ( "title, styles and the document",
       fun () ->
@@ -1797,6 +1797,166 @@ let speculation =
           [ [ ("sec-fetch-dest", "empty") ]; []; [ ("sec-fetch-dest", "Document") ] ] );
   ]
 
+let link_levels =
+  let finds = ref 0 in
+  let find m s q =
+    incr finds;
+    Cycle_shared.Routes.find m s q
+  in
+  let a ?(attrs = []) href = Yuka.element "a" (Yuka.attr "href" href :: attrs) [ Yuka.text "x" ] in
+  let resolve page req (r : Cycle_shared.Routes.t) =
+    match (r, Cycle_server.Yuka_routes.resolve req r) with
+    | Cycle_shared.Routes.Plain, Server.Generated.Page p ->
+        Server.Generated.Page
+          { p with load = (fun () -> Async.return (Ok { Server.Generated.layers = []; page = page () })) }
+    | _, t -> t
+  in
+  let serve ?(headers = []) pages page =
+    let app =
+      Server.Generated.app ~build:"b" ~headers:[] ~prerender:[]
+        ~pages:
+          (List.map
+             (fun prefetch ->
+               Server.Generated.rules ~headers:[] ~cache:(Server.public ~max_age:60 ()) ?prefetch ~prerender:false ())
+             pages)
+        ~find ~resolve:(resolve page)
+        ~missing:{ layers = []; not_found = Server.Generated.default_not_found; error = Server.Generated.default_error }
+    in
+    let r = request ~headers "/plain" in
+    finds := 0;
+    match Async.status (Cycle.handler config app r) with
+    | Async.Done r ->
+        check_status r 200;
+        r.body
+    | _ -> Alcotest.fail "no page"
+  in
+  let mixed = [ Some `Hover; Some `Idle; None ] in
+  let tag body href =
+    let start = index body ({|<a href="|} ^ href ^ {|"|}) in
+    if start < 0 then Alcotest.failf "no link to %s" href
+    else String.sub body start (String.index_from body start '>' + 1 - start)
+  in
+  let level body href expected =
+    let attr = match expected with Some l -> {| data-yuka-prefetch="|} ^ l ^ {|"|} | None -> "" in
+    Alcotest.(check string) href ({|<a href="|} ^ href ^ {|"|} ^ attr ^ ">") (tag body href)
+  in
+  let from marker body =
+    let i = index body marker in
+    check_true ("has " ^ marker) (i >= 0);
+    String.sub body i (String.length body - i)
+  in
+  let cases =
+    [
+      ("/team/a/1", Some "hover", true);
+      ("/", Some "trajectory", true);
+      ("/plain-public", Some "visible", true);
+      ("/team/a/form", Some "off", true);
+      ("/team/a/idle/1", None, true);
+      ("/team/a/json", Some "off", true);
+      ("/asset.txt", Some "off", true);
+      ("/team/a/rename", Some "off", true);
+      ("/old", None, true);
+      ("/tmp/a", None, true);
+      ("/plain/", None, false);
+      ("/nowhere", None, true);
+      ("/static/s.css", None, false);
+      ("/_yuka/app/app/main.js", None, false);
+      ("//host/x", None, false);
+      ("https://example.com/team/a/1", None, false);
+      ("team/a/1", None, false);
+      ("../plain", None, false);
+      ("?page=2", None, false);
+      ("#top", None, false);
+      ("", None, false);
+      ("?x#y", None, false);
+      ("/team/../1", None, false);
+      ("/team/./1", None, false);
+      ("/team/%2e%2e/1", None, false);
+      ("/a/../b", None, false);
+      ("/a/./b", None, false);
+      ("/a/%2e%2e/b", None, false);
+      ("/raising/ok", Some "trajectory", true);
+      ("/raising/boom", None, true);
+      ("/raising-search?q=ok", Some "trajectory", true);
+      ("/raising-search?q=boom", None, true);
+      ("/team/a/1?x=1", Some "hover", true);
+      ("/team/a/1#top", Some "hover", true);
+      ("/team/a/1?x=1#top", Some "hover", true);
+      ("/team/a%2Fb/1", Some "hover", true);
+    ]
+  in
+  [
+    ( "a tree that mixes levels: each printed link gets the level of its route when it is below the highest",
+      fun () ->
+        let body = serve mixed (fun () -> Server.page (fun () -> Yuka.fragment (List.map (fun (h, _, _) -> a h) cases))) in
+        Alcotest.(check int) "the request and one route match for each link to a path on this site"
+          (1 + List.length (List.filter (fun (_, _, matched) -> matched) cases))
+          !finds;
+        List.iter (fun (href, expected, _) -> level body href expected) cases;
+        check_true "the speculation rule leaves out the off links"
+          (contains body {|"selector_matches":"[data-yuka-prefetch=off],[download],[target]"|}) );
+    ( "a data-yuka-prefetch that the app wrote is kept",
+      fun () ->
+        let body =
+          serve mixed (fun () ->
+              Server.page (fun () ->
+                  Yuka.fragment
+                    [
+                      a ~attrs:[ Yuka.attr "data-yuka-prefetch" "visible" ] "/team/a/1";
+                      a ~attrs:[ Yuka.attr "data-yuka-prefetch" "hover" ] "/team/a/form";
+                    ]))
+        in
+        Alcotest.(check string) "visible" {|<a href="/team/a/1" data-yuka-prefetch="visible">|} (tag body "/team/a/1");
+        Alcotest.(check string) "hover" {|<a href="/team/a/form" data-yuka-prefetch="hover">|} (tag body "/team/a/form") );
+    ( "inside an island: a static href gets the level, a hole href gets none",
+      fun () ->
+        let body =
+          serve mixed (fun () ->
+              Server.page (fun () ->
+                  Yuka.runtime_island ~name:"Links" ~props:`Null (fun () ->
+                      Yuka.fragment
+                        [
+                          a "/team/a/1";
+                          Yuka.element "a" [ Yuka.hole_attr "href" (fun () -> Some "/team/a/form") ] [ Yuka.text "x" ];
+                        ])))
+        in
+        level body "/team/a/1" (Some "hover");
+        level body "/team/a/form" None );
+    ( "a tree with one level prints no attribute and matches no link",
+      fun () ->
+        List.iter
+          (fun pages ->
+            let body =
+              serve pages (fun () -> Server.page (fun () -> Yuka.fragment (List.map (fun (h, _, _) -> a h) cases)))
+            in
+            check_true "no attribute" (not (contains body {|data-yuka-prefetch="|}));
+            Alcotest.(check int) "only the request is matched" 1 !finds)
+          [ [ None ]; [ Some `Hover; Some `Hover ]; [ Some `Idle ] ] );
+    ( "a full page, a client navigation answer and an outlet answer carry the attribute",
+      fun () ->
+        List.iter
+          (fun headers ->
+            let body = (get ~headers "/islands").body in
+            level (from {|<yuka-island data-name="Counter"|} body) "/islands" (Some "trajectory");
+            if headers <> [ ("yuka-navigate", "L0") ] then level body "/plain?x=1" (Some "trajectory"))
+          [ []; [ ("yuka-navigate", "-") ]; [ ("yuka-navigate", "L0") ] ] );
+    ( "a not-found page and an error page carry the attribute",
+      fun () ->
+        level (get "/nowhere").body "/islands" (Some "trajectory");
+        level (get "/boom").body "/islands" (Some "trajectory") );
+    ( "a link in the server HTML of an island carries the attribute",
+      fun () ->
+        let body = (get "/islands").body in
+        level (from {|<yuka-island data-name="Counter"|} body) "/islands" (Some "trajectory") );
+    ( "a streamed fill carries the attribute",
+      fun () ->
+        let a = call (request "/slow") in
+        App.finish_slow "island";
+        match Async.status a with
+        | Async.Done r -> level (from "<template data-yuka-fill" r.body) "/islands" (Some "trajectory")
+        | _ -> Alcotest.fail "not done" );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -1816,4 +1976,5 @@ let () =
       ("forms", cases forms);
       ("prefetch", cases prefetch);
       ("speculation", cases speculation);
+      ("link levels", cases link_levels);
     ]
