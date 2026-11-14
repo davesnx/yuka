@@ -1527,7 +1527,7 @@ let loading_cases =
   in
   let manifest = {|{"Demo_shared.Counter":"./islands/counter.js","Demo_shared.Related":"demo/shared/related.js"}|} in
   let urls () =
-    let f = Yuka.Private.preload_urls ~manifest ~base:"/assets/" () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest ~base:"/assets/" ()) in
     check (list string) "leading ./ removed" [ "/assets/islands/counter.js" ]
       (f "Demo_shared.Counter");
     check (list string) "plain path" [ "/assets/demo/shared/related.js" ]
@@ -1538,11 +1538,11 @@ let loading_cases =
     {|{"inputs":{},"outputs":{"dist/counter-3F2A.js":{"entryPoint":"islands/counter.js","bytes":10},"dist/chunk-X.js":{"bytes":5},"dist/related-9.js":{"entryPoint":"app/demo/shared/related.js"}}}|}
   in
   let urls_metafile () =
-    let f = Yuka.Private.preload_urls ~manifest ~base:"/" ~metafile () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest ~base:"/" ~metafile ()) in
     check (list string) "exact" [ "/dist/counter-3F2A.js" ] (f "Demo_shared.Counter");
     check (list string) "suffix only is no match" [] (f "Demo_shared.Related");
     let g =
-      Yuka.Private.preload_urls ~manifest:{|{"Other":"other.js"}|} ~base:"/" ~metafile ()
+      Result.get_ok (Yuka.Private.preload_urls ~manifest:{|{"Other":"other.js"}|} ~base:"/" ~metafile ())
     in
     check (list string) "no output" [] (g "Other")
   in
@@ -1550,7 +1550,7 @@ let loading_cases =
     let metafile =
       {|{"outputs":{"o/long.js":{"entryPoint":"x/islands/counter.js"},"o/exact.js":{"entryPoint":"./islands/counter.js"}}}|}
     in
-    let f = Yuka.Private.preload_urls ~manifest ~base:"" ~metafile () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest ~base:"" ~metafile ()) in
     check (list string) "exact first" [ "o/exact.js" ] (f "Demo_shared.Counter")
   in
   let chain_metafile =
@@ -1568,16 +1568,16 @@ let loading_cases =
   in
   let chain_manifest = {|{"A":"islands/a.js","Other":"islands/other.js","Lazy":"islands/lazy.js"}|} in
   let urls_static_imports () =
-    let f = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" ()) in
     check (list string) "the island, its static closure, then the rest of the entry closure"
       [ "/b/a-1.js"; "/b/chunk-A.js"; "/b/chunk-B.js"; "/b/chunk-C.js"; "/b/chunk-E.js" ]
       (f "A");
-    let g = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile () in
+    let g = Result.get_ok (Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ()) in
     check (list string) "without an entry" [ "/b/a-1.js"; "/b/chunk-A.js"; "/b/chunk-B.js"; "/b/chunk-C.js" ]
       (g "A")
   in
   let static_imports_on_page () =
-    let preload = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" () in
+    let preload = Result.get_ok (Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" ()) in
     let out =
       shell ~preload (fun () ->
           Yuka.fragment [ isl ~start:(`Lazy `Idle) "Lazy"; isl "A"; isl "Other"; isl ~start:`Visible "A" ])
@@ -1590,15 +1590,15 @@ let loading_cases =
       [ "/b/main.js"; "/b/dyn-1.js"; "/b/lazy-1.js"; "/b/chunk-L.js" ]
   in
   let urls_bad () =
-    let bad f = match f () with _ -> false | exception Invalid_argument _ -> true in
-    check bool "bad manifest" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest:"{" ~base:"" ()));
-    check bool "manifest not an object" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest:"[]" ~base:"" ()));
-    check bool "bad metafile" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"x" ()));
-    check bool "metafile without outputs" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"{}" ()))
+    let error = function Ok _ -> Alcotest.fail "accepted" | Error m -> m in
+    let starts prefix m = check bool m true (String.starts_with ~prefix m) in
+    starts "Yuka.Server.modules: bad manifest JSON: " (error (Yuka.Private.preload_urls ~manifest:"{" ~base:"" ()));
+    check string "manifest not an object" "Yuka.Server.modules: manifest is not an object"
+      (error (Yuka.Private.preload_urls ~manifest:"[]" ~base:"" ()));
+    starts "Yuka.Server.modules: bad metafile JSON: "
+      (error (Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"x" ()));
+    check string "metafile without outputs" "Yuka.Server.modules: metafile has no outputs object"
+      (error (Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"{}" ()))
   in
   [ test_case "data-start from the trigger" `Quick data_start;
     test_case "preload once per island name" `Quick once;

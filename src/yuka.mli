@@ -989,11 +989,18 @@ module Private : sig
       ([+] is a space). *)
 
   val preload_urls :
-    manifest:string -> base:string -> ?metafile:string -> ?entry:string -> unit -> string -> string list
+    manifest:string ->
+    base:string ->
+    ?metafile:string ->
+    ?entry:string ->
+    unit ->
+    (string -> string list, string) result
   (** The URLs to preload for an island name. Without [metafile]: the
       manifest path under [base]. With [metafile]: the output of the island
       and every output it reaches through static imports, then the outputs
-      that [entry] reaches the same way, without [entry] itself. *)
+      that [entry] reaches the same way, without [entry] itself. [Error]
+      with a message when [manifest] or [metafile] is not valid JSON of
+      that shape. *)
 
   val handle_action :
     name:string -> header:(string -> string option) -> body:string -> (int * string) Async.t
@@ -1572,7 +1579,12 @@ module Server : sig
       [/_yuka/app/]. *)
 
   val modules :
-    dir:string -> entry:string -> manifest:string -> packages:string list -> digest:string -> assets
+    dir:string ->
+    entry:string ->
+    manifest:string ->
+    packages:string list ->
+    digest:string ->
+    (assets, string) result
   (** The Melange module tree. [dir] is the emit directory, [entry] the path
       of the entry module in it (served as [/_yuka/app/<entry>]), [manifest]
       the JSON text that [yuka islands --manifest] prints (paths relative to
@@ -1580,17 +1592,17 @@ module Server : sig
       [dir/node_modules] for the import map. [digest] stands for the content
       of the files (for example [Yuka_dream.tree_digest dir]): it goes into
       the build id, so new JavaScript gives a new build id. Files get
-      [cache-control: no-cache]. Raises [Invalid_argument] when [manifest]
-      is not a JSON object of strings. *)
+      [cache-control: no-cache]. [Error] with a message when [manifest] is
+      not a JSON object of strings. *)
 
   val bundle :
-    dir:string -> entry:string -> manifest:string -> metafile:string -> assets
+    dir:string -> entry:string -> manifest:string -> metafile:string -> (assets, string) result
   (** An esbuild bundle. [metafile] is the text of the JSON report that
       esbuild writes with [--metafile=FILE]: the server reads the hashed
       name of each output and its static imports from it. [dir] is the directory esbuild ran in, so that the
       [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
       the path of the entry output. Outputs other than [entry] get
-      {!immutable}; other files get {!no_cache}. Raises [Invalid_argument]
+      {!immutable}; other files get {!no_cache}. [Error] with a message
       when [manifest] or [metafile] is not valid JSON of that shape. *)
 
   type config

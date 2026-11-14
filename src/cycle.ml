@@ -142,35 +142,42 @@ let modules ~dir ~entry ~manifest ~packages ~digest =
     | Some i -> "/_yuka/app/" ^ String.sub entry 0 (i + 1)
     | None -> "/_yuka/app/"
   in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
-    import_map = Server.import_map ~url:"/_yuka/app" packages;
-    preload = Server.preload_urls ~manifest ~base ();
-    immutable = (fun _ -> false);
-  }
+  Result.map
+    (fun preload ->
+      {
+        dir;
+        entry;
+        digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
+        import_map = Server.import_map ~url:"/_yuka/app" packages;
+        preload;
+        immutable = (fun _ -> false);
+      })
+    (Server.preload_urls ~manifest ~base ())
 
 let outputs metafile =
   match Json.of_string metafile with
   | Ok (`Assoc top) -> (
       match List.assoc_opt "outputs" top with
-      | Some (`Assoc outs) -> List.map (fun (file, _) -> Server.normalize file) outs
-      | _ -> invalid_arg "Yuka.Server.bundle: metafile has no outputs object")
-  | Ok _ -> invalid_arg "Yuka.Server.bundle: metafile is not an object"
-  | Error m -> invalid_arg ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
+      | Some (`Assoc outs) -> Ok (List.map (fun (file, _) -> Server.normalize file) outs)
+      | _ -> Error "Yuka.Server.bundle: metafile has no outputs object")
+  | Ok _ -> Error "Yuka.Server.bundle: metafile is not an object"
+  | Error m -> Error ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
 
 let bundle ~dir ~entry ~manifest ~metafile =
+  let ( let* ) = Result.bind in
   let entry = Server.normalize entry in
-  let hashed = List.filter (fun f -> not (String.equal f entry)) (outputs metafile) in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
-    import_map = [];
-    preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry ();
-    immutable = (fun path -> List.exists (String.equal path) hashed);
-  }
+  let* outputs = outputs metafile in
+  let hashed = List.filter (fun f -> not (String.equal f entry)) outputs in
+  let* preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry () in
+  Ok
+    {
+      dir;
+      entry;
+      digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
+      import_map = [];
+      preload;
+      immutable = (fun path -> List.exists (String.equal path) hashed);
+    }
 
 type dev = { state : unit -> string }
 

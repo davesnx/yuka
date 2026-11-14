@@ -110,9 +110,12 @@ let logged = ref []
 let log_hook = ref (fun (_ : Server.log_level) m -> logged := m :: !logged)
 let config_with = Server.config ~log:(fun level m -> !log_hook level m)
 
+let ok = function Ok v -> v | Error m -> Alcotest.fail m
+
 let modules =
-  Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"Counter":"./counter.js"}|} ~digest:"d1"
-    ~packages:[ "pkg" ]
+  ok
+    (Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest:{|{"Counter":"./counter.js"}|} ~digest:"d1"
+       ~packages:[ "pkg" ])
 
 let config =
   config_with ~assets:modules ~public:[ ("/static", "pub") ] ~styles:[ "/static/s.css" ] ()
@@ -184,16 +187,31 @@ let assets =
             | _ -> Alcotest.failf "prefix %S accepted" prefix
             | exception Invalid_argument _ -> ())
           [ "/"; ""; "//" ] );
-    ( "a bad manifest names Yuka.Server.modules",
+    ( "a bad manifest is an Error that names Yuka.Server.modules",
       fun () ->
-        match Server.modules ~dir:"js" ~entry:"main.js" ~manifest:"[]" ~packages:[] ~digest:"" with
-        | _ -> Alcotest.fail "accepted"
-        | exception Invalid_argument m -> check_true m (String.starts_with ~prefix:"Yuka.Server.modules:" m) );
-    ( "a metafile without outputs is rejected",
+        let error manifest =
+          match Server.modules ~dir:"js" ~entry:"main.js" ~manifest ~packages:[] ~digest:"" with
+          | Ok _ -> Alcotest.failf "manifest %S accepted" manifest
+          | Error m -> m
+        in
+        Alcotest.(check string) "not an object" "Yuka.Server.modules: manifest is not an object" (error "[]");
+        Alcotest.(check string) "entry not a string" "Yuka.Server.modules: manifest entry A is not a string"
+          (error {|{"A":1}|});
+        let m = error {|{"A":"a.js"|} in
+        check_true m (String.starts_with ~prefix:"Yuka.Server.modules: bad manifest JSON: " m) );
+    ( "a bad metafile or manifest is an Error that names Yuka.Server.bundle",
       fun () ->
-        match Server.bundle ~dir:"b" ~entry:"main.js" ~manifest:"{}" ~metafile:"{}" with
-        | _ -> Alcotest.fail "accepted"
-        | exception Invalid_argument m -> check_true "context" (contains m "metafile") );
+        let error ?(manifest = "{}") metafile =
+          match Server.bundle ~dir:"b" ~entry:"main.js" ~manifest ~metafile with
+          | Ok _ -> Alcotest.failf "metafile %S accepted" metafile
+          | Error m -> m
+        in
+        Alcotest.(check string) "no outputs" "Yuka.Server.bundle: metafile has no outputs object" (error "{}");
+        Alcotest.(check string) "not an object" "Yuka.Server.bundle: metafile is not an object" (error "[]");
+        let m = error {|{"outputs":{"main.js":{}|} in
+        check_true m (String.starts_with ~prefix:"Yuka.Server.bundle: bad metafile JSON: " m);
+        Alcotest.(check string) "bad manifest" "Yuka.Server.bundle: manifest is not an object"
+          (error ~manifest:"[]" {|{"outputs":{}}|}) );
     ( "asset miss is 404 no-store and never routed",
       fun () ->
         let r = get "/_yuka/app/nope.js" in
@@ -273,8 +291,9 @@ let assets =
     ( "bundle outputs other than the entry are immutable",
       fun () ->
         let bundle =
-          Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:"{}"
-            ~metafile:{|{"outputs":{"bundle/main.js":{"entryPoint":"main.js"},"bundle/chunk-X1.js":{}}}|}
+          ok
+            (Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:"{}"
+               ~metafile:{|{"outputs":{"bundle/main.js":{"entryPoint":"main.js"},"bundle/chunk-X1.js":{}}}|})
         in
         let config = config_with ~assets:bundle () in
         let r = get ~config "/_yuka/app/bundle/chunk-X1.js" in
@@ -284,7 +303,7 @@ let assets =
     ( "a bundle preloads the static imports of each island and of the entry once",
       fun () ->
         let bundle =
-          Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:{|{"Counter":"counter.js","Related":"related.js"}|}
+          ok @@ Server.bundle ~dir:"b" ~entry:"bundle/main.js" ~manifest:{|{"Counter":"counter.js","Related":"related.js"}|}
             ~metafile:
               {|{"outputs":{
                 "bundle/main.js":{"entryPoint":"main.js","imports":[{"path":"bundle/chunk-E.js","kind":"import-statement"},{"path":"bundle/counter-1.js","kind":"dynamic-import"},{"path":"bundle/related-1.js","kind":"dynamic-import"}]},
@@ -1187,7 +1206,7 @@ let navigation =
         let app = Cycle_server.Yuka_routes.app in
         let with_assets ~manifest ~digest =
           config_with
-            ~assets:(Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest)
+            ~assets:(ok (Server.modules ~dir:"js" ~entry:"./app/main.js" ~manifest ~packages:[ "pkg" ] ~digest))
             ()
         in
         let other = with_assets ~manifest:{|{"Counter":"./related.js"}|} ~digest:"d1" in
