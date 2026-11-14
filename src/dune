@@ -2,7 +2,7 @@
  (name yuka)
  (public_name yuka)
  (modes native melange)
- (virtual_modules web dev client navigation_web)
+ (virtual_modules web dev client navigation_web buffer)
  (private_modules
   answers
   browser

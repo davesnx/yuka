@@ -1,3 +1,5 @@
+module Buffer = Stdlib.Buffer
+
 type node = unit
 type event = unit
 type 'a promise = unit
@@ -354,7 +356,7 @@ let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
 let add_stylesheet : string -> unit = fun _ -> browser_only ()
 let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None
 
-let buffers : Buffer.t list ref = ref []
+let buffers : Stdlib.Buffer.t list ref = ref []
 let buffers_lock = Mutex.create ()
 
 let take_buffer () =
@@ -367,6 +369,8 @@ let take_buffer () =
 
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
 let lowercase = String.lowercase_ascii
+let sub = String.sub
+let of_char c = String.make 1 c
 let refuse_url_name name =
   let bad c = c <= ' ' || c = '\127' || c = '"' || c = '\'' || c = '>' || c = '/' || c = '=' || c = '<' in
   match String.lowercase_ascii name with
