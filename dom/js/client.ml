@@ -300,10 +300,8 @@ let delegate doc event =
     Web.add_listener doc event (dispatch event)
   end
 
-let unowned : Base.owner = { last = None; gen = 0; catch = None; parent = None }
-
 let add_handler doc el event handler =
-  let owner = match !Base.current_owner with Some o -> o | None -> unowned in
+  let owner = match !Base.current_owner with Some o -> o | None -> Base.new_owner () in
   if non_bubbling event then begin
     let handler = acting_as !Base.current_owner handler in
     let handler ev = ignore (handle owner handler ev) in
@@ -406,7 +404,7 @@ let rec mount_node pos last n =
           instantiate pos template c parts
       | None -> mount_node pos last ((uncurry2 !Template.expander) template parts [@u]))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
-  | Catch { client; _ } -> (!catch_hook) pos last client [@u]
+  | Catch { client; _ } | Provide { client; _ } -> (!catch_hook) pos last client [@u]
   | Each { items; key; equal; render } ->
       last := false;
       mount_each pos false items key equal render
@@ -919,6 +917,7 @@ let boot entries props island =
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
+              o.env <- Scheduler.Empty;
               match Base.with_owner o (fun () -> hydrate island (Kind.of_fn build)) with
               | d when !failed ->
                   stop d;

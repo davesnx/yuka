@@ -38,6 +38,11 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
         fallback : error:string -> reset:(unit -> unit) -> node;
         client : Obj.t option -> node;
       }
+    | Provide of {
+        add : Scheduler.env -> Scheduler.env;
+        children : unit -> node;
+        client : Obj.t option -> node;
+      }
 
   and slot = { content : node option; dom : Obj.t list ref }
 

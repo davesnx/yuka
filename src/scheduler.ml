@@ -5,10 +5,14 @@ type cell = {
   mutable live : bool;
 }
 
+type binding = ..
+type env = Empty | Bound of binding * env | Island of env
+
 type owner = {
   mutable last : cell option;
   mutable gen : int;
   mutable catch : (exn -> unit) option;
+  mutable env : env;
   parent : owner option;
 }
 

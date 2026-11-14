@@ -185,7 +185,20 @@ open Base
   let kept_buffer = 262_144
   let rendering = Atomic.make 0
 
-  let rec print s build =
+  let rec print ?env s build =
+    let owner = new_owner () in
+    Option.iter (fun e -> owner.env <- e) env;
+    let scoped e f =
+      let old = owner.env in
+      owner.env <- e;
+      match f () with
+      | r ->
+          owner.env <- old;
+          r
+      | exception x ->
+          owner.env <- old;
+          raise x
+    in
     let b = match Web.take_buffer () with Some b -> b | None -> Buffer.create 4096 in
     let peak = ref 0 in
     let cut n =
@@ -260,16 +273,16 @@ open Base
                     raise e
               in
               s.awaits <- s.awaits + 1;
-              let id = s.id_prefix ^ "s" ^ string_of_int s.awaits in
+              let id = s.id_prefix ^ "s" ^ string_of_int s.awaits and env = owner.env in
               s.pending <-
                 Pending_await
                   {
                     id;
                     subscribe =
                       (fun cb -> Async.on_settled async (fun _ -> cb ()));
-                    fill = (fun () -> held (fun () -> print s body));
+                    fill = (fun () -> held (fun () -> print ~env s body));
                     fill_failed =
-                      (fun m -> held (fun () -> print s (fun () -> failed m)));
+                      (fun m -> held (fun () -> print ~env s (fun () -> failed m)));
                     inside_island = inside;
                   }
                 :: s.pending;
@@ -347,9 +360,18 @@ open Base
             marker "<!--[!-->";
             go (fallback ~error:"server error" ~reset:ignore);
             marker "<!--]-->")
+      | Provide { add; children; _ } ->
+          marker "<!--[-->";
+          scoped (add owner.env) (fun () -> go (children ()));
+          marker "<!--]-->"
       | Slot { content; _ } ->
+          let rec page = function
+            | Scheduler.Empty -> owner.env
+            | Scheduler.Bound (_, e) -> page e
+            | Scheduler.Island e -> e
+          in
           marker "<!--[$-->";
-          Option.iter go content;
+          scoped (page owner.env) (fun () -> Option.iter go content);
           marker "<!--]-->"
       | Island { name; props; render; start = strategy } ->
           s.islands <- s.islands + 1;
@@ -387,7 +409,7 @@ open Base
           s.depth <- s.depth + 1;
           s.answers <- [];
           let mine =
-            match go (render ()) with
+            match scoped (Scheduler.Island owner.env) (fun () -> go (render ())) with
             | () ->
                 s.depth <- s.depth - 1;
                 let mine = s.answers in
@@ -548,7 +570,6 @@ open Base
       server_rendering := others && previous;
       current_session := if others then previous_session else None
     in
-    let owner = new_owner () in
     let owned () = match !current_owner with Some o -> o == owner | None -> false in
     let kept () =
       !server_rendering

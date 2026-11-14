@@ -192,6 +192,10 @@ module Private = struct
   include Types
   include Printer
 
+  type env = Scheduler.env
+
+  let print s build = print s build
+
   let stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write build =
     Server.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write (Kind.fn build)
 
@@ -252,6 +256,12 @@ module Private = struct
         forget ();
         Base.dispose_owner o;
         raise e
+
+  let with_context bindings f =
+    let o = Base.new_owner () in
+    o.env <- add_bindings bindings o.env;
+    Option.iter (fun p -> ignore (Base.add_disposer p (fun () -> Base.dispose_owner o))) !Base.current_owner;
+    Base.with_owner o f
 
   let server_rendering = Base.server_rendering
   let platform = Platform.platform

@@ -116,6 +116,53 @@ module Catch = struct
     Kind.of_node (Catch { children = Kind.fn children; fallback = Kind.fallback fallback; client })
 end
 
+let context_env () =
+  match !Base.current_owner with
+  | Some o -> o.env
+  | None -> ( match !Client.acting with Some o -> o.env | None -> Scheduler.Empty)
+
+let rec find_binding prj through = function
+  | Scheduler.Empty -> None
+  | Scheduler.Island e -> if through then find_binding prj through e else None
+  | Scheduler.Bound (b, e) -> ( match prj b with None -> find_binding prj through e | v -> v)
+
+let add_bindings bindings env = List.fold_left (fun e b -> Scheduler.Bound (b, e)) env bindings
+
+let provide_bindings bindings children =
+  let add = add_bindings bindings in
+  let client _ =
+    Hole
+      (fun () ->
+        let o = Option.get !Base.current_owner in
+        o.env <- add o.env;
+        Kind.to_node (Scheduler.untrack children))
+  in
+  Client.use_catch ();
+  Kind.of_node (Provide { add; children = Kind.fn children; client })
+
+module Context = struct
+  type binding = Scheduler.binding
+  type 'a t = { name : string; inj : 'a -> binding; prj : binding -> 'a option }
+
+  let make (type a) ?(name = "a context with no name") () : a t =
+    let module M = struct type Scheduler.binding += B of a end in
+    { name; inj = (fun v -> M.B v); prj = (function M.B v -> Some v | _ -> None) }
+
+  let provide c v children = provide_bindings [ c.inj v ] children
+  let get c = find_binding c.prj false (context_env ())
+
+  let get_exn c =
+    match get c with
+    | Some v -> v
+    | None ->
+        invalid_arg
+          ("Yuka.Context.get_exn: no value for " ^ c.name
+          ^ if Option.is_some (find_binding c.prj true (context_env ())) then ", provided on the page, outside this island" else "")
+
+  let bind c v = c.inj v
+  let provide_all = provide_bindings
+end
+
 module Show = struct
   let make ~status ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
     let view =

@@ -424,6 +424,62 @@ module Catch : sig
       the browser. *)
 end
 
+module Context : sig
+  type 'a t
+  (** A value given at one place of the element tree and read below it, with no argument on the
+      components between. Make a context once, at the top of a module. Two contexts are never
+      the same, also when they hold the same type. *)
+
+  val make : ?name:string -> unit -> 'a t
+  (** A new context. [name] is for the message of {!get_exn}. Write the type where you make it:
+      [let theme : Theme.t Context.t = Context.make ~name:"theme" ()]. *)
+
+  val provide : 'a t -> 'a -> (unit -> 'k element) -> 'k element
+  (** [provide context value children] gives [value] to [children]. In mlx:
+      [<Yuka.Context.Provide of_=context value=v> children </Yuka.Context.Provide>]; the ppx
+      passes the children as a function.
+
+      [children] runs once, untracked. {!get} gives [Some value] in the component functions it
+      calls and in every hole, list row, effect, {!Catch} and {!Await} below them, also when
+      they run again later. The nearest [provide] of a context wins. Outside [children]
+      nothing changes.
+
+      The value is fixed. To give a value that changes, give a State and read it in a hole:
+      only that hole runs again.
+
+      An element built before [children] ran (an argument of the component that calls
+      [provide], for example) has already run its component functions; they saw the values
+      outside. Its holes see [value].
+
+      Islands: an island reads only what is provided inside it, on the server and in the
+      browser. A [provide] on the page does not reach an island, and a [provide] in one island
+      does not reach another; pass the value as a prop. The children that the page gives to an
+      island belong to the page: they see what the page provided.
+
+      On the server a streamed {!Await} that prints later sees the value. A [provide] is
+      printed as a hole. *)
+
+  val get : 'a t -> 'a option
+  (** The value of the nearest {!provide} above the code that runs now, or [None]. Call it in a
+      component function, a hole, a list row or an effect, and keep the result. In an event
+      handler it answers for the element that has the handler. In a timer, in a callback of an
+      {!Async} and in server code outside a render no place of the tree runs: [None]. In the
+      function of a {!State.memo} it answers for the code that reads the memo; read the
+      context outside the memo. *)
+
+  val get_exn : 'a t -> 'a
+  (** As {!get}. With no value, raises [Invalid_argument] with the name of the context. *)
+
+  type binding
+
+  val bind : 'a t -> 'a -> binding
+
+  val provide_all : binding list -> (unit -> 'k element) -> 'k element
+  (** [provide_all [ bind a x; bind b y ] children] is
+      [provide a x (fun () -> provide b y children)] in one node. When a context is in the
+      list twice, the last one wins. *)
+end
+
 module Status = Status
 
 module Show : sig
@@ -744,6 +800,8 @@ val runtime_form_put : string -> 'a Form.kind -> 'a -> (string * string) list
     can change or remove it. *)
 
 module Private : sig
+  type env
+
   type node = private
     | Text of string
     | Element of { tag : string; attrs : attr list; children : node list }
@@ -774,6 +832,11 @@ module Private : sig
     | Catch of {
         children : unit -> node;
         fallback : error:string -> reset:(unit -> unit) -> node;
+        client : Obj.t option -> node;
+      }
+    | Provide of {
+        add : env -> env;
+        children : unit -> node;
         client : Obj.t option -> node;
       }
 
@@ -862,6 +925,11 @@ module Private : sig
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
   (** Like {!owner}, but the new owner belongs to the current owner: it is
       disposed with it. *)
+
+  val with_context : Context.binding list -> (unit -> 'a) -> 'a
+  (** Runs the function in a new owner that has the bindings, as
+      {!Context.provide_all} gives them. The owner is disposed with the
+      current owner. *)
 
   type pending =
     | Pending_await of {
