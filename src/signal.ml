@@ -33,7 +33,11 @@ let peek s =
   s.value
 
 let get s =
-  Scheduler.fresh s.node;
+  (if s.node.state <> 0 then
+     try Scheduler.fresh s.node
+     with e ->
+       Scheduler.track s.node;
+       raise e);
   Scheduler.track s.node;
   s.value
 

@@ -2,7 +2,7 @@
  (name run)
  (package yuka)
  (modules run)
- (libraries alcotest cases yuka))
+ (libraries alcotest cases scheduler_cases yuka))
 
 (executable
  (name default_log)

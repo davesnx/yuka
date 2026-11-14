@@ -1790,4 +1790,5 @@ let () =
       ("review fixes", review_cases);
       ("island loading", loading_cases);
       ("css", css_cases);
+      ("scheduler", List.map (fun (name, case) -> Alcotest.test_case name `Quick case) Scheduler_cases.all);
     ]
