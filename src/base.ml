@@ -53,6 +53,7 @@ let with_owner o f =
 
 let dispose_owner o =
   o.gen <- o.gen + 1;
+  let error = ref None in
   let rec go = function
     | None -> ()
     | Some c ->
@@ -60,11 +61,13 @@ let dispose_owner o =
         if c.live then begin
           let dispose = c.dispose in
           remove_disposer o c;
-          dispose ()
+          try dispose ()
+          with e -> ( match !error with None -> error := Some e | Some _ -> ())
         end;
         go prev
   in
-  go o.last
+  go o.last;
+  match !error with Some e -> raise e | None -> ()
 
 let owner_size o =
   let rec count n = function None -> n | Some c -> count (n + 1) c.prev in
@@ -115,7 +118,13 @@ let run_effect queue ?cleanup body =
   else
   let first = ref None in
   let later =
-    match Scheduler.batch (fun () -> try Scheduler.run node with e -> first := Some e) with
+    match
+      Scheduler.batch (fun () ->
+          try Scheduler.run node
+          with e ->
+            first := Some e;
+            match child.catch with None -> stop () | Some _ -> ())
+    with
     | () -> None
     | exception e -> Some e
   in
@@ -125,9 +134,7 @@ let run_effect queue ?cleanup body =
       | Some _ ->
           fail child e;
           own stop
-      | None ->
-          stop ();
-          raise e)
+      | None -> raise e)
   | None -> (
       own stop;
       match later with Some e -> raise e | None -> ())
@@ -137,10 +144,12 @@ module Effect = struct
   let after ?cleanup body = run_effect Scheduler.late ?cleanup body
 
   let on_change ?equal state f =
-    let prev = ref (Signal.peek state) in
+    let prev = ref (Signal.peek state) and first = ref true in
     after (fun () ->
         let next = Signal.get state in
-        if Signal.differs equal !prev next then begin
+        let created = !first && not (Signal.differs None !prev next) in
+        first := false;
+        if (not created) && Signal.differs equal !prev next then begin
           let p = !prev in
           prev := next;
           Scheduler.untrack (fun () -> f ~prev:p ~next)

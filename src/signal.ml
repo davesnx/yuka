@@ -33,7 +33,11 @@ let peek s =
   s.value
 
 let get s =
-  Scheduler.fresh s.node;
+  (if s.node.state <> 0 then
+     try Scheduler.fresh s.node
+     with e ->
+       Scheduler.track s.node;
+       raise e);
   Scheduler.track s.node;
   s.value
 
@@ -56,10 +60,14 @@ let computed ?equal compute =
   in
   let s = { value; equal; node } in
   Scheduler.set_level node;
+  let running = ref false in
   node.fn <-
     (fun () ->
+      let failed = !running in
+      running := true;
       let next = compute () in
-      differs equal s.value next
+      running := false;
+      (failed || differs equal s.value next)
       && begin
            s.value <- next;
            true

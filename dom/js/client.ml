@@ -556,6 +556,12 @@ and mount_each :
     { key = k; value = v; first; last; dispose }
   in
   let entries = ref [||] in
+  let dispose_all es =
+    for i = 0 to Array.length es - 1 do
+      (get es i).dispose ()
+    done
+  in
+  on_dispose (fun () -> dispose_all !entries);
   let first = State.peek source in
   for i = 0 to Array.length first - 1 do
     let v = get first i in
@@ -565,11 +571,6 @@ and mount_each :
   let clear_all () =
     if start == Js.null then Web.clear pos.parent ""
     else Web.delete_between pos.parent (node_of start) (node_of stop)
-  in
-  let dispose_all es =
-    for i = 0 to Array.length es - 1 do
-      (get es i).dispose ()
-    done
   in
   let reconcile source =
     let n = Array.length source in
@@ -627,7 +628,11 @@ and mount_each :
             if not (get keep j) then move_range pos.parent e.first e.last !anchor;
             e
         end
-        else make_entry (fresh !anchor) (get keys j) item
+        else begin
+          let e = make_entry (fresh !anchor) (get keys j) item in
+          push es e;
+          e
+        end
       in
       set next j e;
       anchor := some e.first
@@ -636,8 +641,7 @@ and mount_each :
   in
   Base.run_effect Scheduler.queue (fun () ->
       let next = State.get source in
-      Scheduler.untrack (fun () -> reconcile next));
-  on_dispose (fun () -> dispose_all !entries)
+      Scheduler.untrack (fun () -> reconcile next))
 
 let keep_hook : (Web.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
 
