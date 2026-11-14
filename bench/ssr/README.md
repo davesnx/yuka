@@ -25,6 +25,14 @@ hydration data.
 Each server is one process with one thread of JavaScript or OCaml. Sources:
 `ocaml/` and `node/`.
 
+The page has no island, so `yuka-stream` is not the same bytes as the
+others: since 2026-11-14 the request cycle ends a page with no island with
+one `<script type="speculationrules">` element (200 bytes; see "Prefetch" in
+`docs/router.md`). No other candidate sends it, and `yuka-page` does not
+either, because `Yuka.Server.to_string` does not go through the request
+cycle. The cost for the server is one string at the end of the body. The
+byte counts in the tables below are from before that change.
+
 ## Run
 
     make bench-ssr SWITCH=<opam switch>
