@@ -640,6 +640,27 @@ module Browser : sig
       logs the first one. Islands that read the route ([Routes.current]) do not see the new
       URL; to change the route of the page, use [Routes.replace]. *)
 
+  val set_cookie :
+    ?max_age:int ->
+    ?path:string ->
+    ?same_site:[ `Lax | `Strict | `None ] ->
+    ?secure:bool ->
+    string ->
+    string ->
+    (unit, string) result
+  (** Browser only: raises [Failure] on native. [set_cookie name value]
+      writes a cookie with [document.cookie], so the server reads it in the
+      next request. [value] is encoded as UTF-8 and percent-encoded: each
+      byte other than [A-Z a-z 0-9 - . _ ~] becomes [%XX], so decode it on
+      the server. [max_age] is in seconds; without it the
+      cookie ends with the browser session, and [~max_age:0] removes it.
+      [path] defaults to ["/"], [same_site] to [`Lax]. [`None] also sets
+      [Secure], as browsers require. Gives [Error] for a name that is not a
+      cookie token (letters, digits and [! # $ % & ' * + - . ^ _ ` | ~]) and
+      for a path that does not start with ['/'] or holds a [';'] or a control
+      character, and for a value that is not valid UTF-16 (a lone surrogate);
+      then nothing is written. *)
+
   val focus : string -> unit
   (** Focuses the element with this id; does nothing when no element has
       it. Inside a {!batch} (an event handler), it runs after the batch
