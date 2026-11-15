@@ -22,4 +22,4 @@
 .stats { display: grid; grid-template-columns: repeat(3, auto); gap: 8px; margin: 14px 0 0; }
 .stat { padding: 8px; border: 1px solid var(--border); border-radius: 7px; }
 .stat dt { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.stat dd { margin: 2px 0 0; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat dd { margin: 2px 0 0; font-size: 17px; font-weight: 600; }

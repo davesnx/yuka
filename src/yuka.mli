@@ -1,7 +1,8 @@
 val owner : (unit -> 'a) -> 'a * (unit -> unit)
 (** [owner body] runs [body] in a new owner. Effects and memos created during [body]
     belong to it. The returned function disposes all of them: it stops the
-    effects and runs their cleanups. The new owner is detached: disposing
+    effects and runs their cleanups. When a cleanup raises, the others still
+    run, and the first exception is raised at the end. The new owner is detached: disposing
     the owner that was current when [owner] was called does not dispose it,
     so call the returned function yourself. An exception in an effect of the
     new owner goes to the same {!Catch} or island as the current owner. *)
@@ -30,10 +31,14 @@ module State : sig
       [equal] counts as a change. *)
 
   val get : ('a, _) signal -> 'a
-  (** Reads the value. Inside an effect or a memo, the read is tracked. *)
+  (** Reads the value. Inside an effect or a memo, the read is tracked, also
+      when it raises. Outside a {!batch}, an effect and a memo, a read that
+      makes a memo compute again runs the effects that the new value makes
+      pending before it returns, and raises their exception. *)
 
   val peek : ('a, _) signal -> 'a
-  (** Reads the value without tracking. *)
+  (** Reads the value without tracking. Outside a {!batch}, an effect and a
+      memo it runs pending effects as {!get} does. *)
 
   val set : 'a t -> 'a -> unit
   (** Writes the value. On the server, raises [Invalid_argument] for a
@@ -46,7 +51,17 @@ module State : sig
   val memo : ?equal:('a -> 'a -> bool) -> (unit -> 'a) -> 'a read
   (** A derived value. It recomputes when a State it read changes. A
       recompute is a change only if [equal] says the new value differs.
-      Default: the same equality as {!make}. *)
+      Default: the same equality as {!make}.
+
+      When the function raises, the read of the memo raises that exception,
+      and the next read computes again. A memo that raises counts as changed:
+      an effect or a memo that read it runs again and gets the exception at
+      its read. The exception of a memo that nothing reads in that update is
+      not raised.
+
+      A memo that writes a State it reads computes again until its value
+      settles; a reader sees only the settled value. After 100 computes
+      without an end, the read raises the [Failure] of {!Effect.after}. *)
 
   val deferred : ?equal:('a -> 'a -> bool) -> ('a, _) signal -> 'a read
   (** A copy of a State that changes after the next paint. It starts with the
@@ -107,16 +122,30 @@ module Effect : sig
       effect does not stop other effects; the first one is raised again after
       all pending effects ran. If effects and memos keep changing States they
       read for more than 100 update rounds, the pending work is dropped and
-      [Failure] is raised. *)
+      [Failure] is raised.
+
+      An effect whose run raised is not stopped: it runs again at the next
+      change of a State or a memo that it read, also one that it read in an
+      earlier run and did not reach in the run that raised. *)
 
   val before : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
   (** As {!after}, with other timing. The first run is at once, in the
       component body, before the elements of the component exist. A later run
-      comes together with the holes, attributes and lists of the same change,
-      parent effects first, so it can see the DOM before that change. Use it
-      to compute a value that the markup of the component needs, or to read
-      the DOM before it changes. An exception in the first run, outside a
-      {!Catch} or an island, stops the effect and is raised to the caller. *)
+      comes in the same round as the holes, attributes and lists of the same
+      change, before the {!after} effects. Use it to compute a value that
+      the markup of the component needs.
+
+      The order in that round: an effect or a hole created inside another
+      effect or hole runs after it. Among the others, one that reads a memo
+      runs after one that reads only States, and then the one created last
+      runs first. The holes of a component are created after the effects of
+      its body, and the effects of a child component after those of its
+      parent. So a later run can come after a hole of the same component,
+      and after a [before] effect of a child component: do not use it to
+      read the DOM before a change.
+
+      An exception in the first run, outside a {!Catch} or an island, stops
+      the effect and is raised to the caller. *)
 
   val on_change :
     ?equal:('a -> 'a -> bool) -> ('a, _) State.signal -> (prev:'a -> next:'a -> unit) -> unit
@@ -1196,9 +1225,9 @@ val render :
     origin, it does [location.assign url].
 
     Prefetch: the [~prefetch] rule of [Routes.ml] sets the level of each
-    page route ([`Off], [`Hover], [`Trajectory] (default) or [`Visible]),
-    and the page has the highest level of the route tree in
-    [<meta name="yuka-prefetch" content="off|hover|visible">] (no meta for
+    page route ([`Off], [`Hover], [`Trajectory] (default), [`Visible] or
+    [`Idle]), and the page has the highest level of the route tree in
+    [<meta name="yuka-prefetch" content="off|hover|visible|idle">] (no meta for
     [`Trajectory]). From [`Hover]: 50 ms after the pointer or the focus enters
     a link that a click would navigate, or at once on [touchstart] or a
     [pointerdown] of the main button with no modifier key, the page is
@@ -1209,7 +1238,15 @@ val render :
     link on screen that the pointer moves toward is prefetched before the
     pointer is on it, with [Yuka-Prefetch: trajectory].
     [`Visible] also prefetches every such link when it comes within 200 px
-    of the view, with [Yuka-Prefetch: visible]. When the trigger is above
+    of the view, with [Yuka-Prefetch: visible].
+    [`Idle] also, once the browser is idle after the start, a client
+    navigation or an action call that succeeds, puts at most 15 links of
+    the page in the queue, in document order, one for each URL, without the
+    URLs in the cache or refused below [idle], with [Yuka-Prefetch: idle];
+    it needs a [Cache-Control] with a max-age (from [~headers], else
+    [~cache]), else the route counts as [`Visible]. A prefetch of a
+    static file gets [204] with [Yuka-Prefetch: off]. No idle prefetch starts under [saveData], on a [2g] or
+    [slow-2g] connection, or while the document is hidden. When the trigger is above
     the level of the route, the server answers [204] with
     [Yuka-Prefetch: LEVEL]; the browser keeps no answer for any [204], a
     click loads the page, and for the life of the page (until the next
@@ -1218,15 +1255,16 @@ val render :
     A visible prefetch is sent with
     [priority: "low"] and only while fewer than 4 prefetches are in flight;
     the others wait, the newest first, and a link that leaves the view
-    before its turn is not fetched. After an action call that succeeds,
+    before its turn is not fetched. An idle prefetch is also low priority
+    and starts after every waiting visible link. After an action call that succeeds,
     the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
     and the highest level [`Off] turn it off, and so does [navigator.connection.saveData].
     A navigation to a URL whose prefetch is in flight waits for it.
     When a hover, focus or press prefetch arrives, the browser starts to
     load the island chunks ([<link rel="modulepreload">]) and the
     [data-yuka-css] style sheets that it names, each once per page; a
-    trajectory or visible prefetch does this only after such a trigger on
-    its link.
+    trajectory, visible or idle prefetch does this only after such a
+    trigger on its link.
 
     Answers are kept by URL and outlet keys, at most 30, by the
     [Cache-Control] of the answer: with [max-age=N] (and no [no-store] or
@@ -1251,7 +1289,7 @@ val render :
     [yuka/navigation.js] on the first click on such a link, [popstate],
     {!Browser.navigate}, or pointer, focus or touch on a link that it would
     prefetch, or the first mouse movement when the highest level is
-    [`Trajectory] (at once when it is [`Visible]). Until it arrives, the click is
+    [`Trajectory] (at once when it is [`Visible] or [`Idle]). Until it arrives, the click is
     already prevented and the events wait in order. If the load fails, or
     does not finish within 3 s of the first such event, it is logged once
     with [console.error], the waiting navigations do [location.assign], and
@@ -1916,7 +1954,7 @@ module Server : sig
     val rules :
       headers:(string * string) list list ->
       ?cache:cache ->
-      ?prefetch:[ `Off | `Hover | `Trajectory | `Visible ] ->
+      ?prefetch:[ `Off | `Hover | `Trajectory | `Visible | `Idle ] ->
       prerender:bool ->
       unit ->
       rules
