@@ -2,6 +2,18 @@ open Types
 
 let current_key = ref ""
 let shown_key = ref ""
+
+let table r =
+  match !r with
+  | Some t -> t
+  | None ->
+      let t = Web.table () in
+      r := Some t;
+      t
+
+let scroll_table : float Web.table option ref = ref None
+let save_scroll () = Web.table_set (table scroll_table) !shown_key (Navigation_web.scroll_y ())
+
 let loaded = Platform.loaded
 let on = ref false
 let router : router option ref = ref None
@@ -138,6 +150,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
     current_key := Web.fresh_key ();
     Web.history_replace_key !current_key
   end;
+  shown_key := !current_key;
   loaded := Web.current_url ();
   let doc = Web.document () in
   (match !listening with

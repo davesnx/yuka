@@ -14,6 +14,8 @@ let setup : string -> unit =
   [%mel.raw
     {|function (html) {
   const { JSDOM, VirtualConsole } = require("jsdom");
+  (globalThis.__added || []).forEach(function (l) { l[0].removeEventListener(l[1], l[2], l[3]); });
+  const added = globalThis.__added = [];
   const log = globalThis.__log = [];
   globalThis.__calls = [];
   globalThis.__ignoreAbort = false;
@@ -27,6 +29,13 @@ let setup : string -> unit =
   });
   const dom = new JSDOM("<!doctype html><html><head><title>start</title></head><body>" + html + "</body></html>", { url: "http://localhost/start?x=1", virtualConsole: vc });
   const w = dom.window;
+  [w, w.document].forEach(function (t) {
+    const add = t.addEventListener;
+    t.addEventListener = function (name, f, options) {
+      added.push([this, name, f, options]);
+      return add.apply(this, arguments);
+    };
+  });
   globalThis.window = w;
   globalThis.document = w.document;
   Object.defineProperty(w, "scrollY", { value: 0, writable: true, configurable: true });
@@ -138,8 +147,11 @@ let location_ : unit -> string =
 let body_html : unit -> string = [%mel.raw "function () { return document.body.innerHTML }"]
 let title : unit -> string = [%mel.raw "function () { return document.title }"]
 let history_length : unit -> int = [%mel.raw "function () { return window.history.length }"]
-let back : unit -> unit = [%mel.raw "function () { window.history.back() }"]
-let forward : unit -> unit = [%mel.raw "function () { window.history.forward() }"]
+let go_back : unit -> unit = [%mel.raw "function () { window.history.back() }"]
+let go_forward : unit -> unit = [%mel.raw "function () { window.history.forward() }"]
+
+let on_popstate : (unit -> unit) -> unit =
+  [%mel.raw "function (f) { window.addEventListener('popstate', function () { f() }, { once: true }) }"]
 let set_scroll : float -> unit = [%mel.raw "function (y) { window.scrollY = y }"]
 
 let set_timeout : (unit -> unit) -> int -> unit =
@@ -151,6 +163,17 @@ let tick f =
   set_timeout
     (fun () -> try f () with e -> !fail_hook e)
     5
+
+let back f =
+  on_popstate (fun () -> tick f);
+  go_back ()
+
+let forward f =
+  on_popstate (fun () -> tick f);
+  go_forward ()
+
+let rec until name cond f n =
+  tick (fun () -> if cond () then f () else if n = 0 then check name "true" "false" else until name cond f (n - 1))
 
 let ints = string_of_int
 let bools = string_of_bool
@@ -262,8 +285,7 @@ let history_and_popstate finish =
       tick (fun () ->
           check "at b" "/b" (location_ ());
           check "two entries added" (ints (start_length + 2)) (ints (history_length ()));
-          back ();
-          tick (fun () ->
+          back (fun () ->
               check "back fetches a" "3" (ints (calls ()));
               check "relative url" "/a" (call_url 2);
               check "header on back" "-" (call_header 2);
@@ -273,8 +295,7 @@ let history_and_popstate finish =
                   check "body of a" (page "<p>ay</p>") (body_html ());
                   check "title of a" "A again" (title ());
                   check "no push on popstate" (ints (start_length + 2)) (ints (history_length ()));
-                  forward ();
-                  tick (fun () ->
+                  forward (fun () ->
                       check "forward fetches b" "/b" (call_url 3);
                       resolve_call 3 (doc "B" (page "<p>bee</p>")) "";
                       tick (fun () ->
@@ -295,14 +316,12 @@ let scrolling finish =
       resolve_call 1 (doc "B" (page "b")) "";
       tick (fun () ->
           log_clear ();
-          back ();
-          tick (fun () ->
+          back (fun () ->
               resolve_call 2 (doc "A" (page "a")) "";
               tick (fun () ->
                   check "restored on back" "scroll:50" (log_read ());
                   log_clear ();
-                  back ();
-                  tick (fun () ->
+                  back (fun () ->
                       resolve_call 3 (doc "S" (page "s")) "";
                       tick (fun () ->
                           check "restored on second back" "scroll:300" (log_read ());
@@ -443,8 +462,7 @@ let start_twice finish =
   ignore (click "#a" "");
   resolve_call 0 (doc "A" (page "a")) "";
   tick (fun () ->
-      back ();
-      tick (fun () ->
+      back (fun () ->
           check "one fetch for the click and one for back" "2" (ints (calls ()));
           finish ()))
 
@@ -702,8 +720,6 @@ let route_page () =
   capture_warn ();
   render ~islands:(runtime_registry [ runtime_entry ~name:"Rt" (fun _ -> Ok rt_view) ]) ()
 
-let wait f = set_timeout (fun () -> try f () with e -> !fail_hook e) 50
-
 let route_island finish =
   setup "";
   route_page ();
@@ -725,12 +741,10 @@ let route_replace_push finish =
   Yuka.runtime_route_push "/start?x=3";
   check "push: the URL, the island, no request, one entry" "/start?x=3 start 3 0 1"
     (String.concat " " [ location_ (); attr_text "b"; ints (calls ()); ints (history_length () - length) ]);
-  back ();
-  wait (fun () ->
+  back (fun () ->
       check "Back after push: the previous route, no request" "/start?x=2 start 2 0"
         (String.concat " " [ location_ (); attr_text "b"; ints (calls ()) ]);
-      forward ();
-      wait (fun () ->
+      forward (fun () ->
           check "Forward: the pushed route again, no request" "/start?x=3 start 3 0"
             (String.concat " " [ location_ (); attr_text "b"; ints (calls ()) ]);
           Yuka.runtime_route_replace "/two";
@@ -742,14 +756,26 @@ let route_push_scroll finish =
   route_page ();
   Yuka.runtime_route_push "/start?x=3";
   set_scroll 700.;
-  back ();
-  wait (fun () ->
+  back (fun () ->
       log_clear ();
       set_scroll 40.;
-      forward ();
-      wait (fun () ->
+      forward (fun () ->
           check "Forward restores the scroll of the pushed entry" "scroll:700" (log_read ());
           finish ()))
+
+let route_push_back_scroll finish =
+  setup "";
+  route_page ();
+  set_scroll 300.;
+  Yuka.runtime_route_push "/start?x=3";
+  set_scroll 20.;
+  log_clear ();
+  back (fun () ->
+      until "Back after Routes.push scrolls" (fun () -> log_read () <> "")
+        (fun () ->
+          check "Back after Routes.push restores the scroll of the entry it left" "scroll:300" (log_read ());
+          finish ())
+        100)
 
 let context_missing finish =
   setup "";
@@ -1556,13 +1582,11 @@ let back_forward_cache finish =
   let text, headers = cached (doc "Two" (page "<p>two</p>")) 60 in
   resolve_headers 0 text 200 headers;
   tick (fun () ->
-      back ();
-      tick (fun () ->
+      back (fun () ->
           check "the start page is fetched" "2" (ints (calls ()));
           resolve_call 1 (doc "start" links) "";
           tick (fun () ->
-              forward ();
-              tick (fun () ->
+              forward (fun () ->
                   check "forward uses the cache" "2" (ints (calls ()));
                   check "shown" (page "<p>two</p>") (body_html ());
                   finish ()))))
@@ -1715,8 +1739,7 @@ let transitions_on finish =
   tick (fun () ->
       check "one transition, push" "vt:push|scroll:0" (log_read ());
       check "shown" (page "<p>two</p>") (body_html ());
-      back ();
-      tick (fun () ->
+      back (fun () ->
           resolve_call 1 (doc "start" links) "";
           tick (fun () ->
               check "back" "vt:push|scroll:0|vt:back|scroll:0" (log_read ());
@@ -1909,8 +1932,7 @@ let back_before_transition finish =
   tick (fun () ->
       check "the URL of the page that waits for its transition" "/two" (location_ ());
       log_clear ();
-      back ();
-      tick (fun () ->
+      back (fun () ->
           run_transition 0;
           check "the abandoned page is never put in the DOM" start (body_html ());
           check "location" "/start?x=1" (location_ ());
@@ -1921,8 +1943,7 @@ let back_before_transition finish =
           finish_transition 0;
           tick (fun () ->
               check "attribute removed" "null" (nav_attr ());
-              forward ();
-              tick (fun () ->
+              forward (fun () ->
                   check "forward loads the abandoned entry" "/two" (call_url 1);
                   resolve_call 1 (doc "Two" (page ("<p>two</p>" ^ island 2))) "";
                   tick (fun () ->
@@ -1958,8 +1979,7 @@ let newer_before_transition fetched (start_newer : unit -> unit) finish =
               tick (fun () ->
                   check "attribute removed" "null" (nav_attr ());
                   log_clear ();
-                  back ();
-                  tick (fun () ->
+                  back (fun () ->
                       check "back to the abandoned entry loads it" "/two" (call_url 2);
                       resolve_call 2 (doc "Two" (page ("<p>two</p>" ^ island 2))) "";
                       tick (fun () ->
@@ -1984,11 +2004,9 @@ let stop_before_transition finish =
 let back_forward_before_transition finish =
   race_start ();
   tick (fun () ->
-      back ();
-      tick (fun () ->
+      back (fun () ->
           log_clear ();
-          forward ();
-          tick (fun () ->
+          forward (fun () ->
               check "forward loads the entry that waits for its update" "/two" (call_url 1);
               run_transition 0;
               check "the older update does nothing" (race_page "<p>start</p>" 1) (body_html ());
@@ -2011,25 +2029,21 @@ let popstate_replaced_scroll finish =
       resolve_call 1 (doc "B" (page "b")) "";
       tick (fun () ->
           set_scroll 70.;
-          back ();
-          tick (fun () ->
+          back (fun () ->
               check "the first popstate loads a" "/a" (call_url 2);
               set_scroll 90.;
-              back ();
-              tick (fun () ->
+              back (fun () ->
                   check "the second popstate loads the start page" "/start?x=1" (call_url 3);
                   resolve_call 3 (doc "S" (page "s")) "";
                   tick (fun () ->
                       check "the start page is shown" (page "s") (body_html ());
                       log_clear ();
-                      forward ();
-                      tick (fun () ->
+                      forward (fun () ->
                           resolve_call 4 (doc "A" (page "a")) "";
                           tick (fun () ->
                               check "a, never shown in between, keeps its own scroll" "scroll:50" (log_read ());
                               log_clear ();
-                              forward ();
-                              tick (fun () ->
+                              forward (fun () ->
                                   resolve_call 5 (doc "B" (page "b")) "";
                                   tick (fun () ->
                                       check "b has the scroll of the last time it was shown" "scroll:90" (log_read ());
@@ -2142,9 +2156,6 @@ let marked_link_loads_nothing finish =
       check "a data-yuka-prefetch=visible link does not load the navigation code at start" "false" (bools (router_loaded ()));
       finish ())
 
-let rec until name cond f n =
-  tick (fun () -> if cond () then f () else if n = 0 then check name "true" "false" else until name cond f (n - 1))
-
 let navigation_off_loads_nothing finish =
   setup (page {|<a id="l" href="/two">x</a>|});
   render ~islands:(runtime_registry []) ~navigation:false ();
@@ -2189,26 +2200,30 @@ let cold_back_forward finish =
   plain_start ();
   let length = history_length () in
   check "no navigation code at start" "false" (bools (router_loaded ()));
-  back ();
-  until "back fetches once the code loads" (fun () -> calls () > 0)
-    (fun () ->
-      check "back fetches the first page" "/first" (call_url 0);
-      resolve_call 0 (doc "First" (page "<p>first</p>")) "";
-      tick (fun () ->
-          check "first shown" (page "<p>first</p>") (body_html ());
-          check "at first" "/first" (location_ ());
-          forward ();
-          until "forward fetches" (fun () -> calls () > 1)
-            (fun () ->
-              check "forward fetches the second page" "/second" (call_url 1);
-              resolve_call 1 (doc "Second" (page "<p>second again</p>")) "";
-              tick (fun () ->
-                  check "second shown" (page "<p>second again</p>") (body_html ());
-                  check "no push" (ints length) (ints (history_length ()));
-                  check "scroll restored, no full page load" "scroll:0|scroll:0" (log_read ());
-                  finish ()))
-            100))
-    100
+  back (fun () ->
+    until "back fetches once the code loads" (fun () -> calls () > 0)
+      (fun () ->
+        check "back fetches the first page" "/first" (call_url 0);
+        resolve_call 0 (doc "First" (page "<p>first</p>")) "";
+        tick (fun () ->
+            check "first shown" (page "<p>first</p>") (body_html ());
+            check "at first" "/first" (location_ ());
+            forward (fun () ->
+              until "forward fetches" (fun () -> calls () > 1)
+                (fun () ->
+                  check "forward fetches the second page" "/second" (call_url 1);
+                  resolve_call 1 (doc "Second" (page "<p>second again</p>")) "";
+                  tick (fun () ->
+                      check "second shown" (page "<p>second again</p>") (body_html ());
+                      check "no push" (ints length) (ints (history_length ()));
+                      check "scroll restored, no full page load" "scroll:0|scroll:0" (log_read ());
+                      finish ()))
+                100)))
+      100)
+
+let cold_route_push_back_scroll finish =
+  check "no navigation code at start" "false" (bools (router_loaded ()));
+  route_push_back_scroll finish
 
 let history_state_key : unit -> string =
   [%mel.raw "function () { const s = window.history.state; return (s && s.yukaKey) || '' }"]
@@ -2240,12 +2255,12 @@ let replace_url_back finish =
     (fun () ->
       resolve_call 0 (doc "A" (page "<p>a</p>")) "";
       tick (fun () ->
-          back ();
-          until "back fetches" (fun () -> calls () > 1)
-            (fun () ->
-              check "back loads the replaced URL" "/start?q=router" (call_url 1);
-              finish ())
-            100))
+          back (fun () ->
+            until "back fetches" (fun () -> calls () > 1)
+              (fun () ->
+                check "back loads the replaced URL" "/start?q=router" (call_url 1);
+                finish ())
+              100)))
     100
 
 let fire_touch : string -> string -> unit =
@@ -3045,6 +3060,7 @@ let all =
     ("an island reads the route; a layout island follows a navigation", route_island);
     ("Routes.replace and Routes.push set the route with no load; Back and Forward", route_replace_push);
     ("the scroll after Routes.push is saved under the pushed entry", route_push_scroll);
+    ("Back after Routes.push restores the scroll of the entry it left", route_push_back_scroll);
     ("a click on a waiting link navigates with one request", click_queued);
     ("after an action the visible links are observed and prefetched again", action_rewatches);
     ("a waiting link does not start under saveData", waiting_save_data);
@@ -3157,6 +3173,7 @@ let () =
   run
     (match argument () with
     | "back" -> [ ("back and forward before the navigation code loads", cold_back_forward) ]
+    | "push" -> [ ("Back after Routes.push before the navigation code loads restores the scroll", cold_route_push_back_scroll) ]
     | "hover" ->
         [ ("a data-yuka-prefetch=visible link does not load the navigation code", marked_link_loads_nothing);
           ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]

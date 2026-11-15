@@ -4,16 +4,8 @@ let shown_key = Navigation_stub.shown_key
 let started = ref false
 let pending : Navigation_web.controller option ref = ref None
 
-let table r =
-  match !r with
-  | Some t -> t
-  | None ->
-      let t = Web.table () in
-      r := Some t;
-      t
-
-let scroll_table : float Web.table option ref = ref None
-let scrolls () = table scroll_table
+let table = Navigation_stub.table
+let scrolls () = table Navigation_stub.scroll_table
 
 let start_islands : (unit -> unit) ref = ref (fun () -> ())
 
@@ -28,7 +20,7 @@ let assign url =
   Navigation_state.set false;
   Web.location_assign url
 
-let save_scroll () = Web.table_set (scrolls ()) !shown_key (Navigation_web.scroll_y ())
+let save_scroll = Navigation_stub.save_scroll
 
 let hash_of = Navigation_web.hash_of
 let outlets () = Web.query_all (Web.document ()) "yuka-outlet"
