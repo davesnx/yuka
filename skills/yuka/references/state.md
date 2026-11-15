@@ -275,8 +275,47 @@ argument gets them already built: if it calls `provide` around them, their
 holes read the value and their component bodies do not. Use the tag at
 the place where the children are written.
 
-An island reads only what a component inside the island gave. See
-[Islands](islands.md#limitations).
+### Contexts that reach islands
+
+An island reads what a component inside the island gave. A value that the
+page gives reaches the islands below it only when the context has a codec:
+
+```ocaml
+let theme : Theme.t Yuka.Context.t =
+  Yuka.Context.make ~name:"theme" ~codec:Theme.codec ()
+```
+
+The server writes the value into the HTML one time for each `Provide`, the
+first time it prints an island below it. In the browser, the first
+`Yuka.Context.get theme` in an island decodes that value, so hydration
+shows what the server printed. Islands under the same `Provide` share the
+decoded value. A context with a codec needs a `~name` of `a-z`, `0-9`, `.`,
+`_` and `-`; it is the key of the value in the HTML, so give each context
+its own name. `make` raises `Invalid_argument` without one.
+
+Everybody who loads the page can read the value. Do not give a secret, and
+do not use it to decide what a user may do: guards, loaders and actions
+check the user from the request again.
+
+A context without a codec does not reach an island: `get` gives `None`
+there, and `get_exn` says that the context has no codec.
+
+A value that must follow a client navigation is a State, with
+`Yuka.Codec.state`:
+
+```ocaml
+let user : User.t Yuka.State.read Yuka.Context.t =
+  Yuka.Context.make ~name:"user" ~codec:(Yuka.Codec.state User.codec) ()
+```
+
+The browser keeps one State for each `Provide`. When a client navigation
+renders that `Provide` again with a new value, the State gets the value
+before the new islands start, so an island that keeps running (in a layout)
+shows it, and only the holes that read the State run again. With a plain
+codec, an island keeps the value of its first read.
+
+The route of the page is such a context; read it with `Routes.current`. See
+[Router](router.md).
 
 ## On the server
 

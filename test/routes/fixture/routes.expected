@@ -189,3 +189,9 @@ let find (meth : Yuka.Router.meth) (path : string list)
       | _ -> Yuka.Router.Wrong_method [ `GET ])
   | "old-docs" :: (_ :: _ as p1) -> Yuka.Router.Redirect { permanent = false; location = Stdlib.( ^ ) "/docs/" (Stdlib.String.concat "/" (Stdlib.List.map Yuka.Router.encode p1)) }
   | _ -> Yuka.Router.Missing
+
+let current () = Yuka.runtime_route_current find
+
+let replace route = Yuka.runtime_route_replace (href route)
+
+let push route = Yuka.runtime_route_push (href route)

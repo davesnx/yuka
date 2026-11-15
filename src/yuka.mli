@@ -637,7 +637,8 @@ module Browser : sig
       new URL. Use it to keep the state of a page, such as a filter, in its
       query, so the URL can be shared. A URL on another origin, or a
       [javascript:], [vbscript:] or [data:] URL, does nothing; a dev build
-      logs the first one. *)
+      logs the first one. Islands that read the route ([Routes.current]) do not see the new
+      URL; to change the route of the page, use [Routes.replace]. *)
 
   val focus : string -> unit
   (** Focuses the element with this id; does nothing when no element has
@@ -1173,9 +1174,10 @@ module Router : sig
       [?fragment], and [()] ([Routes.issue ~id:"YUK-1" ()] is
       ["/issue/YUK-1"]; [Routes.issue ~id:"YUK-1" ~fragment:"comments" ()]
       is ["/issue/YUK-1#comments"]; [~fragment:""] adds [#] alone); [href], which
-      turns a [Routes.t] (for example from [find]) into a URL; and [find]. A
+      turns a [Routes.t] (for example from [find]) into a URL; [find]; and
+      [current], [replace] and [push] (see [docs/router.md]). A
       node name whose link function is an OCaml keyword or [href], [find],
-      [with_query] or [with_fragment] is a build error, and so is a param,
+      [with_query], [with_fragment], [current], [replace] or [push] is a build error, and so is a param,
       search field or loader named [fragment]. Then
       [yuka routes --server --shared-module Routes --source Routes.ml] writes the
       server module with [app]. *)
@@ -1233,6 +1235,21 @@ module Router : sig
 
   (**/**)
 end
+
+(**/**)
+
+val runtime_route_current :
+  (Router.meth -> string list -> (string * string) list -> 'r Router.lookup) -> 'r option State.read
+(** [Routes.current]: the route of the page that the framework provides, typed by [find]. *)
+
+val runtime_route_replace : string -> unit
+(** [Routes.replace]: a URL of the page shown is written with [history.replaceState] and sets
+    the route; another page is a client navigation. *)
+
+val runtime_route_push : string -> unit
+(** [Routes.push]: as {!runtime_route_replace}, with [history.pushState]. *)
+
+(**/**)
 
 val render :
   ?islands:Client.registry ->

@@ -12,7 +12,25 @@ let selector = "script[data-yuka-context]"
 
 let drop t e =
   Web.table_delete t e.id;
+  Array.iter
+    (fun s -> if Option.equal String.equal (Web.get_attribute s "data-yuka-context") (Some e.id) then Web.set_bool s seen false)
+    (Web.query_all (Web.document ()) selector);
   List.iter (fun f -> f ()) e.drops
+
+let put t id name text =
+  match Web.table_get t id with
+  | Some e when String.equal e.name name ->
+      if not (String.equal e.text text) then begin
+        e.text <- text;
+        match (e.change, Json.of_string text) with
+        | Some f, Ok j -> f j
+        | _ ->
+            List.iter (fun f -> f ()) e.drops;
+            e.drops <- []
+      end
+  | old ->
+      Option.iter (drop t) old;
+      Web.table_set t id { id; name; text; change = None; drops = [] }
 
 let table () =
   match !page with
@@ -32,24 +50,15 @@ let scan root =
         && (Web.ready_state () <> "loading" || Result.is_ok (Json.of_string text))
       then begin
         Web.set_bool s seen true;
-        let id = Option.value (Web.get_attribute s "data-yuka-context") ~default:"" in
-        let name = Option.value (Web.get_attribute s "data-name") ~default:"" in
-        match Web.table_get t id with
-        | Some e when String.equal e.name name ->
-            if not (String.equal e.text text) then begin
-              e.text <- text;
-              match (e.change, Json.of_string text) with
-              | Some f, Ok j -> f j
-              | _ ->
-                  List.iter (fun f -> f ()) e.drops;
-                  e.drops <- []
-            end
-        | old ->
-            Option.iter (drop t) old;
-            Web.table_set t id { id; name; text; change = None; drops = [] }
+        put t
+          (Option.value (Web.get_attribute s "data-yuka-context") ~default:"")
+          (Option.value (Web.get_attribute s "data-name") ~default:"")
+          text
       end)
     (Web.query_all root selector);
   t
+
+let set id name json = Scheduler.batch (fun () -> put (scan (Web.document ())) id name (Json.to_string json))
 
 let clear () =
   Option.iter (fun t -> Array.iter (drop t) (Web.table_values t)) !page;

@@ -337,6 +337,7 @@ type env = {
   build : string;
   prefetch : Prefetch.level;
   current : string;
+  route : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
@@ -379,6 +380,12 @@ let html_headers rule_headers extra =
   navigation_vary
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
+let mentions text part =
+  let n = String.length part and m = String.length text in
+  let rec at i j = j = n || (text.[i + j] = part.[j] && at i (j + 1)) in
+  let rec from i = i + n <= m && (at i 0 || from (i + 1)) in
+  from 0
+
 let rec shared sent (layers : layer list) =
   match (sent, layers) with
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
@@ -408,7 +415,9 @@ let render env ~status ~headers layers (page : page) =
         ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
-  let build = nest layers page.body in
+  let route = State.read_only (State.make env.route) in
+  let routed body () = Kind.to_node (Element.Context.provide (Route.get ()) route (fun () -> Kind.of_node (body ()))) in
+  let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
   match env.navigate with
   | Some sent -> (
@@ -433,10 +442,12 @@ let render env ~status ~headers layers (page : page) =
                   log env.config `Warn
                     ("the <yuka-outlet data-k=\"" ^ outlet
                    ^ "\"> is inside an island or a list: this page renders without the values that its layouts provide");
-                nest (List.filteri (fun i _ -> i >= n) layers) page.body ()
+                routed (nest (List.filteri (fun i _ -> i >= n) layers) page.body) ()
           in
+          let script = Printer.context_script "route" Types.route_name (`String env.route) in
           Async.map
-            (fun body -> { status; headers; body = String body })
+            (fun body ->
+              { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
             (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                below))
   | None ->
@@ -895,6 +906,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
       build = build_id config (App a);
       prefetch = a.prefetch;
       current = path;
+      route = path ^ query_suffix query;
       root_headers = a.headers;
       exists;
       form = None;
@@ -1134,6 +1146,7 @@ let missing_page config (App a) ~sleep =
       build = build_id config (App a);
       prefetch = a.prefetch;
       current = "";
+      route = "/404.html";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
       form = None;

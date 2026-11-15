@@ -8,6 +8,8 @@ let loaded = ref ""
 let no_swap (_ : Web.node option) = ()
 let swapped = ref no_swap
 let cleared : (unit -> unit) ref = ref ignore
+let kept : string list ref = ref []
+let moved : (unit -> unit) ref = ref ignore
 
 let platform =
   ref

@@ -114,8 +114,13 @@ open Base
         match List.assq_opt b s.shared with
         | Some id -> (name, id, "")
         | None ->
-            s.contexts <- s.contexts + 1;
-            let id = s.id_prefix ^ "c" ^ string_of_int s.contexts in
+            let id =
+              if String.equal name route_name then "route"
+              else begin
+                s.contexts <- s.contexts + 1;
+                s.id_prefix ^ "c" ^ string_of_int s.contexts
+              end
+            in
             s.shared <- (b, id) :: s.shared;
             let json = match b with Coded { json; _ } -> json () | _ -> `Null in
             (name, id, context_script id name json))
@@ -424,15 +429,15 @@ open Base
           Buffer.add_string b
             ("<yuka-island data-name=\"" ^ escape ~quote:true name
            ^ "\" data-id=\"" ^ id ^ "\" style=\"display:contents\""
-           ^ (match scope with
-               | [] -> ""
-               | l -> " data-ctx=\"" ^ escape ~quote:true (String.concat " " (List.map (fun (n, i, _) -> n ^ "=" ^ i) l)) ^ "\"")
            ^ (match strategy with
                | `Load -> ""
                | `Idle | `Lazy `Idle -> " data-start=\"idle\""
                | `Visible | `Lazy `Visible -> " data-start=\"visible\""
                | `Interaction | `Lazy `Interaction ->
                    " data-start=\"interaction\"")
+           ^ (match scope with
+               | [] -> ""
+               | l -> " data-ctx=\"" ^ escape ~quote:true (String.concat " " (List.map (fun (n, i, _) -> n ^ "=" ^ i) l)) ^ "\"")
            ^ ">");
           after_text := false;
           let saved = snapshot s in

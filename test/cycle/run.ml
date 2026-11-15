@@ -1152,7 +1152,9 @@ let navigation =
         check_header r "content-type" [ "text/html; charset=utf-8" ];
         check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
         check_header r "x-frame-options" [ "DENY" ];
-        Alcotest.(check string) "body" "<p>plain</p>" r.body );
+        Alcotest.(check string) "body, after the route script"
+          ({|<script type="application/json" data-yuka-context="route" data-name="yuka.route">"/plain"</script>|} ^ "<p>plain</p>")
+          r.body );
     ( "the deepest shared layout is the outlet",
       fun () ->
         let r = nav "L0 L2/acme" "/org/acme/x/2" in
@@ -1665,7 +1667,10 @@ let layout_values =
     ( "a layout value reaches the page in the partial response of a client navigation",
       fun () ->
         let b = body ~headers:[ ("Yuka-Navigate", "L0 L1") ] () in
-        Alcotest.(check string) "only the page" "<main>component from L0 hole from L0</main>" b );
+        Alcotest.(check string) "only the page, after the route script"
+          ({|<script type="application/json" data-yuka-context="route" data-name="yuka.route">"/plain"</script>|}
+          ^ "<main>component from L0 hole from L0</main>")
+          b );
     ( "an outlet inside an island's children: the page renders as before, with a warning",
       fun () ->
         let b = body ~shell:true () in

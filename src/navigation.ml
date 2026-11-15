@@ -268,6 +268,7 @@ let show ~dir ~push ~restore url a =
           loaded := Web.current_url ();
           Navigation_state.set false;
           swap target final a.header a.text;
+          Platform.kept := [];
           !Platform.swapped target;
           (match restore with
           | Some y -> Navigation_web.scroll_to y
@@ -367,10 +368,14 @@ let on_popstate _ =
   let dir = if Navigation_web.key_before next !current_key then "back" else "forward" in
   current_key := next;
   let y = Option.value (Web.table_get (scrolls ()) !current_key) ~default:0. in
-  if Web.current_url () = !loaded then begin
+  if Web.current_url () = !loaded || List.exists (String.equal next) !Platform.kept then begin
     cancel_pending ();
     incr nav;
     Navigation_state.set false;
+    if Web.current_url () <> !loaded then begin
+      loaded := Web.current_url ();
+      !Platform.moved ()
+    end;
     Navigation_web.scroll_to y
   end
   else load ~dir ~push:false ~restore:(Some y) (Web.current_url ())

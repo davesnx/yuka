@@ -673,6 +673,70 @@ let context_navigation finish =
       check "one script per id in the document" "1" (ints (count_selector {|script[data-yuka-context="c1"]|}));
       finish ())
 
+let capture_warn : unit -> unit =
+  [%mel.raw "function () { globalThis.__warns = []; globalThis.__warn0 = console.warn; console.warn = function (m) { globalThis.__warns.push(String(m)) } }"]
+
+let warns : unit -> string = [%mel.raw "function () { console.warn = globalThis.__warn0; return globalThis.__warns.join('|') }"]
+
+let rt_find _ segments query =
+  match segments with
+  | [ "start" ] -> Yuka.Router.Found (`Start (String.concat "," (Yuka.Router.search query "x")))
+  | [ "two" ] -> Yuka.Router.Found `Two
+  | _ -> Yuka.Router.Missing
+
+let rt_show = function Some (`Start x) -> "start " ^ x | Some `Two -> "two" | None -> "none"
+
+let rt_view () =
+  let r = Yuka.runtime_route_current rt_find in
+  element "b" [] [ hole (fun () -> text (rt_show (State.get r))) ]
+
+let route_script url = {|<script type="application/json" data-yuka-context="route" data-name="yuka.route">"|} ^ url ^ {|"</script>|}
+
+let route_page () =
+  Yuka.stop ();
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<nav><a id="two" href="/two">two</a></nav><yuka-island data-name="Rt" data-id="i1" style="display:contents" data-ctx="yuka.route=route"><b>start 1</b></yuka-island>|}
+    ^ route_script "/start?x=1" ^ props "i1"
+    ^ {|<yuka-outlet data-k="L0" style="display:contents"><p id="old">old</p></yuka-outlet>|});
+  capture_warn ();
+  render ~islands:(runtime_registry [ runtime_entry ~name:"Rt" (fun _ -> Ok rt_view) ]) ()
+
+let wait f = set_timeout (fun () -> try f () with e -> !fail_hook e) 50
+
+let route_island finish =
+  setup "";
+  route_page ();
+  check "an island reads the route, no hydration mismatch" "start 1|" (attr_text "b" ^ "|" ^ warns ());
+  ignore (click "#two" "");
+  resolve_headers 0 (route_script "/two" ^ {|<p id="new">new</p>|}) 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "a layout island follows a navigation with no island in the outlet" "two" (attr_text "b");
+      check "one route script in the document" "1" (ints (count_selector {|script[data-yuka-context="route"]|}));
+      finish ())
+
+let route_replace_push finish =
+  setup "";
+  route_page ();
+  let length = history_length () in
+  Yuka.runtime_route_replace "/start?x=2";
+  check "replace: the URL, the island, no request, no entry" "/start?x=2 start 2 0 0"
+    (String.concat " " [ location_ (); attr_text "b"; ints (calls ()); ints (history_length () - length) ]);
+  Yuka.runtime_route_push "/start?x=3";
+  check "push: the URL, the island, no request, one entry" "/start?x=3 start 3 0 1"
+    (String.concat " " [ location_ (); attr_text "b"; ints (calls ()); ints (history_length () - length) ]);
+  back ();
+  wait (fun () ->
+      check "Back after push: the previous route, no request" "/start?x=2 start 2 0"
+        (String.concat " " [ location_ (); attr_text "b"; ints (calls ()) ]);
+      forward ();
+      wait (fun () ->
+          check "Forward: the pushed route again, no request" "/start?x=3 start 3 0"
+            (String.concat " " [ location_ (); attr_text "b"; ints (calls ()) ]);
+          Yuka.runtime_route_replace "/two";
+          check "replace with another page: a client navigation" "1" (ints (calls ()));
+          finish ()))
+
 let context_missing finish =
   setup "";
   theme_page ();
@@ -2623,6 +2687,8 @@ let all =
     ("a hover on a waiting link starts it once", hover_queued);
     ("a navigation sets the State of a context with a codec in a layout island", context_navigation);
     ("a navigation to a page without the provider", context_missing);
+    ("an island reads the route; a layout island follows a navigation", route_island);
+    ("Routes.replace and Routes.push set the route with no load; Back and Forward", route_replace_push);
     ("a click on a waiting link navigates with one request", click_queued);
     ("after an action the visible links are observed and prefetched again", action_rewatches);
     ("a waiting link does not start under saveData", waiting_save_data);

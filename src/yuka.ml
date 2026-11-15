@@ -36,6 +36,10 @@ module Router = struct
   module Param = Router_param
 end
 
+let runtime_route_current find = Route.current find
+let runtime_route_replace = Route.replace
+let runtime_route_push = Route.push
+
 module Console = struct
   let send level browser message = if Web.in_browser then browser message else Types.log_message level message
   let log = send `Info Web.console_log

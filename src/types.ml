@@ -236,6 +236,7 @@ let transport : (string -> Json.t -> (Json.t, Status_error.t) result Async.t) re
 
 type Scheduler.binding += Coded of { name : string; json : unit -> Json.t; inner : Scheduler.binding }
 
+let route_name = "yuka.route"
 let state_target : ((Json.t -> unit) -> unit) ref = ref ignore
 
 let async_source : (string -> Json.t Async.t) ref =
