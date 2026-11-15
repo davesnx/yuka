@@ -188,6 +188,25 @@ let body_limit () =
     (fst (post ~length:2_000_000 (quoted 4)));
   Alcotest.(check (pair int string)) "a small declared length" (200, {|{"ok":2}|}) (post ~length:4 (quoted 4))
 
+let no_sessions () =
+  let got = ref [] in
+  let handler = Yuka_dream.handler (Yuka.Server.config ~log:(fun _ m -> got := m :: !got) ()) Yuka_routes.app in
+  let csrf handler =
+    let headers = [ ("Origin", "http://app.test"); ("Host", "app.test") ] in
+    let response = Dream.test handler (Dream.request ~target:"/_yuka/csrf" ~headers "") in
+    (Dream.status_to_int (Dream.status response), Lwt_main.run (Dream.body response))
+  in
+  let status = ref 0 in
+  ignore (with_stderr (fun () -> status := fst (csrf handler)));
+  Alcotest.(check int) "csrf without the middleware" 500 !status;
+  check_true "the log names the path and the middleware"
+    (match !got with [ m ] -> contains m "/_yuka/csrf" && contains m "session middleware" | _ -> false);
+  got := [];
+  let status, body = csrf (Dream.memory_sessions () handler) in
+  Alcotest.(check int) "csrf with the middleware" 200 status;
+  check_true "a token" (contains body {|{"csrf":"|});
+  Alcotest.(check (list string)) "no log" [] !got
+
 let () =
   Alcotest.run "yuka-dream"
     [
@@ -203,4 +222,5 @@ let () =
         ] );
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);
+      ("session", [ Alcotest.test_case "no session middleware" `Quick no_sessions ]);
     ]

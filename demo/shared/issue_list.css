@@ -10,7 +10,7 @@
   content: ""; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 0 2px var(--bg);
 }
-.total { color: var(--muted); font-variant-numeric: tabular-nums; }
+.total { color: var(--muted); }
 .menu {
   inset: auto; margin: 6px 0; box-sizing: border-box; width: 240px; max-width: calc(100vw - 16px);
   max-height: min(360px, 60vh); overflow-y: auto; padding: 5px;
@@ -31,4 +31,4 @@
   border: solid var(--on-accent); border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.count { color: var(--muted); }

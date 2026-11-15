@@ -5,7 +5,16 @@ let () =
   Logs.set_level (Some Logs.Info);
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let port = match Sys.getenv_opt "PORT" with Some p -> int_of_string p | None -> 8080 in
+  let port =
+    match Sys.getenv_opt "PORT" with
+    | None -> 8080
+    | Some p -> (
+        match int_of_string_opt p with
+        | Some port -> port
+        | None ->
+            prerr_endline ("PORT is not a number: " ^ p);
+            exit 1)
+  in
   let socket =
     Eio.Net.listen ~reuse_addr:true ~backlog:128 ~sw (Eio.Stdenv.net env) (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
   in

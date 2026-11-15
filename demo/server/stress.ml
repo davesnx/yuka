@@ -1,7 +1,7 @@
 open Demo_shared
 open Model
 
-let issue_count = 200
+let issue_count = 2000
 let comments_per_issue = 200
 
 let labels =

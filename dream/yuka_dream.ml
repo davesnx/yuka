@@ -44,8 +44,11 @@ module Adapter = struct
     | Some n when n > limit -> to_async (refuse ())
     | _ -> to_async (read ())
 
-  let session = Dream.session_id
-  let csrf_token request = Dream.csrf_token request
+  let without_session f request =
+    match f request with v -> Some v | exception Failure m when m = "Missing session middleware" -> None
+
+  let session = without_session Dream.session_id
+  let csrf_token = without_session (fun request -> Dream.csrf_token request)
 
   let verify_csrf request token =
     to_async (Lwt.map (function `Ok -> true | _ -> false) (Dream.verify_csrf_token request token))

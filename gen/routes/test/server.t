@@ -240,3 +240,66 @@ The shared module must be a module path
     -help                  Display this list of options
     --help                 Display this list of options
   [2]
+
+~prefetch on make, group and route: the nearest one wins; a route with
+none gets the default of Yuka. The app gets the rules of every page route,
+not those of an endpoint or an action
+
+  $ gen <<'EOF'
+  > Router.make ~prefetch:`Visible
+  >   [
+  >     Router.route A ~path:"/a" ~page:Pages.a;
+  >     Router.group ~path:"/g" ~prefetch:`Off
+  >       [
+  >         Router.route B ~path:"/b" ~page:Pages.b;
+  >         Router.route C ~path:"/c" ~page:Pages.c ~prefetch:`Hover;
+  >         Router.route F ~path:"/f" ~page:Pages.f ~prefetch:`Trajectory;
+  >         Router.endpoint D ~path:"/d" ~method_:`GET ~handler:Handlers.d;
+  >         Router.action E ~path:"/e" ~method_:`POST ~handler:Handlers.e;
+  >       ];
+  >   ]
+  > EOF
+  $ grep -e 'Generated.rules' -e 'rules = ' -e '~pages' out.ml
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Visible ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Off ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Hover ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Trajectory ~prerender:false ()
+            rules = rules_0;
+            rules = rules_1;
+            rules = rules_2;
+            rules = rules_3;
+            rules = rules_1;
+            rules = rules_1;
+      ~pages:[ rules_0; rules_1; rules_2; rules_3 ]
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.route A ~path:"/a" ~page:Pages.a;
+  >     Router.route B ~path:"/b" ~page:Pages.b ~prefetch:`Off;
+  >   ]
+  > EOF
+  $ grep -e 'Generated.rules' -e '~pages' out.ml
+    Yuka.Server.Generated.rules ~headers:[  ] ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Off ~prerender:false ()
+      ~pages:[ rules_0; rules_1 ]
+
+`Idle with a ~cache that has a max-age on the route or on a node above it,
+or with a ~cache the generator cannot read (a let), is accepted
+
+  $ gen <<'EOF'
+  > let none = Yuka.Server.no_store
+  > 
+  > let routes =
+  >   Router.make ~cache:(public ~max_age:60 ())
+  >     [
+  >       Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle;
+  >       Router.group ~path:"/g" ~prefetch:`Idle
+  >         [ Router.route B ~path:"/b" ~page:Pages.b ~cache:(private_ ~max_age:5) ];
+  >       Router.route C ~path:"/c" ~page:Pages.c ~cache:none ~prefetch:`Idle;
+  >     ]
+  > EOF
+  $ grep -e 'Generated.rules' out.ml
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(none) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()

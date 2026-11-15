@@ -205,6 +205,25 @@ let html_escaping () =
   check "attribute" "<a href=\"x&amp;y&quot;&lt;>\"></a>"
     (html (element "a" [ attr "href" "x&y\"<>" ] []))
 
+let decode_uri () =
+  let decoded s = match Yuka__Web.decode_uri s with Some d -> d | None -> "None" in
+  let valid s = string_of_bool (Option.is_some (Yuka__Web.decode_uri s)) in
+  check "plain" "a+b" (decoded "a+b");
+  check "escapes" "a b/?#" (decoded "a%20b%2F%3f%23");
+  check "two bytes" "true" (valid "%C3%A9");
+  check "four bytes" "true" (valid "%F0%9F%98%80");
+  if not Yuka__Web.in_browser then check "two bytes, native" "\xc3\xa9" (decoded "%C3%A9");
+  check "percent at the end" "None" (decoded "100%");
+  check "one hex digit" "None" (decoded "%E0%A4%A");
+  check "not hex" "None" (decoded "%zz");
+  check "lead byte alone" "None" (decoded "%C3");
+  check "lead byte then text" "None" (decoded "%C3a");
+  check "continuation byte alone" "None" (decoded "%A9");
+  check "overlong" "None" (decoded "%C0%AF");
+  check "surrogate" "None" (decoded "%ED%A0%80");
+  check "over U+10FFFF" "None" (decoded "%F4%90%80%80");
+  check "five-byte lead" "None" (decoded "%F8%88%80%80%80")
+
 let html_adjacent_texts () =
   check "separator" "<p>a<!---->b<!---->c</p>"
     (html (element "p" [] [ text "a"; text "b"; text "c" ]));
@@ -303,10 +322,25 @@ let parse s =
 
 let is_error s = match Json.of_string s with Error _ -> "error" | Ok _ -> "ok"
 
+let browser = match Sys.backend_type with Sys.Other _ -> true | Sys.Native | Sys.Bytecode -> false
+
+let shape s =
+  match Json.of_string s with
+  | Ok (`Int i) -> "Int " ^ string_of_int i
+  | Ok (`Float f) -> "Float " ^ if f = 0. && 1. /. f < 0. then "-0" else Printf.sprintf "%g" f
+  | Ok j -> show_json j
+  | Error m -> "error: " ^ m
+
+let units s =
+  match Json.of_string s with
+  | Ok (`String x) -> String.concat " " (List.init (String.length x) (fun i -> Printf.sprintf "%x" (Char.code x.[i])))
+  | Ok j -> show_json j
+  | Error m -> "error: " ^ m
+
 let json_round_trip () =
   let values : Json.t list =
     [ `Null; `Bool true; `Bool false; `Int 0; `Int (-42); `Float 1.5;
-      `Float 1.0; `Float (-0.25); `Float 1e100; `String ""; `String "a\"b\\c\n\t\r";
+      `Float (-0.25); `Float 1e100; `String ""; `String "a\"b\\c\n\t\r";
       `String "caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80"; `List [];
       `Assoc []; `List [ `Int 1; `List [ `Null; `Assoc [ ("k", `String "v") ] ] ];
       `Assoc [ ("a", `Int 1); ("b", `List [ `Float 2.5 ]) ] ]
@@ -316,7 +350,16 @@ let json_round_trip () =
       match Json.of_string (show_json v) with
       | Ok v' -> if v <> v' then raise (Failed ("round trip: " ^ show_json v))
       | Error m -> raise (Failed ("round trip error: " ^ m)))
-    values
+    values;
+  check "1.0" (if browser then "Int 1" else "Float 1") (shape (show_json (`Float 1.0)));
+  check "Codec.float reads 1.0" "1.0"
+    (match Result.bind (Json.of_string "1.0") (Codec.decode Codec.float) with
+    | Ok f -> if f = 1.0 then "1.0" else Printf.sprintf "%g" f
+    | Error m -> m);
+  check "Codec.int reads 1" "1"
+    (match Result.bind (Json.of_string "1") (Codec.decode Codec.int) with
+    | Ok n -> string_of_int n
+    | Error m -> m)
 
 let json_printing () =
   check "compact" "{\"a\":[1,2.5,null,true],\"b\":\"x\"}"
@@ -339,13 +382,15 @@ let json_script_safety () =
 let json_parser () =
   check "escapes" "\"a\\n\\\"\\\\/\\b\""
     (parse "\"a\\n\\\"\\\\\\/\\b\"");
-  check "unicode escape" "\"\xc3\xa9\xe2\x82\xac\"" (parse "\"\\u00e9\\u20AC\"");
-  check "surrogate pair" "\"\xf0\x9f\x98\x80\"" (parse "\"\\ud83d\\ude00\"");
+  check "unicode escape" (if browser then "e9 20ac" else "c3 a9 e2 82 ac") (units "\"\\u00e9\\u20AC\"");
+  check "unicode escape is the text" (units {js|"é€"|js}) (units "\"\\u00e9\\u20AC\"");
+  check "surrogate pair" (if browser then "d83d de00" else "f0 9f 98 80") (units "\"\\ud83d\\ude00\"");
+  check "surrogate pair is the text" (units {js|"😀"|js}) (units "\"\\ud83d\\ude00\"");
   check "whitespace" "{\"a\":[1,2]}" (parse " { \"a\" : [ 1 , 2 ] }\n");
   check "int" "`Int" (match Json.of_string "123" with Ok (`Int 123) -> "`Int" | _ -> "other");
   check "negative int" "`Int" (match Json.of_string "-7" with Ok (`Int (-7)) -> "`Int" | _ -> "other");
-  check "float dot" "`Float" (match Json.of_string "1.0" with Ok (`Float _) -> "`Float" | _ -> "other");
-  check "float exp" "`Float" (match Json.of_string "1e2" with Ok (`Float 100.) -> "`Float" | _ -> "other");
+  check "float dot" (if browser then "Int 1" else "Float 1") (shape "1.0");
+  check "float exp" (if browser then "Int 100" else "Float 100") (shape "1e2");
   check "float neg exp" "`Float" (match Json.of_string "-2.5E-1" with Ok (`Float (-0.25)) -> "`Float" | _ -> "other");
   check "empty containers" "[[],{}]" (parse "[[],{}]");
   check "nested" "{\"a\":{\"b\":[{\"c\":null}]}}" (parse "{\"a\":{\"b\":[{\"c\":null}]}}")
@@ -354,8 +399,18 @@ let json_invalid () =
   List.iter
     (fun s -> check ("invalid " ^ String.escaped s) "error" (is_error s))
     [ ""; " "; "["; "[1,]"; "{\"a\"}"; "{\"a\":1,}"; "{a:1}"; "tru"; "nul";
-      "01"; "1."; ".5"; "-"; "1e"; "\"abc"; "\"\\x\""; "\"\\u12\""; "\"\\ud83d\"";
-      "\"\\ude00\""; "\"\\ud83d\\u0041\""; "1 2"; "[1] x"; "'a'"; "\"a\nb\"" ]
+      "01"; "1."; ".5"; "-"; "1e"; "\"abc"; "\"\\x\""; "\"\\u12\""; "1 2"; "[1] x";
+      "'a'"; "\"a\nb\"" ];
+  check "lone high surrogate" (if browser then "d83d" else "error: lone surrogate at 7") (units "\"\\ud83d\"");
+  check "lone low surrogate" (if browser then "de00" else "error: lone surrogate at 7") (units "\"\\ude00\"");
+  check "high surrogate before a letter" (if browser then "d83d 41" else "error: invalid surrogate pair at 13")
+    (units "\"\\ud83d\\u0041\"")
+
+let json_objects_and_zero () =
+  check "integer-like keys" (if browser then {|{"1":2,"2":1}|} else {|{"2":1,"1":2}|}) (parse {|{"2":1,"1":2}|});
+  check "duplicate keys" (if browser then {|{"a":3,"b":2}|} else {|{"a":1,"b":2,"a":3}|})
+    (parse {|{"a":1,"b":2,"a":3}|});
+  check "minus zero" (if browser then "Int 0" else "Float -0") (shape "-0.0")
 
 let codec_ok c v = Codec.decode c (Codec.encode c v)
 
@@ -1203,6 +1258,12 @@ let json_depth_limit () =
     (is_error (String.concat "" (List.init 100000 (fun _ -> "{\"a\":")) ^ "1"));
   check "depth 512 is fine" "ok" (is_error (deep 512));
   check "depth 513 is an error" "error" (is_error (deep 513));
+  let deep_object n = String.concat "" (List.init n (fun _ -> "{\"a\":")) ^ "1" ^ String.make n '}' in
+  check "object depth 512 is fine" "ok" (is_error (deep_object 512));
+  check "object depth 513 is an error" "error" (is_error (deep_object 513));
+  let mixed n = String.concat "" (List.init n (fun _ -> "[{\"a\":")) ^ "1" ^ String.concat "" (List.init n (fun _ -> "}]")) in
+  check "mixed depth 512 is fine" "ok" (is_error (mixed 256));
+  check "mixed depth 514 is an error" "error" (is_error (mixed 257));
   check "the message says why" "error: nesting too deep"
     (let m = parse (deep 513) in
      if String.length m >= 23 then String.sub m 0 23 else m)
@@ -1754,6 +1815,7 @@ let all =
     ("effect writing its own State settles", effect_writing_own_state_settles);
     ("effect writing its own State stops at a limit", effect_writing_own_state_stops);
     ("html escaping", html_escaping);
+    ("Web.decode_uri", decode_uri);
     ("html adjacent texts", html_adjacent_texts);
     ("html empty text", html_empty_text);
     ("html hole markers", html_hole);
@@ -1768,6 +1830,7 @@ let all =
     ("json script safety", json_script_safety);
     ("json parser", json_parser);
     ("json invalid input", json_invalid);
+    ("json objects and minus zero", json_objects_and_zero);
     ("codec round trip", codec_round_trip);
     ("codec errors", codec_errors);
     ("async settles once", async_settle_once);

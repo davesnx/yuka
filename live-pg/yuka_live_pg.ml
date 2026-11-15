@@ -134,19 +134,23 @@ let bus ?(retry = 1.) ~conninfo ~channel () =
     match !started with
     | Some ready -> ready
     | None ->
-        let ready =
-          to_async
-            (let* c =
-               match connect conninfo with
-               | c -> (
-                   let* () = query c ("LISTEN " ^ quote_ident channel) in
-                   Lwt.return c)
-               | exception Postgresql.Error e -> Lwt.fail_with (Postgresql.string_of_error e)
-             in
-             Lwt.async (fun () -> watch c);
-             Lwt.return_unit)
-        in
+        let ready, ok, fail = Async.make () in
         started := Some ready;
+        let first () =
+          let c = connect conninfo in
+          let* () = Lwt.catch (fun () -> query c ("LISTEN " ^ quote_ident channel)) (fun e -> close c; Lwt.fail e) in
+          Lwt.async (fun () -> watch c);
+          Lwt.return_unit
+        in
+        Lwt.on_any
+          (Lwt.catch first (function
+            | Postgresql.Error e -> Lwt.fail_with (Postgresql.string_of_error e)
+            | e -> Lwt.fail e))
+          ok
+          (fun e ->
+            started := None;
+            listeners := [];
+            fail (Printexc.to_string e));
         ready
   in
   let close_bus () =

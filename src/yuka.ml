@@ -17,8 +17,7 @@ module Client = struct
   include Client
 
   type registry = {
-    start :
-      bool * [ `Hover | `Visible | `Off ] option * bool option * (string -> unit) option -> unit;
+    start : bool * bool option * (string -> unit) option -> unit;
   }
 end
 module Action = Action
@@ -134,7 +133,7 @@ module Server = struct
   end
 end
 
-let render ?islands ?navigation ?prefetch ?transitions ?on_error ?root () =
+let render ?islands ?navigation ?transitions ?on_error ?root () =
   if not Web.in_browser then failwith "Yuka.render: browser only";
   match (islands, root) with
   | None, None -> invalid_arg "Yuka.render: no ~islands and no ~root"
@@ -142,7 +141,7 @@ let render ?islands ?navigation ?prefetch ?transitions ?on_error ?root () =
       (match root with Some r -> Client.render_root r | None -> ());
       match islands with
       | Some { Client.start } ->
-          start ((match navigation with Some n -> n | None -> true), prefetch, transitions, on_error)
+          start ((match navigation with Some n -> n | None -> true), transitions, on_error)
       | None -> ())
 
 let stop () =
@@ -175,11 +174,11 @@ let runtime_promise_map = Client.promise_map
 let runtime_registry ?(lazy_entries = []) ?navigation:load entries =
   {
     Client.start =
-      (fun (navigation, prefetch, transitions, on_error) ->
+      (fun (navigation, transitions, on_error) ->
         Option.iter (fun f -> Client.on_error := f) on_error;
         match load with
         | Some load when navigation ->
-            Navigation_stub.start ~load ~lazy_entries ?prefetch ?transitions entries
+            Navigation_stub.start ~load ~lazy_entries ?transitions entries
         | _ -> Client.start ~lazy_entries entries);
   }
 

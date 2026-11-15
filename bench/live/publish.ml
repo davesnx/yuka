@@ -34,7 +34,7 @@ let connect key bytes =
     (Yuka.Server.Testing.live_run ~sleep:never
        (Yuka.Server.Testing.context ~session:"bench" ())
        ~verify_csrf:(fun _ -> Yuka.Async.return true)
-       ~token:(fun () -> "t") connection)
+       ~token:(fun () -> Some "t") connection)
 
 let () =
   Yuka.Server.Testing.set_log (fun _ _ -> ());

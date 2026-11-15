@@ -379,6 +379,7 @@ let run ?node ~sleep (peer : peer) ~verify_csrf ~token (c : connection) =
       subs = [];
     }
   in
+  let fresh () = match token () with Some t -> [ ("csrf", `String t) ] | None -> [] in
   let finished, resolve, _ = Async.make () in
   let heard = ref 0 and ready = ref false in
   let finish ~close code =
@@ -421,8 +422,7 @@ let run ?node ~sleep (peer : peer) ~verify_csrf ~token (c : connection) =
               | Async.Pending -> ()
               | Async.Done true when not conn.ended ->
                   ready := true;
-                  send_text conn
-                    (message [ ("t", `String "hello"); ("v", `Int 1); ("csrf", `String (token ())) ]);
+                  send_text conn (message ([ ("t", `String "hello"); ("v", `Int 1) ] @ fresh ()));
                   next ()
               | _ -> conn.stop 4403)
       | Some _, false | Some (Hello _), true -> conn.stop 4400
@@ -443,7 +443,7 @@ let run ?node ~sleep (peer : peer) ~verify_csrf ~token (c : connection) =
           | _ -> synced conn id r);
           next ()
       | Some Ping, true ->
-          send_text conn (message [ ("t", `String "pong"); ("csrf", `String (token ())) ]);
+          send_text conn (message (("t", `String "pong") :: fresh ()));
           next ()
   in
   let session = peer.session () in

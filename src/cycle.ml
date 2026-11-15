@@ -40,10 +40,34 @@ let merge_headers lists =
     (fun acc l -> List.filter (fun (n, _) -> not (has_header n l)) acc @ l)
     [] lists
 
-type rules = { headers : (string * string) list; cache : cache option; prerender : bool }
+type rules = {
+  headers : (string * string) list;
+  cache : cache option;
+  prefetch : Prefetch.level;
+  prerender : bool;
+}
 
-let rules ~headers ?cache ~prerender () =
-  { headers = merge_headers headers; cache; prerender }
+let answer_cache headers cache =
+  match List.find_opt (fun (n, _) -> same_name n "cache-control") headers with
+  | Some (_, v) -> Some v
+  | None -> cache
+
+let lasting cache =
+  List.exists
+    (fun d ->
+      match String.split_on_char '=' (String.trim d) with
+      | [ "max-age"; n ] -> Option.fold ~none:false ~some:(fun n -> n > 0) (int_of_string_opt n)
+      | _ -> false)
+    (String.split_on_char ',' cache)
+
+let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
+  let headers = merge_headers headers in
+  let prefetch =
+    match prefetch with
+    | `Idle when not (Option.fold ~none:false ~some:lasting (answer_cache headers cache)) -> `Visible
+    | p -> p
+  in
+  { headers; cache; prefetch; prerender }
 
 type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
 type response = { status : int; headers : (string * string) list; body : body }
@@ -87,14 +111,25 @@ type 'req app =
       build : string;
       headers : (string * string) list;
       prerender : string list;
+      prefetch : Prefetch.level;
       find : Router.meth -> string list -> (string * string) list -> 'r Router.lookup;
       resolve : 'req -> 'r -> target;
       missing : fallback;
     }
       -> 'req app
 
-let app ~build ~headers ~prerender ~find ~resolve ~missing =
-  App { build; headers = merge_headers [ headers ]; prerender; find; resolve; missing }
+let app ~build ~headers ~prerender ~pages ~find ~resolve ~missing =
+  let highest a (r : rules) = if Prefetch.rank r.prefetch > Prefetch.rank a then r.prefetch else a in
+  App
+    {
+      build;
+      headers = merge_headers [ headers ];
+      prerender;
+      prefetch = List.fold_left highest `Off pages;
+      find;
+      resolve;
+      missing;
+    }
 
 let failure e = Fail (Web.exn_to_string e)
 
@@ -142,35 +177,42 @@ let modules ~dir ~entry ~manifest ~packages ~digest =
     | Some i -> "/_yuka/app/" ^ String.sub entry 0 (i + 1)
     | None -> "/_yuka/app/"
   in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
-    import_map = Server.import_map ~url:"/_yuka/app" packages;
-    preload = Server.preload_urls ~manifest ~base ();
-    immutable = (fun _ -> false);
-  }
+  Result.map
+    (fun preload ->
+      {
+        dir;
+        entry;
+        digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
+        import_map = Server.import_map ~url:"/_yuka/app" packages;
+        preload;
+        immutable = (fun _ -> false);
+      })
+    (Server.preload_urls ~manifest ~base ())
 
 let outputs metafile =
   match Json.of_string metafile with
   | Ok (`Assoc top) -> (
       match List.assoc_opt "outputs" top with
-      | Some (`Assoc outs) -> List.map (fun (file, _) -> Server.normalize file) outs
-      | _ -> invalid_arg "Yuka.Server.bundle: metafile has no outputs object")
-  | Ok _ -> invalid_arg "Yuka.Server.bundle: metafile is not an object"
-  | Error m -> invalid_arg ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
+      | Some (`Assoc outs) -> Ok (List.map (fun (file, _) -> Server.normalize file) outs)
+      | _ -> Error "Yuka.Server.bundle: metafile has no outputs object")
+  | Ok _ -> Error "Yuka.Server.bundle: metafile is not an object"
+  | Error m -> Error ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
 
 let bundle ~dir ~entry ~manifest ~metafile =
+  let ( let* ) = Result.bind in
   let entry = Server.normalize entry in
-  let hashed = List.filter (fun f -> not (String.equal f entry)) (outputs metafile) in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
-    import_map = [];
-    preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry ();
-    immutable = (fun path -> List.exists (String.equal path) hashed);
-  }
+  let* outputs = outputs metafile in
+  let hashed = List.filter (fun f -> not (String.equal f entry)) outputs in
+  let* preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry () in
+  Ok
+    {
+      dir;
+      entry;
+      digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
+      import_map = [];
+      preload;
+      immutable = (fun path -> List.exists (String.equal path) hashed);
+    }
 
 type dev = { state : unit -> string }
 
@@ -263,8 +305,8 @@ type request = {
   target : string;
   header : string -> string option;
   body : limit:int -> string option Async.t;
-  session : unit -> string;
-  csrf_token : unit -> string;
+  session : unit -> string option;
+  csrf_token : unit -> string option;
   verify_csrf : string -> bool Async.t;
 }
 
@@ -312,11 +354,12 @@ type env = {
   head_only : bool;
   navigate : string list option;
   build : string;
+  prefetch : Prefetch.level;
   current : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
-  csrf : (unit -> string) option;
+  csrf : (unit -> string option) option;
   context : Types.context;
   node : Live_server.node;
   live_used : bool ref;
@@ -347,14 +390,19 @@ let add_vary value headers =
   in
   set_header ("vary", String.concat ", " values) headers
 
+let navigation_vary headers = add_vary "Yuka-Prefetch" (add_vary "Yuka-Navigate" headers)
+
 let html_headers rule_headers extra =
-  add_vary "Yuka-Navigate"
+  navigation_vary
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
 let rec shared sent (layers : layer list) =
   match (sent, layers) with
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
   | _ -> 0
+
+let speculation_rules =
+  {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
 
 let render env ~status ~headers layers (page : page) =
   let assets = env.config.assets in
@@ -372,6 +420,8 @@ let render env ~status ~headers layers (page : page) =
     Server.head
       ~extra:
         ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
+        ^ (if env.prefetch = Prefetch.default then ""
+           else "<meta name=\"yuka-prefetch\" content=\"" ^ Prefetch.name env.prefetch ^ "\">")
         ^ (match (env.config.dev, env.navigate) with
           | Some dev, None -> dev_script (dev.state ())
           | _ -> "")
@@ -415,10 +465,13 @@ let render env ~status ~headers layers (page : page) =
         ~on_value:write
     in
     let written () = String.concat "" (List.rev !early) in
+    let close islands =
+      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+    in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
-    | Async.Done () ->
-        early := "</body></html>" :: !early;
+    | Async.Done islands ->
+        early := close islands :: !early;
         Async.return { status; headers; body = String (written ()) }
     | Async.Pending ->
     let stream w =
@@ -426,7 +479,7 @@ let render env ~status ~headers layers (page : page) =
       writer := (fun text -> Async.bind flushed (fun () -> w text));
       let result, resolve, _ = Async.make () in
       Async.on_settled finished (function
-        | Async.Done () -> Async.on_settled (write "</body></html>") (fun _ -> resolve ())
+        | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
         | Async.Failed m ->
             log env.config `Error m;
             Async.on_settled flushed (fun _ -> resolve ())
@@ -516,9 +569,8 @@ let rec run_guards = function
         | Error _ as e -> Async.return e)
 
 let rule_cache (rules : rules) headers =
-  match rules.cache with
-  | Some c when not (has_header "cache-control" headers) ->
-      headers @ [ ("cache-control", c) ]
+  match answer_cache headers rules.cache with
+  | Some c when not (has_header "cache-control" headers) -> headers @ [ ("cache-control", c) ]
   | _ -> headers
 
 let file_path raw =
@@ -559,14 +611,20 @@ let serve_file meth ~root ~headers raw =
 let csrf_answer env (r : request) =
   match r.meth with
   | `GET | `HEAD ->
-      if Server.trusted_origin ?origins:env.config.origins r.header then
-        reply
-          {
-            status = 200;
-            headers = [ ("content-type", "application/json"); no_store_header ];
-            body = String (Json.to_string (`Assoc [ ("csrf", `String (r.csrf_token ())) ]));
-          }
-      else reply (plain 403 "Forbidden" [])
+      if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden" [])
+      else (
+        match r.csrf_token () with
+        | None ->
+            log_quietly env.config `Error
+              "/_yuka/csrf refused: the request has no session; the CSRF token needs session middleware";
+            reply (internal_error ())
+        | Some token ->
+            reply
+              {
+                status = 200;
+                headers = [ ("content-type", "application/json"); no_store_header ];
+                body = String (Json.to_string (`Assoc [ ("csrf", `String token) ]));
+              })
   | _ -> reply (method_not_allowed "GET, HEAD")
 
 let action env (r : request) raw =
@@ -701,10 +759,43 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
                                     | None -> page_or_error (fail_page env a.missing m)))))))
   | _ -> reply (method_not_allowed allowed)
 
+let refusal headers level =
+  reply
+    (empty 204
+       (navigation_vary (merge_headers [ headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
+
+(* A non-ok status makes the browser drop a speculative prefetch and fetch again at the click; a
+   2xx such as 204 would be kept and used for the click. "supports prefetch" in
+   https://wicg.github.io/nav-speculation/prefetch.html; 503 as in
+   https://developer.chrome.com/docs/web-platform/prerender-pages *)
+let speculation_refusal headers =
+  reply (empty 503 (add_vary "Sec-Purpose" (navigation_vary (merge_headers [ headers; [ no_store_header ] ]))))
+
+let sf_key k =
+  k <> ""
+  && (match k.[0] with 'a' .. 'z' | '*' -> true | _ -> false)
+  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '*' -> true | _ -> false) k
+
+let speculative (r : request) =
+  match (r.header "sec-purpose", Option.map String.trim (r.header "sec-fetch-dest")) with
+  | Some v, Some "document" -> (
+      match String.split_on_char ';' (String.trim v) with
+      | "prefetch" :: params ->
+          List.for_all
+            (fun p ->
+              let p = String.trim p in
+              match String.index_opt p '=' with
+              | None -> sf_key p
+              | Some i -> sf_key (String.sub p 0 i) && i + 1 < String.length p && not (String.contains p ','))
+            params
+      | _ -> false)
+  | _ -> false
+
 let route env (App a) req (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
   let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
+  let refuse (rules : rules) level = refusal rules.headers level in
   match a.find r.meth segments (Router.query r.target) with
   | Router.Redirect { permanent; location } ->
       reply (empty (if permanent then 308 else 307) [ ("location", location ^ suffix) ])
@@ -718,6 +809,15 @@ let route env (App a) req (r : request) ~path ~raw ~query =
   | Router.Found found -> (
       match a.resolve req found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
+      | Page { rules; _ }
+        when Option.fold ~none:false
+               ~some:(fun v -> Prefetch.rank (Prefetch.trigger v) > Prefetch.rank rules.prefetch)
+               (r.header "yuka-prefetch") ->
+          refuse rules rules.prefetch
+      | Handler { rules; _ } when Option.is_some (r.header "yuka-prefetch") -> refuse rules `Off
+      | Page { rules; _ } when Prefetch.rank `Hover > Prefetch.rank rules.prefetch && speculative r ->
+          speculation_refusal rules.headers
+      | Handler { rules; _ } when speculative r -> speculation_refusal rules.headers
       | Page { rules; guards; load; fallback } ->
           serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
       | Handler { rules; action; cross_origin; guards; run } ->
@@ -795,12 +895,11 @@ let live_answer env (r : request) =
         reply (plain 426 "Upgrade Required" [ ("upgrade", "websocket") ])
       else (
         match r.session () with
-        | exception e ->
+        | None ->
             log_quietly env.config `Error
-              ("live socket refused: the request has no session (" ^ Web.exn_to_string e
-             ^ "); the live socket needs session middleware");
+              "live socket refused: the request has no session; the live socket needs session middleware";
             reply (plain 500 "Internal Server Error" [])
-        | session ->
+        | Some session ->
             let context = { env.context with session = (fun () -> Some session) } in
             Async.return
               (Upgrade
@@ -818,7 +917,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
       meth = r.meth;
       path;
       header = r.header;
-      session = (fun () -> Some (r.session ()));
+      session = r.session;
       log = log config;
       live =
         (fun name key ->
@@ -836,11 +935,19 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
           (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
           (r.header "yuka-navigate");
       build = build_id config (App a);
+      prefetch = a.prefetch;
       current = path;
       root_headers = a.headers;
       exists;
       form = None;
-      csrf = Some r.csrf_token;
+      csrf =
+        Some
+          (fun () ->
+            let token = r.csrf_token () in
+            if token = None then
+              log_quietly config `Error
+                "page with a Live.use: the request has no session; live data needs session middleware";
+            token);
       context;
       node;
       live_used;
@@ -856,6 +963,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         | _ -> None)
       config.public
   in
+  let static serve = if Option.is_some (r.header "yuka-prefetch") then refusal [] `Off else serve () in
   let run () =
     match (parts, public) with
     | "" :: "_yuka" :: _, _ -> (
@@ -877,32 +985,34 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         | "action" :: rest -> action env r rest
         | [ "csrf" ] -> csrf_answer env r
         | [ "live" ] -> live_answer env r
-        | "css" :: rest when config.css <> [] -> (
-            match r.meth with
-            | `GET | `HEAD -> (
-                match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
-                | Some text ->
-                    reply
-                      {
-                        status = 200;
-                        headers =
-                          [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
-                        body = String text;
-                      }
-                | None -> reply (asset_miss ()))
-            | _ -> reply (method_not_allowed "GET, HEAD"))
+        | "css" :: rest when config.css <> [] ->
+            static (fun () ->
+                match r.meth with
+                | `GET | `HEAD -> (
+                    match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
+                    | Some text ->
+                        reply
+                          {
+                            status = 200;
+                            headers =
+                              [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
+                            body = String text;
+                          }
+                    | None -> reply (asset_miss ()))
+                | _ -> reply (method_not_allowed "GET, HEAD"))
         | "app" :: rest -> (
             match config.assets with
             | None -> reply (asset_miss ())
             | Some assets ->
-                let headers =
-                  match file_path rest with
-                  | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
-                  | _ -> [ ("cache-control", no_cache) ]
-                in
-                serve_file r.meth ~root:assets.dir ~headers rest)
+                static (fun () ->
+                    let headers =
+                      match file_path rest with
+                      | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
+                      | _ -> [ ("cache-control", no_cache) ]
+                    in
+                    serve_file r.meth ~root:assets.dir ~headers rest))
         | _ -> reply (asset_miss ()))
-    | "" :: _, Some (dir, rest) -> serve_file r.meth ~root:dir ~headers:[] rest
+    | "" :: _, Some (dir, rest) -> static (fun () -> serve_file r.meth ~root:dir ~headers:[] rest)
     | "" :: _, None when String.contains path '\\' ->
         Async.map (fun x -> Respond x) (not_found_page env a.missing path)
     | "" :: rest, None ->
@@ -949,8 +1059,8 @@ module type ADAPTER = sig
   val target : request -> string
   val header : request -> string -> string option
   val body : request -> limit:int -> string option Async.t
-  val session : request -> string
-  val csrf_token : request -> string
+  val session : request -> string option
+  val csrf_token : request -> string option
   val verify_csrf : request -> string -> bool Async.t
   val respond : response -> reply Async.t
   val file : request -> root:string -> path:string -> headers:(string * string) list -> reply Async.t
@@ -1067,6 +1177,7 @@ let missing_page config (App a) ~sleep =
       head_only = false;
       navigate = None;
       build = build_id config (App a);
+      prefetch = a.prefetch;
       current = "";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);

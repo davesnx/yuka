@@ -1,9 +1,10 @@
 open Demo_shared
 
-let sidebar workspace : Yuka.server Yuka.element = <Yuka.Client><New_issue workspace /></Yuka.Client>
+let sidebar workspace : Yuka.server Yuka.element = <Yuka.Client start=(`Lazy `Interaction)><New_issue workspace /></Yuka.Client>
+let commit = match Sys.getenv_opt "VERCEL_GIT_COMMIT_SHA" with Some "" -> None | value -> value
 
 let shell_of workspace children : Yuka.server Yuka.element =
-  <Views.Shell workspace sidebar=(sidebar workspace)>children</Views.Shell>
+  <Views.Shell workspace commit sidebar=(sidebar workspace)>children</Views.Shell>
 
 let shell ~children () = shell_of Model.Workspace.default children
 
@@ -20,9 +21,18 @@ let insights_in workspace =
   Yuka.Server.page ~title:"Insights" (fun () -> <Yuka.Client><Insights workspace /></Yuka.Client>)
 
 let insights () = insights_in Model.Workspace.default
-let report_in workspace = Yuka.Server.page ~title:"Report" (fun () -> Report.view (Store.issues workspace))
+let report_in workspace = Yuka.Server.page ~title:"Report" (fun () -> Report.view workspace (Store.issues workspace))
 let report () = report_in Model.Workspace.default
-let canvas_in workspace = Yuka.Server.page ~title:"Canvas" (fun () -> <Yuka.Client><Canvas workspace /></Yuka.Client>)
+let canvas_in workspace =
+  Yuka.Server.page ~title:"Canvas" (fun () ->
+      <Yuka.Client>
+        <Canvas workspace>
+          <dl>
+            (Yuka.fragment
+               (List.map (fun (label, value) -> <div><dt>(Yuka.text label)</dt><dd>(Yuka.text value)</dd></div>) (Store.facts ())))
+          </dl>
+        </Canvas>
+      </Yuka.Client>)
 let canvas () = canvas_in Model.Workspace.default
 
 let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =

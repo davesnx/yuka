@@ -45,6 +45,7 @@ let listener = ref None
 let queue = ref []
 let late = ref []
 let depth = ref 0
+let writes = ref 0
 let never () = false
 
 let make eff fn =
@@ -127,60 +128,83 @@ let set_level n =
   in
   n.level <- 1 + go 0 n.head
 
-let rec mark skip n state =
+let rec mark n state =
   let rec go = function
     | Some l ->
         let o = l.dst in
-        if o.state < state && o != skip then begin
+        if o.state < state && o != n && (l.at = o.runs || o.state < 0) then begin
           let was = o.state in
           o.state <- (if was < 0 then 2 else state);
           if was <= 0 then
-            match o.eff with Some q -> q := o :: !q | None -> mark skip o 1
+            match o.eff with Some q -> q := o :: !q | None -> mark o 1
         end;
         go l.next
     | None -> ()
   in
   go n.first
 
-let run n =
+let loop =
+  Failure
+    "Yuka: an effect or a memo keeps changing a State it reads (more than 100 \
+     update rounds in one flush)"
+
+let rec run n =
   n.rest <- n.head;
   n.head <- None;
   n.tail <- None;
   n.runs <- n.runs + 1;
   n.state <- 0;
-  incr stack;
+  let outer = !stack in
+  stack := n.depth + 1;
   let changed =
     match with_listener (Some n) n.fn with
     | c ->
-        decr stack;
+        stack := outer;
         unlink_all n.rest;
         n.rest <- None;
         c
     | exception e ->
-        decr stack;
+        stack := outer;
+        let rec refresh = function
+          | Some l ->
+              (try settle 100 l.src with _ -> ());
+              refresh l.dep
+          | None -> ()
+        in
+        refresh n.rest;
         (match n.tail with Some t -> t.dep <- n.rest | None -> n.head <- n.rest);
         n.rest <- None;
         raise e
   in
   if n.level = 0 then set_level n;
-  if changed then mark (match !listener with Some l -> l | None -> n) n 2
+  if changed then mark n 2
 
-let rec fresh n =
+and settle left n =
   if n.state <> 0 && n.state <> 3 then
     try
       if n.state = 1 then begin
+        let before = !writes in
         let rec check = function
           | Some l when n.state = 1 ->
-              fresh l.src;
+              (try settle 100 l.src with _ -> n.state <- 2);
               check l.dep
           | _ -> ()
         in
         check n.head;
-        if n.state = 1 then n.state <- 0
+        if n.state = 1 && !writes = before then n.state <- 0
       end;
-      if n.state = 2 || n.state < 0 then run n
+      let again =
+        n.state = 1
+        ||
+        if n.state = 2 || n.state < 0 then begin
+          run n;
+          n.eff = None && n.state > 0
+        end
+        else false
+      in
+      if again then if left = 0 then raise loop else settle (left - 1) n
     with e ->
-      n.state <- (if n.eff = None then -1 else 0);
+      n.state <- -1;
       raise e
 
 let rec stale n =
@@ -224,7 +248,7 @@ let flush () =
   depth := 1;
   let error = ref None and rounds = ref 0 in
   let fail e = match !error with None -> error := Some e | Some _ -> () in
-  let rec loop () =
+  let rec round () =
     (match !queue with
     | [] ->
         queue := !late;
@@ -239,23 +263,20 @@ let flush () =
             | [] -> ()
             | n :: rest ->
                 if n.state <> 3 then begin
-                  n.state <- 0;
+                  n.state <- -1;
                   stale n
                 end;
                 drop rest
           in
           drop q;
-          fail
-            (Failure
-               "Yuka: an effect or a memo keeps changing a State it reads \
-                (more than 100 update rounds in one flush)")
+          fail loop
         end
         else begin
           incr rounds;
           let rec run_all = function
             | [] -> ()
             | n :: rest ->
-                (try fresh n
+                (try settle 100 n
                  with e -> (
                    match n.owner with
                    | Some o -> ( try catch o e with e -> fail e)
@@ -264,9 +285,9 @@ let flush () =
           in
           run_all (if sorted q then q else sort q)
         end;
-        loop ()
+        round ()
   in
-  loop ();
+  round ();
   depth := 0;
   match !error with Some e -> raise e | None -> ()
 
@@ -285,7 +306,8 @@ let flush_all () =
   g ()
 
 let changed n =
-  mark n n 2;
+  incr writes;
+  mark n 2;
   if !depth = 0 then flush_all ()
 
 let finish () =
@@ -301,3 +323,6 @@ let batch f =
   | exception e ->
       (try finish () with _ -> ());
       raise e
+
+let fresh n =
+  if n.state <> 0 then if !depth = 0 then batch (fun () -> settle 100 n) else settle 100 n

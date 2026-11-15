@@ -38,9 +38,11 @@ val switch : unit -> Eio.Switch.t
 (** The switch of the current request, inside {!handler}. Raises
     [Invalid_argument] outside a request. *)
 
-val await : 'a Yuka.Async.t -> 'a
-(** Waits for the value. A failed [Async] raises [Failure] with its
-    message. *)
+val await : 'a Yuka.Async.t -> ('a, string) result
+(** Waits for the value. A failed [Async] gives [Error] with its message. *)
+
+val await_exn : 'a Yuka.Async.t -> 'a
+(** {!await}, but a failed [Async] raises [Failure] with its message. *)
 
 val async : sw:Eio.Switch.t -> (unit -> 'a) -> 'a Yuka.Async.t
 (** Runs the function in a new fiber on [sw]. An exception gives a failed

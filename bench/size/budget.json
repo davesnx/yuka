@@ -1,1 +1,4 @@
-{ "keyed_gzip": 7981 }
+{
+  "keyed_gzip": 8195,
+  "comment": "Raised from 7981 to 8195 for the scheduler fixes of pull request 12: each fix costs 4 to 35 B gzip, most of it try/catch on error paths. Lower it when the app gets smaller."
+}
