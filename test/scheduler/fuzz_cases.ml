@@ -1456,7 +1456,7 @@ let spawns = { groups with spawns = true }
 let c_raises = { groups with c_raises = true }
 let c_writes = { groups with c_writes = true }
 let catches = { raises with catches = true }
-let contexts = { spawns with kills = true; batches = true; writers = true; contexts = true }
+let contexts = { spawns with kills = true; batches = true; writers = true; c_writes = true; contexts = true }
 
 let every =
   {

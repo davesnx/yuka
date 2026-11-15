@@ -78,7 +78,7 @@ let owner_size o =
 let mount f =
   let o = new_owner () in
   match with_owner o f with
-  | result -> (result, fun () -> dispose_owner o)
+  | result -> (result, fun () -> Scheduler.batch (fun () -> dispose_owner o))
   | exception e ->
       dispose_owner o;
       raise e

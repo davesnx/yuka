@@ -350,8 +350,27 @@ let write_in_cleanup_on_dispose () =
   in
   dispose ();
   State.set s 2;
-  check "an effect of the disposed owner runs once more for a write in a sibling cleanup"
-    "a0 a1" (read ())
+  check "a write in a cleanup during a dispose does not run an effect of the disposed owner" "a0"
+    (read ())
+
+let dispose_again_during_dispose () =
+  let add, read = log () in
+  let s = State.make 0 in
+  let again = ref ignore in
+  let (), dispose =
+    owner (fun () ->
+        Private.with_context [] (fun () ->
+            Effect.before (fun () ->
+                if State.get s = 1 then begin
+                  Effect.before ~cleanup:(fun () -> add "child") ignore;
+                  !again ();
+                  add "returned"
+                end);
+            Effect.before ~cleanup:(fun () -> State.set s 1) ignore))
+  in
+  again := dispose;
+  dispose ();
+  check "a cleanup that writes during a dispose runs no effect of the disposed owner" "" (read ())
 
 let batch_in_memo () =
   let add, read = log () in
@@ -926,6 +945,7 @@ let all =
     ("edge: second round for an effect that ran", second_round);
     ("edge: write in a cleanup during a re-run", write_in_cleanup_on_rerun);
     ("edge: write in a cleanup during dispose", write_in_cleanup_on_dispose);
+    ("edge: dispose called again during a dispose", dispose_again_during_dispose);
     ("edge: batch in a memo", batch_in_memo);
     ("edge: write in a first run", write_in_first_run);
     ("edge: effect disposes its own owner then creates one", disposes_own_owner_then_creates);
