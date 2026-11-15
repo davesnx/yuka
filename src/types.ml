@@ -194,6 +194,8 @@ let log name value =
   end
 
 let current_session : session option ref = ref None
+let local_session = if Scheduler.js then None else Some (Web.local (fun () -> ref None))
+let current_session () = match local_session with Some k when not Scheduler.js -> Web.local_get k | _ -> current_session
 
 let level_name = function `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug"
 
@@ -203,7 +205,7 @@ let default_log : (log_level -> string -> unit) ref =
 let log_in session level message =
   match session with Some { context = Some c; _ } -> c.log level message | _ -> !default_log level message
 
-let log_message level message = log_in !current_session level message
+let log_message level message = log_in !(current_session ()) level message
 
 let reject_prefix = lazy ("yuka.reject." ^ Web.nonce () ^ ":")
 
@@ -216,7 +218,7 @@ let rejection message =
     Some (String.sub message n (String.length message - n))
   else None
 
-let shown ?(session = !current_session) what message =
+let shown ?(session = !(current_session ())) what message =
   match rejection message with
   | Some m -> m
   | None ->

@@ -84,7 +84,7 @@ let async c : 'a Async.t t =
       (fun a ->
         let j = Async.map c.encode a in
         let id, streaming =
-          match !current_session with
+          match !(current_session ()) with
           | Some s ->
               s.asyncs <- s.asyncs + 1;
               (s.id_prefix ^ "a" ^ string_of_int s.asyncs, s.streaming)
@@ -95,7 +95,7 @@ let async c : 'a Async.t t =
         | Async.Done v -> assoc [ ("ok", v) ]
         | Async.Failed m -> assoc [ ("error", `String (async_error id m)) ]
         | Async.Pending -> (
-            match !current_session with
+            match !(current_session ()) with
             | Some s when streaming ->
                 s.pending <- Pending_async { id; async = j } :: s.pending;
                 assoc []

@@ -1022,8 +1022,9 @@ module Private : sig
       installed by the first [Action.call] or island form submit, and a call
       before it raises [Failure]. *)
 
-  val server_rendering : bool ref
-  (** When true, [Effect.after] and [Effect.before] do nothing. *)
+  val server_rendering : unit -> bool
+  (** True during a server render on this domain; then [Effect.after] and
+      [Effect.before] do nothing. *)
 
   type platform = {
     target_value : Event.t -> string;
@@ -1401,9 +1402,10 @@ module Server : sig
       because the browser hydrates nothing else. The function builds the tree
       with effects off, so component bodies do not run effects.
 
-      Run one server render at a time per process. Renders that overlap on
-      system threads or domains share state, and each of them raises
-      [Failure]. A render inside another on the same thread is allowed. *)
+      Renders on different domains can run at the same time. Run one
+      server render at a time per domain: renders that overlap on system
+      threads of one domain share state, and each of them raises [Failure].
+      A render inside another on the same thread is allowed. *)
 
   type context
   (** The request that runs an action, a form action or a live [allow]. *)

@@ -239,7 +239,7 @@ module Private = struct
 
   let owned f =
     let o = Base.new_owner () in
-    let parent = !Base.current_owner in
+    let parent = !(Base.current_owner ()) in
     let id =
       Option.map
         (fun p -> (p, Base.add_disposer p (fun () -> Base.dispose_owner o)))
@@ -260,16 +260,16 @@ module Private = struct
   let with_context bindings f =
     let o = Base.new_owner () in
     o.env <- add_bindings bindings o.env;
-    Option.iter (fun p -> ignore (Base.add_disposer p (fun () -> Base.dispose_owner o))) !Base.current_owner;
+    Option.iter (fun p -> ignore (Base.add_disposer p (fun () -> Base.dispose_owner o))) !(Base.current_owner ());
     Base.with_owner o f
 
-  let server_rendering = Base.server_rendering
+  let server_rendering () = !(Base.server_rendering ())
   let platform = Platform.platform
   let entry_name (e : Island.entry) = e.name
   let entry_decode (e : Island.entry) j = e.decode j
 
   let owner_size () =
-    match !Base.current_owner with
+    match !(Base.current_owner ()) with
     | Some o -> Base.owner_size o
     | None -> 0
 

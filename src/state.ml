@@ -7,7 +7,7 @@ let get = Signal.get
 let peek = Signal.peek
 
 let set (s : _ t) value =
-  Web.check_state_write s.node;
+  Scheduler.check_write s.node;
   Signal.set s value
 
 let update s f = set s (f s.value)
@@ -78,7 +78,7 @@ let deferred ?equal (source : (_, _) signal) =
           queued := true
         end;
         false);
-    watch.owner <- !Base.current_owner;
+    watch.owner <- !(Base.current_owner ());
     Base.own (fun () ->
         live := false;
         Scheduler.dispose watch);

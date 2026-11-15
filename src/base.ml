@@ -14,8 +14,10 @@ type owner = Scheduler.owner = {
 }
 
 let current_owner : owner option ref = ref None
+let current_owner () = Scheduler.here current_owner (fun d -> d.owner)
 
 let new_owner () =
+  let current_owner = current_owner () in
   { last = None; gen = 0;
     catch = (match !current_owner with Some o -> o.catch | None -> None);
     env = (match !current_owner with Some o -> o.env | None -> Scheduler.Empty);
@@ -38,11 +40,12 @@ let remove_disposer o c =
   end
 
 let own dispose =
-  match !current_owner with
+  match !(current_owner ()) with
   | Some o -> ignore (add_disposer o dispose)
   | None -> ()
 
 let with_owner o f =
+  let current_owner = current_owner () in
   let prev = !current_owner in
   current_owner := Some o;
   match f () with
@@ -84,10 +87,11 @@ let mount f =
       raise e
 
 let server_rendering = ref false
+let server_rendering () = Scheduler.here server_rendering (fun d -> d.rendering)
 let in_frame = ref false
 
 let run_effect queue ?cleanup body =
-  if !server_rendering then () else
+  if !(server_rendering ()) then () else
   let child = new_owner () in
   let last = ref None in
   let teardown () =
@@ -99,7 +103,7 @@ let run_effect queue ?cleanup body =
         finish ()
   in
   let node =
-    Scheduler.make (Some queue) (fun () ->
+    Scheduler.make (Some (Scheduler.mine queue)) (fun () ->
         teardown ();
         let result = with_owner child body in
         (match cleanup with
@@ -112,9 +116,10 @@ let run_effect queue ?cleanup body =
     teardown ()
   in
   node.owner <- Some child;
-  if queue == Scheduler.late && !Scheduler.depth > 0 then begin
+  if queue == Scheduler.late && !(Scheduler.depth ()) > 0 then begin
     node.state <- 2;
-    Scheduler.late := node :: !Scheduler.late;
+    let late = Scheduler.mine queue in
+    late := node :: !late;
     own stop
   end
   else

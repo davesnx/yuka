@@ -31,11 +31,17 @@ let in_parallel f g =
   Thread.join tg;
   (!x, !y)
 
+let in_domains f g =
+  step := 0;
+  let df = Domain.spawn f and dg = Domain.spawn g in
+  let x = Domain.join df in
+  (x, Domain.join dg)
+
 let page () = element "p" [] [ text "B"; hole (fun () -> text "b") ]
 let page_html = Server.to_string page
 
 let clean name =
-  check (name ^ ": server_rendering after") (not !Private.server_rendering) "true";
+  check (name ^ ": server_rendering after") (not (Private.server_rendering ())) "true";
   let probe = Yuka.State.make 0 in
   ignore (Yuka.State.get probe);
   check (name ^ ": a top-level State.get is not tracked") (not (Private.has_readers probe)) "tracked";
@@ -95,6 +101,55 @@ let owner_cursor () =
   check "owner on another thread: the owner" (o = Ok "") (show o);
   clean "owner on another thread"
 
+let domains_interleaved () =
+  let a, b =
+    in_domains
+      (fun () ->
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+        go 3;
+        r)
+      (fun () ->
+        wait 1;
+        outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))
+  in
+  check "interleaved on two domains: A" (a = Ok "<p>a</p>") (show a);
+  check "interleaved on two domains: B" (b = Ok "<p>b</p>") (show b);
+  clean "interleaved on two domains"
+
+let domains_memo_and_owner () =
+  let a, m =
+    in_domains
+      (fun () ->
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+        go 3;
+        r)
+      (fun () ->
+        wait 1;
+        let (), dispose = owner (fun () -> ignore (Yuka.State.get (Yuka.State.memo (fun () -> go 2; wait 3; 7)))) in
+        dispose ();
+        Ok "")
+  in
+  check "memo and owner on another domain: the render" (a = Ok "<p>a</p>") (show a);
+  check "memo and owner on another domain: the owner" (m = Ok "") (show m);
+  clean "memo and owner on another domain"
+
+let threads_in_a_domain () =
+  let a, b =
+    Domain.join
+      (Domain.spawn (fun () ->
+           in_parallel
+             (fun () ->
+               let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+               go 3;
+               r)
+             (fun () ->
+               wait 1;
+               outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))))
+  in
+  check "interleaved threads in one other domain: A raises" (overlapped a) (show a);
+  check "interleaved threads in one other domain: B raises" (overlapped b) (show b);
+  clean "interleaved threads in one other domain"
+
 let nested () =
   let inner = ref "" in
   let html =
@@ -132,4 +187,7 @@ let () =
   interleaved ();
   listener ();
   owner_cursor ();
-  if !failed then exit 1 else print_endline "overlap: interleaved renders raise, nested and sequential renders do not"
+  domains_interleaved ();
+  domains_memo_and_owner ();
+  threads_in_a_domain ();
+  if !failed then exit 1 else print_endline "overlap: interleaved renders on threads of one domain raise; nested, sequential and other-domain renders do not"

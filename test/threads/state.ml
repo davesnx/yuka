@@ -108,6 +108,7 @@ let run mode lock domains threads rounds =
   check (mode ^ ": HTML") (Atomic.get wrong = 0) (Printf.sprintf "%d of %d renders" (Atomic.get wrong) renders);
   check (mode ^ ": exceptions") (Atomic.get raised = 0) (Printf.sprintf "%d of %d renders" (Atomic.get raised) renders);
   Option.iter (Printf.printf "  first: %s\n") (Atomic.get sample);
+  if threads = 1 then check (mode ^ ": no overlap between domains") (Atomic.get overlaps = 0) (string_of_int (Atomic.get overlaps));
   if lock then
     check (mode ^ ": one log per caught memo failure") (Atomic.get logged = !failing)
       (Printf.sprintf "%d logs for %d failing renders" (Atomic.get logged) !failing);
@@ -123,6 +124,7 @@ let () =
       run "domains" true 4 4 5_000;
       run "threads, no lock" false 1 16 10_000;
       run "domains, no lock" false 4 4 1_000;
-      check "after the overlaps: server_rendering" (not !Private.server_rendering) "true";
+      run "one thread per domain, no lock" false 8 1 5_000;
+      check "after the overlaps: server_rendering" (not (Private.server_rendering ())) "true";
       check "after the overlaps: a render" (render 1 = expected_html 1) (render 1));
   if !failed then exit 1

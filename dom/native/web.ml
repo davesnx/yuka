@@ -3,13 +3,6 @@ type event = unit
 type 'a promise = unit
 
 let in_browser = false
-let last_module_node = ref (-1)
-let seal_states () = if !last_module_node < 0 then last_module_node := !Scheduler.ids
-
-let check_state_write (n : Scheduler.node) =
-  if n.id <= !last_module_node then
-    invalid_arg
-      "Yuka.State: a write to a State made at module level, before the first server render or request. The server process has one copy for every request. Create the State inside a component."
 
 let browser_only () = failwith "Yuka: browser only"
 
@@ -366,6 +359,11 @@ let take_buffer () =
       | [] -> None)
 
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
+
+type 'a local = 'a Domain.DLS.key
+
+let local f = Domain.DLS.new_key f
+let local_get = Domain.DLS.get
 let lowercase = String.lowercase_ascii
 let refuse_url_name name =
   let bad c = c <= ' ' || c = '\127' || c = '"' || c = '\'' || c = '>' || c = '/' || c = '=' || c = '<' in

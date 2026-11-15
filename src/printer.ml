@@ -183,7 +183,7 @@ open Base
     t.ops
 
   let kept_buffer = 262_144
-  let rendering = Atomic.make 0
+  let rendering = Web.local (fun () -> Atomic.make 0)
 
   let rec print ?env s build =
     let owner = new_owner () in
@@ -558,12 +558,15 @@ open Base
           end)
         (items ())
     in
+    let server_rendering = server_rendering () and current_session = current_session () in
+    let current_owner = current_owner () and listener = Scheduler.listener () in
+    let rendering = Web.local_get rendering in
     let previous = !server_rendering in
     let previous_session = !current_session in
-    let previous_listener = !Scheduler.listener in
+    let previous_listener = !listener in
     Atomic.incr rendering;
     server_rendering := true;
-    Web.seal_states ();
+    Scheduler.seal ();
     current_session := Some s;
     let restore () =
       let others = Atomic.fetch_and_add rendering (-1) > 1 in
@@ -573,18 +576,18 @@ open Base
     let owned () = match !current_owner with Some o -> o == owner | None -> false in
     let kept () =
       !server_rendering
-      && !Scheduler.listener == previous_listener
+      && !listener == previous_listener
       && match !current_session with Some c -> c == s | None -> false
     in
     let overlap () =
       server_rendering := Atomic.fetch_and_add rendering (-1) > 1;
       current_session := None;
-      Scheduler.listener := None;
+      listener := None;
       current_owner := None;
       dispose_owner owner;
       release ();
       failwith
-        "Yuka.Server: two server renders overlapped: while this render ran, a render or a memo on another thread or domain changed the state that they share. Run one server render at a time per process, for example under a Mutex."
+        "Yuka.Server: two server renders overlapped: while this render ran, a render or a memo on another thread of the same domain changed the state that they share. Run one server render at a time per domain, for example under a Mutex."
     in
     (match with_owner owner (fun () -> go (build ()); owned ()) with
     | true when kept () ->

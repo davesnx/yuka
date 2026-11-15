@@ -3,8 +3,6 @@ type event
 type 'a promise
 
 val in_browser : bool
-val check_state_write : Scheduler.node -> unit
-val seal_states : unit -> unit
 val window : unit -> node
 val document : unit -> node
 val owner_document : node -> node
@@ -146,5 +144,10 @@ val add_stylesheet : string -> unit
 val read_file : string -> string option
 val take_buffer : unit -> Buffer.t option
 val give_buffer : Buffer.t -> unit
+
+type 'a local
+
+val local : (unit -> 'a) -> 'a local
+val local_get : 'a local -> 'a
 val lowercase : string -> string
 val refuse_url_name : string -> unit

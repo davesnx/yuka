@@ -37,7 +37,7 @@ let find_added key nodes =
        (Array.to_list nodes))
 
 let slot key =
-  match !Types.current_session with
+  match !(Types.current_session ()) with
   | Some s when s.depth > 0 && not (List.mem key s.answered) ->
       s.answered <- key :: s.answered;
       Some s

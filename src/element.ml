@@ -48,7 +48,7 @@ type stylesheet = string
 let stylesheet href = href
 
 let use_css href body =
-  if !Base.server_rendering then
+  if !(Base.server_rendering ()) then
     Kind.of_node
       (Fragment
          [ Kind.to_node (element "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] []);
@@ -83,7 +83,7 @@ let suspend ~loading ?failed async =
 module Catch = struct
   let make ~fallback ~children () =
     let client at =
-      let outer = Option.bind !Base.current_owner (fun o -> o.catch) in
+      let outer = Option.bind !(Base.current_owner ()) (fun o -> o.catch) in
       let failed =
         match at with
         | Some n ->
@@ -99,7 +99,7 @@ module Catch = struct
       in
       Hole
         (fun () ->
-          let o = Option.get !Base.current_owner in
+          let o = Option.get !(Base.current_owner ()) in
           match State.get error with
           | Some m -> show o m
           | None -> (
@@ -117,7 +117,7 @@ module Catch = struct
 end
 
 let context_env () =
-  match !Base.current_owner with
+  match !(Base.current_owner ()) with
   | Some o -> o.env
   | None -> ( match !Client.acting with Some o -> o.env | None -> Scheduler.Empty)
 
@@ -133,7 +133,7 @@ let provide_bindings bindings children =
   let client _ =
     Hole
       (fun () ->
-        let o = Option.get !Base.current_owner in
+        let o = Option.get !(Base.current_owner ()) in
         o.env <- add o.env;
         Kind.to_node (Scheduler.untrack children))
   in

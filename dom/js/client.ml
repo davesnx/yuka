@@ -301,9 +301,9 @@ let delegate doc event =
   end
 
 let add_handler doc el event handler =
-  let owner = match !Base.current_owner with Some o -> o | None -> Base.new_owner () in
+  let owner = match !(Base.current_owner ()) with Some o -> o | None -> Base.new_owner () in
   if non_bubbling event then begin
-    let handler = acting_as !Base.current_owner handler in
+    let handler = acting_as !(Base.current_owner ()) handler in
     let handler ev = ignore (handle owner handler ev) in
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
@@ -818,7 +818,7 @@ let transport name input =
             match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
             | Some (o, _) -> tie o
             | None -> abort ())
-    | None -> Option.iter tie !Base.current_owner
+    | None -> Option.iter tie !(Base.current_owner ())
   end;
   result
 
