@@ -1,5 +1,5 @@
 .insights { min-width: 0; }
-.note { color: var(--muted); font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.note { color: var(--muted); font-size: 13px; font-weight: 400; }
 
 .controls { display: flex; flex-direction: column; gap: 8px; padding: 10px 19px; border-bottom: 1px solid var(--border); }
 .control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -29,6 +29,8 @@
 
 .dates { display: contents; }
 .dates-label { color: var(--muted); }
+.dates-day { min-width: 6ch; text-align: right; }
+.arrow ~ .dates-day { text-align: left; }
 .arrow { font-size: 0; }
 .arrow::before { content: "\2192"; font-size: 13px; color: var(--muted); }
 .dates-menu {
@@ -54,7 +56,7 @@
 .chart { display: block; width: 100%; height: auto; overflow: visible; font-size: 11px; will-change: transform; }
 .chart text { fill: var(--muted); }
 .axis { fill: var(--muted); }
-.chart .amount { fill: var(--text); font-variant-numeric: tabular-nums; }
+.chart .amount { fill: var(--text); }
 .grid { stroke: var(--border); stroke-width: 1; }
 .mark { cursor: pointer; }
 .mark:hover > rect:not(.hit) { filter: brightness(1.25); }
@@ -74,12 +76,12 @@
 
 .bound { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .bound-label { width: 36px; flex: none; }
-.bound-date { width: 48px; flex: none; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.bound-date { width: 48px; flex: none; text-align: right; color: var(--text); }
 .slider { flex: 1; min-width: 0; margin: 0; accent-color: var(--accent); }
 
 .hud {
   position: fixed; right: 12px; bottom: 12px; z-index: 5; box-sizing: border-box; width: 260px;
-  max-width: calc(100vw - 24px); padding: 6px 6px 6px 12px; font-size: 12px; font-variant-numeric: tabular-nums;
+  max-width: calc(100vw - 24px); padding: 6px 6px 6px 12px; font-size: 12px;
   color: var(--text); background: color-mix(in srgb, var(--bg-menu) 88%, transparent);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow);

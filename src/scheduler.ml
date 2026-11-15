@@ -5,10 +5,14 @@ type cell = {
   mutable live : bool;
 }
 
+type binding = ..
+type env = Empty | Bound of binding * env | Island of env | Root of string
+
 type owner = {
   mutable last : cell option;
   mutable gen : int;
   mutable catch : (exn -> unit) option;
+  mutable env : env;
   parent : owner option;
 }
 
@@ -39,14 +43,60 @@ and link = {
   mutable at : int;
 }
 
+let js = Obj.is_int (Obj.repr 0.5)
 let ids = ref 0
+let sealed = ref (-1)
+let seal () = if (not js) && !sealed < 0 then sealed := !ids
 let stack = ref 0
 let listener = ref None
 let queue = ref []
 let late = ref []
 let depth = ref 0
 let writes = ref 0
+let later = ref ignore
+
+type domain = {
+  stack : int ref;
+  listener : node option ref;
+  queue : node list ref;
+  late : node list ref;
+  depth : int ref;
+  writes : int ref;
+  later : (unit -> unit) ref;
+  owner : owner option ref;
+  rendering : bool ref;
+}
+
+let key =
+  if js then None
+  else
+    Some
+      (Web.local (fun () ->
+           {
+             stack = ref 0;
+             listener = ref None;
+             queue = ref [];
+             late = ref [];
+             depth = ref 0;
+             writes = ref 0;
+             later = ref ignore;
+             owner = ref None;
+             rendering = ref false;
+           }))
+
+let here r f = match key with Some k when not js -> f (Web.local_get k) | _ -> r
+let stack () = here stack (fun d -> d.stack)
+let listener () = here listener (fun d -> d.listener)
+let mine q = here q (fun d -> if q == late then d.late else d.queue)
+let depth () = here depth (fun d -> d.depth)
+let writes () = here writes (fun d -> d.writes)
+let later () = here later (fun d -> d.later)
 let never () = false
+
+let check_write n =
+  if (not js) && n.id <= !sealed then
+    invalid_arg
+      "Yuka.State: a write to a State made at module level, before the first server render or request. The server process has one copy for every request. Create the State inside a component."
 
 let make eff fn =
   incr ids;
@@ -61,7 +111,7 @@ let make eff fn =
     level = 0;
     runs = 0;
     owner = None;
-    depth = !stack;
+    depth = !(stack ());
     id = !ids;
     eff;
   }
@@ -94,8 +144,8 @@ let append dst l =
   dst.tail <- Some l
 
 let track src =
-  match !listener with
-  | Some dst when dst.state <> 3 -> (
+  match !(listener ()) with
+  | Some dst when dst.state <> 3 && (js || src.id > !sealed) -> (
       match (dst.rest, src.last) with
       | Some l, _ when l.src == src ->
           dst.rest <- l.dep;
@@ -109,6 +159,7 @@ let track src =
   | _ -> ()
 
 let with_listener n f =
+  let listener = listener () in
   let prev = !listener in
   listener := n;
   match f () with
@@ -154,6 +205,7 @@ let rec run n =
   n.tail <- None;
   n.runs <- n.runs + 1;
   n.state <- 0;
+  let stack = stack () in
   let outer = !stack in
   stack := n.depth + 1;
   let changed =
@@ -183,6 +235,7 @@ and settle left n =
   if n.state <> 0 && n.state <> 3 then
     try
       if n.state = 1 then begin
+        let writes = writes () in
         let before = !writes in
         let rec check = function
           | Some l when n.state = 1 ->
@@ -220,7 +273,7 @@ let rec stale n =
   in
   go n.head
 
-let before a b =
+let before (a : node) (b : node) =
   a.depth < b.depth
   || a.depth = b.depth
      && (a.level < b.level || (a.level = b.level && a.id > b.id))
@@ -245,10 +298,11 @@ let rec sort = function
       merge [] (sort a) (sort b)
 
 let flush () =
-  depth := 1;
+  depth () := 1;
   let error = ref None and rounds = ref 0 in
   let fail e = match !error with None -> error := Some e | Some _ -> () in
   let rec round () =
+    let queue = mine queue and late = mine late in
     (match !queue with
     | [] ->
         queue := !late;
@@ -288,12 +342,11 @@ let flush () =
         round ()
   in
   round ();
-  depth := 0;
+  depth () := 0;
   match !error with Some e -> raise e | None -> ()
 
-let later = ref ignore
-
 let after f =
+  let depth = depth () and later = later () in
   if !depth = 0 then f ()
   else
     let g = !later in
@@ -301,21 +354,24 @@ let after f =
 
 let flush_all () =
   flush ();
+  let later = later () in
   let g = !later in
   later := ignore;
   g ()
 
 let changed n =
+  let writes = writes () and depth = depth () in
   incr writes;
   mark n 2;
   if !depth = 0 then flush_all ()
 
 let finish () =
+  let depth = depth () in
   decr depth;
   if !depth = 0 then flush_all ()
 
 let batch f =
-  incr depth;
+  incr (depth ());
   match f () with
   | v ->
       finish ();
@@ -325,4 +381,4 @@ let batch f =
       raise e
 
 let fresh n =
-  if n.state <> 0 then if !depth = 0 then batch (fun () -> settle 100 n) else settle 100 n
+  if n.state <> 0 then if !(depth ()) = 0 then batch (fun () -> settle 100 n) else settle 100 n

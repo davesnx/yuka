@@ -1,6 +1,7 @@
 open Types
 
 let current_key = ref ""
+let shown_key = ref ""
 let loaded = Platform.loaded
 let on = ref false
 let router : router option ref = ref None
@@ -151,7 +152,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
   Platform.client_navigate := Some navigate;
   match !router with
   | Some r -> r.boot !settings
-  | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch][content=visible]") > 0 ->
+  | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch][content=visible],meta[name=yuka-prefetch][content=idle]") > 0 ->
       use ignore
   | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch]") = 0 ->
       Web.add_listener doc "pointermove" on_move

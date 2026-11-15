@@ -70,5 +70,5 @@
 
 let mismatch what (j : t) =
   let s = to_string j in
-  let s = if String.length s > 40 then String.sub s 0 40 ^ "..." else s in
+  let s = if String.length s > 40 then Web.sub s 0 40 ^ "..." else s in
   Error ("expected " ^ what ^ ", got " ^ s)

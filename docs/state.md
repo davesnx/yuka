@@ -226,6 +226,97 @@ effect is stopped before the outer effect runs again.
 `Yuka.owner body` runs `body` and returns a function that stops everything `body`
 created. Use it for effects that must live outside a component.
 
+## Context
+
+A context gives a value to every component below one place of the page,
+with no argument on the components between. Make the context one time, at
+the top of a module, and write its type:
+
+```ocaml
+let theme : Theme.t Yuka.State.read Yuka.Context.t = Yuka.Context.make ~name:"theme" ()
+```
+
+Give a value with the `<Yuka.Context.Provide>` tag:
+
+```ocaml
+let page () =
+  <Yuka.Context.Provide of_=theme value=dark>
+    <Layout> <Save /> </Layout>
+  </Yuka.Context.Provide>
+```
+
+Read it in a component below:
+
+```ocaml
+let save () =
+  let theme = Yuka.Context.get_exn theme in
+  <button class_=(Theme.button (Yuka.State.get theme))> "Save" </button>
+```
+
+`Yuka.Context.get` gives `None` when no component above gave a value.
+`Yuka.Context.get_exn` raises `Invalid_argument` with the name of the
+context. The nearest `Provide` above wins.
+
+The value is fixed. To give a value that changes, give a State, as above.
+A change then runs the holes that read the State, and no component runs
+again.
+
+Call `get` in the component body and keep the result. A timer and an
+`Async` callback run outside the page, so `get` gives `None` there.
+
+Without mlx, `Yuka.Context.provide theme dark (fun () -> children)` is the
+same as the tag. `Yuka.Context.provide_all [ Yuka.Context.bind a x;
+Yuka.Context.bind b y ] (fun () -> children)` gives several values in one
+call.
+
+The tag passes its children as a function, so the components inside it run
+after the value is given. A component that receives `children` as an
+argument gets them already built: if it calls `provide` around them, their
+holes read the value and their component bodies do not. Use the tag at
+the place where the children are written.
+
+### Contexts that reach islands
+
+An island reads what a component inside the island gave. A value that the
+page gives reaches the islands below it only when the context has a codec:
+
+```ocaml
+let theme : Theme.t Yuka.Context.t =
+  Yuka.Context.make ~name:"theme" ~codec:Theme.codec ()
+```
+
+The server writes the value into the HTML one time for each `Provide`, the
+first time it prints an island below it. In the browser, the first
+`Yuka.Context.get theme` in an island decodes that value, so hydration
+shows what the server printed. Islands under the same `Provide` share the
+decoded value. A context with a codec needs a `~name` of `a-z`, `0-9`, `.`,
+`_` and `-`; it is the key of the value in the HTML, so give each context
+its own name. `make` raises `Invalid_argument` without one.
+
+Everybody who loads the page can read the value. Do not give a secret, and
+do not use it to decide what a user may do: guards, loaders and actions
+check the user from the request again.
+
+A context without a codec does not reach an island: `get` gives `None`
+there, and `get_exn` says that the context has no codec.
+
+A value that must follow a client navigation is a State, with
+`Yuka.Codec.state`:
+
+```ocaml
+let user : User.t Yuka.State.read Yuka.Context.t =
+  Yuka.Context.make ~name:"user" ~codec:(Yuka.Codec.state User.codec) ()
+```
+
+The browser keeps one State for each `Provide`. When a client navigation
+renders that `Provide` again with a new value, the State gets the value
+before the new islands start, so an island that keeps running (in a layout)
+shows it, and only the holes that read the State run again. With a plain
+codec, an island keeps the value of its first read.
+
+The route of the page is such a context; read it with `Routes.current`. See
+[Router](router.md).
+
 ## On the server
 
 The server calls the component one time to print HTML.

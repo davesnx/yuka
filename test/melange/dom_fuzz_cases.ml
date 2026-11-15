@@ -46,6 +46,8 @@ type tree =
   | Button of int * int
   | Key
   | Val
+  | Provide of int * int * tree list
+  | Ctx of int
 
 and attr = Fixed of string * string | Dyn of string * expr
 
@@ -61,6 +63,7 @@ type features = {
   stop : bool;
   hydrate : bool;
   row_raise : bool;
+  context : bool;
 }
 
 let base =
@@ -76,6 +79,7 @@ let base =
     stop = false;
     hydrate = false;
     row_raise = false;
+    context = false;
   }
 
 type spec = {
@@ -126,6 +130,8 @@ let rec show_tree = function
   | Button (id, s) -> Printf.sprintf "button%d(s%d)" id s
   | Key -> "key"
   | Val -> "val"
+  | Provide (c, v, kids) -> Printf.sprintf "provide c%d=%d(%s)" c v (show_trees kids)
+  | Ctx s -> Printf.sprintf "ctx(s%d)" s
 
 and show_trees l = String.concat " " (List.map show_tree l)
 
@@ -157,17 +163,23 @@ let gen_spec g f =
   let rec node ~depth ~holes ~guarded ~safe ~in_row ~lists =
     decr budget;
     let leaf () =
-      match int g 6 with
-      | 0 -> Txt words.(int g (Array.length words))
-      | 1 when in_row -> if chance g 50 then Key else Val
-      | 2 when guarded && f.catch -> Bomb (int g n_ints, int g 4)
-      | 3 when f.events -> button ()
-      | _ -> Show (int g 4, expr ())
+      if f.context && chance g 35 then Ctx (int g n_ints)
+      else
+        match int g 6 with
+        | 0 -> Txt words.(int g (Array.length words))
+        | 1 when in_row -> if chance g 50 then Key else Val
+        | 2 when guarded && f.catch -> Bomb (int g n_ints, int g 4)
+        | 3 when f.events -> button ()
+        | _ -> Show (int g 4, expr ())
     in
     let kids ?(holes = holes) ?(guarded = guarded) ?(safe = safe) ?(in_row = in_row) ?(lists = lists) () =
       list (int g 4) (fun () -> node ~depth:(depth + 1) ~holes ~guarded ~safe ~in_row ~lists)
     in
     if depth > 4 || !budget <= 0 then leaf ()
+    else if f.context && chance g 25 then
+      let c = int g 2 in
+      let v = int g 6 in
+      Provide (c, v, kids ())
     else
       match int g 12 with
       | 0 | 1 | 2 ->
@@ -247,6 +259,7 @@ type world = {
   mutable client_catches : int;
   mutable after_snaps : (node * string) list;
   mutable violations : string list;
+  mutable ctx_fails : (string * string * string) list;
   mutable step : int;
   mutable ops : string list;
   live : node;
@@ -254,7 +267,15 @@ type world = {
   mutable next_tag : int;
 }
 
-type env = { w : world; mode : mode; root : node; memos : int State.read array; path : string; row : (int * int) option }
+type env = {
+  w : world;
+  mode : mode;
+  root : node;
+  memos : int State.read array;
+  path : string;
+  row : (int * int) option;
+  given : int option array;
+}
 
 type stats = {
   mutable kept : int;
@@ -276,6 +297,23 @@ let fail w check what expected observed =
        (Printf.sprintf "seed %d step %d check %s: %s: expected %s, observed %s\ntree: %s\nops: %s"
           w.seed w.step check what expected observed (show_trees w.spec.tree)
           (String.concat "; " (List.rev w.ops))))
+
+let contexts : int Context.t array = [| Context.make ~name:"c0" (); Context.make ~name:"c1" () |]
+let ctx_now () = Array.map Context.get contexts
+
+let show_ctx a =
+  String.concat "," (Array.to_list (Array.map (function None -> "-" | Some v -> string_of_int v) a))
+
+let read_ctx env place =
+  let seen = ctx_now () in
+  if seen <> env.given then
+    env.w.ctx_fails <-
+      ( Printf.sprintf "%s at %s (%s)" place (if env.path = "" then "/" else env.path)
+          (match env.mode with Live -> "live" | Shadow -> "fresh render" | Server -> "server"),
+        show_ctx env.given,
+        show_ctx seen )
+      :: env.w.ctx_fails;
+  seen
 
 let memo_fn a b = (a * 3) + b
 let eval env = function St i -> State.get env.w.ints.(i) | Memo i -> State.get env.memos.(i)
@@ -331,6 +369,7 @@ let new_inst env path effs =
 let start_effect env inst k e =
   let w = env.w in
   let body () =
+    ignore (read_ctx env (Printf.sprintf "effect %d of %s" k inst.ipath));
     let vals = List.map (eval env) e.reads in
     inst.runs.(k) <- inst.runs.(k) + 1;
     inst.last_ok.(k) <- false;
@@ -378,6 +417,7 @@ let rec build env t : client element =
           let v = State.get w.ints.(s) in
           let side = if v mod 2 = 0 then "a" else "b" in
           let env = { env with path = Printf.sprintf "%s/s%d%s" env.path id side } in
+          ignore (read_ctx env "switch side");
           fragment (List.map (build env) (if v mod 2 = 0 then a else b)))
   | Comp (id, effs, raises, kids) ->
       let path = Printf.sprintf "%s/c%d" env.path id in
@@ -395,6 +435,7 @@ let rec build env t : client element =
         (fun (k, v) ->
           let path = Printf.sprintf "%s/l%d:%d" env.path id k in
           let env = { env with path; row = Some (k, v) } in
+          ignore (read_ctx env "row");
           let li () = element "article" [ attr "data-row" path ] (List.map (build env) kids) in
           match shape with
           | 0 -> li ()
@@ -406,6 +447,7 @@ let rec build env t : client element =
       Catch.make
         ~fallback:(fun ~error ~reset ->
           let error = if replay then Hashtbl.find w.caught path else error in
+          ignore (read_ctx { env with path } "catch fallback");
           if env.mode = Live then begin
             Hashtbl.replace w.caught path error;
             w.guard_events <- w.guard_events + 1;
@@ -415,6 +457,7 @@ let rec build env t : client element =
           element "p" [ attr "data-fallback" path; on "click" (fun _ -> reset ()) ] [ text ("caught " ^ error) ])
         ~children:(fun () ->
           if replay then raise Replay;
+          ignore (read_ctx { env with path } "catch children");
           if env.mode = Live then begin
             Hashtbl.remove w.caught path;
             w.guard_events <- w.guard_events + 1
@@ -428,10 +471,23 @@ let rec build env t : client element =
   | Button (id, s) ->
       element "button"
         [ attr "data-b" (Printf.sprintf "%s/b%d" env.path id);
-          on "click" (fun _ -> write_int w s (State.peek w.ints.(s) + 1)) ]
+          on "click" (fun _ ->
+              ignore (read_ctx env (Printf.sprintf "click handler of b%d" id));
+              write_int w s (State.peek w.ints.(s) + 1)) ]
         [ text "+" ]
   | Key -> text (match env.row with Some (k, _) -> "k" ^ string_of_int k | None -> "?")
   | Val -> text (match env.row with Some (_, v) -> "v" ^ string_of_int v | None -> "?")
+  | Provide (c, v, kids) ->
+      let given = Array.copy env.given in
+      given.(c) <- Some v;
+      let env = { env with given } in
+      Context.provide contexts.(c) v (fun () -> fragment (List.map (build env) kids))
+  | Ctx s ->
+      let seen = read_ctx env "component function" in
+      hole (fun () ->
+          let v = State.get w.ints.(s) in
+          let now = read_ctx env "hole" in
+          text (Printf.sprintf "r%s/%s:%d" (show_ctx seen) (show_ctx now) v))
 
 let root env =
   let w = env.w in
@@ -442,7 +498,7 @@ let root env =
   in
   element "main" [] (List.map (build { env with memos }) w.spec.tree)
 
-let env w mode root = { w; mode; root; memos = [||]; path = ""; row = None }
+let env w mode root = { w; mode; root; memos = [||]; path = ""; row = None; given = [| None; None |] }
 
 let canonical : node -> string =
   [%mel.raw
@@ -462,6 +518,11 @@ let restore_log () =
       let name = match level with `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug" in
       if level <> `Debug then prerr_endline ("yuka: " ^ name ^ " " ^ message))
 
+let check_context w =
+  (match List.rev w.ctx_fails with (place, want, seen) :: _ -> fail w "7 context" place want seen | [] -> ());
+  let outside = ctx_now () in
+  if outside <> [| None; None |] then fail w "7 context" "Context.get outside a render" "-,-" (show_ctx outside)
+
 let mount w g =
   w.after_snaps <- [];
   if w.feats.hydrate then begin
@@ -470,6 +531,7 @@ let mount w g =
       Fun.protect ~finally:restore_log (fun () ->
           Private.render_html (fun () -> Private.node (root (env w Server w.live))))
     in
+    check_context w;
     Dom_cases.set_html w.live server;
     let catches = w.client_catches in
     Dom_cases.capture_warnings ();
@@ -635,6 +697,7 @@ let check_shadow w =
 
 let check_step w pre ~stopped =
   (match w.violations with v :: _ -> fail w "3 cleanups" "cleanup argument" "the result of the previous run" v | [] -> ());
+  check_context w;
   let live = html w.live in
   if w.guard_events = pre.events then
     List.iter
@@ -644,7 +707,8 @@ let check_step w pre ~stopped =
       w.after_snaps;
   check_rows w pre ~stopped;
   check_instances w pre ~stopped;
-  check_shadow w
+  check_shadow w;
+  check_context w
 
 type op =
   | Set of int * int
@@ -796,6 +860,7 @@ let execute f seed ~steps =
       client_catches = 0;
       after_snaps = [];
       violations = [];
+      ctx_fails = [];
       step = 0;
       ops = [];
       live;
@@ -863,6 +928,11 @@ let effects_switch = { base with effects = true; switch = true }
 let catch_effects = { base with effects = true; catch = true; lists = true; nested = true }
 let hydrate_events = { base with hydrate = true; events = true }
 let row_raise = { catch_effects with row_raise = true }
+let context = { base with context = true }
+let context_lists = { base with context = true; lists = true; nested = true; effects = true; batches = true }
+let context_switch = { base with context = true; switch = true; effects = true; events = true }
+let context_catch = { base with context = true; catch = true; effects = true; lists = true; nested = true; events = true }
+let context_hydrate = { base with context = true; hydrate = true; switch = true; lists = true; events = true }
 
 let every =
   {
@@ -877,6 +947,7 @@ let every =
     stop = true;
     hydrate = false;
     row_raise = false;
+    context = true;
   }
 
 let every_hydrate = { every with hydrate = true }
@@ -930,6 +1001,11 @@ let all =
     ("dom fuzz: stop", seeds stop ~from:1 ~upto:20);
     ("dom fuzz: hydrate", seeds hydrate ~from:1 ~upto:30);
     ("dom fuzz: hydrate with events", seeds hydrate_events ~from:1 ~upto:20);
+    ("dom fuzz: context", seeds context ~from:1 ~upto:20);
+    ("dom fuzz: context in lists", seeds context_lists ~from:1 ~upto:10);
+    ("dom fuzz: context in switches", seeds context_switch ~from:1 ~upto:10);
+    ("dom fuzz: context in catch", seeds context_catch ~from:1 ~upto:10);
+    ("dom fuzz: context with hydration", seeds context_hydrate ~from:1 ~upto:10);
     ("dom fuzz: every feature", seeds every ~from:1 ~upto:12);
     ("dom fuzz: every feature with hydration", seeds every_hydrate ~from:1 ~upto:12);
     ("dom fuzz: a row that raises on first mount stops the rows before it", row_raise_leak ~update:false);

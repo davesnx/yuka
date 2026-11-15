@@ -102,6 +102,18 @@ let save_data : unit -> bool =
   [%mel.raw
     "function () { const c = window.navigator.connection; return !!(c && c.saveData) }"]
 
+let hidden_or_slow : unit -> bool =
+  [%mel.raw
+    "function () { const c = window.navigator.connection, t = c && c.effectiveType; return document.hidden || t === '2g' || t === 'slow-2g' }"]
+
+let on_visible : (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (f) {
+  const d = document, h = function () { if (!d.hidden) f(); };
+  d.addEventListener("visibilitychange", h);
+  return function () { d.removeEventListener("visibilitychange", h); };
+}|}]
+
 let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit =
   [%mel.raw
     {|function (els, f) {

@@ -2,7 +2,7 @@ open Platform
 
 let on_window name handler = Base.own (!platform.on_window name (fun e -> Scheduler.batch (fun () -> handler e)))
 let navigate url = if Url.unsafe ~tag:"a" "href" url then Types.log "navigate" url else !platform.navigate url
-let navigating = Navigation_state.navigating
+let navigating : bool State.read = State.of_signal Navigation_state.navigating
 
 let replace_url url =
   if Url.unsafe ~tag:"a" "href" url || not (Web.same_origin url) then Types.log "replace_url" url

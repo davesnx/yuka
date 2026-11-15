@@ -3,8 +3,6 @@ type event
 type 'a promise = 'a Js.Promise.t
 
 let in_browser = true
-let check_state_write _ = ()
-let seal_states () = ()
 
 let window () : node = [%mel.raw "window"]
 external owner_document : node -> node = "ownerDocument" [@@mel.get]
@@ -508,7 +506,7 @@ let add_stylesheet : string -> unit =
 
 let read_file (_ : string) : string option = None
 
-let buffers : Buffer.t list ref = ref []
+let buffers : Stdlib.Buffer.t list ref = ref []
 
 let take_buffer () =
   match !buffers with
@@ -519,7 +517,18 @@ let take_buffer () =
 
 let give_buffer b = buffers := b :: !buffers
 
+type 'a local = 'a
+
+let local f = f ()
+let local_get v = v
+
 external lowercase : string -> string = "toLowerCase" [@@mel.send]
+let skip_clean (_ : string) i = i
+external slice : string -> int -> int -> string = "slice" [@@mel.send]
+
+let sub s offset len = slice s offset (offset + len)
+
+external of_char : char -> string = "fromCharCode" [@@mel.scope "String"]
 
 let refuse_url_name : string -> unit =
   [%mel.raw

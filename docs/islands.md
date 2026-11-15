@@ -180,8 +180,16 @@ A `<Yuka.Client>` in the children is its own island.
   Yuka.client is not compatible with type Yuka.server".
 - An island cannot contain `<Yuka.Client>` in its own markup; that is a
   type error. Pass the inner island as children, as above.
-- An island cannot read the current route or search params as a State.
-  Pass what it needs as props.
+- An island reads the route of the page as a State with
+  `Routes.current ()`, and changes it with `Routes.replace` and
+  `Routes.push`. See [Router](router.md#the-current-route).
+- An island reads a context (`Yuka.Context`) that the page gave outside it
+  only when the context has a codec; islands under one `Provide` share the
+  value. A context without a codec does not reach an island, and one
+  island does not read a context of another. Give the value inside the
+  island, pass it as a prop, or make the context with a codec. See
+  [State](state.md#contexts-that-reach-islands). The children that the page
+  passes to an island belong to the page: they read what the page gave.
 
 ## Build
 

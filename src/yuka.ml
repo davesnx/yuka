@@ -3,7 +3,11 @@ module Async = Async
 module Status = Status
 module Codec = Codec
 module State = struct include State end
-module Effect = Base.Effect
+module Effect = struct
+  include Base.Effect
+
+  let on_change = State.on_change
+end
 
 let owner = Base.mount
 let batch = Scheduler.batch
@@ -31,6 +35,10 @@ module Router = struct
   include Router
   module Param = Router_param
 end
+
+let runtime_route_current find = Route.current find
+let runtime_route_replace = Route.replace
+let runtime_route_push = Route.push
 
 module Console = struct
   let send level browser message = if Web.in_browser then browser message else Types.log_message level message
@@ -192,6 +200,10 @@ module Private = struct
   include Types
   include Printer
 
+  type env = Scheduler.env
+
+  let print s build = print s build
+
   let stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write build =
     Server.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write (Kind.fn build)
 
@@ -235,7 +247,7 @@ module Private = struct
 
   let owned f =
     let o = Base.new_owner () in
-    let parent = !Base.current_owner in
+    let parent = !(Base.current_owner ()) in
     let id =
       Option.map
         (fun p -> (p, Base.add_disposer p (fun () -> Base.dispose_owner o)))
@@ -253,17 +265,23 @@ module Private = struct
         Base.dispose_owner o;
         raise e
 
-  let server_rendering = Base.server_rendering
+  let with_context bindings f =
+    let o = Base.new_owner () in
+    o.env <- add_bindings bindings o.env;
+    Option.iter (fun p -> ignore (Base.add_disposer p (fun () -> Base.dispose_owner o))) !(Base.current_owner ());
+    Base.with_owner o f
+
+  let server_rendering () = !(Base.server_rendering ())
   let platform = Platform.platform
   let entry_name (e : Island.entry) = e.name
   let entry_decode (e : Island.entry) j = e.decode j
 
   let owner_size () =
-    match !Base.current_owner with
+    match !(Base.current_owner ()) with
     | Some o -> Base.owner_size o
     | None -> 0
 
-  let has_readers (s : _ Signal.t) = Option.is_some s.node.first
+  let has_readers s = Option.is_some (State.signal s).node.first
 
   let slot = slot
 
@@ -273,6 +291,7 @@ module Private = struct
   let slot_dom (s : slot) = s.dom
   let call_action = Types.transport
   let async_source = Types.async_source
+  let page_contexts () = !Platform.swapped != Platform.no_swap
   let render = Client.render
   let hydrate = Client.hydrate
 end

@@ -37,8 +37,8 @@ let index () =
   has html "My issues";
   has html "<a class=\"nav-link\" href=\"/\" aria-current=\"page\">Issues</a>";
   has html "<yuka-island data-name=\"Demo_shared.Issue_list\" data-id=\"i";
-  has html "<yuka-island data-name=\"Demo_shared.New_issue\" data-id=\"i3\" style=\"display:contents\" data-start=\"interaction\">";
-  has html "<yuka-island data-name=\"Demo_shared.Nav_progress\" data-id=\"i2\" style=\"display:contents\" data-start=\"idle\">";
+  has html "<yuka-island data-name=\"Demo_shared.New_issue\" data-id=\"i3\" style=\"display:contents\" data-start=\"interaction\" data-ctx=\"yuka.route=route\">";
+  has html "<yuka-island data-name=\"Demo_shared.Nav_progress\" data-id=\"i2\" style=\"display:contents\" data-start=\"idle\" data-ctx=\"yuka.route=route\">";
   has html "<script type=\"module\" async src=\"/_yuka/app/demo/client/main.js\"></script>";
   has html "data-start=\"idle\"";
   lacks html "Demo_shared.Issue_props";

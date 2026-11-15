@@ -3,6 +3,7 @@ open Pages
 
 let root_headers = [ ("x-frame-options", "DENY"); ("x-a", "root") ]
 let minute = Yuka.Server.public ~max_age:60 ()
+let uncached = Yuka.Server.no_cache
 
 let routes =
   Router.make ~layout:Layouts.root ~not_found ~error ~headers:root_headers ~cache:no_store
@@ -26,6 +27,12 @@ let routes =
           Router.route Member ~path:"/:user<int>" ~page:App.Pages.member
             ~loader:App.Loaders.profile ~guard:App.Guards.inner;
           Router.route Team_form ~path:"/form" ~page:App.Pages.team_form ~prefetch:`Off;
+          Router.route Team_idle ~path:"/idle/:user<int>" ~page:App.Pages.member
+            ~loader:App.Loaders.profile ~guard:App.Guards.inner ~prefetch:`Idle;
+          Router.route Team_uncached ~path:"/uncached" ~page:App.Pages.team_form
+            ~cache:uncached ~prefetch:`Idle;
+          Router.route Team_headed ~path:"/headed" ~page:App.Pages.team_form
+            ~headers:[ ("Cache-Control", "no-store") ] ~prefetch:`Idle;
           Router.endpoint Team_json ~path:"/json" ~method_:`GET
             ~handler:App.Api.team
             ~cache:(public ~s_max_age:600 ~max_age:60 ());

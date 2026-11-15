@@ -7,7 +7,7 @@ let get = Signal.get
 let peek = Signal.peek
 
 let set (s : _ t) value =
-  Web.check_state_write s.node;
+  Scheduler.check_write s.node;
   Signal.set s value
 
 let update s f = set s (f s.value)
@@ -78,9 +78,24 @@ let deferred ?equal (source : (_, _) signal) =
           queued := true
         end;
         false);
-    watch.owner <- !Base.current_owner;
+    watch.owner <- !(Base.current_owner ());
     Base.own (fun () ->
         live := false;
         Scheduler.dispose watch);
     s
   end
+
+let on_change ?equal (state : (_, _) signal) f =
+  let prev = ref (Signal.peek state) and first = ref true in
+  Base.Effect.after (fun () ->
+      let next = Signal.get state in
+      let created = !first && not (Signal.differs None !prev next) in
+      first := false;
+      if (not created) && Signal.differs equal !prev next then begin
+        let p = !prev in
+        prev := next;
+        Scheduler.untrack (fun () -> f ~prev:p ~next)
+      end)
+
+external signal : ('a, _) signal -> 'a Signal.t = "%identity"
+external of_signal : 'a Signal.t -> ('a, _) signal = "%identity"

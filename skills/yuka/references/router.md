@@ -264,11 +264,34 @@ let[@client] make () =
 
 It is always `false` on the server.
 
+## The current route
+
+The shared `Routes` module also has three functions for the route of the
+page that is shown:
+
+```ocaml
+val current : unit -> t option Yuka.State.read
+val replace : t -> unit
+val push : t -> unit
+```
+
+`Routes.current ()` gives the route of the page as a read-only State,
+on the server and in an island. It is `None` when the URL matches no page
+route, and in a tree that `Yuka.render ~root` builds. Call it in the body of
+a component and read the State in a hole. A client navigation sets the
+State, also in an island of a layout that stays on the screen.
+
+`Routes.replace route` and `Routes.push route` change the route of the page
+that is shown with no request: the URL (`history.replaceState` or
+`history.pushState`) and the State, so every island that reads
+`Routes.current` shows the new route. After `push`, Back and Forward set the
+State again with no request. A route of another page (another node, or
+another path param) is a client navigation, as `Yuka.Browser.navigate`.
+A reload loads the new URL, and the server renders the page with it.
+
 To keep the state of a page in its URL, such as a filter that a user can
-share, give the state to the page as search fields and change the URL with
-`Yuka.Browser.replace_url`. It replaces the URL of the current history
-entry and loads nothing; a reload, back and forward load the page with the
-new query, and the server renders it with that state:
+share, give the state to the page as search fields and write it back with
+`Routes.replace`:
 
 ```ocaml
 (* Routes.ml *)
@@ -283,9 +306,28 @@ let blog ~tag () =
 let[@client] make ~(tag : string) () =
   let tag = Yuka.State.make tag in
   Yuka.Effect.on_change tag (fun ~prev:_ ~next ->
-      Yuka.Browser.replace_url (Routes.blog ?tag:(if next = "" then None else Some next) ()));
+      Routes.replace (Routes.Blog { tag = (if next = "" then None else Some next) }));
   ...
 ```
+
+Another island on the page can read the tag with `Routes.current`:
+
+```ocaml
+let[@client] make () =
+  let route = Routes.current () in
+  <span>
+    (match Yuka.State.get route with
+     | Some (Routes.Blog { tag = Some t }) -> Yuka.text t
+     | _ -> Yuka.text "all")
+  </span>
+```
+
+`Yuka.Browser.replace_url` changes the URL only: islands that read
+`Routes.current` do not see the change.
+
+The framework writes the route into the HTML of each page with an island
+(about 70 bytes), and at the start of each client navigation answer that
+replaces the inside of a layout.
 
 ## Prefetch
 
@@ -298,10 +340,21 @@ A client navigation can load a page before the click: a prefetch.
 | `` `Hover `` | 50 ms after the pointer or the focus is on the link, and at once on a press |
 | `` `Trajectory `` (default) | also when the mouse moves toward the link |
 | `` `Visible `` | also when the link comes within 200 px of the view |
+| `` `Idle `` | also when the page is loaded and the browser is idle |
 
 Each level includes the ones before it. The nearest `~prefetch` wins, as
 for `~cache`. An endpoint, an action and a redirect take no `~prefetch`;
 another value is an error.
+
+`` `Idle `` needs a `~cache` with a max-age: a prefetched answer without one
+can be used for 10 s only. `yuka routes` reports an error when the nearest
+`~cache` of a route with `` `Idle `` is absent, `no_store` or `no_cache`;
+it accepts a `~cache` that names a `let`. The server counts a route with
+`` `Idle `` as `` `Visible `` when the `Cache-Control` of its answers has
+no max-age above 0: the one in `~headers` when there is one, else the
+`~cache` rule. A page that renders a `Live.use` is sent with
+`private, no-store` at render time, which the level cannot know: do not
+give such a route `` `Idle ``.
 
 With `` `Trajectory `` the browser follows the mouse pointer (not touch or
 pen). Every 50 ms or more it takes the smoothed direction of the movement
@@ -310,7 +363,21 @@ the same link is found twice in a row, it is prefetched before the pointer
 is on it. This prefetch does not load the island chunks and style sheets of
 the page; a later hover, focus or press on the link does. On a page whose
 highest level is `` `Trajectory ``, the navigation code loads at the first
-mouse movement; with `` `Visible `` it loads when the page starts.
+mouse movement; with `` `Visible `` or `` `Idle `` it loads when the page
+starts.
+
+With `` `Idle ``, when the page starts and after each client navigation or
+action, the browser waits until it is idle (`requestIdleCallback`). Then
+it takes the links of the page in document order, one for each URL,
+without the URLs that are in the cache or in flight and those refused below
+`idle`, and puts at most 15 of them in the queue. An idle prefetch has
+`Yuka-Prefetch: idle` and `priority: "low"`, starts only while fewer than
+4 prefetches are in flight and after every waiting visible link, and does
+not load the island chunks and style sheets. There is no idle pass, and no
+waiting idle link starts, under `saveData`, on a `2g` or `slow-2g`
+connection, or while the document is hidden; a pass that finds the document
+hidden runs once when the document becomes visible, and the waiting idle
+links start then. A link to the URL on screen is skipped.
 
 ```ocaml
 Router.make ~not_found
@@ -325,28 +392,64 @@ The browser does not have the route tree. Each page carries the highest
 level of the tree (`<meta name="yuka-prefetch" content="visible">`, no
 meta for `` `Trajectory ``), and the browser runs the triggers up to that
 level. A prefetch request has the header `Yuka-Prefetch: hover` (hover,
-focus or press), `Yuka-Prefetch: trajectory` or `Yuka-Prefetch: visible`.
+focus or press), `trajectory`, `visible` or `idle`.
 When the trigger is above the level of the route, the server answers `204`
-with `Yuka-Prefetch: LEVEL` (`off`, `hover` or `trajectory`) before guards
+with `Yuka-Prefetch: LEVEL` (`off`, `hover`, `trajectory` or `visible`) before guards
 and loaders run. The browser keeps no
 answer for that URL, and for the life of the page it sends no prefetch
 above that level for it (it keeps at most 200 URLs). A click always loads
 the page. So an app that mixes levels pays one small refused request for
-each URL of a route with a lower level, once per page load. The server counts a value it does not know as
+each URL of a route with a lower level, once per page load. With
+`` `Visible `` or `` `Idle `` somewhere in the tree, every page observes its
+links and pays one refused request for each URL of a route with a lower
+level. The server counts a value it does not know as
 `visible`. A prefetch of an endpoint or an action gets `204` with
-`Yuka-Prefetch: off`, and its guards and handler do not run. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch`.
+`Yuka-Prefetch: off`, and its guards and handler do not run. A prefetch
+of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
+`204` with `Yuka-Prefetch: off`, and the file is not read. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch`.
 
 On a link, `data-yuka-prefetch="off"` stops its prefetch.
 `navigator.connection.saveData` stops all prefetch.
+
+A page with no island loads no navigation code, so the browser prefetches
+for it. At the end of the body of such a page, the server prints one
+speculation rule (JSON, not JavaScript):
+
+```html
+<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>
+```
+
+A browser that runs speculation rules (Chrome and Edge today; a browser
+that does not ignores the element) fetches the full document of a link to this site at the
+pointer down or touch down on it, on desktop and on mobile, and uses that
+answer at the click that follows. A hover alone fetches nothing. A link
+with `data-yuka-prefetch="off"`, `download` or `target` is left out. With
+the highest level of the tree `` `Off ``, no page has the rule. A page with
+an island and a client navigation answer have none. The not-found and error
+pages have it when they have no island.
+
+Such a request is a navigation prefetch: `Sec-Purpose: prefetch` and
+`Sec-Fetch-Dest: document`. A prerender has `Sec-Purpose: prefetch;prerender`,
+and the server reads it as a prefetch. The server counts a navigation prefetch as the trigger `hover`
+(which includes a press): a page route with `` `Off ``, an endpoint and an
+action answer `503` with `Cache-Control: no-store` and `Vary:
+Yuka-Navigate, Yuka-Prefetch, Sec-Purpose`, before guards, loaders and the
+handler. The browser drops a non-2xx answer and loads the URL again at the
+click. Any other page route answers the full page. A static file is served,
+because the click follows the press at once and needs the file. A request
+with `Sec-Purpose` and another `Sec-Fetch-Dest` (such as `empty`, which
+browsers send for `<link rel="prefetch">`) is answered as a request without
+`Sec-Purpose`. Each refused prefetch shows as a `503` in the access log. To
+allow the rule under a `Content-Security-Policy`, see
+[Security](security.md).
 
 A prefetch runs the guards and loaders of the page for a link that the
 user may never click: they must have no side effects.
 
 ## Limitations
 
-- An island cannot read the current route or search params as a State.
-  Pass what it needs as props, and write them back with
-  `Yuka.Browser.replace_url`.
+- After `Routes.push`, Back and Forward set the route only when client
+  navigation is on (`Yuka.render ~islands ()` without `~navigation:false`).
 - There is no base path: the app is served at the root of its origin.
 - An editor does not check `Routes.ml`. `yuka routes` reports each error
   with its location:

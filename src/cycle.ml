@@ -1,3 +1,5 @@
+module Buffer = Stdlib.Buffer
+
 open Types
 
 type redirect = [ `See_other | `Temporary | `Permanent ]
@@ -47,8 +49,27 @@ type rules = {
   prerender : bool;
 }
 
+let answer_cache headers cache =
+  match List.find_opt (fun (n, _) -> same_name n "cache-control") headers with
+  | Some (_, v) -> Some v
+  | None -> cache
+
+let lasting cache =
+  List.exists
+    (fun d ->
+      match String.split_on_char '=' (String.trim d) with
+      | [ "max-age"; n ] -> Option.fold ~none:false ~some:(fun n -> n > 0) (int_of_string_opt n)
+      | _ -> false)
+    (String.split_on_char ',' cache)
+
 let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
-  { headers = merge_headers headers; cache; prefetch; prerender }
+  let headers = merge_headers headers in
+  let prefetch =
+    match prefetch with
+    | `Idle when not (Option.fold ~none:false ~some:lasting (answer_cache headers cache)) -> `Visible
+    | p -> p
+  in
+  { headers; cache; prefetch; prerender }
 
 type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
 type response = { status : int; headers : (string * string) list; body : body }
@@ -337,6 +358,7 @@ type env = {
   build : string;
   prefetch : Prefetch.level;
   current : string;
+  route : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
@@ -354,8 +376,10 @@ let outlet key inner =
       children = [ inner ];
     }
 
-let nest layers body () =
-  List.fold_right (fun (l : layer) inner -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key inner)))) layers (body ())
+let rec nest layers body () =
+  match layers with
+  | [] -> body ()
+  | (l : layer) :: rest -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key (Hole (nest rest body)))))
 
 let add_vary value headers =
   let existing =
@@ -377,10 +401,19 @@ let html_headers rule_headers extra =
   navigation_vary
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
+let mentions text part =
+  let n = String.length part and m = String.length text in
+  let rec at i j = j = n || (text.[i + j] = part.[j] && at i (j + 1)) in
+  let rec from i = i + n <= m && (at i 0 || from (i + 1)) in
+  from 0
+
 let rec shared sent (layers : layer list) =
   match (sent, layers) with
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
   | _ -> 0
+
+let speculation_rules =
+  {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
 
 let render env ~status ~headers layers (page : page) =
   let assets = env.config.assets in
@@ -406,7 +439,9 @@ let render env ~status ~headers layers (page : page) =
         ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
-  let build = nest layers page.body in
+  let route = State.read_only (State.make env.route) in
+  let routed body () = Kind.to_node (Element.Context.provide (Route.get ()) route (fun () -> Kind.of_node (body ()))) in
+  let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
   match env.navigate with
   | Some sent -> (
@@ -423,10 +458,22 @@ let render env ~status ~headers layers (page : page) =
             merge_headers
               [ headers; [ ("yuka-outlet", outlet); ("yuka-title", Router.encode page.title) ] ]
           in
+          let below () =
+            match Printer.seek ~outlet (build ()) with
+            | Some node -> node
+            | None ->
+                if Option.is_some env.config.dev then
+                  log env.config `Warn
+                    ("the <yuka-outlet data-k=\"" ^ outlet
+                   ^ "\"> is inside an island or a list: this page renders without the values that its layouts provide");
+                routed (nest (List.filteri (fun i _ -> i >= n) layers) page.body) ()
+          in
+          let script = Printer.context_script "route" Types.route_name (`String env.route) in
           Async.map
-            (fun body -> { status; headers; body = String body })
+            (fun body ->
+              { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
             (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
-               (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
+               below))
   | None ->
     let early = ref [] in
     let writer =
@@ -443,10 +490,13 @@ let render env ~status ~headers layers (page : page) =
         ~on_value:write
     in
     let written () = String.concat "" (List.rev !early) in
+    let close islands =
+      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+    in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
-    | Async.Done () ->
-        early := "</body></html>" :: !early;
+    | Async.Done islands ->
+        early := close islands :: !early;
         Async.return { status; headers; body = String (written ()) }
     | Async.Pending ->
     let stream w =
@@ -454,7 +504,7 @@ let render env ~status ~headers layers (page : page) =
       writer := (fun text -> Async.bind flushed (fun () -> w text));
       let result, resolve, _ = Async.make () in
       Async.on_settled finished (function
-        | Async.Done () -> Async.on_settled (write "</body></html>") (fun _ -> resolve ())
+        | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
         | Async.Failed m ->
             log env.config `Error m;
             Async.on_settled flushed (fun _ -> resolve ())
@@ -544,9 +594,8 @@ let rec run_guards = function
         | Error _ as e -> Async.return e)
 
 let rule_cache (rules : rules) headers =
-  match rules.cache with
-  | Some c when not (has_header "cache-control" headers) ->
-      headers @ [ ("cache-control", c) ]
+  match answer_cache headers rules.cache with
+  | Some c when not (has_header "cache-control" headers) -> headers @ [ ("cache-control", c) ]
   | _ -> headers
 
 let file_path raw =
@@ -735,16 +784,43 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
                                     | None -> page_or_error (fail_page env a.missing m)))))))
   | _ -> reply (method_not_allowed allowed)
 
+let refusal headers level =
+  reply
+    (empty 204
+       (navigation_vary (merge_headers [ headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
+
+(* A non-ok status makes the browser drop a speculative prefetch and fetch again at the click; a
+   2xx such as 204 would be kept and used for the click. "supports prefetch" in
+   https://wicg.github.io/nav-speculation/prefetch.html; 503 as in
+   https://developer.chrome.com/docs/web-platform/prerender-pages *)
+let speculation_refusal headers =
+  reply (empty 503 (add_vary "Sec-Purpose" (navigation_vary (merge_headers [ headers; [ no_store_header ] ]))))
+
+let sf_key k =
+  k <> ""
+  && (match k.[0] with 'a' .. 'z' | '*' -> true | _ -> false)
+  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '*' -> true | _ -> false) k
+
+let speculative (r : request) =
+  match (r.header "sec-purpose", Option.map String.trim (r.header "sec-fetch-dest")) with
+  | Some v, Some "document" -> (
+      match String.split_on_char ';' (String.trim v) with
+      | "prefetch" :: params ->
+          List.for_all
+            (fun p ->
+              let p = String.trim p in
+              match String.index_opt p '=' with
+              | None -> sf_key p
+              | Some i -> sf_key (String.sub p 0 i) && i + 1 < String.length p && not (String.contains p ','))
+            params
+      | _ -> false)
+  | _ -> false
+
 let route env (App a) req (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
   let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
-  let refuse (rules : rules) level =
-    reply
-      (empty 204
-         (navigation_vary
-            (merge_headers [ rules.headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
-  in
+  let refuse (rules : rules) level = refusal rules.headers level in
   match a.find r.meth segments (Router.query r.target) with
   | Router.Redirect { permanent; location } ->
       reply (empty (if permanent then 308 else 307) [ ("location", location ^ suffix) ])
@@ -764,6 +840,9 @@ let route env (App a) req (r : request) ~path ~raw ~query =
                (r.header "yuka-prefetch") ->
           refuse rules rules.prefetch
       | Handler { rules; _ } when Option.is_some (r.header "yuka-prefetch") -> refuse rules `Off
+      | Page { rules; _ } when Prefetch.rank `Hover > Prefetch.rank rules.prefetch && speculative r ->
+          speculation_refusal rules.headers
+      | Handler { rules; _ } when speculative r -> speculation_refusal rules.headers
       | Page { rules; guards; load; fallback } ->
           serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
       | Handler { rules; action; cross_origin; guards; run } ->
@@ -854,7 +933,7 @@ let live_answer env (r : request) =
   | _ -> reply (method_not_allowed "GET")
 
 let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists req (r : request) =
-  Web.seal_states ();
+  Scheduler.seal ();
   let path, query = Router.split_target r.target in
   Live_server.use_log node (log config);
   let live_used = ref false in
@@ -883,6 +962,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
       build = build_id config (App a);
       prefetch = a.prefetch;
       current = path;
+      route = path ^ query_suffix query;
       root_headers = a.headers;
       exists;
       form = None;
@@ -909,6 +989,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         | _ -> None)
       config.public
   in
+  let static serve = if Option.is_some (r.header "yuka-prefetch") then refusal [] `Off else serve () in
   let run () =
     match (parts, public) with
     | "" :: "_yuka" :: _, _ -> (
@@ -930,32 +1011,34 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         | "action" :: rest -> action env r rest
         | [ "csrf" ] -> csrf_answer env r
         | [ "live" ] -> live_answer env r
-        | "css" :: rest when config.css <> [] -> (
-            match r.meth with
-            | `GET | `HEAD -> (
-                match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
-                | Some text ->
-                    reply
-                      {
-                        status = 200;
-                        headers =
-                          [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
-                        body = String text;
-                      }
-                | None -> reply (asset_miss ()))
-            | _ -> reply (method_not_allowed "GET, HEAD"))
+        | "css" :: rest when config.css <> [] ->
+            static (fun () ->
+                match r.meth with
+                | `GET | `HEAD -> (
+                    match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
+                    | Some text ->
+                        reply
+                          {
+                            status = 200;
+                            headers =
+                              [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
+                            body = String text;
+                          }
+                    | None -> reply (asset_miss ()))
+                | _ -> reply (method_not_allowed "GET, HEAD"))
         | "app" :: rest -> (
             match config.assets with
             | None -> reply (asset_miss ())
             | Some assets ->
-                let headers =
-                  match file_path rest with
-                  | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
-                  | _ -> [ ("cache-control", no_cache) ]
-                in
-                serve_file r.meth ~root:assets.dir ~headers rest)
+                static (fun () ->
+                    let headers =
+                      match file_path rest with
+                      | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
+                      | _ -> [ ("cache-control", no_cache) ]
+                    in
+                    serve_file r.meth ~root:assets.dir ~headers rest))
         | _ -> reply (asset_miss ()))
-    | "" :: _, Some (dir, rest) -> serve_file r.meth ~root:dir ~headers:[] rest
+    | "" :: _, Some (dir, rest) -> static (fun () -> serve_file r.meth ~root:dir ~headers:[] rest)
     | "" :: _, None when String.contains path '\\' ->
         Async.map (fun x -> Respond x) (not_found_page env a.missing path)
     | "" :: rest, None ->
@@ -1122,6 +1205,7 @@ let missing_page config (App a) ~sleep =
       build = build_id config (App a);
       prefetch = a.prefetch;
       current = "";
+      route = "/404.html";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
       form = None;

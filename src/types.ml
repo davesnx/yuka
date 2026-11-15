@@ -38,6 +38,11 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
         fallback : error:string -> reset:(unit -> unit) -> node;
         client : Obj.t option -> node;
       }
+    | Provide of {
+        add : Scheduler.env -> Scheduler.env;
+        children : unit -> node;
+        client : Obj.t option -> node;
+      }
 
   and slot = { content : node option; dom : Obj.t list ref }
 
@@ -151,6 +156,8 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable sheets : string list;
     mutable held : string list;
     mutable context : context option;
+    mutable shared : (Scheduler.binding * string) list;
+    mutable contexts : int;
   }
 
   let snapshot s = { s with streaming = s.streaming }
@@ -158,7 +165,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context } =
+        csrf; sheets; held; context; shared; contexts } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -178,7 +185,9 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     s.csrf <- csrf;
     s.sheets <- sheets;
     s.held <- held;
-    s.context <- context
+    s.context <- context;
+    s.shared <- shared;
+    s.contexts <- contexts
 
 let warned = ref false
 
@@ -189,6 +198,8 @@ let log name value =
   end
 
 let current_session : session option ref = ref None
+let local_session = if Scheduler.js then None else Some (Web.local (fun () -> ref None))
+let current_session () = match local_session with Some k when not Scheduler.js -> Web.local_get k | _ -> current_session
 
 let level_name = function `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug"
 
@@ -198,7 +209,7 @@ let default_log : (log_level -> string -> unit) ref =
 let log_in session level message =
   match session with Some { context = Some c; _ } -> c.log level message | _ -> !default_log level message
 
-let log_message level message = log_in !current_session level message
+let log_message level message = log_in !(current_session ()) level message
 
 let reject_prefix = lazy ("yuka.reject." ^ Web.nonce () ^ ":")
 
@@ -211,7 +222,7 @@ let rejection message =
     Some (String.sub message n (String.length message - n))
   else None
 
-let shown ?(session = !current_session) what message =
+let shown ?(session = !(current_session ())) what message =
   match rejection message with
   | Some m -> m
   | None ->
@@ -222,6 +233,11 @@ let async_error ?session id message = shown ?session ("async value " ^ id) messa
 
 let transport : (string -> Json.t -> (Json.t, Status_error.t) result Async.t) ref =
   ref (fun _ _ -> Async.return (Error (Status_error.Network "no action transport")))
+
+type Scheduler.binding += Coded of { name : string; json : unit -> Json.t; inner : Scheduler.binding }
+
+let route_name = "yuka.route"
+let state_target : ((Json.t -> unit) -> unit) ref = ref ignore
 
 let async_source : (string -> Json.t Async.t) ref =
   ref (fun _ -> Async.failed "no async transport")

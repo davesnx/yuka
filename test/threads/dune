@@ -1,4 +1,4 @@
 (tests
- (names run state)
+ (names run state overlap)
  (package yuka)
  (libraries yuka threads.posix))

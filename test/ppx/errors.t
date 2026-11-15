@@ -334,6 +334,66 @@ Catch without children:
   Error: [yuka] Yuka.Catch needs children
   [1]
 
+Context.Provide without of_:
+
+  $ cat > p0.mlx <<'X'
+  > let x = <Yuka.Context.Provide value=1><p /></Yuka.Context.Provide>
+  > X
+  $ run p0
+  File "p0.mlx", line 1, characters 8-29:
+  1 | let x = <Yuka.Context.Provide value=1><p /></Yuka.Context.Provide>
+              ^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] Yuka.Context.Provide needs the prop 'of_'
+  [1]
+
+Context.Provide without value:
+
+  $ cat > p1.mlx <<'X'
+  > let x = <Yuka.Context.Provide of_=c><p /></Yuka.Context.Provide>
+  > X
+  $ run p1
+  File "p1.mlx", line 1, characters 8-29:
+  1 | let x = <Yuka.Context.Provide of_=c><p /></Yuka.Context.Provide>
+              ^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] Yuka.Context.Provide needs the prop 'value'
+  [1]
+
+Context.Provide with an unknown prop:
+
+  $ cat > p2.mlx <<'X'
+  > let x = <Yuka.Context.Provide of_=c value=1 key="k"><p /></Yuka.Context.Provide>
+  > X
+  $ run p2
+  File "p2.mlx", line 1, characters 8-29:
+  1 | let x = <Yuka.Context.Provide of_=c value=1 key="k"><p /></Yuka.Context.Provide>
+              ^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] Yuka.Context.Provide takes of_ and value
+  [1]
+
+Context.Provide with a prop given twice:
+
+  $ cat > pd.mlx <<'X'
+  > let x = <Yuka.Context.Provide of_=a of_=b value=1><p /></Yuka.Context.Provide>
+  > X
+  $ run pd
+  File "pd.mlx", line 1, characters 40-41:
+  1 | let x = <Yuka.Context.Provide of_=a of_=b value=1><p /></Yuka.Context.Provide>
+                                              ^
+  Error: [yuka] Yuka.Context.Provide takes the prop 'of_' once
+  [1]
+
+Context.Provide without children:
+
+  $ cat > p3.mlx <<'X'
+  > let x = <Yuka.Context.Provide of_=c value=1 />
+  > X
+  $ run p3
+  File "p3.mlx", line 1, characters 8-29:
+  1 | let x = <Yuka.Context.Provide of_=c value=1 />
+              ^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] Yuka.Context.Provide needs children
+  [1]
+
 Show without status:
 
   $ cat > s0.mlx <<'X'
@@ -855,6 +915,7 @@ the file defines a module of that name:
   > let s x = <Show status=x loading=(text "l")>(fun v -> text v)</Show>
   > let c () = <Catch fallback=(fun _ -> text "f")><b /></Catch>
   > let i () = <Client><Counter n=1 /></Client>
+  > let p c = <Context.Provide of_=c value=1>(text "v")</Context.Provide>
   > Y
   $ run op1
   open Yuka
@@ -872,6 +933,7 @@ the file defines a module of that name:
     Yuka.Catch.make ~fallback:(fun _ -> text "f")
       ~children:(fun () -> Yuka.runtime_instance __yuka_template_op1_0 [||]) ()
   let i () = Counter.island ~n:1 ()
+  let p c = Yuka.Context.provide c 1 (fun () -> text "v")
   $ cat > op2.mlx <<'Y'
   > open Yuka
   > module Show = struct let createElement ~children () = children end
