@@ -69,6 +69,7 @@ let console_log : string -> unit = fun _ -> browser_only ()
 let console_debug : string -> unit = fun _ -> browser_only ()
 let exn_to_string = Printexc.to_string
 let encode_uri : string -> string = fun _ -> browser_only ()
+let encode_cookie_value : string -> string option = fun _ -> browser_only ()
 let decode_uri s =
   let n = String.length s and out = Buffer.create (String.length s) and run = Buffer.create 4 in
   let hex i =
@@ -120,6 +121,7 @@ let same_origin : string -> bool = fun _ -> browser_only ()
 let fresh_key : unit -> string = fun _ -> browser_only ()
 let history_key : unit -> string = fun _ -> browser_only ()
 let history_replace_key : string -> unit = fun _ -> browser_only ()
+let set_cookie : string -> unit = fun _ -> browser_only ()
 let history_replace_url : string -> unit = fun _ -> browser_only ()
 let manual_scroll : unit -> unit = fun _ -> browser_only ()
 let plain_click : event -> bool = fun _ -> browser_only ()

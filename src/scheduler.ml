@@ -209,26 +209,24 @@ let rec run n =
   let outer = !stack in
   stack := n.depth + 1;
   let changed =
-    match with_listener (Some n) n.fn with
-    | c ->
-        stack := outer;
-        unlink_all n.rest;
-        n.rest <- None;
-        c
-    | exception e ->
-        stack := outer;
-        let rec refresh = function
-          | Some l ->
-              (try settle 100 l.src with _ -> ());
-              refresh l.dep
-          | None -> ()
-        in
-        refresh n.rest;
-        (match n.tail with Some t -> t.dep <- n.rest | None -> n.head <- n.rest);
-        n.rest <- None;
-        raise e
+    try with_listener (Some n) n.fn
+    with e ->
+      stack := outer;
+      let rec refresh = function
+        | Some l ->
+            (try settle 100 l.src with _ -> ());
+            refresh l.dep
+        | None -> ()
+      in
+      refresh n.rest;
+      (match n.tail with Some t -> t.dep <- n.rest | None -> n.head <- n.rest);
+      n.rest <- None;
+      raise e
   in
-  if n.level = 0 then set_level n;
+  stack := outer;
+  unlink_all n.rest;
+  n.rest <- None;
+  (match n.head with Some _ when n.level = 0 -> set_level n | _ -> ());
   if changed then mark n 2
 
 and settle left n =
@@ -261,13 +259,11 @@ and settle left n =
       raise e
 
 let rec stale n =
+  n.state <- -1;
   let rec go = function
     | Some l ->
         let s = l.src in
-        if s.state > 0 && s.state < 3 then begin
-          s.state <- -1;
-          stale s
-        end;
+        if s.state > 0 && s.state < 3 then if s.head = None then run s else stale s;
         go l.dep
     | None -> ()
   in
@@ -316,10 +312,7 @@ let flush () =
           let rec drop = function
             | [] -> ()
             | n :: rest ->
-                if n.state <> 3 then begin
-                  n.state <- -1;
-                  stale n
-                end;
+                if n.state <> 3 then stale n;
                 drop rest
           in
           drop q;
@@ -362,7 +355,11 @@ let flush_all () =
 let changed n =
   let writes = writes () and depth = depth () in
   incr writes;
-  mark n 2;
+  (match n.first with
+  | Some _ ->
+      n.state <- 2;
+      mark n 1
+  | None -> ());
   if !depth = 0 then flush_all ()
 
 let finish () =
@@ -380,5 +377,4 @@ let batch f =
       (try finish () with _ -> ());
       raise e
 
-let fresh n =
-  if n.state <> 0 then if !(depth ()) = 0 then batch (fun () -> settle 100 n) else settle 100 n
+let fresh n = if n.state <> 0 then batch (fun () -> settle 100 n)

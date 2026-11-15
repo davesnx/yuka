@@ -1,5 +1,6 @@
 type 'a t = {
   mutable value : 'a;
+  mutable old : 'a;
   equal : ('a -> 'a -> bool) option;
   node : Scheduler.node;
 }
@@ -26,7 +27,18 @@ let differs equal a b =
   | None -> not (same a b)
   | Some equal -> ( try not (equal a b) with _ -> true)
 
-let make ?equal value = { value; equal; node = Scheduler.make None Scheduler.never }
+let make ?equal value =
+  let s = { value; old = value; equal; node = Scheduler.make None Scheduler.never } in
+  s.node.fn <-
+    (fun () ->
+      let c = differs equal s.old s.value in
+      s.old <- s.value;
+      c);
+  s
+
+let quiet_set s value =
+  s.value <- value;
+  s.old <- value
 
 let peek s =
   Scheduler.fresh s.node;
@@ -44,6 +56,7 @@ let get s =
 let set s value =
   if differs s.equal s.value value then begin
     s.value <- value;
+    (match s.node.first with None -> s.old <- value | Some _ -> ());
     Scheduler.changed s.node
   end
 
@@ -58,7 +71,7 @@ let computed ?equal compute =
         Scheduler.dispose node;
         raise e
   in
-  let s = { value; equal; node } in
+  let s = { value; old = value; equal; node } in
   Scheduler.set_level node;
   let running = ref false in
   node.fn <-

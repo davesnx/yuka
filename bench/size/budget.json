@@ -1,4 +1,4 @@
 {
-  "keyed_gzip": 8195,
-  "comment": "Raised from 7981 to 8195 for the scheduler fixes of pull request 12: each fix costs 4 to 35 B gzip, most of it try/catch on error paths. Lower it when the app gets smaller."
+  "keyed_gzip": 8206,
+  "comment": "Raised from 7981 to 8195 for the scheduler fixes of pull request 12: each fix costs 4 to 35 B gzip, most of it try/catch on error paths. Raised from 8195 to 8206 for issue 10: a State written in a batch compares its value at the end with the value its readers saw. Lower it when the app gets smaller."
 }

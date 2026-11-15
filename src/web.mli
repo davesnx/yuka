@@ -65,6 +65,7 @@ val console_debug : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
 val decode_uri : string -> string option
+val encode_cookie_value : string -> string option
 val contains : node -> node -> bool
 val fetch_post :
   string ->
@@ -99,6 +100,7 @@ val same_origin : string -> bool
 val fresh_key : unit -> string
 val history_key : unit -> string
 val history_replace_key : string -> unit
+val set_cookie : string -> unit
 val history_replace_url : string -> unit
 val manual_scroll : unit -> unit
 val plain_click : event -> bool
