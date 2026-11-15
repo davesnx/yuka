@@ -520,6 +520,7 @@ let take_buffer () =
 let give_buffer b = buffers := b :: !buffers
 
 external lowercase : string -> string = "toLowerCase" [@@mel.send]
+let skip_clean (_ : string) i = i
 external slice : string -> int -> int -> string = "slice" [@@mel.send]
 
 let sub s offset len = slice s offset (offset + len)
