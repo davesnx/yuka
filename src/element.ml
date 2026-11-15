@@ -109,7 +109,7 @@ module Catch = struct
               | exception e ->
                   let m = Web.exn_to_string e in
                   Base.dispose_owner o;
-                  (State.signal error).value <- Some m;
+                  Signal.quiet_set (State.signal error) (Some m);
                   show o m))
     in
     Client.use_catch ();

@@ -901,6 +901,50 @@ let batch_nests () =
   State.set trigger 1;
   check "batch inside an effect" "2,0" (String.concat "," (List.map string_of_int !seen))
 
+let write_back_in_batch () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  Effect.before (fun () ->
+      ignore (State.get a);
+      incr runs);
+  batch (fun () ->
+      State.set a 1;
+      State.set a 0);
+  check "a write back to the old value causes no run" "1" (string_of_int !runs);
+  batch (fun () ->
+      State.set a 1;
+      State.set a 2);
+  check "a write to a new value causes one run" "2" (string_of_int !runs);
+  let b = State.make ~equal:(fun x y -> x mod 10 = y mod 10) 0 in
+  Effect.before (fun () ->
+      ignore (State.get b);
+      incr runs);
+  batch (fun () ->
+      State.set b 1;
+      State.set b 10);
+  check "the old value is compared with ~equal" "3" (string_of_int !runs);
+  let c = State.make 0 in
+  State.set c 5;
+  Effect.before (fun () ->
+      ignore (State.get c);
+      incr runs);
+  batch (fun () ->
+      State.set c 1;
+      State.set c 0);
+  check "a write before the first reader counts as seen" "5" (string_of_int !runs)
+
+let write_back_through_memo () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  let m = State.memo (fun () -> State.get a) in
+  Effect.before (fun () ->
+      ignore (State.get m);
+      incr runs);
+  batch (fun () ->
+      State.set a 1;
+      State.set a 0);
+  check "a write back to the old value causes no run" "1" (string_of_int !runs)
+
 let batch_raises () =
   let add, read = log () in
   let a = State.make 0 in
@@ -1855,6 +1899,8 @@ let all =
     ("closure in a State", closure_state);
     ("batch delays effects", batch_delays);
     ("batch nests", batch_nests);
+    ("write back in a batch", write_back_in_batch);
+    ("write back through a memo", write_back_through_memo);
     ("batch with an exception", batch_raises);
     ("owned removed from its parent", owned_removed_from_parent);
     ("disposal order", disposal_order);
