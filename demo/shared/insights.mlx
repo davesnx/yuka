@@ -550,9 +550,9 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
       <button id="insights-dates-button" class_=(if Yuka.State.get range = None then "chip" else "chip on") type_=`button
         popovertarget="insights-dates" aria_haspopup=`dialog data_dates="true">
         <span class_=Css.dates_label>"Created"</span>
-        <span>(Yuka.text (date_of_day (fst (Yuka.State.get window))))</span>
+        <span class_=Css.dates_day>(Yuka.text (date_of_day (fst (Yuka.State.get window))))</span>
         <span class_=Css.arrow>" to "</span>
-        <span>(Yuka.text (date_of_day (snd (Yuka.State.get window))))</span>
+        <span class_=Css.dates_day>(Yuka.text (date_of_day (snd (Yuka.State.get window))))</span>
       </button>
       <div id="insights-dates" popover=`auto role=`dialog aria_label="Created date range" class_=Css.dates_menu>
         (range_input ~label:"From" ~pick:fst ~apply:(fun day (_, to_day) -> (min day to_day, to_day)))

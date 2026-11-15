@@ -165,6 +165,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 16px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -215,7 +216,7 @@ h1, h2, p { margin: 0; }
   gap: 14px;
 }
 
-.version { padding: 0 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.version { padding: 0 10px; font-size: 12px; color: var(--muted); }
 a.version:hover { color: var(--text); }
 .nav { display: flex; flex-direction: column; gap: 1px; }
 .nav-link { padding: 6px 10px; border-radius: 6px; color: var(--muted); }
@@ -259,7 +260,7 @@ a.version:hover { color: var(--text); }
 }
 .row:hover { background: var(--bg-hover); }
 .row.selected { background: var(--bg-selected); box-shadow: inset 2px 0 0 var(--accent); }
-.row-id { width: 70px; color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+.row-id { width: 70px; color: var(--muted); flex: none; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-title:hover { text-decoration: underline; }
 .row-title::after { content: ""; position: absolute; inset: 0; }
@@ -401,7 +402,7 @@ a.version:hover { color: var(--text); }
 .chip:hover { background: var(--bg-selected); border-color: var(--border-hover); color: var(--text); }
 .chip:active { background: var(--border-strong); }
 .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.chip-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip-count { color: var(--muted); }
 .chip.on { background: var(--bg-selected); border-color: var(--accent); color: var(--text); }
 .chip.on::before {
   content: ""; width: 3px; height: 7px; margin: -2px 1px 0 0;

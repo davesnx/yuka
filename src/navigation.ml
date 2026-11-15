@@ -1,5 +1,6 @@
 let current_key = Navigation_stub.current_key
 let loaded = Navigation_stub.loaded
+let shown_key = Navigation_stub.shown_key
 let started = ref false
 let pending : Navigation_web.controller option ref = ref None
 
@@ -27,7 +28,7 @@ let assign url =
   Navigation_state.set false;
   Web.location_assign url
 
-let save_scroll () = Web.table_set (scrolls ()) !current_key (Navigation_web.scroll_y ())
+let save_scroll () = Web.table_set (scrolls ()) !shown_key (Navigation_web.scroll_y ())
 
 let hash_of = Navigation_web.hash_of
 let outlets () = Web.query_all (Web.document ()) "yuka-outlet"
@@ -146,13 +147,15 @@ let transitions_on = ref false
 let nav = ref 0
 let hover = ref ignore
 
-let queued : (Web.node * string * string * (unit -> unit)) list ref = ref []
+type waiting = { link : Web.node; key : string; url : string; trigger : Prefetch.level; unobserve : unit -> unit }
+
+let queued : waiting list ref = ref []
 
 let rec without f = function [] -> [] | x :: rest -> if f x then without f rest else x :: without f rest
 
 let take key =
-  List.iter (fun (_, k, _, unobserve) -> if String.equal k key then unobserve ()) !queued;
-  queued := without (fun (_, k, _, _) -> String.equal k key) !queued
+  List.iter (fun w -> if String.equal w.key key then w.unobserve ()) !queued;
+  queued := without (fun w -> String.equal w.key key) !queued
 
 let opened () =
   let n = ref 0 in
@@ -162,11 +165,13 @@ let opened () =
 let allowed () =
   !started && (match !prefetching with `Off -> false | _ -> true) && not (Navigation_web.save_data ())
 
+let under trigger page =
+  match Web.table_get (limits ()) page with Some l -> Prefetch.rank trigger <= Prefetch.rank l | None -> true
+
 let rec start (trigger : Prefetch.level) key url =
-  let low = match trigger with `Visible -> true | _ -> false in
+  let low = match trigger with `Visible | `Idle -> true | _ -> false in
   let page = Navigation_web.absolute url in
-  let under = match Web.table_get (limits ()) page with Some l -> Prefetch.rank trigger <= Prefetch.rank l | None -> true in
-  if under && Option.is_none (lookup key) then begin
+  if under trigger page && Option.is_none (lookup key) then begin
     let e =
       { key; answer = None; waiters = []; controller = Navigation_web.new_controller (); at = 0.;
         prefetched = true; warm = (match trigger with `Hover -> true | _ -> false) }
@@ -191,7 +196,7 @@ let rec start (trigger : Prefetch.level) key url =
             (Option.bind (header "yuka-prefetch") Prefetch.of_name);
           settle (Some a);
           match trigger with
-          | (`Trajectory | `Visible) when e.warm && (not waited) && allowed () -> start `Hover key url
+          | (`Trajectory | `Visible | `Idle) when e.warm && (not waited) && allowed () -> start `Hover key url
           | _ -> ()
         end
         else begin
@@ -207,10 +212,12 @@ let rec start (trigger : Prefetch.level) key url =
 
 and pump () =
   match !queued with
-  | (_, key, url, unobserve) :: rest when opened () < 4 && allowed () ->
+  | w :: rest
+    when opened () < 4 && allowed ()
+         && match w.trigger with `Idle -> not (Navigation_web.hidden_or_slow ()) | _ -> true ->
       queued := rest;
-      unobserve ();
-      start `Visible key url;
+      w.unobserve ();
+      start w.trigger w.key w.url;
       pump ()
   | _ -> ()
 
@@ -233,7 +240,7 @@ let predict url =
   end
 
 let seen a inside unobserve =
-  queued := without (fun (l, _, _, _) -> l == a) !queued;
+  queued := without (fun w -> w.link == a && match w.trigger with `Visible -> true | _ -> false) !queued;
   match Web.link_href true a with
   | href when inside && href <> "" && allowed () ->
       let key = page_key href in
@@ -241,8 +248,33 @@ let seen a inside unobserve =
         unobserve ();
         start `Visible key href
       end
-      else queued := (a, key, href, unobserve) :: !queued
+      else queued := { link = a; key; url = href; trigger = `Visible; unobserve } :: !queued
   | _ -> if inside then unobserve ()
+
+let rec waits key = function [] -> false | w :: rest -> String.equal w.key key || waits key rest
+
+let pass () =
+  allowed () && (not (Navigation_web.hidden_or_slow ()))
+  && begin
+    let here = Navigation_web.absolute (Web.current_url ()) and fresh = ref [] and n = ref 0 in
+    Array.iter
+      (fun a ->
+        match Web.link_href true a with
+        | href when href <> "" && !n < 15 ->
+            let key = page_key href and page = Navigation_web.absolute href in
+            if (not (String.equal page here)) && under `Idle page
+               && Option.is_none (lookup key)
+               && not (waits key !queued || waits key !fresh)
+            then begin
+              incr n;
+              fresh := { link = a; key; url = href; trigger = `Idle; unobserve = ignore } :: !fresh
+            end
+        | _ -> ())
+      (Web.query_all (Web.document ()) "a[href]");
+    queued := List.rev_append (List.rev !queued) (List.rev !fresh);
+    pump ();
+    true
+  end
 
 let show ~dir ~push ~restore url a =
   let final =
@@ -253,19 +285,16 @@ let show ~dir ~push ~restore url a =
   match swappable a with
   | None -> assign final
   | Some target ->
-      let pushed =
-        if push then begin
-          let key = Web.fresh_key () in
-          Navigation_web.history_push_key key final;
-          current_key := key;
-          Some key
-        end
-        else None
-      in
+      if push then begin
+        let key = Web.fresh_key () in
+        Navigation_web.history_push_key key final;
+        current_key := key
+      end;
       let gen = !nav in
       let apply () =
         if !nav = gen then begin
           loaded := Web.current_url ();
+          shown_key := !current_key;
           Navigation_state.set false;
           swap target final a.header a.text;
           Platform.kept := [];
@@ -275,7 +304,6 @@ let show ~dir ~push ~restore url a =
           | None -> Navigation_web.scroll_to_hash (hash_of final));
           !start_islands ()
         end
-        else Option.iter (Web.table_delete (scrolls ())) pushed
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 
@@ -352,8 +380,19 @@ let watch () =
   !unwatch ();
   unwatch := ignore;
   queued := [];
+  let observe () = Navigation_web.observe (Web.query_all (Web.document ()) "a[href]") seen in
   match !prefetching with
-  | `Visible -> unwatch := Navigation_web.observe (Web.query_all (Web.document ()) "a[href]") seen
+  | `Visible -> unwatch := observe ()
+  | `Idle ->
+      let skipped = ref false in
+      let run () = skipped := not (pass ()) in
+      let off = observe () and cancel = Web.on_idle run in
+      let unlisten = Navigation_web.on_visible (fun () -> if !skipped then run () else pump ()) in
+      unwatch :=
+        fun () ->
+          off ();
+          cancel ();
+          unlisten ()
   | `Off | `Hover | `Trajectory -> ()
 
 let clear () =
@@ -369,6 +408,7 @@ let on_popstate _ =
   current_key := next;
   let y = Option.value (Web.table_get (scrolls ()) !current_key) ~default:0. in
   if Web.current_url () = !loaded || List.exists (String.equal next) !Platform.kept then begin
+    shown_key := next;
     cancel_pending ();
     incr nav;
     Navigation_state.set false;
@@ -391,6 +431,7 @@ let handle e =
 let boot (transitions, islands) =
   cancel_pending ();
   started := true;
+  shown_key := !current_key;
   Web.table_clear (limits ());
   (prefetching :=
      match Web.query_all (Web.document ()) "meta[name=yuka-prefetch]" with
@@ -400,7 +441,7 @@ let boot (transitions, islands) =
   !untrack ();
   (untrack :=
      match !prefetching with
-     | `Trajectory | `Visible -> Navigation_web.trajectory (Web.link_href true) predict
+     | `Trajectory | `Visible | `Idle -> Navigation_web.trajectory (Web.link_href true) predict
      | `Off | `Hover -> ignore);
   (Platform.acted :=
      fun () ->

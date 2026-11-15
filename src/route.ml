@@ -35,6 +35,7 @@ let push url =
     let before = Web.history_key () and key = Web.fresh_key () in
     Navigation_web.history_push_key key url;
     Navigation_stub.current_key := key;
+    Navigation_stub.shown_key := key;
     Platform.kept := key :: before :: !Platform.kept;
     Platform.moved := moved;
     Platform.loaded := Web.current_url ();
