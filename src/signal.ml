@@ -56,7 +56,6 @@ let get s =
 let set s value =
   if differs s.equal s.value value then begin
     s.value <- value;
-    (match s.node.first with None -> s.old <- value | Some _ -> ());
     Scheduler.changed s.node
   end
 

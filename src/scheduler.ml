@@ -355,12 +355,15 @@ let flush_all () =
 let changed n =
   let writes = writes () and depth = depth () in
   incr writes;
-  (match n.first with
-  | Some _ ->
-      n.state <- 2;
-      mark n 1
-  | None -> ());
-  if !depth = 0 then flush_all ()
+  if !depth = 0 then begin
+    run n;
+    flush_all ()
+  end
+  else if n.first == None then run n
+  else begin
+    n.state <- 2;
+    mark n 1
+  end
 
 let finish () =
   let depth = depth () in
@@ -377,4 +380,5 @@ let batch f =
       (try finish () with _ -> ());
       raise e
 
-let fresh n = if n.state <> 0 then batch (fun () -> settle 100 n)
+let fresh n =
+  if n.state <> 0 && (n.head != None || !(listener ()) != None) then batch (fun () -> settle 100 n)

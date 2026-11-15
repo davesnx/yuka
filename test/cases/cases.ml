@@ -933,6 +933,45 @@ let write_back_in_batch () =
       State.set c 0);
   check "a write before the first reader counts as seen" "5" (string_of_int !runs)
 
+let write_back_after_untracked_read () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  Effect.before (fun () ->
+      ignore (State.get a);
+      incr runs);
+  batch (fun () ->
+      State.set a 1;
+      ignore (State.get a);
+      State.set a 0);
+  check "a get between the writes causes no run" "1" (string_of_int !runs);
+  batch (fun () ->
+      State.set a 1;
+      ignore (State.peek a);
+      State.set a 0);
+  check "a peek between the writes causes no run" "1" (string_of_int !runs)
+
+let write_back_in_flush () =
+  let seen = ref [] in
+  let a = State.make 0 in
+  let writer () =
+    Effect.before (fun () -> if State.get a = 1 then State.set a 0)
+  in
+  let reader () =
+    Effect.before (fun () -> seen := State.get a :: !seen)
+  in
+  writer ();
+  reader ();
+  State.set a 1;
+  check "a reader that runs before the writer sees the last value" "0"
+    (string_of_int (List.hd !seen));
+  seen := [];
+  let b = State.make 0 in
+  Effect.before (fun () -> seen := State.get b :: !seen);
+  Effect.before (fun () -> if State.get b = 1 then State.set b 0);
+  State.set b 1;
+  check "a reader that runs after the writer sees the last value" "0"
+    (string_of_int (List.hd !seen))
+
 let write_back_through_memo () =
   let runs = ref 0 in
   let a = State.make 0 in
@@ -1901,6 +1940,8 @@ let all =
     ("batch nests", batch_nests);
     ("write back in a batch", write_back_in_batch);
     ("write back through a memo", write_back_through_memo);
+    ("write back after an untracked read", write_back_after_untracked_read);
+    ("write back in a flush", write_back_in_flush);
     ("batch with an exception", batch_raises);
     ("owned removed from its parent", owned_removed_from_parent);
     ("disposal order", disposal_order);
