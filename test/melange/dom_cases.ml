@@ -1948,8 +1948,26 @@ let now_and_count_elements () =
   check "count_elements counts the matches in the document" "2" (ints (Browser.count_elements ".yuka-count span"));
   set_html c ""
 
+let cookies () : string = [%mel.raw "document.cookie"]
+
+let set_cookie () =
+  let written = Browser.set_cookie "yuka_test" "a b;c=d/é" in
+  check "a cookie is written" "ok" (match written with Ok () -> "ok" | Error e -> e);
+  check "the value is percent-encoded" "true"
+    (string_of_bool (Cases.contains (cookies ()) "yuka_test=a%20b%3Bc%3Dd%2F%C3%A9"));
+  ignore (Browser.set_cookie ~max_age:0 "yuka_test" "");
+  check "max_age 0 removes it" "false" (string_of_bool (Cases.contains (cookies ()) "yuka_test="));
+  let refused = function Ok () -> "written" | Error _ -> "refused" in
+  check "a name with a space is refused" "refused" (refused (Browser.set_cookie "a b" "x"));
+  check "a name with = is refused" "refused" (refused (Browser.set_cookie "a=b" "x"));
+  check "an empty name is refused" "refused" (refused (Browser.set_cookie "" "x"));
+  check "a path with ; is refused" "refused" (refused (Browser.set_cookie ~path:"/;Domain=evil" "n" "x"));
+  check "a relative path is refused" "refused" (refused (Browser.set_cookie ~path:"x" "n" "x"));
+  check "nothing was written by a refused call" "false" (string_of_bool (Cases.contains (cookies ()) "n=x"))
+
 let all =
   [
+    ("Browser.set_cookie", set_cookie);
     ("handlers run in a batch", handler_batched);
     ("after: reads the DOM of the same change", after_sees_dom);
     ("after: the first run finds the element", after_finds_own_element);
