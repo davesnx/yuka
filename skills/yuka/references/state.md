@@ -148,10 +148,11 @@ a State it read changes. Use it for most effects.
   effects of the same change, so `body` sees the new DOM.
 
 `Effect.before body` runs `body` at once, in the component body, before the
-elements of the component exist. A later run comes together with the
-holes and the lists of the same change, a parent before its children. Use
-it when `body` must run before the DOM changes, for example to read a scroll
-position before new rows push it.
+elements of the component exist. Use it for a value that the markup of the
+component needs. A later run comes in the same round as the holes and the
+lists of the same change, before the `Effect.after` effects. A hole or a
+list of the same component can run before it, so do not use it to read the
+DOM before a change.
 
 `~cleanup` receives the result of the previous run. Yuka calls it before
 the next run and when the component is removed. Here `connect` and

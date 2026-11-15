@@ -1,4 +1,4 @@
-(test
- (name run)
+(tests
+ (names run state)
  (package yuka)
  (libraries yuka threads.posix))

@@ -10,7 +10,7 @@ let report name = function
       incr failures;
       print_endline ("FAIL " ^ name ^ ": " ^ Printexc.to_string e)
 
-let sync_cases = Cases.all @ Dom_cases.all @ Island_cases.all @ Catch_cases.all @ Live_cases.all
+let sync_cases = Cases.all @ Dom_cases.all @ Island_cases.all @ Catch_cases.all @ Live_cases.all @ Scheduler_cases.all @ Dom_fuzz_cases.all
 let async_cases = Deferred_cases.async @ Island_cases.async @ Remote_cases.async @ Form_cases.async @ Live_cases.async
 let total = List.length sync_cases + List.length async_cases
 let finished = ref false
