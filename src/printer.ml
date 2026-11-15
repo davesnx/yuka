@@ -608,6 +608,32 @@ open Base
     release ();
     html
 
+  let seek ~outlet node =
+    let o = Option.get !(current_owner ()) in
+    let rec find = function
+      | Element { tag = "yuka-outlet"; attrs = Static ("data-k", k) :: _; children } when String.equal k outlet ->
+          Some (Fragment children)
+      | Element { children; _ } | Fragment children -> first children
+      | Hole f -> find (f ())
+      | Catch { children; _ } -> find (children ())
+      | Await { async; render; _ } -> ( match Async.status async with Async.Done v -> find (render v) | _ -> None)
+      | Template { parts; _ } ->
+          first (Array.fold_right (fun p acc -> match p with Child n -> n :: acc | _ -> acc) parts [])
+      | Provide { add; children; _ } -> (
+          let e = o.env in
+          o.env <- add e;
+          match find (children ()) with
+          | None ->
+              o.env <- e;
+              None
+          | r -> r)
+      | Text _ | Island _ | Each _ | Slot _ -> None
+    and first = function
+      | [] -> None
+      | c :: cs -> ( match find c with None -> first cs | r -> r)
+    in
+    find node
+
   let render_html build = print (session ~streaming:false ~islands_only:false) build
 
   let to_html root = render_html (fun () -> root)

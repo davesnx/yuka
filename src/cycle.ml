@@ -354,8 +354,10 @@ let outlet key inner =
       children = [ inner ];
     }
 
-let nest layers body () =
-  List.fold_right (fun (l : layer) inner -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key inner)))) layers (body ())
+let rec nest layers body () =
+  match layers with
+  | [] -> body ()
+  | (l : layer) :: rest -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key (Hole (nest rest body)))))
 
 let add_vary value headers =
   let existing =
@@ -423,10 +425,20 @@ let render env ~status ~headers layers (page : page) =
             merge_headers
               [ headers; [ ("yuka-outlet", outlet); ("yuka-title", Router.encode page.title) ] ]
           in
+          let below () =
+            match Printer.seek ~outlet (build ()) with
+            | Some node -> node
+            | None ->
+                if Option.is_some env.config.dev then
+                  log env.config `Warn
+                    ("the <yuka-outlet data-k=\"" ^ outlet
+                   ^ "\"> is inside an island or a list: this page renders without the values that its layouts provide");
+                nest (List.filteri (fun i _ -> i >= n) layers) page.body ()
+          in
           Async.map
             (fun body -> { status; headers; body = String body })
             (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
-               (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
+               below))
   | None ->
     let early = ref [] in
     let writer =

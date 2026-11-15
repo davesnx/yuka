@@ -1622,6 +1622,60 @@ let prefetch =
         check_true "visible wins" (contains (highest [ Some `Off; Some `Visible; None ]) {|content="visible"|}) );
   ]
 
+let layout_values =
+  let el = App.el and text = App.text in
+  let ctx : string Yuka.Context.t = Yuka.Context.make ~name:"layout value" () in
+  let read where = Option.value (Yuka.Context.get ctx) ~default:("none in " ^ where) in
+  let app ~shell =
+    let wrap key children =
+      Yuka.Context.provide ctx ("from " ^ key) (fun () ->
+          let inner = el "div" ~attrs:[ ("class", key) ] [ children ] in
+          if shell then Yuka.runtime_island ~name:"Shell" ~props:`Null (fun () -> Yuka.Private.slot (Yuka.Private.Slot.make inner))
+          else inner)
+    in
+    let layers =
+      [ { Server.Generated.key = "L0"; data = false; wrap = wrap "L0" };
+        { Server.Generated.key = "L1"; data = false; wrap = (fun c -> el "section" [ c ]) } ]
+    in
+    let page () =
+      Server.page ~title:"Values" (fun () ->
+          el "main"
+            [ text ("component " ^ read "component");
+              Yuka.Private.element (Yuka.Private.hole (fun () -> Yuka.Private.node (text (" hole " ^ read "hole")))) ])
+    in
+    let rules = Server.Generated.rules ~headers:[] ~prerender:false () in
+    let fallback = { Server.Generated.layers; not_found = Server.Generated.default_not_found; error = Server.Generated.default_error } in
+    Server.Generated.app ~build:"b" ~headers:[] ~prerender:[] ~pages:[ rules ] ~find:Cycle_shared.Routes.find
+      ~resolve:(fun _ _ ->
+        Server.Generated.Page
+          { rules; guards = []; fallback; load = (fun () -> Async.return (Ok { Server.Generated.layers; page = page () })) })
+      ~missing:fallback
+  in
+  let body ?(config = config) ?(shell = false) ?(headers = []) () =
+    match Async.status (Cycle.handler config (app ~shell) (request ~headers "/plain")) with
+    | Async.Done r -> r.body
+    | _ -> Alcotest.fail "no page"
+  in
+  [
+    ( "a layout value reaches the page's component function and hole on a full load",
+      fun () ->
+        let b = body () in
+        check_true "component" (contains b "component from L0");
+        check_true "hole" (contains b " hole from L0") );
+    ( "a layout value reaches the page in the partial response of a client navigation",
+      fun () ->
+        let b = body ~headers:[ ("Yuka-Navigate", "L0 L1") ] () in
+        Alcotest.(check string) "only the page" "<main>component from L0 hole from L0</main>" b );
+    ( "an outlet inside an island's children: the page renders as before, with a warning",
+      fun () ->
+        let b = body ~shell:true () in
+        check_true "full load" (contains b "component from L0");
+        Unix.putenv "YUKA_DEV_FILE" "/nonexistent/yuka-dev";
+        let b = body ~config:(config_with ~dev:true ()) ~shell:true ~headers:[ ("Yuka-Navigate", "L0 L1") ] () in
+        check_true "partial without the value" (contains b "component none in component");
+        check_true "warned" (List.exists (fun m -> contains m "yuka-outlet") !logged) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -1640,4 +1694,5 @@ let () =
       ("navigation", cases navigation);
       ("forms", cases forms);
       ("prefetch", cases prefetch);
+      ("layout values", cases layout_values);
     ]
