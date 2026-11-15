@@ -109,7 +109,7 @@ module Catch = struct
               | exception e ->
                   let m = Web.exn_to_string e in
                   Base.dispose_owner o;
-                  error.value <- Some m;
+                  (State.signal error).value <- Some m;
                   show o m))
     in
     Client.use_catch ();
@@ -122,9 +122,27 @@ let context_env () =
   | None -> ( match !Client.acting with Some o -> o.env | None -> Scheduler.Empty)
 
 let rec find_binding prj through = function
-  | Scheduler.Empty -> None
+  | Scheduler.Empty | Scheduler.Root _ -> None
   | Scheduler.Island e -> if through then find_binding prj through e else None
   | Scheduler.Bound (b, e) -> ( match prj b with None -> find_binding prj through e | v -> v)
+
+let rec root = function
+  | Scheduler.Root scope -> Some scope
+  | Scheduler.Bound (_, e) | Scheduler.Island e -> root e
+  | Scheduler.Empty -> None
+
+let coded name codec inj =
+  match name with
+  | Some name
+    when name <> ""
+         && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '.' || c = '_' || c = '-') name ->
+      ( name,
+        (fun v -> Types.Coded { name; json = (fun () -> Codec.encode codec v); inner = inj v }),
+        Some (Page_context.reader name codec) )
+  | _ ->
+      invalid_arg
+        ("Yuka.Context.make: a context with a codec needs a ~name of a-z, 0-9, '.', '_' and '-', got "
+        ^ Option.value name ~default:"no name")
 
 let add_bindings bindings env = List.fold_left (fun e b -> Scheduler.Bound (b, e)) env bindings
 
@@ -142,22 +160,38 @@ let provide_bindings bindings children =
 
 module Context = struct
   type binding = Scheduler.binding
-  type 'a t = { name : string; inj : 'a -> binding; prj : binding -> 'a option }
+  type 'a t = { name : string; inj : 'a -> binding; prj : binding -> 'a option; page : (string -> 'a option) option }
 
-  let make (type a) ?(name = "a context with no name") () : a t =
+  let make (type a) ?name ?codec () : a t =
     let module M = struct type Scheduler.binding += B of a end in
-    { name; inj = (fun v -> M.B v); prj = (function M.B v -> Some v | _ -> None) }
+    let inj v = M.B v and prj = function M.B v | Types.Coded { inner = M.B v; _ } -> Some v | _ -> None in
+    match codec with
+    | None -> { name = Option.value name ~default:"a context with no name"; inj; prj; page = None }
+    | Some codec ->
+        let name, inj, page = coded name codec inj in
+        { name; inj; prj; page }
 
   let provide c v children = provide_bindings [ c.inj v ] children
-  let get c = find_binding c.prj false (context_env ())
+
+  let get c =
+    let env = context_env () in
+    match (find_binding c.prj (Option.is_some c.page) env, c.page) with
+    | None, Some read -> Option.bind (root env) read
+    | v, _ -> v
 
   let get_exn c =
     match get c with
     | Some v -> v
     | None ->
+        let env = context_env () in
+        let outside = Option.is_some (find_binding c.prj true env) in
         invalid_arg
           ("Yuka.Context.get_exn: no value for " ^ c.name
-          ^ if Option.is_some (find_binding c.prj true (context_env ())) then ", provided on the page, outside this island" else "")
+          ^ (if outside then ", provided on the page, outside this island" else "")
+          ^
+          if Option.is_none c.page && (outside || Option.is_some (root env)) then
+            "; a context without a codec does not reach an island"
+          else "")
 
   let bind c v = c.inj v
   let provide_all = provide_bindings

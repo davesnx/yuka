@@ -917,7 +917,7 @@ let boot entries props island =
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
-              o.env <- Scheduler.Empty;
+              o.env <- Scheduler.Root (Option.value (Web.get_attribute island "data-ctx") ~default:"");
               match Base.with_owner o (fun () -> hydrate island (Kind.of_fn build)) with
               | d when !failed ->
                   stop d;
@@ -966,7 +966,8 @@ let stop () =
   Web.table_clear (cleanups ());
   Array.iter (fun f -> f ()) pending;
   List.iter (fun island -> Web.set_bool island started_key false) !live_islands;
-  live_islands := []
+  live_islands := [];
+  !Platform.cleared ()
 
 let cleanup_key = "__yuka_cleanup"
 

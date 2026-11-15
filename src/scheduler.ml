@@ -6,7 +6,7 @@ type cell = {
 }
 
 type binding = ..
-type env = Empty | Bound of binding * env | Island of env
+type env = Empty | Bound of binding * env | Island of env | Root of string
 
 type owner = {
   mutable last : cell option;

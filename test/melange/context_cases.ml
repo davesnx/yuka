@@ -196,7 +196,7 @@ let island_start () =
   Island_cases.start_islands [ island_entry ];
   ignore (Dom_cases.warnings ());
   check "inside the island get is None" "none" (Dom_cases.texts c "i");
-  check "get_exn raises with the name of the context" "Yuka.Context.get_exn: no value for num" !island_message;
+  check "get_exn raises with the name of the context" "Yuka.Context.get_exn: no value for num; a context without a codec does not reach an island" !island_message;
   check "a provide inside the island" "3" (Dom_cases.texts c "b");
   check "the page's children keep the page value" "1" (Dom_cases.texts c "u");
   Island_cases.reset_body ()
@@ -207,7 +207,7 @@ let island_start_in_scope () =
   Dom_cases.capture_warnings ();
   Private.with_context [ Context.bind num 5 ] (fun () -> Island_cases.start_islands [ island_entry ]);
   ignore (Dom_cases.warnings ());
-  check "the island ran in the browser" "Yuka.Context.get_exn: no value for num" !island_message;
+  check "the island ran in the browser" "Yuka.Context.get_exn: no value for num; a context without a codec does not reach an island" !island_message;
   check "an island started inside a scope reads None" "none" (Dom_cases.texts c "i");
   check "its provide still works" "3" (Dom_cases.texts c "b");
   Island_cases.reset_body ()

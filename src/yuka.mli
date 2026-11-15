@@ -8,7 +8,7 @@ val owner : (unit -> 'a) -> 'a * (unit -> unit)
     new owner goes to the same {!Catch} or island as the current owner. *)
 
 module State : sig
-  type ('a, 'access) signal
+  type ('a, 'access) signal = ('a, 'access) State.signal
   (** A value that tracks its readers. ['access] is [[ `Write ]] for a State
       made with {!make} and [[ `Read ]] for a {!memo}. A function that only
       reads takes [('a, _) signal] and accepts both. *)
@@ -430,9 +430,17 @@ module Context : sig
       components between. Make a context once, at the top of a module. Two contexts are never
       the same, also when they hold the same type. *)
 
-  val make : ?name:string -> unit -> 'a t
+  val make : ?name:string -> ?codec:'a Codec.t -> unit -> 'a t
   (** A new context. [name] is for the message of {!get_exn}. Write the type where you make it:
-      [let theme : Theme.t Context.t = Context.make ~name:"theme" ()]. *)
+      [let theme : Theme.t Context.t = Context.make ~name:"theme" ()].
+
+      With [codec], the value also reaches the islands below a {!provide} on the page: the
+      server writes [codec.encode value] into the HTML once per [provide], and an island reads
+      it with {!get}. [name] is then required: it is the key of the value in the HTML, made of
+      [a-z], [0-9], [.], [_] and [-], the same on the server and in the browser, and unique among
+      the contexts with a codec. Raises [Invalid_argument] for a codec with no [name] or with
+      another character. Anyone who loads the page can read the value: never give a secret, and
+      check the user again in guards, loaders and actions. *)
 
   val provide : 'a t -> 'a -> (unit -> 'k element) -> 'k element
   (** [provide context value children] gives [value] to [children]. In mlx:
@@ -451,10 +459,14 @@ module Context : sig
       [provide], for example) has already run its component functions; they saw the values
       outside. Its holes see [value].
 
-      Islands: an island reads only what is provided inside it, on the server and in the
-      browser. A [provide] on the page does not reach an island, and a [provide] in one island
-      does not reach another; pass the value as a prop. The children that the page gives to an
-      island belong to the page: they see what the page provided.
+      Islands: an island reads what is provided inside it, on the server and in the browser. A
+      [provide] in one island does not reach another. A [provide] on the page reaches the
+      islands below it only for a context made with a [codec]: in the browser, {!get} decodes
+      the value that the server wrote, at the first read, and all islands under one [provide]
+      share the decoded value. For a value that must follow a client navigation, use
+      {!Codec.state}. A context without a codec does not reach an island; pass the value as a
+      prop. The children that the page gives to an island belong to the page: they see what
+      the page provided.
 
       On the server a streamed {!Await} that prints later sees the value. A [provide] is
       printed as a hole. *)
@@ -980,6 +992,10 @@ module Private : sig
       values that the page writes; that reader is installed by the first
       [Codec.async] decoding of a bare reference, and a call before it raises
       [Failure]. *)
+
+  val page_contexts : unit -> bool
+  (** [true] once a {!Context} with a codec is made: the code that reads the values of the
+      page and follows client navigations is installed. *)
 
   val render_html : (unit -> node) -> string
   (** Like [to_html], but also builds the tree with [server_rendering] true,

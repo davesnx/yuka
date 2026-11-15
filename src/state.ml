@@ -84,3 +84,18 @@ let deferred ?equal (source : (_, _) signal) =
         Scheduler.dispose watch);
     s
   end
+
+let on_change ?equal (state : (_, _) signal) f =
+  let prev = ref (Signal.peek state) and first = ref true in
+  Base.Effect.after (fun () ->
+      let next = Signal.get state in
+      let created = !first && not (Signal.differs None !prev next) in
+      first := false;
+      if (not created) && Signal.differs equal !prev next then begin
+        let p = !prev in
+        prev := next;
+        Scheduler.untrack (fun () -> f ~prev:p ~next)
+      end)
+
+external signal : ('a, _) signal -> 'a Signal.t = "%identity"
+external of_signal : 'a Signal.t -> ('a, _) signal = "%identity"

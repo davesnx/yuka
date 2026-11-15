@@ -3,7 +3,11 @@ module Async = Async
 module Status = Status
 module Codec = Codec
 module State = struct include State end
-module Effect = Base.Effect
+module Effect = struct
+  include Base.Effect
+
+  let on_change = State.on_change
+end
 
 let owner = Base.mount
 let batch = Scheduler.batch
@@ -273,7 +277,7 @@ module Private = struct
     | Some o -> Base.owner_size o
     | None -> 0
 
-  let has_readers (s : _ Signal.t) = Option.is_some s.node.first
+  let has_readers s = Option.is_some (State.signal s).node.first
 
   let slot = slot
 
@@ -283,6 +287,7 @@ module Private = struct
   let slot_dom (s : slot) = s.dom
   let call_action = Types.transport
   let async_source = Types.async_source
+  let page_contexts () = !Platform.swapped != Platform.no_swap
   let render = Client.render
   let hydrate = Client.hydrate
 end

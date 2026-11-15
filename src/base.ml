@@ -149,16 +149,4 @@ let run_effect queue ?cleanup body =
 module Effect = struct
   let before ?cleanup body = run_effect Scheduler.queue ?cleanup body
   let after ?cleanup body = run_effect Scheduler.late ?cleanup body
-
-  let on_change ?equal state f =
-    let prev = ref (Signal.peek state) and first = ref true in
-    after (fun () ->
-        let next = Signal.get state in
-        let created = !first && not (Signal.differs None !prev next) in
-        first := false;
-        if (not created) && Signal.differs equal !prev next then begin
-          let p = !prev in
-          prev := next;
-          Scheduler.untrack (fun () -> f ~prev:p ~next)
-        end)
 end

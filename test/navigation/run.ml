@@ -619,6 +619,69 @@ let partial finish =
 
 let attr_text : string -> string =
   [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.textContent : 'none' }"]
+
+let count_selector : string -> int = [%mel.raw "function (sel) { return document.querySelectorAll(sel).length }"]
+
+let theme_ctx : string State.read Context.t = Context.make ~name:"t" ~codec:(Codec.state Codec.string) ()
+let lay_runs = ref 0
+let theme_text () = match Context.get theme_ctx with Some s -> State.peek s | None -> "none"
+
+let lay_view () =
+  incr lay_runs;
+  let st = Context.get theme_ctx in
+  element "b" [] [ hole (fun () -> text (match st with Some s -> State.get s | None -> "none")) ]
+
+let pg_view () = element "i" [] [ text (theme_text ()) ]
+let theme_entries = [ runtime_entry ~name:"Lay" (fun _ -> Ok lay_view); runtime_entry ~name:"Pg" (fun _ -> Ok pg_view) ]
+
+let theme_page () =
+  Yuka.stop ();
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    (Private.print (Private.session ~streaming:false ~islands_only:true) (fun () ->
+         Private.node
+           (Context.provide theme_ctx (State.read_only (State.make "dark")) (fun () ->
+                fragment
+                  [ element "nav" [] [ element "a" [ Yuka.attr "id" "two"; Yuka.attr "href" "/two" ] [ text "two" ] ];
+                    runtime_island ~name:"Lay" ~props:`Null lay_view;
+                    element "yuka-outlet" [ Yuka.attr "data-k" "L0"; Yuka.attr "style" "display:contents" ]
+                      [ runtime_island ~name:"Pg" ~props:`Null pg_view ] ]))));
+  lay_runs := 0;
+  render ~islands:(runtime_registry theme_entries) ()
+
+let pg_island ?ctx value =
+  {|<yuka-island data-name="Pg" data-id="L0-i1"|}
+  ^ (match ctx with Some c -> {| data-ctx="|} ^ c ^ {|"|} | None -> "")
+  ^ {| style="display:contents"><i>|} ^ value ^ {|</i></yuka-island>|}
+
+let context_script id value = {|<script type="application/json" data-yuka-context="|} ^ id ^ {|" data-name="t">|} ^ value ^ "</script>"
+let props id = {|<script type="application/json" data-yuka-props="|} ^ id ^ {|">null</script>|}
+
+let context_navigation finish =
+  setup "";
+  theme_page ();
+  check "server values" "dark dark 1" (attr_text "b" ^ " " ^ attr_text "i" ^ " " ^ ints !lay_runs);
+  ignore (click "#two" "");
+  resolve_headers 0
+    (pg_island ~ctx:"t=c1" "light" ^ context_script "c1" {|"light"|} ^ props "L0-i1")
+    200
+    [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "the layout island shows the new value, its component function did not run again" "light 1"
+        (attr_text "b" ^ " " ^ ints !lay_runs);
+      check "the new island reads the new value" "light" (attr_text "i");
+      check "one script per id in the document" "1" (ints (count_selector {|script[data-yuka-context="c1"]|}));
+      finish ())
+
+let context_missing finish =
+  setup "";
+  theme_page ();
+  ignore (click "#two" "");
+  resolve_headers 0 (pg_island "none" ^ props "L0-i1") 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "the layout island keeps its value; the new island has no provider" "dark none"
+        (attr_text "b" ^ " " ^ attr_text "i");
+      finish ())
 let document_session_set : string -> string -> unit =
   [%mel.raw "function (k, v) { document.defaultView.sessionStorage.setItem(k, v) }"]
 let fire_load : unit -> unit =
@@ -2558,6 +2621,8 @@ let all =
     ("visible: waiting links are not in the cache", visible_no_eviction);
     ("intent starts at once with 4 open; only visible requests are low priority", intent_skips_limit);
     ("a hover on a waiting link starts it once", hover_queued);
+    ("a navigation sets the State of a context with a codec in a layout island", context_navigation);
+    ("a navigation to a page without the provider", context_missing);
     ("a click on a waiting link navigates with one request", click_queued);
     ("after an action the visible links are observed and prefetched again", action_rewatches);
     ("a waiting link does not start under saveData", waiting_save_data);

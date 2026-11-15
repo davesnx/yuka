@@ -156,6 +156,8 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable sheets : string list;
     mutable held : string list;
     mutable context : context option;
+    mutable shared : (Scheduler.binding * string) list;
+    mutable contexts : int;
   }
 
   let snapshot s = { s with streaming = s.streaming }
@@ -163,7 +165,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context } =
+        csrf; sheets; held; context; shared; contexts } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -183,7 +185,9 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     s.csrf <- csrf;
     s.sheets <- sheets;
     s.held <- held;
-    s.context <- context
+    s.context <- context;
+    s.shared <- shared;
+    s.contexts <- contexts
 
 let warned = ref false
 
@@ -229,6 +233,10 @@ let async_error ?session id message = shown ?session ("async value " ^ id) messa
 
 let transport : (string -> Json.t -> (Json.t, Status_error.t) result Async.t) ref =
   ref (fun _ _ -> Async.return (Error (Status_error.Network "no action transport")))
+
+type Scheduler.binding += Coded of { name : string; json : unit -> Json.t; inner : Scheduler.binding }
+
+let state_target : ((Json.t -> unit) -> unit) ref = ref ignore
 
 let async_source : (string -> Json.t Async.t) ref =
   ref (fun _ -> Async.failed "no async transport")

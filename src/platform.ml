@@ -5,6 +5,9 @@ let acted : (unit -> unit) ref = ref ignore
 let live_mark : ((string * Json.t) list -> unit) ref = ref ignore
 let client_navigate : (string -> unit) option ref = ref None
 let loaded = ref ""
+let no_swap (_ : Web.node option) = ()
+let swapped = ref no_swap
+let cleared : (unit -> unit) ref = ref ignore
 
 let platform =
   ref

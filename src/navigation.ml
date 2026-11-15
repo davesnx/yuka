@@ -268,6 +268,7 @@ let show ~dir ~push ~restore url a =
           loaded := Web.current_url ();
           Navigation_state.set false;
           swap target final a.header a.text;
+          !Platform.swapped target;
           (match restore with
           | Some y -> Navigation_web.scroll_to y
           | None -> Navigation_web.scroll_to_hash (hash_of final));

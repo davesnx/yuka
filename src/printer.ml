@@ -79,7 +79,7 @@ open Base
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
-      csrf = None; sheets = []; held = []; context = None }
+      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0 }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -94,6 +94,32 @@ open Base
       (List.rev_map
          (function key, Some json -> answer_script key json | key, None -> pending_answer_script key)
          answers)
+
+  let context_script id name json =
+    "<script type=\"application/json\" data-yuka-context=\"" ^ escape ~quote:true id ^ "\" data-name=\""
+    ^ escape ~quote:true name ^ "\">" ^ Json.to_string json ^ "</script>"
+
+  let coded_scope env =
+    let rec go acc = function
+      | Scheduler.Bound ((Coded { name; _ } as b), e) ->
+          go (if List.exists (fun (n, _) -> String.equal n name) acc then acc else (name, b) :: acc) e
+      | Scheduler.Bound (_, e) | Scheduler.Island e -> go acc e
+      | Scheduler.Empty | Scheduler.Root _ -> List.rev acc
+    in
+    go [] env
+
+  let context_ids s env =
+    List.map
+      (fun (name, b) ->
+        match List.assq_opt b s.shared with
+        | Some id -> (name, id, "")
+        | None ->
+            s.contexts <- s.contexts + 1;
+            let id = s.id_prefix ^ "c" ^ string_of_int s.contexts in
+            s.shared <- (b, id) :: s.shared;
+            let json = match b with Coded { json; _ } -> json () | _ -> `Null in
+            (name, id, context_script id name json))
+      (coded_scope env)
 
   let take_answers s =
     let html = answers_html s.answers in
@@ -366,7 +392,7 @@ open Base
           marker "<!--]-->"
       | Slot { content; _ } ->
           let rec page = function
-            | Scheduler.Empty -> owner.env
+            | Scheduler.Empty | Scheduler.Root _ -> owner.env
             | Scheduler.Bound (_, e) -> page e
             | Scheduler.Island e -> e
           in
@@ -393,10 +419,14 @@ open Base
                     if direct then Buffer.add_string b link else s.queued <- link :: s.queued
                   end)
                 (f name));
+          let scope = context_ids s owner.env in
           let outermost = s.depth = 0 and start = Buffer.length b in
           Buffer.add_string b
             ("<yuka-island data-name=\"" ^ escape ~quote:true name
            ^ "\" data-id=\"" ^ id ^ "\" style=\"display:contents\""
+           ^ (match scope with
+               | [] -> ""
+               | l -> " data-ctx=\"" ^ escape ~quote:true (String.concat " " (List.map (fun (n, i, _) -> n ^ "=" ^ i) l)) ^ "\"")
            ^ (match strategy with
                | `Load -> ""
                | `Idle | `Lazy `Idle -> " data-start=\"idle\""
@@ -427,6 +457,7 @@ open Base
             Buffer.add_string b island
           end;
           Buffer.add_string b (answers_html mine);
+          List.iter (fun (_, _, script) -> Buffer.add_string b script) scope;
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
             ^ Json.to_string props ^ "</script>");
