@@ -1380,13 +1380,25 @@ let caught =
 open
   struct
     let __yuka_template_rewrite_46 =
+      Yuka.runtime_template "\001b\002\bx\006" ~html:"<b>x</b>" ~walk:
+        [||] ~kids:[||] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let provided =
+  Yuka.Context.provide theme dark
+    (fun () ->
+       Yuka.fragment
+         [Panel.make ();
+         Yuka.runtime_instance __yuka_template_rewrite_46 [||]])
+open
+  struct
+    let __yuka_template_rewrite_47 =
       Yuka.runtime_template "\001b\002\007\006" ~html:"<b></b>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
 let shown =
   Yuka.Show.make ~status:s ~loading:(Yuka.text "l")
     ~children:(fun d ->
-                 Yuka.runtime_instance __yuka_template_rewrite_46
+                 Yuka.runtime_instance __yuka_template_rewrite_47
                    [|(Yuka.runtime_child (Yuka.text d))|]) ()
 type signup =
   {
@@ -1453,7 +1465,7 @@ include
   end[@@ocaml.doc "@inline"][@@merlin.hide ]
 open
   struct
-    let __yuka_template_rewrite_47 =
+    let __yuka_template_rewrite_48 =
       Yuka.runtime_template "\001input\003name\004name\005\002\006"
         ~html:"<input name=\"name\">" ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|]
         ~values:[||] ~clones:1
@@ -1461,18 +1473,18 @@ open
 let signup_form_view =
   Yuka.Form.make ~action:signup_action
     ~children:(fun form ->
-                 Yuka.runtime_instance __yuka_template_rewrite_47
+                 Yuka.runtime_instance __yuka_template_rewrite_48
                    [|(Yuka.runtime_attribute
                         (Yuka.runtime_attr "value"
                            (Yuka.Form.value form `Name : string)))|]) ()
 open
   struct
-    let __yuka_template_rewrite_48 =
+    let __yuka_template_rewrite_49 =
       Yuka.runtime_template "\001a\005\005\002\bx\006" ~html:"<a>x</a>"
         ~walk:[||] ~kids:[||] ~attrs:[|0;0;2;0;1;2|] ~values:[||] ~clones:3
   end
 let url_attrs u =
-  Yuka.runtime_instance __yuka_template_rewrite_48
+  Yuka.runtime_instance __yuka_template_rewrite_49
     [|(Yuka.runtime_attribute
          ((Yuka.runtime_url_attr "a") "href" (u : string)));(Yuka.runtime_attribute
                                                                (Yuka.runtime_attr
@@ -1481,26 +1493,26 @@ let url_attrs u =
                                                                   string)))|]
 open
   struct
-    let __yuka_template_rewrite_49 =
+    let __yuka_template_rewrite_50 =
       Yuka.runtime_template "\001div\002\007\007\006" ~html:"<div></div>"
         ~walk:[||] ~kids:[|0;0;(-1);18;0;1;0;(-1);16;0|] ~attrs:[||]
         ~values:[||] ~clones:1
   end
 let script_text =
-  Yuka.runtime_instance __yuka_template_rewrite_49
+  Yuka.runtime_instance __yuka_template_rewrite_50
     [|(Yuka.runtime_child
          (Yuka.element "script" [] [Yuka.text {|a < b && "</script>"|}]));(
       Yuka.runtime_child (Yuka.element "style" [] [Yuka.text "p > a {}"]))|]
 let script_root = Yuka.element "script" [] [Yuka.text "x < 1"]
 open
   struct
-    let __yuka_template_rewrite_50 =
+    let __yuka_template_rewrite_51 =
       Yuka.runtime_template "\001svg\002\001animate\005\005\002\006\006"
         ~html:"<svg><animate></animate></svg>" ~walk:[|0;0|] ~kids:[||]
         ~attrs:[|1;0;3;1;1;3|] ~values:[||] ~clones:3
   end
 let animate_values u =
-  Yuka.runtime_instance __yuka_template_rewrite_50
+  Yuka.runtime_instance __yuka_template_rewrite_51
     [|(Yuka.runtime_attribute
          ((Yuka.runtime_url_attr "animate") "values" (u : string)));(
       Yuka.runtime_attribute

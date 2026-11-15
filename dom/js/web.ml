@@ -3,8 +3,6 @@ type event
 type 'a promise = 'a Js.Promise.t
 
 let in_browser = true
-let check_state_write _ = ()
-let seal_states () = ()
 
 let window () : node = [%mel.raw "window"]
 external owner_document : node -> node = "ownerDocument" [@@mel.get]
@@ -527,6 +525,11 @@ let take_buffer () =
   | [] -> None
 
 let give_buffer b = buffers := b :: !buffers
+
+type 'a local = 'a
+
+let local f = f ()
+let local_get v = v
 
 external lowercase : string -> string = "toLowerCase" [@@mel.send]
 let skip_clean (_ : string) i = i

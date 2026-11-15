@@ -40,7 +40,7 @@ type ctx = {
 
 let rules = [ "headers"; "cache"; "prerender" ]
 let reserved = [ "with_query"; "with_fragment"; "href"; "fragment"; "req"; "children" ]
-let generated_values = [ "href"; "find"; "with_query"; "with_fragment" ]
+let generated_values = [ "href"; "find"; "with_query"; "with_fragment"; "current"; "replace"; "push" ]
 
 let encode text =
   let b = Buffer.create (String.length text) in
@@ -898,7 +898,17 @@ let find nodes =
 
 let generate input nodes =
   if named nodes = [] then fail (Location.in_file input) "the route tree has no named node";
-  String.concat "\n" (type_t nodes @ [ "" ] @ href nodes @ helpers nodes @ [ "" ] @ find nodes) ^ "\n"
+  String.concat "\n"
+    (type_t nodes @ [ "" ] @ href nodes @ helpers nodes @ [ "" ] @ find nodes
+    @ [
+        "";
+        "let current () = Yuka.runtime_route_current find";
+        "";
+        "let replace route = Yuka.runtime_route_replace (href route)";
+        "";
+        "let push route = Yuka.runtime_route_push (href route)";
+      ])
+  ^ "\n"
 
 let expr e = Pprintast.string_of_expression e
 let paren e = "(" ^ expr e ^ ")"

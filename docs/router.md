@@ -264,11 +264,34 @@ let[@client] make () =
 
 It is always `false` on the server.
 
+## The current route
+
+The shared `Routes` module also has three functions for the route of the
+page that is shown:
+
+```ocaml
+val current : unit -> t option Yuka.State.read
+val replace : t -> unit
+val push : t -> unit
+```
+
+`Routes.current ()` gives the route of the page as a read-only State,
+on the server and in an island. It is `None` when the URL matches no page
+route, and in a tree that `Yuka.render ~root` builds. Call it in the body of
+a component and read the State in a hole. A client navigation sets the
+State, also in an island of a layout that stays on the screen.
+
+`Routes.replace route` and `Routes.push route` change the route of the page
+that is shown with no request: the URL (`history.replaceState` or
+`history.pushState`) and the State, so every island that reads
+`Routes.current` shows the new route. After `push`, Back and Forward set the
+State again with no request. A route of another page (another node, or
+another path param) is a client navigation, as `Yuka.Browser.navigate`.
+A reload loads the new URL, and the server renders the page with it.
+
 To keep the state of a page in its URL, such as a filter that a user can
-share, give the state to the page as search fields and change the URL with
-`Yuka.Browser.replace_url`. It replaces the URL of the current history
-entry and loads nothing; a reload, back and forward load the page with the
-new query, and the server renders it with that state:
+share, give the state to the page as search fields and write it back with
+`Routes.replace`:
 
 ```ocaml
 (* Routes.ml *)
@@ -283,9 +306,28 @@ let blog ~tag () =
 let[@client] make ~(tag : string) () =
   let tag = Yuka.State.make tag in
   Yuka.Effect.on_change tag (fun ~prev:_ ~next ->
-      Yuka.Browser.replace_url (Routes.blog ?tag:(if next = "" then None else Some next) ()));
+      Routes.replace (Routes.Blog { tag = (if next = "" then None else Some next) }));
   ...
 ```
+
+Another island on the page can read the tag with `Routes.current`:
+
+```ocaml
+let[@client] make () =
+  let route = Routes.current () in
+  <span>
+    (match Yuka.State.get route with
+     | Some (Routes.Blog { tag = Some t }) -> Yuka.text t
+     | _ -> Yuka.text "all")
+  </span>
+```
+
+`Yuka.Browser.replace_url` changes the URL only: islands that read
+`Routes.current` do not see the change.
+
+The framework writes the route into the HTML of each page with an island
+(about 70 bytes), and at the start of each client navigation answer that
+replaces the inside of a layout.
 
 ## Prefetch
 
@@ -406,9 +448,8 @@ user may never click: they must have no side effects.
 
 ## Limitations
 
-- An island cannot read the current route or search params as a State.
-  Pass what it needs as props, and write them back with
-  `Yuka.Browser.replace_url`.
+- After `Routes.push`, Back and Forward set the route only when client
+  navigation is on (`Yuka.render ~islands ()` without `~navigation:false`).
 - There is no base path: the app is served at the root of its origin.
 - An editor does not check `Routes.ml`. `yuka routes` reports each error
   with its location:

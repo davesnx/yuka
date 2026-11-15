@@ -1,6 +1,7 @@
 open Types
 
 let current_key = ref ""
+let shown_key = ref ""
 let loaded = Platform.loaded
 let on = ref false
 let router : router option ref = ref None

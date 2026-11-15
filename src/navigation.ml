@@ -1,6 +1,6 @@
 let current_key = Navigation_stub.current_key
 let loaded = Navigation_stub.loaded
-let shown_key = ref ""
+let shown_key = Navigation_stub.shown_key
 let started = ref false
 let pending : Navigation_web.controller option ref = ref None
 
@@ -297,6 +297,8 @@ let show ~dir ~push ~restore url a =
           shown_key := !current_key;
           Navigation_state.set false;
           swap target final a.header a.text;
+          Platform.kept := [];
+          !Platform.swapped target;
           (match restore with
           | Some y -> Navigation_web.scroll_to y
           | None -> Navigation_web.scroll_to_hash (hash_of final));
@@ -405,11 +407,15 @@ let on_popstate _ =
   let dir = if Navigation_web.key_before next !current_key then "back" else "forward" in
   current_key := next;
   let y = Option.value (Web.table_get (scrolls ()) !current_key) ~default:0. in
-  if Web.current_url () = !loaded then begin
+  if Web.current_url () = !loaded || List.exists (String.equal next) !Platform.kept then begin
     shown_key := next;
     cancel_pending ();
     incr nav;
     Navigation_state.set false;
+    if Web.current_url () <> !loaded then begin
+      loaded := Web.current_url ();
+      !Platform.moved ()
+    end;
     Navigation_web.scroll_to y
   end
   else load ~dir ~push:false ~restore:(Some y) (Web.current_url ())

@@ -300,12 +300,10 @@ let delegate doc event =
     Web.add_listener doc event (dispatch event)
   end
 
-let unowned : Base.owner = { last = None; gen = 0; catch = None; parent = None }
-
 let add_handler doc el event handler =
-  let owner = match !Base.current_owner with Some o -> o | None -> unowned in
+  let owner = match !(Base.current_owner ()) with Some o -> o | None -> Base.new_owner () in
   if non_bubbling event then begin
-    let handler = acting_as !Base.current_owner handler in
+    let handler = acting_as !(Base.current_owner ()) handler in
     let handler ev = ignore (handle owner handler ev) in
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
@@ -406,7 +404,7 @@ let rec mount_node pos last n =
           instantiate pos template c parts
       | None -> mount_node pos last ((uncurry2 !Template.expander) template parts [@u]))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
-  | Catch { client; _ } -> (!catch_hook) pos last client [@u]
+  | Catch { client; _ } | Provide { client; _ } -> (!catch_hook) pos last client [@u]
   | Each { items; key; equal; render } ->
       last := false;
       mount_each pos false items key equal render
@@ -820,7 +818,7 @@ let transport name input =
             match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
             | Some (o, _) -> tie o
             | None -> abort ())
-    | None -> Option.iter tie !Base.current_owner
+    | None -> Option.iter tie !(Base.current_owner ())
   end;
   result
 
@@ -919,6 +917,7 @@ let boot entries props island =
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
+              o.env <- Scheduler.Root (Option.value (Web.get_attribute island "data-ctx") ~default:"");
               match Base.with_owner o (fun () -> hydrate island (Kind.of_fn build)) with
               | d when !failed ->
                   stop d;
@@ -967,7 +966,8 @@ let stop () =
   Web.table_clear (cleanups ());
   Array.iter (fun f -> f ()) pending;
   List.iter (fun island -> Web.set_bool island started_key false) !live_islands;
-  live_islands := []
+  live_islands := [];
+  !Platform.cleared ()
 
 let cleanup_key = "__yuka_cleanup"
 

@@ -8,7 +8,7 @@ val owner : (unit -> 'a) -> 'a * (unit -> unit)
     new owner goes to the same {!Catch} or island as the current owner. *)
 
 module State : sig
-  type ('a, 'access) signal
+  type ('a, 'access) signal = ('a, 'access) State.signal
   (** A value that tracks its readers. ['access] is [[ `Write ]] for a State
       made with {!make} and [[ `Read ]] for a {!memo}. A function that only
       reads takes [('a, _) signal] and accepts both. *)
@@ -424,6 +424,74 @@ module Catch : sig
       the browser. *)
 end
 
+module Context : sig
+  type 'a t
+  (** A value given at one place of the element tree and read below it, with no argument on the
+      components between. Make a context once, at the top of a module. Two contexts are never
+      the same, also when they hold the same type. *)
+
+  val make : ?name:string -> ?codec:'a Codec.t -> unit -> 'a t
+  (** A new context. [name] is for the message of {!get_exn}. Write the type where you make it:
+      [let theme : Theme.t Context.t = Context.make ~name:"theme" ()].
+
+      With [codec], the value also reaches the islands below a {!provide} on the page: the
+      server writes [codec.encode value] into the HTML once per [provide], and an island reads
+      it with {!get}. [name] is then required: it is the key of the value in the HTML, made of
+      [a-z], [0-9], [.], [_] and [-], the same on the server and in the browser, and unique among
+      the contexts with a codec. Raises [Invalid_argument] for a codec with no [name] or with
+      another character. Anyone who loads the page can read the value: never give a secret, and
+      check the user again in guards, loaders and actions. *)
+
+  val provide : 'a t -> 'a -> (unit -> 'k element) -> 'k element
+  (** [provide context value children] gives [value] to [children]. In mlx:
+      [<Yuka.Context.Provide of_=context value=v> children </Yuka.Context.Provide>]; the ppx
+      passes the children as a function.
+
+      [children] runs once, untracked. {!get} gives [Some value] in the component functions it
+      calls and in every hole, list row, effect, {!Catch} and {!Await} below them, also when
+      they run again later. The nearest [provide] of a context wins. Outside [children]
+      nothing changes.
+
+      The value is fixed. To give a value that changes, give a State and read it in a hole:
+      only that hole runs again.
+
+      An element built before [children] ran (an argument of the component that calls
+      [provide], for example) has already run its component functions; they saw the values
+      outside. Its holes see [value].
+
+      Islands: an island reads what is provided inside it, on the server and in the browser. A
+      [provide] in one island does not reach another. A [provide] on the page reaches the
+      islands below it only for a context made with a [codec]: in the browser, {!get} decodes
+      the value that the server wrote, at the first read, and all islands under one [provide]
+      share the decoded value. For a value that must follow a client navigation, use
+      {!Codec.state}. A context without a codec does not reach an island; pass the value as a
+      prop. The children that the page gives to an island belong to the page: they see what
+      the page provided.
+
+      On the server a streamed {!Await} that prints later sees the value. A [provide] is
+      printed as a hole. *)
+
+  val get : 'a t -> 'a option
+  (** The value of the nearest {!provide} above the code that runs now, or [None]. Call it in a
+      component function, a hole, a list row or an effect, and keep the result. In an event
+      handler it answers for the element that has the handler. In a timer, in a callback of an
+      {!Async} and in server code outside a render no place of the tree runs: [None]. In the
+      function of a {!State.memo} it answers for the code that reads the memo; read the
+      context outside the memo. *)
+
+  val get_exn : 'a t -> 'a
+  (** As {!get}. With no value, raises [Invalid_argument] with the name of the context. *)
+
+  type binding
+
+  val bind : 'a t -> 'a -> binding
+
+  val provide_all : binding list -> (unit -> 'k element) -> 'k element
+  (** [provide_all [ bind a x; bind b y ] children] is
+      [provide a x (fun () -> provide b y children)] in one node. When a context is in the
+      list twice, the last one wins. *)
+end
+
 module Status = Status
 
 module Show : sig
@@ -569,7 +637,8 @@ module Browser : sig
       new URL. Use it to keep the state of a page, such as a filter, in its
       query, so the URL can be shared. A URL on another origin, or a
       [javascript:], [vbscript:] or [data:] URL, does nothing; a dev build
-      logs the first one. *)
+      logs the first one. Islands that read the route ([Routes.current]) do not see the new
+      URL; to change the route of the page, use [Routes.replace]. *)
 
   val set_cookie :
     ?max_age:int ->
@@ -765,6 +834,8 @@ val runtime_form_put : string -> 'a Form.kind -> 'a -> (string * string) list
     can change or remove it. *)
 
 module Private : sig
+  type env
+
   type node = private
     | Text of string
     | Element of { tag : string; attrs : attr list; children : node list }
@@ -795,6 +866,11 @@ module Private : sig
     | Catch of {
         children : unit -> node;
         fallback : error:string -> reset:(unit -> unit) -> node;
+        client : Obj.t option -> node;
+      }
+    | Provide of {
+        add : env -> env;
+        children : unit -> node;
         client : Obj.t option -> node;
       }
 
@@ -884,6 +960,11 @@ module Private : sig
   (** Like {!owner}, but the new owner belongs to the current owner: it is
       disposed with it. *)
 
+  val with_context : Context.binding list -> (unit -> 'a) -> 'a
+  (** Runs the function in a new owner that has the bindings, as
+      {!Context.provide_all} gives them. The owner is disposed with the
+      current owner. *)
+
   type pending =
     | Pending_await of {
         id : string;
@@ -934,6 +1015,10 @@ module Private : sig
       [Codec.async] decoding of a bare reference, and a call before it raises
       [Failure]. *)
 
+  val page_contexts : unit -> bool
+  (** [true] once a {!Context} with a codec is made: the code that reads the values of the
+      page and follows client navigations is installed. *)
+
   val render_html : (unit -> node) -> string
   (** Like [to_html], but also builds the tree with [server_rendering] true,
       so effects in component bodies do nothing. *)
@@ -975,8 +1060,9 @@ module Private : sig
       installed by the first [Action.call] or island form submit, and a call
       before it raises [Failure]. *)
 
-  val server_rendering : bool ref
-  (** When true, [Effect.after] and [Effect.before] do nothing. *)
+  val server_rendering : unit -> bool
+  (** True during a server render on this domain; then [Effect.after] and
+      [Effect.before] do nothing. *)
 
   type platform = {
     target_value : Event.t -> string;
@@ -1109,9 +1195,10 @@ module Router : sig
       [?fragment], and [()] ([Routes.issue ~id:"YUK-1" ()] is
       ["/issue/YUK-1"]; [Routes.issue ~id:"YUK-1" ~fragment:"comments" ()]
       is ["/issue/YUK-1#comments"]; [~fragment:""] adds [#] alone); [href], which
-      turns a [Routes.t] (for example from [find]) into a URL; and [find]. A
+      turns a [Routes.t] (for example from [find]) into a URL; [find]; and
+      [current], [replace] and [push] (see [docs/router.md]). A
       node name whose link function is an OCaml keyword or [href], [find],
-      [with_query] or [with_fragment] is a build error, and so is a param,
+      [with_query], [with_fragment], [current], [replace] or [push] is a build error, and so is a param,
       search field or loader named [fragment]. Then
       [yuka routes --server --shared-module Routes --source Routes.ml] writes the
       server module with [app]. *)
@@ -1169,6 +1256,21 @@ module Router : sig
 
   (**/**)
 end
+
+(**/**)
+
+val runtime_route_current :
+  (Router.meth -> string list -> (string * string) list -> 'r Router.lookup) -> 'r option State.read
+(** [Routes.current]: the route of the page that the framework provides, typed by [find]. *)
+
+val runtime_route_replace : string -> unit
+(** [Routes.replace]: a URL of the page shown is written with [history.replaceState] and sets
+    the route; another page is a client navigation. *)
+
+val runtime_route_push : string -> unit
+(** [Routes.push]: as {!runtime_route_replace}, with [history.pushState]. *)
+
+(**/**)
 
 val render :
   ?islands:Client.registry ->
@@ -1361,7 +1463,12 @@ module Server : sig
   val to_string : (unit -> server element) -> string
   (** The tree as HTML. Hydration markers are written only inside an island,
       because the browser hydrates nothing else. The function builds the tree
-      with effects off, so component bodies do not run effects. *)
+      with effects off, so component bodies do not run effects.
+
+      Renders on different domains can run at the same time. Run one
+      server render at a time per domain: renders that overlap on system
+      threads of one domain share state, and each of them raises [Failure].
+      A render inside another on the same thread is allowed. *)
 
   type context
   (** The request that runs an action, a form action or a live [allow]. *)

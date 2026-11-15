@@ -117,7 +117,7 @@ let read_sent name key =
     (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-sent]"))
 
 let sent_state name key =
-  match !current_session with
+  match !(current_session ()) with
   | Some s -> (
       match s.form with
       | Some (n, k, values, errors) when String.equal n name && String.equal k key -> Some (values, errors)

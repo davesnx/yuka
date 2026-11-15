@@ -1,0 +1,15 @@
+let label : string Yuka.Context.t = Yuka.Context.make ~name:"label" ()
+
+module Save = struct
+  let make () : Yuka.server Yuka.element =
+    let label = Yuka.Context.get_exn label in
+    <button>(Yuka.text label)</button>
+end
+
+let view () : Yuka.server Yuka.element =
+  <div>
+    <Yuka.Context.Provide of_=label value="Save">
+      <span>"before"</span>
+      <Save />
+    </Yuka.Context.Provide>
+  </div>

@@ -271,7 +271,7 @@ let decode (topic : (_, 's) Topic.t) last j =
   | Error m -> Status.Failed { error = Status.Protocol m; last }
 
 let csrf_answer () =
-  match !Types.current_session with
+  match !(Types.current_session ()) with
   | Some { csrf = Some token; _ } ->
       Answers.record_value "l:csrf" (fun () ->
           match token () with Some t -> Ok (`String t) | None -> Error Status.Forbidden)
@@ -279,13 +279,13 @@ let csrf_answer () =
 
 let on_server (topic : (_, _) Topic.t) key base =
   let loaded =
-    match !Types.current_session with
+    match !(Types.current_session ()) with
     | Some { context = Some c; _ } -> c.live (Topic.name topic) key
     | _ -> !Bridge.live_state (Topic.name topic) key
   in
   let settle r = State.set base (match r with Ok j -> decode topic None j | Error error -> Status.Failed { error; last = None }) in
   Async.on_result loaded (function Ok r -> settle r | Error m -> settle (Error (Status.Network m)));
-  if !Base.server_rendering then begin
+  if !(Base.server_rendering ()) then begin
     csrf_answer ();
     let name = key_name topic key in
     match Async.status loaded with
@@ -296,7 +296,7 @@ let on_server (topic : (_, _) Topic.t) key base =
 let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
-  if !Base.server_rendering || not Web.in_browser then begin
+  if !(Base.server_rendering ()) || not Web.in_browser then begin
     on_server topic ((Topic.key topic).encode (args ())) base;
     { base; changes; use = None }
   end

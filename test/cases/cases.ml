@@ -303,14 +303,14 @@ let html_effect_skipped () =
   check "build and print" "<p></p>"
     (Private.render_html (fun () -> Private.node (component ())));
   check "build effect not run" "0" (string_of_int !runs);
-  check "flag restored" "false" (string_of_bool !Private.server_rendering);
+  check "flag restored" "false" (string_of_bool (Private.server_rendering ()));
   (try
      ignore
        (Private.to_html
           (Private.node (element "p" [] [ hole (fun () -> failwith "x") ])))
    with Failure _ -> ());
   check "flag restored after exception" "false"
-    (string_of_bool !Private.server_rendering);
+    (string_of_bool (Private.server_rendering ()));
   let (), dispose = owner (fun () -> ignore (component ())) in
   dispose ();
   check "runs in mount" "2" (string_of_int !runs)

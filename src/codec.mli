@@ -49,6 +49,14 @@ val async : 'a t -> 'a Async.t t
     writes for that id; before it or outside the browser, a failed
     [Async]. *)
 
+val state : 'a t -> 'a State.read t
+(** A codec of a State, for a {!Yuka.Context} that islands read: the value of the State is written
+    with [codec]. In an island, all islands under one {!Yuka.Context.provide} get one State, and a
+    client navigation that renders the [provide] again sets it to the new value, so the
+    islands that keep running (in a layout) show it. With a plain codec the island keeps the
+    value of its first read. Use it at the top of the codec of a context, not inside
+    another codec. *)
+
 val encode : 'a t -> 'a -> Json.t
 (** [encode codec value] is [codec.encode value]. *)
 

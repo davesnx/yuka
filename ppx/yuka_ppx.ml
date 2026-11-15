@@ -68,6 +68,8 @@ let special_form = function
   | Ldot (Lident (("Await" | "Show" | "Catch" | "Client") as m), "createElement")
     when !scope.opens_yuka && not (own_module m) ->
       Ldot (Ldot (Lident "Yuka", m), "createElement")
+  | Ldot (Ldot (Lident "Context", "Provide"), "createElement") when !scope.opens_yuka && not (own_module "Context") ->
+      Ldot (Ldot (Ldot (Lident "Yuka", "Context"), "Provide"), "createElement")
   | path -> path
 
 let yuka_render = function
@@ -643,6 +645,30 @@ let rewrite_jsx self e =
             | ks -> [%expr Yuka.fragment [%e list_expr ~loc ks]]
           in
           [%expr Yuka.Catch.make ~fallback:[%e fallback] ~children:(fun () -> [%e kids]) ()]
+      | Ldot (Ldot (Ldot (Lident "Yuka", "Context"), "Provide"), "createElement") ->
+          ignore
+            (List.fold_left
+               (fun seen (l, v) ->
+                 match l with
+                 | Labelled (("of_" | "value") as n) ->
+                     if List.mem n seen then
+                       Location.raise_errorf ~loc:v.pexp_loc "[yuka] Yuka.Context.Provide takes the prop '%s' once" n;
+                     n :: seen
+                 | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Context.Provide takes of_ and value")
+               [] props);
+          let required name =
+            match List.assoc_opt (Labelled name) props with
+            | Some v -> self#expression v
+            | None -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Context.Provide needs the prop '%s'" name
+          in
+          let context = required "of_" and value = required "value" in
+          let kids =
+            match List.map (rewrite_child ~self) children with
+            | [] -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Context.Provide needs children"
+            | [ k ] -> k
+            | ks -> [%expr Yuka.fragment [%e list_expr ~loc ks]]
+          in
+          [%expr Yuka.Context.provide [%e context] [%e value] (fun () -> [%e kids])]
       | Ldot (Ldot (Lident "Yuka", "Client"), "createElement") ->
           let start =
             List.map

@@ -55,7 +55,7 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
     (args : unit -> 'i) : 'o t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
-  if !Base.server_rendering then begin
+  if !(Base.server_rendering ()) then begin
     on_server ~enabled q args base;
     { base; changes; refetch = ignore }
   end

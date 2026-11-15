@@ -9,5 +9,5 @@ val on_settled : 'a t -> ('a status -> unit) -> unit
 val on_result : 'a t -> (('a, string) result -> unit) -> unit
 val bind : 'a t -> ('a -> 'b t) -> 'b t
 val map : ('a -> 'b) -> 'a t -> 'b t
-val watch : 'a t -> 'a status State.t
+val watch : 'a t -> 'a status State.read
 val guard : ('a -> 'b t) -> 'a -> 'b t

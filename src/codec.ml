@@ -84,7 +84,7 @@ let async c : 'a Async.t t =
       (fun a ->
         let j = Async.map c.encode a in
         let id, streaming =
-          match !current_session with
+          match !(current_session ()) with
           | Some s ->
               s.asyncs <- s.asyncs + 1;
               (s.id_prefix ^ "a" ^ string_of_int s.asyncs, s.streaming)
@@ -95,7 +95,7 @@ let async c : 'a Async.t t =
         | Async.Done v -> assoc [ ("ok", v) ]
         | Async.Failed m -> assoc [ ("error", `String (async_error id m)) ]
         | Async.Pending -> (
-            match !current_session with
+            match !(current_session ()) with
             | Some s when streaming ->
                 s.pending <- Pending_async { id; async = j } :: s.pending;
                 assoc []
@@ -118,3 +118,16 @@ let async c : 'a Async.t t =
       | j -> mismatch "async reference" j);
   }
 
+let state c : 'a State.read t =
+  {
+    encode = (fun s -> c.encode (State.peek s));
+    decode =
+      (fun j ->
+        Result.map
+          (fun v ->
+            let s = State.make v in
+            !state_target (fun j ->
+                match c.decode j with Ok v -> State.set s v | Error m -> Web.console_error ("yuka: Codec.state: " ^ m));
+            State.read_only s)
+          (c.decode j));
+  }

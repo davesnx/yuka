@@ -381,6 +381,27 @@ A route name whose helper the generated code already defines
   [1]
 
   $ gen <<'EOF'
+  > Router.make [ Router.route Current ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-34:
+  Error: name Current makes the helper Routes.current, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route Replace ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-34:
+  Error: name Replace makes the helper Routes.replace, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route Push ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-31:
+  Error: name Push makes the helper Routes.push, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
   > Router.make [ Router.route With_query ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-37:

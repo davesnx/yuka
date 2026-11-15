@@ -361,7 +361,7 @@ let empty_context () : Types.context =
   }
 
 let current_context () =
-  match !Types.current_session with Some { context = Some c; _ } -> c | _ -> empty_context ()
+  match !(Types.current_session ()) with Some { context = Some c; _ } -> c | _ -> empty_context ()
 
 let call f context x = Async.guard (fun x -> f context x) x
 

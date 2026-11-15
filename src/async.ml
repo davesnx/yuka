@@ -53,6 +53,6 @@
   let watch t =
     let s = State.make t.status in
     on_settled t (fun st -> State.set s st);
-    s
+    State.read_only s
 
   let guard f x = match f x with a -> a | exception e -> failed (Web.exn_to_string e)
