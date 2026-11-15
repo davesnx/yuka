@@ -65,6 +65,13 @@ let exn_to_string : exn -> string =
 external encode_uri : string -> string = "encodeURIComponent"
 let decode_uri : string -> string option =
   [%mel.raw "function (s) { try { return decodeURIComponent(s) } catch (e) { return undefined } }"]
+let encode_cookie_value : string -> string option =
+  [%mel.raw
+    {|function (s) {
+      try {
+        return encodeURIComponent(s).replace(/[!'()*]/g, function (c) { return "%" + c.charCodeAt(0).toString(16).toUpperCase() });
+      } catch (e) { return undefined }
+    }|}]
 
 let contains : node -> node -> bool = [%mel.raw "function (a, b) { return a.contains(b) }"]
 

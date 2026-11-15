@@ -1951,10 +1951,13 @@ let now_and_count_elements () =
 let cookies () : string = [%mel.raw "document.cookie"]
 
 let set_cookie () =
-  let written = Browser.set_cookie "yuka_test" "a b;c=d/é" in
+  let written = Browser.set_cookie "yuka_test" {js|a b;c=d/é|js} in
   check "a cookie is written" "ok" (match written with Ok () -> "ok" | Error e -> e);
   check "the value is percent-encoded" "true"
     (string_of_bool (Cases.contains (cookies ()) "yuka_test=a%20b%3Bc%3Dd%2F%C3%A9"));
+  ignore (Browser.set_cookie "yuka_test" ({js|é€😀|js} ^ "!'()*"));
+  check "a JS string value is encoded as UTF-8, with !'()* encoded" "true"
+    (string_of_bool (Cases.contains (cookies ()) "yuka_test=%C3%A9%E2%82%AC%F0%9F%98%80%21%27%28%29%2A"));
   ignore (Browser.set_cookie ~max_age:0 "yuka_test" "");
   check "max_age 0 removes it" "false" (string_of_bool (Cases.contains (cookies ()) "yuka_test="));
   let refused = function Ok () -> "written" | Error _ -> "refused" in
@@ -1963,6 +1966,9 @@ let set_cookie () =
   check "an empty name is refused" "refused" (refused (Browser.set_cookie "" "x"));
   check "a path with ; is refused" "refused" (refused (Browser.set_cookie ~path:"/;Domain=evil" "n" "x"));
   check "a relative path is refused" "refused" (refused (Browser.set_cookie ~path:"x" "n" "x"));
+  let lone_surrogate : string = [%mel.raw {|"x\uD800"|}] in
+  check "a value with a lone surrogate is refused" "refused" (refused (Browser.set_cookie "lone" lone_surrogate));
+  check "nothing was written for the lone surrogate" "false" (string_of_bool (Cases.contains (cookies ()) "lone="));
   check "nothing was written by a refused call" "false" (string_of_bool (Cases.contains (cookies ()) "n=x"))
 
 let all =

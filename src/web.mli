@@ -67,6 +67,7 @@ val console_debug : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
 val decode_uri : string -> string option
+val encode_cookie_value : string -> string option
 val contains : node -> node -> bool
 val fetch_post :
   string ->

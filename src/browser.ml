@@ -25,18 +25,20 @@ let set_cookie ?max_age ?(path = "/") ?(same_site = `Lax) ?(secure = false) name
   if not (cookie_name name) then Error ("Yuka.Browser.set_cookie: invalid cookie name " ^ name)
   else if path = "" || path.[0] <> '/' || String.exists (fun c -> c = ';' || Char.code c < 32 || Char.code c = 127) path
   then Error ("Yuka.Browser.set_cookie: invalid path " ^ path)
-  else begin
-    let attribute = function
-      | Some text -> "; " ^ text
-      | None -> ""
-    in
-    Web.set_cookie
-      (name ^ "=" ^ Router.encode value ^ "; Path=" ^ path
-      ^ attribute (Option.map (fun seconds -> "Max-Age=" ^ string_of_int seconds) max_age)
-      ^ (match same_site with `Lax -> "; SameSite=Lax" | `Strict -> "; SameSite=Strict" | `None -> "; SameSite=None")
-      ^ if secure || same_site = `None then "; Secure" else "");
-    Ok ()
-  end
+  else
+    match Web.encode_cookie_value value with
+    | None -> Error "Yuka.Browser.set_cookie: invalid value, not valid UTF-16"
+    | Some encoded ->
+        let attribute = function
+          | Some text -> "; " ^ text
+          | None -> ""
+        in
+        Web.set_cookie
+          (name ^ "=" ^ encoded ^ "; Path=" ^ path
+          ^ attribute (Option.map (fun seconds -> "Max-Age=" ^ string_of_int seconds) max_age)
+          ^ (match same_site with `Lax -> "; SameSite=Lax" | `Strict -> "; SameSite=Strict" | `None -> "; SameSite=None")
+          ^ if secure || same_site = `None then "; Secure" else "");
+        Ok ()
 
 let focus id = Scheduler.after (fun () -> !platform.focus id)
 let scroll_into_view id = Scheduler.after (fun () -> !platform.scroll_into_view id)
