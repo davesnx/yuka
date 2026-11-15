@@ -508,7 +508,7 @@ let add_stylesheet : string -> unit =
 
 let read_file (_ : string) : string option = None
 
-let buffers : Buffer.t list ref = ref []
+let buffers : Stdlib.Buffer.t list ref = ref []
 
 let take_buffer () =
   match !buffers with
@@ -520,6 +520,11 @@ let take_buffer () =
 let give_buffer b = buffers := b :: !buffers
 
 external lowercase : string -> string = "toLowerCase" [@@mel.send]
+external slice : string -> int -> int -> string = "slice" [@@mel.send]
+
+let sub s offset len = slice s offset (offset + len)
+
+external of_char : char -> string = "fromCharCode" [@@mel.scope "String"]
 
 let refuse_url_name : string -> unit =
   [%mel.raw

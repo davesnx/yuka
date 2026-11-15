@@ -1,3 +1,5 @@
+module Buffer = Stdlib.Buffer
+
 open Types
 
 type redirect = [ `See_other | `Temporary | `Permanent ]

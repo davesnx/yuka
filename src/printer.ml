@@ -1,9 +1,27 @@
+module Buffer = Stdlib.Buffer
+
 open Types
 open Base
 
   let escape = Template_build.escape
 
-  let add_escaped = Template_build.add_escaped
+  let add_escaped b ~quote s =
+    let n = String.length s in
+    let start = ref 0 in
+    let put i entity =
+      Buffer.add_substring b s !start (i - !start);
+      Buffer.add_string b entity;
+      start := i + 1
+    in
+    for i = 0 to n - 1 do
+      match String.unsafe_get s i with
+      | '&' -> put i "&amp;"
+      | '<' -> put i "&lt;"
+      | '>' when not quote -> put i "&gt;"
+      | '"' when quote -> put i "&quot;"
+      | _ -> ()
+    done;
+    Buffer.add_substring b s !start (n - !start)
 
   let blocked_logged = ref false
 
