@@ -139,15 +139,26 @@ async function timings(browser: Browser, url: string, plain: string | null): Pro
   return { lcp: median(samples.map((s) => s.lcp)), tbt: median(samples.map((s) => s.tbt)), runs: samples };
 }
 
-const server = spawn(join(buildDir, "default/demo/server/demo_server.exe"), ["--port", options.port, "--bundle"], { stdio: "ignore" });
+const server = spawn(join(buildDir, "default/demo/server/demo_server.exe"), ["--port", options.port, "--interface", "127.0.0.1", "--bundle"], {
+  stdio: ["ignore", "pipe", "pipe"],
+});
 const stop = () => server.kill();
 process.on("exit", stop);
+let started = false;
+let output = "";
+const collect = (chunk: Buffer) => {
+  if (!started) output += chunk.toString();
+};
+server.stdout.on("data", collect);
+server.stderr.on("data", collect);
+const notStarted = (why: string) => new Error(`demo server ${why}; its output:\n${output}`);
 for (let i = 0; ; i++) {
-  if (server.exitCode !== null) throw new Error(`demo server exited with ${server.exitCode}`);
+  if (server.exitCode !== null) throw notStarted(`exited with ${server.exitCode}`);
   if (await fetch(`${base}/about`).then((r) => r.ok, () => false)) break;
-  if (i > 100) throw new Error("demo server did not start");
+  if (i > 100) throw notStarted(`did not answer on ${base}`);
   await wait(100);
 }
+started = true;
 
 const loadBefore = loadavg();
 const browser = await chromium.launch({ executablePath: options.chrome === "" ? undefined : options.chrome });
