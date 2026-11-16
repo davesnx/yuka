@@ -52,6 +52,7 @@ let listener = ref None
 let queue = ref []
 let late = ref []
 let depth = ref 0
+let nest = ref 0
 let writes = ref 0
 let later = ref ignore
 
@@ -61,6 +62,7 @@ type domain = {
   queue : node list ref;
   late : node list ref;
   depth : int ref;
+  nest : int ref;
   writes : int ref;
   later : (unit -> unit) ref;
   owner : owner option ref;
@@ -78,6 +80,7 @@ let key =
              queue = ref [];
              late = ref [];
              depth = ref 0;
+             nest = ref 0;
              writes = ref 0;
              later = ref ignore;
              owner = ref None;
@@ -89,6 +92,7 @@ let stack () = here stack (fun d -> d.stack)
 let listener () = here listener (fun d -> d.listener)
 let mine q = here q (fun d -> if q == late then d.late else d.queue)
 let depth () = here depth (fun d -> d.depth)
+let nest () = here nest (fun d -> d.nest)
 let writes () = here writes (fun d -> d.writes)
 let later () = here later (fun d -> d.later)
 let never () = false
@@ -211,6 +215,15 @@ let loop =
     "Yuka: an effect or a memo keeps changing a State it reads (more than 100 \
      update rounds in one flush)"
 
+let rec restore = function
+  | (c, f) :: rest ->
+      if c.state <> 3 then begin
+        if c.state = -2 then c.state <- -1;
+        c.fn <- f
+      end;
+      restore rest
+  | [] -> ()
+
 let rec run n =
   n.rest <- n.head;
   n.head <- None;
@@ -231,7 +244,8 @@ let rec run n =
         | None -> ()
       in
       refresh n.rest;
-      (match n.tail with Some t -> t.dep <- n.rest | None -> n.head <- n.rest);
+      if n.rest != None then (
+        match n.tail with Some t -> t.dep <- n.rest | None -> n.head <- n.rest);
       n.rest <- None;
       raise e
   in
@@ -242,12 +256,18 @@ let rec run n =
   if changed then mark n 2
 
 and settle left n =
-  let writes = writes () in
-  let stack = ref [] and node = ref n and work = ref true in
+  let writes = writes () and nest = nest () in
+  incr nest;
+  let deep = !nest > 100 in
+  let stack = ref [] and node = ref n and work = ref true and swapped = ref [] in
   let before = ref !writes and next = ref n.head in
   while !work do
     let n = !node in
-    match if n.state = 1 then !next else None with
+    if deep && (n.state = 2 || n.state = -1) then n.state <- 4;
+    match if n.state = 1 || n.state = 4 then !next else None with
+    | Some l when l.src.state = 4 ->
+        n.state <- 2;
+        next := l.dep
     | Some l ->
         stack := (!before, l) :: !stack;
         node := l.src;
@@ -259,7 +279,7 @@ and settle left n =
         (match
            if
              n.state = 1
-             || (n.state = 2 || n.state < 0)
+             || n.state <> 0 && n.state <> 3
                 && begin
                      run n;
                      n.eff = None && n.state > 0
@@ -270,8 +290,27 @@ and settle left n =
         | exception e -> (
             n.state <- -1;
             match !stack with
-            | [] -> raise e
-            | (_, l) :: _ -> l.dst.state <- 2));
+            | [] ->
+                decr nest;
+                restore !swapped;
+                raise e
+            | (_, l) :: _ ->
+                if deep then begin
+                  let f = n.fn and w = !writes in
+                  let fake () =
+                    n.fn <- f;
+                    if !writes <> w then f ()
+                    else begin
+                      n.head <- n.rest;
+                      n.rest <- None;
+                      raise e
+                    end
+                  in
+                  n.fn <- fake;
+                  n.state <- -2;
+                  swapped := (n, f) :: !swapped
+                end;
+                l.dst.state <- 2));
         match !stack with
         | [] -> work := false
         | (b, l) :: rest ->
@@ -279,7 +318,9 @@ and settle left n =
             node := l.dst;
             before := b;
             next := l.dep)
-  done
+  done;
+  decr nest;
+  restore !swapped
 
 let stale n =
   n.state <- -1;
@@ -348,11 +389,11 @@ let flush () =
           let rec drop = function
             | [] -> ()
             | n :: rest ->
-                if n.state <> 3 then stale n;
+                if n.state <> 3 then (try stale n with e -> fail e);
                 drop rest
           in
-          drop q;
-          fail loop
+          fail loop;
+          drop q
         end
         else begin
           incr rounds;

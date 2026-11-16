@@ -1893,6 +1893,334 @@ let memo_chain_loop length () =
   in
   check "the round limit with a chain of memos" "limit" result
 
+let memo_chain_shared_source () =
+  let s = State.make 0 in
+  let runs = ref 0 in
+  let memo f = State.memo (fun () -> incr runs; f ()) in
+  let rec chain n m =
+    if n = 0 then m else chain (n - 1) (memo (fun () -> State.get s + State.get m))
+  in
+  let last, dispose = owner (fun () -> chain 10_000 (memo (fun () -> State.get s))) in
+  runs := 0;
+  State.set s 1;
+  check "the end of the chain" "10001" (string_of_int (State.peek last));
+  check "each memo runs once" "10001" (string_of_int !runs);
+  dispose ()
+
+let memo_chain_first_raises () =
+  let s = State.make 0 in
+  let firsts = ref 0 in
+  let rec chain n m =
+    if n = 0 then m else chain (n - 1) (State.memo (fun () -> State.get s + State.get m))
+  in
+  let last, dispose =
+    owner (fun () ->
+        chain 10_000
+          (State.memo (fun () ->
+               incr firsts;
+               if State.get s = 1 then failwith "boom" else State.get s)))
+  in
+  firsts := 0;
+  State.set s 1;
+  let raised = match State.peek last with _ -> "no error" | exception Failure m -> m in
+  check "the error at the end of the chain" "boom" raised;
+  State.set s 2;
+  check "the chain recovers" "20002" (string_of_int (State.peek last));
+  check "the first memo runs once for each write" "2" (string_of_int !firsts);
+  dispose ()
+
+let memo_chain_middle_raises () =
+  let s = State.make 0 in
+  let runs = ref 0 and middle = ref 0 in
+  let link k m () =
+    incr runs;
+    let v = State.get s in
+    if k = 5_000 then begin
+      incr middle;
+      if v = 1 then failwith "middle"
+    end;
+    v + State.get m
+  in
+  let rec chain k m = if k > 10_000 then m else chain (k + 1) (State.memo (link k m)) in
+  let last, dispose = owner (fun () -> chain 1 (State.memo (fun () -> incr runs; State.get s))) in
+  runs := 0;
+  middle := 0;
+  State.set s 1;
+  let raised = match State.peek last with _ -> "no error" | exception Failure m -> m in
+  check "the error of the middle memo" "middle" raised;
+  check "each memo runs once" "10001 1" (string_of_int !runs ^ " " ^ string_of_int !middle);
+  runs := 0;
+  middle := 0;
+  State.set s 2;
+  check "the chain recovers" "20002" (string_of_int (State.peek last));
+  check "each memo runs once after the error" "10001 1"
+    (string_of_int !runs ^ " " ^ string_of_int !middle);
+  dispose ()
+
+let memo_chain_dynamic () =
+  let s = State.make 0 and c = State.make true in
+  let bs = ref 0 in
+  let last, dispose =
+    owner (fun () ->
+        let a = State.memo (fun () -> State.get s * 10) in
+        let b = State.memo (fun () -> incr bs; State.get s * 100) in
+        let rec chain n m =
+          if n = 0 then m
+          else
+            chain (n - 1)
+              (State.memo (fun () ->
+                   (if State.get c then State.get a else State.get b) + State.get m))
+        in
+        chain 10_000 (State.memo (fun () -> State.get s)))
+  in
+  bs := 0;
+  batch (fun () ->
+      State.set s 1;
+      State.set c false);
+  check "the chain reads the other memo" "1000001" (string_of_int (State.peek last));
+  check "the other memo runs once" "1" (string_of_int !bs);
+  State.set c true;
+  check "the chain reads the first memo again" "100001" (string_of_int (State.peek last));
+  dispose ()
+
+let memo_chain_retry () =
+  let s = State.make 0 and w = State.make 3 in
+  let last, dispose =
+    owner (fun () ->
+        let rec chain k m =
+          if k > 10_000 then m
+          else
+            chain (k + 1)
+              (State.memo (fun () ->
+                   let v = State.get s + State.get m in
+                   if k = 5_000 then begin
+                     let x = State.get w in
+                     if x < 3 then State.set w (x + 1);
+                     v + x
+                   end
+                   else v))
+        in
+        chain 1 (State.memo (fun () -> State.get s)))
+  in
+  batch (fun () ->
+      State.set s 1;
+      State.set w 0);
+  let v = State.peek last in
+  check "a memo in the chain writes its State until it settles" "10004 3"
+    (string_of_int v ^ " " ^ string_of_int (State.peek w));
+  dispose ()
+
+let memo_chain_after_limit () =
+  let s = State.make 0 in
+  let last, dispose = owner (fun () -> memo_chain_from s 10_000) in
+  let result =
+    match owner (fun () -> Effect.before (fun () -> State.set s (State.get last))) with
+    | (), stop ->
+        stop ();
+        "no error"
+    | exception Failure m when contains m "keeps changing a State it reads" -> "limit"
+    | exception e -> Printexc.to_string e
+  in
+  check "the round limit" "limit" result;
+  State.set s 5;
+  check "the chain after the round limit" "10005" (string_of_int (State.peek last));
+  dispose ()
+
+let nested d k inner =
+  let rec go j m =
+    if j > k then m else go (j + 1) (State.memo (fun () -> State.get d + State.get m))
+  in
+  go 2 (State.memo (fun () -> State.get d + inner ()))
+
+let shown m = match State.get m with v -> string_of_int v | exception Failure e -> e
+
+let deep_fake_keeps_sources k () =
+  let s = State.make 0 and x = State.make 10 and d = State.make 0 in
+  let top, dispose =
+    owner (fun () ->
+        let m =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "m";
+              v + State.get x)
+        in
+        let p = State.memo (fun () -> try State.get m with Failure _ -> -1) in
+        nested d k (fun () -> State.get p))
+  in
+  State.set d 1;
+  batch (fun () ->
+      State.set s 1);
+  check "the top of the chain" (string_of_int (k - 1)) (string_of_int (State.peek top));
+  dispose ();
+  check "no link left after dispose" "false false"
+    (string_of_bool (Private.has_readers s) ^ " " ^ string_of_bool (Private.has_readers x))
+
+let deep_write_marks_failed_readers k () =
+  let s = State.make 0 and flag = State.make false and d = State.make 0 in
+  let add, read = log () in
+  let top, dispose =
+    owner (fun () ->
+        let a =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "a" else v)
+        in
+        Effect.before (fun () -> add (shown a));
+        let p =
+          State.memo (fun () ->
+              if State.get flag then begin
+                State.set s 2;
+                0
+              end
+              else try State.get a with Failure _ -> -1)
+        in
+        nested d k (fun () -> State.get p))
+  in
+  State.set s 1;
+  ignore (State.peek top);
+  State.set d 1;
+  batch (fun () ->
+      State.set flag true);
+  ignore (State.peek top);
+  check "the effect reads the memo after the write in the chain" "0 a 2" (read ());
+  dispose ()
+
+let deep_read_of_pending_memo k () =
+  let s = State.make 7 and sw = State.make false and t = State.make 7 and d = State.make 0 in
+  let seen = ref [] in
+  let b_ref = ref None in
+  let top, dispose =
+    owner (fun () ->
+        let rec a =
+          lazy
+            (State.memo (fun () ->
+                 if State.get sw then State.get s
+                 else match !b_ref with Some b -> State.get b | None -> 0))
+        and c = lazy (State.memo (fun () -> State.get (Lazy.force a))) in
+        let b =
+          State.memo (fun () ->
+              if State.get sw then begin
+                let v = State.get (Lazy.force c) in
+                seen := v :: !seen;
+                v
+              end
+              else State.get t)
+        in
+        b_ref := Some b;
+        let a = Lazy.force a in
+        ignore (State.peek (Lazy.force c));
+        (nested d k (fun () -> State.get a), b))
+  in
+  let top, b = top in
+  State.set d 1;
+  batch (fun () ->
+      State.set sw true;
+      State.set s 5);
+  ignore (State.peek top);
+  ignore (State.peek b);
+  check "the old source sees only the new value of the memo" "5"
+    (String.concat " " (List.rev_map string_of_int !seen));
+  dispose ()
+
+let deep_two_failed_sources k () =
+  let s = State.make 0 and flag = State.make false and d = State.make 0 in
+  let add, read = log () in
+  let top, dispose =
+    owner (fun () ->
+        let a1 =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "a1" else v)
+        and a2 =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "a2" else v)
+        in
+        Effect.before (fun () -> add (shown a1));
+        let p =
+          State.memo (fun () ->
+              if State.get flag then 0
+              else
+                (try State.get a1 with Failure _ -> -1)
+                + try State.get a2 with Failure _ -> -1)
+        in
+        nested d k (fun () -> State.get p))
+  in
+  State.set s 1;
+  ignore (State.peek top);
+  State.set d 1;
+  batch (fun () ->
+      State.set flag true);
+  ignore (State.peek top);
+  State.set s 2;
+  check "the effect runs after a write once the chain settled" "0 a1 2" (read ());
+  dispose ()
+
+let deep_failed_memo_at_the_limit k () =
+  let s = State.make 0 and x = State.make 0 and l = State.make 0 in
+  let on = State.make false and d = State.make 0 in
+  let top, dispose =
+    owner (fun () ->
+        let m =
+          State.memo (fun () ->
+              if State.peek s = 1 then failwith "m";
+              State.get x)
+        in
+        let p = State.memo (fun () -> try State.get m with Failure _ -> -1) in
+        Effect.before (fun () ->
+            (try ignore (State.get m) with Failure _ -> ());
+            if State.get on then begin
+              let v = State.get l in
+              State.set x (v + 1);
+              State.set l (v + 1)
+            end);
+        nested d k (fun () -> State.get p))
+  in
+  State.set d 1;
+  batch (fun () ->
+      State.set s 1;
+      State.set x 1);
+  ignore (State.peek top);
+  let result =
+    match State.set on true with
+    | () -> "no error"
+    | exception Failure m when contains m "keeps changing a State it reads" -> "limit"
+    | exception e -> Printexc.to_string e
+  in
+  dispose ();
+  let runs = ref 0 and z = State.make 0 in
+  let (), stop = owner (fun () -> Effect.before (fun () -> ignore (State.get z); incr runs)) in
+  State.set z 1;
+  stop ();
+  check "the round limit, then an effect runs" "limit 2" (result ^ " " ^ string_of_int !runs)
+
+let nested_batches_old_source k () =
+  let s = State.make 0 and sw = State.make true in
+  let bs = ref 0 in
+  let m, dispose =
+    owner (fun () ->
+        let a = State.memo (fun () -> State.get s) in
+        let b =
+          State.memo (fun () ->
+              incr bs;
+              State.get s * 10)
+        in
+        State.memo (fun () -> if State.get sw then State.get a + State.get b else State.get a))
+  in
+  bs := 0;
+  let rec nest j =
+    if j = 0 then begin
+      State.set sw false;
+      State.set s 1;
+      State.peek m
+    end
+    else batch (fun () -> nest (j - 1))
+  in
+  let v = nest k in
+  check "the memo, and runs of the source it no longer reads" "1 0"
+    (string_of_int v ^ " " ^ string_of_int !bs);
+  dispose ()
+
 let all =
   [
     ("catch: server fallback", catch_server_fallback);
@@ -2011,4 +2339,22 @@ let all =
     ("chain of 10,000 memos", memo_chain 10_000);
     ("effect at the end of a chain of 10,000 memos", memo_chain_effect 10_000);
     ("round limit with a chain of 10,000 memos", memo_chain_loop 10_000);
+    ("chain of 10,000 memos that each read the State", memo_chain_shared_source);
+    ("chain of 10,000 memos whose first memo raises once", memo_chain_first_raises);
+    ("chain of 10,000 memos whose middle memo raises once", memo_chain_middle_raises);
+    ("chain of 10,000 memos with dynamic dependencies", memo_chain_dynamic);
+    ("chain of 10,000 memos with a memo that writes its State", memo_chain_retry);
+    ("chain of 10,000 memos after the round limit", memo_chain_after_limit);
+    ("deep 1: a failed memo keeps its sources when its reader reads it", deep_fake_keeps_sources 1);
+    ("deep 1: a write in the chain reaches the reader of a failed memo", deep_write_marks_failed_readers 1);
+    ("deep 1: an old source does not see the old value of a memo", deep_read_of_pending_memo 1);
+    ("deep 1: two failed sources the reader no longer reads", deep_two_failed_sources 1);
+    ("deep 1: a failed memo at the round limit", deep_failed_memo_at_the_limit 1);
+    ("deep 150: a failed memo keeps its sources when its reader reads it", deep_fake_keeps_sources 150);
+    ("deep 150: a write in the chain reaches the reader of a failed memo", deep_write_marks_failed_readers 150);
+    ("deep 150: an old source does not see the old value of a memo", deep_read_of_pending_memo 150);
+    ("deep 150: two failed sources the reader no longer reads", deep_two_failed_sources 150);
+    ("deep 150: a failed memo at the round limit", deep_failed_memo_at_the_limit 150);
+    ("batch 1: a memo in nested batches does not compute a source it no longer reads", nested_batches_old_source 1);
+    ("batch 150: a memo in nested batches does not compute a source it no longer reads", nested_batches_old_source 150);
   ]
