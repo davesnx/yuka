@@ -137,14 +137,14 @@ let find (meth : Yuka.Router.meth) (path : string list)
       match meth with
       | `GET | `HEAD -> (
           Yuka.Router.Found (Post {
-            slug = p1;
+            slug = Yuka.Router.of_segment p1;
             lang = (match Yuka.Router.search query "lang" with v :: _ -> Some v | [] -> None);
           }))
       | _ -> Yuka.Router.Wrong_method [ `GET ])
   | [ "issue"; p1 ] -> (
       match meth with
       | `GET | `HEAD -> (
-          match Yuka.Router.Param.decode Params.issue_id_param p1 with
+          match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
           | None -> Yuka.Router.Missing
           | Some p1 -> (
               Yuka.Router.Found (Issue {
@@ -162,30 +162,30 @@ let find (meth : Yuka.Router.meth) (path : string list)
           | Some p1 -> Yuka.Router.Found (Page_n { n = p1 }))
       | _ -> Yuka.Router.Wrong_method [ `GET ])
   | [ "i"; p1 ] -> (
-      match Yuka.Router.Param.decode Params.issue_id_param p1 with
+      match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
       | None -> Yuka.Router.Missing
-      | Some p1 -> Yuka.Router.Redirect { permanent = true; location = Stdlib.( ^ ) "/issue/" (Yuka.Router.encode (Yuka.Router.Param.encode Params.issue_id_param p1)) })
+      | Some p1 -> Yuka.Router.Redirect { permanent = true; location = Stdlib.( ^ ) "/issue/" (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param p1)) })
   | [ "issue"; p1; "close" ] -> (
       match meth with
       | `POST -> (
-          match Yuka.Router.Param.decode Params.issue_id_param p1 with
+          match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
           | None -> Yuka.Router.Missing
           | Some p1 -> Yuka.Router.Found (Close_issue { id = p1 }))
       | _ -> Yuka.Router.Wrong_method [ `POST ])
   | [ "issue"; p1; "json" ] -> (
       match meth with
       | `GET | `HEAD -> (
-          match Yuka.Router.Param.decode Params.issue_id_param p1 with
+          match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
           | None -> Yuka.Router.Missing
           | Some p1 -> Yuka.Router.Found (Issue_json { id = p1 }))
       | `PUT -> (
-          match Yuka.Router.Param.decode Params.issue_id_param p1 with
+          match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
           | None -> Yuka.Router.Missing
           | Some p1 -> Yuka.Router.Found (Update_issue { id = p1 }))
       | _ -> Yuka.Router.Wrong_method [ `GET; `PUT ])
   | "docs" :: (_ :: _ as p1) -> (
       match meth with
-      | `GET | `HEAD -> Yuka.Router.Found (Doc { parts = p1 })
+      | `GET | `HEAD -> Yuka.Router.Found (Doc { parts = Stdlib.List.map Yuka.Router.of_segment p1 })
       | _ -> Yuka.Router.Wrong_method [ `GET ])
   | "old-docs" :: (_ :: _ as p1) -> Yuka.Router.Redirect { permanent = false; location = Stdlib.( ^ ) "/docs/" (Stdlib.String.concat "/" (Stdlib.List.map Yuka.Router.encode p1)) }
   | _ -> Yuka.Router.Missing

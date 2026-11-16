@@ -772,11 +772,16 @@ let rec decode_params params k =
   match params with
   | [] -> k
   | (i, ty) :: rest -> (
-      let fn = match ty with Int -> Some "Yuka.Router.int_param" | Custom { param = m; _ } -> Some (custom_decode m) | _ -> None in
-      match fn with
+      let call =
+        match ty with
+        | Int -> Some (sprintf "Yuka.Router.int_param p%d" i)
+        | Custom { param = m; _ } -> Some (sprintf "%s (Yuka.Router.of_segment p%d)" (custom_decode m) i)
+        | _ -> None
+      in
+      match call with
       | None -> decode_params rest k
-      | Some fn ->
-          (sprintf "match %s p%d with" fn i
+      | Some call ->
+          (sprintf "match %s with" call
           :: "| None -> Yuka.Router.Missing"
           :: arm (sprintf "Some p%d" i) (decode_params rest k)))
 
@@ -800,7 +805,9 @@ let found name segs search =
       (List.mapi
          (fun i s ->
            match s with
-           | Param (n, _) | Rest n -> [ sprintf "%s = p%d" n i ]
+           | Param (n, String) -> [ sprintf "%s = Yuka.Router.of_segment p%d" n i ]
+           | Rest n -> [ sprintf "%s = Stdlib.List.map Yuka.Router.of_segment p%d" n i ]
+           | Param (n, _) -> [ sprintf "%s = p%d" n i ]
            | Static _ -> [])
          segs)
     @ List.map (fun f -> sprintf "%s = %s" f.fname (decode_search f)) search
@@ -818,6 +825,7 @@ let redirect segs permanent target =
     let name = String.sub p 1 (String.length p - 1) in
     let v = var segs name in
     match List.find (function Param (n, _) | Rest n -> n = name | Static _ -> false) segs with
+    | Param (_, Custom { param = m; _ }) -> Code (sprintf "Yuka.Router.segment (%s)" (custom_encode m v))
     | Param (_, ty) -> Code (to_url ty v)
     | Rest _ ->
         Code (sprintf "Stdlib.String.concat \"/\" (Stdlib.List.map Yuka.Router.encode %s)" v)

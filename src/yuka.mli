@@ -1263,15 +1263,20 @@ module Router : sig
       [A-Z a-z 0-9 - . _ ~] stay as they are. *)
 
   val segment : string -> string
-  (** [encode] for one path segment that [href] writes. Raises
-      [Invalid_argument] on [""], ["."] and [".."]: the request cycle drops
-      empty segments and browsers resolve dot segments (also written
-      [%2E]), so no URL can give them back. *)
+  (** [encode] for one path segment that [href] writes. The request cycle
+      drops empty segments and browsers resolve dot segments (also written
+      [%2E]), so [segment] adds a [~] before a value that is tildes and
+      then [""], ["."] or [".."]: [""] gives ["~"], [".."] gives ["~.."]
+      and ["~"] gives ["~~"]. {!of_segment} removes it. *)
+
+  val of_segment : string -> string
+  (** The inverse of {!segment} on a percent-decoded segment, which [find]
+      calls on each [string] and custom path param. *)
 
   val segments : string list -> string
   (** A catch-all for [href]: ["/"] and {!segment} of each element. Raises
       [Invalid_argument] on [[]], since a catch-all matches one segment or
-      more, and on an element that {!segment} refuses. *)
+      more. *)
 
   val int_param : string -> int option
   (** [Param.decode Param.int], which the generated code calls inline. Use
