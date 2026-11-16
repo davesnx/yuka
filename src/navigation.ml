@@ -279,7 +279,7 @@ let show ~dir ~push ~restore url a =
   | Some target ->
       if push then begin
         let key = Web.fresh_key () in
-        Navigation_web.history_push_key key final;
+        Web.history_push_key key final;
         current_key := key
       end;
       let gen = !nav in
@@ -294,7 +294,9 @@ let show ~dir ~push ~restore url a =
           (match restore with
           | Some y -> Navigation_web.scroll_to y
           | None -> Navigation_web.scroll_to_hash (hash_of final));
-          !start_islands ()
+          !start_islands ();
+          Navigation_web.live ();
+          Navigation_web.settle (Option.value target ~default:(Web.document ())) (hash_of final)
         end
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
@@ -441,6 +443,7 @@ let boot (transitions, islands) =
        watch ());
   clear ();
   Navigation_web.adopt_stylesheets ();
+  Navigation_web.live ();
   (start_islands :=
      fun () ->
        islands ();

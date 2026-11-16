@@ -34,7 +34,7 @@ let push url =
   if same_page url then begin
     Navigation_stub.save_scroll ();
     let before = Web.history_key () and key = Web.fresh_key () in
-    Navigation_web.history_push_key key url;
+    Web.history_push_key key url;
     Navigation_stub.current_key := key;
     Navigation_stub.shown_key := key;
     Platform.kept := key :: before :: !Platform.kept;

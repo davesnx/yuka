@@ -300,6 +300,13 @@ await step("3c. partial navigation", async () => {
   await page.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
   check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
+  const focusState = () =>
+    page.evaluate(() => {
+      const a = document.activeElement!, outlet = document.querySelector("yuka-outlet")!;
+      return { cls: a.className, tag: a.localName, inOutlet: outlet.contains(a), live: document.getElementById("yuka-announcer")?.textContent, title: document.title };
+    });
+  const onIssue = await focusState();
+  check("3c.5a after a client navigation the focus is on the h1 of the new page and its title is announced", onIssue.cls === "issue-title" && onIssue.live === "YUK-3", JSON.stringify(onIssue));
   check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null", await current());
   await page.locator(".new-issue-button").click();
   await page.waitForSelector(".dialog", { timeout: 2000 });
@@ -308,6 +315,8 @@ await step("3c. partial navigation", async () => {
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
+  const onMy = await focusState();
+  check("3c.8a a page with no h1: the focus moves from the sidebar link into the new content, the title is announced", onMy.inOutlet && onMy.live === onMy.title && onMy.title !== "YUK-3", JSON.stringify(onMy));
   check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null", await current());
   check("3c.9 progress bar still kept", (await bar()).kept === true, JSON.stringify(await bar()));
   const y0 = await page.evaluate(() => Math.round(window.scrollY));
@@ -319,6 +328,9 @@ await step("3c. partial navigation", async () => {
   await page.goBack();
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
+  await page.waitForFunction(() => document.getElementById("yuka-announcer")?.textContent === "YUK-3", null, { timeout: 2000 }).catch(() => {});
+  const onBack = await focusState();
+  check("3c.11a after Back the focus is on the h1 again and the title is announced", onBack.cls === "issue-title" && onBack.live === "YUK-3", JSON.stringify(onBack));
   check("3c.11 back is partial too (progress bar kept)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");

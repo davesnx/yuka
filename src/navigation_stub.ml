@@ -12,7 +12,7 @@ let table r =
       t
 
 let scroll_table : float Web.table option ref = ref None
-let save_scroll () = Web.table_set (table scroll_table) !shown_key (Navigation_web.scroll_y ())
+let save_scroll () = Web.table_set (table scroll_table) !shown_key (Web.scroll_y ())
 
 let loaded = Platform.loaded
 let on = ref false

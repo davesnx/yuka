@@ -348,6 +348,12 @@ let history_replace_key : string -> unit =
   [%mel.raw
     "function (k) { window.history.replaceState({ yukaKey: k }, '', window.location.href) }"]
 
+let history_push_key : string -> string -> unit =
+  [%mel.raw
+    "function (k, url) { window.history.pushState({ yukaKey: k }, '', url) }"]
+
+let scroll_y : unit -> float = [%mel.raw "function () { return window.scrollY || 0 }"]
+
 let set_cookie : string -> unit = [%mel.raw "function (cookie) { document.cookie = cookie }"]
 
 let history_replace_url : string -> unit =

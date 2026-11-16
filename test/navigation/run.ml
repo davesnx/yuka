@@ -144,7 +144,9 @@ let prevent_on : string -> unit =
 let location_ : unit -> string =
   [%mel.raw "function () { return window.location.pathname + window.location.search + window.location.hash }"]
 
-let body_html : unit -> string = [%mel.raw "function () { return document.body.innerHTML }"]
+let body_html : unit -> string =
+  [%mel.raw
+    {|function () { const b = document.body.cloneNode(true), r = b.querySelector("#yuka-announcer"); if (r) r.remove(); return b.innerHTML }|}]
 let title : unit -> string = [%mel.raw "function () { return document.title }"]
 let history_length : unit -> int = [%mel.raw "function () { return window.history.length }"]
 let go_back : unit -> unit = [%mel.raw "function () { window.history.back() }"]
@@ -776,6 +778,103 @@ let route_push_back_scroll finish =
           check "Back after Routes.push restores the scroll of the entry it left" "scroll:300" (log_read ());
           finish ())
         100)
+
+let focus_on : string -> unit = [%mel.raw "function (sel) { document.querySelector(sel).focus() }"]
+
+let focused : unit -> string =
+  [%mel.raw
+    {|function () { const a = document.activeElement; return !a ? "none" : a.id || a.localName + (a.getAttribute("tabindex") === null ? "" : "[" + a.getAttribute("tabindex") + "]") }|}]
+
+let announced : unit -> string =
+  [%mel.raw
+    {|function () { const r = document.querySelectorAll("[aria-live]"); return r.length === 1 && r[0].isConnected && r[0].getAttribute("aria-live") === "assertive" && r[0].getAttribute("aria-atomic") === "true" ? r[0].textContent : "regions:" + r.length }|}]
+
+let outlet_answer i body title =
+  resolve_headers i body 200 [| ("yuka-outlet", "L0"); ("yuka-title", title); ("yuka-build", "b1") |]
+
+let focus_heading finish =
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  focus_on "#two";
+  ignore (click "#two" "");
+  outlet_answer 0 {|<p>x</p><h1 id="h">Two</h1>|} "Two";
+  tick (fun () ->
+      check "the h1 of the new content has the focus" "h" (focused ());
+      check "the h1 was made focusable" "-1" (attr "#h" "tabindex");
+      check "the new title is announced" "Two" (announced ());
+      back (fun () ->
+          outlet_answer 1 {|<h1 id="h0">Start</h1>|} "Start";
+          tick (fun () ->
+              check "Back: the h1 of the page has the focus" "h0" (focused ());
+              check "Back: the title is announced" "Start" (announced ());
+              finish ())))
+
+let focus_targets finish =
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  focus_on "#two";
+  ignore (click "#two" "");
+  outlet_answer 0 {|<h1 id="h">Two</h1><input id="f" autofocus>|} "Two";
+  tick (fun () ->
+      check "autofocus wins over the h1" "f" (focused ());
+      check "the h1 is not changed" "null" (attr "#h" "tabindex");
+      Browser.navigate "/three#part";
+      outlet_answer 1 {|<h1 id="h">Three</h1><h2 id="part">Part</h2>|} "";
+      tick (fun () ->
+          check "the fragment target wins over the h1" "part" (focused ());
+          check "no title: the h1 is announced" "Three" (announced ());
+          Browser.navigate "/four";
+          outlet_answer 2 {|<p id="p">no heading</p>|} "Four";
+          tick (fun () ->
+              check "no h1: the outlet has the focus" "yuka-outlet[-1]" (focused ());
+              Browser.navigate "/five";
+              outlet_answer 3 {|<h1 id="h5">Five</h1><a id="in" href="/x">x</a>|} "Five";
+              tick (fun () ->
+                  check "a link in the content keeps its own tab order" "null" (attr "#in" "tabindex");
+                  check "the h1 has the focus" "h5" (focused ());
+                  finish ()))))
+
+let focus_kept finish =
+  setup "";
+  outlet_page ();
+  set_body ({|<input id="search">|} ^ body_html ());
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  focus_on "#search";
+  Browser.navigate "/two";
+  outlet_answer 0 {|<h1 id="h">Two</h1>|} "Two";
+  tick (fun () ->
+      check "a text field outside the content keeps the focus" "search" (focused ());
+      check "the page is still announced" "Two" (announced ());
+      finish ())
+
+let focus_same_page finish =
+  setup "";
+  route_page ();
+  focus_on "#two";
+  Yuka.runtime_route_replace "/start?x=2";
+  Yuka.runtime_route_push "/start?x=3";
+  back (fun () ->
+      check "Routes.replace, Routes.push and Back to them keep the focus" "two" (focused ());
+      check "nothing announced" "true" (bools (List.mem (announced ()) [ ""; "regions:0" ]));
+      finish ())
+
+let focus_full_swap finish =
+  setup (page {|<a id="a" href="/a">a</a>|});
+  plain_start ();
+  focus_on "#a";
+  ignore (click "#a" "");
+  resolve_call 0 (doc "A" (page {|<h1 id="ha">A</h1><a id="b" href="/b">b</a>|})) "";
+  tick (fun () ->
+      check "full swap: the h1 has the focus" "ha" (focused ());
+      check "full swap: one region, announced" "A" (announced ());
+      ignore (click "#b" "");
+      resolve_call 1 (doc "B" (page {|<p>b</p>|})) "";
+      tick (fun () ->
+          check "full swap without h1: the body has the focus" "body" (focused ());
+          check "second full swap: still one region" "B" (announced ());
+          finish ()))
 
 let context_missing finish =
   setup "";
@@ -3026,6 +3125,11 @@ let all =
     ("404 is shown in place", shown_in_place 404);
     ("500 is shown in place", shown_in_place 500);
     ("partial response replaces the outlet", partial);
+    ("a navigation focuses the h1 of the new content and announces the title, also on Back", focus_heading);
+    ("focus order: autofocus, fragment target, h1, outlet", focus_targets);
+    ("a text field outside the content keeps the focus", focus_kept);
+    ("Routes.replace and Routes.push keep the focus and announce nothing", focus_same_page);
+    ("a full body swap focuses the h1 and keeps one live region", focus_full_swap);
     ("another build is a full load", stale_build);
     ("unknown outlet is a full load", unknown_outlet);
     ("a bad title still navigates", bad_title);
