@@ -364,41 +364,45 @@ let take_buffer () =
 
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
 
-type 'a local = { index : int; init : unit -> 'a }
+module Threads = Ephemeron.K1.Make (struct
+  type t = Thread.t
 
-let locals = Atomic.make 0
-let unset = Obj.repr (ref ())
-let local init = { index = Atomic.fetch_and_add locals 1; init }
+  let equal = ( == )
+  let hash = Thread.id
+end)
 
-(* OCaml 5.4 otherlibs/systhreads/st_stubs.c: a Thread.t is the block (ident, start closure, terminated). The runtime
-   sets the start closure to unit before the thread runs, and after that only the thread itself reads or writes this
-   field, so it can hold the thread's slots. *)
-let () = if Obj.size (Obj.repr (Thread.self ())) <> 3 then failwith "Yuka: unknown Thread.t layout"
+type 'a last = Nobody | Last of Thread.t * 'a
+type 'a slots = { mutable last : 'a last; values : 'a Threads.t; lock : Mutex.t }
+type 'a local = { init : unit -> 'a; mutable domains : 'a slots array }
 
-let local_init k =
-  let v = k.init () in
-  let thread = Obj.repr (Thread.self ()) in
-  let slots = Obj.field thread 1 in
-  let size = if Obj.is_int slots then 0 else Obj.size slots in
-  let slots =
-    if k.index < size then slots
-    else begin
-      let grown = Obj.repr (Array.make (max (k.index + 1) (Atomic.get locals)) unset) in
-      for i = 0 to size - 1 do
-        Obj.set_field grown i (Obj.field slots i)
-      done;
-      Obj.set_field thread 1 grown;
-      grown
-    end
+let slots () = { last = Nobody; values = Threads.create 8; lock = Mutex.create () }
+let local init = { init; domains = [| slots () |] }
+let growing = Mutex.create ()
+
+let grow k i =
+  Mutex.protect growing (fun () ->
+      let d = k.domains in
+      let n = Array.length d in
+      if i >= n then k.domains <- Array.init (max (i + 1) (2 * n)) (fun j -> if j < n then d.(j) else slots ()));
+  k.domains.(i)
+
+let local_slow k s self =
+  let v =
+    match Mutex.protect s.lock (fun () -> Threads.find_opt s.values self) with
+    | Some v -> v
+    | None ->
+        let v = k.init () in
+        Mutex.protect s.lock (fun () -> Threads.replace s.values self v);
+        v
   in
-  Obj.set_field slots k.index (Obj.repr v);
+  s.last <- Last (self, v);
   v
 
 let local_get k =
-  let slots = Obj.field (Obj.repr (Thread.self ())) 1 in
-  if Obj.is_block slots && k.index < Obj.size slots && Obj.field slots k.index != unset then
-    Obj.obj (Obj.field slots k.index)
-  else local_init k
+  let d = k.domains and i = Domain.self_index () in
+  let s = if i < Array.length d then Array.unsafe_get d i else grow k i in
+  let self = Thread.self () in
+  match s.last with Last (t, v) when t == self -> v | _ -> local_slow k s self
 let rec has_upper s i = i < String.length s && match String.unsafe_get s i with 'A' .. 'Z' -> true | _ -> has_upper s (i + 1)
 let lowercase s = if has_upper s 0 then String.lowercase_ascii s else s
 

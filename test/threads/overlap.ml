@@ -60,6 +60,7 @@ let interleaved () =
       (fun () ->
         let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
         go 3;
+        clean "interleaved, worker A";
         r)
       (fun () ->
         wait 1;
@@ -75,6 +76,7 @@ let listener () =
       (fun () ->
         let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
         go 3;
+        clean "memo on another thread, render worker";
         r)
       (fun () ->
         wait 1;
@@ -90,7 +92,9 @@ let owner_cursor () =
     in_parallel
       (fun () ->
         wait 1;
-        outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "a") ])))
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "a") ])) in
+        clean "owner on another thread, render worker";
+        r)
       (fun () ->
         let (), dispose = owner (fun () -> go 1; wait 2) in
         dispose ();
