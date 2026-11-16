@@ -2,7 +2,7 @@ module Json = Json
 module Async = Async
 module Status = Status
 module Codec = Codec
-module State = struct include State end
+module State = State
 module Effect = struct
   include Base.Effect
 

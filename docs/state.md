@@ -2,7 +2,7 @@
 
 This page explains how a Yuka component updates the page. It is for a
 reader who knows React or Solid. The exact API is in
-[`src/yuka.mli`](../src/yuka.mli).
+[`src/state.mli`](../src/state.mli) and [`src/yuka.mli`](../src/yuka.mli).
 
 ## A component runs once
 
