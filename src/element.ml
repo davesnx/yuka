@@ -32,6 +32,7 @@ let attr_unchecked name value =
   Web.refuse_url_name name;
   Static (name, value)
 let hole f = Kind.of_node (Hole (Kind.fn f))
+let with_unique_id f = Kind.of_node (Hole (fun () -> Kind.to_node (f (Types.next_id ()))))
 let slot s =
   Client.use_slot ();
   Kind.of_node (Slot s)

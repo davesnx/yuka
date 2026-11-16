@@ -180,11 +180,15 @@ module Issue_form = struct
     let sent_priority = match Yuka.Form.value form `Priority with "" -> "no-priority" | value -> value in
     <div class_="issue-form">
       <input type_=`hidden name="workspace" value=(Workspace.slug workspace) />
+      <label class_="visually-hidden" for_="dialog-title">"Title"</label>
       <input class_="dialog-title" type_=`text id="dialog-title" name="title" placeholder="Issue title"
         autofocus=true value=(Yuka.Form.value form `Title) />
-      (Yuka.Form.error_view form `Title (fun message -> <p class_="error">(Yuka.text message)</p>))
-      <textarea class_="dialog-description" name="description" placeholder="Description" rows=4
-        value=(Yuka.Form.value form `Description) />
+      (Yuka.Form.error_view form `Title (fun ~id message -> <p id class_="error">(Yuka.text message)</p>))
+      (Yuka.with_unique_id (fun id ->
+         Yuka.fragment
+           [ <label class_="visually-hidden" for_=id>"Description"</label>;
+             <textarea class_="dialog-description" id name="description" placeholder="Description" rows=4
+               value=(Yuka.Form.value form `Description) /> ]))
       <div class_="dialog-row">
         <select class_="select" aria_label="Status" name="status">
           (Yuka.fragment

@@ -75,6 +75,7 @@ type ('o, 'f) form = {
   failed : 'f errors State.t;
   busy : bool State.t;
   field_name : 'f -> string;
+  error_id : 'f -> string;
 }
 
 let value form f = Option.value (List.assoc_opt (form.field_name f) form.sent) ~default:""
@@ -86,7 +87,8 @@ let error form f =
 
 let errors form = List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
 let error_view form f view =
-  Kind.of_node (Hole (fun () -> match error form f with Some m -> Kind.to_node (view m) | None -> Fragment []))
+  Kind.of_node
+    (Hole (fun () -> match error form f with Some m -> Kind.to_node (view ~id:(form.error_id f) m) | None -> Fragment []))
 
 let errors_view form view =
   Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (errors form))))
@@ -102,19 +104,52 @@ let parse_sent sent =
       | _ -> None)
   | _ -> None
 
+let forms_of name key =
+  List.filter
+    (fun el -> Web.get_attribute el "data-yuka-action" = Some name && Web.get_attribute el "data-yuka-key" = Some key)
+    (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-action]"))
+
+let mark ~action ~key ~focus names form_el =
+  let focused = ref (not focus) in
+  Array.iter
+    (fun el ->
+      match (Web.local_name el, Web.get_attribute el "name") with
+      | ("input" | "select" | "textarea"), Some name ->
+          let id = error_id ~action ~key name in
+          let others =
+            List.filter
+              (fun token -> token <> "" && token <> id)
+              (String.split_on_char ' ' (Option.value (Web.get_attribute el "aria-describedby") ~default:""))
+          in
+          if List.exists (String.equal name) names then begin
+            Web.set_attribute el "aria-invalid" "true";
+            Web.set_attribute el "aria-describedby" (String.concat " " (others @ [ id ]));
+            match Web.get_attribute el "type" with
+            | Some "hidden" -> ()
+            | _ when !focused -> ()
+            | _ ->
+                focused := true;
+                Web.focus_node el
+          end
+          else begin
+            Web.remove_attribute el "aria-invalid";
+            match others with
+            | [] -> Web.remove_attribute el "aria-describedby"
+            | _ -> Web.set_attribute el "aria-describedby" (String.concat " " others)
+          end
+      | _ -> ())
+    (Web.query_all form_el "[name]")
+
 let read_sent name key =
   List.find_map
     (fun el ->
-      if Web.get_attribute el "data-yuka-action" <> Some name || Web.get_attribute el "data-yuka-key" <> Some key
-      then None
-      else
-        let sent = Option.value (Web.get_attribute el "data-yuka-sent") ~default:"" in
-        match parse_sent sent with
-        | Some state -> Some state
-        | None ->
-            if Dev.on then Web.console_error ("yuka: ignored a bad data-yuka-sent on form " ^ name ^ ": " ^ sent);
-            None)
-    (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-sent]"))
+      let sent = Option.value (Web.get_attribute el "data-yuka-sent") ~default:"" in
+      match parse_sent sent with
+      | Some state -> Some state
+      | None ->
+          if Dev.on then Web.console_error ("yuka: ignored a bad data-yuka-sent on form " ^ name ^ ": " ^ sent);
+          None)
+    (List.filter (fun el -> Option.is_some (Web.get_attribute el "data-yuka-sent")) (forms_of name key))
 
 let sent_state name key =
   match !(current_session ()) with
@@ -135,8 +170,16 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
       failed = State.make (match sent with Some (_, e) -> unnamed t e | None -> []);
       busy = State.make false;
       field_name = name t;
+      error_id = (fun f -> error_id ~action:(Action.name action) ~key (name t f));
     }
   in
+  let first = ref true in
+  Base.Effect.after (fun () ->
+      let names = List.filter_map (function Some f, _ -> Some (name t f) | None, _ -> None) (State.get form.failed) in
+      let focus = not !first in
+      first := false;
+      if (match names with [] -> focus | _ -> true) then
+        List.iter (mark ~action:(Action.name action) ~key ~focus names) (forms_of (Action.name action) key));
   let follow = function
     | Some location when not (Web.same_origin location) ->
         State.set form.failed [ (None, "Yuka: refused a redirect to another site: " ^ location) ]

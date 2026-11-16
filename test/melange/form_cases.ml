@@ -47,6 +47,16 @@ let text_of : string -> string =
 let input_value : string -> string =
   [%mel.raw "function (name) { return document.querySelector('input[name=' + name + ']').value }"]
 
+let attribute : string -> string -> string =
+  [%mel.raw
+    {|function (sel, name) { const e = document.querySelector(sel); return e ? (e.getAttribute(name) ?? "none") : "missing" }|}]
+
+let focused_name : unit -> string =
+  [%mel.raw "function () { const e = document.activeElement; return (e && e.getAttribute('name')) || 'none' }"]
+
+let set_field : string -> string -> unit =
+  [%mel.raw "function (sel, v) { document.querySelector(sel).value = v }"]
+
 let after_ms : int -> (unit -> unit) -> unit =
   [%mel.raw "function (ms, f) { setTimeout(function () { f() }, ms) }"]
 
@@ -60,7 +70,7 @@ let view () =
         [
           element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
           element "i" [] [ hole (fun () -> text (if Form.pending form then "pending" else "idle")) ];
-          Form.error_view form `Body (fun m -> element "b" [] [ text m ]);
+          Form.error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
           Form.errors_view form (fun m -> element "u" [] [ text m ]);
         ])
     ()
@@ -75,7 +85,7 @@ let plain_view key () =
       fragment
         [
           element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
-          Form.error_view form `Body (fun m -> element "b" [] [ text m ]);
+          Form.error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
         ])
     ()
 
@@ -112,6 +122,7 @@ let entries =
     entry_of "Btn" button_view;
     entry_of "Redirect" redirect_view;
     entry_of "Toggled" toggled_view;
+    entry_of "Invalid" Forms_shared.Invalid.view;
   ]
 
 let island_of name view = runtime_island ~name ~props:`Null view
@@ -264,6 +275,7 @@ let async =
         let first = text_of "b" in
         State.update tick succ;
         let remounted = (text_of "b", input_value "body") in
+        let remounted_marks = (attribute "input[name=body]" "aria-invalid", attribute "input[name=body]" "aria-describedby") in
         set_input "body" "longer";
         ignore (submit ());
         State.update tick succ;
@@ -271,7 +283,10 @@ let async =
             check "shown at hydration" "Too short" first;
             check "kept after a new render" "Too short" (fst remounted);
             check "value kept after a new render" "sent" (snd remounted);
+            check "aria-invalid after a new render" "true" (fst remounted_marks);
+            check "aria-describedby after a new render" "jot-body-error" (snd remounted_marks);
             check "gone after a client submit" "none" (text_of "b");
+            check "aria-invalid gone after a client submit" "none" (attribute "input[name=body]" "aria-invalid");
             check "value gone after a client submit" "" (input_value "body");
             Yuka.stop ()) );
     ( "form: unknown field names from the server are form errors",
@@ -320,6 +335,87 @@ let async =
         finish (fun () ->
             check "value kept" "sent" (input_value "body");
             check "error kept" "Too short" (text_of "b");
+            check "server aria-invalid" "true" (attribute "input[name=body]" "aria-invalid");
+            check "server aria-describedby" "jot-body-error" (attribute "input[name=body]" "aria-describedby");
+            check "error id" "jot-body-error" (attribute "b" "id");
+            check "server autofocus" "" (attribute "input[name=body]" "autofocus");
+            check "hydration moves no focus" "none" (focused_name ());
+            check "same markup after hydration" html after;
+            Yuka.stop ()) );
+      ( "form: field errors from the server mark the field and take the focus, a valid submit clears them",
+      fun finish ->
+        start (Server.to_string island);
+        let before = (attribute "input[name=body]" "aria-invalid", attribute "input[name=body]" "aria-describedby") in
+        set_input "body" "x";
+        ignore (submit ());
+        respond 0 200 {|{"ok":{"errors":[["body","Too short"]]}}|};
+        after_ms 10 (fun () ->
+            let invalid = attribute "input[name=body]" "aria-invalid" in
+            let described = attribute "input[name=body]" "aria-describedby" in
+            let error_id = attribute "b" "id" in
+            let focus = focused_name () in
+            set_input "body" "longer";
+            ignore (submit ());
+            let during = attribute "input[name=body]" "aria-invalid" in
+            respond 1 200 {|{"ok":{"value":5}}|};
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "no aria-invalid before" "none" (fst before);
+                    check "no aria-describedby before" "none" (snd before);
+                    check "aria-invalid" "true" invalid;
+                    check "aria-describedby" "jot-body-error" described;
+                    check "the error has the id" "jot-body-error" error_id;
+                    check "focus on the field" "body" focus;
+                    check "cleared at the next submit" "none" during;
+                    check "no aria-invalid after" "none" (attribute "input[name=body]" "aria-invalid");
+                    check "no aria-describedby after" "none" (attribute "input[name=body]" "aria-describedby");
+                    Yuka.stop ()))) );
+    ( "form: a decode error in the browser marks the first wrong field and focuses it",
+      fun finish ->
+        start (Server.to_string (fun () -> island_of "Invalid" Forms_shared.Invalid.view));
+        set_field "input[name=count]" "x3";
+        ignore (submit ());
+        after_ms 10 (fun () ->
+            let marks =
+              ( attribute "input[name=count]" "aria-invalid",
+                attribute "input[name=count]" "aria-describedby",
+                attribute "input[name=title]" "aria-invalid",
+                attribute "input[name=title]" "aria-describedby" )
+            in
+            let focus = focused_name () in
+            let count_error = text_of "#save_entry-k-count-error" in
+            set_field "input[name=count]" "3";
+            ignore (submit ());
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    let count_invalid, count_described, title_invalid, title_described = marks in
+                    check "count invalid" "true" count_invalid;
+                    check "count described by its error" "save_entry-k-count-error" count_described;
+                    check "count error element" "Not a whole number" count_error;
+                    check "title valid" "none" title_invalid;
+                    check "title keeps its own describedby" "hint" title_described;
+                    check "focus on count" "count" focus;
+                    check "count valid again" "none" (attribute "input[name=count]" "aria-invalid");
+                    check "count describedby gone" "none" (attribute "input[name=count]" "aria-describedby");
+                    check "title describedby kept" "hint" (attribute "input[name=title]" "aria-describedby");
+                    Yuka.stop ()))) );
+    ( "form: a 422 with several fields hydrates with the server marks and the author's describedby",
+      fun finish ->
+        let html =
+          Private.print
+            (let s = Private.session ~streaming:false ~islands_only:true in
+             Private.set_form s Forms_shared.Invalid.sent;
+             s)
+            (fun () -> Private.node (island_of "Invalid" Forms_shared.Invalid.view))
+        in
+        start html;
+        let after = body_html () in
+        finish (fun () ->
+            check "title" "hint save_entry-k-title-error" (attribute "input[name=title]" "aria-describedby");
+            check "count" "save_entry-k-count-error" (attribute "input[name=count]" "aria-describedby");
+            check "level" "true" (attribute "select[name=level]" "aria-invalid");
+            check "tags valid" "none" (attribute "textarea[name=tags]" "aria-invalid");
+            check "count error element" "Not a whole number" (text_of "#save_entry-k-count-error");
             check "same markup after hydration" html after;
             Yuka.stop ()) );
   ]

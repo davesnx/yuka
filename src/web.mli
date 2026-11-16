@@ -77,6 +77,7 @@ val fetch_post :
 val watch_added : (node array -> bool) -> unit -> unit
 val navigate : string -> unit
 val focus : string -> unit
+val focus_node : node -> unit
 val scroll_into_view : string -> unit
 val has_intersection_observer : node -> bool
 val on_idle : (unit -> unit) -> unit -> unit

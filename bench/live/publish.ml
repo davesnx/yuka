@@ -9,7 +9,10 @@ let issues n =
       let base = seed.(i mod Array.length seed) in
       { base with Model.Issue.id = Printf.sprintf "YUK-%d" (i + 1) })
 
+let sessions = ref 0
+
 let connect key bytes =
+  incr sessions;
   let pending = ref [ {|{"t":"hello","v":1,"csrf":""}|}; Printf.sprintf {|{"t":"sub","id":1,"topic":"bench","key":%d}|} key ] in
   let connection =
     Yuka.Server.Live.connection
@@ -32,7 +35,7 @@ let connect key bytes =
   in
   ignore
     (Yuka.Server.Testing.live_run ~sleep:never
-       (Yuka.Server.Testing.context ~session:"bench" ())
+       (Yuka.Server.Testing.context ~session:("bench" ^ string_of_int !sessions) ())
        ~verify_csrf:(fun _ -> Yuka.Async.return true)
        ~token:(fun () -> Some "t") connection)
 
@@ -46,6 +49,13 @@ let () =
         connect key bytes
       done;
       let state = issues n in
+      let changed =
+        List.mapi
+          (fun i (issue : Model.Issue.t) ->
+            if i = n / 2 then { issue with Model.Issue.status = (if issue.status = Done then Todo else Done) } else issue)
+          state
+      in
+      Yuka.Server.Live.publish topic key state;
       bytes := 0;
       let runs = 20 in
       let encode_start = Unix.gettimeofday () in
@@ -54,10 +64,31 @@ let () =
       done;
       let encode_ms = (Unix.gettimeofday () -. encode_start) *. 1000. /. float_of_int runs in
       let start = Unix.gettimeofday () in
-      for _ = 1 to runs do
-        Yuka.Server.Live.publish topic key state
+      for run = 1 to runs do
+        Yuka.Server.Live.publish topic key (if run mod 2 = 1 then changed else state)
       done;
       let publish_ms = (Unix.gettimeofday () -. start) *. 1000. /. float_of_int runs in
-      Printf.printf "%5d issues: %8d bytes per message, encode %6.2f ms, publish to 100 sockets %6.2f ms\n" n
-        (!bytes / runs / 100) encode_ms publish_ms)
+      Printf.printf
+        "%5d issues, one issue changed: %8d bytes per message, encode %6.2f ms, publish to 100 sockets %6.2f ms\n" n
+        (!bytes / runs / 100) encode_ms publish_ms;
+      bytes := 0;
+      let reversed = List.rev state in
+      let start = Unix.gettimeofday () in
+      for run = 1 to runs do
+        Yuka.Server.Live.publish topic key (if run mod 2 = 1 then reversed else state)
+      done;
+      let reversed_ms = (Unix.gettimeofday () -. start) *. 1000. /. float_of_int runs in
+      let encode = (Yuka.Codec.list Model.Issue.codec).encode in
+      let diff_ms next =
+        let a = encode state and b = encode next in
+        let start = Unix.gettimeofday () in
+        for _ = 1 to runs do
+          ignore (Yuka.Server.Testing.json_diff a b)
+        done;
+        (Unix.gettimeofday () -. start) *. 1000. /. float_of_int runs
+      in
+      Printf.printf "%5d issues, order reversed:   %8d bytes per message, publish to 100 sockets %6.2f ms\n" n
+        (!bytes / runs / 100) reversed_ms;
+      Printf.printf "%5d issues, diff alone: one issue changed %6.2f ms, order reversed %6.2f ms\n" n (diff_ms changed)
+        (diff_ms reversed))
     [ 25; 500; 5000 ]

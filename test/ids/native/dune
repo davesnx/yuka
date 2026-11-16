@@ -1,0 +1,25 @@
+(executable
+ (name page)
+ (modules page)
+ (libraries ids_cases yuka))
+
+(rule
+ (with-stdout-to
+  filled.html
+  (run ./page.exe filled)))
+
+(rule
+ (with-stdout-to
+  shell.html
+  (run ./page.exe shell)))
+
+(rule
+ (with-stdout-to
+  answer.html
+  (run ./page.exe answer)))
+
+(test
+ (name run)
+ (package yuka)
+ (modules run)
+ (deps filled.html shell.html answer.html))

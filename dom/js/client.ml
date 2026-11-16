@@ -673,11 +673,12 @@ let mount_element pos tag attrs children =
 
 let mount_await pos async loading failed render =
   let status = Async.watch async in
-  mount_hole pos false (fun () ->
-      match State.get status with
-      | Async.Pending -> loading
-      | Async.Done v -> render v
-      | Async.Failed m -> failed m)
+  Types.with_browser_ids (Types.next_id () ^ "-") (fun () ->
+      mount_hole pos false (fun () ->
+          match State.get status with
+          | Async.Pending -> loading
+          | Async.Done v -> render v
+          | Async.Failed m -> failed m))
 
 let mount_catch pos last client =
   mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
@@ -918,7 +919,7 @@ let boot entries props island =
               let o = Base.new_owner () in
               o.catch <- Some catch;
               o.env <- Scheduler.Root (Option.value (Web.get_attribute island "data-ctx") ~default:"");
-              match Base.with_owner o (fun () -> hydrate island (Kind.of_fn build)) with
+              match Base.with_owner o (fun () -> Types.with_browser_ids (id ^ "-") (fun () -> hydrate island (Kind.of_fn build))) with
               | d when !failed ->
                   stop d;
                   Base.dispose_owner o;

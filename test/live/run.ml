@@ -499,7 +499,7 @@ let ssr_cases =
         let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Live" ~props:`Null view)) in
         let has part = Astring_like.contains html part in
         Alcotest.(check bool) "data" true (has "3,5");
-        Alcotest.(check bool) "state answer" true (has {|data-yuka-answer="l:count &quot;ssr&quot;">{"ok":3}|});
+        Alcotest.(check bool) "state answer" true (has {|data-yuka-answer="l:count &quot;ssr&quot;">{"ok":[3]}|});
         Alcotest.(check bool) "token" true (has {|data-yuka-answer="l:csrf">{"ok":"tok"}|});
         Alcotest.(check int) "asked once" 1 !asked );
     ( "a page with no live use asks no token",
@@ -732,6 +732,266 @@ let action_mark_cases =
           (match Async.status after with Async.Done r -> Some r | _ -> None) );
   ]
 
+let rec random_json rng depth : Json.t =
+  let keys = [| "a"; "b"; "c"; "d"; "e\"/~0" |] in
+  let leaf () : Json.t =
+    match Random.State.int rng 6 with
+    | 0 -> `Null
+    | 1 -> `Bool (Random.State.bool rng)
+    | 2 -> `Int (Random.State.int rng 5)
+    | 3 -> `Float (float_of_int (Random.State.int rng 9) /. 4.)
+    | 4 -> `String (String.make (Random.State.int rng 3) 'x')
+    | _ -> `String "\"\n<"
+  in
+  if depth = 0 then leaf ()
+  else
+    match Random.State.int rng 3 with
+    | 0 -> leaf ()
+    | 1 -> `List (List.init (Random.State.int rng 6) (fun _ -> random_json rng (depth - 1)))
+    | _ ->
+        `Assoc
+          (List.init (Random.State.int rng 5) (fun _ ->
+               (keys.(Random.State.int rng (Array.length keys)), random_json rng (depth - 1))))
+
+let rec mutate rng (j : Json.t) : Json.t =
+  match j with
+  | `List items when items <> [] && Random.State.int rng 4 > 0 ->
+      let at = Random.State.int rng (List.length items) in
+      let items =
+        List.concat
+          (List.mapi
+             (fun i x ->
+               if i <> at then [ x ]
+               else
+                 match Random.State.int rng 4 with
+                 | 0 -> []
+                 | 1 -> [ random_json rng 2; x ]
+                 | 2 -> [ x; x ]
+                 | _ -> [ mutate rng x ])
+             items)
+      in
+      `List (if Random.State.int rng 5 = 0 then List.rev items else items)
+  | `Assoc fields when fields <> [] && Random.State.int rng 4 > 0 ->
+      let at = Random.State.int rng (List.length fields) in
+      let fields =
+        List.concat
+          (List.mapi
+             (fun i (k, v) ->
+               if i <> at then [ (k, v) ]
+               else
+                 match Random.State.int rng 4 with
+                 | 0 -> []
+                 | 1 -> [ (k, v); ("n" ^ string_of_int (Random.State.int rng 9), random_json rng 2) ]
+                 | _ -> [ (k, mutate rng v) ])
+             fields)
+      in
+      `Assoc (if Random.State.int rng 6 = 0 then List.rev fields else fields)
+  | _ -> random_json rng 3
+
+let wire_of text = match Json.of_string text with Ok j -> j | Error m -> Alcotest.fail m
+
+let wire ops =
+  match Json.of_string (Json.to_string (`List ops)) with Ok j -> j | Error m -> Alcotest.fail m
+
+let diff_cases =
+  [
+    ( "patch (diff a b) a = b on random JSON, also after the wire",
+      fun () ->
+        let rng = Random.State.make [| 30 |] in
+        for i = 1 to 5_000 do
+          let a = random_json rng 4 in
+          let b = if i mod 4 = 0 then random_json rng 4 else mutate rng (mutate rng a) in
+          let ops = Server.Testing.json_diff a b in
+          let shown = Json.to_string a ^ " -> " ^ Json.to_string b in
+          Alcotest.(check (option string)) shown (Some (Json.to_string b))
+            (Option.map Json.to_string (Server.Testing.json_patch a (`List ops)));
+          Alcotest.(check (option string)) ("wire " ^ shown) (Some (Json.to_string b))
+            (Option.map Json.to_string (Server.Testing.json_patch a (wire ops)))
+        done );
+    ( "one changed field of one item of a long list is one op",
+      fun () ->
+        let item i status = `Assoc [ ("id", `Int i); ("status", `String status) ] in
+        let a = `List (List.init 5_000 (fun i -> item i "todo")) in
+        let b = `List (List.init 5_000 (fun i -> item i (if i = 17 then "done" else "todo"))) in
+        Alcotest.(check string) "ops" {|[["r",[17,"status"],"done"]]|}
+          (Json.to_string (`List (Server.Testing.json_diff a b)));
+        let moved = `List (item 4_999 "todo" :: List.init 4_999 (fun i -> item i "todo")) in
+        Alcotest.(check string) "a move to the top is a removal and an insertion"
+          {|[["x",[4999]],["a",[0],{"id":4999,"status":"todo"}]]|}
+          (Json.to_string (`List (Server.Testing.json_diff a moved))) );
+    ( "ops that do not apply give None",
+      fun () ->
+        let none ops = Alcotest.(check (option string)) ops None
+            (Option.map Json.to_string (Server.Testing.json_patch (`List [ `Int 1 ]) (wire_of ops))) in
+        none {|[["x",[1]]]|};
+        none {|[["r",[0,"a"],1]]|};
+        none {|[["a",[2],1]]|};
+        none {|[["q",[0],1]]|};
+        none {|{"x":1}|} );
+  ]
+
+let items = Topic.declare ~name:"items" ~key:Codec.string ~state:(Codec.list Codec.string)
+let stored_items : (string * string list) list ref = ref []
+let () = Live.serve items (fun key -> Async.return (Option.value (List.assoc_opt key !stored_items) ~default:[]))
+let letters = List.init 10 (fun i -> String.make 20 (Char.chr (97 + i)))
+let one_changed = List.mapi (fun i x -> if i = 3 then "changed" else x) letters
+
+let kind_of text = match field "t" text with Some (`String k) -> k | _ -> ""
+let int_field name text = match field name text with Some (`Int i) -> i | _ -> -1
+
+let replay ?(from = None) f =
+  List.fold_left
+    (fun (seq, state) text ->
+      match kind_of text with
+      | "state" -> (int_field "seq" text, field "state" text)
+      | "resumed" -> (int_field "seq" text, state)
+      | "patch" ->
+          if int_field "from" text <> seq then Alcotest.fail ("patch from a seq the client does not have: " ^ text);
+          ( int_field "seq" text,
+            Option.bind state (fun j -> Option.bind (field "ops" text) (Server.Testing.json_patch j)) )
+      | _ -> (seq, state))
+    (match from with Some (seq, j) -> (seq, Some j) | None -> (0, None))
+    f.out
+
+let replayed ?from f = Option.map Json.to_string (snd (replay ?from f))
+let encoded list = Some (Json.to_string ((Codec.list Codec.string).encode list))
+
+let open_with_node ?node () =
+  let f, _ = start ?node () in
+  push f hello;
+  let node = match field "node" (List.hd f.out) with Some (`String n) -> n | _ -> Alcotest.fail "no node" in
+  f.out <- [];
+  (f, node)
+
+let sub_at id key node seq =
+  Printf.sprintf {|{"t":"sub","id":%d,"topic":"items","key":"%s","at":["%s",%d]}|} id key node seq
+
+let patch_cases =
+  [
+    ( "a one-item change sends a patch, which gives the new state",
+      fun () ->
+        stored_items := [ ("p1", letters) ];
+        let a, _ = open_ () in
+        push a (sub 1 "items" {|"p1"|});
+        Live.publish items "p1" one_changed;
+        Alcotest.(check (list string)) "kinds" [ "state"; "patch" ] (kinds a);
+        let patch = List.nth a.out 1 in
+        Alcotest.(check int) "from the state seq" (int_field "seq" (List.hd a.out)) (int_field "from" patch);
+        Alcotest.(check string) "ops" {|[["r",[3],"changed"]]|}
+          (Option.fold ~none:"" ~some:Json.to_string (field "ops" patch));
+        Alcotest.(check (option string)) "client state" (encoded one_changed) (replayed a);
+        hang_up a );
+    ( "a patch not shorter than half of the state sends the state",
+      fun () ->
+        stored_items := [ ("p2", letters) ];
+        let a, _ = open_ () in
+        push a (sub 1 "items" {|"p2"|});
+        let other = List.map (fun x -> x ^ "!") letters in
+        Live.publish items "p2" other;
+        Alcotest.(check (list string)) "kinds" [ "state"; "state" ] (kinds a);
+        Alcotest.(check (option string)) "client state" (encoded other) (replayed a);
+        hang_up a );
+    ( "publishes while a send waits: one patch in flight, then the last state in full",
+      fun () ->
+        stored_items := [ ("p3", letters) ];
+        let a, _ = open_ () in
+        push a (sub 1 "items" {|"p3"|});
+        let g, release, _ = Async.make () in
+        a.gate <- Some g;
+        let change n = List.mapi (fun i x -> if i = n then "v" ^ string_of_int n else x) letters in
+        Live.publish items "p3" (change 1);
+        Live.publish items "p3" (change 2);
+        Live.publish items "p3" (change 3);
+        Alcotest.(check (list string)) "only the first patch is out" [ "state"; "patch" ] (kinds a);
+        a.gate <- None;
+        release ();
+        Alcotest.(check (list string)) "then the last state" [ "state"; "patch"; "state" ] (kinds a);
+        Live.publish items "p3" (change 4);
+        Alcotest.(check (list string)) "a patch again" [ "state"; "patch"; "state"; "patch" ] (kinds a);
+        Alcotest.(check (option string)) "client state" (encoded (change 4)) (replayed a);
+        hang_up a );
+    ( "a patch that waits behind another message is replaced by the next state",
+      fun () ->
+        stored_items := [ ("p4", letters) ];
+        let a, _ = open_ () in
+        push a (sub 1 "items" {|"p4"|});
+        let g, release, _ = Async.make () in
+        a.gate <- Some g;
+        push a {|{"t":"ping"}|};
+        Live.publish items "p4" one_changed;
+        Live.publish items "p4" letters;
+        a.gate <- None;
+        release ();
+        Alcotest.(check (list string)) "kinds" [ "state"; "pong"; "state" ] (kinds a);
+        Alcotest.(check (option string)) "client state" (encoded letters) (replayed a);
+        hang_up a );
+    ( "resume: the same node and seq get resumed, then patches; another seq or node gets the state",
+      fun () ->
+        stored_items := [ ("r1", letters) ];
+        let a, node = open_with_node () in
+        push a (sub 1 "items" {|"r1"|});
+        let seq = int_field "seq" (List.hd a.out) in
+        let base = Option.get (field "state" (List.hd a.out)) in
+        let b, _ = open_with_node () in
+        push b (sub_at 4 "r1" node seq);
+        Alcotest.(check (list string)) "resumed" [ "resumed" ] (kinds b);
+        Alcotest.(check int) "its seq" seq (int_field "seq" (List.hd b.out));
+        Live.publish items "r1" one_changed;
+        Alcotest.(check (list string)) "then a patch" [ "resumed"; "patch" ] (kinds b);
+        Alcotest.(check (option string)) "client state" (encoded one_changed) (replayed ~from:(Some (seq, base)) b);
+        push b {|{"t":"sync","id":4,"ref":1}|};
+        Alcotest.(check string) "synced at once" "synced" (kind_of (List.nth b.out 2));
+        let c, _ = open_with_node () in
+        push c (sub_at 1 "r1" node seq);
+        push c (sub_at 2 "r1" "another-node" (seq + 1));
+        Alcotest.(check (list string)) "an old seq and another node: the state" [ "state"; "state" ] (kinds c);
+        Alcotest.(check (option string)) "c state" (encoded one_changed) (replayed c);
+        List.iter hang_up [ a; b; c ] );
+    ( "resume with no state on the node loads and sends the state",
+      fun () ->
+        stored_items := [ ("r2", letters) ];
+        let a, node = open_with_node () in
+        push a (sub_at 1 "r2" node 1);
+        Alcotest.(check (list string)) "state" [ "state" ] (kinds a);
+        hang_up a );
+    ( "two nodes: a seq of A is not resumed on B, and B sends patches from its own reload",
+      fun () ->
+        let _, node_a, node_b = two_nodes () in
+        stored_items := [ ("n1", letters) ];
+        let a, name_a = open_with_node ~node:node_a () in
+        let b, name_b = open_with_node ~node:node_b () in
+        Alcotest.(check bool) "node names differ" true (name_a <> name_b);
+        push a (sub 1 "items" {|"n1"|});
+        push b (sub 1 "items" {|"n1"|});
+        let seq_a = int_field "seq" (List.hd a.out) and seq_b = int_field "seq" (List.hd b.out) in
+        Alcotest.(check int) "same seq number on both nodes" seq_a seq_b;
+        let c, _ = open_with_node ~node:node_b () in
+        push c (sub_at 1 "n1" name_a seq_a);
+        Alcotest.(check (list string)) "the state, not resumed" [ "state" ] (kinds c);
+        stored_items := [ ("n1", one_changed) ];
+        Live.publish ~node:node_a items "n1" one_changed;
+        Alcotest.(check (list string)) "A: patch" [ "state"; "patch" ] (kinds a);
+        Alcotest.(check (list string)) "B: patch after its reload" [ "state"; "patch" ] (kinds b);
+        Alcotest.(check (option string)) "B client state" (encoded one_changed) (replayed b);
+        List.iter hang_up [ a; b; c ] );
+    ( "a server render embeds the node and seq when the node has the state",
+      fun () ->
+        stored_items := [ ("ssr", [ "x" ]) ];
+        let a, node = open_with_node () in
+        push a (sub 1 "items" {|"ssr"|});
+        let seq = int_field "seq" (List.hd a.out) in
+        let s = Private.session ~streaming:false ~islands_only:true in
+        Private.set_csrf s (fun () -> Some "tok");
+        let view () =
+          let live = Yuka.Live.use items (fun () -> "ssr") in
+          text (match Yuka.Live.status live with Status.Ready { data; _ } -> String.concat "," data | _ -> "?")
+        in
+        let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Live" ~props:`Null view)) in
+        let expected = Printf.sprintf {|data-yuka-answer="l:items &quot;ssr&quot;">{"ok":[["x"],"%s",%d]}|} node seq in
+        Alcotest.(check bool) expected true (Astring_like.contains html expected);
+        hang_up a );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -744,4 +1004,6 @@ let () =
       ("review", cases review_cases);
       ("nodes", cases node_cases);
       ("action mark", cases action_mark_cases);
+      ("json diff", cases diff_cases);
+      ("patches", cases patch_cases);
     ]

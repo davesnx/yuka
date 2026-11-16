@@ -244,7 +244,7 @@ let navigation_keeps_socket () =
 
 let embedded () =
   set_body
-    {|<script type="application/json" data-yuka-answer="l:items &quot;a&quot;">{"ok":["e"]}</script><script type="application/json" data-yuka-answer="l:csrf">{"ok":"page-token"}</script>|};
+    {|<script type="application/json" data-yuka-answer="l:items &quot;a&quot;">{"ok":[["e"]]}</script><script type="application/json" data-yuka-answer="l:csrf">{"ok":"page-token"}</script>|};
   let a, stop = use "a" in
   check "ready before open" "ready e" (show a);
   ws_open 0;
@@ -374,6 +374,70 @@ let key_change () =
   check "new" "ready y" (show a);
   stop ()
 
+let patch ~seq ~from id ops = Printf.sprintf {|{"t":"patch","id":%d,"seq":%d,"from":%d,"ops":%s}|} id seq from ops
+
+let patches () =
+  let a, stop = use "a" in
+  ws_open 0;
+  ws_message 0 {|{"t":"hello","v":1,"node":"N"}|};
+  ws_message 0 (state ~seq:3 1 [ "x"; "y" ]);
+  ws_message 0 (patch ~seq:4 ~from:3 1 {|[["r",[0],"x2"],["a",[2],"z"]]|});
+  check "applied" "ready x2,y,z" (show a);
+  ws_message 0 (patch ~seq:6 ~from:4 1 {|[["x",[0]]]|});
+  check "applied again" "ready y,z" (show a);
+  clear_sent 0;
+  ws_message 0 (patch ~seq:9 ~from:7 1 {|[["x",[0]]]|});
+  check "a patch from another seq: kept" "ready y,z" (show a);
+  check "subscribes again, with no at" {|{"t":"unsub","id":1} {"t":"sub","id":2,"topic":"items","key":"a"}|} (sent 0);
+  ws_message 0 (state ~seq:10 2 [ "full" ]);
+  clear_sent 0;
+  ws_message 0 (patch ~seq:11 ~from:10 2 {|[["r",[5],"no"]]|});
+  check "a patch that does not apply: kept" "ready full" (show a);
+  check "subscribes again" {|{"t":"unsub","id":2} {"t":"sub","id":3,"topic":"items","key":"a"}|} (sent 0);
+  stop ()
+
+let resume_embedded () =
+  set_body
+    {|<script type="application/json" data-yuka-answer="l:items &quot;a&quot;">{"ok":[["e"],"N",7]}</script>|};
+  let a, stop = use "a" in
+  ws_open 0;
+  check "the sub names the node and seq of the page"
+    {|{"t":"hello","v":1,"csrf":""} {"t":"sub","id":1,"topic":"items","key":"a","at":["N",7]}|} (sent 0);
+  ws_message 0 {|{"t":"hello","v":1,"node":"N"}|};
+  ws_message 0 {|{"t":"resumed","id":1,"seq":7}|};
+  check "ready" "ready e" (show a);
+  ws_message 0 (patch ~seq:8 ~from:7 1 {|[["a",[1],"f"]]|});
+  check "a patch on the embedded state" "ready e,f" (show a);
+  stop ()
+
+let resume_reconnect () =
+  set_random 1.;
+  let a, stop = use "a" in
+  ws_open 0;
+  ws_message 0 {|{"t":"hello","v":1,"node":"N"}|};
+  ws_message 0 (state ~seq:4 1 [ "x" ]);
+  ws_message 0 (patch ~seq:5 ~from:4 1 {|[["a",[1],"y"]]|});
+  ws_close 0 1006;
+  check "stale" "stale x,y" (show a);
+  fire 250;
+  ws_open 1;
+  check "the sub names the last node and seq"
+    {|{"t":"hello","v":1,"csrf":""} {"t":"sub","id":2,"topic":"items","key":"a","at":["N",5]}|} (sent 1);
+  ws_message 1 {|{"t":"hello","v":1,"node":"N"}|};
+  ws_message 1 {|{"t":"resumed","id":2,"seq":5}|};
+  check "fresh with no state message" "ready x,y" (show a);
+  ws_message 1 (patch ~seq:6 ~from:5 2 {|[["r",[0],"x2"]]|});
+  check "patches go on" "ready x2,y" (show a);
+  ws_close 1 1006;
+  fire 250;
+  ws_open 2;
+  ws_message 2 {|{"t":"hello","v":1,"node":"M"}|};
+  ws_message 2 {|{"t":"resumed","id":3,"seq":5}|};
+  check "a resumed for another seq is ignored" "stale x2,y" (show a);
+  ws_message 2 (state ~seq:2 3 [ "m" ]);
+  check "the state of another node, with a lower seq" "ready m" (show a);
+  stop ()
+
 let token_error () =
   set_body {|<script type="application/json" data-yuka-answer="l:csrf">{"error":{"kind":"forbidden"}}</script>|};
   let a, stop_a = use "a" in
@@ -409,6 +473,9 @@ let all =
       ("optimistic while the socket is down syncs after the next sub", optimistic_while_down);
       ("a key change unsubscribes and subscribes", key_change);
       ("a page token error opens no socket and fails the uses", token_error);
+      ("patches apply on the last state; a patch that does not fit subscribes again", patches);
+      ("an embedded state with node and seq resumes, then takes patches", resume_embedded);
+      ("a reconnect resumes from the last node and seq", resume_reconnect);
     ]
 
 let expired_token finish =

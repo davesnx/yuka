@@ -98,7 +98,9 @@ open Base
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
-      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0 }
+      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0;
+      id_scope = "p-"; id_count = 0; page_scope = "p-"; page_count = 0;
+      invalid = []; invalid_focused = false }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -208,7 +210,10 @@ open Base
           | _ -> go_element ~only tag attrs children ~context:None)
     and go_element ~only:_ tag attrs children ~context =
       let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
-      if (not (needs_special tag)) && List.length fixed = List.length attrs then begin
+      if (not (needs_special tag))
+         && List.length fixed = List.length attrs
+         && not (Web.lowercase tag = "input" && List.mem_assoc "name" fixed)
+      then begin
         Buffer.add_char raw '<';
         Buffer.add_string raw tag;
         List.iter (fun (n, v) -> add_attr raw ~literal:true ~tag n v) fixed;
@@ -269,6 +274,39 @@ open Base
       if hydrating () then Buffer.add_string b m;
       after_text := false
     in
+    let field_attrs ~tag each add =
+      let field =
+        match (s.invalid, Web.lowercase tag) with
+        | [], _ -> None
+        | invalid, ("input" | "select" | "textarea") ->
+            let name = ref None and hidden = ref false in
+            each (fun _ n v ->
+                if n = "name" && Option.is_none !name then name := Some v
+                else if n = "type" && Web.lowercase v = "hidden" then hidden := true);
+            Option.map (fun id -> (id, !hidden)) (Option.bind !name (fun n -> List.assoc_opt n invalid))
+        | _ -> None
+      in
+      match field with
+      | None -> each add
+      | Some (id, hidden) ->
+          let described = ref false and focused = ref false in
+          each (fun literal n v ->
+              match Web.lowercase n with
+              | "aria-invalid" -> ()
+              | "aria-describedby" ->
+                  described := true;
+                  add literal n (v ^ " " ^ id)
+              | "autofocus" ->
+                  focused := true;
+                  add literal n v
+              | _ -> add literal n v);
+          add false "aria-invalid" "true";
+          if not !described then add false "aria-describedby" id;
+          if not (hidden || s.invalid_focused) then begin
+            if not !focused then add false "autofocus" "";
+            s.invalid_focused <- true
+          end
+    in
     let holding = ref 0 in
     let use_sheet href =
       if s.islands_only && not (List.mem href s.sheets) then begin
@@ -297,6 +335,23 @@ open Base
           go (f ());
           marker "<!--]-->"
       | Await { async; loading; failed; render } -> (
+          let ids = next_id () ^ "-" in
+          let in_ids f =
+            let scope = s.id_scope and count = s.id_count in
+            let restore () =
+              s.id_scope <- scope;
+              s.id_count <- count
+            in
+            s.id_scope <- ids;
+            s.id_count <- 0;
+            match f () with
+            | r ->
+                restore ();
+                r
+            | exception e ->
+                restore ();
+                raise e
+          in
           let body () =
             match Async.status async with
             | Async.Done v -> render v
@@ -330,9 +385,9 @@ open Base
                     id;
                     subscribe =
                       (fun cb -> Async.on_settled async (fun _ -> cb ()));
-                    fill = (fun () -> held (fun () -> print ~env s body));
+                    fill = (fun () -> held (fun () -> in_ids (fun () -> print ~env s body)));
                     fill_failed =
-                      (fun m -> held (fun () -> print ~env s (fun () -> failed m)));
+                      (fun m -> held (fun () -> in_ids (fun () -> print ~env s (fun () -> failed m))));
                     inside_island = inside;
                   }
                 :: s.pending;
@@ -341,7 +396,7 @@ open Base
               incr holding;
               Buffer.add_string b ("<!--[" ^ id ^ "-->");
               after_text := false;
-              (match go loading with
+              (match in_ids (fun () -> go loading) with
               | () -> decr holding
               | exception e ->
                   decr holding;
@@ -361,7 +416,7 @@ open Base
                 end
           | _ ->
               marker "<!--[-->";
-              go (body ());
+              in_ids (fun () -> go (body ()));
               marker "<!--]-->")
       | Template { template; parts } ->
           Array.iter
@@ -399,15 +454,18 @@ open Base
                       | Some h when String.equal h path && not !current -> add_attr b ~tag "aria-current" "page"
                       | _ -> ())
                   | _ ->
-                      List.iter
-                        (function
-                          | Fixed (n, v) -> add_attr b ~literal:true ~tag n v
-                          | Part_attr i -> (
-                              match parts.(i) with
-                              | Attribute (Static (n, v)) -> add_attr b ~tag n v
-                              | Attribute (Dynamic (n, f)) -> Option.iter (add_attr b ~tag n) (f ())
-                              | Attribute (Handler _) | Child _ | No_attribute -> ()))
-                        attrs);
+                      let each add =
+                        List.iter
+                          (function
+                            | Fixed (n, v) -> add true n v
+                            | Part_attr i -> (
+                                match parts.(i) with
+                                | Attribute (Static (n, v)) -> add false n v
+                                | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f ())
+                                | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                          attrs
+                      in
+                      field_attrs ~tag each (fun literal n v -> add_attr b ~literal ~tag n v));
                   Buffer.add_char b '>';
                   after_text := false
               | Subtree shape -> go (Template.expand_shape parts shape)
@@ -439,9 +497,15 @@ open Base
             | Scheduler.Bound (_, e) -> page e
             | Scheduler.Island e -> e
           in
+          let scope = s.id_scope and count = s.id_count in
+          s.id_scope <- s.page_scope;
+          s.id_count <- s.page_count;
           marker "<!--[$-->";
           scoped (page owner.env) (fun () -> Option.iter go content);
-          marker "<!--]-->"
+          marker "<!--]-->";
+          s.page_count <- s.id_count;
+          s.id_scope <- scope;
+          s.id_count <- count
       | Island { name; props; render; start = strategy } ->
           s.islands <- s.islands + 1;
           let id = s.id_prefix ^ "i" ^ string_of_int s.islands in
@@ -481,10 +545,18 @@ open Base
           let saved = snapshot s in
           s.depth <- s.depth + 1;
           s.answers <- [];
+          s.page_scope <- s.id_scope;
+          s.page_count <- s.id_count;
+          s.id_scope <- id ^ "-";
+          s.id_count <- 0;
           let mine =
             match scoped (Scheduler.Island owner.env) (fun () -> go (render ())) with
             | () ->
                 s.depth <- s.depth - 1;
+                s.id_scope <- s.page_scope;
+                s.id_count <- s.page_count;
+                s.page_scope <- saved.page_scope;
+                s.page_count <- saved.page_count;
                 let mine = s.answers in
                 s.answers <- saved.answers;
                 mine
@@ -544,15 +616,29 @@ open Base
           let value =
             if needs_special tag then special tag attrs
             else begin
-                List.iter
-                  (function
-                    | Static (name, v) -> add_attr b ~tag name v
-                    | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
-                    | Handler _ -> ())
-                  attrs;
+                field_attrs ~tag
+                  (fun add ->
+                    List.iter
+                      (function
+                        | Static (name, v) -> add false name v
+                        | Dynamic (name, f) -> Option.iter (add false name) (f ())
+                        | Handler _ -> ())
+                      attrs)
+                  (fun _ name v -> add_attr b ~tag name v);
                 None
             end
           in
+          let outer = s.invalid in
+          (match s.form with
+          | Some (action, key, _, errors)
+            when Web.lowercase tag = "form"
+                 && List.exists (function Static ("data-yuka-action", a) -> a = action | _ -> false) attrs
+                 && List.exists (function Static ("data-yuka-key", k) -> k = key | _ -> false) attrs ->
+              s.invalid <-
+                List.filter_map
+                  (function Some field, _ -> Some (field, error_id ~action ~key field) | None, _ -> None)
+                  errors
+          | _ -> ());
           Buffer.add_char b '>';
           after_text := false;
           let lt = String.lowercase_ascii tag in
@@ -584,7 +670,8 @@ open Base
             Buffer.add_string b tag;
             Buffer.add_char b '>';
             after_text := false
-          end
+          end;
+          s.invalid <- outer
     and special tag attrs =
       let lt = String.lowercase_ascii tag in
       let resolved =
@@ -613,7 +700,8 @@ open Base
             resolved @ [ ("aria-current", "page") ]
         | _ -> resolved
       in
-      List.iter (fun (name, v) -> add_attr b ~tag name v) resolved;
+      field_attrs ~tag (fun add -> List.iter (fun (name, v) -> add false name v) resolved) (fun _ name v ->
+          add_attr b ~tag name v);
       value
     and contents = function
       | [ Hole f ] -> go (f ())

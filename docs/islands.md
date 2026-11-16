@@ -116,6 +116,62 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
 
 [`state.md`](state.md) explains State, memos and effects.
 
+## Ids for labels
+
+A `label` links to its field by `id`, and `aria-describedby`,
+`aria-labelledby` and `aria-controls` take ids too. A component that a page
+uses more than once cannot write a fixed id, and an id made with a counter
+or a random value is different on the server and in the browser. Use
+`Yuka.with_unique_id`:
+
+```ocaml
+let make ~label () =
+  Yuka.with_unique_id (fun id ->
+      <p>
+        <label for_=id>(Yuka.text label)</label>
+        <input id aria_describedby=(id ^ "-hint") />
+        <small id=(id ^ "-hint")>"At most 80 characters."</small>
+      </p>)
+```
+
+The id is unique on the page. In an island, the browser gets the same id as
+the server when it hydrates, also with several islands on the page, in a
+client navigation answer, in keyed list rows and in a streamed
+`<Yuka.Await>`. Outside an island, and in a component that only the browser
+renders, the id is unique. For a second id, add a suffix that starts with a
+letter, as `-hint` above, or call `with_unique_id` again.
+
+`with_unique_id` works as a hole: when its function reads a State, the function
+runs again with a new id. An element that the browser makes after the
+island has started (a new list row, an `Await` value that arrives later)
+gets a new id, which the server never printed.
+
+## Form errors
+
+`Yuka.Form.error_view` gives the view of a field error an `id`. Put it on
+the element of the error:
+
+```ocaml
+<input name="title" value=(Yuka.Form.value form `Title) />
+(Yuka.Form.error_view form `Title (fun ~id message ->
+   <p id class_="error">(Yuka.text message)</p>))
+```
+
+While the field has an error, `Yuka.Form` sets `aria-invalid="true"` on each
+`input`, `select` and `textarea` of the form with that `name`, and adds the
+`id` to its `aria-describedby`, after the ids that the field already has.
+When the error goes, it removes both. A screen reader then reads the error
+with the field.
+
+After a submit in the browser that ends with field errors, the focus goes to
+the first field with an error. On a failed post with no JavaScript (422), the
+server prints these attributes, and `autofocus` on the first field with an
+error, so the page opens on it. Errors for the whole form (`errors_view`)
+are not linked to a field and do not move the focus.
+
+The `id` is made from the action name, the `key` of the form and the field
+name. Two forms of one action on a page need different keys.
+
 ## Start strategies
 
 The `start` prop says when the browser downloads and starts the island:
