@@ -135,7 +135,7 @@ BENCH_CHECKS ?= keyed,ssr,pages
 
 .PHONY: bench-check
 bench-check: ## Check the last bench-keyed, bench-ssr and measure-pages results against bench/gate/limits.json (BENCH_CHECKS)
-	node bench/gate/gate.ts --build-dir $(BUILD_DIR) --checks $(BENCH_CHECKS)
+	node bench/gate/gate.ts --build-dir $(BUILD_DIR) --keyed $(BENCH_OUT) --checks $(BENCH_CHECKS)
 
 .PHONY: bench-gate
 bench-gate: ## Run bench-keyed (yuka and solid), bench-ssr (yuka-stream and its references, interleaved) and measure-pages, then bench-check

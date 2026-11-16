@@ -25,7 +25,7 @@ interface KeyedResult {
 }
 
 interface SsrResult {
-  results: { name: string; rps: number }[];
+  results: { name: string; rps: number; rounds: { errors: number }[] }[];
   skipped: string[];
 }
 
@@ -77,11 +77,14 @@ const ssr = read<SsrResult>("ssr");
 if (ssr !== undefined) {
   const rps = (name: string) => ssr.results.find((r) => r.name === name)?.rps;
   const own = rps(limits.ssr.candidate);
+  const errors = (name: string) => ssr.results.find((r) => r.name === name)?.rounds.reduce((sum, r) => sum + r.errors, 0) ?? 0;
+  check(errors(limits.ssr.candidate) === 0, `ssr: ${limits.ssr.candidate} request errors ${errors(limits.ssr.candidate)} = 0`);
   for (const [reference, min] of Object.entries(limits.ssr.min_ratio)) {
     if (ssr.skipped.includes(reference)) {
       report("SKIP", `ssr: ${reference} was not built`);
       continue;
     }
+    check(errors(reference) === 0, `ssr: ${reference} request errors ${errors(reference)} = 0`);
     const other = rps(reference);
     const ratio = own !== undefined && other !== undefined ? own / other : undefined;
     check(ratio !== undefined && ratio >= min, `ssr: ${limits.ssr.candidate}/${reference} req/s ${ratio?.toFixed(3) ?? "missing"} >= ${min}`);
