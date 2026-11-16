@@ -1584,9 +1584,11 @@ module Server : sig
 
     val publish : ?node:node -> ('k, 's) Topic.t -> 'k -> 's -> unit
     (** The new full state of a key, sent to each subscriber of the key on
-        the node; with a bus, a note tells the other nodes that the key
-        changed. With no bus it does nothing when the key has no
-        subscriber. A publish while the loader runs wins over the loaded
+        the node: as the changes from the state before (a patch, computed
+        once per publish) when the subscriber has that state and the patch
+        is shorter than half of the state, else in full. With a bus, a
+        note tells the other nodes that the key changed. With no bus it
+        does nothing when the key has no subscriber. A publish while the loader runs wins over the loaded
         state. [allow] decides at subscribe time: a subscriber gets every
         publish of its key until it unsubscribes, its socket reconnects
         (each connection checks [allow] again), or {!revoke} closes it. *)
@@ -2193,16 +2195,32 @@ module Server : sig
           version closes with 4426, a token that [verify_csrf] refuses with
           4403, any other first message with 4400. The answer
           [{"t":"hello","v":1,"csrf":T'}] carries [token ()] for the next
-          [hello] of the page; when [token ()] is [None], the answer has no
-          [csrf] field.
-        - [sub] ([id], [topic], [key]), [unsub] ([id]), [sync] ([id],
+          [hello] of the page, and [node], a name of this node that changes
+          when the process starts again; when [token ()] is [None], the
+          answer has no [csrf] field.
+        - [sub] ([id], [topic], [key], and [at] [[NODE, SEQ]] when the
+          page has a state of the key), [unsub] ([id]), [sync] ([id],
           [ref]) and [ping]. A subscription gets [state] messages ([id],
-          [seq], [state]), or one [error] ([id], [code]: [unknown_topic],
-          [bad_key], [forbidden], [rejected] with [message], [server],
-          [limit]). [sync] is answered by [synced] after the latest state
-          of the subscription.
-        - On a slow socket, a newer state replaces a state that still waits
-          to be sent.
+          [seq], [state]), [patch] messages ([id], [seq], [from], [ops]),
+          or one [error] ([id], [code]: [unknown_topic], [bad_key],
+          [forbidden], [rejected] with [message], [server], [limit]).
+          [sync] is answered by [synced] after the latest state of the
+          subscription.
+        - When [at] names this node and the [seq] of the current state of
+          the key, the answer to [sub] is [{"t":"resumed","id":N,"seq":SEQ}]
+          in place of the state.
+        - A [patch] changes the state of [seq] [from] into the state of
+          [seq]. It is sent when the last message of the subscription had
+          [seq] [from] and no message of the subscription waits to be sent,
+          and when its [ops] are shorter than half of the state; else the
+          state is sent. [ops] is a list: [["r",PATH,V]] replaces the value
+          at [PATH] with [V], [["a",PATH,V]] inserts [V] into an array at
+          the index (the end when it is the length) or adds a field at the
+          end of an object, [["x",PATH]] removes it. [PATH] is a list of
+          field names and array indices, from the root ([[]] is the whole
+          state). Each op applies to the result of the op before it.
+        - On a slow socket, a newer state replaces a state or patch that
+          still waits to be sent.
         - Limits: a message over 64 KiB closes with 1009; more than 64
           subscriptions gives [limit]; a message out over 1 MiB is sent and
           logged; more than 256 replies waiting on a slow socket close it
@@ -2236,6 +2254,14 @@ module Server : sig
     val memory_down : Live.memory -> bool -> unit
     (** [memory_down memory true] drops notes; [false] brings the bus back and
         calls each [on_restart] function. *)
+
+    val json_diff : Json.t -> Json.t -> Json.t list
+    (** The [ops] of a live [patch] (see {!live_run}) from the first value
+        to the second. *)
+
+    val json_patch : Json.t -> Json.t -> Json.t option
+    (** [json_patch value ops] applies a list of [ops], as the browser does;
+        [None] when an op does not apply. *)
   end
 
   (**/**)

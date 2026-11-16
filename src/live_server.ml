@@ -42,6 +42,7 @@ and sub = {
   id : int;
   entry : entry;
   mutable has_state : bool;
+  mutable sent : int;
   mutable sync : int option;
   mutable held : int option;
   mutable after : (string * int) list;
@@ -61,6 +62,7 @@ and entry = {
 }
 
 and node = {
+  identity : string;
   table : entry Web.table;
   mutable log : Types.log_level -> string -> unit;
   own_log : bool;
@@ -85,7 +87,9 @@ let max_note = 7_900
 let topics : (string * served) list ref = ref []
 
 let node ?log ?(per_session = 16) ?(total = 10_000) () =
+  let random = Random.State.make_self_init () in
   {
+    identity = string_of_int (Random.State.bits random) ^ "." ^ string_of_int (Random.State.bits random);
     table = Web.table ();
     log = (match log with Some f -> f | None -> fun level m -> !Types.default_log level m);
     own_log = Option.is_some log;
@@ -182,11 +186,14 @@ let send_text conn text =
 let message fields = Json.to_string (`Assoc fields)
 let synced conn id r = send_text conn (message [ ("t", `String "synced"); ("id", `Int id); ("ref", `Int r) ])
 
-let send_state (sub : sub) seq text =
+let waits (sub : sub) = Web.table_has sub.conn.waiting (string_of_int sub.id)
+
+let send_slot (sub : sub) seq kind body =
   let slot = string_of_int sub.id in
-  if not (Web.table_has sub.conn.waiting slot) then sub.conn.back <- State_of sub.id :: sub.conn.back;
+  if not (waits sub) then sub.conn.back <- State_of sub.id :: sub.conn.back;
   Web.table_set sub.conn.waiting slot
-    ("{\"t\":\"state\",\"id\":" ^ slot ^ ",\"seq\":" ^ string_of_int seq ^ ",\"state\":" ^ text ^ "}");
+    ("{\"t\":\"" ^ kind ^ "\",\"id\":" ^ slot ^ ",\"seq\":" ^ string_of_int seq ^ body ^ "}");
+  sub.sent <- seq;
   sub.has_state <- true;
   match sub.sync with
   | Some r ->
@@ -215,11 +222,29 @@ let error_message id code text =
 let current e =
   match Web.table_get e.home.table (entry_key e.topic e.wire) with Some x -> x == e | None -> false
 
+let send_state sub seq text = send_slot sub seq "state" (",\"state\":" ^ text)
+
 let store e json =
   let text = Json.to_string json in
+  let previous = e.state and from = e.seq in
   e.state <- Some (json, text);
   e.seq <- next_seq e.home;
-  List.iter (fun s -> send_state s e.seq text) (List.rev e.members)
+  let patch =
+    lazy
+      (match previous with
+      | None -> None
+      | Some (old, _) ->
+          let ops = Json.to_string (`List (Json_diff.diff old json)) in
+          if 2 * String.length ops < String.length text then
+            Some (",\"from\":" ^ string_of_int from ^ ",\"ops\":" ^ ops)
+          else None)
+  in
+  List.iter
+    (fun s ->
+      match if s.sent = from && not (waits s) then Lazy.force patch else None with
+      | Some body -> send_slot s e.seq "patch" body
+      | None -> send_state s e.seq text)
+    (List.rev e.members)
 
 let seen node name = Option.value (Web.table_get node.seen name) ~default:0
 
@@ -280,7 +305,7 @@ let reload e =
     | Some served, Ok key -> start_load e served key
     | _ -> ()
 
-let subscribe conn id topic key =
+let subscribe conn id topic key at =
   let fail code text = send_text conn (error_message id code text) in
   if List.length conn.subs >= max_subs then fail "limit" "at most 64 subscriptions"
   else
@@ -307,17 +332,18 @@ let subscribe conn id topic key =
                   e
             in
             let sub =
-              { conn; id; entry = e; has_state = false; sync = None; held = None; after = []; target = None }
+              { conn; id; entry = e; has_state = false; sent = 0; sync = None; held = None; after = []; target = None }
             in
             e.members <- sub :: e.members;
             conn.subs <- (id, sub) :: conn.subs;
             match e.state with
+            | Some _ when at = Some (conn.node.identity, e.seq) -> send_slot sub e.seq "resumed" ""
             | Some (_, text) -> send_state sub e.seq text
             | None -> if not e.loading then start_load e served key)
 
 type incoming =
   | Hello of { v : int; csrf : string }
-  | Sub of { id : int; topic : string; key : Json.t }
+  | Sub of { id : int; topic : string; key : Json.t; at : (string * int) option }
   | Unsub of int
   | Sync of { id : int; r : int; after : (string * int) list }
   | Ping
@@ -332,7 +358,9 @@ let parse text =
           match (int "v", str "csrf") with Some v, Some csrf -> Some (Hello { v; csrf }) | _ -> None)
       | Some "sub", Some id -> (
           match (str "topic", List.assoc_opt "key" f) with
-          | Some topic, Some key -> Some (Sub { id; topic; key })
+          | Some topic, Some key ->
+              let at = match List.assoc_opt "at" f with Some (`List [ `String n; `Int s ]) -> Some (n, s) | _ -> None in
+              Some (Sub { id; topic; key; at })
           | _ -> None)
       | Some "unsub", Some id -> Some (Unsub id)
       | Some "sync", Some id ->
@@ -422,14 +450,15 @@ let run ?node ~sleep (peer : peer) ~verify_csrf ~token (c : connection) =
               | Async.Pending -> ()
               | Async.Done true when not conn.ended ->
                   ready := true;
-                  send_text conn (message ([ ("t", `String "hello"); ("v", `Int 1) ] @ fresh ()));
+                  send_text conn
+                    (message ([ ("t", `String "hello"); ("v", `Int 1); ("node", `String node.identity) ] @ fresh ()));
                   next ()
               | _ -> conn.stop 4403)
       | Some _, false | Some (Hello _), true -> conn.stop 4400
-      | Some (Sub { id; topic; key }), true ->
+      | Some (Sub { id; topic; key; at }), true ->
           if List.mem_assoc id conn.subs then conn.stop 4400
           else begin
-            subscribe conn id topic key;
+            subscribe conn id topic key at;
             next ()
           end
       | Some (Unsub id), true ->
@@ -470,12 +499,12 @@ let ssr_state node (peer : peer) name key =
       | Forbid -> Async.return (Error Status.Forbidden)
       | Accept wire -> (
           match Web.table_get node.table (entry_key name wire) with
-          | Some { state = Some (json, _); _ } -> Async.return (Ok json)
+          | Some { state = Some (json, _); seq; _ } -> Async.return (Ok (json, Some (node.identity, seq)))
           | _ ->
               let result, resolve, _ = Async.make () in
               Async.on_settled (Async.guard served.load key) (function
                 | Async.Pending -> ()
-                | Async.Done j -> resolve (Ok j)
+                | Async.Done j -> resolve (Ok (j, None))
                 | Async.Failed m -> resolve (Error (failure peer.log name m)));
               result))
 

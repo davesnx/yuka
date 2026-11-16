@@ -3,12 +3,15 @@ type use = {
   mutable key : Json.t option;
   mutable wire_id : int option;
   mutable last_seq : int;
+  mutable json : Json.t option;
+  mutable at : (string * int) option;
   mutable ended : bool;
   mutable syncs : (int * Json.t option) list;
   on_state : Json.t -> unit;
   on_error : Status.error -> unit;
   on_stale : unit -> unit;
   on_synced : int -> unit;
+  on_resumed : unit -> unit;
 }
 
 type 's t = {
@@ -20,6 +23,7 @@ type 's t = {
 type manager = {
   mutable socket : Web.socket option;
   mutable live : bool;
+  mutable node : string;
   mutable uses : use list;
   mutable ids : (int * use) list;
   mutable next_id : int;
@@ -45,6 +49,7 @@ let get () =
         {
           socket = None;
           live = false;
+          node = "";
           uses = [];
           ids = [];
           next_id = 0;
@@ -86,9 +91,25 @@ let send_sub m u =
       u.wire_id <- Some id;
       u.last_seq <- 0;
       m.ids <- (id, u) :: m.ids;
-      send m [ ("t", `String "sub"); ("id", `Int id); ("topic", `String u.topic); ("key", key) ];
+      send m
+        ([ ("t", `String "sub"); ("id", `Int id); ("topic", `String u.topic); ("key", key) ]
+        @ match u.at with Some (node, seq) -> [ ("at", `List [ `String node; `Int seq ]) ] | None -> []);
       List.iter (send_sync m u) (List.rev u.syncs)
   | _ -> ()
+
+let unsub m u =
+  (match u.wire_id with
+  | Some id ->
+      send m [ ("t", `String "unsub"); ("id", `Int id) ];
+      m.ids <- List.filter (fun (i, _) -> i <> id) m.ids
+  | None -> ());
+  u.wire_id <- None
+
+let take m u seq state =
+  u.last_seq <- seq;
+  u.json <- Some state;
+  u.at <- (if m.node = "" then None else Some (m.node, seq));
+  u.on_state state
 
 let token m =
   match m.token with
@@ -142,14 +163,30 @@ and heard m text =
       | Some ("hello" | "pong") as t ->
           if t = Some "hello" then begin
             m.attempt <- 0;
-            m.renewed <- false
+            m.renewed <- false;
+            m.node <- Option.value (str "node") ~default:""
           end;
           Option.iter (fun t -> m.token <- Some t) (str "csrf")
       | Some "state" -> (
           match (use (), int "seq", List.assoc_opt "state" f) with
-          | Some u, Some seq, Some state when seq > u.last_seq ->
+          | Some u, Some seq, Some state when seq > u.last_seq -> take m u seq state
+          | _ -> ())
+      | Some "patch" -> (
+          match (use (), int "seq", int "from", List.assoc_opt "ops" f) with
+          | Some u, Some seq, Some from, Some ops when seq > u.last_seq -> (
+              match if from = u.last_seq then Option.bind u.json (fun j -> Json_patch.apply j ops) else None with
+              | Some state -> take m u seq state
+              | None ->
+                  u.json <- None;
+                  u.at <- None;
+                  unsub m u;
+                  send_sub m u)
+          | _ -> ())
+      | Some "resumed" -> (
+          match (use (), int "seq") with
+          | Some u, Some seq when u.last_seq = 0 && Option.map snd u.at = Some seq ->
               u.last_seq <- seq;
-              u.on_state state
+              u.on_resumed ()
           | _ -> ())
       | Some "error" -> (
           match use () with
@@ -244,14 +281,6 @@ let attach m u =
   m.dead <- None;
   if m.live then send_sub m u else if Option.is_none m.socket && not m.waiting then connect m
 
-let unsub m u =
-  (match u.wire_id with
-  | Some id ->
-      send m [ ("t", `String "unsub"); ("id", `Int id) ];
-      m.ids <- List.filter (fun (i, _) -> i <> id) m.ids
-  | None -> ());
-  u.wire_id <- None
-
 let detach m u =
   unsub m u;
   m.uses <- List.filter (fun x -> x != u) m.uses;
@@ -283,14 +312,21 @@ let on_server (topic : (_, _) Topic.t) key base =
     | Some { context = Some c; _ } -> c.live (Topic.name topic) key
     | _ -> !Bridge.live_state (Topic.name topic) key
   in
-  let settle r = State.set base (match r with Ok j -> decode topic None j | Error error -> Status.Failed { error; last = None }) in
+  let settle r =
+    State.set base (match r with Ok (j, _) -> decode topic None j | Error error -> Status.Failed { error; last = None })
+  in
   Async.on_result loaded (function Ok r -> settle r | Error m -> settle (Error (Status.Network m)));
   if !(Base.server_rendering ()) then begin
     csrf_answer ();
     let name = key_name topic key in
-    match Async.status loaded with
-    | Async.Done r -> Answers.record name (Some r) loaded
-    | _ -> Answers.record name None loaded
+    let embed =
+      Result.map (fun (j, at) ->
+          `List (j :: (match at with Some (node, seq) -> [ `String node; `Int seq ] | None -> [])))
+    in
+    let embedded = Async.map embed loaded in
+    match Async.status embedded with
+    | Async.Done r -> Answers.record name (Some r) embedded
+    | _ -> Answers.record name None embedded
   end
 
 let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
@@ -308,6 +344,8 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
         key = None;
         wire_id = None;
         last_seq = 0;
+        json = None;
+        at = None;
         ended = false;
         syncs = [];
         on_state = (fun j -> State.set base (decode topic (data ()) j));
@@ -328,6 +366,12 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
             u.syncs <- waiting;
             Scheduler.batch (fun () ->
                 List.iter (fun (id, _) -> State.set changes (Optimistic.remove (State.peek changes) id)) settled));
+        on_resumed =
+          (fun () ->
+            match State.peek base with
+            | Status.Ready { data; stale = true } -> State.set base (Status.Ready { data; stale = false })
+            | Status.Ready _ -> ()
+            | _ -> Option.iter u.on_state u.json);
       }
     in
     Platform.live_mark := (fun fields -> last_mark := List.assoc_opt "live" fields);
@@ -341,10 +385,16 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
             Scheduler.untrack (fun () ->
                 unsub m u;
                 u.key <- Some key;
+                u.json <- None;
+                u.at <- None;
                 u.ended <- false;
                 (if !first then
                    match Answers.find (key_name topic key) with
-                   | Answers.Found (Ok j) -> State.set base (decode topic None j)
+                   | Answers.Found (Ok (`List (j :: at))) ->
+                       u.json <- Some j;
+                       u.at <- (match at with [ `String node; `Int seq ] -> Some (node, seq) | _ -> None);
+                       State.set base (decode topic None j)
+                   | Answers.Found (Ok _) -> State.set base (Status.Failed { error = Status.Protocol "live answer"; last = None })
                    | Answers.Found (Error error) -> State.set base (Status.Failed { error; last = None })
                    | Answers.Pending | Answers.Absent -> ()
                  else State.set base (Status.Loading (data ())));

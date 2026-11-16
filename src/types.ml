@@ -130,7 +130,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     header : string -> string option;
     session : unit -> string option;
     log : log_level -> string -> unit;
-    live : string -> Json.t -> (Json.t, Status_error.t) result Async.t;
+    live : string -> Json.t -> (Json.t * (string * int) option, Status_error.t) result Async.t;
   }
 
   type session = {

@@ -134,6 +134,8 @@ module Server = struct
     let live_run = Live_server.run
     let live_mark = Live_server.mark
     let memory_down = Live_server.memory_down
+    let json_diff = Json_diff.diff
+    let json_patch = Json_patch.apply
     let set_log f = Types.default_log := f
 
     let context ?(header = fun _ -> None) ?session () : context =

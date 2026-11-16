@@ -1,6 +1,8 @@
 (** Server state that the server pushes to the page over one WebSocket
-    ([GET /_yuka/live]) when it changes. Each message is the full state of
-    one key. The server side is {!Server.Live}. *)
+    ([GET /_yuka/live]) when it changes. A message is the full state of one
+    key, or the changes from the state before; the client keeps the last
+    state as JSON, applies the changes and decodes the whole state again.
+    The server side is {!Server.Live}. *)
 
 type 's t
 
@@ -26,8 +28,10 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
       When the socket closes it is [Ready { stale = true }] (or
       [Loading None] with no data) while the client reconnects, after
       250 ms, 500 ms, 1 s, 2 s, 4 s, then every 5 s (half to all of each
-      delay, at random), or when the browser comes back online. Each
-      reconnect gets the full state again.
+      delay, at random), or when the browser comes back online. A
+      reconnect, and the first subscribe after a server render, get the
+      full state again, unless the node of the socket still has the state
+      that the page has (same node process, same [seq]).
     - [Failed]: the server refused the key ([Forbidden], [Not_found],
       [Rejected] from the loader, [Server]); this use does not subscribe
       again. An unsupported protocol gives [Protocol] to every use.

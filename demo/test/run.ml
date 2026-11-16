@@ -513,7 +513,7 @@ let board_actions () =
 
 let live_answers () =
   let html = get "/" in
-  has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Yuka&quot;,&quot;view&quot;:&quot;All&quot;}">{"ok":[{"id":"YUK-|};
+  has html {|data-yuka-answer="l:issues {&quot;workspace&quot;:&quot;Yuka&quot;,&quot;view&quot;:&quot;All&quot;}">{"ok":[[{"id":"YUK-|};
   has html {|data-yuka-answer="l:csrf">{"ok":"|};
   has html "<a class=\"row-title\" href=\"/issue/YUK-1\">";
   let html = get "/issue/YUK-2" in
@@ -549,15 +549,15 @@ let live_publish () =
    with
   | Ok _ -> ()
   | Error message -> Alcotest.failf "update failed: %s" message);
-  let state_ids () =
+  let patch_ids () =
     List.sort compare
       (List.filter_map
          (fun frame ->
-           match Yojson_like.id frame with Some id when Model.Issue.contains ~sub:{|"t":"state"|} frame -> Some id | _ -> None)
+           match Yojson_like.id frame with Some id when Model.Issue.contains ~sub:{|"t":"patch"|} frame -> Some id | _ -> None)
          !out)
   in
-  let ids = state_ids () in
-  Alcotest.(check (list int)) "published to both views and the issue" [ 1; 2; 3 ] ids;
+  let ids = patch_ids () in
+  Alcotest.(check (list int)) "published to both views and the issue, as patches" [ 1; 2; 3 ] ids;
   Alcotest.(check bool) "the new status" true
     (List.exists (fun frame -> Yojson_like.id frame = Some 3 && Model.Issue.contains ~sub:"Canceled" frame) !out);
   out := [];
@@ -568,7 +568,7 @@ let live_publish () =
    with
   | Ok _ -> ()
   | Error message -> Alcotest.failf "update failed: %s" message);
-  Alcotest.(check (list int)) "a stress change goes to the stress list only" [ 4 ] (state_ids ())
+  Alcotest.(check (list int)) "a stress change goes to the stress list only" [ 4 ] (patch_ids ())
 
 let markdown_page () =
   let html = get "/issue/YUK-1" in
