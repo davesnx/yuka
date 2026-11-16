@@ -27,6 +27,28 @@ const step = async (name: string, f: () => Promise<void>) => {
     check(name, false, "exception: " + String((e as Error).message).split("\n")[0]);
   }
 };
+const until = async (ready: () => boolean | Promise<boolean>, timeout = 30_000) => {
+  for (const end = Date.now() + timeout; !(await ready()); await new Promise((r) => setTimeout(r, 20)))
+    if (Date.now() > end) return false;
+  return true;
+};
+const gate = () => {
+  let open = () => {};
+  const opened = new Promise<void>((resolve) => (open = resolve));
+  return { open, opened };
+};
+const statusIs = ([id, status]: string[]) =>
+  !!document.querySelector(`.row[data-id="${id}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + status);
+const islandsStarted = (p: Page) =>
+  p.waitForFunction(() => {
+    const islands = [...document.querySelectorAll("yuka-island")];
+    return islands.length > 0 && islands.every((i) => (i as any).__yuka_started);
+  }).catch(() => {});
+const rowsBetween = (p: Page, low: number, high: number) =>
+  p.waitForFunction(([low, high]) => {
+    const rows = document.querySelectorAll(".row").length;
+    return rows >= low && rows <= high;
+  }, [low, high]).catch(() => {});
 
 const browser = await chromium.launch({ headless: true });
 const page: Page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -96,7 +118,7 @@ const installProbes = () => {
 await page.addInitScript(installProbes);
 
 const routerLoaded = async (p: Page) => {
-  const loaded = p.waitForResponse((r) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url()).pathname), { timeout: 3000 }).then(() => true, () => false);
+  const loaded = p.waitForResponse((r) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url()).pathname)).then(() => true, () => false);
   await p.mouse.move(1270, 790);
   await p.mouse.move(1272, 792);
   const ok = await loaded;
@@ -112,7 +134,7 @@ await step("1. load /", async () => {
   const mark = allRequests.length;
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
-  await page.waitForTimeout(300);
+  await islandsStarted(page);
   check("1a no console errors", consoleErrors.length === 0, consoleErrors.join(" | "));
   check("1b no page errors", pageErrors.length === 0, pageErrors.join(" | "));
   check("1c no failed requests", failedRequests.length === 0, failedRequests.join(" | "));
@@ -144,15 +166,15 @@ await step("1. load /", async () => {
 await step("2. filter", async () => {
   const total = await page.locator(".row").count();
   await page.fill(".filter", "keyboard");
-  await page.waitForTimeout(100);
+  await rowsBetween(page, 1, total - 1);
   const some = await page.locator(".row").count();
   const titles = await page.locator(".row .row-title").allTextContents();
   check("2a typing filters rows", some > 0 && some < total && titles.every((t) => /keyboard/i.test(t)), `${total} -> ${some}`);
   await page.fill(".filter", "zzzzzz");
-  await page.waitForTimeout(100);
+  await page.waitForFunction(() => document.querySelectorAll(".row").length === 0 && document.querySelectorAll(".list-empty, p.empty").length === 1).catch(() => {});
   check("2b no match shows empty state", (await page.locator(".row").count()) === 0 && (await page.locator(".list-empty, p.empty").count()) === 1);
   await page.fill(".filter", "");
-  await page.waitForTimeout(100);
+  await rowsBetween(page, total, total);
   check("2c clearing restores rows", (await page.locator(".row").count()) === total);
   await page.locator(".filter").blur();
 });
@@ -196,7 +218,7 @@ await step("3b. router", async () => {
   const moved = allRequests.length;
   await page.locator(".filter").hover();
   await page.locator(".filter").focus();
-  await page.waitForTimeout(200);
+  await until(() => allRequests.slice(moved).some(routerCode));
   await page.locator(".filter").blur();
   await page.evaluate(() => ((window as any).__marker = "alive"));
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
@@ -215,8 +237,9 @@ await step("3b. router", async () => {
   const titleAfter = await page.title();
   check("3b.3 URL and title changed", page.url().endsWith("/issue/YUK-8") && titleAfter !== titleBefore, `"${titleBefore}" -> "${titleAfter}"`);
   await page.locator(".props .property").first().hover();
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !!(document.querySelector(".props select") as any)?.__yuka_change && !!(document.querySelector(".comment-input") as any)?.__yuka_input).catch(() => {});
   await page.locator(".comment-input").fill("hello");
+  await page.waitForFunction(() => !(document.querySelector(".comment-box button.primary") as HTMLButtonElement | null)?.disabled).catch(() => {});
   const islands = await page.evaluate(() => ({
     props: !!(document.querySelector(".props select") as any)?.__yuka_change,
     comments: !!(document.querySelector(".comment-input") as any)?.__yuka_input,
@@ -226,13 +249,13 @@ await step("3b. router", async () => {
   check("3b.4 islands on the new page work (Issue_props, Comments)", islands.props && islands.comments && islands.sendEnabled, JSON.stringify(islands));
   await page.goBack();
   await page.waitForSelector(".row");
-  await page.waitForTimeout(300);
+  await page.waitForFunction((y) => location.pathname === "/" && Math.abs(Math.round(scrollY) - y) <= 2, y).catch(() => {});
   const back = await page.evaluate(() => ({ y: Math.round(window.scrollY), path: location.pathname }));
   check("3b.5 back returns to / with the marker", back.path === "/" && (await marker()) === "alive", JSON.stringify(back));
   check("3b.6 scroll restored", Math.abs(back.y - y) <= 2 && y > 0, `before=${y} after=${back.y}`);
   const total = await page.locator(".row").count();
   await page.fill(".filter", "keyboard");
-  await page.waitForTimeout(100);
+  await rowsBetween(page, 0, total - 1);
   const filtered = await page.locator(".row").count();
   await page.fill(".filter", "");
   check("3b.7 list works after back", total > 1 && filtered < total, `${total} -> ${filtered}`);
@@ -272,7 +295,7 @@ await step("3c. partial navigation", async () => {
       const element = document.querySelector("[data-nav-progress]") as any;
       return { state: element?.getAttribute("data-nav-progress"), kept: element?.__kept as boolean | undefined };
     });
-  await page.waitForFunction(() => !!(document.querySelector("[data-nav-progress]") as any)?.__yuka_animationstart, null, { timeout: 5000 });
+  await page.waitForFunction(() => !!(document.querySelector("[data-nav-progress]") as any)?.__yuka_animationstart);
   await page.evaluate(() => ((document.querySelector("[data-nav-progress]") as any).__kept = true));
   check("3c.1 the progress bar (Idle) started without interaction and is idle", (await bar()).state === "idle", JSON.stringify(await bar()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
@@ -297,7 +320,7 @@ await step("3c. partial navigation", async () => {
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
   check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
-  await page.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
+  await page.waitForSelector("[data-nav-progress=finished]");
   check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
   const focusState = () =>
@@ -309,7 +332,7 @@ await step("3c. partial navigation", async () => {
   check("3c.5a after a client navigation the focus is on the h1 of the new page and its title is announced", onIssue.cls === "issue-title" && onIssue.live === "YUK-3", JSON.stringify(onIssue));
   check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null", await current());
   await page.locator(".new-issue-button").click();
-  await page.waitForSelector(".dialog", { timeout: 2000 });
+  await page.waitForSelector(".dialog");
   check("3c.7 New_issue in the kept sidebar still opens", (await page.locator(".dialog").count()) === 1);
   await page.keyboard.press("Escape");
   await page.locator('.nav-link[href="/my"]').click();
@@ -328,7 +351,7 @@ await step("3c. partial navigation", async () => {
   await page.goBack();
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
-  await page.waitForFunction(() => document.getElementById("yuka-announcer")?.textContent === "YUK-3", null, { timeout: 2000 }).catch(() => {});
+  await page.waitForFunction(() => document.getElementById("yuka-announcer")?.textContent === "YUK-3").catch(() => {});
   const onBack = await focusState();
   check("3c.11a after Back the focus is on the h1 again and the title is announced", onBack.cls === "issue-title" && onBack.live === "YUK-3", JSON.stringify(onBack));
   check("3c.11 back is partial too (progress bar kept)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
@@ -381,7 +404,7 @@ await step("3d2. a page with no island prefetches through speculation rules", as
   const afterHover = (await Promise.all(prefetches)).join(",");
   check("3d2.2 a hover alone sends no request for the link", afterHover === "", afterHover);
   await pg.mouse.down();
-  const status = await Promise.race([ready, new Promise<string>((r) => setTimeout(() => r("timeout"), 3000))]);
+  const status = await Promise.race([ready, new Promise<string>((r) => setTimeout(() => r("timeout"), 30_000))]);
   const afterDown = (await Promise.all(prefetches)).join(",");
   check("3d2.2b a pointer down sends a document request with Sec-Purpose: prefetch", status === "Ready" && afterDown === "prefetch/document", `status=${status} requests=${afterDown}`);
   const logfile = process.env.YUKA_E2E_LOG;
@@ -403,9 +426,14 @@ await step("3i. input made before hydration", async () => {
   const errors: string[] = [];
   pg.on("console", (m) => (m.type() === "error" || m.text().includes("hydration mismatch")) && errors.push(m.text()));
   pg.on("pageerror", (e) => errors.push(String(e)));
+  const late = gate();
+  await pg.route(/\/main\.js$/, async (route) => {
+    await late.opened;
+    await route.continue();
+  });
   const t0 = Date.now();
   await pg.goto(base + "/before-hydration", { waitUntil: "commit" });
-  await pg.waitForSelector("#early-note", { timeout: 3000 });
+  await pg.waitForSelector("#early-note");
   const early = await pg.textContent("yuka-island p");
   await pg.locator("#early-name").pressSequentially("typed early");
   await pg.locator("#early-agreed").check();
@@ -413,7 +441,9 @@ await step("3i. input made before hydration", async () => {
   await pg.locator("#early-note").pressSequentially("a note");
   await pg.locator("#early-name").evaluate((el: HTMLInputElement) => { el.focus(); el.setSelectionRange(2, 5); });
   const typedAt = Date.now() - t0;
-  await pg.waitForFunction(() => document.querySelector("yuka-island p")?.textContent?.startsWith("Interactive"), null, { timeout: 8000 });
+  const stillEarly = await pg.textContent("yuka-island p");
+  late.open();
+  await pg.waitForFunction(() => document.querySelector("yuka-island p")?.textContent?.startsWith("Interactive"));
   const readyAt = Date.now() - t0;
   const got = await pg.evaluate(() => {
     const v = (id: string) => (document.getElementById(id) as HTMLInputElement).value;
@@ -425,7 +455,8 @@ await step("3i. input made before hydration", async () => {
       focus: [document.activeElement === name, name.selectionStart, name.selectionEnd].join(","),
     };
   });
-  check("3i.1 the fields were changed before the late script ran", (early ?? "").startsWith("Not interactive") && typedAt < 2500 && readyAt >= 3000, `status=${early} typed by ${typedAt}ms, interactive at ${readyAt}ms`);
+  check("3i.1 the fields were changed before the late script ran", (early ?? "").startsWith("Not interactive") && (stillEarly ?? "").startsWith("Not interactive") && readyAt >= 3000, `status=${early}, after typing=${stillEarly}, typed by ${typedAt}ms, interactive at ${readyAt}ms`);
+
   check("3i.2 hydration keeps what the user did", got.values === "typed early|true|large|a note", got.values);
   check("3i.3 each State learned it", got.states === "State: typed early|State: true|State: large|State: a note", got.states);
   check("3i.4 focus and selection did not move", got.focus === "true,2,5", got.focus);
@@ -485,23 +516,33 @@ await step("3j. themes and the navigation progress bar", async () => {
   await p.keyboard.press("Escape");
   check("3j.8 Escape closes without a change", (await p.locator("[role=menu]").count()) === 0 && (await p.getAttribute("html", "data-theme")) === "pale");
   await p.evaluate(() => ((window as any).__alive = true));
+  const slow = gate();
+  await p.route("**/issue/YUK-1", async (route) => {
+    await slow.opened;
+    await route.continue();
+  });
   await p.locator('.row[data-id="YUK-1"] .row-title').click();
-  await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 });
-  await p.waitForTimeout(300);
+  await p.waitForFunction(() => {
+    const element = document.querySelector("[data-nav-progress]");
+    return element?.getAttribute("data-nav-progress") !== "loading" || element.getBoundingClientRect().width > 0;
+  }).catch(() => {});
   const bar = await p.evaluate(() => {
     const element = document.querySelector("[data-nav-progress]")!;
     const box = element.getBoundingClientRect();
     return { width: box.width, top: box.top, state: element.getAttribute("data-nav-progress"), path: location.pathname };
   });
   check("3j.9 a slow navigation shows the progress bar at the top while the old page is shown", bar.width > 0 && bar.top === 0 && bar.state === "loading" && bar.path === "/", JSON.stringify(bar));
+  slow.open();
   await p.waitForURL("**/issue/YUK-1");
-  await p.waitForSelector("[data-nav-progress=finished]", { timeout: 5000 });
-  await p.waitForTimeout(700);
+  await p.unroute("**/issue/YUK-1");
+  await p.waitForSelector("[data-nav-progress=finished]");
+  await p.waitForFunction(() => getComputedStyle(document.querySelector("[data-nav-progress]")!).opacity === "0").catch(() => {});
   check("3j.10 the bar goes away when the page is shown", (await p.evaluate(() => getComputedStyle(document.querySelector("[data-nav-progress]")!).opacity)) === "0");
   check("3j.11 the theme stays after a client navigation", (await p.evaluate(() => (window as any).__alive)) === true && (await p.getAttribute("html", "data-theme")) === "pale");
   await p.goBack();
   await p.waitForSelector(".row");
-  await p.waitForFunction(() => document.querySelector("[data-nav-progress]")?.getAttribute("data-nav-progress") !== "loading", null, { timeout: 5000 });
+  await p.waitForFunction(() => document.querySelector("[data-nav-progress]")?.getAttribute("data-nav-progress") !== "loading");
+
   check("3j.12 back: the bar is not left loading", true);
   await p.reload({ waitUntil: "networkidle" });
   check("3j.13 the theme stays after a reload, set before the body is parsed", (await p.getAttribute("html", "data-theme")) === "pale" && (await p.evaluate(() => (window as any).__themeAtBody)) === "pale", String(await p.evaluate(() => (window as any).__themeAtBody)));
@@ -566,6 +607,7 @@ await step("3f. prefetch and the navigation cache", async () => {
   const link = (id: string) => page.locator(`.row[data-id="${id}"] .row-title`);
   let from = allRequests.length;
   await link("YUK-5").hover();
+  await until(() => requestsTo(from, "/issue/YUK-5").length > 0);
   await page.waitForTimeout(300);
   const pre = requestsTo(from, "/issue/YUK-5");
   check("3f.1 hover sends one prefetch that names its trigger", pre.length === 1 && pre[0].prefetch === "hover" && pre[0].navigate, JSON.stringify(pre));
@@ -584,7 +626,7 @@ await step("3f. prefetch and the navigation cache", async () => {
   const vt = await page.evaluate(() => (window as any).__vt);
   check("3f.2a the navigation runs in a view transition (demo enables them)", JSON.stringify(vt) === '["push"]', JSON.stringify(vt));
   const removed = await page
-    .waitForFunction(() => document.documentElement.getAttribute("data-yuka-nav") === null, null, { timeout: 3000 })
+    .waitForFunction(() => document.documentElement.getAttribute("data-yuka-nav") === null)
     .then(() => true, () => false);
   check("3f.2b data-yuka-nav is removed after the transition", removed);
   check("3f.2 the click uses the prefetch", requestsTo(from, "/issue/YUK-5").length === 1, String(requestsTo(from, "/issue/YUK-5").length));
@@ -602,6 +644,7 @@ await step("3f. prefetch and the navigation cache", async () => {
   await page.mouse.move(1, 1);
   from = allRequests.length;
   await link("YUK-6").hover();
+  await until(() => requestsTo(from, "/issue/YUK-6").length > 0);
   await page.waitForTimeout(300);
   check("3f.4 prefetched before the action", requestsTo(from, "/issue/YUK-6").length === 1);
   const posts = actionPosts.length;
@@ -610,10 +653,10 @@ await step("3f. prefetch and the navigation cache", async () => {
   const label = before === "done" ? "Todo" : "Done";
   await page.locator('.row[data-id="YUK-6"] button[aria-label="Change status"]').click();
   await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
-  const deadline = Date.now() + 5000;
-  while (actionPosts.length === posts && Date.now() < deadline) await page.waitForTimeout(50);
-  await page.waitForTimeout(100);
+  await until(() => actionPosts.slice(posts).some((p) => p.url.endsWith("/update_issue")) && allRequests.slice(from).some((r) => r.url.endsWith("/_yuka/action/labels")));
+
   await link("YUK-6").click();
+
   await page.waitForURL("**/issue/YUK-6");
   await page.waitForSelector(".comment-input");
   const dropped = (f: string) => f === `GET ${base}/issue/YUK-6 net::ERR_ABORTED`;
@@ -644,16 +687,31 @@ await step("3k. trajectory prefetch (scripted mouse paths, not user data)", asyn
   const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   const glide = async (x0: number, y0: number, x1: number, y1: number, pxPerS: number, target?: Box) => {
     const dist = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.round(dist / (pxPerS / 60)));
-    let entered = 0;
+    let entered = 0, gap = 0;
     const started = Date.now();
+    let moved = started;
     for (let i = 1; i <= n; i++) {
       const x = x0 + ((x1 - x0) * i) / n, y = y0 + ((y1 - y0) * i) / n;
       const due = started + (i * 1000) / 60;
       if (Date.now() < due) await page.waitForTimeout(due - Date.now());
       await page.mouse.move(x, y);
+      gap = Math.max(gap, Date.now() - moved);
+      moved = Date.now();
       if (target && !entered && inside(target, x, y)) entered = Date.now();
     }
-    return { entered, ms: Date.now() - started, speed: Math.round(dist / ((Date.now() - started) / 1000)) };
+    return { entered, gap, ms: Date.now() - started, speed: Math.round(dist / ((Date.now() - started) / 1000)) };
+  };
+  const tries = async <T,>(name: string, path: () => Promise<{ gap: number; result: T }>) => {
+    const gaps: number[] = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await fresh();
+      const { gap, result } = await path();
+      if (gap < 40) return result;
+      gaps.push(gap);
+      console.log(`RETRY ${name}: a mouse step took ${gap} ms (limit 40 ms), so the path was not the scripted one`);
+    }
+    check(name, false, `3 tries, each with a mouse step of 40 ms or more (${gaps.join(", ")} ms): the path could not be run, the check is not proven`);
+    return undefined;
   };
   const prefetches = (from: number) =>
     allRequests.slice(from).filter((r) => r.prefetch !== undefined).map((r) => ({ path: new URL(r.url).pathname, prefetch: r.prefetch, t: r.t }));
@@ -669,42 +727,59 @@ await step("3k. trajectory prefetch (scripted mouse paths, not user data)", asyn
     );
   const onLink = (x: number, y: number) =>
     page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("a[href]")?.getAttribute("href") ?? "none", [x, y]);
-  const t = (await menuBoxes()).at(-1)!;
-  const tx = t.x + t.w / 2, startY = Math.min(t.y + t.h / 2 + 400, 795);
-  const startA = await onLink(tx, startY);
-  let from = allRequests.length;
-  const toward = await glide(tx, startY, tx, t.y + t.h / 2, 800, t);
-  await page.waitForTimeout(300);
-  const a = prefetches(from);
-  const first = a.find((r) => r.path === t.href);
-  const lead = first && toward.entered ? toward.entered + 50 - first.t : NaN;
-  check("3k.1 a straight path toward a link prefetches it before the pointer enters it, as trajectory", !!first && first.prefetch === "trajectory" && first.t < toward.entered, `${show(a)} start on link: ${startA}`);
-  console.log(`MEASURE 3k.1 scripted: ${Math.round(startY - t.y - t.h / 2)} px straight up at ${toward.speed} px/s toward ${t.href} (start on link: ${startA}); trajectory request ${lead} ms before a hover prefetch would start (pointer enters + 50 ms); requests: ${a.length} (${show(a)})`);
+  const k1 = "3k.1 a straight path toward a link prefetches it before the pointer enters it, as trajectory";
+  const one = await tries(k1, async () => {
+    const t = (await menuBoxes()).at(-1)!;
+    const tx = t.x + t.w / 2, startY = Math.min(t.y + t.h / 2 + 400, 795);
+    const startA = await onLink(tx, startY);
+    const from = allRequests.length;
+    const toward = await glide(tx, startY, tx, t.y + t.h / 2, 800, t);
+    await until(() => prefetches(from).some((r) => r.path === t.href));
+    return { gap: toward.gap, result: { t, startY, startA, toward, a: prefetches(from) } };
+  });
+  if (one) {
+    const { t, startY, startA, toward, a } = one;
+    const first = a.find((r) => r.path === t.href);
+    const lead = first && toward.entered ? toward.entered + 50 - first.t : NaN;
+    check(k1, !!first && first.prefetch === "trajectory" && first.t < toward.entered, `${show(a)} start on link: ${startA}`);
+    console.log(`MEASURE 3k.1 scripted: ${Math.round(startY - t.y - t.h / 2)} px straight up at ${toward.speed} px/s toward ${t.href} (start on link: ${startA}); trajectory request ${lead} ms before a hover prefetch would start (pointer enters + 50 ms); requests: ${a.length} (${show(a)})`);
+  }
 
-  await fresh();
-  const n = (await menuBoxes()).at(-1)!;
-  const ny = n.y + n.h + 50, nx0 = 5, nx1 = n.x + n.w - 10;
-  const startB = await onLink(nx0, ny), endB = await onLink(nx1, 795);
-  from = allRequests.length;
-  await glide(nx0, ny, nx1, ny, 800);
-  await glide(nx1, ny, nx1, 795, 800);
-  await page.waitForTimeout(300);
-  const b = prefetches(from);
-  check("3k.2 a path near one link and away from the others sends at most one request, for that link", b.length <= 1 && b.every((r) => r.path === n.href), show(b));
-  console.log(`MEASURE 3k.2 scripted: a path 50 px under ${n.href}, left to right, then down to the bottom of the window (start on link: ${startB}, end on link: ${endB}): ${b.length} requests (${show(b)})`);
+  const k2 = "3k.2 a path near one link and away from the others sends at most one request, for that link";
+  const two = await tries(k2, async () => {
+    const n = (await menuBoxes()).at(-1)!;
+    const ny = n.y + n.h + 50, nx0 = 5, nx1 = n.x + n.w - 10;
+    const startB = await onLink(nx0, ny), endB = await onLink(nx1, 795);
+    const from = allRequests.length;
+    const across = await glide(nx0, ny, nx1, ny, 800);
+    const down = await glide(nx1, ny, nx1, 795, 800);
+    await page.waitForTimeout(300);
+    return { gap: Math.max(across.gap, down.gap), result: { n, startB, endB, b: prefetches(from) } };
+  });
+  if (two) {
+    const { n, startB, endB, b } = two;
+    check(k2, b.length <= 1 && b.every((r) => r.path === n.href), show(b));
+    console.log(`MEASURE 3k.2 scripted: a path 50 px under ${n.href}, left to right, then down to the bottom of the window (start on link: ${startB}, end on link: ${endB}): ${b.length} requests (${show(b)})`);
+  }
 
-  await fresh();
-  const menu = await menuBoxes();
-  const last = menu[menu.length - 1];
-  const head = menu[0];
-  from = allRequests.length;
-  const cross = await glide(head.x + head.w / 2, head.y - 150, last.x + last.w / 2, last.y + last.h / 2, 800, { x: last.x, y: last.y, w: last.w, h: last.h });
-  await page.waitForTimeout(300);
-  const c = prefetches(from);
-  const passed = menu.slice(1, -1).map((m) => m.href);
-  check("3k.3 a path across the menu sends nothing for the links it passes", !c.some((r) => passed.includes(r.path)), `passed ${passed.join(" ")}: ${show(c)}`);
-  console.log(`MEASURE 3k.3 scripted: a path across the menu (${menu.map((m) => m.href).join(" ")}) toward ${last.href} at ${cross.speed} px/s: ${c.length} requests (${show(c)})`);
+  const k3 = "3k.3 a path across the menu sends nothing for the links it passes";
+  const three = await tries(k3, async () => {
+    const menu = await menuBoxes();
+    const last = menu[menu.length - 1];
+    const head = menu[0];
+    const from = allRequests.length;
+    const cross = await glide(head.x + head.w / 2, head.y - 150, last.x + last.w / 2, last.y + last.h / 2, 800, { x: last.x, y: last.y, w: last.w, h: last.h });
+    await page.waitForTimeout(300);
+    return { gap: cross.gap, result: { menu, last, cross, c: prefetches(from) } };
+  });
+  if (three) {
+    const { menu, last, cross, c } = three;
+    const passed = menu.slice(1, -1).map((m) => m.href);
+    check(k3, !c.some((r) => passed.includes(r.path)), `passed ${passed.join(" ")}: ${show(c)}`);
+    console.log(`MEASURE 3k.3 scripted: a path across the menu (${menu.map((m) => m.href).join(" ")}) toward ${last.href} at ${cross.speed} px/s: ${c.length} requests (${show(c)})`);
+  }
   await page.goto(base + "/", { waitUntil: "networkidle" });
+
 });
 
 
@@ -723,8 +798,9 @@ const liveOpen = (p: Page) =>
   p.waitForFunction(() => {
     const s = (window as any).__sockets as WebSocket[];
     return s.length > 0 && s[s.length - 1].readyState === 1;
-  }, null, { timeout: 5000 });
-const livePage = async (path: string, at = base) => {
+  });
+const livePage
+ = async (path: string, at = base) => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await ctx.addInitScript(recordSockets);
   const routes: { close: (o?: { code?: number; reason?: string }) => Promise<void> }[] = [];
@@ -783,29 +859,18 @@ if (second)
     const before = await statusIn(B.p, id);
     const target = before === "done" ? "todo" : "done";
     await pickStatus(A.p, id, target === "done" ? "Done" : "Todo");
-    const seen = await B.p
-      .waitForFunction(
-        ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
-        [id, target],
-        { timeout: 2000 },
-      )
-      .then(() => true, () => false);
+    const seen = await B.p.waitForFunction(statusIs, [id, target]).then(() => true, () => false);
     check("3h.1 a change in a page on node 1 shows in a page on node 2", seen, `${id} ${before} -> ${target} on ${second}`);
     const back = target === "done" ? "todo" : "done";
     await pickStatus(B.p, id, back === "done" ? "Done" : "Todo");
+    const shownInB = await B.p.waitForFunction(statusIs, [id, back]).then(() => true, () => false);
     const shown: string[] = [];
     for (let i = 0; i < 15; i++) {
       shown.push(await statusIn(B.p, id));
       await B.p.waitForTimeout(100);
     }
-    const inA = await A.p
-      .waitForFunction(
-        ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
-        [id, back],
-        { timeout: 2000 },
-      )
-      .then(() => true, () => false);
-    check("3h.2 a change made on node 2 never flickers back there and reaches node 1", shown.every((s) => s === back) && inA, `node 2 showed ${shown.join(",")}, node 1 got it: ${inA}`);
+    const inA = await A.p.waitForFunction(statusIs, [id, back]).then(() => true, () => false);
+    check("3h.2 a change made on node 2 never flickers back there and reaches node 1", shownInB && shown.every((s) => s === back) && inA, `node 2 showed it: ${shownInB}, then ${shown.join(",")}, node 1 got it: ${inA}`);
     const unexpected = [...A.errors, ...B.errors];
     check("3h.3 no console errors in the two-node pages", unexpected.length === 0, unexpected.join(" | "));
     await A.ctx.close();
@@ -821,13 +886,7 @@ await step("3g. live data", async () => {
   const label = target === "done" ? "Done" : "Todo";
   const t0 = Date.now();
   await pickStatus(A.p, id, label);
-  const seen = await B.p
-    .waitForFunction(
-      ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
-      [id, target],
-      { timeout: 1000 },
-    )
-    .then(() => Date.now() - t0, () => -1);
+  const seen = await B.p.waitForFunction(statusIs, [id, target], { timeout: 1000 }).then(() => Date.now() - t0, () => -1);
   check("3g.1 a status change in page A (/) shows in page B (/my) within 1 s", seen >= 0, `${id} ${before} -> ${target} after ${seen} ms`);
 
   await B.p.goto(base + "/", { waitUntil: "networkidle" });
@@ -839,32 +898,43 @@ await step("3g. live data", async () => {
   await A.p.waitForSelector(".dialog");
   await A.p.fill(".dialog-title", title);
   await A.p.locator(".dialog .button.primary").click();
-  const created = await B.p.locator(".row", { hasText: title }).waitFor({ timeout: 2000 }).then(() => true, () => false);
+  const created = await B.p.locator(".row", { hasText: title }).waitFor().then(() => true, () => false);
   check("3g.2 an issue created in page A shows in page B", created);
   await A.p.waitForURL(/\/issue\/YUK-\d+$/);
   await A.p.goBack();
   await A.p.waitForSelector(`.row:has-text("${title}")`);
 
   await B.routes[B.routes.length - 1].close({ code: 4001, reason: "dropped by the test" });
-  const offline = await B.p.waitForSelector(".offline", { timeout: 1000 }).then(() => true, () => false);
-  const back = await B.p.waitForSelector(".offline", { state: "detached", timeout: 5000 }).then(() => true, () => false);
+  const offline = await B.p.waitForSelector(".offline").then(() => true, () => false);
+  const back = await B.p.waitForSelector(".offline", { state: "detached" }).then(() => true, () => false);
   check("3g.3 a closed socket shows Offline, then the page reconnects", offline && back, `offline=${offline} back=${back}`);
   await liveOpen(B.p);
 
   const before2 = await statusIn(B.p, id);
   const target2 = before2 === "done" ? "todo" : "done";
+  const refused = gate();
   await A.p.route("**/_yuka/action/**", async (route) => {
-    await new Promise((r) => setTimeout(r, 300));
+    await refused.opened;
     await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"action failed"}' });
   });
-  await pickStatus(A.p, id, target2 === "done" ? "Done" : "Todo");
-  const shownInA = await statusIn(A.p, id);
   let seenInB = false;
-  for (let i = 0; i < 12; i++) {
-    if ((await statusIn(B.p, id)) === target2) seenInB = true;
-    await B.p.waitForTimeout(100);
-  }
+  let watching = true;
+  const watchB = (async () => {
+    while (watching) {
+      if ((await statusIn(B.p, id)) === target2) seenInB = true;
+      await B.p.waitForTimeout(100);
+    }
+  })();
+  await pickStatus(A.p, id, target2 === "done" ? "Done" : "Todo");
+  await A.p.waitForFunction(statusIs, [id, target2]).catch(() => {});
+  const shownInA = await statusIn(A.p, id);
+  refused.open();
+  await A.p.waitForFunction(statusIs, [id, before2]).catch(() => {});
+  await B.p.waitForTimeout(1200);
+  watching = false;
+  await watchB;
   await A.p.unroute("**/_yuka/action/**");
+
   check("3g.4 a forced 500 rolls back in page A and page B never shows the change", shownInA === target2 && (await statusIn(A.p, id)) === before2 && !seenInB, `A ${before2} -> ${shownInA} -> ${await statusIn(A.p, id)}, B saw it: ${seenInB}`);
 
   const foreign = await handshake("http://evil.example");
@@ -883,26 +953,25 @@ await step("4. status change", async () => {
   const before = statusSlug(await statusOf(id));
   const target = before === "done" ? "todo" : "done";
   const label = target === "done" ? "Done" : "Todo";
+  const held = gate();
   await page.route("**/_yuka/action/**", async (route) => {
-    await new Promise((r) => setTimeout(r, 800));
+    await held.opened;
     await route.continue().catch(() => {});
   });
   actionPosts.length = 0;
   const labelsAgain = page
-    .waitForResponse((r) => r.url().endsWith("/_yuka/action/labels") && r.status() === 200, { timeout: 5000 })
+    .waitForResponse((r) => r.url().endsWith("/_yuka/action/labels") && r.status() === 200)
     .then(() => true, () => false);
   await page.locator(`.row[data-id="${id}"] button[aria-label="Change status"]`).click();
   await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
   await page.mouse.move(0, 0);
   const start = Date.now();
-  await page.waitForFunction(
-    ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
-    [id, target],
-    { timeout: 700 },
-  );
+  const shown = await page.waitForFunction(statusIs, [id, target]).then(() => true, () => false);
   const quick = Date.now() - start;
-  check("4a row updates at once (before response)", actionPosts.length === 0 && quick < 700, `after ${quick}ms, responses so far=${actionPosts.length}`);
-  await page.waitForTimeout(1200);
+  check("4a row updates at once (before response)", shown && actionPosts.length === 0, `after ${quick}ms with the response held, responses so far=${actionPosts.length}`);
+  held.open();
+  await until(() => actionPosts.some((p) => p.url.endsWith("/update_issue")));
+  const labelsFetched = await labelsAgain;
   await page.unroute("**/_yuka/action/**");
   const updates = actionPosts.filter((p) => p.url.endsWith("/update_issue"));
   check(
@@ -910,7 +979,7 @@ await step("4. status change", async () => {
     updates.length === 1 && updates[0].status === 200,
     JSON.stringify(actionPosts),
   );
-  check("4e the label counts are fetched again after a status change", await labelsAgain);
+  check("4e the label counts are fetched again after a status change", labelsFetched);
   check("4c row keeps new status after response", statusSlug(await statusOf(id)) === target);
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector(".row");
@@ -923,16 +992,19 @@ await step("5. failure path", async () => {
   const target = before === "done" ? "todo" : "done";
   const label = target === "done" ? "Done" : "Todo";
   expectedFailures = 500;
+  const held = gate();
   await page.route("**/_yuka/action/**", async (route) => {
-    await new Promise((r) => setTimeout(r, 500));
+    await held.opened;
     await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"action failed"}' });
   });
   const rowTopBefore = (await page.locator(`.row[data-id="${id}"]`).boundingBox())?.y ?? -1;
   await page.locator(`.row[data-id="${id}"] button[aria-label="Change status"]`).click();
   await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
-  await page.waitForTimeout(100);
+  await page.waitForFunction(statusIs, [id, target]).catch(() => {});
   const optimistic = statusSlug(await statusOf(id));
-  await page.waitForTimeout(1200);
+  held.open();
+  await page.waitForFunction(statusIs, [id, before]).catch(() => {});
+  await page.waitForSelector(".toast").catch(() => {});
   const after = statusSlug(await statusOf(id));
   await page.unroute("**/_yuka/action/**");
   check("5a optimistic change shown first", optimistic === target, `${before} -> ${optimistic}`);
@@ -980,22 +1052,27 @@ await step("6. new issue dialog", async () => {
   const listUrl = page.url();
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("c");
-  await page.waitForSelector(".dialog", { timeout: 2000 });
+  await page.waitForSelector(".dialog");
   check("6a c opens dialog", (await page.locator(".dialog h2").textContent()) === "New issue");
   const dialogLabels = await fieldLabels(page, ".dialog");
   check("6a2 the title and the description have a linked label", dialogLabels === "Title:title,Description:description", String(dialogLabels));
   await page.screenshot({ path: join(shots, "dialog.png") });
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(100);
-  check("6b Escape closes dialog", (await page.locator(".dialog").count()) === 0);
+  await page.waitForSelector(".dialog", { state: "detached" }).catch(() => {});
+  check("6b Escape closes dialog"
+, (await page.locator(".dialog").count()) === 0);
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("c");
   await page.waitForSelector(".dialog");
   consoleErrors.length = 0;
   await page.locator(".dialog .button.primary").click();
-  await page.waitForSelector(".dialog .error", { timeout: 3000 });
+  await page.waitForSelector(".dialog .error");
   check("6c0 empty title shows 'Title is required'", (await page.locator(".dialog .error").textContent()) === "Title is required");
   check("6c0b dialog stays open", (await page.locator(".dialog").count()) === 1);
+  await page.waitForFunction(() => {
+    const title = document.querySelector('.dialog [name="title"]');
+    return title?.getAttribute("aria-invalid") === "true" && document.activeElement === title;
+  }).catch(() => {});
   const marks = await fieldMarks(page, ".dialog");
   check("6c0h the title is invalid, described by its error, and has the focus",
     marks.invalid === "true" && marks.describedBy === "Title is required" && marks.focused, JSON.stringify(marks));
@@ -1006,11 +1083,11 @@ await step("6. new issue dialog", async () => {
   const errText = async () => (await page.locator(".dialog .error").textContent()) ?? "";
   await page.fill(".dialog-title", "x".repeat(81));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForFunction(() => /too long/.test(document.querySelector(".dialog .error")?.textContent ?? ""), null, { timeout: 3000 });
+  await page.waitForFunction(() => /too long/.test(document.querySelector(".dialog .error")?.textContent ?? ""));
   check("6c0d long title shows 'Title is too long'", (await errText()) === "Title is too long (at most 80 characters)", await errText());
   await page.fill(".dialog-title", "Write the release notes");
   await page.locator(".dialog .button.primary").click();
-  await page.waitForFunction(() => /already exists/.test(document.querySelector(".dialog .error")?.textContent ?? ""), null, { timeout: 3000 });
+  await page.waitForFunction(() => /already exists/.test(document.querySelector(".dialog .error")?.textContent ?? ""));
   check("6c0e duplicate title shows the existing id", (await errText()) === "An issue with this title already exists: YUK-25", await errText());
   check("6c0f typed errors cause no console error", consoleErrors.length === 0, consoleErrors.join(" | "));
   check("6c0g typed errors do not navigate", page.url() === listUrl, `${listUrl} -> ${page.url()}`);
@@ -1029,7 +1106,7 @@ await step("6. new issue dialog", async () => {
   });
   check("6c0j a fixed title loses aria-invalid and aria-describedby at submit",
     markedBefore.invalid === "true" && cleared.invalid === null && cleared.describedBy === null, JSON.stringify({ markedBefore, cleared }));
-  await page.waitForURL(/\/issue\/YUK-\d+$/, { timeout: 3000 });
+  await page.waitForURL(/\/issue\/YUK-\d+$/);
   await page.waitForSelector(".issue-title");
   const landed = {
     path: new URL(page.url()).pathname,
@@ -1043,7 +1120,7 @@ await step("6. new issue dialog", async () => {
   check("6c3 focus is on a connected element outside the dialog", landed.focus, JSON.stringify(landed));
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("c");
-  await page.waitForSelector(".dialog", { timeout: 2000 });
+  await page.waitForSelector(".dialog");
   const fresh = {
     title: await page.inputValue(".dialog-title"),
     description: await page.inputValue(".dialog-description"),
@@ -1052,10 +1129,10 @@ await step("6. new issue dialog", async () => {
   };
   check("6c4 c on the new issue opens an empty dialog", fresh.title === "" && fresh.description === "" && fresh.errors === 0 && !fresh.disabled, JSON.stringify(fresh));
   await page.keyboard.press("Escape");
-  await page.waitForSelector(".dialog", { state: "detached", timeout: 2000 });
+  await page.waitForSelector(".dialog", { state: "detached" });
   await page.goBack();
   await page.waitForURL(listUrl);
-  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 3000 });
+  await page.waitForSelector(`.row:has-text("${title}")`);
   const row = page.locator(".row", { hasText: title });
   check("6c5 Back is a client navigation to the list", (await page.evaluate(() => (window as any).__created)) === "alive");
   check("6c issue appears without reload", (await row.count()) === 1 && (await page.locator(".row").count()) === before + 1);
@@ -1146,25 +1223,25 @@ await step("6g. workspaces", async () => {
   await page.waitForSelector(".filter");
   await page.locator(".page-header").first().click();
   await page.keyboard.press("c");
-  await page.waitForSelector(".dialog", { timeout: 2000 });
+  await page.waitForSelector(".dialog");
   const title = `Stress issue ${run}`;
   await page.fill(".dialog-title", title);
   await page.evaluate(() => ((window as any).__created = "stress"));
   await page.locator(".dialog .button.primary").click();
-  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/, { timeout: 30000 });
+  await page.waitForURL(/\/w\/stress\/issue\/STR-\d+$/);
   await page.waitForSelector(".issue-title");
   const landed = { path: new URL(page.url()).pathname, title: await page.locator(".issue-title").textContent(), marker: await page.evaluate(() => (window as any).__created) };
   check("6g.12a creating in stress opens /w/stress/issue/STR-n with a client navigation", landed.title === title && landed.marker === "stress", JSON.stringify(landed));
   await page.goBack();
   await page.waitForURL("**/w/stress");
-  await page.waitForSelector(`.row:has-text("${title}")`, { timeout: 30000 });
+  await page.waitForSelector(`.row:has-text("${title}")`);
   const created = await page.locator(".row", { hasText: title }).getAttribute("data-id");
   check("6g.12b the issue page is the created issue", landed.path === `/w/stress/issue/${created}`, `${landed.path} ${created}`);
   check("6g.12 an issue made in stress gets a stress id", /^STR-\d+$/.test(created ?? "") && (await page.locator(".row").count()) === 2001, `${created} rows=${await page.locator(".row").count()}`);
   await page.evaluate(() => ((window as any).__workspace = "alive"));
   await page.locator('.workspace-link[href="/"]').click();
   await page.waitForURL(base + "/");
-  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]', { timeout: 30000 });
+  await page.waitForSelector('.workspace-link[href="/"][aria-current="true"]');
   await page.waitForSelector(".row");
   check("6g.13 switching workspace is a client navigation", (await page.evaluate(() => (window as any).__workspace)) === "alive");
   check("6g.14 the switcher marks Home", (await current()) === "/=true /w/stress=false", await current());
@@ -1172,7 +1249,7 @@ await step("6g. workspaces", async () => {
   check("6g.15 the yuka list has no stress issue", yukaIds.length > 0 && yukaIds.every((id) => id.startsWith("YUK-")) && (await page.locator(".row", { hasText: title }).count()) === 0, String(yukaIds.length));
   await page.locator('.workspace-link[href="/w/stress"]').click();
   await page.waitForURL("**/w/stress");
-  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]', { timeout: 30000 });
+  await page.waitForSelector('.workspace-link[href="/w/stress"][aria-current="true"]');
   await page.waitForSelector(".row");
   check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
   const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
@@ -1182,7 +1259,7 @@ await step("6g. workspaces", async () => {
 await step("6i. the label menu", async () => {
   const pg = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await pg.goto(base + "/w/stress", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click, null, { timeout: 30000 });
+  await pg.waitForFunction(() => !!(document.querySelector("#labels-button") as any)?.__yuka_click);
   const sideways = () => pg.evaluate(() => { const chips = document.querySelector(".chips")!; return chips.scrollWidth - chips.clientWidth; });
   const shown = () => pg.evaluate(() => {
     const bottom = document.querySelector(".chips")!.getBoundingClientRect().bottom;
@@ -1219,7 +1296,7 @@ await step("6i. the label menu", async () => {
   await pg.waitForFunction((label) => {
     const bottom = document.querySelector(".chips")!.getBoundingClientRect().bottom;
     return document.querySelector(`.chips .chip[data-label="${label}"]`)!.getBoundingClientRect().top < bottom;
-  }, hidden, { timeout: 5000 }).catch(() => {});
+  }, hidden).catch(() => {});
   check("6i.7 at 390 px the row does not scroll sideways and keeps the chosen label", (await sideways()) <= 0 && (await shown()).includes(hidden), `${await sideways()} ${(await shown()).join(",")}`);
   await pg.close();
 });
@@ -1235,7 +1312,7 @@ await step("6h. insights", async () => {
   const placeholders = ["fps", "update", "updates", "worst-frame", "long-frames", "nodes", "dom-nodes"].filter((metric) => !new RegExp(`data-metric="${metric}">-<`).test(html));
   check("6h.1b the server HTML has the panel with a placeholder for each measured metric", placeholders.length === 0 && html.includes('aria-live="off"'), placeholders.join(","));
   await pg.goto(base + "/insights", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 5000 });
+  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click);
   const nav = await pg.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
   check("6h.2 the sidebar marks Insights", nav === "/=null /my=null /insights=page /report=null /canvas=null", nav);
   const amounts = () => pg.evaluate(() => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(","));
@@ -1243,13 +1320,13 @@ await step("6h. insights", async () => {
   const all = await amounts();
   const allPoints = await points();
   await pg.locator("button.chip", { hasText: /^Urgent$/ }).click();
-  await pg.waitForFunction((previous) => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(",") !== previous, all, { timeout: 5000 }).catch(() => undefined);
+  await pg.waitForFunction((previous) => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(",") !== previous, all).catch(() => undefined);
   const urgent = await amounts();
   check("6h.3 a priority filter changes the status bars", urgent !== all && (await points()) < allPoints, `${all} -> ${urgent}`);
   await pg.locator('[data-chart="status"] g[data-key="done"] rect').click();
   check("6h.4 a click on a bar toggles its filter", (await pg.locator("button.chip", { hasText: /^Done$/ }).getAttribute("aria-pressed")) === "true");
   await pg.locator("button", { hasText: "Clear filters" }).click();
-  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, allPoints, { timeout: 5000 }).catch(() => undefined);
+  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, allPoints).catch(() => undefined);
   check("6h.5 clearing the filters restores the bars", (await amounts()) === all && (await points()) === allPoints, `${await amounts()} points=${await points()}`);
   await pg.locator('[data-chart="status"] g[data-key="todo"] rect').hover();
   const tip = await pg.locator('[data-chart="status"] g:last-child text').last().textContent();
@@ -1257,17 +1334,17 @@ await step("6h. insights", async () => {
   await pg.mouse.move(5, 790);
   const other = await browser.newPage();
   await other.goto(base + "/", { waitUntil: "networkidle" });
-  await other.waitForFunction(() => !!(document.querySelector(".icon-button") as any)?.__yuka_click, null, { timeout: 5000 });
+  await other.waitForFunction(() => !!(document.querySelector(".icon-button") as any)?.__yuka_click);
   const id = (await other.locator(".row").first().getAttribute("data-id")) ?? "";
   const before = await statusIn(other, id);
   const target = before === "done" ? "Todo" : "Done";
   await pickStatus(other, id, target);
-  const live = await pg.waitForFunction((previous) => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(",") !== previous, all, { timeout: 5000 }).then(() => true, () => false);
+  const live = await pg.waitForFunction((previous) => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(",") !== previous, all).then(() => true, () => false);
   check("6h.7 a status change in another page updates the charts", live, `${id} ${before} -> ${target}: ${await amounts()}`);
   await pickStatus(other, id, before === "done" ? "Done" : before === "todo" ? "Todo" : before === "in-progress" ? "In Progress" : before === "backlog" ? "Backlog" : "Canceled");
   await other.close();
   await pg.goto(base + "/w/stress/insights", { waitUntil: "networkidle" });
-  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click, null, { timeout: 30000 });
+  await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click);
   const stress = Number(((await pg.locator('[data-metric="points"]').textContent()) ?? "").replace(/,/g, ""));
   check("6h.8 stress has a point per issue", stress >= 2000 && (await points()) === stress, `${await points()} of ${stress}`);
   const dates = pg.locator("[data-filters] button[data-dates]");
@@ -1283,10 +1360,10 @@ await step("6h. insights", async () => {
   const from = pg.locator('#insights-dates input[data-bound="From"]');
   await from.focus();
   for (let press = 0; press < 20; press++) await pg.keyboard.press("ArrowRight");
-  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") !== full, fullRange, { timeout: 5000 }).catch(() => {});
+  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") !== full, fullRange).catch(() => {});
   const narrowed = await datesText();
   check("6h.14 arrow keys on From narrow the range; the control, the slider and the time chart show the same dates", narrowed !== fullRange && narrowed === (await timeNote()) && narrowed.startsWith((await from.getAttribute("aria-valuetext")) ?? "-"), `${narrowed} / ${await timeNote()} / ${await from.getAttribute("aria-valuetext")}`);
-  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length < count, stress, { timeout: 5000 }).catch(() => undefined);
+  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length < count, stress).catch(() => undefined);
   check("6h.15 the narrower range changes the charts", (await amounts()) !== stressAmounts && (await points()) < stress, `${stressAmounts} -> ${await amounts()} points=${await points()}`);
   const datesBox = async () => ({
     text: await datesText(),
@@ -1297,14 +1374,14 @@ await step("6h. insights", async () => {
   for (let batch = 0; batch < 3; batch++) {
     const day = Number(await from.inputValue());
     for (let press = 0; press < 12; press++) await pg.keyboard.press("ArrowRight");
-    await pg.waitForFunction((value) => document.querySelector("[data-dates]")?.textContent?.startsWith("Created" + value), await from.getAttribute("aria-valuetext"), { timeout: 5000 }).catch(() => {});
+    await pg.waitForFunction((value) => document.querySelector("[data-dates]")?.textContent?.startsWith("Created" + value), await from.getAttribute("aria-valuetext")).catch(() => {});
     if (Number(await from.inputValue()) !== day) datesBoxes.push(await datesBox());
   }
   const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
   check("6h.28 the range control keeps its width and the next filter its place when the dates change", new Set(datesBoxes.map((box) => box.text)).size >= 3 && spread(datesBoxes.map((box) => box.width)) <= 0.5 && spread(datesBoxes.map((box) => box.next)) <= 0.5, JSON.stringify(datesBoxes));
   await reset.click();
-  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") === full, fullRange, { timeout: 5000 }).catch(() => {});
-  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, stress, { timeout: 5000 }).catch(() => undefined);
+  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") === full, fullRange).catch(() => {});
+  await pg.waitForFunction((count) => document.querySelectorAll('[data-chart="scatter"] circle').length === count, stress).catch(() => undefined);
   check("6h.16 Full range restores the dates and the charts", (await datesText()) === fullRange && (await amounts()) === stressAmounts && (await points()) === stress && (await reset.isDisabled()), `${await datesText()} ${await amounts()} points=${await points()}`);
   await pg.keyboard.press("Escape");
   await pg.waitForSelector("#insights-dates:popover-open", { state: "detached" });
@@ -1321,7 +1398,7 @@ await step("6h. insights", async () => {
   const maxPoints = 20000;
   const hundredPoints = Math.min(stress * 100, maxPoints);
   const hundred = hundredPoints.toLocaleString("en-US");
-  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, hundred, { timeout: 10000 });
+  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, hundred);
   const cappedNote = (await pg.locator("[data-capped]").textContent()) ?? "";
   check("6h.9 the 100x stress control makes 100 times the points, capped at 20,000 with a note", (await points()) === hundredPoints && cappedNote === "capped at 20,000 points", `${await points()} (${hundred}) ${cappedNote}`);
   const metric = (name: string) => pg.locator(`[data-metric="${name}"]`).textContent();
@@ -1332,20 +1409,20 @@ await step("6h. insights", async () => {
     return Number(text("fps")) > 0 && / ms$/.test(text("update")) && Number(text("updates")) > 0 && / ms$/.test(text("worst-frame"))
       && /^\d+$/.test(text("long-frames")) && Number(text("nodes").replace(/,/g, "")) > 0 && Number(text("dom-nodes").replace(/,/g, "")) > 0
       && (document.querySelector("[data-frames] path")?.getAttribute("d") ?? "").startsWith("M");
-  }, null, { timeout: 15000 }).then(() => true, () => false);
+  }).then(() => true, () => false);
   const readings = Object.fromEntries(await Promise.all(["fps", "update", "updates", "worst-frame", "long-frames", "nodes", "dom-nodes", "points"].map(async (name) => [name, await metric(name)])));
   check("6h.10 animate runs and the panel shows a measured value for each metric", measured && readings.points === hundred, JSON.stringify(readings));
-  const swept = await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") !== full, fullRange, { timeout: 5000 }).then(() => true, () => false);
+  const swept = await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") !== full, fullRange).then(() => true, () => false);
   check("6h.21 Animate sweeps the same range the control shows", swept && (await datesText()) !== fullRange, await datesText());
   await animate.click();
   check("6h.22 a second click stops Animate", (await animate.getAttribute("aria-pressed")) === "false");
   await reset.evaluate((button: HTMLButtonElement) => button.click());
-  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") === full, fullRange, { timeout: 5000 }).catch(() => {});
+  await pg.waitForFunction((full) => document.querySelector("[data-dates]")?.textContent?.replace(/^Created/, "") === full, fullRange).catch(() => {});
   const counted = () => pg.evaluate(() => {
     const shown = (name: string) => Number((document.querySelector(`[data-metric="${name}"]`)?.textContent ?? "").replace(/,/g, ""));
     return { svg: shown("nodes"), svgPage: document.querySelectorAll("[data-chart] *").length, dom: shown("dom-nodes"), domPage: document.querySelectorAll("*").length };
   });
-  await pg.waitForFunction(() => Number((document.querySelector('[data-metric="nodes"]')?.textContent ?? "").replace(/,/g, "")) === document.querySelectorAll("[data-chart] *").length, null, { timeout: 5000 }).catch(() => {});
+  await pg.waitForFunction(() => Number((document.querySelector('[data-metric="nodes"]')?.textContent ?? "").replace(/,/g, "")) === document.querySelectorAll("[data-chart] *").length).catch(() => {});
   const nodeCounts = await counted();
   check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > hundredPoints && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
   const hud = pg.locator("aside[data-hud]");
@@ -1366,7 +1443,7 @@ await step("6h. insights", async () => {
   await pg.waitForSelector("#insights-metrics");
   check("6h.25 Enter on the focused toggle expands the panel again", (await toggle.getAttribute("aria-expanded")) === "true" && (await metric("points")) === hundred, `${await toggle.getAttribute("aria-expanded")} ${await metric("points")}`);
   await pg.locator("button", { hasText: /^1x$/ }).click();
-  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, stress.toLocaleString("en-US"), { timeout: 10000 });
+  await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, stress.toLocaleString("en-US"));
   await pg.setViewportSize({ width: 390, height: 800 });
   await pg.evaluate(() => window.scrollTo(0, 0));
   await dates.click();
@@ -1402,7 +1479,7 @@ await step("6i. report and canvas", async () => {
   const B = await open("/canvas");
   await liveOpen(A);
   await liveOpen(B);
-  await A.waitForFunction(() => !!(document.querySelector("[data-canvas] [data-id]") as any)?.__yuka_pointerdown, null, { timeout: 5000 });
+  await A.waitForFunction(() => !!(document.querySelector("[data-canvas] [data-id]") as any)?.__yuka_pointerdown);
   check("6i.3 the sidebar marks Canvas", (await nav(A)) === "/=null /my=null /insights=null /report=null /canvas=page", await nav(A));
   const at = (style: string | null) => (/translate\((-?\d+)px, ?(-?\d+)px\)/.exec(style ?? "") ?? []).slice(1).map(Number);
   const grip = await A.evaluate(() => {
@@ -1431,24 +1508,29 @@ await step("6i. report and canvas", async () => {
   const moved = await A.waitForFunction(
     ([sel, x, y]) => (document.querySelector(sel as string)?.getAttribute("style") ?? "").includes(`translate(${x}px,${y}px)`),
     [`[data-canvas] [data-id="${grip.id}"]`, want[0], want[1]] as const,
-    { timeout: 2000 },
   ).then(() => true, () => false);
   check("6i.4 a drag moves the card with the pointer and sends one move on release", during.join(",") === want.join(",") && moved && sentDuring === 0 && A.url() === url, `${grip.id} ${x0},${y0} -> during ${during.join(",")}, after ${at(await card(A).getAttribute("style")).join(",")}, want ${want.join(",")}; moves sent during the drag ${sentDuring}`);
+  await until(() => moves.length > 0);
   await A.waitForTimeout(300);
   check("6i.5 one move_item call", moves.length === 1, String(moves.length));
   const seen = await B.waitForFunction(
     ([sel, x, y]) => (document.querySelector(sel as string)?.getAttribute("style") ?? "").includes(`translate(${x}px,${y}px)`),
     [`[data-canvas] [data-id="${grip.id}"]`, want[0], want[1]] as const,
-    { timeout: 2000 },
   ).then(() => true, () => false);
   check("6i.6 the second page gets the move over Live", seen, `${grip.id} in B: ${await card(B).getAttribute("style")}`);
+  const answered = (name: string) => A.waitForResponse((r) => r.url().endsWith("/_yuka/action/" + name)).catch(() => {});
   await A.locator('[aria-label="Note text"]').fill("e2e note");
+  const added = answered("add_note");
   await A.locator("button", { hasText: /^Add note$/ }).click();
   const note = A.locator("[data-canvas] [data-id^='note-']", { hasText: "e2e note" });
-  await note.waitFor({ timeout: 5000 });
+  await note.waitFor();
+  await added;
+  const removed = answered("remove_note");
   await note.locator("button").click();
-  await note.waitFor({ state: "detached", timeout: 5000 });
+  await note.waitFor({ state: "detached" });
+  await removed;
   await A.waitForTimeout(300);
+
   const noteErrors = await A.locator("[data-canvas] .error").allTextContents();
   check("6i.7 a note is added and removed with no error message", noteErrors.length === 0, noteErrors.join(" | "));
   check("6i.8 no console error and no hydration mismatch on /report and /canvas", errors.length === 0, errors.join(" | "));
@@ -1568,30 +1650,46 @@ await step("7a. streaming", async () => {
   const early = await browser.newPage();
   const earlyErrors: string[] = [];
   early.on("console", (m) => m.type() === "error" && earlyErrors.push(m.text()));
-  const t0 = Date.now();
+  await early.addInitScript(() => {
+    type Seen = { order: number; t: number; skeleton: number; comments: number; related: number; title: string };
+    const seen: Record<string, Seen> = ((window as any).__firstSeen = {});
+    const watched: Record<string, string> = { skeleton: ".skeleton", comments: ".comment", related: "[class^=related-list_] li" };
+    let order = 0;
+    new MutationObserver(() => {
+      for (const [name, selector] of Object.entries(watched))
+        if (!seen[name] && document.querySelector(selector))
+          seen[name] = {
+            order: order++,
+            t: Math.round(performance.now()),
+            skeleton: document.querySelectorAll(".skeleton").length,
+            comments: document.querySelectorAll(".comment").length,
+            related: document.querySelectorAll("[class^=related-list_] li").length,
+            title: document.querySelector(".issue-title")?.textContent ?? "",
+          };
+    }).observe(document, { childList: true, subtree: true });
+  });
   await early.goto(base + issuePath, { waitUntil: "commit" });
-  await early.waitForSelector(".skeleton", { timeout: 3000 });
-  const firstPaint = await early.evaluate(() => ({
-    skeleton: document.querySelectorAll(".skeleton").length,
-    comments: document.querySelectorAll(".comment").length,
-    related: document.querySelectorAll("[class^=related-list_] li").length,
-    title: document.querySelector(".issue-title")?.textContent ?? "",
-  }));
-  const tSkeleton = Date.now() - t0;
+  await early.waitForSelector("[class^=related-list_] li");
+  type Seen = { order: number; t: number; skeleton: number; comments: number; related: number; title: string };
+  const seen: Record<string, Seen | undefined> = await early.evaluate(() => (window as any).__firstSeen);
+  const firstPaint = seen.skeleton;
   check(
     "7.1 skeleton visible before comments and related arrive",
-    firstPaint.skeleton >= 1 && firstPaint.comments === 0 && firstPaint.related === 0 && firstPaint.title !== "",
-    `${JSON.stringify(firstPaint)} after ${tSkeleton}ms`,
+    !!firstPaint && firstPaint.skeleton >= 1 && firstPaint.comments === 0 && firstPaint.related === 0 && firstPaint.title !== "",
+    JSON.stringify(firstPaint),
   );
-  await early.waitForSelector(".comment", { timeout: 5000 });
-  const tComments = Date.now() - t0;
-  const relatedAtComments = await early.locator("[class^=related-list_] li").count();
-  await early.waitForSelector("[class^=related-list_] li", { timeout: 5000 });
-  const tRelated = Date.now() - t0;
-  check("7.2 comments arrive before related issues", relatedAtComments === 0 && tRelated > tComments, `comments ${tComments}ms, related ${tRelated}ms`);
+  const { comments, related } = seen;
+  check(
+    "7.2 comments arrive before related issues",
+    !!comments && !!related && comments.related === 0 && related.order > comments.order,
+    `comments at ${comments?.t}ms with ${comments?.related} related, related at ${related?.t}ms`,
+  );
   await early.waitForLoadState("networkidle");
-  await early.waitForTimeout(300);
-  const done = await early.evaluate(() => ({
+  await early.waitForFunction(() =>
+    !document.querySelector(".skeleton, template[data-yuka-fill]") &&
+    [...document.querySelectorAll("yuka-island")].every((i) => (i as any).__yuka_started)).catch(() => {});
+  const done
+ = await early.evaluate(() => ({
     skeleton: document.querySelectorAll(".skeleton").length,
     comments: document.querySelectorAll(".comments .comment").length,
     related: document.querySelectorAll("[class^=related-list_] li").length,
@@ -1622,6 +1720,7 @@ await step("7b. start strategies", async () => {
   const names = () => chunks.map((c) => c.name).join(",");
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
   await p.waitForSelector("[class^=related-list_] li");
+  await p.waitForFunction(() => !!(document.querySelector("[data-nav-progress]") as any)?.__yuka_animationstart).catch(() => {});
   await p.waitForTimeout(800);
   const state = () =>
     p.evaluate(() => {
@@ -1645,14 +1744,16 @@ await step("7b. start strategies", async () => {
   check("7b.3 Related not started while below the fold", before.relatedTop > before.vh && before.io.length === 0, `top=${before.relatedTop} vh=${before.vh} fired=${before.io.length}`);
   check("7b.2b before interaction: no issue_props or related chunk requested", !names().includes("issue_props") && !names().includes("related"), names());
   await p.locator(".props .property").first().hover();
-  await p.waitForTimeout(200);
+  await until(() => names().includes("issue_props"));
+  await p.waitForFunction(() => !!(document.querySelector(".props select") as any)?.__yuka_change).catch(() => {});
   check("7b.2c issue_props chunk requested after hover, related not yet", names().includes("issue_props") && !names().includes("related"), names());
   const hovered = await state();
   check("7b.4 Issue_props started after hover", hovered.props, JSON.stringify(hovered));
   check("7b.5 Related still not started after hover", hovered.io.length === 0);
   const tScroll = Date.now();
   await p.locator("[class^=related_]").scrollIntoViewIfNeeded();
-  await p.waitForTimeout(300);
+  await p.waitForFunction(() => ((window as any).__ioFired as { cls: string }[]).some((x) => /related/.test(x.cls))).catch(() => {});
+  await until(() => names().includes("related"));
   const scrolled = await state();
   check("7b.6 Related started when scrolled into view", scrolled.io.length >= 1, `fired=${JSON.stringify(scrolled.io)} ${Date.now() - tScroll}ms after scroll`);
   check("7b.6b related chunk requested after scroll", names().includes("related"), names());
@@ -1663,13 +1764,16 @@ await step("7b. start strategies", async () => {
     props: (document.querySelector(".props") as any)?.__tag === "server",
   }));
   check("7b.7 slot nodes inside Issue_props are the server nodes", slot.related && slot.props && slot.total === 4 && slot.items === 4, JSON.stringify(slot));
+  const slow = gate();
   await p.route(base + "/", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await slow.opened;
     await route.continue();
   });
   await p.locator('.nav-link[href="/"]').click();
-  const barShown = await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 }).then(() => true, () => false);
+  const barShown = await p.waitForSelector("[data-nav-progress=loading]").then(() => true, () => false);
+  slow.open();
   await p.waitForURL(base + "/");
+
   check("7b.1 Nav_progress (idle) started without interaction: a slow navigation shows the bar", before.navProgress && barShown, `handler=${before.navProgress} shown=${barShown}`);
   check("7b.8 no errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
@@ -1694,8 +1798,9 @@ await step("7c. Issue_props status change", async () => {
   check("7c.0 status select shows the saved status before hydration", !preHandler && preValue === beforeStatus, `select=${preValue} icon=${beforeStatus} hydrated=${preHandler}`);
   const relatedBefore = await pg.locator("[class^=related-list_] li").count();
   const target = beforeStatus === "done" ? "todo" : "done";
+  const held = gate();
   await pg.route("**/_yuka/action/**", async (route) => {
-    await new Promise((r) => setTimeout(r, 800));
+    await held.opened;
     await route.continue();
   });
   await pg.locator(".props .property").first().hover();
@@ -1704,9 +1809,9 @@ await step("7c. Issue_props status change", async () => {
     await pg.waitForFunction(
       (t) => document.querySelector(".props .property svg")?.getAttribute("class")?.includes("status-" + t),
       target,
-      { timeout: 700 },
     );
   } catch {
+    held.open();
     const dbg = await pg.evaluate(() => ({
       icon: document.querySelector(".props .property svg")?.getAttribute("class"),
       handler: !!(document.querySelector(".props select") as any)?.__yuka_change,
@@ -1716,9 +1821,13 @@ await step("7c. Issue_props status change", async () => {
     await p.close();
     return;
   }
-  check("7c.1 status icon updates at once", posts.length === 0, `${beforeStatus} -> ${target}, responses so far=${posts.length}`);
-  await pg.waitForTimeout(1200);
+  check("7c.1 status icon updates at once", posts.length === 0, `${beforeStatus} -> ${target} with the response held, responses so far=${posts.length}`);
+  held.open();
+  await until(() => posts.length > 0);
+  await pg.waitForTimeout(300);
   await pg.unroute("**/_yuka/action/**");
+
+
   check("7c.2 action returned 200", posts.length === 1 && posts[0] === 200, JSON.stringify(posts));
   const slot = await pg.evaluate(() => ({
     items: document.querySelectorAll("[class^=related-list_] li").length,
@@ -1760,7 +1869,7 @@ await step("7f. early start", async () => {
   });
   const p = await ctx.newPage();
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
-  await p.waitForTimeout(300);
+  await p.waitForFunction(() => (window as any).__themeMenuStarted !== undefined && (window as any).__fills.length >= 2).catch(() => {});
   const r = await p.evaluate(() => ({
     started: (window as any).__themeMenuStarted as number | undefined,
     fills: (window as any).__fills as number[],
@@ -1793,6 +1902,8 @@ await step("7g. generated island registry", async () => {
 
   await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
   await p.waitForSelector("[class^=related-list_] li");
+  await p.waitForFunction(() =>
+    !!(document.querySelector("[data-nav-progress]") as any)?.__yuka_animationstart && !!(document.querySelector(".comment-input") as any)?.__yuka_input).catch(() => {});
   await p.waitForTimeout(500);
 
   check("7g.1 lazy New_issue not started before interaction", !(await has(".new-issue-button", "click")));
@@ -1805,7 +1916,8 @@ await step("7g. generated island registry", async () => {
   check("7g.9b Issue_list module not requested on a page without it", !seen.includes("issue_list"), seen.join(","));
 
   await p.locator(".props .property").first().hover();
-  await p.waitForTimeout(300);
+  await p.waitForFunction(() => !!(document.querySelector(".props select") as any)?.__yuka_change).catch(() => {});
+  await until(() => seen.includes("issue_props"));
   check("7g.10 Issue_props live after hover", await has(".props select", "change"));
   check("7g.11 issue_props chunk requested after hover, related not yet", lazyNames() === "comments,issue_props", lazyNames());
   check(
@@ -1813,16 +1925,21 @@ await step("7g. generated island registry", async () => {
     (await p.evaluate(() => ((window as any).__ioFired as { cls: string }[]).filter((x) => /related/.test(x.cls)).length)) === 0,
   );
   await p.locator("[class^=related_]").scrollIntoViewIfNeeded();
-  await p.waitForTimeout(400);
+  await until(() => seen.includes("related"));
   check("7g.13 related chunk requested after scroll", lazyNames() === "comments,issue_props,related", lazyNames());
   await p.locator("body").click({ position: { x: 5, y: 5 } });
   await p.keyboard.press("c");
-  await p.waitForSelector(".dialog", { timeout: 2000 });
+  await p.waitForSelector(".dialog");
   check("7g.4 c starts New_issue and opens the dialog", (await p.locator(".dialog h2").textContent()) === "New issue" && seen.includes("new_issue"), seen.join(","));
   await p.keyboard.press("Escape");
   await p.locator(".comment-input").fill("probe");
+  await p.waitForFunction(() => !(document.querySelector(".comment-box button.primary") as HTMLButtonElement | null)?.disabled).catch(() => {});
   check("7g.6 Comments is live: send enabled after typing", !(await p.locator(".comment-box button.primary").isDisabled()));
 
+  await p.waitForFunction((names) => {
+    const loaded = performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname);
+    return names.every((n) => loaded.some((u) => new RegExp(`/${n}(-[^/]*)?\\.js$`).test(u)));
+  }, ["comments", "issue_props", "related"]).catch(() => {});
   const requested = await p.evaluate(() =>
     performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((u) => /\.js$/.test(u)),
   );
@@ -1834,12 +1951,14 @@ await step("7g. generated island registry", async () => {
     const chunkFiles = requested.filter((u) => /\/(comments|issue_props|related)-[^/]*\.js$/.test(u));
     check("7g.15 bundle: three distinct lazy chunks, not main.js", new Set(chunkFiles).size === 3 && !chunkFiles.some((u) => u.endsWith("/main.js")), chunkFiles.join(","));
   }
+  const slow = gate();
   await p.route(base + "/", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await slow.opened;
     await route.continue();
   });
   await p.locator('.nav-link[href="/"]').click();
-  const barShown = await p.waitForSelector("[data-nav-progress=loading]", { timeout: 2000 }).then(() => true, () => false);
+  const barShown = await p.waitForSelector("[data-nav-progress=loading]").then(() => true, () => false);
+  slow.open();
   await p.waitForURL(base + "/");
   check("7g.3 Nav_progress is live: a slow navigation shows the bar", barShown);
   check("7g.16 no 'no entry for island' or other errors", errors.length === 0, errors.join(" | "));
@@ -1866,16 +1985,16 @@ await step("7h. client navigation with Yuka.render ~islands", async () => {
   await p.locator('.row[data-id="YUK-3"] .row-title').click();
   await p.waitForURL("**/issue/YUK-3");
   await p.waitForSelector(".comment-input");
-  await p.waitForTimeout(500);
+  await p.waitForFunction(() => !!(document.querySelector(".comment-input") as any)?.__yuka_input).catch(() => {});
   check("7h.2 link click is not a document load", docs.length === 1 && docs[0] === "/" && (await p.evaluate(() => (window as any).__nav)) === "alive", docs.join(","));
   check("7h.3 lazy island loaded by the navigated page", commentsReqs.length === 1, commentsReqs.join(","));
   check("7h.4 Comments live after navigation", await p.evaluate(() => !!(document.querySelector(".comment-input") as any)?.__yuka_input));
   await p.goBack();
   await p.waitForSelector(".row");
-  await p.waitForTimeout(300);
+  await islandsStarted(p);
   const total = await p.locator(".row").count();
   await p.fill(".filter", "keyboard");
-  await p.waitForTimeout(100);
+  await rowsBetween(p, 0, total - 1);
   check("7h.5 Issue_list live after navigating back", (await p.locator(".row").count()) < total);
   check("7h.6 no errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
@@ -1921,15 +2040,16 @@ await step("7i. modulepreload", async () => {
   });
   await q.setViewportSize({ width: 1280, height: 260 });
   await q.goto(base + "/issue/YUK-2", { waitUntil: "commit" });
-  await q.waitForSelector("[class^=related-list_] li", { timeout: 8000 });
+  await q.waitForSelector("[class^=related-list_] li");
   const at = (n: string) => qReqs.filter((r) => r.name === n).length;
+  await until(() => at("comments") > 0);
   await q.waitForTimeout(500);
   check("7i.7 Comments (Lazy Idle) requested after idle, others not yet", at("comments") === 1 && at("issue_props") === 0 && at("related") === 0, qReqs.map((r) => r.name).join(","));
   await q.locator(".props .property").first().hover();
-  await q.waitForTimeout(300);
+  await until(() => at("issue_props") > 0);
   check("7i.8 Issue_props (Lazy Interaction) requested only after hover", at("issue_props") === 1 && at("related") === 0, qReqs.map((r) => r.name).join(","));
   await q.locator("[class^=related_]").scrollIntoViewIfNeeded();
-  await q.waitForTimeout(400);
+  await until(() => at("related") > 0);
   check("7i.9 Related (Lazy Visible) requested only after scroll", at("related") === 1, qReqs.map((r) => r.name).join(","));
   await q.close();
 
@@ -1950,18 +2070,19 @@ await step("7i. modulepreload", async () => {
   await r.evaluate(() => ((window as any).__nav = "alive"));
   check("7i.10 Issue_list not loaded before navigation", !rReqs.includes("issue_list"));
   await r.locator('a[href="/"]').first().hover();
-  await r.waitForTimeout(3500);
+  await until(() => rReqs.includes("issue_list") && sheetLoads.length > 0);
   check("7i.10b a hover on a link warms the chunk and the sheet of the target before the click", rReqs.includes("issue_list") && sheetLoads.join(",") === "network", `${rReqs.filter((n) => n.includes("issue_list")).join(",")} sheet=${sheetLoads.join(",")}`);
   check("7i.10c no preload warning", !warnings.some((w) => /preload/i.test(w)), warnings.join(" | "));
   await r.locator('a[href="/"]').first().click();
   await r.waitForSelector(".row");
-  await r.waitForTimeout(500);
+  await islandsStarted(r);
   check("7i.11 navigation was client-side", (await r.evaluate(() => (window as any).__nav)) === "alive");
   check("7i.12 new non-lazy island module requested once", rReqs.filter((n) => n === "issue_list").length === 1, String(rReqs.filter((n) => n === "issue_list").length));
   check("7i.12b the sheet of the new page comes from the HTTP cache", sheetLoads[0] === "network" && sheetLoads.slice(1).every((l) => l === "cache"), sheetLoads.join(","));
   const total = await r.locator(".row").count();
   await r.fill(".filter", "keyboard");
-  await r.waitForTimeout(100);
+  await rowsBetween(r, 0, total - 1);
+
   check("7i.13 Issue_list hydrates after navigation", (await r.locator(".row").count()) < total, `${total} -> ${await r.locator(".row").count()}`);
   check("7i.14 no errors", errors.length === 0, errors.join(" | "));
   await ctx.close();
@@ -2025,17 +2146,21 @@ await step("7. comment", async () => {
   await page.screenshot({ path: join(shots, "issue.png"), fullPage: true });
   const body = `Browser comment ${run}`;
   const before = await page.locator(".comment").count();
+  const held = gate();
   await page.route("**/_yuka/action/**", async (route) => {
-    await new Promise((r) => setTimeout(r, 800));
+    await held.opened;
     await route.continue();
   });
   await page.fill(".comment-input", body);
   await page.getByRole("button", { name: "Comment" }).click();
-  await page.waitForTimeout(150);
+  await page.locator(".comment", { hasText: body }).first().waitFor().catch(() => {});
   const immediate = await page.locator(".comment", { hasText: body }).count();
   check("7e.1 comment appears at once", immediate === 1 && (await page.locator(".comment").count()) === before + 1);
   check("7e.2 draft cleared", (await page.inputValue(".comment-input")) === "");
-  await page.waitForTimeout(1200);
+  const saved = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/_yuka/action/")).catch(() => {});
+  held.open();
+  await saved;
+  await page.waitForFunction((text) => [...document.querySelectorAll(".comment")].some((c) => c.textContent?.includes(text) && !c.id.includes("tmp-")), body).catch(() => {});
   await page.unroute("**/_yuka/action/**");
   check("7e.3 still one copy after response", (await page.locator(".comment", { hasText: body }).count()) === 1);
   await page.reload({ waitUntil: "networkidle" });
@@ -2077,13 +2202,15 @@ await step("7l. long comment threads", async () => {
   await pg.waitForFunction((text) => document.querySelector(".comments .comment:last-child")?.textContent?.includes(text) && !document.querySelector(".comments .comment:last-child")?.id.includes("tmp-"), body);
   check("7l.4 a new comment goes last and the hidden count stays", (await counter.textContent()) === "192 hidden comments" && (await ids()).length === 9, (await ids()).join(","));
   await pg.evaluate(() => document.querySelectorAll(".comments .comment").forEach((item) => ((item as any).__kept = true)));
+  const ranged = gate();
   await pg.route("**/_yuka/action/comment_range", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await ranged.opened;
     await route.continue();
   });
   await pg.click("#load-more-comments");
   await pg.waitForFunction(() => document.querySelector("#load-more-comments")?.textContent === "Loading...");
   check("7l.5 the button shows a pending state", (await pg.getAttribute("#load-more-comments", "aria-disabled")) === "true");
+  ranged.open();
   await pg.waitForFunction(() => document.querySelector("[aria-label='Hidden comments'] [aria-live]")?.textContent === "142 hidden comments");
   await pg.unroute("**/_yuka/action/comment_range");
   const afterMore = await ids();
@@ -2246,16 +2373,19 @@ await step("7k. markdown and code style", async () => {
   await page.goto(base + "/issue/YUK-19", { waitUntil: "networkidle" });
   await page.waitForSelector(".comment-input");
   const body = `**Bold ${run}** and \`code\`\n\n\`\`\`ocaml\nlet answer = 42\n\`\`\``;
+  const held = gate();
   await page.route("**/_yuka/action/**", async (route) => {
-    await new Promise((r) => setTimeout(r, 600));
+    await held.opened;
     await route.continue();
   });
   await page.fill(".comment-input", body);
   await page.getByRole("button", { name: "Comment" }).click();
-  await page.waitForTimeout(150);
+  await page.locator(".comment", { hasText: `**Bold ${run}**` }).first().waitFor().catch(() => {});
   const pending = await page.locator(".comment", { hasText: `**Bold ${run}**` }).count();
   check("7k.12 the new comment shows its text at once", pending === 1, String(pending));
-  await page.waitForSelector(`.comment strong:text("Bold ${run}")`, { timeout: 5000 });
+  held.open();
+
+  await page.waitForSelector(`.comment strong:text("Bold ${run}")`);
   await page.unroute("**/_yuka/action/**");
   const saved = await page.evaluate((run) => {
     const strong = [...document.querySelectorAll(".comment strong")].find((element) => element.textContent === `Bold ${run}`);
@@ -2295,16 +2425,16 @@ await step("8c. live pages after a server restart", async () => {
   await A.p.evaluate(() => ((window as any).__marker = "alive"));
   await B.p.evaluate(() => ((window as any).__marker = "alive"));
   process.kill(Number(readFileSync(pidfile, "utf8").trim()));
-  const offA = await A.p.waitForSelector(".offline", { timeout: 3000 }).then(() => true, () => false);
-  const offB = await B.p.waitForSelector(".offline", { timeout: 3000 }).then(() => true, () => false);
+  const offA = await A.p.waitForSelector(".offline").then(() => true, () => false);
+  const offB = await B.p.waitForSelector(".offline").then(() => true, () => false);
   check("8c.1 both pages show Offline", offA && offB, `A=${offA} B=${offB}`);
   const [exe, ...args] = command.split(" ").filter((x) => x !== "");
   const log = openSync(logfile, "a");
   const server = spawn(exe, args, { detached: true, stdio: ["ignore", log, log] });
   server.unref();
   writeFileSync(pidfile, String(server.pid));
-  const backA = await A.p.waitForSelector(".offline", { state: "detached", timeout: 15000 }).then(() => true, () => false);
-  const backB = await B.p.waitForSelector(".offline", { state: "detached", timeout: 15000 }).then(() => true, () => false);
+  const backA = await A.p.waitForSelector(".offline", { state: "detached" }).then(() => true, () => false);
+  const backB = await B.p.waitForSelector(".offline", { state: "detached" }).then(() => true, () => false);
   const rows = await A.p.locator(".row").count();
   const markers = [await A.p.evaluate(() => (window as any).__marker), await B.p.evaluate(() => (window as any).__marker)];
   check("8c.2 both pages reconnect and show the current list, with no reload", backA && backB && rows > 0 && markers.every((m) => m === "alive"), `A=${backA} B=${backB} rows=${rows} markers=${markers}`);
@@ -2312,14 +2442,9 @@ await step("8c. live pages after a server restart", async () => {
   const before = await statusIn(B.p, id);
   const target = before === "done" ? "todo" : "done";
   await pickStatus(A.p, id, target === "done" ? "Done" : "Todo");
-  const live = await B.p
-    .waitForFunction(
-      ([i, t]) => document.querySelector(`.row[data-id="${i}"] button[aria-label="Change status"] svg`)?.getAttribute("class")?.includes("status-" + t),
-      [id, target],
-      { timeout: 3000 },
-    )
-    .then(() => true, () => false);
-  const failed = await B.p.locator(".list-empty.error").count();
+  const live = await B.p.waitForFunction(statusIs, [id, target]).then(() => true, () => false);
+  const failed
+ = await B.p.locator(".list-empty.error").count();
   check("8c.4 after the restart a change in page A still shows in page B (the CSRF check passes)", live && failed === 0, `${id} ${before} -> ${target} live=${live} error shown=${failed}`);
   const unexpected = [...A.errors, ...B.errors].filter((e) => !/WebSocket connection to .* failed/.test(e));
   check("8c.3 no console error but the expected socket failures", unexpected.length === 0, unexpected.join(" | "));
