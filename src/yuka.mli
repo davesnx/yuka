@@ -597,8 +597,7 @@ module Console : sig
       the browser. In the browser, each function calls the [console] method
       of its name. On the server, it sends the level and the message to the
       [log] of {!Server.val-config} during a server render of a request, and
-      to the default sink otherwise ({!Server.Testing.set_log}). A prototype:
-      the API can change. *)
+      to the default sink otherwise ({!Server.set_default_log}). *)
 
   val log : string -> unit
   (** [console.log]; level [`Info] on the server. *)
@@ -1111,7 +1110,7 @@ module Router : sig
       turns a [Routes.t] (for example from [find]) into a URL; [find]; and
       [current], [replace] and [push] (see [docs/router.md]). A
       node name whose link function is an OCaml keyword or [href], [find],
-      [with_query], [with_fragment], [current], [replace] or [push] is a build error, and so is a param,
+      [current], [replace] or [push] is a build error, and so is a param,
       search field or loader named [fragment]. Then
       [yuka routes --server --shared-module Routes --source Routes.ml] writes the
       server module with [app]. *)
@@ -1163,6 +1162,15 @@ module Router : sig
   (** A catch-all for [href]: ["/"] and {!segment} of each element. Raises
       [Invalid_argument] on [[]], since a catch-all matches one segment or
       more. *)
+
+  val with_query : string -> (string * string) list -> string
+  (** [with_query path pairs] is [path], then [?] and the [key=value]
+      pairs joined by [&] when [pairs] is not empty. The pairs must be
+      encoded already. *)
+
+  val with_fragment : string -> string option -> string
+  (** [with_fragment path fragment] is [path], then [#] and {!encode} of
+      the fragment when there is one. *)
 
   val int_param : string -> int option
   (** [Param.decode Param.int], which the generated code calls inline. Use
@@ -1474,7 +1482,7 @@ module Server : sig
         [log] gets the failures of loaders and of the bus. Without it
         (and for the default node), the node logs to the [log] of the
         config of the last request that a handler served on this node, and
-        to the default sink (see {!Testing.set_log}) before the first request. [max_sockets]
+        to the default sink (see {!Server.set_default_log}) before the first request. [max_sockets]
         (default 10,000) and [max_sockets_per_session] (default 16) are the
         most open live sockets on this node and per session; a socket over a
         limit is closed with 1013 before its [hello], and the page tries again
@@ -1529,16 +1537,7 @@ module Server : sig
         node, the app must call it on every node (for example from its own
         message between nodes). *)
 
-    type bus = private {
-      send : string -> unit Async.t;  (** One short note to every node, this one too. *)
-      listen : (string -> unit) -> unit Async.t;
-          (** Calls the function with each note; settles when listening
-              started. *)
-      on_restart : (unit -> unit) -> unit;
-          (** Calls the function after the bus reconnects: notes may have
-              been lost. *)
-      close : unit -> unit Async.t;  (** Stops the bus and frees its resources. *)
-    }
+    type bus
     (** How server nodes tell each other that a key changed. A note is
         [{"n":NODE,"t":TOPIC,"k":KEY,"p":N}], under 7,900 bytes (Postgres
         [NOTIFY] takes 8,000); a publish whose note would be longer is not
@@ -1551,7 +1550,11 @@ module Server : sig
       on_restart:((unit -> unit) -> unit) ->
       close:(unit -> unit Async.t) ->
       bus
-    (** A bus with these functions. *)
+    (** A bus with these functions. [send] sends one short note to every
+        node, this one too. [listen] calls its function with each note and
+        settles when listening started. [on_restart] calls its function
+        after the bus reconnects: notes may have been lost. [close] stops
+        the bus and frees its resources. *)
 
     val close_bus : bus -> unit Async.t
     (** Calls the [close] function of the bus. A node that uses the bus
@@ -1670,7 +1673,7 @@ module Server : sig
   val no_cache : cache
   (** [no-cache]: a cache must ask the server before it uses a copy. *)
 
-  val private_ : max_age:int -> cache
+  val private_cache : max_age:int -> cache
   (** [private, max-age=N] *)
 
   val public : ?s_max_age:int -> max_age:int -> unit -> cache
@@ -1690,7 +1693,7 @@ module Server : sig
       header name or value with CR, LF or NUL makes the cycle answer a
       plain 500 instead, with a log message. *)
 
-  val response : ?status:int -> ?headers:(string * string) list -> body -> response
+  val response : ?status:int -> ?headers:(string * string) list -> body -> response Async.t
   (** Default status: 200; default headers: none. [response (Stream producer)]
       streams. *)
 
@@ -1728,10 +1731,15 @@ module Server : sig
       the JSON text that [yuka islands --manifest] prints (paths relative to
       the directory of [entry]), and [packages] the npm packages under
       [dir/node_modules] for the import map. [digest] stands for the content
-      of the files (for example [Yuka_dream.tree_digest dir]): it goes into
+      of the files (for example {!tree_digest} of [dir]): it goes into
       the build id, so new JavaScript gives a new build id. Files get
       [cache-control: no-cache]. [Error] with a message when [manifest] is
       not a JSON object of strings. *)
+
+  val tree_digest : string -> string
+  (** A digest of the paths and contents of every file under a directory
+      (symbolic links followed), for the [digest] of {!modules}. Compute it
+      once at start. *)
 
   val bundle :
     dir:string -> entry:string -> manifest:string -> metafile:string -> (assets, string) result
@@ -1794,8 +1802,14 @@ module Server : sig
       header) or [`Warn], and the {!Yuka.Console} calls of a server render
       of a request. Without it, the adapter may give its own log
       ({!Adapter.default_log}); else messages go to the default sink: one
-      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. This is a
-      prototype: the sink type can change. *)
+      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
+
+  val set_default_log : (log_level -> string -> unit) -> unit
+  (** Replaces the default sink: where messages go outside a request (a
+      render without the cycle, an [Action.call] on the server outside a
+      render, a {!Yuka.Console} call outside a render), and the log of a
+      config without [log] and of a {!Live.node} without [log]. Default:
+      one line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
 
   (** {2 Adapters} *)
 
@@ -2119,13 +2133,16 @@ module Server : sig
           [{"t":"hello","v":1,"csrf":T'}] carries [token ()] for the next
           [hello] of the page, and [node], a name of this node that changes
           when the process starts again; when [token ()] is [None], the
-          answer has no [csrf] field.
+          answer has no [csrf] field. Later, a second [hello], a [sub]
+          with the [id] of a subscription of the socket, or a message that
+          does not parse closes with 4400.
         - [sub] ([id], [topic], [key], and [at] [[NODE, SEQ]] when the
           page has a state of the key), [unsub] ([id]), [sync] ([id],
           [ref]) and [ping]. A subscription gets [state] messages ([id],
           [seq], [state]), [patch] messages ([id], [seq], [from], [ops]),
           or one [error] ([id], [code]: [unknown_topic], [bad_key],
-          [forbidden], [rejected] with [message], [server], [limit]).
+          [forbidden], [rejected], [server], [limit]; and [message], a
+          text that is empty for [forbidden]).
           [sync] is answered by [synced] after the latest state of the
           subscription.
         - When [at] names this node and the [seq] of the current state of
@@ -2156,6 +2173,7 @@ module Server : sig
           [NODE] (or [NODE] is this node) and every load of the key that
           those notes started has finished; then [synced] comes after the
           latest state. It waits 5 s at most (a lost note).
+        - A send or a receive that fails closes with 1011.
         - The function closes the socket once, when it ends the protocol
           itself (a limit, a failed send or receive, {!Live.revoke}); it
           does not close a socket that the client closed. *)
@@ -2166,12 +2184,14 @@ module Server : sig
         that settles on another node waits until that node has heard those
         notes and loaded the key again. *)
 
-    val set_log : (log_level -> string -> unit) -> unit
-    (** Replaces the default sink: where messages go outside a request (a
-        render without the cycle, an [Action.call] on the server outside a
-        render, a {!Yuka.Console} call outside a render), and the log of a
-        config without [log] and of a {!Live.node} without [log]. Default:
-        one line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
+    val bus_send : Live.bus -> string -> unit Async.t
+    (** The [send] function of the bus. *)
+
+    val bus_listen : Live.bus -> (string -> unit) -> unit Async.t
+    (** The [listen] function of the bus. *)
+
+    val bus_on_restart : Live.bus -> (unit -> unit) -> unit
+    (** The [on_restart] function of the bus. *)
 
     val memory_down : Live.memory -> bool -> unit
     (** [memory_down memory true] drops notes; [false] brings the bus back and

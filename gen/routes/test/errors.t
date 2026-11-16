@@ -292,19 +292,6 @@ A param name that is a keyword
   Error: param "effect" in path "/a/:effect<string>" is not a lowercase OCaml label
   [1]
 
-A label reserved by the generated code
-
-  $ gen <<'EOF'
-  > Router.make
-  >   [
-  >     Router.route A ~path:"/a" ~page:Pages.a
-  >       ~search:{ with_query = optional string };
-  >   ]
-  > EOF
-  File "Routes.ml", line 4, characters 14-46:
-  Error: label with_query is reserved by the generated code
-  [1]
-
 A param named href, which the route helpers call
 
   $ gen <<'EOF'
@@ -399,20 +386,6 @@ A route name whose helper the generated code already defines
   > EOF
   File "Routes.ml", line 1, characters 27-31:
   Error: name Push makes the helper Routes.push, which the generated code already defines; choose another name
-  [1]
-
-  $ gen <<'EOF'
-  > Router.make [ Router.route With_query ~path:"/a" ~page:Pages.a ]
-  > EOF
-  File "Routes.ml", line 1, characters 27-37:
-  Error: name With_query makes the helper Routes.with_query, which the generated code already defines; choose another name
-  [1]
-
-  $ gen <<'EOF'
-  > Router.make [ Router.route With_fragment ~path:"/a" ~page:Pages.a ]
-  > EOF
-  File "Routes.ml", line 1, characters 27-40:
-  Error: name With_fragment makes the helper Routes.with_fragment, which the generated code already defines; choose another name
   [1]
 
 A bad search kind
@@ -938,5 +911,5 @@ errors, and the nearest ~cache of the route decides
 
   $ gen > /dev/null <<'EOF'
   > Router.make ~cache:no_store
-  >   [ Router.route A ~path:"/a" ~page:Pages.a ~cache:(private_ ~max_age:60) ~prefetch:`Idle ]
+  >   [ Router.route A ~path:"/a" ~page:Pages.a ~cache:(private_cache ~max_age:60) ~prefetch:`Idle ]
   > EOF

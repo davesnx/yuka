@@ -140,22 +140,6 @@ let out_inside_a_served_dir () =
     [ Filename.concat dir "site"; dir; Filename.concat dir "a/../site" ];
   Alcotest.(check (list string)) "nothing written" [ "s.css" ] (List.map fst (files dir ""))
 
-let tree_digest () =
-  let dir = Filename.temp_dir "yuka_tree" "" in
-  let write name text =
-    Out_channel.with_open_bin (Filename.concat dir name) (fun oc -> output_string oc text)
-  in
-  Sys.mkdir (Filename.concat dir "a") 0o755;
-  write "a/x.js" "one";
-  write "y.js" "two";
-  let first = Yuka_dream.tree_digest dir in
-  Alcotest.(check string) "stable" first (Yuka_dream.tree_digest dir);
-  write "a/x.js" "ONE";
-  let changed = Yuka_dream.tree_digest dir in
-  check_true "content changes it" (changed <> first);
-  write "z.js" "";
-  check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
-
 let dream_log () =
   let get handler = ignore (Lwt_main.run (Dream.body (Dream.test handler (Dream.request ~target:"/warned" "")))) in
   let output = with_stderr (fun () -> get (Dream.logger (Yuka_dream.handler (Yuka.Server.config ()) Yuka_routes.app))) in
@@ -224,7 +208,6 @@ let () =
           Alcotest.test_case "YUKA_DEV=1 does not turn on dev mode" `Quick dev_env_ignored;
           Alcotest.test_case "a prerender with ~dev:true writes no dev script" `Quick prerender_dev_off;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
-          Alcotest.test_case "tree digest follows file contents" `Quick tree_digest;
         ] );
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);

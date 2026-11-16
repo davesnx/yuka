@@ -166,7 +166,7 @@ let () =
       Yuka.Server.modules ~dir ~entry:"client/main.js"
         ~manifest:(read "_build/default/client/yuka_islands.json")
         ~packages:(Array.to_list (Sys.readdir (Filename.concat dir "node_modules")))
-        ~digest:(Yuka_dream.tree_digest dir)
+        ~digest:(Yuka.Server.tree_digest dir)
     with
     | Ok assets -> assets
     | Error message ->

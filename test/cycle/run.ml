@@ -171,6 +171,22 @@ let check_true msg b = Alcotest.(check bool) msg true b
 
 let assets =
   [
+    ( "tree digest follows file contents",
+      fun () ->
+        let dir = Filename.temp_dir "yuka_tree" "" in
+        let write name text =
+          Out_channel.with_open_bin (Filename.concat dir name) (fun oc -> output_string oc text)
+        in
+        Sys.mkdir (Filename.concat dir "a") 0o755;
+        write "a/x.js" "one";
+        write "y.js" "two";
+        let first = Server.tree_digest dir in
+        Alcotest.(check string) "stable" first (Server.tree_digest dir);
+        write "a/x.js" "ONE";
+        let changed = Server.tree_digest dir in
+        check_true "content changes it" (changed <> first);
+        write "z.js" "";
+        check_true "a new file changes it" (Server.tree_digest dir <> changed) );
     ( "HEAD answers have no body",
       fun () ->
         List.iter
@@ -955,9 +971,9 @@ let render =
     ( "Console outside a request goes to the default sink",
       fun () ->
         let got = ref [] in
-        Server.Testing.set_log (leveled got);
+        Server.set_default_log (leveled got);
         console_calls ();
-        Server.Testing.set_log (fun _ m -> prerr_endline m);
+        Server.set_default_log (fun _ m -> prerr_endline m);
         Alcotest.(check (list string)) "levels" console_levels (List.rev !got) );
     ( "a failed render waits for the writes in flight",
       fun () ->
@@ -1506,10 +1522,10 @@ let dev =
           if !calls = 1 then {|{"build":1}|} else failwith "state gone"
         in
         let logged = ref [] in
-        Server.Testing.set_log (fun _ m -> logged := m :: !logged);
+        Server.set_default_log (fun _ m -> logged := m :: !logged);
         let ended = Yuka.Private.dev_events ~state ~sleep (fun _ -> Async.return ()) in
         (try tick () with _ -> ());
-        Server.Testing.set_log (fun _ m -> prerr_endline m);
+        Server.set_default_log (fun _ m -> prerr_endline m);
         check_true "ended" (Async.status ended = Async.Done ());
         Alcotest.(check int) "logged once" 1 (List.length !logged);
         Alcotest.(check int) "no timer left" 0 (List.length !timers) );
@@ -1648,7 +1664,7 @@ let prefetch =
         List.iter
           (fun cache ->
             check_true "the meta says visible" (contains (demoted cache) {|<meta name="yuka-prefetch" content="visible">|}))
-          [ Server.no_store; Server.no_cache; Server.private_ ~max_age:0 ];
+          [ Server.no_store; Server.no_cache; Server.private_cache ~max_age:0 ];
         check_true "no cache rule: visible"
           (contains (highest [ Some `Idle ]) {|<meta name="yuka-prefetch" content="visible">|}) );
     ( "a Cache-Control in ~headers decides the level of an Idle route",

@@ -22,7 +22,7 @@ let routes =
       Router.group ~path:"/team/:team<Params.Team.t>" ~layout:App.Layouts.team
         ~guard:App.Guards.outer ~loader:App.Loaders.squad
         ~headers:[ ("X-A", "team") ]
-        ~cache:(private_ ~max_age:5) ~prefetch:`Hover
+        ~cache:(private_cache ~max_age:5) ~prefetch:`Hover
         [
           Router.route Member ~path:"/:user<int>" ~page:App.Pages.member
             ~loader:App.Loaders.profile ~guard:App.Guards.inner;

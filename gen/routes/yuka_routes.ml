@@ -39,8 +39,8 @@ type ctx = {
 }
 
 let rules = [ "headers"; "cache"; "prerender" ]
-let reserved = [ "with_query"; "with_fragment"; "href"; "fragment"; "req"; "children" ]
-let generated_values = [ "href"; "find"; "with_query"; "with_fragment"; "current"; "replace"; "push" ]
+let reserved = [ "href"; "fragment"; "req"; "children" ]
+let generated_values = [ "href"; "find"; "current"; "replace"; "push" ]
 
 let encode text =
   let b = Buffer.create (String.length text) in
@@ -669,27 +669,7 @@ let search_pairs f =
         f.fname
 
 let href nodes =
-  let uses_search = List.exists (fun (_, _, s) -> s <> []) (named nodes) in
-  let helper =
-    if uses_search then
-      [
-        "let with_query path pairs =";
-        "  match pairs with";
-        "  | [] -> path";
-        "  | _ ->";
-        "      Stdlib.String.concat \"\"";
-        "        [";
-        "          path;";
-        "          \"?\";";
-        "          Stdlib.String.concat \"&\"";
-        "            (Stdlib.List.map (fun (k, v) -> Stdlib.String.concat \"=\" [ k; v ]) pairs);";
-        "        ]";
-        "";
-      ]
-    else []
-  in
-  helper
-  @ "let href = function"
+  "let href = function"
     :: List.concat_map
          (fun (name, segs, search) ->
            let head =
@@ -713,18 +693,12 @@ let href nodes =
                      @ [ "   ])" ]
                in
                indent 2
-                 ((sprintf "| %s ->" head :: indent 4 [ "with_query " ^ path ])
+                 ((sprintf "| %s ->" head :: indent 4 [ "Yuka.Router.with_query " ^ path ])
                  @ indent 6 pairs))
          (named nodes)
 
 let helpers nodes =
-  [
-    "";
-    "let with_fragment path fragment =";
-    "  Stdlib.( ^ ) path";
-    "    (match fragment with None -> \"\" | Some fragment -> Stdlib.( ^ ) \"#\" (Yuka.Router.encode fragment))";
-  ]
-  @ List.concat_map
+  List.concat_map
     (fun (name, segs, search) ->
       let required = List.map (fun n -> "~" ^ n) (seg_labels segs) in
       let optional =
@@ -744,7 +718,7 @@ let helpers nodes =
       in
       [
         "";
-        sprintf "let %s %s() = with_fragment (href %s) fragment" (String.uncapitalize_ascii name)
+        sprintf "let %s %s() = Yuka.Router.with_fragment (href %s) fragment" (String.uncapitalize_ascii name)
           (String.concat "" (List.map (fun a -> a ^ " ") (required @ optional)))
           value;
       ])

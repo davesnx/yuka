@@ -111,7 +111,7 @@ let () =
           ~metafile:(read_file !metafile)
       else
         Yuka.Server.modules ~dir:!js_dir ~entry:"demo/client/main.js" ~manifest
-          ~packages:(packages !js_dir) ~digest:(Yuka_dream.tree_digest !js_dir)
+          ~packages:(packages !js_dir) ~digest:(Yuka.Server.tree_digest !js_dir)
     with
     | Ok assets -> assets
     | Error message -> stop message

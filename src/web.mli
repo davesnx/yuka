@@ -159,3 +159,4 @@ val skip_clean : string -> int -> int
 val sub : string -> int -> int -> string
 val of_char : char -> string
 val refuse_url_name : string -> unit
+val tree_digest : string -> string

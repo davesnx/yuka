@@ -161,7 +161,7 @@ Rules, on any node except a redirect:
 
 - `~headers:[ ("x-frame-options", "DENY") ]`: response headers. A node
   replaces a header of the same name set above it.
-- `~cache`: `no_store`, `no_cache`, `private_ ~max_age:5`,
+- `~cache`: `no_store`, `no_cache`, `private_cache ~max_age:5`,
   `public ~max_age:60 ()` (with an optional `~s_max_age`) or
   `immutable`. The nearest one wins.
 - `~prerender:true`: the prerender step can write the page as a static

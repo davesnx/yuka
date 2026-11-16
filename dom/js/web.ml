@@ -550,3 +550,5 @@ external of_char : char -> string = "fromCharCode" [@@mel.scope "String"]
 let refuse_url_name : string -> unit =
   [%mel.raw
     {|function (n) { if (n === "" || /[\s"'>\/=<\x00-\x1f\x7f]|^on|^(href|src|action|formaction|xlink:?href|poster|cite|data|background|longdesc|manifest|codebase|icon|srcdoc)$/i.test(n)) throw new Error("Yuka: refused attribute name " + n) }|}]
+
+let tree_digest _ = invalid_arg "Yuka.Server.tree_digest: native only"

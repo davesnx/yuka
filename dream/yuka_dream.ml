@@ -107,16 +107,6 @@ module Fresh = Yuka.Server.Adapter.Make (struct
   let exists ~root:_ ~path:_ = false
 end)
 
-let tree_digest dir =
-  let rec files rel =
-    let path = if rel = "" then dir else Filename.concat dir rel in
-    if Sys.is_directory path then
-      Sys.readdir path |> Array.to_list |> List.sort compare
-      |> List.concat_map (fun name -> files (if rel = "" then name else Filename.concat rel name))
-    else [ rel ^ "\000" ^ Digest.to_hex (Digest.file path) ]
-  in
-  Digest.to_hex (Digest.string (String.concat "\n" (files "")))
-
 let dream_log = Dream.sub_log "yuka"
 
 let log level message =

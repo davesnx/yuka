@@ -117,7 +117,7 @@ let run mode lock domains threads rounds =
     domains threads (Atomic.get overlaps)
 
 let () =
-  Server.Testing.set_log (fun _ _ -> Atomic.incr logged);
+  Server.set_default_log (fun _ _ -> Atomic.incr logged);
   (match Array.to_list Sys.argv with
   | [ _; mode; lock; d; t; r ] -> run mode (bool_of_string lock) (int_of_string d) (int_of_string t) (int_of_string r)
   | _ ->

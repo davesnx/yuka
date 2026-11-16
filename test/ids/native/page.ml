@@ -39,7 +39,7 @@ let answer () =
   match Async.status body with Async.Done html -> html | _ -> invalid_arg "the answer did not settle"
 
 let () =
-  Server.Testing.set_log (fun _ _ -> ());
+  Server.set_default_log (fun _ _ -> ());
   match Sys.argv with
   | [| _; "shell" |] -> print_string (fst (streamed ()))
   | [| _; "filled" |] ->

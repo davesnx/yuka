@@ -130,14 +130,18 @@ module Server = struct
     let served_dirs = Cycle.served_dirs
   end
 
+  let set_default_log f = Types.default_log := f
+
   module Testing = struct
     let live_run = Live_server.run
     let live_mark = Live_server.mark
     let memory_down = Live_server.memory_down
+    let bus_send (b : Live.bus) = b.send
+    let bus_listen (b : Live.bus) = b.listen
+    let bus_on_restart (b : Live.bus) = b.on_restart
     let json_diff = Json_diff.diff
     let live_state ?node ~sleep request name key = Live_server.ssr_state ~sleep (Live_server.pick node) request name key
     let json_patch = Json_patch.apply
-    let set_log f = Types.default_log := f
 
     let request ?(header = fun _ -> None) ?session () : request =
       { (Server.empty_context ()) with header; session = (fun () -> session) }

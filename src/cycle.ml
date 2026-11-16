@@ -22,7 +22,7 @@ type cache = string
 
 let no_store = "no-store"
 let no_cache = "no-cache"
-let private_ ~max_age = "private, max-age=" ^ string_of_int max_age
+let private_cache ~max_age = "private, max-age=" ^ string_of_int max_age
 
 let public ?s_max_age ~max_age () =
   "public, max-age=" ^ string_of_int max_age
@@ -74,7 +74,7 @@ let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
 type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
 type response = { status : int; headers : (string * string) list; body : body }
 
-let response ?(status = 200) ?(headers = []) body = { status; headers; body }
+let response ?(status = 200) ?(headers = []) body = Async.return { status; headers; body }
 
 let with_type kind ?(status = 200) ?(headers = []) text =
   Async.return
@@ -86,6 +86,8 @@ let json ?status ?headers j = with_type "application/json" ?status ?headers (Jso
 
 let see_other location =
   Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
+
+let tree_digest = Web.tree_digest
 
 type fallback = { layers : layer list; not_found : string -> page; error : unit -> page }
 

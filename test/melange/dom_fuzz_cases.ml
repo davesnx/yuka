@@ -514,7 +514,7 @@ let canonical : node -> string =
 }|}]
 
 let restore_log () =
-  Server.Testing.set_log (fun level message ->
+  Server.set_default_log (fun level message ->
       let name = match level with `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug" in
       if level <> `Debug then prerr_endline ("yuka: " ^ name ^ " " ^ message))
 
@@ -526,7 +526,7 @@ let check_context w =
 let mount w g =
   w.after_snaps <- [];
   if w.feats.hydrate then begin
-    Server.Testing.set_log (fun _ _ -> ());
+    Server.set_default_log (fun _ _ -> ());
     let server =
       Fun.protect ~finally:restore_log (fun () ->
           Private.render_html (fun () -> Private.node (root (env w Server w.live))))

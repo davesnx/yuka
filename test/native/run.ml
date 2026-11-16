@@ -276,9 +276,9 @@ let post ?content_type ?origin ?host ?fetch_site name body =
 let logged f =
   let messages = ref [] in
   let saved = fun _ m -> prerr_endline m in
-  Yuka.Server.Testing.set_log (fun _ m -> messages := m :: !messages);
-  let result = (try f () with e -> Yuka.Server.Testing.set_log saved; raise e) in
-  Yuka.Server.Testing.set_log saved;
+  Yuka.Server.set_default_log (fun _ m -> messages := m :: !messages);
+  let result = (try f () with e -> Yuka.Server.set_default_log saved; raise e) in
+  Yuka.Server.set_default_log saved;
   (result, List.rev !messages)
 
 let action_cases =
@@ -529,12 +529,12 @@ let stream_cases =
     let write, chunks = recorder () in
     let logged = ref [] in
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
+    Yuka.Server.set_default_log (fun _ m -> logged := m :: !logged);
     let p = stream (fun () -> Yuka.fragment [ island a; island b ]) write in
     fail_a "db password wrong";
     open_b ();
     get p;
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check list_of "values"
       [ value_script "a2" "{\"error\":\"server error\"}";
         value_script "a1" "{\"error\":\"title is empty\"}";
@@ -545,7 +545,7 @@ let stream_cases =
   let async_errors_inline () =
     let logged = ref [] in
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
+    Yuka.Server.set_default_log (fun _ m -> logged := m :: !logged);
     let html =
       Server.to_string (fun () ->
           Yuka.fragment
@@ -553,7 +553,7 @@ let stream_cases =
               island (Server.Action.reject "title is empty");
               island (Async.failed "yuka.reject:forged") ])
     in
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check string "inline values"
       (island_html "i1" "{\"$async\":\"a3\",\"error\":\"server error\"}"
       ^ island_html "i2" "{\"$async\":\"a2\",\"error\":\"title is empty\"}"
@@ -1317,7 +1317,7 @@ let loading_cases =
   in
   let catch_keeps_link () =
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ _ -> ());
+    Yuka.Server.set_default_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           Yuka.fragment
@@ -1330,7 +1330,7 @@ let loading_cases =
                 ();
               isl "Counter" ])
     in
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check int "the link of a dropped island is printed again" 1 (count out (link "/js/Counter.js"))
   in
   let no_function () =
@@ -1418,7 +1418,7 @@ let loading_cases =
   in
   let nested_in_failed_catch () =
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ _ -> ());
+    Yuka.Server.set_default_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           outer_with (fun () ->
@@ -1430,7 +1430,7 @@ let loading_cases =
                       Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
                 ()))
     in
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check int "no link for the dropped inner island" 0 (count out (link "/js/Inner.js"))
   in
   let nested_dedup () =

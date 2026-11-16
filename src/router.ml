@@ -52,6 +52,14 @@ let segments parts =
   | [] -> invalid_arg "Yuka.Router.segments: a catch-all needs one segment"
   | _ -> String.concat "" (List.map (fun p -> "/" ^ segment p) parts)
 
+let with_query path pairs =
+  match pairs with
+  | [] -> path
+  | _ -> String.concat "" [ path; "?"; String.concat "&" (List.map (fun (k, v) -> String.concat "=" [ k; v ]) pairs) ]
+
+let with_fragment path fragment =
+  match fragment with None -> path | Some fragment -> path ^ "#" ^ encode fragment
+
 let int_param text =
   match int_of_string_opt text with
   | Some n when string_of_int n = text -> Some n

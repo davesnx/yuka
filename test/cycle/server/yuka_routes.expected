@@ -12,19 +12,19 @@ let rules_1 =
   Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:true ()
 
 let rules_2 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Hover ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_cache ~max_age:5) [@warning "-33"]) ~prefetch:`Hover ~prerender:false ()
 
 let rules_3 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Off ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_cache ~max_age:5) [@warning "-33"]) ~prefetch:`Off ~prerender:false ()
 
 let rules_4 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(private_cache ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
 
 let rules_5 =
   Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(uncached) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
 
 let rules_6 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")]; [("Cache-Control", "no-store")] ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")]; [("Cache-Control", "no-store")] ] ~cache:(Yuka.Server.(private_cache ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
 
 let rules_7 =
   Yuka.Server.Generated.rules ~headers:[ root_headers; [("X-A", "team")] ] ~cache:(Yuka.Server.(public ~s_max_age:600 ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Hover ~prerender:false ()
@@ -523,7 +523,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"5e3fcfe3e8d8c427e722ed0153c41e51"
+  Yuka.Server.Generated.app ~build:"70352ddd143dc10f9bbdf5de6d5bdaca"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11 ]

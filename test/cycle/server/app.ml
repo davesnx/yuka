@@ -280,7 +280,7 @@ module Api = struct
   let cookies _req =
     Server.text ~headers:[ ("set-cookie", "a=1"); ("Set-Cookie", "b=2"); ("x-a", "mine") ] "two cookies"
 
-  let bad_header _req = Async.return (Server.response ~headers:[ ("x-bad", "a\r\nset-cookie: x=1") ] (Server.String "bad"))
+  let bad_header _req = Server.response ~headers:[ ("x-bad", "a\r\nset-cookie: x=1") ] (Server.String "bad")
 
   let thing _req =
     note "thing";

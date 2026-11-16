@@ -295,11 +295,11 @@ or with a ~cache the generator cannot read (a let), is accepted
   >     [
   >       Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle;
   >       Router.group ~path:"/g" ~prefetch:`Idle
-  >         [ Router.route B ~path:"/b" ~page:Pages.b ~cache:(private_ ~max_age:5) ];
+  >         [ Router.route B ~path:"/b" ~page:Pages.b ~cache:(private_cache ~max_age:5) ];
   >       Router.route C ~path:"/c" ~page:Pages.c ~cache:none ~prefetch:`Idle;
   >     ]
   > EOF
   $ grep -e 'Generated.rules' out.ml
     Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
-    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(private_ ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(private_cache ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
     Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(none) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()

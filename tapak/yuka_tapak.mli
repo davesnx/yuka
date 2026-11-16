@@ -1,4 +1,5 @@
-(** Runs a Yuka app on tapak, in direct style on Eio. One domain. *)
+(** Runs a Yuka app on tapak, in direct style on Eio. One domain. There is
+    no [prerender] yet: [Yuka_dream.prerender] is the only one for now. *)
 
 val handler :
   sw:Eio.Switch.t ->

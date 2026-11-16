@@ -1715,8 +1715,8 @@ let fallback ~error ~reset:_ = element "p" [] [ text ("caught " ^ error) ]
 
 let logged f =
   let saved = fun _ m -> prerr_endline m and messages = ref [] in
-  Yuka.Server.Testing.set_log (fun _ m -> messages := m :: !messages);
-  let result = Fun.protect ~finally:(fun () -> Yuka.Server.Testing.set_log saved) f in
+  Yuka.Server.set_default_log (fun _ m -> messages := m :: !messages);
+  let result = Fun.protect ~finally:(fun () -> Yuka.Server.set_default_log saved) f in
   (result, List.rev !messages)
 
 let in_island tree =

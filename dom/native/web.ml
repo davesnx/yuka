@@ -451,3 +451,13 @@ let refuse_url_name name =
   | _ when refused_byte name 0 || (String.length lname > 1 && lname.[0] = 'o' && lname.[1] = 'n') ->
       invalid_arg ("Yuka: refused attribute name " ^ name)
   | _ -> ()
+
+let tree_digest dir =
+  let rec files rel =
+    let path = if rel = "" then dir else Filename.concat dir rel in
+    if Sys.is_directory path then
+      Sys.readdir path |> Array.to_list |> List.sort compare
+      |> List.concat_map (fun name -> files (if rel = "" then name else Filename.concat rel name))
+    else [ rel ^ "\000" ^ Digest.to_hex (Digest.file path) ]
+  in
+  Digest.to_hex (Digest.string (String.concat "\n" (files "")))

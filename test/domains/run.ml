@@ -83,7 +83,7 @@ let rounds = 2_000
 let inputs = 6
 
 let () =
-  Server.Testing.set_log (fun _ _ -> ());
+  Server.set_default_log (fun _ _ -> ());
   let expected = Array.init (domains * inputs) (fun i -> Server.to_string (page i)) in
   Array.iteri (fun i html -> check (Printf.sprintf "one domain, input %d" i) (html = expected_html i) html) expected;
   let wrong = Atomic.make 0 and raised = Atomic.make 0 and sample = Atomic.make None in

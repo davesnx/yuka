@@ -43,11 +43,6 @@ val prerender :
     writes nothing, when [out] is inside a directory of
     [Yuka.Server.Prerender.served_dirs]. *)
 
-val tree_digest : string -> string
-(** A digest of the paths and contents of every file under a directory
-    (symbolic links followed), for the [digest] of [Yuka.Server.modules].
-    Compute it once at start. *)
-
 val to_async : 'a Lwt.t -> 'a Yuka.Async.t
 (** A failed promise gives a failed [Async] with the exception text. *)
 
