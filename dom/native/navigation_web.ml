@@ -2,7 +2,7 @@ open Web
 
 type controller = unit
 
-let browser_only () = failwith "Yuka: browser only"
+let browser_only () = invalid_arg "Yuka: browser only"
 let set_title : string -> unit = fun _ -> browser_only ()
 let scroll_to : float -> unit = fun _ -> browser_only ()
 let scroll_to_hash : string -> unit = fun _ -> browser_only ()

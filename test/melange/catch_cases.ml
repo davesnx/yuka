@@ -156,16 +156,6 @@ let catch_each_row () =
   check "an error in a new row" {|caught Failure(row)|} (shown c);
   dispose ()
 
-let catch_each_duplicate_key () =
-  let items = State.make [| "a"; "b" |] in
-  let c, dispose =
-    render (fun () ->
-        Dom_cases.div [] [ boundary (fun () -> Dom_cases.div [] [ each ~key:Fun.id (fun () -> State.get items) text ]) ])
-  in
-  State.set items [| "b"; "a"; "b" |];
-  check "a duplicate key in an update" {|caught Failure(Yuka.each: duplicate key b)|} (shown c);
-  dispose ()
-
 let catch_click () =
   let n = State.make 0 in
   let child () =
@@ -528,7 +518,6 @@ let all =
     ("catch: memo", catch_memo);
     ("catch: hole that runs again", catch_hole);
     ("catch: each row", catch_each_row);
-    ("catch: each duplicate key", catch_each_duplicate_key);
     ("catch: event handler", catch_click);
     ("catch: non-bubbling handler", catch_focus);
     ("catch: reset", catch_reset);

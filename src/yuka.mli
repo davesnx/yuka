@@ -548,8 +548,10 @@ val each :
   client element
 (** A keyed list. The array function is tracked as a hole. An item whose key
     stays keeps its DOM nodes; it renders again when [equal] says its value
-    changed. Default [equal]: identity, as in {!State.make}. Two items with
-    the same key raise [Failure] on an update. [each] reads the array only
+    changed. Default [equal]: identity, as in {!State.make}. Of two items
+    with the same key, only the first shows, on the server and in the
+    browser; in development the browser writes a console error with the key
+    on each render that has one. [each] reads the array only
     while it renders: it keeps the items, not the array, so a later write
     into that array changes nothing on the page. To show a change, give a
     new array ({!State.set} with the same array is no change). For a list,
@@ -641,7 +643,7 @@ module Browser : sig
       runs in a {!batch}. Browser only: call it inside [Effect.after]. *)
 
   val navigate : string -> unit
-  (** Browser only: raises [Failure] on native. Loads the URL. After [render ~islands] with navigation (the default), it
+  (** Browser only: raises [Invalid_argument] on native. Loads the URL. After [render ~islands] with navigation (the default), it
       is a client navigation, as a click on a link; see {!render}. Otherwise it
       does [location.assign url]. A [javascript:], [vbscript:] or [data:]
       URL (read as {!attr} reads a URL) does nothing; a dev build logs the
@@ -657,7 +659,7 @@ module Browser : sig
       without client navigation. *)
 
   val replace_url : string -> unit
-  (** Browser only: raises [Failure] on native. Sets the URL of the current
+  (** Browser only: raises [Invalid_argument] on native. Sets the URL of the current
       history entry ([history.replaceState]) and loads nothing: no request,
       no new entry, the page and its islands stay. A reload, back and
       forward to this entry, and a client navigation back to it load the
@@ -675,7 +677,7 @@ module Browser : sig
     string ->
     string ->
     (unit, string) result
-  (** Browser only: raises [Failure] on native. [set_cookie name value]
+  (** Browser only: raises [Invalid_argument] on native. [set_cookie name value]
       writes a cookie with [document.cookie], so the server reads it in the
       next request. [value] is encoded as UTF-8 and percent-encoded: each
       byte other than [A-Z a-z 0-9 - . _ ~] becomes [%XX], so decode it on
@@ -692,12 +694,12 @@ module Browser : sig
   (** Focuses the element with this id; does nothing when no element has
       it. Inside a {!batch} (an event handler), it runs after the batch
       updated the DOM, so it finds an element that a write of the handler
-      creates. Browser only: raises [Failure] on native. *)
+      creates. Browser only: raises [Invalid_argument] on native. *)
 
   val scroll_into_view : string -> unit
   (** Scrolls the element with this id into view; does nothing when no
       element has it. Inside a {!batch}, it runs as {!focus} does. Browser
-      only: raises [Failure] on native. *)
+      only: raises [Invalid_argument] on native. *)
 
   val on_frame : (float -> unit) -> unit
   (** Calls the handler before each repaint of the browser
@@ -707,11 +709,11 @@ module Browser : sig
 
   val now : unit -> float
   (** Milliseconds since the page opened, with a fraction
-      ([performance.now]). Browser only: raises [Failure] on native. *)
+      ([performance.now]). Browser only: raises [Invalid_argument] on native. *)
 
   val count_elements : string -> int
   (** The number of elements in the document that match the CSS selector
-      ([querySelectorAll]). Browser only: raises [Failure] on native. *)
+      ([querySelectorAll]). Browser only: raises [Invalid_argument] on native. *)
 end
 
 module Console : sig
@@ -1470,7 +1472,7 @@ val render :
     added twice.
 
     Without [~islands], [~navigation], [~transitions] and
-    [~on_error] do nothing. Raises [Failure] outside the browser, and
+    [~on_error] do nothing. Raises [Invalid_argument] outside the browser, and
     [Invalid_argument] without [~islands] and [~root]. An app that does not
     pass [~islands] contains no island, action or navigation code.
 

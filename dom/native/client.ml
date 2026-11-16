@@ -13,7 +13,7 @@ let lazy_entry ~name:_ _ = ()
 
 let acting : Base.owner option ref = ref None
 
-let browser_only () = failwith "Yuka: browser only"
+let browser_only () = invalid_arg "Yuka: browser only"
 let render _ _ = browser_only ()
 let hydrate _ _ = browser_only ()
 let render_root _ = browser_only ()

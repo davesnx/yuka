@@ -145,7 +145,7 @@ module Server = struct
 end
 
 let render ?islands ?navigation ?transitions ?on_error ?root () =
-  if not Web.in_browser then failwith "Yuka.render: browser only";
+  if not Web.in_browser then invalid_arg "Yuka.render: browser only";
   match (islands, root) with
   | None, None -> invalid_arg "Yuka.render: no ~islands and no ~root"
   | _ -> (

@@ -573,9 +573,14 @@ and mount_each :
   in
   on_dispose (fun () -> dispose_all !entries);
   let first = State.peek source in
+  let seen = Web.table () in
   for i = 0 to Array.length first - 1 do
     let v = get first i in
-    push !entries (make_entry pos (key v) v)
+    let k = key v in
+    if not (Web.table_has seen k) then begin
+      Web.table_set seen k true;
+      push !entries (make_entry pos k v)
+    end
   done;
   let stop = if owned then (drop_to_end pos; Js.null) else some (comment pos "]") in
   let clear_all () =
@@ -583,17 +588,21 @@ and mount_each :
     else Web.delete_between pos.parent (node_of start) (node_of stop)
   in
   let reconcile source =
-    let n = Array.length source in
-    let items = alloc n and keys = alloc n in
-    let wanted = Web.table () in
-    for j = 0 to n - 1 do
+    let items = [||] and keys = [||] and wanted = Web.table () in
+    for j = 0 to Array.length source - 1 do
       let v = get source j in
       let k = key v in
-      if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
-      Web.table_set wanted k true;
-      set items j v;
-      set keys j k
+      if Web.table_has wanted k then begin
+        if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then
+          Web.console_error ("yuka: each: duplicate key " ^ k ^ ", the later item is left out")
+      end
+      else begin
+        Web.table_set wanted k true;
+        push items v;
+        push keys k
+      end
     done;
+    let n = Array.length items in
     let es = !entries in
     let old = Web.table () in
     let removed = [||] in

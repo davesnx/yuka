@@ -581,9 +581,9 @@ open Base
             s.queued <- []
           end;
           after_text := false
-      | Each { items; key = _; equal = _; render } ->
+      | Each { items; key; equal = _; render } ->
           marker "<!--[-->";
-          rows items render;
+          rows items key render;
           marker "<!--]-->"
       | Element { tag; attrs; children }
         when (match String.lowercase_ascii tag with "script" | "style" -> true | _ -> false) ->
@@ -705,18 +705,23 @@ open Base
       value
     and contents = function
       | [ Hole f ] -> go (f ())
-      | [ Each { items; key = _; equal = _; render } ] -> rows items render
+      | [ Each { items; key; equal = _; render } ] -> rows items key render
       | children -> List.iter go children
-    and rows : type a. (unit -> a array) -> (a -> node) -> unit =
-     fun items render ->
+    and rows : type a. (unit -> a array) -> (a -> string) -> (a -> node) -> unit =
+     fun items key render ->
+      let seen = Hashtbl.create 8 in
       Array.iter
         (fun item ->
-          let n = unwrap (render item) in
-          if Template.single_element n then go n
-          else begin
-            marker "<!--[-->";
-            go n;
-            marker "<!--]-->"
+          let k = key item in
+          if not (Hashtbl.mem seen k) then begin
+            Hashtbl.add seen k ();
+            let n = unwrap (render item) in
+            if Template.single_element n then go n
+            else begin
+              marker "<!--[-->";
+              go n;
+              marker "<!--]-->"
+            end
           end)
         (items ())
     in

@@ -6,7 +6,7 @@ type 'a promise = unit
 
 let in_browser = false
 
-let browser_only () = failwith "Yuka: browser only"
+let browser_only () = invalid_arg "Yuka: browser only"
 
 let window : unit -> node = fun _ -> browser_only ()
 let document : unit -> node = fun _ -> browser_only ()

@@ -6,6 +6,7 @@ First release on opam.
 
 ### yuka
 
+- Fix: `Yuka.each` with two items of one key shows only the first, on the server, on the first render, on hydration and on an update; in a dev build the browser writes a console error with the key on each render that has one. Before, the server and the first render showed both, and an update raised `Failure`, which stopped the island. The browser-only functions (`Browser.*`, `Yuka.render`) raise `Invalid_argument` on native, not `Failure`. The keyed benchmark app goes from 8,517 to 8,505 B gzip (#29, @davesnx)
 - Breaking: `Server.Live.node` takes `?max_sockets` (default 10,000) and `?max_sockets_per_session` (default 16) for the open live sockets, and `?max_kept_states` (default 10,000) and `?max_kept_states_per_session` (default 16) for the states that server renders keep, in place of `?total` and `?per_session`, which set both (#29, @davesnx)
 - Breaking: `Yuka.owner` is now `Yuka.with_owner`, and the prop `of_=` of `<Yuka.Context.Provide>` is now `context=`: write `<Yuka.Context.Provide context=theme value=dark>`. `Context.bind` has a doc comment (#29, @davesnx)
 - Breaking: `Yuka.Server.Action.make` is `Yuka.Server.Action.implement` and `Yuka.Server.Live.serve` is `Yuka.Server.Live.implement`, as `Yuka.Server.Form.implement`: each registers the server code of an action, a topic or a form that the shared code declares. The arguments do not change. The message of a second `Live.implement` of a topic is "already implemented" (#29, @davesnx)

@@ -1423,6 +1423,44 @@ let console_methods () =
   Console.debug "d";
   check "each function calls its console method" "log l|info i|warn w|error e|debug d" (console_calls ())
 
+let each_duplicate_key () =
+  let items = State.make [| ("a", "1"); ("b", "2"); ("a", "3") |] in
+  let tree () = element "ul" [] [ each ~key:fst (fun () -> State.get items) (fun (k, v) -> li k [ text v ]) ] in
+  let markup = server (tree ()) in
+  check "server keeps the first" {|<ul><li data-key="a">1</li><li data-key="b">2</li></ul>|} markup;
+  capture_console ();
+  let c = container "" in
+  let dispose = Yuka.Private.render (as_element c) tree in
+  check "first render as the server" markup (html c);
+  dispose ();
+  check "first render logs the key" "error yuka: each: duplicate key a, the later item is left out" (console_calls ());
+  let c = container markup in
+  let a = query c "[data-key=a]" in
+  capture_console ();
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
+  check "hydration keeps the markup" markup (html c);
+  same "hydration adopts the first" a (query c "[data-key=a]");
+  State.set items [| ("b", "2"); ("c", "3"); ("b", "4"); ("c", "5") |];
+  check "update keeps the first" {|<ul><li data-key="b">2</li><li data-key="c">3</li></ul>|} (html c);
+  check "an error for each duplicate key of each render"
+    "error yuka: each: duplicate key a, the later item is left out|error yuka: each: duplicate key b, the later item is left out|error yuka: each: duplicate key c, the later item is left out"
+    (console_calls ());
+  dispose ()
+
+let each_key_untracked () =
+  let salt = State.make "" in
+  let calls = ref 0 in
+  let key k = incr calls; k ^ State.get salt in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        element "ul" [] [ each ~key (fun () -> [| "a"; "b" |]) (fun k -> li k [ text k ]) ])
+  in
+  let before = !calls in
+  State.set salt "x";
+  check "a State read in the key does not run the list again" (ints before) (ints !calls);
+  dispose ()
+
 let hydrate_logged server_html tree =
   let island = create (document ()) "yuka-island" in
   set_attribute island "data-name" "Board.Island";
@@ -2001,6 +2039,8 @@ let all =
     ("client: script takes one text or one hole", client_script_children);
     ("dom hydration mismatch log", mismatch_log);
     ("Console calls the console method of its name", console_methods);
+    ("each keeps the first item of a duplicate key", each_duplicate_key);
+    ("each does not track a State read in the key", each_key_untracked);
     ("dom template select value", template_select_value);
     ("dom template parser changes", parser_changes);
     ("dom create", create_tree);

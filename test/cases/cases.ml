@@ -261,7 +261,11 @@ let html_each () =
   check "empty" "<!--[--><!--]-->"
     (chtml (each ~key:string_of_int (fun () -> [||]) (fun _ -> empty)));
   check "texts in items stay apart" "<!--[--><!--[-->a<!--]--><!--[-->b<!--]--><!--]-->"
-    (chtml (each ~key:Fun.id (fun () -> [| "a"; "b" |]) text))
+    (chtml (each ~key:Fun.id (fun () -> [| "a"; "b" |]) text));
+  check "a duplicate key keeps the first item" "<ul><li>a1</li><li>b</li></ul>"
+    (chtml
+       (element "ul" []
+          [ each ~key:(fun s -> String.sub s 0 1) (fun () -> [| "a1"; "b"; "a2" |]) (fun v -> element "li" [] [ text v ]) ]))
 
 let html_dynamic_attribute () =
   let s = State.make (Some "v") in

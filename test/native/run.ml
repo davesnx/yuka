@@ -1162,7 +1162,7 @@ let navigation_cases =
     let browser_only f =
       match f () with
       | () -> false
-      | exception Failure m -> contains m "browser only"
+      | exception Invalid_argument m -> contains m "browser only"
     in
     check bool "no arguments" true (browser_only (fun () -> Yuka.render ()));
     check bool "registry on native" true
