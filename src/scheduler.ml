@@ -179,20 +179,32 @@ let set_level n =
   in
   n.level <- 1 + go 0 n.head
 
-let rec mark n state =
-  let rec go = function
+let mark n state =
+  let stack = ref [] and next = ref n.first in
+  while !next != None || !stack != [] do
+    match !next with
     | Some l ->
         let o = l.dst in
-        if o.state < state && o != n && (l.at = o.runs || o.state < 0) then begin
+        let state = match !stack with [] -> state | _ :: _ -> 1 in
+        next := l.next;
+        if o.state < state && o != l.src && (l.at = o.runs || o.state < 0)
+        then begin
           let was = o.state in
           o.state <- (if was < 0 then 2 else state);
           if was <= 0 then
-            match o.eff with Some q -> q := o :: !q | None -> mark o 1
-        end;
-        go l.next
-    | None -> ()
-  in
-  go n.first
+            match o.eff with
+            | Some q -> q := o :: !q
+            | None ->
+                stack := !next :: !stack;
+                next := o.first
+        end
+    | None -> (
+        match !stack with
+        | [] -> ()
+        | l :: rest ->
+            stack := rest;
+            next := l)
+  done
 
 let loop =
   Failure
@@ -230,44 +242,68 @@ let rec run n =
   if changed then mark n 2
 
 and settle left n =
-  if n.state <> 0 && n.state <> 3 then
-    try
-      if n.state = 1 then begin
-        let writes = writes () in
-        let before = !writes in
-        let rec check = function
-          | Some l when n.state = 1 ->
-              (try settle 100 l.src with _ -> n.state <- 2);
-              check l.dep
-          | _ -> ()
-        in
-        check n.head;
-        if n.state = 1 && !writes = before then n.state <- 0
-      end;
-      let again =
-        n.state = 1
-        ||
-        if n.state = 2 || n.state < 0 then begin
-          run n;
-          n.eff = None && n.state > 0
-        end
-        else false
-      in
-      if again then if left = 0 then raise loop else settle (left - 1) n
-    with e ->
-      n.state <- -1;
-      raise e
+  let writes = writes () in
+  let stack = ref [] and node = ref n and work = ref true in
+  let before = ref !writes and next = ref n.head in
+  while !work do
+    let n = !node in
+    match if n.state = 1 then !next else None with
+    | Some l ->
+        stack := (!before, l) :: !stack;
+        node := l.src;
+        before := !writes;
+        next := l.src.head
+    | None -> (
+        if n.state = 1 && !writes = !before then n.state <- 0;
+        let left = match !stack with [] -> left | _ :: _ -> 100 in
+        (match
+           if
+             n.state = 1
+             || (n.state = 2 || n.state < 0)
+                && begin
+                     run n;
+                     n.eff = None && n.state > 0
+                   end
+           then if left = 0 then raise loop else settle (left - 1) n
+         with
+        | () -> ()
+        | exception e -> (
+            n.state <- -1;
+            match !stack with
+            | [] -> raise e
+            | (_, l) :: _ -> l.dst.state <- 2));
+        match !stack with
+        | [] -> work := false
+        | (b, l) :: rest ->
+            stack := rest;
+            node := l.dst;
+            before := b;
+            next := l.dep)
+  done
 
-let rec stale n =
+let stale n =
   n.state <- -1;
-  let rec go = function
+  let stack = ref [] and next = ref n.head in
+  while !next != None || !stack != [] do
+    match !next with
     | Some l ->
         let s = l.src in
-        if s.state > 0 && s.state < 3 then if s.head = None then run s else stale s;
-        go l.dep
-    | None -> ()
-  in
-  go n.head
+        if s.state > 0 && s.state < 3 && s.head <> None then begin
+          s.state <- -1;
+          stack := l :: !stack;
+          next := s.head
+        end
+        else begin
+          if s.state > 0 && s.state < 3 then run s;
+          next := l.dep
+        end
+    | None -> (
+        match !stack with
+        | [] -> ()
+        | l :: rest ->
+            stack := rest;
+            next := l.dep)
+  done
 
 let before (a : node) (b : node) =
   a.depth < b.depth

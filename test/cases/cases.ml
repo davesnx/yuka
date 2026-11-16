@@ -1847,6 +1847,52 @@ let show_server () =
   check "failed" "<!--[-->failed server error<!--]-->"
     (print (Status.Failed { error = Status.Server; last = Some "d" }))
 
+let memo_chain_from s length =
+  let rec chain n m =
+    if n = 0 then m else chain (n - 1) (State.memo (fun () -> State.get m + 1))
+  in
+  chain length (State.memo (fun () -> State.get s))
+
+let memo_chain length () =
+  let s = State.make 0 in
+  let last, dispose = owner (fun () -> memo_chain_from s length) in
+  State.set s 1;
+  check "the end of the chain" (string_of_int (length + 1))
+    (string_of_int (State.peek last));
+  dispose ()
+
+let memo_chain_effect length () =
+  let s = State.make 0 in
+  let seen = ref (-1) in
+  let (), dispose =
+    owner (fun () ->
+        let last = memo_chain_from s length in
+        Effect.before (fun () -> seen := State.get last))
+  in
+  State.set s 1;
+  check "the effect at the end of the chain" (string_of_int (length + 1))
+    (string_of_int !seen);
+  dispose ();
+  State.set s 2;
+  check "no run after dispose" (string_of_int (length + 1)) (string_of_int !seen)
+
+let memo_chain_loop length () =
+  let s = State.make 0 in
+  let result =
+    match
+      owner (fun () ->
+          let last = memo_chain_from s length in
+          Effect.before (fun () -> State.set s (State.get last)))
+    with
+    | (), dispose ->
+        dispose ();
+        "no error"
+    | exception Failure m when contains m "keeps changing a State it reads" ->
+        "limit"
+    | exception e -> Printexc.to_string e
+  in
+  check "the round limit with a chain of memos" "limit" result
+
 let all =
   [
     ("catch: server fallback", catch_server_fallback);
@@ -1960,4 +2006,9 @@ let all =
     ("json depth limit", json_depth_limit);
     ("html float special values", html_float_special);
     ("owned disposes when the function raises", owned_raises_disposes);
+    ("chain of 2,000 memos", memo_chain 2_000);
+    ("chain of 5,000 memos", memo_chain 5_000);
+    ("chain of 10,000 memos", memo_chain 10_000);
+    ("effect at the end of a chain of 10,000 memos", memo_chain_effect 10_000);
+    ("round limit with a chain of 10,000 memos", memo_chain_loop 10_000);
   ]
