@@ -363,6 +363,30 @@ val hole_attr : string -> (unit -> string option) -> client attribute
     client, [value], [checked] and [selected] are set as properties. A URL
     attribute gets the check of {!attr} on each value. *)
 
+val with_id : (string -> 'k element) -> 'k element
+(** [with_id (fun id -> element)]: [element] with an [id] for [for],
+    [aria-labelledby], [aria-describedby] or [aria-controls]. The [id] is
+    unique on the page. In an island, the browser gives the same [id] as the
+    server when it hydrates, so a [label] stays linked to its field.
+    Example: [Yuka.with_id (fun id -> <div><label for_=id>"Title"</label>
+    <input id name="title" /></div>)].
+
+    Yuka makes the [id] when it prints or mounts the element, not when the
+    component function runs, so the order in which OCaml evaluates
+    arguments has no effect. Each island counts its own ids, so the islands of a
+    page can start in any order; so does the content of an {!Await}, which
+    can arrive after the content that follows it. For a second
+    [id], call [with_id] again or add a suffix that starts with a letter:
+    [id ^ "-error"].
+
+    The function runs as a {!hole}: when it reads a State, it runs again
+    with a new [id] and replaces its output. An element made in the browser
+    after the island has hydrated (a new list row, a value of an {!Await}
+    that arrives later, or a render with no server HTML) gets an [id] that
+    is unique but not equal to one from the server. The form of the [id]
+    is not part of the API; do not give an element an [id] that starts
+    with [p-], [c-] or [i] and a digit. *)
+
 module Await : sig
   val make :
     async:'a Async.t ->
@@ -1105,10 +1129,12 @@ module Private : sig
   val settled :
     ?timeout:float ->
     ?preload:(string -> string list) ->
+    ?id_prefix:string ->
     sleep:(float -> unit Async.t) ->
     (unit -> server element) ->
     string Async.t
-  (** The settled body that the cycle sends for [Yuka-Navigate], for tests. *)
+  (** The settled body that the cycle sends for [Yuka-Navigate], for tests.
+      [id_prefix] is the outlet key and [-], as the cycle gives it. *)
 
   val import_map : url:string -> string list -> (string * string) list
 

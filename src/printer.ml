@@ -98,7 +98,8 @@ open Base
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
-      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0 }
+      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0;
+      id_scope = "p-"; id_count = 0; page_scope = "p-"; page_count = 0 }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -297,6 +298,23 @@ open Base
           go (f ());
           marker "<!--]-->"
       | Await { async; loading; failed; render } -> (
+          let ids = next_id () ^ "-" in
+          let in_ids f =
+            let scope = s.id_scope and count = s.id_count in
+            let restore () =
+              s.id_scope <- scope;
+              s.id_count <- count
+            in
+            s.id_scope <- ids;
+            s.id_count <- 0;
+            match f () with
+            | r ->
+                restore ();
+                r
+            | exception e ->
+                restore ();
+                raise e
+          in
           let body () =
             match Async.status async with
             | Async.Done v -> render v
@@ -330,9 +348,9 @@ open Base
                     id;
                     subscribe =
                       (fun cb -> Async.on_settled async (fun _ -> cb ()));
-                    fill = (fun () -> held (fun () -> print ~env s body));
+                    fill = (fun () -> held (fun () -> in_ids (fun () -> print ~env s body)));
                     fill_failed =
-                      (fun m -> held (fun () -> print ~env s (fun () -> failed m)));
+                      (fun m -> held (fun () -> in_ids (fun () -> print ~env s (fun () -> failed m))));
                     inside_island = inside;
                   }
                 :: s.pending;
@@ -341,7 +359,7 @@ open Base
               incr holding;
               Buffer.add_string b ("<!--[" ^ id ^ "-->");
               after_text := false;
-              (match go loading with
+              (match in_ids (fun () -> go loading) with
               | () -> decr holding
               | exception e ->
                   decr holding;
@@ -361,7 +379,7 @@ open Base
                 end
           | _ ->
               marker "<!--[-->";
-              go (body ());
+              in_ids (fun () -> go (body ()));
               marker "<!--]-->")
       | Template { template; parts } ->
           Array.iter
@@ -439,9 +457,15 @@ open Base
             | Scheduler.Bound (_, e) -> page e
             | Scheduler.Island e -> e
           in
+          let scope = s.id_scope and count = s.id_count in
+          s.id_scope <- s.page_scope;
+          s.id_count <- s.page_count;
           marker "<!--[$-->";
           scoped (page owner.env) (fun () -> Option.iter go content);
-          marker "<!--]-->"
+          marker "<!--]-->";
+          s.page_count <- s.id_count;
+          s.id_scope <- scope;
+          s.id_count <- count
       | Island { name; props; render; start = strategy } ->
           s.islands <- s.islands + 1;
           let id = s.id_prefix ^ "i" ^ string_of_int s.islands in
@@ -481,10 +505,18 @@ open Base
           let saved = snapshot s in
           s.depth <- s.depth + 1;
           s.answers <- [];
+          s.page_scope <- s.id_scope;
+          s.page_count <- s.id_count;
+          s.id_scope <- id ^ "-";
+          s.id_count <- 0;
           let mine =
             match scoped (Scheduler.Island owner.env) (fun () -> go (render ())) with
             | () ->
                 s.depth <- s.depth - 1;
+                s.id_scope <- s.page_scope;
+                s.id_count <- s.page_count;
+                s.page_scope <- saved.page_scope;
+                s.page_count <- saved.page_count;
                 let mine = s.answers in
                 s.answers <- saved.answers;
                 mine

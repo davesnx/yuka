@@ -207,7 +207,8 @@ module Private = struct
   let stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write build =
     Server.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write (Kind.fn build)
 
-  let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep (Kind.fn build)
+  let settled ?timeout ?preload ?id_prefix ~sleep build =
+    Server.settled ?timeout ?preload ?id_prefix ~sleep (Kind.fn build)
   let import_map = Server.import_map
   let set_form (s : session) f = s.form <- Some f
   let set_csrf (s : session) f = s.csrf <- Some f
