@@ -364,10 +364,41 @@ let take_buffer () =
 
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
 
-type 'a local = 'a Domain.DLS.key
+type 'a local = { index : int; init : unit -> 'a }
 
-let local f = Domain.DLS.new_key f
-let local_get = Domain.DLS.get
+let locals = Atomic.make 0
+let unset = Obj.repr (ref ())
+let local init = { index = Atomic.fetch_and_add locals 1; init }
+
+(* OCaml 5.4 otherlibs/systhreads/st_stubs.c: a Thread.t is the block (ident, start closure, terminated). The runtime
+   sets the start closure to unit before the thread runs, and after that only the thread itself reads or writes this
+   field, so it can hold the thread's slots. *)
+let () = if Obj.size (Obj.repr (Thread.self ())) <> 3 then failwith "Yuka: unknown Thread.t layout"
+
+let local_init k =
+  let v = k.init () in
+  let thread = Obj.repr (Thread.self ()) in
+  let slots = Obj.field thread 1 in
+  let size = if Obj.is_int slots then 0 else Obj.size slots in
+  let slots =
+    if k.index < size then slots
+    else begin
+      let grown = Obj.repr (Array.make (max (k.index + 1) (Atomic.get locals)) unset) in
+      for i = 0 to size - 1 do
+        Obj.set_field grown i (Obj.field slots i)
+      done;
+      Obj.set_field thread 1 grown;
+      grown
+    end
+  in
+  Obj.set_field slots k.index (Obj.repr v);
+  v
+
+let local_get k =
+  let slots = Obj.field (Obj.repr (Thread.self ())) 1 in
+  if Obj.is_block slots && k.index < Obj.size slots && Obj.field slots k.index != unset then
+    Obj.obj (Obj.field slots k.index)
+  else local_init k
 let rec has_upper s i = i < String.length s && match String.unsafe_get s i with 'A' .. 'Z' -> true | _ -> has_upper s (i + 1)
 let lowercase s = if has_upper s 0 then String.lowercase_ascii s else s
 

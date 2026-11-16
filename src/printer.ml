@@ -661,7 +661,7 @@ open Base
       dispose_owner owner;
       release ();
       failwith
-        "Yuka.Server: two server renders overlapped: while this render ran, a render or a memo on another thread of the same domain changed the state that they share. Run one server render at a time per domain, for example under a Mutex."
+        "Yuka.Server: two server renders overlapped: while this render was suspended, another render on the same system thread, for example in another fiber, changed the state that they share. Do not suspend a fiber during a server render."
     in
     (match with_owner owner (fun () -> go (build ()); owned ()) with
     | true when kept () ->

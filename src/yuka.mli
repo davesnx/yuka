@@ -1465,10 +1465,10 @@ module Server : sig
       because the browser hydrates nothing else. The function builds the tree
       with effects off, so component bodies do not run effects.
 
-      Renders on different domains can run at the same time. Run one
-      server render at a time per domain: renders that overlap on system
-      threads of one domain share state, and each of them raises [Failure].
-      A render inside another on the same thread is allowed. *)
+      Renders on different domains and system threads can run at the same
+      time. Renders that interleave as fibers on one system thread, because
+      a component suspends its fiber, share state, and each of them raises
+      [Failure]. A render inside another on the same thread is allowed. *)
 
   type context
   (** The request that runs an action, a form action or a live [allow]. *)

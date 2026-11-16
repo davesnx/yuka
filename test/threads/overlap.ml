@@ -65,8 +65,8 @@ let interleaved () =
         wait 1;
         outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))
   in
-  check "interleaved: A ends first and raises" (overlapped a) (show a);
-  check "interleaved: B ends second and raises" (overlapped b) (show b);
+  check "interleaved: A" (a = Ok "<p>a</p>") (show a);
+  check "interleaved: B" (b = Ok "<p>b</p>") (show b);
   clean "interleaved"
 
 let listener () =
@@ -81,7 +81,7 @@ let listener () =
         let v = Yuka.State.get (Yuka.State.memo (fun () -> go 2; wait 3; 7)) in
         Ok (string_of_int v))
   in
-  check "memo on another thread: the render raises" (overlapped a) (show a);
+  check "memo on another thread: the render" (a = Ok "<p>a</p>") (show a);
   check "memo on another thread: the memo" (m = Ok "7") (show m);
   clean "memo on another thread"
 
@@ -97,7 +97,7 @@ let owner_cursor () =
         go 3;
         Ok "")
   in
-  check "owner on another thread: the render raises" (overlapped a) (show a);
+  check "owner on another thread: the render" (a = Ok "<p>a</p>") (show a);
   check "owner on another thread: the owner" (o = Ok "") (show o);
   clean "owner on another thread"
 
@@ -146,8 +146,8 @@ let threads_in_a_domain () =
                wait 1;
                outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))))
   in
-  check "interleaved threads in one other domain: A raises" (overlapped a) (show a);
-  check "interleaved threads in one other domain: B raises" (overlapped b) (show b);
+  check "interleaved threads in one other domain: A" (a = Ok "<p>a</p>") (show a);
+  check "interleaved threads in one other domain: B" (b = Ok "<p>b</p>") (show b);
   clean "interleaved threads in one other domain"
 
 let nested () =
@@ -181,6 +181,50 @@ let sequential () =
   check "one after the other on two threads: second" (b = Ok page_html) (show b);
   clean "one after the other"
 
+module Deep = Stdlib.Effect.Deep
+
+type _ Stdlib.Effect.t += Suspend : unit Stdlib.Effect.t
+
+let fiber f =
+  let result = ref (Ok "") and paused = ref None in
+  Deep.match_with f ()
+    {
+      retc = (fun r -> result := r);
+      exnc = raise;
+      effc =
+        (fun (type b) (e : b Stdlib.Effect.t) ->
+          match e with
+          | Suspend -> Some (fun (k : (b, unit) Deep.continuation) -> paused := Some (k : (unit, unit) Deep.continuation))
+          | _ -> None);
+    };
+  (result, paused)
+
+let resume paused = Option.iter (fun k -> Deep.continue k ()) !paused
+
+let suspending name () =
+  let suspend () =
+    Stdlib.Effect.perform Suspend;
+    text name
+  in
+  outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole suspend ]))
+
+let fibers_nested () =
+  let a, paused = fiber (suspending "a") in
+  let b = outcome (fun () -> Server.to_string page) in
+  resume paused;
+  check "a render while a fiber waits: the render" (b = Ok page_html) (show b);
+  check "a render while a fiber waits: the fiber" (!a = Ok "<p>a</p>") (show !a);
+  clean "a render while a fiber waits"
+
+let fibers_interleaved () =
+  let a, paused_a = fiber (suspending "a") in
+  let b, paused_b = fiber (suspending "b") in
+  resume paused_a;
+  resume paused_b;
+  check "interleaved fibers on one thread: A raises" (overlapped !a) (show !a);
+  check "interleaved fibers on one thread: B raises" (overlapped !b) (show !b);
+  clean "interleaved fibers on one thread"
+
 let () =
   nested ();
   sequential ();
@@ -190,4 +234,10 @@ let () =
   domains_interleaved ();
   domains_memo_and_owner ();
   threads_in_a_domain ();
-  if !failed then exit 1 else print_endline "overlap: interleaved renders on threads of one domain raise; nested, sequential and other-domain renders do not"
+  fibers_nested ();
+  fibers_interleaved ();
+  if !failed then exit 1
+  else
+    print_endline
+      "overlap: renders that interleave on threads and domains return their HTML; renders that interleave as fibers on \
+       one thread raise"
