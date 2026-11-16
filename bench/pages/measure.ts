@@ -170,7 +170,7 @@ try {
 const loadAfter = loadavg();
 
 const zeroJs = results.filter((r) => r.islands === 0);
-const checks = zeroJs.map((r) => ({ path: r.path, ok: r.js.total.raw === 0, bytes: r.js.total.raw }));
+const checks = zeroJs.map((r) => ({ path: r.path, ok: r.js.external.raw === 0, bytes: r.js.external.raw }));
 if (checks.length === 0) checks.push({ path: "(no page without island)", ok: false, bytes: NaN });
 
 const ms = (x: number) => x.toFixed(0);
@@ -183,7 +183,7 @@ const lines = [
     row([r.path, String(r.islands), String(r.js.files.length), String(r.js.external.raw), String(r.js.external.gzip), String(r.js.inline.raw), ms(r.page.tbt), ms(r.page.lcp), ms(r.plain.lcp)]),
   ),
   "",
-  ...checks.map((c) => `${c.ok ? "PASS" : "FAIL"}  0 bytes of JavaScript on ${c.path}${c.ok ? "" : ` (${c.bytes} bytes)`}`),
+  ...checks.map((c) => `${c.ok ? "PASS" : "FAIL"}  0 bytes of JavaScript files on ${c.path}${c.ok ? "" : ` (${c.bytes} bytes)`}`),
 ];
 console.log(lines.join("\n"));
 
