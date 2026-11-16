@@ -48,7 +48,7 @@ let clean name =
   ignore (Yuka.State.memo (fun () -> 0));
   check (name ^ ": a top-level memo has no owner") (Private.owner_size () = 0) (string_of_int (Private.owner_size ()));
   let runs = ref 0 in
-  let (), dispose = owner (fun () -> Effect.before (fun () -> incr runs)) in
+  let (), dispose = with_owner (fun () -> Effect.before (fun () -> incr runs)) in
   dispose ();
   check (name ^ ": Effect.before in owner runs") (!runs = 1) (string_of_int !runs);
   let html = outcome (fun () -> Server.to_string page) in
@@ -96,7 +96,7 @@ let owner_cursor () =
         clean "owner on another thread, render worker";
         r)
       (fun () ->
-        let (), dispose = owner (fun () -> go 1; wait 2) in
+        let (), dispose = with_owner (fun () -> go 1; wait 2) in
         dispose ();
         go 3;
         Ok "")
@@ -205,7 +205,7 @@ let domains_memo_and_owner () =
         r)
       (fun () ->
         wait 1;
-        let (), dispose = owner (fun () -> ignore (Yuka.State.get (Yuka.State.memo (fun () -> go 2; wait 3; 7)))) in
+        let (), dispose = with_owner (fun () -> ignore (Yuka.State.get (Yuka.State.memo (fun () -> go 2; wait 3; 7)))) in
         dispose ();
         Ok "")
   in

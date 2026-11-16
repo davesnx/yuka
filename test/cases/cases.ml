@@ -69,7 +69,7 @@ let mount_dispose () =
   let add, read = log () in
   let count = State.make 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> add "outer-clean")
           (fun () ->
@@ -311,7 +311,7 @@ let html_effect_skipped () =
    with Failure _ -> ());
   check "flag restored after exception" "false"
     (string_of_bool (Private.server_rendering ()));
-  let (), dispose = owner (fun () -> ignore (component ())) in
+  let (), dispose = with_owner (fun () -> ignore (component ())) in
   dispose ();
   check "runs in mount" "2" (string_of_int !runs)
 
@@ -1018,7 +1018,7 @@ let batch_raises () =
 let disposal_order () =
   let add, read = log () in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before ~cleanup:(fun () -> add "first") (fun () -> ());
         Effect.before ~cleanup:(fun () -> add "second") (fun () -> ());
         Effect.before ~cleanup:(fun () -> add "third") (fun () -> ()))
@@ -1041,7 +1041,7 @@ let effect_run_order () =
 let disposal_order_after_removal () =
   let add, read = log () in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before ~cleanup:(fun () -> add "a") (fun () -> ());
         let (), dispose_b =
           Private.owned (fun () ->
@@ -1069,7 +1069,7 @@ let disposal_order_after_removal () =
 let owned_removed_from_parent () =
   let add, read = log () in
   let (), dispose_parent =
-    owner (fun () ->
+    with_owner (fun () ->
         check "empty at first" "0" (string_of_int (Private.owner_size ()));
         for i = 1 to 200 do
           let (), dispose =
@@ -1295,7 +1295,7 @@ let mount_raises_disposes () =
   let add, read = log () in
   let result =
     match
-      owner (fun () ->
+      with_owner (fun () ->
           Effect.before ~cleanup:(fun () -> add "cleaned") (fun () -> add "ran");
           failwith "boom")
     with
@@ -1307,7 +1307,7 @@ let mount_raises_disposes () =
   let count = State.make 0 in
   let runs = ref 0 in
   (match
-     owner (fun () ->
+     with_owner (fun () ->
          Effect.before (fun () -> ignore (State.get count); incr runs);
          failwith "again")
    with
@@ -1319,7 +1319,7 @@ let mount_raises_disposes () =
 let owned_raises_disposes () =
   let add, read = log () in
   let (), dispose_parent =
-    owner (fun () ->
+    with_owner (fun () ->
         (match
            Private.owned (fun () ->
                Effect.before ~cleanup:(fun () -> add "cleaned") (fun () -> ());
@@ -1472,7 +1472,7 @@ let disposed_during_run () =
   let t = State.make 0 in
   let dispose = ref ignore in
   let (), d =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before (fun () ->
             if State.get s = 1 then begin
               !dispose ();
@@ -1499,7 +1499,7 @@ let disposed_while_pending () =
   let add, read = log () in
   let s = State.make 0 in
   let (), dispose =
-    owner (fun () -> Effect.before (fun () -> add ("b" ^ string_of_int (State.get s))))
+    with_owner (fun () -> Effect.before (fun () -> add ("b" ^ string_of_int (State.get s))))
   in
   Effect.before (fun () -> if State.get s = 1 then dispose ());
   State.set s 1;
@@ -1584,7 +1584,7 @@ let after_outside_a_mount () =
   Effect.after (fun () -> add ("top" ^ string_of_int (State.get s)));
   check "at the top level the first run is at once" "top0" (read ());
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.after (fun () -> add ("owner" ^ string_of_int (State.get s)));
         add "body")
   in
@@ -1604,7 +1604,7 @@ let after_disposed_before_first_run () =
   let s = State.make 0 in
   batch (fun () ->
       let (), dispose =
-        owner (fun () ->
+        with_owner (fun () ->
             Effect.after ~cleanup:(fun () -> incr cleaned) (fun () -> ignore (State.get s); incr runs))
       in
       dispose ());
@@ -1617,7 +1617,7 @@ let after_cleanup () =
   let count = State.make 0 in
   let (), dispose =
     batch (fun () ->
-        owner (fun () ->
+        with_owner (fun () ->
             Effect.after
               ~cleanup:(fun id -> add ("clear" ^ string_of_int id))
               (fun () ->

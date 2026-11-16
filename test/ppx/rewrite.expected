@@ -1289,7 +1289,7 @@ let partial_nav = Yuka.render ~navigation:false
 let explicit = Yuka.render ~islands:other ()
 let optional = Yuka.render ?islands ()
 let () = Yuka.render ~islands:(Yuka.runtime_registry []) ()
-let () = Yuka.owner ~islands ()
+let () = Yuka.with_owner ~islands ()
 let () = render ~islands ()
 module Awaiting =
   struct

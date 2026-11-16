@@ -334,7 +334,7 @@ Catch without children:
   Error: [yuka] Yuka.Catch needs children
   [1]
 
-Context.Provide without of_:
+Context.Provide without context:
 
   $ cat > p0.mlx <<'X'
   > let x = <Yuka.Context.Provide value=1><p /></Yuka.Context.Provide>
@@ -343,17 +343,17 @@ Context.Provide without of_:
   File "p0.mlx", line 1, characters 8-29:
   1 | let x = <Yuka.Context.Provide value=1><p /></Yuka.Context.Provide>
               ^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] Yuka.Context.Provide needs the prop 'of_'
+  Error: [yuka] Yuka.Context.Provide needs the prop 'context'
   [1]
 
 Context.Provide without value:
 
   $ cat > p1.mlx <<'X'
-  > let x = <Yuka.Context.Provide of_=c><p /></Yuka.Context.Provide>
+  > let x = <Yuka.Context.Provide context=c><p /></Yuka.Context.Provide>
   > X
   $ run p1
   File "p1.mlx", line 1, characters 8-29:
-  1 | let x = <Yuka.Context.Provide of_=c><p /></Yuka.Context.Provide>
+  1 | let x = <Yuka.Context.Provide context=c><p /></Yuka.Context.Provide>
               ^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] Yuka.Context.Provide needs the prop 'value'
   [1]
@@ -361,35 +361,35 @@ Context.Provide without value:
 Context.Provide with an unknown prop:
 
   $ cat > p2.mlx <<'X'
-  > let x = <Yuka.Context.Provide of_=c value=1 key="k"><p /></Yuka.Context.Provide>
+  > let x = <Yuka.Context.Provide context=c value=1 key="k"><p /></Yuka.Context.Provide>
   > X
   $ run p2
   File "p2.mlx", line 1, characters 8-29:
-  1 | let x = <Yuka.Context.Provide of_=c value=1 key="k"><p /></Yuka.Context.Provide>
+  1 | let x = <Yuka.Context.Provide context=c value=1 key="k"><p /></Yuka.Context.Provide>
               ^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] Yuka.Context.Provide takes of_ and value
+  Error: [yuka] Yuka.Context.Provide takes context and value
   [1]
 
 Context.Provide with a prop given twice:
 
   $ cat > pd.mlx <<'X'
-  > let x = <Yuka.Context.Provide of_=a of_=b value=1><p /></Yuka.Context.Provide>
+  > let x = <Yuka.Context.Provide context=a context=b value=1><p /></Yuka.Context.Provide>
   > X
   $ run pd
-  File "pd.mlx", line 1, characters 40-41:
-  1 | let x = <Yuka.Context.Provide of_=a of_=b value=1><p /></Yuka.Context.Provide>
-                                              ^
-  Error: [yuka] Yuka.Context.Provide takes the prop 'of_' once
+  File "pd.mlx", line 1, characters 48-49:
+  1 | let x = <Yuka.Context.Provide context=a context=b value=1><p /></Yuka.Context.Provide>
+                                                      ^
+  Error: [yuka] Yuka.Context.Provide takes the prop 'context' once
   [1]
 
 Context.Provide without children:
 
   $ cat > p3.mlx <<'X'
-  > let x = <Yuka.Context.Provide of_=c value=1 />
+  > let x = <Yuka.Context.Provide context=c value=1 />
   > X
   $ run p3
   File "p3.mlx", line 1, characters 8-29:
-  1 | let x = <Yuka.Context.Provide of_=c value=1 />
+  1 | let x = <Yuka.Context.Provide context=c value=1 />
               ^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] Yuka.Context.Provide needs children
   [1]
@@ -915,7 +915,7 @@ the file defines a module of that name:
   > let s x = <Show status=x loading=(text "l")>(fun v -> text v)</Show>
   > let c () = <Catch fallback=(fun _ -> text "f")><b /></Catch>
   > let i () = <Client><Counter n=1 /></Client>
-  > let p c = <Context.Provide of_=c value=1>(text "v")</Context.Provide>
+  > let p c = <Context.Provide context=c value=1>(text "v")</Context.Provide>
   > Y
   $ run op1
   open Yuka

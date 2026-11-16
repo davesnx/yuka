@@ -174,7 +174,7 @@ let detached_owner_keeps () =
   let s = State.make 0 in
   let add, read = log () in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Private.with_context [ Context.bind num 1 ] (fun () ->
             Effect.before (fun () ->
                 ignore (State.get s);
@@ -201,7 +201,7 @@ let later_effect () =
   let s = State.make 0 in
   let add, read = log () in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Private.with_context [ Context.bind num 1 ] (fun () ->
             Effect.before (fun () -> if State.get s > 0 then Effect.before (fun () -> add (show num)))))
   in

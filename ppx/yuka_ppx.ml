@@ -650,18 +650,18 @@ let rewrite_jsx self e =
             (List.fold_left
                (fun seen (l, v) ->
                  match l with
-                 | Labelled (("of_" | "value") as n) ->
+                 | Labelled (("context" | "value") as n) ->
                      if List.mem n seen then
                        Location.raise_errorf ~loc:v.pexp_loc "[yuka] Yuka.Context.Provide takes the prop '%s' once" n;
                      n :: seen
-                 | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Context.Provide takes of_ and value")
+                 | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Context.Provide takes context and value")
                [] props);
           let required name =
             match List.assoc_opt (Labelled name) props with
             | Some v -> self#expression v
             | None -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Context.Provide needs the prop '%s'" name
           in
-          let context = required "of_" and value = required "value" in
+          let context = required "context" and value = required "value" in
           let kids =
             match List.map (rewrite_child ~self) children with
             | [] -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Context.Provide needs children"

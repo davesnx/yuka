@@ -180,7 +180,7 @@ let focus_after_update () =
 let on_window_batched () =
   let a = State.make 0 and b = State.make 0 and runs = ref 0 in
   let (), stop =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.after (fun () ->
             ignore (State.get a + State.get b);
             incr runs);
@@ -1922,7 +1922,7 @@ let frames_batched_until_dispose () =
   stub_frames ();
   let a = State.make 0. and b = State.make 0. and runs = ref 0 and times = ref [] in
   let (), stop =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.after (fun () ->
             ignore (State.get a +. State.get b);
             incr runs);

@@ -198,7 +198,7 @@ so a write in a component body updates the page when the render ends.
 
 The first run of an `Effect.after` effect also waits for the end of the
 batch or the update that creates it. Outside both, for example at the top
-level of `Yuka.owner`, it runs at once.
+level of `Yuka.with_owner`, it runs at once.
 
 `Yuka.Browser.on_frame handler` calls `handler` before each repaint, in a
 batch, until its owner is disposed. Call it in an effect: when the effect
@@ -223,7 +223,7 @@ them. When Yuka removes that part of the page, it stops its effects, runs
 their cleanups and drops its memos. An effect created inside another
 effect is stopped before the outer effect runs again.
 
-`Yuka.owner body` runs `body` and returns a function that stops everything `body`
+`Yuka.with_owner body` runs `body` and returns a function that stops everything `body`
 created. Use it for effects that must live outside a component.
 
 ## Context
@@ -240,7 +240,7 @@ Give a value with the `<Yuka.Context.Provide>` tag:
 
 ```ocaml
 let page () =
-  <Yuka.Context.Provide of_=theme value=dark>
+  <Yuka.Context.Provide context=theme value=dark>
     <Layout> <Save /> </Layout>
   </Yuka.Context.Provide>
 ```

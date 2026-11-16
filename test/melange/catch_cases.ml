@@ -71,7 +71,7 @@ let render_error tree =
 let catch_other_effect_error () =
   let run ~wrap =
     let s = State.make 0 in
-    let (), stop_b = owner (fun () -> Effect.after (fun () -> if State.get s = 1 then failwith "B")) in
+    let (), stop_b = with_owner (fun () -> Effect.after (fun () -> if State.get s = 1 then failwith "B")) in
     let result = render_error (fun () -> flush_tree s ~wrap) in
     stop_b ();
     result

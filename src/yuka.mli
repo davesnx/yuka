@@ -1,9 +1,9 @@
-val owner : (unit -> 'a) -> 'a * (unit -> unit)
-(** [owner body] runs [body] in a new owner. Effects and memos created during [body]
+val with_owner : (unit -> 'a) -> 'a * (unit -> unit)
+(** [with_owner body] runs [body] in a new owner. Effects and memos created during [body]
     belong to it. The returned function disposes all of them: it stops the
     effects and runs their cleanups. When a cleanup raises, the others still
     run, and the first exception is raised at the end. The new owner is detached: disposing
-    the owner that was current when [owner] was called does not dispose it,
+    the owner that was current when [with_owner] was called does not dispose it,
     so call the returned function yourself. An exception in an effect of the
     new owner goes to the same {!Catch} or island as the current owner. *)
 
@@ -106,7 +106,7 @@ module Effect : sig
       end of the current {!batch} or update; {!render}, hydration and the
       creation of a list row run in one, so the first run of an effect created
       in a component finds the elements of the component in the document.
-      Outside a batch or an update, as at the top level of {!owner}, the first
+      Outside a batch or an update, as at the top level of {!with_owner}, the first
       run is at once. A later run comes after the holes, the attributes, the
       lists and the {!before} effects that the same change runs. An effect
       whose owner is disposed before its first run never runs.
@@ -117,7 +117,7 @@ module Effect : sig
       previous run are disposed. Inside a {!Catch} or an island, an exception
       in the body, or in a cleanup that runs during a State change or an
       event handler, goes to that boundary. A cleanup that raises when its
-      owner is disposed by a direct call (the function returned by {!owner},
+      owner is disposed by a direct call (the function returned by {!with_owner},
       or {!stop}) raises to that caller. Elsewhere, an exception in one
       effect does not stop other effects; the first one is raised again after
       all pending effects ran. If effects and memos keep changing States they
@@ -469,7 +469,7 @@ module Context : sig
 
   val provide : 'a t -> 'a -> (unit -> 'k element) -> 'k element
   (** [provide context value children] gives [value] to [children]. In mlx:
-      [<Yuka.Context.Provide of_=context value=v> children </Yuka.Context.Provide>]; the ppx
+      [<Yuka.Context.Provide context=context value=v> children </Yuka.Context.Provide>]; the ppx
       passes the children as a function.
 
       [children] runs once, untracked. {!get} gives [Some value] in the component functions it
@@ -510,6 +510,8 @@ module Context : sig
   type binding
 
   val bind : 'a t -> 'a -> binding
+  (** [bind context value] pairs [value] with [context] for {!provide_all}. It gives nothing by
+      itself. *)
 
   val provide_all : binding list -> (unit -> 'k element) -> 'k element
   (** [provide_all [ bind a x; bind b y ] children] is
@@ -982,7 +984,7 @@ module Private : sig
       without the constructor that installs its client code. *)
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
-  (** Like {!owner}, but the new owner belongs to the current owner: it is
+  (** Like {!with_owner}, but the new owner belongs to the current owner: it is
       disposed with it. *)
 
   val with_context : Context.binding list -> (unit -> 'a) -> 'a

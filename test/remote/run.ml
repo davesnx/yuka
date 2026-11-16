@@ -66,7 +66,7 @@ let () =
       incr counted;
       failwith "secret detail")
 
-let in_owner f = Yuka.owner f
+let in_owner f = Yuka.with_owner f
 
 let transport =
   [

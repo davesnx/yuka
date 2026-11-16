@@ -971,7 +971,7 @@ and create t gs =
       gs.effects;
     check_ctx t "the build of a group after its effects" want
   in
-  match owner (rolled t (fun () -> gr.g_dying <- true) build) with
+  match with_owner (rolled t (fun () -> gr.g_dying <- true) build) with
   | (), d ->
       gr.g_dispose <- d;
       gr.g_ready <- true;
@@ -1113,7 +1113,7 @@ let loop_op t s variant =
   in
   let got =
     match
-      owner (fun () ->
+      with_owner (fun () ->
           match variant with
           | 0 -> Effect.before (fun () -> ignore (bump ()))
           | 1 -> batch (fun () -> ignore (State.peek (State.memo bump)))
@@ -1140,7 +1140,7 @@ let loop_op t s variant =
   List.iter (fun i -> if i.i_alive && i.attempts = 0 then kill t i) t.insts;
   let u = State.make 0 in
   let seen = ref (-1) in
-  let (), stop = owner (fun () -> Effect.before (fun () -> seen := State.get u)) in
+  let (), stop = with_owner (fun () -> Effect.before (fun () -> seen := State.get u)) in
   (match State.set u 1 with
   | () -> ()
   | exception e ->
@@ -1391,7 +1391,7 @@ let execute seed graph ops =
   let started =
     attempt (fun () ->
         let (), d =
-          owner
+          with_owner
             (rolled t
                (fun () -> t.root_dying <- true)
                (fun () ->

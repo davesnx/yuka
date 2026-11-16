@@ -123,7 +123,7 @@ let fresh () =
   install ();
   set_body ""
 
-let use key = Yuka.owner (fun () -> Live.use topic (fun () -> key))
+let use key = Yuka.with_owner (fun () -> Live.use topic (fun () -> key))
 
 let with_env f () =
   fresh ();
@@ -361,7 +361,7 @@ let optimistic_while_down () =
 
 let key_change () =
   let k = State.make "a" in
-  let a, stop = Yuka.owner (fun () -> Live.use topic (fun () -> State.get k)) in
+  let a, stop = Yuka.with_owner (fun () -> Live.use topic (fun () -> State.get k)) in
   ws_open 0;
   ws_message 0 (state 1 [ "x" ]);
   clear_sent 0;
@@ -441,7 +441,7 @@ let resume_reconnect () =
 let rows_topic = Topic.declare ~name:"rows" ~key:Codec.string ~state:(Codec.list (Codec.list Codec.string))
 
 let patch_keeps_items () =
-  let rows, stop = Yuka.owner (fun () -> Live.use rows_topic (fun () -> "a")) in
+  let rows, stop = Yuka.with_owner (fun () -> Live.use rows_topic (fun () -> "a")) in
   let data () = match Live.status rows with Status.Ready { data; _ } -> data | _ -> [] in
   ws_open 0;
   ws_message 0 {|{"t":"hello","v":1,"node":"N"}|};

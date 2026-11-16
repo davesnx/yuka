@@ -57,7 +57,7 @@ let scheduler_works () =
   let s = State.make 1 in
   let seen = ref [] in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let m = State.memo (fun () -> State.get s * 2) in
         Effect.before (fun () -> seen := State.get m :: !seen))
   in

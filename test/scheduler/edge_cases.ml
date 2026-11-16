@@ -117,7 +117,7 @@ let many_dependencies () =
   let on = State.make true in
   let total = ref 0 and runs = ref 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before (fun () ->
             incr runs;
             if State.get on then
@@ -139,7 +139,7 @@ let many_readers () =
   let s = State.make 0 in
   let runs = ref 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         for _ = 1 to 10_000 do
           Effect.before (fun () ->
               ignore (State.get s);
@@ -157,7 +157,7 @@ let many_memo_readers () =
   let s = State.make 1 in
   let total = ref 0 and runs = ref 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let memos = List.init 10_000 (fun i -> State.memo (fun () -> State.get s + i)) in
         Effect.before (fun () ->
             incr runs;
@@ -176,7 +176,7 @@ let short_chain () =
   let s = State.make 0 in
   let seen = ref 0 in
   let last, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let last = chain 2_000 s in
         Effect.before (fun () -> seen := State.get last);
         last)
@@ -344,7 +344,7 @@ let write_in_cleanup_on_dispose () =
   let add, read = log () in
   let s = State.make 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before (fun () -> add ("a" ^ ints (State.get s)));
         Effect.before ~cleanup:(fun () -> State.set s 1) (fun () -> ()))
   in
@@ -358,7 +358,7 @@ let dispose_again_during_dispose () =
   let s = State.make 0 in
   let again = ref ignore in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Private.with_context [] (fun () ->
             Effect.before (fun () ->
                 if State.get s = 1 then begin
@@ -406,7 +406,7 @@ let disposes_own_owner_then_creates () =
   let s = State.make 0 and t = State.make 0 in
   let d = ref ignore in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before
           ~cleanup:(fun v -> add ("clean" ^ ints v))
           (fun () ->
@@ -427,7 +427,7 @@ let disposes_own_owner_then_creates () =
 
 let disposed_memo_with_queued_reader () =
   let s = State.make 1 in
-  let m, dispose_m = owner (fun () -> State.memo (fun () -> State.get s * 2)) in
+  let m, dispose_m = with_owner (fun () -> State.memo (fun () -> State.get s * 2)) in
   let seen = ref [] in
   Effect.before (fun () -> seen := State.get m :: !seen);
   Effect.before (fun () -> if State.get s = 2 then dispose_m ());
@@ -441,7 +441,7 @@ let read_disposed_memo () =
   let s = State.make 1 in
   let computes = ref 0 in
   let m, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         State.memo (fun () ->
             incr computes;
             State.get s * 2))
@@ -462,7 +462,7 @@ let write_without_live_readers () =
   let runs = ref 0 in
   let s = State.make 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before (fun () -> ignore (State.get s); incr runs);
         ignore (State.memo (fun () -> State.get s));
         Effect.after (fun () -> ignore (State.get s); incr runs))
@@ -476,7 +476,7 @@ let reentrant_dispose () =
   let add, read = log () in
   let d = ref ignore in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before ~cleanup:(fun () -> add "a") (fun () -> ());
         Effect.before
           ~cleanup:(fun () ->
@@ -494,7 +494,7 @@ let raising_cleanup_disposes_the_rest () =
   let runs = ref 0 and cleaned = ref 0 in
   let s = State.make 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> incr cleaned)
           (fun () ->
@@ -511,7 +511,7 @@ let effect_in_cleanup () =
   let add, read = log () in
   let s = State.make 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> Effect.before (fun () -> add ("late" ^ ints (State.get s))))
           (fun () -> ()))
@@ -526,7 +526,7 @@ let detached_owner_in_effect () =
   let stops = ref [] in
   Effect.before (fun () ->
       let v = State.get s in
-      let (), stop = owner (fun () -> Effect.before (fun () -> add (Printf.sprintf "%d:%d" v (State.get t)))) in
+      let (), stop = with_owner (fun () -> Effect.before (fun () -> add (Printf.sprintf "%d:%d" v (State.get t)))) in
       stops := stop :: !stops);
   State.set s 1;
   State.set t 1;
@@ -863,7 +863,7 @@ let deferred_on_native () =
   if not js then begin
     let s = State.make 1 in
     let (d, dm), dispose =
-      owner (fun () ->
+      with_owner (fun () ->
           let m = State.memo (fun () -> State.get s * 2) in
           (State.deferred s, State.deferred m))
     in

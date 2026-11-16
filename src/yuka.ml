@@ -9,7 +9,7 @@ module Effect = struct
   let on_change = State.on_change
 end
 
-let owner = Base.mount
+let with_owner = Base.mount
 let batch = Scheduler.batch
 
 type server = Types.server

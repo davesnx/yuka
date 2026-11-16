@@ -6,6 +6,7 @@ First release on opam.
 
 ### yuka
 
+- Breaking: `Yuka.owner` is now `Yuka.with_owner`, and the prop `of_=` of `<Yuka.Context.Provide>` is now `context=`: write `<Yuka.Context.Provide context=theme value=dark>`. `Context.bind` has a doc comment (#29, @davesnx)
 - Breaking: `Yuka.Server.Action.make` is `Yuka.Server.Action.implement` and `Yuka.Server.Live.serve` is `Yuka.Server.Live.implement`, as `Yuka.Server.Form.implement`: each registers the server code of an action, a topic or a form that the shared code declares. The arguments do not change. The message of a second `Live.implement` of a topic is "already implemented" (#29, @davesnx)
 - Breaking: the request of an action, a form action or a live `allow` is `Yuka.Server.request`, read with `Yuka.Server.Request.header`, `session`, `meth` and `path`; it was `Yuka.Server.context` and `Yuka.Server.Context`, which `open Yuka.Server` in `Routes.ml` put over `Yuka.Context`. `Yuka.Server.Testing.context` is `Yuka.Server.Testing.request` (#29, @davesnx)
 - Breaking: the `Redirect` of `Yuka.Router.lookup` (from the generated `Routes.find`) is ``Redirect of { location : string; kind : [ `Permanent | `Temporary ] }``, the shape of the `Redirect` of `Yuka.Server.stop`. It was `Redirect of { permanent : bool; location : string }` (#29, @davesnx)

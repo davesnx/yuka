@@ -312,7 +312,7 @@ let mutual_disposal () =
   let runs = ref 0 and clean_a = ref 0 and clean_b = ref 0 in
   let other_a = ref ignore and other_b = ref ignore in
   let (), dispose_a =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> incr clean_a)
           (fun () ->
@@ -320,7 +320,7 @@ let mutual_disposal () =
             incr runs))
   in
   let (), dispose_b =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> incr clean_b)
           (fun () ->
@@ -363,7 +363,7 @@ let unobserved_memo () =
         incr computes;
         State.get src * 2)
   in
-  let (), dispose = owner (fun () -> before (fun () -> ignore (State.get c))) in
+  let (), dispose = with_owner (fun () -> before (fun () -> ignore (State.get c))) in
   check "observed" "true" (string_of_bool (Private.has_readers src));
   dispose ();
   check "contract silent: the memo still reads its source after its reader is gone"
@@ -372,7 +372,7 @@ let unobserved_memo () =
   State.set src 5;
   check "an unobserved memo is up to date on read" "10" (int (State.peek c));
   let seen = ref 0 in
-  let (), dispose = owner (fun () -> before (fun () -> seen := State.get c)) in
+  let (), dispose = with_owner (fun () -> before (fun () -> seen := State.get c)) in
   State.set src 6;
   check "and its new reader runs" "12" (int !seen);
   check "value" "12" (int (State.peek c));
@@ -414,7 +414,7 @@ let effects_in_recomputed_memo () =
 let memo_released_with_owner () =
   let src = State.make 1 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let doubled = State.memo (fun () -> State.get src * 2) in
         before (fun () -> ignore (State.get doubled)))
   in
@@ -430,7 +430,7 @@ let detached_owner_in_rerun () =
   before (fun () ->
       ignore (State.get s);
       let (), dispose =
-        owner (fun () ->
+        with_owner (fun () ->
             before (fun () ->
                 ignore (State.get t);
                 incr inner))

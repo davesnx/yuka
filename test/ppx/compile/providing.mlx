@@ -8,7 +8,7 @@ end
 
 let view () : Yuka.server Yuka.element =
   <div>
-    <Yuka.Context.Provide of_=label value="Save">
+    <Yuka.Context.Provide context=label value="Save">
       <span>"before"</span>
       <Save />
     </Yuka.Context.Provide>
