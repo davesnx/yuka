@@ -438,6 +438,23 @@ let resume_reconnect () =
   check "the state of another node, with a lower seq" "ready m" (show a);
   stop ()
 
+let rows_topic = Topic.declare ~name:"rows" ~key:Codec.string ~state:(Codec.list (Codec.list Codec.string))
+
+let patch_keeps_items () =
+  let rows, stop = Yuka.owner (fun () -> Live.use rows_topic (fun () -> "a")) in
+  let data () = match Live.status rows with Status.Ready { data; _ } -> data | _ -> [] in
+  ws_open 0;
+  ws_message 0 {|{"t":"hello","v":1,"node":"N"}|};
+  ws_message 0 {|{"t":"state","id":1,"seq":1,"state":[["a"],["b"],["c"]]}|};
+  let before = data () in
+  ws_message 0 (patch ~seq:2 ~from:1 1 {|[["r",[1,0],"B"],["a",[0],["new"]]]|});
+  let after = data () in
+  check "values" "new;a;B;c" (String.concat ";" (List.map (String.concat ",") after));
+  let same = List.map2 ( == ) (List.tl after) before in
+  check "unchanged rows keep their decoded value" "true false true"
+    (String.concat " " (List.map string_of_bool same));
+  stop ()
+
 let token_error () =
   set_body {|<script type="application/json" data-yuka-answer="l:csrf">{"error":{"kind":"forbidden"}}</script>|};
   let a, stop_a = use "a" in
@@ -476,6 +493,7 @@ let all =
       ("patches apply on the last state; a patch that does not fit subscribes again", patches);
       ("an embedded state with node and seq resumes, then takes patches", resume_embedded);
       ("a reconnect resumes from the last node and seq", resume_reconnect);
+      ("a patch keeps the decoded value of each unchanged list item", patch_keeps_items);
     ]
 
 let expired_token finish =

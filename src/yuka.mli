@@ -1572,7 +1572,12 @@ module Server : sig
       ?allow:(context -> 'k -> bool) -> ('k, 's) Topic.t -> ('k -> 's Async.t) -> unit
     (** Registers the loader of a topic: the full state of a key, run when
         a key that has no current state gets a subscriber, and by a server
-        render. The loaded state of a key is shared by every subscriber
+        render. A server render through the request cycle keeps the state it
+        loaded on the node for 30 s with no subscriber (each render of the
+        key starts the 30 s again), so the first subscribe of the page gets
+        no state again; a change of the key ({!changed}, a bus note, a
+        restart of the bus) drops such a state. A session keeps at most
+        [per_session] such states, a node at most [total]. The loaded state of a key is shared by every subscriber
         of the key on the node, so the loader gets no request and must not
         depend on who asks: [allow] decides who may read a key. [allow] (default: always) runs on each subscribe, with the
         context of the WebSocket upgrade request, and on each server render
@@ -1586,7 +1591,9 @@ module Server : sig
     (** The new full state of a key, sent to each subscriber of the key on
         the node: as the changes from the state before (a patch, computed
         once per publish) when the subscriber has that state and the patch
-        is shorter than half of the state, else in full. With a bus, a
+        is shorter than half of the last full state that the node encoded
+        for the key, else in full. The full state is encoded only when a
+        subscriber needs it. With a bus, a
         note tells the other nodes that the key changed. With no bus it
         does nothing when the key has no subscriber. A publish while the loader runs wins over the loaded
         state. [allow] decides at subscribe time: a subscriber gets every
@@ -2212,8 +2219,8 @@ module Server : sig
         - A [patch] changes the state of [seq] [from] into the state of
           [seq]. It is sent when the last message of the subscription had
           [seq] [from] and no message of the subscription waits to be sent,
-          and when its [ops] are shorter than half of the state; else the
-          state is sent. [ops] is a list: [["r",PATH,V]] replaces the value
+          and when its [ops] are shorter than half of the last state text
+          that the node encoded for the key; else the state is sent. [ops] is a list: [["r",PATH,V]] replaces the value
           at [PATH] with [V], [["a",PATH,V]] inserts [V] into an array at
           the index (the end when it is the length) or adds a field at the
           end of an object, [["x",PATH]] removes it. [PATH] is a list of
@@ -2254,6 +2261,17 @@ module Server : sig
     val memory_down : Live.memory -> bool -> unit
     (** [memory_down memory true] drops notes; [false] brings the bus back and
         calls each [on_restart] function. *)
+
+    val live_state :
+      ?node:Live.node ->
+      sleep:(float -> unit Async.t) ->
+      context ->
+      string ->
+      Json.t ->
+      (Json.t * (string * int) option, Status.error) result Async.t
+    (** The state that a server render of [Live.use] embeds for a topic name
+        and key, with the node and [seq] when the page can resume from it,
+        as the request cycle reads it. *)
 
     val json_diff : Json.t -> Json.t -> Json.t list
     (** The [ops] of a live [patch] (see {!live_run}) from the first value

@@ -992,6 +992,102 @@ let patch_cases =
         hang_up a );
   ]
 
+let render_state ?node ?(session = "renderer") key =
+  match
+    Async.status (Server.Testing.live_state ?node ~sleep (Server.Testing.context ~session ()) "items" (`String key))
+  with
+  | Async.Done (Ok (_, mark)) -> mark
+  | _ -> Alcotest.fail "the render did not settle"
+
+let kept_cases =
+  [
+    ( "a first render keeps the state: the first sub gets resumed, with no state",
+      fun () ->
+        stored_items := [ ("k1", letters) ];
+        match render_state "k1" with
+        | None -> Alcotest.fail "the render embeds no node and seq"
+        | Some (node, seq) ->
+            let a, _ = open_with_node () in
+            push a (sub_at 1 "k1" node seq);
+            Alcotest.(check (list string)) "resumed" [ "resumed" ] (kinds a);
+            Live.publish items "k1" one_changed;
+            Alcotest.(check (list string)) "then a patch" [ "resumed"; "patch" ] (kinds a);
+            hang_up a );
+    ( "an entry with no subscriber is dropped after its time, and a render keeps it longer",
+      fun () ->
+        stored_items := [ ("k2", letters) ];
+        sleeps := [];
+        let first = render_state "k2" in
+        let first_timer = !sleeps in
+        Alcotest.(check int) "one timer" 1 (List.length first_timer);
+        sleeps := [];
+        Alcotest.(check bool) "a second render reads the kept state" true (render_state "k2" = first && first <> None);
+        let second_timer = !sleeps in
+        List.iter (fun w -> w ()) first_timer;
+        sleeps := [];
+        Alcotest.(check bool) "the older time does not drop it" true (render_state "k2" = first);
+        List.iter (fun w -> w ()) second_timer;
+        Alcotest.(check bool) "nor the second" true (render_state "k2" = first);
+        List.iter (fun w -> w ()) !sleeps;
+        sleeps := [];
+        match (first, render_state "k2") with
+        | Some (_, seq), Some (_, after) -> Alcotest.(check bool) "dropped: loaded again with a new seq" true (after > seq)
+        | _ -> Alcotest.fail "no mark" );
+    ( "a bus note drops an entry with no subscriber",
+      fun () ->
+        let _, node_a, node_b = two_nodes () in
+        stored_items := [ ("k3", letters) ];
+        let node, seq = Option.get (render_state ~node:node_b "k3") in
+        stored_items := [ ("k3", one_changed) ];
+        Live.publish ~node:node_a items "k3" one_changed;
+        let b, _ = open_with_node ~node:node_b () in
+        push b (sub_at 1 "k3" node seq);
+        Alcotest.(check (list string)) "the new state, not resumed" [ "state" ] (kinds b);
+        Alcotest.(check (option string)) "state" (encoded one_changed) (replayed b);
+        hang_up b );
+    ( "a session keeps at most per_session entries, a node at most total",
+      fun () ->
+        let node = Live.node ~per_session:2 ~total:3 () in
+        stored_items := List.init 6 (fun i -> ("q" ^ string_of_int i, letters));
+        let kept session key = render_state ~node ~session key <> None in
+        Alcotest.(check (list bool)) "per session" [ true; true; false ] (List.map (kept "one") [ "q0"; "q1"; "q2" ]);
+        Alcotest.(check (list bool)) "in total" [ true; false ] (List.map (kept "two") [ "q3"; "q4" ]);
+        Alcotest.(check bool) "a kept key is read by any session" true (kept "three" "q0") );
+    ( "a change of the key while the render loads keeps nothing",
+      fun () ->
+        let mark ?node key =
+          Server.Testing.live_state ?node ~sleep (Server.Testing.context ~session:"racer" ()) "count" (`String key)
+        in
+        let settled_mark rendered =
+          match Async.status rendered with Async.Done (Ok (_, m)) -> m | _ -> Alcotest.fail "not settled"
+        in
+        let local = mark "slow-local" in
+        Live.publish count "slow-local" 7;
+        let _, resolve, _ = gate "slow-local" in
+        resolve 5;
+        Alcotest.(check bool) "a local publish" true (settled_mark local = None);
+        let _, node_a, node_b = two_nodes () in
+        let noted = mark ~node:node_b "slow-note" in
+        Live.publish ~node:node_a count "slow-note" 7;
+        let _, resolve, _ = gate "slow-note" in
+        resolve 5;
+        Alcotest.(check bool) "a bus note" true (settled_mark noted = None);
+        let quiet = mark "slow-quiet" in
+        let _, resolve, _ = gate "slow-quiet" in
+        resolve 5;
+        Alcotest.(check bool) "no change: kept" true (settled_mark quiet <> None) );
+    ( "the size rule uses the length of the previous state: a shrink with a large patch is a patch",
+      fun () ->
+        let big = String.make 1_000 'b' and small = String.make 300 's' in
+        stored_items := [ ("z1", [ big ]) ];
+        let a, _ = open_ () in
+        push a (sub 1 "items" {|"z1"|});
+        Live.publish items "z1" [ small ];
+        Alcotest.(check (list string)) "kinds" [ "state"; "patch" ] (kinds a);
+        Alcotest.(check (option string)) "client state" (encoded [ small ]) (replayed a);
+        hang_up a );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -1006,4 +1102,5 @@ let () =
       ("action mark", cases action_mark_cases);
       ("json diff", cases diff_cases);
       ("patches", cases patch_cases);
+      ("kept entries", cases kept_cases);
     ]

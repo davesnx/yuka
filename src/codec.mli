@@ -23,7 +23,13 @@ val unit : unit t
 (** [`Null]. *)
 
 val list : 'a t -> 'a list t
-(** [`List]. Decoding stops at the first element that fails. *)
+(** [`List]. Decoding stops at the first element that fails. In the
+    browser, the codec keeps the elements of its last decode: an element
+    that is the same JSON value ([==]) at the same place, or one place
+    later, gives the same decoded value again without decoding it. A live
+    patch keeps the JSON of each unchanged element, so one changed item of
+    a long list decodes one item, and the other items stay [==]. The
+    decoder of the elements must be pure. *)
 
 val array : 'a t -> 'a array t
 (** As [list]. *)

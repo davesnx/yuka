@@ -53,8 +53,12 @@ and entry = {
   home : node;
   topic : string;
   wire : string;
-  mutable state : (Json.t * string) option;
+  mutable state : Json.t option;
+  mutable text : string option;
+  mutable size : int;
   mutable seq : int;
+  mutable keeper : string option;
+  mutable kept : int;
   mutable members : sub list;
   mutable loading : bool;
   mutable again : bool;
@@ -68,6 +72,9 @@ and node = {
   own_log : bool;
   per_session : int;
   total : int;
+  kept_by : int Web.table;
+  mutable kept_total : int;
+  mutable rendering : (string * bool ref) list;
   mutable conns : conn list;
   mutable counter : int;
   mutable name : string;
@@ -84,6 +91,7 @@ let max_subs = 64
 let max_out = 1_048_576
 let max_queued = 256
 let max_note = 7_900
+let keep_seconds = 30.
 let topics : (string * served) list ref = ref []
 
 let node ?log ?(per_session = 16) ?(total = 10_000) () =
@@ -95,6 +103,9 @@ let node ?log ?(per_session = 16) ?(total = 10_000) () =
     own_log = Option.is_some log;
     per_session;
     total;
+    kept_by = Web.table ();
+    kept_total = 0;
+    rendering = [];
     conns = [];
     counter = 0;
     name = "";
@@ -201,6 +212,16 @@ let send_slot (sub : sub) seq kind body =
       synced sub.conn sub.id r
   | None -> pump sub.conn
 
+let unkeep e =
+  match e.keeper with
+  | None -> ()
+  | Some session ->
+      e.keeper <- None;
+      let node = e.home in
+      node.kept_total <- node.kept_total - 1;
+      let left = Option.value (Web.table_get node.kept_by session) ~default:1 - 1 in
+      if left <= 0 then Web.table_delete node.kept_by session else Web.table_set node.kept_by session left
+
 let leave (sub : sub) =
   let e = sub.entry in
   e.members <- List.filter (fun s -> s != sub) e.members;
@@ -222,20 +243,38 @@ let error_message id code text =
 let current e =
   match Web.table_get e.home.table (entry_key e.topic e.wire) with Some x -> x == e | None -> false
 
+let touch node key = List.iter (fun (k, dirty) -> if k = key then dirty := true) node.rendering
+
+let drop_idle e =
+  if e.members = [] && current e then begin
+    unkeep e;
+    Web.table_delete e.home.table (entry_key e.topic e.wire)
+  end
+
 let send_state sub seq text = send_slot sub seq "state" (",\"state\":" ^ text)
 
+let full e json =
+  match e.text with
+  | Some text -> text
+  | None ->
+      let text = Json.to_string json in
+      e.text <- Some text;
+      e.size <- String.length text;
+      text
+
 let store e json =
-  let text = Json.to_string json in
   let previous = e.state and from = e.seq in
-  e.state <- Some (json, text);
+  e.state <- Some json;
+  e.text <- None;
   e.seq <- next_seq e.home;
   let patch =
     lazy
       (match previous with
       | None -> None
-      | Some (old, _) ->
+      | Some old ->
           let ops = Json.to_string (`List (Json_diff.diff old json)) in
-          if 2 * String.length ops < String.length text then
+          let size = if e.size > 0 then e.size else String.length (full e json) in
+          if 2 * String.length ops < size then
             Some (",\"from\":" ^ string_of_int from ^ ",\"ops\":" ^ ops)
           else None)
   in
@@ -243,7 +282,7 @@ let store e json =
     (fun s ->
       match if s.sent = from && not (waits s) then Lazy.force patch else None with
       | Some body -> send_slot s e.seq "patch" body
-      | None -> send_state s e.seq text)
+      | None -> send_state s e.seq (full e json))
     (List.rev e.members)
 
 let seen node name = Option.value (Web.table_get node.seen name) ~default:0
@@ -325,8 +364,8 @@ let subscribe conn id topic key at =
               | Some e -> e
               | None ->
                   let e =
-                    { home = conn.node; topic; wire; state = None; seq = 0; members = []; loading = false;
-                      again = false; uncovered = [] }
+                    { home = conn.node; topic; wire; state = None; text = None; size = 0; seq = 0; keeper = None;
+                      kept = 0; members = []; loading = false; again = false; uncovered = [] }
                   in
                   Web.table_set t (entry_key topic wire) e;
                   e
@@ -334,11 +373,12 @@ let subscribe conn id topic key at =
             let sub =
               { conn; id; entry = e; has_state = false; sent = 0; sync = None; held = None; after = []; target = None }
             in
+            unkeep e;
             e.members <- sub :: e.members;
             conn.subs <- (id, sub) :: conn.subs;
             match e.state with
             | Some _ when at = Some (conn.node.identity, e.seq) -> send_slot sub e.seq "resumed" ""
-            | Some (_, text) -> send_state sub e.seq text
+            | Some json -> send_state sub e.seq (full e json)
             | None -> if not e.loading then start_load e served key)
 
 type incoming =
@@ -489,7 +529,30 @@ let revoke ?node matches =
   let node = pick node in
   List.iter (fun conn -> if matches conn.peer then conn.stop 4401) node.conns
 
-let ssr_state node (peer : peer) name key =
+let expire ~sleep e =
+  e.kept <- e.kept + 1;
+  let mark = e.kept in
+  Async.on_settled (sleep keep_seconds) (fun _ -> if e.kept = mark then drop_idle e)
+
+let keep ~sleep node (peer : peer) name wire json =
+  match peer.session () with
+  | Some session
+    when node.kept_total < node.total
+         && Option.value (Web.table_get node.kept_by session) ~default:0 < node.per_session
+         && not (Web.table_has node.table (entry_key name wire)) ->
+      let e =
+        { home = node; topic = name; wire; state = None; text = None; size = 0; seq = 0; keeper = Some session;
+          kept = 0; members = []; loading = false; again = false; uncovered = [] }
+      in
+      Web.table_set node.table (entry_key name wire) e;
+      node.kept_total <- node.kept_total + 1;
+      Web.table_set node.kept_by session (Option.value (Web.table_get node.kept_by session) ~default:0 + 1);
+      store e json;
+      expire ~sleep e;
+      Some (node.identity, e.seq)
+  | _ -> None
+
+let ssr_state ?sleep node (peer : peer) name key =
   match List.assoc_opt name !topics with
   | None -> Async.return (Error Status.Not_found)
   | Some served -> (
@@ -499,13 +562,25 @@ let ssr_state node (peer : peer) name key =
       | Forbid -> Async.return (Error Status.Forbidden)
       | Accept wire -> (
           match Web.table_get node.table (entry_key name wire) with
-          | Some { state = Some (json, _); seq; _ } -> Async.return (Ok (json, Some (node.identity, seq)))
+          | Some ({ state = Some json; seq; _ } as e) ->
+              (match sleep with Some sleep when e.members = [] -> expire ~sleep e | _ -> ());
+              Async.return (Ok (json, Some (node.identity, seq)))
           | _ ->
               let result, resolve, _ = Async.make () in
-              Async.on_settled (Async.guard served.load key) (function
-                | Async.Pending -> ()
-                | Async.Done j -> resolve (Ok (j, None))
-                | Async.Failed m -> resolve (Error (failure peer.log name m)));
+              let loading = (entry_key name wire, ref false) in
+              node.rendering <- loading :: node.rendering;
+              Async.on_settled (Async.guard served.load key) (fun settled ->
+                  node.rendering <- List.filter (fun x -> x != loading) node.rendering;
+                  match settled with
+                  | Async.Pending -> ()
+                  | Async.Done j ->
+                      let mark =
+                        match sleep with
+                        | Some sleep when not !(snd loading) -> keep ~sleep node peer name wire j
+                        | _ -> None
+                      in
+                      resolve (Ok (j, mark))
+                  | Async.Failed m -> resolve (Error (failure peer.log name m)));
               result))
 
 let serve ?(allow = fun _ _ -> true) (topic : ('k, 's) Topic.t) load =
@@ -551,6 +626,7 @@ let note node topic wire =
 let publish ?node (topic : ('k, 's) Topic.t) key state =
   let node = pick node in
   let wire = Topic.wire_key topic key in
+  touch node (entry_key (Topic.name topic) wire);
   (match Web.table_get node.table (entry_key (Topic.name topic) wire) with
   | None -> ()
   | Some e ->
@@ -561,9 +637,11 @@ let publish ?node (topic : ('k, 's) Topic.t) key state =
 let changed ?node (topic : ('k, 's) Topic.t) key =
   let node = pick node in
   let wire = Topic.wire_key topic key in
+  touch node (entry_key (Topic.name topic) wire);
   (match Web.table_get node.table (entry_key (Topic.name topic) wire) with
   | Some e when e.members <> [] -> reload e
-  | _ -> ());
+  | Some e -> drop_idle e
+  | None -> ());
   note node (Topic.name topic) wire
 
 let heard node text =
@@ -573,23 +651,27 @@ let heard node text =
       | Some (`String n), Some (`String topic), Some (`String wire), Some (`Int p) when n <> node.name ->
           node.events <- node.events + 1;
           if p > seen node n then Web.table_set node.seen n p;
+          touch node (entry_key topic wire);
           (match Web.table_get node.table (entry_key topic wire) with
           | Some e when e.members <> [] ->
               e.uncovered <- e.uncovered @ [ node.events ];
               reload e
-          | _ -> ());
+          | Some e -> drop_idle e
+          | None -> ());
           check_all node
       | _ -> ())
   | _ -> ()
 
 let restarted node =
   node.events <- node.events + 1;
+  List.iter (fun (_, dirty) -> dirty := true) node.rendering;
   List.iter
     (fun e ->
       if e.members <> [] then begin
         e.uncovered <- e.uncovered @ [ node.events ];
         reload e
-      end)
+      end
+      else drop_idle e)
     (Array.to_list (Web.table_values node.table))
 
 let use_bus ?node ~name (bus : bus) =
