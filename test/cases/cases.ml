@@ -1855,7 +1855,7 @@ let memo_chain_from s length =
 
 let memo_chain length () =
   let s = State.make 0 in
-  let last, dispose = owner (fun () -> memo_chain_from s length) in
+  let last, dispose = with_owner (fun () -> memo_chain_from s length) in
   State.set s 1;
   check "the end of the chain" (string_of_int (length + 1))
     (string_of_int (State.peek last));
@@ -1865,7 +1865,7 @@ let memo_chain_effect length () =
   let s = State.make 0 in
   let seen = ref (-1) in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let last = memo_chain_from s length in
         Effect.before (fun () -> seen := State.get last))
   in
@@ -1880,7 +1880,7 @@ let memo_chain_loop length () =
   let s = State.make 0 in
   let result =
     match
-      owner (fun () ->
+      with_owner (fun () ->
           let last = memo_chain_from s length in
           Effect.before (fun () -> State.set s (State.get last)))
     with
@@ -1900,7 +1900,7 @@ let memo_chain_shared_source () =
   let rec chain n m =
     if n = 0 then m else chain (n - 1) (memo (fun () -> State.get s + State.get m))
   in
-  let last, dispose = owner (fun () -> chain 10_000 (memo (fun () -> State.get s))) in
+  let last, dispose = with_owner (fun () -> chain 10_000 (memo (fun () -> State.get s))) in
   runs := 0;
   State.set s 1;
   check "the end of the chain" "10001" (string_of_int (State.peek last));
@@ -1914,7 +1914,7 @@ let memo_chain_first_raises () =
     if n = 0 then m else chain (n - 1) (State.memo (fun () -> State.get s + State.get m))
   in
   let last, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         chain 10_000
           (State.memo (fun () ->
                incr firsts;
@@ -1942,7 +1942,7 @@ let memo_chain_middle_raises () =
     v + State.get m
   in
   let rec chain k m = if k > 10_000 then m else chain (k + 1) (State.memo (link k m)) in
-  let last, dispose = owner (fun () -> chain 1 (State.memo (fun () -> incr runs; State.get s))) in
+  let last, dispose = with_owner (fun () -> chain 1 (State.memo (fun () -> incr runs; State.get s))) in
   runs := 0;
   middle := 0;
   State.set s 1;
@@ -1961,7 +1961,7 @@ let memo_chain_dynamic () =
   let s = State.make 0 and c = State.make true in
   let bs = ref 0 in
   let last, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let a = State.memo (fun () -> State.get s * 10) in
         let b = State.memo (fun () -> incr bs; State.get s * 100) in
         let rec chain n m =
@@ -1986,7 +1986,7 @@ let memo_chain_dynamic () =
 let memo_chain_retry () =
   let s = State.make 0 and w = State.make 3 in
   let last, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let rec chain k m =
           if k > 10_000 then m
           else
@@ -2012,9 +2012,9 @@ let memo_chain_retry () =
 
 let memo_chain_after_limit () =
   let s = State.make 0 in
-  let last, dispose = owner (fun () -> memo_chain_from s 10_000) in
+  let last, dispose = with_owner (fun () -> memo_chain_from s 10_000) in
   let result =
-    match owner (fun () -> Effect.before (fun () -> State.set s (State.get last))) with
+    match with_owner (fun () -> Effect.before (fun () -> State.set s (State.get last))) with
     | (), stop ->
         stop ();
         "no error"
@@ -2037,7 +2037,7 @@ let shown m = match State.get m with v -> string_of_int v | exception Failure e 
 let deep_fake_keeps_sources k () =
   let s = State.make 0 and x = State.make 10 and d = State.make 0 in
   let top, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let m =
           State.memo (fun () ->
               let v = State.get s in
@@ -2059,7 +2059,7 @@ let deep_write_marks_failed_readers k () =
   let s = State.make 0 and flag = State.make false and d = State.make 0 in
   let add, read = log () in
   let top, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let a =
           State.memo (fun () ->
               let v = State.get s in
@@ -2090,7 +2090,7 @@ let deep_read_of_pending_memo k () =
   let seen = ref [] in
   let b_ref = ref None in
   let top, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let rec a =
           lazy
             (State.memo (fun () ->
@@ -2126,7 +2126,7 @@ let deep_two_failed_sources k () =
   let s = State.make 0 and flag = State.make false and d = State.make 0 in
   let add, read = log () in
   let top, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let a1 =
           State.memo (fun () ->
               let v = State.get s in
@@ -2160,7 +2160,7 @@ let deep_failed_memo_at_the_limit k () =
   let s = State.make 0 and x = State.make 0 and l = State.make 0 in
   let on = State.make false and d = State.make 0 in
   let top, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let m =
           State.memo (fun () ->
               if State.peek s = 1 then failwith "m";
@@ -2189,7 +2189,7 @@ let deep_failed_memo_at_the_limit k () =
   in
   dispose ();
   let runs = ref 0 and z = State.make 0 in
-  let (), stop = owner (fun () -> Effect.before (fun () -> ignore (State.get z); incr runs)) in
+  let (), stop = with_owner (fun () -> Effect.before (fun () -> ignore (State.get z); incr runs)) in
   State.set z 1;
   stop ();
   check "the round limit, then an effect runs" "limit 2" (result ^ " " ^ string_of_int !runs)
@@ -2198,7 +2198,7 @@ let nested_batches_old_source k () =
   let s = State.make 0 and sw = State.make true in
   let bs = ref 0 in
   let m, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let a = State.memo (fun () -> State.get s) in
         let b =
           State.memo (fun () ->
