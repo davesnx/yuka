@@ -36,10 +36,16 @@ let decode ~plus text =
   done;
   Buffer.contents b
 
-let segment text =
-  if text = "" || text = "." || text = ".." then
-    invalid_arg "Yuka.Router.segment: empty, . or .. cannot be a path segment";
-  encode text
+let escaped text =
+  let n = String.length text in
+  let rec tildes i = if i < n && text.[i] = '~' then tildes (i + 1) else i in
+  match String.sub text (tildes 0) (n - tildes 0) with "" | "." | ".." -> true | _ -> false
+
+let segment text = encode (if escaped text then "~" ^ text else text)
+
+let of_segment text =
+  if text <> "" && text.[0] = '~' && escaped text then String.sub text 1 (String.length text - 1)
+  else text
 
 let segments parts =
   match parts with

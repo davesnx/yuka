@@ -99,7 +99,8 @@ Router.route Issue ~path:"/issue/:id<string>/:tab<Model.tab>" ~page:Pages.issue
 - The link function takes the same type:
   `Routes.issue ~id:"YUK-8" ~tab:Activity ()` gives
   `"/issue/YUK-8/activity"`.
-- `decode` gets the segment after percent-decoding. When it returns
+- `decode` gets the segment after percent-decoding and after the `~` of
+  an empty or dot value is removed (see [Links](#links)). When it returns
   `None`, the path does not match and the answer is the not-found page.
 - `encode` must be the inverse of `decode`. The router percent-encodes its
   result, so it can return any text.
@@ -224,6 +225,14 @@ Routes.blog ~page:2 ~fragment:"top" ()  (* "/blog?page=2#top" *)
 Path params are required labelled arguments. Search fields are optional
 arguments. Every function ends with `()`. A missing or wrong param does
 not compile.
+
+Each path param value gives a link, also `""`, `"."` and `".."`, which no
+URL segment can hold: browsers resolve dot segments and the server drops
+empty ones. Such a value, also after one or more `~`, gets one more `~`
+in front, and `find` removes it: `Routes.post ~slug:"" ()` gives
+`"/blog/~"`, `~slug:".."` gives `"/blog/~.."` and `~slug:"~"` gives
+`"/blog/~~"`. Other values, such as `"~a"`, stay as they are. A
+catch-all with no element raises `Invalid_argument`.
 
 The last optional argument, `?fragment`, adds `#` and the encoded
 fragment; `~fragment:""` adds `#` alone. A param, search field or loader
