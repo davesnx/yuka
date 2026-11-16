@@ -191,6 +191,7 @@ First release on opam.
 
 ### yuka-dream
 
+- Fix: `Yuka_dream.handler` sets `SIGPIPE` to be ignored on Unix, as `Dream.run` does. Before, a server that ran the handler with `Dream.serve` stopped with no message when a client closed its connection during a streamed answer (the demo with `--second-node` stopped in about 1 of 4 `make e2e` runs) (@davesnx)
 - Breaking: `Yuka_dream.tree_digest` is gone; use `Yuka.Server.tree_digest` (#29, @davesnx)
 - Breaking: `Yuka_dream.prerender` gives `(unit, string) result Lwt.t`: `Error` with a message that names the directory, and nothing written, when `out` is inside a served directory, in place of `Invalid_argument` (#29, @davesnx)
 - `Yuka_dream` gives `None` for the session and the CSRF token of a request that no session middleware runs: it catches the `Failure "Missing session middleware"` of `Dream.session_id` and `Dream.csrf_token`. Dream still logs that error (@davesnx)

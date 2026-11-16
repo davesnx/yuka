@@ -197,6 +197,60 @@ let no_sessions () =
   check_true "a token" (contains body {|{"csrf":"|});
   Alcotest.(check (list string)) "no log" [] !got
 
+let free_port () =
+  let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.bind s (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port = match Unix.getsockname s with Unix.ADDR_INET (_, port) -> port | _ -> assert false in
+  Unix.close s;
+  port
+
+let rec connect_to port tries =
+  let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  match Unix.connect s (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
+  | () -> s
+  | exception Unix.Unix_error (Unix.ECONNREFUSED, _, _) when tries > 0 ->
+      Unix.close s;
+      Unix.sleepf 0.05;
+      connect_to port (tries - 1)
+
+let client_leaves_during_a_stream () =
+  let port = free_port () in
+  match Lwt_unix.fork () with
+  | 0 ->
+      let handler = Yuka_dream.handler config Yuka_routes.app in
+      let stream _ =
+        Dream.stream (fun s ->
+            let rec go n =
+              if n = 0 then Dream.close s
+              else Lwt.bind (Dream.write s "chunk\n") (fun () -> Lwt.bind (Dream.flush s) (fun () -> Lwt.bind (Lwt_unix.sleep 0.05) (fun () -> go (n - 1))))
+            in
+            go 40)
+      in
+      Lwt_main.run
+        (Dream.serve ~interface:"127.0.0.1" ~port (fun request ->
+             if Dream.target request = "/stream" then stream request else handler request));
+      Stdlib.exit 0
+  | child ->
+      let s = connect_to port 100 in
+      let request = "GET /stream HTTP/1.1\r\nHost: x\r\n\r\n" in
+      ignore (Unix.write_substring s request 0 (String.length request));
+      Unix.shutdown s Unix.SHUTDOWN_SEND;
+      Unix.close s;
+      Unix.sleepf 1.;
+      let state = Unix.waitpid [ Unix.WNOHANG ] child in
+      if fst state = 0 then begin
+        Unix.kill child Sys.sigkill;
+        ignore (Unix.waitpid [] child)
+      end;
+      Alcotest.(check string)
+        "the server process is still running" "running"
+        (match state with
+        | 0, _ -> "running"
+        | _, Unix.WSIGNALED n when n = Sys.sigpipe -> "killed by SIGPIPE"
+        | _, Unix.WSIGNALED n -> Printf.sprintf "killed by signal %d" n
+        | _, Unix.WEXITED n -> Printf.sprintf "exited %d" n
+        | _, Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+
 let () =
   Alcotest.run "yuka-dream"
     [
@@ -212,4 +266,5 @@ let () =
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);
       ("session", [ Alcotest.test_case "no session middleware" `Quick no_sessions ]);
+      ("serve", [ Alcotest.test_case "a client that leaves during a streamed answer" `Quick client_leaves_during_a_stream ]);
     ]

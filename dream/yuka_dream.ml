@@ -117,6 +117,7 @@ let log level message =
   | `Debug -> dream_log.debug (fun k -> k "%s" message)
 
 let handler ?node config app =
+  if Sys.unix then Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let config = Yuka.Server.Adapter.default_log log config in
   fun request -> to_lwt (Cycle.handler ?node config app request)
 

@@ -5,7 +5,10 @@ val handler :
 (** Answers every request with the request cycle
     ([Yuka.Server.Adapter.Make]), the WebSocket of {!Yuka.Live} at
     [/_yuka/live] included. Put Dream middleware (logger, sessions) around
-    it. When the config has no [log], the messages of the cycle and of
+    it. On Unix it sets [SIGPIPE] to be ignored for the whole process, as
+    [Dream.run] does and [Dream.serve] does not: else a client that closes
+    its connection during a streamed answer stops the process with no
+    message. When the config has no [log], the messages of the cycle and of
     {!Yuka.Console} during a request go to the Dream log
     [Dream.sub_log "yuka"], at the same level ([`Warn] is Dream's
     [`Warning]); Dream filters them with the level of

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { request } from "node:http";
 import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import { readFileSync, writeFileSync, openSync } from "node:fs";
 
 const playwrightPath =
@@ -2450,6 +2451,23 @@ await step("8c. live pages after a server restart", async () => {
   check("8c.3 no console error but the expected socket failures", unexpected.length === 0, unexpected.join(" | "));
   await A.ctx.close();
   await B.ctx.close();
+});
+
+await step("8e. a client that leaves during a streamed page", async () => {
+  const { hostname, port } = new URL(base);
+  for (let i = 0; i < 3; i++)
+    await new Promise<void>((done) => {
+      const s = connect(Number(port), hostname, () =>
+        s.end(`GET /issue/YUK-2 HTTP/1.1\r\nHost: ${hostname}\r\n\r\n`, () => {
+          s.destroy();
+          done();
+        }),
+      );
+      s.on("error", () => done());
+    });
+  await new Promise((r) => setTimeout(r, 2000));
+  const status = await fetch(base + "/").then((r) => r.status, (e) => String(e));
+  check("8e.1 the server still answers after clients closed their connections during streamed responses", status === 200, String(status));
 });
 
 await step("9. screenshots", async () => {
