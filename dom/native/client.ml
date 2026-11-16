@@ -21,6 +21,7 @@ let stop_roots () = ()
 let start ?lazy_entries:_ _ = browser_only ()
 let stop () = ()
 let stop_within _ = ()
+let has_handler _ _ _ = false
 let on_error : (string -> unit) ref = ref ignore
 let use_element () = ()
 let use_url_check () = ()

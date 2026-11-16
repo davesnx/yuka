@@ -846,12 +846,12 @@ val runtime_form_fields :
   encode:('i -> (string * string) list) ->
   ('i, 'f) Form.t
 
-val runtime_form_field : 'f runtime_form_decoding -> 'f -> string -> 'a Form.kind -> 'a option
+val runtime_form_field : 'f runtime_form_decoding -> 'f -> string -> 'a Form.field_kind -> 'a option
 val runtime_form_get : 'a option -> 'a
 (** Raises [Invalid_argument] on [None]. *)
 
 val runtime_form_finish : 'f runtime_form_decoding -> (unit -> 'i) -> ('i, 'f Form.errors) result
-val runtime_form_put : string -> 'a Form.kind -> 'a -> (string * string) list
+val runtime_form_put : string -> 'a Form.field_kind -> 'a -> (string * string) list
 
 (** {1 Private}
 

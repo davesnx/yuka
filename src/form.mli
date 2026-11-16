@@ -9,26 +9,26 @@
 type 'f errors = ('f option * string) list
 (** [None] is an error for the whole form. *)
 
-type 'a kind = 'a Form_core.kind
+type 'a field_kind = 'a Form_core.field_kind
 (** How one field reads from the posted strings and writes back. *)
 
-val string : string kind
+val string : string field_kind
 (** The first value; ["Missing"] when the field is absent. *)
 
-val int : int kind
+val int : int field_kind
 (** ["Not a whole number"] when it does not parse. *)
 
-val float : float kind
-val bool : bool kind
+val float : float field_kind
+val bool : bool field_kind
 (** A checkbox: present is [true], absent is [false]. *)
 
-val option : 'a kind -> 'a option kind
+val option : 'a field_kind -> 'a option field_kind
 (** Absent or empty is [None]. *)
 
-val list : 'a kind -> 'a list kind
+val list : 'a field_kind -> 'a list field_kind
 (** Every value of the field, in order. *)
 
-val custom : (string -> 'a option) -> ('a -> string) -> 'a kind
+val custom : (string -> 'a option) -> ('a -> string) -> 'a field_kind
 (** ["Not valid"] when [of_string] gives [None]. *)
 
 type ('i, 'f) t = ('i, 'f) Form_core.t
@@ -54,23 +54,29 @@ val value : ('o, 'f) form -> 'f -> string
 (** The value sent for the field when the page answers a failed post
     (422), else [""]. *)
 
-val error : ('o, 'f) form -> 'f -> string option
+val field_error : ('o, 'f) form -> 'f -> string option
 (** Tracked read of the first error of the field. *)
 
-val error_view : ('o, 'f) form -> 'f -> (id:string -> string -> 'k Kind.element) -> 'k Kind.element
+val field_error_view : ('o, 'f) form -> 'f -> (id:string -> string -> 'k Kind.element) -> 'k Kind.element
 (** A hole: [view ~id message] for the field's error, or nothing. Give the
     element of the error this [id]: each [input], [select] and [textarea] of
     the form whose [name] is the field gets [aria-invalid="true"] and an
     [aria-describedby] that holds [id], after the ids it already had, for as
     long as the field has an error; the server prints them on a failed post
-    (422). The [id] is made from the action name, the [key] of {!make} and
-    the field name. *)
+    (422). When the error goes, Yuka removes [aria-invalid] and [id] only
+    from the fields whose [aria-describedby] holds [id]: an [aria-invalid]
+    that the author set on another field stays. The [id] is made from the
+    action name, the [key] of {!make} and the field name. *)
 
-val errors : ('o, 'f) form -> string list
+val form_errors : ('o, 'f) form -> string list
 (** Tracked read of the errors for the whole form, not for one field. *)
 
-val errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.element
-(** A hole: the view of each error of {!val-errors}. *)
+val form_errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.element
+(** A [<div role="alert" tabindex="-1">] that holds the view of each error
+    of {!val-form_errors}, so that a screen reader reads them when they
+    show. When a submit in the browser ends with errors for the whole form
+    and no field takes the focus, the focus goes to this [div]; on a failed
+    post (422) with no field errors, the server prints [autofocus] on it. *)
 
 val pending : ('o, 'f) form -> bool
 (** Tracked: true while an island submit waits for its answer. Read it in
@@ -88,9 +94,11 @@ val make :
 (** [<Yuka.Form action>(fun form -> ...)</Yuka.Form>]: a
     [<form method="post">] with no [action] attribute (it posts to the
     page URL) and a hidden [_yuka_action] field, so it works with no
-    JavaScript. Give [key] to tell apart two forms of one action on a
-    page: after a failed post (422) only the form with the posted key
-    shows the sent values and errors. In an island, they stay for the
+    JavaScript. Two forms of one action on a page need different [key]s:
+    after a failed post (422) only the form with the posted key shows the
+    sent values and errors, and the error ids are made from the key. In a
+    development build, the browser console shows an error when two forms
+    on a page have the same action and key. In an island, they stay for the
     life of that [<form>] element (a new render of the form shows them
     again) until a submit in the browser. In an island, a submit is handled
     in the browser: the fields (with the submit button's [name] and
@@ -101,10 +109,12 @@ val make :
     else the page
     follows the server's [redirect] (with [run], the page URL) with a
     client navigation, as a post with no JavaScript does. A [redirect] to
-    another origin is not followed: it shows as a form error.
+    another origin is not followed: it shows as the form error
+    ["protocol error: refused a redirect"], and in a development build the
+    browser console shows its URL.
 
     A screen reader hears the field errors of a failed submit: when a
     submit in the browser ends with field errors, the focus goes to the
     first field with an error, in document order, and the server prints
     [autofocus] on that field on a failed post (422) when it has none. Each
-    field with an error gets the attributes of {!error_view}. *)
+    field with an error gets the attributes of {!field_error_view}. *)

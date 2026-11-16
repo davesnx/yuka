@@ -183,7 +183,7 @@ module Issue_form = struct
       <label class_="visually-hidden" for_="dialog-title">"Title"</label>
       <input class_="dialog-title" type_=`text id="dialog-title" name="title" placeholder="Issue title"
         autofocus=true value=(Yuka.Form.value form `Title) />
-      (Yuka.Form.error_view form `Title (fun ~id message -> <p id class_="error">(Yuka.text message)</p>))
+      (Yuka.Form.field_error_view form `Title (fun ~id message -> <p id class_="error">(Yuka.text message)</p>))
       (Yuka.with_unique_id (fun id ->
          Yuka.fragment
            [ <label class_="visually-hidden" for_=id>"Description"</label>;
@@ -209,6 +209,6 @@ module Issue_form = struct
                 Issue.all_priorities))
         </select>
       </div>
-      (Yuka.Form.errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
+      (Yuka.Form.form_errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
     </div>
 end

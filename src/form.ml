@@ -80,18 +80,29 @@ type ('o, 'f) form = {
 
 let value form f = Option.value (List.assoc_opt (form.field_name f) form.sent) ~default:""
 
-let error form f =
+let field_error form f =
   List.find_map
     (fun (g, m) -> match g with Some g when g == f -> Some m | _ -> None)
     (State.get form.failed)
 
-let errors form = List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
-let error_view form f view =
-  Kind.of_node
-    (Hole (fun () -> match error form f with Some m -> Kind.to_node (view ~id:(form.error_id f) m) | None -> Fragment []))
+let form_errors form =
+  List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
 
-let errors_view form view =
-  Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (errors form))))
+let field_error_view form f view =
+  Kind.of_node
+    (Hole
+       (fun () -> match field_error form f with Some m -> Kind.to_node (view ~id:(form.error_id f) m) | None -> Fragment []))
+
+let form_errors_view form view =
+  let autofocus =
+    !(Base.server_rendering ())
+    && match State.get form.failed with [] -> false | e -> List.for_all (fun (g, _) -> Option.is_none g) e
+  in
+  Element.element "div"
+    ([ Static ("role", "alert"); Static ("tabindex", "-1"); Static ("data-yuka-errors", "") ]
+    @ if autofocus then [ Static ("autofocus", "") ] else [])
+    [ Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (form_errors form)))) ]
+
 let pending form = State.get form.busy
 let parse_sent sent =
   match Json.of_string sent with
@@ -109,18 +120,15 @@ let forms_of name key =
     (fun el -> Web.get_attribute el "data-yuka-action" = Some name && Web.get_attribute el "data-yuka-key" = Some key)
     (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-action]"))
 
-let mark ~action ~key ~focus names form_el =
+let mark ~action ~key ~focus ~whole names form_el =
   let focused = ref (not focus) in
   Array.iter
     (fun el ->
       match (Web.local_name el, Web.get_attribute el "name") with
       | ("input" | "select" | "textarea"), Some name ->
           let id = error_id ~action ~key name in
-          let others =
-            List.filter
-              (fun token -> token <> "" && token <> id)
-              (String.split_on_char ' ' (Option.value (Web.get_attribute el "aria-describedby") ~default:""))
-          in
+          let tokens = String.split_on_char ' ' (Option.value (Web.get_attribute el "aria-describedby") ~default:"") in
+          let others = List.filter (fun token -> token <> "" && token <> id) tokens in
           if List.exists (String.equal name) names then begin
             Web.set_attribute el "aria-invalid" "true";
             Web.set_attribute el "aria-describedby" (String.concat " " (others @ [ id ]));
@@ -131,14 +139,16 @@ let mark ~action ~key ~focus names form_el =
                 focused := true;
                 Web.focus_node el
           end
-          else begin
+          else if List.mem id tokens then begin
             Web.remove_attribute el "aria-invalid";
             match others with
             | [] -> Web.remove_attribute el "aria-describedby"
             | _ -> Web.set_attribute el "aria-describedby" (String.concat " " others)
           end
       | _ -> ())
-    (Web.query_all form_el "[name]")
+    (Web.query_all form_el "[name]");
+  if whole && not !focused then
+    match Web.query_all form_el "[data-yuka-errors]" with [||] -> () | found -> Web.focus_node found.(0)
 
 let read_sent name key =
   List.find_map
@@ -174,37 +184,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     }
   in
   let first = ref true in
-  Base.Effect.after (fun () ->
-      let names = List.filter_map (function Some f, _ -> Some (name t f) | None, _ -> None) (State.get form.failed) in
-      let focus = not !first in
-      first := false;
-      if (match names with [] -> focus | _ -> true) then
-        List.iter (mark ~action:(Action.name action) ~key ~focus names) (forms_of (Action.name action) key));
-  let follow = function
-    | Some location when not (Web.same_origin location) ->
-        State.set form.failed [ (None, "Yuka: refused a redirect to another site: " ^ location) ]
-    | Some location -> Browser.navigate location
-    | None -> Browser.navigate (Web.current_url ())
-  in
-  let finish result redirect =
-    State.set form.busy false;
-    match result with
-    | Ok (Ok o) -> ( match on_ok with Some f -> f o | None -> follow redirect)
-    | Ok (Error e) -> State.set form.failed e
-    | Error m -> State.set form.failed [ (None, m) ]
-  in
-  let failed e = finish (Error (Status.error_to_string e)) None in
-  let call input =
-    let json = (Action.input action).encode input in
-    Async.on_result (Action.send (Action.name action) json) (function
-      | Ok (Ok j) -> (
-          match read_answer output j with
-          | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
-          | Error m -> finish (Error m) None)
-      | Ok (Error e) -> failed e
-      | Error m -> finish (Error m) None)
-  in
-  let submit ev =
+  let rec submit ev =
     Web.prevent_default ev;
     Web.remove_attribute (Web.target ev) "data-yuka-sent";
     match decode t (Array.to_list (Web.form_values ev)) with
@@ -219,7 +199,45 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
               | Ok (Error e) -> failed e
               | Error m -> finish (Error m) None)
         | None -> call input)
+  and finish result redirect =
+    State.set form.busy false;
+    match result with
+    | Ok (Ok o) -> ( match on_ok with Some f -> f o | None -> follow redirect)
+    | Ok (Error e) -> State.set form.failed e
+    | Error m -> State.set form.failed [ (None, m) ]
+  and failed e = finish (Error (Status.error_to_string e)) None
+  and call input =
+    let json = (Action.input action).encode input in
+    Async.on_result (Action.send (Action.name action) json) (function
+      | Ok (Ok j) -> (
+          match read_answer output j with
+          | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
+          | Error m -> finish (Error m) None)
+      | Ok (Error e) -> failed e
+      | Error m -> finish (Error m) None)
+  and follow = function
+    | Some location when not (Web.same_origin location) ->
+        if Dev.on then Web.console_error ("yuka: refused a redirect to another site: " ^ location);
+        State.set form.failed [ (None, Status.error_to_string (Protocol "refused a redirect")) ]
+    | Some location -> Browser.navigate location
+    | None -> Browser.navigate (Web.current_url ())
   in
+  Base.Effect.after (fun () ->
+      let failed = State.get form.failed in
+      let names = List.filter_map (function Some f, _ -> Some (name t f) | None, _ -> None) failed in
+      let whole = List.exists (fun (g, _) -> Option.is_none g) failed in
+      let focus = not !first in
+      if !first && Dev.on && List.length (forms_of (Action.name action) key) > 1 then
+        Web.console_error
+          ("yuka: two forms on this page have the action " ^ Action.name action ^ " and the key \"" ^ key
+         ^ "\": give each a different key");
+      first := false;
+      if (match names with [] -> focus | _ -> true) then
+        List.iter
+          (mark ~action:(Action.name action) ~key ~focus ~whole names)
+          (List.filter
+             (fun el -> Client.has_handler el "submit" submit)
+             (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-action]"))));
   let sent_attr =
     match sent with
     | Some (values, errors) ->
