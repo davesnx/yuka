@@ -57,8 +57,14 @@ val value : ('o, 'f) form -> 'f -> string
 val error : ('o, 'f) form -> 'f -> string option
 (** Tracked read of the first error of the field. *)
 
-val error_view : ('o, 'f) form -> 'f -> (string -> 'k Kind.element) -> 'k Kind.element
-(** A hole: the view of the field's error, or nothing. *)
+val error_view : ('o, 'f) form -> 'f -> (id:string -> string -> 'k Kind.element) -> 'k Kind.element
+(** A hole: [view ~id message] for the field's error, or nothing. Give the
+    element of the error this [id]: each [input], [select] and [textarea] of
+    the form whose [name] is the field gets [aria-invalid="true"] and an
+    [aria-describedby] that holds [id], after the ids it already had, for as
+    long as the field has an error; the server prints them on a failed post
+    (422). The [id] is made from the action name, the [key] of {!make} and
+    the field name. *)
 
 val errors : ('o, 'f) form -> string list
 (** Tracked read of the errors for the whole form, not for one field. *)
@@ -95,4 +101,10 @@ val make :
     else the page
     follows the server's [redirect] (with [run], the page URL) with a
     client navigation, as a post with no JavaScript does. A [redirect] to
-    another origin is not followed: it shows as a form error. *)
+    another origin is not followed: it shows as a form error.
+
+    A screen reader hears the field errors of a failed submit: when a
+    submit in the browser ends with field errors, the focus goes to the
+    first field with an error, in document order, and the server prints
+    [autofocus] on that field on a failed post (422) when it has none. Each
+    field with an error gets the attributes of {!error_view}. *)

@@ -162,6 +162,8 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable id_count : int;
     mutable page_scope : string;
     mutable page_count : int;
+    mutable invalid : (string * string) list;
+    mutable invalid_focused : bool;
   }
 
   let snapshot s = { s with streaming = s.streaming }
@@ -169,7 +171,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count } =
+        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -195,7 +197,9 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     s.id_scope <- id_scope;
     s.id_count <- id_count;
     s.page_scope <- page_scope;
-    s.page_count <- page_count
+    s.page_count <- page_count;
+    s.invalid <- invalid;
+    s.invalid_focused <- invalid_focused
 
 let warned = ref false
 
@@ -237,6 +241,11 @@ let with_browser_ids scope f =
   | exception e ->
       restore ();
       raise e
+
+let error_id ~action ~key field =
+  String.map
+    (function ' ' | '\t' | '\n' | '\r' | '\012' -> '_' | c -> c)
+    (action ^ "-" ^ (if key = "" then "" else key ^ "-") ^ field ^ "-error")
 
 let level_name = function `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug"
 

@@ -146,6 +146,32 @@ runs again with a new id. An element that the browser makes after the
 island has started (a new list row, an `Await` value that arrives later)
 gets a new id, which the server never printed.
 
+## Form errors
+
+`Yuka.Form.error_view` gives the view of a field error an `id`. Put it on
+the element of the error:
+
+```ocaml
+<input name="title" value=(Yuka.Form.value form `Title) />
+(Yuka.Form.error_view form `Title (fun ~id message ->
+   <p id class_="error">(Yuka.text message)</p>))
+```
+
+While the field has an error, `Yuka.Form` sets `aria-invalid="true"` on each
+`input`, `select` and `textarea` of the form with that `name`, and adds the
+`id` to its `aria-describedby`, after the ids that the field already has.
+When the error goes, it removes both. A screen reader then reads the error
+with the field.
+
+After a submit in the browser that ends with field errors, the focus goes to
+the first field with an error. On a failed post with no JavaScript (422), the
+server prints these attributes, and `autofocus` on the first field with an
+error, so the page opens on it. Errors for the whole form (`errors_view`)
+are not linked to a field and do not move the focus.
+
+The `id` is made from the action name, the `key` of the form and the field
+name. Two forms of one action on a page need different keys.
+
 ## Start strategies
 
 The `start` prop says when the browser downloads and starts the island:

@@ -938,6 +938,21 @@ await step("5. failure path", async () => {
   check("5e server status unchanged", statusSlug(await statusOf(id)) === before);
 });
 
+const fieldMarks = (p: Page, root: string) =>
+  p.evaluate((root) => {
+    const field = (name: string) => document.querySelector(`${root} [name="${name}"]`);
+    const title = field("title");
+    const description = field("description");
+    const ids = (title?.getAttribute("aria-describedby") ?? "").split(" ").filter((id) => id !== "");
+    return {
+      invalid: title?.getAttribute("aria-invalid") ?? null,
+      describedBy: ids.map((id) => document.getElementById(id)?.textContent ?? `missing ${id}`).join(" | "),
+      focused: document.activeElement === title,
+      descriptionInvalid: description?.getAttribute("aria-invalid") ?? null,
+      descriptionDescribedBy: description?.getAttribute("aria-describedby") ?? null,
+    };
+  }, root);
+
 const fieldLabels = async (p: Page, root: string) => {
   const out: string[] = [];
   for (const label of await p.locator(`${root} label`).all()) {
@@ -969,6 +984,11 @@ await step("6. new issue dialog", async () => {
   await page.waitForSelector(".dialog .error", { timeout: 3000 });
   check("6c0 empty title shows 'Title is required'", (await page.locator(".dialog .error").textContent()) === "Title is required");
   check("6c0b dialog stays open", (await page.locator(".dialog").count()) === 1);
+  const marks = await fieldMarks(page, ".dialog");
+  check("6c0h the title is invalid, described by its error, and has the focus",
+    marks.invalid === "true" && marks.describedBy === "Title is required" && marks.focused, JSON.stringify(marks));
+  check("6c0i the description has no error and no mark",
+    marks.descriptionInvalid === null && marks.descriptionDescribedBy === null, JSON.stringify(marks));
   const rejected = consoleErrors.splice(0);
   check("6c0c empty title is a typed error: no console error", rejected.length === 0, rejected.join(" | "));
   const errText = async () => (await page.locator(".dialog .error").textContent()) ?? "";
@@ -988,7 +1008,15 @@ await step("6. new issue dialog", async () => {
   await page.fill(".dialog-description", "Created by the browser check.");
   const before = await page.locator(".row").count();
   await page.evaluate(() => ((window as any).__created = "alive"));
-  await page.locator(".dialog .button.primary").click();
+  const markedBefore = await fieldMarks(page, ".dialog");
+  const cleared = await page.evaluate(async () => {
+    (document.querySelector(".dialog .button.primary") as HTMLButtonElement).click();
+    await Promise.resolve();
+    const title = document.querySelector(".dialog-title");
+    return { invalid: title?.getAttribute("aria-invalid") ?? null, describedBy: title?.getAttribute("aria-describedby") ?? null };
+  });
+  check("6c0j a fixed title loses aria-invalid and aria-describedby at submit",
+    markedBefore.invalid === "true" && cleared.invalid === null && cleared.describedBy === null, JSON.stringify({ markedBefore, cleared }));
   await page.waitForURL(/\/issue\/YUK-\d+$/, { timeout: 3000 });
   await page.waitForSelector(".issue-title");
   const landed = {
@@ -1045,6 +1073,11 @@ await step("6f. new issue form with JavaScript off", async () => {
   check("6f.1 empty title: 422 page with the error", statuses.includes(422) && (await pg.locator(".error").first().textContent()) === "Title is required", JSON.stringify(statuses));
   check("6f.2 the sent description is kept", (await pg.inputValue('textarea[name="description"]')) === "kept by the server");
   check("6f.3 the address stays /new", new URL(pg.url()).pathname === "/new", pg.url());
+  const noJsMarks = await fieldMarks(pg, ".new-issue-page");
+  check("6f.3b the server marks the title invalid, described by its error, with the focus",
+    noJsMarks.invalid === "true" && noJsMarks.describedBy === "Title is required" && noJsMarks.focused, JSON.stringify(noJsMarks));
+  check("6f.3c the description has no error and no mark",
+    noJsMarks.descriptionInvalid === null && noJsMarks.descriptionDescribedBy === null, JSON.stringify(noJsMarks));
   const title = `No-JS issue ${run}`;
   await pg.fill('input[name="title"]', title);
   await pg.locator('button[type="submit"]').click();

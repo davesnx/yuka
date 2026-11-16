@@ -98,6 +98,7 @@ let fetch_post : string -> string -> (int -> string -> unit) -> (bool -> string 
 let watch_added : (node array -> bool) -> unit -> unit = fun _ _ -> browser_only ()
 let navigate : string -> unit = fun _ -> browser_only ()
 let focus : string -> unit = fun _ -> browser_only ()
+let focus_node : node -> unit = fun _ -> browser_only ()
 let scroll_into_view : string -> unit = fun _ -> browser_only ()
 let has_intersection_observer : node -> bool = fun _ -> browser_only ()
 let on_idle : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()

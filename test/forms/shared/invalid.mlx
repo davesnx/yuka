@@ -1,0 +1,33 @@
+open Entry
+
+let error ~id message = <b id>(Yuka.text message)</b>
+
+let view () : _ Yuka.element =
+  <Yuka.Form action=save key="k">
+    (fun form ->
+      <div>
+        <input type_=`hidden name="ratio" value="1" />
+        <input name="title" aria_describedby="hint" />
+        <p id="hint">"Hint"</p>
+        (Yuka.Form.error_view form `Title error)
+        <input name="count" value=(Yuka.Form.value form `Count) />
+        (Yuka.Form.error_view form `Count error)
+        <select name="level"><option value="low">"Low"</option></select>
+        (Yuka.Form.error_view form `Level error)
+        <textarea name="tags" />
+        (Yuka.element "input" [ Yuka.attr "name" "urgent"; Yuka.attr "type" "checkbox" ] [])
+        <button type_=`submit>"Save"</button>
+      </div>)
+  </Yuka.Form>
+
+let sent_errors =
+  [
+    (Some "ratio", "Bad ratio");
+    (Some "title", "Missing");
+    (Some "count", "Not a whole number");
+    (Some "level", "Not valid");
+    (Some "urgent", "Bad");
+    (None, "Whole form");
+  ]
+
+let sent = ("save_entry", "k", [ ("count", "x3") ], sent_errors)

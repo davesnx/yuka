@@ -134,6 +134,8 @@ let focus : string -> unit =
   [%mel.raw
     "function (id) { const el = document.getElementById(id); if (el) el.focus() }"]
 
+external focus_node : node -> unit = "focus" [@@mel.send]
+
 let scroll_into_view : string -> unit =
   [%mel.raw
     "function (id) { const el = document.getElementById(id); if (el) el.scrollIntoView() }"]
