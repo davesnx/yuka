@@ -141,8 +141,9 @@ client navigation answer, in keyed list rows and in a streamed
 renders, the id is unique. For a second id, add a suffix that starts with a
 letter, as `-hint` above, or call `with_unique_id` again.
 
-`with_unique_id` works as a hole: when its function reads a State, the function
-runs again with a new id. An element that the browser makes after the
+The function runs once and does not track a State that it reads, so the
+`input` keeps its text and focus when that State changes. To show a State
+inside, put a `Yuka.hole` there. An element that the browser makes after the
 island has started (a new list row, an `Await` value that arrives later)
 gets a new id, which the server never printed.
 

@@ -379,8 +379,9 @@ val with_unique_id : (string -> 'k element) -> 'k element
     [id], call [with_unique_id] again or add a suffix that starts with a letter:
     [id ^ "-error"].
 
-    The function runs as a {!hole}: when it reads a State, it runs again
-    with a new [id] and replaces its output. An element made in the browser
+    The function runs once and does not track a State that it reads, so
+    an [input] in it keeps its text and focus; to show a State, put a
+    {!hole} inside. An element made in the browser
     after the island has hydrated (a new list row, a value of an {!Await}
     that arrives later, or a render with no server HTML) gets an [id] that
     is unique but not equal to one from the server. The form of the [id]

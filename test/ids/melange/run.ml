@@ -49,6 +49,12 @@ let duplicates : unit -> string =
   return dup.join(" ");
 }|}]
 
+let last_input : unit -> node = [%mel.raw {|function () { const a = document.querySelectorAll("input"); return a[a.length - 1] }|}]
+let type_and_focus : node -> string -> unit = [%mel.raw {|function (n, v) { n.value = v; n.focus() }|}]
+let value : node -> string = [%mel.raw {|function (n) { return n.value }|}]
+let id_of : node -> string = [%mel.raw {|function (n) { return n.id }|}]
+let focused : node -> bool = [%mel.raw {|function (n) { return document.activeElement === n }|}]
+
 let failures = ref 0
 
 let check name expected got =
@@ -104,6 +110,22 @@ let () =
   page_is_sound "answer";
   let dispose = Private.render (new_container ()) (fun () -> Ids_cases.form_view (Async.return "x")) in
   page_is_sound "client render";
+  dispose ();
+  let title = State.make "a" in
+  let dispose =
+    Private.render (new_container ()) (fun () ->
+        with_unique_id (fun id ->
+            element "p" []
+              [ element "label" [ attr "for" id ] [ text (State.get title) ]; element "input" [ attr "id" id ] [] ]))
+  in
+  let input = last_input () in
+  let id = id_of input in
+  type_and_focus input "typed";
+  State.set title "b";
+  check "state read: same input" "true" (string_of_bool (last_input () == input));
+  check "state read: same id" id (id_of (last_input ()));
+  check "state read: value kept" "typed" (value (last_input ()));
+  check "state read: focus kept" "true" (string_of_bool (focused (last_input ())));
   dispose ();
   let async, resolve, _ = Async.make () in
   hydrates "shell" (read 1) async;
