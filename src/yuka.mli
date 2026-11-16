@@ -207,40 +207,7 @@ module Json : sig
       error. *)
 end
 
-module Async : sig
-  type 'a t = 'a Async.t
-  type 'a status = Pending | Done of 'a | Failed of string
-
-  val make : unit -> 'a t * ('a -> unit) * (string -> unit)
-  (** A pending value and its resolve and fail functions. It settles once;
-      later calls are ignored. *)
-
-  val return : 'a -> 'a t
-  (** A value that is already [Done]. *)
-
-  val failed : string -> 'a t
-  (** A value that is already [Failed] with this message. *)
-
-  val status : 'a t -> 'a status
-  (** The status now. *)
-
-  val on_settled : 'a t -> ('a status -> unit) -> unit
-  (** Callbacks run in registration order; now, if already settled. *)
-
-  val on_result : 'a t -> (('a, string) result -> unit) -> unit
-  (** Like [on_settled], without the [Pending] case. *)
-
-  val map : ('a -> 'b) -> 'a t -> 'b t
-  (** Applies the function to the value when it is [Done]. A failure stays a
-      failure with the same message. An exception that the function raises
-      gives [Failed] with the exception as text. *)
-
-  val bind : 'a t -> ('a -> 'b t) -> 'b t
-  (** Like [map], with a function that gives an [Async]. *)
-
-  val watch : 'a t -> 'a status State.read
-  (** A State that follows the status. *)
-end
+module Async = Async
 
 module Codec = Codec
 
@@ -1092,6 +1059,12 @@ module Private : sig
   val server_rendering : unit -> bool
   (** True during a server render on this domain; then [Effect.after] and
       [Effect.before] do nothing. *)
+
+  val in_browser : bool
+  (** True in the browser build. *)
+
+  val decode_uri : string -> string option
+  (** As [decodeURIComponent]; [None] where it throws. *)
 
   type platform = {
     target_value : Event.t -> string;

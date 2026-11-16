@@ -206,13 +206,13 @@ let html_escaping () =
     (html (element "a" [ attr "href" "x&y\"<>" ] []))
 
 let decode_uri () =
-  let decoded s = match Yuka__Web.decode_uri s with Some d -> d | None -> "None" in
-  let valid s = string_of_bool (Option.is_some (Yuka__Web.decode_uri s)) in
+  let decoded s = match Private.decode_uri s with Some d -> d | None -> "None" in
+  let valid s = string_of_bool (Option.is_some (Private.decode_uri s)) in
   check "plain" "a+b" (decoded "a+b");
   check "escapes" "a b/?#" (decoded "a%20b%2F%3f%23");
   check "two bytes" "true" (valid "%C3%A9");
   check "four bytes" "true" (valid "%F0%9F%98%80");
-  if not Yuka__Web.in_browser then check "two bytes, native" "\xc3\xa9" (decoded "%C3%A9");
+  if not Private.in_browser then check "two bytes, native" "\xc3\xa9" (decoded "%C3%A9");
   check "percent at the end" "None" (decoded "100%");
   check "one hex digit" "None" (decoded "%E0%A4%A");
   check "not hex" "None" (decoded "%zz");

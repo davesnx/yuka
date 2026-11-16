@@ -276,6 +276,8 @@ module Private = struct
     Base.with_owner o f
 
   let server_rendering () = !(Base.server_rendering ())
+  let in_browser = Web.in_browser
+  let decode_uri = Web.decode_uri
   let platform = Platform.platform
   let entry_name (e : Island.entry) = e.name
   let entry_decode (e : Island.entry) j = e.decode j

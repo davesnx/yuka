@@ -15,8 +15,9 @@ A Melange build of a Yuka client needs yuka.js; without it the build fails
   $ ls _build/default/out/main.js
   _build/default/out/main.js
 
-Most internal modules are private; the ones that the implementations yuka.js
-and yuka.native compile against stay reachable:
+Most internal modules are private. The virtual modules, the modules that the
+implementations yuka.js and yuka.native compile against, and the modules that
+Yuka re-exports by alias stay reachable:
 
   $ mkdir native && printf '(executable\n (name main)\n (libraries yuka))\n' > native/dune
   $ printf 'let _ = Yuka__Server.handle\n' > native/main.ml
@@ -25,5 +26,14 @@ and yuka.native compile against stay reachable:
   $ printf 'let _ = Yuka__Signal.create\n' > native/main.ml
   $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Signal'
   Unbound module Yuka__Signal
+  $ printf 'let _ = Yuka__Form_core.get\n' > native/main.ml
+  $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Form_core'
+  Unbound module Yuka__Form_core
+  $ printf 'let _ = Yuka__Route.push\n' > native/main.ml
+  $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Route'
+  Unbound module Yuka__Route
   $ printf 'let _ = ignore (Yuka.text "x")\n' > native/main.ml
   $ dune build --root . ./native/main.exe
+  $ printf 'let _ = Yuka__Form_core.get\n' > main.ml
+  $ dune build --root . 2>&1 | grep -o 'Unbound module Yuka__Form_core'
+  Unbound module Yuka__Form_core

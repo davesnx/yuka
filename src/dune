@@ -8,15 +8,21 @@
   browser
   cycle
   element
+  form_core
+  json_diff
+  json_patch
   live_server
   navigation
   navigation_state
   navigation_stub
   optimistic
+  page_context
   prefetch
   printer
+  route
   router
   server
   signal
+  status_error
   topic)
  (default_implementation yuka.native))

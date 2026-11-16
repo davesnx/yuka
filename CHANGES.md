@@ -6,6 +6,8 @@ First release on opam.
 
 ### yuka
 
+- Breaking: the internal modules `Yuka__Form_core`, `Yuka__Json_diff`, `Yuka__Json_patch`, `Yuka__Page_context`, `Yuka__Route` and `Yuka__Status_error` are private, so code outside Yuka cannot name them. The tests of Yuka read `Web.decode_uri` and `Web.in_browser` through `Yuka.Private` (#29, @davesnx)
+- `Yuka.Async` is an alias of its module, so compiler errors print `Yuka.Async.t` instead of `Yuka__Async.t`. Its documentation is in `src/async.mli` (#29, @davesnx)
 - Fix: `Yuka.each` with two items of one key shows only the first, on the server, on the first render, on hydration and on an update; in a dev build the browser writes a console error with the key on each render that has one. Before, the server and the first render showed both, and an update raised `Failure`, which stopped the island. The browser-only functions (`Browser.*`, `Yuka.render`) raise `Invalid_argument` on native, not `Failure`. The keyed benchmark app goes from 8,517 to 8,505 B gzip (#29, @davesnx)
 - Breaking: `Server.Live.node` takes `?max_sockets` (default 10,000) and `?max_sockets_per_session` (default 16) for the open live sockets, and `?max_kept_states` (default 10,000) and `?max_kept_states_per_session` (default 16) for the states that server renders keep, in place of `?total` and `?per_session`, which set both (#29, @davesnx)
 - Breaking: `Yuka.owner` is now `Yuka.with_owner`, and the prop `of_=` of `<Yuka.Context.Provide>` is now `context=`: write `<Yuka.Context.Provide context=theme value=dark>`. `Context.bind` has a doc comment (#29, @davesnx)
