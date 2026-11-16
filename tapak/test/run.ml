@@ -184,6 +184,12 @@ let request_switch_ends ~fs () =
       check_true "answered" (contains body "answered"));
   check_true "the fiber on the request switch ends with the response" (Unix.gettimeofday () -. start < 1.)
 
+let switch_outside_a_request () =
+  check_true "no switch" (Option.is_none (Yuka_tapak.switch ()));
+  match Yuka_tapak.switch_exn () with
+  | _ -> Alcotest.fail "a switch outside a request"
+  | exception Invalid_argument m -> check_true "names the handler" (contains m "Yuka_tapak.handler")
+
 let no_sessions ~sw ~fs () =
   let logged = ref [] in
   let config = Yuka.Server.config ~log:(fun _ m -> logged := m :: !logged) () in
@@ -373,6 +379,7 @@ let () =
           Alcotest.test_case "no sessions middleware" `Quick (no_sessions ~sw ~fs);
           Alcotest.test_case "malformed cookies are replaced" `Quick (bad_cookies make);
           Alcotest.test_case "the request switch ends with the response" `Quick (request_switch_ends ~fs);
+          Alcotest.test_case "no switch outside a request" `Quick switch_outside_a_request;
         ] );
       ("live", [ Alcotest.test_case "hello, ping and close over a socket" `Quick (live ~sw ~net make) ]);
     ]

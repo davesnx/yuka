@@ -183,16 +183,11 @@ let rec inside ~dir path =
 
 let check_out out config =
   let target = absolute out in
-  List.iter
-    (fun (_, dir) ->
-      if inside ~dir:(absolute dir) target then
-        invalid_arg
-          (Printf.sprintf "Yuka_dream.prerender: out %S is inside the served directory %S" out dir))
-    (Yuka.Server.Prerender.served_dirs config)
+  match List.find_opt (fun (_, dir) -> inside ~dir:(absolute dir) target) (Yuka.Server.Prerender.served_dirs config) with
+  | Some (_, dir) -> Error (Printf.sprintf "Yuka_dream.prerender: out %S is inside the served directory %S" out dir)
+  | None -> Ok ()
 
-let prerender ~out config app =
-  let config = Yuka.Server.Prerender.config config in
-  check_out out config;
+let write_pages ~out config app =
   let ( let* ) = Lwt.bind in
   let request path = Dream.request ~method_:`GET ~target:path "" in
   let seen = Hashtbl.create 64 and queue = Queue.create () in
@@ -239,3 +234,9 @@ let prerender ~out config app =
     (fun (prefix, dir) -> copy dir (Filename.concat out (String.sub prefix 1 (String.length prefix - 1))))
     (Yuka.Server.Prerender.served_dirs config);
   Lwt.return_unit
+
+let prerender ~out config app =
+  let config = Yuka.Server.Prerender.config config in
+  match check_out out config with
+  | Error _ as e -> Lwt.return e
+  | Ok () -> Lwt.map Result.ok (write_pages ~out config app)

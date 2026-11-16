@@ -1578,15 +1578,25 @@ module Server : sig
         [seq] counter, limits and bus. A process has one default node, which
         every function uses when [?node] is not given. *)
 
-    val node : ?log:(log_level -> string -> unit) -> ?per_session:int -> ?total:int -> unit -> node
+    val node :
+      ?log:(log_level -> string -> unit) ->
+      ?max_sockets:int ->
+      ?max_sockets_per_session:int ->
+      ?max_kept_states:int ->
+      ?max_kept_states_per_session:int ->
+      unit ->
+      node
     (** A new, empty node, for example for a second handler in one process.
         [log] gets the failures of loaders and of the bus. Without it
         (and for the default node), the node logs to the [log] of the
         config of the last request that a handler served on this node, and
-        to the default sink (see {!Testing.set_log}) before the first request. [per_session] (default 16) and [total] (default
-        10,000) are the most open live sockets per session and on this node;
-        a socket over a limit is closed with 1013 before its [hello], and
-        the page tries again later. *)
+        to the default sink (see {!Testing.set_log}) before the first request. [max_sockets]
+        (default 10,000) and [max_sockets_per_session] (default 16) are the
+        most open live sockets on this node and per session; a socket over a
+        limit is closed with 1013 before its [hello], and the page tries again
+        later. [max_kept_states] (default 10,000) and
+        [max_kept_states_per_session] (default 16) are the most server-render
+        states the node keeps, in total and per session (see {!implement}). *)
 
     val implement :
       ?allow:(request -> 'k -> bool) -> ('k, 's) Topic.t -> ('k -> 's Async.t) -> unit
@@ -1597,7 +1607,8 @@ module Server : sig
         key starts the 30 s again), so the first subscribe of the page gets
         no state again; a change of the key ({!changed}, a bus note, a
         restart of the bus) drops such a state. A session keeps at most
-        [per_session] such states, a node at most [total]. The loaded state of a key is shared by every subscriber
+        [max_kept_states_per_session] such states, a node at most
+        [max_kept_states] (see {!node}). The loaded state of a key is shared by every subscriber
         of the key on the node, so the loader gets no request and must not
         depend on who asks: [allow] decides who may read a key. [allow] (default: always) runs on each subscribe, with the
         WebSocket upgrade request, and on each server render of

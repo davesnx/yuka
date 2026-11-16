@@ -70,8 +70,10 @@ and node = {
   table : entry Web.table;
   mutable log : Types.log_level -> string -> unit;
   own_log : bool;
-  per_session : int;
-  total : int;
+  max_sockets : int;
+  max_sockets_per_session : int;
+  max_kept_states : int;
+  max_kept_states_per_session : int;
   kept_by : int Web.table;
   mutable kept_total : int;
   mutable rendering : (string * bool ref) list;
@@ -94,15 +96,18 @@ let max_note = 7_900
 let keep_seconds = 30.
 let topics : (string * served) list ref = ref []
 
-let node ?log ?(per_session = 16) ?(total = 10_000) () =
+let node ?log ?(max_sockets = 10_000) ?(max_sockets_per_session = 16) ?(max_kept_states = 10_000)
+    ?(max_kept_states_per_session = 16) () =
   let random = Random.State.make_self_init () in
   {
     identity = string_of_int (Random.State.bits random) ^ "." ^ string_of_int (Random.State.bits random);
     table = Web.table ();
     log = (match log with Some f -> f | None -> fun level m -> !Types.default_log level m);
     own_log = Option.is_some log;
-    per_session;
-    total;
+    max_sockets;
+    max_sockets_per_session;
+    max_kept_states;
+    max_kept_states_per_session;
     kept_by = Web.table ();
     kept_total = 0;
     rendering = [];
@@ -517,7 +522,7 @@ let run ?node ~sleep (peer : peer) ~verify_csrf ~token (c : connection) =
   in
   let session = peer.session () in
   let same = List.filter (fun x -> x.peer.session () = session) node.conns in
-  if List.length node.conns >= node.total || List.length same >= node.per_session then conn.stop 1013
+  if List.length node.conns >= node.max_sockets || List.length same >= node.max_sockets_per_session then conn.stop 1013
   else begin
     node.conns <- conn :: node.conns;
     watch 10.;
@@ -537,8 +542,8 @@ let expire ~sleep e =
 let keep ~sleep node (peer : peer) name wire json =
   match peer.session () with
   | Some session
-    when node.kept_total < node.total
-         && Option.value (Web.table_get node.kept_by session) ~default:0 < node.per_session
+    when node.kept_total < node.max_kept_states
+         && Option.value (Web.table_get node.kept_by session) ~default:0 < node.max_kept_states_per_session
          && not (Web.table_has node.table (entry_key name wire)) ->
       let e =
         { home = node; topic = name; wire; state = None; text = None; size = 0; seq = 0; keeper = Some session;

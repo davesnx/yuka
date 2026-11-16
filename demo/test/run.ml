@@ -264,7 +264,9 @@ let form_post () =
 
 let prerendered () =
   let out = Filename.temp_dir "yuka_demo" "" in
-  Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ()) Yuka_routes.app);
+  (match Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ()) Yuka_routes.app) with
+  | Ok () -> ()
+  | Error m -> Alcotest.fail m);
   let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ()) Yuka_routes.app
   in
   let call meth =

@@ -4,10 +4,12 @@ let current : current Eio.Fiber.key = Eio.Fiber.create_key ()
 
 exception Request_ended
 
-let switch () =
-  match Eio.Fiber.get current with
-  | Some c -> c.sw
-  | None -> invalid_arg "Yuka_tapak.switch: not inside a request of Yuka_tapak.handler"
+let switch () = Option.map (fun c -> c.sw) (Eio.Fiber.get current)
+
+let switch_exn () =
+  match switch () with
+  | Some sw -> sw
+  | None -> invalid_arg "Yuka_tapak.switch_exn: not inside a request of Yuka_tapak.handler"
 
 let await async =
   match Yuka.Async.status async with

@@ -34,9 +34,12 @@ val sessions : Tapak.middleware
     first request already has a session. The live socket and
     [/_yuka/csrf] need it. *)
 
-val switch : unit -> Eio.Switch.t
-(** The switch of the current request, inside {!handler}. Raises
-    [Invalid_argument] outside a request. *)
+val switch : unit -> Eio.Switch.t option
+(** The switch of the current request, inside {!handler}. [None] outside a
+    request. *)
+
+val switch_exn : unit -> Eio.Switch.t
+(** {!switch}, but raises [Invalid_argument] outside a request. *)
 
 val await : 'a Yuka.Async.t -> ('a, string) result
 (** Waits for the value. A failed [Async] gives [Error] with its message. *)

@@ -6,6 +6,7 @@ First release on opam.
 
 ### yuka
 
+- Breaking: `Server.Live.node` takes `?max_sockets` (default 10,000) and `?max_sockets_per_session` (default 16) for the open live sockets, and `?max_kept_states` (default 10,000) and `?max_kept_states_per_session` (default 16) for the states that server renders keep, in place of `?total` and `?per_session`, which set both (#29, @davesnx)
 - Breaking: `Yuka.owner` is now `Yuka.with_owner`, and the prop `of_=` of `<Yuka.Context.Provide>` is now `context=`: write `<Yuka.Context.Provide context=theme value=dark>`. `Context.bind` has a doc comment (#29, @davesnx)
 - Breaking: `Yuka.Server.Action.make` is `Yuka.Server.Action.implement` and `Yuka.Server.Live.serve` is `Yuka.Server.Live.implement`, as `Yuka.Server.Form.implement`: each registers the server code of an action, a topic or a form that the shared code declares. The arguments do not change. The message of a second `Live.implement` of a topic is "already implemented" (#29, @davesnx)
 - Breaking: the request of an action, a form action or a live `allow` is `Yuka.Server.request`, read with `Yuka.Server.Request.header`, `session`, `meth` and `path`; it was `Yuka.Server.context` and `Yuka.Server.Context`, which `open Yuka.Server` in `Routes.ml` put over `Yuka.Context`. `Yuka.Server.Testing.context` is `Yuka.Server.Testing.request` (#29, @davesnx)
@@ -178,6 +179,7 @@ First release on opam.
 
 ### yuka-dream
 
+- Breaking: `Yuka_dream.prerender` gives `(unit, string) result Lwt.t`: `Error` with a message that names the directory, and nothing written, when `out` is inside a served directory, in place of `Invalid_argument` (#29, @davesnx)
 - `Yuka_dream` gives `None` for the session and the CSRF token of a request that no session middleware runs: it catches the `Failure "Missing session middleware"` of `Dream.session_id` and `Dream.csrf_token`. Dream still logs that error (@davesnx)
 - `Yuka_dream.handler ?node` serves `GET /_yuka/live` (live data) for a live node; it needs Dream sessions that every server process shares and that survive a restart (`Dream.cookie_sessions` with `Dream.set_secret`) (@davesnx)
 - `Yuka_dream.handler` sends the server log to `Dream.sub_log "yuka"` (`` `Warn `` is Dream's `` `Warning ``) when the config has no `log`; remove a `~log_error` that called `Dream.error` (@davesnx)
@@ -191,4 +193,5 @@ First release on opam.
 
 ### yuka-tapak
 
+- Breaking: `Yuka_tapak.switch` gives `None` outside a request, and `Yuka_tapak.switch_exn` raises `Invalid_argument` there, as `switch` did (#29, @davesnx)
 - New package `yuka-tapak` (experiment, not released): the request cycle on [tapak](https://github.com/syaiful6/tapak), in direct style on Eio, on one domain. `Yuka_tapak.handler ~sw ~fs` is a `Tapak.handler` and goes in the `~not_found` of a tapak router; `Yuka_tapak.sessions` is the middleware for the session and CSRF cookies (without it, the request has no session); `await` (an `Error` with the message for a failed `Async`), `await_exn` (a `Failure` in its place) and `async` convert between `Yuka.Async.t` and fibers. No `prerender`. `tapak`, `sch` and `cows` are not in opam: `make pin` pins them (@davesnx)

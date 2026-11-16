@@ -12,7 +12,7 @@ let home () =
 let slow () =
   Yuka.Server.page ~title:"Slow" (fun () ->
       let data =
-        Yuka_tapak.async ~sw:(Yuka_tapak.switch ()) (fun () ->
+        Yuka_tapak.async ~sw:(Yuka_tapak.switch_exn ()) (fun () ->
             Eio_unix.sleep 1.;
             "loaded after one second")
       in

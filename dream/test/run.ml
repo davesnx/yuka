@@ -24,7 +24,10 @@ let with_stderr f =
     f;
   In_channel.with_open_bin file In_channel.input_all
 
-let prerender out = Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app)
+let prerender out =
+  match Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app) with
+  | Ok () -> ()
+  | Error m -> Alcotest.fail m
 
 let contains text part =
   let n = String.length part in
@@ -116,7 +119,10 @@ let prerender_dev_off () =
   Unix.putenv "YUKA_DEV_FILE" "/nonexistent/yuka-dev";
   let out = Filename.temp_dir "yuka_out" "" in
   ignore
-    (with_stderr (fun () -> Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ~dev:true ()) Yuka_routes.app)));
+    (with_stderr (fun () ->
+         match Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ~dev:true ()) Yuka_routes.app) with
+         | Ok () -> ()
+         | Error m -> Alcotest.fail m));
   let read name = In_channel.with_open_bin (Filename.concat out name) In_channel.input_all in
   check_true "a page" (contains (read "index.html") "<title>Home</title>");
   check_true "no dev script in a page" (not (contains (read "index.html") "EventSource"));
@@ -129,8 +135,8 @@ let out_inside_a_served_dir () =
   List.iter
     (fun out ->
       match Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app) with
-      | () -> Alcotest.failf "%s accepted" out
-      | exception Invalid_argument m -> check_true "names the directory" (contains m dir))
+      | Ok () -> Alcotest.failf "%s accepted" out
+      | Error m -> check_true "names the directory" (contains m dir))
     [ Filename.concat dir "site"; dir; Filename.concat dir "a/../site" ];
   Alcotest.(check (list string)) "nothing written" [ "s.css" ] (List.map fst (files dir ""))
 

@@ -400,7 +400,7 @@ let review_cases =
         hang_up a );
     ( "connection limits per session and in total close 1013",
       fun () ->
-        let node = Live.node ~per_session:2 ~total:1_000_000 () in
+        let node = Live.node ~max_sockets_per_session:2 () in
         let a, _ = open_ ~node ~session:"limited" () in
         let b, _ = open_ ~node ~session:"limited" () in
         let c, _ = open_ ~node ~session:"limited" () in
@@ -409,7 +409,7 @@ let review_cases =
         Alcotest.(check (list (option int))) "third of a session" [ None; None; Some 1013; None; None ]
           [ a.closed; b.closed; c.closed; d.closed; x.closed ];
         List.iter hang_up [ a; b; d; x ];
-        let node = Live.node ~total:1 () in
+        let node = Live.node ~max_sockets:1 () in
         let e, _ = open_ ~node () in
         let f, _ = open_ ~node () in
         Alcotest.(check (option int)) "over the total" (Some 1013) f.closed;
@@ -1045,9 +1045,9 @@ let kept_cases =
         Alcotest.(check (list string)) "the new state, not resumed" [ "state" ] (kinds b);
         Alcotest.(check (option string)) "state" (encoded one_changed) (replayed b);
         hang_up b );
-    ( "a session keeps at most per_session entries, a node at most total",
+    ( "a session keeps at most max_kept_states_per_session entries, a node at most max_kept_states",
       fun () ->
-        let node = Live.node ~per_session:2 ~total:3 () in
+        let node = Live.node ~max_kept_states_per_session:2 ~max_kept_states:3 () in
         stored_items := List.init 6 (fun i -> ("q" ^ string_of_int i, letters));
         let kept session key = render_state ~node ~session key <> None in
         Alcotest.(check (list bool)) "per session" [ true; true; false ] (List.map (kept "one") [ "q0"; "q1"; "q2" ]);

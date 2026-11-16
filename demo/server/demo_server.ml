@@ -149,7 +149,8 @@ let () =
     end
   end;
   let app = Demo_app.Yuka_routes.app in
-  if !prerender <> "" then Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app)
+  if !prerender <> "" then (
+    match Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app) with Ok () -> () | Error message -> stop message)
   else if !second = 0 then
     Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ refresh_store @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
     @@ Yuka_dream.handler config app

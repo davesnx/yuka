@@ -30,7 +30,7 @@ let warned () =
 let slow () =
   Yuka.Server.page ~title:"Slow" (fun () ->
       let data =
-        Yuka_tapak.async ~sw:(Yuka_tapak.switch ()) (fun () ->
+        Yuka_tapak.async ~sw:(Yuka_tapak.switch_exn ()) (fun () ->
             Eio_unix.sleep 0.05;
             "slow data")
       in
@@ -47,7 +47,7 @@ let stuck () =
 
 let lingering () =
   Yuka.Server.page (fun () ->
-      ignore (Yuka_tapak.async ~sw:(Yuka_tapak.switch ()) (fun () -> Eio_unix.sleep 5.));
+      ignore (Yuka_tapak.async ~sw:(Yuka_tapak.switch_exn ()) (fun () -> Eio_unix.sleep 5.));
       Yuka.text "answered")
 
 let not_found ~path () = Yuka.Server.page ~title:"Missing" (fun () -> Yuka.text ("missing " ^ path))

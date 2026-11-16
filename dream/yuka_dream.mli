@@ -22,7 +22,7 @@ val handler :
     node. *)
 
 val prerender :
-  out:string -> Yuka.Server.config -> Dream.request Yuka.Server.app -> unit Lwt.t
+  out:string -> Yuka.Server.config -> Dream.request Yuka.Server.app -> (unit, string) result Lwt.t
 (** Writes the pages of the app to the directory [out]:
 
     - It starts from [Yuka.Server.Prerender.seeds] and renders each path
@@ -39,8 +39,9 @@ val prerender :
     page that renders a [Yuka.Live.use] is a 500 with a log message, so it is
     not written. A file in the [prerendered] directory of the config is not
     read. Files already in [out] are replaced; running it twice gives the
-    same files. Raises [Invalid_argument] at once when [out] is inside a
-    directory of [Yuka.Server.Prerender.served_dirs]. *)
+    same files. Gives [Error] with a message that names the directory, and
+    writes nothing, when [out] is inside a directory of
+    [Yuka.Server.Prerender.served_dirs]. *)
 
 val tree_digest : string -> string
 (** A digest of the paths and contents of every file under a directory
