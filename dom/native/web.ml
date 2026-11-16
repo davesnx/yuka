@@ -367,10 +367,45 @@ let take_buffer () =
 
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
 
-type 'a local = 'a Domain.DLS.key
+module Threads = Ephemeron.K1.Make (struct
+  type t = Thread.t
 
-let local f = Domain.DLS.new_key f
-let local_get = Domain.DLS.get
+  let equal = ( == )
+  let hash = Thread.id
+end)
+
+type 'a last = Nobody | Last of Thread.t * 'a
+type 'a slots = { mutable last : 'a last; values : 'a Threads.t; lock : Mutex.t }
+type 'a local = { init : unit -> 'a; mutable domains : 'a slots array }
+
+let slots () = { last = Nobody; values = Threads.create 8; lock = Mutex.create () }
+let local init = { init; domains = [| slots () |] }
+let growing = Mutex.create ()
+
+let grow k i =
+  Mutex.protect growing (fun () ->
+      let d = k.domains in
+      let n = Array.length d in
+      if i >= n then k.domains <- Array.init (max (i + 1) (2 * n)) (fun j -> if j < n then d.(j) else slots ()));
+  k.domains.(i)
+
+let local_slow k s self =
+  let v =
+    match Mutex.protect s.lock (fun () -> Threads.find_opt s.values self) with
+    | Some v -> v
+    | None ->
+        let v = k.init () in
+        Mutex.protect s.lock (fun () -> Threads.replace s.values self v);
+        v
+  in
+  s.last <- Last (self, v);
+  v
+
+let local_get k =
+  let d = k.domains and i = Domain.self_index () in
+  let s = if i < Array.length d then Array.unsafe_get d i else grow k i in
+  let self = Thread.self () in
+  match s.last with Last (t, v) when t == self -> v | _ -> local_slow k s self
 let rec has_upper s i = i < String.length s && match String.unsafe_get s i with 'A' .. 'Z' -> true | _ -> has_upper s (i + 1)
 let lowercase s = if has_upper s 0 then String.lowercase_ascii s else s
 
