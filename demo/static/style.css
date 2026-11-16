@@ -338,6 +338,10 @@ a.version:hover { color: var(--text); }
 .not-found a, .about a { color: var(--accent); }
 .new-issue-page { padding: 29px 38px; max-width: 912px; display: flex; flex-direction: column; gap: 14px; }
 .issue-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 .new-issue-button {
   width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--bg-selected);

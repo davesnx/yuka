@@ -74,6 +74,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeo
   session.entry <- entry;
   session.current <- current;
   session.id_prefix <- id_prefix;
+  session.id_scope <- id_prefix ^ "p-";
   let shell = Printer.print session (fun () -> build ()) in
   let fills =
     List.exists

@@ -158,6 +158,10 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable context : context option;
     mutable shared : (Scheduler.binding * string) list;
     mutable contexts : int;
+    mutable id_scope : string;
+    mutable id_count : int;
+    mutable page_scope : string;
+    mutable page_count : int;
   }
 
   let snapshot s = { s with streaming = s.streaming }
@@ -165,7 +169,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context; shared; contexts } =
+        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -187,7 +191,11 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     s.held <- held;
     s.context <- context;
     s.shared <- shared;
-    s.contexts <- contexts
+    s.contexts <- contexts;
+    s.id_scope <- id_scope;
+    s.id_count <- id_count;
+    s.page_scope <- page_scope;
+    s.page_count <- page_count
 
 let warned = ref false
 
@@ -200,6 +208,35 @@ let log name value =
 let current_session : session option ref = ref None
 let local_session = if Scheduler.js then None else Some (Web.local (fun () -> ref None))
 let current_session () = match local_session with Some k when not Scheduler.js -> Web.local_get k | _ -> current_session
+
+type ids = { mutable scope : string; mutable count : int }
+
+let browser_ids = { scope = "c-"; count = 0 }
+
+let next_id () =
+  match !(current_session ()) with
+  | Some s ->
+      s.id_count <- s.id_count + 1;
+      s.id_scope ^ string_of_int s.id_count
+  | None ->
+      browser_ids.count <- browser_ids.count + 1;
+      browser_ids.scope ^ string_of_int browser_ids.count
+
+let with_browser_ids scope f =
+  let { scope = outer; count } = browser_ids in
+  let restore () =
+    browser_ids.scope <- outer;
+    browser_ids.count <- count
+  in
+  browser_ids.scope <- scope;
+  browser_ids.count <- 0;
+  match f () with
+  | r ->
+      restore ();
+      r
+  | exception e ->
+      restore ();
+      raise e
 
 let level_name = function `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug"
 

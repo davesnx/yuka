@@ -938,12 +938,25 @@ await step("5. failure path", async () => {
   check("5e server status unchanged", statusSlug(await statusOf(id)) === before);
 });
 
+const fieldLabels = async (p: Page, root: string) => {
+  const out: string[] = [];
+  for (const label of await p.locator(`${root} label`).all()) {
+    const id = await label.getAttribute("for");
+    const fields = id ? p.locator(`[id="${id}"]`) : null;
+    const name = fields && (await fields.count()) === 1 ? await fields.getAttribute("name") : "none";
+    out.push(`${await label.textContent()}:${name}`);
+  }
+  return out.join(",");
+};
+
 await step("6. new issue dialog", async () => {
   const listUrl = page.url();
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("c");
   await page.waitForSelector(".dialog", { timeout: 2000 });
   check("6a c opens dialog", (await page.locator(".dialog h2").textContent()) === "New issue");
+  const dialogLabels = await fieldLabels(page, ".dialog");
+  check("6a2 the title and the description have a linked label", dialogLabels === "Title:title,Description:description", String(dialogLabels));
   await page.screenshot({ path: join(shots, "dialog.png") });
   await page.keyboard.press("Escape");
   await page.waitForTimeout(100);
@@ -1023,6 +1036,8 @@ await step("6f. new issue form with JavaScript off", async () => {
   const statuses: number[] = [];
   pg.on("response", (r) => { if (r.request().method() === "POST") statuses.push(r.status()); });
   await pg.goto(base + "/new", { waitUntil: "load" });
+  const pageLabels = await fieldLabels(pg, ".new-issue-page");
+  check("6f.0 the server HTML links the title and description labels", pageLabels === "Title:title,Description:description", String(pageLabels));
   await pg.fill('input[name="title"]', "");
   await pg.fill('textarea[name="description"]', "kept by the server");
   await pg.locator('button[type="submit"]').click();
