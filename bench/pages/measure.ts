@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { loadavg } from "node:os";
 import { gzipSync } from "node:zlib";
 import { parseArgs } from "node:util";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type BrowserContext } from "playwright-core";
 
 const { values: options } = parseArgs({
   options: {
@@ -75,8 +75,19 @@ function inlineScripts(html: string): string[] {
 const plainHtml = (html: string) =>
   html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<link\b[^>]*rel\s*=\s*["']?modulepreload["']?[^>]*>/gi, "");
 
-async function jsBytes(browser: Browser, url: string, html: string): Promise<Js> {
+// Headless Chromium keeps its mouse over the page and can send a pointermove after layout,
+// which loads code meant for user intent, such as navigation (issue #36).
+const noPointer = `for (const t of ["pointerover", "pointerout", "pointermove", "mouseover", "mouseout", "mousemove"])
+  window.addEventListener(t, (e) => e.stopImmediatePropagation(), true);`;
+
+async function newContext(browser: Browser): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await context.addInitScript(noPointer);
+  return context;
+}
+
+async function jsBytes(browser: Browser, url: string, html: string): Promise<Js> {
+  const context = await newContext(browser);
   try {
     const page = await context.newPage();
     const pending: Promise<{ url: string; body: Buffer } | null>[] = [];
@@ -115,7 +126,7 @@ const observe = `
 `;
 
 async function timing(browser: Browser, url: string, plain: string | null): Promise<Timing> {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await newContext(browser);
   try {
     const page = await context.newPage();
     if (plain !== null)

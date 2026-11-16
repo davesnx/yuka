@@ -60,13 +60,14 @@ let interleaved () =
       (fun () ->
         let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
         go 3;
+        clean "interleaved, worker A";
         r)
       (fun () ->
         wait 1;
         outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))
   in
-  check "interleaved: A ends first and raises" (overlapped a) (show a);
-  check "interleaved: B ends second and raises" (overlapped b) (show b);
+  check "interleaved: A" (a = Ok "<p>a</p>") (show a);
+  check "interleaved: B" (b = Ok "<p>b</p>") (show b);
   clean "interleaved"
 
 let listener () =
@@ -75,13 +76,14 @@ let listener () =
       (fun () ->
         let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
         go 3;
+        clean "memo on another thread, render worker";
         r)
       (fun () ->
         wait 1;
         let v = Yuka.State.get (Yuka.State.memo (fun () -> go 2; wait 3; 7)) in
         Ok (string_of_int v))
   in
-  check "memo on another thread: the render raises" (overlapped a) (show a);
+  check "memo on another thread: the render" (a = Ok "<p>a</p>") (show a);
   check "memo on another thread: the memo" (m = Ok "7") (show m);
   clean "memo on another thread"
 
@@ -90,16 +92,94 @@ let owner_cursor () =
     in_parallel
       (fun () ->
         wait 1;
-        outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "a") ])))
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "a") ])) in
+        clean "owner on another thread, render worker";
+        r)
       (fun () ->
         let (), dispose = owner (fun () -> go 1; wait 2) in
         dispose ();
         go 3;
         Ok "")
   in
-  check "owner on another thread: the render raises" (overlapped a) (show a);
+  check "owner on another thread: the render" (a = Ok "<p>a</p>") (show a);
   check "owner on another thread: the owner" (o = Ok "") (show o);
   clean "owner on another thread"
+
+let c : string Context.t = Context.make ~name:"overlap" ()
+let read () = match Context.get c with Some v -> v | None -> "none"
+
+let context_interleaved () =
+  let a, b =
+    in_parallel
+      (fun () ->
+        let r =
+          outcome (fun () ->
+              Server.to_string (fun () ->
+                  Context.provide c "a" (fun () ->
+                      element "p" []
+                        [
+                          hole (fun () ->
+                              go 1;
+                              wait 2;
+                              let v = read () in
+                              go 3;
+                              wait 4;
+                              text v);
+                        ])))
+        in
+        clean "context on two threads, worker A";
+        r)
+      (fun () ->
+        wait 1;
+        let r =
+          outcome (fun () ->
+              Server.to_string (fun () ->
+                  Context.provide c "b" (fun () ->
+                      element "p" []
+                        [
+                          hole (fun () ->
+                              go 2;
+                              wait 3;
+                              let v = read () in
+                              go 4;
+                              text v);
+                        ])))
+        in
+        clean "context on two threads, worker B";
+        r)
+  in
+  check "context on two threads: A" (a = Ok "<p>a</p>") (show a);
+  check "context on two threads: B" (b = Ok "<p>b</p>") (show b);
+  clean "context on two threads"
+
+let context_no_provider () =
+  let a, b =
+    in_parallel
+      (fun () ->
+        let r =
+          outcome (fun () ->
+              Server.to_string (fun () ->
+                  Context.provide c "a" (fun () ->
+                      element "p" []
+                        [
+                          hole (fun () ->
+                              go 1;
+                              wait 2;
+                              text (read ()));
+                        ])))
+        in
+        clean "context without provide on another thread, worker A";
+        r)
+      (fun () ->
+        wait 1;
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> text (read ())) ])) in
+        go 2;
+        clean "context without provide on another thread, worker B";
+        r)
+  in
+  check "context without provide on another thread: A" (a = Ok "<p>a</p>") (show a);
+  check "context without provide on another thread: B" (b = Ok "<p>none</p>") (show b);
+  clean "context without provide on another thread"
 
 let domains_interleaved () =
   let a, b =
@@ -146,8 +226,8 @@ let threads_in_a_domain () =
                wait 1;
                outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))))
   in
-  check "interleaved threads in one other domain: A raises" (overlapped a) (show a);
-  check "interleaved threads in one other domain: B raises" (overlapped b) (show b);
+  check "interleaved threads in one other domain: A" (a = Ok "<p>a</p>") (show a);
+  check "interleaved threads in one other domain: B" (b = Ok "<p>b</p>") (show b);
   clean "interleaved threads in one other domain"
 
 let nested () =
@@ -181,13 +261,65 @@ let sequential () =
   check "one after the other on two threads: second" (b = Ok page_html) (show b);
   clean "one after the other"
 
+module Deep = Stdlib.Effect.Deep
+
+type _ Stdlib.Effect.t += Suspend : unit Stdlib.Effect.t
+
+let fiber f =
+  let result = ref (Ok "") and paused = ref None in
+  Deep.match_with f ()
+    {
+      retc = (fun r -> result := r);
+      exnc = raise;
+      effc =
+        (fun (type b) (e : b Stdlib.Effect.t) ->
+          match e with
+          | Suspend -> Some (fun (k : (b, unit) Deep.continuation) -> paused := Some (k : (unit, unit) Deep.continuation))
+          | _ -> None);
+    };
+  (result, paused)
+
+let resume paused = Option.iter (fun k -> Deep.continue k ()) !paused
+
+let suspending name () =
+  let suspend () =
+    Stdlib.Effect.perform Suspend;
+    text name
+  in
+  outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole suspend ]))
+
+let fibers_nested () =
+  let a, paused = fiber (suspending "a") in
+  let b = outcome (fun () -> Server.to_string page) in
+  resume paused;
+  check "a render while a fiber waits: the render" (b = Ok page_html) (show b);
+  check "a render while a fiber waits: the fiber" (!a = Ok "<p>a</p>") (show !a);
+  clean "a render while a fiber waits"
+
+let fibers_interleaved () =
+  let a, paused_a = fiber (suspending "a") in
+  let b, paused_b = fiber (suspending "b") in
+  resume paused_a;
+  resume paused_b;
+  check "interleaved fibers on one thread: A raises" (overlapped !a) (show !a);
+  check "interleaved fibers on one thread: B raises" (overlapped !b) (show !b);
+  clean "interleaved fibers on one thread"
+
 let () =
   nested ();
   sequential ();
   interleaved ();
   listener ();
   owner_cursor ();
+  context_interleaved ();
+  context_no_provider ();
   domains_interleaved ();
   domains_memo_and_owner ();
   threads_in_a_domain ();
-  if !failed then exit 1 else print_endline "overlap: interleaved renders on threads of one domain raise; nested, sequential and other-domain renders do not"
+  fibers_nested ();
+  fibers_interleaved ();
+  if !failed then exit 1
+  else
+    print_endline
+      "overlap: renders that interleave on threads and domains return their HTML; renders that interleave as fibers on \
+       one thread raise"

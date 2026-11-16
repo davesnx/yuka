@@ -17,10 +17,9 @@ let () =
     done
   in
   List.iter Thread.join (List.init threads (fun k -> Thread.create (worker k) ()));
-  if Atomic.get wrong > 0 then begin
-    Printf.printf "%d of %d renders got another thread's HTML\n" (Atomic.get wrong) (threads * rounds);
+  if Atomic.get wrong > 0 || Atomic.get overlaps > 0 then begin
+    Printf.printf "%d of %d renders got another thread's HTML, %d raised an overlap\n" (Atomic.get wrong) (threads * rounds)
+      (Atomic.get overlaps);
     exit 1
   end
-  else
-    Printf.printf "%d renders on %d threads, each its own HTML or an overlap error (%d)\n" (threads * rounds) threads
-      (Atomic.get overlaps)
+  else Printf.printf "%d renders on %d threads, each its own HTML\n" (threads * rounds) threads

@@ -379,8 +379,9 @@ val with_unique_id : (string -> 'k element) -> 'k element
     [id], call [with_unique_id] again or add a suffix that starts with a letter:
     [id ^ "-error"].
 
-    The function runs as a {!hole}: when it reads a State, it runs again
-    with a new [id] and replaces its output. An element made in the browser
+    The function runs once and does not track a State that it reads, so
+    an [input] in it keeps its text and focus; to show a State, put a
+    {!hole} inside. An element made in the browser
     after the island has hydrated (a new list row, a value of an {!Await}
     that arrives later, or a render with no server HTML) gets an [id] that
     is unique but not equal to one from the server. The form of the [id]
@@ -845,12 +846,12 @@ val runtime_form_fields :
   encode:('i -> (string * string) list) ->
   ('i, 'f) Form.t
 
-val runtime_form_field : 'f runtime_form_decoding -> 'f -> string -> 'a Form.kind -> 'a option
+val runtime_form_field : 'f runtime_form_decoding -> 'f -> string -> 'a Form.field_kind -> 'a option
 val runtime_form_get : 'a option -> 'a
 (** Raises [Invalid_argument] on [None]. *)
 
 val runtime_form_finish : 'f runtime_form_decoding -> (unit -> 'i) -> ('i, 'f Form.errors) result
-val runtime_form_put : string -> 'a Form.kind -> 'a -> (string * string) list
+val runtime_form_put : string -> 'a Form.field_kind -> 'a -> (string * string) list
 
 (** {1 Private}
 
@@ -1503,10 +1504,10 @@ module Server : sig
       because the browser hydrates nothing else. The function builds the tree
       with effects off, so component bodies do not run effects.
 
-      Renders on different domains can run at the same time. Run one
-      server render at a time per domain: renders that overlap on system
-      threads of one domain share state, and each of them raises [Failure].
-      A render inside another on the same thread is allowed. *)
+      Renders on different domains and system threads can run at the same
+      time. Renders that interleave as fibers on one system thread, because
+      a component suspends its fiber, share state, and each of them raises
+      [Failure]. A render inside another on the same thread is allowed. *)
 
   type context
   (** The request that runs an action, a form action or a live [allow]. *)

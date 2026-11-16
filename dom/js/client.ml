@@ -321,6 +321,18 @@ let add_handler doc el event handler =
     end
   end
 
+let has_handler el event run =
+  let hs = prop el (handlers_key event) in
+  let found = ref false in
+  if hs != Js.undefined then begin
+    let hs = defined hs in
+    for i = 0 to Array.length hs - 1 do
+      let h = get hs i in
+      if live h && h.run == run then found := true
+    done
+  end;
+  !found
+
 
 let compile doc svg (template : template) =
   let t = Web.create_element doc "template" in

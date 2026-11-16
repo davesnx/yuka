@@ -67,6 +67,22 @@ let invalid_fields () =
     ]
     (tags html)
 
+let contains html part =
+  let n = String.length part in
+  let rec go i = i + n <= String.length html && (String.sub html i n = part || go (i + 1)) in
+  go 0
+
+let form_errors () =
+  let alert = {|<div role="alert" tabindex="-1" data-yuka-errors="">|} in
+  let focused = {|<div role="alert" tabindex="-1" data-yuka-errors="" autofocus="">|} in
+  let with_fields = render ~form:Forms_shared.Invalid.sent () in
+  Alcotest.(check bool) "with field errors: the alert" true (contains with_fields (alert ^ "<i>Whole form</i>"));
+  let action, key, values, _ = Forms_shared.Invalid.sent in
+  let only = render ~form:(action, key, values, [ (None, "Whole form") ]) () in
+  Alcotest.(check bool) "only form errors: autofocus on the alert" true (contains only (focused ^ "<i>Whole form</i>"));
+  Alcotest.(check (list string)) "only form errors: no field mark" [] (attribute_values only "aria-invalid");
+  Alcotest.(check bool) "no error: an empty alert" true (contains (render ()) (alert ^ "</div>"))
+
 let valid_fields () =
   let clean = render () in
   Alcotest.(check (list string)) "no aria-invalid" [] (attribute_values clean "aria-invalid");
@@ -89,5 +105,6 @@ let () =
         [
           Alcotest.test_case "a failed post marks its fields" `Quick invalid_fields;
           Alcotest.test_case "no error, no mark" `Quick valid_fields;
+          Alcotest.test_case "errors for the whole form" `Quick form_errors;
         ] );
     ]

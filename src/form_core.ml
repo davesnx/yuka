@@ -1,5 +1,5 @@
 type 'f errors = ('f option * string) list
-type 'a kind = { read : string list -> ('a, string) result; write : 'a -> string list }
+type 'a field_kind = { read : string list -> ('a, string) result; write : 'a -> string list }
 
 let first k = function v :: _ -> k v | [] -> Error "Missing"
 let string = { read = first (fun v -> Ok v); write = (fun v -> [ v ]) }

@@ -57,6 +57,35 @@ let focused_name : unit -> string =
 let set_field : string -> string -> unit =
   [%mel.raw "function (sel, v) { document.querySelector(sel).value = v }"]
 
+let attribute_nth : int -> string -> string -> string =
+  [%mel.raw
+    {|function (i, sel, name) { const e = document.querySelectorAll('form')[i].querySelector(sel); return e ? (e.getAttribute(name) ?? "none") : "missing" }|}]
+
+let set_input_nth : int -> string -> unit =
+  [%mel.raw "function (i, v) { document.querySelectorAll('form')[i].querySelector('input[name=body]').value = v }"]
+
+let submit_nth : int -> unit =
+  [%mel.raw
+    {|function (i) {
+  document.querySelectorAll('form')[i].dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+}|}]
+
+let focused_form : unit -> int =
+  [%mel.raw
+    "function () { const f = document.activeElement && document.activeElement.closest('form'); return f ? [].indexOf.call(document.querySelectorAll('form'), f) : -1 }"]
+
+let focused_alert : unit -> bool =
+  [%mel.raw "function () { const e = document.activeElement; return !!e && e.getAttribute('role') === 'alert' }"]
+
+let record_console : unit -> unit =
+  [%mel.raw
+    "function () { globalThis.__error = globalThis.__error || console.error; globalThis.__errors = []; console.error = function (m) { globalThis.__errors.push(String(m)) } }"]
+
+let restore_console : unit -> unit = [%mel.raw "function () { if (globalThis.__error) console.error = globalThis.__error }"]
+
+let console_errors : unit -> string =
+  [%mel.raw "function () { return (globalThis.__errors || []).join(' | ') }"]
+
 let after_ms : int -> (unit -> unit) -> unit =
   [%mel.raw "function (ms, f) { setTimeout(function () { f() }, ms) }"]
 
@@ -70,8 +99,8 @@ let view () =
         [
           element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
           element "i" [] [ hole (fun () -> text (if Form.pending form then "pending" else "idle")) ];
-          Form.error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
-          Form.errors_view form (fun m -> element "u" [] [ text m ]);
+          Form.field_error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
+          Form.form_errors_view form (fun m -> element "u" [] [ text m ]);
         ])
     ()
 
@@ -85,7 +114,7 @@ let plain_view key () =
       fragment
         [
           element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
-          Form.error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
+          Form.field_error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
         ])
     ()
 
@@ -95,7 +124,18 @@ let redirect_view () =
       fragment
         [
           element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
-          Form.errors_view form (fun m -> element "u" [] [ text m ]);
+          Form.form_errors_view form (fun m -> element "u" [] [ text m ]);
+        ])
+    ()
+
+let author_view () =
+  Form.make ~action:jot ~key:"au"
+    ~children:(fun form ->
+      fragment
+        [
+          element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
+          element "input" [ attr "name" "note"; attr "aria-invalid" "true" ] [];
+          Form.field_error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
         ])
     ()
 
@@ -121,6 +161,7 @@ let entries =
     entry_of "Second" (plain_view "b");
     entry_of "Btn" button_view;
     entry_of "Redirect" redirect_view;
+    entry_of "Author" author_view;
     entry_of "Toggled" toggled_view;
     entry_of "Invalid" Forms_shared.Invalid.view;
   ]
@@ -229,6 +270,7 @@ let async =
     ( "form: a redirect to another site is refused",
       fun finish ->
         start (Server.to_string (fun () -> island_of "Redirect" redirect_view));
+        record_console ();
         let answers =
           [ "javascript:alert(1)"; " JavaScript:alert(1)"; "https://evil.example/"; "//evil.example/x"; "data:text/html,x" ]
         in
@@ -236,7 +278,10 @@ let async =
           | [] ->
               finish (fun () ->
                   check "not followed" "" (String.concat "," !navigated);
-                  check "shown" "Yuka: refused a redirect to another site: data:text/html,x" (text_of "u");
+                  check "shown" "protocol error: refused a redirect" (text_of "u");
+                  check "the URL in the console" "true"
+                    (string_of_bool (Js.String.includes ~search:"data:text/html,x" (console_errors ())));
+                  restore_console ();
                   Yuka.stop ())
           | l :: rest ->
               set_input_in "r" "x";
@@ -245,6 +290,62 @@ let async =
               after_ms 10 (fun () -> go (i + 1) rest)
         in
         go 0 answers );
+    ( "form: two forms of one action and key: only the submitted form is marked and focused",
+      fun finish ->
+        record_console ();
+        start (Server.to_string (fun () -> fragment [ island_of "First" (plain_view "a"); island_of "First" (plain_view "a") ]));
+        set_input_nth 1 "x";
+        submit_nth 1;
+        respond 0 200 {|{"ok":{"errors":[["body","Too short"]]}}|};
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "the other form is not marked" "none" (attribute_nth 0 "input[name=body]" "aria-invalid");
+                check "the submitted form is marked" "true" (attribute_nth 1 "input[name=body]" "aria-invalid");
+                check "focus in the submitted form" "1" (string_of_int (focused_form ()));
+                check "dev warning" "true"
+                  (string_of_bool (Js.String.includes ~search:"two forms on this page" (console_errors ())));
+                restore_console ();
+                Yuka.stop ())) );
+    ( "form: an aria-invalid that the author set stays",
+      fun finish ->
+        start (Server.to_string (fun () -> island_of "Author" author_view));
+        set_input_in "au" "x";
+        submit_in "au";
+        respond 0 200 {|{"ok":{"errors":[["body","Too short"]]}}|};
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "the field with an error" "true" (attribute "input[name=body]" "aria-invalid");
+                check "the author's aria-invalid" "true" (attribute "input[name=note]" "aria-invalid");
+                Yuka.stop ())) );
+    ( "form: an error for the whole form is in an alert and takes the focus",
+      fun finish ->
+        start (Server.to_string island);
+        set_input "body" "x";
+        ignore (submit ());
+        respond 0 400 {|{"error":"Refused"}|};
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "in the alert" "Refused" (text_of "[role=alert] u");
+                check "focusable" "-1" (attribute "[role=alert]" "tabindex");
+                check "focus on the alert" "true" (string_of_bool (focused_alert ()));
+                Yuka.stop ())) );
+    ( "form: a 422 with only an error for the whole form hydrates with the same markup",
+      fun finish ->
+        let html =
+          Private.print
+            (let s = Private.session ~streaming:false ~islands_only:true in
+             Private.set_form s ("jot", "", [ ("body", "sent") ], [ (None, "Whole form") ]);
+             s)
+            (fun () -> Private.node (island ()))
+        in
+        start html;
+        let after = body_html () in
+        finish (fun () ->
+            check "server autofocus on the alert" "" (attribute "[role=alert]" "autofocus");
+            check "no autofocus on the field" "none" (attribute "input[name=body]" "autofocus");
+            check "error shown" "Whole form" (text_of "[role=alert] u");
+            check "same markup after hydration" html after;
+            Yuka.stop ()) );
     ( "form: with no redirect and no on_ok, reload the page URL",
       fun finish ->
         start (Server.to_string (fun () -> island_of "First" (plain_view "a")));

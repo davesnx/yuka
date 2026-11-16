@@ -7,7 +7,7 @@
   "pages": {
     "max_lcp_ratio": 2,
     "max_tbt_over_plain_ms": 50,
-    "max_js_raw": { "/": 195564, "/my": 195564, "/issue/YUK-1": 165744, "/about": 434 }
+    "max_js_raw": { "/": 196264, "/my": 196264, "/issue/YUK-1": 166444, "/about": 434 }
   },
   "comment": "Provisional. Ratios from 3 runs on 2026-11-16, load average 200 to 229 on a shared 512-core machine: keyed yuka/solid 1.058, 1.144 and 1.152 (the last from make bench-gate); ssr yuka-stream/solid-node 1.389, 1.603 and 1.368; LCP page/plain HTML 1.04 to 1.64; TBT 0 ms on every page. The server-reason-react limit is from bench/ssr/README.md (1.76 after ticket 31), since it is out of the build. max_js_raw is the exact raw bytes of JavaScript files and inline scripts of each page: change it with the change that changes the bytes. Set again on 5349ba5: pull requests 27, 28 and 30 grew / and /my to 200,388 B and /issue/YUK-1 to 170,568 B without a change here, and pull request 26 then moved the router code out of the start chunk. Raised by 830 B on each page for issue 11: the scheduler walks a chain of memos with a loop."
 }

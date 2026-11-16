@@ -84,7 +84,7 @@ let jot_form key =
       el "div"
         [
           el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form `Body) ] [];
-          Yuka.Form.error_view form `Body (fun ~id:_ m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
+          Yuka.Form.field_error_view form `Body (fun ~id:_ m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
         ])
     ()
 
@@ -115,9 +115,9 @@ module Pages = struct
                   [
                     el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form `Title) ] [];
                     el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form `Count) ] [];
-                    Yuka.Form.error_view form `Title (fun ~id:_ m -> el "p" [ text ("title error: " ^ m) ]);
-                    Yuka.Form.error_view form `Count (fun ~id:_ m -> el "p" [ text ("count error: " ^ m) ]);
-                    Yuka.Form.errors_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
+                    Yuka.Form.field_error_view form `Title (fun ~id:_ m -> el "p" [ text ("title error: " ^ m) ]);
+                    Yuka.Form.field_error_view form `Count (fun ~id:_ m -> el "p" [ text ("count error: " ^ m) ]);
+                    Yuka.Form.form_errors_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
                   ])
               ();
             jot_form "one";
