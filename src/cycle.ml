@@ -947,7 +947,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
       live =
         (fun name key ->
           live_used := true;
-          Live_server.ssr_state node context name key);
+          Live_server.ssr_state ~sleep node context name key);
     }
   in
   let env =

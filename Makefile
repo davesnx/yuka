@@ -101,12 +101,13 @@ bench: ## Build and run the browser benchmark
 
 BENCH_RUNS ?= 10
 BENCH_OUT ?= $(BUILD_DIR)/bench-keyed/result.json
+BENCH_APPS ?= vanillajs,solid,yuka
 
 .PHONY: bench-keyed
-bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUNS, BENCH_OUT, CHROME_PATH)
+bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUNS, BENCH_OUT, BENCH_APPS, CHROME_PATH)
 	$(DUNE) build --root . --profile=release @bench/keyed/bench-keyed
 	BUILD_DIR=$(BUILD_DIR) bench/keyed/build.sh
-	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --out $(BENCH_OUT)
+	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --apps $(BENCH_APPS) --out $(BENCH_OUT)
 
 .PHONY: size
 size: ## Bundle the keyed benchmark app, the demo and three one-island pages, print raw and gzip bytes and the JavaScript each page loads at start, check the budget in bench/size/budget.json
@@ -115,12 +116,13 @@ size: ## Bundle the keyed benchmark app, the demo and three one-island pages, pr
 
 SSR_ROWS ?= 100
 SSR_CONNECTIONS ?= 32
+SSR_ARGS ?=
 
 .PHONY: bench-ssr
-bench-ssr: ## SSR throughput of the same issue list page: yuka, dream, server-reason-react, react, solid (SSR_ROWS, SSR_CONNECTIONS)
+bench-ssr: ## SSR throughput of the same issue list page: yuka, dream, server-reason-react, react, solid (SSR_ROWS, SSR_CONNECTIONS, SSR_ARGS)
 	$(DUNE) build --root . --profile=release @bench/ssr/ocaml/all
 	[ -d bench/ssr/node/node_modules ] || npm ci --prefix bench/ssr/node --no-audit --no-fund
-	node bench/ssr/run.ts --build-dir $(BUILD_DIR) --rows $(SSR_ROWS) --connections $(SSR_CONNECTIONS)
+	node bench/ssr/run.ts --build-dir $(BUILD_DIR) --rows $(SSR_ROWS) --connections $(SSR_CONNECTIONS) $(SSR_ARGS)
 
 PAGES_RUNS ?= 5
 PAGES_THROTTLE ?= 4
@@ -128,6 +130,19 @@ PAGES_THROTTLE ?= 4
 .PHONY: measure-pages
 measure-pages: demo-bundle ## Measure JS bytes, TBT and LCP of each demo page, and LCP as plain HTML (PAGES_RUNS, PAGES_THROTTLE, CHROME_PATH)
 	node bench/pages/measure.ts --build-dir $(BUILD_DIR) --runs $(PAGES_RUNS) --throttle $(PAGES_THROTTLE)
+
+BENCH_CHECKS ?= keyed,ssr,pages
+
+.PHONY: bench-check
+bench-check: ## Check the last bench-keyed, bench-ssr and measure-pages results against bench/gate/limits.json (BENCH_CHECKS)
+	node bench/gate/gate.ts --build-dir $(BUILD_DIR) --keyed $(BENCH_OUT) --checks $(BENCH_CHECKS)
+
+.PHONY: bench-gate
+bench-gate: ## Run bench-keyed (yuka and solid), bench-ssr (yuka-stream and its references, interleaved) and measure-pages, then bench-check
+	$(MAKE) bench-keyed BENCH_APPS=solid,yuka
+	$(MAKE) bench-ssr SSR_ARGS="--only yuka-stream,solid-node,server-reason-react --interleave"
+	$(MAKE) measure-pages
+	$(MAKE) bench-check
 
 .PHONY: docs
 docs: ## Copy docs/ to the references of the agent skill in skills/yuka (make test fails when they differ)

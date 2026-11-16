@@ -1,7 +1,8 @@
 (** Server state that the server pushes to the page over one WebSocket
     ([GET /_yuka/live]) when it changes. A message is the full state of one
     key, or the changes from the state before; the client keeps the last
-    state as JSON, applies the changes and decodes the whole state again.
+    state as JSON, applies the changes and decodes the state again; a
+    {!Codec.list} decodes only the items that changed.
     The server side is {!Server.Live}. *)
 
 type 's t

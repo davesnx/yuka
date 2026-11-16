@@ -135,6 +135,7 @@ module Server = struct
     let live_mark = Live_server.mark
     let memory_down = Live_server.memory_down
     let json_diff = Json_diff.diff
+    let live_state ?node ~sleep context name key = Live_server.ssr_state ~sleep (Live_server.pick node) context name key
     let json_patch = Json_patch.apply
     let set_log f = Types.default_log := f
 

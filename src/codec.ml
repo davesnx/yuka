@@ -38,18 +38,27 @@ open Types
       decode = (function `Null -> Ok () | j -> mismatch "null" j) }
 
   let list c =
+    let last = ref ([||], [||]) in
     { encode = (fun l -> `List (List.map c.encode l));
       decode =
         (function
         | `List l ->
-            let rec go acc = function
-              | [] -> Ok (List.rev acc)
+            let inputs, outputs = !last in
+            let size = Array.length inputs in
+            let rec go acc next = function
+              | [] ->
+                  let decoded = List.rev acc in
+                  if Web.in_browser then last := (Array.of_list l, Array.of_list decoded);
+                  Ok decoded
               | x :: rest -> (
-                  match c.decode x with
-                  | Ok v -> go (v :: acc) rest
-                  | Error _ as e -> e)
+                  if next < size && inputs.(next) == x then go (outputs.(next) :: acc) (next + 1) rest
+                  else if next + 1 < size && inputs.(next + 1) == x then go (outputs.(next + 1) :: acc) (next + 2) rest
+                  else
+                    match c.decode x with
+                    | Ok v -> go (v :: acc) next rest
+                    | Error _ as e -> e)
             in
-            go [] l
+            go [] 0 l
         | j -> mismatch "list" j) }
 
   let array c =
