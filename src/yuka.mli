@@ -88,9 +88,13 @@ type start = [ `Load | trigger | `Lazy of trigger ]
     component cannot have a prop named [start].
     - [`Load] (default): download and start when the page opens.
     - A trigger: download when the page opens, start at the trigger.
-    - [`Lazy trigger]: download and start at [trigger]. Events before the
-      start are recorded and replayed. The server prints no preload link for
-      it.
+    - [`Lazy trigger]: download and start at [trigger]. The server prints
+      no preload link for it.
+
+    With a trigger or [`Lazy], the events inside the island between the run
+    of the page script and the start are recorded and replayed at the
+    start. An event before the page script runs is not recorded, with every
+    strategy.
 
     The early download of a non-lazy island happens through the
     [<link rel="modulepreload">] that the server prints from the manifest

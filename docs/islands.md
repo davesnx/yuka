@@ -149,38 +149,8 @@ gets a new id, which the server never printed.
 
 ## Form errors
 
-`Yuka.Form.field_error_view` gives the view of a field error an `id`. Put it on
-the element of the error:
-
-```ocaml
-<input name="title" value=(Yuka.Form.value form `Title) />
-(Yuka.Form.field_error_view form `Title (fun ~id message ->
-   <p id class_="error">(Yuka.text message)</p>))
-```
-
-While the field has an error, `Yuka.Form` sets `aria-invalid="true"` on each
-`input`, `select` and `textarea` of the form with that `name`, and adds the
-`id` to its `aria-describedby`, after the ids that the field already has.
-When the error goes, it removes both. A screen reader then reads the error
-with the field. An `aria-invalid` that you set on a field with no Yuka error
-stays.
-
-After a submit in the browser that ends with field errors, the focus goes to
-the first field with an error. On a failed post with no JavaScript (422), the
-server prints these attributes, and `autofocus` on the first field with an
-error, so the page opens on it.
-
-`Yuka.Form.form_errors_view` shows the errors for the whole form (a refused
-request, an error from the server) in a `<div role="alert" tabindex="-1">`,
-so a screen reader reads them when they show. When a submit in the browser
-ends with errors for the whole form and no field takes the focus, the focus
-goes to that `div`; on a
-failed post (422) with no field errors, the server prints `autofocus` on it.
-
-The `id` is made from the action name, the `key` of the form and the field
-name. Two forms of one action on a page need different keys: a development
-build shows an error in the browser console when two forms have the same
-action and key.
+[Data](data.md#form-errors) explains how `Yuka.Form` shows field errors
+and errors for the whole form, with their ids, focus and ARIA attributes.
 
 ## Start strategies
 
@@ -199,12 +169,15 @@ The `start` prop says when the browser downloads and starts the island:
 <Yuka.Client start=(`Lazy `Visible)><Counter initial=0 /></Yuka.Client>
 ```
 
-`` `Lazy `` records the events before the start and replays them.
+Once the page script runs, an island that waits for its start (`` `Idle ``,
+`` `Visible ``, `` `Interaction `` or `` `Lazy ``) records the events inside
+it and replays them when it starts.
 
-A user can type, tick or choose in an island before it starts. The control
-keeps what the user did. When the island starts, Yuka sends `input` and
-`change` to that control, so your `on_input` and `on_change` handlers update
-the State. A click before the script runs is lost.
+Before the page script runs, no island records events. A user can still
+type, tick or choose in an island. The control keeps what the user did.
+When the island starts, Yuka sends `input` and `change` to that control,
+so your `on_input` and `on_change` handlers update the State. A click
+before the page script runs is lost, with every start strategy.
 
 ## Children
 

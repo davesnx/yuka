@@ -59,6 +59,15 @@ let post (_ : Dream.request) ~slug =
 `method_` is one of `` `GET ``, `` `POST ``, `` `PUT ``, `` `PATCH `` and
 `` `DELETE ``. A `` `GET `` node also answers `HEAD`.
 
+A node name is a constructor, such as `Home`, and gives the link function
+`Routes.home`. Each name is used once. These names are build errors:
+
+- `Some` and `None`, which the generated code uses.
+- A name whose lowercase form is an OCaml keyword, such as `Type`,
+  `Match` or `Effect`.
+- `Href`, `Find`, `With_query`, `With_fragment`, `Current`, `Replace` and
+  `Push`, which the `Routes` module already defines.
+
 ## Paths
 
 - `:id<string>`: one segment, as a `string`.
@@ -150,7 +159,8 @@ adapter, such as `Dream.request`.
   name of the loader: `~loader:Loaders.post` gives `~post`. A layout gets
   the results of the loaders on its group and above.
 - Params, search fields and loader results share one set of labels: a
-  name used twice is an error.
+  name used twice is an error. `href`, `fragment`, `with_query`,
+  `with_fragment`, `req` and `children` are reserved labels.
 - A stop is `Not_found`, `Forbidden` (403), `Redirect`,
   `Redirect_off_site` or `Fail`.
 - `not_found` and `error` use the nearest one above the node. A

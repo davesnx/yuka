@@ -2,7 +2,8 @@
 
 This page explains how a Yuka component updates the page. It is for a
 reader who knows React or Solid. The exact API is in
-[`src/state.mli`](../src/state.mli) and [`src/yuka.mli`](../src/yuka.mli).
+[`src/state.mli`](https://github.com/davesnx/yuka/blob/main/src/state.mli) and
+[`src/yuka.mli`](https://github.com/davesnx/yuka/blob/main/src/yuka.mli).
 
 ## A component runs once
 
@@ -79,6 +80,24 @@ read inside another function that the expression calls. Wrap such a call:
 A hole that returns elements, not text, removes its old elements and
 creates new ones each time it runs. Keep such a hole small, or read the
 State deeper in the tree, so that less is created again.
+
+## Keyed lists
+
+`Yuka.each` shows a list whose rows keep their DOM nodes. Give it a key
+for each item, a function that reads the items (a hole), and the view of
+one item:
+
+```ocaml
+(Yuka.each ~key:(fun (issue : Issue.t) -> issue.id)
+   (fun () -> Array.of_list (Yuka.State.get issues))
+   (fun (issue : Issue.t) -> <li>(Yuka.text issue.title)</li>))
+```
+
+A row whose key stays keeps its nodes, and renders again only when
+`equal` says its item changed (default: identity, `==`). Give
+`~equal:( = )` for items that are rebuilt with the same content. Of two
+items with the same key, only the first shows. `each` keeps the items,
+not the array: to show a change, give a new array.
 
 ## Memos
 
@@ -248,9 +267,11 @@ let page () =
 Read it in a component below:
 
 ```ocaml
-let save () =
-  let theme = Yuka.Context.get_exn theme in
-  <button class_=(Theme.button (Yuka.State.get theme))> "Save" </button>
+module Save = struct
+  let make () =
+    let theme = Yuka.Context.get_exn theme in
+    <button class_=(Theme.button (Yuka.State.get theme))> "Save" </button>
+end
 ```
 
 `Yuka.Context.get` gives `None` when no component above gave a value.

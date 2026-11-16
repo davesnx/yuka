@@ -51,8 +51,9 @@
   that sets `script-src` must allow this element: add the hash of its
   text, `'sha256-noc9jWPkx7Sf6fj4Eowojtg1qcTXxDSHRgItGG0axUw='`. The hash
   works in every browser that runs the rule. It is the hash of the text of
-  this release and changes when the text changes. `'inline-speculation-rules'`
-  allowed the element in Chromium 151 and 156. Without either, the page
+  this release and changes when the text changes. In tests with Chromium
+  151 and Chromium 156, `'inline-speculation-rules'` also allowed the
+  element; other browsers and versions were not tested. Without either, the page
   works and has no prefetch, and each page with no island reports a CSP
   violation (in the console, and to `report-uri` or `report-to` when the
   policy has one).
