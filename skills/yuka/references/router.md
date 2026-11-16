@@ -264,6 +264,24 @@ let[@client] make () =
 
 It is always `false` on the server.
 
+After a client navigation to another page, Yuka tells screen readers
+about it and moves the focus, as a full page load does:
+
+- A live region (`<div id="yuka-announcer" aria-live="assertive">`,
+  hidden from view) gets the new `document.title`, or the text of the
+  first `h1` of the new content when the title is empty.
+- The focus goes to the first of these in the new content (the outlet,
+  or `<body>` without one) that can take it: an element with
+  `autofocus`, the element of the URL fragment, the first `h1`, the
+  content itself, then its elements in document order. An `h1` or a wrapper with no `tabindex` gets
+  `tabindex="-1"`. The page does not scroll for it.
+- The focus does not move when an island of the new content took it, or
+  when it is in an `input`, `textarea`, `select` or `contenteditable`
+  element, so a search field that navigates keeps it.
+
+`Routes.replace`, `Routes.push`, `Browser.replace_url`, a fragment link,
+and Back or Forward to an entry of the page shown change neither.
+
 ## The current route
 
 The shared `Routes` module also has three functions for the route of the

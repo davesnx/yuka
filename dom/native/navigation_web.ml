@@ -4,10 +4,8 @@ type controller = unit
 
 let browser_only () = failwith "Yuka: browser only"
 let set_title : string -> unit = fun _ -> browser_only ()
-let scroll_y : unit -> float = fun _ -> browser_only ()
 let scroll_to : float -> unit = fun _ -> browser_only ()
 let scroll_to_hash : string -> unit = fun _ -> browser_only ()
-let history_push_key : string -> string -> unit = fun _ _ -> browser_only ()
 let new_controller : unit -> controller = fun _ -> browser_only ()
 let abort : controller -> unit = fun _ -> browser_only ()
 let fetch_page :
@@ -33,3 +31,5 @@ let warm : string -> string -> unit = fun _ _ -> browser_only ()
 let transition : string -> (unit -> unit) -> unit = fun _ _ -> browser_only ()
 let swap_page : string -> unit = fun _ -> browser_only ()
 let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()
+let live : unit -> unit = fun _ -> browser_only ()
+let settle : node -> string -> unit = fun _ _ -> browser_only ()

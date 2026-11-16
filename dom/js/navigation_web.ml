@@ -4,10 +4,6 @@ let set_title : string -> unit = [%mel.raw "function (t) { document.title = t }"
 
 type controller
 
-let scroll_y : unit -> float =
-  [%mel.raw
-    "function () { return window.scrollY || 0 }"]
-
 let scroll_to : float -> unit =
   [%mel.raw
     "function (y) { window.scrollTo(0, y) }"]
@@ -20,10 +16,6 @@ let scroll_to_hash : string -> unit =
   const el = id ? document.getElementById(id) : null;
   if (el) el.scrollIntoView(); else window.scrollTo(0, 0);
 }|}]
-
-let history_push_key : string -> string -> unit =
-  [%mel.raw
-    "function (k, url) { window.history.pushState({ yukaKey: k }, '', url) }"]
 
 let new_controller : unit -> controller =
   [%mel.raw
@@ -240,4 +232,40 @@ let adopt_stylesheets : unit -> unit =
     else { seen.add(href); head.appendChild(l); }
   });
   document.__yukaSheets = seen;
+}|}]
+
+let live : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const d = document;
+  let r = d.__yukaLive;
+  if (!r) {
+    r = d.__yukaLive = d.createElement("div");
+    r.id = "yuka-announcer";
+    r.setAttribute("aria-live", "assertive");
+    r.setAttribute("aria-atomic", "true");
+    r.style.cssText = "position:absolute;top:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap";
+  }
+  if (!r.isConnected && d.body) d.body.appendChild(r);
+}|}]
+
+let settle : node -> string -> unit =
+  [%mel.raw
+    {|function (root, hash) {
+  const d = document, h = (root = root.body || root).querySelector("h1"), a = d.activeElement;
+  if (d.__yukaLive) d.__yukaLive.textContent = d.title || (h ? h.textContent.trim() : "");
+  if (a && a !== d.body && (a.matches("input,textarea,select,[contenteditable]") || (a !== root && root.contains(a)))) return;
+  const f = function (t) {
+    if (!t) return false;
+    const add = t !== d.body && t.tabIndex < 0 && !t.hasAttribute("tabindex");
+    if (add) t.setAttribute("tabindex", "-1");
+    t.focus({ preventScroll: true });
+    if (d.activeElement === t) return true;
+    if (add) t.removeAttribute("tabindex");
+    return false;
+  };
+  let id = hash.slice(1);
+  try { id = decodeURIComponent(id) } catch (e) {}
+  if (f(root.querySelector("[autofocus]")) || f(id && d.getElementById(id)) || f(h) || f(root)) return;
+  for (const t of root.querySelectorAll("*")) if (f(t)) return;
 }|}]

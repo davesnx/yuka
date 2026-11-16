@@ -1366,7 +1366,19 @@ val render :
     does [location.assign]. Without [Yuka-Outlet] it stops every island and
     replaces [<body>] and [document.title] with those of the response. Then it starts
     the new islands, pushes a history entry (after the page loaded) and
-    scrolls to the fragment or to the top. A navigation started while
+    scrolls to the fragment or to the top. It then writes the new
+    [document.title] (or, when it is empty, the text of the first [h1] of
+    the new content) into a visually hidden
+    [<div id="yuka-announcer" aria-live="assertive" aria-atomic="true">],
+    added to [<body>] when the navigation code starts, and moves the focus,
+    without scrolling, to the first element of the new content (the outlet,
+    or [<body>]) that takes it: an [[autofocus]] element, the element of
+    the fragment, the first [h1], the content, then its elements in
+    document order; an element with no [tabindex] that cannot take the focus
+    gets [tabindex="-1"]. The focus stays where it is when it is inside the new content
+    (an island took it) or in an [input], [textarea], [select] or
+    [contenteditable] element. A [popstate] to the page shown changes
+    neither. A navigation started while
     another one loads aborts the first. Any 2xx or 4xx/5xx status is shown
     in place. If the request fails, the status is 1xx or 3xx, the response
     is not [text/html], its [Yuka-Build] differs from the
