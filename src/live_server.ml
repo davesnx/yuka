@@ -583,9 +583,9 @@ let ssr_state ?sleep node (peer : peer) name key =
                   | Async.Failed m -> resolve (Error (failure peer.log name m)));
               result))
 
-let serve ?(allow = fun _ _ -> true) (topic : ('k, 's) Topic.t) load =
+let implement ?(allow = fun _ _ -> true) (topic : ('k, 's) Topic.t) load =
   if List.mem_assoc (Topic.name topic) !topics then
-    invalid_arg ("Yuka.Server.Live.serve: already served: " ^ Topic.name topic);
+    invalid_arg ("Yuka.Server.Live.implement: already implemented: " ^ Topic.name topic);
   let check peer j =
     match (Topic.key topic).decode j with
     | Error m -> Bad_key m

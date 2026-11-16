@@ -24,15 +24,15 @@ let write workspace f k =
   | Error Unavailable -> Yuka.Server.Action.reject Store.unavailable
 
 let register () =
-  Yuka.Server.Action.make Queries.labels (fun _ workspace -> Yuka.Async.return (Store.label_counts workspace));
-  Yuka.Server.Action.make User_popup.stats (fun _ { workspace; user } -> Yuka.Async.return (Store.user_stats workspace user));
-  Yuka.Server.Live.serve Topics.issues (fun list ->
+  Yuka.Server.Action.implement Queries.labels (fun _ workspace -> Yuka.Async.return (Store.label_counts workspace));
+  Yuka.Server.Action.implement User_popup.stats (fun _ { workspace; user } -> Yuka.Async.return (Store.user_stats workspace user));
+  Yuka.Server.Live.implement Topics.issues (fun list ->
       Store.refresh ();
       Yuka.Async.return (view_issues list));
-  Yuka.Server.Live.serve Topics.issue (fun id ->
+  Yuka.Server.Live.implement Topics.issue (fun id ->
       Store.refresh ();
       match Store.find id with Some issue -> Yuka.Async.return issue | None -> Yuka.Server.Action.reject ("No issue " ^ id));
-  Yuka.Server.Action.make Actions.update_issue
+  Yuka.Server.Action.implement Actions.update_issue
     (fun _ ({ id; status; priority } : Actions.update_input) ->
       match Store.workspace_of id with
       | None -> Yuka.Server.Action.reject ("No issue " ^ id)
@@ -61,7 +61,7 @@ let register () =
             Yuka.Async.return (Ok issue)
         | Error (Refused message) -> title_error message
         | Error Unavailable -> Yuka.Server.Action.reject Store.unavailable);
-  Yuka.Server.Action.make Comment.add
+  Yuka.Server.Action.implement Comment.add
     (fun _ { issue_id; body } ->
       match Store.workspace_of issue_id with
       | None -> Yuka.Server.Action.reject "No such issue"
@@ -73,22 +73,22 @@ let register () =
               | Some _ -> Error "Comment is empty"
               | None -> Error "No such issue")
             Yuka.Async.return);
-  Yuka.Server.Action.make Comment.range (fun _ (range : Comment.range) ->
+  Yuka.Server.Action.implement Comment.range (fun _ (range : Comment.range) ->
       match Store.find range.issue with
       | Some _ when range.offset >= 0 && range.limit >= 0 -> Yuka.Async.return (Store.comment_range range)
       | Some _ -> Yuka.Server.Action.reject "Offset and limit must not be negative"
       | None -> Yuka.Server.Action.reject "No such issue");
-  Yuka.Server.Live.serve Topics.board (fun workspace ->
+  Yuka.Server.Live.implement Topics.board (fun workspace ->
       Store.refresh ();
       Yuka.Async.return (Store.board workspace));
-  Yuka.Server.Action.make Board.move (fun _ { workspace; id; x; y } ->
+  Yuka.Server.Action.implement Board.move (fun _ { workspace; id; x; y } ->
       write workspace
         (fun () ->
           if not (Store.on_board workspace id) then Error ("No item " ^ id)
           else if not (Board.inside ~x ~y) then Error "The position is outside the board"
           else Ok (Store.move_item workspace ~id ~x ~y))
         (fun () -> publish_board workspace));
-  Yuka.Server.Action.make Board.add_note (fun _ { workspace; text } ->
+  Yuka.Server.Action.implement Board.add_note (fun _ { workspace; text } ->
       let text = String.trim text in
       if text = "" then Yuka.Server.Action.reject "Note is empty"
       else if not (String.is_valid_utf_8 text) then Yuka.Server.Action.reject "Note is not valid UTF-8 text"
@@ -101,11 +101,11 @@ let register () =
               Error (Printf.sprintf "The board has %d notes, the most it can have" Board.note_limit)
             else Ok (Store.add_note workspace ~text))
           (fun () -> publish_board workspace));
-  Yuka.Server.Action.make Board.remove_note (fun _ { workspace; note_id } ->
+  Yuka.Server.Action.implement Board.remove_note (fun _ { workspace; note_id } ->
       write workspace
         (fun () -> if Store.remove_note workspace ~id:note_id then Ok () else Error ("No note " ^ note_id))
         (fun () -> publish_board workspace));
-  Yuka.Server.Action.make Board.shuffle (fun _ workspace ->
+  Yuka.Server.Action.implement Board.shuffle (fun _ workspace ->
       write workspace (fun () -> Ok (Store.shuffle workspace)) (fun () -> publish_board workspace))
 
 let issues_json (_ : Dream.request) =

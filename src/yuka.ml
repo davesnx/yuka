@@ -53,21 +53,21 @@ module Server = struct
   include Server
   include Cycle
 
-  type context = Types.context
+  type request = Types.context
   type log_level = Types.log_level
 
-  module Context = struct
-    let header (c : context) = c.header
-    let session (c : context) = c.session ()
-    let meth (c : context) = c.meth
-    let path (c : context) = c.path
+  module Request = struct
+    let header (r : request) = r.header
+    let session (r : request) = r.session ()
+    let meth (r : request) = r.meth
+    let path (r : request) = r.path
   end
 
   let to_string build = Server.to_string (Kind.fn build)
   let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
 
   module Action = struct
-    let make = Server.implement
+    let implement = Server.implement
     let reject = Server.reject
   end
 
@@ -135,11 +135,11 @@ module Server = struct
     let live_mark = Live_server.mark
     let memory_down = Live_server.memory_down
     let json_diff = Json_diff.diff
-    let live_state ?node ~sleep context name key = Live_server.ssr_state ~sleep (Live_server.pick node) context name key
+    let live_state ?node ~sleep request name key = Live_server.ssr_state ~sleep (Live_server.pick node) request name key
     let json_patch = Json_patch.apply
     let set_log f = Types.default_log := f
 
-    let context ?(header = fun _ -> None) ?session () : context =
+    let request ?(header = fun _ -> None) ?session () : request =
       { (Server.empty_context ()) with header; session = (fun () -> session) }
   end
 end

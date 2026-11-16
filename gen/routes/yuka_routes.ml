@@ -836,7 +836,10 @@ let redirect segs permanent target =
     |> List.map (fun p -> if String.length p > 1 && p.[0] = ':' then param p else Lit p)
     |> List.fold_left (fun acc p -> match acc with [] -> [ p ] | _ -> acc @ [ Lit "/"; p ]) []
   in
-  [ sprintf "Yuka.Router.Redirect { permanent = %b; location = %s }" permanent (concat pieces) ]
+  [
+    sprintf "Yuka.Router.Redirect { location = %s; kind = %s }" (concat pieces)
+      (if permanent then "`Permanent" else "`Temporary");
+  ]
 
 let pattern segs =
   let items =

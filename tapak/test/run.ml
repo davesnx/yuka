@@ -87,7 +87,7 @@ let tapak_log make () =
       check_true "not in Logs" (not (List.exists (fun (_, _, m) -> m = "warned page") !got)))
 
 let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
-let () = Yuka.Server.Action.make echo (fun _ s -> Yuka.Async.return (String.length s))
+let () = Yuka.Server.Action.implement echo (fun _ s -> Yuka.Async.return (String.length s))
 
 let body_limit make () =
   let handler = make config in

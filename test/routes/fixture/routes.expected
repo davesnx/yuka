@@ -125,7 +125,7 @@ let find (meth : Yuka.Router.meth) (path : string list)
       match meth with
       | `GET | `HEAD -> Yuka.Router.Found Missing
       | _ -> Yuka.Router.Wrong_method [ `GET ])
-  | [ "legacy-blog" ] -> Yuka.Router.Redirect { permanent = false; location = "/blog" }
+  | [ "legacy-blog" ] -> Yuka.Router.Redirect { location = "/blog"; kind = `Temporary }
   | [ "blog"; "new" ] -> (
       match meth with
       | `GET | `HEAD -> (
@@ -164,7 +164,7 @@ let find (meth : Yuka.Router.meth) (path : string list)
   | [ "i"; p1 ] -> (
       match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
       | None -> Yuka.Router.Missing
-      | Some p1 -> Yuka.Router.Redirect { permanent = true; location = Stdlib.( ^ ) "/issue/" (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param p1)) })
+      | Some p1 -> Yuka.Router.Redirect { location = Stdlib.( ^ ) "/issue/" (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param p1)); kind = `Permanent })
   | [ "issue"; p1; "close" ] -> (
       match meth with
       | `POST -> (
@@ -187,7 +187,7 @@ let find (meth : Yuka.Router.meth) (path : string list)
       match meth with
       | `GET | `HEAD -> Yuka.Router.Found (Doc { parts = Stdlib.List.map Yuka.Router.of_segment p1 })
       | _ -> Yuka.Router.Wrong_method [ `GET ])
-  | "old-docs" :: (_ :: _ as p1) -> Yuka.Router.Redirect { permanent = false; location = Stdlib.( ^ ) "/docs/" (Stdlib.String.concat "/" (Stdlib.List.map Yuka.Router.encode p1)) }
+  | "old-docs" :: (_ :: _ as p1) -> Yuka.Router.Redirect { location = Stdlib.( ^ ) "/docs/" (Stdlib.String.concat "/" (Stdlib.List.map Yuka.Router.encode p1)); kind = `Temporary }
   | _ -> Yuka.Router.Missing
 
 let current () = Yuka.runtime_route_current find

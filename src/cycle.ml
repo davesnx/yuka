@@ -822,8 +822,8 @@ let route env (App a) req (r : request) ~path ~raw ~query =
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
   let refuse (rules : rules) level = refusal rules.headers level in
   match a.find r.meth segments (Router.query r.target) with
-  | Router.Redirect { permanent; location } ->
-      reply (empty (if permanent then 308 else 307) [ ("location", location ^ suffix) ])
+  | Router.Redirect { location; kind } ->
+      reply (empty (match kind with `Permanent -> 308 | `Temporary -> 307) [ ("location", location ^ suffix) ])
   | Router.Missing -> page_or_error (not_found_page env a.missing path)
   | Router.Wrong_method ms -> (
       match r.meth with

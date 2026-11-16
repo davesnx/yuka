@@ -1,7 +1,7 @@
 open Demo_shared
 
 let topic = Yuka.Topic.declare ~name:"bench" ~key:Yuka.Codec.int ~state:(Yuka.Codec.list Model.Issue.codec)
-let () = Yuka.Server.Live.serve topic (fun _ -> Yuka.Async.return [])
+let () = Yuka.Server.Live.implement topic (fun _ -> Yuka.Async.return [])
 
 let issues n =
   let seed = Array.of_list Demo_app.Store.seed in
@@ -35,7 +35,7 @@ let connect key bytes =
   in
   ignore
     (Yuka.Server.Testing.live_run ~sleep:never
-       (Yuka.Server.Testing.context ~session:("bench" ^ string_of_int !sessions) ())
+       (Yuka.Server.Testing.request ~session:("bench" ^ string_of_int !sessions) ())
        ~verify_csrf:(fun _ -> Yuka.Async.return true)
        ~token:(fun () -> Some "t") connection)
 

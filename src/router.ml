@@ -66,7 +66,7 @@ type meth =
 type 'r lookup =
   | Found of 'r
   | Wrong_method of meth list
-  | Redirect of { permanent : bool; location : string }
+  | Redirect of { location : string; kind : [ `Permanent | `Temporary ] }
   | Missing
 
 let cut text c =

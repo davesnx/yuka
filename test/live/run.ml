@@ -72,7 +72,7 @@ let fresh_session () =
 let start ?node ?(csrf = "good") ?(fresh = Some "next") ?(session = fresh_session ()) () =
   let f = fake () in
   let finished =
-    Server.Testing.live_run ?node ~sleep (Server.Testing.context ~session ())
+    Server.Testing.live_run ?node ~sleep (Server.Testing.request ~session ())
       ~verify_csrf:(fun t -> Async.return (t = csrf))
       ~token:(fun () -> fresh)
       (connection f)
@@ -124,7 +124,7 @@ let loads = ref []
 let gates : (string * (int -> unit) * (string -> unit)) list ref = ref []
 
 let () =
-  Live.serve count (fun key ->
+  Live.implement count (fun key ->
       loads := key :: !loads;
       match key with
       | "boom" -> failwith "secret boom"
@@ -136,7 +136,7 @@ let () =
       | k -> Async.return (String.length k))
 
 let forbidden = Topic.declare ~name:"private" ~key:Codec.string ~state:Codec.int
-let () = Live.serve ~allow:(fun p k -> Server.Context.session p = Some k) forbidden (fun _ -> Async.return 1)
+let () = Live.implement ~allow:(fun p k -> Server.Request.session p = Some k) forbidden (fun _ -> Async.return 1)
 
 let gate key = List.find (fun (k, _, _) -> k = key) !gates
 
@@ -168,7 +168,7 @@ let hello_cases =
         let f = fake () in
         f.inbox <- [ Some hello; Some (sub 1 "count" {|"abcd"|}) ];
         let verify, accept, _ = Async.make () in
-        let _ = Server.Testing.live_run ~sleep (Server.Testing.context ~session:("pipe") ()) ~verify_csrf:(fun _ -> verify) ~token:(fun () -> Some "T2") (connection f) in
+        let _ = Server.Testing.live_run ~sleep (Server.Testing.request ~session:("pipe") ()) ~verify_csrf:(fun _ -> verify) ~token:(fun () -> Some "T2") (connection f) in
         Alcotest.(check (list string)) "nothing before the check" [] f.out;
         accept true;
         Alcotest.(check (list string)) "messages" [ "hello"; "state" ] (kinds f);
@@ -353,10 +353,10 @@ let pair : (int * int) Codec.t =
       | _ -> Error "pair")
 
 let pairs = Topic.declare ~name:"pairs" ~key:pair ~state:Codec.int
-let () = Live.serve pairs (fun (a, b) -> Async.return (a + b))
+let () = Live.implement pairs (fun (a, b) -> Async.return (a + b))
 let allowed = ref true
 let guarded_topic = Topic.declare ~name:"guarded" ~key:Codec.string ~state:Codec.int
-let () = Live.serve ~allow:(fun _ _ -> !allowed) guarded_topic (fun _ -> Async.return 0)
+let () = Live.implement ~allow:(fun _ _ -> !allowed) guarded_topic (fun _ -> Async.return 0)
 
 let review_cases =
   [
@@ -454,7 +454,7 @@ let review_cases =
         let b, _ = open_ ~session:"staying" () in
         push a (sub 1 "count" {|"rev"|});
         push b (sub 1 "count" {|"rev"|});
-        Live.revoke (fun p -> Server.Context.session p = Some "leaving");
+        Live.revoke (fun p -> Server.Request.session p = Some "leaving");
         a.out <- [];
         b.out <- [];
         Live.publish count "rev" 9;
@@ -471,7 +471,7 @@ let review_cases =
         let b = fake () in
         b.inbox <- [ Some hello ];
         let _ =
-          Server.Testing.live_run ~sleep (Server.Testing.context ~session:("err") ())
+          Server.Testing.live_run ~sleep (Server.Testing.request ~session:("err") ())
             ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t")
             (connection ~receive:(fun b () -> if b.inbox = [] then Async.failed "reset" else receive b ()) b)
         in
@@ -519,7 +519,7 @@ let slow_shared = ref false
 let shared_topic = Topic.declare ~name:"shared" ~key:Codec.string ~state:Codec.int
 
 let () =
-  Live.serve shared_topic (fun key ->
+  Live.implement shared_topic (fun key ->
       shared_loads := key :: !shared_loads;
       if !slow_shared then begin
         let a, resolve, _ = Async.make () in
@@ -531,7 +531,7 @@ let () =
 let open_on node =
   let f = fake () in
   let _ =
-    Server.Testing.live_run ~node ~sleep (Server.Testing.context ~session:(fresh_session ()) ())
+    Server.Testing.live_run ~node ~sleep (Server.Testing.request ~session:(fresh_session ()) ())
       ~verify_csrf:(fun t -> Async.return (t = "good"))
       ~token:(fun () -> Some "next")
       (connection f)
@@ -714,7 +714,7 @@ let action_mark_cases =
     ( "an action answer carries the mark of the node",
       fun () ->
         let echo = Action.mutation ~name:"mark-echo" ~input:Codec.int ~output:Codec.int in
-        Server.Action.make echo (fun _ n ->
+        Server.Action.implement echo (fun _ n ->
             Live.publish shared_topic "m" n;
             Async.return n);
         let header = function
@@ -832,7 +832,7 @@ let diff_cases =
 
 let items = Topic.declare ~name:"items" ~key:Codec.string ~state:(Codec.list Codec.string)
 let stored_items : (string * string list) list ref = ref []
-let () = Live.serve items (fun key -> Async.return (Option.value (List.assoc_opt key !stored_items) ~default:[]))
+let () = Live.implement items (fun key -> Async.return (Option.value (List.assoc_opt key !stored_items) ~default:[]))
 let letters = List.init 10 (fun i -> String.make 20 (Char.chr (97 + i)))
 let one_changed = List.mapi (fun i x -> if i = 3 then "changed" else x) letters
 
@@ -994,7 +994,7 @@ let patch_cases =
 
 let render_state ?node ?(session = "renderer") key =
   match
-    Async.status (Server.Testing.live_state ?node ~sleep (Server.Testing.context ~session ()) "items" (`String key))
+    Async.status (Server.Testing.live_state ?node ~sleep (Server.Testing.request ~session ()) "items" (`String key))
   with
   | Async.Done (Ok (_, mark)) -> mark
   | _ -> Alcotest.fail "the render did not settle"
@@ -1056,7 +1056,7 @@ let kept_cases =
     ( "a change of the key while the render loads keeps nothing",
       fun () ->
         let mark ?node key =
-          Server.Testing.live_state ?node ~sleep (Server.Testing.context ~session:"racer" ()) "count" (`String key)
+          Server.Testing.live_state ?node ~sleep (Server.Testing.request ~session:"racer" ()) "count" (`String key)
         in
         let settled_mark rendered =
           match Async.status rendered with Async.Done (Ok (_, m)) -> m | _ -> Alcotest.fail "not settled"

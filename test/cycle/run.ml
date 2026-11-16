@@ -760,7 +760,7 @@ let reviewed =
               | [] -> fst3 (Async.make ()))
             ~close:(fun _ -> Async.return ())
         in
-        let ann = Server.Testing.context ~header:(function "x-user" -> Some "ann" | _ -> None) ~session:"s" () in
+        let ann = Server.Testing.request ~header:(function "x-user" -> Some "ann" | _ -> None) ~session:"s" () in
         ignore
           (Server.Testing.live_run ~node ~sleep:(fun _ -> fst3 (Async.make ())) ann
              ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t") connection);
@@ -852,7 +852,7 @@ let reviewed =
             ~close:(fun _ -> Async.return ())
         in
         ignore
-          (Server.Testing.live_run ~sleep:(fun _ -> fst3 (Async.make ())) (Server.Testing.context ~session:"s" ())
+          (Server.Testing.live_run ~sleep:(fun _ -> fst3 (Async.make ())) (Server.Testing.request ~session:"s" ())
              ~verify_csrf:(fun _ -> Async.return true) ~token:(fun () -> Some "t") connection);
         check_true "in the config log" (List.exists (fun m -> contains m "boom secret") !logged) );
     ( "the handler's live node marks its action answers",

@@ -84,7 +84,7 @@ let close () =
 
 let topic = Yuka.Topic.declare ~name:"pg-count" ~key:Yuka.Codec.string ~state:Yuka.Codec.int
 let truth = ref 0
-let () = Live.serve topic (fun _ -> Async.return !truth)
+let () = Live.implement topic (fun _ -> Async.return !truth)
 
 let lwt_sleep s =
   let a, resolve, _ = Async.make () in
@@ -117,7 +117,7 @@ let two_nodes () =
       ~close:(fun _ -> Async.return ())
   in
   ignore
-    (Yuka.Server.Testing.live_run ~node:nb ~sleep:lwt_sleep (Yuka.Server.Testing.context ~session:"s" ())
+    (Yuka.Server.Testing.live_run ~node:nb ~sleep:lwt_sleep (Yuka.Server.Testing.request ~session:"s" ())
        ~verify_csrf:(fun _ -> Async.return true)
        ~token:(fun () -> Some "t")
        connection);

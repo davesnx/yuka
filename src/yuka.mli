@@ -588,7 +588,7 @@ module Action : sig
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Mutation ]) t
   (** An action named [name] that can change data: the server and the client
       must declare it with the same name and codecs. The server runs it
-      after {!Server.Action.make}. *)
+      after {!Server.Action.implement}. *)
 
   val query :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Query ]) t
@@ -1241,7 +1241,7 @@ module Router : sig
         (** A node matches the path but not the method. The list holds the
             methods of the path, in file order. [`GET] stands for [`HEAD]
             too. *)
-    | Redirect of { permanent : bool; location : string }
+    | Redirect of { location : string; kind : [ `Permanent | `Temporary ] }
         (** A redirect node matches the path. [location] has its params
             substituted and encoded. *)
     | Missing  (** No node matches, or a param does not decode. *)
@@ -1514,32 +1514,32 @@ module Server : sig
       a component suspends its fiber, share state, and each of them raises
       [Failure]. A render inside another on the same thread is allowed. *)
 
-  type context
+  type request
   (** The request that runs an action, a form action or a live [allow]. *)
 
   type log_level = [ `Error | `Warn | `Info | `Debug ]
   (** The level of a message to the server log ([log] of {!val-config}). *)
 
-  module Context : sig
-    val header : context -> string -> string option
+  module Request : sig
+    val header : request -> string -> string option
     (** A request header, case-insensitive. For a live [allow], the
         headers of the WebSocket upgrade request. *)
 
-    val session : context -> string option
+    val session : request -> string option
     (** The session id of the request, from the adapter ([Dream.session_id]
         for Dream). [None] outside a request (an {!Yuka.Action.call} on the
         server that no request runs, for example in a test) and when the
         request has no session (with Dream: no session middleware). *)
 
-    val meth : context -> Router.meth
+    val meth : request -> Router.meth
     (** The request method. *)
 
-    val path : context -> string
+    val path : request -> string
     (** The request path, without the query. *)
   end
 
   module Action : sig
-    val make : ('i, 'o, _) Action.t -> (context -> 'i -> 'o Async.t) -> unit
+    val implement : ('i, 'o, _) Action.t -> (request -> 'i -> 'o Async.t) -> unit
     (** Registers the implementation of a declared action, and makes
         [Action.call] run it directly on the server. Raises
         [Invalid_argument] if the name is already implemented.
@@ -1547,10 +1547,10 @@ module Server : sig
         Any page can call any action: [POST /_yuka/action/NAME] runs no
         route guard, and a form post runs the guards of the page it is
         posted to, not of a page that shows the form. So an action checks
-        permissions itself, with its [context] (a session, a cookie header).
-        On the server, [Action.call] during a render gets the context of
-        the rendered request; outside a request it gets a context with no
-        header and no session. *)
+        permissions itself, with its [request] (a session, a cookie header).
+        On the server, [Action.call] during a render gets the rendered
+        request; outside a request it gets a request with no header and no
+        session. *)
 
     val reject : string -> 'a Async.t
     (** A failed [Async] that refuses the input: the action call answers
@@ -1586,8 +1586,8 @@ module Server : sig
         a socket over a limit is closed with 1013 before its [hello], and
         the page tries again later. *)
 
-    val serve :
-      ?allow:(context -> 'k -> bool) -> ('k, 's) Topic.t -> ('k -> 's Async.t) -> unit
+    val implement :
+      ?allow:(request -> 'k -> bool) -> ('k, 's) Topic.t -> ('k -> 's Async.t) -> unit
     (** Registers the loader of a topic: the full state of a key, run when
         a key that has no current state gets a subscriber, and by a server
         render. A server render through the request cycle keeps the state it
@@ -1598,12 +1598,12 @@ module Server : sig
         [per_session] such states, a node at most [total]. The loaded state of a key is shared by every subscriber
         of the key on the node, so the loader gets no request and must not
         depend on who asks: [allow] decides who may read a key. [allow] (default: always) runs on each subscribe, with the
-        context of the WebSocket upgrade request, and on each server render
-        of {!Yuka.Live.use}, with the context of the page request; false
+        WebSocket upgrade request, and on each server render of
+        {!Yuka.Live.use}, with the page request; false
         refuses it ([Forbidden]). A loader that fails with {!Action.reject}
         gives [Rejected]; any other failure gives [Server] and a log
         message. Raises [Invalid_argument] when the topic is already
-        served. *)
+        implemented. *)
 
     val publish : ?node:node -> ('k, 's) Topic.t -> 'k -> 's -> unit
     (** The new full state of a key, sent to each subscriber of the key on
@@ -1623,11 +1623,11 @@ module Server : sig
         for its subscribers, and the bus tells the other nodes, which do
         the same. Use it when the action does not have the new state. *)
 
-    val revoke : ?node:node -> (context -> bool) -> unit
-    (** Closes, with code 4401, every live socket of the node whose context
+    val revoke : ?node:node -> (request -> bool) -> unit
+    (** Closes, with code 4401, every live socket of the node whose request
         matches. The page reconnects, and [allow] decides again for each
         key. Call it on logout
-        ([revoke (fun context -> Context.session context = Some id)]) and after a
+        ([revoke (fun request -> Request.session request = Some id)]) and after a
         permission change. It does not go over the bus: with more than one
         node, the app must call it on every node (for example from its own
         message between nodes). *)
@@ -1700,10 +1700,10 @@ module Server : sig
     val implement :
       ('i, 'o, 'f) Form.action ->
       ?redirect:('o -> string) ->
-      (context -> 'i -> ('o, 'f Form.errors) result Async.t) ->
+      (request -> 'i -> ('o, 'f Form.errors) result Async.t) ->
       unit
     (** Registers a form action (see {!Yuka.Form}). It answers the island
-        path ([POST /_yuka/action/<name>], JSON) like {!Action.make},
+        path ([POST /_yuka/action/<name>], JSON) like {!Action.implement},
         with [redirect output] in the answer (checked as for the 303 below: a
         bad one answers 500 [action failed] and is logged), and the form
         post of a page. The request cycle checks the origin (403), runs the
@@ -1715,7 +1715,7 @@ module Server : sig
         [Error], a decode error or {!Action.reject}. The form field
         [_yuka_action] names the action, so a post to any [GET] page can run
         any form action: the function checks permissions itself, as for
-        {!Action.make}. Only [application/x-www-form-urlencoded] posts
+        {!Action.implement}. Only [application/x-www-form-urlencoded] posts
         reach a form action; a [multipart/form-data] post (a file input) is
         a 405. The 303, 403 and 413 carry the page's rule headers. A
         [redirect output] that is not a path ([/x], not [//x]) or an [http:] or
@@ -1928,7 +1928,7 @@ module Server : sig
       val session : request -> string option
       (** The session id of the request (Dream: [Dream.session_id]), or
           [None] when the request has no session (Dream: no session
-          middleware). Called only by {!Context.session}, and by the live
+          middleware). Called only by {!Request.session}, and by the live
           socket, which refuses a request with [None] and counts the sockets
           of a session. Must not raise. *)
 
@@ -2203,12 +2203,12 @@ module Server : sig
 
   (** For Yuka's tests. Not covered by semantic versioning. *)
   module Testing : sig
-    val context : ?header:(string -> string option) -> ?session:string -> unit -> context
+    val request : ?header:(string -> string option) -> ?session:string -> unit -> request
 
     val live_run :
       ?node:Live.node ->
       sleep:(float -> unit Async.t) ->
-      context ->
+      request ->
       verify_csrf:(string -> bool Async.t) ->
       token:(unit -> string option) ->
       Live.connection ->
@@ -2283,7 +2283,7 @@ module Server : sig
     val live_state :
       ?node:Live.node ->
       sleep:(float -> unit Async.t) ->
-      context ->
+      request ->
       string ->
       Json.t ->
       (Json.t * (string * int) option, Status.error) result Async.t

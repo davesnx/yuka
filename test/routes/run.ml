@@ -16,8 +16,10 @@ let pp_lookup ppf = function
   | Router.Found r -> Format.fprintf ppf "Found %s" (Routes.href r)
   | Router.Wrong_method ms ->
       Format.fprintf ppf "Wrong_method [%s]" (String.concat "; " (List.map meth_name ms))
-  | Router.Redirect { permanent; location } ->
-      Format.fprintf ppf "Redirect %b %s" permanent location
+  | Router.Redirect { location; kind } ->
+      Format.fprintf ppf "Redirect %s %s"
+        (match kind with `Permanent -> "permanent" | `Temporary -> "temporary")
+        location
   | Router.Missing -> Format.fprintf ppf "Missing"
 
 let lookup = testable pp_lookup ( = )
@@ -274,18 +276,18 @@ let find_cases =
         check lookup "page" (found Home) (find ~meth:`HEAD "/");
         check lookup "endpoint" (found Feed) (find ~meth:`HEAD "/feed.xml"));
     t "redirects substitute and encode params, for every method" (fun () ->
-        let moved = Router.Redirect { permanent = true; location = "/issue/YUK-7" } in
+        let moved = Router.Redirect { location = "/issue/YUK-7"; kind = `Permanent } in
         check lookup "GET" moved (find "/i/YUK-7");
         check lookup "POST" moved (find ~meth:`POST "/i/YUK-7");
         check lookup "bad param" Router.Missing (find "/i/x");
         check lookup "catch-all"
-          (Router.Redirect { permanent = false; location = "/docs/a%20b/c" })
+          (Router.Redirect { location = "/docs/a%20b/c"; kind = `Temporary })
           (find "/old-docs/a%20b/c");
         check lookup "catch-all keeps the escape"
-          (Router.Redirect { permanent = false; location = "/docs/~/~~." })
+          (Router.Redirect { location = "/docs/~/~~."; kind = `Temporary })
           (find "/old-docs/~/~~.");
         check lookup "static"
-          (Router.Redirect { permanent = false; location = "/blog" })
+          (Router.Redirect { location = "/blog"; kind = `Temporary })
           (find ~meth:`DELETE "/legacy-blog"));
     t "search decoding" (fun () ->
         let blog ?(tag = None) ?(page = 1) ?(label = []) ?(draft = false) () =

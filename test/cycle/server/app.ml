@@ -91,11 +91,11 @@ let jot_form key =
 let mine = Yuka.Topic.declare ~name:"cycle-mine" ~key:Yuka.Codec.string ~state:Yuka.Codec.string
 let mine_loads = ref 0
 let boom_topic = Yuka.Topic.declare ~name:"cycle-boom" ~key:Yuka.Codec.string ~state:Yuka.Codec.string
-let () = Server.Live.serve boom_topic (fun _ -> Async.failed "boom secret")
+let () = Server.Live.implement boom_topic (fun _ -> Async.failed "boom secret")
 
 let () =
-  Server.Live.serve
-    ~allow:(fun ctx key -> Server.Context.header ctx "x-user" = Some key)
+  Server.Live.implement
+    ~allow:(fun request key -> Server.Request.header request "x-user" = Some key)
     mine
     (fun key ->
       incr mine_loads;
@@ -294,14 +294,14 @@ let saved = ref []
 let whoami = Yuka.Action.mutation ~name:"whoami" ~input:Yuka.Codec.unit ~output:Yuka.Codec.string
 
 let () =
-  Server.Action.make whoami (fun ctx () ->
+  Server.Action.implement whoami (fun request () ->
       Async.return
         (String.concat " "
            [
-             Option.value (Server.Context.header ctx "x-user") ~default:"-";
-             Option.value (Server.Context.session ctx) ~default:"-";
-             (match Server.Context.meth ctx with `POST -> "POST" | _ -> "other");
-             Server.Context.path ctx;
+             Option.value (Server.Request.header request "x-user") ~default:"-";
+             Option.value (Server.Request.session request) ~default:"-";
+             (match Server.Request.meth request with `POST -> "POST" | _ -> "other");
+             Server.Request.path request;
            ]))
 
 let () =
@@ -310,10 +310,10 @@ let () =
     ~redirect:(fun o ->
       if String.exists (fun c -> c = ':' || c < ' ' || c = '\127') o || String.starts_with ~prefix:"/" o then o
       else "/entry?saved=" ^ o)
-    (fun ctx e ->
+    (fun request e ->
       saved := e.title :: !saved;
       match e.title with
-      | "who" -> Async.return (Ok (Option.value (Server.Context.header ctx "x-user") ~default:"none"))
+      | "who" -> Async.return (Ok (Option.value (Server.Request.header request "x-user") ~default:"none"))
       | "taken" -> Async.return (Error [ (Some `Title, "Taken") ])
       | "nope" -> Server.Action.reject "Refused"
       | "boom" -> failwith "secret boom"
