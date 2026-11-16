@@ -105,6 +105,82 @@ let owner_cursor () =
   check "owner on another thread: the owner" (o = Ok "") (show o);
   clean "owner on another thread"
 
+let c : string Context.t = Context.make ~name:"overlap" ()
+let read () = match Context.get c with Some v -> v | None -> "none"
+
+let context_interleaved () =
+  let a, b =
+    in_parallel
+      (fun () ->
+        let r =
+          outcome (fun () ->
+              Server.to_string (fun () ->
+                  Context.provide c "a" (fun () ->
+                      element "p" []
+                        [
+                          hole (fun () ->
+                              go 1;
+                              wait 2;
+                              let v = read () in
+                              go 3;
+                              wait 4;
+                              text v);
+                        ])))
+        in
+        clean "context on two threads, worker A";
+        r)
+      (fun () ->
+        wait 1;
+        let r =
+          outcome (fun () ->
+              Server.to_string (fun () ->
+                  Context.provide c "b" (fun () ->
+                      element "p" []
+                        [
+                          hole (fun () ->
+                              go 2;
+                              wait 3;
+                              let v = read () in
+                              go 4;
+                              text v);
+                        ])))
+        in
+        clean "context on two threads, worker B";
+        r)
+  in
+  check "context on two threads: A" (a = Ok "<p>a</p>") (show a);
+  check "context on two threads: B" (b = Ok "<p>b</p>") (show b);
+  clean "context on two threads"
+
+let context_no_provider () =
+  let a, b =
+    in_parallel
+      (fun () ->
+        let r =
+          outcome (fun () ->
+              Server.to_string (fun () ->
+                  Context.provide c "a" (fun () ->
+                      element "p" []
+                        [
+                          hole (fun () ->
+                              go 1;
+                              wait 2;
+                              text (read ()));
+                        ])))
+        in
+        clean "context without provide on another thread, worker A";
+        r)
+      (fun () ->
+        wait 1;
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> text (read ())) ])) in
+        go 2;
+        clean "context without provide on another thread, worker B";
+        r)
+  in
+  check "context without provide on another thread: A" (a = Ok "<p>a</p>") (show a);
+  check "context without provide on another thread: B" (b = Ok "<p>none</p>") (show b);
+  clean "context without provide on another thread"
+
 let domains_interleaved () =
   let a, b =
     in_domains
@@ -235,6 +311,8 @@ let () =
   interleaved ();
   listener ();
   owner_cursor ();
+  context_interleaved ();
+  context_no_provider ();
   domains_interleaved ();
   domains_memo_and_owner ();
   threads_in_a_domain ();
