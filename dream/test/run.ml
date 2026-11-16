@@ -213,6 +213,11 @@ let rec connect_to port tries =
       Unix.sleepf 0.05;
       connect_to port (tries - 1)
 
+let rec wait_child flags pid =
+  match Unix.waitpid flags pid with
+  | state -> state
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_child flags pid
+
 let client_leaves_during_a_stream () =
   let port = free_port () in
   match Lwt_unix.fork () with
@@ -237,10 +242,10 @@ let client_leaves_during_a_stream () =
       Unix.shutdown s Unix.SHUTDOWN_SEND;
       Unix.close s;
       Unix.sleepf 1.;
-      let state = Unix.waitpid [ Unix.WNOHANG ] child in
+      let state = wait_child [ Unix.WNOHANG ] child in
       if fst state = 0 then begin
         Unix.kill child Sys.sigkill;
-        ignore (Unix.waitpid [] child)
+        ignore (wait_child [] child)
       end;
       Alcotest.(check string)
         "the server process is still running" "running"
