@@ -9,7 +9,7 @@ let take_seen () =
 let doomed = ref true
 
 let field label =
-  with_id (fun id ->
+  with_unique_id (fun id ->
       seen := id :: !seen;
       element "p" []
         [

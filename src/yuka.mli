@@ -363,12 +363,12 @@ val hole_attr : string -> (unit -> string option) -> client attribute
     client, [value], [checked] and [selected] are set as properties. A URL
     attribute gets the check of {!attr} on each value. *)
 
-val with_id : (string -> 'k element) -> 'k element
-(** [with_id (fun id -> element)]: [element] with an [id] for [for],
+val with_unique_id : (string -> 'k element) -> 'k element
+(** [with_unique_id (fun id -> element)]: [element] with an [id] for [for],
     [aria-labelledby], [aria-describedby] or [aria-controls]. The [id] is
     unique on the page. In an island, the browser gives the same [id] as the
     server when it hydrates, so a [label] stays linked to its field.
-    Example: [Yuka.with_id (fun id -> <div><label for_=id>"Title"</label>
+    Example: [Yuka.with_unique_id (fun id -> <div><label for_=id>"Title"</label>
     <input id name="title" /></div>)].
 
     Yuka makes the [id] when it prints or mounts the element, not when the
@@ -376,7 +376,7 @@ val with_id : (string -> 'k element) -> 'k element
     arguments has no effect. Each island counts its own ids, so the islands of a
     page can start in any order; so does the content of an {!Await}, which
     can arrive after the content that follows it. For a second
-    [id], call [with_id] again or add a suffix that starts with a letter:
+    [id], call [with_unique_id] again or add a suffix that starts with a letter:
     [id ^ "-error"].
 
     The function runs as a {!hole}: when it reads a State, it runs again

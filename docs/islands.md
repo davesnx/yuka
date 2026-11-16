@@ -122,11 +122,11 @@ A `label` links to its field by `id`, and `aria-describedby`,
 `aria-labelledby` and `aria-controls` take ids too. A component that a page
 uses more than once cannot write a fixed id, and an id made with a counter
 or a random value is different on the server and in the browser. Use
-`Yuka.with_id`:
+`Yuka.with_unique_id`:
 
 ```ocaml
 let make ~label () =
-  Yuka.with_id (fun id ->
+  Yuka.with_unique_id (fun id ->
       <p>
         <label for_=id>(Yuka.text label)</label>
         <input id aria_describedby=(id ^ "-hint") />
@@ -139,9 +139,9 @@ the server when it hydrates, also with several islands on the page, in a
 client navigation answer, in keyed list rows and in a streamed
 `<Yuka.Await>`. Outside an island, and in a component that only the browser
 renders, the id is unique. For a second id, add a suffix that starts with a
-letter, as `-hint` above, or call `with_id` again.
+letter, as `-hint` above, or call `with_unique_id` again.
 
-`with_id` works as a hole: when its function reads a State, the function
+`with_unique_id` works as a hole: when its function reads a State, the function
 runs again with a new id. An element that the browser makes after the
 island has started (a new list row, an `Await` value that arrives later)
 gets a new id, which the server never printed.
