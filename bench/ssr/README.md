@@ -38,8 +38,8 @@ runs every candidate once, so load changes hit all of them; the table gives
 the median, min and max), `--baseline-build-dir <dir>` (adds
 `yuka-page-baseline` and `yuka-stream-baseline` from another build, for
 before/after). Make variables: `SSR_ROWS`, `SSR_CONNECTIONS`. The JSON goes to
-`$(BUILD_DIR)/bench-ssr/result.json`, with each round and the load average
-at its end.
+`$(BUILD_DIR)/bench-ssr/result.json`, with each round, the load average
+at its end, and the CPU model and count.
 
 `ocaml/golden.expected` is the full HTML of the page (document and request
 cycle); `dune build @runtest` compares it, so a speed change cannot change
