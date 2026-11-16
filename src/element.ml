@@ -78,9 +78,6 @@ module Await = struct
     Kind.of_node (Await { async; loading = Kind.to_node loading; failed = Kind.fn failed; render = Kind.fn children })
 end
 
-let suspend ~loading ?failed async =
-  Await.make ~async ~loading ?failed ~children:(fun e -> e) ()
-
 module Catch = struct
   let make ~fallback ~children () =
     let client at =

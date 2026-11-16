@@ -37,13 +37,13 @@ let slow () =
       el "main"
         [
           Yuka.text "before";
-          Yuka.suspend ~loading:(Yuka.text "loading") (Yuka.Async.map (fun s -> el "p" [ Yuka.text s ]) data);
+          Yuka.Await.make ~async:data ~loading:(Yuka.text "loading") ~children:(fun s -> el "p" [ Yuka.text s ]) ();
         ])
 
 let stuck () =
   Yuka.Server.page ~title:"Stuck" (fun () ->
       let never, _, _ = Yuka.Async.make () in
-      Yuka.suspend ~loading:(Yuka.text "loading") ~failed:(fun m -> Yuka.text ("failed " ^ m)) never)
+      Yuka.Await.make ~async:never ~loading:(Yuka.text "loading") ~failed:(fun m -> Yuka.text ("failed " ^ m)) ~children:Fun.id ())
 
 let lingering () =
   Yuka.Server.page (fun () ->

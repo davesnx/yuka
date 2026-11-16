@@ -592,14 +592,14 @@ let implement ?(allow = fun _ _ -> true) (topic : ('k, 's) Topic.t) load =
   if List.mem_assoc (Topic.name topic) !topics then
     invalid_arg ("Yuka.Server.Live.implement: already implemented: " ^ Topic.name topic);
   let check peer j =
-    match (Topic.key topic).decode j with
+    match Codec.decode (Topic.key topic) j with
     | Error m -> Bad_key m
     | Ok k -> if allow peer k then Accept (Topic.wire_key topic k) else Forbid
   in
   let load j =
-    match (Topic.key topic).decode j with
+    match Codec.decode (Topic.key topic) j with
     | Error m -> Async.failed m
-    | Ok k -> Async.map (Topic.state topic).encode (Async.guard load k)
+    | Ok k -> Async.map (Codec.encode (Topic.state topic)) (Async.guard load k)
   in
   topics := (Topic.name topic, { check; load }) :: !topics;
   Bridge.live_state := fun name key -> ssr_state (main ()) (Server.empty_context ()) name key
@@ -636,7 +636,7 @@ let publish ?node (topic : ('k, 's) Topic.t) key state =
   | None -> ()
   | Some e ->
       if e.loading then e.again <- true;
-      store e ((Topic.state topic).encode state));
+      store e (Codec.encode (Topic.state topic) state));
   note node (Topic.name topic) wire
 
 let changed ?node (topic : ('k, 's) Topic.t) key =

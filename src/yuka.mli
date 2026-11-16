@@ -295,18 +295,6 @@ module Await : sig
       detail. *)
 end
 
-val suspend :
-  loading:server element ->
-  ?failed:(string -> server element) ->
-  server element Async.t ->
-  server element
-(** Shows [loading] until the element is settled, then the element, or
-    [failed message] (default: nothing), with the [message] rule of
-    {!Await.make}. It streams as [<Yuka.Await>] does.
-    Build the argument with [Async.map (fun data -> <View data />) fetch].
-    Server only: in an island, use [<Yuka.Await>], which builds the element
-    in the island's owner. *)
-
 module Catch : sig
   val make :
     fallback:(error:string -> reset:(unit -> unit) -> 'k element) ->
@@ -350,7 +338,7 @@ module Context : sig
       [let theme : Theme.t Context.t = Context.make ~name:"theme" ()].
 
       With [codec], the value also reaches the islands below a {!provide} on the page: the
-      server writes [codec.encode value] into the HTML once per [provide], and an island reads
+      server writes [Codec.encode codec value] into the HTML once per [provide], and an island reads
       it with {!get}. [name] is then required: it is the key of the value in the HTML, made of
       [a-z], [0-9], [.], [_] and [-], the same on the server and in the browser, and unique among
       the contexts with a codec. Raises [Invalid_argument] for a codec with no [name] or with
@@ -519,8 +507,6 @@ module Topic : sig
   val declare : name:string -> key:'k Codec.t -> state:'s Codec.t -> ('k, 's) t
   (** The server and the client must declare it with the same name and
       codecs. *)
-
-  val name : (_, _) t -> string
 end
 
 module Live = Live

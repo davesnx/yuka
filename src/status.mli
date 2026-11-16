@@ -20,10 +20,5 @@ type 'a t =
 val data : 'a t -> 'a option
 (** [data] of [Ready], [last] of [Failed], the option of [Loading]. *)
 
-val map : ('a -> 'b) -> 'a t -> 'b t
-
 val error_to_string : error -> string
 (** [Rejected message] is [message]; the others are short English text. *)
-
-val error_codec : error Codec.t
-(** [{"kind": "rejected", "message": message}], [{"kind": "server"}], ... *)

@@ -25,6 +25,6 @@
   let call a i =
     Async.map
       (function
-        | Ok j -> Result.map_error (fun m -> Status.Protocol m) (a.output.decode j)
+        | Ok j -> Result.map_error (fun m -> Status.Protocol m) (Codec.decode a.output j)
         | Error e -> Error e)
-      (send a.name (a.input.encode i))
+      (send a.name (Codec.encode a.input i))

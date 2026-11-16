@@ -58,7 +58,7 @@ let fill_chunk id html =
 let rejection = Types.rejection
 
 let timeout_answer () : Json.t =
-  `Assoc [ ("error", Status.error_codec.encode (Status.Network "timeout")) ]
+  Answers.to_json (Error (Status.Network "timeout"))
 
 let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id

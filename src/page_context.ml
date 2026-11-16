@@ -131,7 +131,7 @@ let reader name (codec : 'a Codec.t) =
                 | Error m -> fail m
                 | Ok j -> (
                     Types.state_target := (fun f -> e.change <- Some f);
-                    let r = match codec.decode j with r -> r | exception x -> Error (Web.exn_to_string x) in
+                    let r = match Codec.decode codec j with r -> r | exception x -> Error (Web.exn_to_string x) in
                     Types.state_target := ignore;
                     match r with
                     | Error m -> fail m

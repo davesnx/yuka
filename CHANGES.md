@@ -6,6 +6,9 @@ First release on opam.
 
 ### yuka
 
+- Breaking: `Yuka.Codec.t` is abstract: use `Codec.encode codec value` and `Codec.decode codec json` in place of `codec.encode value` and `codec.decode json` (#29, @davesnx)
+- Breaking: `Yuka.Status.error_codec`, `Yuka.Status.map`, `Yuka.Topic.name` and `Yuka.suspend` are gone. In place of `Yuka.suspend ~loading ?failed element`, write `Yuka.Await.make ~async:element ~loading ?failed ~children:Fun.id ()` (#29, @davesnx)
+- The doc of `Codec.list` says that a decoded element is shared between decodes, that a `Codec.state` must not be inside a list, and that a list codec is made once, at the top of a module (#29, @davesnx)
 - Breaking: the internal modules `Yuka__Form_core`, `Yuka__Json_diff`, `Yuka__Json_patch`, `Yuka__Page_context`, `Yuka__Route` and `Yuka__Status_error` are private, so code outside Yuka cannot name them. The tests of Yuka read `Web.decode_uri` and `Web.in_browser` through `Yuka.Private` (#29, @davesnx)
 - `Yuka.State` and `Yuka.Async` are aliases of their modules, so compiler errors print `Yuka.State.signal` and `Yuka.Async.t` instead of `Yuka__State.signal` and `Yuka__Async.t`. Their documentation is in `src/state.mli` and `src/async.mli` (#29, @davesnx)
 - Fix: `Yuka.each` with two items of one key shows only the first, on the server, on the first render, on hydration and on an update; in a dev build the browser writes a console error with the key on each render that has one. Before, the server and the first render showed both, and an update raised `Failure`, which stopped the island. The browser-only functions (`Browser.*`, `Yuka.render`) raise `Invalid_argument` on native, not `Failure`. The keyed benchmark app goes from 8,517 to 8,505 B gzip (#29, @davesnx)

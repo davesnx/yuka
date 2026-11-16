@@ -2,15 +2,43 @@ type found = Found of (Json.t, Status.error) result | Pending | Absent
 
 let key name input = "r:" ^ name ^ " " ^ Json.to_string input
 
+let error_codec : Status.error Codec.t =
+  let open Status in
+  let kind k extra : Json.t = `Assoc (("kind", `String k) :: extra) in
+  let message m = [ ("message", `String m) ] in
+  Codec.make
+    ~encode:((function
+      | Rejected m -> kind "rejected" (message m)
+      | Forbidden -> kind "forbidden" []
+      | Not_found -> kind "not_found" []
+      | Server -> kind "server" []
+      | Network m -> kind "network" (message m)
+      | Protocol m -> kind "protocol" (message m)))
+    ~decode:((fun j ->
+        match j with
+        | `Assoc fields -> (
+            let text () =
+              match List.assoc_opt "message" fields with Some (`String m) -> m | _ -> ""
+            in
+            match List.assoc_opt "kind" fields with
+            | Some (`String "rejected") -> Ok (Rejected (text ()))
+            | Some (`String "forbidden") -> Ok Forbidden
+            | Some (`String "not_found") -> Ok Not_found
+            | Some (`String "server") -> Ok Server
+            | Some (`String "network") -> Ok (Network (text ()))
+            | Some (`String "protocol") -> Ok (Protocol (text ()))
+            | _ -> Json.mismatch "status error" j)
+        | _ -> Json.mismatch "status error" j))
+
 let to_json : (Json.t, Status.error) result -> Json.t = function
   | Ok j -> `Assoc [ ("ok", j) ]
-  | Error e -> `Assoc [ ("error", Status.error_codec.encode e) ]
+  | Error e -> `Assoc [ ("error", Codec.encode error_codec e) ]
 
 let of_json text =
   match Json.of_string text with
   | Ok (`Assoc [ ("ok", j) ]) -> Some (Ok j)
   | Ok (`Assoc [ ("error", e) ]) -> (
-      match Status.error_codec.decode e with Ok e -> Some (Error e) | Error _ -> None)
+      match Codec.decode error_codec e with Ok e -> Some (Error e) | Error _ -> None)
   | _ -> None
 
 let mine key elements =

@@ -1,4 +1,4 @@
-type 'a t = private { encode : 'a -> Json.t; decode : Json.t -> ('a, string) result }
+type 'a t
 
 val make : encode:('a -> Json.t) -> decode:(Json.t -> ('a, string) result) -> 'a t
 
@@ -29,7 +29,12 @@ val list : 'a t -> 'a list t
     later, gives the same decoded value again without decoding it. A live
     patch keeps the JSON of each unchanged element, so one changed item of
     a long list decodes one item, and the other items stay [==]. The
-    decoder of the elements must be pure. *)
+    decoder of the elements must be pure.
+
+    A decoded element is shared between decodes: do not change it. Do not
+    put a {!state} codec inside a list. Make a list codec once, at the top
+    of a module: a codec made in each render keeps nothing between
+    renders, and a top-level codec keeps its last list in memory. *)
 
 val array : 'a t -> 'a array t
 (** As [list]. *)
@@ -64,8 +69,8 @@ val state : 'a t -> 'a State.read t
     another codec. *)
 
 val encode : 'a t -> 'a -> Json.t
-(** [encode codec value] is [codec.encode value]. *)
+(** [encode codec value] writes [value] as JSON. *)
 
 val decode : 'a t -> Json.t -> ('a, string) result
-(** [decode codec json] is [codec.decode json]. The error of a codec of this module
+(** [decode codec json] reads [json]. The error of a codec of this module
     names the expected kind and the start of the JSON text. *)

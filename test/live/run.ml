@@ -854,7 +854,7 @@ let replay ?(from = None) f =
     f.out
 
 let replayed ?from f = Option.map Json.to_string (snd (replay ?from f))
-let encoded list = Some (Json.to_string ((Codec.list Codec.string).encode list))
+let encoded list = Some (Json.to_string (Codec.encode (Codec.list Codec.string) list))
 
 let open_with_node ?node () =
   let f, _ = start ?node () in

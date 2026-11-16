@@ -60,7 +60,7 @@ let () =
       let runs = 20 in
       let encode_start = Unix.gettimeofday () in
       for _ = 1 to runs do
-        ignore (Yuka.Json.to_string ((Yuka.Codec.list Model.Issue.codec).encode state))
+        ignore (Yuka.Json.to_string (Yuka.Codec.encode (Yuka.Codec.list Model.Issue.codec) state))
       done;
       let encode_ms = (Unix.gettimeofday () -. encode_start) *. 1000. /. float_of_int runs in
       let start = Unix.gettimeofday () in
@@ -78,7 +78,7 @@ let () =
         Yuka.Server.Live.publish topic key (if run mod 2 = 1 then reversed else state)
       done;
       let reversed_ms = (Unix.gettimeofday () -. start) *. 1000. /. float_of_int runs in
-      let encode = (Yuka.Codec.list Model.Issue.codec).encode in
+      let encode = Yuka.Codec.encode (Yuka.Codec.list Model.Issue.codec) in
       let diff_ms next =
         let a = encode state and b = encode next in
         let start = Unix.gettimeofday () in

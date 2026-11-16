@@ -295,7 +295,7 @@ let detach m u =
 let key_name (topic : (_, _) Topic.t) key = "l:" ^ Topic.name topic ^ " " ^ Json.to_string key
 
 let decode (topic : (_, 's) Topic.t) last j =
-  match (Topic.state topic).decode j with
+  match Codec.decode (Topic.state topic) j with
   | Ok data -> Status.Ready { data; stale = false }
   | Error m -> Status.Failed { error = Status.Protocol m; last }
 
@@ -333,7 +333,7 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
   if !(Base.server_rendering ()) || not Web.in_browser then begin
-    on_server topic ((Topic.key topic).encode (args ())) base;
+    on_server topic (Codec.encode (Topic.key topic) (args ())) base;
     { base; changes; use = None }
   end
   else begin
@@ -378,7 +378,7 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
     let m = get () in
     let first = ref true in
     Base.run_effect Scheduler.queue (fun () ->
-        let key = (Topic.key topic).encode (args ()) in
+        let key = Codec.encode (Topic.key topic) (args ()) in
         match u.key with
         | Some k when Json.to_string k = Json.to_string key -> ()
         | _ ->
@@ -411,7 +411,7 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
 let status t =
   let changes = State.get t.changes in
   let base = State.get t.base in
-  if Optimistic.is_empty changes then base else Status.map (Optimistic.apply (fun d f -> f d) changes) base
+  Optimistic.status changes base
 
 let optimistic ?commit t ~change run =
   let added, id = Optimistic.add (State.peek t.changes) change in

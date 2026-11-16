@@ -467,65 +467,16 @@ let stream_cases =
         "</body></html>" ]
       (List.tl (chunks ()))
   in
-  let suspend_settled () =
-    let write, chunks = recorder () in
-    get
-      (stream
-         (fun () -> Yuka.suspend ~loading:(Yuka.text "L") (Async.return (Yuka.text "a7")))
-         write);
-    check list_of "inline" [ "a7"; "</body></html>" ] (List.tl (chunks ()));
-    check string "same as Await"
-      (Server.to_string (fun () -> text_await (Async.return 7) "a"))
-      (Server.to_string (fun () ->
-           Yuka.suspend ~loading:(Yuka.text "La") (Async.return (Yuka.text "a7"))))
-  in
-  let suspend_pending () =
-    let a, resolve, _ = Async.make () in
-    let write, chunks = recorder () in
-    let p =
-      stream
-        (fun () -> Yuka.element "div" [] [ Yuka.suspend ~loading:(Yuka.text "La") a ])
-        write
-    in
-    check string "shell" "<div><!--[s1-->La<!--]--></div>" (List.nth (chunks ()) 1);
-    resolve (Yuka.element "b" [] [ Yuka.text "v" ]);
-    get p;
-    check list_of "fill"
-      [ fill "s1" "<b>v</b>"; "</body></html>" ]
-      (List.filteri (fun i _ -> i >= 2) (chunks ()))
-  in
-  let suspend_failure () =
-    let a, _, fail_a = Async.make () in
-    let b, _, fail_b = Async.make () in
-    let write, chunks = recorder () in
-    let p =
-      stream
-        (fun () ->
-          Yuka.fragment
-            [ Yuka.suspend ~loading:(Yuka.text "La")
-                ~failed:(fun m -> Yuka.text ("E:" ^ m)) a;
-              Yuka.suspend ~loading:(Yuka.text "Lb") b ])
-        write
-    in
-    fail_b "x";
-    fail_a "boom";
-    get p;
-    check list_of "failure chunks"
-      [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->";
-        fill "s2" "";
-        fill "s1" "E:server error";
-        "</body></html>" ]
-      (List.tl (chunks ()))
-  in
   let failure_hidden () =
     let html, messages =
       logged (fun () ->
           Server.to_string (fun () ->
               Yuka.fragment
                 [ text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) (Async.failed "secret detail") "a";
-                  Yuka.suspend ~loading:(Yuka.text "L")
+                  Yuka.Await.make ~loading:(Yuka.text "L")
                     ~failed:(fun m -> Yuka.text ("S:" ^ m))
-                    (Async.map (fun () -> failwith "secret view") (Async.return ())) ]))
+                    ~async:(Async.map (fun () -> failwith "secret view") (Async.return ()))
+                    ~children:Fun.id () ]))
     in
     check bool "no detail in the page" false (contains html "secret");
     check bool "a fixed message" true (contains html "E:server error" && contains html "S:server error");
@@ -745,9 +696,6 @@ let stream_cases =
     test_case "settled value is inline" `Quick settled_inline;
     test_case "nested await" `Quick nested;
     test_case "failure" `Quick failure;
-    test_case "suspend settled is inline" `Quick suspend_settled;
-    test_case "suspend streams" `Quick suspend_pending;
-    test_case "suspend failure" `Quick suspend_failure;
     test_case "a failure message stays on the server" `Quick failure_hidden;
     test_case "one failure text for Await and Async props" `Quick one_failure_rule;
     test_case "async props" `Quick async_prop;

@@ -41,7 +41,7 @@ let read_answer (output : 'o Codec.t) (j : Json.t) : ('o answer, string) result 
                 result = Ok o;
                 redirect = (match List.assoc_opt "redirect" fields with Some (`String l) -> Some l | _ -> None);
               })
-            (output.decode v)
+            (Codec.decode output v)
       | None, Some e -> Result.map (fun e -> { result = Error e; redirect = None }) (names_of_json e)
       | None, None -> Json.mismatch "form answer" j)
   | _ -> Json.mismatch "form answer" j
@@ -61,7 +61,7 @@ let action ~name ~fields:t ~(output : 'o Codec.t) : ('i, 'o, 'f) action =
   let result : ('o, _) result Codec.t =
     Codec.make
       ~encode:((function
-        | Ok o -> `Assoc [ ("value", output.encode o) ]
+        | Ok o -> `Assoc [ ("value", Codec.encode output o) ]
         | Error e -> `Assoc [ ("errors", names_json (named t e)) ]))
       ~decode:((fun j ->
           Result.map
@@ -207,7 +207,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     | Error m -> State.set form.failed [ (None, m) ]
   and failed e = finish (Error (Status.error_to_string e)) None
   and call input =
-    let json = (Action.input action).encode input in
+    let json = Codec.encode (Action.input action) input in
     Async.on_result (Action.send (Action.name action) json) (function
       | Ok (Ok j) -> (
           match read_answer output j with
