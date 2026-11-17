@@ -1,0 +1,13 @@
+File "body_get.ml", line 3, characters 43-48:
+3 |   Yuka.text (string_of_int (Yuka.State.get count))
+                                               ^^^^^
+Error: The value count has type
+         int Yuka.State.t = (int, [ `Write ]) Yuka.State.signal
+       but an expression was expected of type
+         Yuka.State.scope = Yuka__Signal.scope
+File "unit_scope.ml", line 2, characters 29-31:
+2 | let read () = Yuka.State.get () count
+                                 ^^
+Error: The constructor () has type unit
+       but an expression was expected of type
+         Yuka.State.scope = Yuka__Signal.scope

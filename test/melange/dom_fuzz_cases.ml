@@ -316,7 +316,7 @@ let read_ctx env place =
   seen
 
 let memo_fn a b = (a * 3) + b
-let eval env = function St i -> State.get env.w.ints.(i) | Memo i -> State.get env.memos.(i)
+let eval sc env = function St i -> State.get sc env.w.ints.(i) | Memo i -> State.get sc env.memos.(i)
 
 let model w = function
   | St i -> State.peek w.ints.(i)
@@ -368,9 +368,9 @@ let new_inst env path effs =
 
 let start_effect env inst k e =
   let w = env.w in
-  let body () =
+  let body sc =
     ignore (read_ctx env (Printf.sprintf "effect %d of %s" k inst.ipath));
-    let vals = List.map (eval env) e.reads in
+    let vals = List.map (eval sc env) e.reads in
     inst.runs.(k) <- inst.runs.(k) + 1;
     inst.last_ok.(k) <- false;
     inst.seen.(k) <- vals;
@@ -392,9 +392,9 @@ let start_effect env inst k e =
   in
   match (e.kind, e.cleanup) with
   | Before, true -> Effect.before ~cleanup body
-  | Before, false -> Effect.before (fun () -> ignore (body ()))
+  | Before, false -> Effect.before (fun sc -> ignore (body sc))
   | After, true -> Effect.after ~cleanup body
-  | After, false -> Effect.after (fun () -> ignore (body ()))
+  | After, false -> Effect.after (fun sc -> ignore (body sc))
 
 let rec build env t : client element =
   let w = env.w in
@@ -405,16 +405,16 @@ let rec build env t : client element =
            (function
              | Fixed (n, v) -> attr n v
              | Dyn (n, e) ->
-                 hole_attr n (fun () ->
-                     let v = eval env e in
+                 hole_attr n (fun sc ->
+                     let v = eval sc env e in
                      if v mod 3 = 0 then None else Some (string_of_int v)))
            attrs)
         (List.map (build env) kids)
   | Txt s -> text s
-  | Show (k, e) -> hole (fun () -> show_text k (eval env e))
+  | Show (k, e) -> hole (fun sc -> show_text k (eval sc env e))
   | Switch (id, s, a, b) ->
-      hole (fun () ->
-          let v = State.get w.ints.(s) in
+      hole (fun sc ->
+          let v = State.get sc w.ints.(s) in
           let side = if v mod 2 = 0 then "a" else "b" in
           let env = { env with path = Printf.sprintf "%s/s%d%s" env.path id side } in
           ignore (read_ctx env "switch side");
@@ -431,7 +431,7 @@ let rec build env t : client element =
   | Each (id, src, shape, kids) ->
       each ~equal:( = )
         ~key:(fun (k, _) -> string_of_int k)
-        (fun () -> State.get w.lists.(src))
+        (fun sc -> State.get sc w.lists.(src))
         (fun (k, v) ->
           let path = Printf.sprintf "%s/l%d:%d" env.path id k in
           let env = { env with path; row = Some (k, v) } in
@@ -465,8 +465,8 @@ let rec build env t : client element =
           fragment (List.map (build { env with path }) kids))
         ()
   | Bomb (s, k) ->
-      hole (fun () ->
-          let v = State.get w.ints.(s) in
+      hole (fun sc ->
+          let v = State.get sc w.ints.(s) in
           if v mod 4 = k then raise (Boom k) else text ("b" ^ string_of_int v))
   | Button (id, s) ->
       element "button"
@@ -484,8 +484,8 @@ let rec build env t : client element =
       Context.provide contexts.(c) v (fun () -> fragment (List.map (build env) kids))
   | Ctx s ->
       let seen = read_ctx env "component function" in
-      hole (fun () ->
-          let v = State.get w.ints.(s) in
+      hole (fun sc ->
+          let v = State.get sc w.ints.(s) in
           let now = read_ctx env "hole" in
           text (Printf.sprintf "r%s/%s:%d" (show_ctx seen) (show_ctx now) v))
 
@@ -493,7 +493,7 @@ let root env =
   let w = env.w in
   let memos =
     Array.map
-      (fun (a, b) -> State.memo (fun () -> memo_fn (State.get w.ints.(a)) (State.get w.ints.(b))))
+      (fun (a, b) -> State.memo (fun sc -> memo_fn (State.get sc w.ints.(a)) (State.get sc w.ints.(b))))
       w.spec.memos
   in
   element "main" [] (List.map (build { env with memos }) w.spec.tree)
@@ -965,11 +965,11 @@ let row_raise_leak ~update () =
           ~children:(fun () ->
             element "ul" []
               [ each ~key:string_of_int
-                  (fun () -> State.get items)
+                  (fun sc -> State.get sc items)
                   (fun k ->
                     if k = 2 then failwith "row 2";
-                    Effect.before ~cleanup:(fun () -> incr cleanups) (fun () ->
-                        ignore (State.get s);
+                    Effect.before ~cleanup:(fun () -> incr cleanups) (fun sc ->
+                        ignore (State.get sc s);
                         incr runs);
                     element "li" [] [ text (string_of_int k) ]) ])
           ())

@@ -14,7 +14,7 @@ val default_retry : retry
 val no_retry : retry
 
 val use :
-  ?retry:retry -> ?enabled:(unit -> bool) -> ('i, 'o, [ `Query ]) Action.t -> (unit -> 'i) -> 'o t
+  ?retry:retry -> ?enabled:(State.scope -> bool) -> ('i, 'o, [ `Query ]) Action.t -> (State.scope -> 'i) -> 'o t
 (** Runs the query for the input that the function returns, and again
     when a State that the function or [enabled] reads changes. Call it in
     a component body: when its owner is disposed, the request in flight
@@ -24,7 +24,7 @@ val use :
       the query runs again only when the key changes. A new key,
       {!refetch} or {!invalidate} aborts the request in flight, and only
       the latest request writes the status.
-    - [enabled ()] false gives [Idle] and aborts the request.
+    - [enabled] false gives [Idle] and aborts the request.
     - [Network] and [Server] errors are tried again by [retry] (default
       {!default_retry}); the others fail at once.
     - In a server render it runs the implementation once. If it settles
@@ -36,7 +36,7 @@ val use :
     - Outside the browser and outside a render (tests), it calls the
       implementation directly. *)
 
-val status : 'o t -> 'o Status.t
+val status : State.scope -> 'o t -> 'o Status.t
 (** Tracked read, with the pending {!optimistic} changes applied to the data. *)
 
 val refetch : 'o t -> unit

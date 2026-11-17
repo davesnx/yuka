@@ -32,7 +32,7 @@ let attr_unchecked name value =
   Web.refuse_url_name name;
   Static (name, value)
 let hole f = Kind.of_node (Hole (Kind.fn f))
-let with_unique_id f = Kind.of_node (Hole (fun () -> Kind.to_node (Scheduler.untrack (fun () -> f (Types.next_id ())))))
+let with_unique_id f = Kind.of_node (Hole (fun _ -> Kind.to_node (Scheduler.untrack (fun () -> f (Types.next_id ())))))
 let slot s =
   Client.use_slot ();
   Kind.of_node (Slot s)
@@ -96,9 +96,9 @@ module Catch = struct
         Kind.to_node (fallback ~error:m ~reset)
       in
       Hole
-        (fun () ->
+        (fun s ->
           let o = Option.get !(Base.current_owner ()) in
-          match State.get error with
+          match State.get s error with
           | Some m -> show o m
           | None -> (
               o.catch <- Some (fun e -> State.set error (Some (Web.exn_to_string e)));
@@ -148,7 +148,7 @@ let provide_bindings bindings children =
   let add = add_bindings bindings in
   let client _ =
     Hole
-      (fun () ->
+      (fun _ ->
         let o = Option.get !(Base.current_owner ()) in
         o.env <- add o.env;
         Kind.to_node (Scheduler.untrack children))
@@ -205,16 +205,16 @@ module Show = struct
           | `Loading, `Loading -> true
           | `Failed x, `Failed y -> x = y
           | _ -> false)
-        (fun () ->
-          match status () with
+        (fun s ->
+          match status s with
           | Status.Ready { data; _ } | Loading (Some data) -> `Data data
           | Idle | Loading None -> `Loading
           | Failed { error; _ } -> `Failed error)
     in
     Kind.of_node
       (Hole
-         (fun () ->
-           match State.get view with
+         (fun s ->
+           match State.get s view with
            | `Data d -> Kind.to_node (Scheduler.untrack (fun () -> children d))
            | `Loading -> Kind.to_node loading
            | `Failed e -> Kind.to_node (Scheduler.untrack (fun () -> failed e))))

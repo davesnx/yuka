@@ -8,7 +8,7 @@ let[@client] make () =
   let size = Yuka.State.make "medium" in
   let note = Yuka.State.make "" in
   let ready = Yuka.State.make false in
-  Yuka.Effect.after (fun () -> Yuka.State.set ready true);
+  Yuka.Effect.after (fun _ -> Yuka.State.set ready true);
   <div>
     (if Yuka.State.get ready then <p class_=(Css.status ^ " " ^ Css.ready)>"Interactive: the island has hydrated."</p>
      else <p class_=Css.status>"Not interactive yet: the script is still loading."</p>)

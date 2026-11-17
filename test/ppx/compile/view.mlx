@@ -22,7 +22,7 @@ let client_view : Yuka.client Yuka.element =
     <button on_click=(fun _ -> Yuka.State.update count succ)>"inc"</button>
     <input on_input=(fun e -> ignore (Yuka.Event.target_value e)) />
     "n"
-    (Yuka.hole (fun () -> Yuka.text (string_of_int (Yuka.State.get count))))
+    (Yuka.hole (fun s -> Yuka.text (string_of_int (Yuka.State.get s count))))
   </div>
 
 let components : Yuka.client Yuka.element =

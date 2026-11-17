@@ -70,9 +70,20 @@ Each rule prevents a build error or a bug that the references explain.
   inner island as children from the page.
 - Each island prop needs a codec. Put `[@@deriving codec]` on your records
   and variants. A function cannot be a prop.
-- The ppx makes a hole only where the expression itself contains
-  `Yuka.State.get`. For a read inside another function, write
-  `Yuka.hole (fun () -> ...)`.
+- `Yuka.State.get scope state` needs the scope that Yuka gives to a hole,
+  a memo, an effect, the array function of `Yuka.each`, the `status` of
+  `Yuka.Show`, and the functions of `Remote.use` and `Live.use`:
+  `Yuka.State.memo (fun s -> Yuka.State.get s count * 2)`. A function that
+  reads nothing writes `fun _ ->`. In a component body, an event handler or
+  at the top level, read with `Yuka.State.peek`, or with
+  `Yuka.State.untrack (fun s -> ...)` for the reads that take a scope.
+- In markup, the ppx makes a hole of a child or attribute that contains
+  `Yuka.State.get state` (one argument) and passes the scope. It does not
+  see a read inside another function, and it does not know `Form.pending`,
+  `Form.field_error`, `Form.form_errors`, `Remote.status` and
+  `Live.status`, which take the scope first. For those, and for a read
+  inside a `fun` in the child, write `Yuka.hole (fun s -> ...)` and pass
+  `s`. It does see reads inside the elements of the child.
 - Create a State inside `make`, not at the top level of a module.
 - Do not copy one State into another with an effect. Use `Yuka.State.memo`.
 - Code that needs the browser goes in an effect or an event handler:

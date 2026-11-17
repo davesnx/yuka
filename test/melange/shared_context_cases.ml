@@ -18,7 +18,7 @@ let view () =
   let st = Context.get theme in
   Option.iter (fun s -> seen := s :: !seen) st;
   let n = match (Context.get label, Context.get plain) with Some n, None -> ints n | _, Some _ -> "plain" | None, None -> "none" in
-  element "p" [] [ text n; hole (fun () -> text (match st with Some s -> " " ^ State.get s | None -> " none")) ]
+  element "p" [] [ text n; hole (fun sc -> text (match st with Some s -> " " ^ State.get sc s | None -> " none")) ]
 
 let entry = runtime_entry ~name:"Th" (fun _ -> Ok view)
 let island () = runtime_island ~name:"Th" ~props:`Null view

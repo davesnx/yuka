@@ -381,7 +381,7 @@ let outlet key inner =
 let rec nest layers body () =
   match layers with
   | [] -> body ()
-  | (l : layer) :: rest -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key (Hole (nest rest body)))))
+  | (l : layer) :: rest -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key (Hole (fun _ -> nest rest body ())))))
 
 let add_vary value headers =
   let existing =

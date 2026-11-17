@@ -1,3 +1,11 @@
+type scope = unit
+
+let scope = ()
+
+type 'a thunk = unit -> 'a
+
+external scoped : (scope -> 'a) -> 'a thunk = "%identity"
+
 type 'a t = {
   mutable value : 'a;
   mutable old : 'a;
@@ -44,7 +52,7 @@ let peek s =
   Scheduler.fresh s.node;
   s.value
 
-let get s =
+let get (_ : scope) s =
   (if s.node.state <> 0 then
      try Scheduler.fresh s.node
      with e ->

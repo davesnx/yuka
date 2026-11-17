@@ -10,7 +10,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     | Text of string
     | Element of { tag : string; attrs : attr list; children : node list }
     | Fragment of node list
-    | Hole of (unit -> node)
+    | Hole of (Signal.scope -> node)
     | Island of {
         name : string;
         props : Json.t;
@@ -27,7 +27,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     | Slot of slot
     | Template of { template : template; parts : part array }
     | Each : {
-        items : unit -> 'a array;
+        items : Signal.scope -> 'a array;
         key : 'a -> string;
         equal : 'a -> 'a -> bool;
         render : 'a -> node;
@@ -83,7 +83,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
 
   and attr =
     | Static of string * string
-    | Dynamic of string * (unit -> string option)
+    | Dynamic of string * (Signal.scope -> string option)
     | Handler of string * (event -> unit)
 
 

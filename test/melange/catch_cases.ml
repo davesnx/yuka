@@ -21,7 +21,7 @@ let catch_first_effect () =
         Dom_cases.div []
           [ text "a";
             boundary (fun () ->
-                Effect.before (fun () -> failwith "first");
+                Effect.before (fun _ -> failwith "first");
                 Dom_cases.span [ text "x" ]);
             text "b" ])
   in
@@ -34,7 +34,7 @@ let catch_first_after () =
         Dom_cases.div []
           [ text "a";
             boundary (fun () ->
-                Effect.after (fun () -> failwith "first");
+                Effect.after (fun _ -> failwith "first");
                 Dom_cases.span [ text "x" ]);
             text "b" ])
   in
@@ -47,7 +47,7 @@ let after_of_failed_children () =
     render (fun () ->
         Dom_cases.div []
           [ boundary (fun () ->
-                Effect.after (fun () -> incr runs);
+                Effect.after (fun _ -> incr runs);
                 failwith "render") ])
   in
   check "fallback" {|caught Failure(render)|} (shown c);
@@ -57,7 +57,7 @@ let after_of_failed_children () =
 let flush_tree s ~wrap =
   Dom_cases.div []
     [ wrap (fun () ->
-          Effect.before (fun () -> State.set s 1);
+          Effect.before (fun _ -> State.set s 1);
           Dom_cases.span [ text "ok" ]) ]
 
 let render_error tree =
@@ -71,7 +71,7 @@ let render_error tree =
 let catch_other_effect_error () =
   let run ~wrap =
     let s = State.make 0 in
-    let (), stop_b = with_owner (fun () -> Effect.after (fun () -> if State.get s = 1 then failwith "B")) in
+    let (), stop_b = with_owner (fun () -> Effect.after (fun sc -> if State.get sc s = 1 then failwith "B")) in
     let result = render_error (fun () -> flush_tree s ~wrap) in
     stop_b ();
     result
@@ -94,10 +94,10 @@ let catch_render () =
 let catch_effect () =
   let n = State.make 0 and cleaned = ref 0 and runs = ref 0 in
   let child () =
-    Effect.after ~cleanup:(fun () -> incr cleaned) (fun () -> ignore (State.get n));
-    Effect.after (fun () ->
+    Effect.after ~cleanup:(fun () -> incr cleaned) (fun sc -> ignore (State.get sc n));
+    Effect.after (fun sc ->
         incr runs;
-        if State.get n = 1 then failwith "effect");
+        if State.get sc n = 1 then failwith "effect");
     Dom_cases.span [ text "ok" ]
   in
   let c, dispose = render (fun () -> Dom_cases.div [] [ boundary child ]) in
@@ -114,7 +114,7 @@ let catch_cleanup () =
   let child () =
     Effect.after
       ~cleanup:(fun () -> if State.peek n > 0 then failwith "cleanup")
-      (fun () -> ignore (State.get n));
+      (fun sc -> ignore (State.get sc n));
     Dom_cases.span [ text "ok" ]
   in
   let c, dispose = render (fun () -> Dom_cases.div [] [ boundary child ]) in
@@ -125,8 +125,8 @@ let catch_cleanup () =
 let catch_memo () =
   let n = State.make 0 in
   let child () =
-    let m = State.memo (fun () -> if State.get n > 0 then failwith "memo" else 7) in
-    Dom_cases.span [ hole (fun () -> text (ints (State.get m))) ]
+    let m = State.memo (fun sc -> if State.get sc n > 0 then failwith "memo" else 7) in
+    Dom_cases.span [ hole (fun sc -> text (ints (State.get sc m))) ]
   in
   let c, dispose = render (fun () -> Dom_cases.div [] [ boundary child ]) in
   check "memo value" "7" (shown c);
@@ -137,7 +137,7 @@ let catch_memo () =
 let catch_hole () =
   let n = State.make 0 in
   let child () =
-    Dom_cases.span [ hole (fun () -> if State.get n > 0 then failwith "hole" else text "ok") ]
+    Dom_cases.span [ hole (fun sc -> if State.get sc n > 0 then failwith "hole" else text "ok") ]
   in
   let c, dispose = render (fun () -> Dom_cases.div [] [ boundary child ]) in
   State.set n 1;
@@ -148,7 +148,7 @@ let catch_each_row () =
   let items = State.make [| "a" |] in
   let child () =
     Dom_cases.div []
-      [ each ~key:Fun.id (fun () -> State.get items)
+      [ each ~key:Fun.id (fun sc -> State.get sc items)
           (fun s -> if s = "bad" then failwith "row" else Dom_cases.span [ text s ]) ]
   in
   let c, dispose = render (fun () -> Dom_cases.div [] [ boundary child ]) in
@@ -160,7 +160,7 @@ let catch_click () =
   let n = State.make 0 in
   let child () =
     Dom_cases.div []
-      [ Dom_cases.span [ hole (fun () -> text (ints (State.get n))) ];
+      [ Dom_cases.span [ hole (fun sc -> text (ints (State.get sc n))) ];
         element "button" [ on "click" (fun _ -> State.update n succ; failwith "click") ] [] ]
   in
   let c, dispose = render (fun () -> Dom_cases.div [] [ boundary child ]) in
@@ -181,7 +181,7 @@ let catch_reset () =
     let n = State.make 0 in
     Dom_cases.div []
       [ element "button" [ attr "id" "inc"; on "click" (fun _ -> State.update n succ) ] [];
-        element "i" [] [ hole (fun () -> text (ints (State.get n))) ];
+        element "i" [] [ hole (fun sc -> text (ints (State.get sc n))) ];
         element "button"
           [ attr "id" "bad"; on "click" (fun _ -> if !fail then failwith "bad") ]
           [] ]
@@ -189,7 +189,7 @@ let catch_reset () =
   let c, dispose =
     render (fun () ->
         Dom_cases.div []
-          [ element "b" [] [ hole (fun () -> text (ints (State.get parent))) ]; boundary child ])
+          [ element "b" [] [ hole (fun sc -> text (ints (State.get sc parent))) ]; boundary child ])
   in
   Dom_cases.click (Dom_cases.query c "#inc");
   Dom_cases.click (Dom_cases.query c "#inc");
@@ -216,7 +216,7 @@ let catch_nested () =
                 Dom_cases.div []
                   [ Dom_cases.span [ text "o" ];
                     boundary (fun () ->
-                        Dom_cases.span [ hole (fun () -> if State.get n = 1 then failwith "inner" else text "i") ]) ])
+                        Dom_cases.span [ hole (fun sc -> if State.get sc n = 1 then failwith "inner" else text "i") ]) ])
               () ])
   in
   State.set n 1;
@@ -285,7 +285,7 @@ let show_view status =
 
 let show_client () =
   let st = State.make Status.Idle in
-  let c, dispose = render (fun () -> show_view (fun () -> State.get st)) in
+  let c, dispose = render (fun () -> show_view (fun sc -> State.get sc st)) in
   check "idle" "loading" (shown c);
   State.set st (Status.Loading None);
   check "loading" "loading" (shown c);
@@ -304,7 +304,7 @@ let show_client () =
 let show_hydrate () =
   List.iter
     (fun (name, st) ->
-      let tree () = Dom_cases.div [] [ show_view (fun () -> st) ] in
+      let tree () = Dom_cases.div [] [ show_view (fun _ -> st) ] in
       let logged, _ = Dom_cases.hydrate_logged (Dom_cases.server (tree ())) tree in
       check ("hydrate " ^ name) "" logged)
     [ ("idle", Status.Idle);
@@ -315,15 +315,15 @@ let show_hydrate () =
 
 let effect_view () =
   let n = State.make 0 in
-  Effect.after (fun () -> if State.get n = 2 then failwith "effect");
+  Effect.after (fun sc -> if State.get sc n = 2 then failwith "effect");
   element "div" []
-    [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
+    [ element "span" [] [ hole (fun sc -> text (ints (State.get sc n))) ];
       element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
 
 let click_view () =
   let n = State.make 0 in
   element "div" []
-    [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
+    [ element "span" [] [ hole (fun sc -> text (ints (State.get sc n))) ];
       element "button" [ on "click" (fun _ -> State.update n succ; failwith "click") ] [ text "!" ] ]
 
 let without_boundary view expected =
@@ -368,7 +368,7 @@ let island_boot_error () =
   check "server html kept" "server" (Island_cases.spans c)
 
 let bad_rows () =
-  Dom_cases.div [] [ each ~key:Fun.id (fun () -> [| "a"; "bad" |])
+  Dom_cases.div [] [ each ~key:Fun.id (fun _ -> [| "a"; "bad" |])
                (fun s -> if s = "bad" then failwith "row" else Dom_cases.span [ text s ]) ]
 
 let catch_each_first_render () =
@@ -393,12 +393,17 @@ let catch_each_first_hydrate () =
 
 let show_untracks_children () =
   let st = State.make (Status.Ready { data = "a"; stale = false }) and other = State.make "x" in
+  let scope = ref None in
   let c, dispose =
     render (fun () ->
         Show.make
-          ~status:(fun () -> State.get st)
+          ~status:(fun sc ->
+            scope := Some sc;
+            State.get sc st)
           ~loading:(text "loading")
-          ~children:(fun d -> element "b" [] [ text (d ^ State.get other) ])
+          ~children:(fun d ->
+            let o = match !scope with Some sc -> State.get sc other | None -> "?" in
+            element "b" [] [ text (d ^ o) ])
           ())
   in
   let b = Dom_cases.query c "b" in
@@ -429,7 +434,7 @@ let cleanup_on_dispose () =
   in
   let c, dispose =
     render (fun () ->
-        Dom_cases.div [] [ boundary (fun () -> Dom_cases.div [] [ each ~key:Fun.id (fun () -> State.get items) row ]) ])
+        Dom_cases.div [] [ boundary (fun () -> Dom_cases.div [] [ each ~key:Fun.id (fun sc -> State.get sc items) row ]) ])
   in
   State.set items [||];
   check "fallback" {|caught Failure(cleanup)|} (shown c);
@@ -439,7 +444,7 @@ let cleanup_on_dispose () =
 let looping_view () =
   boundary (fun () ->
       let s = State.make 0 in
-      Effect.after (fun () -> if State.get s > 0 then State.set s (State.peek s + 1));
+      Effect.after (fun sc -> if State.get sc s > 0 then State.set s (State.peek s + 1));
       element "button" [ on "click" (fun _ -> State.set s 1; failwith "x") ] [ text "go" ])
 
 let flush_error_reported () =
@@ -481,9 +486,9 @@ let on_error_raises () =
 let cleanup_raises_view () =
   let n = State.make 0 in
   Effect.after ~cleanup:(fun () -> failwith "cleanup") ignore;
-  Effect.after (fun () -> if State.get n = 1 then failwith "effect");
+  Effect.after (fun sc -> if State.get sc n = 1 then failwith "effect");
   element "div" []
-    [ element "span" [] [ hole (fun () -> text (ints (State.get n))) ];
+    [ element "span" [] [ hole (fun sc -> text (ints (State.get sc n))) ];
       element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ] ]
 
 let island_dispose_raises () =
@@ -494,7 +499,7 @@ let island_dispose_raises () =
 let island_start_dispose_raises () =
   let view () =
     Effect.after ~cleanup:(fun () -> failwith "cleanup") ignore;
-    Effect.after (fun () -> failwith "first");
+    Effect.after (fun _ -> failwith "first");
     Dom_cases.span [ text "x" ]
   in
   let c = Island_cases.setup_page (Island_cases.page [ runtime_island ~name:"Bad" ~props:(`Int 0) view; Island_cases.counter_island 10 ]) in

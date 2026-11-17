@@ -329,11 +329,11 @@ let on_server (topic : (_, _) Topic.t) key base =
     | _ -> Answers.record name None embedded
   end
 
-let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
+let use (topic : ('k, 's) Topic.t) (args : State.scope -> 'k) : 's t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
   if !(Base.server_rendering ()) || not Web.in_browser then begin
-    on_server topic (Codec.encode (Topic.key topic) (args ())) base;
+    on_server topic (Codec.encode (Topic.key topic) (args Signal.scope)) base;
     { base; changes; use = None }
   end
   else begin
@@ -377,8 +377,8 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
     Platform.live_mark := (fun fields -> last_mark := List.assoc_opt "live" fields);
     let m = get () in
     let first = ref true in
-    Base.run_effect Scheduler.queue (fun () ->
-        let key = Codec.encode (Topic.key topic) (args ()) in
+    Base.run_effect Scheduler.queue (fun s ->
+        let key = Codec.encode (Topic.key topic) (args s) in
         match u.key with
         | Some k when Json.to_string k = Json.to_string key -> ()
         | _ ->
@@ -408,9 +408,9 @@ let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
     { base; changes; use = Some u }
   end
 
-let status t =
-  let changes = State.get t.changes in
-  let base = State.get t.base in
+let status s t =
+  let changes = State.get s t.changes in
+  let base = State.get s t.base in
   Optimistic.status changes base
 
 let optimistic ?commit t ~change run =

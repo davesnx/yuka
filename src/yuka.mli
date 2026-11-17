@@ -22,9 +22,9 @@ val batch : (unit -> 'a) -> 'a
     exception of the update go to the {!Catch} or island around it. *)
 
 module Effect : sig
-  val after : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
+  val after : ?cleanup:('r -> unit) -> (State.scope -> 'r) -> unit
   (** Runs the body after the DOM is up to date, and again after each change
-      of a State it read with [State.get]. Use it for code that reads or
+      of a State it read with [State.get scope]. Use it for code that reads or
       changes the DOM, and for most other effects. The first run waits for the
       end of the current {!batch} or update; {!render}, hydration and the
       creation of a list row run in one, so the first run of an effect created
@@ -51,7 +51,7 @@ module Effect : sig
       change of a State or a memo that it read, also one that it read in an
       earlier run and did not reach in the run that raised. *)
 
-  val before : ?cleanup:('r -> unit) -> (unit -> 'r) -> unit
+  val before : ?cleanup:('r -> unit) -> (State.scope -> 'r) -> unit
   (** As {!after}, with other timing. The first run is at once, in the
       component body, before the elements of the component exist. A later run
       comes in the same round as the holes, attributes and lists of the same
@@ -247,12 +247,12 @@ val attr : string -> string -> 'kind attribute
     or [=] raises [Invalid_argument] (in the browser here, on the server
     when printed). *)
 
-val hole : (unit -> client element) -> client element
+val hole : (State.scope -> client element) -> client element
 (** A part that changes after the first render. The function runs once; it
     runs again when a State it read changes, and its output replaces the old
     output. *)
 
-val hole_attr : string -> (unit -> string option) -> client attribute
+val hole_attr : string -> (State.scope -> string option) -> client attribute
 (** An attribute whose value changes. [None] removes the attribute. On the
     client, [value], [checked] and [selected] are set as properties. A URL
     attribute gets the check of {!attr} on each value. *)
@@ -405,14 +405,14 @@ module Status = Status
 
 module Show : sig
   val make :
-    status:(unit -> 'a Status.t) ->
+    status:(State.scope -> 'a Status.t) ->
     loading:'k element ->
     ?failed:(Status.error -> 'k element) ->
     children:('a -> 'k element) ->
     unit ->
     'k element
   (** [<Yuka.Show status loading failed> (fun data -> ...) </Yuka.Show>]: a
-      hole over [status ()]. [Ready] and [Loading (Some data)] show
+      hole over [status scope]. [Ready] and [Loading (Some data)] show
       [children data], so data stays on screen while it loads again; [Idle]
       and [Loading None] show [loading]; [Failed] shows [failed error]
       (default: nothing). The children render again only when the data
@@ -425,7 +425,7 @@ val on : string -> (Event.t -> unit) -> client attribute
 val each :
   ?equal:('a -> 'a -> bool) ->
   key:('a -> string) ->
-  (unit -> 'a array) ->
+  (State.scope -> 'a array) ->
   ('a -> client element) ->
   client element
 (** A keyed list. The array function is tracked as a hole. An item whose key
@@ -437,7 +437,7 @@ val each :
     while it renders: it keeps the items, not the array, so a later write
     into that array changes nothing on the page. To show a change, give a
     new array ({!State.set} with the same array is no change). For a list,
-    [fun () -> Array.of_list (State.get items)]. *)
+    [fun s -> Array.of_list (State.get s items)]. *)
 
 type stylesheet
 (** A CSS file of a module, made by [module Css = [%yuka.css "file.css"]].
@@ -534,7 +534,7 @@ module Browser : sig
       link, [popstate] or {!navigate} (also while the navigation code
       loads) until the new page is shown, a full page load starts in its
       place, or {!stop}. A navigation that a newer one aborts leaves it
-      [true] for the newer one. Read it with {!State.get} in an island, for
+      [true] for the newer one. Read it with {!State.get} in a hole of an island, for
       example to show a progress bar. Always [false] on the server and
       without client navigation. *)
 
@@ -650,7 +650,7 @@ type runtime_router
 type 'f runtime_form_decoding
 
 val runtime_attr : string -> string -> 'kind attribute
-val runtime_hole_attr : string -> (unit -> string option) -> client attribute
+val runtime_hole_attr : string -> (State.scope -> string option) -> client attribute
 (** {!attr} and {!hole_attr} for names that the ppx proved are not URL
     attributes. They raise [Invalid_argument] on a URL attribute name,
     [srcdoc], or a name that {!attr} refuses (an [on] name too). They do
@@ -659,7 +659,7 @@ val runtime_hole_attr : string -> (unit -> string option) -> client attribute
     [Failure] when the app links no URL check. *)
 
 val runtime_url_attr : string -> string -> string -> 'kind attribute
-val runtime_url_hole_attr : string -> string -> (unit -> string option) -> client attribute
+val runtime_url_hole_attr : string -> string -> (State.scope -> string option) -> client attribute
 (** [runtime_url_attr tag name value] is {!attr} that knows the element. *)
 
 val runtime_template :
@@ -748,7 +748,7 @@ module Private : sig
     | Text of string
     | Element of { tag : string; attrs : attr list; children : node list }
     | Fragment of node list
-    | Hole of (unit -> node)
+    | Hole of (State.scope -> node)
     | Island of {
         name : string;
         props : Json.t;
@@ -765,7 +765,7 @@ module Private : sig
     | Slot of slot
     | Template of { template : template; parts : part array }
     | Each : {
-        items : unit -> 'a array;
+        items : State.scope -> 'a array;
         key : 'a -> string;
         equal : 'a -> 'a -> bool;
         render : 'a -> node;
@@ -784,7 +784,7 @@ module Private : sig
 
   and attr =
     | Static of string * string
-    | Dynamic of string * (unit -> string option)
+    | Dynamic of string * (State.scope -> string option)
     | Handler of string * (Event.t -> unit)
 
   and template = runtime_template
@@ -860,7 +860,7 @@ module Private : sig
 
   val element : node -> 'kind element
 
-  val hole : (unit -> node) -> node
+  val hole : (State.scope -> node) -> node
   (** [Hole compute]. [node] is private, so that a test cannot build a node kind
       without the constructor that installs its client code. *)
 

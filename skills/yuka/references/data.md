@@ -131,8 +131,8 @@ function of the form:
       (Yuka.Form.field_error_view form `Title (fun ~id message ->
          <p id class_="error">(Yuka.text message)</p>))
       (Yuka.Form.form_errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
-      (Yuka.hole (fun () ->
-         <button type_=`submit disabled=(Yuka.Form.pending form)>"Create issue"</button>))
+      (Yuka.hole (fun s ->
+         <button type_=`submit disabled=(Yuka.Form.pending s form)>"Create issue"</button>))
     </div>)
 </Yuka.Form>
 ```
@@ -142,7 +142,10 @@ function of the form:
   failed post (422); else `""`.
 - In an island, a submit decodes the fields in the browser first (an
   error shows at once, with no request), then calls the action.
-  `Yuka.Form.pending form` is true while it waits; read it in a hole. On
+  `Yuka.Form.pending s form` is true while it waits. It takes the scope
+  `s` of a hole: write the hole yourself, as above, because the ppx makes
+  a hole only for `State.get`. `Yuka.Form.field_error s form field` and
+  `Yuka.Form.form_errors s form` are read the same way. On
   `Ok output`, `on_ok output` runs, or else the page follows the redirect
   of the server with a client navigation.
 - Two forms of one action on a page need different `key`s:
@@ -180,8 +183,8 @@ when two forms on a page have the same action and key.
 ## Remote data
 
 `Yuka.Remote.use` runs a query and keeps its status. Call it in a
-component body. It runs again when a State that its input function reads
-changes:
+component body. Its input function gets a scope, and the query runs
+again when a State that the function reads with it changes:
 
 ```ocaml
 (* shared/user_popup.mlx *)
@@ -192,8 +195,8 @@ let stats = Yuka.Action.query ~name:"user_stats" ~input:input_codec ~output:stat
 
 module Card = struct
   let make ~workspace ~(user : Model.User.t) () =
-    let remote = Yuka.Remote.use stats (fun () -> { workspace; user = user.id }) in
-    <Yuka.Show status=(fun () -> Yuka.Remote.status remote)
+    let remote = Yuka.Remote.use stats (fun _ -> { workspace; user = user.id }) in
+    <Yuka.Show status=(fun s -> Yuka.Remote.status s remote)
       loading=(<p>"Loading..."</p>)
       failed=(fun _ -> <p>"Could not load the numbers."</p>)>
       (fun (stats : stats) -> <p>(Yuka.text (Printf.sprintf "%d open" stats.open_))</p>)
@@ -211,7 +214,8 @@ Yuka.Server.Action.implement User_popup.stats (fun _request { workspace; user } 
 - In a server render, the query runs once. Inside an island, the answer
   is written in the page, and the browser reads it with no request.
 - A `Network` or `Server` error is tried again two times, after 500 ms
-  and 1500 ms (`?retry`). `?enabled` stops the query while it is false.
+  and 1500 ms (`?retry`). `?enabled:(fun s -> ...)` stops the query while
+  it gives false.
 - `Yuka.Remote.refetch remote` sends it again. `Yuka.Remote.invalidate query`
   sends again every use of the query on the page, for example after an
   action changed the data.
@@ -222,7 +226,9 @@ Yuka.Server.Action.implement User_popup.stats (fun _request { workspace; user } 
 
 `Yuka.Remote.status` and `Yuka.Live.status` give a `Yuka.Status.t`:
 `Idle`, `Loading (Some last)`, `Ready { data; stale }` or
-`Failed { error; last }`. `<Yuka.Show>` shows it, as in the sample above:
+`Failed { error; last }`. Both take the scope first, so read them in a
+hole, a memo or the `status` function of `<Yuka.Show>`. `<Yuka.Show>`
+shows it, as in the sample above:
 
 - `Ready` and `Loading (Some data)` show the children with the data, so
   the data stays on the page while it loads again.
@@ -259,9 +265,9 @@ An island subscribes with `Yuka.Live.use`:
 ```ocaml
 (* shared/issue_props.mlx *)
 let[@client] make ~(issue : Model.Issue.t) () =
-  let live = Yuka.Live.use Topics.issue (fun () -> issue.id) in
+  let live = Yuka.Live.use Topics.issue (fun _ -> issue.id) in
   let current =
-    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:issue)
+    Yuka.State.memo (fun s -> Option.value (Yuka.Status.data (Yuka.Live.status s live)) ~default:issue)
   in
   <p>(Yuka.text (Model.Issue.status_label (Yuka.State.get current).status))</p>
 ```

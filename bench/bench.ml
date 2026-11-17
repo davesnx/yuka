@@ -39,11 +39,11 @@ let row ~wrap i =
   let selected = State.make false in
   let title = State.make ("Issue " ^ string_of_int i) in
   let selected_attr =
-    hole_attr "data-selected" (fun () -> if State.get selected then Some "1" else None)
+    hole_attr "data-selected" (fun s -> if State.get s selected then Some "1" else None)
   in
   let click = on "click" (fun _ -> State.set selected true) in
-  let title_hole = hole (fun () -> text (State.get title)) in
-  let id_hole = hole (fun () -> text ("YU-" ^ string_of_int i)) in
+  let title_hole = hole (fun s -> text (State.get s title)) in
+  let id_hole = hole (fun _ -> text ("YU-" ^ string_of_int i)) in
   if wrap then
     runtime_instance row_template
       [| runtime_attribute selected_attr; runtime_attribute click; runtime_child title_hole; runtime_child id_hole |]
@@ -82,7 +82,7 @@ let once ?(static = false) wrap rows =
           element "ul" []
             [
               each ~key:string_of_int
-                (fun () -> Array.init rows Fun.id)
+                (fun _ -> Array.init rows Fun.id)
                 (fun i -> row ~wrap i);
             ] )
     ();

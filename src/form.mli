@@ -54,7 +54,7 @@ val value : ('o, 'f) form -> 'f -> string
 (** The value sent for the field when the page answers a failed post
     (422), else [""]. *)
 
-val field_error : ('o, 'f) form -> 'f -> string option
+val field_error : State.scope -> ('o, 'f) form -> 'f -> string option
 (** Tracked read of the first error of the field. *)
 
 val field_error_view : ('o, 'f) form -> 'f -> (id:string -> string -> 'k Kind.element) -> 'k Kind.element
@@ -68,7 +68,7 @@ val field_error_view : ('o, 'f) form -> 'f -> (id:string -> string -> 'k Kind.el
     that the author set on another field stays. The [id] is made from the
     action name, the [key] of {!make} and the field name. *)
 
-val form_errors : ('o, 'f) form -> string list
+val form_errors : State.scope -> ('o, 'f) form -> string list
 (** Tracked read of the errors for the whole form, not for one field. *)
 
 val form_errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.element
@@ -78,10 +78,9 @@ val form_errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.e
     and no field takes the focus, the focus goes to this [div]; on a failed
     post (422) with no field errors, the server prints [autofocus] on it. *)
 
-val pending : ('o, 'f) form -> bool
+val pending : State.scope -> ('o, 'f) form -> bool
 (** Tracked: true while an island submit waits for its answer. Read it in
-    a hole ([Yuka.hole]); read in the children directly, it renders the
-    enclosing component again, with a new form. *)
+    a hole: [Yuka.hole (fun s -> ... Form.pending s form ...)]. *)
 
 val make :
   action:('i, 'o, 'f) action ->

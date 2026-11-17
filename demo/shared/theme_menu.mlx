@@ -46,7 +46,7 @@ let[@client] make () =
         Yuka.State.set code choice);
     close ~refocus:true
   in
-  Yuka.Effect.after (fun () ->
+  Yuka.Effect.after (fun _ ->
       Yuka.Browser.on_window "keydown" (fun event ->
           if Yuka.State.peek opened then
             match Yuka.Event.key event with
@@ -67,11 +67,12 @@ let[@client] make () =
             | _ -> ()));
   let item choice =
     let checked =
-      match choice with Ui theme -> Yuka.State.get current = theme | Code choice -> Yuka.State.get code = choice
+      Yuka.State.memo (fun s ->
+          match choice with Ui theme -> Yuka.State.get s current = theme | Code choice -> Yuka.State.get s code = choice)
     in
     <button id=(item_id choice) class_="menu-item" type_=`button role=`menuitemradio
       tabindex=(if Yuka.State.get active = index_of choice then 0 else -1)
-      aria_checked=(if checked then `true_ else `false_)
+      aria_checked=(if Yuka.State.get checked then `true_ else `false_)
       on_click=(fun _ -> choose choice)>
       (match choice with
       | Ui theme -> <span class_=Css.swatch data_theme=(Theme.slug theme) />
@@ -82,7 +83,7 @@ let[@client] make () =
          | Ui theme -> Theme.label theme
          | Code None -> "Auto"
          | Code (Some code) -> Theme.Code.label code))
-      (if checked then
+      (if Yuka.State.get checked then
          <svg class_=Css.check view_box="0 0 14 14" width="14" height="14" aria_hidden=true>
            <path d="M3 7.5 L6 10.5 L11 4" fill="none" stroke="currentColor" stroke_width="1.75" />
          </svg>

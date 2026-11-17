@@ -107,7 +107,7 @@ let set_body : string -> unit = [%mel.raw "function (h) { document.body.innerHTM
 let topic = Topic.declare ~name:"items" ~key:Codec.string ~state:(Codec.list Codec.string)
 
 let show (t : string list Live.t) =
-  match Live.status t with
+  match State.untrack (fun s -> Live.status s t) with
   | Status.Idle -> "idle"
   | Status.Loading None -> "loading"
   | Status.Loading (Some d) -> "loading " ^ String.concat "," d
@@ -123,7 +123,7 @@ let fresh () =
   install ();
   set_body ""
 
-let use key = Yuka.with_owner (fun () -> Live.use topic (fun () -> key))
+let use key = Yuka.with_owner (fun () -> Live.use topic (fun _ -> key))
 
 let with_env f () =
   fresh ();
@@ -361,7 +361,7 @@ let optimistic_while_down () =
 
 let key_change () =
   let k = State.make "a" in
-  let a, stop = Yuka.with_owner (fun () -> Live.use topic (fun () -> State.get k)) in
+  let a, stop = Yuka.with_owner (fun () -> Live.use topic (fun sc -> State.get sc k)) in
   ws_open 0;
   ws_message 0 (state 1 [ "x" ]);
   clear_sent 0;
@@ -441,8 +441,8 @@ let resume_reconnect () =
 let rows_topic = Topic.declare ~name:"rows" ~key:Codec.string ~state:(Codec.list (Codec.list Codec.string))
 
 let patch_keeps_items () =
-  let rows, stop = Yuka.with_owner (fun () -> Live.use rows_topic (fun () -> "a")) in
-  let data () = match Live.status rows with Status.Ready { data; _ } -> data | _ -> [] in
+  let rows, stop = Yuka.with_owner (fun () -> Live.use rows_topic (fun _ -> "a")) in
+  let data () = match State.untrack (fun s -> Live.status s rows) with Status.Ready { data; _ } -> data | _ -> [] in
   ws_open 0;
   ws_message 0 {|{"t":"hello","v":1,"node":"N"}|};
   ws_message 0 {|{"t":"state","id":1,"seq":1,"state":[["a"],["b"],["c"]]}|};

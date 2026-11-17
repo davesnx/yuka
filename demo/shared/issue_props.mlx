@@ -1,9 +1,9 @@
 open Model
 
 let[@client] make ~(issue : Model.Issue.t) ~children () =
-  let live = Yuka.Live.use Topics.issue (fun () -> issue.id) in
+  let live = Yuka.Live.use Topics.issue (fun _ -> issue.id) in
   let current =
-    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:issue)
+    Yuka.State.memo (fun s -> Option.value (Yuka.Status.data (Yuka.Live.status s live)) ~default:issue)
   in
   let error : string option Yuka.State.t = Yuka.State.make None in
   let change ?status ?priority () =
@@ -32,8 +32,8 @@ let[@client] make ~(issue : Model.Issue.t) ~children () =
             items))
     </select>
   in
-  let status = Yuka.State.memo (fun () -> (Yuka.State.get current).status) in
-  let priority = Yuka.State.memo (fun () -> (Yuka.State.get current).priority) in
+  let status = Yuka.State.memo (fun s -> (Yuka.State.get s current).status) in
+  let priority = Yuka.State.memo (fun s -> (Yuka.State.get s current).priority) in
   <Yuka.Catch fallback=(fun ~error:_ ~reset ->
       <div class_="props">
         <p class_="error">"The properties could not be shown."</p>
@@ -59,8 +59,8 @@ let[@client] make ~(issue : Model.Issue.t) ~children () =
       (match Yuka.State.get error with
        | Some message -> <p class_="error">(Yuka.text message)</p>
        | None -> Yuka.empty)
-      (Yuka.hole (fun () ->
-         match Yuka.Live.status live with
+      (Yuka.hole (fun s ->
+         match Yuka.Live.status s live with
          | Yuka.Status.Ready { stale = true; _ } -> <p class_="offline">"Offline"</p>
          | _ -> Yuka.empty))
       children

@@ -454,7 +454,7 @@ type t = {
 
 type reader = {
   read : bool -> bool -> int -> int;
-  untrack : (unit -> int) -> int;
+  untrack : (reader -> int) -> int;
   write : int -> int -> unit;
 }
 
@@ -517,7 +517,7 @@ let pairs l = String.concat " " (List.map (fun (j, x) -> Printf.sprintf "n%d=%s"
 let rec eval rd ~tracked id = function
   | Get j -> rd.read tracked false j
   | Peek j -> rd.read false true j
-  | Untrack e -> rd.untrack (fun () -> eval rd ~tracked:false id e)
+  | Untrack e -> rd.untrack (fun rd -> eval rd ~tracked:false id e)
   | Sum l ->
       List.fold_left
         (fun acc e ->
@@ -575,7 +575,7 @@ and model t =
         | Val v -> v
         | Err k -> raise (Boom k)
         | Unknown | Stale -> failwith "the model reads a loose node");
-    untrack = (fun f -> f ());
+    untrack = (fun f -> f (model t));
     write = (fun _ _ -> ());
   }
 
@@ -619,13 +619,13 @@ let set_src t j v =
   if t.depth = 0 then t.s1.(j) <- v;
   match n.writer with Some w -> State.set w v | None -> ()
 
-let actual t ?(vers = ref []) who obs =
+let rec actual t ?(vers = ref []) sc who obs =
   {
     read =
       (fun tracked peek j ->
         let h = handle t j in
         let got =
-          match if peek then State.peek h else State.get h with
+          match if peek then State.peek h else State.get sc h with
           | v -> Val v
           | exception Boom k -> Err k
         in
@@ -639,7 +639,7 @@ let actual t ?(vers = ref []) who obs =
           vers := t.nodes.(j).ver :: !vers
         end;
         match got with Val v -> v | Err k -> raise (Boom k) | Unknown | Stale -> assert false);
-    untrack = State.untrack;
+    untrack = (fun f -> State.untrack (fun sc -> f (actual t ~vers sc who obs)));
     write = set_src t;
   }
 
@@ -649,7 +649,7 @@ let val_vers obs vers =
   List.concat
     (List.map2 (fun (j, x) c -> match x with Val v -> [ (j, v, c) ] | _ -> []) (List.rev obs) (List.rev vers))
 
-let compute t n e () =
+let compute t n e sc =
   let who = Printf.sprintf "memo n%d" n.id in
   if not n.alive then fail t "6 disposal" who "no compute after its owner is disposed" "a compute";
   if
@@ -664,7 +664,7 @@ let compute t n e () =
   n.computes <- n.computes + 1;
   enter t;
   let obs = ref [] and vers = ref [] in
-  match eval (actual t ~vers who obs) ~tracked:true n.id e with
+  match eval (actual t ~vers sc who obs) ~tracked:true n.id e with
   | v ->
       leave t None;
       if n.computes > 1 && v <> n.value then n.ver <- n.ver + 1;
@@ -826,9 +826,9 @@ and start_in t ?grp home spec =
       if (not deferred) && i.i_failed && i.oks = 0 then kill t i;
       raise e
 
-and run t i () = entered t i.want (run_in t i)
+and run t i sc = entered t i.want (run_in t i sc)
 
-and run_in t i () =
+and run_in t i sc () =
   resolve t;
   let w = who i in
   check_ctx t (w ^ " at the start of its run") i.want;
@@ -865,7 +865,7 @@ and run_in t i () =
   enter t;
   let obs = ref [] and vers = ref [] in
   match
-    let v = eval (actual t ~vers w obs) ~tracked:true (1000 + i.iid) i.spec.body in
+    let v = eval (actual t ~vers sc w obs) ~tracked:true (1000 + i.iid) i.spec.body in
     check_ctx t (w ^ " after its reads") i.want;
     List.iter (fun k -> start t ?grp:i.home (fun c -> i.children <- c :: i.children) k) i.spec.kids;
     (match i.spec.writes with Some s -> set_src t s (v mod 4) | None -> ());
@@ -1106,8 +1106,8 @@ let loop_op t s variant =
   t.looping <- true;
   t.exact <- false;
   let h = handle t s in
-  let bump () =
-    let v = State.get h in
+  let bump sc =
+    let v = State.get sc h in
     set_src t s ((v + 1) mod 4);
     v
   in
@@ -1115,12 +1115,12 @@ let loop_op t s variant =
     match
       with_owner (fun () ->
           match variant with
-          | 0 -> Effect.before (fun () -> ignore (bump ()))
+          | 0 -> Effect.before (fun sc -> ignore (bump sc))
           | 1 -> batch (fun () -> ignore (State.peek (State.memo bump)))
           | _ ->
               batch (fun () ->
                   let m = State.memo bump in
-                  Effect.before (fun () -> ignore (State.get m))))
+                  Effect.before (fun sc -> ignore (State.get sc m))))
     with
     | (), d ->
         d ();
@@ -1140,7 +1140,7 @@ let loop_op t s variant =
   List.iter (fun i -> if i.i_alive && i.attempts = 0 then kill t i) t.insts;
   let u = State.make 0 in
   let seen = ref (-1) in
-  let (), stop = with_owner (fun () -> Effect.before (fun () -> seen := State.get u)) in
+  let (), stop = with_owner (fun () -> Effect.before (fun sc -> seen := State.get sc u)) in
   (match State.set u 1 with
   | () -> ()
   | exception e ->
@@ -1508,38 +1508,38 @@ let joined l = String.concat " " (List.rev l)
 
 let needless_rerun () =
   let a = State.make 0 in
-  let b = State.memo (fun () -> State.get a) in
+  let b = State.memo (fun sc -> State.get sc a) in
   let c =
-    State.memo (fun () ->
-        let x = State.get a in
-        x + State.get b)
+    State.memo (fun sc ->
+        let x = State.get sc a in
+        x + State.get sc b)
   in
   let runs = ref 0 in
-  Effect.before (fun () ->
+  Effect.before (fun sc ->
       incr runs;
-      let x = State.get a in
-      let y = State.get c in
-      ignore (x + y + State.get b));
+      let x = State.get sc a in
+      let y = State.get sc c in
+      ignore (x + y + State.get sc b));
   State.set a 1;
   Cases.check "one run for one write" "2" (string_of_int !runs)
 
 let missed_run () =
   let a = State.make 0 in
-  let j = State.memo (fun () -> State.get a) in
+  let j = State.memo (fun sc -> State.get sc a) in
   let y =
-    State.memo (fun () ->
-        let x = State.get a in
-        x + State.get j)
+    State.memo (fun sc ->
+        let x = State.get sc a in
+        x + State.get sc j)
   in
   let x =
-    State.memo (fun () ->
-        let s = State.get a in
-        let s = s + State.get y in
-        let s = s + State.get j in
+    State.memo (fun sc ->
+        let s = State.get sc a in
+        let s = s + State.get sc y in
+        let s = s + State.get sc j in
         if s = 4 then 0 else s)
   in
   let seen = ref [] in
-  Effect.before (fun () -> seen := string_of_int (State.get x) :: !seen);
+  Effect.before (fun sc -> seen := string_of_int (State.get sc x) :: !seen);
   State.set a 1;
   State.set a 2;
   Cases.check "the effect sees x = 8" "0 8" (joined !seen)
@@ -1547,21 +1547,21 @@ let missed_run () =
 let child_before_parent () =
   let a = State.make 0 in
   let log = ref [] in
-  Effect.before (fun () ->
-      Effect.before (fun () ->
-          log := ("P" ^ string_of_int (State.get a)) :: !log;
-          Effect.before (fun () -> log := ("C" ^ string_of_int (State.get a)) :: !log)));
+  Effect.before (fun _ ->
+      Effect.before (fun sc ->
+          log := ("P" ^ string_of_int (State.get sc a)) :: !log;
+          Effect.before (fun sc -> log := ("C" ^ string_of_int (State.get sc a)) :: !log)));
   State.set a 1;
   State.set a 2;
   Cases.check "parent effects first" "P0 C0 P1 C1 P2 C2" (joined !log)
 
 let no_rerun_after_recovery () =
   let a = State.make 0 and b = State.make 0 in
-  let m = State.memo (fun () -> if State.get a = 1 then raise (Boom 1) else 0) in
+  let m = State.memo (fun sc -> if State.get sc a = 1 then raise (Boom 1) else 0) in
   let seen = ref [] in
-  Effect.before (fun () ->
-      let x = State.get b in
-      let y = State.get m in
+  Effect.before (fun sc ->
+      let x = State.get sc b in
+      let y = State.get sc m in
       seen := Printf.sprintf "%d/%d" x y :: !seen);
   (try State.set a 1 with Boom _ -> ());
   (try State.set b 5 with Boom _ -> ());
@@ -1570,24 +1570,24 @@ let no_rerun_after_recovery () =
 
 let raising_read_untracked () =
   let a = State.make 0 in
-  let m = State.memo (fun () -> let v = State.get a in if v = 1 then raise (Boom 1) else v) in
+  let m = State.memo (fun sc -> let v = State.get sc a in if v = 1 then raise (Boom 1) else v) in
   State.set a 1;
   let seen = ref [] in
-  (try batch (fun () -> Effect.after (fun () -> seen := string_of_int (State.get m) :: !seen))
+  (try batch (fun () -> Effect.after (fun sc -> seen := string_of_int (State.get sc m) :: !seen))
    with Boom _ -> ());
   State.set a 2;
   Cases.check "the effect runs once m recovers" "2" (joined !seen)
 
 let before_after_after () =
   let a = State.make 0 and b = State.make 0 in
-  let r = State.memo (fun () -> if State.get a = 1 then raise (Boom 1) else 0) in
-  let c = State.memo (fun () -> State.get b) in
+  let r = State.memo (fun sc -> if State.get sc a = 1 then raise (Boom 1) else 0) in
+  let c = State.memo (fun sc -> State.get sc b) in
   let log = ref [] in
-  Effect.after (fun () -> log := ("after" ^ string_of_int (State.get c)) :: !log);
-  Effect.before (fun () ->
+  Effect.after (fun sc -> log := ("after" ^ string_of_int (State.get sc c)) :: !log);
+  Effect.before (fun sc ->
       log := "before" :: !log;
-      let x = State.get r in
-      ignore (x + State.get c));
+      let x = State.get sc r in
+      ignore (x + State.get sc c));
   (try State.set a 1 with Boom _ -> ());
   log := [];
   (try State.set b 1 with Boom _ -> ());
@@ -1597,12 +1597,12 @@ let before_after_after () =
 let pending_after_peek () =
   let a = State.make 0 and t = State.make 0 in
   let m =
-    State.memo (fun () ->
-        let x = State.get t in
+    State.memo (fun sc ->
+        let x = State.get sc t in
         if State.peek a = 1 then raise (Boom 1) else x)
   in
   let seen = ref [] in
-  Effect.before (fun () -> seen := string_of_int (State.get m) :: !seen);
+  Effect.before (fun sc -> seen := string_of_int (State.get sc m) :: !seen);
   State.set a 1;
   (try State.set t 1 with Boom _ -> ());
   State.set a 0;
@@ -1612,13 +1612,13 @@ let pending_after_peek () =
 let caught_then_recovers () =
   let n = State.make 0 in
   let m =
-    State.memo (fun () ->
-        let v = State.get n in
+    State.memo (fun sc ->
+        let v = State.get sc n in
         if v = 3 then raise (Boom 2) else v)
   in
   let seen = ref [] in
-  Effect.before (fun () ->
-      let v = try State.get m with Boom _ -> -1 in
+  Effect.before (fun sc ->
+      let v = try State.get sc m with Boom _ -> -1 in
       seen := string_of_int v :: !seen);
   State.set n 2;
   State.set n 3;
@@ -1627,16 +1627,16 @@ let caught_then_recovers () =
 
 let write_in_check_phase () =
   let s = State.make 0 in
-  let a = State.memo (fun () -> State.get s mod 3) in
+  let a = State.memo (fun sc -> State.get sc s mod 3) in
   let c =
-    State.memo (fun () ->
-        if State.get s > 1 then State.set s 1;
+    State.memo (fun sc ->
+        if State.get sc s > 1 then State.set s 1;
         0)
   in
   let seen = ref [] in
-  Effect.before (fun () ->
-      let x = State.get a in
-      let y = State.get c in
+  Effect.before (fun sc ->
+      let x = State.get sc a in
+      let y = State.get sc c in
       seen := Printf.sprintf "%d/%d" x y :: !seen);
   State.set s 3;
   Cases.check "the effect sees the value of a after the clamp" "0/0 1/0" (joined !seen)

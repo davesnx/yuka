@@ -48,7 +48,7 @@ let counter_view n =
   let c = State.make n in
   element "div" []
     [
-      element "span" [] [ hole (fun () -> text (ints (State.get c))) ];
+      element "span" [] [ hole (fun sc -> text (ints (State.get sc c))) ];
       element "button" [ on "click" (fun _ -> State.update c succ) ] [ text "+" ];
     ]
 
@@ -268,11 +268,11 @@ let fill_view a =
   element "div" []
     [
       text "x";
-      Await.make ~async:a ~loading:(hole (fun () -> text "wait"))
+      Await.make ~async:a ~loading:(hole (fun _ -> text "wait"))
         ~children:(fun n ->
           element "section" []
             [
-              hole (fun () -> text (ints n));
+              hole (fun _ -> text (ints n));
               Await.make ~async:(Async.return "z") ~loading:empty
                 ~children:(fun z -> element "i" [] [ text z ])
                 ();
@@ -361,7 +361,7 @@ let slot_page_tree slot =
   element "div" []
     [
       text "a";
-      hole (fun () ->
+      hole (fun _ ->
           if true then element "div" [] [ Private.slot slot ] else empty);
     ]
 
@@ -388,8 +388,8 @@ let slot_moves_with_hole () =
   let view slot =
     element "main" []
       [
-        hole (fun () ->
-            if State.get wrap then element "div" [] [ Private.slot slot ]
+        hole (fun sc ->
+            if State.get sc wrap then element "div" [] [ Private.slot slot ]
             else element "section" [] [ Private.slot slot ]);
       ]
   in
@@ -424,8 +424,8 @@ let outer_view slot =
   element "div" []
     [
       element "button" [ attr "id" "outer"; on "click" (fun _ -> State.update wrap not) ] [];
-      hole (fun () ->
-          if State.get wrap then element "div" [] [ Private.slot slot ]
+      hole (fun sc ->
+          if State.get sc wrap then element "div" [] [ Private.slot slot ]
           else element "section" [] [ Private.slot slot ]);
     ]
 
@@ -701,7 +701,7 @@ let replay_view () =
   let log s = replay_log := s :: !replay_log in
   element "div" []
     [
-      element "span" [ attr "id" "count" ] [ hole (fun () -> text (ints (State.get count))) ];
+      element "span" [ attr "id" "count" ] [ hole (fun sc -> text (ints (State.get sc count))) ];
       element "button"
         [ on "click" (fun _ -> log "c"; State.update count succ) ]
         [ text "+" ];
@@ -711,9 +711,9 @@ let replay_view () =
           element "option" [ attr "value" "a" ] [ text "A" ];
           element "option" [ attr "value" "b" ] [ text "B" ];
         ];
-      element "span" [ attr "id" "chosen" ] [ hole (fun () -> text (State.get chosen)) ];
+      element "span" [ attr "id" "chosen" ] [ hole (fun sc -> text (State.get sc chosen)) ];
       element "input" [ on "keydown" (fun e -> log ("k:" ^ Event.key e); State.update keys (fun k -> k ^ Event.key e)) ] [];
-      element "span" [ attr "id" "keys" ] [ hole (fun () -> text (State.get keys)) ];
+      element "span" [ attr "id" "keys" ] [ hole (fun sc -> text (State.get sc keys)) ];
     ]
 
 let replay_entry =
@@ -742,14 +742,14 @@ let select_view () =
     [
       element "select"
         [
-          hole_attr "value" (fun () -> Some (State.get chosen));
+          hole_attr "value" (fun sc -> Some (State.get sc chosen));
           on "change" (fun e -> State.set chosen (Event.target_value e));
         ]
         [
           element "option" [ attr "value" "a" ] [ text "A" ];
           element "option" [ attr "value" "b" ] [ text "B" ];
         ];
-      element "span" [ attr "id" "chosen" ] [ hole (fun () -> text (State.get chosen)) ];
+      element "span" [ attr "id" "chosen" ] [ hole (fun sc -> text (State.get sc chosen)) ];
     ]
 
 let select_entry = runtime_entry ~name:"Select" (fun _ -> Ok (fun () -> select_view ()))

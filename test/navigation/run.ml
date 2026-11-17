@@ -251,8 +251,8 @@ let probe_entry =
   runtime_entry ~name:"Probe" (fun json ->
       Result.map
         (fun n () ->
-          Effect.after (fun () ->
-              log ("g" ^ ints (State.get probe_runs) ^ "/" ^ ints n));
+          Effect.after (fun sc ->
+              log ("g" ^ ints (State.get sc probe_runs) ^ "/" ^ ints n));
           element "span" [] [ text "p" ])
         (Codec.decode Codec.int json))
 
@@ -649,7 +649,7 @@ let theme_text () = match Context.get theme_ctx with Some s -> State.peek s | No
 let lay_view () =
   incr lay_runs;
   let st = Context.get theme_ctx in
-  element "b" [] [ hole (fun () -> text (match st with Some s -> State.get s | None -> "none")) ]
+  element "b" [] [ hole (fun sc -> text (match st with Some s -> State.get sc s | None -> "none")) ]
 
 let pg_view () = element "i" [] [ text (theme_text ()) ]
 let theme_entries = [ runtime_entry ~name:"Lay" (fun _ -> Ok lay_view); runtime_entry ~name:"Pg" (fun _ -> Ok pg_view) ]
@@ -708,7 +708,7 @@ let rt_show = function Some (`Start x) -> "start " ^ x | Some `Two -> "two" | No
 
 let rt_view () =
   let r = Yuka.runtime_route_current rt_find in
-  element "b" [] [ hole (fun () -> text (rt_show (State.get r))) ]
+  element "b" [] [ hole (fun sc -> text (rt_show (State.get sc r))) ]
 
 let route_script url = {|<script type="application/json" data-yuka-context="route" data-name="yuka.route">"|} ^ url ^ {|"</script>|}
 
@@ -1082,8 +1082,8 @@ let rerender_entry =
       Result.map
         (fun (_ : int) () ->
           let n = State.make 0 in
-          hole (fun () ->
-              let v = State.get n in
+          hole (fun sc ->
+              let v = State.get sc n in
               element "button"
                 [ Yuka.attr "id" "b";
                   on "click" (fun _ ->
@@ -1884,7 +1884,7 @@ let remote_optimistic_clears finish =
       ignore (click "#m" "");
       resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
       tick (fun () ->
-          let r, dispose = Yuka.with_owner (fun () -> Remote.use lookup_q (fun () -> "a")) in
+          let r, dispose = Yuka.with_owner (fun () -> Remote.use lookup_q (fun _ -> "a")) in
           check "the query is sent" "3" (ints (calls ()));
           resolve_with 2 {|{"ok":"base"}|} "" 200 "application/json";
           tick (fun () ->

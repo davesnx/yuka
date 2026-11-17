@@ -23,5 +23,5 @@ let () =
   in
   reached "a static URL attribute with no installer raises" (fun () -> Yuka.runtime_attr "to" "javascript:alert(1)");
   reached "a dynamic URL attribute with no installer raises" (fun () ->
-      Yuka.runtime_hole_attr "to" (fun () -> Some "javascript:alert(1)"));
+      Yuka.runtime_hole_attr "to" (fun _ -> Some "javascript:alert(1)"));
   finish "URL check default"

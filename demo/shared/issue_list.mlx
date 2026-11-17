@@ -12,18 +12,18 @@ let index_of id items =
 
 let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Queries.view) ~(query : string)
     ~(chosen : string list) () =
-  let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view }) in
+  let source = Yuka.Live.use Topics.issues (fun _ -> { Queries.workspace; view }) in
   let issues =
-    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
+    Yuka.State.memo (fun s -> Option.value (Yuka.Status.data (Yuka.Live.status s source)) ~default:[])
   in
-  let labels = Yuka.Remote.use Queries.labels (fun () -> workspace) in
+  let labels = Yuka.Remote.use Queries.labels (fun _ -> workspace) in
   let label_counts =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        match Yuka.Remote.status labels with
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        match Yuka.Remote.status s labels with
         | Yuka.Status.Ready { data; _ } | Yuka.Status.Loading (Some data) -> data
         | _ -> [])
   in
-  let has_labels = Yuka.State.memo (fun () -> Yuka.State.get label_counts <> []) in
+  let has_labels = Yuka.State.memo (fun s -> Yuka.State.get s label_counts <> []) in
   let filter = Yuka.State.make query in
   let chosen_labels = Yuka.State.make chosen in
   let pinned = Yuka.State.make chosen in
@@ -33,17 +33,17 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
   let menu : menu option Yuka.State.t = Yuka.State.make None in
   let toast : string option Yuka.State.t = Yuka.State.make None in
   let visible =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let query = Yuka.State.get filter and only = Yuka.State.get chosen_labels in
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        let query = Yuka.State.get s filter and only = Yuka.State.get s chosen_labels in
         List.filter
           (fun (issue : Issue.t) ->
             Issue.matches ~query issue && List.for_all (fun chosen -> List.mem chosen issue.labels) only)
-          (Yuka.State.get issues))
+          (Yuka.State.get s issues))
   in
   let route =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let q = match Yuka.State.get filter with "" -> None | text -> Some text
-        and label = Yuka.State.get chosen_labels in
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        let q = match Yuka.State.get s filter with "" -> None | text -> Some text
+        and label = Yuka.State.get s chosen_labels in
         match (view, Links.default workspace) with
         | Queries.All, true -> Routes.Issues { q; label }
         | All, false -> Workspace_issues { workspace; q; label }
@@ -52,8 +52,8 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
   in
   Yuka.Effect.on_change route (fun ~prev:_ ~next -> Routes.replace next);
   let arranged =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let counts = Yuka.State.get label_counts and first = Yuka.State.get pinned in
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        let counts = Yuka.State.get s label_counts and first = Yuka.State.get s pinned in
         List.filter_map
           (fun label -> List.find_opt (fun (count : Queries.label_count) -> count.label = label) counts)
           first
@@ -114,8 +114,8 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
       | "End" -> go (total - 1)
       | _ -> ()
   in
-  let groups = Yuka.State.memo ~equal:( = ) (fun () -> Issue.group (Yuka.State.get visible)) in
-  let ordered = Yuka.State.memo ~equal:( = ) (fun () -> List.concat_map snd (Yuka.State.get groups)) in
+  let groups = Yuka.State.memo ~equal:( = ) (fun s -> Issue.group (Yuka.State.get s visible)) in
+  let ordered = Yuka.State.memo ~equal:( = ) (fun s -> List.concat_map snd (Yuka.State.get s groups)) in
   let change ~id ?status ?priority () =
     Yuka.State.set menu None;
     Yuka.State.set toast None;
@@ -165,7 +165,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
           | None -> ())
       | _ -> ()
   in
-  Yuka.Effect.after (fun () -> Yuka.Browser.on_window "keydown" on_key);
+  Yuka.Effect.after (fun _ -> Yuka.Browser.on_window "keydown" on_key);
   let popup items : Yuka.client Yuka.element =
     Yuka.fragment
       [
@@ -228,15 +228,15 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
   let group ((status, items) : Issue.status * Issue.t list) : Yuka.client Yuka.element =
     <section class_="group">
       <Views.Group_header status count=(List.length items) />
-      (Yuka.each ~key:(fun (issue : Issue.t) -> issue.id) (fun () -> Array.of_list items) row)
+      (Yuka.each ~key:(fun (issue : Issue.t) -> issue.id) (fun _ -> Array.of_list items) row)
     </section>
   in
   <div class_="issues">
     <header class_="page-header">
       <span>(Yuka.text title)</span>
       <span class_="group-count">(Yuka.int (List.length (Yuka.State.get issues)))</span>
-      (Yuka.hole (fun () ->
-         match Yuka.Live.status source with
+      (Yuka.hole (fun s ->
+         match Yuka.Live.status s source with
          | Yuka.Status.Ready { stale = true; _ } -> <span class_="offline">"Offline, reconnecting"</span>
          | _ -> Yuka.empty))
     </header>
@@ -247,7 +247,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
          <div class_=Css.bar>
            <div class_="chips">
              (Yuka.each ~equal:( = ) ~key:(fun (count : Queries.label_count) -> count.label)
-                (fun () -> Array.of_list (Yuka.State.get arranged)) chip)
+                (fun s -> Array.of_list (Yuka.State.get s arranged)) chip)
            </div>
            <button id="labels-button" class_=Css.more type_=`button popovertarget="labels-menu" aria_haspopup=`menu
              aria_label=(more_label ~total:(List.length (Yuka.State.get label_counts))
@@ -264,7 +264,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
            (if Yuka.State.get menu_rendered then
               <div id="labels-menu" popover=`auto role=`menu aria_label="Labels" class_=Css.menu on_keydown=menu_key>
                 (Yuka.each ~equal:( = ) ~key:(fun (count : Queries.label_count) -> count.label)
-                   (fun () -> Array.of_list (Yuka.State.get label_counts)) menu_item)
+                   (fun s -> Array.of_list (Yuka.State.get s label_counts)) menu_item)
               </div>
             else Yuka.empty)
          </div>
@@ -278,9 +278,9 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
          </div>
      | None -> Yuka.empty)
     <div class_="list">
-      (Yuka.each ~equal:( = ) ~key:(fun (status, _) -> Issue.status_slug status) (fun () -> Array.of_list (Yuka.State.get groups)) group)
+      (Yuka.each ~equal:( = ) ~key:(fun (status, _) -> Issue.status_slug status) (fun s -> Array.of_list (Yuka.State.get s groups)) group)
     </div>
-    <Yuka.Show status=(fun () -> Yuka.Live.status source)
+    <Yuka.Show status=(fun s -> Yuka.Live.status s source)
       loading=(<p class_="list-empty">"Loading issues..."</p>)
       failed=(fun error ->
         <p class_="list-empty error">
@@ -289,7 +289,8 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
         </p>)>
       (fun _ -> Yuka.empty)
     </Yuka.Show>
-    (if Yuka.State.get visible = [] && Option.is_some (Yuka.Status.data (Yuka.Live.status source)) then
-       <p class_="list-empty">"No issues match."</p>
-     else Yuka.empty)
+    (Yuka.hole (fun s ->
+       if Yuka.State.get s visible = [] && Option.is_some (Yuka.Status.data (Yuka.Live.status s source)) then
+         <p class_="list-empty">"No issues match."</p>
+       else Yuka.empty))
   </div>

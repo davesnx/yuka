@@ -16,7 +16,7 @@ let typed find url =
 
 let current find =
   match Element.Context.get (get ()) with
-  | Some url -> State.memo (fun () -> typed find (State.get url))
+  | Some url -> State.memo (fun s -> typed find (State.get s url))
   | None -> State.read_only (State.make None)
 
 let moved () = Page_context.set "route" Types.route_name (`String (Web.current_url ()))

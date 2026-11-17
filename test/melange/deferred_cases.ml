@@ -6,7 +6,7 @@ let next_task : (unit -> unit) -> unit = [%mel.raw "function (f) { setTimeout(f,
 
 let reads d =
   let seen = ref [] in
-  Effect.after (fun () -> seen := ints (State.get d) :: !seen);
+  Effect.after (fun s -> seen := ints (State.get s d) :: !seen);
   fun () -> String.concat " " (List.rev !seen)
 
 let after_paint finish =
@@ -43,8 +43,8 @@ let one_batch finish =
   let (da, db), dispose =
     with_owner (fun () ->
         let da = State.deferred a and db = State.deferred b in
-        Effect.after (fun () ->
-            ignore (State.get da + State.get db);
+        Effect.after (fun s ->
+            ignore (State.get s da + State.get s db);
             incr runs);
         (da, db))
   in
@@ -76,7 +76,7 @@ let memo_source finish =
   let n = State.make 1 in
   let (d, seen), dispose =
     with_owner (fun () ->
-        let parity = State.memo (fun () -> State.get n mod 2) in
+        let parity = State.memo (fun s -> State.get s n mod 2) in
         let d = State.deferred parity in
         (d, reads d))
   in
@@ -96,10 +96,10 @@ let chained finish =
   let (first, second, seen), dispose =
     with_owner (fun () ->
         let first = State.deferred a in
-        let sum = State.memo (fun () -> State.get first + State.get b) in
+        let sum = State.memo (fun s -> State.get s first + State.get s b) in
         let second = State.deferred sum in
         let seen = ref [] in
-        Effect.after (fun () -> seen := (ints (State.get first) ^ "," ^ ints (State.get second)) :: !seen);
+        Effect.after (fun s -> seen := (ints (State.get s first) ^ "," ^ ints (State.get s second)) :: !seen);
         (first, second, fun () -> String.concat " " (List.rev !seen)))
   in
   State.set a 1;
@@ -117,7 +117,7 @@ let in_frame_handler finish =
   let source = State.make 0 in
   let d, dispose =
     with_owner (fun () ->
-        Effect.after (fun () -> Browser.on_frame (fun _ -> State.set source (State.peek source + 1)));
+        Effect.after (fun _ -> Browser.on_frame (fun _ -> State.set source (State.peek source + 1)));
         State.deferred source)
   in
   Dom_cases.run_frame 16.;

@@ -80,30 +80,30 @@ type ('o, 'f) form = {
 
 let value form f = Option.value (List.assoc_opt (form.field_name f) form.sent) ~default:""
 
-let field_error form f =
+let field_error s form f =
   List.find_map
     (fun (g, m) -> match g with Some g when g == f -> Some m | _ -> None)
-    (State.get form.failed)
+    (State.get s form.failed)
 
-let form_errors form =
-  List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
+let form_errors s form =
+  List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get s form.failed)
 
 let field_error_view form f view =
   Kind.of_node
     (Hole
-       (fun () -> match field_error form f with Some m -> Kind.to_node (view ~id:(form.error_id f) m) | None -> Fragment []))
+       (fun s -> match field_error s form f with Some m -> Kind.to_node (view ~id:(form.error_id f) m) | None -> Fragment []))
 
 let form_errors_view form view =
   let autofocus =
     !(Base.server_rendering ())
-    && match State.get form.failed with [] -> false | e -> List.for_all (fun (g, _) -> Option.is_none g) e
+    && match State.peek form.failed with [] -> false | e -> List.for_all (fun (g, _) -> Option.is_none g) e
   in
   Element.element "div"
     ([ Static ("role", "alert"); Static ("tabindex", "-1"); Static ("data-yuka-errors", "") ]
     @ if autofocus then [ Static ("autofocus", "") ] else [])
-    [ Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (form_errors form)))) ]
+    [ Kind.of_node (Hole (fun s -> Fragment (List.map (Kind.fn view) (form_errors s form)))) ]
 
-let pending form = State.get form.busy
+let pending s form = State.get s form.busy
 let parse_sent sent =
   match Json.of_string sent with
   | Ok (`Assoc fields) -> (
@@ -222,8 +222,8 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     | Some location -> Browser.navigate location
     | None -> Browser.navigate (Web.current_url ())
   in
-  Base.Effect.after (fun () ->
-      let failed = State.get form.failed in
+  Base.Effect.after (fun s ->
+      let failed = State.get s form.failed in
       let names = List.filter_map (function Some f, _ -> Some (name t f) | None, _ -> None) failed in
       let whole = List.exists (fun (g, _) -> Option.is_none g) failed in
       let focus = not !first in

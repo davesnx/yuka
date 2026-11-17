@@ -7,7 +7,7 @@
 
 type 's t
 
-val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
+val use : ('k, 's) Topic.t -> (State.scope -> 'k) -> 's t
 (** Subscribes to the state of the key that the function returns, and
     again when a State that the function reads changes the key. Call it
     in a component body; the subscription ends when its owner is disposed.
@@ -43,7 +43,7 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
       is [Failed Forbidden] until a new use (after a navigation) connects
       again with the token of its page. *)
 
-val status : 's t -> 's Status.t
+val status : State.scope -> 's t -> 's Status.t
 (** Tracked read, with the pending {!optimistic} changes applied. *)
 
 val optimistic :

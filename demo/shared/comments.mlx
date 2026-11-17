@@ -63,8 +63,8 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(thread : Comment.t
   let started = Yuka.State.make false in
   let loading : load option Yuka.State.t = Yuka.State.make None in
   let load_error : (string * load) option Yuka.State.t = Yuka.State.make None in
-  let failing = Yuka.State.memo (fun () -> Option.is_some (Yuka.State.get load_error)) in
-  Yuka.Effect.after (fun () -> Yuka.State.set started true);
+  let failing = Yuka.State.memo (fun s -> Option.is_some (Yuka.State.get s load_error)) in
+  Yuka.Effect.after (fun _ -> Yuka.State.set started true);
   let load kind =
     if Option.is_none (Yuka.State.peek loading) then (
       let offset = List.length (Yuka.State.peek first) in
@@ -129,10 +129,10 @@ let[@client] make ~(issue_id : string) ~(me : Model.User.t) ~(thread : Comment.t
       </div>
     </li>
   in
-  let rows () =
+  let rows s =
     let shown comments = List.map (fun comment -> Shown comment) comments in
     Array.of_list
-      (shown (Yuka.State.get first) @ (if Yuka.State.get hidden > 0 then [ Gap ] else []) @ shown (Yuka.State.get last))
+      (shown (Yuka.State.get s first) @ (if Yuka.State.get s hidden > 0 then [ Gap ] else []) @ shown (Yuka.State.get s last))
   in
   let same_row before after = match (before, after) with Shown before, Shown after -> before == after | Gap, Gap -> true | _ -> false in
   let key = function Shown (comment : Comment.t) -> comment.id | Gap -> "gap" in

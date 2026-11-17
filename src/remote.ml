@@ -40,9 +40,9 @@ let decode (q : (_, _, _) Action.t) last = function
   | Error error -> Status.Failed { error; last }
 
 let on_server ~enabled (q : (_, _, _) Action.t) args base =
-  if not (enabled ()) then State.set base Status.Idle
+  if not (enabled Signal.scope) then State.set base Status.Idle
   else
-    let input = Codec.encode (Action.input q) (args ()) in
+    let input = Codec.encode (Action.input q) (args Signal.scope) in
     let settled, resolve, _ = Async.make () in
     let (_abort : unit -> unit) = !Bridge.send (Action.name q) input resolve in
     match Async.status settled with
@@ -51,8 +51,8 @@ let on_server ~enabled (q : (_, _, _) Action.t) args base =
         Answers.record (Answers.key (Action.name q) input) (Some r) settled
     | _ -> Answers.record (Answers.key (Action.name q) input) None settled
 
-let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
-    (args : unit -> 'i) : 'o t =
+let use ?(retry = default_retry) ?(enabled = fun _ -> true) (q : ('i, 'o, [ `Query ]) Action.t)
+    (args : State.scope -> 'i) : 'o t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
   if !(Base.server_rendering ()) then begin
@@ -120,9 +120,9 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
             stop := release
     in
     let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
-    Base.run_effect Scheduler.queue (fun () ->
-        if enabled () then begin
-          let input = Codec.encode (Action.input q) (args ()) in
+    Base.run_effect Scheduler.queue (fun s ->
+        if enabled s then begin
+          let input = Codec.encode (Action.input q) (args s) in
           let key = Answers.key (Action.name q) input in
           match !current with
           | Some (k, _) when String.equal k key -> ()
@@ -147,9 +147,9 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
     { base; changes; refetch }
   end
 
-let status r =
-  let changes = State.get r.changes in
-  let base = State.get r.base in
+let status s r =
+  let changes = State.get s r.changes in
+  let base = State.get s r.base in
   Optimistic.status changes base
 
 let refetch r = r.refetch ()

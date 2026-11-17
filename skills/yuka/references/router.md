@@ -278,7 +278,7 @@ island can read it to show a progress bar:
 
 ```ocaml
 let[@client] make () =
-  <div class_=(if State.get Yuka.Browser.navigating then "progress on" else "progress") />
+  <div class_=(if Yuka.State.get Yuka.Browser.navigating then "progress on" else "progress") />
 ```
 
 It is always `false` on the server.

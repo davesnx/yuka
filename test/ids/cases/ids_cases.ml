@@ -27,11 +27,11 @@ let form_view (async : string Async.t) =
       Await.make ~async ~loading:(field "wait")
         ~children:(fun v -> element "section" [] [ field v; field (v ^ "2") ])
         ();
-      each ~key:Fun.id (fun () -> State.get rows) (fun k -> field k);
+      each ~key:Fun.id (fun s -> State.get s rows) (fun k -> field k);
       Catch.make
         ~fallback:(fun ~error:_ ~reset:_ -> field "fallback")
         ~children:(fun () ->
-          fragment [ field "doomed"; hole (fun () -> if !doomed then failwith "boom" else empty) ])
+          fragment [ field "doomed"; hole (fun _ -> if !doomed then failwith "boom" else empty) ])
         ();
       field "last";
       element "button" [ on "click" (fun _ -> State.set rows [| "r1"; "r2"; "r3" |]) ] [ text "add" ];

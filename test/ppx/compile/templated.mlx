@@ -10,7 +10,7 @@ let by_hand : Yuka.client Yuka.element =
   Yuka.element "ul" [ Yuka.attr "class" "list" ]
     [ Yuka.element "li" [] [ Yuka.text "one" ];
       Yuka.element "li" [ Yuka.on "click" (fun _ -> Yuka.State.update count succ) ]
-        [ Yuka.hole (fun () -> Yuka.text (string_of_int (Yuka.State.get count))) ] ]
+        [ Yuka.hole (fun s -> Yuka.text (string_of_int (Yuka.State.get s count))) ] ]
 
 let static_tree : Yuka.server Yuka.element =
   <section id="s"><h1>"Title"</h1><p>"body"</p></section>

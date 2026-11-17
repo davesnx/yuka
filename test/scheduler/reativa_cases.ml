@@ -2,8 +2,8 @@ open Yuka
 
 let check = Cases.check
 let log = Cases.log
-let before (f : unit -> unit) = Effect.before f
-let after (f : unit -> unit) = Effect.after f
+let before (f : State.scope -> unit) = Effect.before f
+let after (f : State.scope -> unit) = Effect.after f
 let int = string_of_int
 
 let since read f =
@@ -17,11 +17,11 @@ let since read f =
 let memo_in_first_run kind () =
   let runs = ref 0 in
   let other = State.make 0 and count = State.make 0 in
-  kind (fun () ->
-      ignore (State.get other);
-      let c = State.memo (fun () -> State.get count + 1) in
+  kind (fun sc ->
+      ignore (State.get sc other);
+      let c = State.memo (fun sc -> State.get sc count + 1) in
       ignore (State.peek c);
-      ignore (State.get count);
+      ignore (State.get sc count);
       incr runs);
   State.set count 1;
   State.set count 2;
@@ -32,11 +32,11 @@ let memo_in_deferred_first_run () =
   let runs = ref 0 in
   let other = State.make 0 and count = State.make 0 in
   batch (fun () ->
-      Effect.after (fun () ->
-          ignore (State.get other);
-          let c = State.memo (fun () -> State.get count + 1) in
-          ignore (State.get c);
-          ignore (State.get count);
+      Effect.after (fun sc ->
+          ignore (State.get sc other);
+          let c = State.memo (fun sc -> State.get sc count + 1) in
+          ignore (State.get sc c);
+          ignore (State.get sc count);
           incr runs));
   State.set count 1;
   State.set count 2;
@@ -46,10 +46,10 @@ let memo_in_deferred_first_run () =
 let effect_in_memo_compute () =
   let other = State.make 0 and count = State.make 0 in
   let c =
-    State.memo (fun () ->
-        ignore (State.get other);
-        Effect.before (fun () -> ignore (State.get count));
-        State.get count)
+    State.memo (fun sc ->
+        ignore (State.get sc other);
+        Effect.before (fun sc -> ignore (State.get sc count));
+        State.get sc count)
   in
   State.set count 5;
   check "a memo keeps its dependency after an effect made in its compute" "5"
@@ -62,14 +62,14 @@ let effect_in_memo_compute () =
 let memo_in_memo_compute () =
   let other = State.make 0 and count = State.make 0 in
   let c =
-    State.memo (fun () ->
-        ignore (State.get other);
-        let inner = State.memo (fun () -> State.get count * 2) in
+    State.memo (fun sc ->
+        ignore (State.get sc other);
+        let inner = State.memo (fun sc -> State.get sc count * 2) in
         ignore (State.peek inner);
-        State.get count)
+        State.get sc count)
   in
   let seen = ref [] in
-  Effect.before (fun () -> seen := State.get c :: !seen);
+  Effect.before (fun sc -> seen := State.get sc c :: !seen);
   State.set count 5;
   State.set other 1;
   State.set count 6;
@@ -79,8 +79,8 @@ let memo_in_memo_compute () =
 let self_write_first_run kind () =
   let add, read = log () in
   let s = State.make 0 in
-  kind (fun () ->
-      let v = State.get s in
+  kind (fun sc ->
+      let v = State.get sc s in
       add (int v);
       if v < 1 then State.set s 1);
   check "the write in the first run is a change of a State the effect read" "0 1"
@@ -93,8 +93,8 @@ let self_write_first_run_in_batch () =
   let add, read = log () in
   let s = State.make 0 in
   batch (fun () ->
-      Effect.before (fun () ->
-          let v = State.get s in
+      Effect.before (fun sc ->
+          let v = State.get sc s in
           add (int v);
           if v < 1 then State.set s 1);
       add "end");
@@ -106,8 +106,8 @@ let self_write_deferred_first_run () =
   let add, read = log () in
   let s = State.make 0 in
   batch (fun () ->
-      Effect.after (fun () ->
-          let v = State.get s in
+      Effect.after (fun sc ->
+          let v = State.get sc s in
           add (int v);
           if v < 1 then State.set s 1);
       add "end");
@@ -118,9 +118,9 @@ let self_write_deferred_first_run () =
 let self_write_through_memo kind () =
   let add, read = log () in
   let s = State.make 0 in
-  let m = State.memo (fun () -> State.get s) in
-  kind (fun () ->
-      let v = State.get m in
+  let m = State.memo (fun sc -> State.get sc s) in
+  kind (fun sc ->
+      let v = State.get sc m in
       add (int v);
       if v < 1 then State.set s 1);
   check "the write reaches the effect through the memo" "0 1" (read ());
@@ -130,10 +130,10 @@ let self_write_through_memo kind () =
 let self_write_in_nested_first_run () =
   let add, read = log () in
   let trigger = State.make 0 and s = State.make 0 in
-  before (fun () ->
-      if State.get trigger = 1 then
-        before (fun () ->
-            let v = State.get s in
+  before (fun sc ->
+      if State.get sc trigger = 1 then
+        before (fun sc ->
+            let v = State.get sc s in
             add ("i" ^ int v);
             if v < 1 then State.set s 1));
   State.set trigger 1;
@@ -145,9 +145,9 @@ let self_write_in_nested_first_run () =
 let inner_writes_outer_dependency () =
   let add, read = log () in
   let s = State.make 0 in
-  before (fun () ->
-      add ("a" ^ int (State.get s));
-      before (fun () -> State.set s 1));
+  before (fun sc ->
+      add ("a" ^ int (State.get sc s));
+      before (fun _ -> State.set s 1));
   check "the outer effect re-runs after the write of its inner effect" "a0 a1" (read ());
   State.set s 5;
   check "and keeps its dependency" "a0 a1 a5 a1" (read ());
@@ -157,8 +157,8 @@ let inner_writes_outer_dependency () =
 let clamp kind () =
   let add, read = log () in
   let s = State.make 0 in
-  kind (fun () ->
-      let v = State.get s in
+  kind (fun sc ->
+      let v = State.get sc s in
       if v > 10 then State.set s 10;
       add (int v));
   State.set s 15;
@@ -171,8 +171,8 @@ let clamp kind () =
 let clamp_in_batch kind () =
   let add, read = log () in
   let s = State.make 0 in
-  kind (fun () ->
-      let v = State.get s in
+  kind (fun sc ->
+      let v = State.get sc s in
       if v > 10 then State.set s 10;
       add (int v));
   batch (fun () ->
@@ -184,9 +184,9 @@ let clamp_in_batch kind () =
 let clamp_through_memo kind () =
   let add, read = log () in
   let s = State.make 0 in
-  let m = State.memo (fun () -> State.get s) in
-  kind (fun () ->
-      let v = State.get m in
+  let m = State.memo (fun sc -> State.get sc s) in
+  kind (fun sc ->
+      let v = State.get sc m in
       if v > 10 then State.set s 10;
       add (int v));
   State.set s 15;
@@ -197,22 +197,22 @@ let clamp_through_memo kind () =
 let clamp_in_after_render_in_before () =
   let add, read = log () in
   let s = State.make 0 in
-  Effect.after (fun () ->
-      let v = State.get s in
+  Effect.after (fun sc ->
+      let v = State.get sc s in
       if v > 10 then State.set s 10);
-  before (fun () -> add ("r" ^ int (State.get s)));
+  before (fun sc -> add ("r" ^ int (State.get sc s)));
   State.set s 15;
   check "the before effect ends on the settled value" "r0 r15 r10" (read ())
 
 let indirect_cycle effect_a effect_b () =
   let add, read = log () in
   let s = State.make 0 and t = State.make 0 in
-  effect_b (fun () ->
-      let w = State.get t in
+  effect_b (fun sc ->
+      let w = State.get sc t in
       add ("b" ^ int w);
       if w = 1 then State.set s 2);
-  effect_a (fun () ->
-      let v = State.get s in
+  effect_a (fun sc ->
+      let v = State.get sc s in
       add ("a" ^ int v);
       State.set t (v + 1));
   check "the cycle settles" "b0 a0 b1 a2 b3" (read ());
@@ -223,12 +223,12 @@ let indirect_cycle_in_batch kind () =
   let add, read = log () in
   let s = State.make 0 and t = State.make 0 in
   batch (fun () ->
-      kind (fun () ->
-          let w = State.get t in
+      kind (fun sc ->
+          let w = State.get sc t in
           add ("b" ^ int w);
           if w = 1 then State.set s 2);
-      kind (fun () ->
-          let v = State.get s in
+      kind (fun sc ->
+          let v = State.get sc s in
           add ("a" ^ int v);
           State.set t (v + 1)));
   check "settled values" "2 3" (Printf.sprintf "%d %d" (State.peek s) (State.peek t));
@@ -238,13 +238,13 @@ let indirect_cycle_in_batch kind () =
 let indirect_cycle_through_memo () =
   let add, read = log () in
   let s = State.make 0 and t = State.make 0 in
-  let mt = State.memo (fun () -> State.get t) in
-  before (fun () ->
-      let w = State.get mt in
+  let mt = State.memo (fun sc -> State.get sc t) in
+  before (fun sc ->
+      let w = State.get sc mt in
       add ("b" ^ int w);
       if w = 1 then State.set s 2);
-  before (fun () ->
-      let v = State.get s in
+  before (fun sc ->
+      let v = State.get sc s in
       add ("a" ^ int v);
       State.set t (v + 1));
   check "the cycle settles" "b0 a0 b1 a2 b3" (read ());
@@ -254,16 +254,16 @@ let indirect_cycle_through_memo () =
 let three_node_cycle kind () =
   let add, read = log () in
   let s = State.make 0 and t = State.make 0 and u = State.make 0 in
-  kind (fun () ->
-      let w = State.get u in
+  kind (fun sc ->
+      let w = State.get sc u in
       add ("c" ^ int w);
       if w = 2 then State.set s 5);
-  kind (fun () ->
-      let v = State.get t in
+  kind (fun sc ->
+      let v = State.get sc t in
       add ("b" ^ int v);
       State.set u (v + 1));
-  kind (fun () ->
-      let v = State.get s in
+  kind (fun sc ->
+      let v = State.get sc s in
       add ("a" ^ int v);
       State.set t (v + 1));
   check "the cycle settles" "c0 b0 c1 a0 b1 c2 a5 b6 c7" (read ());
@@ -273,12 +273,12 @@ let three_node_cycle kind () =
 let cycle_from_rerun kind () =
   let add, read = log () in
   let on = State.make false and s = State.make 0 and t = State.make 0 in
-  kind (fun () ->
-      let v = State.get s in
+  kind (fun sc ->
+      let v = State.get sc s in
       add ("a" ^ int v);
-      if State.get on then State.set t (v + 1));
-  kind (fun () ->
-      let w = State.get t in
+      if State.get sc on then State.set t (v + 1));
+  kind (fun sc ->
+      let w = State.get sc t in
       add ("b" ^ int w);
       if w = 1 then State.set s 2);
   check "first runs" "a0 b0" (read ());
@@ -290,12 +290,12 @@ let cycle_from_rerun kind () =
 let indirect_cycle_limit () =
   let go = State.make false and s = State.make 0 and t = State.make 0 in
   let seen = ref 0 in
-  before (fun () ->
-      let v = State.get s in
+  before (fun sc ->
+      let v = State.get sc s in
       seen := v;
-      if State.get go then State.set t (v + 1));
-  before (fun () ->
-      let w = State.get t in
+      if State.get sc go then State.set t (v + 1));
+  before (fun sc ->
+      let w = State.get sc t in
       if State.peek go then State.set s (w + 1));
   let result =
     match State.set go true with
@@ -315,16 +315,16 @@ let mutual_disposal () =
     with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> incr clean_a)
-          (fun () ->
-            if State.get s > 0 then !other_a ();
+          (fun sc ->
+            if State.get sc s > 0 then !other_a ();
             incr runs))
   in
   let (), dispose_b =
     with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> incr clean_b)
-          (fun () ->
-            if State.get s > 0 then !other_b ();
+          (fun sc ->
+            if State.get sc s > 0 then !other_b ();
             incr runs))
   in
   other_a := dispose_b;
@@ -340,15 +340,15 @@ let mutual_disposal () =
 let raising_memo_in_first_run () =
   let tracked = State.make 0 and other = State.make 0 in
   let runs = ref 0 in
-  before (fun () ->
+  before (fun sc ->
       (try
          ignore
-           (State.memo (fun () ->
-                ignore (State.get other);
+           (State.memo (fun sc ->
+                ignore (State.get sc other);
                 failwith "boom")
              : int State.read)
        with Failure _ -> ());
-      ignore (State.get tracked);
+      ignore (State.get sc tracked);
       incr runs);
   State.set tracked 1;
   check "reads after a raising memo are still tracked" "2" (int !runs);
@@ -359,11 +359,11 @@ let unobserved_memo () =
   let src = State.make 1 in
   let computes = ref 0 in
   let c =
-    State.memo (fun () ->
+    State.memo (fun sc ->
         incr computes;
-        State.get src * 2)
+        State.get sc src * 2)
   in
-  let (), dispose = with_owner (fun () -> before (fun () -> ignore (State.get c))) in
+  let (), dispose = with_owner (fun () -> before (fun sc -> ignore (State.get sc c))) in
   check "observed" "true" (string_of_bool (Private.has_readers src));
   dispose ();
   check "contract silent: the memo still reads its source after its reader is gone"
@@ -372,7 +372,7 @@ let unobserved_memo () =
   State.set src 5;
   check "an unobserved memo is up to date on read" "10" (int (State.peek c));
   let seen = ref 0 in
-  let (), dispose = with_owner (fun () -> before (fun () -> seen := State.get c)) in
+  let (), dispose = with_owner (fun () -> before (fun sc -> seen := State.get sc c)) in
   State.set src 6;
   check "and its new reader runs" "12" (int !seen);
   check "value" "12" (int (State.peek c));
@@ -380,11 +380,12 @@ let unobserved_memo () =
 
 let cleanup_reads_state () =
   let s = State.make 0 and x = State.make 0 in
-  let runs = ref 0 in
+  let runs = ref 0 and scope = ref None in
   Effect.before
-    ~cleanup:(fun () -> ignore (State.get x))
-    (fun () ->
-      ignore (State.get s);
+    ~cleanup:(fun () -> Option.iter (fun sc -> ignore (State.get sc x)) !scope)
+    (fun sc ->
+      scope := Some sc;
+      ignore (State.get sc s);
       incr runs);
   State.set s 1;
   State.set x 1;
@@ -395,10 +396,10 @@ let effects_in_recomputed_memo () =
   let n = State.make 0 and tick = State.make 0 in
   let alive = ref 0 in
   let m =
-    State.memo (fun () ->
-        let v = State.get n in
-        Effect.before (fun () ->
-            ignore (State.get tick);
+    State.memo (fun sc ->
+        let v = State.get sc n in
+        Effect.before (fun sc ->
+            ignore (State.get sc tick);
             incr alive);
         v)
   in
@@ -415,8 +416,8 @@ let memo_released_with_owner () =
   let src = State.make 1 in
   let (), dispose =
     with_owner (fun () ->
-        let doubled = State.memo (fun () -> State.get src * 2) in
-        before (fun () -> ignore (State.get doubled)))
+        let doubled = State.memo (fun sc -> State.get sc src * 2) in
+        before (fun sc -> ignore (State.get sc doubled)))
   in
   check "observed" "true" (string_of_bool (Private.has_readers src));
   dispose ();
@@ -427,12 +428,12 @@ let detached_owner_in_rerun () =
   let s = State.make 0 and t = State.make 0 in
   let inner = ref 0 in
   let disposers = ref [] in
-  before (fun () ->
-      ignore (State.get s);
+  before (fun sc ->
+      ignore (State.get sc s);
       let (), dispose =
         with_owner (fun () ->
-            before (fun () ->
-                ignore (State.get t);
+            before (fun sc ->
+                ignore (State.get sc t);
                 incr inner))
       in
       disposers := dispose :: !disposers);
@@ -460,8 +461,8 @@ let on_change_clamp () =
 let clamp_in_raising_batch () =
   let add, read = log () in
   let s = State.make 0 in
-  before (fun () ->
-      let v = State.get s in
+  before (fun sc ->
+      let v = State.get sc s in
       if v > 10 then State.set s 10;
       add (int v));
   let raised =
@@ -481,9 +482,9 @@ let self_write_then_raise_in_first_run () =
   let s = State.make 0 in
   let raised =
     match
-      Effect.before (fun () ->
+      Effect.before (fun sc ->
           incr runs;
-          let v = State.get s in
+          let v = State.get sc s in
           if v < 1 then begin
             State.set s 1;
             failwith "first"
@@ -500,12 +501,12 @@ let self_write_then_raise_in_first_run () =
 let indirect_write_then_raise_in_first_run () =
   let runs = ref 0 in
   let s = State.make 0 and t = State.make 0 in
-  before (fun () -> if State.get t = 1 then State.set s 1);
+  before (fun sc -> if State.get sc t = 1 then State.set s 1);
   let raised =
     match
-      Effect.before (fun () ->
+      Effect.before (fun sc ->
           incr runs;
-          if State.get s = 0 then begin
+          if State.get sc s = 0 then begin
             State.set t 1;
             failwith "first"
           end)
@@ -519,10 +520,10 @@ let indirect_write_then_raise_in_first_run () =
 
 let memo_peek_after_write () =
   let s = State.make 0 in
-  let m = State.memo (fun () -> State.get s * 2) in
+  let m = State.memo (fun sc -> State.get sc s * 2) in
   let seen = ref [] in
-  before (fun () ->
-      seen := State.get m :: !seen;
+  before (fun sc ->
+      seen := State.get sc m :: !seen;
       if State.peek s = 0 then begin
         State.set s 1;
         ignore (State.peek m)
@@ -532,11 +533,11 @@ let memo_peek_after_write () =
 
 let memo_peek_after_write_in_rerun () =
   let go = State.make false and s = State.make 0 in
-  let m = State.memo (fun () -> State.get s * 2) in
+  let m = State.memo (fun sc -> State.get sc s * 2) in
   let seen = ref [] in
-  before (fun () ->
-      seen := State.get m :: !seen;
-      if State.get go && State.peek s = 0 then begin
+  before (fun sc ->
+      seen := State.get sc m :: !seen;
+      if State.get sc go && State.peek s = 0 then begin
         State.set s 1;
         ignore (State.peek m)
       end);
@@ -548,13 +549,13 @@ let memo_peek_after_write_in_rerun () =
 
 let memo_untrack_after_write () =
   let s = State.make 0 in
-  let m = State.memo (fun () -> State.get s * 2) in
+  let m = State.memo (fun sc -> State.get sc s * 2) in
   let seen = ref [] in
-  before (fun () ->
-      seen := State.get m :: !seen;
+  before (fun sc ->
+      seen := State.get sc m :: !seen;
       if State.peek s = 0 then begin
         State.set s 1;
-        ignore (State.untrack (fun () -> State.get m))
+        ignore (State.untrack (fun sc -> State.get sc m))
       end);
   check "with untrack the effect runs again" "2,0"
     (String.concat "," (List.map int !seen))
@@ -562,12 +563,12 @@ let memo_untrack_after_write () =
 let memo_chain_after_write () =
   let add, read = log () in
   let s = State.make 0 in
-  let m = State.memo (fun () -> State.get s * 2) in
-  let m2 = State.memo (fun () -> State.get m + 1) in
-  before (fun () ->
-      let a = State.get m in
+  let m = State.memo (fun sc -> State.get sc s * 2) in
+  let m2 = State.memo (fun sc -> State.get sc m + 1) in
+  before (fun sc ->
+      let a = State.get sc m in
       if State.peek s = 0 then State.set s 1;
-      add (Printf.sprintf "%d/%d" a (State.get m2)));
+      add (Printf.sprintf "%d/%d" a (State.get sc m2)));
   check "the effect runs again after the memo it read changed" "0/3 2/3" (read ())
 
 let all =

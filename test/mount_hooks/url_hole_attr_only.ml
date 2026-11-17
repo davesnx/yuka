@@ -8,7 +8,7 @@ let () =
         let c, dispose =
           mount (fun () ->
               Yuka.runtime_instance (one_part tag)
-                [| Yuka.runtime_attribute (make tag name (fun () -> Some (Yuka.State.get s))) |])
+                [| Yuka.runtime_attribute (make tag name (fun sc -> Some (Yuka.State.get sc s))) |])
         in
         Yuka.State.set s value;
         check (path ^ ": " ^ tag ^ " " ^ name ^ "=" ^ String.escaped value) expected (html c);

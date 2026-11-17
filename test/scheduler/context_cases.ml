@@ -7,9 +7,9 @@ let num : int Context.t = Context.make ~name:"num" ()
 let other : int Context.t = Context.make ~name:"other" ()
 let show c = match Context.get c with Some n -> string_of_int n | None -> "none"
 let read c = text (show c)
-let later c = hole (fun () -> read c)
+let later c = hole (fun _ -> read c)
 let render build = Private.render_html (fun () -> Private.node (build ()))
-let server_hole c = Private.element (Private.hole (fun () -> Private.node (read c)))
+let server_hole c = Private.element (Private.hole (fun _ -> Private.node (read c)))
 
 let raises f =
   match f () with
@@ -60,10 +60,10 @@ let every_place () =
          Context.provide num 5 (fun () ->
              let v = show num in
              element "p"
-               [ hole_attr "title" (fun () -> Some (show num)) ]
+               [ hole_attr "title" (fun _ -> Some (show num)) ]
                [ text v;
                  later num;
-                 each ~key:Fun.id (fun () -> [| "a" |]) (fun k -> element "i" [] [ text (k ^ show num) ]);
+                 each ~key:Fun.id (fun _ -> [| "a" |]) (fun k -> element "i" [] [ text (k ^ show num) ]);
                  Catch.make ~fallback:(fun ~error:_ ~reset:_ -> text "f") ~children:(fun () -> read num) () ])))
 
 let catch_restores () =
@@ -75,7 +75,7 @@ let catch_restores () =
                [ Catch.make
                    ~fallback:(fun ~error:_ ~reset:_ -> read num)
                    ~children:(fun () ->
-                     Context.provide num 2 (fun () -> fragment [ later num; hole (fun () -> failwith "boom") ]))
+                     Context.provide num 2 (fun () -> fragment [ later num; hole (fun _ -> failwith "boom") ]))
                    ();
                  later num ])))
 
@@ -160,9 +160,9 @@ let fixed_value () =
     Private.with_context [ Context.bind sc st ] (fun () ->
         incr comp;
         let given = Context.get_exn sc in
-        Effect.before (fun () ->
+        Effect.before (fun scope ->
             same := !same && Context.get_exn sc == given;
-            add (string_of_int (State.get given))))
+            add (string_of_int (State.get scope given))))
   in
   State.set st 1;
   State.set st 2;
@@ -176,8 +176,8 @@ let detached_owner_keeps () =
   let (), dispose =
     with_owner (fun () ->
         Private.with_context [ Context.bind num 1 ] (fun () ->
-            Effect.before (fun () ->
-                ignore (State.get s);
+            Effect.before (fun scope ->
+                ignore (State.get scope s);
                 add (show num))))
   in
   Private.with_context [ Context.bind num 2 ] (fun () -> State.set s 1);
@@ -203,7 +203,7 @@ let later_effect () =
   let (), dispose =
     with_owner (fun () ->
         Private.with_context [ Context.bind num 1 ] (fun () ->
-            Effect.before (fun () -> if State.get s > 0 then Effect.before (fun () -> add (show num)))))
+            Effect.before (fun scope -> if State.get scope s > 0 then Effect.before (fun _ -> add (show num)))))
   in
   Private.with_context [ Context.bind num 2 ] (fun () -> State.set s 1);
   check "an effect made in a later run of an effect sees the value" "1" (read ());

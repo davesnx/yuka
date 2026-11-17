@@ -79,7 +79,8 @@ open
   end
 let hole_child =
   Yuka.runtime_instance __yuka_template_rewrite_6
-    [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get count)))|]
+    [|(Yuka.runtime_child
+         (Yuka.hole (fun _yuka_scope -> State.get _yuka_scope count)))|]
 open
   struct
     let __yuka_template_rewrite_7 =
@@ -88,7 +89,8 @@ open
   end
 let qualified_hole_child =
   Yuka.runtime_instance __yuka_template_rewrite_7
-    [|(Yuka.runtime_child (Yuka.hole (fun () -> Yuka.State.get count)))|]
+    [|(Yuka.runtime_child
+         (Yuka.hole (fun _yuka_scope -> Yuka.State.get _yuka_scope count)))|]
 open
   struct
     let __yuka_template_rewrite_8 =
@@ -126,13 +128,16 @@ let hole_attribute =
   Yuka.runtime_instance __yuka_template_rewrite_11
     [|(Yuka.runtime_attribute
          (Yuka.runtime_hole_attr "class"
-            (fun () -> Some (if State.get on then "a" else "b" : string))));(
+            (fun _yuka_scope ->
+               Some (if State.get _yuka_scope on then "a" else "b" : string))));(
       Yuka.runtime_attribute
         (Yuka.runtime_hole_attr "hidden"
-           (fun () -> if (State.get h : bool) then Some "" else None)));(
+           (fun _yuka_scope ->
+              if (State.get _yuka_scope h : bool) then Some "" else None)));(
       Yuka.runtime_attribute
         (Yuka.runtime_hole_attr "tabindex"
-           (fun () -> Some (Stdlib.string_of_int (State.get n : int)))))|]
+           (fun _yuka_scope ->
+              Some (Stdlib.string_of_int (State.get _yuka_scope n : int)))))|]
 let component_plain = Ui.Badge.make ~tone:1 ~label:"x" ()
 open
   struct
@@ -153,7 +158,7 @@ let component_children =
   Ui.Card.make ~title:"t"
     ~children:(Yuka.fragment
                  [Yuka.text "a";
-                 Yuka.hole (fun () -> State.get s);
+                 Yuka.hole (fun _yuka_scope -> State.get _yuka_scope s);
                  Yuka.runtime_instance __yuka_template_rewrite_13 [||]]) ()
 let component_prop_no_hole = Ui.Card.make ~title:(State.get s) ()
 open
@@ -167,7 +172,8 @@ open
   end
 let nested =
   Yuka.runtime_instance __yuka_template_rewrite_14
-    [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get name)))|]
+    [|(Yuka.runtime_child
+         (Yuka.hole (fun _yuka_scope -> State.get _yuka_scope name)))|]
 let lowercase_function = Ui.button ~label:"l" ~children:[Yuka.text "txt"] ()
 open
   struct
@@ -1104,7 +1110,7 @@ let select_hole =
   Yuka.runtime_instance __yuka_template_rewrite_22
     [|(Yuka.runtime_attribute
          (Yuka.runtime_hole_attr "value"
-            (fun () -> Some (State.get v : string))))|]
+            (fun _yuka_scope -> Some (State.get _yuka_scope v : string))))|]
 open
   struct
     let __yuka_template_rewrite_23 =
@@ -1124,7 +1130,7 @@ let textarea_hole =
   Yuka.runtime_instance __yuka_template_rewrite_24
     [|(Yuka.runtime_attribute
          (Yuka.runtime_hole_attr "value"
-            (fun () -> Some (State.get t : string))))|]
+            (fun _yuka_scope -> Some (State.get _yuka_scope t : string))))|]
 module Templates =
   struct
     open
@@ -1140,9 +1146,11 @@ module Templates =
       Yuka.runtime_instance __yuka_template_rewrite_25
         [|(Yuka.runtime_attribute (Yuka.on "click" (fun _ -> ())));(Yuka.runtime_child
                                                                     (Yuka.hole
-                                                                    (fun ()
+                                                                    (fun
+                                                                    _yuka_scope
                                                                     ->
                                                                     State.get
+                                                                    _yuka_scope
                                                                     n)))|]
     open
       struct
@@ -1155,7 +1163,7 @@ module Templates =
       Yuka.runtime_instance __yuka_template_rewrite_26
         [|(Yuka.runtime_attribute
              (Yuka.runtime_hole_attr "class"
-                (fun () -> Some (State.get c : string))))|]
+                (fun _yuka_scope -> Some (State.get _yuka_scope c : string))))|]
     open
       struct
         let __yuka_template_rewrite_27 =
@@ -1216,7 +1224,8 @@ module Templates =
       end
     let single_with_hole =
       Yuka.runtime_instance __yuka_template_rewrite_32
-        [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get n)))|]
+        [|(Yuka.runtime_child
+             (Yuka.hole (fun _yuka_scope -> State.get _yuka_scope n)))|]
     open
       struct
         let __yuka_template_rewrite_33 =
@@ -1240,12 +1249,10 @@ module Templates =
       end
     let hole_with_fixed_inside =
       Yuka.runtime_instance __yuka_template_rewrite_34
-        [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get n)));(Yuka.runtime_child
-                                                                    (Yuka.hole
-                                                                    (fun ()
-                                                                    ->
-                                                                    State.get
-                                                                    m)))|]
+        [|(Yuka.runtime_child
+             (Yuka.hole (fun _yuka_scope -> State.get _yuka_scope n)));(
+          Yuka.runtime_child
+            (Yuka.hole (fun _yuka_scope -> State.get _yuka_scope m)))|]
     open
       struct
         let __yuka_template_rewrite_35 =
@@ -1262,8 +1269,8 @@ module Templates =
       Yuka.runtime_instance __yuka_template_rewrite_36
         [|(Yuka.runtime_child
              (Yuka.hole
-                (fun () ->
-                   if State.get ok
+                (fun _yuka_scope ->
+                   if State.get _yuka_scope ok
                    then Yuka.runtime_instance __yuka_template_rewrite_35 [||]
                    else Yuka.empty)))|]
   end
@@ -1311,7 +1318,9 @@ module Awaiting =
         ~children:(fun items ->
                      Yuka.runtime_instance __yuka_template_rewrite_38
                        [|(Yuka.runtime_child
-                            (Yuka.hole (fun () -> State.get n)))|]) ()
+                            (Yuka.hole
+                               (fun _yuka_scope -> State.get _yuka_scope n)))|])
+        ()
     open
       struct
         let __yuka_template_rewrite_40 =
@@ -1362,8 +1371,9 @@ module Awaiting =
                 ~children:(fun v ->
                              Yuka.runtime_instance __yuka_template_rewrite_43
                                [|(Yuka.runtime_child
-                                    (Yuka.hole (fun () -> State.get n)))|])
-                ()))|]
+                                    (Yuka.hole
+                                       (fun _yuka_scope ->
+                                          State.get _yuka_scope n)))|]) ()))|]
   end
 open
   struct
@@ -1520,10 +1530,46 @@ let animate_values u =
 let style_parts c =
   Yuka.element "style" []
     [Yuka.hole
-       (fun () ->
-          Yuka.text (Stdlib.String.concat "" ["a{color:"; State.get c; "}"]))]
+       (fun _yuka_scope ->
+          Yuka.text
+            (Stdlib.String.concat ""
+               ["a{color:"; State.get _yuka_scope c; "}"]))]
 let reparsed c =
   Yuka.element "p" [Yuka.runtime_attr "class" "p"]
     [Yuka.element "div" [Yuka.runtime_attr "id" (c : string)]
        [Yuka.text "x";
        Yuka.element "a" [Yuka.runtime_url_attr "a" "href" "/y"] [Yuka.text c]]]
+open
+  struct
+    let __yuka_template_rewrite_52 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let scope_given_is_kept =
+  Yuka.runtime_instance __yuka_template_rewrite_52
+    [|(Yuka.runtime_child (Yuka.hole (fun _yuka_scope -> State.get s count)))|]
+open
+  struct
+    let __yuka_template_rewrite_53 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let only_one_argument_reads_get_the_scope =
+  Yuka.runtime_instance __yuka_template_rewrite_53
+    [|(Yuka.runtime_child
+         (Yuka.hole
+            (fun _yuka_scope -> (State.get _yuka_scope a) ^ (State.get s b))))|]
+open
+  struct
+    let __yuka_template_rewrite_54 =
+      Yuka.runtime_template "\001div\002\007\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let nested_jsx_in_hole =
+  Yuka.runtime_instance __yuka_template_rewrite_54
+    [|(Yuka.runtime_child
+         (Yuka.hole
+            (fun _yuka_scope ->
+               if State.get _yuka_scope a
+               then Ui.Child.make ~label:(State.get _yuka_scope b) ()
+               else Yuka.empty)))|]

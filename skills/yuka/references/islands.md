@@ -80,14 +80,14 @@ end
 (* shared/tags.mlx *)
 let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   let all = Yuka.State.make false in
-  let shown () =
-    if Yuka.State.get all then tags else List.filteri (fun index _ -> index < limit) tags
+  let shown s =
+    if Yuka.State.get s all then tags else List.filteri (fun index _ -> index < limit) tags
   in
   <div>
     <ul>
-      (Yuka.hole (fun () ->
+      (Yuka.hole (fun s ->
          Yuka.fragment
-           (List.map (fun (tag : Model.Tag.t) -> <li>(Yuka.text tag.name)</li>) (shown ()))))
+           (List.map (fun (tag : Model.Tag.t) -> <li>(Yuka.text tag.name)</li>) (shown s))))
     </ul>
     <button hidden=(Yuka.State.get all) on_click=(fun _ -> Yuka.State.set all true)>
       "Show all"
@@ -97,8 +97,10 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
 
 ## State, events and holes
 
-- `Yuka.State.make value` makes a State. `Yuka.State.get` reads it,
-  `Yuka.State.set` and `Yuka.State.update` write it.
+- `Yuka.State.make value` makes a State. `Yuka.State.set` and
+  `Yuka.State.update` write it. `Yuka.State.peek` reads it in the
+  component body and in an event handler. `Yuka.State.get scope` reads it
+  in a hole, a memo or an effect, which gets the scope from Yuka.
 - An event handler is a function: `on_click=(fun event -> ...)`.
   `Yuka.Event` reads the event: `target_value`, `target_checked`,
   `target_tag`, `key`, the modifier keys (`shift_key`, `ctrl_key`,
@@ -109,7 +111,8 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   changes. The ppx makes a hole of each child or attribute of an HTML tag
   whose expression contains `Yuka.State.get`: `hidden=(Yuka.State.get all)`
   above. It does not see a read inside another function, such as
-  `shown ()`; write `Yuka.hole (fun () -> ...)` for it.
+  `shown s`; give that function the scope and write
+  `Yuka.hole (fun s -> ...)` for it.
 - Make a State inside `make`. Every request of the server shares a State
   made at the top level of a module, so on the server `State.set` or
   `State.update` on it raises `Invalid_argument`.
@@ -141,9 +144,8 @@ client navigation answer, in keyed list rows and in a streamed
 renders, the id is unique. For a second id, add a suffix that starts with a
 letter, as `-hint` above, or call `with_unique_id` again.
 
-The function runs once and does not track a State that it reads, so the
-`input` keeps its text and focus when that State changes. To show a State
-inside, put a `Yuka.hole` there. An element that the browser makes after the
+The function runs once, so the `input` keeps its text and focus when a
+State changes. To show a State inside, read it in a hole. An element that the browser makes after the
 island has started (a new list row, an `Await` value that arrives later)
 gets a new id, which the server never printed.
 

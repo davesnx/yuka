@@ -6,7 +6,7 @@ let ints = string_of_int
 let num : int Context.t = Context.make ~name:"num" ()
 let other : int Context.t = Context.make ~name:"other" ()
 let show c = match Context.get c with Some n -> ints n | None -> "none"
-let later c = hole (fun () -> text (show c))
+let later c = hole (fun _ -> text (show c))
 let shown = Dom_cases.text_content
 
 let render tree =
@@ -25,9 +25,9 @@ let root_render () =
         Dom_cases.div []
           [ Context.provide num 1 (fun () ->
                 element "p"
-                  [ hole_attr "title" (fun () -> Some (show num)) ]
+                  [ hole_attr "title" (fun _ -> Some (show num)) ]
                   [ text ("f" ^ show num); later num ]);
-            element "b" [ hole_attr "title" (fun () -> Some (show num)) ] [ text ("f" ^ show num); later num ] ])
+            element "b" [ hole_attr "title" (fun _ -> Some (show num)) ] [ text ("f" ^ show num); later num ] ])
   in
   check "inside: function, hole, attribute" "f11 1"
     (shown (Dom_cases.query c "p") ^ " " ^ Option.value ~default:"null" (Dom_cases.get_attribute (Dom_cases.query c "p") "title"));
@@ -43,8 +43,8 @@ let hole_again () =
     incr comp;
     let v = Context.get_exn sc in
     Dom_cases.div []
-      [ element "i" [] [ hole (fun () -> text (ints (State.get s) ^ ":" ^ show num)) ];
-        element "b" [] [ hole (fun () -> text (ints (State.get v))) ] ]
+      [ element "i" [] [ hole (fun scope -> text (ints (State.get scope s) ^ ":" ^ show num)) ];
+        element "b" [] [ hole (fun scope -> text (ints (State.get scope v))) ] ]
   in
   let c, dispose =
     render (fun () -> Context.provide num 1 (fun () -> Context.provide sc st (fun () -> child ())))
@@ -63,12 +63,12 @@ let hole_again () =
 let row_later () =
   let items = State.make [| "a" |] in
   let row k =
-    let body () = element "i" [] [ text (k ^ show num); hole (fun () -> text (show num)) ] in
+    let body () = element "i" [] [ text (k ^ show num); hole (fun _ -> text (show num)) ] in
     if k = "c" then Context.provide num 9 body else body ()
   in
   let c, dispose =
     render (fun () ->
-        Context.provide num 1 (fun () -> Dom_cases.div [] [ each ~key:Fun.id (fun () -> State.get items) row ]))
+        Context.provide num 1 (fun () -> Dom_cases.div [] [ each ~key:Fun.id (fun scope -> State.get scope items) row ]))
   in
   check "first row" "a11" (Dom_cases.texts c "i");
   State.set items [| "a"; "b"; "c" |];
@@ -148,8 +148,8 @@ let hydrate_tree s () =
   Dom_cases.div []
     [ Context.provide num 1 (fun () ->
           element "p"
-            [ hole_attr "title" (fun () -> Some (show num)) ]
-            [ text (show num); hole (fun () -> text (ints (State.get s) ^ ":" ^ show num)) ]);
+            [ hole_attr "title" (fun _ -> Some (show num)) ]
+            [ text (show num); hole (fun scope -> text (ints (State.get scope s) ^ ":" ^ show num)) ]);
       element "b" [] [ later num ] ]
 
 let hydration () =
@@ -185,7 +185,7 @@ let island_page () =
   Island_cases.page
     [ Context.provide num 1 (fun () ->
           runtime_island ~name:"Ctx" ~props:`Null (fun () ->
-              island_view (Some (Private.element (Private.hole (fun () -> Private.node (element "u" [] [ text (show num) ])))))))
+              island_view (Some (Private.element (Private.hole (fun _ -> Private.node (element "u" [] [ text (show num) ])))))))
     ]
 
 let island_start () =
@@ -213,7 +213,7 @@ let island_start_in_scope () =
   Island_cases.reset_body ()
 
 let provide_all () =
-  let both () = text (show num ^ show other) in
+  let both _ = text (show num ^ show other) in
   let c, dispose =
     render (fun () ->
         Dom_cases.div []

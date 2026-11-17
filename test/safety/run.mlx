@@ -96,9 +96,9 @@ let data_scheme () =
 let printer_paths () =
   raises "attr_unchecked refuses a URL name" (fun () -> runtime_attr "href" "/x");
   raises "attr_unchecked refuses any case" (fun () -> runtime_attr "SRC" "/x");
-  raises "hole_attr_unchecked refuses a URL name" (fun () -> runtime_hole_attr "formaction" (fun () -> None));
+  raises "hole_attr_unchecked refuses a URL name" (fun () -> runtime_hole_attr "formaction" (fun _ -> None));
   check_client "a dynamic attribute" {|<a href="about:blank#blocked">x</a>|}
-    (element "a" [ hole_attr "href" (fun () -> Some " javascript:x") ] [ text "x" ]);
+    (element "a" [ hole_attr "href" (fun _ -> Some " javascript:x") ] [ text "x" ]);
   let t =
     Private.Template.make
       (Private.Template.element "form" [ Private.Template.fixed "action" "javascript:alert(1)"; Private.Template.part_attr 0 ] [])
@@ -111,9 +111,9 @@ let attribute_names () =
   List.iter
     (fun name ->
       raises ("printer: " ^ String.escaped name) (fun () -> html (element "a" [ attr name "x" ] []));
-      raises ("hole: " ^ String.escaped name) (fun () -> print_client (element "a" [ hole_attr name (fun () -> Some "x") ] []));
+      raises ("hole: " ^ String.escaped name) (fun () -> print_client (element "a" [ hole_attr name (fun _ -> Some "x") ] []));
       raises ("unchecked: " ^ String.escaped name) (fun () -> runtime_attr name "x");
-      raises ("hole unchecked: " ^ String.escaped name) (fun () -> runtime_hole_attr name (fun () -> None));
+      raises ("hole unchecked: " ^ String.escaped name) (fun () -> runtime_hole_attr name (fun _ -> None));
       raises ("template: " ^ String.escaped name) (fun () -> Private.template Private.Template.(element "a" [ fixed name "x" ] [])))
     [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
   check_html "a valid name" {|<a data-x:y_z.1="x"></a>|} (element "a" [ attr "data-x:y_z.1" "x" ] [])
@@ -146,13 +146,13 @@ let srcdoc () =
   check_html "a dynamic srcdoc is empty" {|<iframe srcdoc=""></iframe>|} (element "iframe" [ attr "srcdoc" v ] []);
   check_html "any case" {|<IFRAME SrcDoc=""></IFRAME>|} (element "IFRAME" [ attr "SrcDoc" v ] []);
   check_client "a srcdoc hole is empty" {|<iframe srcdoc=""></iframe>|}
-    (element "iframe" [ hole_attr "srcdoc" (fun () -> Some v) ] []);
+    (element "iframe" [ hole_attr "srcdoc" (fun _ -> Some v) ] []);
   check_html "mlx: a srcdoc value is empty" {|<iframe srcdoc=""></iframe>|} <iframe srcdoc=v />;
   check_html "mlx: a literal srcdoc is kept" {|<iframe srcdoc="&lt;b>hi&lt;/b>"></iframe>|}
     <iframe srcdoc="<b>hi</b>" />;
   check_html "srcdoc on another element is not HTML" {|<p srcdoc="&lt;b>"></p>|} (element "p" [ attr "srcdoc" "<b>" ] []);
   raises "srcdoc unchecked" (fun () -> runtime_attr "srcdoc" v);
-  raises "srcdoc hole unchecked" (fun () -> runtime_hole_attr "SRCDOC" (fun () -> None))
+  raises "srcdoc hole unchecked" (fun () -> runtime_hole_attr "SRCDOC" (fun _ -> None))
 
 let animation_names () =
   let matrix = "0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0 0 0 1 0" in
@@ -161,7 +161,7 @@ let animation_names () =
   check_html "attr_unchecked values" expected
     (element "svg" [] [ element "feColorMatrix" [ runtime_attr "type" "matrix"; runtime_attr "values" matrix ] [] ]);
   check_client "hole_attr_unchecked to" {|<p to="a" from="b" by="c"></p>|}
-    (element "p" [ runtime_hole_attr "to" (fun () -> Some "a"); runtime_attr "from" "b"; runtime_attr "by" "c" ] []);
+    (element "p" [ runtime_hole_attr "to" (fun _ -> Some "a"); runtime_attr "from" "b"; runtime_attr "by" "c" ] []);
   check_html "values on animate is still checked" {|<animate values="about:blank#blocked"></animate>|}
     (element "animate" [ attr "values" "javascript:alert(1)" ] [])
 
@@ -194,10 +194,10 @@ let event_names () =
   List.iter
     (fun name ->
       raises ("printer: " ^ name) (fun () -> html (element "img" [ attr name "alert(1)" ] []));
-      raises ("hole: " ^ name) (fun () -> print_client (element "img" [ hole_attr name (fun () -> Some "alert(1)") ] []));
+      raises ("hole: " ^ name) (fun () -> print_client (element "img" [ hole_attr name (fun _ -> Some "alert(1)") ] []));
       raises ("url_attr: " ^ name) (fun () -> html (element "img" [ runtime_url_attr "img" name "alert(1)" ] []));
       raises ("unchecked: " ^ name) (fun () -> runtime_attr name "alert(1)");
-      raises ("hole unchecked: " ^ name) (fun () -> runtime_hole_attr name (fun () -> None));
+      raises ("hole unchecked: " ^ name) (fun () -> runtime_hole_attr name (fun _ -> None));
       raises ("template: " ^ name) (fun () -> Private.template Private.Template.(element "img" [ fixed name "alert(1)" ] [])))
     [ "onfocus"; "onerror"; "ONCLICK"; "onbegin"; "On"; "one" ];
   check_html "names that do not start with on" {|<p data-onclick="x" o="2" no="3"></p>|}
@@ -207,7 +207,7 @@ let base_href () =
   let v = "https://evil.example/" in
   check_html "a dynamic base href is empty" {|<base href="">|} (element "base" [ attr "href" v ] []);
   check_html "any case" {|<BASE HREF="">|} (element "BASE" [ attr "HREF" v ] []);
-  check_client "a base href hole" {|<base href="">|} (element "base" [ hole_attr "href" (fun () -> Some v) ] []);
+  check_client "a base href hole" {|<base href="">|} (element "base" [ hole_attr "href" (fun _ -> Some v) ] []);
   check_html "mlx: a base href value" {|<base href="">|} <base href=v />;
   check_html "mlx: a literal base href is kept" {|<base href="/app/">|} <base href="/app/" />;
   check_html "a hand-written template" {|<base href="">|}
@@ -275,7 +275,7 @@ let raw_text () =
   check_html "an import map" {|<script type="importmap">{"imports":{"\u003ca":"/x"}}</script>|}
     (element "script" [ attr "type" "importmap" ] [ text {|{"imports":{"<a":"/x"}}|} ]);
   check_client "one hole: one text, no markers" {|<script>a && "<\/script>"</script>|}
-    (element "script" [] [ hole (fun () -> text {|a && "</script>"|}) ]);
+    (element "script" [] [ hole (fun _ -> text {|a && "</script>"|}) ]);
   check_html "mlx: texts and a value joined, then made safe as one string"
     {|<div><script>x = 1 < 2 && "<\/script>"</script><style>p > a {} <\/style></style></div>|}
     (let tail = "/style>" in
@@ -341,7 +341,7 @@ let raw_text () =
 let raw_text_children () =
   raises "two texts" (fun () -> html (element "script" [] [ text "a"; text "b" ]));
   raises "an element" (fun () -> html (element "style" [] [ element "b" [] [] ]));
-  raises "a hole that gives an element" (fun () -> print_client (element "script" [] [ hole (fun () -> element "b" [] []) ]));
+  raises "a hole that gives an element" (fun () -> print_client (element "script" [] [ hole (fun _ -> element "b" [] []) ]));
   raises "two texts in svg" (fun () -> html (element "svg" [] [ element "style" [] [ text "a"; text "b" ] ]));
   raises "an element in math" (fun () -> html (element "math" [] [ element "script" [] [ element "b" [] [] ] ]));
   raises "two texts in SCRIPT" (fun () -> html (element "SCRIPT" [] [ text "a"; text "b" ]));

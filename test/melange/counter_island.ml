@@ -4,7 +4,7 @@ let view n =
   let c = State.make n in
   element "div" []
     [
-      element "span" [] [ hole (fun () -> text (string_of_int (State.get c))) ];
+      element "span" [] [ hole (fun s -> text (string_of_int (State.get s c))) ];
       element "button" [ on "click" (fun _ -> State.update c succ) ] [ text "+" ];
     ]
 

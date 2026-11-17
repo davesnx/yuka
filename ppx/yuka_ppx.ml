@@ -95,6 +95,24 @@ let reads_state e =
   finder#expression e;
   !found
 
+let scope_var = "_yuka_scope"
+
+let pass_scope e =
+  let mapper =
+    object
+      inherit Ast_traverse.map as super
+
+      method! expression e =
+        match e.pexp_desc with
+        | Pexp_function _ -> e
+        | Pexp_apply (({ pexp_desc = Pexp_ident { txt = Ldot (p, "get"); _ }; pexp_loc = loc; _ } as get), [ (Nolabel, x) ])
+          when is_state_path p ->
+            { e with pexp_desc = Pexp_apply (get, [ (Nolabel, evar ~loc scope_var); (Nolabel, super#expression x) ]) }
+        | _ -> super#expression e
+    end
+  in
+  mapper#expression e
+
 let issues = "reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works)"
 
 let lint_error ~loc what =
@@ -303,7 +321,7 @@ let rewrite_attribute ~self ~loc tag (label, value) =
       if not (Url.valid_name dom) then Location.raise_errorf ~loc:vloc "[yuka] %S is not a valid attribute name." dom;
       let dom_e = estring ~loc dom in
       let hole = reads_state value in
-      let value = self#expression value in
+      let value = self#expression (if hole then pass_scope value else value) in
       let url = Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) in
       let tag_e = estring ~loc tag in
       let attr = if url then [%expr Yuka.runtime_url_attr [%e tag_e]] else [%expr Yuka.runtime_attr] in
@@ -312,7 +330,7 @@ let rewrite_attribute ~self ~loc tag (label, value) =
         Plain
           [%expr
             [%e hole_attr] [%e dom_e]
-              (fun () -> [%e option_string ~loc ~optional kind value])]
+              (fun [%p pvar ~loc scope_var] -> [%e option_string ~loc ~optional kind value])]
       else if optional || kind = Bool then
         Maybe
           [%expr
@@ -377,8 +395,8 @@ let rewrite_child ~self child =
   | _ when is_jsx child -> self#expression child
   | _ ->
       let hole = reads_state child in
-      let child = self#expression child in
-      if hole then [%expr Yuka.hole (fun () -> [%e child])] else child
+      let child = self#expression (if hole then pass_scope child else child) in
+      if hole then [%expr Yuka.hole (fun [%p pvar ~loc scope_var] -> [%e child])] else child
 
 let children_arg ~loc kids =
   match kids with
@@ -402,12 +420,13 @@ let raw_text_element = function "script" | "style" -> true | _ -> false
 let lower_element ~self ~loc ~fnloc tag args =
   let props, children = split_args args in
   let attrs = attributes_expr ~loc (List.map (rewrite_attribute ~self ~loc:fnloc tag) props) in
+  let reads = List.exists reads_state children in
   let text c =
     match c.pexp_desc with
     | Pexp_constant (Pconst_string _) when not (is_jsx c) -> c
     | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Yuka", "text") | Lident "text"; _ }; _ }, [ (Nolabel, e) ])
       when not (is_jsx c) ->
-        self#expression e
+        self#expression (if reads then pass_scope e else e)
     | _ ->
         Location.raise_errorf ~loc:c.pexp_loc
           "[yuka] <%s> takes only text: a string or (Yuka.text e), not an element, a component or an island." tag
@@ -416,10 +435,10 @@ let lower_element ~self ~loc ~fnloc tag args =
   let content =
     match parts with
     | [] -> [%expr []]
-    | [ p ] when not (List.exists reads_state children) -> [%expr [ Yuka.text [%e p] ]]
+    | [ p ] when not reads -> [%expr [ Yuka.text [%e p] ]]
     | _ ->
         let joined = [%expr Stdlib.String.concat "" [%e list_expr ~loc parts]] in
-        if List.exists reads_state children then [%expr [ Yuka.hole (fun () -> Yuka.text [%e joined]) ]]
+        if reads then [%expr [ Yuka.hole (fun [%p pvar ~loc scope_var] -> Yuka.text [%e joined]) ]]
         else [%expr [ Yuka.text [%e joined] ]]
   in
   [%expr Yuka.element [%e estring ~loc tag] [%e attrs] [%e content]]

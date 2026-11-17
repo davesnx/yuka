@@ -1,3 +1,4 @@
+type scope = Signal.scope
 type ('a, 'access) signal = 'a Signal.t
 type 'a t = ('a, [ `Write ]) signal
 type 'a read = ('a, [ `Read ]) signal
@@ -12,7 +13,7 @@ let set (s : _ t) value =
 
 let update s f = set s (f s.value)
 external read_only : 'a t -> 'a read = "%identity"
-let untrack = Scheduler.untrack
+let untrack f = Scheduler.untrack (Signal.scoped f)
 
 let memo ?equal f =
   let s = Signal.computed ?equal f in
@@ -47,11 +48,11 @@ let after_paint job =
   waiting := job :: !waiting
 
 let deferred ?equal (source : (_, _) signal) =
-  if not Web.in_browser then memo ?equal (fun () -> get source)
+  if not Web.in_browser then memo ?equal (fun s -> get s source)
   else begin
     let watch = Scheduler.make (Some Scheduler.queue) Scheduler.never in
     let first =
-      match Scheduler.with_listener (Some watch) (fun () -> get source) with
+      match Scheduler.with_listener (Some watch) (fun () -> get Signal.scope source) with
       | v -> v
       | exception e ->
           Scheduler.dispose watch;
@@ -72,7 +73,7 @@ let deferred ?equal (source : (_, _) signal) =
     Scheduler.set_level watch;
     watch.fn <-
       (fun () ->
-        let value = get source in
+        let value = get Signal.scope source in
         if (not !queued) && Signal.differs s.equal s.value value then begin
           after_paint job;
           queued := true
@@ -87,8 +88,8 @@ let deferred ?equal (source : (_, _) signal) =
 
 let on_change ?equal (state : (_, _) signal) f =
   let prev = ref (Signal.peek state) and first = ref true in
-  Base.Effect.after (fun () ->
-      let next = Signal.get state in
+  Base.Effect.after (fun s ->
+      let next = Signal.get s state in
       let created = !first && not (Signal.differs None !prev next) in
       first := false;
       if (not created) && Signal.differs equal !prev next then begin

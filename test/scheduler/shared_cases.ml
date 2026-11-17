@@ -80,7 +80,7 @@ let server_get () =
   let html =
     print (fun () ->
         Context.provide theme "dark" (fun () ->
-            island (fun () -> fragment [ text (show theme); hole (fun () -> text (" " ^ show theme)) ])))
+            island (fun () -> fragment [ text (show theme); hole (fun _ -> text (" " ^ show theme)) ])))
   in
   check "an island render reads the page value of a context with a codec" "true"
     (string_of_bool (Cases.contains html "dark<!--[--> dark<!--]-->"));
@@ -126,7 +126,7 @@ let catch () =
             fragment
               [ Catch.make
                   ~fallback:(fun ~error:_ ~reset:_ -> text "lost")
-                  ~children:(fun () -> fragment [ quiet (); Private.element (Private.hole (fun () -> failwith "x")) ])
+                  ~children:(fun () -> fragment [ quiet (); Private.element (Private.hole (fun _ -> failwith "x")) ])
                   ();
                 quiet () ]))
   in

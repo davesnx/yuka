@@ -240,8 +240,8 @@ let scatter_points (first, last) items =
        items)
 
 let tooltip (hover : hover option Yuka.State.read) : Yuka.client Yuka.element =
-  Yuka.hole (fun () ->
-      match Yuka.State.get hover with
+  Yuka.hole (fun s ->
+      match Yuka.State.get s hover with
       | None -> Yuka.empty
       | Some hover ->
           let box = 14 + (String.length hover.text * 11 / 2) in
@@ -253,8 +253,8 @@ let tooltip (hover : hover option Yuka.State.read) : Yuka.client Yuka.element =
           </g>)
 
 let[@client] make ~(workspace : Model.Workspace.t) () =
-  let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view = Queries.All }) in
-  let issues = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[]) in
+  let source = Yuka.Live.use Topics.issues (fun _ -> { Queries.workspace; view = Queries.All }) in
+  let issues = Yuka.State.memo (fun s -> Option.value (Yuka.Status.data (Yuka.Live.status s source)) ~default:[]) in
   let multiplier = Yuka.State.make 1 in
   let animate = Yuka.State.make false in
   let measure = Yuka.State.make Count in
@@ -280,29 +280,29 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let shown_labels = Yuka.State.deferred labels_on in
   let shown_assignees = Yuka.State.deferred assignees_on in
   let shown_range = Yuka.State.deferred range in
-  let items = Yuka.State.memo (fun () -> expand ~multiplier:(Yuka.State.get shown_multiplier) (Yuka.State.get issues)) in
-  let bounds = Yuka.State.memo ~equal:( = ) (fun () -> bounds_of (Yuka.State.get items)) in
+  let items = Yuka.State.memo (fun s -> expand ~multiplier:(Yuka.State.get s shown_multiplier) (Yuka.State.get s issues)) in
+  let bounds = Yuka.State.memo ~equal:( = ) (fun s -> bounds_of (Yuka.State.get s items)) in
   let window_of range =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        let first, last = Yuka.State.get bounds in
-        match Yuka.State.get range with
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        let first, last = Yuka.State.get s bounds in
+        match Yuka.State.get s range with
         | None -> (first, last)
         | Some (from_day, to_day) -> (max first from_day, min last to_day))
   in
   let window = window_of range in
   let shown_window = window_of shown_range in
   let subset ?(status = true) ?(priority = true) ?(label = true) ?(assignee = true) ?(dated = true) () =
-    Yuka.State.memo (fun () ->
-        let statuses = if status then Yuka.State.get shown_statuses else [] in
-        let priorities = if priority then Yuka.State.get shown_priorities else [] in
-        let labels = if label then Yuka.State.get shown_labels else [] in
-        let assignees = if assignee then Yuka.State.get shown_assignees else [] in
-        let first, last = if dated then Yuka.State.get shown_window else (min_int, max_int) in
+    Yuka.State.memo (fun s ->
+        let statuses = if status then Yuka.State.get s shown_statuses else [] in
+        let priorities = if priority then Yuka.State.get s shown_priorities else [] in
+        let labels = if label then Yuka.State.get s shown_labels else [] in
+        let assignees = if assignee then Yuka.State.get s shown_assignees else [] in
+        let first, last = if dated then Yuka.State.get s shown_window else (min_int, max_int) in
         List.filter
           (fun (item : item) ->
             item.day >= first && item.day <= last && keeps statuses item.status && keeps priorities item.priority
             && keeps_any labels item.labels && keeps assignees item.assignee)
-          (Yuka.State.get items))
+          (Yuka.State.get s items))
   in
   let for_status = subset ~status:false () in
   let for_priority = subset ~priority:false () in
@@ -311,8 +311,8 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let for_time = subset ~dated:false () in
   let selected = subset () in
   let hover_in chart =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        match Yuka.State.get hover with Some hover when hover.chart = chart -> Some hover | _ -> None)
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        match Yuka.State.get s hover with Some hover when hover.chart = chart -> Some hover | _ -> None)
   in
   let pending = ref None and frame_number = ref 0 in
   let mark () = if !pending = None then pending := Some (Yuka.Browser.now (), !frame_number) in
@@ -324,8 +324,8 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   in
   let frames = ref 0 and since = ref 0. and previous = ref 0. and worst = ref 0. and updates = ref 0 in
   let long_times = ref [] and gaps = Array.make frame_samples 0. and next_gap = ref 0 in
-  Yuka.Effect.after (fun () -> if Yuka.State.get expanded then count_nodes ());
-  Yuka.Effect.after (fun () ->
+  Yuka.Effect.after (fun s -> if Yuka.State.get s expanded then count_nodes ());
+  Yuka.Effect.after (fun _ ->
       Yuka.Browser.on_frame (fun time ->
           incr frames;
           if !since = 0. then since := time;
@@ -355,8 +355,8 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
             since := time;
             if Yuka.State.peek animate then count_nodes ()
           end));
-  Yuka.Effect.after (fun () ->
-      if Yuka.State.get animate then begin
+  Yuka.Effect.after (fun s ->
+      if Yuka.State.get s animate then begin
         let direction = ref 1 in
         Yuka.Browser.on_frame (fun _ ->
             let first, last = Yuka.State.peek bounds in
@@ -371,31 +371,31 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
   let enter chart x y text = Yuka.State.set hover (Some { chart; x; y; text }) in
   let leave _ = Yuka.State.set hover None in
   let status_chart =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        status_bars ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_statuses) (Yuka.State.get for_status))
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        status_bars ~measure:(Yuka.State.get s measure) ~chosen:(Yuka.State.get s shown_statuses) (Yuka.State.get s for_status))
   in
   let priority_chart =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        priority_bars ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_priorities) (Yuka.State.get for_priority))
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        priority_bars ~measure:(Yuka.State.get s measure) ~chosen:(Yuka.State.get s shown_priorities) (Yuka.State.get s for_priority))
   in
-  let label_names = Yuka.State.memo ~equal:( = ) (fun () -> label_names_of (Yuka.State.get issues)) in
+  let label_names = Yuka.State.memo ~equal:( = ) (fun s -> label_names_of (Yuka.State.get s issues)) in
   let label_chart =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        label_bars ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_labels) ~labels:(Yuka.State.get label_names)
-          (Yuka.State.get for_label))
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        label_bars ~measure:(Yuka.State.get s measure) ~chosen:(Yuka.State.get s shown_labels) ~labels:(Yuka.State.get s label_names)
+          (Yuka.State.get s for_label))
   in
-  let assignee_names = Yuka.State.memo ~equal:( = ) (fun () -> assignee_names_of (Yuka.State.get issues)) in
+  let assignee_names = Yuka.State.memo ~equal:( = ) (fun s -> assignee_names_of (Yuka.State.get s issues)) in
   let workload_chart =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        workload ~measure:(Yuka.State.get measure) ~chosen:(Yuka.State.get shown_assignees) ~names:(Yuka.State.get assignee_names)
-          ~stack_by:(Yuka.State.get stack_by) (Yuka.State.get for_assignee))
+    Yuka.State.memo ~equal:( = ) (fun s ->
+        workload ~measure:(Yuka.State.get s measure) ~chosen:(Yuka.State.get s shown_assignees) ~names:(Yuka.State.get s assignee_names)
+          ~stack_by:(Yuka.State.get s stack_by) (Yuka.State.get s for_assignee))
   in
-  let heatmap = Yuka.State.memo ~equal:( = ) (fun () -> heat_cells ~measure:(Yuka.State.get measure) (Yuka.State.get selected)) in
+  let heatmap = Yuka.State.memo ~equal:( = ) (fun s -> heat_cells ~measure:(Yuka.State.get s measure) (Yuka.State.get s selected)) in
   let timeline =
-    Yuka.State.memo ~equal:( = ) (fun () -> timeline_of ~measure:(Yuka.State.get measure) (Yuka.State.get bounds) (Yuka.State.get for_time))
+    Yuka.State.memo ~equal:( = ) (fun s -> timeline_of ~measure:(Yuka.State.get s measure) (Yuka.State.get s bounds) (Yuka.State.get s for_time))
   in
-  let day_ticks = Yuka.State.memo ~equal:( = ) (fun () -> day_ticks_of (Yuka.State.get bounds)) in
-  let scatter = Yuka.State.memo (fun () -> scatter_points (Yuka.State.get bounds) (Yuka.State.get selected)) in
+  let day_ticks = Yuka.State.memo ~equal:( = ) (fun s -> day_ticks_of (Yuka.State.get s bounds)) in
+  let scatter = Yuka.State.memo (fun s -> scatter_points (Yuka.State.get s bounds) (Yuka.State.get s selected)) in
   let toggle_status status _ = change (fun () -> Yuka.State.update statuses_on (toggle status)) in
   let toggle_priority priority _ = change (fun () -> Yuka.State.update priorities_on (toggle priority)) in
   let toggle_label label _ = change (fun () -> Yuka.State.update labels_on (toggle label)) in
@@ -408,15 +408,15 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
         Yuka.State.set assignees_on [];
         Yuka.State.set range None)
   in
-  Yuka.Effect.after (fun () ->
+  Yuka.Effect.after (fun s ->
       ignore
-        ( Yuka.State.get status_chart,
-          Yuka.State.get priority_chart,
-          Yuka.State.get label_chart,
-          Yuka.State.get workload_chart,
-          Yuka.State.get heatmap,
-          Yuka.State.get timeline,
-          Yuka.State.get scatter );
+        ( Yuka.State.get s status_chart,
+          Yuka.State.get s priority_chart,
+          Yuka.State.get s label_chart,
+          Yuka.State.get s workload_chart,
+          Yuka.State.get s heatmap,
+          Yuka.State.get s timeline,
+          Yuka.State.get s scatter );
       incr updates;
       match !pending with
       | Some (start, _) ->
@@ -496,8 +496,8 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
     let hovered = hover_in "time" in
     Yuka.fragment
       [
-        Yuka.hole (fun () ->
-            match Yuka.State.get hovered with
+        Yuka.hole (fun s ->
+            match Yuka.State.get s hovered with
             | Some hover -> <line class_=Css.crosshair x1=(px hover.x) x2=(px hover.x) y1="12" y2="150" />
             | None -> Yuka.empty);
         tooltip hovered;
@@ -565,9 +565,9 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
     </div>
   in
   let shown ~metric state show : Yuka.client Yuka.element =
-    <dd data_metric=metric>(Yuka.hole (fun () -> Yuka.text (match Yuka.State.get state with Some value -> show value | None -> "-")))</dd>
+    <dd data_metric=metric>(Yuka.hole (fun s -> Yuka.text (match Yuka.State.get s state with Some value -> show value | None -> "-")))</dd>
   in
-  let measure_text () = match Yuka.State.get measure with Count -> "Issues" | Points -> "Points" in
+  let measure_text s = match Yuka.State.get s measure with Count -> "Issues" | Points -> "Points" in
   <div class_=Css.insights data_insights="true">
     <header class_="page-header">
       <span>"Insights"</span>
@@ -599,7 +599,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
           (Yuka.fragment
              (List.map
                 (fun status ->
-                  chip ~label:(Issue.status_label status) ~pressed:(Yuka.State.memo (fun () -> List.mem status (Yuka.State.get statuses_on)))
+                  chip ~label:(Issue.status_label status) ~pressed:(Yuka.State.memo (fun s -> List.mem status (Yuka.State.get s statuses_on)))
                     ~on_click:(toggle_status status))
                 statuses))
         </div>
@@ -607,15 +607,15 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
           (Yuka.fragment
              (List.map
                 (fun priority ->
-                  chip ~label:(Issue.priority_label priority) ~pressed:(Yuka.State.memo (fun () -> List.mem priority (Yuka.State.get priorities_on)))
+                  chip ~label:(Issue.priority_label priority) ~pressed:(Yuka.State.memo (fun s -> List.mem priority (Yuka.State.get s priorities_on)))
                     ~on_click:(toggle_priority priority))
                 priorities))
         </div>
-        (Yuka.hole (fun () ->
-             let labels = Yuka.State.get labels_on and assignees = Yuka.State.get assignees_on in
+        (Yuka.hole (fun s ->
+             let labels = Yuka.State.get s labels_on and assignees = Yuka.State.get s assignees_on in
              let active =
-               Yuka.State.get statuses_on <> [] || Yuka.State.get priorities_on <> [] || labels <> [] || assignees <> []
-               || Yuka.State.get range <> None
+               Yuka.State.get s statuses_on <> [] || Yuka.State.get s priorities_on <> [] || labels <> [] || assignees <> []
+               || Yuka.State.get s range <> None
              in
              <div class_=Css.chips>
                (Yuka.fragment
@@ -628,41 +628,41 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
     </div>
     <div class_=Css.dashboard>
       (card ~title:"Created over time"
-         ~note:(Yuka.hole (fun () -> let first, last = Yuka.State.get window in Yuka.text (date_of_day first ^ " to " ^ date_of_day last)))
+         ~note:(Yuka.hole (fun s -> let first, last = Yuka.State.get s window in Yuka.text (date_of_day first ^ " to " ^ date_of_day last)))
          ~children:
            <svg class_=Css.chart view_box="0 0 400 172" data_chart="time">
-             (Yuka.each ~equal:( = ) ~key:(fun (tick : tick) -> px tick.tick_value) (fun () -> (Yuka.State.get timeline).time_ticks) grid_line)
+             (Yuka.each ~equal:( = ) ~key:(fun (tick : tick) -> px tick.tick_value) (fun s -> (Yuka.State.get s timeline).time_ticks) grid_line)
              <rect class_=Css.brush
                x=(px (day_x (Yuka.State.get bounds) (fst (Yuka.State.get window))))
                width=(px (max 1 (day_x (Yuka.State.get bounds) (snd (Yuka.State.get window)) - day_x (Yuka.State.get bounds) (fst (Yuka.State.get window)))))
                y="12" height="138" />
              <path class_=Css.area d=(Yuka.State.get timeline).area />
              <path class_=Css.line d=(Yuka.State.get timeline).line />
-             (Yuka.each ~equal:( = ) ~key:(fun (day, _) -> px day) (fun () -> Yuka.State.get day_ticks) (day_label ~y:166))
-             (Yuka.each ~equal:( = ) ~key:(fun (column : column) -> px column.column_day) (fun () -> (Yuka.State.get timeline).columns) time_column)
+             (Yuka.each ~equal:( = ) ~key:(fun (day, _) -> px day) (fun s -> Yuka.State.get s day_ticks) (day_label ~y:166))
+             (Yuka.each ~equal:( = ) ~key:(fun (column : column) -> px column.column_day) (fun s -> (Yuka.State.get s timeline).columns) time_column)
              crosshair
            </svg>)
       (card ~title:"Issues by status" ~note:(Yuka.text "Click a bar to filter")
          ~children:
            <svg class_=Css.chart view_box="0 0 400 192" data_chart="status">
-             (Yuka.each ~equal:( = ) ~key:(fun (tick : tick) -> px tick.tick_value) (fun () -> (Yuka.State.get status_chart).ticks) grid_line)
-             (Yuka.each ~equal:( = ) ~key:(fun (bar : bar) -> bar.key) (fun () -> (Yuka.State.get status_chart).bars) status_bar)
+             (Yuka.each ~equal:( = ) ~key:(fun (tick : tick) -> px tick.tick_value) (fun s -> (Yuka.State.get s status_chart).ticks) grid_line)
+             (Yuka.each ~equal:( = ) ~key:(fun (bar : bar) -> bar.key) (fun s -> (Yuka.State.get s status_chart).bars) status_bar)
              (tooltip (hover_in "status"))
            </svg>)
-      (card ~title:"Issues by priority" ~note:(Yuka.hole (fun () -> Yuka.text (measure_text ())))
+      (card ~title:"Issues by priority" ~note:(Yuka.hole (fun s -> Yuka.text (measure_text s)))
          ~children:
            <svg class_=Css.chart view_box=("0 0 400 " ^ px (label_rows (List.length priorities))) data_chart="priority">
-             (Yuka.each ~equal:( = ) ~key:(fun (bar : bar) -> bar.key) (fun () -> Yuka.State.get priority_chart)
+             (Yuka.each ~equal:( = ) ~key:(fun (bar : bar) -> bar.key) (fun s -> Yuka.State.get s priority_chart)
                 (horizontal_bar ~chart:"priority" ~on_pick:(fun key -> toggle_priority (priority_of_key key))))
              (tooltip (hover_in "priority"))
            </svg>)
-      (card ~title:"Workload by assignee" ~note:(Yuka.hole (fun () -> Yuka.text (match Yuka.State.get stack_by with By_status -> "Stacked by status" | By_priority -> "Stacked by priority")))
+      (card ~title:"Workload by assignee" ~note:(Yuka.hole (fun s -> Yuka.text (match Yuka.State.get s stack_by with By_status -> "Stacked by status" | By_priority -> "Stacked by priority")))
          ~children:
            <svg class_=Css.chart view_box=("0 0 400 " ^ px (label_rows (List.length (Yuka.State.get assignee_names)))) data_chart="workload">
-             (Yuka.each ~equal:( = ) ~key:(fun (stack : stack) -> stack.row.key) (fun () -> Yuka.State.get workload_chart) stacked_row)
+             (Yuka.each ~equal:( = ) ~key:(fun (stack : stack) -> stack.row.key) (fun s -> Yuka.State.get s workload_chart) stacked_row)
              (tooltip (hover_in "workload"))
            </svg>)
-      (card ~title:"Status by priority" ~note:(Yuka.hole (fun () -> Yuka.text (measure_text ())))
+      (card ~title:"Status by priority" ~note:(Yuka.hole (fun s -> Yuka.text (measure_text s)))
          ~children:
            <svg class_=Css.chart view_box="0 0 400 154" data_chart="heatmap">
              (Yuka.fragment
@@ -675,10 +675,10 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
                    (fun index status ->
                      <text class_=Css.axis x="86" y=(px (38 + (index * 26))) text_anchor="end">(Yuka.text (Issue.status_label status))</text>)
                    statuses))
-             (Yuka.each ~equal:( = ) ~key:(fun (cell : cell) -> cell.cell_key) (fun () -> Yuka.State.get heatmap) heat_cell)
+             (Yuka.each ~equal:( = ) ~key:(fun (cell : cell) -> cell.cell_key) (fun s -> Yuka.State.get s heatmap) heat_cell)
              (tooltip (hover_in "heatmap"))
            </svg>)
-      (card ~title:"Cycle time by created date" ~note:(Yuka.hole (fun () -> Yuka.text (format_int (Array.length (Yuka.State.get scatter)) ^ " points")))
+      (card ~title:"Cycle time by created date" ~note:(Yuka.hole (fun s -> Yuka.text (format_int (Array.length (Yuka.State.get s scatter)) ^ " points")))
          ~children:
            <div>
            <svg class_=Css.chart view_box="0 0 400 190" data_chart="scatter">
@@ -691,8 +691,8 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
                        <text class_=Css.axis x="34" y=(px (y + 4)) text_anchor="end">(Yuka.text (px days ^ "d"))</text>
                      </g>)
                    [ 0; 10; 20; 30 ]))
-             (Yuka.each ~equal:( = ) ~key:(fun (day, _) -> px day) (fun () -> Yuka.State.get day_ticks) (day_label ~y:186))
-             <g class_=Css.points>(Yuka.each ~equal:( = ) ~key:(fun (point : point) -> point.point_key) (fun () -> Yuka.State.get scatter) point)</g>
+             (Yuka.each ~equal:( = ) ~key:(fun (day, _) -> px day) (fun s -> Yuka.State.get s day_ticks) (day_label ~y:186))
+             <g class_=Css.points>(Yuka.each ~equal:( = ) ~key:(fun (point : point) -> point.point_key) (fun s -> Yuka.State.get s scatter) point)</g>
            </svg>
            <p class_=Css.legend>
              (Yuka.fragment
@@ -702,10 +702,10 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
                    statuses))
            </p>
            </div>)
-      (card ~title:"Issues by label" ~note:(Yuka.hole (fun () -> Yuka.text (px (List.length (Yuka.State.get label_names)) ^ " labels")))
+      (card ~title:"Issues by label" ~note:(Yuka.hole (fun s -> Yuka.text (px (List.length (Yuka.State.get s label_names)) ^ " labels")))
          ~children:
            <svg class_=Css.chart view_box=("0 0 400 " ^ px (label_rows (List.length (Yuka.State.get label_names)))) data_chart="label">
-             (Yuka.each ~equal:( = ) ~key:(fun (bar : bar) -> bar.key) (fun () -> Yuka.State.get label_chart)
+             (Yuka.each ~equal:( = ) ~key:(fun (bar : bar) -> bar.key) (fun s -> Yuka.State.get s label_chart)
                 (horizontal_bar ~chart:"label" ~on_pick:toggle_label))
              (tooltip (hover_in "label"))
            </svg>)

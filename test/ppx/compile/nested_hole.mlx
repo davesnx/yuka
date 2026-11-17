@@ -1,0 +1,13 @@
+module Child = struct
+  let make ~(label : int) () : Yuka.client Yuka.element = <span>(Yuka.text (string_of_int label))</span>
+end
+
+let on : bool Yuka.State.t = Yuka.State.make true
+let count : int Yuka.State.t = Yuka.State.make 0
+
+let view : Yuka.client Yuka.element =
+  <div>
+    (if Yuka.State.get on then
+       <p title=(string_of_int (Yuka.State.get count))><Child label=(Yuka.State.get count) /></p>
+     else Yuka.empty)
+  </div>

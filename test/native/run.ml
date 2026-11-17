@@ -92,13 +92,13 @@ let memo_released () =
     let held = Bytes.create 16 in
     Weak.set weak 0 (Some held);
     Server.to_string (fun () ->
-        let m = Yuka.State.memo (fun () -> Bytes.length held + Yuka.State.get shared) in
-        Yuka.int (Yuka.State.get m))
+        let m = Yuka.State.memo (fun sc -> Bytes.length held + Yuka.State.get sc shared) in
+        Yuka.int (Yuka.State.peek m))
   in
   Alcotest.(check string) "html" "17" (render ());
   Gc.full_major ();
   Alcotest.(check bool) "the memo of a finished render is not kept" false (Weak.check weak 0);
-  Alcotest.(check int) "the State lives on" 1 (Yuka.State.get shared)
+  Alcotest.(check int) "the State lives on" 1 (Yuka.State.peek shared)
 
 let module_count =
   let s = Yuka.State.make 0 in
@@ -115,9 +115,9 @@ let module_state_cases =
           "Yuka.State: a write to a State made at module level, before the first server render or request. The server process has one copy for every request. Create the State inside a component."
           m
   in
-  let before_seal () = check int "a write before the first render is kept" 1 (Yuka.State.get module_count) in
+  let before_seal () = check int "a write before the first render is kept" 1 (Yuka.State.peek module_count) in
   let read () =
-    check string "a render reads it" "1" (Server.to_string (fun () -> Yuka.int (Yuka.State.get module_count)))
+    check string "a render reads it" "1" (Server.to_string (fun () -> Yuka.int (Yuka.State.peek module_count)))
   in
   let write () =
     refused "set" (fun () ->
@@ -125,14 +125,14 @@ let module_state_cases =
             Yuka.State.set module_count 2;
             Yuka.int 0));
     refused "update" (fun () -> Yuka.State.update module_count succ);
-    check int "the value is unchanged" 1 (Yuka.State.get module_count)
+    check int "the value is unchanged" 1 (Yuka.State.peek module_count)
   in
   let local () =
     check string "a State made in a component is written" "2"
       (Server.to_string (fun () ->
            let s = Yuka.State.make 1 in
            Yuka.State.set s 2;
-           Yuka.int (Yuka.State.get s)))
+           Yuka.int (Yuka.State.peek s)))
   in
   [ test_case "a write before the first render" `Quick before_seal;
     test_case "a render reads a module-level State" `Quick read;
@@ -144,16 +144,16 @@ let deferred_cases =
   let follows () =
     let source = Yuka.State.make 1 in
     let d = Yuka.State.deferred source in
-    check int "the value of the source" 1 (Yuka.State.get d);
+    check int "the value of the source" 1 (Yuka.State.peek d);
     Yuka.State.set source 2;
-    check int "the new value at once" 2 (Yuka.State.get d)
+    check int "the new value at once" 2 (Yuka.State.peek d)
   in
   let server () =
     check string "the html of the source" "<b>3</b>"
       (Server.to_string (fun () ->
            let source = Yuka.State.make 3 in
            let d = Yuka.State.deferred source in
-           Yuka.element "b" [] [ Yuka.int (Yuka.State.get d) ]))
+           Yuka.element "b" [] [ Yuka.int (Yuka.State.peek d) ]))
   in
   [ test_case "follows the source at once" `Quick follows;
     test_case "a server render prints the value of the source" `Quick server ]
@@ -180,8 +180,8 @@ let page_cases =
       Yuka.element "p" []
         [ Yuka.text "a";
           Yuka.text "b";
-          Yuka.hole (fun () -> Yuka.text "h");
-          Yuka.each ~key:Fun.id (fun () -> [| "x"; "y" |]) Yuka.text;
+          Yuka.hole (fun _ -> Yuka.text "h");
+          Yuka.each ~key:Fun.id (fun _ -> [| "x"; "y" |]) Yuka.text;
           text_await (Async.return 1) "s";
           text_await pending "l" ]
     in
@@ -212,8 +212,8 @@ let page_cases =
   let component_effect () =
     let runs = ref 0 in
     let component () =
-      Yuka.Effect.after (fun () -> incr runs);
-      Yuka.Effect.before (fun () -> incr runs);
+      Yuka.Effect.after (fun _ -> incr runs);
+      Yuka.Effect.before (fun _ -> incr runs);
       Yuka.element "p" [] []
     in
     check string "html" "<p></p>" (Server.to_string component);
@@ -1326,7 +1326,7 @@ let loading_cases =
                 ~children:(fun () ->
                   Yuka.fragment
                     [ isl "Counter";
-                      Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
+                      Yuka.Private.element (Yuka.Private.hole (fun _ -> failwith "x")) ])
                 ();
               isl "Counter" ])
     in
@@ -1427,7 +1427,7 @@ let loading_cases =
                 ~children:(fun () ->
                   Yuka.fragment
                     [ Yuka.Private.element (Yuka.Private.node (isl "Inner"));
-                      Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
+                      Yuka.Private.element (Yuka.Private.hole (fun _ -> failwith "x")) ])
                 ()))
     in
     Yuka.Server.set_default_log saved;
@@ -1643,7 +1643,7 @@ let css_cases =
       shell (fun () ->
           Yuka.runtime_island ~name:"Counter" ~props:`Null (fun () ->
               Yuka.element "ul" []
-                [ Yuka.each ~key:Fun.id (fun () -> [| "1"; "2" |])
+                [ Yuka.each ~key:Fun.id (fun _ -> [| "1"; "2" |])
                     (fun k -> Yuka.use_css x (Yuka.element "li" [] [ Yuka.text k ])) ]))
     in
     get p;

@@ -165,3 +165,9 @@ let animate_values u = <svg><animate values=u from=u /></svg>
 let style_parts c = <style>"a{color:"(Yuka.text (State.get c))"}"</style>
 
 let reparsed c = <p class_="p"><div id=c>"x"<a href="/y">(Yuka.text c)</a></div></p>
+
+let scope_given_is_kept = <p>(State.get s count)</p>
+
+let only_one_argument_reads_get_the_scope = <p>(State.get a ^ State.get s b)</p>
+
+let nested_jsx_in_hole = <div>(if State.get a then <Ui.Child label=(State.get b) /> else Yuka.empty)</div>

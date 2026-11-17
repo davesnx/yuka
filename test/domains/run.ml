@@ -2,37 +2,37 @@ open Yuka
 
 let shared = State.make 3
 let base = State.make 3
-let shared_memo = State.memo (fun () -> State.get base * 10)
+let shared_memo = State.memo (fun sc -> State.get sc base * 10)
 let theme : string Context.t = Context.make ~name:"theme" ()
 let effect_runs = Atomic.make 0
 let server (e : _ element) : server element = Private.element (Private.node e)
-let hole f = server (Private.element (Private.hole (fun () -> Private.node (f ()))))
+let hole f = server (Private.element (Private.hole (fun s -> Private.node (f s))))
 let fails input = input mod 5 = 0
 let words n = List.init n (fun j -> String.make (1 + ((n + j) mod 5)) (Char.chr (97 + (((n * 7) + j) mod 26))))
 
 let page input () : server element =
   let count = State.make input in
   let items = State.make (words (3 + (input mod 4))) in
-  let doubled = State.memo (fun () -> (State.get count * 2) + State.get shared) in
-  let label = State.memo (fun () -> String.concat "," (State.get items) ^ "+" ^ string_of_int (State.get shared_memo)) in
-  Effect.before (fun () -> Atomic.incr effect_runs);
-  Effect.after (fun () -> Atomic.incr effect_runs);
+  let doubled = State.memo (fun sc -> (State.get sc count * 2) + State.get sc shared) in
+  let label = State.memo (fun sc -> String.concat "," (State.get sc items) ^ "+" ^ string_of_int (State.get sc shared_memo)) in
+  Effect.before (fun _ -> Atomic.incr effect_runs);
+  Effect.after (fun _ -> Atomic.incr effect_runs);
   State.set count (input + 1);
   element "section"
     [ attr "data-input" (string_of_int input) ]
     [
-      hole (fun () -> text (State.get label));
-      hole (fun () -> int (State.get doubled));
+      hole (fun sc -> text (State.get sc label));
+      hole (fun sc -> int (State.get sc doubled));
       Context.provide theme (Printf.sprintf "t%d" input) (fun () ->
-          let shown = State.memo (fun () -> Option.value ~default:"none" (Context.get theme) ^ "!") in
-          element "b" [] [ hole (fun () -> text (State.get shown)) ]);
+          let shown = State.memo (fun _ -> Option.value ~default:"none" (Context.get theme) ^ "!") in
+          element "b" [] [ hole (fun sc -> text (State.get sc shown)) ]);
       Catch.make
         ~fallback:(fun ~error ~reset:_ -> element "em" [] [ text error ])
         ~children:(fun () ->
-          let risky = State.memo (fun () -> if fails input then failwith "bad input" else State.get count) in
-          element "i" [] [ int (State.get risky) ])
+          let risky = State.memo (fun sc -> if fails input then failwith "bad input" else State.get sc count) in
+          element "i" [] [ int (State.peek risky) ])
         ();
-      server (element "ul" [] [ each ~key:Fun.id (fun () -> Array.of_list (State.get items)) (fun w -> element "li" [] [ text w ]) ]);
+      server (element "ul" [] [ each ~key:Fun.id (fun sc -> Array.of_list (State.get sc items)) (fun w -> element "li" [] [ text w ]) ]);
     ]
 
 let expected_html input =
@@ -58,8 +58,8 @@ let scheduler_works () =
   let seen = ref [] in
   let (), dispose =
     with_owner (fun () ->
-        let m = State.memo (fun () -> State.get s * 2) in
-        Effect.before (fun () -> seen := State.get m :: !seen))
+        let m = State.memo (fun sc -> State.get sc s * 2) in
+        Effect.before (fun sc -> seen := State.get sc m :: !seen))
   in
   State.set s 2;
   let batched = ref 0 in
@@ -70,7 +70,7 @@ let scheduler_works () =
   dispose ();
   State.set s 5;
   let probe = State.make 0 in
-  ignore (State.get probe);
+  ignore (State.peek probe);
   if !seen <> [ 8; 4; 2 ] then Error (String.concat "," (List.map string_of_int !seen))
   else if !batched <> 2 then Error "an effect ran inside a batch"
   else if Private.server_rendering () then Error "server_rendering is true"

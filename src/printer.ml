@@ -88,7 +88,7 @@ open Base
     match children with
     | [] -> ""
     | [ Text t ] -> t
-    | [ Hole f ] -> ( match f () with Text t -> t | Fragment [] -> "" | _ -> refuse ())
+    | [ Hole f ] -> ( match f Signal.scope with Text t -> t | Fragment [] -> "" | _ -> refuse ())
     | _ -> refuse ()
 
   let fill_script =
@@ -332,7 +332,7 @@ open Base
       | Fragment children -> List.iter go children
       | Hole f ->
           marker "<!--[-->";
-          go (f ());
+          go (f Signal.scope);
           marker "<!--]-->"
       | Await { async; loading; failed; render } -> (
           let ids = next_id () ^ "-" in
@@ -447,7 +447,7 @@ open Base
                           | Part_attr i -> (
                               match parts.(i) with
                               | Attribute (Static (n, v)) -> add n v
-                              | Attribute (Dynamic (n, f)) -> Option.iter (add n) (f ())
+                              | Attribute (Dynamic (n, f)) -> Option.iter (add n) (f Signal.scope)
                               | Attribute (Handler _) | Child _ | No_attribute -> ()))
                         attrs;
                       (match !href with
@@ -461,7 +461,7 @@ open Base
                             | Part_attr i -> (
                                 match parts.(i) with
                                 | Attribute (Static (n, v)) -> add false n v
-                                | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f ())
+                                | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f Signal.scope)
                                 | Attribute (Handler _) | Child _ | No_attribute -> ()))
                           attrs
                       in
@@ -593,7 +593,7 @@ open Base
             List.find_map
               (function
                 | Static (n, v) when String.lowercase_ascii n = "type" -> Some (Some v)
-                | Dynamic (n, f) when String.lowercase_ascii n = "type" -> Some (f ())
+                | Dynamic (n, f) when String.lowercase_ascii n = "type" -> Some (f Signal.scope)
                 | _ -> None)
               attrs
           in
@@ -601,7 +601,7 @@ open Base
           List.iter
             (function
               | Static (name, v) -> add_attr b ~tag name v
-              | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
+              | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f Signal.scope)
               | Handler _ -> ())
             attrs;
           Buffer.add_char b '>';
@@ -621,7 +621,7 @@ open Base
                     List.iter
                       (function
                         | Static (name, v) -> add false name v
-                        | Dynamic (name, f) -> Option.iter (add false name) (f ())
+                        | Dynamic (name, f) -> Option.iter (add false name) (f Signal.scope)
                         | Handler _ -> ())
                       attrs)
                   (fun _ name v -> add_attr b ~tag name v);
@@ -678,7 +678,7 @@ open Base
         List.filter_map
           (function
             | Static (name, value) -> Some (name, value)
-            | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f ())
+            | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f Signal.scope)
             | Handler _ -> None)
           attrs
       in
@@ -704,10 +704,10 @@ open Base
           add_attr b ~tag name v);
       value
     and contents = function
-      | [ Hole f ] -> go (f ())
+      | [ Hole f ] -> go (f Signal.scope)
       | [ Each { items; key; equal = _; render } ] -> rows items key render
       | children -> List.iter go children
-    and rows : type a. (unit -> a array) -> (a -> string) -> (a -> node) -> unit =
+    and rows : type a. (Signal.scope -> a array) -> (a -> string) -> (a -> node) -> unit =
      fun items key render ->
       let seen = Hashtbl.create 8 in
       Array.iter
@@ -723,7 +723,7 @@ open Base
               marker "<!--]-->"
             end
           end)
-        (items ())
+        (items Signal.scope)
     in
     let server_rendering = server_rendering () and current_session = current_session () in
     let current_owner = current_owner () and listener = Scheduler.listener () in
@@ -781,7 +781,7 @@ open Base
       | Element { tag = "yuka-outlet"; attrs = Static ("data-k", k) :: _; children } when String.equal k outlet ->
           Some (Fragment children)
       | Element { children; _ } | Fragment children -> first children
-      | Hole f -> find (f ())
+      | Hole f -> find (f Signal.scope)
       | Catch { children; _ } -> find (children ())
       | Await { async; render; _ } -> ( match Async.status async with Async.Done v -> find (render v) | _ -> None)
       | Template { parts; _ } ->

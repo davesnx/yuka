@@ -1,3 +1,11 @@
+type scope = Signal.scope
+(** What {!get} needs. Yuka gives one to the function of a {!memo}, an
+    effect, a hole, a hole attribute, the array function of [each], the
+    [status] function of [Show] and {!untrack}; there is no other way to
+    get one. A read with a scope that a function kept after it returned,
+    as in an event handler made in a hole, compiles and is not tracked,
+    as {!peek}. *)
+
 type ('a, 'access) signal
 (** A value that tracks its readers. ['access] is [[ `Write ]] for a State
     made with {!make} and [[ `Read ]] for a {!memo}. A function that only
@@ -20,15 +28,18 @@ val make : ?equal:('a -> 'a -> bool) -> 'a -> 'a t
     [value] is not a change there; on native it is. An exception raised by
     [equal] counts as a change. *)
 
-val get : ('a, _) signal -> 'a
-(** Reads the value. Inside an effect or a memo, the read is tracked, also
-    when it raises. Outside a {!Yuka.batch}, an effect and a memo, a read that
-    makes a memo compute again runs the effects that the new value makes
-    pending before it returns, and raises their exception. *)
+val get : scope -> ('a, _) signal -> 'a
+(** [get scope state] reads the value, tracked: a change of [state] runs
+    the function that got [scope] again. The read is tracked also when it
+    raises. In a component body, an event handler or at the top level,
+    where there is no scope, use {!peek} or {!untrack}. *)
 
 val peek : ('a, _) signal -> 'a
-(** Reads the value without tracking. Outside a {!Yuka.batch}, an effect and a
-    memo it runs pending effects as {!get} does. *)
+(** Reads the value without tracking. Use it in a component body, an event
+    handler and at the top level. Outside a {!Yuka.batch}, an effect and a
+    memo, a read that makes a memo compute again runs the effects that the
+    new value makes pending before it returns, and raises their
+    exception. *)
 
 val set : 'a t -> 'a -> unit
 (** Writes the value. On the server, raises [Invalid_argument] for a
@@ -38,7 +49,7 @@ val set : 'a t -> 'a -> unit
 val update : 'a t -> ('a -> 'a) -> unit
 (** Like [set], with a function of the current value. *)
 
-val memo : ?equal:('a -> 'a -> bool) -> (unit -> 'a) -> 'a read
+val memo : ?equal:('a -> 'a -> bool) -> (scope -> 'a) -> 'a read
 (** A derived value. It recomputes when a State it read changes. A
     recompute is a change only if [equal] says the new value differs.
     Default: the same equality as {!make}.
@@ -70,10 +81,12 @@ external read_only : 'a t -> 'a read = "%identity"
 (** The same State, typed so that {!set} and {!update} on it do not
     compile. *)
 
-val untrack : (unit -> 'a) -> 'a
-(** Runs the function and returns its result. Its {!get} reads are not
-    tracked: inside an effect or a memo, a change of such a State does not
-    run it again. *)
+val untrack : (scope -> 'a) -> 'a
+(** Runs the function with a scope and returns its result. Its reads are
+    not tracked: inside an effect or a memo, a change of such a State does
+    not run it again. Use it to read [Remote.status], [Live.status] and
+    [Form.field_error], [Form.form_errors] or [Form.pending] in an event
+    handler, a component body, or untracked in an effect. *)
 
 (**/**)
 

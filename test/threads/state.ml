@@ -1,48 +1,48 @@
 open Yuka
 
 let shared = State.make 3
-let shared_memo = State.memo (fun () -> State.get shared * 10)
+let shared_memo = State.memo (fun s -> State.get s shared * 10)
 let logged = Atomic.make 0
 let effect_runs = Atomic.make 0
 let inputs = 4
 
 let words n = List.init n (fun j -> String.make (1 + ((n + j) mod 5)) (Char.chr (97 + (((n * 7) + j) mod 26))))
 let server (e : _ element) : server element = Private.element (Private.node e)
-let hole f = server (Private.element (Private.hole (fun () -> Private.node (f ()))))
+let hole f = server (Private.element (Private.hole (fun s -> Private.node (f s))))
 let fails input = input mod 5 = 0
 
 let page input () : server element =
   let name = State.make (Printf.sprintf "user-%d" input) in
   let count = State.make input in
   let items = State.make (words (3 + (input mod 4))) in
-  let doubled = State.memo (fun () -> State.get count * 2) in
+  let doubled = State.memo (fun s -> State.get s count * 2) in
   let label =
-    State.memo (fun () ->
-        String.concat "," (State.get items) ^ "#" ^ State.get name ^ "+" ^ string_of_int (State.get shared_memo))
+    State.memo (fun s ->
+        String.concat "," (State.get s items) ^ "#" ^ State.get s name ^ "+" ^ string_of_int (State.get s shared_memo))
   in
-  let summary = State.memo (fun () -> Printf.sprintf "%s=%d" (State.get label) (State.get doubled)) in
-  Effect.before (fun () -> Atomic.incr effect_runs);
-  Effect.after (fun () -> Atomic.incr effect_runs);
+  let summary = State.memo (fun s -> Printf.sprintf "%s=%d" (State.get s label) (State.get s doubled)) in
+  Effect.before (fun _ -> Atomic.incr effect_runs);
+  Effect.after (fun _ -> Atomic.incr effect_runs);
   element "section"
     [ attr "data-input" (string_of_int input) ]
     [
-      element "h1" [] [ text (State.get name) ];
-      hole (fun () -> text (State.get summary));
-      hole (fun () -> int (State.get doubled));
-      element "p" [] [ hole (fun () -> int (State.get doubled + State.get shared)) ];
-      server (element "i" [ hole_attr "title" (fun () -> Some (State.get label)) ] [ text "t" ]);
-      text (string_of_int (State.get shared_memo));
+      element "h1" [] [ text (State.peek name) ];
+      hole (fun s -> text (State.get s summary));
+      hole (fun s -> int (State.get s doubled));
+      element "p" [] [ hole (fun s -> int (State.get s doubled + State.get s shared)) ];
+      server (element "i" [ hole_attr "title" (fun s -> Some (State.get s label)) ] [ text "t" ]);
+      text (string_of_int (State.peek shared_memo));
       Catch.make
         ~fallback:(fun ~error ~reset:_ -> element "em" [] [ text error ])
         ~children:(fun () ->
           let risky =
-            State.memo (fun () -> if fails (State.get count) then failwith "bad input" else State.get count + State.get shared)
+            State.memo (fun s -> if fails (State.get s count) then failwith "bad input" else State.get s count + State.get s shared)
           in
-          element "b" [] [ int (State.get risky) ])
+          element "b" [] [ int (State.peek risky) ])
         ();
       server
         (element "ul" []
-           [ each ~key:Fun.id (fun () -> Array.of_list (State.get items)) (fun w -> element "li" [] [ text w ]) ]);
+           [ each ~key:Fun.id (fun s -> Array.of_list (State.get s items)) (fun w -> element "li" [] [ text w ]) ]);
     ]
 
 let render input = Server.to_string (page input)

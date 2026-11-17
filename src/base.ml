@@ -105,7 +105,7 @@ let run_effect queue ?cleanup body =
   let node =
     Scheduler.make (Some (Scheduler.mine queue)) (fun () ->
         teardown ();
-        let result = with_owner child body in
+        let result = with_owner child (Signal.scoped body) in
         (match cleanup with
         | Some cleanup -> last := Some (fun () -> cleanup result)
         | None -> ());

@@ -67,9 +67,9 @@ let show (s : string Status.t) =
   | Status.Failed { error; _ } -> "failed " ^ Status.error_to_string error
 
 let view () =
-  let r = Remote.use ~retry:!retry query (fun () -> State.get input) in
+  let r = Remote.use ~retry:!retry query (fun sc -> State.get sc input) in
   handle := Some r;
-  element "b" [] [ hole (fun () -> text (show (Remote.status r))) ]
+  element "b" [] [ hole (fun sc -> text (show (Remote.status sc r))) ]
 
 let later = State.make false
 
@@ -79,10 +79,10 @@ let late_entry =
         (fun () () ->
           element "i" []
             [
-              hole (fun () ->
-                  if State.get later then (
-                    let r = Remote.use query (fun () -> "late") in
-                    element "u" [] [ hole (fun () -> text (show (Remote.status r))) ])
+              hole (fun sc ->
+                  if State.get sc later then (
+                    let r = Remote.use query (fun _ -> "late") in
+                    element "u" [] [ hole (fun sc -> text (show (Remote.status sc r))) ])
                   else empty);
             ])
         (Codec.decode Codec.unit json))

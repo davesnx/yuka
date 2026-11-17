@@ -1834,7 +1834,7 @@ let layout_values =
       Server.page ~title:"Values" (fun () ->
           el "main"
             [ text ("component " ^ read "component");
-              Yuka.Private.element (Yuka.Private.hole (fun () -> Yuka.Private.node (text (" hole " ^ read "hole")))) ])
+              Yuka.Private.element (Yuka.Private.hole (fun _ -> Yuka.Private.node (text (" hole " ^ read "hole")))) ])
     in
     let rules = Server.Generated.rules ~headers:[] ~prerender:false () in
     let fallback = { Server.Generated.layers; not_found = Server.Generated.default_not_found; error = Server.Generated.default_error } in

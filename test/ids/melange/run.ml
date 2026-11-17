@@ -116,7 +116,7 @@ let () =
     Private.render (new_container ()) (fun () ->
         with_unique_id (fun id ->
             element "p" []
-              [ element "label" [ attr "for" id ] [ text (State.get title) ]; element "input" [ attr "id" id ] [] ]))
+              [ element "label" [ attr "for" id ] [ text (State.peek title) ]; element "input" [ attr "id" id ] [] ]))
   in
   let input = last_input () in
   let id = id_of input in

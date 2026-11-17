@@ -75,7 +75,7 @@ let counter () =
   let tree () =
     div []
       [
-        span [ hole (fun () -> text (ints (State.get n))) ];
+        span [ hole (fun sc -> text (ints (State.get sc n))) ];
         element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "+" ];
       ]
   in
@@ -124,8 +124,8 @@ let handler_batched () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        Effect.after (fun () ->
-            ignore (State.get a + State.get b);
+        Effect.after (fun sc ->
+            ignore (State.get sc a + State.get sc b);
             incr runs);
         element "div" []
           [ element "button"
@@ -139,7 +139,7 @@ let handler_batched () =
                     State.set b 2;
                     focused := State.peek a + State.peek b) ]
               [];
-            hole (fun () -> text (ints (State.get a + State.get b))) ]) in
+            hole (fun sc -> text (ints (State.get sc a + State.get sc b))) ]) in
   click (query c "button");
   check "one effect run for two writes in a handler" "2" (ints !runs);
   check "the DOM after the handler" "2" (text_content (query c "div"));
@@ -171,7 +171,7 @@ let focus_after_update () =
                     State.set editing true;
                     Browser.focus "yuka-focus-input") ]
               [];
-            hole (fun () -> if State.get editing then element "input" [ attr "id" "yuka-focus-input" ] [] else empty) ])
+            hole (fun sc -> if State.get sc editing then element "input" [ attr "id" "yuka-focus-input" ] [] else empty) ])
   in
   click (query c "button");
   check "focus finds the element that the handler's write creates" "yuka-focus-input" (active_id ());
@@ -181,8 +181,8 @@ let on_window_batched () =
   let a = State.make 0 and b = State.make 0 and runs = ref 0 in
   let (), stop =
     with_owner (fun () ->
-        Effect.after (fun () ->
-            ignore (State.get a + State.get b);
+        Effect.after (fun sc ->
+            ignore (State.get sc a + State.get sc b);
             incr runs);
         Browser.on_window "yuka-test" (fun _ ->
             State.set a 1;
@@ -261,8 +261,8 @@ let old_handler_removed_on_hole_rerun () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        hole (fun () ->
-            if State.get flag then
+        hole (fun sc ->
+            if State.get sc flag then
               element "button" [ on "click" (fun _ -> incr calls) ] []
             else span []))
   in
@@ -296,13 +296,13 @@ let each_item_reads_untracked () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        hole (fun () ->
+        hole (fun sc ->
             incr hole_runs;
             element "ul" []
               [
                 each ~key:Fun.id
-                  (fun () -> State.get items)
-                  (fun id -> li id [ text (id ^ ints (State.get other)) ]);
+                  (fun sc -> State.get sc items)
+                  (fun id -> li id [ text (id ^ ints (State.get sc other)) ]);
               ]))
   in
   check "first" "1" (ints !hole_runs);
@@ -319,7 +319,7 @@ let text_hole_in_place () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        div [] [ hole (fun () -> text (State.get n)) ])
+        div [] [ hole (fun sc -> text (State.get sc n)) ])
   in
   let t = (child_nodes (first_child c)).(0) in
   State.set n "b";
@@ -334,8 +334,8 @@ let hole_swaps_element () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            hole (fun () ->
-                if State.get flag then span [ text "s" ]
+            hole (fun sc ->
+                if State.get sc flag then span [ text "s" ]
                 else element "p" [] [ text "p" ]);
             text "!";
           ])
@@ -354,11 +354,11 @@ let nested_hole_disposed () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        hole (fun () ->
-            ignore (State.get a);
-            hole (fun () ->
+        hole (fun sc ->
+            ignore (State.get sc a);
+            hole (fun sc ->
                 incr inner_runs;
-                text (ints (State.get b)))))
+                text (ints (State.get sc b)))))
   in
   check "start" "1" (ints !inner_runs);
   State.update a succ;
@@ -377,9 +377,9 @@ let dynamic_attributes () =
     Yuka.Private.render (as_element c) (fun () ->
         element "input"
           [
-            hole_attr "value" (fun () -> Some (State.get v));
-            hole_attr "title" (fun () -> State.get title);
-            hole_attr "checked" (fun () -> if State.get on_ then Some "" else None);
+            hole_attr "value" (fun sc -> Some (State.get sc v));
+            hole_attr "title" (fun sc -> State.get sc title);
+            hole_attr "checked" (fun sc -> if State.get sc on_ then Some "" else None);
             on "input" (fun e -> State.set v (Event.target_value e));
           ]
           [])
@@ -402,9 +402,9 @@ let dynamic_attributes () =
   dispose ()
 
 let item_view log (id, label) =
-  li id [ hole (fun () -> text label); element "b" [] [] ]
+  li id [ hole (fun _ -> text label); element "b" [] [] ]
   |> fun el ->
-  Effect.after ~cleanup:(fun () -> log := ("gone " ^ id) :: !log) (fun () -> ());
+  Effect.after ~cleanup:(fun () -> log := ("gone " ^ id) :: !log) (fun _ -> ());
   el
 
 let order c = texts c "li"
@@ -419,7 +419,7 @@ let each_identity_default () =
         element "ul" []
           [
             each ~key:fst
-              (fun () -> State.get items)
+              (fun sc -> State.get sc items)
               (fun (k, v) ->
                 renders := k :: !renders;
                 li k [ text v ]);
@@ -443,7 +443,7 @@ let keyed_list () =
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
         element "ul" []
-          [ each ~equal:( = ) ~key:fst (fun () -> State.get items) (item_view log) ])
+          [ each ~equal:( = ) ~key:fst (fun sc -> State.get sc items) (item_view log) ])
   in
   let node k = query c ("[data-key=" ^ k ^ "]") in
   let a, b, cc, d = (node "a", node "b", node "c", node "d") in
@@ -482,7 +482,7 @@ let keyed_list_shuffle () =
         element "ul" []
           [
             each ~key:Fun.id
-              (fun () -> Array.of_list (State.get items))
+              (fun sc -> Array.of_list (State.get sc items))
               (fun id -> li id [ text id ]);
           ])
   in
@@ -507,7 +507,7 @@ let each_source_mutated_in_place () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        element "ul" [] [ each ~key:Fun.id (fun () -> State.get items) (fun id -> li id [ text id ]) ])
+        element "ul" [] [ each ~key:Fun.id (fun sc -> State.get sc items) (fun id -> li id [ text id ]) ])
   in
   let node k = query c ("[data-key=" ^ k ^ "]") in
   let a, b, cc = (node "a", node "b", node "c") in
@@ -558,13 +558,13 @@ let hydrate_server_output () =
   let n = State.make 1 in
   let items = State.make [| ("a", "A"); ("b", "B") |] in
   let tree () =
-    div [ hole_attr "title" (fun () -> Some (ints (State.get n))) ]
+    div [ hole_attr "title" (fun sc -> Some (ints (State.get sc n))) ]
       [
         text "x";
         text "y";
-        hole (fun () -> text (ints (State.get n)));
+        hole (fun sc -> text (ints (State.get sc n)));
         element "ul" []
-          [ each ~equal:( = ) ~key:fst (fun () -> State.get items) (fun (k, v) -> li k [ text v ]) ];
+          [ each ~equal:( = ) ~key:fst (fun sc -> State.get sc items) (fun (k, v) -> li k [ text v ]) ];
         element "button" [ on "click" (fun _ -> State.update n succ) ] [ text "go" ];
       ]
   in
@@ -619,8 +619,8 @@ let svg_hole () =
     Yuka.Private.render (as_element c) (fun () ->
         svg_el "svg" []
           [
-            hole (fun () ->
-                if State.get big then svg_el "circle" [] []
+            hole (fun sc ->
+                if State.get sc big then svg_el "circle" [] []
                 else svg_el "rect" [] []);
           ])
   in
@@ -793,7 +793,7 @@ let textarea_hydrate () =
     div []
       [
         element "textarea" [ attr "value" "fixed" ] [];
-        element "textarea" [ hole_attr "value" (fun () -> Some (State.get v)) ] [];
+        element "textarea" [ hole_attr "value" (fun sc -> Some (State.get sc v)) ] [];
       ]
   in
   let c = container (server (tree ())) in
@@ -816,7 +816,7 @@ let select_hydrate () =
   let v = State.make "b" in
   let option_ k = element "option" [ attr "value" k ] [ text (String.uppercase_ascii k) ] in
   let tree () =
-    element "select" [ hole_attr "value" (fun () -> Some (State.get v)) ]
+    element "select" [ hole_attr "value" (fun sc -> Some (State.get sc v)) ]
       [ option_ "a"; option_ "b"; option_ "c" ]
   in
   let c = container (server (tree ())) in
@@ -843,7 +843,7 @@ let checked_property () =
         element "input"
           [
             attr "type" "checkbox";
-            hole_attr "checked" (fun () -> if State.get on_ then Some "" else None);
+            hole_attr "checked" (fun sc -> if State.get sc on_ then Some "" else None);
           ]
           [])
   in
@@ -872,7 +872,7 @@ let selected_property () =
             element "option"
               [
                 attr "value" "b";
-                hole_attr "selected" (fun () -> if State.get on_ then Some "" else None);
+                hole_attr "selected" (fun sc -> if State.get sc on_ then Some "" else None);
               ]
               [ text "B" ];
           ])
@@ -906,23 +906,23 @@ let hydrate_keeps_user_input () =
   let typed = State.make "server" and untouched = State.make "same" and box = State.make false in
   let pick = State.make "a" and note = State.make "first" and fed = State.make "" in
   let opt = State.make "x" and shown = State.make "kept" in
-  let echo id s = element "span" [ attr "id" id ] [ hole (fun () -> text (s ())) ] in
+  let echo id s = element "span" [ attr "id" id ] [ hole (fun sc -> text (s sc)) ] in
   let tree () =
     div []
       [
         element "input"
           [
             attr "id" "typed";
-            hole_attr "value" (fun () -> Some (State.get typed));
+            hole_attr "value" (fun sc -> Some (State.get sc typed));
             on "input" (fun e -> log "typed:input" e; State.set typed (Event.target_value e));
             on "change" (log "typed:change");
           ]
           [];
-        echo "typed-state" (fun () -> State.get typed);
+        echo "typed-state" (fun sc -> State.get sc typed);
         element "input"
           [
             attr "id" "untouched";
-            hole_attr "value" (fun () -> Some (State.get untouched));
+            hole_attr "value" (fun sc -> Some (State.get sc untouched));
             on "input" (fun e -> log "untouched:input" e; State.set untouched (Event.target_value e));
             on "change" (log "untouched:change");
           ]
@@ -930,15 +930,15 @@ let hydrate_keeps_user_input () =
         element "input"
           [
             attr "type" "checkbox";
-            hole_attr "checked" (fun () -> if State.get box then Some "" else None);
+            hole_attr "checked" (fun sc -> if State.get sc box then Some "" else None);
             on "change" (fun e -> log "box:change" e; State.set box (Event.target_checked e));
           ]
           [];
-        echo "box-state" (fun () -> string_of_bool @@ State.get box);
+        echo "box-state" (fun sc -> string_of_bool @@ State.get sc box);
         element "select"
           [
             attr "id" "pick";
-            hole_attr "value" (fun () -> Some (State.get pick));
+            hole_attr "value" (fun sc -> Some (State.get sc pick));
             on "change" (fun e -> log "pick:change" e; State.set pick (Event.target_value e));
           ]
           [
@@ -946,27 +946,27 @@ let hydrate_keeps_user_input () =
             element "option" [ attr "value" "b" ] [ text "B" ];
             element "option" [ attr "value" "c" ] [ text "C" ];
           ];
-        echo "pick-state" (fun () -> State.get pick);
+        echo "pick-state" (fun sc -> State.get sc pick);
         element "textarea"
           [
-            hole_attr "value" (fun () -> Some (State.get note));
+            hole_attr "value" (fun sc -> Some (State.get sc note));
             on "input" (fun e -> log "note:input" e; State.set note (Event.target_value e));
           ]
           [];
-        echo "note-state" (fun () -> State.get note);
+        echo "note-state" (fun sc -> State.get sc note);
         element "input"
           [ attr "id" "fed"; on "input" (fun e -> log "fed:input" e; State.set fed (Event.target_value e)) ]
           [];
-        echo "fed-state" (fun () -> State.get fed);
+        echo "fed-state" (fun sc -> State.get sc fed);
         element "select"
           [ attr "id" "opt"; on "change" (fun e -> log "opt:change" e; State.set opt (Event.target_value e)) ]
           (List.map
              (fun k ->
                element "option"
-                 [ attr "value" k; hole_attr "selected" (fun () -> if State.get opt = k then Some "" else None) ]
+                 [ attr "value" k; hole_attr "selected" (fun sc -> if State.get sc opt = k then Some "" else None) ]
                  [ text k ])
              [ "x"; "y" ]);
-        element "input" [ attr "id" "shown"; hole_attr "value" (fun () -> Some (State.get shown)) ] [];
+        element "input" [ attr "id" "shown"; hole_attr "value" (fun sc -> Some (State.get sc shown)) ] [];
       ]
   in
   let c = container (server (tree ())) in
@@ -1013,7 +1013,7 @@ let hydrate_untouched_radio () =
     element "input"
       [
         attr "type" "radio"; attr "name" "r"; attr "value" v;
-        hole_attr "checked" (fun () -> if v = "x" then Some "" else None);
+        hole_attr "checked" (fun _ -> if v = "x" then Some "" else None);
         on "change" (fun _ -> calls := v :: !calls);
       ]
       []
@@ -1043,9 +1043,9 @@ let row_shape =
 let row_template = Private.template row_shape
 
 let row ?(wrap = true) ?(template = row_template) count title =
-  let title_attr = hole_attr "title" (fun () -> Some (State.get title)) in
+  let title_attr = hole_attr "title" (fun sc -> Some (State.get sc title)) in
   let click = on "click" (fun _ -> State.update count succ) in
-  let count_hole = hole (fun () -> text (ints (State.get count))) in
+  let count_hole = hole (fun sc -> text (ints (State.get sc count))) in
   if wrap then
     runtime_instance template [| runtime_attribute title_attr; runtime_attribute click; runtime_child count_hole |]
   else
@@ -1098,7 +1098,7 @@ let template_cached () =
         element "ul" []
           [
             each ~key:ints
-              (fun () -> State.get items)
+              (fun sc -> State.get sc items)
               (fun i -> row ~template (State.make i) (State.make "t"));
           ])
   in
@@ -1133,7 +1133,7 @@ let template_timing () =
           element "ul" []
             [
               each ~key:ints
-                (fun () -> Array.init rows Fun.id)
+                (fun _ -> Array.init rows Fun.id)
                 (fun i -> row ~wrap (State.make i) (State.make "t"));
             ])
     in
@@ -1158,9 +1158,9 @@ let template_with_slot () =
   let view slot =
     element "main" []
       [
-        hole (fun () ->
+        hole (fun sc ->
             runtime_instance
-              (if State.get wrap then slot_a else slot_b)
+              (if State.get sc wrap then slot_a else slot_b)
               [| runtime_child (Private.slot slot) |]);
       ]
   in
@@ -1198,8 +1198,8 @@ let template_clone_same_dom () =
       ("elements", [ span []; span []; span []; span []; span [] ]);
       ("empty", [ empty; text ""; empty; empty; empty ]);
       ( "holes",
-        [ hole (fun () -> text (State.get s)); text "y"; hole (fun () -> span []);
-          text "w"; hole (fun () -> text (State.get s)) ] );
+        [ hole (fun sc -> text (State.get sc s)); text "y"; hole (fun _ -> span []);
+          text "w"; hole (fun sc -> text (State.get sc s)) ] );
       ("mixed", [ span []; text "y"; text "z"; span []; text "v" ]);
     ]
   in
@@ -1227,7 +1227,7 @@ let svg_template () =
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
         element "svg" []
-          [ runtime_instance t [| runtime_attribute (hole_attr "cx" (fun () -> Some "2")) |] ])
+          [ runtime_instance t [| runtime_attribute (hole_attr "cx" (fun _ -> Some "2")) |] ])
   in
   let circle = query c "circle" in
   check "svg namespace" "http://www.w3.org/2000/svg" (namespace_uri circle);
@@ -1236,7 +1236,7 @@ let svg_template () =
 
 let only_child_hole_hydrates () =
   let s = State.make "x" in
-  let tree () = element "p" [] [ hole (fun () -> text (State.get s)) ] in
+  let tree () = element "p" [] [ hole (fun sc -> text (State.get sc s)) ] in
   let c = container (server (tree ())) in
   check "server html has no markers" "<p>x</p>" (html c);
   let t = first_child (query c "p") in
@@ -1249,7 +1249,7 @@ let only_child_hole_hydrates () =
   let e = State.make "" in
   let tree () =
     element "p" []
-      [ hole (fun () -> if State.get e = "el" then span [ text "s" ] else text (State.get e)) ]
+      [ hole (fun sc -> if State.get sc e = "el" then span [ text "s" ] else text (State.get sc e)) ]
   in
   let c = container (server (tree ())) in
   check "empty text writes nothing" "<p></p>" (html c);
@@ -1272,9 +1272,9 @@ let list_clear_disposes () =
       Yuka.Private.render (as_element c) (fun () ->
           element "ul" []
             ([ each ~key:ints
-                 (fun () -> State.get items)
+                 (fun sc -> State.get sc items)
                  (fun i ->
-                   Effect.after ~cleanup:(fun () -> incr gone) (fun () -> ());
+                   Effect.after ~cleanup:(fun () -> incr gone) (fun _ -> ());
                    li (ints i) [ text (ints i) ]) ]
             @ if sibling then [ element "i" [] [] ] else []))
     in
@@ -1301,7 +1301,7 @@ let row_root_removed_in_one_call () =
     Yuka.Private.render (as_element c) (fun () ->
         element "ul" []
           [ each ~key:Fun.id
-              (fun () -> State.get items)
+              (fun sc -> State.get sc items)
               (fun k ->
                 if k = "f" then fragment [ text "f1"; li k [] ] else li k [ text k ]) ])
   in
@@ -1328,7 +1328,7 @@ let template_select_value () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        runtime_instance t [| runtime_child (each ~key:Fun.id (fun () -> [| "a"; "b"; "c" |]) opt) |])
+        runtime_instance t [| runtime_child (each ~key:Fun.id (fun _ -> [| "a"; "b"; "c" |]) opt) |])
   in
   check "value set after options mount" "b" (select_value (query c "select"));
   dispose ()
@@ -1425,7 +1425,7 @@ let console_methods () =
 
 let each_duplicate_key () =
   let items = State.make [| ("a", "1"); ("b", "2"); ("a", "3") |] in
-  let tree () = element "ul" [] [ each ~key:fst (fun () -> State.get items) (fun (k, v) -> li k [ text v ]) ] in
+  let tree () = element "ul" [] [ each ~key:fst (fun sc -> State.get sc items) (fun (k, v) -> li k [ text v ]) ] in
   let markup = server (tree ()) in
   check "server keeps the first" {|<ul><li data-key="a">1</li><li data-key="b">2</li></ul>|} markup;
   capture_console ();
@@ -1449,12 +1449,22 @@ let each_duplicate_key () =
 
 let each_key_untracked () =
   let salt = State.make "" in
-  let calls = ref 0 in
-  let key k = incr calls; k ^ State.get salt in
+  let calls = ref 0 and scope = ref None in
+  let key k =
+    incr calls;
+    k ^ match !scope with Some sc -> State.get sc salt | None -> "?"
+  in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        element "ul" [] [ each ~key (fun () -> [| "a"; "b" |]) (fun k -> li k [ text k ]) ])
+        element "ul" []
+          [
+            each ~key
+              (fun sc ->
+                scope := Some sc;
+                [| "a"; "b" |])
+              (fun k -> li k [ text k ]);
+          ])
   in
   let before = !calls in
   State.set salt "x";
@@ -1476,7 +1486,7 @@ let hydrate_logged server_html tree =
 let mismatch_log () =
   let p children = element "p" [] children in
   let match_tree () =
-    div [] [ span [ text "a" ]; p [ hole (fun () -> text "b") ]; element "i" [] [] ]
+    div [] [ span [ text "a" ]; p [ hole (fun _ -> text "b") ]; element "i" [] [] ]
   in
   let logged, _ = hydrate_logged (server (match_tree ())) match_tree in
   check "a match logs nothing" "" logged;
@@ -1623,7 +1633,7 @@ let css_hydrate_rows () =
   clear_sheets ();
   let x = runtime_stylesheet "/_yuka/css/x.css" in
   let tree () =
-    element "ul" [] [ each ~key:Fun.id (fun () -> [| "a"; "b" |]) (fun k -> use_css x (li k [ text k ])) ]
+    element "ul" [] [ each ~key:Fun.id (fun _ -> [| "a"; "b" |]) (fun k -> use_css x (li k [ text k ])) ]
   in
   let c = container (Private.render_html (fun () -> Private.node (tree ()))) in
   let server_html = html c in
@@ -1641,7 +1651,7 @@ let client_urls () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            element "a" [ hole_attr "href" (fun () -> Some (State.get url)) ] [ text "a" ];
+            element "a" [ hole_attr "href" (fun sc -> Some (State.get sc url)) ] [ text "a" ];
             element "iframe" [ attr "src" "java\tscript:alert(1)" ] [];
             element "a" [ attr "title" "javascript:x" ] [ text "b" ];
           ])
@@ -1661,7 +1671,7 @@ let client_urls () =
 
 let style_hole_hydrates () =
   let c = State.make "red" in
-  let tree () = div [] [ element "style" [] [ hole (fun () -> text ("a{color:" ^ State.get c ^ "}</style>")) ] ] in
+  let tree () = div [] [ element "style" [] [ hole (fun sc -> text ("a{color:" ^ State.get sc c ^ "}</style>")) ] ] in
   let box = container (server (tree ())) in
   let before = html box in
   let text_node = (child_nodes (query box "style")).(0) in
@@ -1719,9 +1729,9 @@ let client_attribute_names () =
     (fun name ->
       refused ("attr " ^ name) (fun () -> attr name "x");
       refused ("url_attr " ^ name) (fun () -> runtime_url_attr "a" name "x");
-      refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun () -> None));
+      refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun _ -> None));
       refused ("attr_unchecked " ^ name) (fun () -> runtime_attr name "x");
-      refused ("hole_attr_unchecked " ^ name) (fun () -> runtime_hole_attr name (fun () -> None)))
+      refused ("hole_attr_unchecked " ^ name) (fun () -> runtime_hole_attr name (fun _ -> None)))
     [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a/b"; "a=b"; "a<b"; "a>b"; "a'b"; "a\x01b"; "a\x7fb" ]
 
 let client_srcdoc () =
@@ -1732,7 +1742,7 @@ let client_srcdoc () =
         div []
           [
             element "iframe" [ attr "srcdoc" "<script>alert(1)</script>" ] [];
-            element "IFRAME" [ hole_attr "SrcDoc" (fun () -> Some (State.get v)) ] [];
+            element "IFRAME" [ hole_attr "SrcDoc" (fun sc -> Some (State.get sc v)) ] [];
           ])
   in
   check "srcdoc is empty" {|<div><iframe srcdoc=""></iframe><iframe srcdoc=""></iframe></div>|} (html c);
@@ -1767,7 +1777,7 @@ let client_animation_names () =
           [
             element "feColorMatrix" [ runtime_attr "values" matrix ] [];
             element "feColorMatrix" [ attr "values" matrix ] [];
-            element "p" [ runtime_hole_attr "to" (fun () -> Some "a") ] [];
+            element "p" [ runtime_hole_attr "to" (fun _ -> Some "a") ] [];
             element "animate" [ runtime_url_attr "animate" "values" "javascript:alert(1)" ] [];
             element "set" [ attr "to" "javascript:alert(1)" ] [];
           ])
@@ -1799,10 +1809,10 @@ let client_event_names () =
     (fun name ->
       refused ("attr " ^ name) (fun () -> attr name "alert(1)");
       refused ("url_attr " ^ name) (fun () -> runtime_url_attr "img" name "alert(1)");
-      refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun () -> None));
-      refused ("url_hole_attr " ^ name) (fun () -> runtime_url_hole_attr "img" name (fun () -> None));
+      refused ("hole_attr " ^ name) (fun () -> hole_attr name (fun _ -> None));
+      refused ("url_hole_attr " ^ name) (fun () -> runtime_url_hole_attr "img" name (fun _ -> None));
       refused ("attr_unchecked " ^ name) (fun () -> runtime_attr name "alert(1)");
-      refused ("hole_attr_unchecked " ^ name) (fun () -> runtime_hole_attr name (fun () -> None)))
+      refused ("hole_attr_unchecked " ^ name) (fun () -> runtime_hole_attr name (fun _ -> None)))
     [ "onfocus"; "onerror"; "ONCLICK"; "onbegin" ]
 
 let client_base_href () =
@@ -1813,7 +1823,7 @@ let client_base_href () =
         div []
           [
             element "base" [ runtime_url_attr "base" "href" "https://evil.example/" ] [];
-            element "base" [ runtime_url_hole_attr "base" "HREF" (fun () -> Some (State.get v)) ] [];
+            element "base" [ runtime_url_hole_attr "base" "HREF" (fun sc -> Some (State.get sc v)) ] [];
           ])
   in
   check "base href is empty" {|<div><base href=""><base href=""></div>|} (html c);
@@ -1831,7 +1841,7 @@ let client_sink_urls () =
     Yuka.Private.render (as_element c) (fun () ->
         div []
           [
-            element "base" [ hole_attr "href" (fun () -> Some (State.get v)) ] [];
+            element "base" [ hole_attr "href" (fun sc -> Some (State.get sc v)) ] [];
             element "iframe" [ attr "src" "data:text/html,<script>alert(1)</script>" ] [];
             element "script" [ attr "src" "data:text/javascript,alert(1)" ] [];
             element "img" [ attr "src" "data:image/png;base64,iVBORw0KGgo=" ] [];
@@ -1867,11 +1877,11 @@ let after_sees_dom () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        Effect.after (fun () ->
-            ignore (State.get count);
+        Effect.after (fun sc ->
+            ignore (State.get sc count);
             seen := span_text c :: !seen);
-        let double = State.memo (fun () -> State.get count * 2) in
-        span [ hole (fun () -> text (ints (State.get double))) ])
+        let double = State.memo (fun sc -> State.get sc count * 2) in
+        span [ hole (fun sc -> text (ints (State.get sc double))) ])
   in
   State.set count 5;
   check "an after effect reads the DOM of the same change" "0 10"
@@ -1880,20 +1890,20 @@ let after_sees_dom () =
 
 let after_finds_own_element () =
   let show = State.make false and items = State.make [||] and seen = ref [] in
-  let probe id = Effect.after (fun () -> seen := (id ^ "=" ^ string_of_bool (present (by_id id))) :: !seen) in
+  let probe id = Effect.after (fun _ -> seen := (id ^ "=" ^ string_of_bool (present (by_id id))) :: !seen) in
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
         probe "after-root";
         element "div" [ attr "id" "after-root" ]
-          [ hole (fun () ->
-                if State.get show then begin
+          [ hole (fun sc ->
+                if State.get sc show then begin
                   probe "after-hole";
                   element "p" [ attr "id" "after-hole" ] []
                 end
                 else empty);
             element "ul" []
-              [ each ~key:Fun.id (fun () -> State.get items) (fun id ->
+              [ each ~key:Fun.id (fun sc -> State.get sc items) (fun id ->
                     probe id;
                     element "li" [ attr "id" id ] []) ] ])
   in
@@ -1911,8 +1921,8 @@ let on_change_sees_dom () =
     Yuka.Private.render (as_element c) (fun () ->
         Effect.on_change count (fun ~prev ~next ->
             seen := Printf.sprintf "%d->%d:%s" prev next (span_text c) :: !seen);
-        let double = State.memo (fun () -> State.get count * 2) in
-        span [ hole (fun () -> text (ints (State.get double))) ])
+        let double = State.memo (fun sc -> State.get sc count * 2) in
+        span [ hole (fun sc -> text (ints (State.get sc double))) ])
   in
   check "not called for the first value" "" (String.concat " " !seen);
   State.set count 5;
@@ -1924,13 +1934,13 @@ let after_in_handler () =
   let c = container "" in
   let dispose =
     Yuka.Private.render (as_element c) (fun () ->
-        let double = State.memo (fun () -> State.get count * 2) in
+        let double = State.memo (fun sc -> State.get sc count * 2) in
         div []
-          [ span [ hole (fun () -> text (ints (State.get double))) ];
+          [ span [ hole (fun sc -> text (ints (State.get sc double))) ];
             element "button"
               [ on "click" (fun _ ->
                     State.set count 1;
-                    Effect.after (fun () -> seen := span_text c)) ]
+                    Effect.after (fun _ -> seen := span_text c)) ]
               [] ])
   in
   click (query c "button");
@@ -1961,8 +1971,8 @@ let frames_batched_until_dispose () =
   let a = State.make 0. and b = State.make 0. and runs = ref 0 and times = ref [] in
   let (), stop =
     with_owner (fun () ->
-        Effect.after (fun () ->
-            ignore (State.get a +. State.get b);
+        Effect.after (fun sc ->
+            ignore (State.get sc a +. State.get sc b);
             incr runs);
         Browser.on_frame (fun time ->
             times := time :: !times;

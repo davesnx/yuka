@@ -23,8 +23,8 @@ runs it again. You do not write a list of dependencies.
 ```ocaml
 let[@client] make ~(initial : int) () =
   let count = Yuka.State.make initial in
-  let double = Yuka.State.memo (fun () -> Yuka.State.get count * 2) in
-  Yuka.Effect.after (fun () -> Yuka.Console.log ("count is " ^ Int.to_string (Yuka.State.get count)));
+  let double = Yuka.State.memo (fun s -> Yuka.State.get s count * 2) in
+  Yuka.Effect.after (fun s -> Yuka.Console.log ("count is " ^ Int.to_string (Yuka.State.get s count)));
   <button on_click=(fun _ -> Yuka.State.update count succ)>
     "Double: "
     (Yuka.int (Yuka.State.get double))
@@ -41,11 +41,28 @@ order of the calls.
 
 `State.make value` creates a State that holds `value`.
 
-- `State.get state` reads the value. Inside a hole, a memo or an effect, the
-  read is recorded.
-- `State.peek state` reads the value and records nothing.
+- `State.get scope state` reads the value and records the read.
+- `State.peek state` reads the value and records nothing. Use it in a
+  component body, in an event handler and at the top level.
 - `State.set state value` writes a value. `State.update state change` writes `change` of the
   current value.
+
+`State.get` needs a `State.scope`. Yuka gives one to the function of each
+hole, memo and effect, to the array function of `Yuka.each`, to the
+`status` function of `Yuka.Show`, to the input functions of `Remote.use`
+and `Live.use`, and to `State.untrack`. These functions take it as their
+argument: `fun s -> Yuka.State.get s count`. A function that reads
+nothing writes `fun _ ->`. A component body and an event handler get no
+scope, so a `State.get` there does not compile: use `State.peek`, or put
+the read in a hole. A `State.get` with a scope that a function kept after
+it returned, for example in an event handler made inside a hole, compiles
+and records nothing, as `State.peek`.
+
+`Form.field_error`, `Form.form_errors`, `Form.pending`, `Remote.status`
+and `Live.status` are recorded reads too, so they also take the scope
+first: `Yuka.Remote.status s remote`. To read one of them in an event
+handler or a component body, use `State.untrack`, which gives a scope and
+records nothing: `Yuka.State.untrack (fun s -> Yuka.Remote.status s remote)`.
 
 A write is a change only when the new value differs from the old one.
 Readers do not run for a write that is not a change. The default test is
@@ -73,9 +90,24 @@ This paragraph has two holes. A write to `active` sets the `class`
 attribute. A write to `name` sets the text. Each write touches one place
 in the DOM.
 
-The ppx looks for `State.get` in the expression itself. It does not see a
-read inside another function that the expression calls. Wrap such a call:
-`(Yuka.hole (fun () -> label ()))`.
+The ppx gives each such hole a scope and passes it to each `State.get`
+with one argument. A `State.get` that already has its scope stays as it
+is. The ppx looks for `State.get` in the expression itself. It does not
+see a read inside another function that the expression calls, and it does
+not know `Form`, `Remote.status` and `Live.status`. Give the function the
+scope and write the hole: `(Yuka.hole (fun s -> label s))`. The ppx does
+not look inside a function either, so a read in a function that the child
+passes on does not compile:
+`<p>(Yuka.text (String.concat ", " (List.map (fun tag -> Yuka.State.get tag) tags)))</p>`
+gets no scope for that read. Write the hole and pass the scope:
+`<p>(Yuka.hole (fun s -> Yuka.text (String.concat ", " (List.map (fun tag -> Yuka.State.get s tag) tags))))</p>`.
+
+The ppx does look inside the elements of the expression, so in
+`(if Yuka.State.get open_ then <Panel title=(Yuka.State.get title) /> else Yuka.empty)`
+both reads get the scope of the hole.
+
+A `State.get` inside a function in the markup, such as an event handler,
+gets no scope from the ppx and does not compile. Use `State.peek` there.
 
 A hole that returns elements, not text, removes its old elements and
 creates new ones each time it runs. Keep such a hole small, or read the
@@ -89,7 +121,7 @@ one item:
 
 ```ocaml
 (Yuka.each ~key:(fun (issue : Issue.t) -> issue.id)
-   (fun () -> Array.of_list (Yuka.State.get issues))
+   (fun s -> Array.of_list (Yuka.State.get s issues))
    (fun (issue : Issue.t) -> <li>(Yuka.text issue.title)</li>))
 ```
 
@@ -106,8 +138,8 @@ computation is costly, or when several readers need the same result.
 
 ```ocaml
 let visible =
-  Yuka.State.memo (fun () ->
-      List.filter (matches (Yuka.State.get filter)) (Yuka.State.get issues))
+  Yuka.State.memo (fun s ->
+      List.filter (matches (Yuka.State.get s filter)) (Yuka.State.get s issues))
 ```
 
 - A memo is read-only: `State.set` on it does not compile.
@@ -178,7 +210,7 @@ the next run and when the component is removed. Here `connect` and
 `close` are your own functions:
 
 ```ocaml
-Yuka.Effect.after ~cleanup:close (fun () -> connect (Yuka.State.get room))
+Yuka.Effect.after ~cleanup:close (fun s -> connect (Yuka.State.get s room))
 ```
 
 When `room` changes, Yuka closes the old connection and opens a new one.
@@ -189,7 +221,9 @@ removes the component before the first run, the effect never runs.
 timing of `Effect.after`. It does not call `handler` for the first value.
 
 To read a State in an effect without a re-run when it changes, use
-`State.peek`, or wrap the code in `State.untrack`.
+`State.peek`, or `State.untrack (fun s -> ...)` for a read that needs a
+scope. A function that the effect calls records nothing unless it gets
+the scope.
 
 Do not use an effect to copy one State into another. Use a memo. An effect
 that writes a State it reads runs again and again. After 100 rounds Yuka
@@ -225,8 +259,8 @@ runs again or its component goes away, the calls stop. This effect animates
 while `playing` is true:
 
 ```ocaml
-Yuka.Effect.after (fun () ->
-    if Yuka.State.get playing then
+Yuka.Effect.after (fun s ->
+    if Yuka.State.get s playing then
       Yuka.Browser.on_frame (fun time -> Yuka.State.set angle (time /. 10.)))
 ```
 

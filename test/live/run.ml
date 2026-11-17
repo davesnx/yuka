@@ -492,8 +492,8 @@ let ssr_cases =
         let asked = ref 0 in
         Private.set_csrf s (fun () -> incr asked; Some "tok");
         let view () =
-          let a = Yuka.Live.use count (fun () -> "ssr") and b = Yuka.Live.use count (fun () -> "other") in
-          let show t = match Yuka.Live.status t with Status.Ready { data; _ } -> string_of_int data | _ -> "?" in
+          let a = Yuka.Live.use count (fun _ -> "ssr") and b = Yuka.Live.use count (fun _ -> "other") in
+          let show t = match State.untrack (fun s -> Yuka.Live.status s t) with Status.Ready { data; _ } -> string_of_int data | _ -> "?" in
           element "p" [] [ text (show a ^ "," ^ show b) ]
         in
         let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Live" ~props:`Null view)) in
@@ -983,8 +983,8 @@ let patch_cases =
         let s = Private.session ~streaming:false ~islands_only:true in
         Private.set_csrf s (fun () -> Some "tok");
         let view () =
-          let live = Yuka.Live.use items (fun () -> "ssr") in
-          text (match Yuka.Live.status live with Status.Ready { data; _ } -> String.concat "," data | _ -> "?")
+          let live = Yuka.Live.use items (fun _ -> "ssr") in
+          text (match State.untrack (fun s -> Yuka.Live.status s live) with Status.Ready { data; _ } -> String.concat "," data | _ -> "?")
         in
         let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Live" ~props:`Null view)) in
         let expected = Printf.sprintf {|data-yuka-answer="l:items &quot;ssr&quot;">{"ok":[["x"],"%s",%d]}|} node seq in

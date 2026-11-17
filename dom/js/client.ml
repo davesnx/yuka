@@ -486,7 +486,7 @@ and instantiate pos (template : template) c parts =
 
 and mount_attr doc svg el adopted = function
   | Static (name, value) -> if not adopted then set_attr svg el name (Some value)
-  | Dynamic (name, f) -> Base.run_effect Scheduler.queue (fun () -> set_attr svg el name (f ()))
+  | Dynamic (name, f) -> Base.run_effect Scheduler.queue (fun s -> set_attr svg el name (f s))
   | Handler (event, handler) -> add_handler doc el event handler
 
 and mount_hole pos owned f =
@@ -501,8 +501,8 @@ and mount_hole pos owned f =
         text_node := Js.null;
         mount_node pos (ref false) n
   in
-  Base.run_effect Scheduler.queue (fun () ->
-      let n = f () in
+  Base.run_effect Scheduler.queue (fun s ->
+      let n = f s in
       if not !mounted then begin
         mounted := true;
         let close () =
@@ -534,7 +534,7 @@ and mount_each :
     type a.
     pos ->
     bool ->
-    (unit -> a array) ->
+    (State.scope -> a array) ->
     (a -> string) ->
     (a -> a -> bool) ->
     (a -> node) ->
@@ -658,8 +658,8 @@ and mount_each :
     done;
     entries := next
   in
-  Base.run_effect Scheduler.queue (fun () ->
-      let next = State.get source in
+  Base.run_effect Scheduler.queue (fun s ->
+      let next = State.get s source in
       Scheduler.untrack (fun () -> reconcile next))
 
 let keep_hook : (Web.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
@@ -695,8 +695,8 @@ let mount_element pos tag attrs children =
 let mount_await pos async loading failed render =
   let status = Async.watch async in
   Types.with_browser_ids (Types.next_id () ^ "-") (fun () ->
-      mount_hole pos false (fun () ->
-          match State.get status with
+      mount_hole pos false (fun s ->
+          match State.get s status with
           | Async.Pending -> loading
           | Async.Done v -> render v
           | Async.Failed m -> failed m))
@@ -737,8 +737,8 @@ let changed : Web.node list ref = ref []
 let rec keep el = function
   | Dynamic (("value" | "checked" | "selected") as name, f) :: rest ->
       let first = ref true in
-      Base.run_effect Scheduler.queue (fun () ->
-          let v = f () in
+      Base.run_effect Scheduler.queue (fun s ->
+          let v = f s in
           if !first then first := false else set_attr false el name v);
       keep el rest
   | a :: rest -> a :: keep el rest

@@ -5,7 +5,7 @@ let cond = Condition.create ()
 let step = ref 0
 let wait n = Mutex.protect gate (fun () -> while !step < n do Condition.wait cond gate done)
 let go n = Mutex.protect gate (fun () -> step := n; Condition.broadcast cond)
-let hole f : server element = Private.element (Private.hole (fun () -> Private.node (f ())))
+let hole f : server element = Private.element (Private.hole (fun s -> Private.node (f s)))
 let failed = ref false
 
 let check name ok detail =
@@ -37,18 +37,18 @@ let in_domains f g =
   let x = Domain.join df in
   (x, Domain.join dg)
 
-let page () = element "p" [] [ text "B"; hole (fun () -> text "b") ]
+let page () = element "p" [] [ text "B"; hole (fun _ -> text "b") ]
 let page_html = Server.to_string page
 
 let clean name =
   check (name ^ ": server_rendering after") (not (Private.server_rendering ())) "true";
   let probe = Yuka.State.make 0 in
-  ignore (Yuka.State.get probe);
-  check (name ^ ": a top-level State.get is not tracked") (not (Private.has_readers probe)) "tracked";
-  ignore (Yuka.State.memo (fun () -> 0));
+  ignore (Yuka.State.peek probe);
+  check (name ^ ": a top-level State.peek is not tracked") (not (Private.has_readers probe)) "tracked";
+  ignore (Yuka.State.memo (fun _ -> 0));
   check (name ^ ": a top-level memo has no owner") (Private.owner_size () = 0) (string_of_int (Private.owner_size ()));
   let runs = ref 0 in
-  let (), dispose = with_owner (fun () -> Effect.before (fun () -> incr runs)) in
+  let (), dispose = with_owner (fun () -> Effect.before (fun _ -> incr runs)) in
   dispose ();
   check (name ^ ": Effect.before in owner runs") (!runs = 1) (string_of_int !runs);
   let html = outcome (fun () -> Server.to_string page) in
@@ -58,13 +58,13 @@ let interleaved () =
   let a, b =
     in_parallel
       (fun () ->
-        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 1; wait 2; text "a") ])) in
         go 3;
         clean "interleaved, worker A";
         r)
       (fun () ->
         wait 1;
-        outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))
+        outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 2; wait 3; text "b") ])))
   in
   check "interleaved: A" (a = Ok "<p>a</p>") (show a);
   check "interleaved: B" (b = Ok "<p>b</p>") (show b);
@@ -74,13 +74,13 @@ let listener () =
   let a, m =
     in_parallel
       (fun () ->
-        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 1; wait 2; text "a") ])) in
         go 3;
         clean "memo on another thread, render worker";
         r)
       (fun () ->
         wait 1;
-        let v = Yuka.State.get (Yuka.State.memo (fun () -> go 2; wait 3; 7)) in
+        let v = Yuka.State.peek (Yuka.State.memo (fun _ -> go 2; wait 3; 7)) in
         Ok (string_of_int v))
   in
   check "memo on another thread: the render" (a = Ok "<p>a</p>") (show a);
@@ -92,7 +92,7 @@ let owner_cursor () =
     in_parallel
       (fun () ->
         wait 1;
-        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "a") ])) in
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 2; wait 3; text "a") ])) in
         clean "owner on another thread, render worker";
         r)
       (fun () ->
@@ -118,7 +118,7 @@ let context_interleaved () =
                   Context.provide c "a" (fun () ->
                       element "p" []
                         [
-                          hole (fun () ->
+                          hole (fun _ ->
                               go 1;
                               wait 2;
                               let v = read () in
@@ -137,7 +137,7 @@ let context_interleaved () =
                   Context.provide c "b" (fun () ->
                       element "p" []
                         [
-                          hole (fun () ->
+                          hole (fun _ ->
                               go 2;
                               wait 3;
                               let v = read () in
@@ -162,7 +162,7 @@ let context_no_provider () =
                   Context.provide c "a" (fun () ->
                       element "p" []
                         [
-                          hole (fun () ->
+                          hole (fun _ ->
                               go 1;
                               wait 2;
                               text (read ()));
@@ -172,7 +172,7 @@ let context_no_provider () =
         r)
       (fun () ->
         wait 1;
-        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> text (read ())) ])) in
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> text (read ())) ])) in
         go 2;
         clean "context without provide on another thread, worker B";
         r)
@@ -185,12 +185,12 @@ let domains_interleaved () =
   let a, b =
     in_domains
       (fun () ->
-        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 1; wait 2; text "a") ])) in
         go 3;
         r)
       (fun () ->
         wait 1;
-        outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))
+        outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 2; wait 3; text "b") ])))
   in
   check "interleaved on two domains: A" (a = Ok "<p>a</p>") (show a);
   check "interleaved on two domains: B" (b = Ok "<p>b</p>") (show b);
@@ -200,12 +200,12 @@ let domains_memo_and_owner () =
   let a, m =
     in_domains
       (fun () ->
-        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+        let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 1; wait 2; text "a") ])) in
         go 3;
         r)
       (fun () ->
         wait 1;
-        let (), dispose = with_owner (fun () -> ignore (Yuka.State.get (Yuka.State.memo (fun () -> go 2; wait 3; 7)))) in
+        let (), dispose = with_owner (fun () -> ignore (Yuka.State.peek (Yuka.State.memo (fun _ -> go 2; wait 3; 7)))) in
         dispose ();
         Ok "")
   in
@@ -219,12 +219,12 @@ let threads_in_a_domain () =
       (Domain.spawn (fun () ->
            in_parallel
              (fun () ->
-               let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 1; wait 2; text "a") ])) in
+               let r = outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 1; wait 2; text "a") ])) in
                go 3;
                r)
              (fun () ->
                wait 1;
-               outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun () -> go 2; wait 3; text "b") ])))))
+               outcome (fun () -> Server.to_string (fun () -> element "p" [] [ hole (fun _ -> go 2; wait 3; text "b") ])))))
   in
   check "interleaved threads in one other domain: A" (a = Ok "<p>a</p>") (show a);
   check "interleaved threads in one other domain: B" (b = Ok "<p>b</p>") (show b);
@@ -237,7 +237,7 @@ let nested () =
         Server.to_string (fun () ->
             element "div" []
               [
-                hole (fun () ->
+                hole (fun _ ->
                     inner := Server.to_string page;
                     text !inner);
               ]))
@@ -282,7 +282,7 @@ let fiber f =
 let resume paused = Option.iter (fun k -> Deep.continue k ()) !paused
 
 let suspending name () =
-  let suspend () =
+  let suspend _ =
     Stdlib.Effect.perform Suspend;
     text name
   in

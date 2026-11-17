@@ -9,6 +9,6 @@ let view ~fail : Yuka.server Yuka.element =
   </div>
 
 let status (s : string Yuka.Status.t) : Yuka.server Yuka.element =
-  <Yuka.Show status=(fun () -> s) loading="wait" failed=(fun e -> <p>(Yuka.text (Yuka.Status.error_to_string e))</p>)>
+  <Yuka.Show status=(fun _ -> s) loading="wait" failed=(fun e -> <p>(Yuka.text (Yuka.Status.error_to_string e))</p>)>
     (fun d -> <b>(Yuka.text d)</b>)
   </Yuka.Show>

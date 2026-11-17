@@ -85,7 +85,7 @@ let app () =
     </div>
     <table class_="table table-hover table-striped test-data">
       <tbody>
-        (Yuka.each ~key:(fun r -> string_of_int r.id) (fun () -> State.get rows) row)
+        (Yuka.each ~key:(fun r -> string_of_int r.id) (fun s -> State.get s rows) row)
       </tbody>
     </table>
     <span class_="preloadicon glyphicon glyphicon-remove" aria_hidden=true />
