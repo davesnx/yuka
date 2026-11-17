@@ -58,6 +58,36 @@ Any page can call any action, and `POST /_yuka/action/NAME` runs no route
 guard. An action checks permissions itself, with its request
 (`Yuka.Server.Request.session`, `Yuka.Server.Request.header`).
 
+### The request
+
+`Yuka.Server.Request` reads the request of a loader, a guard, a handler,
+an action, a form action or a live `allow`:
+
+| Function | Gives |
+| --- | --- |
+| `meth`, `path` | the method; the path without the query |
+| `target` | the path and the query as sent, not decoded |
+| `query`, `query_param` | the decoded query pairs, in order; the first value of a name |
+| `header`, `cookie` | a header (any case); a cookie value from the `cookie` header |
+| `session` | the session id from the adapter |
+| `body ~limit` | the body, or ``Error `Too_large`` when it is longer than `limit` bytes |
+| `json ?limit codec` | the body decoded with the codec (default limit 1 MiB) |
+
+The server reads the body from the client one time. Each later `body` or
+`json` call gives the same bytes; the guards and the handler of a route
+get the same request, and in an action the cycle read the body before
+the action runs, so these calls read nothing more. A call with a
+smaller limit than the length of the body gives ``Error `Too_large``.
+After a call gave ``Error `Too_large``, each later call gives it too.
+
+`json` keeps its errors apart: `` `Too_large ``, `` `Invalid_json message ``
+(the body is not JSON) and `` `Invalid_value message `` (the codec does not
+accept it).
+
+`Yuka.Server.json codec value` answers with the value encoded as
+`application/json`, and `Yuka.Server.text` with `text/plain;
+charset=utf-8`. Both take `?status` (default 200) and `?headers`.
+
 Call it from an island with `Yuka.Action.call`. The result is an
 `Async` that is always `Done`, with `Ok output` or `Error error`
 (`Yuka.Status.error`). `message` is a `string option Yuka.State.t`:

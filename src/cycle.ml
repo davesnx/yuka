@@ -82,7 +82,8 @@ let with_type kind ?(status = 200) ?(headers = []) text =
 
 let text ?status ?headers s = with_type "text/plain; charset=utf-8" ?status ?headers s
 let html ?status ?headers s = with_type "text/html; charset=utf-8" ?status ?headers s
-let json ?status ?headers j = with_type "application/json" ?status ?headers (Json.to_string j)
+let json ?status ?headers codec v =
+  with_type "application/json" ?status ?headers (Json.to_string (Codec.encode codec v))
 
 let see_other location =
   Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
@@ -110,17 +111,17 @@ type target =
       run : unit -> response Async.t;
     }
 
-type 'req app =
+type app =
   | App : {
       build : string;
       headers : (string * string) list;
       prerender : string list;
       prefetch : Prefetch.level;
       find : Router.meth -> string list -> (string * string) list -> 'r Router.lookup;
-      resolve : 'req -> 'r -> target;
+      resolve : Types.context -> 'r -> target;
       missing : fallback;
     }
-      -> 'req app
+      -> app
 
 let app ~build ~headers ~prerender ~pages ~find ~resolve ~missing =
   let highest a (r : rules) = if Prefetch.rank r.prefetch > Prefetch.rank a then r.prefetch else a in
@@ -308,10 +309,11 @@ type request = {
   meth : Router.meth;
   target : string;
   header : string -> string option;
-  body : limit:int -> string option Async.t;
+  body : limit:int -> (string, [ `Too_large ]) result Async.t;
   session : unit -> string option;
   csrf_token : unit -> string option;
   verify_csrf : string -> bool Async.t;
+  backend : Types.backend;
 }
 
 type outcome =
@@ -672,8 +674,8 @@ let action env (r : request) raw =
       | Error e -> Async.return (json e)
       | Ok handler ->
           Async.bind (r.body ~limit:Server.max_body) (function
-            | None -> Async.return (json (Server.action_error 413 "request too large"))
-            | Some body ->
+            | Error `Too_large -> Async.return (json (Server.action_error 413 "request too large"))
+            | Ok body ->
                 Async.map json
                   (Server.answer_action ?origins ~context ~live:(Live_server.mark_json env.node) ~name handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
@@ -740,11 +742,11 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
 
 let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
 
-let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
+let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
   match a.find `GET segments (Router.query r.target) with
   | Router.Found found -> (
-      match a.resolve req found with
+      match a.resolve env.context found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
       | Handler _ -> reply (method_not_allowed allowed)
       | Page { rules; guards; load; fallback } ->
@@ -755,8 +757,8 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
               | Error stop -> page_or_error (stopped env fallback path stop)
               | Ok () ->
                   Async.bind (r.body ~limit:Server.max_body) (function
-                    | None -> reply (plain 413 "Request Too Large")
-                    | Some body -> (
+                    | Error `Too_large -> reply (plain 413 "Request Too Large")
+                    | Ok body -> (
                         let fields = Router.query ("?" ^ body) in
                         match List.assoc_opt "_yuka_action" fields with
                         | None -> reply (method_not_allowed allowed)
@@ -829,7 +831,7 @@ let speculative (r : request) =
       | _ -> false)
   | _ -> false
 
-let route env (App a) req (r : request) ~path ~raw ~query =
+let route env (App a) (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
   let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
@@ -842,10 +844,10 @@ let route env (App a) req (r : request) ~path ~raw ~query =
       match r.meth with
       | `OPTIONS -> reply (empty 204 [ ("allow", allow ms) ])
       | `POST when List.mem `GET ms && is_form (r.header "content-type") ->
-          form_post env (App a) req r ~path ~segments ~query ~allowed:(allow ms)
+          form_post env (App a) r ~path ~segments ~query ~allowed:(allow ms)
       | _ -> reply (method_not_allowed (allow ms)))
   | Router.Found found -> (
-      match a.resolve req found with
+      match a.resolve env.context found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
       | Page { rules; _ }
         when Option.fold ~none:false
@@ -945,7 +947,7 @@ let live_answer env (r : request) =
                     ~token:r.csrf_token)))
   | _ -> reply (method_not_allowed "GET")
 
-let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists req (r : request) =
+let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r : request) =
   Scheduler.seal ();
   let path, query = Router.split_target r.target in
   Live_server.use_log node (log config);
@@ -954,13 +956,16 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
     {
       meth = r.meth;
       path;
+      target = r.target;
       header = r.header;
+      body = r.body;
       session = r.session;
       log = log config;
       live =
         (fun name key ->
           live_used := true;
           Live_server.ssr_state ~sleep node context name key);
+      backend = Some r.backend;
     }
   in
   let env =
@@ -1061,7 +1066,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         if trailing then
           let suffix = query_suffix query in
           reply (empty 308 [ ("location", canonical ^ suffix) ])
-        else route env app req r ~path ~raw ~query
+        else route env app r ~path ~raw ~query
     | _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
   in
   let bodyless = function
@@ -1110,19 +1115,24 @@ module type ADAPTER = sig
 end
 
 module Make (Backend : ADAPTER) = struct
+  type Types.backend += Request of Backend.request
+
+  let backend_request (c : Types.context) = match c.backend with Some (Request r) -> Some r | _ -> None
+
   let handler ?node config app (req : Backend.request) =
     let view =
       {
         meth = Backend.meth req;
         target = Backend.target req;
         header = Backend.header req;
-        body = (fun ~limit -> Backend.body req ~limit);
+        body = Server.read_once (Backend.body req);
         session = (fun () -> Backend.session req);
         csrf_token = (fun () -> Backend.csrf_token req);
         verify_csrf = Backend.verify_csrf req;
+        backend = Request req;
       }
     in
-    Async.bind (handle ?node config app ~sleep:Backend.sleep ~exists:Backend.exists req view) (function
+    Async.bind (handle ?node config app ~sleep:Backend.sleep ~exists:Backend.exists view) (function
       | Respond r -> Backend.respond r
       | File { root; path; headers } -> Backend.file req ~root ~path ~headers
       | Upgrade run -> Backend.upgrade req run)
@@ -1130,7 +1140,7 @@ end
 
 let prerender_seeds (App a) = a.prerender
 
-let prerenderable config (App a) req target =
+let prerenderable config (App a) target =
   let path, _ = Router.split_target target in
   let raw = Router.split_path path in
   let served =
@@ -1141,7 +1151,7 @@ let prerenderable config (App a) req target =
   &&
   match a.find `GET (List.map (Router.decode ~plus:false) raw) [] with
   | Router.Found found -> (
-      match a.resolve req found with
+      match a.resolve { (Server.empty_context ()) with path; target } found with
       | Page { rules; _ } | Handler { rules; _ } -> rules.prerender
       | exception _ -> false)
   | _ -> false

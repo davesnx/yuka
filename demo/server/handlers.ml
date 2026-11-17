@@ -108,5 +108,5 @@ let register () =
   Yuka.Server.Action.implement Board.shuffle (fun _ workspace ->
       write workspace (fun () -> Ok (Store.shuffle workspace)) (fun () -> publish_board workspace))
 
-let issues_json (_ : Dream.request) =
-  Yuka.Server.json (Yuka.Codec.encode (Yuka.Codec.list Model.Issue.codec) (Store.issues Model.Workspace.default))
+let issues_json (_ : Yuka.Server.request) =
+  Yuka.Server.json (Yuka.Codec.list Model.Issue.codec) (Store.issues Model.Workspace.default)

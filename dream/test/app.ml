@@ -23,7 +23,7 @@ let home () =
 
 let docs () = Yuka.Server.page ~title:"Docs" (fun () -> el "p" [ Yuka.text "docs" ])
 
-let post (_ : Dream.request) ~slug =
+let post (_ : Yuka.Server.request) ~slug =
   Yuka.Async.return
     (match slug with "hello" | "world" -> Ok slug | _ -> Error Yuka.Server.Not_found)
 
@@ -41,4 +41,21 @@ let warned () =
       Yuka.Console.warn "warned page";
       Yuka.text "warned")
 let not_found ~path () = Yuka.Server.page ~title:"Missing" (fun () -> Yuka.text ("missing " ^ path))
-let feed (_ : Dream.request) = Yuka.Server.text ~headers:[ ("content-type", "application/rss+xml") ] "<rss/>"
+let feed (_ : Yuka.Server.request) = Yuka.Server.text ~headers:[ ("content-type", "application/rss+xml") ] "<rss/>"
+
+let whoami req =
+  match Yuka_dream.request req with
+  | None -> Yuka.Server.text "no Dream request"
+  | Some dream -> Yuka.Server.text (Dream.target dream ^ " " ^ Option.value (Dream.header dream "x-user") ~default:"-")
+
+let sum req =
+  Yuka.Async.bind (Yuka.Server.Request.json req Yuka.Codec.(list int)) (function
+    | Error _ -> Yuka.Server.text ~status:400 "bad body"
+    | Ok numbers ->
+        Yuka.Server.json ~status:201
+          Yuka.Codec.(list string)
+          [
+            string_of_int (List.fold_left ( + ) 0 numbers);
+            Option.value (Yuka.Server.Request.query_param req "tag") ~default:"-";
+            Option.value (Yuka.Server.Request.cookie req "theme") ~default:"-";
+          ])

@@ -19,6 +19,9 @@ let routes =
       Router.route Broken ~path:"/broken" ~page:App.Pages.broken;
       Router.route Boom ~path:"/boom" ~page:App.Pages.boom
         ~loader:App.Loaders.exploding;
+      Router.route Greet ~path:"/greet" ~page:App.Pages.greet
+        ~loader:App.Loaders.greeting ~guard:App.Guards.greet;
+      Router.post Sum ~path:"/sum" ~handler:App.Api.sum ~guard:App.Guards.sum;
       Router.group ~path:"/team/:team<Params.Team.t>" ~layout:App.Layouts.team
         ~guard:App.Guards.outer ~loader:App.Loaders.squad
         ~headers:[ ("X-A", "team") ]
@@ -33,25 +36,25 @@ let routes =
             ~cache:uncached ~prefetch:`Idle;
           Router.route Team_headed ~path:"/headed" ~page:App.Pages.team_form
             ~headers:[ ("Cache-Control", "no-store") ] ~prefetch:`Idle;
-          Router.endpoint Team_json ~path:"/json" ~method_:`GET
+          Router.get Team_json ~path:"/json"
             ~handler:App.Api.team
             ~cache:(public ~s_max_age:600 ~max_age:60 ());
-          Router.action Rename ~path:"/rename" ~method_:`POST
+          Router.post Rename ~path:"/rename"
             ~handler:App.Api.rename;
         ];
       Router.route Varied ~path:"/varied" ~page:App.Pages.plain
         ~headers:[ ("Vary", "Cookie") ];
-      Router.endpoint Asset ~path:"/asset.txt" ~method_:`GET ~handler:App.Api.asset
+      Router.get Asset ~path:"/asset.txt" ~handler:App.Api.asset
         ~cache:immutable;
       Router.route Live_page ~path:"/live" ~page:App.Pages.live;
       Router.route Live_public ~path:"/live-public" ~page:App.Pages.live
         ~cache:(public ~max_age:60 ());
       Router.route Plain_public ~path:"/plain-public" ~page:plain ~cache:minute ~prefetch:`Visible;
-      Router.endpoint Cookies ~path:"/cookies" ~method_:`GET ~handler:App.Api.cookies;
-      Router.endpoint Bad_header ~path:"/bad-header" ~method_:`GET ~handler:App.Api.bad_header;
-      Router.endpoint Put_thing ~path:"/thing" ~method_:`PUT ~handler:App.Api.thing
+      Router.get Cookies ~path:"/cookies" ~handler:App.Api.cookies;
+      Router.get Bad_header ~path:"/bad-header" ~handler:App.Api.bad_header;
+      Router.put Put_thing ~path:"/thing" ~handler:App.Api.thing
         ~guard:App.Guards.thing;
-      Router.endpoint Hook ~path:"/hook" ~method_:`POST ~handler:App.Api.hook
+      Router.post Hook ~path:"/hook" ~handler:App.Api.hook
         ~cross_origin:true;
       Router.group ~path:"/org/:org<string>" ~layout:App.Layouts.org
         [
@@ -61,11 +64,11 @@ let routes =
                 ?overlay:App.Pages.org_dialog ~loader:App.Loaders.org_item;
             ];
         ];
-      Router.endpoint Feed ~path:"/feed.xml" ~method_:`GET ~handler:App.Api.feed
+      Router.get Feed ~path:"/feed.xml" ~handler:App.Api.feed
         ~prerender:true;
-      Router.endpoint Later ~path:"/later" ~method_:`GET ~handler:App.Api.later;
-      Router.action Clear_feed ~path:"/feed.xml" ~method_:`DELETE
-        ~handler:App.Api.clear ~cache:immutable;
+      Router.get Later ~path:"/later" ~handler:App.Api.later;
+      Router.delete Clear_feed ~path:"/feed.xml"
+        ~handler:App.Api.clear;
       Router.redirect ~path:"/old" ~to_:(Permanent "/");
       Router.redirect ~path:"/tmp/:x<string>" ~to_:(Temporary "/team/:x/json");
     ]

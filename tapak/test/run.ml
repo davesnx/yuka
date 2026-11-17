@@ -330,6 +330,18 @@ let live ~sw ~net make () =
           | `Close (code, _) -> Alcotest.(check int) "a bad token" 4403 code
           | _ -> Alcotest.fail "not a close"))
 
+let tapak_request make () =
+  let handler = make config in
+  let _, body = call ~headers:[ ("x-user", "bob") ] handler "/whoami?a=1" in
+  Alcotest.(check string) "inside a tapak request" "/whoami?a=1 bob" body;
+  check_true "a Testing request" (Option.is_none (Yuka_tapak.request (Yuka.Server.Testing.request ())))
+
+let handler_reads_the_request make () =
+  let handler = make config in
+  let headers = (("Content-Type", "application/json") :: same_origin) @ [ ("Cookie", "a=1; theme=dark") ] in
+  let response, body = call ~meth:`POST ~headers ~body:"[1,2,3]" handler "/sum?tag=t" in
+  Alcotest.(check (pair int string)) "JSON body, query param and cookie" (201, {|["6","t","dark"]|}) (status response, body)
+
 let await_result () =
   let check = Alcotest.(check (result int string)) in
   check "done" (Ok 1) (Yuka_tapak.await (Yuka.Async.return 1));
@@ -368,6 +380,11 @@ let () =
           Alcotest.test_case "HEAD then GET on one connection" `Quick (head_then_get ~net make);
         ] );
       ("log", [ Alcotest.test_case "Console reaches Logs" `Quick (tapak_log make) ]);
+      ( "request",
+        [
+          Alcotest.test_case "Yuka_tapak.request" `Quick (tapak_request make);
+          Alcotest.test_case "a handler reads the request" `Quick (handler_reads_the_request make);
+        ] );
       ( "await",
         [
           Alcotest.test_case "await gives a result" `Quick await_result;

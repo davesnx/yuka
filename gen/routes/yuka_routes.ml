@@ -304,14 +304,6 @@ let parse_name names v =
       n
   | _ -> fail v.pexp_loc "the route name must be a constructor such as Issue"
 
-let parse_method tag v =
-  match v.pexp_desc with
-  | Pexp_variant ((("GET" | "POST" | "PUT" | "PATCH" | "DELETE") as m), None) ->
-      if tag = "action" && m = "GET" then
-        fail v.pexp_loc "Router.action cannot use `GET; use `POST, `PUT, `PATCH or `DELETE";
-      m
-  | _ -> fail v.pexp_loc "~method_ must be one of `GET, `POST, `PUT, `PATCH, `DELETE"
-
 let parse_redirect segs v =
   let permanent, tv =
     match v.pexp_desc with
@@ -483,28 +475,31 @@ let read ~server ~items names e =
             tag;
             levels;
           }
-    | "endpoint" | "action" ->
-        check_props tag loc props ~required:[ "path"; "method_"; "handler" ]
-          ~optional:((if tag = "endpoint" then [ "guard"; "cross_origin" ] else [ "guard" ]) @ rules);
+    | "get" | "post" | "put" | "patch" | "delete" ->
+        let optional = if tag = "get" then [ "guard" ] @ rules else [ "guard"; "cross_origin"; "headers" ] in
+        check_props tag loc props ~required:[ "path"; "handler" ] ~optional;
         check_cross_origin props;
         let name = name () in
-        let meth = parse_method tag (List.assoc "method_" props) in
         let text, ploc, segs = own_path () in
         ignore (add_labels ploc ctx.labels (seg_labels segs));
         add
           {
-            kind = Named { name; meth; search = [] };
+            kind = Named { name; meth = String.uppercase_ascii tag; search = [] };
             segs = ctx.prefix @ segs;
             path = join ctx.text text;
             loc;
             tag;
             levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
           }
+    | "endpoint" ->
+        fail loc "Router.endpoint was removed: use Router.get, Router.post, Router.put, Router.patch or Router.delete"
+    | "action" -> fail loc "Router.action was removed: use Router.post, Router.put, Router.patch or Router.delete"
     | "make" -> fail loc "Router.make can only be the root"
     | _ ->
         fail loc
           "unknown node Router.%s; the nodes are Router.make, Router.group, Router.route, \
-           Router.endpoint, Router.action and Router.redirect (names of the route file syntax, not OCaml values)"
+           Router.get, Router.post, Router.put, Router.patch, Router.delete and Router.redirect \
+           (names of the route file syntax, not OCaml values)"
           tag
   in
   let tag, args, props, loc = element e in
@@ -1123,7 +1118,7 @@ let server_arm ~shared ~rule ~fallback n =
             "Yuka.Server.Generated.Handler";
             "  {";
             sprintf "    rules = %s;" rules;
-            sprintf "    action = %b;" (n.tag = "action");
+            sprintf "    action = %b;" (n.tag <> "get");
             sprintf "    cross_origin = %b;" (cross_origin leaf);
             sprintf "    guards = %s;" guards;
             sprintf "    run = (fun () -> %s req%s);"
@@ -1212,7 +1207,7 @@ let generate_server ~shared ~digest (nodes, root) =
           sprintf "let %s : Yuka.Server.Generated.fallback =\n%s\n" n
             (String.concat "\n" (indent 2 (String.split_on_char '\n' t))))
         (fallbacks ())
-    @ [ sprintf "let resolve %s (route : %s.t) : Yuka.Server.Generated.target =" req shared;
+    @ [ sprintf "let resolve (%s : Yuka.Server.request) (route : %s.t) : Yuka.Server.Generated.target =" req shared;
         "  match route with" ]
     @ indent 2 arms
     @ [

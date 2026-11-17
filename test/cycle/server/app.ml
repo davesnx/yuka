@@ -174,6 +174,7 @@ module Pages = struct
 
   let broken () = Server.page ~title:"Broken" (fun () -> failwith "shell secret")
   let boom ~exploding () = Server.page (fun () -> text exploding)
+  let greet ~greeting () = Server.page (fun () -> text greeting)
 
   let member ~team ~user ~squad ~profile () =
     Server.page ~title:"Member" (fun () ->
@@ -209,6 +210,8 @@ module Pages = struct
             el "p" [ text shown ]))
 end
 
+let last_request : Server.request option ref = ref None
+
 module Loaders = struct
   let squad _req ~team =
     note "squad start";
@@ -222,12 +225,19 @@ module Loaders = struct
     | "wait", _ -> later ()
     | _, 404 -> Async.return (Error Server.Not_found)
     | _, 500 -> Async.failed "loader secret"
-    | _ -> Async.return (Ok (Option.value (header req "x-user") ~default:"anonymous"))
+    | _ -> Async.return (Ok (Option.value (Server.Request.header req "x-user") ~default:"anonymous"))
 
   let org_item _req ~org:_ ~n =
     Async.return (if n = 404 then Error Server.Not_found else Ok "item")
 
   let exploding _req : (string, Server.stop) result Async.t = failwith "loader secret"
+
+  let greeting req =
+    Async.return
+      (Ok
+         (Printf.sprintf "hello %s from %s"
+            (Option.value (Server.Request.query_param req "name") ~default:"-")
+            (Option.value (Server.Request.header req "x-user") ~default:"-")))
 end
 
 module Guards = struct
@@ -252,6 +262,21 @@ module Guards = struct
   let inner _req ~team:_ ~user =
     note "inner";
     Async.return (if user = 0 then Error (Server.Fail "guard secret") else Ok ())
+
+  let greet req =
+    if Server.Request.header req "x-user" = None then Async.return (Error Server.Forbidden)
+    else
+      match Server.Request.meth req with
+      | `POST ->
+          Async.map
+            (function Ok body when body <> "" -> Ok () | _ -> Error Server.Forbidden)
+            (Server.Request.body req ~limit:1000)
+      | _ -> Async.return (Ok ())
+
+  let sum req =
+    Async.map
+      (function Ok (_ :: _) -> Ok () | _ -> Error Server.Forbidden)
+      (Server.Request.json req Yuka.Codec.(list int))
 end
 
 module Api = struct
@@ -259,10 +284,11 @@ module Api = struct
     note "team json";
     if team = "gone" then Server.text ~status:404 "gone" else
     Server.json
+      (Yuka.Codec.make ~encode:Fun.id ~decode:Result.ok)
       (`Assoc
         [
           ("team", `String (team));
-          ("user", `String (Option.value (header req "x-user") ~default:"anonymous"));
+          ("user", `String (Option.value (Server.Request.header req "x-user") ~default:"anonymous"));
         ])
 
   let rename _req ~team:_ =
@@ -290,7 +316,21 @@ module Api = struct
     note "thing";
     Server.text "thing"
 
-  let hook _req = Server.text "hook"
+  let hook req =
+    last_request := Some req;
+    Server.text "hook"
+
+  let sum req =
+    Async.bind (Server.Request.json req Yuka.Codec.(list int)) (function
+      | Error _ -> Server.text ~status:400 "bad body"
+      | Ok numbers ->
+          Server.json ~status:201
+            Yuka.Codec.(list string)
+            [
+              string_of_int (List.fold_left ( + ) 0 numbers);
+              Option.value (Server.Request.query_param req "tag") ~default:"-";
+              Option.value (Server.Request.header req "x-user") ~default:"-";
+            ])
 end
 
 let saved = ref []
@@ -306,6 +346,40 @@ let () =
              Option.value (Server.Request.session request) ~default:"-";
              (match Server.Request.meth request with `POST -> "POST" | _ -> "other");
              Server.Request.path request;
+           ]))
+
+let inspect = Yuka.Action.mutation ~name:"inspect" ~input:Yuka.Codec.int ~output:Yuka.Codec.string
+
+let () =
+  Server.Action.implement inspect (fun request n ->
+      let module R = Server.Request in
+      let shown = function
+        | Ok s -> s
+        | Error `Too_large -> "too large"
+      in
+      let json_shown = function
+        | Ok n -> string_of_int n
+        | Error `Too_large -> "too large"
+        | Error (`Invalid_json _) -> "invalid json"
+        | Error (`Invalid_value _) -> "invalid value"
+      in
+      Async.bind (R.body request ~limit:100) @@ fun first ->
+      Async.bind (R.body request ~limit:100) @@ fun second ->
+      Async.bind (R.body request ~limit:1) @@ fun small ->
+      Async.bind (R.json request Yuka.Codec.int) @@ fun as_int ->
+      Async.bind (R.json request Yuka.Codec.string) @@ fun as_string ->
+      Async.return
+        (String.concat " | "
+           [
+             string_of_int n;
+             shown first;
+             shown second;
+             shown small;
+             json_shown as_int;
+             (match as_string with Error (`Invalid_value _) -> "invalid value" | _ -> "other");
+             R.target request;
+             String.concat "," (List.map (fun (k, v) -> k ^ "=" ^ v) (R.query request));
+             Option.value (R.cookie request "sid") ~default:"-";
            ]))
 
 let () =

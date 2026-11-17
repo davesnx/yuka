@@ -7,6 +7,7 @@ type reply = { status : int; headers : (string * string) list; body : string }
 let files = [ ("pre/plain/index.html", "prerendered plain"); ("js/app/main.js", "main"); ("pub/s.css", "css"); ("b/bundle/chunk-X1.js", "c"); ("b/bundle/main.js", "m") ]
 let file_calls = ref []
 let body_read = ref 0
+let body_calls = ref 0
 
 module Test_adapter = struct
   type request = App.req
@@ -16,6 +17,7 @@ module Test_adapter = struct
   let target (r : request) = r.target
   let header = App.header
   let body (r : request) ~limit =
+    incr body_calls;
     let n = String.length r.body in
     let rec read at =
       if at >= n then Some r.body
@@ -400,9 +402,8 @@ let prerender =
     ( "seeds and prerenderable paths",
       fun () ->
         Alcotest.(check (list string)) "seeds" [ "/plain"; "/feed.xml" ] (Server.Prerender.seeds app);
-        let req = request "/" in
         List.iter
-          (fun (path, expected) -> Alcotest.(check bool) path expected (Server.Prerender.prerenderable config app req path))
+          (fun (path, expected) -> Alcotest.(check bool) path expected (Server.Prerender.prerenderable config app path))
           [ ("/plain", true); ("/plain?x=1#y", true); ("/feed.xml", true); ("/", false); ("/nowhere", false);
             ("/team/a/1", false); ("/_yuka/app/app/main.js", false); ("/static/s.css", false) ] );
     ( "links of a page",
@@ -897,7 +898,7 @@ let loaders =
     ( "loader-free layers are built once",
       fun () ->
         let first_layer route =
-          match Cycle_server.Yuka_routes.resolve (request "/") route with
+          match Cycle_server.Yuka_routes.resolve (Server.Testing.request ()) route with
           | Server.Generated.Page { load; _ } -> (
               match Async.status (load ()) with
               | Async.Done (Ok plan) -> List.hd plan.layers
@@ -1901,6 +1902,141 @@ let layout_values =
         check_true "warned" (List.exists (fun m -> contains m "yuka-outlet") !logged) );
   ]
 
+let run_request a =
+  match Async.status a with
+  | Async.Done v -> v
+  | Async.Failed m -> Alcotest.failf "failed: %s" m
+  | Async.Pending -> Alcotest.fail "pending"
+
+let request_api =
+  let module R = Server.Request in
+  let json_error = function
+    | Ok _ -> "ok"
+    | Error `Too_large -> "too large"
+    | Error (`Invalid_json _) -> "invalid json"
+    | Error (`Invalid_value _) -> "invalid value"
+  in
+  let body_text = function Ok s -> s | Error `Too_large -> "too large" in
+  [
+    ( "an action reads the body, query, target and cookie; the body is read from the client once",
+      fun () ->
+        body_calls := 0;
+        let r =
+          get ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example");
+                ("cookie", "a=1; sid=\"s 1\" ;theme=dark") ]
+            ~body:"42" "/_yuka/action/inspect?tag=a&tag=b%2Fc&q=x+y%20z&flag"
+        in
+        check_status r 200;
+        Alcotest.(check string) "body"
+          {|{"ok":"42 | 42 | 42 | too large | 42 | invalid value | /_yuka/action/inspect?tag=a&tag=b%2Fc&q=x+y%20z&flag | tag=a,tag=b/c,q=x y z,flag= | s 1"}|}
+          r.body;
+        Alcotest.(check int) "one read of the client body" 1 !body_calls );
+    ( "a guard and a loader read the header and the query of the request",
+      fun () ->
+        let r = get ~headers:[ ("x-user", "bob") ] "/greet?name=Ada" in
+        check_status r 200;
+        check_true "loader value" (contains r.body "hello Ada from bob");
+        check_status (get "/greet?name=Ada") 403 );
+    ( "a post handler and its guard read one JSON body; the client body is read once",
+      fun () ->
+        let post body =
+          get ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example");
+                ("x-user", "bob") ]
+            ~body "/sum?tag=t"
+        in
+        body_calls := 0;
+        let r = post "[1,2,3]" in
+        check_status r 201;
+        Alcotest.(check string) "body" {|["6","t","bob"]|} r.body;
+        Alcotest.(check int) "one read of the client body" 1 !body_calls;
+        check_status (post "[]") 403 );
+    ( "a guard and the cycle read one form body; the client body is read once",
+      fun () ->
+        App.saved := [];
+        body_calls := 0;
+        let r =
+          get ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/x-www-form-urlencoded"); ("origin", "http://app.example");
+                ("host", "app.example"); ("x-user", "bob") ]
+            ~body:"_yuka_action=jot&_yuka_key=k&body=hello" "/greet"
+        in
+        check_status r 303;
+        Alcotest.(check (list string)) "the form got the body" [ "jot hello" ] !App.saved;
+        Alcotest.(check int) "one read of the client body" 1 !body_calls );
+    ( "backend_request gives the request of the adapter that made it",
+      fun () ->
+        App.last_request := None;
+        check_status (get ~meth:`POST ~headers:[ ("x-user", "bob") ] "/hook") 200;
+        match !App.last_request with
+        | None -> Alcotest.fail "the handler did not run"
+        | Some req ->
+            Alcotest.(check (option string)) "the adapter request" (Some "/hook")
+              (Option.map (fun (r : Test_adapter.request) -> r.target) (Cycle.backend_request req));
+            check_true "another Make" (Option.is_none (Held.backend_request req));
+            check_true "a Testing request" (Option.is_none (Cycle.backend_request (Server.Testing.request ()))) );
+    ( "target, query and query_param of a request",
+      fun () ->
+        let r = Server.Testing.request ~target:"/s?k=%41&k=2&e=&plus=a+b" () in
+        Alcotest.(check string) "target" "/s?k=%41&k=2&e=&plus=a+b" (R.target r);
+        Alcotest.(check string) "path" "/s" (R.path r);
+        Alcotest.(check (list (pair string string))) "query"
+          [ ("k", "A"); ("k", "2"); ("e", ""); ("plus", "a b") ] (R.query r);
+        Alcotest.(check (option string)) "first value" (Some "A") (R.query_param r "k");
+        Alcotest.(check (option string)) "missing" None (R.query_param r "nope");
+        Alcotest.(check (list (pair string string))) "no query" [] (R.query (Server.Testing.request ~target:"/s" ())) );
+    ( "cookie: found, missing, no header, a name that is a prefix",
+      fun () ->
+        let with_cookie v = Server.Testing.request ~header:(function "cookie" -> Some v | _ -> None) () in
+        let r = with_cookie "ab=1; a=two=2;b=" in
+        Alcotest.(check (option string)) "value with =" (Some "two=2") (R.cookie r "a");
+        Alcotest.(check (option string)) "longer name" (Some "1") (R.cookie r "ab");
+        Alcotest.(check (option string)) "empty value" (Some "") (R.cookie r "b");
+        Alcotest.(check (option string)) "missing" None (R.cookie r "c");
+        Alcotest.(check (option string)) "no header" None (R.cookie (Server.Testing.request ()) "a") );
+    ( "body: two reads give the same bytes; a smaller limit gives Too_large",
+      fun () ->
+        let r = Server.Testing.request ~meth:`POST ~body:"hello" () in
+        Alcotest.(check string) "first" "hello" (body_text (run_request (R.body r ~limit:5)));
+        Alcotest.(check string) "second" "hello" (body_text (run_request (R.body r ~limit:100)));
+        Alcotest.(check string) "smaller limit" "too large" (body_text (run_request (R.body r ~limit:4))) );
+    ( "body: after Too_large, a larger limit still gives Too_large",
+      fun () ->
+        let r = Server.Testing.request ~meth:`POST ~body:"hello" () in
+        Alcotest.(check string) "first" "too large" (body_text (run_request (R.body r ~limit:4)));
+        Alcotest.(check string) "larger" "too large" (body_text (run_request (R.body r ~limit:100))) );
+    ( "json: value, bad JSON, decode error, limit",
+      fun () ->
+        let req body = Server.Testing.request ~meth:`POST ~body () in
+        (match run_request (R.json (req "[1,2]") Yuka.Codec.(list int)) with
+        | Ok v -> Alcotest.(check (list int)) "value" [ 1; 2 ] v
+        | e -> Alcotest.fail (json_error e));
+        Alcotest.(check string) "bad JSON" "invalid json" (json_error (run_request (R.json (req "[1,") Yuka.Codec.int)));
+        Alcotest.(check string) "decode error" "invalid value"
+          (json_error (run_request (R.json (req {|"x"|}) Yuka.Codec.int)));
+        Alcotest.(check string) "limit" "too large"
+          (json_error (run_request (R.json ~limit:2 (req "[1,2]") Yuka.Codec.(list int))));
+        Alcotest.(check string) "default limit" "too large"
+          (json_error (run_request (R.json (req (String.make ((1024 * 1024) + 1) ' ')) Yuka.Codec.int)));
+        Alcotest.(check string) "empty body" "invalid json" (json_error (run_request (R.json (Server.Testing.request ()) Yuka.Codec.int))) );
+    ( "json and text responses",
+      fun () ->
+        let r = run_request (Server.json ~status:201 Yuka.Codec.(list int) [ 1; 2 ]) in
+        Alcotest.(check int) "status" 201 r.status;
+        Alcotest.(check (list (pair string string))) "headers" [ ("content-type", "application/json") ] r.headers;
+        (match r.body with
+        | Server.String s -> Alcotest.(check string) "body" "[1,2]" s
+        | Server.Stream _ -> Alcotest.fail "stream");
+        let r = run_request (Server.text ~headers:[ ("x-a", "1") ] "hi") in
+        Alcotest.(check int) "text status" 200 r.status;
+        Alcotest.(check (list (pair string string))) "text headers"
+          [ ("content-type", "text/plain; charset=utf-8"); ("x-a", "1") ] r.headers );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -1921,4 +2057,5 @@ let () =
       ("prefetch", cases prefetch);
       ("speculation", cases speculation);
       ("layout values", cases layout_values);
+      ("request api", cases request_api);
     ]
