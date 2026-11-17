@@ -1334,6 +1334,41 @@ module Server : sig
 
     val path : request -> string
     (** The request path, without the query. *)
+
+    val target : request -> string
+    (** The path and the query as the client sent them, not decoded:
+        [/search?q=a%20b]. *)
+
+    val query : request -> (string * string) list
+    (** The pairs of the query, in the order of the target. A name can
+        occur more than once. Names and values are percent-decoded, and [+]
+        is a space. A pair without [=] has the value [""]. *)
+
+    val query_param : request -> string -> string option
+    (** The first value of the name in {!query}. *)
+
+    val cookie : request -> string -> string option
+    (** The value of a cookie from the [cookie] header, not decoded. Double
+        quotes around the value are removed. [None] when the request has no
+        cookie of this name. *)
+
+    val body : request -> limit:int -> (string, [ `Too_large ]) result Async.t
+    (** The request body, read from the client one time only. A later call
+        gives the same bytes again; this includes a call in an action, whose
+        body the cycle read before. A body longer than [limit] bytes gives
+        [Error `Too_large], also when an earlier call with a larger limit
+        read it. After a call gave [Error `Too_large], each later call gives
+        [Error `Too_large] too, because the read stopped at that limit. *)
+
+    val json :
+      ?limit:int ->
+      request ->
+      'a Codec.t ->
+      ('a, [ `Too_large | `Invalid_json of string | `Invalid_value of string ]) result Async.t
+    (** The body as JSON, decoded with the codec. Default [limit]:
+        1 MiB, the limit of an action body. [`Too_large] as for {!body};
+        [`Invalid_json] when the body is not JSON; [`Invalid_value] when
+        the codec does not accept the JSON. Each message tells why. *)
   end
 
   module Action : sig
@@ -1608,8 +1643,9 @@ module Server : sig
   val html : ?status:int -> ?headers:(string * string) list -> string -> response Async.t
   (** Like {!text}, with [text/html; charset=utf-8]. *)
 
-  val json : ?status:int -> ?headers:(string * string) list -> Json.t -> response Async.t
-  (** Like {!text}, with [application/json]. *)
+  val json : ?status:int -> ?headers:(string * string) list -> 'a Codec.t -> 'a -> response Async.t
+  (** [json codec value]: the value encoded with the codec. Like {!text},
+      with [application/json]. *)
 
   val see_other : string -> response Async.t
   (** 303 to the location, no body. *)
@@ -2030,7 +2066,16 @@ module Server : sig
 
   (** For Yuka's tests. Not covered by semantic versioning. *)
   module Testing : sig
-    val request : ?header:(string -> string option) -> ?session:string -> unit -> request
+    val request :
+      ?header:(string -> string option) ->
+      ?session:string ->
+      ?meth:Router.meth ->
+      ?target:string ->
+      ?body:string ->
+      unit ->
+      request
+    (** A request for a test, with no server. Default [meth]: [`GET];
+        default [target] and body: empty. *)
 
     val live_run :
       ?node:Live.node ->

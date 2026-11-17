@@ -128,7 +128,9 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   type context = {
     meth : Router.meth;
     path : string;
+    target : string;
     header : string -> string option;
+    body : limit:int -> (string, [ `Too_large ]) result Async.t;
     session : unit -> string option;
     log : log_level -> string -> unit;
     live : string -> Json.t -> (Json.t * (string * int) option, Status_error.t) result Async.t;
