@@ -1,6 +1,22 @@
 open Web
 
 let set_title : string -> unit = [%mel.raw "function (t) { document.title = t }"]
+let title : unit -> string = [%mel.raw "function () { return document.title }"]
+let active : unit -> node = [%mel.raw "function () { return document.activeElement || document.body }"]
+let refocus : node -> unit = [%mel.raw "function (n) { n.focus() }"]
+
+let route_script : unit -> (node * node) option =
+  [%mel.raw
+    {|function () { const s = document.querySelector('script[data-yuka-context="route"]'); return s && s.parentNode ? [s, s.parentNode] : undefined }|}]
+
+let put_back : node * node -> unit = [%mel.raw "function (r) { r[0].__yuka_seen = false; r[1].appendChild(r[0]) }"]
+
+let layer : unit -> node =
+  [%mel.raw
+    {|function () {
+  const d = document;
+  return d.querySelector("yuka-overlay") || d.body.appendChild(d.createElement("yuka-overlay"));
+}|}]
 
 type controller
 
@@ -26,12 +42,13 @@ let abort : controller -> unit =
     "function (c) { c.abort() }"]
 
 let fetch_page :
-    string * string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller * bool -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
   [%mel.raw
     {|function (a, ok, fail) {
   const url = a[0], keys = a[1], prefetch = a[2], low = a[3], controller = a[4];
   const signal = controller.signal;
   const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
+  if (a[5]) init.headers["Yuka-Overlay"] = "1";
   if (prefetch) { init.headers["Yuka-Prefetch"] = prefetch; init.cache = "no-store"; }
   if (low) init.priority = "low";
   let request;

@@ -58,7 +58,7 @@ let routes =
           Router.group ~path:"/x" ~not_found:App.Pages.org_missing
             [
               Router.route Org_item ~path:"/:n<int>" ~page:App.Pages.org_item
-                ~loader:App.Loaders.org_item;
+                ?overlay:App.Pages.org_dialog ~loader:App.Loaders.org_item;
             ];
         ];
       Router.endpoint Feed ~path:"/feed.xml" ~method_:`GET ~handler:App.Api.feed

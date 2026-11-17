@@ -72,6 +72,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = home ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Plain ->
@@ -90,6 +91,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = plain ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Entry ->
@@ -108,6 +110,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.entry ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Search { q; tag } ->
@@ -126,6 +129,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.find ~q ~tag ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Islands ->
@@ -144,6 +148,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.islands ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Slow ->
@@ -162,6 +167,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.slow ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Twice ->
@@ -180,6 +186,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.twice ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Broken ->
@@ -198,6 +205,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.broken ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Boom ->
@@ -218,6 +226,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.boom ~exploding ();
+                     overlay = None;
                    })));
         }
   | Cycle_shared.Routes.Member { team; user } ->
@@ -241,6 +250,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
                        ];
                      page = App.Pages.member ~team ~user ~squad ~profile ();
+                     overlay = None;
                    }))));
         }
   | Cycle_shared.Routes.Team_form { team } ->
@@ -262,6 +272,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
                        ];
                      page = App.Pages.team_form ~team ~squad ();
+                     overlay = None;
                    })));
         }
   | Cycle_shared.Routes.Team_idle { team; user } ->
@@ -285,6 +296,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
                        ];
                      page = App.Pages.member ~team ~user ~squad ~profile ();
+                     overlay = None;
                    }))));
         }
   | Cycle_shared.Routes.Team_uncached { team } ->
@@ -306,6 +318,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
                        ];
                      page = App.Pages.team_form ~team ~squad ();
+                     overlay = None;
                    })));
         }
   | Cycle_shared.Routes.Team_headed { team } ->
@@ -327,6 +340,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          { Yuka.Server.Generated.key = Stdlib.String.concat "/" [ "L1"; Yuka.Router.encode (Yuka.Router.Param.encode Params.Team.param team) ]; data = true; wrap = (fun children -> App.Layouts.team ~team ~squad ~children ()) };
                        ];
                      page = App.Pages.team_form ~team ~squad ();
+                     overlay = None;
                    })));
         }
   | Cycle_shared.Routes.Team_json { team } ->
@@ -363,6 +377,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.plain ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Asset ->
@@ -390,6 +405,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.live ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Live_public ->
@@ -408,6 +424,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = App.Pages.live ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Plain_public ->
@@ -426,6 +443,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_0;
                        ];
                      page = plain ();
+                     overlay = None;
                    }));
         }
   | Cycle_shared.Routes.Cookies ->
@@ -492,6 +510,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                          layer_2;
                        ];
                      page = App.Pages.org_item ~org ~n ~org_item ();
+                     overlay = Some (App.Pages.org_dialog ~org ~n ~org_item ());
                    })));
         }
   | Cycle_shared.Routes.Feed ->
@@ -523,7 +542,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"70352ddd143dc10f9bbdf5de6d5bdaca"
+  Yuka.Server.Generated.app ~build:"41f43a8b36b1e79c307f2d3addb3f8e1"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11 ]

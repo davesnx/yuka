@@ -109,6 +109,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   type router = {
     boot : bool * (unit -> unit) -> unit;
     navigate : string -> unit;
+    back : unit -> unit;
     handle : event -> unit;
     stop : unit -> unit;
   }

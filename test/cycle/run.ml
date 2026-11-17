@@ -557,7 +557,7 @@ let head_and_rules =
         let r = get "/plain" in
         check_status r 200;
         check_header r "content-type" [ "text/html; charset=utf-8" ];
-        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ];
         check_header r "cache-control" [ "no-store" ];
         check_header r "x-frame-options" [ "DENY" ] );
     ( "header inheritance and override by name",
@@ -581,9 +581,9 @@ let head_and_rules =
     ( "vary values are joined",
       fun () ->
         let r = get "/varied" in
-        check_header r "vary" [ "Cookie, Yuka-Navigate, Yuka-Prefetch" ];
+        check_header r "vary" [ "Cookie, Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ];
         let r = get "/plain" in
-        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ] );
     ( "an Action is always no-store",
       fun () ->
         let r = get ~meth:`DELETE ~headers:[ ("sec-fetch-site", "same-origin") ] "/feed.xml" in
@@ -1168,7 +1168,7 @@ let navigation =
         check_header r "yuka-build" [ build ];
         check_header r "yuka-title" [ "Plain" ];
         check_header r "content-type" [ "text/html; charset=utf-8" ];
-        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ];
         check_header r "x-frame-options" [ "DENY" ];
         Alcotest.(check string) "body, after the route script"
           ({|<script type="application/json" data-yuka-context="route" data-name="yuka.route">"/plain"</script>|} ^ "<p>plain</p>")
@@ -1198,6 +1198,35 @@ let navigation =
             check_true "document" (String.starts_with ~prefix:"<!DOCTYPE html>" r.body);
             check_true "meta" (contains r.body ({|<meta name="yuka-build" content="|} ^ build ^ {|">|})))
           [ "X0"; ""; "-"; "1"; "L1/a" ] );
+    ( "Yuka-Overlay and a shared layer: the overlay page cut out of the innermost outlet",
+      fun () ->
+        let r = get ~headers:[ ("Yuka-Navigate", "L0"); ("Yuka-Overlay", "1") ] "/org/acme/x/2" in
+        check_status r 200;
+        check_header r "yuka-layer" [ "overlay" ];
+        check_header r "yuka-outlet" [];
+        check_header r "yuka-title" [ "Dialog" ];
+        check_header r "yuka-build" [ build ];
+        check_true "overlay page" (contains r.body "<dialog>dialog acme 2 item");
+        check_true "no layout" (not (contains r.body {|class="org"|} || contains r.body {|class="root"|}));
+        check_true "route of the overlay" (contains r.body {|data-yuka-context="route" data-name="yuka.route">"/org/acme/x/2"|});
+        check_true "ids start with overlay-" (contains r.body {|data-id="overlay-i1"|}) );
+    ( "without Yuka-Overlay, or with no shared layer, an overlay route gives the page",
+      fun () ->
+        let r = nav "L0" "/org/acme/x/2" in
+        check_header r "yuka-layer" [];
+        check_header r "yuka-outlet" [ "L0" ];
+        check_true "page in its layout" (contains r.body {|class="org"|} && contains r.body "acme 2 item");
+        check_true "no dialog" (not (contains r.body "dialog"));
+        let r = get ~headers:[ ("Yuka-Navigate", "X0"); ("Yuka-Overlay", "1") ] "/org/acme/x/2" in
+        check_header r "yuka-layer" [];
+        check_true "full document" (String.starts_with ~prefix:"<!DOCTYPE html>" r.body);
+        check_true "no dialog in the document" (not (contains r.body "dialog"));
+        let r = get ~headers:[ ("Yuka-Overlay", "1") ] "/org/acme/x/2" in
+        check_header r "yuka-layer" [];
+        check_true "a direct load is the full page" (contains r.body {|class="org"|} && not (contains r.body "dialog"));
+        let r = get ~headers:[ ("Yuka-Navigate", "L0"); ("Yuka-Overlay", "1") ] "/plain" in
+        check_header r "yuka-layer" [];
+        check_header r "yuka-outlet" [ "L0" ] );
     ( "ids in a partial start with the outlet key",
       fun () ->
         let r = nav "L0" "/islands" in
@@ -1617,8 +1646,8 @@ let prefetch =
         check_status (nav ~trigger:(trigger "visible") "/nowhere") 404 );
     ( "a page answer varies on Yuka-Prefetch",
       fun () ->
-        check_header (nav ~trigger:(trigger "hover") "/team/a/1") "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
-        check_header (get "/plain") "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
+        check_header (nav ~trigger:(trigger "hover") "/team/a/1") "vary" [ "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ];
+        check_header (get "/plain") "vary" [ "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ] );
     ( "a prerendered file: a refused trigger gets 204, an allowed one the file",
       fun () ->
         let prerendered = config_with ~assets:modules ~prerendered:"pre" () in
@@ -1627,7 +1656,7 @@ let prefetch =
         Alcotest.(check (list string)) "no file" [] !file_calls;
         let r = get ~config:prerendered ~headers:(trigger "hover") "/plain" in
         Alcotest.(check string) "the file" "prerendered plain" r.body;
-        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ] );
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ] );
     ( "the page prints the highest level of the tree",
       fun () ->
         check_true "idle" (contains (get "/plain").body {|<meta name="yuka-prefetch" content="idle">|});
@@ -1775,7 +1804,7 @@ let speculation =
         let r = get ~headers:(purpose "prefetch") "/team/a/1" in
         check_status r 200;
         check_events [ "outer"; "inner"; "squad start"; "profile start" ];
-        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch" ];
+        check_header r "vary" [ "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay" ];
         let r = get ~headers:(purpose "prefetch;prerender") "/plain" in
         check_status r 200;
         check_true "the page" (ends_with_rule r.body) );
@@ -1841,7 +1870,7 @@ let layout_values =
     Server.Generated.app ~build:"b" ~headers:[] ~prerender:[] ~pages:[ rules ] ~find:Cycle_shared.Routes.find
       ~resolve:(fun _ _ ->
         Server.Generated.Page
-          { rules; guards = []; fallback; load = (fun () -> Async.return (Ok { Server.Generated.layers; page = page () })) })
+          { rules; guards = []; fallback; load = (fun () -> Async.return (Ok { Server.Generated.layers; page = page (); overlay = None })) })
       ~missing:fallback
   in
   let body ?(config = config) ?(shell = false) ?(headers = []) () =

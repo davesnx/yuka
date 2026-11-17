@@ -4,12 +4,18 @@ type controller = unit
 
 let browser_only () = invalid_arg "Yuka: browser only"
 let set_title : string -> unit = fun _ -> browser_only ()
+let title : unit -> string = fun _ -> browser_only ()
+let active : unit -> node = fun _ -> browser_only ()
+let refocus : node -> unit = fun _ -> browser_only ()
+let route_script : unit -> (node * node) option = fun _ -> browser_only ()
+let put_back : node * node -> unit = fun _ -> browser_only ()
+let layer : unit -> node = fun _ -> browser_only ()
 let scroll_to : float -> unit = fun _ -> browser_only ()
 let scroll_to_hash : string -> unit = fun _ -> browser_only ()
 let new_controller : unit -> controller = fun _ -> browser_only ()
 let abort : controller -> unit = fun _ -> browser_only ()
 let fetch_page :
-    string * string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller * bool -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
  fun _ _ _ -> browser_only ()
 let hash_of : string -> string = fun _ -> browser_only ()
 let no_hash : string -> string = fun _ -> browser_only ()

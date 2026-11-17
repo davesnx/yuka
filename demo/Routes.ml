@@ -18,7 +18,10 @@ let routes =
           Router.route Create ~path:"/new" ~page:Pages.create;
           Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
             ~not_found:Pages.issue_not_found
-            [ Router.route Issue ~path:"/" ~page:Pages.issue ~search:{ comments = optional string } ];
+            [
+              Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:Pages.issue_dialog
+                ~search:{ comments = optional string };
+            ];
         ];
       Router.group ~path:"/w/:workspace<Model.Workspace.t>" ~layout:Pages.Workspace.shell
         [

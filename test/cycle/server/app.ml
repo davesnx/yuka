@@ -184,6 +184,10 @@ module Pages = struct
   let org_item ~org ~n ~org_item () =
     Server.page (fun () -> text (String.concat " " [ org; string_of_int n; org_item ]))
 
+  let org_dialog ~org ~n ~org_item () =
+    Server.page ~title:"Dialog" (fun () ->
+        el "dialog" [ text (String.concat " " [ "dialog"; org; string_of_int n; org_item ]); island "Counter" ])
+
   let org_missing ~org ~path () =
     Server.page ~title:"Org missing" (fun () -> el "p" [ text ("no org page " ^ path ^ " in " ^ org) ])
 

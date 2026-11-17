@@ -21,7 +21,7 @@ Router.make ~layout:Layouts.root ~not_found:Pages.not_found ~error:Pages.error
     Router.group ~path:"/issue/:id<Params.issue_id>" ~loader:Loaders.issue
       ~guard:Guards.signed_in
       [
-        Router.route Issue ~path:"/" ~page:Pages.issue
+        Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:Pages.issue_dialog
           ~search:
             {
               tab = optional Params.Tab.t;

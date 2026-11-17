@@ -16,7 +16,7 @@ type page = { title : string; head : string; body : unit -> node }
 let page ?(title = "") ?(head = "") body = { title; head; body }
 
 type layer = { key : string; data : bool; wrap : server Kind.element -> server Kind.element }
-type plan = { layers : layer list; page : page }
+type plan = { layers : layer list; page : page; overlay : page option }
 
 type cache = string
 
@@ -357,6 +357,7 @@ type env = {
   sleep : float -> unit Async.t;
   head_only : bool;
   navigate : string list option;
+  overlay : bool;
   build : string;
   prefetch : Prefetch.level;
   current : string;
@@ -400,7 +401,7 @@ let add_vary value headers =
 let navigation_vary headers = add_vary "Yuka-Prefetch" (add_vary "Yuka-Navigate" headers)
 
 let html_headers rule_headers extra =
-  navigation_vary
+  add_vary "Yuka-Overlay" @@ navigation_vary
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
 let mentions text part =
@@ -417,7 +418,7 @@ let rec shared sent (layers : layer list) =
 let speculation_rules =
   {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
 
-let render env ~status ~headers layers (page : page) =
+let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
   let entry =
@@ -455,10 +456,14 @@ let render env ~status ~headers layers (page : page) =
             (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
             (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build)
       | n ->
+          let n = if overlay then List.length layers else n in
           let outlet = List.nth keys (n - 1) in
           let headers =
             merge_headers
-              [ headers; [ ("yuka-outlet", outlet); ("yuka-title", Router.encode page.title) ] ]
+              [
+                headers;
+                [ (if overlay then ("yuka-layer", "overlay") else ("yuka-outlet", outlet)); ("yuka-title", Router.encode page.title) ];
+              ]
           in
           let below () =
             match Printer.seek ~outlet (build ()) with
@@ -474,7 +479,7 @@ let render env ~status ~headers layers (page : page) =
           Async.map
             (fun body ->
               { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
-            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(if overlay then "overlay-" else outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                below))
   | None ->
     let early = ref [] in
@@ -553,8 +558,8 @@ let fail_page env fallback message =
   log env.config `Error message;
   error_page env fallback
 
-let show env ~status ~headers ~fallback layers (page : unit -> page) =
-    match render env ~status ~headers layers (page ()) with
+let show ?overlay env ~status ~headers ~fallback layers (page : unit -> page) =
+    match render ?overlay env ~status ~headers layers (page ()) with
     | a -> recover env a (fail_page env fallback)
     | exception e -> fail_page env fallback (Web.exn_to_string e)
 
@@ -723,8 +728,14 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
               (Async.bind (protect load) (function
                 | Error stop -> stopped env fallback path stop
                 | Ok plan ->
+                    let overlay =
+                      match (plan.overlay, env.navigate) with
+                      | Some page, Some sent when env.overlay && shared sent plan.layers > 0 -> Some page
+                      | _ -> None
+                    in
                     Async.bind
-                      (show env ~status ~headers ~fallback plan.layers (fun () -> plan.page))
+                      (show ~overlay:(Option.is_some overlay) env ~status ~headers ~fallback plan.layers (fun () ->
+                           Option.value overlay ~default:plan.page))
                       (live_checked env fallback ~path)))))
 
 let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
@@ -961,6 +972,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         Option.map
           (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
           (r.header "yuka-navigate");
+      overlay = r.header "yuka-overlay" = Some "1";
       build = build_id config (App a);
       prefetch = a.prefetch;
       current = path;
@@ -1204,6 +1216,7 @@ let missing_page config (App a) ~sleep =
       sleep;
       head_only = false;
       navigate = None;
+      overlay = false;
       build = build_id config (App a);
       prefetch = a.prefetch;
       current = "";

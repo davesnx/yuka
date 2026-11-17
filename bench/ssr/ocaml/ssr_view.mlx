@@ -31,7 +31,7 @@ let stream_app issues : Dream.request Yuka.Server.app =
   let open Yuka.Server.Generated in
   let fallback : fallback = { layers = []; not_found = default_not_found; error = default_error } in
   let rules = rules ~headers:[] ~prerender:false () in
-  let plan : plan = { layers = []; page = Yuka.Server.page ~title:"Issues" (view issues) } in
+  let plan : plan = { layers = []; page = Yuka.Server.page ~title:"Issues" (view issues); overlay = None } in
   app ~build:"ssr" ~headers:[] ~prerender:[] ~pages:[ rules ]
     ~find:(fun meth segments _ ->
       match (meth, segments) with

@@ -356,6 +356,8 @@ let scroll_y : unit -> float = [%mel.raw "function () { return window.scrollY ||
 
 let set_cookie : string -> unit = [%mel.raw "function (cookie) { document.cookie = cookie }"]
 
+let history_back : unit -> unit = [%mel.raw "function () { window.history.back() }"]
+
 let history_replace_url : string -> unit =
   [%mel.raw
     "function (url) { window.history.replaceState(window.history.state, '', url) }"]

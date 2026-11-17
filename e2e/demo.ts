@@ -319,8 +319,12 @@ await step("3c. partial navigation", async () => {
   await page.locator('.row[data-id="YUK-3"] .row-title').click();
   const response = await outlet;
   await page.waitForURL("**/issue/YUK-3");
-  await page.waitForSelector(".comment-input");
-  check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
+  await page.waitForSelector("yuka-overlay .comment-input");
+  check(
+    "3c.3 an overlay answer over the shell",
+    response.request().headers()["yuka-overlay"] === "1" && response.headers()["yuka-layer"] === "overlay" && !(await response.text()).includes("<!DOCTYPE"),
+    String(response.headers()["yuka-layer"]),
+  );
   await page.waitForSelector("[data-nav-progress=finished]");
   check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
@@ -331,14 +335,19 @@ await step("3c. partial navigation", async () => {
     });
   const onIssue = await focusState();
   check("3c.5a after a client navigation the focus is on the h1 of the new page and its title is announced", onIssue.cls === "issue-title" && onIssue.live === "YUK-3", JSON.stringify(onIssue));
-  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null", await current());
+  check("3c.6 the list stays under the overlay and its link stays current", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null" && (await page.locator("yuka-outlet .row").count()) > 0, await current());
+  const beforeClose = allRequests.length;
+  await page.goBack();
+  await page.waitForURL(base + "/");
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
+  check("3c.6b Back removes the overlay with no request", allRequests.slice(beforeClose).filter((r) => r.navigate).length === 0 && (await marker()) === "alive", JSON.stringify(allRequests.slice(beforeClose).map((r) => r.url)));
   await page.locator(".new-issue-button").click();
   await page.waitForSelector(".dialog");
   check("3c.7 New_issue in the kept sidebar still opens", (await page.locator(".dialog").count()) === 1);
   await page.keyboard.press("Escape");
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
-  await page.waitForSelector(".row");
+  await page.waitForFunction(() => document.title === "My issues");
   const onMy = await focusState();
   check("3c.8a a page with no h1: the focus moves from the sidebar link into the new content, the title is announced", onMy.inOutlet && onMy.live === onMy.title && onMy.title !== "YUK-3", JSON.stringify(onMy));
   check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null", await current());
@@ -350,17 +359,102 @@ await step("3c. partial navigation", async () => {
     await route.fulfill({ response: real, headers: { ...real.headers(), "yuka-build": "changed" } });
   });
   await page.goBack();
-  await page.waitForURL("**/issue/YUK-3");
-  await page.waitForSelector(".comment-input");
-  await page.waitForFunction(() => document.getElementById("yuka-announcer")?.textContent === "YUK-3").catch(() => {});
+  await page.waitForURL(base + "/");
+  await page.waitForSelector("yuka-outlet .row");
+  await page.waitForFunction(() => document.getElementById("yuka-announcer")?.textContent === "Issues").catch(() => {});
   const onBack = await focusState();
-  check("3c.11a after Back the focus is on the h1 again and the title is announced", onBack.cls === "issue-title" && onBack.live === "YUK-3", JSON.stringify(onBack));
+  check("3c.11a after Back the focus is in the new content and the title is announced", onBack.inOutlet && onBack.live === "Issues", JSON.stringify(onBack));
   check("3c.11 back is partial too (progress bar kept)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   await page.locator('.nav-link[href="/my"]').click();
   await page.waitForURL("**/my");
   await page.waitForSelector(".row");
   await page.unroute("**/my");
   check("3c.12 another Yuka-Build is a full page load", (await marker()) === undefined && (await bar()).kept === undefined, `marker=${await marker()} ${JSON.stringify(await bar())}`);
+});
+
+await step("3l. overlay route", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  await page.evaluate(() => ((window as any).__marker = "alive"));
+  const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
+  await page.evaluate(() => window.scrollTo(0, 200));
+  const y = await page.evaluate(() => Math.round(window.scrollY));
+  const state = () =>
+    page.evaluate(() => ({
+      path: location.pathname,
+      overlays: document.querySelectorAll("yuka-overlay .issue-dialog").length,
+      rows: document.querySelectorAll("yuka-outlet .row").length,
+      y: Math.round(window.scrollY),
+      title: document.title,
+    }));
+  const opened = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-4"));
+  await page.locator('.row[data-id="YUK-4"] .row-title').click();
+  const answer = await opened;
+  await page.waitForURL("**/issue/YUK-4");
+  await page.waitForSelector("yuka-overlay .issue-dialog .comment-input");
+  const open = await state();
+  check(
+    "3l.1 a click on an issue shows it over the list, with its URL and title",
+    answer.headers()["yuka-layer"] === "overlay" && open.overlays === 1 && open.rows > 0 && open.title === "YUK-4" && (await marker()) === "alive",
+    JSON.stringify(open),
+  );
+  await page.mouse.move(1270, 790);
+  let mark = allRequests.length;
+  await page.goBack();
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
+  await page.waitForTimeout(300);
+  const back = await state();
+  check(
+    "3l.2 Back removes the overlay with no request (the focus that comes back to the link prefetches nothing) and keeps the list and its scroll",
+    allRequests.slice(mark).filter((r) => r.navigate).length === 0 && back.path === "/" && back.rows > 0 && back.y === y && (await marker()) === "alive",
+    JSON.stringify({ ...back, y0: y, requests: allRequests.slice(mark).map((r) => r.url) }),
+  );
+  check("3l.2b the focus is back on the link that opened the overlay", await page.evaluate(() => !!document.activeElement?.closest('.row[data-id="YUK-4"]')));
+  await page.goForward();
+  await page.waitForSelector("yuka-overlay .issue-dialog .comment-input");
+  check("3l.3 Forward shows the overlay again", (await state()).overlays === 1 && page.url().endsWith("/issue/YUK-4"), JSON.stringify(await state()));
+  await page.waitForSelector("yuka-overlay .close-button");
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay .close-button")?.closest("yuka-island") as any)?.__yuka_started);
+  mark = allRequests.length;
+  await page.locator("yuka-overlay .close-button").click();
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
+  check(
+    "3l.4 the close button (Browser.back) removes the overlay with no request",
+    allRequests.slice(mark).filter((r) => r.navigate).length === 0 && new URL(page.url()).pathname === "/" && (await marker()) === "alive",
+    page.url(),
+  );
+  await page.locator('.row[data-id="YUK-4"] .row-title').click();
+  await page.waitForSelector("yuka-overlay .issue-dialog .comment-input");
+  const related = page.locator("yuka-overlay a[href^='/issue/']").first();
+  await related.waitFor();
+  const target = (await related.getAttribute("href"))!;
+  await related.click();
+  await page.waitForURL("**" + target);
+  await page.waitForFunction((t) => document.title === t.split("/").pop(), target);
+  const replaced = await state();
+  check("3l.5 a link inside the overlay to another issue replaces the overlay", replaced.overlays === 1 && replaced.rows > 0 && (await marker()) === "alive", JSON.stringify({ target, ...replaced }));
+  mark = allRequests.length;
+  await page.locator("yuka-overlay .close-button").click();
+  await page.waitForURL(base + "/");
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
+  check(
+    "3l.6 the close button after a replaced overlay loads the list without an overlay",
+    allRequests.slice(mark).some((r) => r.navigate && new URL(r.url).pathname === "/") && (await state()).rows > 0,
+    JSON.stringify(allRequests.slice(mark).map((r) => r.url)),
+  );
+  await page.locator('.row[data-id="YUK-4"] .row-title').click();
+  await page.waitForSelector("yuka-overlay .issue-dialog .comment-input");
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector(".issue-page .comment-input");
+  const reloaded = await state();
+  check(
+    "3l.7 a reload of the overlay URL shows the full issue page",
+    reloaded.path === "/issue/YUK-4" && reloaded.overlays === 0 && reloaded.rows === 0 && (await page.locator("yuka-overlay").count()) === 0,
+    JSON.stringify(reloaded),
+  );
+  await page.locator(".crumb").click();
+  await page.waitForURL(base + "/");
+  await page.waitForSelector("yuka-outlet .row");
 });
 
 await step("3d. a page with no island loads no script", async () => {
@@ -631,18 +725,18 @@ await step("3f. prefetch and the navigation cache", async () => {
     .then(() => true, () => false);
   check("3f.2b data-yuka-nav is removed after the transition", removed);
   check("3f.2 the click uses the prefetch", requestsTo(from, "/issue/YUK-5").length === 1, String(requestsTo(from, "/issue/YUK-5").length));
-  await page.goBack();
-  await page.waitForSelector(".row");
   await page.mouse.move(1, 1);
+  await page.goBack();
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
   from = allRequests.length;
   await link("YUK-5").click();
   await page.waitForURL("**/issue/YUK-5");
   await page.waitForSelector(".comment-input");
   const again = requestsTo(from, "/issue/YUK-5");
   check("3f.3 a no-store page is fetched again", again.length === 1, JSON.stringify(again));
-  await page.goBack();
-  await page.waitForSelector(".row");
   await page.mouse.move(1, 1);
+  await page.goBack();
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
   from = allRequests.length;
   await link("YUK-6").hover();
   await until(() => requestsTo(from, "/issue/YUK-6").length > 0);
@@ -2359,6 +2453,8 @@ await step("7k. markdown and code style", async () => {
     navigated.theme === "light" && navigated.code === "gruvbox" && navigated.token === navigated.variants[4] && navigated.background === keyboard.background,
     JSON.stringify(navigated),
   );
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector(".comment-input");
   await pick("code-auto");
   const auto = await look();
   check(

@@ -529,6 +529,14 @@ module Browser : sig
       URL (read as {!attr} reads a URL) does nothing; a dev build logs the
       first one. *)
 
+  val back : unit -> unit
+  (** Browser only: raises [Invalid_argument] on native. Closes the overlay
+      that a client navigation to a route with [?overlay] showed: when the
+      history entry before it is the page under the overlay, it does
+      [history.back()], which removes the overlay with no request; else it
+      is a client navigation to the URL of the page under the overlay.
+      Without an overlay it does [history.back()]. *)
+
   val navigating : bool State.read
   (** [true] while a client navigation is in flight: from the click on a
       link, [popstate] or {!navigate} (also while the navigation code
@@ -1953,6 +1961,12 @@ module Server : sig
             [Yuka-Outlet] (its key) and [Yuka-Title] (percent-encoded);
             island, await and async ids get the prefix [KEY-]. Both have
             [Yuka-Build] ({!build_id}).
+          + With [Yuka-Overlay: 1] as well, a route with an overlay page
+            and [shared >= 1]: the overlay page, rendered inside the layers
+            and cut out of the innermost outlet, settled, with the headers
+            [Yuka-Layer: overlay] and [Yuka-Title]; ids get the prefix
+            [overlay-]. Page answers have [vary: Yuka-Navigate,
+            Yuka-Prefetch, Yuka-Overlay].
 
           A 404 or 500 page has the root [headers] and [no-store]. A
           failure before the response is returned (shell, or a fill that
@@ -2064,8 +2078,10 @@ module Server : sig
         renders it again instead of keeping it; [wrap] puts the layout
         around its children. *)
 
-    type plan = { layers : layer list; page : page }
-    (** What a page route renders. [layers] are outermost first. *)
+    type plan = { layers : layer list; page : page; overlay : page option }
+    (** What a page route renders. [layers] are outermost first. [overlay]
+        is the page of [?overlay], shown over the current page on a client
+        navigation. *)
 
     type fallback = { layers : layer list; not_found : string -> page; error : unit -> page }
     (** The pages for a 404 ([not_found] gets the request path) and a 500,

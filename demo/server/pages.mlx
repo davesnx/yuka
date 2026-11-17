@@ -63,6 +63,15 @@ let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yu
 
 let issue ~id ~issue ~comments () = Yuka.Server.page ~title:id (fun () -> issue_view ~comments issue)
 
+let issue_dialog ~id ~issue ~comments () =
+  Yuka.Server.page ~title:id (fun () ->
+      <div class_="issue-overlay">
+        <div class_="issue-dialog" role=`dialog aria_label=id>
+          <Yuka.Client><Close_button /></Yuka.Client>
+          (issue_view ~comments issue)
+        </div>
+      </div>)
+
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
       <div class_="not-found">

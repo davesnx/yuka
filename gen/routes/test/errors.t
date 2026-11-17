@@ -449,7 +449,7 @@ An unknown argument
   > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~layout:Layouts.a ]
   > EOF
   File "Routes.ml", line 1, characters 62-71:
-  Error: Router.route has no argument ~layout; its labelled arguments are ~path, ~page, ~loader, ~guard, ~search, ~prefetch, ~headers, ~cache, ~prerender
+  Error: Router.route has no argument ~layout; its labelled arguments are ~path, ~page, ?overlay, ~loader, ~guard, ~search, ~prefetch, ~headers, ~cache, ~prerender
   [1]
 
 A missing argument
@@ -557,6 +557,42 @@ A page that is not a value path
   > EOF
   File "Routes.ml", line 1, characters 46-63:
   Error: ~page must be a value path such as Pages.home
+  [1]
+
+An overlay page that is not a value path
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ?overlay:(Some Pages.dialog) ]
+  > EOF
+  File "Routes.ml", line 1, characters 63-82:
+  Error: ?overlay must be a value path such as Pages.home
+  [1]
+
+An overlay page written ~overlay
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~overlay:Pages.dialog ]
+  > EOF
+  File "Routes.ml", line 1, characters 63-75:
+  Error: the overlay page is an optional argument: write ?overlay:Pages.dialog
+  [1]
+
+An overlay on a group
+
+  $ gen <<'EOF'
+  > Router.make [ Router.group ~path:"/a" ?overlay:Pages.dialog [ Router.route A ~path:"/" ~page:Pages.a ] ]
+  > EOF
+  File "Routes.ml", line 1, characters 47-59:
+  Error: Router.group has no argument ?overlay; its labelled arguments are ~path, ~layout, ~loader, ~guard, ~not_found, ~error, ~search, ~prefetch, ~headers, ~cache, ~prerender
+  [1]
+
+An overlay given twice
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ?overlay:Pages.b ?overlay:Pages.c ]
+  > EOF
+  File "Routes.ml", line 1, characters 80-87:
+  Error: argument ?overlay is given twice
   [1]
 
 A handler that is not a value path

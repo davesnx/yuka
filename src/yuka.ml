@@ -79,7 +79,7 @@ module Server = struct
   module Generated = struct
     type rules = Cycle.rules
     type layer = Cycle.layer = { key : string; data : bool; wrap : Types.server Kind.element -> Types.server Kind.element }
-    type plan = Cycle.plan = { layers : layer list; page : Cycle.page }
+    type plan = Cycle.plan = { layers : layer list; page : Cycle.page; overlay : Cycle.page option }
 
     type fallback = Cycle.fallback = {
       layers : layer list;

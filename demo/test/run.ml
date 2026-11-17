@@ -93,10 +93,16 @@ let streaming () =
 
 let navigation () =
   let _, response, html = call ~headers:[ ("Yuka-Navigate", "1") ] "/issue/YUK-1" in
-  Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate, Yuka-Prefetch") (header response "vary");
+  Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay") (header response "vary");
   has html "Please add a test with an empty filter result.";
   lacks html "skeleton";
-  lacks html "__yukaFill"
+  lacks html "__yukaFill";
+  let _, response, html = call ~headers:[ ("Yuka-Navigate", "L0"); ("Yuka-Overlay", "1") ] "/issue/YUK-1" in
+  Alcotest.(check (option string)) "overlay" (Some "overlay") (header response "yuka-layer");
+  has html "class=\"issue-dialog\"";
+  has html "data-name=\"Demo_shared.Close_button\"";
+  has html "Please add a test with an empty filter result.";
+  lacks html "class=\"sidebar\""
 
 let not_found () =
   let status, response, html = call "/issue/NOPE" in

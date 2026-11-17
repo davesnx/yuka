@@ -3,12 +3,18 @@ open Web
 type controller
 
 val set_title : string -> unit
+val title : unit -> string
+val active : unit -> node
+val refocus : node -> unit
+val route_script : unit -> (node * node) option
+val put_back : node * node -> unit
+val layer : unit -> node
 val scroll_to : float -> unit
 val scroll_to_hash : string -> unit
 val new_controller : unit -> controller
 val abort : controller -> unit
 val fetch_page :
-  string * string * string * bool * controller ->
+  string * string * string * bool * controller * bool ->
   (string -> int -> (string -> string option) -> string -> unit) ->
   (unit -> unit) ->
   unit

@@ -146,6 +146,8 @@ let rec list_items e =
       fail e.pexp_loc
         "the child nodes must be a list such as [ Router.route A ~path:\"/a\" ~page:Pages.a ]"
 
+let arg l = (if l = "overlay" then "?" else "~") ^ l
+
 let element e =
   match e.pexp_desc with
   | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Router", tag); _ }; _ }, args) ->
@@ -154,7 +156,8 @@ let element e =
           (fun (label, v) ->
             match label with
             | Nolabel -> None
-            | Labelled l -> Some (l, v)
+            | Labelled "overlay" -> fail v.pexp_loc "the overlay page is an optional argument: write ?overlay:%s" (Pprintast.string_of_expression v)
+            | Labelled l | Optional ("overlay" as l) -> Some (l, v)
             | Optional l -> fail v.pexp_loc "?%s: optional arguments are not supported" l)
           args
       in
@@ -162,7 +165,7 @@ let element e =
         | [] -> ()
         | (l, _) :: rest ->
             (match List.assoc_opt l rest with
-            | Some v -> fail v.pexp_loc "argument ~%s is given twice" l
+            | Some v -> fail v.pexp_loc "argument %s is given twice" (arg l)
             | None -> ());
             no_dups rest
       in
@@ -177,18 +180,18 @@ let unlabelled tag loc what = function
   | [ v ] -> v
   | _ -> fail loc "Router.%s takes %s as its one unlabelled argument" tag what
 
-let attachments = [ "page"; "layout"; "handler"; "guard"; "not_found"; "error" ]
+let attachments = [ "page"; "overlay"; "layout"; "handler"; "guard"; "not_found"; "error" ]
 
 let check_props tag loc props ~required ~optional =
   List.iter
     (fun (l, v) ->
       if not (List.mem l required || List.mem l optional) then
-        fail v.pexp_loc "Router.%s has no argument ~%s; its labelled arguments are %s" tag l
-          (String.concat ", " (List.map (( ^ ) "~") (required @ optional)));
+        fail v.pexp_loc "Router.%s has no argument %s; its labelled arguments are %s" tag (arg l)
+          (String.concat ", " (List.map arg (required @ optional)));
       match v.pexp_desc with
       | Pexp_ident _ -> ()
       | _ when List.mem l attachments ->
-          fail v.pexp_loc "~%s must be a value path such as Pages.home" l
+          fail v.pexp_loc "%s must be a value path such as Pages.home" (arg l)
       | _ -> ())
     props;
   List.iter
@@ -464,7 +467,7 @@ let read ~server ~items names e =
           }
     | "route" ->
         check_props tag loc props ~required:[ "path"; "page" ]
-          ~optional:([ "loader"; "guard"; "search"; "prefetch" ] @ rules);
+          ~optional:([ "overlay"; "loader"; "guard"; "search"; "prefetch" ] @ rules);
         let name = name () in
         let text, ploc, segs = own_path () in
         let labels = add_labels ploc ctx.labels (seg_labels segs) |> with_loader in
@@ -1088,15 +1091,14 @@ let server_arm ~shared ~rule ~fallback n =
                   (prop "loader" l))
               n.levels
           in
-          let page =
-            sprintf "%s%s ()" (expr (Option.get (prop "page" leaf)))
-              (args (labels @ List.map fst loaders))
-          in
+          let call v = sprintf "%s%s ()" (expr v) (args (labels @ List.map fst loaders)) in
           let plan =
             [ "Yuka.Async.return"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.Generated.layers =" ]
             @ indent 9 (layers_lines n.levels)
             @ [
-                sprintf "       page = %s;" page;
+                sprintf "       page = %s;" (call (Option.get (prop "page" leaf)));
+                sprintf "       overlay = %s;"
+                  (match prop "overlay" leaf with Some v -> sprintf "Some (%s)" (call v) | None -> "None");
                 sprintf "     })%s);" (String.make (List.length loaders) ')');
               ]
           in
@@ -1159,14 +1161,14 @@ let check_hidden nodes =
               | Pexp_ident { txt = Lident name; _ } when List.mem prop ("loader" :: attachments) ->
                   if generated_name name then
                     fail v.pexp_loc
-                      "~%s:%s is hidden by a name of the generated server code (req, children, path, \
+                      "%s:%s is hidden by a name of the generated server code (req, children, path, \
                        rules_N, layer_N, fallback_N); write it with its module path"
-                      prop name
+                      (arg prop) name
                   else if prop <> "loader" && List.mem name labels then
                     fail v.pexp_loc
-                      "~%s:%s is hidden by the param, search field or loader result %s of the route \
+                      "%s:%s is hidden by the param, search field or loader result %s of the route \
                        %s; write it with its module path"
-                      prop name name route
+                      (arg prop) name name route
               | _ -> ())
             level.props)
         n.levels)

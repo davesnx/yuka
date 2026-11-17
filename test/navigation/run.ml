@@ -637,10 +637,90 @@ let partial finish =
       check "outer kept, inner stopped, new running" "g1/3|g1/1" (log_g ());
       finish ())
 
+let count_selector : string -> int = [%mel.raw "function (sel) { return document.querySelectorAll(sel).length }"]
+
+let call_overlay : int -> string =
+  [%mel.raw "function (i) { return String(globalThis.__calls[i].init.headers['Yuka-Overlay']) }"]
+
+let overlay_answer i body = resolve_headers i body 200 [| ("yuka-layer", "overlay"); ("yuka-title", "Two"); ("yuka-build", "b1") |]
+
+let overlay finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  ignore (click "#two" "");
+  check "a click asks for an overlay" "1" (call_overlay 0);
+  overlay_answer 0 ({|<p id="ov">ov</p><a id="next" href="/three">3</a>|} ^ island_at "overlay-i1" 3);
+  tick (fun () ->
+      check "background kept" "old" (attr "#old" "id");
+      check "content in the overlay" "1" (ints (count_selector "body > yuka-overlay:last-child #ov"));
+      check "title" "Two" (title ());
+      check "pushed" "/two" (location_ ());
+      check "links of the background not marked" "page" (attr "#home" "aria-current");
+      check "overlay island started, background islands not again" "g0/1|g0/2|g0/3" (log_g ());
+      log_clear ();
+      back (fun () ->
+          check "Back sends no request" "1" (ints (calls ()));
+          check "overlay removed" "0" (ints (count_selector "yuka-overlay"));
+          check "background still there" "old" (attr "#old" "id");
+          check "title of the background" "start" (title ());
+          check "location" "/start?x=1" (location_ ());
+          State.set probe_runs 1;
+          check "overlay island stopped, background islands run" "g1/2|g1/1" (log_g ());
+          forward (fun () ->
+              check "Forward asks for the overlay" "1" (call_overlay 1);
+              overlay_answer 1 {|<p id="ov">ov</p><a id="next" href="/three">3</a>|};
+              tick (fun () ->
+                  check "overlay shown again" "1" (ints (count_selector "yuka-overlay #ov"));
+                  Browser.back ();
+                  on_popstate (fun () ->
+                      tick (fun () ->
+                          check "Browser.back removes the overlay with no request" "2" (ints (calls ()));
+                          check "no overlay" "0" (ints (count_selector "yuka-overlay"));
+                          check "at the background" "/start?x=1" (location_ ());
+                          finish ()))))))
+
+let overlay_replaced finish =
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  ignore (click "#two" "");
+  overlay_answer 0 {|<a id="next" href="/three">3</a>|};
+  tick (fun () ->
+      ignore (click "#next" "");
+      check "a link inside the overlay asks for an overlay" "1" (call_overlay 1);
+      overlay_answer 1 {|<p id="three">3</p>|};
+      tick (fun () ->
+          check "one overlay, replaced" "1" (ints (count_selector "yuka-overlay"));
+          check "new content" "three" (attr "yuka-overlay #three" "id");
+          check "pushed" "/three" (location_ ());
+          Browser.back ();
+          check "Browser.back loads the background" "3" (ints (calls ()));
+          check "the background URL" "/start?x=1" (call_url 2);
+          check "without an overlay" "undefined" (call_overlay 2);
+          resolve_headers 2 {|<p id="back">back</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+          tick (fun () ->
+              check "overlay removed" "0" (ints (count_selector "yuka-overlay"));
+              check "outlet swapped" "back" (attr "#back" "id");
+              check "pushed" "/start?x=1" (location_ ());
+              ignore (click "#two" "");
+              overlay_answer 3 {|<p id="ov">ov</p>|};
+              tick (fun () ->
+                  ignore (click "#home" "");
+                  resolve_headers 4 {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+                  tick (fun () ->
+                      check "a link in the background closes the overlay" "0" (ints (count_selector "yuka-overlay"));
+                      check "and navigates" "home-page" (attr "#home-page" "id");
+                      back (fun () ->
+                          check "Back to the overlay entry under another page loads it without an overlay" "undefined"
+                            (call_overlay 5);
+                          finish ()))))))
+
 let attr_text : string -> string =
   [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.textContent : 'none' }"]
 
-let count_selector : string -> int = [%mel.raw "function (sel) { return document.querySelectorAll(sel).length }"]
 
 let theme_ctx : string State.read Context.t = Context.make ~name:"t" ~codec:(Codec.state Codec.string) ()
 let lay_runs = ref 0
@@ -784,6 +864,29 @@ let focus_on : string -> unit = [%mel.raw "function (sel) { document.querySelect
 let focused : unit -> string =
   [%mel.raw
     {|function () { const a = document.activeElement; return !a ? "none" : a.id || a.localName + (a.getAttribute("tabindex") === null ? "" : "[" + a.getAttribute("tabindex") + "]") }|}]
+
+let route_overlay finish =
+  setup "";
+  route_page ();
+  focus_on "#two";
+  ignore (click "#two" "");
+  resolve_headers 0 (route_script "/two" ^ {|<p id="ov">ov</p>|}) 200
+    [| ("yuka-layer", "overlay"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "the route is the overlay's while it shows" "two" (attr_text "b");
+      check "the focus moves into the overlay" "yuka-overlay[-1]" (focused ());
+      back (fun () ->
+          check "Back: the route of the background, no request" "start 1 1" (attr_text "b" ^ " " ^ ints (calls ()));
+          check "the focus comes back" "two" (focused ());
+          check "one route script in the document" "1" (ints (count_selector {|script[data-yuka-context="route"]|}));
+          forward (fun () ->
+              resolve_headers 1 (route_script "/two" ^ {|<p id="ov">ov</p>|}) 200
+                [| ("yuka-layer", "overlay"); ("yuka-build", "b1") |];
+              tick (fun () ->
+                  check "Forward: the overlay's route again" "two" (attr_text "b");
+                  back (fun () ->
+                      check "Back again: the background's route" "start 1" (attr_text "b");
+                      finish ())))))
 
 let announced : unit -> string =
   [%mel.raw
@@ -3125,6 +3228,9 @@ let all =
     ("404 is shown in place", shown_in_place 404);
     ("500 is shown in place", shown_in_place 500);
     ("partial response replaces the outlet", partial);
+    ("overlay: shown over the page, Back removes it with no request, Forward shows it", overlay);
+    ("overlay: Routes.current and the focus follow the overlay", route_overlay);
+    ("overlay: replaced from inside, Browser.back loads the background, a background link closes it", overlay_replaced);
     ("a navigation focuses the h1 of the new content and announces the title, also on Back", focus_heading);
     ("focus order: autofocus, fragment target, h1, outlet", focus_targets);
     ("a text field outside the content keeps the focus", focus_kept);

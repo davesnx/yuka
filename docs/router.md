@@ -46,7 +46,8 @@ let post (_ : Dream.request) ~slug =
 - `Router.make [ nodes ]`: the root.
 - `Router.group ~path [ nodes ]`: a path prefix for its children. Its
   layout, loader, guard, search fields and rules apply to all of them.
-- `Router.route Name ~path ~page`: a page.
+- `Router.route Name ~path ~page`: a page. `?overlay:Pages.dialog` adds
+  an overlay page (see "Overlay routes").
 - `Router.endpoint Name ~path ~method_ ~handler`: a response that is not
   a page, such as JSON or a file.
 - `Router.action Name ~path ~method_ ~handler`: like an endpoint, for a
@@ -145,6 +146,7 @@ adapter, such as `Dream.request`.
 | Attachment | On | Shape |
 |---|---|---|
 | `~page` | route | `~params ~search ~loaded () -> Yuka.Server.page` |
+| `?overlay` | route | as `~page` |
 | `~layout` | make, group | `~params ~loaded ~children () -> Yuka.server Yuka.element` |
 | `~loader` | group, route | `req -> ~params -> ('a, Yuka.Server.stop) result Yuka.Async.t` |
 | `~guard` | all but redirect | `req -> ~params -> (unit, Yuka.Server.stop) result Yuka.Async.t` |
@@ -301,6 +303,65 @@ about it and moves the focus, as a full page load does:
 `Routes.replace`, `Routes.push`, `Browser.replace_url`, a fragment link,
 and Back or Forward to an entry of the page shown change neither.
 
+## Overlay routes
+
+A route with `?overlay` shows its overlay page over the current page on a
+client navigation, as a dialog. A direct load or a reload of its URL
+shows the normal page:
+
+```ocaml
+(* Routes.ml *)
+Router.group ~path:"/" ~layout:Pages.shell
+  [
+    Router.route Issues ~path:"/" ~page:Pages.index;
+    Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+      [ Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:Pages.issue_dialog ];
+  ]
+
+(* pages.mlx: the overlay page gets the arguments of ~page *)
+let issue_dialog ~id ~issue () =
+  Yuka.Server.page ~title:id (fun () ->
+      <div class_="dialog" role=`dialog aria_label=id>
+        <Yuka.Client><Close_button /></Yuka.Client>
+        <Issue_view issue />
+      </div>)
+
+(* close_button.mlx *)
+let[@client] make () =
+  <button type_=`button on_click=(fun _ -> Yuka.Browser.back ())>"Close"</button>
+```
+
+- A click on a link, or `Yuka.Browser.navigate`, to the route sends
+  `Yuka-Overlay: 1`. When the current page and the route share a layout
+  that stays (the case for an outlet answer), the server renders the
+  overlay page inside the layouts of the route and answers its content
+  with `Yuka-Layer: overlay`. Else it answers as for any page.
+- The browser puts that content in one `<yuka-overlay>` element at the
+  end of `<body>` and adds a history entry. The page under it stays as it
+  is: its islands run, and its scroll does not change. The title and
+  `Routes.current` are those of the overlay route. The focus moves into
+  the overlay, as for a client navigation.
+- Back removes the overlay with no request and gives the title, the
+  route and the focus back to the page under it. Forward shows the
+  overlay again.
+- A link in the overlay to another route with an overlay replaces the
+  overlay. Any other navigation removes it.
+- `Yuka.Browser.back ()` closes the overlay: Back when the history entry
+  before it is the page under it, else a client navigation to the URL of
+  that page.
+- The overlay page is the whole content of the overlay: give it its own
+  backdrop and dialog markup. Ids in it start with `overlay-`.
+
+Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay`.
+
+### Split views
+
+There are no parallel outlets. For a list next to its detail, put the
+list in the layout of a group and the detail in a child route: a client
+navigation between details keeps the layout. For a second pane with its
+own state, keep that state in a search field and change it with
+`Routes.replace`, or keep it in an island.
+
 ## The current route
 
 The shared `Routes` module also has three functions for the route of the
@@ -443,7 +504,7 @@ level. The server counts a value it does not know as
 `visible`. A prefetch of an endpoint or an action gets `204` with
 `Yuka-Prefetch: off`, and its guards and handler do not run. A prefetch
 of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
-`204` with `Yuka-Prefetch: off`, and the file is not read. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch`.
+`204` with `Yuka-Prefetch: off`, and the file is not read. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay`.
 
 On a link, `data-yuka-prefetch="off"` stops its prefetch.
 `navigator.connection.saveData` stops all prefetch.

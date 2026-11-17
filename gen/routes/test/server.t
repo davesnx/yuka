@@ -183,6 +183,33 @@ user's value
   $ grep 'page =' out.ml
                        page = routes ();
 
+An overlay page gets the arguments of the page; a route without one has None
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+  >       [ Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:Pages.issue_dialog ~search:{ tab = optional string } ];
+  >     Router.route Home ~path:"/" ~page:Pages.home;
+  >   ]
+  > EOF
+  $ grep -e 'page =' -e 'overlay =' out.ml
+                       page = Pages.issue ~id ~tab ~issue ();
+                       overlay = Some (Pages.issue_dialog ~id ~tab ~issue ());
+                       page = Pages.home ();
+                       overlay = None;
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+  >       [ Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:issue ];
+  >   ]
+  > EOF
+  File "Routes.ml", line 4, characters 64-69:
+  Error: ?overlay:issue is hidden by the param, search field or loader result issue of the route Issue; write it with its module path
+  [1]
+
 A short attachment that the generated code would hide
 
   $ gen <<'EOF'

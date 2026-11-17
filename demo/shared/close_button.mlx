@@ -1,0 +1,2 @@
+let[@client] make () =
+  <button class_="button close-button" type_=`button aria_label="Close" on_click=(fun _ -> Yuka.Browser.back ())>"Close"</button>
