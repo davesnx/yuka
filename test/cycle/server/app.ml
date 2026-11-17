@@ -259,6 +259,7 @@ module Api = struct
     note "team json";
     if team = "gone" then Server.text ~status:404 "gone" else
     Server.json
+      (Yuka.Codec.make ~encode:Fun.id ~decode:Result.ok)
       (`Assoc
         [
           ("team", `String (team));
@@ -306,6 +307,40 @@ let () =
              Option.value (Server.Request.session request) ~default:"-";
              (match Server.Request.meth request with `POST -> "POST" | _ -> "other");
              Server.Request.path request;
+           ]))
+
+let inspect = Yuka.Action.mutation ~name:"inspect" ~input:Yuka.Codec.int ~output:Yuka.Codec.string
+
+let () =
+  Server.Action.implement inspect (fun request n ->
+      let module R = Server.Request in
+      let shown = function
+        | Ok s -> s
+        | Error `Too_large -> "too large"
+      in
+      let json_shown = function
+        | Ok n -> string_of_int n
+        | Error `Too_large -> "too large"
+        | Error (`Invalid_json _) -> "invalid json"
+        | Error (`Invalid_value _) -> "invalid value"
+      in
+      Async.bind (R.body request ~limit:100) @@ fun first ->
+      Async.bind (R.body request ~limit:100) @@ fun second ->
+      Async.bind (R.body request ~limit:1) @@ fun small ->
+      Async.bind (R.json request Yuka.Codec.int) @@ fun as_int ->
+      Async.bind (R.json request Yuka.Codec.string) @@ fun as_string ->
+      Async.return
+        (String.concat " | "
+           [
+             string_of_int n;
+             shown first;
+             shown second;
+             shown small;
+             json_shown as_int;
+             (match as_string with Error (`Invalid_value _) -> "invalid value" | _ -> "other");
+             R.target request;
+             String.concat "," (List.map (fun (k, v) -> k ^ "=" ^ v) (R.query request));
+             Option.value (R.cookie request "sid") ~default:"-";
            ]))
 
 let () =

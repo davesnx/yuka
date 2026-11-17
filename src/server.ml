@@ -355,7 +355,9 @@ let empty_context () : Types.context =
   {
     meth = `GET;
     path = "";
+    target = "";
     header = (fun _ -> None);
+    body = (fun ~limit:_ -> Async.return (Ok ""));
     session = (fun () -> None);
     log = (fun level m -> !Types.default_log level m);
     live = (fun name key -> !Bridge.live_state name key);
@@ -457,6 +459,54 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ 
   forms := (Action.name action, run) :: !forms
 
 let max_body = 1_048_576
+
+let read_once read =
+  let first = ref None in
+  fun ~limit ->
+    let read =
+      match !first with
+      | Some r -> r
+      | None ->
+          let r = Async.map (function Some s -> Ok s | None -> Error `Too_large) (read ~limit) in
+          first := Some r;
+          r
+    in
+    Async.map (function Ok s when String.length s > limit -> Error `Too_large | r -> r) read
+
+module Request = struct
+  let header (r : Types.context) = r.header
+  let session (r : Types.context) = r.session ()
+  let meth (r : Types.context) = r.meth
+  let path (r : Types.context) = r.path
+  let target (r : Types.context) = r.target
+  let query (r : Types.context) = Router.query r.target
+  let query_param r name = match Router.search (query r) name with v :: _ -> Some v | [] -> None
+
+  let cookie (r : Types.context) name =
+    let unquote v =
+      let n = String.length v in
+      if n >= 2 && v.[0] = '"' && v.[n - 1] = '"' then String.sub v 1 (n - 2) else v
+    in
+    Option.bind (r.header "cookie") (fun h ->
+        List.find_map
+          (fun pair ->
+            match Router.cut pair '=' with
+            | k, Some v when String.equal (String.trim k) name -> Some (unquote (String.trim v))
+            | _ -> None)
+          (String.split_on_char ';' h))
+
+  let body (r : Types.context) ~limit = r.body ~limit
+
+  let json ?(limit = max_body) (r : Types.context) codec =
+    Async.map
+      (function
+        | Error `Too_large -> Error `Too_large
+        | Ok text -> (
+            match Json.of_string text with
+            | Error m -> Error (`Invalid_json m)
+            | Ok j -> Result.map_error (fun m -> `Invalid_value m) (Codec.decode codec j)))
+      (r.body ~limit)
+end
 
 let authority url =
   match String.index_opt url ':' with

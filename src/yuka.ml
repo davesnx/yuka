@@ -56,13 +56,6 @@ module Server = struct
   type request = Types.context
   type log_level = Types.log_level
 
-  module Request = struct
-    let header (r : request) = r.header
-    let session (r : request) = r.session ()
-    let meth (r : request) = r.meth
-    let path (r : request) = r.path
-  end
-
   let to_string build = Server.to_string (Kind.fn build)
   let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
 
@@ -143,8 +136,14 @@ module Server = struct
     let live_state ?node ~sleep request name key = Live_server.ssr_state ~sleep (Live_server.pick node) request name key
     let json_patch = Json_patch.apply
 
-    let request ?(header = fun _ -> None) ?session () : request =
-      { (Server.empty_context ()) with header; session = (fun () -> session) }
+    let request ?(header = fun _ -> None) ?session ?(meth = `GET) ?(target = "") ?body () : request =
+      let empty = Server.empty_context () in
+      let body =
+        match body with
+        | None -> empty.body
+        | Some text -> Server.read_once (fun ~limit -> Async.return (if String.length text > limit then None else Some text))
+      in
+      { empty with header; session = (fun () -> session); meth; target; path = fst (Router.split_target target); body }
   end
 end
 

@@ -82,7 +82,8 @@ let with_type kind ?(status = 200) ?(headers = []) text =
 
 let text ?status ?headers s = with_type "text/plain; charset=utf-8" ?status ?headers s
 let html ?status ?headers s = with_type "text/html; charset=utf-8" ?status ?headers s
-let json ?status ?headers j = with_type "application/json" ?status ?headers (Json.to_string j)
+let json ?status ?headers codec v =
+  with_type "application/json" ?status ?headers (Json.to_string (Codec.encode codec v))
 
 let see_other location =
   Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
@@ -308,7 +309,7 @@ type request = {
   meth : Router.meth;
   target : string;
   header : string -> string option;
-  body : limit:int -> string option Async.t;
+  body : limit:int -> (string, [ `Too_large ]) result Async.t;
   session : unit -> string option;
   csrf_token : unit -> string option;
   verify_csrf : string -> bool Async.t;
@@ -672,8 +673,8 @@ let action env (r : request) raw =
       | Error e -> Async.return (json e)
       | Ok handler ->
           Async.bind (r.body ~limit:Server.max_body) (function
-            | None -> Async.return (json (Server.action_error 413 "request too large"))
-            | Some body ->
+            | Error `Too_large -> Async.return (json (Server.action_error 413 "request too large"))
+            | Ok body ->
                 Async.map json
                   (Server.answer_action ?origins ~context ~live:(Live_server.mark_json env.node) ~name handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
@@ -755,8 +756,8 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
               | Error stop -> page_or_error (stopped env fallback path stop)
               | Ok () ->
                   Async.bind (r.body ~limit:Server.max_body) (function
-                    | None -> reply (plain 413 "Request Too Large")
-                    | Some body -> (
+                    | Error `Too_large -> reply (plain 413 "Request Too Large")
+                    | Ok body -> (
                         let fields = Router.query ("?" ^ body) in
                         match List.assoc_opt "_yuka_action" fields with
                         | None -> reply (method_not_allowed allowed)
@@ -954,7 +955,9 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
     {
       meth = r.meth;
       path;
+      target = r.target;
       header = r.header;
+      body = r.body;
       session = r.session;
       log = log config;
       live =
@@ -1116,7 +1119,7 @@ module Make (Backend : ADAPTER) = struct
         meth = Backend.meth req;
         target = Backend.target req;
         header = Backend.header req;
-        body = (fun ~limit -> Backend.body req ~limit);
+        body = Server.read_once (Backend.body req);
         session = (fun () -> Backend.session req);
         csrf_token = (fun () -> Backend.csrf_token req);
         verify_csrf = Backend.verify_csrf req;
