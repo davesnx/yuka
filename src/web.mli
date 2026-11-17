@@ -120,6 +120,15 @@ val table_size : 'a table -> int
 val table_values : 'a table -> 'a array
 val table_clear : 'a table -> unit
 
+type ('k, 'v) keyed
+
+val keyed : ('k -> 'k -> bool) -> ('k, 'v) keyed
+val keyed_get : ('k, 'v) keyed -> 'k -> 'v option
+val keyed_set : ('k, 'v) keyed -> 'k -> 'v -> unit
+val keyed_size : ('k, 'v) keyed -> int
+val keyed_keep : ('k, 'v) keyed -> ('v -> bool) -> unit
+val keyed_clear : ('k, 'v) keyed -> unit
+
 val shortest_float : float -> string
 val parse_float : string -> float
 val parse_int : string -> int option
