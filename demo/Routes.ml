@@ -37,7 +37,7 @@ let routes =
             ~not_found:Pages.Workspace.issue_not_found
             [ Router.route Workspace_issue ~path:"/" ~page:Pages.Workspace.issue ~search:{ comments = optional string } ];
         ];
-      Router.endpoint Issues_json ~path:"/issues.json" ~method_:`GET
+      Router.get Issues_json ~path:"/issues.json"
         ~handler:Handlers.issues_json
         ~cache:(public ~max_age:60 ());
       Router.redirect ~path:"/issues" ~to_:(Permanent "/");

@@ -468,7 +468,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
       Yuka.Server.Generated.Handler
         {
           rules = rules_0;
-          action = false;
+          action = true;
           cross_origin = false;
           guards = [ (fun () -> App.Guards.thing req) ];
           run = (fun () -> App.Api.thing req);
@@ -477,7 +477,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
       Yuka.Server.Generated.Handler
         {
           rules = rules_0;
-          action = false;
+          action = true;
           cross_origin = true;
           guards = [];
           run = (fun () -> App.Api.hook req);
@@ -534,7 +534,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   | Cycle_shared.Routes.Clear_feed ->
       Yuka.Server.Generated.Handler
         {
-          rules = rules_9;
+          rules = rules_0;
           action = true;
           cross_origin = false;
           guards = [];
@@ -542,7 +542,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"41f43a8b36b1e79c307f2d3addb3f8e1"
+  Yuka.Server.Generated.app ~build:"bd658bd5bd70228fa760e5b5ce43b61f"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11 ]

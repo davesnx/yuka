@@ -12,6 +12,6 @@ Router.make ~layout:App.root ~not_found:App.not_found
     Router.route Stuck ~path:"/stuck" ~page:App.stuck;
     Router.route Lingering ~path:"/lingering" ~page:App.lingering;
     Router.route Page ~path:"/:parts<string...>" ~page:App.page ~prerender:true;
-    Router.endpoint Feed ~path:"/feed.xml" ~method_:`GET ~handler:App.feed
+    Router.get Feed ~path:"/feed.xml" ~handler:App.feed
       ~prerender:true;
   ]
