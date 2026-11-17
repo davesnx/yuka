@@ -54,8 +54,9 @@ client/   dune, main.ml
 ```
 
 `Routes.ml` is the route tree. It is not compiled: `yuka routes` reads it.
-`Router.make`, `Router.group`, `Router.route`, `Router.endpoint`,
-`Router.action` and `Router.redirect` are the nodes of this file, and
+`Router.make`, `Router.group`, `Router.route`, `Router.get`,
+`Router.post`, `Router.put`, `Router.patch`, `Router.delete` and
+`Router.redirect` are the nodes of this file, and
 `~page`, `~layout`, `~loader`, `~guard`, `~handler`, `~not_found` and
 `~error` name functions of the server:
 

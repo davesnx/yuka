@@ -18,7 +18,7 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
         Router.route Post ~path:"/:slug<string>" ~page:Pages.post
           ~loader:Loaders.post;
       ];
-    Router.endpoint Feed ~path:"/feed.json" ~method_:`GET ~handler:Api.feed;
+    Router.get Feed ~path:"/feed.json" ~handler:Api.feed;
     Router.redirect ~path:"/old-blog" ~to_:(Permanent "/blog");
   ]
 ```
@@ -48,17 +48,20 @@ let post (_ : Dream.request) ~slug =
   layout, loader, guard, search fields and rules apply to all of them.
 - `Router.route Name ~path ~page`: a page. `?overlay:Pages.dialog` adds
   an overlay page (see "Overlay routes").
-- `Router.endpoint Name ~path ~method_ ~handler`: a response that is not
-  a page, such as JSON or a file.
-- `Router.action Name ~path ~method_ ~handler`: like an endpoint, for a
-  method that changes data. `` `GET `` is an error, and the answer is
-  never cached.
+- `Router.get Name ~path ~handler`: a response that is not a page, such
+  as JSON or a file. It answers `GET` and `HEAD`.
+- `Router.post Name ~path ~handler`, and `Router.put`, `Router.patch` and
+  `Router.delete` with the same arguments: a handler for that method, for
+  a request that changes data. The answer is never cached.
 - `Router.redirect ~path ~to_:(Permanent "/")`: a 308 redirect, or
   `Temporary` for a 307. The target can use the params of the path:
   `~to_:(Temporary "/team/:name")`.
 
-`method_` is one of `` `GET ``, `` `POST ``, `` `PUT ``, `` `PATCH `` and
-`` `DELETE ``. A `` `GET `` node also answers `HEAD`.
+These five are the method nodes. Two method nodes can have the same path
+when their methods are different, each with its own name. A request with
+another method gets `405` with the methods of the path in `allow`.
+`Router.endpoint` and `Router.action` were removed: they are build errors
+that name the method nodes.
 
 A node name is a constructor, such as `Home`, and gives the link function
 `Routes.home`. Each name is used once. These names are build errors:
@@ -150,7 +153,7 @@ adapter, such as `Dream.request`.
 | `~layout` | make, group | `~params ~loaded ~children () -> Yuka.server Yuka.element` |
 | `~loader` | group, route | `req -> ~params -> ('a, Yuka.Server.stop) result Yuka.Async.t` |
 | `~guard` | all but redirect | `req -> ~params -> (unit, Yuka.Server.stop) result Yuka.Async.t` |
-| `~handler` | endpoint, action | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
+| `~handler` | method nodes | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
 | `~not_found` | make, group | `~params ~path () -> Yuka.Server.page` |
 | `~error` | make, group | `~params () -> Yuka.Server.page` |
 
@@ -169,7 +172,8 @@ adapter, such as `Dream.request`.
   `not_found` or `error` below a layout that takes a loader result is an
   error.
 
-Rules, on any node except a redirect:
+Rules, on any node except a redirect. `Router.post`, `Router.put`,
+`Router.patch` and `Router.delete` take no `~cache` and no `~prerender`:
 
 - `~headers:[ ("x-frame-options", "DENY") ]`: response headers. A node
   replaces a header of the same name set above it.
@@ -178,8 +182,9 @@ Rules, on any node except a redirect:
   `immutable`. The nearest one wins.
 - `~prerender:true`: the prerender step can write the page as a static
   file (see `Yuka.Server.Prerender`).
-- `~cross_origin:true`, on an endpoint only: skip the origin check that a
-  method other than `GET`, `HEAD` and `OPTIONS` gets. Use it for webhooks.
+- `~cross_origin:true`, on `Router.post`, `Router.put`, `Router.patch` and
+  `Router.delete` only: skip the origin check that these methods get. Use
+  it for webhooks.
 - `~prefetch`, on make, group and route only: when the browser loads the
   page before the click (see "Prefetch").
 
@@ -224,8 +229,8 @@ Two limits:
 
 ## Links
 
-The shared `Routes` module has one function for each route, endpoint and
-action, named as the node in lowercase:
+The shared `Routes` module has one function for each route and method
+node, named as the node in lowercase:
 
 ```ocaml
 Routes.hello ~name:"Yuka" ()            (* "/hello/Yuka" *)
@@ -441,7 +446,7 @@ A client navigation can load a page before the click: a prefetch.
 | `` `Idle `` | also when the page is loaded and the browser is idle |
 
 Each level includes the ones before it. The nearest `~prefetch` wins, as
-for `~cache`. An endpoint, an action and a redirect take no `~prefetch`;
+for `~cache`. A method node and a redirect take no `~prefetch`;
 another value is an error.
 
 `` `Idle `` needs a `~cache` with a max-age: a prefetched answer without one
@@ -501,7 +506,7 @@ each URL of a route with a lower level, once per page load. With
 `` `Visible `` or `` `Idle `` somewhere in the tree, every page observes its
 links and pays one refused request for each URL of a route with a lower
 level. The server counts a value it does not know as
-`visible`. A prefetch of an endpoint or an action gets `204` with
+`visible`. A prefetch of a method node gets `204` with
 `Yuka-Prefetch: off`, and its guards and handler do not run. A prefetch
 of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
 `204` with `Yuka-Prefetch: off`, and the file is not read. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay`.
@@ -529,8 +534,8 @@ pages have it when they have no island.
 Such a request is a navigation prefetch: `Sec-Purpose: prefetch` and
 `Sec-Fetch-Dest: document`. A prerender has `Sec-Purpose: prefetch;prerender`,
 and the server reads it as a prefetch. The server counts a navigation prefetch as the trigger `hover`
-(which includes a press): a page route with `` `Off ``, an endpoint and an
-action answer `503` with `Cache-Control: no-store` and `Vary:
+(which includes a press): a page route with `` `Off `` and a method node
+answer `503` with `Cache-Control: no-store` and `Vary:
 Yuka-Navigate, Yuka-Prefetch, Sec-Purpose`, before guards, loaders and the
 handler. The browser drops a non-2xx answer and loads the URL again at the
 click. Any other page route answers the full page. A static file is served,

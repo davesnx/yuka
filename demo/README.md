@@ -149,8 +149,8 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   server sends the script of this page 3 s late (to this page only), so you
   can change the fields before the island starts. Open the URL directly or
   reload: a client navigation has the script already.
-- `http://localhost:8080/issues.json`: the issues of `yuka` as JSON (an
-  endpoint).
+- `http://localhost:8080/issues.json`: the issues of `yuka` as JSON (a
+  `Router.get` node).
 - `http://localhost:8080/issues`: a permanent redirect to `/`.
 
 A click anywhere on a row opens the issue: the title link covers the row,

@@ -978,8 +978,9 @@ module Router : sig
 
       The tree in [Routes.ml] is not compiled. It is in its own syntax,
       written with OCaml expressions, that only [yuka routes] reads. The
-      names [Router.make], [Router.group], [Router.route],
-      [Router.endpoint], [Router.action] and [Router.redirect] are nodes of
+      names [Router.make], [Router.group], [Router.route], [Router.get],
+      [Router.post], [Router.put], [Router.patch], [Router.delete] and
+      [Router.redirect] are nodes of
       that syntax, not values of this module, so an editor does not check
       the file; [yuka routes] reports each error with its location in
       [Routes.ml]. The file ends with the tree, [Router.make ... [ nodes ]].
@@ -994,8 +995,7 @@ module Router : sig
             Router.route Home ~path:"/" ~page:Pages.home;
             Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
               [ Router.route Issue ~path:"/" ~page:Pages.issue ];
-            Router.endpoint Feed ~path:"/feed.json" ~method_:`GET
-              ~handler:Handlers.feed;
+            Router.get Feed ~path:"/feed.json" ~handler:Handlers.feed;
             Router.redirect ~path:"/old" ~to_:(Permanent "/");
           ]
       ]}
@@ -1692,8 +1692,9 @@ module Server : sig
       production: [/_yuka/dev] streams that file. A prerender turns it off
       ({!Prerender.config}).
 
-      [origins] lists the origins that an action, a form post, an endpoint
-      with an unsafe method, [/_yuka/csrf] and the live socket accept, as
+      [origins] lists the origins that an action, a form post, a
+      [Router.post], [Router.put], [Router.patch] or [Router.delete] node,
+      [/_yuka/csrf] and the live socket accept, as
       [scheme://host[:port]] (["https://app.example"]), compared without
       case. Without it, the [Origin] header must have the authority of the
       [Host] header; behind a proxy that rewrites [Host], give [origins].
@@ -1820,9 +1821,9 @@ module Server : sig
           + [Missing]: the not-found page, 404. [Wrong_method]: 405 with
             [allow] (the methods, [HEAD] after [GET], then [OPTIONS]); for
             [OPTIONS], 204 with the same [allow].
-          + An endpoint or action whose method is not [GET], [HEAD] or
-            [OPTIONS]: 403 when the origin check fails, before the guards,
-            unless its node has [~cross_origin:true].
+          + A [Router.post], [Router.put], [Router.patch] or
+            [Router.delete] node: 403 when the origin check fails, before
+            the guards, unless the node has [~cross_origin:true].
           + Guards, one after another. A {!type-stop} skips the rest.
           + A handler: its response, after the rule headers (a header name
             of the handler replaces that name of the rules) and the rule
@@ -1874,7 +1875,8 @@ module Server : sig
           answers 200 with the headers it knows (no [content-type] for a
           client or public file) when [exists] says so, else the plain 404.
 
-          An [Action] always sends [cache-control: no-store]; a handler
+          A [Router.post], [Router.put], [Router.patch] or [Router.delete]
+          node always sends [cache-control: no-store]; a handler
           response that is not 2xx gets [no-store] unless it set
           [cache-control]. [vary] values are joined. A path with a literal
           backslash is the 404 page. An answer with a header name or value
@@ -1913,7 +1915,7 @@ module Server : sig
         [prerender]. *)
 
     val prerenderable : config -> 'req app -> 'req -> string -> bool
-    (** Whether a [GET] of this path matches a page or an endpoint whose
+    (** Whether a [GET] of this path matches a page or a [Router.get] node whose
         rules say [prerender]. A path that the cycle serves as a file
         ([/_yuka/], a [public] prefix) is not, even when a route such as a
         catch-all would match it. The query and fragment are ignored. *)
@@ -1997,7 +1999,9 @@ module Server : sig
         }
       | Handler of {
           rules : rules;
-          action : bool;  (** An [Action] node: always [no-store]. *)
+          action : bool;
+              (** A [Router.post], [Router.put], [Router.patch] or [Router.delete]
+                  node: always [no-store]. *)
           cross_origin : bool;  (** No origin check for an unsafe method. *)
           guards : (unit -> (unit, stop) result Async.t) list;
           run : unit -> response Async.t;

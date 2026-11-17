@@ -87,37 +87,63 @@ the param is bound
             };
             load =
 
-An endpoint with ~cross_origin:true skips the origin check; an action
-never does
+Router.get answers GET and HEAD and follows the cache rules; Router.post,
+Router.put, Router.patch and Router.delete are never cached. ~cross_origin:true
+skips the origin check
 
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.endpoint Hook ~path:"/hook" ~method_:`POST ~handler:Handlers.hook ~cross_origin:true;
-  >     Router.endpoint Put ~path:"/put" ~method_:`PUT ~handler:Handlers.put;
-  >     Router.action Act ~path:"/act" ~method_:`POST ~handler:Handlers.act;
+  >     Router.get Item ~path:"/item" ~handler:Handlers.item;
+  >     Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cross_origin:true;
+  >     Router.put Put ~path:"/item" ~handler:Handlers.put;
+  >     Router.patch Patch ~path:"/item" ~handler:Handlers.patch;
+  >     Router.delete Delete ~path:"/item" ~handler:Handlers.delete;
   >   ]
   > EOF
   $ grep -E 'action =|cross_origin =' out.ml
             action = false;
+            cross_origin = false;
+            action = true;
             cross_origin = true;
-            action = false;
+            action = true;
+            cross_origin = false;
+            action = true;
             cross_origin = false;
             action = true;
             cross_origin = false;
 
+Each method node on one path is its own route: find gives each one, and
+any other method is Wrong_method with the methods of the path
+
+  $ yuka routes --shared --source Routes.ml | grep -A 6 '| \[ "item" \]'
+    | [ "item" ] -> (
+        match meth with
+        | `GET | `HEAD -> Yuka.Router.Found Item
+        | `PUT -> Yuka.Router.Found Put
+        | `PATCH -> Yuka.Router.Found Patch
+        | `DELETE -> Yuka.Router.Found Delete
+        | _ -> Yuka.Router.Wrong_method [ `GET; `PUT; `PATCH; `DELETE ])
+
   $ gen <<'EOF'
-  > Router.make [ Router.endpoint Hook ~path:"/hook" ~method_:`POST ~handler:Handlers.hook ~cross_origin:yes ]
+  > Router.make [ Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cross_origin:yes ]
   > EOF
-  File "Routes.ml", line 1, characters 101-104:
+  File "Routes.ml", line 1, characters 82-85:
   Error: ~cross_origin must be true or false
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.action Act ~path:"/act" ~method_:`POST ~handler:Handlers.act ~cross_origin:true ]
+  > Router.make [ Router.get Feed ~path:"/feed" ~handler:Handlers.feed ~cross_origin:true ]
   > EOF
-  File "Routes.ml", line 1, characters 96-100:
-  Error: Router.action has no argument ~cross_origin; its labelled arguments are ~path, ~method_, ~handler, ~guard, ~headers, ~cache, ~prerender
+  File "Routes.ml", line 1, characters 81-85:
+  Error: Router.get has no argument ~cross_origin; its labelled arguments are ~path, ~handler, ~guard, ~headers, ~cache, ~prerender
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cache:immutable ]
+  > EOF
+  File "Routes.ml", line 1, characters 75-84:
+  Error: Router.post has no argument ~cache; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
   [1]
 
 A cache value is read with Yuka.Server opened
@@ -270,7 +296,7 @@ The shared module must be a module path
 
 ~prefetch on make, group and route: the nearest one wins; a route with
 none gets the default of Yuka. The app gets the rules of every page route,
-not those of an endpoint or an action
+not those of a method node such as Router.get
 
   $ gen <<'EOF'
   > Router.make ~prefetch:`Visible
@@ -281,8 +307,8 @@ not those of an endpoint or an action
   >         Router.route B ~path:"/b" ~page:Pages.b;
   >         Router.route C ~path:"/c" ~page:Pages.c ~prefetch:`Hover;
   >         Router.route F ~path:"/f" ~page:Pages.f ~prefetch:`Trajectory;
-  >         Router.endpoint D ~path:"/d" ~method_:`GET ~handler:Handlers.d;
-  >         Router.action E ~path:"/e" ~method_:`POST ~handler:Handlers.e;
+  >         Router.get D ~path:"/d" ~handler:Handlers.d;
+  >         Router.post E ~path:"/e" ~handler:Handlers.e;
   >       ];
   >   ]
   > EOF
