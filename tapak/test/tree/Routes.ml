@@ -11,6 +11,8 @@ Router.make ~layout:App.root ~not_found:App.not_found
     Router.route Slow ~path:"/slow" ~page:App.slow;
     Router.route Stuck ~path:"/stuck" ~page:App.stuck;
     Router.route Lingering ~path:"/lingering" ~page:App.lingering;
+    Router.get Whoami ~path:"/whoami" ~handler:App.whoami;
+    Router.post Sum ~path:"/sum" ~handler:App.sum;
     Router.route Page ~path:"/:parts<string...>" ~page:App.page ~prerender:true;
     Router.get Feed ~path:"/feed.xml" ~handler:App.feed
       ~prerender:true;

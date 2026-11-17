@@ -4,6 +4,7 @@ type event = Web.event
 type trigger = [ `Idle | `Visible | `Interaction ]
 type start = [ `Load | trigger | `Lazy of trigger ]
 type log_level = [ `Error | `Warn | `Info | `Debug ]
+type backend = ..
 
 
   type node =
@@ -134,6 +135,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     session : unit -> string option;
     log : log_level -> string -> unit;
     live : string -> Json.t -> (Json.t * (string * int) option, Status_error.t) result Async.t;
+    backend : backend option;
   }
 
   type session = {

@@ -8,6 +8,8 @@ Router.make ~layout:App.root ~not_found:App.not_found
       [ Router.route Post ~path:"/" ~page:App.post_page ];
     Router.route Secret ~path:"/secret" ~page:App.secret;
     Router.route Warned ~path:"/warned" ~page:App.warned;
+    Router.post Sum ~path:"/sum" ~handler:App.sum;
+    Router.get Whoami ~path:"/whoami.txt" ~handler:App.whoami ~prerender:true;
     Router.route Page ~path:"/:parts<string...>" ~page:App.page ~prerender:true;
     Router.get Feed ~path:"/feed.xml" ~handler:App.feed
       ~prerender:true;

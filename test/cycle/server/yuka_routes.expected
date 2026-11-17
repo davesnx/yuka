@@ -54,7 +54,7 @@ let fallback_0 : Yuka.Server.Generated.fallback =
     error = (fun () -> error ());
   }
 
-let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
+let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
   match route with
   | Cycle_shared.Routes.Home ->
       Yuka.Server.Generated.Page
@@ -228,6 +228,36 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
                      page = App.Pages.boom ~exploding ();
                      overlay = None;
                    })));
+        }
+  | Cycle_shared.Routes.Greet ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_0;
+          guards = [ (fun () -> App.Guards.greet req) ];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let greeting = App.Loaders.greeting req in
+              Yuka.Server.Generated.loaded greeting (fun greeting ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                       ];
+                     page = App.Pages.greet ~greeting ();
+                     overlay = None;
+                   })));
+        }
+  | Cycle_shared.Routes.Sum ->
+      Yuka.Server.Generated.Handler
+        {
+          rules = rules_0;
+          action = true;
+          cross_origin = false;
+          guards = [ (fun () -> App.Guards.sum req) ];
+          run = (fun () -> App.Api.sum req);
         }
   | Cycle_shared.Routes.Member { team; user } ->
       Yuka.Server.Generated.Page
@@ -542,7 +572,7 @@ let resolve req (route : Cycle_shared.Routes.t) : Yuka.Server.Generated.target =
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"bd658bd5bd70228fa760e5b5ce43b61f"
+  Yuka.Server.Generated.app ~build:"e51c0b556f1752539db2de557d4e3ec9"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11 ]

@@ -1,5 +1,6 @@
 module Web = Yuka__Web
 module Scheduler = Yuka__Scheduler
+module Base = Yuka__Base
 
 type slot
 
@@ -33,8 +34,7 @@ and 'p component = {
   walk : int array;
   targets : int array;
   kinds : kind array;
-  same : 'p -> 'p -> bool;
-  body : 'p -> slot array;
+  setup : 'p -> 'p -> slot array;
   mutable template : Web.node Js.null;
 }
 
@@ -43,6 +43,8 @@ type ('a, 'p) each = { items : 'a array; key : 'a -> string; props : 'a -> 'p }
 type instance = {
   component : Obj.t component;
   mutable props : Obj.t;
+  view : Obj.t -> slot array;
+  owner : Scheduler.owner;
   root : Web.node;
   nodes : Web.node array;
   mutable slots : slot array;
@@ -53,8 +55,7 @@ type instance = {
 and mounted = Nothing | One of instance | Rows of rows
 and rows = { mutable keys : string array; mutable entries : instance array }
 
-let component ~markup ~walk ~targets ~kinds ~same body =
-  { markup; walk; targets; kinds; same; body; template = Js.null }
+let component ~markup ~walk ~targets ~kinds setup = { markup; walk; targets; kinds; setup; template = Js.null }
 
 let child_kind (component : 'p component) = Child (Obj.magic component)
 let each_kind (component : 'p component) = Each (Obj.magic component)
@@ -75,6 +76,31 @@ let template_of doc component =
       in
       component.template <- Js.Null.return root;
       root
+
+(* Melange compiles a tuple to a JS array, and the ppx gives every props
+   value a tuple of at least two parts, so props read as an array. *)
+let same (old : Obj.t) (next : Obj.t) =
+  let old : Obj.t array = Obj.magic old and next : Obj.t array = Obj.magic next in
+  let at = ref (Array.length next - 1) in
+  while !at >= 0 && get old !at == get next !at do
+    decr at
+  done;
+  !at < 0
+
+let setup owner (component : Obj.t component) props =
+  let listener = Scheduler.listener () and current = Base.current_owner () in
+  let outer_listener = !listener and outer_owner = !current in
+  listener := None;
+  current := Some owner;
+  match component.setup props with
+  | view ->
+      listener := outer_listener;
+      current := outer_owner;
+      view
+  | exception error ->
+      listener := outer_listener;
+      current := outer_owner;
+      raise error
 
 let lis order =
   let length = Array.length order in
@@ -100,7 +126,9 @@ let lis order =
   done;
   keep
 
-let rec create doc (component : Obj.t component) props parent anchor =
+let rec create doc (component : Obj.t component) props parent anchor (above : Scheduler.owner) =
+  let owner = { Scheduler.last = None; gen = 0; catch = above.catch; env = above.env; parent = Some above } in
+  let view = setup owner component props in
   let root = Web.clone_node (template_of doc component) true in
   let walked = Web.walk root component.walk in
   let count = Array.length component.kinds in
@@ -108,6 +136,8 @@ let rec create doc (component : Obj.t component) props parent anchor =
     {
       component;
       props;
+      view;
+      owner;
       root;
       nodes = Array.map (fun i -> get walked i) component.targets;
       slots = fill (alloc count) unset;
@@ -124,7 +154,7 @@ let rec create doc (component : Obj.t component) props parent anchor =
   instance
 
 and render doc instance =
-  let next = instance.component.body instance.props and old = instance.slots in
+  let next = instance.view instance.props and old = instance.slots in
   for i = 0 to Array.length next - 1 do
     let value = get next i in
     if value != get old i then patch doc instance i value
@@ -142,23 +172,24 @@ and patch doc instance i value =
       match get instance.mounted i with
       | One child -> update child (Obj.magic value)
       | Nothing | Rows _ ->
-          set instance.mounted i (One (create doc component (Obj.magic value) node Js.null)))
+          set instance.mounted i (One (create doc component (Obj.magic value) node Js.null instance.owner)))
   | Each component -> (
       match get instance.mounted i with
-      | Rows rows -> reconcile doc component node rows (Obj.magic value)
+      | Rows rows -> reconcile doc component node rows (Obj.magic value) instance.owner
       | Nothing | One _ ->
           let rows = { keys = [||]; entries = [||] } in
           set instance.mounted i (Rows rows);
-          reconcile doc component node rows (Obj.magic value))
+          reconcile doc component node rows (Obj.magic value) instance.owner)
 
 and update instance props =
-  if not (instance.component.same instance.props props) then begin
+  if not (same instance.props props) then begin
     instance.props <- props;
     Scheduler.run instance.node
   end
 
 and dispose instance =
   Scheduler.dispose instance.node;
+  Base.dispose_owner instance.owner;
   Array.iter
     (function
       | One child -> dispose child
@@ -166,14 +197,14 @@ and dispose instance =
       | Nothing -> ())
     instance.mounted
 
-and reconcile doc component parent rows (each : (Obj.t, Obj.t) each) =
+and reconcile doc component parent rows (each : (Obj.t, Obj.t) each) owner =
   let items = each.items in
   let length = Array.length items in
   let keys = Array.map each.key items in
   let old_keys = rows.keys and old_entries = rows.entries in
   let old_length = Array.length old_entries in
   let entries = alloc length in
-  let fresh j anchor = set entries j (create doc component (each.props (get items j)) parent anchor) in
+  let fresh j anchor = set entries j (create doc component (each.props (get items j)) parent anchor owner) in
   let keep j old =
     let entry = get old_entries old in
     update entry (each.props (get items j));
@@ -248,8 +279,8 @@ let rec dispatch event node =
     let parent = parent_of node in
     if parent != Js.null then dispatch event (Js.Null.getExn parent)
 
-let mount container (component : unit component) =
+let mount container (component : (unit * unit) component) =
   let doc = Web.owner_document container in
   Web.add_listener doc "click" (fun event -> dispatch event (Web.target event));
   Web.clear container "";
-  ignore (Scheduler.batch (fun () -> create doc (Obj.magic component) (Obj.repr ()) container Js.null))
+  ignore (Scheduler.batch (fun () -> create doc (Obj.magic component) (Obj.repr ((), ())) container Js.null (Base.new_owner ())))

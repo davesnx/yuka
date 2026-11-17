@@ -361,6 +361,7 @@ let empty_context () : Types.context =
     session = (fun () -> None);
     log = (fun level m -> !Types.default_log level m);
     live = (fun name key -> !Bridge.live_state name key);
+    backend = None;
   }
 
 let current_context () =

@@ -4,7 +4,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 build=${BUILD_DIR:-_build}
 keyed="$root/bench/keyed"
 site="$root/$build/bench-keyed"
-mkdir -p "$site/yuka/dist" "$site/yuka-block/dist" "$site/solid/dist" "$site/vanillajs/src"
+mkdir -p "$site/yuka/dist" "$site/yuka-block/dist" "$site/yuka-block-plain/dist" "$site/solid/dist" "$site/vanillajs/src"
 cp -R "$keyed/css" "$site/"
 
 node "$root/scripts/bundle.ts" --entry "$root/$build/default/bench/keyed/yuka/out/bench/keyed/yuka/main.js" \
@@ -15,6 +15,11 @@ node "$root/scripts/bundle.ts" --entry "$root/$build/default/bench/keyed/yuka-bl
   --outdir "$site/yuka-block/dist"
 cp "$keyed/yuka-block/index.html" "$site/yuka-block/"
 
+node "$root/scripts/bundle.ts" --entry "$root/$build/default/bench/keyed/yuka-block/out/bench/keyed/yuka-block/plain.js" \
+  --outdir "$site/yuka-block-plain/dist"
+mv "$site/yuka-block-plain/dist/plain.js" "$site/yuka-block-plain/dist/main.js"
+cp "$keyed/yuka-block/index.html" "$site/yuka-block-plain/"
+
 if [ ! -d "$keyed/solid/node_modules" ]; then
   npm ci --prefix "$keyed/solid" --no-audit --no-fund
 fi
@@ -22,12 +27,14 @@ npm run --prefix "$keyed/solid" --silent build -- --file "$root/$build/bench-key
 node "$root/scripts/bundle.ts" --entry "$root/$build/bench-keyed-solid/main.js" --outdir "$site/solid/dist"
 cp "$keyed/solid/index.html" "$site/solid/"
 
-if [ ! -d "$keyed/brumate/node_modules" ]; then
-  npm ci --prefix "$keyed/brumate" --no-audit --no-fund
+if [ "${BENCH_BRUMATE:-}" = 1 ]; then
+  if [ ! -d "$keyed/brumate/node_modules" ]; then
+    npm ci --prefix "$keyed/brumate" --no-audit --no-fund
+  fi
+  npm run --prefix "$keyed/brumate" --silent build
+  rm -rf "$site/brumate"
+  node "$keyed/brumate/site.ts" --dist "$keyed/brumate/dist/client" --out "$site/brumate"
 fi
-npm run --prefix "$keyed/brumate" --silent build
-rm -rf "$site/brumate"
-node "$keyed/brumate/site.ts" --dist "$keyed/brumate/dist/client" --out "$site/brumate"
 
 cp "$keyed/vanillajs/index.html" "$site/vanillajs/"
 cp "$keyed/vanillajs/src/Main.js" "$site/vanillajs/src/"

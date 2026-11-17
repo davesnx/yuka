@@ -5,9 +5,9 @@ import { gzipSync, brotliCompressSync, constants as zlib } from "node:zlib";
 import { parseArgs } from "node:util";
 import { chromium, type Browser, type Page } from "playwright-core";
 
-const allApps = ["vanillajs", "solid", "yuka", "yuka-block", "brumate"] as const;
-type App = (typeof allApps)[number];
-const defaultApps: App[] = ["vanillajs", "solid", "yuka", "yuka-block"];
+const allApps = ["vanillajs", "solid", "yuka", "yuka-block", "yuka-block-plain", "brumate"];
+type App = string;
+const defaultApps: App[] = ["vanillajs", "solid", "yuka", "yuka-block", "yuka-block-plain"];
 
 interface Bench {
   id: string;
@@ -67,11 +67,12 @@ const site = resolve(options.site);
 if (!statSync(site, { throwIfNoEntry: false })?.isDirectory()) {
   throw new Error(`${site} is not a directory; build it with "make bench-keyed" or bench/keyed/build.sh`);
 }
-const apps: App[] = options.apps.split(",").map((a) => {
-  const app = allApps.find((x) => x === a);
-  if (!app) throw new Error(`unknown app ${a}; known: ${allApps.join(", ")}`);
-  return app;
-});
+const apps: App[] = options.apps.split(",");
+for (const app of apps) {
+  if (!statSync(join(site, app, "index.html"), { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`unknown app ${app}: ${join(site, app, "index.html")} does not exist; built apps: ${allApps.join(", ")}`);
+  }
+}
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -546,6 +547,11 @@ for (const app of apps) sizes[app] = sizeOf(app);
 
 const ratio = geomean.yuka !== undefined && geomean.solid !== undefined ? geomean.yuka / geomean.solid : undefined;
 const blockRatio = geomean["yuka-block"] !== undefined && geomean.solid !== undefined ? geomean["yuka-block"] / geomean.solid : undefined;
+const solidRatios: Record<App, number> = {};
+for (const app of apps) {
+  const value = geomean[app];
+  if (app !== "solid" && value !== undefined && geomean.solid !== undefined) solidRatios[app] = value / geomean.solid;
+}
 
 const pad = (s: string, n: number) => s.padStart(n);
 const lines: string[] = [];
@@ -566,7 +572,9 @@ if (ratio !== undefined) {
   lines.push("");
   lines.push(`yuka/solid weighted geometric mean ratio: ${ratio.toFixed(3)}`);
 }
-if (blockRatio !== undefined) lines.push(`yuka-block/solid weighted geometric mean ratio: ${blockRatio.toFixed(3)}`);
+for (const [app, value] of Object.entries(solidRatios)) {
+  if (app.startsWith("yuka-block")) lines.push(`${app}/solid weighted geometric mean ratio: ${value.toFixed(3)}`);
+}
 console.log(lines.join("\n"));
 
 if (options.out !== undefined) {
@@ -584,6 +592,7 @@ if (options.out !== undefined) {
         geomean,
         yukaSolidRatio: ratio ?? null,
         yukaBlockSolidRatio: blockRatio ?? null,
+        solidRatios,
         sizes,
       },
       null,

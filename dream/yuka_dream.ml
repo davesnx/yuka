@@ -107,6 +107,8 @@ module Fresh = Yuka.Server.Adapter.Make (struct
   let exists ~root:_ ~path:_ = false
 end)
 
+let request r = match Cycle.backend_request r with None -> Fresh.backend_request r | found -> found
+
 let dream_log = Dream.sub_log "yuka"
 
 let log level message =
@@ -180,7 +182,6 @@ let check_out out config =
 
 let write_pages ~out config app =
   let ( let* ) = Lwt.bind in
-  let request path = Dream.request ~method_:`GET ~target:path "" in
   let seen = Hashtbl.create 64 and queue = Queue.create () in
   let add path =
     if not (Hashtbl.mem seen path) then begin
@@ -193,7 +194,7 @@ let write_pages ~out config app =
     match Queue.take_opt queue with
     | None -> Lwt.return_unit
     | Some path -> (
-        let* response = to_lwt (Fresh.handler config app (request path)) in
+        let* response = to_lwt (Fresh.handler config app (Dream.request ~method_:`GET ~target:path "")) in
         let status = Dream.status_to_int (Dream.status response) in
         let* body = Dream.body response in
         let ok = status >= 200 && status < 300 in
@@ -204,7 +205,7 @@ let write_pages ~out config app =
               List.iter
                 (fun link ->
                   if (not (Hashtbl.mem seen link))
-                     && Yuka.Server.Prerender.prerenderable config app (request link) link
+                     && Yuka.Server.Prerender.prerenderable config app link
                   then add link)
                 (Yuka.Server.Prerender.links body);
             visit ()

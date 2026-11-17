@@ -1,7 +1,7 @@
 (** Runs a Yuka app on Dream. *)
 
 val handler :
-  ?node:Yuka.Server.Live.node -> Yuka.Server.config -> Dream.request Yuka.Server.app -> Dream.handler
+  ?node:Yuka.Server.Live.node -> Yuka.Server.config -> Yuka.Server.app -> Dream.handler
 (** Answers every request with the request cycle
     ([Yuka.Server.Adapter.Make]), the WebSocket of {!Yuka.Live} at
     [/_yuka/live] included. Put Dream middleware (logger, sessions) around
@@ -25,7 +25,7 @@ val handler :
     node. *)
 
 val prerender :
-  out:string -> Yuka.Server.config -> Dream.request Yuka.Server.app -> (unit, string) result Lwt.t
+  out:string -> Yuka.Server.config -> Yuka.Server.app -> (unit, string) result Lwt.t
 (** Writes the pages of the app to the directory [out]:
 
     - It starts from [Yuka.Server.Prerender.seeds] and renders each path
@@ -45,6 +45,11 @@ val prerender :
     same files. Gives [Error] with a message that names the directory, and
     writes nothing, when [out] is inside a directory of
     [Yuka.Server.Prerender.served_dirs]. *)
+
+val request : Yuka.Server.request -> Dream.request option
+(** The Dream request of a request that {!handler} or {!prerender} made,
+    for a loader, guard, handler or action that needs Dream. [None] for a
+    request from another adapter or from [Yuka.Server.Testing.request]. *)
 
 val to_async : 'a Lwt.t -> 'a Yuka.Async.t
 (** A failed promise gives a failed [Async] with the exception text. *)
