@@ -5,7 +5,6 @@
  (virtual_modules web dev client navigation_web buffer)
  (private_modules
   answers
-  browser
   cycle
   element
   form_core

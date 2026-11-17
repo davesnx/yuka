@@ -29,7 +29,7 @@ module Remote = Remote
 module Topic = Topic
 module Live = Live
 module Form = Form
-module Event = Platform.Event
+module Event = Event
 module Browser = Browser
 module Router = struct
   include Router
