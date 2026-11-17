@@ -90,6 +90,68 @@ let deferred ?equal (source : (_, _) signal) =
     s
   end
 
+let select_with_size (source : (_, _) signal) =
+  let watch =
+    let stack = Scheduler.stack () in
+    let outer = !stack in
+    stack := -1;
+    let first_in_each_round =
+      Scheduler.make (Some (Scheduler.mine Scheduler.queue)) Scheduler.never
+    in
+    stack := outer;
+    first_in_each_round
+  in
+  let current =
+    match Scheduler.with_listener (Some watch) (fun () -> get source) with
+    | value -> ref value
+    | exception e ->
+        Scheduler.dispose watch;
+        raise e
+  in
+  let keys = Web.keyed Signal.same and limit = ref 16 and live = ref true in
+  let write key answer =
+    match Web.keyed_get keys key with Some s -> Signal.set s answer | None -> ()
+  in
+  Scheduler.set_level watch;
+  watch.fn <-
+    (fun () ->
+      let value = get source and prev = !current in
+      if not (Signal.same prev value) then begin
+        current := value;
+        write prev false;
+        write value true
+      end;
+      false);
+  watch.owner <- !(Base.current_owner ());
+  Base.own (fun () ->
+      live := false;
+      Scheduler.dispose watch;
+      Web.keyed_clear keys);
+  let entry key =
+    match Web.keyed_get keys key with
+    | Some s -> s
+    | None ->
+        if Web.keyed_size keys >= !limit then begin
+          Web.keyed_keep keys (fun (s : bool Signal.t) -> s.node.first != None);
+          let size = Web.keyed_size keys in
+          limit := if size > 8 then 2 * size else 16
+        end;
+        let s = Signal.make (Signal.same !current key) in
+        Web.keyed_set keys key s;
+        s
+  in
+  let read key =
+    if !live && !(Scheduler.listener ()) != None then begin
+      (* An exception of [watch] reaches its owner when the flush runs it. *)
+      (try Scheduler.fresh watch with _ -> ());
+      Signal.get (entry key)
+    end
+    else Signal.same (if !live then Signal.peek source else !current) key
+  in
+  (read, fun () -> Web.keyed_size keys)
+
+let select source = fst (select_with_size source)
+
 let on_change ?equal (state : (_, _) signal) f =
   let prev = ref (Signal.peek state) and first = ref true in
   Base.Effect.after (fun () ->

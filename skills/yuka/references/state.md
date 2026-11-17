@@ -157,6 +157,41 @@ let visible =
 - A reader never sees a memo that is out of date. In the example at the
   top, no code can observe the new `count` together with the old `double`.
 
+## Selectors
+
+`State.select source` gives a function `is_selected` such that
+`is_selected key` is `true` when the value of `source` is `key`. It is
+Solid's `createSelector`. Use it when many rows ask "is this row the
+selected one?".
+
+```ocaml
+let selected = Yuka.State.make "" in
+let is_selected = Yuka.State.select selected in
+...
+(Yuka.each ~key:(fun (issue : Issue.t) -> issue.id)
+   (fun () -> Array.of_list (Yuka.State.get issues))
+   (fun (issue : Issue.t) ->
+     <li>
+       (Yuka.hole (fun () ->
+          Yuka.text (if is_selected issue.id then "> " else "")))
+       (Yuka.text issue.title)
+     </li>))
+```
+
+- A hole, memo or effect that calls `is_selected key` runs again only when
+  the answer for `key` changes. A change of `selected` from one row to
+  another runs two holes, not one per row.
+- Keys compare as the default `equal` of `State.make`: ints, strings and
+  constant constructors by value, records and other values by identity,
+  so two equal records are two keys.
+- The ppx makes a hole only where it sees `State.get`. It does not see a
+  call to `is_selected`, so wrap the markup that calls it in
+  `Yuka.hole`, as above.
+- Make the selector where you make a State, not inside a hole. When its
+  owner goes away, it stops.
+- Outside a hole, a memo and an effect, `is_selected key` only reads
+  `source`.
+
 ## Deferred State
 
 `State.deferred source` is a read-only copy of `source` that changes after

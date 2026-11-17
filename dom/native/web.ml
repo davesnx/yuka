@@ -141,6 +141,36 @@ let table_size = Hashtbl.length
 let table_values t = Array.of_seq (Hashtbl.to_seq_values t)
 let table_clear = Hashtbl.reset
 
+type ('k, 'v) keyed = {
+  equal : 'k -> 'k -> bool;
+  mutable pairs : ('k * 'v) list;
+  mutable size : int;
+}
+
+let keyed equal = { equal; pairs = []; size = 0 }
+
+let keyed_get t key =
+  let rec find = function
+    | [] -> None
+    | (k, v) :: rest -> if t.equal k key then Some v else find rest
+  in
+  find t.pairs
+
+let keyed_set t key value =
+  let others = List.filter (fun (k, _) -> not (t.equal k key)) t.pairs in
+  t.pairs <- (key, value) :: others;
+  t.size <- List.length t.pairs
+
+let keyed_size t = t.size
+
+let keyed_keep t keep =
+  t.pairs <- List.filter (fun (_, v) -> keep v) t.pairs;
+  t.size <- List.length t.pairs
+
+let keyed_clear t =
+  t.pairs <- [];
+  t.size <- 0
+
 let shortest_float f =
   let rec try_precision p =
     let s = Printf.sprintf "%.*g" p f in
