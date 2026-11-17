@@ -189,8 +189,8 @@ dev-packages: ## List opam packages the benchmarks and the demo need that are no
 
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
-	@echo "ache git+https://github.com/davesnx/ache.git#535c41e032d8d8e3b80aa3e74f8ed7bba69e7e98"
-	@echo "ache-lwt git+https://github.com/davesnx/ache.git#535c41e032d8d8e3b80aa3e74f8ed7bba69e7e98"
+	@echo "ache git+https://github.com/davesnx/ache.git#5827338a3c35d39feec2f772a7cc4014ebef7a7c"
+	@echo "ache-lwt git+https://github.com/davesnx/ache.git#5827338a3c35d39feec2f772a7cc4014ebef7a7c"
 	@echo "cows git+https://github.com/syaiful6/cows.git#fc74ab9f372adf6b19d00feec60e4bc669ea10a8"
 	@echo "sch git+https://github.com/syaiful6/tapak.git#874cb1b6e1b54019d3425550d8c471621aa59f17"
 	@echo "tapak git+https://github.com/syaiful6/tapak.git#874cb1b6e1b54019d3425550d8c471621aa59f17"
