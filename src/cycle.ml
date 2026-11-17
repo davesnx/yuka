@@ -700,14 +700,14 @@ let live_checked env fallback ~path (resp : response) =
   if not !(env.live_used) then Async.return resp
   else if env.config.prerendering then
     fail_page env fallback
-      ("page " ^ path ^ " renders a Live.use, whose state depends on the request; it cannot be prerendered")
+      ("page " ^ path ^ " renders a Live.make, whose state depends on the request; it cannot be prerendered")
   else
     match List.find_opt (fun (n, _) -> same_name n "cache-control") resp.headers with
     | Some (_, v) when shared_cache v ->
         if not (List.mem path !(env.config.warned)) then begin
           env.config.warned := path :: !(env.config.warned);
           log_quietly env.config `Warn
-            ("page " ^ path ^ " renders a Live.use under a shared cache rule (" ^ v
+            ("page " ^ path ^ " renders a Live.make under a shared cache rule (" ^ v
            ^ "); it is sent with private, no-store")
         end;
         Async.return { resp with headers = set_header ("cache-control", "private, no-store") resp.headers }
@@ -986,7 +986,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
             let token = r.csrf_token () in
             if token = None then
               log_quietly config `Error
-                "page with a Live.use: the request has no session; live data needs session middleware";
+                "page with a Live.make: the request has no session; live data needs session middleware";
             token);
       context;
       node;

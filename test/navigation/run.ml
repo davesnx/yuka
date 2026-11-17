@@ -1988,7 +1988,7 @@ let remote_optimistic_clears finish =
       ignore (click "#m" "");
       resolve_call 1 (doc "Three" (page {|<a id="l" href="/two">two</a>|})) "";
       tick (fun () ->
-          let r, dispose = Yuka.with_owner (fun () -> Remote.use lookup_q (fun () -> "a")) in
+          let r, dispose = Yuka.with_owner (fun () -> Remote.make lookup_q (fun () -> "a")) in
           check "the query is sent" "3" (ints (calls ()));
           resolve_with 2 {|{"ok":"base"}|} "" 200 "application/json";
           tick (fun () ->

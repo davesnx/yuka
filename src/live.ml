@@ -329,7 +329,7 @@ let on_server (topic : (_, _) Topic.t) key base =
     | _ -> Answers.record name None embedded
   end
 
-let use (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
+let make (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
   if !(Base.server_rendering ()) || not Web.in_browser then begin

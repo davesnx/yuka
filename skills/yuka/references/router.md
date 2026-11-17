@@ -450,7 +450,7 @@ can be used for 10 s only. `yuka routes` reports an error when the nearest
 it accepts a `~cache` that names a `let`. The server counts a route with
 `` `Idle `` as `` `Visible `` when the `Cache-Control` of its answers has
 no max-age above 0: the one in `~headers` when there is one, else the
-`~cache` rule. A page that renders a `Live.use` is sent with
+`~cache` rule. A page that renders a `Live.make` is sent with
 `private, no-store` at render time, which the level cannot know: do not
 give such a route `` `Idle ``.
 

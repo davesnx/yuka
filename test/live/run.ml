@@ -492,7 +492,7 @@ let ssr_cases =
         let asked = ref 0 in
         Private.set_csrf s (fun () -> incr asked; Some "tok");
         let view () =
-          let a = Yuka.Live.use count (fun () -> "ssr") and b = Yuka.Live.use count (fun () -> "other") in
+          let a = Yuka.Live.make count (fun () -> "ssr") and b = Yuka.Live.make count (fun () -> "other") in
           let show t = match Yuka.Live.status t with Status.Ready { data; _ } -> string_of_int data | _ -> "?" in
           element "p" [] [ text (show a ^ "," ^ show b) ]
         in
@@ -983,7 +983,7 @@ let patch_cases =
         let s = Private.session ~streaming:false ~islands_only:true in
         Private.set_csrf s (fun () -> Some "tok");
         let view () =
-          let live = Yuka.Live.use items (fun () -> "ssr") in
+          let live = Yuka.Live.make items (fun () -> "ssr") in
           text (match Yuka.Live.status live with Status.Ready { data; _ } -> String.concat "," data | _ -> "?")
         in
         let html = Private.print s (fun () -> Private.node (runtime_island ~name:"Live" ~props:`Null view)) in

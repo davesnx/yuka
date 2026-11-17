@@ -7,7 +7,7 @@
 
 type 's t
 
-val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
+val make : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
 (** Subscribes to the state of the key that the function returns, and
     again when a State that the function reads changes the key. Call it
     in a component body; the subscription ends when its owner is disposed.

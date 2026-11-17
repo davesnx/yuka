@@ -199,7 +199,7 @@ module Pages = struct
   let live () =
     Server.page ~title:"Live" (fun () ->
         Yuka.runtime_island ~name:"Live" ~props:`Null (fun () ->
-            let t = Yuka.Live.use mine (fun () -> "ann") in
+            let t = Yuka.Live.make mine (fun () -> "ann") in
             let shown =
               match Yuka.Live.status t with
               | Yuka.Status.Ready { data; _ } -> "data " ^ data

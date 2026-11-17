@@ -73,22 +73,22 @@ let transport =
     ( "server status mapping: reject, bad input, raise, unknown",
       fun () ->
         reset ();
-        let r, _ = in_owner (fun () -> Remote.use ~retry:Remote.no_retry rejecting (fun () -> 1)) in
+        let r, _ = in_owner (fun () -> Remote.make ~retry:Remote.no_retry rejecting (fun () -> 1)) in
         check_status "reject" "failed no way" r;
-        let r, _ = in_owner (fun () -> Remote.use ~retry:Remote.no_retry broken (fun () -> 1)) in
+        let r, _ = in_owner (fun () -> Remote.make ~retry:Remote.no_retry broken (fun () -> 1)) in
         check_status "raise" "failed server error" r;
         Alcotest.(check bool) "logged" true (List.exists (fun m -> contains m "secret detail") !logged);
         let unknown = Action.query ~name:"nobody" ~input:Codec.int ~output:Codec.string in
-        let r, _ = in_owner (fun () -> Remote.use unknown (fun () -> 1)) in
+        let r, _ = in_owner (fun () -> Remote.make unknown (fun () -> 1)) in
         check_status "unknown" "failed not found" r;
         let wrong = Action.query ~name:"echo" ~input:Codec.int ~output:Codec.string in
-        let r, _ = in_owner (fun () -> Remote.use wrong (fun () -> 1)) in
+        let r, _ = in_owner (fun () -> Remote.make wrong (fun () -> 1)) in
         Alcotest.(check bool) "bad input" true (contains (show (Remote.status r)) "failed invalid input") );
     ( "a key change sends a new call and the old answer is dropped",
       fun () ->
         reset ();
         let input = State.make "a" in
-        let r, _ = in_owner (fun () -> Remote.use gated (fun () -> State.get input)) in
+        let r, _ = in_owner (fun () -> Remote.make gated (fun () -> State.get input)) in
         check_status "first" "loading" r;
         State.set input "b";
         Alcotest.(check (list string)) "two calls" [ "b"; "a" ] !calls;
@@ -100,7 +100,7 @@ let transport =
       fun () ->
         reset ();
         let input = State.make (String.make 1 'x') in
-        let r, _ = in_owner (fun () -> Remote.use gated (fun () -> State.get input)) in
+        let r, _ = in_owner (fun () -> Remote.make gated (fun () -> State.get input)) in
         State.set input (String.make 1 'x');
         Alcotest.(check int) "one call" 1 (List.length !calls);
         settle 0 "X";
@@ -109,16 +109,16 @@ let transport =
       fun () ->
         reset ();
         let on = State.make false in
-        let r, _ = in_owner (fun () -> Remote.use ~enabled:(fun () -> State.get on) echo (fun () -> "e")) in
+        let r, _ = in_owner (fun () -> Remote.make ~enabled:(fun () -> State.get on) echo (fun () -> "e")) in
         check_status "idle" "idle" r;
         State.set on true;
         check_status "ready" "ready echo e" r );
     ( "invalidate refetches mounted uses only",
       fun () ->
         reset ();
-        let a, _ = in_owner (fun () -> Remote.use gated (fun () -> "a")) in
-        let b, _ = in_owner (fun () -> Remote.use gated (fun () -> "b")) in
-        let _, dispose = in_owner (fun () -> Remote.use gated (fun () -> "c")) in
+        let a, _ = in_owner (fun () -> Remote.make gated (fun () -> "a")) in
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "b")) in
+        let _, dispose = in_owner (fun () -> Remote.make gated (fun () -> "c")) in
         dispose ();
         settle 0 "A";
         settle 1 "B";
@@ -135,21 +135,21 @@ let transport =
         counted := 0;
         let r, _ =
           in_owner (fun () ->
-              Remote.use ~retry:(Remote.retry ~attempts:2 ~delay_ms:(fun _ -> 0)) rejecting (fun () -> 1))
+              Remote.make ~retry:(Remote.retry ~attempts:2 ~delay_ms:(fun _ -> 0)) rejecting (fun () -> 1))
         in
         check_status "failed" "failed no way" r;
         Alcotest.(check int) "one call" 1 !counted );
     ( "a disposed use aborts and writes nothing",
       fun () ->
         reset ();
-        let r, dispose = in_owner (fun () -> Remote.use gated (fun () -> "a")) in
+        let r, dispose = in_owner (fun () -> Remote.make gated (fun () -> "a")) in
         dispose ();
         settle 0 "A";
         check_status "still loading" "loading" r );
     ( "a failed refetch keeps the last data",
       fun () ->
         reset ();
-        let r, _ = in_owner (fun () -> Remote.use ~retry:Remote.no_retry gated (fun () -> "a")) in
+        let r, _ = in_owner (fun () -> Remote.make ~retry:Remote.no_retry gated (fun () -> "a")) in
         settle 0 "A";
         Remote.refetch r;
         check_status "loading with last" "loading A" r;
@@ -159,7 +159,7 @@ let transport =
 
 let island q input =
   runtime_island ~name:"Query" ~props:`Null (fun () ->
-      let r = Remote.use q (fun () -> input) in
+      let r = Remote.make q (fun () -> input) in
       element "b" [] [ text (show (Remote.status r)) ])
 
 let answers =
@@ -183,7 +183,7 @@ let answers =
         reset ();
         let html =
           Server.to_string (fun () ->
-              let r = Remote.use echo (fun () -> "out") in
+              let r = Remote.make echo (fun () -> "out") in
               element "b" [] [ text (show (Remote.status r)) ])
         in
         Alcotest.(check bool) "data" true (contains html "ready echo out");
@@ -265,7 +265,7 @@ let fill_and_rollback =
               runtime_island ~name:"Fill" ~props:`Null (fun () ->
                   Await.make ~async:value ~loading:(text "wait")
                     ~children:(fun v ->
-                      let r = Remote.use echo (fun () -> v) in
+                      let r = Remote.make echo (fun () -> v) in
                       element "b" [] [ text (show (Remote.status r)) ])
                     ()))
         in
@@ -281,7 +281,7 @@ let fill_and_rollback =
         let s = Private.session ~streaming:false ~islands_only:true in
         let broken () =
           runtime_island ~name:"Broken" ~props:`Null (fun () ->
-              ignore (Remote.use echo (fun () -> "r"));
+              ignore (Remote.make echo (fun () -> "r"));
               failwith "island broke")
         in
         (match Private.print s (fun () -> Private.node (broken ())) with
@@ -301,7 +301,7 @@ let fill_and_rollback =
                     ~fallback:(fun ~error:_ ~reset:_ -> text "caught")
                     ~children:(fun () ->
                       runtime_island ~name:"Broken" ~props:`Null (fun () ->
-                          ignore (Remote.use echo (fun () -> "c"));
+                          ignore (Remote.make echo (fun () -> "c"));
                           failwith "island broke"))
                     ();
                   island echo "c";
@@ -335,7 +335,7 @@ let optimistic =
       fun () ->
         reset ();
         edits := [];
-        let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "m")) in
+        let r, _ = in_owner (fun () -> Remote.make gated (fun () -> "m")) in
         settle 0 "base";
         let a = Remote.optimistic r ~change:(fun d -> d ^ "+x") (fun () -> Action.call edit "x") in
         check_status "shown before the call settles" "ready base+x" r;
@@ -354,7 +354,7 @@ let optimistic =
       fun () ->
         reset ();
         edits := [];
-        let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "k")) in
+        let r, _ = in_owner (fun () -> Remote.make gated (fun () -> "k")) in
         settle 0 "old";
         let _ = Remote.optimistic r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         Remote.refetch r;
@@ -369,7 +369,7 @@ let optimistic =
       fun () ->
         reset ();
         edits := [];
-        let r, _ = in_owner (fun () -> Remote.use ~retry:Remote.no_retry gated (fun () -> "e")) in
+        let r, _ = in_owner (fun () -> Remote.make ~retry:Remote.no_retry gated (fun () -> "e")) in
         settle 0 "base";
         Remote.refetch r;
         fail 1 "down";
@@ -380,7 +380,7 @@ let optimistic =
       fun () ->
         reset ();
         edits := [];
-        let r, _ = in_owner (fun () -> Remote.use gated (fun () -> "p")) in
+        let r, _ = in_owner (fun () -> Remote.make gated (fun () -> "p")) in
         settle 0 "old";
         let _ = Remote.optimistic r ~change:(fun d -> d ^ "+c") (fun () -> Action.call edit "c") in
         Remote.refetch r;

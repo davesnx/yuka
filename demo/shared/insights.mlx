@@ -253,7 +253,7 @@ let tooltip (hover : hover option Yuka.State.read) : Yuka.client Yuka.element =
           </g>)
 
 let[@client] make ~(workspace : Model.Workspace.t) () =
-  let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view = Queries.All }) in
+  let source = Yuka.Live.make Topics.issues (fun () -> { Queries.workspace; view = Queries.All }) in
   let issues = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[]) in
   let multiplier = Yuka.State.make 1 in
   let animate = Yuka.State.make false in

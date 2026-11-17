@@ -209,7 +209,7 @@ when two forms on a page have the same action and key.
 
 ## Remote data
 
-`Yuka.Remote.use` runs a query and keeps its status. Call it in a
+`Yuka.Remote.make` runs a query and keeps its status. Call it in a
 component body. It runs again when a State that its input function reads
 changes:
 
@@ -222,7 +222,7 @@ let stats = Yuka.Action.query ~name:"user_stats" ~input:input_codec ~output:stat
 
 module Card = struct
   let make ~workspace ~(user : Model.User.t) () =
-    let remote = Yuka.Remote.use stats (fun () -> { workspace; user = user.id }) in
+    let remote = Yuka.Remote.make stats (fun () -> { workspace; user = user.id }) in
     <Yuka.Show status=(fun () -> Yuka.Remote.status remote)
       loading=(<p>"Loading..."</p>)
       failed=(fun _ -> <p>"Could not load the numbers."</p>)>
@@ -284,12 +284,12 @@ Yuka.Server.Live.implement Topics.issue (fun id ->
     | None -> Yuka.Server.Action.reject ("No issue " ^ id))
 ```
 
-An island subscribes with `Yuka.Live.use`:
+An island subscribes with `Yuka.Live.make`:
 
 ```ocaml
 (* shared/issue_props.mlx *)
 let[@client] make ~(issue : Model.Issue.t) () =
-  let live = Yuka.Live.use Topics.issue (fun () -> issue.id) in
+  let live = Yuka.Live.make Topics.issue (fun () -> issue.id) in
   let current =
     Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:issue)
   in
@@ -311,10 +311,10 @@ The server sends a subscriber the changes from the state it has (a patch)
 when the patch is short, else the full state. When the socket closes, the
 status is `Ready { stale = true }` while the browser connects again; after
 the reconnect, the page gets the full state again. In a server render,
-`Live.use` runs `allow` and reads the state (the loader runs when the node
+`Live.make` runs `allow` and reads the state (the loader runs when the node
 has none), and an island starts from that state with no wait.
 
-`Live.use` needs a session: with Dream, `Dream.cookie_sessions` and
+`Live.make` needs a session: with Dream, `Dream.cookie_sessions` and
 `Dream.set_secret`, with a secret that is the same on every server and
 after a restart. A page that uses it cannot be prerendered, and its route
 must not use a shared cache.
