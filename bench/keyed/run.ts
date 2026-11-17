@@ -5,8 +5,9 @@ import { gzipSync, brotliCompressSync, constants as zlib } from "node:zlib";
 import { parseArgs } from "node:util";
 import { chromium, type Browser, type Page } from "playwright-core";
 
-const allApps = ["vanillajs", "solid", "yuka", "yuka-block"] as const;
+const allApps = ["vanillajs", "solid", "yuka", "yuka-block", "brumate"] as const;
 type App = (typeof allApps)[number];
+const defaultApps: App[] = ["vanillajs", "solid", "yuka", "yuka-block"];
 
 interface Bench {
   id: string;
@@ -52,7 +53,7 @@ const { values: options } = parseArgs({
   options: {
     site: { type: "string", default: join(process.env.BUILD_DIR ?? "_build", "bench-keyed") },
     runs: { type: "string", default: "10" },
-    apps: { type: "string", default: allApps.join(",") },
+    apps: { type: "string", default: defaultApps.join(",") },
     benchmarks: { type: "string", default: "" },
     out: { type: "string" },
     chrome: { type: "string", default: process.env.CHROME_PATH ?? "" },

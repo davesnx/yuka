@@ -22,5 +22,12 @@ npm run --prefix "$keyed/solid" --silent build -- --file "$root/$build/bench-key
 node "$root/scripts/bundle.ts" --entry "$root/$build/bench-keyed-solid/main.js" --outdir "$site/solid/dist"
 cp "$keyed/solid/index.html" "$site/solid/"
 
+if [ ! -d "$keyed/brumate/node_modules" ]; then
+  npm ci --prefix "$keyed/brumate" --no-audit --no-fund
+fi
+npm run --prefix "$keyed/brumate" --silent build
+rm -rf "$site/brumate"
+node "$keyed/brumate/site.ts" --dist "$keyed/brumate/dist/client" --out "$site/brumate"
+
 cp "$keyed/vanillajs/index.html" "$site/vanillajs/"
 cp "$keyed/vanillajs/src/Main.js" "$site/vanillajs/src/"
