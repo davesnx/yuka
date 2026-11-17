@@ -4,12 +4,16 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 build=${BUILD_DIR:-_build}
 keyed="$root/bench/keyed"
 site="$root/$build/bench-keyed"
-mkdir -p "$site/yuka/dist" "$site/solid/dist" "$site/vanillajs/src"
+mkdir -p "$site/yuka/dist" "$site/yuka-block/dist" "$site/solid/dist" "$site/vanillajs/src"
 cp -R "$keyed/css" "$site/"
 
 node "$root/scripts/bundle.ts" --entry "$root/$build/default/bench/keyed/yuka/out/bench/keyed/yuka/main.js" \
   --outdir "$site/yuka/dist"
 cp "$keyed/yuka/index.html" "$site/yuka/"
+
+node "$root/scripts/bundle.ts" --entry "$root/$build/default/bench/keyed/yuka-block/out/bench/keyed/yuka-block/main.js" \
+  --outdir "$site/yuka-block/dist"
+cp "$keyed/yuka-block/index.html" "$site/yuka-block/"
 
 if [ ! -d "$keyed/solid/node_modules" ]; then
   npm ci --prefix "$keyed/solid" --no-audit --no-fund

@@ -5,7 +5,7 @@ import { gzipSync, brotliCompressSync, constants as zlib } from "node:zlib";
 import { parseArgs } from "node:util";
 import { chromium, type Browser, type Page } from "playwright-core";
 
-const allApps = ["vanillajs", "solid", "yuka"] as const;
+const allApps = ["vanillajs", "solid", "yuka", "yuka-block"] as const;
 type App = (typeof allApps)[number];
 
 interface Bench {
@@ -544,6 +544,7 @@ const sizes: Partial<Record<App, Size>> = {};
 for (const app of apps) sizes[app] = sizeOf(app);
 
 const ratio = geomean.yuka !== undefined && geomean.solid !== undefined ? geomean.yuka / geomean.solid : undefined;
+const blockRatio = geomean["yuka-block"] !== undefined && geomean.solid !== undefined ? geomean["yuka-block"] / geomean.solid : undefined;
 
 const pad = (s: string, n: number) => s.padStart(n);
 const lines: string[] = [];
@@ -564,6 +565,7 @@ if (ratio !== undefined) {
   lines.push("");
   lines.push(`yuka/solid weighted geometric mean ratio: ${ratio.toFixed(3)}`);
 }
+if (blockRatio !== undefined) lines.push(`yuka-block/solid weighted geometric mean ratio: ${blockRatio.toFixed(3)}`);
 console.log(lines.join("\n"));
 
 if (options.out !== undefined) {
@@ -580,6 +582,7 @@ if (options.out !== undefined) {
         samples: results,
         geomean,
         yukaSolidRatio: ratio ?? null,
+        yukaBlockSolidRatio: blockRatio ?? null,
         sizes,
       },
       null,
