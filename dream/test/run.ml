@@ -52,6 +52,7 @@ let pages () =
       "post/hello/index.html";
       "post/world/index.html";
       "static/s.css";
+      "whoami.txt";
     ]
     (List.map fst written);
   let file name = List.assoc name written in
@@ -59,6 +60,7 @@ let pages () =
   check_true "crawled from a crawled page" (contains (file "post/world/index.html") "post world");
   check_true "rule header page" (contains (file "post/hello/index.html") "class=\"root\"");
   Alcotest.(check string) "endpoint" "<rss/>" (file "feed.xml");
+  Alcotest.(check string) "the Dream request of a prerender" "/whoami.txt -" (file "whoami.txt");
   check_true "404 page" (contains (file "404.html") "missing /404.html");
   Alcotest.(check string) "static copied" "body{}" (file "static/s.css");
   Alcotest.(check string) "css sheet written" ".w_0a1b{}" (file "_yuka/css/w-0a1b.css");
@@ -67,10 +69,9 @@ let pages () =
   check_true "files are not crawled" (not (contains warnings "/_yuka"));
   check_true "a path that cannot be a file name"
     (contains warnings "yuka-dream prerender: /a%2Fb answered 200 but cannot be a file name, not written");
-  let req = Dream.request ~target:"/" "" in
   List.iter
     (fun (path, expected) ->
-      Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Yuka_routes.app req path))
+      Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Yuka_routes.app path))
     [ ("/guide", true); ("/static/s.css", false); ("/_yuka/app/main.js", false); ("/_yuka", false) ]
 
 let twice () =
@@ -197,6 +198,21 @@ let no_sessions () =
   check_true "a token" (contains body {|{"csrf":"|});
   Alcotest.(check (list string)) "no log" [] !got
 
+let dream_request () =
+  let handler = Yuka_dream.handler config Yuka_routes.app in
+  let response = Dream.test handler (Dream.request ~target:"/whoami.txt?a=1" ~headers:[ ("x-user", "bob") ] "") in
+  Alcotest.(check string) "inside a Dream request" "/whoami.txt?a=1 bob" (Lwt_main.run (Dream.body response));
+  check_true "a Testing request" (Option.is_none (Yuka_dream.request (Yuka.Server.Testing.request ())))
+
+let handler_reads_the_request () =
+  let handler = Yuka_dream.handler config Yuka_routes.app in
+  let headers =
+    [ ("Content-Type", "application/json"); ("Origin", "http://app.test"); ("Host", "app.test"); ("Cookie", "a=1; theme=dark") ]
+  in
+  let response = Dream.test handler (Dream.request ~method_:`POST ~target:"/sum?tag=t" ~headers "[1,2,3]") in
+  Alcotest.(check (pair int string)) "JSON body, query param and cookie" (201, {|["6","t","dark"]|})
+    (Dream.status_to_int (Dream.status response), Lwt_main.run (Dream.body response))
+
 let free_port () =
   let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.bind s (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
@@ -271,5 +287,10 @@ let () =
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);
       ("session", [ Alcotest.test_case "no session middleware" `Quick no_sessions ]);
+      ( "request",
+        [
+          Alcotest.test_case "Yuka_dream.request" `Quick dream_request;
+          Alcotest.test_case "a handler reads the request" `Quick handler_reads_the_request;
+        ] );
       ("serve", [ Alcotest.test_case "a client that leaves during a streamed answer" `Quick client_leaves_during_a_stream ]);
     ]

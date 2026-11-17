@@ -29,5 +29,5 @@ let hello_codec =
   Yuka.Codec.make ~encode:hello_to_json ~decode:(fun j ->
       match hello_of_json j with v -> Ok v | exception e -> Error (Printexc.to_string e))
 
-let hello (_ : Tapak.Request.t) = Yuka.Server.json hello_codec { from = "yuka endpoint" }
+let hello (_ : Yuka.Server.request) = Yuka.Server.json hello_codec { from = "yuka endpoint" }
 let not_found ~path () = Yuka.Server.page ~title:"Missing" (fun () -> <p>(Yuka.text ("missing " ^ path))</p>)

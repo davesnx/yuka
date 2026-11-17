@@ -19,6 +19,9 @@ let routes =
       Router.route Broken ~path:"/broken" ~page:App.Pages.broken;
       Router.route Boom ~path:"/boom" ~page:App.Pages.boom
         ~loader:App.Loaders.exploding;
+      Router.route Greet ~path:"/greet" ~page:App.Pages.greet
+        ~loader:App.Loaders.greeting ~guard:App.Guards.greet;
+      Router.post Sum ~path:"/sum" ~handler:App.Api.sum ~guard:App.Guards.sum;
       Router.group ~path:"/team/:team<Params.Team.t>" ~layout:App.Layouts.team
         ~guard:App.Guards.outer ~loader:App.Loaders.squad
         ~headers:[ ("X-A", "team") ]

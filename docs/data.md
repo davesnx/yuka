@@ -60,8 +60,8 @@ guard. An action checks permissions itself, with its request
 
 ### The request
 
-`Yuka.Server.Request` reads the request of an action, a form action or
-a live `allow`:
+`Yuka.Server.Request` reads the request of a loader, a guard, a handler,
+an action, a form action or a live `allow`:
 
 | Function | Gives |
 | --- | --- |
@@ -74,8 +74,9 @@ a live `allow`:
 | `json ?limit codec` | the body decoded with the codec (default limit 1 MiB) |
 
 The server reads the body from the client one time. Each later `body` or
-`json` call gives the same bytes; in an action, the cycle read the body
-before the action runs, so these calls read nothing more. A call with a
+`json` call gives the same bytes; the guards and the handler of a route
+get the same request, and in an action the cycle read the body before
+the action runs, so these calls read nothing more. A call with a
 smaller limit than the length of the body gives ``Error `Too_large``.
 After a call gave ``Error `Too_large``, each later call gives it too.
 

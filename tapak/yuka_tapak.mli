@@ -6,7 +6,7 @@ val handler :
   fs:_ Eio.Path.t ->
   ?node:Yuka.Server.Live.node ->
   Yuka.Server.config ->
-  Tapak.Request.t Yuka.Server.app ->
+  Yuka.Server.app ->
   Tapak.handler
 (** Answers every request with the request cycle
     ([Yuka.Server.Adapter.Make]), the WebSocket of {!Yuka.Live} at
@@ -27,6 +27,11 @@ val handler :
 
     When the config has no [log], messages go to the [Logs] source
     ["yuka"]. *)
+
+val request : Yuka.Server.request -> Tapak.Request.t option
+(** The tapak request of a request that {!handler} made, for a loader,
+    guard, handler or action that needs tapak. [None] for a request from
+    another adapter or from [Yuka.Server.Testing.request]. *)
 
 val sessions : Tapak.middleware
 (** Gives each client a session id cookie ([yuka-session]) and a CSRF

@@ -33,7 +33,7 @@ JavaScript (components and islands), the server, and the client entry.
 dune-project
 Routes.ml
 shared/   dune, counter.mlx, counter.css
-server/   dune, pages.mlx, yuka_routes.mli, main.ml
+server/   dune, pages.mlx, main.ml
 client/   dune, main.ml
 ```
 
@@ -154,14 +154,6 @@ let home () =
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
       <p>(Yuka.text ("No page at " ^ path))</p>)
-```
-
-`Yuka_routes.app` takes the request type of the adapter from a loader,
-guard or handler. When none of them names it, give it in
-`server/yuka_routes.mli`:
-
-```ocaml
-val app : Dream.request Yuka.Server.app
 ```
 
 `server/main.ml` runs the app on Dream:

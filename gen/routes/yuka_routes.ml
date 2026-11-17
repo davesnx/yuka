@@ -1207,7 +1207,7 @@ let generate_server ~shared ~digest (nodes, root) =
           sprintf "let %s : Yuka.Server.Generated.fallback =\n%s\n" n
             (String.concat "\n" (indent 2 (String.split_on_char '\n' t))))
         (fallbacks ())
-    @ [ sprintf "let resolve %s (route : %s.t) : Yuka.Server.Generated.target =" req shared;
+    @ [ sprintf "let resolve (%s : Yuka.Server.request) (route : %s.t) : Yuka.Server.Generated.target =" req shared;
         "  match route with" ]
     @ indent 2 arms
     @ [

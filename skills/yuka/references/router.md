@@ -36,7 +36,7 @@ let post ~slug ~post () =
   Yuka.Server.page ~title:slug (fun () -> <article>(Yuka.text post)</article>)
 
 (* loaders.ml *)
-let post (_ : Dream.request) ~slug =
+let post (_ : Yuka.Server.request) ~slug =
   Yuka.Async.return
     (if slug = "hello" then Ok "Hello, world" else Error Yuka.Server.Not_found)
 ```
@@ -143,8 +143,10 @@ does not decode counts as absent. Search fields go on a route or a group.
 
 Each attachment is a value path such as `Pages.home`, or `home` after
 `open Pages` (see "Code before the tree"). The generated code
-calls it with labelled arguments. `req` is the request of the server
-adapter, such as `Dream.request`.
+calls it with labelled arguments. `req` is a `Yuka.Server.request`: read
+it with `Yuka.Server.Request` (see "The request" in `data.md`). Code that
+needs the request of the server gets it from the adapter:
+`Yuka_dream.request req` gives a `Dream.request option`.
 
 | Attachment | On | Shape |
 |---|---|---|

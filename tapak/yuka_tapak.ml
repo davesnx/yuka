@@ -1,4 +1,8 @@
-type current = { sw : Eio.Switch.t; mutable read : bool }
+type current = {
+  sw : Eio.Switch.t;
+  mutable read : bool;
+  file : root:string -> path:string -> headers:(string * string) list -> Tapak.Response.t;
+}
 
 let current : current Eio.Fiber.key = Eio.Fiber.create_key ()
 
@@ -195,19 +199,26 @@ let drain request =
   let rec read () = if not (Bytesrw.Bytes.Slice.is_eod (Bytesrw.Bytes.Reader.read reader)) then read () in
   try read () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
 
-let handler ~sw ~fs ?node config app =
-  let module Cycle = Yuka.Server.Adapter.Make (struct
-    include Base
+module Cycle = Yuka.Server.Adapter.Make (struct
+  include Base
 
-    let file _ ~root ~path ~headers =
-      Yuka.Async.return
-        (if exists ~root ~path then
-           Tapak.Response.file ~headers:(Http.Header.of_list headers) Eio.Path.(fs / root / path)
-         else
-           Tapak.Response.of_string ~status:`Not_found
-             ~headers:(Http.Header.of_list [ ("cache-control", "no-store") ])
-             "Not Found")
-  end) in
+  let file _ ~root ~path ~headers =
+    match Eio.Fiber.get current with
+    | None -> Yuka.Async.failed "Yuka_tapak: file outside a request"
+    | Some c -> Yuka.Async.return (c.file ~root ~path ~headers)
+end)
+
+let request = Cycle.backend_request
+
+let handler ~sw ~fs ?node config app =
+  let file ~root ~path ~headers =
+    if Base.exists ~root ~path then
+      Tapak.Response.file ~headers:(Http.Header.of_list headers) Eio.Path.(fs / root / path)
+    else
+      Tapak.Response.of_string ~status:`Not_found
+        ~headers:(Http.Header.of_list [ ("cache-control", "no-store") ])
+        "Not Found"
+  in
   let config = Yuka.Server.Adapter.default_log log config in
   fun request ->
     let opened, open_ = Eio.Promise.create () and closed, close = Eio.Promise.create () in
@@ -221,7 +232,7 @@ let handler ~sw ~fs ?node config app =
         | Request_ended -> ()
         | Eio.Cancel.Cancelled _ as e -> raise e
         | e -> Logs.err ~src (fun m -> m "request switch failed: %s" (Printexc.to_string e)));
-    let state = { sw = Eio.Promise.await opened; read = false } in
+    let state = { sw = Eio.Promise.await opened; read = false; file } in
     let close () = ignore (Eio.Promise.try_resolve close ()) in
     let bound run = Eio.Fiber.with_binding current state run in
     let later run = Fun.protect ~finally:close (fun () -> bound run) in
