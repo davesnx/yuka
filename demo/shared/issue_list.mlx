@@ -12,11 +12,11 @@ let index_of id items =
 
 let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Queries.view) ~(query : string)
     ~(chosen : string list) () =
-  let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view }) in
+  let source = Yuka.Live.make Topics.issues (fun () -> { Queries.workspace; view }) in
   let issues =
     Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
   in
-  let labels = Yuka.Remote.use Queries.labels (fun () -> workspace) in
+  let labels = Yuka.Remote.make Queries.labels (fun () -> workspace) in
   let label_counts =
     Yuka.State.memo ~equal:( = ) (fun () ->
         match Yuka.Remote.status labels with

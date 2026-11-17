@@ -9,7 +9,7 @@ let clamp low high value = max low (min high value)
 let scale_text percent = px (percent / 100) ^ "." ^ (if percent mod 100 < 10 then "0" else "") ^ px (percent mod 100)
 
 let[@client] make ~(workspace : Workspace.t) ~children () =
-  let live = Yuka.Live.use Topics.board (fun () -> workspace) in
+  let live = Yuka.Live.make Topics.board (fun () -> workspace) in
   let items = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:[]) in
   let spots =
     Yuka.State.memo (fun () ->

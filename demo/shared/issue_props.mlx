@@ -1,7 +1,7 @@
 open Model
 
 let[@client] make ~(issue : Model.Issue.t) ~children () =
-  let live = Yuka.Live.use Topics.issue (fun () -> issue.id) in
+  let live = Yuka.Live.make Topics.issue (fun () -> issue.id) in
   let current =
     Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:issue)
   in

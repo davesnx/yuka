@@ -1,7 +1,7 @@
 let items = Yuka.Action.query ~name:"items" ~input:Yuka.Codec.unit ~output:(Yuka.Codec.list Yuka.Codec.string)
 
 let[@client] make () =
-  let r = Yuka.Remote.use items (fun () -> ()) in
+  let r = Yuka.Remote.make items (fun () -> ()) in
   <ul>
     (Yuka.hole (fun () ->
          match Yuka.Remote.status r with

@@ -13,7 +13,7 @@ val default_retry : retry
 
 val no_retry : retry
 
-val use :
+val make :
   ?retry:retry -> ?enabled:(unit -> bool) -> ('i, 'o, [ `Query ]) Action.t -> (unit -> 'i) -> 'o t
 (** Runs the query for the input that the function returns, and again
     when a State that the function or [enabled] reads changes. Call it in

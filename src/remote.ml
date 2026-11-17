@@ -51,7 +51,7 @@ let on_server ~enabled (q : (_, _, _) Action.t) args base =
         Answers.record (Answers.key (Action.name q) input) (Some r) settled
     | _ -> Answers.record (Answers.key (Action.name q) input) None settled
 
-let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
+let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
     (args : unit -> 'i) : 'o t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in

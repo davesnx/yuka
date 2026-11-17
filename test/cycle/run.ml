@@ -719,7 +719,7 @@ let reviewed =
         check_header r "x-bad" [];
         check_header r "set-cookie" [];
         Alcotest.(check int) "one log" 1 (List.length !logged) );
-    ( "a server render of Live.use runs allow with the request",
+    ( "a server render of Live.make runs allow with the request",
       fun () ->
         let loads = !App.mine_loads in
         let r = get ~headers:[ ("x-user", "ann") ] "/live" in
@@ -761,7 +761,7 @@ let reviewed =
         let r = get ~meth:`POST ~headers:(("upgrade", "websocket") :: same) "/_yuka/live" in
         check_status r 405;
         Alcotest.(check (list string)) "no file" [] !file_calls );
-    ( "a server render of Live.use reads the state of the handler's node",
+    ( "a server render of Live.make reads the state of the handler's node",
       fun () ->
         let node = Server.Live.node () in
         let inbox = ref [ Some {|{"t":"hello","v":1,"csrf":"t"}|}; Some {|{"t":"sub","id":1,"topic":"cycle-mine","key":"ann"}|} ] in
@@ -820,7 +820,7 @@ let reviewed =
         Alcotest.(check int) "one log" 1 (List.length !logged);
         check_true "names the path and the middleware"
           (contains (List.hd !logged) "/_yuka/csrf" && contains (List.hd !logged) "session middleware") );
-    ( "a page with Live.use and no session writes the token as an error",
+    ( "a page with Live.make and no session writes the token as an error",
       fun () ->
         let r = get ~headers:[ ("x-user", "ann"); ("x-no-session", "1") ] "/live" in
         check_status r 200;
@@ -828,7 +828,7 @@ let reviewed =
         check_true "no token"
           (contains r.body {|data-yuka-answer="l:csrf">{"error":{"kind":"forbidden"}}</script>|});
         Alcotest.(check (list string)) "one log"
-          [ "page with a Live.use: the request has no session; live data needs session middleware" ] !logged );
+          [ "page with a Live.make: the request has no session; live data needs session middleware" ] !logged );
     ( "a page with live state under a shared cache rule is sent private, no-store",
       fun () ->
         let r = get ~headers:[ ("x-user", "ann") ] "/live-public" in

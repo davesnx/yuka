@@ -438,7 +438,7 @@ module Action : sig
   val query :
     name:string -> input:'i Codec.t -> output:'o Codec.t -> ('i, 'o, [ `Query ]) t
   (** Like {!mutation}, for a read with no side effect: a server render may
-      run it and {!Remote.use} may retry it. Same endpoint and wire format. *)
+      run it and {!Remote.make} may retry it. Same endpoint and wire format. *)
 
   val name : (_, _, _) t -> string
   (** The name given to {!mutation} or {!query}. *)
@@ -1390,7 +1390,7 @@ module Server : sig
         of the key on the node, so the loader gets no request and must not
         depend on who asks: [allow] decides who may read a key. [allow] (default: always) runs on each subscribe, with the
         WebSocket upgrade request, and on each server render of
-        {!Yuka.Live.use}, with the page request; false
+        {!Yuka.Live.make}, with the page request; false
         refuses it ([Forbidden]). A loader that fails with {!Action.reject}
         gives [Rejected]; any other failure gives [Server] and a log
         message. Raises [Invalid_argument] when the topic is already
@@ -1732,7 +1732,7 @@ module Server : sig
       val csrf_token : request -> string option
       (** A CSRF token bound to the session of the request (Dream:
           [Dream.csrf_token]), or [None] when the request has no session. It
-          is written in a page only when the page has a {!Yuka.Live.use}
+          is written in a page only when the page has a {!Yuka.Live.make}
           ([None] writes the error [Forbidden] in its place and logs one
           line: the uses of the page get [Forbidden] and the client opens
           no socket), answers
@@ -1774,7 +1774,7 @@ module Server : sig
       val handler : ?node:Live.node -> config -> Backend.request app -> Backend.request -> Backend.reply Async.t
       (** Answers one request. [node] (default: the process node) is the
           live node of the sockets of [/_yuka/live] and of the server render
-          of {!Yuka.Live.use}; a second handler in one process with its own
+          of {!Yuka.Live.make}; a second handler in one process with its own
           {!Live.type-node} is a second node. Steps, in this order:
 
           + A reserved path (see {!Server}): [/_yuka/action/<name>], the
@@ -1813,10 +1813,10 @@ module Server : sig
             and it applies; else the loaders, then status 200 with the rule
             headers, [content-type], [vary: Yuka-Navigate] and the rule
             [cache-control]. When the shell of the page rendered a
-            {!Yuka.Live.use} (its state passed [allow] for this request) and
+            {!Yuka.Live.make} (its state passed [allow] for this request) and
             that [cache-control] is shared ([public] or [s-maxage]), the
             answer has [cache-control: private, no-store] instead, and the
-            first such answer for a path logs a message. A [Live.use] that
+            first such answer for a path logs a message. A [Live.make] that
             renders only in a streamed fill comes after the headers and is
             not covered: give such a route a private cache.
           + The document, streamed. Each layer's children are inside
@@ -1886,7 +1886,7 @@ module Server : sig
     val config : config -> config
     (** The config a prerender renders with: [dev] off, whatever [~dev]
         says, so no static file gets the dev script or the dev state; and a
-        page that renders a {!Yuka.Live.use} gives the 500 page and a log
+        page that renders a {!Yuka.Live.make} gives the 500 page and a log
         message instead of a file, since its state depends on the request.
         {!missing_page} uses it too. *)
 
@@ -2098,7 +2098,7 @@ module Server : sig
       string ->
       Json.t ->
       (Json.t * (string * int) option, Status.error) result Async.t
-    (** The state that a server render of [Live.use] embeds for a topic name
+    (** The state that a server render of [Live.make] embeds for a topic name
         and key, with the node and [seq] when the page can resume from it,
         as the request cycle reads it. *)
 

@@ -20,7 +20,7 @@ val handler :
     (https://github.com/camlworks/dream/issues/467): a publish written to a
     client that reset its connection just before can freeze the server at
     100% CPU. [node] is the live node of the sockets and of the server
-    render of [Yuka.Live.use] (default: the process node); a second handler
+    render of [Yuka.Live.make] (default: the process node); a second handler
     in one process with its own {!Yuka.Server.Live.type-node} is a second
     node. *)
 
@@ -39,7 +39,7 @@ val prerender :
       copies [Yuka.Server.Prerender.served_dirs] under their prefixes.
 
     It renders with [Yuka.Server.Prerender.config]: dev mode is off, and a
-    page that renders a [Yuka.Live.use] is a 500 with a log message, so it is
+    page that renders a [Yuka.Live.make] is a 500 with a log message, so it is
     not written. A file in the [prerendered] directory of the config is not
     read. Files already in [out] are replaced; running it twice gives the
     same files. Gives [Error] with a message that names the directory, and

@@ -229,7 +229,7 @@ A prerender writes each page whose rules say `~prerender:true` (see
 [Router](router.md)) to a directory. It starts from the nodes with no
 param, follows the links of each page to other such pages, writes
 `404.html`, and copies the client JavaScript and the `public`
-directories. A page that uses `Yuka.Live.use` is not written. Run it as a
+directories. A page that uses `Yuka.Live.make` is not written. Run it as a
 build step, with the config and app of the server:
 
 ```ocaml
