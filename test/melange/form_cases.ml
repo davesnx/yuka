@@ -346,6 +346,17 @@ let async =
             check "error shown" "Whole form" (text_of "[role=alert] u");
             check "same markup after hydration" html after;
             Yuka.stop ()) );
+    ( "form: the answer of a form that is gone does not navigate",
+      fun finish ->
+        start (Server.to_string (fun () -> island_of "Toggled" toggled_view));
+        set_input "body" "x";
+        ignore (submit ());
+        State.update tick succ;
+        respond 0 200 {|{"ok":{"value":1,"redirect":"/gone"}}|};
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "not followed" "" (String.concat "," !navigated);
+                Yuka.stop ())) );
     ( "form: with no redirect and no on_ok, reload the page URL",
       fun finish ->
         start (Server.to_string (fun () -> island_of "First" (plain_view "a")));

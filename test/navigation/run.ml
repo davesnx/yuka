@@ -1151,13 +1151,14 @@ let bad_title finish =
       finish ())
 
 let act = Action.mutation ~name:"act" ~input:Codec.string ~output:Codec.string
+let ask = Action.query ~name:"ask" ~input:Codec.string ~output:Codec.string
 
 let actor_entry =
   runtime_entry ~name:"Actor" (fun json ->
       Result.map
         (fun (_ : int) () ->
           element "button"
-            [ on "click" (fun _ -> ignore (Action.call act "go")) ]
+            [ on "click" (fun _ -> ignore (Action.call ask "go")) ]
             [ text "act" ])
         (Codec.decode Codec.int json))
 
@@ -1191,7 +1192,7 @@ let rerender_entry =
                 [ Yuka.attr "id" "b";
                   on "click" (fun _ ->
                       State.set n (v + 1);
-                      ignore (Action.call act "go")) ]
+                      ignore (Action.call ask "go")) ]
                 [ text (string_of_int v) ]))
         (Codec.decode Codec.int json))
 
@@ -1833,25 +1834,25 @@ let rerendered_call_aborted_by_outlet finish =
           check "aborted when the outlet stops its island" "true" (bools (call_aborted 0));
           finish ()))
 
-let leaver_entry =
+let leaver_entry action =
   runtime_entry ~name:"Leaver" (fun json ->
       Result.map
         (fun (_ : int) () ->
           element "button"
             [ Yuka.attr "id" "go";
               on "click" (fun _ ->
-                  ignore (Action.call act "go");
+                  ignore (Action.call action "go");
                   Browser.navigate "/two") ]
             [ text "go" ])
         (Codec.decode Codec.int json))
 
-let call_then_navigate_aborted finish =
+let call_then_navigate ~entry ~aborted finish =
   setup "";
   set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
   set_body
     ({|<a id="l" href="/two">two</a>|}
     ^ {|<yuka-outlet data-k="L0" style="display:contents"><yuka-island data-name="Leaver" data-id="i1" style="display:contents"><button id="go">go</button></yuka-island><script type="application/json" data-yuka-props="i1">1</script></yuka-outlet>|});
-  render ~islands:(runtime_registry [ leaver_entry ]) ();
+  render ~islands:(runtime_registry [ entry ]) ();
   fire "#l" "pointerdown";
   resolve_headers 0 "<p>new</p>" 200
     [| ("yuka-outlet", "L0"); ("yuka-build", "b1"); ("cache-control", "private, max-age=60") |];
@@ -1860,7 +1861,7 @@ let call_then_navigate_aborted finish =
       let action = calls () - 1 in
       tick (fun () ->
           check "the page changed" "/two" (location_ ());
-          check "the call of the stopped island is aborted" "true" (bools (call_aborted action));
+          check "the call of the stopped island" aborted (bools (call_aborted action));
           finish ()))
 
 let set_outlet_key : string -> unit =
@@ -3239,10 +3240,13 @@ let all =
     ("another build is a full load", stale_build);
     ("unknown outlet is a full load", unknown_outlet);
     ("a bad title still navigates", bad_title);
-    ("stop_within aborts the actions of the islands it stops", actions_of_stopped_islands);
-    ("an action call survives the render that its handler's writes cause", action_survives_own_render);
+    ("stop_within aborts the query calls of the islands it stops", actions_of_stopped_islands);
+    ("a query call survives the render that its handler's writes cause", action_survives_own_render);
     ("that call is still aborted when its island stops", rerendered_call_aborted_by_outlet);
-    ("an action call then a navigation in one handler: the call is aborted", call_then_navigate_aborted);
+    ( "a query call then a navigation in one handler: the call is aborted",
+      call_then_navigate ~entry:(leaver_entry ask) ~aborted:"true" );
+    ( "a mutation call then a navigation in one handler: the call is not aborted",
+      call_then_navigate ~entry:(leaver_entry act) ~aborted:"false" );
     ("302 not followed is a full load", not_a_page 302 "text/html");
     ("json is a full load", not_a_page 200 "application/json");
     ("no content type is a full load", not_a_page 200 "");

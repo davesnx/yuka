@@ -558,18 +558,17 @@ let action_call () =
     | Async.Pending -> "pending"
   in
   let result =
-    call (fun name input ->
+    call (fun name input k ->
         seen := name ^ " " ^ show_json input;
-        match input with
-        | `Int n -> Async.return (Ok (`Int (n * 2)))
-        | _ -> Async.return (Error Status.Server))
+        (match input with `Int n -> k (Ok (`Int (n * 2))) | _ -> k (Error Status.Server));
+        ignore)
   in
   check "transport got" "double 21" !seen;
   check "decoded output" "ok 42" (show result);
   check "a decode error is Protocol" "error protocol error: expected int, got \"x\""
-    (show (call (fun _ _ -> Async.return (Ok (`String "x")))));
+    (show (call (fun _ _ k -> k (Ok (`String "x")); ignore)));
   check "a transport error stays" "error forbidden"
-    (show (call (fun _ _ -> Async.return (Error Status.Forbidden))))
+    (show (call (fun _ _ k -> k (Error Status.Forbidden); ignore)))
 
 let html_island () =
   let item name =

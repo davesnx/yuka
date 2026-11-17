@@ -75,6 +75,36 @@ Yuka.Async.on_result
 The outer `result` is the one of `Async.on_result`: `Error` only when the
 `Async` failed, which `call` never does.
 
+In the browser, a query called while an owner is current is aborted when
+that owner is disposed: when its `Yuka.Effect.after` or
+`Yuka.Effect.before` runs again, or when its component goes. The `Async` of
+an aborted call stays `Pending`, and a late answer is dropped. So an effect
+that loads data needs no code to drop old answers: only the answer for the
+latest run reaches the State. `query` and `issues` are States:
+
+```ocaml
+Yuka.Effect.after (fun () ->
+    Yuka.Async.on_result (Yuka.Action.call Actions.search (Yuka.State.get query))
+      (function
+        | Ok (Ok found) -> Yuka.State.set issues found
+        | Ok (Error _) | Error _ -> ()))
+```
+
+A mutation or a form action is not aborted that way, since an abort cannot
+undo the work of the server, and a request aborted early may not reach
+it. To abort any action, use `Yuka.Action.start`, which gives the `Async`
+and the function that aborts the call:
+
+```ocaml
+let result, abort = Yuka.Action.start Actions.update_issue input in
+(* later *)
+abort ()
+```
+
+On the server, a call is never aborted, and the abort of `start` only
+drops the answer. `Yuka.Remote.make` does all of this for a query and keeps
+its status; use `call` in an effect when the answer goes to your own State.
+
 ## Forms
 
 A form posts with no JavaScript, and in an island it submits through its

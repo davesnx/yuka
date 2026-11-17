@@ -411,11 +411,6 @@ let send name input k =
             context.log `Error ("action " ^ name ^ " failed: " ^ m);
             Error Status.Server))
 
-let transport name input =
-  let settled, resolve, _ = Async.make () in
-  let (_ : unit -> unit) = send name input resolve in
-  settled
-
 let register action f encode =
   let name = Action.name action in
   if Option.is_some (find_action name) then
@@ -429,7 +424,6 @@ let register action f encode =
         | Ok v ->
             Async.map encode (call f context v) )
     :: !registry;
-  Types.transport := transport;
   Bridge.send := send
 
 let implement action f = register action f (fun o -> Output (Codec.encode (Action.output action) o))

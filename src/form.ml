@@ -184,6 +184,8 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     }
   in
   let first = ref true in
+  let gone = ref false in
+  Base.own (fun () -> gone := true);
   let rec submit ev =
     Web.prevent_default ev;
     Web.remove_attribute (Web.target ev) "data-yuka-sent";
@@ -200,21 +202,25 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
               | Error m -> finish (Error m) None)
         | None -> call input)
   and finish result redirect =
-    State.set form.busy false;
-    match result with
-    | Ok (Ok o) -> ( match on_ok with Some f -> f o | None -> follow redirect)
-    | Ok (Error e) -> State.set form.failed e
-    | Error m -> State.set form.failed [ (None, m) ]
+    if not !gone then begin
+      State.set form.busy false;
+      match result with
+      | Ok (Ok o) -> ( match on_ok with Some f -> f o | None -> follow redirect)
+      | Ok (Error e) -> State.set form.failed e
+      | Error m -> State.set form.failed [ (None, m) ]
+    end
   and failed e = finish (Error (Status.error_to_string e)) None
   and call input =
     let json = Codec.encode (Action.input action) input in
-    Async.on_result (Action.send (Action.name action) json) (function
-      | Ok (Ok j) -> (
-          match read_answer output j with
-          | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
-          | Error m -> finish (Error m) None)
-      | Ok (Error e) -> failed e
-      | Error m -> finish (Error m) None)
+    let (_ : unit -> unit) =
+      Action.send (Action.name action) json (function
+        | Ok j -> (
+            match read_answer output j with
+            | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
+            | Error m -> finish (Error m) None)
+        | Error e -> failed e)
+    in
+    ()
   and follow = function
     | Some location when not (Web.same_origin location) ->
         if Dev.on then Web.console_error ("yuka: refused a redirect to another site: " ^ location);

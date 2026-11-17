@@ -18,13 +18,31 @@
   let output a = a.output
   let form a = a.form
 
-  let send name json =
+  let send name json k =
     Client.use_actions ();
-    !Types.transport name json
+    !Bridge.send name json k
 
-  let call a i =
-    Async.map
-      (function
-        | Ok j -> Result.map_error (fun m -> Status.Protocol m) (Codec.decode a.output j)
-        | Error e -> Error e)
-      (send a.name (Codec.encode a.input i))
+  let start a i =
+    let settled, resolve, _ = Async.make () in
+    let live = ref true in
+    let stop =
+      send a.name (Codec.encode a.input i) (fun answer ->
+          if !live then
+            resolve
+              (match answer with
+              | Ok j -> Result.map_error (fun m -> Status.Protocol m) (Codec.decode a.output j)
+              | Error e -> Error e))
+    in
+    let abort () =
+      if !live then begin
+        live := false;
+        stop ()
+      end
+    in
+    (settled, abort)
+
+  let call : type i o kind. (i, o, kind) t -> i -> (o, Status.error) result Async.t =
+   fun a i ->
+    let settled, abort = start a i in
+    (match a.form with Query -> Client.own_call settled abort | Mutation | Form _ -> ());
+    settled

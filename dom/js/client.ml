@@ -804,8 +804,7 @@ let field name fields =
 
 let has_value value id = match value with Some v -> String.equal v id | None -> false
 
-let transport name input =
-  let result, resolve, _ = Async.make () in
+let transport name input k =
   let id = register ignore in
   let finish () = drop_cleanup id in
   let abort =
@@ -821,28 +820,28 @@ let transport name input =
           !Platform.acted ();
           !Platform.live_mark fields
       | _ -> ());
-      resolve answer)
+      k answer)
     (fun cancelled message ->
       finish ();
-      resolve (Error (Status.Network (if cancelled then "cancelled" else message))))
+      k (Error (Status.Network (if cancelled then "cancelled" else message))))
   in
-  if Web.table_has (cleanups ()) (string_of_int id) then begin
-    set_cleanup id abort;
-    let tie (owner : Base.owner) =
-      let disposer = Base.add_disposer owner abort in
-      Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
-    in
-    match !acting with
-    | Some owner ->
-        let rec chain (o : Base.owner) = (o, o.gen) :: (match o.parent with Some p -> chain p | None -> []) in
-        let owners = chain owner in
-        Web.microtask (fun () ->
-            match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
-            | Some (o, _) -> tie o
-            | None -> abort ())
-    | None -> Option.iter tie !(Base.current_owner ())
-  end;
-  result
+  if Web.table_has (cleanups ()) (string_of_int id) then set_cleanup id abort;
+  abort
+
+let own_call result abort =
+  let tie (owner : Base.owner) =
+    let disposer = Base.add_disposer owner abort in
+    Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
+  in
+  match !acting with
+  | Some owner ->
+      let rec chain (o : Base.owner) = (o, o.gen) :: (match o.parent with Some p -> chain p | None -> []) in
+      let owners = chain owner in
+      Web.microtask (fun () ->
+          match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
+          | Some (o, _) -> tie o
+          | None -> abort ())
+  | None -> Option.iter tie !(Base.current_owner ())
 
 let async_value id =
   let result, resolve, fail = Async.make () in
@@ -1075,8 +1074,8 @@ let start_island entries lazy_entries props island =
         cancel ();
         drop_events ())
 
-let transport_hook : (string -> Json.t -> (Json.t, Status.error) result Async.t) ref =
-  ref (fun name _ -> failwith ("Yuka: no action transport for " ^ name ^ ": Action.send did not call Client.use_actions"))
+let transport_hook : (string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit) ref =
+  ref (fun name _ _ -> failwith ("Yuka: no action transport for " ^ name ^ ": Action.send did not call Client.use_actions"))
 
 let use_actions () = transport_hook := transport
 
@@ -1091,7 +1090,7 @@ let script_props script =
   | None -> None
 
 let start ?(lazy_entries = []) entries =
-  Types.transport := (fun name input -> !transport_hook name input);
+  Bridge.send := (fun name input k -> !transport_hook name input k);
   Types.async_source := (fun id -> !async_hook id);
   let props = Web.table () in
   let waiting = ref [] in

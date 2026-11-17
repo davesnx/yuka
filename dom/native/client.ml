@@ -12,6 +12,7 @@ type lazy_entry = unit
 let lazy_entry ~name:_ _ = ()
 
 let acting : Base.owner option ref = ref None
+let own_call _ _ = ()
 
 let browser_only () = invalid_arg "Yuka: browser only"
 let render _ _ = browser_only ()

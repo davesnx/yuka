@@ -446,7 +446,17 @@ module Action : sig
   val call : ('i, 'o, _) t -> 'i -> ('o, Status.error) result Async.t
   (** Encodes the input, sends it to the server (in the browser after
       [render ~islands], as [POST /_yuka/action/<name>]; on the server, to the
-      implementation), decodes the output. The [Async] is always [Done]:
+      implementation), decodes the output.
+
+      In the browser, a {!query} called while an owner is current (in an
+      {!Effect.after} or {!Effect.before} body, a component, an event handler)
+      is aborted when that owner is disposed: when the effect runs again or
+      the component goes. An aborted call stays [Pending] and drops a late
+      answer, so in an effect only the answer for the latest run arrives. A
+      {!mutation} or a form action is not aborted that way, since an abort
+      cannot undo the work of the server; use {!start} to abort one.
+
+      The [Async] of a call that is not aborted is always [Done]:
       - [Ok output]: the output.
       - [Error (Rejected message)]: the server refused the input (400); [message] is
         for the user.
@@ -454,9 +464,15 @@ module Action : sig
       - [Error Not_found]: no implementation has this name (404).
       - [Error Server]: the implementation raised or failed (500); the
         detail is in the server log.
-      - [Error (Network message)]: no answer. [message] is ["cancelled"] when the owner
-        of the call was disposed or {!stop} ran.
+      - [Error (Network message)]: no answer. [message] is ["cancelled"] when {!stop}
+        aborted the request; a query tied to an owner that {!stop} disposes stays [Pending].
       - [Error (Protocol message)]: the answer or the output did not decode. *)
+
+  val start : ('i, 'o, _) t -> 'i -> ('o, Status.error) result Async.t * (unit -> unit)
+  (** Like {!call}, with the function that aborts the call, and with no tie to an
+      owner. After the abort, the [Async] stays [Pending] and a late answer is
+      dropped; an abort after the answer does nothing. The server may already
+      have run the action. On the server, the abort only drops the answer. *)
 end
 
 module Remote = Remote
@@ -844,8 +860,9 @@ module Private : sig
   val has_readers : ('a, _) State.signal -> bool
   (** Whether an effect or a memo reads the State. For tests. *)
 
-  val call_action : (string -> Json.t -> (Json.t, Status.error) result Async.t) ref
-  (** The transport of [Action.call]. Default: [Error (Network _)].
+  val call_action : (string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit) ref
+  (** The transport of [Action.call]: it sends the input, calls the function with the
+      answer, and gives the function that aborts the request. Default: [Error (Network _)].
       [render ~islands] sets it to the browser transport; that transport is
       installed by the first [Action.call] or island form submit, and a call
       before it raises [Failure]. *)
@@ -1262,7 +1279,8 @@ val stop : unit -> unit
 (** Stops every tree that {!render} started: each [~root] tree and every
     island. Effects, handlers and document listeners are removed, start strategies that did not fire yet are
     cancelled, and action requests in flight are aborted (their [Async]
-    gives [Error (Network "cancelled")]). It also stops navigation: the [click] and
+    gives [Error (Network "cancelled")], but a query that {!Action.call} tied to an
+    owner that [stop] disposes stays [Pending]). It also stops navigation: the [click] and
     [popstate] listeners are removed, a navigation in flight is aborted, and
     {!Browser.navigate} does [location.assign] again. The DOM stays.
     {!render} works again afterwards, for example on a new body. *)

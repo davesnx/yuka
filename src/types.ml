@@ -278,9 +278,6 @@ let shown ?(session = !(current_session ())) what message =
 
 let async_error ?session id message = shown ?session ("async value " ^ id) message
 
-let transport : (string -> Json.t -> (Json.t, Status_error.t) result Async.t) ref =
-  ref (fun _ _ -> Async.return (Error (Status_error.Network "no action transport")))
-
 type Scheduler.binding += Coded of { name : string; json : unit -> Json.t; inner : Scheduler.binding }
 
 let route_name = "yuka.route"
