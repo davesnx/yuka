@@ -158,6 +158,38 @@ let deferred_cases =
   [ test_case "follows the source at once" `Quick follows;
     test_case "a server render prints the value of the source" `Quick server ]
 
+type counter_action = Increment | Reset of int
+
+let reducer_cases =
+  let open Alcotest in
+  let reduce n = function Increment -> n + 1 | Reset m -> m in
+  let dispatches () =
+    let count, dispatch = Yuka.State.reducer reduce 1 in
+    check int "the initial value" 1 (Yuka.State.get count);
+    dispatch Increment;
+    dispatch Increment;
+    check int "each action applies to the current value" 3 (Yuka.State.get count);
+    dispatch (Reset 0);
+    check int "reset" 0 (Yuka.State.get count)
+  in
+  let equal () =
+    let runs = ref 0 in
+    let state, dispatch = Yuka.State.reducer ~equal:( = ) (fun _ n -> [ n ]) [ 1 ] in
+    let (), stop =
+      Yuka.with_owner (fun () ->
+          Yuka.Effect.after (fun () ->
+              ignore (Yuka.State.get state);
+              incr runs))
+    in
+    dispatch 1;
+    check int "an equal value is no change" 1 !runs;
+    dispatch 2;
+    check int "a new value runs the reader" 2 !runs;
+    stop ()
+  in
+  [ test_case "dispatch writes the reduced value" `Quick dispatches;
+    test_case "equal decides a change" `Quick equal ]
+
 let page_cases =
   let open Alcotest in
   let page () =
@@ -1728,6 +1760,7 @@ let () =
       ("server", page_cases);
       ("module-level State", module_state_cases);
       ("deferred", deferred_cases);
+      ("reducer", reducer_cases);
       ("actions", action_cases);
       ("streaming", stream_cases);
       ("page extras", page_extra_cases);

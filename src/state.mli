@@ -70,6 +70,13 @@ external read_only : 'a t -> 'a read = "%identity"
 (** The same State, typed so that {!set} and {!update} on it do not
     compile. *)
 
+val reducer : ?equal:('a -> 'a -> bool) -> ('a -> 'action -> 'a) -> 'a -> 'a read * ('action -> unit)
+(** [reducer reduce initial] is a State that holds [initial], and a
+    [dispatch] function. [dispatch action] writes [reduce value action] of
+    the current value. The State is read-only, so only [dispatch] writes it.
+    It is {!make} and {!update}: a component runs one time, so [dispatch]
+    stays the same function. [equal] is as in {!make}. *)
+
 val untrack : (unit -> 'a) -> 'a
 (** Runs the function and returns its result. Its {!get} reads are not
     tracked: inside an effect or a memo, a change of such a State does not

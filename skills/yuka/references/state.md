@@ -57,6 +57,44 @@ are equal. Pass `~equal:( = )` to compare contents:
 let filter = Yuka.State.make ~equal:( = ) { status = Open; mine = false }
 ```
 
+## Reducers
+
+Yuka has no `useReducer` hook. React needs one to keep the state and a
+stable `dispatch` across renders. A Yuka component runs one time, so a
+State and a function that calls `State.update` are enough:
+
+```ocaml
+type action = Increment | Decrement | Reset of int
+
+let reduce count = function
+  | Increment -> count + 1
+  | Decrement -> count - 1
+  | Reset n -> n
+
+let[@client] make ~(initial : int) () =
+  let count = Yuka.State.make initial in
+  let dispatch action = Yuka.State.update count (fun c -> reduce c action) in
+  <div>
+    <button on_click=(fun _ -> dispatch Decrement)> "-" </button>
+    (Yuka.int (Yuka.State.get count))
+    <button on_click=(fun _ -> dispatch Increment)> "+" </button>
+    <button on_click=(fun _ -> dispatch (Reset initial))> "Reset" </button>
+  </div>
+```
+
+`State.reducer reduce initial` does the same and returns the State
+read-only, so only `dispatch` can write it:
+
+```ocaml
+let count, dispatch = Yuka.State.reducer reduce initial in
+```
+
+- `dispatch action` writes `reduce value action` of the current value.
+- A reducer that returns a new record is a change, also when its contents
+  are equal. Pass `~equal:( = )` to compare contents.
+- Each event handler runs in a batch, so several `dispatch` calls in one
+  handler update the page one time. Elsewhere, wrap them in `Yuka.batch`.
+
 ## Holes
 
 In an `.mlx` file, a child or an attribute value that contains `State.get`

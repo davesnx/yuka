@@ -12,6 +12,11 @@ let set (s : _ t) value =
 
 let update s f = set s (f s.value)
 external read_only : 'a t -> 'a read = "%identity"
+
+let reducer ?equal reduce initial =
+  let s = make ?equal initial in
+  (read_only s, fun action -> update s (fun value -> reduce value action))
+
 let untrack = Scheduler.untrack
 
 let memo ?equal f =
