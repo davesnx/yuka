@@ -35,7 +35,7 @@ let canvas_in workspace =
       </Yuka.Client>)
 let canvas () = canvas_in Model.Workspace.default
 
-let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
+let issue_view ?(delay = 0.6) ?(close = Yuka.empty) ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
   let all = comments = Some "all" in
   let comments =
     <Yuka.Await async=(Store.thread_async ~delay ~all issue.id)
@@ -59,16 +59,16 @@ let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yu
     </Yuka.Client>
   in
   let description = Markup_view.nodes (Markdown.render issue.description) in
-  <Views.Issue_page issue description comments props />
+  <Views.Issue_page issue description comments props close />
 
 let issue ~id ~issue ~comments () = Yuka.Server.page ~title:id (fun () -> issue_view ~comments issue)
 
 let issue_dialog ~id ~issue ~comments () =
   Yuka.Server.page ~title:id (fun () ->
       <div class_="issue-overlay">
+        <Yuka.Client><Overlay_backdrop /></Yuka.Client>
         <div class_="issue-dialog" role=`dialog aria_label=id>
-          <Yuka.Client><Close_button /></Yuka.Client>
-          (issue_view ~comments issue)
+          (issue_view ~close:<Yuka.Client><Close_button /></Yuka.Client> ~comments issue)
         </div>
       </div>)
 

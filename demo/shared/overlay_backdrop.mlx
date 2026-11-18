@@ -1,0 +1,2 @@
+let[@client] make () =
+  <div class_="issue-backdrop" aria_hidden=true on_click=(fun _ -> Yuka.Browser.back ()) />
