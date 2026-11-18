@@ -234,7 +234,6 @@ a.version:hover { color: var(--text); }
   display: flex; align-items: center; gap: 10px;
   height: 48px; padding: 0 19px; border-bottom: 1px solid var(--border); font-weight: 500;
 }
-.page-header .close-button { margin-left: auto; }
 .crumb:hover { text-decoration: underline; }
 
 .toolbar {
@@ -374,16 +373,17 @@ a.version:hover { color: var(--text); }
 .dialog-title:focus, .dialog-description:focus, .comment-input:focus, .select:focus { border-color: var(--accent); }
 .dialog-row { display: flex; gap: 10px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
-.issue-overlay {
+.overlay {
   position: fixed; inset: 0; z-index: 20; display: grid; place-items: start center; padding-top: 6vh;
   background: var(--backdrop);
 }
-.issue-backdrop { position: absolute; inset: 0; }
-.issue-dialog {
-  position: relative; width: 1040px; max-width: calc(100vw - 38px); max-height: 88vh; overflow: auto; padding: 12px 19px 19px;
+.overlay-backdrop { position: absolute; inset: 0; }
+.overlay-dialog {
+  position: relative; width: 1240px; max-width: calc(100vw - 38px); max-height: 88vh; overflow: auto; padding: 12px 19px 19px;
   background: var(--bg-dialog); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 19px 58px var(--shadow-strong);
   display: flex; flex-direction: column; gap: 12px;
 }
+.overlay-bar { display: flex; justify-content: flex-end; }
 
 .button {
   font: inherit; color: var(--text); background: var(--bg-selected); border: 1px solid var(--border);
