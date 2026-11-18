@@ -2495,17 +2495,16 @@ let hover_loads_and_prefetches finish =
 let block_router : string -> unit =
   [%mel.raw
     {|function (mode) {
-  const { MessageChannel } = require("node:worker_threads");
-  const channel = new MessageChannel();
   globalThis.__imports = 0;
-  channel.port1.on("message", function () { globalThis.__imports++; });
-  channel.port1.unref();
-  const hook = "let port, mode; export function initialize(d) { port = d.port; mode = d.mode; }" +
-    " export async function resolve(s, c, next) { if (s === 'yuka/navigation.js') { port.postMessage(1);" +
-    " if (mode === 'stall') return new Promise(function (r) { setTimeout(r, 600000); }); throw new Error('blocked'); }" +
-    " return next(s, c); }";
-  require("node:module").register("data:text/javascript," + encodeURIComponent(hook),
-    { data: { port: channel.port2, mode: mode }, transferList: [channel.port2] });
+  require("node:module").registerHooks({
+    resolve: function (specifier, context, next) {
+      if (specifier !== "yuka/navigation.js") return next(specifier, context);
+      globalThis.__imports++;
+      if (mode === "stall")
+        return { url: "data:text/javascript,await new Promise(function () {})", shortCircuit: true };
+      throw new Error("blocked");
+    },
+  });
   globalThis.__errors = [];
   console.error = function (m) { globalThis.__errors.push(String(m)); };
 }|}]
