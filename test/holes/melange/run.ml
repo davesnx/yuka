@@ -112,6 +112,22 @@ let () =
   State.set Holes_cases.name "b";
   check "conditional read, read: after a write" "<p>a<!--[-->b<!--]--><i></i></p>" (html c);
   State.set Holes_cases.name "a";
+  dispose ();
+  let c, dispose =
+    hydrate "a hole that returns a hole that reads" Holes_cases.nested_view "<p>a<!--[--><!--[-->a<!--]--><!--]--><i></i></p>"
+  in
+  State.set Holes_cases.name "b";
+  check "a hole that returns a hole that reads: after a write" "<p>a<!--[--><!--[-->b<!--]--><!--]--><i></i></p>" (html c);
+  State.set Holes_cases.name "a";
+  dispose ();
+  let c, dispose =
+    hydrate "a hole that returns an element with an attribute that reads" Holes_cases.closure_attr_view
+      "<p><i title=\"a\">x</i></p>"
+  in
+  State.set Holes_cases.name "b";
+  check "a hole that returns an element with an attribute that reads: after a write" "<p><i title=\"b\">x</i></p>"
+    (html c);
+  State.set Holes_cases.name "a";
   dispose ()
 
 let () =
