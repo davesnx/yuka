@@ -117,12 +117,21 @@ A constant is an expression that the ppx can prove reads no State:
   function whose body is a constant;
 - a function defined with `let` in the same file whose body is a
   constant, such as `let badge ~count = <b>(Yuka.int count)</b>`, applied
-  to constants;
+  to constants and to no more arguments than it has parameters that are
+  not optional;
 - `Yuka.text`, `Yuka.int`, `Yuka.float`, `Yuka.fragment`, `Yuka.each`,
   `Yuka.hole`, `Yuka.with_unique_id`, `Yuka.Form.value`,
   `Yuka.Form.field_error`, `Yuka.Form.form_errors`,
   `Yuka.Form.field_error_view`, `Yuka.Form.form_errors_view` and
   `Yuka.Status.error_to_string` applied to constants.
+
+An `open`, `include`, `let*`, `let module` or `external` can hide a
+function of the same file, so after one the ppx does not use that
+function as a constant. After an `open` of a module of the same file, of a
+first-class module or of a functor result, also a function or module of
+the standard library is a hole. In `Yuka.with_unique_id (fun id -> ...)`,
+the ppx puts a body that is not a constant in a hole, so the body updates
+and keeps its `id`.
 
 A call of a function from another module, `(Model.label issue)`, is a
 hole: the ppx cannot see whether it reads a State.
@@ -183,8 +192,11 @@ The ppx checks two places:
 
 - The body of a component: a function bound to `make` at the top of a
   file or of a module, as in `let make ~count () = ...` or
-  `let[@client] make ...`. The tag `<Counter />` calls `Counter.make`.
-  The ppx has no other mark for a component.
+  `let[@client] make ...`, whose result contains an HTML or component
+  tag. The tag `<Counter />` calls `Counter.make`. The ppx has no other
+  mark for a component. A `make` whose result has no tag, such as
+  `let make s = State.get s * 2`, is not checked, and in
+  `let rec make () = ... and view () = ...` only `make` is checked.
 - The row function of `Yuka.each`, `(fun item -> ...)`, in any place: a
   row renders untracked, also inside a hole.
 
@@ -214,8 +226,8 @@ Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.
 
 This is an error in every place, also when the tag is inside a hole or
 `Yuka.hole`: there a change builds the whole component again. A prop that
-is a function, such as `on_pick=(fun () -> Yuka.State.get sel)`, is
-correct, because the read runs later. A component that takes a value
+is a function, such as `on_pick=(fun () -> Yuka.State.get sel)` or
+`read=Yuka.State.get`, is correct, because the read runs later. A component that takes a value
 that changes takes a `State.read`.
 
 To read one time on purpose, use `State.peek`. The top level of a module
@@ -223,22 +235,27 @@ runs one time by design and is not checked. On the server every read is
 one time: a `State.get` in a server-only `make` is an error too, so use
 `State.peek` there.
 
-The check finds `State.get`, `Yuka.State.get`, and `State.get` under
-`open Yuka`, by name. The ppx also uses these names in its output. So
-another name for `Yuka.State` is an error: `open Yuka.State`,
-`Yuka.State.(...)`, `let open Yuka.State in`, `include Yuka.State`,
-`module S = Yuka.State` and `let module S = Yuka.State in`. The alias
-`module State = Yuka.State` is correct.
+The check finds `Yuka.State.get`, and `State.get` in a file that has
+`open Yuka` or `module State = Yuka.State`, by name. In a file without
+them, `State` is a module of the project and is not checked. The ppx also
+uses these names to choose its output. So another name for `Yuka.State`
+is an error: `open Yuka.State`, `Yuka.State.(...)`,
+`let open Yuka.State in`, `include Yuka.State`, `module S = Yuka.State`
+and `let module S = Yuka.State in`, and after `open Yuka` also
+`open State` and `module S = State`. The alias
+`module State = Yuka.State` is correct. An interface (`.mli`) has no
+reads, so it can open `Yuka.State`.
 
 ```
-Yuka: module S = Yuka.State hides State.get from the ppx. The ppx checks and compiles reads by the exact names Yuka.State.get and State.get, so a read through S is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+Yuka: module S = Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through S is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
 ```
 
 The check does not see:
 
 - a read inside a function of another file, or inside a helper that the
   body calls outside markup (`let n = label () in`);
-- a read in a function that is not `make`, such as `let view () = ...`.
+- a read in a function that is not `make`, such as `let view () = ...`,
+  or in a `make` whose result has no tag.
 
 ## Keyed lists
 

@@ -23,6 +23,7 @@ let nodes : node -> node array =
   [%mel.raw "function (c) { const out = []; const w = document.createTreeWalker(c, 133); let n; while ((n = w.nextNode())) out.push(n); return out }"]
 
 external html : node -> string = "innerHTML" [@@mel.get]
+external text_content : node -> string = "textContent" [@@mel.get]
 external set_html : node -> string -> unit = "innerHTML" [@@mel.set]
 external as_container : node -> Client.container = "%identity"
 
@@ -140,6 +141,30 @@ let () =
   check "plain call: text updated" "<p><!--[--><i>0</i><!--]--><span>b</span></p>" (html c);
   State.set Holes_cases.name "a";
   dispose ()
+
+let () =
+  let c, dispose = render Holes_cases.unique_id_view in
+  check "with_unique_id: first" "<p><!--[-->c-1a<!--]--></p>" (html c);
+  State.set Holes_cases.name "b";
+  check "with_unique_id: a State read in the function updates" "<p><!--[-->c-1b<!--]--></p>" (html c);
+  State.set Holes_cases.name "a";
+  dispose ()
+
+let () =
+  List.iter
+    (fun (case, view) ->
+      let c, dispose = render view in
+      check (case ^ ": first") "a" (text_content c);
+      State.set Holes_cases.name "b";
+      check (case ^ ": after a write") "b" (text_content c);
+      State.set Holes_cases.name "a";
+      dispose ())
+    [
+      ("a call after let open", Holes_cases.local_open_view);
+      ("a call of a nested module", Holes_cases.Nested.view);
+      ("a call of a function with an optional parameter", Holes_cases.optional_view);
+      ("an over-applied Option.value", Holes_cases.over_applied_view);
+    ]
 
 let submit_with : node -> string -> unit =
   [%mel.raw
