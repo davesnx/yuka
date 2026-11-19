@@ -19,8 +19,8 @@ let target ~loc =
       fail ~loc
         "let%%action needs the compilation-mode cookie to know if it compiles for the server or the browser: use \
          (lang dune 3.26) or later in dune-project, or pass the cookie to the ppx: (preprocess (pps yuka.ppx -- --cookie \
-         'compilation-mode=\"ocaml\"')) and (melange.preprocess (pps yuka.ppx -- --cookie \
-         'compilation-mode=\"melange\"'))"
+         \"compilation-mode=\\\"ocaml\\\"\")) and (melange.preprocess (pps yuka.ppx -- --cookie \
+         \"compilation-mode=\\\"melange\\\"\"))"
   | Some { pexp_desc = Pexp_constant (Pconst_string ("ocaml", _, _)); _ } -> Server
   | Some { pexp_desc = Pexp_constant (Pconst_string ("melange", _, _)); _ } -> Browser
   | Some e ->

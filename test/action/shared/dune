@@ -4,4 +4,6 @@
  (libraries yuka action_secret)
  (melange.libraries yuka)
  (preprocess
-  (pps yuka.ppx)))
+  (pps yuka.ppx -- --cookie "compilation-mode=\"ocaml\""))
+ (melange.preprocess
+  (pps yuka.ppx -- --cookie "compilation-mode=\"melange\"")))

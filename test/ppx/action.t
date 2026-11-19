@@ -84,7 +84,7 @@ No compilation-mode cookie:
   File "comment.ml", line 1, characters 4-10:
   1 | let%action add =
           ^^^^^^
-  Error: [yuka] let%action needs the compilation-mode cookie to know if it compiles for the server or the browser: use (lang dune 3.26) or later in dune-project, or pass the cookie to the ppx: (preprocess (pps yuka.ppx -- --cookie 'compilation-mode="ocaml"')) and (melange.preprocess (pps yuka.ppx -- --cookie 'compilation-mode="melange"'))
+  Error: [yuka] let%action needs the compilation-mode cookie to know if it compiles for the server or the browser: use (lang dune 3.26) or later in dune-project, or pass the cookie to the ppx: (preprocess (pps yuka.ppx -- --cookie "compilation-mode=\"ocaml\"")) and (melange.preprocess (pps yuka.ppx -- --cookie "compilation-mode=\"melange\""))
   [1]
 
 A compilation-mode cookie that is not "ocaml" or "melange":
@@ -153,6 +153,16 @@ Action without open Yuka, or with a local Action module:
                      ^^^^^^^^^^^^^^^
   Error: [yuka] Action here is not Yuka.Action (the ppx knows only an open Yuka at the top of the file, and no module Action of the file): write Yuka.Action.mutation. let%action takes the form: let%action <name> = Yuka.Action.mutation ~input:<codec> ~output:<codec> (fun ctx input -> ...), or the same with Yuka.Action.query
   [1]
+  $ shape 'open Yuka
+  > module M = struct
+  >   module Action = struct let mutation ~input:_ ~output:_ f = f end
+  >   let%action a = Action.mutation ~input:i ~output:o (fun _ x -> x)
+  > end'
+  File "shape.ml", line 4, characters 17-32:
+  4 |   let%action a = Action.mutation ~input:i ~output:o (fun _ x -> x)
+                       ^^^^^^^^^^^^^^^
+  Error: [yuka] Action here is not Yuka.Action (the ppx knows only an open Yuka at the top of the file, and no module Action of the file): write Yuka.Action.mutation. let%action takes the form: let%action <name> = Yuka.Action.mutation ~input:<codec> ~output:<codec> (fun ctx input -> ...), or the same with Yuka.Action.query
+  [1]
 
 Missing, repeated and unknown labels; two implementations:
 
@@ -218,6 +228,16 @@ Not in a functor, where each application would register the same name:
   1 | module F (X : sig end) = struct let%action a = Yuka.Action.mutation ~input:i ~output:o f end
                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: [yuka] let%action cannot be in a functor: each application would register the same action name.
+  [1]
+
+Not in an anonymous module, where the name would be the same as an action
+outside it:
+
+  $ shape 'module _ = struct let%action save = Yuka.Action.mutation ~input:i ~output:o f end'
+  File "shape.ml", line 1, characters 18-77:
+  1 | module _ = struct let%action save = Yuka.Action.mutation ~input:i ~output:o f end
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] let%action cannot be in an anonymous module: its name would be the same as an action outside it.
   [1]
 
 The implementation sees the bindings before the let%action, as in a plain

@@ -17,6 +17,7 @@ let in_hole = ref false
 let submodules : string loc list ref = ref []
 let in_expression = ref false
 let in_functor = ref false
+let in_anonymous = ref false
 
 type reader = Body | Row | Prop
 
@@ -212,6 +213,9 @@ let expand_action item =
       else if !in_functor then
         Location.raise_errorf ~loc
           "[yuka] let%%action cannot be in a functor: each application would register the same action name."
+      else if !in_anonymous then
+        Location.raise_errorf ~loc
+          "[yuka] let%%action cannot be in an anonymous module: its name would be the same as an action outside it."
       else
         Action_gen.expand ~is_action_module ~submodules:(List.rev !submodules) ~library:!Island.library ~loc
           ~name_loc payload
@@ -1134,7 +1138,7 @@ let mapper =
     method! module_binding mb =
       match mb.pmb_name with
       | { txt = Some name; loc } -> with_ref submodules ({ txt = name; loc } :: !submodules) (fun () -> super#module_binding mb)
-      | { txt = None; _ } -> super#module_binding mb
+      | { txt = None; _ } -> with_ref in_anonymous true (fun () -> super#module_binding mb)
 
     method! structure items =
       let top = !depth = 0 in
