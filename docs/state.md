@@ -155,8 +155,10 @@ let label () = Yuka.text (Yuka.State.get name) in
 ```
 
 A hole runs one time when it is mounted, and again after each change of a
-State that it read. A hole that reads no State never runs again, but it
-keeps its place in the scheduler and its markers, as any hole.
+State that it read. A hole whose first run reads no State never runs
+again, and the browser keeps nothing in the scheduler for it; it keeps its
+markers, as any hole. A read in a branch that the first run does not take
+is no read. An effect whose first run reads no State is not kept either.
 
 A component tag and a plain call are different in a hole:
 

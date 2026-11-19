@@ -238,6 +238,24 @@ let async =
                 check "one fetch" "1" (string_of_int (fetches ()));
                 check "rejected" "failed bad title" (shown ());
                 Yuka.stop ())) );
+    ( "action: disposing the owner aborts a query call from a handler in a hole that reads nothing",
+      fun finish ->
+        fresh_calls ();
+        let c = Dom_cases.container "" in
+        let dispose =
+          Private.render (Dom_cases.as_element c) (fun () ->
+              element "div" []
+                [
+                  hole (fun () ->
+                      element "button" [ attr "id" "sx"; on "click" (fun _ -> ignore (Action.call query "x")) ] []);
+                ])
+        in
+        Dom_cases.click (Dom_cases.query c "#sx");
+        dispose ();
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "aborted" "true" (string_of_bool (aborted 0));
+                Yuka.stop ())) );
     ( "remote: stop aborts",
       fun finish ->
         fresh ();

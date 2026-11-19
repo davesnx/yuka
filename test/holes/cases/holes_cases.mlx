@@ -29,6 +29,12 @@ let dynamic_view () : Yuka.client Yuka.element = <p>"a" (Yuka.text (Yuka.State.g
 let conditional_view ~read () : Yuka.client Yuka.element =
   <p>"a" (if read then Yuka.text (Yuka.State.get name) else Yuka.text "none") <i /></p>
 
+let nested_view () : Yuka.client Yuka.element =
+  <p>"a" (Yuka.hole (fun () -> Yuka.hole (fun () -> Yuka.text (Yuka.State.get name)))) <i /></p>
+
+let closure_attr_view () : Yuka.client Yuka.element =
+  <p>(Yuka.hole (fun () -> <i title=(Yuka.State.get name)>"x"</i>))</p>
+
 let static_list_view () : Yuka.client Yuka.element =
   <ul>(Yuka.each ~key:(fun item -> item) (fun () -> [| "x"; "y" |]) (fun item -> <li>(Yuka.text item)</li>))</ul>
 

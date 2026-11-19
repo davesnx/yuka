@@ -143,7 +143,8 @@ let run_effect queue ?cleanup body =
           own stop
       | None -> raise e)
   | None -> (
-      own stop;
+      if node.head != None then own stop
+      else if child.last != None || !last != None then own teardown;
       match later with Some e -> raise e | None -> ())
 
 module Effect = struct

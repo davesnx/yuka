@@ -275,6 +275,20 @@ let old_handler_removed_on_hole_rerun () =
   check "old handler removed" "1" (ints !calls);
   dispose ()
 
+let handler_in_static_hole_dead_after_dispose () =
+  let calls = ref 0 in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        div [] [ hole (fun () -> element "button" [ on "click" (fun _ -> incr calls) ] []) ])
+  in
+  let button = query c "button" in
+  click button;
+  dispose ();
+  append c button;
+  click button;
+  check "no call after dispose" "1" (ints !calls)
+
 let direct_handler () =
   let calls = ref 0 in
   let c = container "" in
@@ -2051,6 +2065,7 @@ let all =
     ("dom hydrate again after dispose", hydrate_again_after_dispose);
     ("dom two handlers in order", two_handlers_in_order);
     ("dom old handler removed on hole rerun", old_handler_removed_on_hole_rerun);
+    ("dom handler in a hole that reads nothing is dead after dispose", handler_in_static_hole_dead_after_dispose);
     ("dom direct handler", direct_handler);
     ("dom each item reads are untracked", each_item_reads_untracked);
     ("dom text hole in place", text_hole_in_place);
