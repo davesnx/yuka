@@ -169,7 +169,7 @@ let () =
   let html e = Yuka.Private.to_html (Yuka.Private.node e) in
   let saved = fun _ m -> prerr_endline m in
   Yuka.Server.set_default_log (fun _ _ -> ());
-  check "catch children" (html (Catching.view ~fail:false) = "<div><!--[--><span>before</span><b>ok</b><!--]--></div>");
+  check "catch children" (html (Catching.view ~fail:false) = "<div><!--[--><span>before</span><!--[--><b>ok</b><!--]--><!--]--></div>");
   check "catch fallback" (html (Catching.view ~fail:true) = "<div><!--[!--><p>server error</p><!--]--></div>");
   Yuka.Server.set_default_log saved;
   check "show loading" (html (Catching.status (Yuka.Status.Loading None)) = "<!--[-->wait<!--]-->");

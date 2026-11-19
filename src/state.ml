@@ -17,7 +17,8 @@ let reducer ?equal reduce initial =
   let s = make ?equal initial in
   (read_only s, fun action -> update s (fun value -> reduce value action))
 
-let untrack = Scheduler.untrack
+let runtime_untrack = Scheduler.untrack
+let untrack f = if Dev.on then Scheduler.quiet f else Scheduler.untrack f
 
 let memo ?equal f =
   let s = Signal.computed ?equal f in
@@ -90,6 +91,66 @@ let deferred ?equal (source : (_, _) signal) =
     s
   end
 
+let select_with_size (source : (_, _) signal) =
+  let watch =
+    Scheduler.make (Some (Scheduler.mine Scheduler.selects)) Scheduler.never
+  in
+  let current =
+    match Scheduler.with_listener (Some watch) (fun () -> get source) with
+    | value -> ref value
+    | exception e ->
+        Scheduler.dispose watch;
+        raise e
+  in
+  let keys = Web.keyed Signal.same and limit = ref 16 and live = ref true in
+  let write key answer =
+    match Web.keyed_get keys key with Some s -> Signal.set s answer | None -> ()
+  in
+  watch.level <- -1;
+  watch.fn <-
+    (fun () ->
+      let value = get source and prev = !current in
+      if not (Signal.same prev value) then begin
+        current := value;
+        write prev false;
+        write value true
+      end;
+      false);
+  watch.owner <- !(Base.current_owner ());
+  Base.own (fun () ->
+      live := false;
+      Scheduler.dispose watch;
+      Web.keyed_clear keys);
+  let entry key =
+    match Web.keyed_get keys key with
+    | Some s -> s
+    | None ->
+        if Web.keyed_size keys >= !limit then begin
+          Web.keyed_keep keys (fun (s : bool Signal.t) -> s.node.first != None);
+          let size = Web.keyed_size keys in
+          limit := if size > 8 then 2 * size else 16
+        end;
+        let s = Signal.make (Signal.same !current key) in
+        Web.keyed_set keys key s;
+        s
+  in
+  let read key =
+    if
+      !live
+      && !(Scheduler.listener ()) != None
+      && Signal.same key key
+      && (Scheduler.js || (watch.id > !Scheduler.sealed && not !(Base.server_rendering ())))
+    then begin
+      (* An exception of [watch] reaches its owner when the flush runs it. *)
+      (try Scheduler.fresh watch with _ -> ());
+      Signal.get (entry key)
+    end
+    else Signal.same (if !live then get source else !current) key
+  in
+  (read, fun () -> Web.keyed_size keys)
+
+let select source = fst (select_with_size source)
+
 let on_change ?equal (state : (_, _) signal) f =
   let prev = ref (Signal.peek state) and first = ref true in
   Base.Effect.after (fun () ->
@@ -99,7 +160,9 @@ let on_change ?equal (state : (_, _) signal) f =
       if (not created) && Signal.differs equal !prev next then begin
         let p = !prev in
         prev := next;
-        Scheduler.untrack (fun () -> f ~prev:p ~next)
+        Scheduler.untrack (fun () ->
+            if Dev.on then Scheduler.body := false;
+            f ~prev:p ~next)
       end)
 
 external signal : ('a, _) signal -> 'a Signal.t = "%identity"

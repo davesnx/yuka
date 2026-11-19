@@ -4,13 +4,13 @@ open Store
 external get_element_by_id : string -> Yuka__Web.node = "getElementById" [@@mel.scope "document"]
 
 let row_props ~item () = (item, ())
+let is_selected = State.select selected
 
 let row =
-  Block.component ~markup:row_markup ~walk:row_walk ~targets:row_targets ~kinds:row_kinds (fun (item, ()) ->
-      let is_selected = State.memo (fun () -> State.get selected = item.id) in
+  Block.component ~markup:row_markup ~walk:row_walk ~targets:row_targets ~kinds:row_kinds (fun _ ->
       let view ~item () =
         [|
-          Block.class_name (if State.get is_selected then "danger" else "");
+          Block.class_name (if is_selected item.id then "danger" else "");
           Block.text (string_of_int item.id);
           Block.on_click (fun _ -> State.set selected item.id);
           Block.text item.label;

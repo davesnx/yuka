@@ -172,6 +172,9 @@ type 'f runtime_form_decoding = 'f Form_core.decoding
 
 let runtime_attr = attr_unchecked
 let runtime_hole_attr = hole_attr_unchecked
+let runtime_hole = hole
+let runtime_text_call f x = hole (fun () -> text (f x))
+let runtime_call_attr name f x = hole_attr_unchecked name (fun () -> Some (f x))
 let runtime_url_attr = url_attr
 let runtime_url_hole_attr = url_hole_attr
 let runtime_template = Template.coded

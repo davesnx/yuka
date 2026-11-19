@@ -85,9 +85,8 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   in
   <div>
     <ul>
-      (Yuka.hole (fun () ->
-         Yuka.fragment
-           (List.map (fun (tag : Model.Tag.t) -> <li>(Yuka.text tag.name)</li>) (shown ()))))
+      (Yuka.fragment
+         (List.map (fun (tag : Model.Tag.t) -> <li>(Yuka.text tag.name)</li>) (shown ())))
     </ul>
     <button hidden=(Yuka.State.get all) on_click=(fun _ -> Yuka.State.set all true)>
       "Show all"
@@ -107,9 +106,8 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   act on it.
 - A hole is a part of the markup that updates when a State it reads
   changes. The ppx makes a hole of each child or attribute of an HTML tag
-  whose expression contains `Yuka.State.get`: `hidden=(Yuka.State.get all)`
-  above. It does not see a read inside another function, such as
-  `shown ()`; write `Yuka.hole (fun () -> ...)` for it.
+  that is not a constant: `hidden=(Yuka.State.get all)` and the list that
+  calls `shown ()` above. See [Holes](state.md#holes).
 - Make a State inside `make`. Every request of the server shares a State
   made at the top level of a module, so on the server `State.set` or
   `State.update` on it raises `Invalid_argument`.
@@ -142,8 +140,8 @@ renders, the id is unique. For a second id, add a suffix that starts with a
 letter, as `-hint` above, or call `with_unique_id` again.
 
 The function runs once and does not track a State that it reads, so the
-`input` keeps its text and focus when that State changes. To show a State
-inside, put a `Yuka.hole` there. An element that the browser makes after the
+`input` keeps its text and focus when that State changes. A child or an
+attribute inside that reads a State is a hole of its own and updates. An element that the browser makes after the
 island has started (a new list row, an `Await` value that arrives later)
 gets a new id, which the server never printed.
 
@@ -215,8 +213,10 @@ A `<Yuka.Client>` in the children is its own island.
 
 ## Limitations
 
-- An event handler or a hole outside an island does not compile: "Type
-  Yuka.client is not compatible with type Yuka.server".
+- An event handler or a `Yuka.hole` outside an island does not compile:
+  "Type Yuka.client is not compatible with type Yuka.server". A State read
+  in the markup of a component that only the server prints compiles; it
+  prints the current value and does not update.
 - An island cannot contain `<Yuka.Client>` in its own markup; that is a
   type error. Pass the inner island as children, as above.
 - An island reads the route of the page as a State with

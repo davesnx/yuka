@@ -4,7 +4,7 @@ let[@client] make () =
   let r = Yuka.Remote.make items (fun () -> ()) in
   <ul>
     (Yuka.hole (fun () ->
-         match Yuka.Remote.status r with
+         match Yuka.State.get (Yuka.Remote.state r) with
          | Yuka.Status.Ready { data; _ } -> Yuka.fragment (List.map (fun s -> <li>(Yuka.text s)</li>) data)
          | _ -> Yuka.empty))
   </ul>
