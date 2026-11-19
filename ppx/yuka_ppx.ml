@@ -807,7 +807,7 @@ let rewrite_jsx self e =
           let make = pexp_ident ~loc:fnloc { txt = Ldot (path, "make"); loc = fnloc } in
           let args = props @ children_arg ~loc kids in
           if !in_hole then
-            [%expr Yuka.State.untrack [%e match args with [] -> make | args -> pexp_apply ~loc make args]]
+            [%expr Yuka.State.runtime_untrack [%e match args with [] -> make | args -> pexp_apply ~loc make args]]
           else pexp_apply ~loc make (args @ [ (Nolabel, [%expr ()]) ])
       | _ ->
           let props = List.map (fun (l, v) -> (l, self#expression v)) props in

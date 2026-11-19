@@ -42,7 +42,9 @@ order of the calls.
 `State.make value` creates a State that holds `value`.
 
 - `State.get state` reads the value. Inside a hole, a memo or an effect, the
-  read is recorded.
+  read is recorded. In a dev build, a `State.get` that nothing records while
+  a component body runs in the browser writes a console error with a stack,
+  also from a helper in another module: that read never updates.
 - `State.peek state` reads the value and records nothing.
 - `State.set state value` writes a value. `State.update state change` writes `change` of the
   current value.

@@ -1282,7 +1282,8 @@ val render :
 
     Dev checks: unless the bundler defines the global [__YUKA_DEV__] as
     [false] (for example esbuild [--define:__YUKA_DEV__=false]), the client
-    runs dev checks: hydration mismatch warnings, blocked URL logs and other
+    runs dev checks: hydration mismatch warnings, blocked URL logs, an error
+    for a {!State.get} that nothing tracks in a component body, and other
     [console] messages. When [__YUKA_DEV__] is not defined at all, the
     checks are on, so a production bundle must define it. *)
 

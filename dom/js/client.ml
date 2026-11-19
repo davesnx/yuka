@@ -720,7 +720,7 @@ let start ~adopt container f =
   let (), dispose =
     Scheduler.batch (fun () ->
         Base.mount (fun () ->
-            let n = f () in
+            let n = if Dev.on then Scheduler.with_body true f else f () in
             if not adopt then Web.clear container "";
             let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
             if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then begin

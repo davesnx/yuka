@@ -1643,7 +1643,7 @@ let component_in_hole =
          (Yuka.runtime_hole
             (fun () ->
                if State.get on
-               then Yuka.State.untrack (Ui.Badge.make ~x:1)
+               then Yuka.State.runtime_untrack (Ui.Badge.make ~x:1)
                else Yuka.empty)))|]
 open
   struct
@@ -1656,7 +1656,8 @@ let component_prop_read_child =
     [|(Yuka.runtime_child
          (Yuka.runtime_hole
             (fun () ->
-               Yuka.State.untrack (Ui.Badge.make ~label:(State.get s)))))|]
+               Yuka.State.runtime_untrack
+                 (Ui.Badge.make ~label:(State.get s)))))|]
 let helper_with_prop_read () = Ui.Badge.make ~label:(State.get s) ()
 open
   struct
