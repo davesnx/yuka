@@ -3,9 +3,11 @@ let user : string Yuka.State.t = Yuka.State.make "ada"
 let show : bool Yuka.State.t = Yuka.State.make false
 let at_load = Yuka.State.get count
 
+let read_count () = Yuka.State.get count
+
 module Body_read = struct
   let make () =
-    let n = Yuka.State.get count in
+    let n = read_count () in
     <p>(Yuka.int n)</p>
 end
 

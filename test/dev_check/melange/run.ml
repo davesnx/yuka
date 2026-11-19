@@ -51,7 +51,7 @@ let () = check "module top level" ~fires:false
 
 let () =
   let _, dispose = render Dev_check_cases.body_read in
-  check "a read in a component body" ~fires:true;
+  check "a read in a same-file helper called in a component body" ~fires:true;
   dispose ()
 
 let () =

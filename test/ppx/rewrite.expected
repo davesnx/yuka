@@ -156,7 +156,7 @@ let component_children =
                  [Yuka.text "a";
                  Yuka.runtime_hole (fun () -> State.get s);
                  Yuka.runtime_instance __yuka_template_rewrite_13 [||]]) ()
-let component_prop_no_hole = Ui.Card.make ~title:(State.get s) ()
+let component_prop_no_hole = Ui.Card.make ~title:(State.peek s) ()
 open
   struct
     let __yuka_template_rewrite_14 =
@@ -1657,8 +1657,8 @@ let component_prop_read_child =
          (Yuka.runtime_hole
             (fun () ->
                Yuka.State.runtime_untrack
-                 (Ui.Badge.make ~label:(State.get s)))))|]
-let helper_with_prop_read () = Ui.Badge.make ~label:(State.get s) ()
+                 (Ui.Badge.make ~label:(State.peek s)))))|]
+let helper_with_prop_read () = Ui.Badge.make ~label:(State.peek s) ()
 open
   struct
     let __yuka_template_rewrite_64 =

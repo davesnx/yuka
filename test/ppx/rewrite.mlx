@@ -26,7 +26,7 @@ let component_one_child = <Ui.Card title="t"><p>"body"</p></Ui.Card>
 
 let component_children = <Ui.Card title="t">"a" (State.get s) <b>"c"</b></Ui.Card>
 
-let component_prop_no_hole = <Ui.Card title=(State.get s) />
+let component_prop_no_hole = <Ui.Card title=(State.peek s) />
 
 let nested = <ul class_="list"><li>"one"</li><li><a href="/y">(State.get name)</a></li></ul>
 
@@ -190,8 +190,8 @@ let helper_attr_call = <p class_=(Model.slug item) />
 
 let component_in_hole = <div>(if State.get on then <Ui.Badge x=1 /> else Yuka.empty)</div>
 
-let component_prop_read_child = <div><Ui.Badge label=(State.get s) /></div>
+let component_prop_read_child = <div><Ui.Badge label=(State.peek s) /></div>
 
-let helper_with_prop_read () = <Ui.Badge label=(State.get s) />
+let helper_with_prop_read () = <Ui.Badge label=(State.peek s) />
 
 let helper_with_prop_read_call = <div>(helper_with_prop_read ())</div>

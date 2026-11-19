@@ -166,6 +166,77 @@ A hole that returns elements, not text, removes its old elements and
 creates new ones each time it runs. Keep such a hole small, or read the
 State deeper in the tree, so that less is created again.
 
+## Reads that run one time
+
+A `State.get` that runs while a component builds its markup reads the
+value one time. The body does not run again, so the page never shows a
+change. The ppx reports such a read as a compile error:
+
+```
+Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+```
+
+The ppx checks two places:
+
+- The body of a component: a function bound to `make` at the top of a
+  file or of a module, as in `let make ~count () = ...` or
+  `let[@client] make ...`. The tag `<Counter />` calls `Counter.make`.
+  The ppx has no other mark for a component.
+- The row function of `Yuka.each`, `(fun item -> ...)`, in any place: a
+  row renders untracked, also inside a hole.
+
+In these two places, a `State.get` is correct only inside:
+
+- markup: a child or an attribute value of an HTML tag, which is a hole;
+- a function: an event handler, a helper such as
+  `let label () = ...`, `State.memo`, `Effect.after`, `Effect.before`,
+  `Yuka.hole`, the input of `Remote.make`, or any other `fun`;
+- `lazy`.
+
+| Error | Fix |
+|---|---|
+| `let n = State.get count in <p>(Yuka.int n)</p>` | `<p>(Yuka.int (State.get count))</p>`, or a memo |
+| `if State.get open_ then <A /> else <B />` as the body result | `(Yuka.hole (fun () -> if State.get open_ then <A /> else <B />))`, or make the `if` a child of an HTML tag |
+| `<Label text=(State.get name) />` | `<Label text=name />`, and read `name` in `Label` |
+| `(fun item -> let on = State.get sel = item.id in <li class_=(if on then "on" else "")> ... </li>)` in `Yuka.each` | `(fun item -> <li class_=(if State.get sel = item.id then "on" else "")> ... </li>)` |
+
+A prop of a component tag is not a hole. A `State.get` in a prop is an
+error, also in `value` of `Yuka.Context.Provide`, `async` of
+`Yuka.Await`, `status` of `Yuka.Show` and the props of an island in
+`Yuka.Client`:
+
+```
+Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+```
+
+This is an error in every place, also when the tag is inside a hole or
+`Yuka.hole`: there a change builds the whole component again. A prop that
+is a function, such as `on_pick=(fun () -> Yuka.State.get sel)`, is
+correct, because the read runs later. A component that takes a value
+that changes takes a `State.read`.
+
+To read one time on purpose, use `State.peek`. The top level of a module
+runs one time by design and is not checked. On the server every read is
+one time: a `State.get` in a server-only `make` is an error too, so use
+`State.peek` there.
+
+The check finds `State.get`, `Yuka.State.get`, and `State.get` under
+`open Yuka`, by name. The ppx also uses these names in its output. So
+another name for `Yuka.State` is an error: `open Yuka.State`,
+`Yuka.State.(...)`, `let open Yuka.State in`, `include Yuka.State`,
+`module S = Yuka.State` and `let module S = Yuka.State in`. The alias
+`module State = Yuka.State` is correct.
+
+```
+Yuka: module S = Yuka.State hides State.get from the ppx. The ppx checks and compiles reads by the exact names Yuka.State.get and State.get, so a read through S is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+```
+
+The check does not see:
+
+- a read inside a function of another file, or inside a helper that the
+  body calls outside markup (`let n = label () in`);
+- a read in a function that is not `make`, such as `let view () = ...`.
+
 ## Keyed lists
 
 `Yuka.each` shows a list whose rows keep their DOM nodes. Give it a key
@@ -183,6 +254,9 @@ A row whose key stays keeps its nodes, and renders again only when
 `~equal:( = )` for items that are rebuilt with the same content. Of two
 items with the same key, only the first shows. `each` keeps the items,
 not the array: to show a change, give a new array.
+
+The view of one item runs one time for each row. Read a State in its
+markup, not at its top: see [Reads that run one time](#reads-that-run-one-time).
 
 ## Memos
 

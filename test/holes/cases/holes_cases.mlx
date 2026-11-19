@@ -32,13 +32,15 @@ let conditional_view ~read () : Yuka.client Yuka.element =
 let static_list_view () : Yuka.client Yuka.element =
   <ul>(Yuka.each ~key:(fun item -> item) (fun () -> [| "x"; "y" |]) (fun item -> <li>(Yuka.text item)</li>))</ul>
 
+let read_name () = ignore (Yuka.State.get name)
+
 module Body = struct
   let runs = ref 0
 
   let make () =
     incr runs;
     let own = Yuka.State.make 0 in
-    ignore (Yuka.State.get name);
+    read_name ();
     <i>(Yuka.int (Yuka.State.get own))</i>
 end
 
@@ -57,7 +59,7 @@ module Styled = struct
   let make ~style () = <i>(Yuka.text style.color)</i>
 end
 
-let styled_view () : Yuka.client Yuka.element = <p><Styled style=({ color = Yuka.State.get name ^ "!" }) /></p>
+let styled_view () : Yuka.client Yuka.element = <p><Styled style=({ color = Yuka.State.peek name ^ "!" }) /></p>
 
 let state_query = Yuka.Action.query ~name:"holes_state" ~input:Yuka.Codec.string ~output:Yuka.Codec.string
 let fetched : string Yuka.Remote.t option ref = ref None
