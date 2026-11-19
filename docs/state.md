@@ -120,6 +120,7 @@ A constant is an expression that the ppx can prove reads no State:
   to constants;
 - `Yuka.text`, `Yuka.int`, `Yuka.float`, `Yuka.fragment`, `Yuka.each`,
   `Yuka.hole`, `Yuka.with_unique_id`, `Yuka.Form.value`,
+  `Yuka.Form.field_error`, `Yuka.Form.form_errors`,
   `Yuka.Form.field_error_view`, `Yuka.Form.form_errors_view` and
   `Yuka.Status.error_to_string` applied to constants.
 

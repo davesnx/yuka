@@ -125,6 +125,27 @@ let () =
   State.set Holes_cases.name "a";
   dispose ()
 
+let submit_with : node -> string -> unit =
+  [%mel.raw
+    {|function (c, v) {
+  c.querySelector("input[name=body]").value = v;
+  c.querySelector("form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+}|}]
+
+let text_in : node -> string -> string = [%mel.raw "function (c, s) { return c.querySelector(s).textContent }"]
+
+let () =
+  let c, dispose = render Holes_cases.errors_view in
+  let shows name field whole =
+    check ("Form.errors in markup: " ^ name) (field ^ " | " ^ whole) (text_in c "b" ^ " | " ^ text_in c "i")
+  in
+  shows "first" "-" "";
+  submit_with c "bad";
+  shows "after a failed submit" "Too short" "Refused";
+  submit_with c "good";
+  shows "after a good submit" "-" "";
+  dispose ()
+
 let install_fetch : unit -> unit =
   [%mel.raw
     {|function () {

@@ -237,6 +237,17 @@ The `id` is made from the action name, the `key` of the form and the
 field name. A development build shows an error in the browser console
 when two forms on a page have the same action and key.
 
+To show the errors another way, read `Yuka.Form.errors form`, a read-only
+State, with `Yuka.State.get` in markup, and give its value to
+`Yuka.Form.field_error` (the first error of a field) or
+`Yuka.Form.form_errors` (the errors for the whole form):
+
+```ocaml
+<p class_="error">
+  (Yuka.text (Option.value ~default:"" (Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors form)) `Title)))
+</p>
+```
+
 ## Remote data
 
 `Yuka.Remote.make` runs a query and keeps its status. Call it in a

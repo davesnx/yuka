@@ -195,3 +195,7 @@ let component_prop_read_child = <div><Ui.Badge label=(State.peek s) /></div>
 let helper_with_prop_read () = <Ui.Badge label=(State.peek s) />
 
 let helper_with_prop_read_call = <div>(helper_with_prop_read ())</div>
+
+let field_error_read f = <p>(Yuka.text (Option.value ~default:"" (Yuka.Form.field_error (State.get (Yuka.Form.errors f)) `Title)))</p>
+
+let field_error_value errors = <p title=(String.concat "," (Yuka.Form.form_errors errors))>(Yuka.text (Option.value ~default:"" (Yuka.Form.field_error errors `Title)))</p>

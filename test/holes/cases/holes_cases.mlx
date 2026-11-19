@@ -76,3 +76,21 @@ let state_view () : Yuka.client Yuka.element =
   let remote = Yuka.Remote.make ~retry:Yuka.Remote.no_retry state_query (fun () -> "a") in
   fetched := Some remote;
   <b>(Yuka.text (status_text (Yuka.State.get (Yuka.Remote.state remote))))</b>
+
+type note = { body : string } [@@deriving form]
+
+let note_action = Yuka.Form.action ~name:"holes_note" ~fields:note_form ~output:Yuka.Codec.string
+
+let note_answer note =
+  Yuka.Async.return
+    (Ok (if note.body = "bad" then Error [ (Some `Body, "Too short"); (None, "Refused") ] else Ok note.body))
+
+let errors_view () : Yuka.client Yuka.element =
+  <Yuka.Form action=note_action run=note_answer on_ok=(fun _ -> ())>
+    (fun form ->
+      <div>
+        <input name="body" />
+        <b>(Yuka.text (Option.value ~default:"-" (Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors form)) `Body)))</b>
+        <i>(Yuka.text (String.concat "," (Yuka.Form.form_errors (Yuka.State.get (Yuka.Form.errors form)))))</i>
+      </div>)
+  </Yuka.Form>

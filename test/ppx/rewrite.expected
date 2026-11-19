@@ -1669,3 +1669,33 @@ let helper_with_prop_read_call =
   Yuka.runtime_instance __yuka_template_rewrite_64
     [|(Yuka.runtime_child
          (Yuka.runtime_hole (fun () -> helper_with_prop_read ())))|]
+open
+  struct
+    let __yuka_template_rewrite_65 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let field_error_read f =
+  Yuka.runtime_instance __yuka_template_rewrite_65
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole
+            (fun () ->
+               Yuka.text
+                 (Option.value ~default:""
+                    (Yuka.Form.field_error (State.get (Yuka.Form.errors f))
+                       `Title)))))|]
+open
+  struct
+    let __yuka_template_rewrite_66 =
+      Yuka.runtime_template "\001p\005\002\007\006" ~html:"<p></p>"
+        ~walk:[||] ~kids:[|1;0;(-1);19;0|] ~attrs:[|0;0;2|] ~values:[||]
+        ~clones:1
+  end
+let field_error_value errors =
+  Yuka.runtime_instance __yuka_template_rewrite_66
+    [|(Yuka.runtime_attribute
+         (Yuka.runtime_attr "title"
+            (String.concat "," (Yuka.Form.form_errors errors) : string)));(
+      Yuka.runtime_child
+        (Yuka.text
+           (Option.value ~default:"" (Yuka.Form.field_error errors `Title))))|]

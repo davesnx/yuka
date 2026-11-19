@@ -155,7 +155,7 @@ let higher_order = function
   | _ -> None
 
 let yuka_pure = function
-  | "Form", ("value" | "field_error_view" | "form_errors_view") | "Status", "error_to_string" -> true
+  | "Form", ("value" | "field_error" | "form_errors" | "field_error_view" | "form_errors_view") | "Status", "error_to_string" -> true
   | _ -> false
 
 let yuka_pure_path = function
