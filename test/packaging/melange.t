@@ -1,6 +1,7 @@
 A Melange build of a Yuka client lists only yuka:
 
   $ unset DUNE_BUILD_DIR
+  $ unset CLICOLOR_FORCE
   $ export OCAMLPATH="$(dirname "$(command -v yuka)")/../lib"
   $ printf '(lang dune 3.16)\n(using melange 0.1)\n' > dune-project
   $ printf 'let () = ignore (Yuka.text "x")\n' > main.ml
