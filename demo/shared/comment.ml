@@ -1,7 +1,21 @@
-type t = { id : string; author : Model.User.t; body : Markup.node list; created_at : string } [@@deriving codec]
-type thread = { first : t list; hidden : int; last : t list } [@@deriving codec]
-type range = { issue : string; offset : int; limit : int } [@@deriving codec]
-type input = { issue_id : string; body : string } [@@deriving codec]
+include Comment_types
 
-let add = Yuka.Action.mutation ~name:"add_comment" ~input:input_codec ~output:codec
-let range = Yuka.Action.query ~name:"comment_range" ~input:range_codec ~output:(Yuka.Codec.list codec)
+let%action add =
+  Yuka.Action.mutation ~input:input_codec ~output:codec (fun _ { issue_id; body } ->
+      match Store.workspace_of issue_id with
+      | None -> Yuka.Server.Action.reject "No such issue"
+      | Some workspace ->
+          Store.write workspace
+            (fun () ->
+              match Store.find issue_id with
+              | Some issue when String.trim body <> "" -> Ok (Store.add_comment issue ~body)
+              | Some _ -> Error "Comment is empty"
+              | None -> Error "No such issue")
+            Yuka.Async.return)
+
+let%action range =
+  Yuka.Action.query ~input:range_codec ~output:(Yuka.Codec.list codec) (fun _ (range : range) ->
+      match Store.find range.issue with
+      | Some _ when range.offset >= 0 && range.limit >= 0 -> Yuka.Async.return (Store.comment_range range)
+      | Some _ -> Yuka.Server.Action.reject "Offset and limit must not be negative"
+      | None -> Yuka.Server.Action.reject "No such issue")

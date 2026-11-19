@@ -1,0 +1,15 @@
+(executable
+ (name run)
+ (modules run)
+ (libraries action_shared yuka))
+
+(rule
+ (with-stdout-to
+  run.actual
+  (run ./run.exe)))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (action
+  (diff run.expected run.actual)))

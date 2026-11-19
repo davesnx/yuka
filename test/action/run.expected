@@ -1,0 +1,5 @@
+action_shared.Calc.double
+action_shared.Calc.Inner.shout
+server-only-answer-42-pid-true-body-of-double
+HI
+calc kept on both targets

@@ -64,7 +64,7 @@ try {
   const A = await open(first);
   const B = await open(second);
 
-  const added = await action(first, "add_note", { workspace: "Yuka", text });
+  const added = await action(first, "demo_shared.Board.add_note", { workspace: "Yuka", text });
   const board = added.status === 200 ? (JSON.parse(added.text).ok as { id: string; content: [string, unknown] }[]) : [];
   noteId = board.find((item) => item.content[0] === "Note" && item.content[1] === text)?.id ?? "";
   check("s.1 a note is added through the first server", added.status === 200 && noteId !== "", `${added.status} ${noteId || added.text.slice(0, 200)}`);
@@ -77,7 +77,7 @@ try {
   const missing = pages.filter((html) => !html.includes(text)).length;
   check("s.3 every /canvas answer of both servers has the note", missing === 0, `${missing} of ${pages.length} without it`);
 
-  const moved = await action(second, "move_item", { workspace: "Yuka", id: noteId, x: 40, y: 60 });
+  const moved = await action(second, "demo_shared.Board.move", { workspace: "Yuka", id: noteId, x: 40, y: 60 });
   check("s.4 the note is moved through the second server with no error", moved.status === 200, `${moved.status} ${moved.text.slice(0, 200)}`);
 
   check("s.5 the page on the second server shows the move", await shows(B, noteId, "translate(40px,60px)"));
@@ -86,7 +86,7 @@ try {
   check("s. no exception", false, String((e as Error).message).split("\n")[0]);
 } finally {
   if (noteId !== "") {
-    const removed = await action(first, "remove_note", { workspace: "Yuka", note_id: noteId });
+    const removed = await action(first, "demo_shared.Board.remove_note", { workspace: "Yuka", note_id: noteId });
     check("s.7 the note is removed through the first server", removed.status === 200, `${removed.status} ${removed.text.slice(0, 200)}`);
   }
   await browser.close();

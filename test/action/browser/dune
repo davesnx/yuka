@@ -1,0 +1,21 @@
+(melange.emit
+ (target out)
+ (alias action-js)
+ (libraries action_shared yuka)
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (enabled_if
+  (<> %{profile} release))
+ (deps
+  (alias action-js))
+ (action
+  (progn
+   (with-stdout-to
+    main.actual
+    (run node %{dep:out/test/action/browser/main.js}))
+   (diff main.expected main.actual)
+   (system "! grep -rliE 'body-of-double|server-only-answer|action_secret' out")
+   (system "! grep -rlE 'Server|uppercase' out/test/action"))))

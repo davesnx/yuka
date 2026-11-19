@@ -4,7 +4,7 @@ let topic = Yuka.Topic.declare ~name:"bench" ~key:Yuka.Codec.int ~state:(Yuka.Co
 let () = Yuka.Server.Live.serve topic (fun _ -> Yuka.Async.return [])
 
 let issues n =
-  let seed = Array.of_list Demo_app.Store.seed in
+  let seed = Array.of_list Demo_shared.Store.seed in
   List.init n (fun i ->
       let base = seed.(i mod Array.length seed) in
       { base with Model.Issue.id = Printf.sprintf "YUK-%d" (i + 1) })

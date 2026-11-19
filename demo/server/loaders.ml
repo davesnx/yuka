@@ -2,7 +2,7 @@ open Demo_shared.Model
 
 let issue_in workspace id =
   Yuka.Async.return
-    (match Store.find id with
+    (match Demo_shared.Store.find id with
     | Some (issue : Issue.t) when issue.workspace = workspace -> Ok issue
     | _ -> Error Yuka.Server.Not_found)
 

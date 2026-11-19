@@ -459,7 +459,7 @@ await step("3e. live data is embedded", async () => {
   const html = (await res?.text()) ?? "";
   await pg.waitForSelector(".row");
   check("3e.1 the list, its live answer and the token are in the server HTML", html.includes('class="row-title"') && html.includes('data-yuka-answer="l:issues') && html.includes('data-yuka-answer="l:csrf"'), String(html.length));
-  check("3e.2 no labels request at load, the chips are in the server HTML", html.includes('data-yuka-answer="r:labels') && html.includes('class="chip"') && !posts.some((p) => p.endsWith("/labels")), posts.join(","));
+  check("3e.2 no labels request at load, the chips are in the server HTML", html.includes('data-yuka-answer="r:demo_shared.Queries.labels') && html.includes('class="chip"') && !posts.some((p) => p.endsWith("/demo_shared.Queries.labels")), posts.join(","));
   const all = await pg.locator(".row").count();
   await pg.locator(".chip", { hasText: /^client / }).click();
   const only = await pg.locator(".row").count();
@@ -469,7 +469,7 @@ await step("3e. live data is embedded", async () => {
   await pg.locator('.nav-link[href="/my"]').click();
   await pg.waitForURL("**/my");
   await pg.waitForSelector(".row");
-  check("3e.3 no labels request after a client navigation", !posts.some((p) => p.endsWith("/labels")), posts.join(","));
+  check("3e.3 no labels request after a client navigation", !posts.some((p) => p.endsWith("/demo_shared.Queries.labels")), posts.join(","));
   await pg.close();
 });
 
@@ -534,7 +534,7 @@ await step("3f. prefetch and the navigation cache", async () => {
   const aborted = failedRequests.slice(failedBefore).filter(dropped).length;
   failedRequests.splice(failedBefore, failedRequests.length - failedBefore, ...failedRequests.slice(failedBefore).filter((f) => !dropped(f)));
   check("3f.6 emptying the cache aborts at most the one prefetch in flight", aborted <= 1, String(aborted));
-  check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.slice(posts).filter((p) => p.url.endsWith("/update_issue")).length === 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
+  check("3f.5 a successful action clears the cache (the click fetches again)", actionPosts.slice(posts).filter((p) => p.url.endsWith("/demo_shared.Actions.update_issue")).length === 1 && requestsTo(from, "/issue/YUK-6").length === 2, `posts=${actionPosts.length - posts} ${JSON.stringify(requestsTo(from, "/issue/YUK-6"))}`);
   await page.goto(base + "/", { waitUntil: "networkidle" });
 });
 
@@ -720,7 +720,7 @@ await step("4. status change", async () => {
   });
   actionPosts.length = 0;
   const labelsAgain = page
-    .waitForResponse((r) => r.url().endsWith("/_yuka/action/labels") && r.status() === 200, { timeout: 5000 })
+    .waitForResponse((r) => r.url().endsWith("/_yuka/action/demo_shared.Queries.labels") && r.status() === 200, { timeout: 5000 })
     .then(() => true, () => false);
   await page.locator(`.row[data-id="${id}"] button[aria-label="Change status"]`).click();
   await page.locator(".menu-item", { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click();
@@ -735,9 +735,9 @@ await step("4. status change", async () => {
   check("4a row updates at once (before response)", actionPosts.length === 0 && quick < 700, `after ${quick}ms, responses so far=${actionPosts.length}`);
   await page.waitForTimeout(1200);
   await page.unroute("**/_yuka/action/**");
-  const updates = actionPosts.filter((p) => p.url.endsWith("/update_issue"));
+  const updates = actionPosts.filter((p) => p.url.endsWith("/demo_shared.Actions.update_issue"));
   check(
-    "4b POST /_yuka/action/update_issue returned 200",
+    "4b POST /_yuka/action/demo_shared.Actions.update_issue returned 200",
     updates.length === 1 && updates[0].status === 200,
     JSON.stringify(actionPosts),
   );
@@ -1185,7 +1185,7 @@ await step("6i. report and canvas", async () => {
   const card = (p: Page) => p.locator(`[data-canvas] [data-id="${grip.id}"]`);
   const [x0, y0] = at(await card(A).getAttribute("style"));
   const moves: string[] = [];
-  A.on("request", (r) => { if (r.url().endsWith("/_yuka/action/move_item")) moves.push(r.url()); });
+  A.on("request", (r) => { if (r.url().endsWith("/_yuka/action/demo_shared.Board.move")) moves.push(r.url()); });
   const url = A.url();
   await A.mouse.move(grip.x, grip.y);
   await A.mouse.down();
@@ -1201,7 +1201,7 @@ await step("6i. report and canvas", async () => {
   ).then(() => true, () => false);
   check("6i.4 a drag moves the card with the pointer and sends one move on release", during.join(",") === want.join(",") && moved && sentDuring === 0 && A.url() === url, `${grip.id} ${x0},${y0} -> during ${during.join(",")}, after ${at(await card(A).getAttribute("style")).join(",")}, want ${want.join(",")}; moves sent during the drag ${sentDuring}`);
   await A.waitForTimeout(300);
-  check("6i.5 one move_item call", moves.length === 1, String(moves.length));
+  check("6i.5 one Board.move call", moves.length === 1, String(moves.length));
   const seen = await B.waitForFunction(
     ([sel, x, y]) => (document.querySelector(sel as string)?.getAttribute("style") ?? "").includes(`translate(${x}px,${y}px)`),
     [`[data-canvas] [data-id="${grip.id}"]`, want[0], want[1]] as const,
@@ -1811,7 +1811,7 @@ await step("7l. long comment threads", async () => {
   await pg.waitForFunction((text) => document.querySelector(".comments .comment:last-child")?.textContent?.includes(text) && !document.querySelector(".comments .comment:last-child")?.id.includes("tmp-"), body);
   check("7l.4 a new comment goes last and the hidden count stays", (await counter.textContent()) === "192 hidden comments" && (await ids()).length === 9, (await ids()).join(","));
   await pg.evaluate(() => document.querySelectorAll(".comments .comment").forEach((item) => ((item as any).__kept = true)));
-  await pg.route("**/_yuka/action/comment_range", async (route) => {
+  await pg.route("**/_yuka/action/demo_shared.Comment.range", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     await route.continue();
   });
@@ -1819,16 +1819,16 @@ await step("7l. long comment threads", async () => {
   await pg.waitForFunction(() => document.querySelector("#load-more-comments")?.textContent === "Loading...");
   check("7l.5 the button shows a pending state", (await pg.getAttribute("#load-more-comments", "aria-disabled")) === "true");
   await pg.waitForFunction(() => document.querySelector("[aria-label='Hidden comments'] [aria-live]")?.textContent === "142 hidden comments");
-  await pg.unroute("**/_yuka/action/comment_range");
+  await pg.unroute("**/_yuka/action/demo_shared.Comment.range");
   const afterMore = await ids();
   check("7l.6 Load 50 more inserts comments 4 to 53 in order", inOrder(afterMore.slice(0, 58), [...range(1, 53), 196, 197, 198, 199, 200]) && afterMore.length === 59, afterMore.map(number).join(","));
   const kept = await pg.evaluate(() => [...document.querySelectorAll(".comments .comment")].filter((item) => (item as any).__kept).length);
   check("7l.7 the comments already shown keep their DOM nodes", kept === 9, String(kept));
   check("7l.8 focus stays on the Load more button", (await pg.evaluate(() => document.activeElement?.id)) === "load-more-comments");
-  await pg.route("**/_yuka/action/comment_range", (route) => route.abort());
+  await pg.route("**/_yuka/action/demo_shared.Comment.range", (route) => route.abort());
   await pg.click("#load-more-comments");
   await pg.waitForSelector("[aria-label='Hidden comments'] [role=alert]");
-  await pg.unroute("**/_yuka/action/comment_range");
+  await pg.unroute("**/_yuka/action/demo_shared.Comment.range");
   check("7l.9 a failed load shows an error and keeps the count", (await counter.textContent()) === "142 hidden comments" && (await ids()).length === 59);
   await pg.getByRole("button", { name: "Retry" }).click();
   await pg.waitForFunction(() => document.querySelector("[aria-label='Hidden comments'] [aria-live]")?.textContent === "92 hidden comments");

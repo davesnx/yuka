@@ -37,8 +37,15 @@ type new_issue = {
 }
 [@@deriving form]
 
-let update_issue =
-  Yuka.Action.mutation ~name:"update_issue" ~input:update_input_codec
-    ~output:Issue.codec
+let%action update_issue =
+  Yuka.Action.mutation ~input:update_input_codec ~output:Issue.codec (fun _ ({ id; status; priority } : update_input) ->
+      match Store.workspace_of id with
+      | None -> Yuka.Server.Action.reject ("No issue " ^ id)
+      | Some workspace ->
+          Store.write workspace
+            (fun () -> Option.to_result ~none:("No issue " ^ id) (Store.update ~id ?status ?priority ()))
+            (fun issue ->
+              Store.publish_issue issue;
+              Yuka.Async.return issue))
 
 let create_issue = Yuka.Form.action ~name:"create_issue" ~fields:new_issue_form ~output:Issue.codec

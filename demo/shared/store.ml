@@ -1,4 +1,3 @@
-open Demo_shared
 open Model
 
 let users : User.t list =
@@ -56,7 +55,7 @@ let seed =
   ]
 
 let seed_comments =
-  let comment id author body created_at : Comment.t =
+  let comment id author body created_at : Comment_types.t =
     { id; author = user author; body = Markdown.render body; created_at }
   in
   [
@@ -72,13 +71,13 @@ let seed_comments =
         comment "c5" "dev" "Yes, a fixed height avoids a jump:\n\n```css\n.comments-loading {\n  min-height: 120px;\n}\n```" "Nov 3";
       ] );
     ("YUK-3", [ comment "c6" "maya" "Works well. Shipping it." "Oct 30" ]);
-    ("YUK-5", [ comment "c8" "maya" "The codec for `Comment.t` works. Two open questions:\n\n- Do we keep the `$async` key?\n- Should a bad prop **throw** or only log?" "Nov 4" ]);
+    ("YUK-5", [ comment "c8" "maya" "The codec for `Comment_types.t` works. Two open questions:\n\n- Do we keep the `$async` key?\n- Should a bad prop **throw** or only log?" "Nov 4" ]);
     ("YUK-19", [ comment "c7" "tomas" "Profile shows *80 ms* spent waiting on the comments query:\n\n```shell\nperf record -g -- ./demo_server.exe --port 8080\nperf report --sort symbol\n```\n\nMost of it is in `Store.comments_of`." "Nov 5" ]);
   ]
 
 type saved = {
   issues : Issue.t list;
-  comments : (string * Comment.t list) list;
+  comments : (string * Comment_types.t list) list;
   spots : (string * (int * int)) list;
   notes : (string * string) list;
   comment_count : int;
@@ -129,7 +128,7 @@ let first_shown = 3
 let last_shown = 5
 let collapse_above = 12
 
-let thread ~all id : Comment.thread =
+let thread ~all id : Comment_types.thread =
   let comments = comments_of id in
   let total = List.length comments in
   if all || total <= collapse_above then { first = comments; hidden = 0; last = [] }
@@ -140,7 +139,7 @@ let thread ~all id : Comment.thread =
       last = List.filteri (fun index _ -> index >= total - last_shown) comments;
     }
 
-let comment_range ({ issue; offset; limit } : Comment.range) =
+let comment_range ({ issue; offset; limit } : Comment_types.range) =
   List.filteri (fun index _ -> index >= offset && index < offset + limit) (comments_of issue)
 
 let thread_async ~delay ~all id = after delay (fun () -> thread ~all id)
@@ -194,7 +193,7 @@ let create workspace ~title ~description ~status ~priority =
 let add_comment (issue : Issue.t) ~body =
   let cell = cell issue.workspace in
   let count = cell.saved.comment_count + 1 in
-  let comment : Comment.t = { id = Printf.sprintf "c%d" (100 + count); author = me; body = Markdown.render body; created_at = today } in
+  let comment : Comment_types.t = { id = Printf.sprintf "c%d" (100 + count); author = me; body = Markdown.render body; created_at = today } in
   let added = Option.value (List.assoc_opt issue.id cell.saved.comments) ~default:[] in
   cell.saved <-
     { cell.saved with comments = (issue.id, added @ [ comment ]) :: List.remove_assoc issue.id cell.saved.comments; comment_count = count };
@@ -212,7 +211,7 @@ let label_counts workspace =
   let labels = List.sort_uniq compare (List.concat_map (fun (issue : Issue.t) -> issue.labels) issues) in
   List.map
     (fun label ->
-      { Demo_shared.Queries.label; open_ = List.length (List.filter (fun issue -> open_ issue && List.mem label issue.Issue.labels) issues) })
+      { Queries_types.label; open_ = List.length (List.filter (fun issue -> open_ issue && List.mem label issue.Issue.labels) issues) })
     labels
 
 let user_stats workspace user_id =
@@ -223,19 +222,19 @@ let user_stats workspace user_id =
   in
   let count statuses = List.length (List.filter (fun (issue : Issue.t) -> List.mem issue.status statuses) assigned) in
   {
-    Demo_shared.User_popup.open_ = count [ Issue.Backlog; Todo; In_progress ];
+    User_popup_types.open_ = count [ Issue.Backlog; Todo; In_progress ];
     in_progress = count [ In_progress ];
     done_ = count [ Done ];
   }
 
 let random = Random.State.make_self_init ()
-let random_spot () = (Random.State.int random (Board.width - Board.item_width + 1), Random.State.int random (Board.height - Board.item_height + 1))
+let random_spot () = (Random.State.int random (Board_types.width - Board_types.item_width + 1), Random.State.int random (Board_types.height - Board_types.item_height + 1))
 
 let seeded_spot number =
-  ( Insights_data.hash number mod (Board.width - Board.item_width + 1),
-    Insights_data.hash (number + 50021) mod (Board.height - Board.item_height + 1) )
+  ( Insights_data.hash number mod (Board_types.width - Board_types.item_width + 1),
+    Insights_data.hash (number + 50021) mod (Board_types.height - Board_types.item_height + 1) )
 
-let board workspace : Board.t =
+let board workspace : Board_types.t =
   let saved = (cell workspace).saved in
   let spots = Hashtbl.of_seq (List.to_seq saved.spots) in
   let at id default = Option.value (Hashtbl.find_opt spots id) ~default in
@@ -243,12 +242,12 @@ let board workspace : Board.t =
     List.rev_map
       (fun (issue : Issue.t) ->
         let x, y = at issue.id (seeded_spot (Issue.number issue)) in
-        { Board.id = issue.id; x; y; content = Card { title = issue.title; status = issue.status } })
+        { Board_types.id = issue.id; x; y; content = Card { title = issue.title; status = issue.status } })
       saved.issues
   in
   let notes =
     List.filter_map
-      (fun (id, text) -> Option.map (fun (x, y) -> { Board.id; x; y; content = Note text }) (Hashtbl.find_opt spots id))
+      (fun (id, text) -> Option.map (fun (x, y) -> { Board_types.id; x; y; content = Note text }) (Hashtbl.find_opt spots id))
       saved.notes
   in
   cards @ notes
@@ -285,7 +284,7 @@ let remove_note workspace ~id =
 
 let shuffle workspace =
   List.iter
-    (fun (item : Board.item) ->
+    (fun (item : Board_types.item) ->
       let x, y = random_spot () in
       move_item workspace ~id:item.id ~x ~y)
     (board workspace)
@@ -446,3 +445,26 @@ let connect ~conninfo ~reset_days =
         Workspace.all;
       refresh ())
     started
+
+let view_issues ({ workspace; view } : Queries_types.issue_list) =
+  match view with Queries_types.All -> issues workspace | Mine -> mine workspace
+
+let publish_board workspace =
+  let board = board workspace in
+  Yuka.Server.Live.publish Topics.board workspace board;
+  Yuka.Async.return board
+
+let publish_issue (issue : Issue.t) =
+  Yuka.Server.Live.publish Topics.issue issue.id issue;
+  Yuka.Server.Live.publish Topics.board issue.workspace (board issue.workspace);
+  List.iter
+    (fun view ->
+      let list = { Queries_types.workspace = issue.workspace; view } in
+      Yuka.Server.Live.publish Topics.issues list (view_issues list))
+    [ Queries_types.All; Queries_types.Mine ]
+
+let write workspace f k =
+  match change workspace f with
+  | Ok value -> k value
+  | Error (Refused message) -> Yuka.Server.Action.reject message
+  | Error Unavailable -> Yuka.Server.Action.reject unavailable

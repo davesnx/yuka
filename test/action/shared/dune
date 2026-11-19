@@ -1,0 +1,7 @@
+(library
+ (name action_shared)
+ (modes native melange)
+ (libraries yuka action_secret)
+ (melange.libraries yuka)
+ (preprocess
+  (pps yuka.ppx)))

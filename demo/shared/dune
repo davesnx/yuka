@@ -1,7 +1,24 @@
 (library
  (name demo_shared)
  (modes native melange)
- (libraries yuka)
+ (libraries
+  yuka
+  yuka-dream
+  dream
+  lwt
+  lwt.unix
+  postgresql
+  cmarkit
+  ochre
+  tm-grammars.ocaml
+  tm-grammars.javascript
+  tm-grammars.typescript
+  tm-grammars.shellscript
+  tm-grammars.json
+  tm-grammars.less)
+ (melange.libraries yuka)
+ (melange.modules
+  (:standard \ store description markdown code_style stress))
  (preprocess
   (pps yuka.ppx))
  (preprocessor_deps

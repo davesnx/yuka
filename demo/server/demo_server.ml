@@ -23,7 +23,7 @@ let theme_script =
 let refresh_store inner req =
   let target = Dream.target req in
   if not (String.starts_with ~prefix:"/static/" target || String.starts_with ~prefix:"/_yuka/app/" target) then
-    Demo_app.Store.refresh ();
+    Demo_shared.Store.refresh ();
   inner req
 
 let node_name () =
@@ -106,7 +106,7 @@ let () =
       ?prerendered:(if !prerendered = "" then None else Some !prerendered)
       ~head:
         ({|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="/static/favicon.svg">|}
-        ^ theme_script ^ Demo_app.Code_style.head)
+        ^ theme_script ^ Demo_shared.Code_style.head)
       ~styles:[ "/static/style.css"; "/static/markdown.css" ] ~css:Demo_app.Yuka_css.sheets
       ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
       ()
@@ -120,7 +120,7 @@ let () =
         ("PGCONNECT_TIMEOUT", "5");
         ("PGOPTIONS", "-c lock_timeout=5s -c statement_timeout=10s -c idle_in_transaction_session_timeout=15s");
       ];
-    (match Demo_app.Store.connect ~conninfo:!database ~reset_days:!reset_days with
+    (match Demo_shared.Store.connect ~conninfo:!database ~reset_days:!reset_days with
     | Ok () -> ()
     | Error message ->
         prerr_endline ("demo_server: the database is not available: " ^ message);

@@ -119,7 +119,7 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   shows the first 3 and the last 5; a band between them gives the number
   of hidden comments, "Load 50 more" (the next ones after the first group)
   and "Load all". The page does not send the hidden comments: the island
-  gets them with the `comment_range` query (`shared/comment.ml`).
+  gets them with the `Comment.range` query (`shared/comment.ml`).
   "Load all" is a link to `?comments=all`, which the server renders with
   the whole thread, so the link also works before the island starts, and
   can be shared.
@@ -143,7 +143,7 @@ installs them) and the oniguruma library (`conf-oniguruma`).
 A click anywhere on a row opens the issue: the title link covers the row,
 and the buttons of the row are above it. The avatar of a row opens a card
 with the user and the number of their open, in-progress and done issues
-(`User_popup`; the numbers come from the `user_stats` query when the card
+(`User_popup`; the numbers come from the `User_popup.stats` query when the card
 first opens).
 
 Keys: `j` and `k` move, Enter opens, `c` opens the new issue dialog,

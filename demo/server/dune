@@ -1,22 +1,7 @@
 (library
  (name demo_app)
- (modules code_style markdown description stress store report pages loaders handlers yuka_routes yuka_css)
- (libraries
-  demo_shared
-  yuka
-  yuka-dream
-  dream
-  lwt
-  lwt.unix
-  postgresql
-  cmarkit
-  ochre
-  tm-grammars.ocaml
-  tm-grammars.javascript
-  tm-grammars.typescript
-  tm-grammars.shellscript
-  tm-grammars.json
-  tm-grammars.less)
+ (modules report pages loaders handlers yuka_routes yuka_css)
+ (libraries demo_shared yuka dream)
  (preprocess
   (pps yuka.ppx)))
 
