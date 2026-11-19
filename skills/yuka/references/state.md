@@ -115,11 +115,20 @@ A constant is an expression that the ppx can prove reads no State:
   function whose body is a constant;
 - a function defined with `let` in the same file whose body is a
   constant, such as `let badge ~count = <b>(Yuka.int count)</b>`, applied
-  to constants;
+  to constants and to no more arguments than it has parameters that are
+  not optional;
 - `Yuka.text`, `Yuka.int`, `Yuka.float`, `Yuka.fragment`, `Yuka.each`,
   `Yuka.hole`, `Yuka.with_unique_id`, `Yuka.Form.value`,
   `Yuka.Form.field_error_view`, `Yuka.Form.form_errors_view` and
   `Yuka.Status.error_to_string` applied to constants.
+
+An `open`, `include`, `let*`, `let module` or `external` can hide a
+function of the same file, so after one the ppx does not use that
+function as a constant. After an `open` of a module of the same file, of a
+first-class module or of a functor result, also a function or module of
+the standard library is a hole. In `Yuka.with_unique_id (fun id -> ...)`,
+the ppx puts a body that is not a constant in a hole, so the body updates
+and keeps its `id`.
 
 A call of a function from another module, `(Model.label issue)`, is a
 hole: the ppx cannot see whether it reads a State.
