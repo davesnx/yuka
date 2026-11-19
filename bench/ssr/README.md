@@ -38,13 +38,26 @@ runs every candidate once, so load changes hit all of them; the table gives
 the median, min and max), `--baseline-build-dir <dir>` (adds
 `yuka-page-baseline` and `yuka-stream-baseline` from another build, for
 before/after). Make variables: `SSR_ROWS`, `SSR_CONNECTIONS`. The JSON goes to
-`$(BUILD_DIR)/bench-ssr/result.json`, with each round and the load average
-at its end.
+`$(BUILD_DIR)/bench-ssr/result.json`, with each round, the load average
+at its end, and the CPU model and count.
 
 `ocaml/golden.expected` is the full HTML of the page (document and request
 cycle); `dune build @runtest` compares it, so a speed change cannot change
 the bytes. `ocaml/render.exe [N]` times N renders in process, with no HTTP,
 and prints microseconds and words allocated per page.
+
+The bench does not set the OCaml minor heap. A server that renders large
+pages (more than about 100 KB of HTML) is faster with a larger one: a page
+tree that does not fit in the minor heap is promoted to the major heap during
+the render. Yuka does not set the size; set it when you start the server, for
+example:
+
+```sh
+OCAMLRUNPARAM=s=2M ./main.exe
+```
+
+`s=2M` is 2M words: 16 MB for each domain. With it, a 189 KB and a 360 KB page
+took 10% to 16% less time to render, and a 36 KB page about 3% to 10% less.
 
 Needs `wrk` on the `PATH`. `server-reason-react` is out of the build
 until `quickjs` supports dune 3.25 (see `ocaml/dune`); the numbers below for

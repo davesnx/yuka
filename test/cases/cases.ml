@@ -69,7 +69,7 @@ let mount_dispose () =
   let add, read = log () in
   let count = State.make 0 in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before
           ~cleanup:(fun () -> add "outer-clean")
           (fun () ->
@@ -205,6 +205,25 @@ let html_escaping () =
   check "attribute" "<a href=\"x&amp;y&quot;&lt;>\"></a>"
     (html (element "a" [ attr "href" "x&y\"<>" ] []))
 
+let decode_uri () =
+  let decoded s = match Private.decode_uri s with Some d -> d | None -> "None" in
+  let valid s = string_of_bool (Option.is_some (Private.decode_uri s)) in
+  check "plain" "a+b" (decoded "a+b");
+  check "escapes" "a b/?#" (decoded "a%20b%2F%3f%23");
+  check "two bytes" "true" (valid "%C3%A9");
+  check "four bytes" "true" (valid "%F0%9F%98%80");
+  if not Private.in_browser then check "two bytes, native" "\xc3\xa9" (decoded "%C3%A9");
+  check "percent at the end" "None" (decoded "100%");
+  check "one hex digit" "None" (decoded "%E0%A4%A");
+  check "not hex" "None" (decoded "%zz");
+  check "lead byte alone" "None" (decoded "%C3");
+  check "lead byte then text" "None" (decoded "%C3a");
+  check "continuation byte alone" "None" (decoded "%A9");
+  check "overlong" "None" (decoded "%C0%AF");
+  check "surrogate" "None" (decoded "%ED%A0%80");
+  check "over U+10FFFF" "None" (decoded "%F4%90%80%80");
+  check "five-byte lead" "None" (decoded "%F8%88%80%80%80")
+
 let html_adjacent_texts () =
   check "separator" "<p>a<!---->b<!---->c</p>"
     (html (element "p" [] [ text "a"; text "b"; text "c" ]));
@@ -242,7 +261,11 @@ let html_each () =
   check "empty" "<!--[--><!--]-->"
     (chtml (each ~key:string_of_int (fun () -> [||]) (fun _ -> empty)));
   check "texts in items stay apart" "<!--[--><!--[-->a<!--]--><!--[-->b<!--]--><!--]-->"
-    (chtml (each ~key:Fun.id (fun () -> [| "a"; "b" |]) text))
+    (chtml (each ~key:Fun.id (fun () -> [| "a"; "b" |]) text));
+  check "a duplicate key keeps the first item" "<ul><li>a1</li><li>b</li></ul>"
+    (chtml
+       (element "ul" []
+          [ each ~key:(fun s -> String.sub s 0 1) (fun () -> [| "a1"; "b"; "a2" |]) (fun v -> element "li" [] [ text v ]) ]))
 
 let html_dynamic_attribute () =
   let s = State.make (Some "v") in
@@ -284,15 +307,15 @@ let html_effect_skipped () =
   check "build and print" "<p></p>"
     (Private.render_html (fun () -> Private.node (component ())));
   check "build effect not run" "0" (string_of_int !runs);
-  check "flag restored" "false" (string_of_bool !Private.server_rendering);
+  check "flag restored" "false" (string_of_bool (Private.server_rendering ()));
   (try
      ignore
        (Private.to_html
           (Private.node (element "p" [] [ hole (fun () -> failwith "x") ])))
    with Failure _ -> ());
   check "flag restored after exception" "false"
-    (string_of_bool !Private.server_rendering);
-  let (), dispose = owner (fun () -> ignore (component ())) in
+    (string_of_bool (Private.server_rendering ()));
+  let (), dispose = with_owner (fun () -> ignore (component ())) in
   dispose ();
   check "runs in mount" "2" (string_of_int !runs)
 
@@ -303,10 +326,25 @@ let parse s =
 
 let is_error s = match Json.of_string s with Error _ -> "error" | Ok _ -> "ok"
 
+let browser = match Sys.backend_type with Sys.Other _ -> true | Sys.Native | Sys.Bytecode -> false
+
+let shape s =
+  match Json.of_string s with
+  | Ok (`Int i) -> "Int " ^ string_of_int i
+  | Ok (`Float f) -> "Float " ^ if f = 0. && 1. /. f < 0. then "-0" else Printf.sprintf "%g" f
+  | Ok j -> show_json j
+  | Error m -> "error: " ^ m
+
+let units s =
+  match Json.of_string s with
+  | Ok (`String x) -> String.concat " " (List.init (String.length x) (fun i -> Printf.sprintf "%x" (Char.code x.[i])))
+  | Ok j -> show_json j
+  | Error m -> "error: " ^ m
+
 let json_round_trip () =
   let values : Json.t list =
     [ `Null; `Bool true; `Bool false; `Int 0; `Int (-42); `Float 1.5;
-      `Float 1.0; `Float (-0.25); `Float 1e100; `String ""; `String "a\"b\\c\n\t\r";
+      `Float (-0.25); `Float 1e100; `String ""; `String "a\"b\\c\n\t\r";
       `String "caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80"; `List [];
       `Assoc []; `List [ `Int 1; `List [ `Null; `Assoc [ ("k", `String "v") ] ] ];
       `Assoc [ ("a", `Int 1); ("b", `List [ `Float 2.5 ]) ] ]
@@ -316,7 +354,16 @@ let json_round_trip () =
       match Json.of_string (show_json v) with
       | Ok v' -> if v <> v' then raise (Failed ("round trip: " ^ show_json v))
       | Error m -> raise (Failed ("round trip error: " ^ m)))
-    values
+    values;
+  check "1.0" (if browser then "Int 1" else "Float 1") (shape (show_json (`Float 1.0)));
+  check "Codec.float reads 1.0" "1.0"
+    (match Result.bind (Json.of_string "1.0") (Codec.decode Codec.float) with
+    | Ok f -> if f = 1.0 then "1.0" else Printf.sprintf "%g" f
+    | Error m -> m);
+  check "Codec.int reads 1" "1"
+    (match Result.bind (Json.of_string "1") (Codec.decode Codec.int) with
+    | Ok n -> string_of_int n
+    | Error m -> m)
 
 let json_printing () =
   check "compact" "{\"a\":[1,2.5,null,true],\"b\":\"x\"}"
@@ -339,13 +386,15 @@ let json_script_safety () =
 let json_parser () =
   check "escapes" "\"a\\n\\\"\\\\/\\b\""
     (parse "\"a\\n\\\"\\\\\\/\\b\"");
-  check "unicode escape" "\"\xc3\xa9\xe2\x82\xac\"" (parse "\"\\u00e9\\u20AC\"");
-  check "surrogate pair" "\"\xf0\x9f\x98\x80\"" (parse "\"\\ud83d\\ude00\"");
+  check "unicode escape" (if browser then "e9 20ac" else "c3 a9 e2 82 ac") (units "\"\\u00e9\\u20AC\"");
+  check "unicode escape is the text" (units {js|"é€"|js}) (units "\"\\u00e9\\u20AC\"");
+  check "surrogate pair" (if browser then "d83d de00" else "f0 9f 98 80") (units "\"\\ud83d\\ude00\"");
+  check "surrogate pair is the text" (units {js|"😀"|js}) (units "\"\\ud83d\\ude00\"");
   check "whitespace" "{\"a\":[1,2]}" (parse " { \"a\" : [ 1 , 2 ] }\n");
   check "int" "`Int" (match Json.of_string "123" with Ok (`Int 123) -> "`Int" | _ -> "other");
   check "negative int" "`Int" (match Json.of_string "-7" with Ok (`Int (-7)) -> "`Int" | _ -> "other");
-  check "float dot" "`Float" (match Json.of_string "1.0" with Ok (`Float _) -> "`Float" | _ -> "other");
-  check "float exp" "`Float" (match Json.of_string "1e2" with Ok (`Float 100.) -> "`Float" | _ -> "other");
+  check "float dot" (if browser then "Int 1" else "Float 1") (shape "1.0");
+  check "float exp" (if browser then "Int 100" else "Float 100") (shape "1e2");
   check "float neg exp" "`Float" (match Json.of_string "-2.5E-1" with Ok (`Float (-0.25)) -> "`Float" | _ -> "other");
   check "empty containers" "[[],{}]" (parse "[[],{}]");
   check "nested" "{\"a\":{\"b\":[{\"c\":null}]}}" (parse "{\"a\":{\"b\":[{\"c\":null}]}}")
@@ -354,8 +403,18 @@ let json_invalid () =
   List.iter
     (fun s -> check ("invalid " ^ String.escaped s) "error" (is_error s))
     [ ""; " "; "["; "[1,]"; "{\"a\"}"; "{\"a\":1,}"; "{a:1}"; "tru"; "nul";
-      "01"; "1."; ".5"; "-"; "1e"; "\"abc"; "\"\\x\""; "\"\\u12\""; "\"\\ud83d\"";
-      "\"\\ude00\""; "\"\\ud83d\\u0041\""; "1 2"; "[1] x"; "'a'"; "\"a\nb\"" ]
+      "01"; "1."; ".5"; "-"; "1e"; "\"abc"; "\"\\x\""; "\"\\u12\""; "1 2"; "[1] x";
+      "'a'"; "\"a\nb\"" ];
+  check "lone high surrogate" (if browser then "d83d" else "error: lone surrogate at 7") (units "\"\\ud83d\"");
+  check "lone low surrogate" (if browser then "de00" else "error: lone surrogate at 7") (units "\"\\ude00\"");
+  check "high surrogate before a letter" (if browser then "d83d 41" else "error: invalid surrogate pair at 13")
+    (units "\"\\ud83d\\u0041\"")
+
+let json_objects_and_zero () =
+  check "integer-like keys" (if browser then {|{"1":2,"2":1}|} else {|{"2":1,"1":2}|}) (parse {|{"2":1,"1":2}|});
+  check "duplicate keys" (if browser then {|{"a":3,"b":2}|} else {|{"a":1,"b":2,"a":3}|})
+    (parse {|{"a":1,"b":2,"a":3}|});
+  check "minus zero" (if browser then "Int 0" else "Float -0") (shape "-0.0")
 
 let codec_ok c v = Codec.decode c (Codec.encode c v)
 
@@ -499,18 +558,17 @@ let action_call () =
     | Async.Pending -> "pending"
   in
   let result =
-    call (fun name input ->
+    call (fun name input k ->
         seen := name ^ " " ^ show_json input;
-        match input with
-        | `Int n -> Async.return (Ok (`Int (n * 2)))
-        | _ -> Async.return (Error Status.Server))
+        (match input with `Int n -> k (Ok (`Int (n * 2))) | _ -> k (Error Status.Server));
+        ignore)
   in
   check "transport got" "double 21" !seen;
   check "decoded output" "ok 42" (show result);
   check "a decode error is Protocol" "error protocol error: expected int, got \"x\""
-    (show (call (fun _ _ -> Async.return (Ok (`String "x")))));
+    (show (call (fun _ _ k -> k (Ok (`String "x")); ignore)));
   check "a transport error stays" "error forbidden"
-    (show (call (fun _ _ -> Async.return (Error Status.Forbidden))))
+    (show (call (fun _ _ k -> k (Error Status.Forbidden); ignore)))
 
 let html_island () =
   let item name =
@@ -846,6 +904,89 @@ let batch_nests () =
   State.set trigger 1;
   check "batch inside an effect" "2,0" (String.concat "," (List.map string_of_int !seen))
 
+let write_back_in_batch () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  Effect.before (fun () ->
+      ignore (State.get a);
+      incr runs);
+  batch (fun () ->
+      State.set a 1;
+      State.set a 0);
+  check "a write back to the old value causes no run" "1" (string_of_int !runs);
+  batch (fun () ->
+      State.set a 1;
+      State.set a 2);
+  check "a write to a new value causes one run" "2" (string_of_int !runs);
+  let b = State.make ~equal:(fun x y -> x mod 10 = y mod 10) 0 in
+  Effect.before (fun () ->
+      ignore (State.get b);
+      incr runs);
+  batch (fun () ->
+      State.set b 1;
+      State.set b 10);
+  check "the old value is compared with ~equal" "3" (string_of_int !runs);
+  let c = State.make 0 in
+  State.set c 5;
+  Effect.before (fun () ->
+      ignore (State.get c);
+      incr runs);
+  batch (fun () ->
+      State.set c 1;
+      State.set c 0);
+  check "a write before the first reader counts as seen" "5" (string_of_int !runs)
+
+let write_back_after_untracked_read () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  Effect.before (fun () ->
+      ignore (State.get a);
+      incr runs);
+  batch (fun () ->
+      State.set a 1;
+      ignore (State.get a);
+      State.set a 0);
+  check "a get between the writes causes no run" "1" (string_of_int !runs);
+  batch (fun () ->
+      State.set a 1;
+      ignore (State.peek a);
+      State.set a 0);
+  check "a peek between the writes causes no run" "1" (string_of_int !runs)
+
+let write_back_in_flush () =
+  let seen = ref [] in
+  let a = State.make 0 in
+  let writer () =
+    Effect.before (fun () -> if State.get a = 1 then State.set a 0)
+  in
+  let reader () =
+    Effect.before (fun () -> seen := State.get a :: !seen)
+  in
+  writer ();
+  reader ();
+  State.set a 1;
+  check "a reader that runs before the writer sees the last value" "0"
+    (string_of_int (List.hd !seen));
+  seen := [];
+  let b = State.make 0 in
+  Effect.before (fun () -> seen := State.get b :: !seen);
+  Effect.before (fun () -> if State.get b = 1 then State.set b 0);
+  State.set b 1;
+  check "a reader that runs after the writer sees the last value" "0"
+    (string_of_int (List.hd !seen))
+
+let write_back_through_memo () =
+  let runs = ref 0 in
+  let a = State.make 0 in
+  let m = State.memo (fun () -> State.get a) in
+  Effect.before (fun () ->
+      ignore (State.get m);
+      incr runs);
+  batch (fun () ->
+      State.set a 1;
+      State.set a 0);
+  check "a write back to the old value causes no run" "1" (string_of_int !runs)
+
 let batch_raises () =
   let add, read = log () in
   let a = State.make 0 in
@@ -880,7 +1021,7 @@ let batch_raises () =
 let disposal_order () =
   let add, read = log () in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before ~cleanup:(fun () -> add "first") (fun () -> ());
         Effect.before ~cleanup:(fun () -> add "second") (fun () -> ());
         Effect.before ~cleanup:(fun () -> add "third") (fun () -> ()))
@@ -903,7 +1044,7 @@ let effect_run_order () =
 let disposal_order_after_removal () =
   let add, read = log () in
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before ~cleanup:(fun () -> add "a") (fun () -> ());
         let (), dispose_b =
           Private.owned (fun () ->
@@ -931,7 +1072,7 @@ let disposal_order_after_removal () =
 let owned_removed_from_parent () =
   let add, read = log () in
   let (), dispose_parent =
-    owner (fun () ->
+    with_owner (fun () ->
         check "empty at first" "0" (string_of_int (Private.owner_size ()));
         for i = 1 to 200 do
           let (), dispose =
@@ -1157,7 +1298,7 @@ let mount_raises_disposes () =
   let add, read = log () in
   let result =
     match
-      owner (fun () ->
+      with_owner (fun () ->
           Effect.before ~cleanup:(fun () -> add "cleaned") (fun () -> add "ran");
           failwith "boom")
     with
@@ -1169,7 +1310,7 @@ let mount_raises_disposes () =
   let count = State.make 0 in
   let runs = ref 0 in
   (match
-     owner (fun () ->
+     with_owner (fun () ->
          Effect.before (fun () -> ignore (State.get count); incr runs);
          failwith "again")
    with
@@ -1181,7 +1322,7 @@ let mount_raises_disposes () =
 let owned_raises_disposes () =
   let add, read = log () in
   let (), dispose_parent =
-    owner (fun () ->
+    with_owner (fun () ->
         (match
            Private.owned (fun () ->
                Effect.before ~cleanup:(fun () -> add "cleaned") (fun () -> ());
@@ -1203,6 +1344,12 @@ let json_depth_limit () =
     (is_error (String.concat "" (List.init 100000 (fun _ -> "{\"a\":")) ^ "1"));
   check "depth 512 is fine" "ok" (is_error (deep 512));
   check "depth 513 is an error" "error" (is_error (deep 513));
+  let deep_object n = String.concat "" (List.init n (fun _ -> "{\"a\":")) ^ "1" ^ String.make n '}' in
+  check "object depth 512 is fine" "ok" (is_error (deep_object 512));
+  check "object depth 513 is an error" "error" (is_error (deep_object 513));
+  let mixed n = String.concat "" (List.init n (fun _ -> "[{\"a\":")) ^ "1" ^ String.concat "" (List.init n (fun _ -> "}]")) in
+  check "mixed depth 512 is fine" "ok" (is_error (mixed 256));
+  check "mixed depth 514 is an error" "error" (is_error (mixed 257));
   check "the message says why" "error: nesting too deep"
     (let m = parse (deep 513) in
      if String.length m >= 23 then String.sub m 0 23 else m)
@@ -1328,7 +1475,7 @@ let disposed_during_run () =
   let t = State.make 0 in
   let dispose = ref ignore in
   let (), d =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.before (fun () ->
             if State.get s = 1 then begin
               !dispose ();
@@ -1355,7 +1502,7 @@ let disposed_while_pending () =
   let add, read = log () in
   let s = State.make 0 in
   let (), dispose =
-    owner (fun () -> Effect.before (fun () -> add ("b" ^ string_of_int (State.get s))))
+    with_owner (fun () -> Effect.before (fun () -> add ("b" ^ string_of_int (State.get s))))
   in
   Effect.before (fun () -> if State.get s = 1 then dispose ());
   State.set s 1;
@@ -1440,7 +1587,7 @@ let after_outside_a_mount () =
   Effect.after (fun () -> add ("top" ^ string_of_int (State.get s)));
   check "at the top level the first run is at once" "top0" (read ());
   let (), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.after (fun () -> add ("owner" ^ string_of_int (State.get s)));
         add "body")
   in
@@ -1460,7 +1607,7 @@ let after_disposed_before_first_run () =
   let s = State.make 0 in
   batch (fun () ->
       let (), dispose =
-        owner (fun () ->
+        with_owner (fun () ->
             Effect.after ~cleanup:(fun () -> incr cleaned) (fun () -> ignore (State.get s); incr runs))
       in
       dispose ());
@@ -1473,7 +1620,7 @@ let after_cleanup () =
   let count = State.make 0 in
   let (), dispose =
     batch (fun () ->
-        owner (fun () ->
+        with_owner (fun () ->
             Effect.after
               ~cleanup:(fun id -> add ("clear" ^ string_of_int id))
               (fun () ->
@@ -1567,8 +1714,8 @@ let fallback ~error ~reset:_ = element "p" [] [ text ("caught " ^ error) ]
 
 let logged f =
   let saved = fun _ m -> prerr_endline m and messages = ref [] in
-  Yuka.Server.Testing.set_log (fun _ m -> messages := m :: !messages);
-  let result = Fun.protect ~finally:(fun () -> Yuka.Server.Testing.set_log saved) f in
+  Yuka.Server.set_default_log (fun _ m -> messages := m :: !messages);
+  let result = Fun.protect ~finally:(fun () -> Yuka.Server.set_default_log saved) f in
   (result, List.rev !messages)
 
 let in_island tree =
@@ -1703,6 +1850,380 @@ let show_server () =
   check "failed" "<!--[-->failed server error<!--]-->"
     (print (Status.Failed { error = Status.Server; last = Some "d" }))
 
+let memo_chain_from s length =
+  let rec chain n m =
+    if n = 0 then m else chain (n - 1) (State.memo (fun () -> State.get m + 1))
+  in
+  chain length (State.memo (fun () -> State.get s))
+
+let memo_chain length () =
+  let s = State.make 0 in
+  let last, dispose = with_owner (fun () -> memo_chain_from s length) in
+  State.set s 1;
+  check "the end of the chain" (string_of_int (length + 1))
+    (string_of_int (State.peek last));
+  dispose ()
+
+let memo_chain_effect length () =
+  let s = State.make 0 in
+  let seen = ref (-1) in
+  let (), dispose =
+    with_owner (fun () ->
+        let last = memo_chain_from s length in
+        Effect.before (fun () -> seen := State.get last))
+  in
+  State.set s 1;
+  check "the effect at the end of the chain" (string_of_int (length + 1))
+    (string_of_int !seen);
+  dispose ();
+  State.set s 2;
+  check "no run after dispose" (string_of_int (length + 1)) (string_of_int !seen)
+
+let memo_chain_loop length () =
+  let s = State.make 0 in
+  let result =
+    match
+      with_owner (fun () ->
+          let last = memo_chain_from s length in
+          Effect.before (fun () -> State.set s (State.get last)))
+    with
+    | (), dispose ->
+        dispose ();
+        "no error"
+    | exception Failure m when contains m "keeps changing a State it reads" ->
+        "limit"
+    | exception e -> Printexc.to_string e
+  in
+  check "the round limit with a chain of memos" "limit" result
+
+let memo_chain_shared_source () =
+  let s = State.make 0 in
+  let runs = ref 0 in
+  let memo f = State.memo (fun () -> incr runs; f ()) in
+  let rec chain n m =
+    if n = 0 then m else chain (n - 1) (memo (fun () -> State.get s + State.get m))
+  in
+  let last, dispose = with_owner (fun () -> chain 10_000 (memo (fun () -> State.get s))) in
+  runs := 0;
+  State.set s 1;
+  check "the end of the chain" "10001" (string_of_int (State.peek last));
+  check "each memo runs once" "10001" (string_of_int !runs);
+  dispose ()
+
+let memo_chain_first_raises () =
+  let s = State.make 0 in
+  let firsts = ref 0 in
+  let rec chain n m =
+    if n = 0 then m else chain (n - 1) (State.memo (fun () -> State.get s + State.get m))
+  in
+  let last, dispose =
+    with_owner (fun () ->
+        chain 10_000
+          (State.memo (fun () ->
+               incr firsts;
+               if State.get s = 1 then failwith "boom" else State.get s)))
+  in
+  firsts := 0;
+  State.set s 1;
+  let raised = match State.peek last with _ -> "no error" | exception Failure m -> m in
+  check "the error at the end of the chain" "boom" raised;
+  State.set s 2;
+  check "the chain recovers" "20002" (string_of_int (State.peek last));
+  check "the first memo runs once for each write" "2" (string_of_int !firsts);
+  dispose ()
+
+let memo_chain_middle_raises () =
+  let s = State.make 0 in
+  let runs = ref 0 and middle = ref 0 in
+  let link k m () =
+    incr runs;
+    let v = State.get s in
+    if k = 5_000 then begin
+      incr middle;
+      if v = 1 then failwith "middle"
+    end;
+    v + State.get m
+  in
+  let rec chain k m = if k > 10_000 then m else chain (k + 1) (State.memo (link k m)) in
+  let last, dispose = with_owner (fun () -> chain 1 (State.memo (fun () -> incr runs; State.get s))) in
+  runs := 0;
+  middle := 0;
+  State.set s 1;
+  let raised = match State.peek last with _ -> "no error" | exception Failure m -> m in
+  check "the error of the middle memo" "middle" raised;
+  check "each memo runs once" "10001 1" (string_of_int !runs ^ " " ^ string_of_int !middle);
+  runs := 0;
+  middle := 0;
+  State.set s 2;
+  check "the chain recovers" "20002" (string_of_int (State.peek last));
+  check "each memo runs once after the error" "10001 1"
+    (string_of_int !runs ^ " " ^ string_of_int !middle);
+  dispose ()
+
+let memo_chain_dynamic () =
+  let s = State.make 0 and c = State.make true in
+  let bs = ref 0 in
+  let last, dispose =
+    with_owner (fun () ->
+        let a = State.memo (fun () -> State.get s * 10) in
+        let b = State.memo (fun () -> incr bs; State.get s * 100) in
+        let rec chain n m =
+          if n = 0 then m
+          else
+            chain (n - 1)
+              (State.memo (fun () ->
+                   (if State.get c then State.get a else State.get b) + State.get m))
+        in
+        chain 10_000 (State.memo (fun () -> State.get s)))
+  in
+  bs := 0;
+  batch (fun () ->
+      State.set s 1;
+      State.set c false);
+  check "the chain reads the other memo" "1000001" (string_of_int (State.peek last));
+  check "the other memo runs once" "1" (string_of_int !bs);
+  State.set c true;
+  check "the chain reads the first memo again" "100001" (string_of_int (State.peek last));
+  dispose ()
+
+let memo_chain_retry () =
+  let s = State.make 0 and w = State.make 3 in
+  let last, dispose =
+    with_owner (fun () ->
+        let rec chain k m =
+          if k > 10_000 then m
+          else
+            chain (k + 1)
+              (State.memo (fun () ->
+                   let v = State.get s + State.get m in
+                   if k = 5_000 then begin
+                     let x = State.get w in
+                     if x < 3 then State.set w (x + 1);
+                     v + x
+                   end
+                   else v))
+        in
+        chain 1 (State.memo (fun () -> State.get s)))
+  in
+  batch (fun () ->
+      State.set s 1;
+      State.set w 0);
+  let v = State.peek last in
+  check "a memo in the chain writes its State until it settles" "10004 3"
+    (string_of_int v ^ " " ^ string_of_int (State.peek w));
+  dispose ()
+
+let memo_chain_after_limit () =
+  let s = State.make 0 in
+  let last, dispose = with_owner (fun () -> memo_chain_from s 10_000) in
+  let result =
+    match with_owner (fun () -> Effect.before (fun () -> State.set s (State.get last))) with
+    | (), stop ->
+        stop ();
+        "no error"
+    | exception Failure m when contains m "keeps changing a State it reads" -> "limit"
+    | exception e -> Printexc.to_string e
+  in
+  check "the round limit" "limit" result;
+  State.set s 5;
+  check "the chain after the round limit" "10005" (string_of_int (State.peek last));
+  dispose ()
+
+let nested d k inner =
+  let rec go j m =
+    if j > k then m else go (j + 1) (State.memo (fun () -> State.get d + State.get m))
+  in
+  go 2 (State.memo (fun () -> State.get d + inner ()))
+
+let shown m = match State.get m with v -> string_of_int v | exception Failure e -> e
+
+let deep_fake_keeps_sources k () =
+  let s = State.make 0 and x = State.make 10 and d = State.make 0 in
+  let top, dispose =
+    with_owner (fun () ->
+        let m =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "m";
+              v + State.get x)
+        in
+        let p = State.memo (fun () -> try State.get m with Failure _ -> -1) in
+        nested d k (fun () -> State.get p))
+  in
+  State.set d 1;
+  batch (fun () ->
+      State.set s 1);
+  check "the top of the chain" (string_of_int (k - 1)) (string_of_int (State.peek top));
+  dispose ();
+  check "no link left after dispose" "false false"
+    (string_of_bool (Private.has_readers s) ^ " " ^ string_of_bool (Private.has_readers x))
+
+let deep_write_marks_failed_readers k () =
+  let s = State.make 0 and flag = State.make false and d = State.make 0 in
+  let add, read = log () in
+  let top, dispose =
+    with_owner (fun () ->
+        let a =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "a" else v)
+        in
+        Effect.before (fun () -> add (shown a));
+        let p =
+          State.memo (fun () ->
+              if State.get flag then begin
+                State.set s 2;
+                0
+              end
+              else try State.get a with Failure _ -> -1)
+        in
+        nested d k (fun () -> State.get p))
+  in
+  State.set s 1;
+  ignore (State.peek top);
+  State.set d 1;
+  batch (fun () ->
+      State.set flag true);
+  ignore (State.peek top);
+  check "the effect reads the memo after the write in the chain" "0 a 2" (read ());
+  dispose ()
+
+let deep_read_of_pending_memo k () =
+  let s = State.make 7 and sw = State.make false and t = State.make 7 and d = State.make 0 in
+  let seen = ref [] in
+  let b_ref = ref None in
+  let top, dispose =
+    with_owner (fun () ->
+        let rec a =
+          lazy
+            (State.memo (fun () ->
+                 if State.get sw then State.get s
+                 else match !b_ref with Some b -> State.get b | None -> 0))
+        and c = lazy (State.memo (fun () -> State.get (Lazy.force a))) in
+        let b =
+          State.memo (fun () ->
+              if State.get sw then begin
+                let v = State.get (Lazy.force c) in
+                seen := v :: !seen;
+                v
+              end
+              else State.get t)
+        in
+        b_ref := Some b;
+        let a = Lazy.force a in
+        ignore (State.peek (Lazy.force c));
+        (nested d k (fun () -> State.get a), b))
+  in
+  let top, b = top in
+  State.set d 1;
+  batch (fun () ->
+      State.set sw true;
+      State.set s 5);
+  ignore (State.peek top);
+  ignore (State.peek b);
+  check "the old source sees only the new value of the memo" "5"
+    (String.concat " " (List.rev_map string_of_int !seen));
+  dispose ()
+
+let deep_two_failed_sources k () =
+  let s = State.make 0 and flag = State.make false and d = State.make 0 in
+  let add, read = log () in
+  let top, dispose =
+    with_owner (fun () ->
+        let a1 =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "a1" else v)
+        and a2 =
+          State.memo (fun () ->
+              let v = State.get s in
+              if v = 1 then failwith "a2" else v)
+        in
+        Effect.before (fun () -> add (shown a1));
+        let p =
+          State.memo (fun () ->
+              if State.get flag then 0
+              else
+                (try State.get a1 with Failure _ -> -1)
+                + try State.get a2 with Failure _ -> -1)
+        in
+        nested d k (fun () -> State.get p))
+  in
+  State.set s 1;
+  ignore (State.peek top);
+  State.set d 1;
+  batch (fun () ->
+      State.set flag true);
+  ignore (State.peek top);
+  State.set s 2;
+  check "the effect runs after a write once the chain settled" "0 a1 2" (read ());
+  dispose ()
+
+let deep_failed_memo_at_the_limit k () =
+  let s = State.make 0 and x = State.make 0 and l = State.make 0 in
+  let on = State.make false and d = State.make 0 in
+  let top, dispose =
+    with_owner (fun () ->
+        let m =
+          State.memo (fun () ->
+              if State.peek s = 1 then failwith "m";
+              State.get x)
+        in
+        let p = State.memo (fun () -> try State.get m with Failure _ -> -1) in
+        Effect.before (fun () ->
+            (try ignore (State.get m) with Failure _ -> ());
+            if State.get on then begin
+              let v = State.get l in
+              State.set x (v + 1);
+              State.set l (v + 1)
+            end);
+        nested d k (fun () -> State.get p))
+  in
+  State.set d 1;
+  batch (fun () ->
+      State.set s 1;
+      State.set x 1);
+  ignore (State.peek top);
+  let result =
+    match State.set on true with
+    | () -> "no error"
+    | exception Failure m when contains m "keeps changing a State it reads" -> "limit"
+    | exception e -> Printexc.to_string e
+  in
+  dispose ();
+  let runs = ref 0 and z = State.make 0 in
+  let (), stop = with_owner (fun () -> Effect.before (fun () -> ignore (State.get z); incr runs)) in
+  State.set z 1;
+  stop ();
+  check "the round limit, then an effect runs" "limit 2" (result ^ " " ^ string_of_int !runs)
+
+let nested_batches_old_source k () =
+  let s = State.make 0 and sw = State.make true in
+  let bs = ref 0 in
+  let m, dispose =
+    with_owner (fun () ->
+        let a = State.memo (fun () -> State.get s) in
+        let b =
+          State.memo (fun () ->
+              incr bs;
+              State.get s * 10)
+        in
+        State.memo (fun () -> if State.get sw then State.get a + State.get b else State.get a))
+  in
+  bs := 0;
+  let rec nest j =
+    if j = 0 then begin
+      State.set sw false;
+      State.set s 1;
+      State.peek m
+    end
+    else batch (fun () -> nest (j - 1))
+  in
+  let v = nest k in
+  check "the memo, and runs of the source it no longer reads" "1 0"
+    (string_of_int v ^ " " ^ string_of_int !bs);
+  dispose ()
+
 let all =
   [
     ("catch: server fallback", catch_server_fallback);
@@ -1754,6 +2275,7 @@ let all =
     ("effect writing its own State settles", effect_writing_own_state_settles);
     ("effect writing its own State stops at a limit", effect_writing_own_state_stops);
     ("html escaping", html_escaping);
+    ("Web.decode_uri", decode_uri);
     ("html adjacent texts", html_adjacent_texts);
     ("html empty text", html_empty_text);
     ("html hole markers", html_hole);
@@ -1768,6 +2290,7 @@ let all =
     ("json script safety", json_script_safety);
     ("json parser", json_parser);
     ("json invalid input", json_invalid);
+    ("json objects and minus zero", json_objects_and_zero);
     ("codec round trip", codec_round_trip);
     ("codec errors", codec_errors);
     ("async settles once", async_settle_once);
@@ -1792,6 +2315,10 @@ let all =
     ("closure in a State", closure_state);
     ("batch delays effects", batch_delays);
     ("batch nests", batch_nests);
+    ("write back in a batch", write_back_in_batch);
+    ("write back through a memo", write_back_through_memo);
+    ("write back after an untracked read", write_back_after_untracked_read);
+    ("write back in a flush", write_back_in_flush);
     ("batch with an exception", batch_raises);
     ("owned removed from its parent", owned_removed_from_parent);
     ("disposal order", disposal_order);
@@ -1810,4 +2337,27 @@ let all =
     ("json depth limit", json_depth_limit);
     ("html float special values", html_float_special);
     ("owned disposes when the function raises", owned_raises_disposes);
+    ("chain of 2,000 memos", memo_chain 2_000);
+    ("chain of 5,000 memos", memo_chain 5_000);
+    ("chain of 10,000 memos", memo_chain 10_000);
+    ("effect at the end of a chain of 10,000 memos", memo_chain_effect 10_000);
+    ("round limit with a chain of 10,000 memos", memo_chain_loop 10_000);
+    ("chain of 10,000 memos that each read the State", memo_chain_shared_source);
+    ("chain of 10,000 memos whose first memo raises once", memo_chain_first_raises);
+    ("chain of 10,000 memos whose middle memo raises once", memo_chain_middle_raises);
+    ("chain of 10,000 memos with dynamic dependencies", memo_chain_dynamic);
+    ("chain of 10,000 memos with a memo that writes its State", memo_chain_retry);
+    ("chain of 10,000 memos after the round limit", memo_chain_after_limit);
+    ("deep 1: a failed memo keeps its sources when its reader reads it", deep_fake_keeps_sources 1);
+    ("deep 1: a write in the chain reaches the reader of a failed memo", deep_write_marks_failed_readers 1);
+    ("deep 1: an old source does not see the old value of a memo", deep_read_of_pending_memo 1);
+    ("deep 1: two failed sources the reader no longer reads", deep_two_failed_sources 1);
+    ("deep 1: a failed memo at the round limit", deep_failed_memo_at_the_limit 1);
+    ("deep 150: a failed memo keeps its sources when its reader reads it", deep_fake_keeps_sources 150);
+    ("deep 150: a write in the chain reaches the reader of a failed memo", deep_write_marks_failed_readers 150);
+    ("deep 150: an old source does not see the old value of a memo", deep_read_of_pending_memo 150);
+    ("deep 150: two failed sources the reader no longer reads", deep_two_failed_sources 150);
+    ("deep 150: a failed memo at the round limit", deep_failed_memo_at_the_limit 150);
+    ("batch 1: a memo in nested batches does not compute a source it no longer reads", nested_batches_old_source 1);
+    ("batch 150: a memo in nested batches does not compute a source it no longer reads", nested_batches_old_source 150);
   ]

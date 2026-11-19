@@ -253,7 +253,7 @@ let tooltip (hover : hover option Yuka.State.read) : Yuka.client Yuka.element =
           </g>)
 
 let[@client] make ~(workspace : Model.Workspace.t) () =
-  let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view = Queries.All }) in
+  let source = Yuka.Live.make Topics.issues (fun () -> { Queries.workspace; view = Queries.All }) in
   let issues = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[]) in
   let multiplier = Yuka.State.make 1 in
   let animate = Yuka.State.make false in
@@ -550,9 +550,9 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
       <button id="insights-dates-button" class_=(if Yuka.State.get range = None then "chip" else "chip on") type_=`button
         popovertarget="insights-dates" aria_haspopup=`dialog data_dates="true">
         <span class_=Css.dates_label>"Created"</span>
-        <span>(Yuka.text (date_of_day (fst (Yuka.State.get window))))</span>
+        <span class_=Css.dates_day>(Yuka.text (date_of_day (fst (Yuka.State.get window))))</span>
         <span class_=Css.arrow>" to "</span>
-        <span>(Yuka.text (date_of_day (snd (Yuka.State.get window))))</span>
+        <span class_=Css.dates_day>(Yuka.text (date_of_day (snd (Yuka.State.get window))))</span>
       </button>
       <div id="insights-dates" popover=`auto role=`dialog aria_label="Created date range" class_=Css.dates_menu>
         (range_input ~label:"From" ~pick:fst ~apply:(fun day (_, to_day) -> (min day to_day, to_day)))
@@ -573,6 +573,9 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
       <span>"Insights"</span>
       <span class_="group-count">(Yuka.text (format_int (List.length (Yuka.State.get selected))))</span>
       <span class_=Css.note>(Yuka.text ("of " ^ format_int (List.length (Yuka.State.get items)) ^ " issues"))</span>
+      (if capped ~multiplier:(Yuka.State.get shown_multiplier) (List.length (Yuka.State.get issues)) then
+         <span class_=Css.note data_capped="true">(Yuka.text ("capped at " ^ format_int max_points ^ " points"))</span>
+       else Yuka.empty)
       <button class_=("chip " ^ Css.animate) type_=`button data_animate="true"
         aria_pressed=(if Yuka.State.get animate then `true_ else `false_)
         on_click=(fun _ -> Yuka.State.update animate not)>

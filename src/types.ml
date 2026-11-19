@@ -4,6 +4,7 @@ type event = Web.event
 type trigger = [ `Idle | `Visible | `Interaction ]
 type start = [ `Load | trigger | `Lazy of trigger ]
 type log_level = [ `Error | `Warn | `Info | `Debug ]
+type backend = ..
 
 
   type node =
@@ -36,6 +37,11 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     | Catch of {
         children : unit -> node;
         fallback : error:string -> reset:(unit -> unit) -> node;
+        client : Obj.t option -> node;
+      }
+    | Provide of {
+        add : Scheduler.env -> Scheduler.env;
+        children : unit -> node;
         client : Obj.t option -> node;
       }
 
@@ -102,8 +108,9 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   }
 
   type router = {
-    boot : [ `Hover | `Visible | `Off ] * bool * (unit -> unit) -> unit;
+    boot : bool * (unit -> unit) -> unit;
     navigate : string -> unit;
+    back : unit -> unit;
     handle : event -> unit;
     stop : unit -> unit;
   }
@@ -122,10 +129,13 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   type context = {
     meth : Router.meth;
     path : string;
+    target : string;
     header : string -> string option;
+    body : limit:int -> (string, [ `Too_large ]) result Async.t;
     session : unit -> string option;
     log : log_level -> string -> unit;
-    live : string -> Json.t -> (Json.t, Status_error.t) result Async.t;
+    live : string -> Json.t -> (Json.t * (string * int) option, Status_error.t) result Async.t;
+    backend : backend option;
   }
 
   type session = {
@@ -147,10 +157,18 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     mutable answered : string list;
     mutable select_value : string option;
     mutable form : (string * string * (string * string) list * (string option * string) list) option;
-    mutable csrf : (unit -> string) option;
+    mutable csrf : (unit -> string option) option;
     mutable sheets : string list;
     mutable held : string list;
     mutable context : context option;
+    mutable shared : (Scheduler.binding * string) list;
+    mutable contexts : int;
+    mutable id_scope : string;
+    mutable id_count : int;
+    mutable page_scope : string;
+    mutable page_count : int;
+    mutable invalid : (string * string) list;
+    mutable invalid_focused : bool;
   }
 
   let snapshot s = { s with streaming = s.streaming }
@@ -158,7 +176,7 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context } =
+        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;
@@ -178,7 +196,15 @@ type log_level = [ `Error | `Warn | `Info | `Debug ]
     s.csrf <- csrf;
     s.sheets <- sheets;
     s.held <- held;
-    s.context <- context
+    s.context <- context;
+    s.shared <- shared;
+    s.contexts <- contexts;
+    s.id_scope <- id_scope;
+    s.id_count <- id_count;
+    s.page_scope <- page_scope;
+    s.page_count <- page_count;
+    s.invalid <- invalid;
+    s.invalid_focused <- invalid_focused
 
 let warned = ref false
 
@@ -189,6 +215,42 @@ let log name value =
   end
 
 let current_session : session option ref = ref None
+let local_session = if Scheduler.js then None else Some (Web.local (fun () -> ref None))
+let current_session () = match local_session with Some k when not Scheduler.js -> Web.local_get k | _ -> current_session
+
+type ids = { mutable scope : string; mutable count : int }
+
+let browser_ids = { scope = "c-"; count = 0 }
+
+let next_id () =
+  match !(current_session ()) with
+  | Some s ->
+      s.id_count <- s.id_count + 1;
+      s.id_scope ^ string_of_int s.id_count
+  | None ->
+      browser_ids.count <- browser_ids.count + 1;
+      browser_ids.scope ^ string_of_int browser_ids.count
+
+let with_browser_ids scope f =
+  let { scope = outer; count } = browser_ids in
+  let restore () =
+    browser_ids.scope <- outer;
+    browser_ids.count <- count
+  in
+  browser_ids.scope <- scope;
+  browser_ids.count <- 0;
+  match f () with
+  | r ->
+      restore ();
+      r
+  | exception e ->
+      restore ();
+      raise e
+
+let error_id ~action ~key field =
+  String.map
+    (function ' ' | '\t' | '\n' | '\r' | '\012' -> '_' | c -> c)
+    (action ^ "-" ^ (if key = "" then "" else key ^ "-") ^ field ^ "-error")
 
 let level_name = function `Error -> "error" | `Warn -> "warn" | `Info -> "info" | `Debug -> "debug"
 
@@ -198,7 +260,7 @@ let default_log : (log_level -> string -> unit) ref =
 let log_in session level message =
   match session with Some { context = Some c; _ } -> c.log level message | _ -> !default_log level message
 
-let log_message level message = log_in !current_session level message
+let log_message level message = log_in !(current_session ()) level message
 
 let reject_prefix = lazy ("yuka.reject." ^ Web.nonce () ^ ":")
 
@@ -211,7 +273,7 @@ let rejection message =
     Some (String.sub message n (String.length message - n))
   else None
 
-let shown ?(session = !current_session) what message =
+let shown ?(session = !(current_session ())) what message =
   match rejection message with
   | Some m -> m
   | None ->
@@ -220,8 +282,10 @@ let shown ?(session = !current_session) what message =
 
 let async_error ?session id message = shown ?session ("async value " ^ id) message
 
-let transport : (string -> Json.t -> (Json.t, Status_error.t) result Async.t) ref =
-  ref (fun _ _ -> Async.return (Error (Status_error.Network "no action transport")))
+type Scheduler.binding += Coded of { name : string; json : unit -> Json.t; inner : Scheduler.binding }
+
+let route_name = "yuka.route"
+let state_target : ((Json.t -> unit) -> unit) ref = ref ignore
 
 let async_source : (string -> Json.t Async.t) ref =
   ref (fun _ -> Async.failed "no async transport")

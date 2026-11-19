@@ -1,11 +1,14 @@
 (** Runs a Yuka app on Dream. *)
 
 val handler :
-  ?node:Yuka.Server.Live.node -> Yuka.Server.config -> Dream.request Yuka.Server.app -> Dream.handler
+  ?node:Yuka.Server.Live.node -> Yuka.Server.config -> Yuka.Server.app -> Dream.handler
 (** Answers every request with the request cycle
     ([Yuka.Server.Adapter.Make]), the WebSocket of {!Yuka.Live} at
     [/_yuka/live] included. Put Dream middleware (logger, sessions) around
-    it. When the config has no [log], the messages of the cycle and of
+    it. On Unix it sets [SIGPIPE] to be ignored for the whole process, as
+    [Dream.run] does and [Dream.serve] does not: else a client that closes
+    its connection during a streamed answer stops the process with no
+    message. When the config has no [log], the messages of the cycle and of
     {!Yuka.Console} during a request go to the Dream log
     [Dream.sub_log "yuka"], at the same level ([`Warn] is Dream's
     [`Warning]); Dream filters them with the level of
@@ -17,12 +20,12 @@ val handler :
     (https://github.com/camlworks/dream/issues/467): a publish written to a
     client that reset its connection just before can freeze the server at
     100% CPU. [node] is the live node of the sockets and of the server
-    render of [Yuka.Live.use] (default: the process node); a second handler
+    render of [Yuka.Live.make] (default: the process node); a second handler
     in one process with its own {!Yuka.Server.Live.type-node} is a second
     node. *)
 
 val prerender :
-  out:string -> Yuka.Server.config -> Dream.request Yuka.Server.app -> unit Lwt.t
+  out:string -> Yuka.Server.config -> Yuka.Server.app -> (unit, string) result Lwt.t
 (** Writes the pages of the app to the directory [out]:
 
     - It starts from [Yuka.Server.Prerender.seeds] and renders each path
@@ -36,16 +39,17 @@ val prerender :
       copies [Yuka.Server.Prerender.served_dirs] under their prefixes.
 
     It renders with [Yuka.Server.Prerender.config]: dev mode is off, and a
-    page that renders a [Yuka.Live.use] is a 500 with a log message, so it is
+    page that renders a [Yuka.Live.make] is a 500 with a log message, so it is
     not written. A file in the [prerendered] directory of the config is not
     read. Files already in [out] are replaced; running it twice gives the
-    same files. Raises [Invalid_argument] at once when [out] is inside a
-    directory of [Yuka.Server.Prerender.served_dirs]. *)
+    same files. Gives [Error] with a message that names the directory, and
+    writes nothing, when [out] is inside a directory of
+    [Yuka.Server.Prerender.served_dirs]. *)
 
-val tree_digest : string -> string
-(** A digest of the paths and contents of every file under a directory
-    (symbolic links followed), for the [digest] of [Yuka.Server.modules].
-    Compute it once at start. *)
+val request : Yuka.Server.request -> Dream.request option
+(** The Dream request of a request that {!handler} or {!prerender} made,
+    for a loader, guard, handler or action that needs Dream. [None] for a
+    request from another adapter or from [Yuka.Server.Testing.request]. *)
 
 val to_async : 'a Lwt.t -> 'a Yuka.Async.t
 (** A failed promise gives a failed [Async] with the exception text. *)

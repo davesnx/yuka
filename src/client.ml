@@ -11,7 +11,10 @@ type lazy_entry = unit
 
 let lazy_entry ~name:_ _ = ()
 
-let browser_only () = failwith "Yuka: browser only"
+let acting : Base.owner option ref = ref None
+let own_call _ _ = ()
+
+let browser_only () = invalid_arg "Yuka: browser only"
 let render _ _ = browser_only ()
 let hydrate _ _ = browser_only ()
 let render_root _ = browser_only ()
@@ -19,6 +22,7 @@ let stop_roots () = ()
 let start ?lazy_entries:_ _ = browser_only ()
 let stop () = ()
 let stop_within _ = ()
+let has_handler _ _ _ = false
 let on_error : (string -> unit) ref = ref ignore
 let use_element () = ()
 let use_url_check () = ()

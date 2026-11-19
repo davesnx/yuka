@@ -91,7 +91,7 @@ module Header = struct
       <nav class_="workspaces" aria_label="Workspaces">(Yuka.fragment (List.map switch Workspace.all))</nav>
       <div class_="topbar-end">
         <div class_="topbar-tools">
-          <Yuka.Client><Theme_menu /></Yuka.Client>
+          <Yuka.Client start=`Idle><Theme_menu /></Yuka.Client>
           <Yuka.Client start=`Idle><Nav_progress /></Yuka.Client>
         </div>
         <span class_="topbar-divider" aria_hidden=true />
@@ -108,12 +108,18 @@ module Header = struct
 end
 
 module Shell = struct
-  let make ~workspace ~sidebar ~children () : _ Yuka.element =
+  let make ~workspace ~commit ~sidebar ~children () : _ Yuka.element =
     let links = [ (Links.issues workspace, "Issues"); (Links.my_issues workspace, "My issues"); (Links.insights workspace, "Insights"); (Links.report workspace, "Report"); (Links.canvas workspace, "Canvas") ] in
     <div class_="app">
       <Header workspace />
       <div class_="app-body">
         <aside class_="sidebar">
+          (match commit with
+           | Some hash ->
+               <a class_="version" href=("https://github.com/davesnx/yuka/commit/" ^ hash) target=`_blank rel="noopener">
+                 (Yuka.text (String.sub hash 0 (min 7 (String.length hash))))
+               </a>
+           | None -> <span class_="version">"dev"</span>)
           <nav class_="nav">
             (Yuka.fragment (List.map (fun (href, label) -> <a class_="nav-link" href>(Yuka.text label)</a>) links))
           </nav>
@@ -174,11 +180,15 @@ module Issue_form = struct
     let sent_priority = match Yuka.Form.value form `Priority with "" -> "no-priority" | value -> value in
     <div class_="issue-form">
       <input type_=`hidden name="workspace" value=(Workspace.slug workspace) />
+      <label class_="visually-hidden" for_="dialog-title">"Title"</label>
       <input class_="dialog-title" type_=`text id="dialog-title" name="title" placeholder="Issue title"
         autofocus=true value=(Yuka.Form.value form `Title) />
-      (Yuka.Form.error_view form `Title (fun message -> <p class_="error">(Yuka.text message)</p>))
-      <textarea class_="dialog-description" name="description" placeholder="Description" rows=4
-        value=(Yuka.Form.value form `Description) />
+      (Yuka.Form.field_error_view form `Title (fun ~id message -> <p id class_="error">(Yuka.text message)</p>))
+      (Yuka.with_unique_id (fun id ->
+         Yuka.fragment
+           [ <label class_="visually-hidden" for_=id>"Description"</label>;
+             <textarea class_="dialog-description" id name="description" placeholder="Description" rows=4
+               value=(Yuka.Form.value form `Description) /> ]))
       <div class_="dialog-row">
         <select class_="select" aria_label="Status" name="status">
           (Yuka.fragment
@@ -199,6 +209,6 @@ module Issue_form = struct
                 Issue.all_priorities))
         </select>
       </div>
-      (Yuka.Form.errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
+      (Yuka.Form.form_errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
     </div>
 end

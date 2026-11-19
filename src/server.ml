@@ -58,7 +58,7 @@ let fill_chunk id html =
 let rejection = Types.rejection
 
 let timeout_answer () : Json.t =
-  `Assoc [ ("error", Status.error_codec.encode (Status.Network "timeout")) ]
+  Answers.to_json (Error (Status.Network "timeout"))
 
 let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
@@ -74,6 +74,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeo
   session.entry <- entry;
   session.current <- current;
   session.id_prefix <- id_prefix;
+  session.id_scope <- id_prefix ^ "p-";
   let shell = Printer.print session (fun () -> build ()) in
   let fills =
     List.exists
@@ -91,7 +92,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeo
       finished := true;
       on_timeout := None;
       Async.on_settled !chain (function
-        | Async.Done () -> resolve ()
+        | Async.Done () -> resolve (session.islands > 0)
         | Async.Failed m -> fail m
         | Async.Pending -> ())
     end
@@ -206,7 +207,7 @@ let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
       >>= fun () -> write shell)
     ~on_fill:(fun id _ links html -> write (links ^ fill_chunk id html))
     ~on_value:write
-  >>= fun () -> write "</body></html>"
+  >>= fun _ -> write "</body></html>"
 
 let find_from text part from =
   let n = String.length part in
@@ -246,7 +247,7 @@ let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ?co
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
-    (fun () -> !document ^ Buffer.contents values)
+    (fun _ -> !document ^ Buffer.contents values)
     (drive ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
@@ -269,66 +270,63 @@ let normalize path =
   go path
 
 let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile ?entry () =
+  let ( let* ) = Result.bind in
   let parse what text =
-    match Json.of_string text with
-    | Ok j -> j
-    | Error m ->
-        invalid_arg (caller ^ ": bad " ^ what ^ " JSON: " ^ m)
+    Result.map_error (fun m -> caller ^ ": bad " ^ what ^ " JSON: " ^ m) (Json.of_string text)
   in
-  let paths =
-    match parse "manifest" manifest with
-    | `Assoc fields ->
-        List.map
-          (fun (name, v) ->
-            match v with
-            | `String p -> (name, normalize p)
-            | _ ->
-                invalid_arg
-                  (caller ^ ": manifest entry " ^ name
-                 ^ " is not a string"))
-          fields
-    | _ -> invalid_arg (caller ^ ": manifest is not an object")
+  let rec strings = function
+    | [] -> Ok []
+    | (name, `String p) :: rest ->
+        let* rest = strings rest in
+        Ok ((name, normalize p) :: rest)
+    | (name, _) :: _ -> Error (caller ^ ": manifest entry " ^ name ^ " is not a string")
   in
-  let outputs =
+  let* paths =
+    let* json = parse "manifest" manifest in
+    match json with
+    | `Assoc fields -> strings fields
+    | _ -> Error (caller ^ ": manifest is not an object")
+  in
+  let* outputs =
     match metafile with
-    | None -> None
+    | None -> Ok None
     | Some text -> (
-        match parse "metafile" text with
+        let* json = parse "metafile" text in
+        match json with
         | `Assoc top -> (
             match List.assoc_opt "outputs" top with
             | Some (`Assoc outs) ->
-                Some
-                  (List.filter_map
-                     (fun (file, v) ->
-                       match v with
-                       | `Assoc o ->
-                           let entry_point =
-                             match List.assoc_opt "entryPoint" o with
-                             | Some (`String e) -> Some (normalize e)
-                             | _ -> None
-                           in
-                           let static_imports =
-                             match List.assoc_opt "imports" o with
-                             | Some (`List imports) ->
-                                 List.filter_map
-                                   (function
-                                     | `Assoc import -> (
-                                         match (List.assoc_opt "path" import, List.assoc_opt "kind" import) with
-                                         | Some (`String path), Some (`String "import-statement") -> Some path
-                                         | _ -> None)
-                                     | _ -> None)
-                                   imports
-                             | _ -> []
-                           in
-                           Some (file, entry_point, static_imports)
-                       | _ -> None)
-                     outs)
-            | _ ->
-                invalid_arg
-                  (caller ^ ": metafile has no outputs object"))
-        | _ -> invalid_arg (caller ^ ": metafile is not an object"))
+                Ok
+                  (Some
+                     (List.filter_map
+                        (fun (file, v) ->
+                          match v with
+                          | `Assoc o ->
+                              let entry_point =
+                                match List.assoc_opt "entryPoint" o with
+                                | Some (`String e) -> Some (normalize e)
+                                | _ -> None
+                              in
+                              let static_imports =
+                                match List.assoc_opt "imports" o with
+                                | Some (`List imports) ->
+                                    List.filter_map
+                                      (function
+                                        | `Assoc import -> (
+                                            match (List.assoc_opt "path" import, List.assoc_opt "kind" import) with
+                                            | Some (`String path), Some (`String "import-statement") -> Some path
+                                            | _ -> None)
+                                        | _ -> None)
+                                      imports
+                                | _ -> []
+                              in
+                              Some (file, entry_point, static_imports)
+                          | _ -> None)
+                        outs))
+            | _ -> Error (caller ^ ": metafile has no outputs object"))
+        | _ -> Error (caller ^ ": metafile is not an object"))
   in
-  fun name ->
+  Ok (fun name ->
     match List.assoc_opt name paths with
     | None -> []
     | Some path -> (
@@ -349,7 +347,7 @@ let preload_urls ?(caller = "Yuka.Server.modules") ~manifest ~base ?metafile ?en
                 let files = match entry with None -> island | Some entry -> reach island entry in
                 List.rev files
                 |> List.filter (fun output -> Some output <> entry)
-                |> List.map (fun output -> base ^ output)))
+                |> List.map (fun output -> base ^ output))))
 
 let reject message = Async.failed (Types.reject message)
 
@@ -357,14 +355,17 @@ let empty_context () : Types.context =
   {
     meth = `GET;
     path = "";
+    target = "";
     header = (fun _ -> None);
+    body = (fun ~limit:_ -> Async.return (Ok ""));
     session = (fun () -> None);
     log = (fun level m -> !Types.default_log level m);
     live = (fun name key -> !Bridge.live_state name key);
+    backend = None;
   }
 
 let current_context () =
-  match !Types.current_session with Some { context = Some c; _ } -> c | _ -> empty_context ()
+  match !(Types.current_session ()) with Some { context = Some c; _ } -> c | _ -> empty_context ()
 
 let call f context x = Async.guard (fun x -> f context x) x
 
@@ -413,15 +414,10 @@ let send name input k =
             context.log `Error ("action " ^ name ^ " failed: " ^ m);
             Error Status.Server))
 
-let transport name input =
-  let settled, resolve, _ = Async.make () in
-  let (_ : unit -> unit) = send name input resolve in
-  settled
-
 let register action f encode =
   let name = Action.name action in
   if Option.is_some (find_action name) then
-    invalid_arg ("Yuka.Server.Action.make: already implemented: " ^ name);
+    invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
   let input = Action.input action in
   registry :=
     ( name,
@@ -431,7 +427,6 @@ let register action f encode =
         | Ok v ->
             Async.map encode (call f context v) )
     :: !registry;
-  Types.transport := transport;
   Bridge.send := send
 
 let implement action f = register action f (fun o -> Output (Codec.encode (Action.output action) o))
@@ -465,6 +460,54 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ 
   forms := (Action.name action, run) :: !forms
 
 let max_body = 1_048_576
+
+let read_once read =
+  let first = ref None in
+  fun ~limit ->
+    let read =
+      match !first with
+      | Some r -> r
+      | None ->
+          let r = Async.map (function Some s -> Ok s | None -> Error `Too_large) (read ~limit) in
+          first := Some r;
+          r
+    in
+    Async.map (function Ok s when String.length s > limit -> Error `Too_large | r -> r) read
+
+module Request = struct
+  let header (r : Types.context) = r.header
+  let session (r : Types.context) = r.session ()
+  let meth (r : Types.context) = r.meth
+  let path (r : Types.context) = r.path
+  let target (r : Types.context) = r.target
+  let query (r : Types.context) = Router.query r.target
+  let query_param r name = match Router.search (query r) name with v :: _ -> Some v | [] -> None
+
+  let cookie (r : Types.context) name =
+    let unquote v =
+      let n = String.length v in
+      if n >= 2 && v.[0] = '"' && v.[n - 1] = '"' then String.sub v 1 (n - 2) else v
+    in
+    Option.bind (r.header "cookie") (fun h ->
+        List.find_map
+          (fun pair ->
+            match Router.cut pair '=' with
+            | k, Some v when String.equal (String.trim k) name -> Some (unquote (String.trim v))
+            | _ -> None)
+          (String.split_on_char ';' h))
+
+  let body (r : Types.context) ~limit = r.body ~limit
+
+  let json ?(limit = max_body) (r : Types.context) codec =
+    Async.map
+      (function
+        | Error `Too_large -> Error `Too_large
+        | Ok text -> (
+            match Json.of_string text with
+            | Error m -> Error (`Invalid_json m)
+            | Ok j -> Result.map_error (fun m -> `Invalid_value m) (Codec.decode codec j)))
+      (r.body ~limit)
+end
 
 let authority url =
   match String.index_opt url ':' with

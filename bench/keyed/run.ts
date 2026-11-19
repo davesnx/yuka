@@ -5,8 +5,9 @@ import { gzipSync, brotliCompressSync, constants as zlib } from "node:zlib";
 import { parseArgs } from "node:util";
 import { chromium, type Browser, type Page } from "playwright-core";
 
-const allApps = ["vanillajs", "solid", "yuka"] as const;
-type App = (typeof allApps)[number];
+const allApps = ["vanillajs", "solid", "yuka", "yuka-block", "yuka-block-plain", "brumate"];
+type App = string;
+const defaultApps: App[] = ["vanillajs", "solid", "yuka", "yuka-block", "yuka-block-plain"];
 
 interface Bench {
   id: string;
@@ -52,7 +53,7 @@ const { values: options } = parseArgs({
   options: {
     site: { type: "string", default: join(process.env.BUILD_DIR ?? "_build", "bench-keyed") },
     runs: { type: "string", default: "10" },
-    apps: { type: "string", default: allApps.join(",") },
+    apps: { type: "string", default: defaultApps.join(",") },
     benchmarks: { type: "string", default: "" },
     out: { type: "string" },
     chrome: { type: "string", default: process.env.CHROME_PATH ?? "" },
@@ -66,11 +67,12 @@ const site = resolve(options.site);
 if (!statSync(site, { throwIfNoEntry: false })?.isDirectory()) {
   throw new Error(`${site} is not a directory; build it with "make bench-keyed" or bench/keyed/build.sh`);
 }
-const apps: App[] = options.apps.split(",").map((a) => {
-  const app = allApps.find((x) => x === a);
-  if (!app) throw new Error(`unknown app ${a}; known: ${allApps.join(", ")}`);
-  return app;
-});
+const apps: App[] = options.apps.split(",");
+for (const app of apps) {
+  if (!statSync(join(site, app, "index.html"), { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`unknown app ${app}: ${join(site, app, "index.html")} does not exist; built apps: ${allApps.join(", ")}`);
+  }
+}
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -544,6 +546,12 @@ const sizes: Partial<Record<App, Size>> = {};
 for (const app of apps) sizes[app] = sizeOf(app);
 
 const ratio = geomean.yuka !== undefined && geomean.solid !== undefined ? geomean.yuka / geomean.solid : undefined;
+const blockRatio = geomean["yuka-block"] !== undefined && geomean.solid !== undefined ? geomean["yuka-block"] / geomean.solid : undefined;
+const solidRatios: Record<App, number> = {};
+for (const app of apps) {
+  const value = geomean[app];
+  if (app !== "solid" && value !== undefined && geomean.solid !== undefined) solidRatios[app] = value / geomean.solid;
+}
 
 const pad = (s: string, n: number) => s.padStart(n);
 const lines: string[] = [];
@@ -564,6 +572,9 @@ if (ratio !== undefined) {
   lines.push("");
   lines.push(`yuka/solid weighted geometric mean ratio: ${ratio.toFixed(3)}`);
 }
+for (const [app, value] of Object.entries(solidRatios)) {
+  if (app.startsWith("yuka-block")) lines.push(`${app}/solid weighted geometric mean ratio: ${value.toFixed(3)}`);
+}
 console.log(lines.join("\n"));
 
 if (options.out !== undefined) {
@@ -580,6 +591,8 @@ if (options.out !== undefined) {
         samples: results,
         geomean,
         yukaSolidRatio: ratio ?? null,
+        yukaBlockSolidRatio: blockRatio ?? null,
+        solidRatios,
         sizes,
       },
       null,

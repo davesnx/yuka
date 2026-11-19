@@ -16,8 +16,10 @@ let pp_lookup ppf = function
   | Router.Found r -> Format.fprintf ppf "Found %s" (Routes.href r)
   | Router.Wrong_method ms ->
       Format.fprintf ppf "Wrong_method [%s]" (String.concat "; " (List.map meth_name ms))
-  | Router.Redirect { permanent; location } ->
-      Format.fprintf ppf "Redirect %b %s" permanent location
+  | Router.Redirect { location; kind } ->
+      Format.fprintf ppf "Redirect %s %s"
+        (match kind with `Permanent -> "permanent" | `Temporary -> "temporary")
+        location
   | Router.Missing -> Format.fprintf ppf "Missing"
 
 let lookup = testable pp_lookup ( = )
@@ -91,7 +93,6 @@ let edge_values : Routes.t list =
     Post { slug = ".."; lang = None };
     Post { slug = "..."; lang = None };
     Post { slug = ".a"; lang = None };
-    Doc { parts = [] };
     Doc { parts = [ "a"; "" ] };
     Doc { parts = [ "." ] };
     Doc { parts = [ "a"; ".."; "b" ] };
@@ -186,24 +187,39 @@ let round_trip =
             let target = Routes.href r in
             check lookup (meth_name meth ^ " " ^ target) (Router.Found r) (find ~meth target))
           samples);
-    t "href refuses or round-trips edge values" (fun () ->
+    t "href round-trips edge values" (fun () ->
         List.iter
           (fun r ->
             match Routes.href r with
-            | exception Invalid_argument _ -> ()
+            | exception Invalid_argument _ -> fail "href raised"
             | target -> check lookup target (Router.Found r) (find target))
           edge_values);
-    t "href refuses segments that find cannot give back" (fun () ->
-        let refused r =
-          match Routes.href r with exception Invalid_argument _ -> true | _ -> false
+    t "href of any string round-trips and has no empty or dot segment" (fun () ->
+        let pieces = [ ""; "."; ".."; "~"; "~."; "/"; "%"; "%2E"; "a"; "\xc3\xa9"; "?#" ] in
+        let strings =
+          List.concat_map
+            (fun a -> List.concat_map (fun b -> List.map (fun c -> a ^ b ^ c) pieces) pieces)
+            pieces
         in
-        check bool "empty" true (refused (Post { slug = ""; lang = None }));
-        check bool "dot" true (refused (Post { slug = "."; lang = None }));
-        check bool "dot dot" true (refused (Post { slug = ".."; lang = None }));
-        check bool "empty catch-all" true (refused (Doc { parts = [] }));
-        check bool "empty catch-all item" true (refused (Doc { parts = [ "a"; "" ] }));
-        check bool "dot dot catch-all item" true (refused (Doc { parts = [ "a"; ".." ] }));
-        check bool "three dots" false (refused (Post { slug = "..."; lang = None })));
+        let safe target =
+          match String.split_on_char '/' target with
+          | "" :: segments -> List.for_all (fun s -> s <> "" && s <> "." && s <> "..") segments
+          | _ -> false
+        in
+        List.iter
+          (fun s ->
+            List.iter
+              (fun r ->
+                match Routes.href r with
+                | exception Invalid_argument _ -> fail (Printf.sprintf "href raised on %S" s)
+                | target ->
+                    check bool ("safe " ^ target) true (safe target);
+                    check lookup target (Router.Found r) (find target))
+              [ Post { slug = s; lang = None }; Doc { parts = [ s ] }; Doc { parts = [ s; s ] } ])
+          strings);
+    t "a catch-all needs one element" (fun () ->
+        check bool "empty catch-all" true
+          (match Routes.href (Doc { parts = [] }) with exception Invalid_argument _ -> true | _ -> false));
     t "every constructor has a sample" (fun () ->
         let name : Routes.t -> string = function
           | Home -> "Home"
@@ -260,15 +276,18 @@ let find_cases =
         check lookup "page" (found Home) (find ~meth:`HEAD "/");
         check lookup "endpoint" (found Feed) (find ~meth:`HEAD "/feed.xml"));
     t "redirects substitute and encode params, for every method" (fun () ->
-        let moved = Router.Redirect { permanent = true; location = "/issue/YUK-7" } in
+        let moved = Router.Redirect { location = "/issue/YUK-7"; kind = `Permanent } in
         check lookup "GET" moved (find "/i/YUK-7");
         check lookup "POST" moved (find ~meth:`POST "/i/YUK-7");
         check lookup "bad param" Router.Missing (find "/i/x");
         check lookup "catch-all"
-          (Router.Redirect { permanent = false; location = "/docs/a%20b/c" })
+          (Router.Redirect { location = "/docs/a%20b/c"; kind = `Temporary })
           (find "/old-docs/a%20b/c");
+        check lookup "catch-all keeps the escape"
+          (Router.Redirect { location = "/docs/~/~~."; kind = `Temporary })
+          (find "/old-docs/~/~~.");
         check lookup "static"
-          (Router.Redirect { permanent = false; location = "/blog" })
+          (Router.Redirect { location = "/blog"; kind = `Temporary })
           (find ~meth:`DELETE "/legacy-blog"));
     t "search decoding" (fun () ->
         let blog ?(tag = None) ?(page = 1) ?(label = []) ?(draft = false) () =
@@ -302,10 +321,10 @@ let router_cases =
     t "segment" (fun () ->
         check string "encoded" "a%2Fb" (Router.segment "a/b");
         List.iter
-          (fun s ->
-            check bool s true
-              (match Router.segment s with exception Invalid_argument _ -> true | _ -> false))
-          [ ""; "."; ".." ]);
+          (fun (v, seg) ->
+            check string ("segment " ^ v) seg (Router.segment v);
+            check string ("of_segment " ^ seg) v (Router.of_segment seg))
+          [ ("", "~"); (".", "~."); ("..", "~.."); ("~", "~~"); ("~..", "~~.."); ("~a", "~a"); ("a~", "a~") ]);
     t "int_param" (fun () ->
         check (option int) "neg" (Some (-12)) (Router.int_param "-12");
         check (option int) "empty" None (Router.int_param "");

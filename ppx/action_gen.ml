@@ -105,7 +105,7 @@ let expand ~is_action_module ~submodules ~library ~loc ~name_loc payload =
         bind
           [%expr
             (fun action implementation ->
-              Yuka.Server.Action.make action implementation;
+              Yuka.Server.Action.implement action implementation;
               action)
               [%e declaration] [%e implementation]];
       ]

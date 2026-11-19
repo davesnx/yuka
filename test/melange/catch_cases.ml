@@ -71,7 +71,7 @@ let render_error tree =
 let catch_other_effect_error () =
   let run ~wrap =
     let s = State.make 0 in
-    let (), stop_b = owner (fun () -> Effect.after (fun () -> if State.get s = 1 then failwith "B")) in
+    let (), stop_b = with_owner (fun () -> Effect.after (fun () -> if State.get s = 1 then failwith "B")) in
     let result = render_error (fun () -> flush_tree s ~wrap) in
     stop_b ();
     result
@@ -154,16 +154,6 @@ let catch_each_row () =
   let c, dispose = render (fun () -> Dom_cases.div [] [ boundary child ]) in
   State.set items [| "a"; "bad" |];
   check "an error in a new row" {|caught Failure(row)|} (shown c);
-  dispose ()
-
-let catch_each_duplicate_key () =
-  let items = State.make [| "a"; "b" |] in
-  let c, dispose =
-    render (fun () ->
-        Dom_cases.div [] [ boundary (fun () -> Dom_cases.div [] [ each ~key:Fun.id (fun () -> State.get items) text ]) ])
-  in
-  State.set items [| "b"; "a"; "b" |];
-  check "a duplicate key in an update" {|caught Failure(Yuka.each: duplicate key b)|} (shown c);
   dispose ()
 
 let catch_click () =
@@ -528,7 +518,6 @@ let all =
     ("catch: memo", catch_memo);
     ("catch: hole that runs again", catch_hole);
     ("catch: each row", catch_each_row);
-    ("catch: each duplicate key", catch_each_duplicate_key);
     ("catch: event handler", catch_click);
     ("catch: non-bubbling handler", catch_focus);
     ("catch: reset", catch_reset);

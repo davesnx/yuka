@@ -1,3 +1,5 @@
+module Buffer = Stdlib.Buffer
+
 open Types
 
 type redirect = [ `See_other | `Temporary | `Permanent ]
@@ -14,13 +16,13 @@ type page = { title : string; head : string; body : unit -> node }
 let page ?(title = "") ?(head = "") body = { title; head; body }
 
 type layer = { key : string; data : bool; wrap : server Kind.element -> server Kind.element }
-type plan = { layers : layer list; page : page }
+type plan = { layers : layer list; page : page; overlay : page option }
 
 type cache = string
 
 let no_store = "no-store"
 let no_cache = "no-cache"
-let private_ ~max_age = "private, max-age=" ^ string_of_int max_age
+let private_cache ~max_age = "private, max-age=" ^ string_of_int max_age
 
 let public ?s_max_age ~max_age () =
   "public, max-age=" ^ string_of_int max_age
@@ -40,15 +42,39 @@ let merge_headers lists =
     (fun acc l -> List.filter (fun (n, _) -> not (has_header n l)) acc @ l)
     [] lists
 
-type rules = { headers : (string * string) list; cache : cache option; prerender : bool }
+type rules = {
+  headers : (string * string) list;
+  cache : cache option;
+  prefetch : Prefetch.level;
+  prerender : bool;
+}
 
-let rules ~headers ?cache ~prerender () =
-  { headers = merge_headers headers; cache; prerender }
+let answer_cache headers cache =
+  match List.find_opt (fun (n, _) -> same_name n "cache-control") headers with
+  | Some (_, v) -> Some v
+  | None -> cache
+
+let lasting cache =
+  List.exists
+    (fun d ->
+      match String.split_on_char '=' (String.trim d) with
+      | [ "max-age"; n ] -> Option.fold ~none:false ~some:(fun n -> n > 0) (int_of_string_opt n)
+      | _ -> false)
+    (String.split_on_char ',' cache)
+
+let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
+  let headers = merge_headers headers in
+  let prefetch =
+    match prefetch with
+    | `Idle when not (Option.fold ~none:false ~some:lasting (answer_cache headers cache)) -> `Visible
+    | p -> p
+  in
+  { headers; cache; prefetch; prerender }
 
 type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
 type response = { status : int; headers : (string * string) list; body : body }
 
-let response ?(status = 200) ?(headers = []) body = { status; headers; body }
+let response ?(status = 200) ?(headers = []) body = Async.return { status; headers; body }
 
 let with_type kind ?(status = 200) ?(headers = []) text =
   Async.return
@@ -56,10 +82,13 @@ let with_type kind ?(status = 200) ?(headers = []) text =
 
 let text ?status ?headers s = with_type "text/plain; charset=utf-8" ?status ?headers s
 let html ?status ?headers s = with_type "text/html; charset=utf-8" ?status ?headers s
-let json ?status ?headers j = with_type "application/json" ?status ?headers (Json.to_string j)
+let json ?status ?headers codec v =
+  with_type "application/json" ?status ?headers (Json.to_string (Codec.encode codec v))
 
 let see_other location =
   Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
+
+let tree_digest = Web.tree_digest
 
 type fallback = { layers : layer list; not_found : string -> page; error : unit -> page }
 
@@ -82,19 +111,30 @@ type target =
       run : unit -> response Async.t;
     }
 
-type 'req app =
+type app =
   | App : {
       build : string;
       headers : (string * string) list;
       prerender : string list;
+      prefetch : Prefetch.level;
       find : Router.meth -> string list -> (string * string) list -> 'r Router.lookup;
-      resolve : 'req -> 'r -> target;
+      resolve : Types.context -> 'r -> target;
       missing : fallback;
     }
-      -> 'req app
+      -> app
 
-let app ~build ~headers ~prerender ~find ~resolve ~missing =
-  App { build; headers = merge_headers [ headers ]; prerender; find; resolve; missing }
+let app ~build ~headers ~prerender ~pages ~find ~resolve ~missing =
+  let highest a (r : rules) = if Prefetch.rank r.prefetch > Prefetch.rank a then r.prefetch else a in
+  App
+    {
+      build;
+      headers = merge_headers [ headers ];
+      prerender;
+      prefetch = List.fold_left highest `Off pages;
+      find;
+      resolve;
+      missing;
+    }
 
 let failure e = Fail (Web.exn_to_string e)
 
@@ -142,35 +182,42 @@ let modules ~dir ~entry ~manifest ~packages ~digest =
     | Some i -> "/_yuka/app/" ^ String.sub entry 0 (i + 1)
     | None -> "/_yuka/app/"
   in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
-    import_map = Server.import_map ~url:"/_yuka/app" packages;
-    preload = Server.preload_urls ~manifest ~base ();
-    immutable = (fun _ -> false);
-  }
+  Result.map
+    (fun preload ->
+      {
+        dir;
+        entry;
+        digest = fingerprint (String.concat "\n" (entry :: manifest :: digest :: packages));
+        import_map = Server.import_map ~url:"/_yuka/app" packages;
+        preload;
+        immutable = (fun _ -> false);
+      })
+    (Server.preload_urls ~manifest ~base ())
 
 let outputs metafile =
   match Json.of_string metafile with
   | Ok (`Assoc top) -> (
       match List.assoc_opt "outputs" top with
-      | Some (`Assoc outs) -> List.map (fun (file, _) -> Server.normalize file) outs
-      | _ -> invalid_arg "Yuka.Server.bundle: metafile has no outputs object")
-  | Ok _ -> invalid_arg "Yuka.Server.bundle: metafile is not an object"
-  | Error m -> invalid_arg ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
+      | Some (`Assoc outs) -> Ok (List.map (fun (file, _) -> Server.normalize file) outs)
+      | _ -> Error "Yuka.Server.bundle: metafile has no outputs object")
+  | Ok _ -> Error "Yuka.Server.bundle: metafile is not an object"
+  | Error m -> Error ("Yuka.Server.bundle: bad metafile JSON: " ^ m)
 
 let bundle ~dir ~entry ~manifest ~metafile =
+  let ( let* ) = Result.bind in
   let entry = Server.normalize entry in
-  let hashed = List.filter (fun f -> not (String.equal f entry)) (outputs metafile) in
-  {
-    dir;
-    entry;
-    digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
-    import_map = [];
-    preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry ();
-    immutable = (fun path -> List.exists (String.equal path) hashed);
-  }
+  let* outputs = outputs metafile in
+  let hashed = List.filter (fun f -> not (String.equal f entry)) outputs in
+  let* preload = Server.preload_urls ~caller:"Yuka.Server.bundle" ~manifest ~base:"/_yuka/app/" ~metafile ~entry () in
+  Ok
+    {
+      dir;
+      entry;
+      digest = fingerprint (String.concat "\n" [ entry; manifest; metafile ]);
+      import_map = [];
+      preload;
+      immutable = (fun path -> List.exists (String.equal path) hashed);
+    }
 
 type dev = { state : unit -> string }
 
@@ -262,10 +309,11 @@ type request = {
   meth : Router.meth;
   target : string;
   header : string -> string option;
-  body : limit:int -> string option Async.t;
-  session : unit -> string;
-  csrf_token : unit -> string;
+  body : limit:int -> (string, [ `Too_large ]) result Async.t;
+  session : unit -> string option;
+  csrf_token : unit -> string option;
   verify_csrf : string -> bool Async.t;
+  backend : Types.backend;
 }
 
 type outcome =
@@ -311,12 +359,15 @@ type env = {
   sleep : float -> unit Async.t;
   head_only : bool;
   navigate : string list option;
+  overlay : bool;
   build : string;
+  prefetch : Prefetch.level;
   current : string;
+  route : string;
   root_headers : (string * string) list;
   exists : root:string -> path:string -> bool;
   form : (string * string * (string * string) list * (string option * string) list) option;
-  csrf : (unit -> string) option;
+  csrf : (unit -> string option) option;
   context : Types.context;
   node : Live_server.node;
   live_used : bool ref;
@@ -330,8 +381,10 @@ let outlet key inner =
       children = [ inner ];
     }
 
-let nest layers body () =
-  List.fold_right (fun (l : layer) inner -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key inner)))) layers (body ())
+let rec nest layers body () =
+  match layers with
+  | [] -> body ()
+  | (l : layer) :: rest -> Kind.to_node (l.wrap (Kind.of_node (outlet l.key (Hole (nest rest body)))))
 
 let add_vary value headers =
   let existing =
@@ -347,16 +400,27 @@ let add_vary value headers =
   in
   set_header ("vary", String.concat ", " values) headers
 
+let navigation_vary headers = add_vary "Yuka-Prefetch" (add_vary "Yuka-Navigate" headers)
+
 let html_headers rule_headers extra =
-  add_vary "Yuka-Navigate"
+  add_vary "Yuka-Overlay" @@ navigation_vary
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
+
+let mentions text part =
+  let n = String.length part and m = String.length text in
+  let rec at i j = j = n || (text.[i + j] = part.[j] && at i (j + 1)) in
+  let rec from i = i + n <= m && (at i 0 || from (i + 1)) in
+  from 0
 
 let rec shared sent (layers : layer list) =
   match (sent, layers) with
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
   | _ -> 0
 
-let render env ~status ~headers layers (page : page) =
+let speculation_rules =
+  {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
+
+let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
   let entry =
@@ -372,13 +436,17 @@ let render env ~status ~headers layers (page : page) =
     Server.head
       ~extra:
         ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
+        ^ (if env.prefetch = Prefetch.default then ""
+           else "<meta name=\"yuka-prefetch\" content=\"" ^ Prefetch.name env.prefetch ^ "\">")
         ^ (match (env.config.dev, env.navigate) with
           | Some dev, None -> dev_script (dev.state ())
           | _ -> "")
         ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
   in
-  let build = nest layers page.body in
+  let route = State.read_only (State.make env.route) in
+  let routed body () = Kind.to_node (Element.Context.provide (Route.get ()) route (fun () -> Kind.of_node (body ()))) in
+  let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
   match env.navigate with
   | Some sent -> (
@@ -390,15 +458,31 @@ let render env ~status ~headers layers (page : page) =
             (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
             (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build)
       | n ->
+          let n = if overlay then List.length layers else n in
           let outlet = List.nth keys (n - 1) in
           let headers =
             merge_headers
-              [ headers; [ ("yuka-outlet", outlet); ("yuka-title", Router.encode page.title) ] ]
+              [
+                headers;
+                [ (if overlay then ("yuka-layer", "overlay") else ("yuka-outlet", outlet)); ("yuka-title", Router.encode page.title) ];
+              ]
           in
+          let below () =
+            match Printer.seek ~outlet (build ()) with
+            | Some node -> node
+            | None ->
+                if Option.is_some env.config.dev then
+                  log env.config `Warn
+                    ("the <yuka-outlet data-k=\"" ^ outlet
+                   ^ "\"> is inside an island or a list: this page renders without the values that its layouts provide");
+                routed (nest (List.filteri (fun i _ -> i >= n) layers) page.body) ()
+          in
+          let script = Printer.context_script "route" Types.route_name (`String env.route) in
           Async.map
-            (fun body -> { status; headers; body = String body })
-            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(outlet ^ "-") ~current ~timeout ~sleep:env.sleep
-               (nest (List.filteri (fun i _ -> i >= n) layers) page.body)))
+            (fun body ->
+              { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
+            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(if overlay then "overlay-" else outlet ^ "-") ~current ~timeout ~sleep:env.sleep
+               below))
   | None ->
     let early = ref [] in
     let writer =
@@ -415,10 +499,13 @@ let render env ~status ~headers layers (page : page) =
         ~on_value:write
     in
     let written () = String.concat "" (List.rev !early) in
+    let close islands =
+      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+    in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
-    | Async.Done () ->
-        early := "</body></html>" :: !early;
+    | Async.Done islands ->
+        early := close islands :: !early;
         Async.return { status; headers; body = String (written ()) }
     | Async.Pending ->
     let stream w =
@@ -426,7 +513,7 @@ let render env ~status ~headers layers (page : page) =
       writer := (fun text -> Async.bind flushed (fun () -> w text));
       let result, resolve, _ = Async.make () in
       Async.on_settled finished (function
-        | Async.Done () -> Async.on_settled (write "</body></html>") (fun _ -> resolve ())
+        | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
         | Async.Failed m ->
             log env.config `Error m;
             Async.on_settled flushed (fun _ -> resolve ())
@@ -473,8 +560,8 @@ let fail_page env fallback message =
   log env.config `Error message;
   error_page env fallback
 
-let show env ~status ~headers ~fallback layers (page : unit -> page) =
-    match render env ~status ~headers layers (page ()) with
+let show ?overlay env ~status ~headers ~fallback layers (page : unit -> page) =
+    match render ?overlay env ~status ~headers layers (page ()) with
     | a -> recover env a (fail_page env fallback)
     | exception e -> fail_page env fallback (Web.exn_to_string e)
 
@@ -516,9 +603,8 @@ let rec run_guards = function
         | Error _ as e -> Async.return e)
 
 let rule_cache (rules : rules) headers =
-  match rules.cache with
-  | Some c when not (has_header "cache-control" headers) ->
-      headers @ [ ("cache-control", c) ]
+  match answer_cache headers rules.cache with
+  | Some c when not (has_header "cache-control" headers) -> headers @ [ ("cache-control", c) ]
   | _ -> headers
 
 let file_path raw =
@@ -559,14 +645,20 @@ let serve_file meth ~root ~headers raw =
 let csrf_answer env (r : request) =
   match r.meth with
   | `GET | `HEAD ->
-      if Server.trusted_origin ?origins:env.config.origins r.header then
-        reply
-          {
-            status = 200;
-            headers = [ ("content-type", "application/json"); no_store_header ];
-            body = String (Json.to_string (`Assoc [ ("csrf", `String (r.csrf_token ())) ]));
-          }
-      else reply (plain 403 "Forbidden" [])
+      if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden" [])
+      else (
+        match r.csrf_token () with
+        | None ->
+            log_quietly env.config `Error
+              "/_yuka/csrf refused: the request has no session; the CSRF token needs session middleware";
+            reply (internal_error ())
+        | Some token ->
+            reply
+              {
+                status = 200;
+                headers = [ ("content-type", "application/json"); no_store_header ];
+                body = String (Json.to_string (`Assoc [ ("csrf", `String token) ]));
+              })
   | _ -> reply (method_not_allowed "GET, HEAD")
 
 let action env (r : request) raw =
@@ -582,8 +674,8 @@ let action env (r : request) raw =
       | Error e -> Async.return (json e)
       | Ok handler ->
           Async.bind (r.body ~limit:Server.max_body) (function
-            | None -> Async.return (json (Server.action_error 413 "request too large"))
-            | Some body ->
+            | Error `Too_large -> Async.return (json (Server.action_error 413 "request too large"))
+            | Ok body ->
                 Async.map json
                   (Server.answer_action ?origins ~context ~live:(Live_server.mark_json env.node) ~name handler body)))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
@@ -610,14 +702,14 @@ let live_checked env fallback ~path (resp : response) =
   if not !(env.live_used) then Async.return resp
   else if env.config.prerendering then
     fail_page env fallback
-      ("page " ^ path ^ " renders a Live.use, whose state depends on the request; it cannot be prerendered")
+      ("page " ^ path ^ " renders a Live.make, whose state depends on the request; it cannot be prerendered")
   else
     match List.find_opt (fun (n, _) -> same_name n "cache-control") resp.headers with
     | Some (_, v) when shared_cache v ->
         if not (List.mem path !(env.config.warned)) then begin
           env.config.warned := path :: !(env.config.warned);
           log_quietly env.config `Warn
-            ("page " ^ path ^ " renders a Live.use under a shared cache rule (" ^ v
+            ("page " ^ path ^ " renders a Live.make under a shared cache rule (" ^ v
            ^ "); it is sent with private, no-store")
         end;
         Async.return { resp with headers = set_header ("cache-control", "private, no-store") resp.headers }
@@ -638,17 +730,23 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
               (Async.bind (protect load) (function
                 | Error stop -> stopped env fallback path stop
                 | Ok plan ->
+                    let overlay =
+                      match (plan.overlay, env.navigate) with
+                      | Some page, Some sent when env.overlay && shared sent plan.layers > 0 -> Some page
+                      | _ -> None
+                    in
                     Async.bind
-                      (show env ~status ~headers ~fallback plan.layers (fun () -> plan.page))
+                      (show ~overlay:(Option.is_some overlay) env ~status ~headers ~fallback plan.layers (fun () ->
+                           Option.value overlay ~default:plan.page))
                       (live_checked env fallback ~path)))))
 
 let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
 
-let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
+let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
   match a.find `GET segments (Router.query r.target) with
   | Router.Found found -> (
-      match a.resolve req found with
+      match a.resolve env.context found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
       | Handler _ -> reply (method_not_allowed allowed)
       | Page { rules; guards; load; fallback } ->
@@ -659,8 +757,8 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
               | Error stop -> page_or_error (stopped env fallback path stop)
               | Ok () ->
                   Async.bind (r.body ~limit:Server.max_body) (function
-                    | None -> reply (plain 413 "Request Too Large")
-                    | Some body -> (
+                    | Error `Too_large -> reply (plain 413 "Request Too Large")
+                    | Ok body -> (
                         let fields = Router.query ("?" ^ body) in
                         match List.assoc_opt "_yuka_action" fields with
                         | None -> reply (method_not_allowed allowed)
@@ -701,23 +799,65 @@ let form_post env (App a) req (r : request) ~path ~segments ~query ~allowed =
                                     | None -> page_or_error (fail_page env a.missing m)))))))
   | _ -> reply (method_not_allowed allowed)
 
-let route env (App a) req (r : request) ~path ~raw ~query =
+let refusal headers level =
+  reply
+    (empty 204
+       (navigation_vary (merge_headers [ headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
+
+(* A non-ok status makes the browser drop a speculative prefetch and fetch again at the click; a
+   2xx such as 204 would be kept and used for the click. "supports prefetch" in
+   https://wicg.github.io/nav-speculation/prefetch.html; 503 as in
+   https://developer.chrome.com/docs/web-platform/prerender-pages *)
+let speculation_refusal headers =
+  reply (empty 503 (add_vary "Sec-Purpose" (navigation_vary (merge_headers [ headers; [ no_store_header ] ]))))
+
+let sf_key k =
+  k <> ""
+  && (match k.[0] with 'a' .. 'z' | '*' -> true | _ -> false)
+  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '*' -> true | _ -> false) k
+
+let speculative (r : request) =
+  match (r.header "sec-purpose", Option.map String.trim (r.header "sec-fetch-dest")) with
+  | Some v, Some "document" -> (
+      match String.split_on_char ';' (String.trim v) with
+      | "prefetch" :: params ->
+          List.for_all
+            (fun p ->
+              let p = String.trim p in
+              match String.index_opt p '=' with
+              | None -> sf_key p
+              | Some i -> sf_key (String.sub p 0 i) && i + 1 < String.length p && not (String.contains p ','))
+            params
+      | _ -> false)
+  | _ -> false
+
+let route env (App a) (r : request) ~path ~raw ~query =
   let segments = List.map (Router.decode ~plus:false) raw in
   let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
+  let refuse (rules : rules) level = refusal rules.headers level in
   match a.find r.meth segments (Router.query r.target) with
-  | Router.Redirect { permanent; location } ->
-      reply (empty (if permanent then 308 else 307) [ ("location", location ^ suffix) ])
+  | Router.Redirect { location; kind } ->
+      reply (empty (match kind with `Permanent -> 308 | `Temporary -> 307) [ ("location", location ^ suffix) ])
   | Router.Missing -> page_or_error (not_found_page env a.missing path)
   | Router.Wrong_method ms -> (
       match r.meth with
       | `OPTIONS -> reply (empty 204 [ ("allow", allow ms) ])
       | `POST when List.mem `GET ms && is_form (r.header "content-type") ->
-          form_post env (App a) req r ~path ~segments ~query ~allowed:(allow ms)
+          form_post env (App a) r ~path ~segments ~query ~allowed:(allow ms)
       | _ -> reply (method_not_allowed (allow ms)))
   | Router.Found found -> (
-      match a.resolve req found with
+      match a.resolve env.context found with
       | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
+      | Page { rules; _ }
+        when Option.fold ~none:false
+               ~some:(fun v -> Prefetch.rank (Prefetch.trigger v) > Prefetch.rank rules.prefetch)
+               (r.header "yuka-prefetch") ->
+          refuse rules rules.prefetch
+      | Handler { rules; _ } when Option.is_some (r.header "yuka-prefetch") -> refuse rules `Off
+      | Page { rules; _ } when Prefetch.rank `Hover > Prefetch.rank rules.prefetch && speculative r ->
+          speculation_refusal rules.headers
+      | Handler { rules; _ } when speculative r -> speculation_refusal rules.headers
       | Page { rules; guards; load; fallback } ->
           serve_page env r ~path ~query ~status:200 ~rules ~guards ~load ~fallback
       | Handler { rules; action; cross_origin; guards; run } ->
@@ -795,12 +935,11 @@ let live_answer env (r : request) =
         reply (plain 426 "Upgrade Required" [ ("upgrade", "websocket") ])
       else (
         match r.session () with
-        | exception e ->
+        | None ->
             log_quietly env.config `Error
-              ("live socket refused: the request has no session (" ^ Web.exn_to_string e
-             ^ "); the live socket needs session middleware");
+              "live socket refused: the request has no session; the live socket needs session middleware";
             reply (plain 500 "Internal Server Error" [])
-        | session ->
+        | Some session ->
             let context = { env.context with session = (fun () -> Some session) } in
             Async.return
               (Upgrade
@@ -808,8 +947,8 @@ let live_answer env (r : request) =
                     ~token:r.csrf_token)))
   | _ -> reply (method_not_allowed "GET")
 
-let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists req (r : request) =
-  Web.seal_states ();
+let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r : request) =
+  Scheduler.seal ();
   let path, query = Router.split_target r.target in
   Live_server.use_log node (log config);
   let live_used = ref false in
@@ -817,13 +956,16 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
     {
       meth = r.meth;
       path;
+      target = r.target;
       header = r.header;
-      session = (fun () -> Some (r.session ()));
+      body = r.body;
+      session = r.session;
       log = log config;
       live =
         (fun name key ->
           live_used := true;
-          Live_server.ssr_state node context name key);
+          Live_server.ssr_state ~sleep node context name key);
+      backend = Some r.backend;
     }
   in
   let env =
@@ -835,12 +977,22 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         Option.map
           (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
           (r.header "yuka-navigate");
+      overlay = r.header "yuka-overlay" = Some "1";
       build = build_id config (App a);
+      prefetch = a.prefetch;
       current = path;
+      route = path ^ query_suffix query;
       root_headers = a.headers;
       exists;
       form = None;
-      csrf = Some r.csrf_token;
+      csrf =
+        Some
+          (fun () ->
+            let token = r.csrf_token () in
+            if token = None then
+              log_quietly config `Error
+                "page with a Live.make: the request has no session; live data needs session middleware";
+            token);
       context;
       node;
       live_used;
@@ -856,6 +1008,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         | _ -> None)
       config.public
   in
+  let static serve = if Option.is_some (r.header "yuka-prefetch") then refusal [] `Off else serve () in
   let run () =
     match (parts, public) with
     | "" :: "_yuka" :: _, _ -> (
@@ -877,32 +1030,34 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         | "action" :: rest -> action env r rest
         | [ "csrf" ] -> csrf_answer env r
         | [ "live" ] -> live_answer env r
-        | "css" :: rest when config.css <> [] -> (
-            match r.meth with
-            | `GET | `HEAD -> (
-                match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
-                | Some text ->
-                    reply
-                      {
-                        status = 200;
-                        headers =
-                          [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
-                        body = String text;
-                      }
-                | None -> reply (asset_miss ()))
-            | _ -> reply (method_not_allowed "GET, HEAD"))
+        | "css" :: rest when config.css <> [] ->
+            static (fun () ->
+                match r.meth with
+                | `GET | `HEAD -> (
+                    match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
+                    | Some text ->
+                        reply
+                          {
+                            status = 200;
+                            headers =
+                              [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
+                            body = String text;
+                          }
+                    | None -> reply (asset_miss ()))
+                | _ -> reply (method_not_allowed "GET, HEAD"))
         | "app" :: rest -> (
             match config.assets with
             | None -> reply (asset_miss ())
             | Some assets ->
-                let headers =
-                  match file_path rest with
-                  | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
-                  | _ -> [ ("cache-control", no_cache) ]
-                in
-                serve_file r.meth ~root:assets.dir ~headers rest)
+                static (fun () ->
+                    let headers =
+                      match file_path rest with
+                      | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
+                      | _ -> [ ("cache-control", no_cache) ]
+                    in
+                    serve_file r.meth ~root:assets.dir ~headers rest))
         | _ -> reply (asset_miss ()))
-    | "" :: _, Some (dir, rest) -> serve_file r.meth ~root:dir ~headers:[] rest
+    | "" :: _, Some (dir, rest) -> static (fun () -> serve_file r.meth ~root:dir ~headers:[] rest)
     | "" :: _, None when String.contains path '\\' ->
         Async.map (fun x -> Respond x) (not_found_page env a.missing path)
     | "" :: rest, None ->
@@ -911,7 +1066,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists re
         if trailing then
           let suffix = query_suffix query in
           reply (empty 308 [ ("location", canonical ^ suffix) ])
-        else route env app req r ~path ~raw ~query
+        else route env app r ~path ~raw ~query
     | _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
   in
   let bodyless = function
@@ -949,8 +1104,8 @@ module type ADAPTER = sig
   val target : request -> string
   val header : request -> string -> string option
   val body : request -> limit:int -> string option Async.t
-  val session : request -> string
-  val csrf_token : request -> string
+  val session : request -> string option
+  val csrf_token : request -> string option
   val verify_csrf : request -> string -> bool Async.t
   val respond : response -> reply Async.t
   val file : request -> root:string -> path:string -> headers:(string * string) list -> reply Async.t
@@ -960,19 +1115,24 @@ module type ADAPTER = sig
 end
 
 module Make (Backend : ADAPTER) = struct
+  type Types.backend += Request of Backend.request
+
+  let backend_request (c : Types.context) = match c.backend with Some (Request r) -> Some r | _ -> None
+
   let handler ?node config app (req : Backend.request) =
     let view =
       {
         meth = Backend.meth req;
         target = Backend.target req;
         header = Backend.header req;
-        body = (fun ~limit -> Backend.body req ~limit);
+        body = Server.read_once (Backend.body req);
         session = (fun () -> Backend.session req);
         csrf_token = (fun () -> Backend.csrf_token req);
         verify_csrf = Backend.verify_csrf req;
+        backend = Request req;
       }
     in
-    Async.bind (handle ?node config app ~sleep:Backend.sleep ~exists:Backend.exists req view) (function
+    Async.bind (handle ?node config app ~sleep:Backend.sleep ~exists:Backend.exists view) (function
       | Respond r -> Backend.respond r
       | File { root; path; headers } -> Backend.file req ~root ~path ~headers
       | Upgrade run -> Backend.upgrade req run)
@@ -980,7 +1140,7 @@ end
 
 let prerender_seeds (App a) = a.prerender
 
-let prerenderable config (App a) req target =
+let prerenderable config (App a) target =
   let path, _ = Router.split_target target in
   let raw = Router.split_path path in
   let served =
@@ -991,7 +1151,7 @@ let prerenderable config (App a) req target =
   &&
   match a.find `GET (List.map (Router.decode ~plus:false) raw) [] with
   | Router.Found found -> (
-      match a.resolve req found with
+      match a.resolve { (Server.empty_context ()) with path; target } found with
       | Page { rules; _ } | Handler { rules; _ } -> rules.prerender
       | exception _ -> false)
   | _ -> false
@@ -1066,8 +1226,11 @@ let missing_page config (App a) ~sleep =
       sleep;
       head_only = false;
       navigate = None;
+      overlay = false;
       build = build_id config (App a);
+      prefetch = a.prefetch;
       current = "";
+      route = "/404.html";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
       form = None;

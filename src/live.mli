@@ -1,10 +1,13 @@
 (** Server state that the server pushes to the page over one WebSocket
-    ([GET /_yuka/live]) when it changes. Each message is the full state of
-    one key. The server side is {!Server.Live}. *)
+    ([GET /_yuka/live]) when it changes. A message is the full state of one
+    key, or the changes from the state before; the client keeps the last
+    state as JSON, applies the changes and decodes the state again; a
+    {!Codec.list} decodes only the items that changed.
+    The server side is {!Server.Live}. *)
 
 type 's t
 
-val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
+val make : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
 (** Subscribes to the state of the key that the function returns, and
     again when a State that the function reads changes the key. Call it
     in a component body; the subscription ends when its owner is disposed.
@@ -14,7 +17,9 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
       the state (the current one of the handler's node, else the topic's
       loader) and, inside an island, writes it in the page with
       a CSRF token for the socket; the client starts from it with no
-      wait. A page that has such a use holds a per-session token and
+      wait. When the request has no session, the page holds no token:
+      the uses get [Failed Forbidden] in the browser and the client opens
+      no socket. A page that has such a use holds a per-session token and
       state that [allow] passed for this request, so its route must not
       use a shared cache (the cycle sends [private, no-store] when the
       shell has such a use), and it cannot be prerendered.
@@ -24,8 +29,10 @@ val use : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
       When the socket closes it is [Ready { stale = true }] (or
       [Loading None] with no data) while the client reconnects, after
       250 ms, 500 ms, 1 s, 2 s, 4 s, then every 5 s (half to all of each
-      delay, at random), or when the browser comes back online. Each
-      reconnect gets the full state again.
+      delay, at random), or when the browser comes back online. A
+      reconnect, and the first subscribe after a server render, get the
+      full state again, unless the node of the socket still has the state
+      that the page has (same node process, same [seq]).
     - [Failed]: the server refused the key ([Forbidden], [Not_found],
       [Rejected] from the loader, [Server]); this use does not subscribe
       again. An unsupported protocol gives [Protocol] to every use.

@@ -1,9 +1,28 @@
+module Buffer = Stdlib.Buffer
+
 open Types
 open Base
 
   let escape = Template_build.escape
 
-  let add_escaped = Template_build.add_escaped
+  let put b s start i entity =
+    Buffer.add_substring b s start (i - start);
+    Buffer.add_string b entity;
+    i + 1
+
+  let add_escaped b ~quote s =
+    let n = String.length s in
+    let start = ref 0 and i = ref (Web.skip_clean s 0) in
+    while !i < n do
+      (match String.unsafe_get s !i with
+      | '&' -> start := put b s !start !i "&amp;"
+      | '<' -> start := put b s !start !i "&lt;"
+      | '>' when not quote -> start := put b s !start !i "&gt;"
+      | '"' when quote -> start := put b s !start !i "&quot;"
+      | _ -> ());
+      i := Web.skip_clean s (!i + 1)
+    done;
+    Buffer.add_substring b s !start (n - !start)
 
   let blocked_logged = ref false
 
@@ -15,7 +34,7 @@ open Base
 
   let add_attr b ?(literal = false) ~tag name value =
     if not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ String.escaped name);
-    let tag = String.lowercase_ascii tag and lname = String.lowercase_ascii name in
+    let tag = Web.lowercase tag and lname = Web.lowercase name in
     let value = if literal && Url.html_sink ~tag lname then value else Url.check ~tag ~log:log_blocked lname value in
     Buffer.add_char b ' ';
     Buffer.add_string b name;
@@ -79,7 +98,9 @@ open Base
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
-      csrf = None; sheets = []; held = []; context = None }
+      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0;
+      id_scope = "p-"; id_count = 0; page_scope = "p-"; page_count = 0;
+      invalid = []; invalid_focused = false }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -94,6 +115,37 @@ open Base
       (List.rev_map
          (function key, Some json -> answer_script key json | key, None -> pending_answer_script key)
          answers)
+
+  let context_script id name json =
+    "<script type=\"application/json\" data-yuka-context=\"" ^ escape ~quote:true id ^ "\" data-name=\""
+    ^ escape ~quote:true name ^ "\">" ^ Json.to_string json ^ "</script>"
+
+  let coded_scope env =
+    let rec go acc = function
+      | Scheduler.Bound ((Coded { name; _ } as b), e) ->
+          go (if List.exists (fun (n, _) -> String.equal n name) acc then acc else (name, b) :: acc) e
+      | Scheduler.Bound (_, e) | Scheduler.Island e -> go acc e
+      | Scheduler.Empty | Scheduler.Root _ -> List.rev acc
+    in
+    go [] env
+
+  let context_ids s env =
+    List.map
+      (fun (name, b) ->
+        match List.assq_opt b s.shared with
+        | Some id -> (name, id, "")
+        | None ->
+            let id =
+              if String.equal name route_name then "route"
+              else begin
+                s.contexts <- s.contexts + 1;
+                s.id_prefix ^ "c" ^ string_of_int s.contexts
+              end
+            in
+            s.shared <- (b, id) :: s.shared;
+            let json = match b with Coded { json; _ } -> json () | _ -> `Null in
+            (name, id, context_script id name json))
+      (coded_scope env)
 
   let take_answers s =
     let html = answers_html s.answers in
@@ -125,7 +177,7 @@ open Base
     l
 
   let needs_special tag =
-    match String.lowercase_ascii tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
+    match Web.lowercase tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
 
   type namespace = Html | Svg | Math | Select
 
@@ -158,7 +210,10 @@ open Base
           | _ -> go_element ~only tag attrs children ~context:None)
     and go_element ~only:_ tag attrs children ~context =
       let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
-      if (not (needs_special tag)) && List.length fixed = List.length attrs then begin
+      if (not (needs_special tag))
+         && List.length fixed = List.length attrs
+         && not (Web.lowercase tag = "input" && List.mem_assoc "name" fixed)
+      then begin
         Buffer.add_char raw '<';
         Buffer.add_string raw tag;
         List.iter (fun (n, v) -> add_attr raw ~literal:true ~tag n v) fixed;
@@ -182,9 +237,23 @@ open Base
     if Array.length t.ops = 0 then t.ops <- compile (Template.shape t);
     t.ops
 
-  let kept_buffer = 262_144
+  let kept_buffer = 1_048_576
+  let rendering = Web.local (fun () -> Atomic.make 0)
 
-  let rec print s build =
+  let rec print ?env s build =
+    let owner = new_owner () in
+    Option.iter (fun e -> owner.env <- e) env;
+    let scoped e f =
+      let old = owner.env in
+      owner.env <- e;
+      match f () with
+      | r ->
+          owner.env <- old;
+          r
+      | exception x ->
+          owner.env <- old;
+          raise x
+    in
     let b = match Web.take_buffer () with Some b -> b | None -> Buffer.create 4096 in
     let peak = ref 0 in
     let cut n =
@@ -204,6 +273,39 @@ open Base
     let marker m =
       if hydrating () then Buffer.add_string b m;
       after_text := false
+    in
+    let field_attrs ~tag each add =
+      let field =
+        match (s.invalid, Web.lowercase tag) with
+        | [], _ -> None
+        | invalid, ("input" | "select" | "textarea") ->
+            let name = ref None and hidden = ref false in
+            each (fun _ n v ->
+                if n = "name" && Option.is_none !name then name := Some v
+                else if n = "type" && Web.lowercase v = "hidden" then hidden := true);
+            Option.map (fun id -> (id, !hidden)) (Option.bind !name (fun n -> List.assoc_opt n invalid))
+        | _ -> None
+      in
+      match field with
+      | None -> each add
+      | Some (id, hidden) ->
+          let described = ref false and focused = ref false in
+          each (fun literal n v ->
+              match Web.lowercase n with
+              | "aria-invalid" -> ()
+              | "aria-describedby" ->
+                  described := true;
+                  add literal n (v ^ " " ^ id)
+              | "autofocus" ->
+                  focused := true;
+                  add literal n v
+              | _ -> add literal n v);
+          add false "aria-invalid" "true";
+          if not !described then add false "aria-describedby" id;
+          if not (hidden || s.invalid_focused) then begin
+            if not !focused then add false "autofocus" "";
+            s.invalid_focused <- true
+          end
     in
     let holding = ref 0 in
     let use_sheet href =
@@ -233,6 +335,23 @@ open Base
           go (f ());
           marker "<!--]-->"
       | Await { async; loading; failed; render } -> (
+          let ids = next_id () ^ "-" in
+          let in_ids f =
+            let scope = s.id_scope and count = s.id_count in
+            let restore () =
+              s.id_scope <- scope;
+              s.id_count <- count
+            in
+            s.id_scope <- ids;
+            s.id_count <- 0;
+            match f () with
+            | r ->
+                restore ();
+                r
+            | exception e ->
+                restore ();
+                raise e
+          in
           let body () =
             match Async.status async with
             | Async.Done v -> render v
@@ -259,16 +378,16 @@ open Base
                     raise e
               in
               s.awaits <- s.awaits + 1;
-              let id = s.id_prefix ^ "s" ^ string_of_int s.awaits in
+              let id = s.id_prefix ^ "s" ^ string_of_int s.awaits and env = owner.env in
               s.pending <-
                 Pending_await
                   {
                     id;
                     subscribe =
                       (fun cb -> Async.on_settled async (fun _ -> cb ()));
-                    fill = (fun () -> held (fun () -> print s body));
+                    fill = (fun () -> held (fun () -> in_ids (fun () -> print ~env s body)));
                     fill_failed =
-                      (fun m -> held (fun () -> print s (fun () -> failed m)));
+                      (fun m -> held (fun () -> in_ids (fun () -> print ~env s (fun () -> failed m))));
                     inside_island = inside;
                   }
                 :: s.pending;
@@ -277,7 +396,7 @@ open Base
               incr holding;
               Buffer.add_string b ("<!--[" ^ id ^ "-->");
               after_text := false;
-              (match go loading with
+              (match in_ids (fun () -> go loading) with
               | () -> decr holding
               | exception e ->
                   decr holding;
@@ -297,7 +416,7 @@ open Base
                 end
           | _ ->
               marker "<!--[-->";
-              go (body ());
+              in_ids (fun () -> go (body ()));
               marker "<!--]-->")
       | Template { template; parts } ->
           Array.iter
@@ -314,17 +433,39 @@ open Base
               | Open (tag, attrs) ->
                   Buffer.add_char b '<';
                   Buffer.add_string b tag;
-                  (if needs_special tag then ignore (special tag (Template.expand_attrs parts attrs))
-                   else
-                     List.iter
-                       (function
-                         | Fixed (n, v) -> add_attr b ~literal:true ~tag n v
-                         | Part_attr i -> (
-                             match parts.(i) with
-                             | Attribute (Static (n, v)) -> add_attr b ~tag n v
-                             | Attribute (Dynamic (n, f)) -> Option.iter (add_attr b ~tag n) (f ())
-                             | Attribute (Handler _) | Child _ | No_attribute -> ()))
-                       attrs);
+                  (match s.current with
+                  | Some path when needs_special tag && not (hydrating ()) ->
+                      let href = ref None and current = ref false in
+                      let add n v =
+                        if n = "href" then (if Option.is_none !href then href := Some v)
+                        else if n = "aria-current" then current := true;
+                        add_attr b ~tag n v
+                      in
+                      List.iter
+                        (function
+                          | Fixed (n, v) -> add n v
+                          | Part_attr i -> (
+                              match parts.(i) with
+                              | Attribute (Static (n, v)) -> add n v
+                              | Attribute (Dynamic (n, f)) -> Option.iter (add n) (f ())
+                              | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                        attrs;
+                      (match !href with
+                      | Some h when String.equal h path && not !current -> add_attr b ~tag "aria-current" "page"
+                      | _ -> ())
+                  | _ ->
+                      let each add =
+                        List.iter
+                          (function
+                            | Fixed (n, v) -> add true n v
+                            | Part_attr i -> (
+                                match parts.(i) with
+                                | Attribute (Static (n, v)) -> add false n v
+                                | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f ())
+                                | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                          attrs
+                      in
+                      field_attrs ~tag each (fun literal n v -> add_attr b ~literal ~tag n v));
                   Buffer.add_char b '>';
                   after_text := false
               | Subtree shape -> go (Template.expand_shape parts shape)
@@ -346,10 +487,25 @@ open Base
             marker "<!--[!-->";
             go (fallback ~error:"server error" ~reset:ignore);
             marker "<!--]-->")
-      | Slot { content; _ } ->
-          marker "<!--[$-->";
-          Option.iter go content;
+      | Provide { add; children; _ } ->
+          marker "<!--[-->";
+          scoped (add owner.env) (fun () -> go (children ()));
           marker "<!--]-->"
+      | Slot { content; _ } ->
+          let rec page = function
+            | Scheduler.Empty | Scheduler.Root _ -> owner.env
+            | Scheduler.Bound (_, e) -> page e
+            | Scheduler.Island e -> e
+          in
+          let scope = s.id_scope and count = s.id_count in
+          s.id_scope <- s.page_scope;
+          s.id_count <- s.page_count;
+          marker "<!--[$-->";
+          scoped (page owner.env) (fun () -> Option.iter go content);
+          marker "<!--]-->";
+          s.page_count <- s.id_count;
+          s.id_scope <- scope;
+          s.id_count <- count
       | Island { name; props; render; start = strategy } ->
           s.islands <- s.islands + 1;
           let id = s.id_prefix ^ "i" ^ string_of_int s.islands in
@@ -370,6 +526,7 @@ open Base
                     if direct then Buffer.add_string b link else s.queued <- link :: s.queued
                   end)
                 (f name));
+          let scope = context_ids s owner.env in
           let outermost = s.depth = 0 and start = Buffer.length b in
           Buffer.add_string b
             ("<yuka-island data-name=\"" ^ escape ~quote:true name
@@ -380,15 +537,26 @@ open Base
                | `Visible | `Lazy `Visible -> " data-start=\"visible\""
                | `Interaction | `Lazy `Interaction ->
                    " data-start=\"interaction\"")
+           ^ (match scope with
+               | [] -> ""
+               | l -> " data-ctx=\"" ^ escape ~quote:true (String.concat " " (List.map (fun (n, i, _) -> n ^ "=" ^ i) l)) ^ "\"")
            ^ ">");
           after_text := false;
           let saved = snapshot s in
           s.depth <- s.depth + 1;
           s.answers <- [];
+          s.page_scope <- s.id_scope;
+          s.page_count <- s.id_count;
+          s.id_scope <- id ^ "-";
+          s.id_count <- 0;
           let mine =
-            match go (render ()) with
+            match scoped (Scheduler.Island owner.env) (fun () -> go (render ())) with
             | () ->
                 s.depth <- s.depth - 1;
+                s.id_scope <- s.page_scope;
+                s.id_count <- s.page_count;
+                s.page_scope <- saved.page_scope;
+                s.page_count <- saved.page_count;
                 let mine = s.answers in
                 s.answers <- saved.answers;
                 mine
@@ -404,6 +572,7 @@ open Base
             Buffer.add_string b island
           end;
           Buffer.add_string b (answers_html mine);
+          List.iter (fun (_, _, script) -> Buffer.add_string b script) scope;
           Buffer.add_string b
             ("<script type=\"application/json\" data-yuka-props=\"" ^ id ^ "\">"
             ^ Json.to_string props ^ "</script>");
@@ -412,9 +581,9 @@ open Base
             s.queued <- []
           end;
           after_text := false
-      | Each { items; key = _; equal = _; render } ->
+      | Each { items; key; equal = _; render } ->
           marker "<!--[-->";
-          rows items render;
+          rows items key render;
           marker "<!--]-->"
       | Element { tag; attrs; children }
         when (match String.lowercase_ascii tag with "script" | "style" -> true | _ -> false) ->
@@ -447,15 +616,29 @@ open Base
           let value =
             if needs_special tag then special tag attrs
             else begin
-                List.iter
-                  (function
-                    | Static (name, v) -> add_attr b ~tag name v
-                    | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
-                    | Handler _ -> ())
-                  attrs;
+                field_attrs ~tag
+                  (fun add ->
+                    List.iter
+                      (function
+                        | Static (name, v) -> add false name v
+                        | Dynamic (name, f) -> Option.iter (add false name) (f ())
+                        | Handler _ -> ())
+                      attrs)
+                  (fun _ name v -> add_attr b ~tag name v);
                 None
             end
           in
+          let outer = s.invalid in
+          (match s.form with
+          | Some (action, key, _, errors)
+            when Web.lowercase tag = "form"
+                 && List.exists (function Static ("data-yuka-action", a) -> a = action | _ -> false) attrs
+                 && List.exists (function Static ("data-yuka-key", k) -> k = key | _ -> false) attrs ->
+              s.invalid <-
+                List.filter_map
+                  (function Some field, _ -> Some (field, error_id ~action ~key field) | None, _ -> None)
+                  errors
+          | _ -> ());
           Buffer.add_char b '>';
           after_text := false;
           let lt = String.lowercase_ascii tag in
@@ -487,7 +670,8 @@ open Base
             Buffer.add_string b tag;
             Buffer.add_char b '>';
             after_text := false
-          end
+          end;
+          s.invalid <- outer
     and special tag attrs =
       let lt = String.lowercase_ascii tag in
       let resolved =
@@ -516,44 +700,73 @@ open Base
             resolved @ [ ("aria-current", "page") ]
         | _ -> resolved
       in
-      List.iter (fun (name, v) -> add_attr b ~tag name v) resolved;
+      field_attrs ~tag (fun add -> List.iter (fun (name, v) -> add false name v) resolved) (fun _ name v ->
+          add_attr b ~tag name v);
       value
     and contents = function
       | [ Hole f ] -> go (f ())
-      | [ Each { items; key = _; equal = _; render } ] -> rows items render
+      | [ Each { items; key; equal = _; render } ] -> rows items key render
       | children -> List.iter go children
-    and rows : type a. (unit -> a array) -> (a -> node) -> unit =
-     fun items render ->
+    and rows : type a. (unit -> a array) -> (a -> string) -> (a -> node) -> unit =
+     fun items key render ->
+      let seen = Hashtbl.create 8 in
       Array.iter
         (fun item ->
-          let n = unwrap (render item) in
-          if Template.single_element n then go n
-          else begin
-            marker "<!--[-->";
-            go n;
-            marker "<!--]-->"
+          let k = key item in
+          if not (Hashtbl.mem seen k) then begin
+            Hashtbl.add seen k ();
+            let n = unwrap (render item) in
+            if Template.single_element n then go n
+            else begin
+              marker "<!--[-->";
+              go n;
+              marker "<!--]-->"
+            end
           end)
         (items ())
     in
+    let server_rendering = server_rendering () and current_session = current_session () in
+    let current_owner = current_owner () and listener = Scheduler.listener () in
+    let rendering = Web.local_get rendering in
     let previous = !server_rendering in
     let previous_session = !current_session in
+    let previous_listener = !listener in
+    Atomic.incr rendering;
     server_rendering := true;
-    Web.seal_states ();
+    Scheduler.seal ();
     current_session := Some s;
     let restore () =
-      server_rendering := previous;
-      current_session := previous_session
+      let others = Atomic.fetch_and_add rendering (-1) > 1 in
+      server_rendering := others && previous;
+      current_session := if others then previous_session else None
     in
-    let owner = new_owner () in
-    (match with_owner owner (fun () -> go (build ())) with
-    | () ->
+    let owned () = match !current_owner with Some o -> o == owner | None -> false in
+    let kept () =
+      !server_rendering
+      && !listener == previous_listener
+      && match !current_session with Some c -> c == s | None -> false
+    in
+    let overlap () =
+      server_rendering := Atomic.fetch_and_add rendering (-1) > 1;
+      current_session := None;
+      listener := None;
+      current_owner := None;
+      dispose_owner owner;
+      release ();
+      failwith
+        "Yuka.Server: two server renders overlapped: while this render was suspended, another render on the same system thread, for example in another fiber, changed the state that they share. Do not suspend a fiber during a server render."
+    in
+    (match with_owner owner (fun () -> go (build ()); owned ()) with
+    | true when kept () ->
         restore ();
         dispose_owner owner
-    | exception e ->
+    | _ -> overlap ()
+    | exception e when kept () ->
         restore ();
         dispose_owner owner;
         release ();
-        raise e);
+        raise e
+    | exception _ -> overlap ());
     if s.held <> [] then begin
       s.queued <- s.held @ s.queued;
       s.held <- []
@@ -561,6 +774,32 @@ open Base
     let html = Buffer.contents b in
     release ();
     html
+
+  let seek ~outlet node =
+    let o = Option.get !(current_owner ()) in
+    let rec find = function
+      | Element { tag = "yuka-outlet"; attrs = Static ("data-k", k) :: _; children } when String.equal k outlet ->
+          Some (Fragment children)
+      | Element { children; _ } | Fragment children -> first children
+      | Hole f -> find (f ())
+      | Catch { children; _ } -> find (children ())
+      | Await { async; render; _ } -> ( match Async.status async with Async.Done v -> find (render v) | _ -> None)
+      | Template { parts; _ } ->
+          first (Array.fold_right (fun p acc -> match p with Child n -> n :: acc | _ -> acc) parts [])
+      | Provide { add; children; _ } -> (
+          let e = o.env in
+          o.env <- add e;
+          match find (children ()) with
+          | None ->
+              o.env <- e;
+              None
+          | r -> r)
+      | Text _ | Island _ | Each _ | Slot _ -> None
+    and first = function
+      | [] -> None
+      | c :: cs -> ( match find c with None -> first cs | r -> r)
+    in
+    find node
 
   let render_html build = print (session ~streaming:false ~islands_only:false) build
 

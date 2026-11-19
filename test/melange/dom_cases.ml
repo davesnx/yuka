@@ -180,7 +180,7 @@ let focus_after_update () =
 let on_window_batched () =
   let a = State.make 0 and b = State.make 0 and runs = ref 0 in
   let (), stop =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.after (fun () ->
             ignore (State.get a + State.get b);
             incr runs);
@@ -1423,6 +1423,44 @@ let console_methods () =
   Console.debug "d";
   check "each function calls its console method" "log l|info i|warn w|error e|debug d" (console_calls ())
 
+let each_duplicate_key () =
+  let items = State.make [| ("a", "1"); ("b", "2"); ("a", "3") |] in
+  let tree () = element "ul" [] [ each ~key:fst (fun () -> State.get items) (fun (k, v) -> li k [ text v ]) ] in
+  let markup = server (tree ()) in
+  check "server keeps the first" {|<ul><li data-key="a">1</li><li data-key="b">2</li></ul>|} markup;
+  capture_console ();
+  let c = container "" in
+  let dispose = Yuka.Private.render (as_element c) tree in
+  check "first render as the server" markup (html c);
+  dispose ();
+  check "first render logs the key" "error yuka: each: duplicate key a, the later item is left out" (console_calls ());
+  let c = container markup in
+  let a = query c "[data-key=a]" in
+  capture_console ();
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
+  check "hydration keeps the markup" markup (html c);
+  same "hydration adopts the first" a (query c "[data-key=a]");
+  State.set items [| ("b", "2"); ("c", "3"); ("b", "4"); ("c", "5") |];
+  check "update keeps the first" {|<ul><li data-key="b">2</li><li data-key="c">3</li></ul>|} (html c);
+  check "an error for each duplicate key of each render"
+    "error yuka: each: duplicate key a, the later item is left out|error yuka: each: duplicate key b, the later item is left out|error yuka: each: duplicate key c, the later item is left out"
+    (console_calls ());
+  dispose ()
+
+let each_key_untracked () =
+  let salt = State.make "" in
+  let calls = ref 0 in
+  let key k = incr calls; k ^ State.get salt in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        element "ul" [] [ each ~key (fun () -> [| "a"; "b" |]) (fun k -> li k [ text k ]) ])
+  in
+  let before = !calls in
+  State.set salt "x";
+  check "a State read in the key does not run the list again" (ints before) (ints !calls);
+  dispose ()
+
 let hydrate_logged server_html tree =
   let island = create (document ()) "yuka-island" in
   set_attribute island "data-name" "Board.Island";
@@ -1922,7 +1960,7 @@ let frames_batched_until_dispose () =
   stub_frames ();
   let a = State.make 0. and b = State.make 0. and runs = ref 0 and times = ref [] in
   let (), stop =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.after (fun () ->
             ignore (State.get a +. State.get b);
             incr runs);
@@ -1948,8 +1986,32 @@ let now_and_count_elements () =
   check "count_elements counts the matches in the document" "2" (ints (Browser.count_elements ".yuka-count span"));
   set_html c ""
 
+let cookies () : string = [%mel.raw "document.cookie"]
+
+let set_cookie () =
+  let written = Browser.set_cookie "yuka_test" {js|a b;c=d/é|js} in
+  check "a cookie is written" "ok" (match written with Ok () -> "ok" | Error e -> e);
+  check "the value is percent-encoded" "true"
+    (string_of_bool (Cases.contains (cookies ()) "yuka_test=a%20b%3Bc%3Dd%2F%C3%A9"));
+  ignore (Browser.set_cookie "yuka_test" ({js|é€😀|js} ^ "!'()*"));
+  check "a JS string value is encoded as UTF-8, with !'()* encoded" "true"
+    (string_of_bool (Cases.contains (cookies ()) "yuka_test=%C3%A9%E2%82%AC%F0%9F%98%80%21%27%28%29%2A"));
+  ignore (Browser.set_cookie ~max_age:0 "yuka_test" "");
+  check "max_age 0 removes it" "false" (string_of_bool (Cases.contains (cookies ()) "yuka_test="));
+  let refused = function Ok () -> "written" | Error _ -> "refused" in
+  check "a name with a space is refused" "refused" (refused (Browser.set_cookie "a b" "x"));
+  check "a name with = is refused" "refused" (refused (Browser.set_cookie "a=b" "x"));
+  check "an empty name is refused" "refused" (refused (Browser.set_cookie "" "x"));
+  check "a path with ; is refused" "refused" (refused (Browser.set_cookie ~path:"/;Domain=evil" "n" "x"));
+  check "a relative path is refused" "refused" (refused (Browser.set_cookie ~path:"x" "n" "x"));
+  let lone_surrogate : string = [%mel.raw {|"x\uD800"|}] in
+  check "a value with a lone surrogate is refused" "refused" (refused (Browser.set_cookie "lone" lone_surrogate));
+  check "nothing was written for the lone surrogate" "false" (string_of_bool (Cases.contains (cookies ()) "lone="));
+  check "nothing was written by a refused call" "false" (string_of_bool (Cases.contains (cookies ()) "n=x"))
+
 let all =
   [
+    ("Browser.set_cookie", set_cookie);
     ("handlers run in a batch", handler_batched);
     ("after: reads the DOM of the same change", after_sees_dom);
     ("after: the first run finds the element", after_finds_own_element);
@@ -1977,6 +2039,8 @@ let all =
     ("client: script takes one text or one hole", client_script_children);
     ("dom hydration mismatch log", mismatch_log);
     ("Console calls the console method of its name", console_methods);
+    ("each keeps the first item of a duplicate key", each_duplicate_key);
+    ("each does not track a State read in the key", each_key_untracked);
     ("dom template select value", template_select_value);
     ("dom template parser changes", parser_changes);
     ("dom create", create_tree);

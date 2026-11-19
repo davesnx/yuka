@@ -1,7 +1,7 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { loadavg } from "node:os";
+import { cpus, loadavg } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -28,6 +28,7 @@ const rows = Number(options.rows);
 const rounds = Number(options.rounds);
 const out = options.out ?? join(resolve(options["build-dir"]), "bench-ssr", "result.json");
 const base = `http://127.0.0.1:${options.port}`;
+const cpu = `${cpus()[0]?.model ?? "unknown"} x${cpus().length}`;
 
 interface Candidate {
   name: string;
@@ -141,7 +142,7 @@ for (const c of present) {
 const floor = results.find((r) => r.name === "dream-concat")?.rps;
 const row = (cols: string[]) => cols.map((c, i) => (i === 0 ? c.padEnd(22) : c.padStart(11))).join("");
 const lines = [
-  `${rows} rows, wrk -t${options.threads} -c${options.connections} -d${options.duration}s, ${rounds} rounds${options.interleave ? " interleaved" : ""}, median; load average 1 min per round in the JSON`,
+  `${rows} rows, wrk -t${options.threads} -c${options.connections} -d${options.duration}s, ${rounds} rounds${options.interleave ? " interleaved" : ""}, median; load average 1 min per round in the JSON; cpu ${cpu}`,
   "",
   row(["candidate", "bytes", "req/s", "min", "max", "p50 ms", "p99 ms", "vs floor", "rps spread"]),
   ...results.map((r) => {
@@ -157,7 +158,7 @@ mkdirSync(dirname(out), { recursive: true });
 writeFileSync(
   out,
   JSON.stringify(
-    { date: new Date().toISOString(), rows, threads: Number(options.threads), connections: Number(options.connections), duration: Number(options.duration), rounds, results, skipped },
+    { date: new Date().toISOString(), cpu, rows, threads: Number(options.threads), connections: Number(options.connections), duration: Number(options.duration), rounds, results, skipped },
     null,
     2,
   ) + "\n",

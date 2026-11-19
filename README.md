@@ -36,8 +36,9 @@ let[@client] make ~(initial : int) () =
   </button>
 ```
 
-Two pages, in `pages.mlx`. They run on the server only. A path param is an
-argument of the page, and `Routes.hello` builds a link to the route `Hello`:
+Two pages and the not-found page, in `pages.mlx`. They run on the server
+only. A path param is an argument of the page, and `Routes.hello` builds a
+link to the route `Hello`:
 
 ```ocaml
 let home () =
@@ -50,6 +51,10 @@ let home () =
 let hello ~name () =
   Yuka.Server.page ~title:"Hello" (fun () ->
       <h1>(Yuka.text ("Hello, " ^ name))</h1>)
+
+let not_found ~path () =
+  Yuka.Server.page ~title:"Not found" (fun () ->
+      <p>(Yuka.text ("No page at " ^ path))</p>)
 ```
 
 The routes, in `Routes.ml`. A link to a route that does not exist, or with
@@ -69,6 +74,7 @@ Router.make ~not_found:Pages.not_found
 - [`docs/islands.md`](docs/islands.md): components that run in the browser.
 - [`docs/state.md`](docs/state.md): state, memos and effects.
 - [`docs/router.md`](docs/router.md): routes, params and links.
+- [`docs/data.md`](docs/data.md): actions, forms, remote data and live data.
 - [`docs/security.md`](docs/security.md): what Yuka escapes and blocks.
 
 ## For coding agents

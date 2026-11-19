@@ -34,7 +34,7 @@ let listed name = Option.value (Web.table_get (uses ()) name) ~default:[]
 
 let decode (q : (_, _, _) Action.t) last = function
   | Ok j -> (
-      match (Action.output q).decode j with
+      match Codec.decode (Action.output q) j with
       | Ok data -> Status.Ready { data; stale = false }
       | Error m -> Status.Failed { error = Status.Protocol m; last })
   | Error error -> Status.Failed { error; last }
@@ -42,7 +42,7 @@ let decode (q : (_, _, _) Action.t) last = function
 let on_server ~enabled (q : (_, _, _) Action.t) args base =
   if not (enabled ()) then State.set base Status.Idle
   else
-    let input = (Action.input q).encode (args ()) in
+    let input = Codec.encode (Action.input q) (args ()) in
     let settled, resolve, _ = Async.make () in
     let (_abort : unit -> unit) = !Bridge.send (Action.name q) input resolve in
     match Async.status settled with
@@ -51,11 +51,11 @@ let on_server ~enabled (q : (_, _, _) Action.t) args base =
         Answers.record (Answers.key (Action.name q) input) (Some r) settled
     | _ -> Answers.record (Answers.key (Action.name q) input) None settled
 
-let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
+let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
     (args : unit -> 'i) : 'o t =
   let base = State.make (Status.Loading None) in
   let changes = State.make Optimistic.empty in
-  if !Base.server_rendering then begin
+  if !(Base.server_rendering ()) then begin
     on_server ~enabled q args base;
     { base; changes; refetch = ignore }
   end
@@ -122,7 +122,7 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
     let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
     Base.run_effect Scheduler.queue (fun () ->
         if enabled () then begin
-          let input = (Action.input q).encode (args ()) in
+          let input = Codec.encode (Action.input q) (args ()) in
           let key = Answers.key (Action.name q) input in
           match !current with
           | Some (k, _) when String.equal k key -> ()
@@ -150,8 +150,7 @@ let use ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Qu
 let status r =
   let changes = State.get r.changes in
   let base = State.get r.base in
-  if Optimistic.is_empty changes then base
-  else Status.map (Optimistic.apply (fun d f -> f d) changes) base
+  Optimistic.status changes base
 
 let refetch r = r.refetch ()
 let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed (Action.name q))

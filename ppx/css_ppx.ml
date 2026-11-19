@@ -23,7 +23,7 @@ let expand ~loc payload =
       fail ~loc
         "cannot read %s; list it in the dune file of this library: (preprocessor_deps %s)" file file
   in
-  let sheet = try Css_scan.sheet ~path:file text with Css_scan.Error m -> fail ~loc "%s" m in
+  let sheet = match Css_scan.sheet ~path:file text with Ok sheet -> sheet | Error m -> fail ~loc "%s" m in
   let href = "/_yuka/css/" ^ sheet.file in
   let stylesheet = [%stri let stylesheet = Yuka.runtime_stylesheet [%e estring ~loc href]] in
   let classes =

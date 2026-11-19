@@ -13,7 +13,7 @@ let after_paint finish =
   Dom_cases.stub_frames ();
   let source = State.make 0 in
   let (d, seen), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let d = State.deferred source in
         (d, reads d))
   in
@@ -41,7 +41,7 @@ let one_batch finish =
   let a = State.make 0 and b = State.make 0 in
   let runs = ref 0 in
   let (da, db), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let da = State.deferred a and db = State.deferred b in
         Effect.after (fun () ->
             ignore (State.get da + State.get db);
@@ -61,7 +61,7 @@ let one_batch finish =
 let disposed finish =
   Dom_cases.stub_frames ();
   let source = State.make 0 in
-  let d, dispose = owner (fun () -> State.deferred source) in
+  let d, dispose = with_owner (fun () -> State.deferred source) in
   State.set source 1;
   dispose ();
   Dom_cases.run_frame 16.;
@@ -75,7 +75,7 @@ let memo_source finish =
   Dom_cases.stub_frames ();
   let n = State.make 1 in
   let (d, seen), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let parity = State.memo (fun () -> State.get n mod 2) in
         let d = State.deferred parity in
         (d, reads d))
@@ -94,7 +94,7 @@ let chained finish =
   Dom_cases.stub_frames ();
   let a = State.make 0 and b = State.make 0 in
   let (first, second, seen), dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         let first = State.deferred a in
         let sum = State.memo (fun () -> State.get first + State.get b) in
         let second = State.deferred sum in
@@ -116,7 +116,7 @@ let in_frame_handler finish =
   Dom_cases.stub_frames ();
   let source = State.make 0 in
   let d, dispose =
-    owner (fun () ->
+    with_owner (fun () ->
         Effect.after (fun () -> Browser.on_frame (fun _ -> State.set source (State.peek source + 1)));
         State.deferred source)
   in

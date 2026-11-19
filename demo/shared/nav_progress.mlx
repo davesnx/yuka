@@ -11,6 +11,18 @@ let[@client] make () =
         Yuka.State.set phase Loading
       end
       else Yuka.State.set phase (if !shown then Finished else Idle));
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "keydown" (fun event ->
+          if
+            Yuka.Event.key event = "c"
+            && not
+                 (Ui.typing event || Yuka.State.peek Ui.dialog_open
+                 || Yuka.Event.ctrl_key event || Yuka.Event.meta_key event)
+          then begin
+            Yuka.Event.prevent_default event;
+            Yuka.State.set Ui.dialog_asked true;
+            Yuka.Browser.focus "new-issue-button"
+          end));
   <div
     class_=(match Yuka.State.get phase with
       | Idle -> Css.bar

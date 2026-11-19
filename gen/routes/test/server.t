@@ -87,37 +87,63 @@ the param is bound
             };
             load =
 
-An endpoint with ~cross_origin:true skips the origin check; an action
-never does
+Router.get answers GET and HEAD and follows the cache rules; Router.post,
+Router.put, Router.patch and Router.delete are never cached. ~cross_origin:true
+skips the origin check
 
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.endpoint Hook ~path:"/hook" ~method_:`POST ~handler:Handlers.hook ~cross_origin:true;
-  >     Router.endpoint Put ~path:"/put" ~method_:`PUT ~handler:Handlers.put;
-  >     Router.action Act ~path:"/act" ~method_:`POST ~handler:Handlers.act;
+  >     Router.get Item ~path:"/item" ~handler:Handlers.item;
+  >     Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cross_origin:true;
+  >     Router.put Put ~path:"/item" ~handler:Handlers.put;
+  >     Router.patch Patch ~path:"/item" ~handler:Handlers.patch;
+  >     Router.delete Delete ~path:"/item" ~handler:Handlers.delete;
   >   ]
   > EOF
   $ grep -E 'action =|cross_origin =' out.ml
             action = false;
+            cross_origin = false;
+            action = true;
             cross_origin = true;
-            action = false;
+            action = true;
+            cross_origin = false;
+            action = true;
             cross_origin = false;
             action = true;
             cross_origin = false;
 
+Each method node on one path is its own route: find gives each one, and
+any other method is Wrong_method with the methods of the path
+
+  $ yuka routes --shared --source Routes.ml | grep -A 6 '| \[ "item" \]'
+    | [ "item" ] -> (
+        match meth with
+        | `GET | `HEAD -> Yuka.Router.Found Item
+        | `PUT -> Yuka.Router.Found Put
+        | `PATCH -> Yuka.Router.Found Patch
+        | `DELETE -> Yuka.Router.Found Delete
+        | _ -> Yuka.Router.Wrong_method [ `GET; `PUT; `PATCH; `DELETE ])
+
   $ gen <<'EOF'
-  > Router.make [ Router.endpoint Hook ~path:"/hook" ~method_:`POST ~handler:Handlers.hook ~cross_origin:yes ]
+  > Router.make [ Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cross_origin:yes ]
   > EOF
-  File "Routes.ml", line 1, characters 101-104:
+  File "Routes.ml", line 1, characters 82-85:
   Error: ~cross_origin must be true or false
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.action Act ~path:"/act" ~method_:`POST ~handler:Handlers.act ~cross_origin:true ]
+  > Router.make [ Router.get Feed ~path:"/feed" ~handler:Handlers.feed ~cross_origin:true ]
   > EOF
-  File "Routes.ml", line 1, characters 96-100:
-  Error: Router.action has no argument ~cross_origin; its labelled arguments are ~path, ~method_, ~handler, ~guard, ~headers, ~cache, ~prerender
+  File "Routes.ml", line 1, characters 81-85:
+  Error: Router.get has no argument ~cross_origin; its labelled arguments are ~path, ~handler, ~guard, ~headers, ~cache, ~prerender
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cache:immutable ]
+  > EOF
+  File "Routes.ml", line 1, characters 75-84:
+  Error: Router.post has no argument ~cache; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
   [1]
 
 A cache value is read with Yuka.Server opened
@@ -183,6 +209,33 @@ user's value
   $ grep 'page =' out.ml
                        page = routes ();
 
+An overlay page gets the arguments of the page; a route without one has None
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+  >       [ Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:Pages.issue_dialog ~search:{ tab = optional string } ];
+  >     Router.route Home ~path:"/" ~page:Pages.home;
+  >   ]
+  > EOF
+  $ grep -e 'page =' -e 'overlay =' out.ml
+                       page = Pages.issue ~id ~tab ~issue ();
+                       overlay = Some (Pages.issue_dialog ~id ~tab ~issue ());
+                       page = Pages.home ();
+                       overlay = None;
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+  >       [ Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:issue ];
+  >   ]
+  > EOF
+  File "Routes.ml", line 4, characters 64-69:
+  Error: ?overlay:issue is hidden by the param, search field or loader result issue of the route Issue; write it with its module path
+  [1]
+
 A short attachment that the generated code would hide
 
   $ gen <<'EOF'
@@ -240,3 +293,66 @@ The shared module must be a module path
     -help                  Display this list of options
     --help                 Display this list of options
   [2]
+
+~prefetch on make, group and route: the nearest one wins; a route with
+none gets the default of Yuka. The app gets the rules of every page route,
+not those of a method node such as Router.get
+
+  $ gen <<'EOF'
+  > Router.make ~prefetch:`Visible
+  >   [
+  >     Router.route A ~path:"/a" ~page:Pages.a;
+  >     Router.group ~path:"/g" ~prefetch:`Off
+  >       [
+  >         Router.route B ~path:"/b" ~page:Pages.b;
+  >         Router.route C ~path:"/c" ~page:Pages.c ~prefetch:`Hover;
+  >         Router.route F ~path:"/f" ~page:Pages.f ~prefetch:`Trajectory;
+  >         Router.get D ~path:"/d" ~handler:Handlers.d;
+  >         Router.post E ~path:"/e" ~handler:Handlers.e;
+  >       ];
+  >   ]
+  > EOF
+  $ grep -e 'Generated.rules' -e 'rules = ' -e '~pages' out.ml
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Visible ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Off ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Hover ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Trajectory ~prerender:false ()
+            rules = rules_0;
+            rules = rules_1;
+            rules = rules_2;
+            rules = rules_3;
+            rules = rules_1;
+            rules = rules_1;
+      ~pages:[ rules_0; rules_1; rules_2; rules_3 ]
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.route A ~path:"/a" ~page:Pages.a;
+  >     Router.route B ~path:"/b" ~page:Pages.b ~prefetch:`Off;
+  >   ]
+  > EOF
+  $ grep -e 'Generated.rules' -e '~pages' out.ml
+    Yuka.Server.Generated.rules ~headers:[  ] ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~prefetch:`Off ~prerender:false ()
+      ~pages:[ rules_0; rules_1 ]
+
+`Idle with a ~cache that has a max-age on the route or on a node above it,
+or with a ~cache the generator cannot read (a let), is accepted
+
+  $ gen <<'EOF'
+  > let none = Yuka.Server.no_store
+  > 
+  > let routes =
+  >   Router.make ~cache:(public ~max_age:60 ())
+  >     [
+  >       Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle;
+  >       Router.group ~path:"/g" ~prefetch:`Idle
+  >         [ Router.route B ~path:"/b" ~page:Pages.b ~cache:(private_cache ~max_age:5) ];
+  >       Router.route C ~path:"/c" ~page:Pages.c ~cache:none ~prefetch:`Idle;
+  >     ]
+  > EOF
+  $ grep -e 'Generated.rules' out.ml
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(private_cache ~max_age:5) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()
+    Yuka.Server.Generated.rules ~headers:[  ] ~cache:(Yuka.Server.(none) [@warning "-33"]) ~prefetch:`Idle ~prerender:false ()

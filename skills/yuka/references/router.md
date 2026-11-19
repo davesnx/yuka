@@ -18,7 +18,7 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
         Router.route Post ~path:"/:slug<string>" ~page:Pages.post
           ~loader:Loaders.post;
       ];
-    Router.endpoint Feed ~path:"/feed.json" ~method_:`GET ~handler:Api.feed;
+    Router.get Feed ~path:"/feed.json" ~handler:Api.feed;
     Router.redirect ~path:"/old-blog" ~to_:(Permanent "/blog");
   ]
 ```
@@ -36,7 +36,7 @@ let post ~slug ~post () =
   Yuka.Server.page ~title:slug (fun () -> <article>(Yuka.text post)</article>)
 
 (* loaders.ml *)
-let post (_ : Dream.request) ~slug =
+let post (_ : Yuka.Server.request) ~slug =
   Yuka.Async.return
     (if slug = "hello" then Ok "Hello, world" else Error Yuka.Server.Not_found)
 ```
@@ -46,18 +46,31 @@ let post (_ : Dream.request) ~slug =
 - `Router.make [ nodes ]`: the root.
 - `Router.group ~path [ nodes ]`: a path prefix for its children. Its
   layout, loader, guard, search fields and rules apply to all of them.
-- `Router.route Name ~path ~page`: a page.
-- `Router.endpoint Name ~path ~method_ ~handler`: a response that is not
-  a page, such as JSON or a file.
-- `Router.action Name ~path ~method_ ~handler`: like an endpoint, for a
-  method that changes data. `` `GET `` is an error, and the answer is
-  never cached.
+- `Router.route Name ~path ~page`: a page. `?overlay:Pages.dialog` adds
+  an overlay page (see "Overlay routes").
+- `Router.get Name ~path ~handler`: a response that is not a page, such
+  as JSON or a file. It answers `GET` and `HEAD`.
+- `Router.post Name ~path ~handler`, and `Router.put`, `Router.patch` and
+  `Router.delete` with the same arguments: a handler for that method, for
+  a request that changes data. The answer is never cached.
 - `Router.redirect ~path ~to_:(Permanent "/")`: a 308 redirect, or
   `Temporary` for a 307. The target can use the params of the path:
   `~to_:(Temporary "/team/:name")`.
 
-`method_` is one of `` `GET ``, `` `POST ``, `` `PUT ``, `` `PATCH `` and
-`` `DELETE ``. A `` `GET `` node also answers `HEAD`.
+These five are the method nodes. Two method nodes can have the same path
+when their methods are different, each with its own name. A request with
+another method gets `405` with the methods of the path in `allow`.
+`Router.endpoint` and `Router.action` were removed: they are build errors
+that name the method nodes.
+
+A node name is a constructor, such as `Home`, and gives the link function
+`Routes.home`. Each name is used once. These names are build errors:
+
+- `Some` and `None`, which the generated code uses.
+- A name whose lowercase form is an OCaml keyword, such as `Type`,
+  `Match` or `Effect`.
+- `Href`, `Find`, `With_query`, `With_fragment`, `Current`, `Replace` and
+  `Push`, which the `Routes` module already defines.
 
 ## Paths
 
@@ -99,7 +112,8 @@ Router.route Issue ~path:"/issue/:id<string>/:tab<Model.tab>" ~page:Pages.issue
 - The link function takes the same type:
   `Routes.issue ~id:"YUK-8" ~tab:Activity ()` gives
   `"/issue/YUK-8/activity"`.
-- `decode` gets the segment after percent-decoding. When it returns
+- `decode` gets the segment after percent-decoding and after the `~` of
+  an empty or dot value is removed (see [Links](#links)). When it returns
   `None`, the path does not match and the answer is the not-found page.
 - `encode` must be the inverse of `decode`. The router percent-encodes its
   result, so it can return any text.
@@ -129,16 +143,19 @@ does not decode counts as absent. Search fields go on a route or a group.
 
 Each attachment is a value path such as `Pages.home`, or `home` after
 `open Pages` (see "Code before the tree"). The generated code
-calls it with labelled arguments. `req` is the request of the server
-adapter, such as `Dream.request`.
+calls it with labelled arguments. `req` is a `Yuka.Server.request`: read
+it with `Yuka.Server.Request` (see "The request" in `data.md`). Code that
+needs the request of the server gets it from the adapter:
+`Yuka_dream.request req` gives a `Dream.request option`.
 
 | Attachment | On | Shape |
 |---|---|---|
 | `~page` | route | `~params ~search ~loaded () -> Yuka.Server.page` |
+| `?overlay` | route | as `~page` |
 | `~layout` | make, group | `~params ~loaded ~children () -> Yuka.server Yuka.element` |
 | `~loader` | group, route | `req -> ~params -> ('a, Yuka.Server.stop) result Yuka.Async.t` |
 | `~guard` | all but redirect | `req -> ~params -> (unit, Yuka.Server.stop) result Yuka.Async.t` |
-| `~handler` | endpoint, action | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
+| `~handler` | method nodes | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
 | `~not_found` | make, group | `~params ~path () -> Yuka.Server.page` |
 | `~error` | make, group | `~params () -> Yuka.Server.page` |
 
@@ -149,24 +166,29 @@ adapter, such as `Dream.request`.
   name of the loader: `~loader:Loaders.post` gives `~post`. A layout gets
   the results of the loaders on its group and above.
 - Params, search fields and loader results share one set of labels: a
-  name used twice is an error.
+  name used twice is an error. `href`, `fragment`, `with_query`,
+  `with_fragment`, `req` and `children` are reserved labels.
 - A stop is `Not_found`, `Forbidden` (403), `Redirect`,
   `Redirect_off_site` or `Fail`.
 - `not_found` and `error` use the nearest one above the node. A
   `not_found` or `error` below a layout that takes a loader result is an
   error.
 
-Rules, on any node except a redirect:
+Rules, on any node except a redirect. `Router.post`, `Router.put`,
+`Router.patch` and `Router.delete` take no `~cache` and no `~prerender`:
 
 - `~headers:[ ("x-frame-options", "DENY") ]`: response headers. A node
   replaces a header of the same name set above it.
-- `~cache`: `no_store`, `no_cache`, `private_ ~max_age:5`,
+- `~cache`: `no_store`, `no_cache`, `private_cache ~max_age:5`,
   `public ~max_age:60 ()` (with an optional `~s_max_age`) or
   `immutable`. The nearest one wins.
 - `~prerender:true`: the prerender step can write the page as a static
   file (see `Yuka.Server.Prerender`).
-- `~cross_origin:true`, on an endpoint only: skip the origin check that a
-  method other than `GET`, `HEAD` and `OPTIONS` gets. Use it for webhooks.
+- `~cross_origin:true`, on `Router.post`, `Router.put`, `Router.patch` and
+  `Router.delete` only: skip the origin check that these methods get. Use
+  it for webhooks.
+- `~prefetch`, on make, group and route only: when the browser loads the
+  page before the click (see "Prefetch").
 
 ## Code before the tree
 
@@ -209,8 +231,8 @@ Two limits:
 
 ## Links
 
-The shared `Routes` module has one function for each route, endpoint and
-action, named as the node in lowercase:
+The shared `Routes` module has one function for each route and method
+node, named as the node in lowercase:
 
 ```ocaml
 Routes.hello ~name:"Yuka" ()            (* "/hello/Yuka" *)
@@ -222,6 +244,14 @@ Routes.blog ~page:2 ~fragment:"top" ()  (* "/blog?page=2#top" *)
 Path params are required labelled arguments. Search fields are optional
 arguments. Every function ends with `()`. A missing or wrong param does
 not compile.
+
+Each path param value gives a link, also `""`, `"."` and `".."`, which no
+URL segment can hold: browsers resolve dot segments and the server drops
+empty ones. Such a value, also after one or more `~`, gets one more `~`
+in front, and `find` removes it: `Routes.post ~slug:"" ()` gives
+`"/blog/~"`, `~slug:".."` gives `"/blog/~.."` and `~slug:"~"` gives
+`"/blog/~~"`. Other values, such as `"~a"`, stay as they are. A
+catch-all with no element raises `Invalid_argument`.
 
 The last optional argument, `?fragment`, adds `#` and the encoded
 fragment; `~fragment:""` adds `#` alone. A param, search field or loader
@@ -262,11 +292,111 @@ let[@client] make () =
 
 It is always `false` on the server.
 
+After a client navigation to another page, Yuka tells screen readers
+about it and moves the focus, as a full page load does:
+
+- A live region (`<div id="yuka-announcer" aria-live="assertive">`,
+  hidden from view) gets the new `document.title`, or the text of the
+  first `h1` of the new content when the title is empty.
+- The focus goes to the first of these in the new content (the outlet,
+  or `<body>` without one) that can take it: an element with
+  `autofocus`, the element of the URL fragment, the first `h1`, the
+  content itself, then its elements in document order. An `h1` or a wrapper with no `tabindex` gets
+  `tabindex="-1"`. The page does not scroll for it.
+- The focus does not move when an island of the new content took it, or
+  when it is in an `input`, `textarea`, `select` or `contenteditable`
+  element, so a search field that navigates keeps it.
+
+`Routes.replace`, `Routes.push`, `Browser.replace_url`, a fragment link,
+and Back or Forward to an entry of the page shown change neither.
+
+## Overlay routes
+
+A route with `?overlay` shows its overlay page over the current page on a
+client navigation, as a dialog. A direct load or a reload of its URL
+shows the normal page:
+
+```ocaml
+(* Routes.ml *)
+Router.group ~path:"/" ~layout:Pages.shell
+  [
+    Router.route Issues ~path:"/" ~page:Pages.index;
+    Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
+      [ Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:Pages.issue_dialog ];
+  ]
+
+(* pages.mlx: the overlay page gets the arguments of ~page *)
+let issue_dialog ~id ~issue () =
+  Yuka.Server.page ~title:id (fun () ->
+      <div class_="dialog" role=`dialog aria_label=id>
+        <Yuka.Client><Close_button /></Yuka.Client>
+        <Issue_view issue />
+      </div>)
+
+(* close_button.mlx *)
+let[@client] make () =
+  <button type_=`button on_click=(fun _ -> Yuka.Browser.back ())>"Close"</button>
+```
+
+- A click on a link, or `Yuka.Browser.navigate`, to the route sends
+  `Yuka-Overlay: 1`. When the current page and the route share a layout
+  that stays (the case for an outlet answer), the server renders the
+  overlay page inside the layouts of the route and answers its content
+  with `Yuka-Layer: overlay`. Else it answers as for any page.
+- The browser puts that content in one `<yuka-overlay>` element at the
+  end of `<body>` and adds a history entry. The page under it stays as it
+  is: its islands run, and its scroll does not change. The title and
+  `Routes.current` are those of the overlay route. The focus moves into
+  the overlay, as for a client navigation.
+- Back removes the overlay with no request and gives the title, the
+  route and the focus back to the page under it. Forward shows the
+  overlay again.
+- A link in the overlay to another route with an overlay replaces the
+  overlay. Any other navigation removes it.
+- `Yuka.Browser.back ()` closes the overlay: Back when the history entry
+  before it is the page under it, else a client navigation to the URL of
+  that page.
+- The overlay page is the whole content of the overlay: give it its own
+  backdrop and dialog markup. Ids in it start with `overlay-`.
+
+Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay`.
+
+### Split views
+
+There are no parallel outlets. For a list next to its detail, put the
+list in the layout of a group and the detail in a child route: a client
+navigation between details keeps the layout. For a second pane with its
+own state, keep that state in a search field and change it with
+`Routes.replace`, or keep it in an island.
+
+## The current route
+
+The shared `Routes` module also has three functions for the route of the
+page that is shown:
+
+```ocaml
+val current : unit -> t option Yuka.State.read
+val replace : t -> unit
+val push : t -> unit
+```
+
+`Routes.current ()` gives the route of the page as a read-only State,
+on the server and in an island. It is `None` when the URL matches no page
+route, and in a tree that `Yuka.render ~root` builds. Call it in the body of
+a component and read the State in a hole. A client navigation sets the
+State, also in an island of a layout that stays on the screen.
+
+`Routes.replace route` and `Routes.push route` change the route of the page
+that is shown with no request: the URL (`history.replaceState` or
+`history.pushState`) and the State, so every island that reads
+`Routes.current` shows the new route. After `push`, Back and Forward set the
+State again with no request. A route of another page (another node, or
+another path param) is a client navigation, as `Yuka.Browser.navigate`.
+A reload loads the new URL, and the server renders the page with it.
+
 To keep the state of a page in its URL, such as a filter that a user can
-share, give the state to the page as search fields and change the URL with
-`Yuka.Browser.replace_url`. It replaces the URL of the current history
-entry and loads nothing; a reload, back and forward load the page with the
-new query, and the server renders it with that state:
+share, give the state to the page as search fields and write it back with
+`Routes.replace`:
 
 ```ocaml
 (* Routes.ml *)
@@ -281,15 +411,150 @@ let blog ~tag () =
 let[@client] make ~(tag : string) () =
   let tag = Yuka.State.make tag in
   Yuka.Effect.on_change tag (fun ~prev:_ ~next ->
-      Yuka.Browser.replace_url (Routes.blog ?tag:(if next = "" then None else Some next) ()));
+      Routes.replace (Routes.Blog { tag = (if next = "" then None else Some next) }));
   ...
 ```
 
+Another island on the page can read the tag with `Routes.current`:
+
+```ocaml
+let[@client] make () =
+  let route = Routes.current () in
+  <span>
+    (match Yuka.State.get route with
+     | Some (Routes.Blog { tag = Some t }) -> Yuka.text t
+     | _ -> Yuka.text "all")
+  </span>
+```
+
+`Yuka.Browser.replace_url` changes the URL only: islands that read
+`Routes.current` do not see the change.
+
+The framework writes the route into the HTML of each page with an island
+(about 70 bytes), and at the start of each client navigation answer that
+replaces the inside of a layout.
+
+## Prefetch
+
+A client navigation can load a page before the click: a prefetch.
+`~prefetch` on `Router.make`, a group or a route sets when it starts:
+
+| Value | The request starts |
+|---|---|
+| `` `Off `` | only at the click |
+| `` `Hover `` | 50 ms after the pointer or the focus is on the link, and at once on a press |
+| `` `Trajectory `` (default) | also when the mouse moves toward the link |
+| `` `Visible `` | also when the link comes within 200 px of the view |
+| `` `Idle `` | also when the page is loaded and the browser is idle |
+
+Each level includes the ones before it. The nearest `~prefetch` wins, as
+for `~cache`. A method node and a redirect take no `~prefetch`;
+another value is an error.
+
+`` `Idle `` needs a `~cache` with a max-age: a prefetched answer without one
+can be used for 10 s only. `yuka routes` reports an error when the nearest
+`~cache` of a route with `` `Idle `` is absent, `no_store` or `no_cache`;
+it accepts a `~cache` that names a `let`. The server counts a route with
+`` `Idle `` as `` `Visible `` when the `Cache-Control` of its answers has
+no max-age above 0: the one in `~headers` when there is one, else the
+`~cache` rule. A page that renders a `Live.make` is sent with
+`private, no-store` at render time, which the level cannot know: do not
+give such a route `` `Idle ``.
+
+With `` `Trajectory `` the browser follows the mouse pointer (not touch or
+pen). Every 50 ms or more it takes the smoothed direction of the movement
+and finds the visible link on screen that the pointer moves toward. When
+the same link is found twice in a row, it is prefetched before the pointer
+is on it. This prefetch does not load the island chunks and style sheets of
+the page; a later hover, focus or press on the link does. On a page whose
+highest level is `` `Trajectory ``, the navigation code loads at the first
+mouse movement; with `` `Visible `` or `` `Idle `` it loads when the page
+starts.
+
+With `` `Idle ``, when the page starts and after each client navigation or
+action, the browser waits until it is idle (`requestIdleCallback`). Then
+it takes the links of the page in document order, one for each URL,
+without the URLs that are in the cache or in flight and those refused below
+`idle`, and puts at most 15 of them in the queue. An idle prefetch has
+`Yuka-Prefetch: idle` and `priority: "low"`, starts only while fewer than
+4 prefetches are in flight and after every waiting visible link, and does
+not load the island chunks and style sheets. There is no idle pass, and no
+waiting idle link starts, under `saveData`, on a `2g` or `slow-2g`
+connection, or while the document is hidden; a pass that finds the document
+hidden runs once when the document becomes visible, and the waiting idle
+links start then. A link to the URL on screen is skipped.
+
+```ocaml
+Router.make ~not_found
+  [
+    Router.route Home ~path:"/" ~page:home;
+    Router.group ~path:"/docs" ~prefetch:`Visible [ Router.route Doc ~path:"/:slug<string>" ~page:doc ];
+    Router.route Export ~path:"/export" ~page:export ~prefetch:`Off;
+  ]
+```
+
+The browser does not have the route tree. Each page carries the highest
+level of the tree (`<meta name="yuka-prefetch" content="visible">`, no
+meta for `` `Trajectory ``), and the browser runs the triggers up to that
+level. A prefetch request has the header `Yuka-Prefetch: hover` (hover,
+focus or press), `trajectory`, `visible` or `idle`.
+When the trigger is above the level of the route, the server answers `204`
+with `Yuka-Prefetch: LEVEL` (`off`, `hover`, `trajectory` or `visible`) before guards
+and loaders run. The browser keeps no
+answer for that URL, and for the life of the page it sends no prefetch
+above that level for it (it keeps at most 200 URLs). A click always loads
+the page. So an app that mixes levels pays one small refused request for
+each URL of a route with a lower level, once per page load. With
+`` `Visible `` or `` `Idle `` somewhere in the tree, every page observes its
+links and pays one refused request for each URL of a route with a lower
+level. The server counts a value it does not know as
+`visible`. A prefetch of a method node gets `204` with
+`Yuka-Prefetch: off`, and its guards and handler do not run. A prefetch
+of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
+`204` with `Yuka-Prefetch: off`, and the file is not read. Page answers have `Vary: Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay`.
+
+On a link, `data-yuka-prefetch="off"` stops its prefetch.
+`navigator.connection.saveData` stops all prefetch.
+
+A page with no island loads no navigation code, so the browser prefetches
+for it. At the end of the body of such a page, the server prints one
+speculation rule (JSON, not JavaScript):
+
+```html
+<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>
+```
+
+A browser that runs speculation rules (Chrome and Edge today; a browser
+that does not ignores the element) fetches the full document of a link to this site at the
+pointer down or touch down on it, on desktop and on mobile, and uses that
+answer at the click that follows. A hover alone fetches nothing. A link
+with `data-yuka-prefetch="off"`, `download` or `target` is left out. With
+the highest level of the tree `` `Off ``, no page has the rule. A page with
+an island and a client navigation answer have none. The not-found and error
+pages have it when they have no island.
+
+Such a request is a navigation prefetch: `Sec-Purpose: prefetch` and
+`Sec-Fetch-Dest: document`. A prerender has `Sec-Purpose: prefetch;prerender`,
+and the server reads it as a prefetch. The server counts a navigation prefetch as the trigger `hover`
+(which includes a press): a page route with `` `Off `` and a method node
+answer `503` with `Cache-Control: no-store` and `Vary:
+Yuka-Navigate, Yuka-Prefetch, Sec-Purpose`, before guards, loaders and the
+handler. The browser drops a non-2xx answer and loads the URL again at the
+click. Any other page route answers the full page. A static file is served,
+because the click follows the press at once and needs the file. A request
+with `Sec-Purpose` and another `Sec-Fetch-Dest` (such as `empty`, which
+browsers send for `<link rel="prefetch">`) is answered as a request without
+`Sec-Purpose`. Each refused prefetch shows as a `503` in the access log. To
+allow the rule under a `Content-Security-Policy`, see
+[Security](security.md).
+
+A prefetch runs the guards and loaders of the page for a link that the
+user may never click: they must have no side effects.
+
 ## Limitations
 
-- An island cannot read the current route or search params as a State.
-  Pass what it needs as props, and write them back with
-  `Yuka.Browser.replace_url`.
+- After `Routes.push`, Back and Forward set the route only when client
+  navigation is on (`Yuka.render ~islands ()` without `~navigation:false`).
 - There is no base path: the app is served at the root of its origin.
 - An editor does not check `Routes.ml`. `yuka routes` reports each error
   with its location:

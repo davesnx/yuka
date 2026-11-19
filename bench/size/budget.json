@@ -1,1 +1,4 @@
-{ "keyed_gzip": 7981 }
+{
+  "keyed_gzip": 8550,
+  "comment": "Raised from 7981 to 8195 for the scheduler fixes of pull request 12: each fix costs 4 to 35 B gzip, most of it try/catch on error paths. Raised from 8195 to 8216 for issue 10: a State written in a batch compares its value at the end with the value its readers saw. Raised from 8216 to 8517 for issue 11: mark, settle and stale walk a chain of memos with a list in place of recursion, and settle brings the sources of an out-of-date memo up to date first when reads are nested more than 100 deep, so a long chain does not overflow the stack on Melange. Lowered from 8517 to 8505 for issue 29: each keeps the first item of a duplicate key with one table of seen keys. Lowered from 8505 to 8502 for issue 29: Yuka re-exports State by alias, so Yuka.State is no object of its own. Raised from 8502 to 8550 for the single yuka library: the bundle is 39 B smaller raw and 10 B smaller gzip unminified, but Yuka.render now calls Client.render_root directly, swc then lifts three fewer variables, and its mangler gives different short names across the bundle. Lower it when the app gets smaller."
+}

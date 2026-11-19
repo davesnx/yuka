@@ -1,5 +1,6 @@
 module Async = Yuka.Async
 module Live = Yuka.Server.Live
+module Testing = Yuka.Server.Testing
 
 let conninfo = Sys.getenv_opt "YUKA_LIVE_PG"
 let ( let* ) = Lwt.bind
@@ -25,9 +26,9 @@ let notes_cross () =
   let ch = channel () in
   let a = bus ch and b = bus ch in
   let heard = ref [] in
-  let* _ = wait (b.listen (fun n -> heard := n :: !heard)) in
-  let* _ = wait (a.send "one") in
-  let* _ = wait (a.send "two") in
+  let* _ = wait (Testing.bus_listen b (fun n -> heard := n :: !heard)) in
+  let* _ = wait (Testing.bus_send a "one") in
+  let* _ = wait (Testing.bus_send a "two") in
   let* ok = until (fun () -> List.length !heard = 2) in
   check_true "both notes" ok;
   Alcotest.(check (list string)) "in send order" [ "one"; "two" ] (List.rev !heard);
@@ -35,9 +36,9 @@ let notes_cross () =
 
 let too_long () =
   let a = bus (channel ()) in
-  let* r = wait (a.send (String.make 8001 'x')) in
+  let* r = wait (Testing.bus_send a (String.make 8001 'x')) in
   check_true "refused by Postgres" (match r with Async.Failed _ -> true | _ -> false);
-  let* r = wait (a.send "small") in
+  let* r = wait (Testing.bus_send a "small") in
   check_true "the next note works" (r = Async.Done ());
   Lwt.return_unit
 
@@ -56,12 +57,12 @@ let restart () =
   let ch = channel () in
   let a = bus ch and b = bus ch in
   let heard = ref [] and restarts = ref 0 in
-  b.on_restart (fun () -> incr restarts);
-  let* _ = wait (b.listen (fun n -> heard := n :: !heard)) in
+  Testing.bus_on_restart b (fun () -> incr restarts);
+  let* _ = wait (Testing.bus_listen b (fun n -> heard := n :: !heard)) in
   Alcotest.(check int) "one listener killed" 1 (terminate ch);
   let* ok = until (fun () -> !restarts = 1) in
   check_true "on_restart after the listener came back" ok;
-  let* _ = wait (a.send "after") in
+  let* _ = wait (Testing.bus_send a "after") in
   let* ok = until (fun () -> !heard = [ "after" ]) in
   check_true "notes arrive again" ok;
   Lwt.return_unit
@@ -70,21 +71,21 @@ let close () =
   let ch = channel () in
   let a = bus ch and b = bus ch in
   let heard = ref [] in
-  let* _ = wait (b.listen (fun n -> heard := n :: !heard)) in
-  let* _ = wait (a.send "before") in
+  let* _ = wait (Testing.bus_listen b (fun n -> heard := n :: !heard)) in
+  let* _ = wait (Testing.bus_send a "before") in
   let* ok = until (fun () -> !heard = [ "before" ]) in
   check_true "heard before close" ok;
   let* _ = wait (Live.close_bus b) in
-  let* _ = wait (a.send "after") in
+  let* _ = wait (Testing.bus_send a "after") in
   let* () = Lwt_unix.sleep 0.3 in
   Alcotest.(check (list string)) "nothing after close" [ "before" ] !heard;
-  let* r = wait (b.send "x") in
+  let* r = wait (Testing.bus_send b "x") in
   check_true "a closed bus does not send" (match r with Async.Failed _ -> true | _ -> false);
   Lwt.return_unit
 
 let topic = Yuka.Topic.declare ~name:"pg-count" ~key:Yuka.Codec.string ~state:Yuka.Codec.int
 let truth = ref 0
-let () = Live.serve topic (fun _ -> Async.return !truth)
+let () = Live.implement topic (fun _ -> Async.return !truth)
 
 let lwt_sleep s =
   let a, resolve, _ = Async.make () in
@@ -117,9 +118,9 @@ let two_nodes () =
       ~close:(fun _ -> Async.return ())
   in
   ignore
-    (Yuka.Server.Testing.live_run ~node:nb ~sleep:lwt_sleep (Yuka.Server.Testing.context ~session:"s" ())
+    (Yuka.Server.Testing.live_run ~node:nb ~sleep:lwt_sleep (Yuka.Server.Testing.request ~session:"s" ())
        ~verify_csrf:(fun _ -> Async.return true)
-       ~token:(fun () -> "t")
+       ~token:(fun () -> Some "t")
        connection);
   let has v = List.exists (String.ends_with ~suffix:(Printf.sprintf {|"state":%d}|} v)) !out in
   check_true "the first state on B" (has 0);
@@ -129,14 +130,30 @@ let two_nodes () =
   check_true "a publish on A reaches the subscriber on B through Postgres" ok;
   Lwt.return_unit
 
+let failure = function Async.Failed m -> m | Async.Done () -> "done" | Async.Pending -> "pending"
+
+let no_server () =
+  let dir = Filename.temp_dir "yuka_pg" "" in
+  let b = Yuka_live_pg.bus ~conninfo:("host=" ^ dir ^ " port=5432") ~channel:"c" () in
+  let* first = wait (Testing.bus_listen b ignore) in
+  check_true "a failed Async" (String.starts_with ~prefix:"Failure(\"Connection failure" (failure first));
+  Out_channel.with_open_bin (Filename.concat dir ".s.PGSQL.5432") ignore;
+  let* second = wait (Testing.bus_listen b ignore) in
+  check_true "the second listen connects again" (failure second <> failure first);
+  check_true "and fails as an Async" (String.starts_with ~prefix:"Failure(\"Connection failure" (failure second));
+  Lwt.return_unit
+
 let case name f = Alcotest.test_case name `Quick (fun () -> Lwt_main.run (f ()))
 
 let () =
-  match conninfo with
-  | None -> print_endline "yuka-live-pg: YUKA_LIVE_PG is not set, the Postgres tests are skipped"
-  | Some _ ->
-      Random.self_init ();
-      Alcotest.run "yuka-live-pg"
+  if conninfo = None then print_endline "yuka-live-pg: YUKA_LIVE_PG is not set, the Postgres tests are skipped";
+  Random.self_init ();
+  Alcotest.run "yuka-live-pg"
+    (( "listen", [ case "a listen with no server fails, and the next one connects again" no_server ] )
+    ::
+    (match conninfo with
+    | None -> []
+    | Some _ ->
         [
           ( "bus",
             [
@@ -146,4 +163,4 @@ let () =
               case "close stops listening and sending" close;
               case "two nodes: a publish on A reaches a subscriber on B" two_nodes;
             ] );
-        ]
+        ]))

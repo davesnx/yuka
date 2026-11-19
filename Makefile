@@ -102,12 +102,13 @@ bench: ## Build and run the browser benchmark
 
 BENCH_RUNS ?= 10
 BENCH_OUT ?= $(BUILD_DIR)/bench-keyed/result.json
+BENCH_APPS ?= vanillajs,solid,yuka
 
 .PHONY: bench-keyed
-bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUNS, BENCH_OUT, CHROME_PATH)
+bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUNS, BENCH_OUT, BENCH_APPS, CHROME_PATH)
 	$(DUNE) build --profile=release @bench/keyed/bench-keyed
 	BUILD_DIR=$(BUILD_DIR) bench/keyed/build.sh
-	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --out $(BENCH_OUT)
+	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --apps $(BENCH_APPS) --out $(BENCH_OUT)
 
 .PHONY: size
 size: ## Bundle the keyed benchmark app, the demo and three one-island pages, print raw and gzip bytes and the JavaScript each page loads at start, check the budget in bench/size/budget.json
@@ -116,12 +117,13 @@ size: ## Bundle the keyed benchmark app, the demo and three one-island pages, pr
 
 SSR_ROWS ?= 100
 SSR_CONNECTIONS ?= 32
+SSR_ARGS ?=
 
 .PHONY: bench-ssr
-bench-ssr: ## SSR throughput of the same issue list page: yuka, dream, server-reason-react, react, solid (SSR_ROWS, SSR_CONNECTIONS)
+bench-ssr: ## SSR throughput of the same issue list page: yuka, dream, server-reason-react, react, solid (SSR_ROWS, SSR_CONNECTIONS, SSR_ARGS)
 	$(DUNE) build --profile=release @bench/ssr/ocaml/all
 	[ -d bench/ssr/node/node_modules ] || npm ci --prefix bench/ssr/node --no-audit --no-fund
-	node bench/ssr/run.ts --build-dir $(BUILD_DIR) --rows $(SSR_ROWS) --connections $(SSR_CONNECTIONS)
+	node bench/ssr/run.ts --build-dir $(BUILD_DIR) --rows $(SSR_ROWS) --connections $(SSR_CONNECTIONS) $(SSR_ARGS)
 
 PAGES_RUNS ?= 5
 PAGES_THROTTLE ?= 4
@@ -129,6 +131,19 @@ PAGES_THROTTLE ?= 4
 .PHONY: measure-pages
 measure-pages: demo-bundle ## Measure JS bytes, TBT and LCP of each demo page, and LCP as plain HTML (PAGES_RUNS, PAGES_THROTTLE, CHROME_PATH)
 	node bench/pages/measure.ts --build-dir $(BUILD_DIR) --runs $(PAGES_RUNS) --throttle $(PAGES_THROTTLE)
+
+BENCH_CHECKS ?= keyed,ssr,pages
+
+.PHONY: bench-check
+bench-check: ## Check the last bench-keyed, bench-ssr and measure-pages results against bench/gate/limits.json (BENCH_CHECKS)
+	node bench/gate/gate.ts --build-dir $(BUILD_DIR) --keyed $(BENCH_OUT) --checks $(BENCH_CHECKS)
+
+.PHONY: bench-gate
+bench-gate: ## Run bench-keyed (yuka and solid), bench-ssr (yuka-stream and its references, interleaved) and measure-pages, then bench-check
+	$(MAKE) bench-keyed BENCH_APPS=solid,yuka
+	$(MAKE) bench-ssr SSR_ARGS="--only yuka-stream,solid-node,server-reason-react --interleave"
+	$(MAKE) measure-pages
+	$(MAKE) bench-check
 
 .PHONY: docs
 docs: ## Copy docs/ to the references of the agent skill in skills/yuka (make test fails when they differ)
@@ -177,6 +192,8 @@ dev-packages: ## List opam packages the benchmarks and the demo need that are no
 # https://github.com/melange-re/melange/pull/2211, for https://github.com/ocaml/dune/issues/17020
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
+	@echo "ache git+https://github.com/davesnx/ache.git#5827338a3c35d39feec2f772a7cc4014ebef7a7c"
+	@echo "ache-lwt git+https://github.com/davesnx/ache.git#5827338a3c35d39feec2f772a7cc4014ebef7a7c"
 	@echo "cows git+https://github.com/syaiful6/cows.git#fc74ab9f372adf6b19d00feec60e4bc669ea10a8"
 	@echo "dune.3.25.0 git+https://github.com/davesnx/dune.git#1e6f26d4d6615e0d2770977a00d2f654fcc4dba3"
 	@echo "melange.7.0.1-55 git+https://github.com/davesnx/melange.git#16162e70268bf63cab1e12fd14f49f8d06983cf6"

@@ -1,6 +1,19 @@
 open Types
 
 let current_key = ref ""
+let shown_key = ref ""
+
+let table r =
+  match !r with
+  | Some t -> t
+  | None ->
+      let t = Web.table () in
+      r := Some t;
+      t
+
+let scroll_table : float Web.table option ref = ref None
+let save_scroll () = Web.table_set (table scroll_table) !shown_key (Web.scroll_y ())
+
 let loaded = Platform.loaded
 let on = ref false
 let router : router option ref = ref None
@@ -10,7 +23,7 @@ let attempt = ref 0
 let failed = ref false
 let timer : (unit -> unit) option ref = ref None
 let waiting : ((router -> unit) * (unit -> unit)) list ref = ref []
-let settings = ref (`Hover, false, ignore)
+let settings = ref (false, ignore)
 let listening : Web.node option ref = ref None
 let link_events = [ "pointerover"; "focusin"; "pointerdown"; "touchstart" ]
 let leave_events = [ "pointerout"; "focusout" ]
@@ -112,6 +125,12 @@ let on_link e =
   if Option.is_some !router || Web.link_href true (Web.target e) <> "" then
     use (fun r -> r.handle e)
 
+let rec on_move e =
+  if Web.pointer_type e = "mouse" then begin
+    Web.remove_listener (Web.document ()) "pointermove" on_move;
+    use ignore
+  end
+
 let on_leave e = if !loading || Option.is_some !router then use (fun r -> r.handle e)
 
 let on_popstate e =
@@ -119,18 +138,19 @@ let on_popstate e =
     (fun r -> r.handle e)
     (fun () -> if Web.current_url () <> !loaded then Web.location_assign (Web.current_url ()))
 
-let start ~load ?lazy_entries ?(prefetch = `Hover) ?(transitions = false) entries =
+let start ~load ?lazy_entries ?(transitions = false) entries =
   on := true;
   failed := false;
   loader := load;
   let islands () = Client.start ?lazy_entries entries in
-  settings := (prefetch, transitions, islands);
+  settings := (transitions, islands);
   Web.manual_scroll ();
   current_key := Web.history_key ();
   if !current_key = "" then begin
     current_key := Web.fresh_key ();
     Web.history_replace_key !current_key
   end;
+  shown_key := !current_key;
   loaded := Web.current_url ();
   let doc = Web.document () in
   (match !listening with
@@ -143,12 +163,13 @@ let start ~load ?lazy_entries ?(prefetch = `Hover) ?(transitions = false) entrie
       Web.add_listener (Web.window ()) "popstate" on_popstate);
   islands ();
   Platform.client_navigate := Some navigate;
-  match (!router, prefetch) with
-  | Some r, _ -> r.boot !settings
-  | None, `Visible -> use ignore
-  | None, `Hover when Array.length (Web.query_all doc "a[data-yuka-prefetch=visible]") > 0 ->
+  match !router with
+  | Some r -> r.boot !settings
+  | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch][content=visible],meta[name=yuka-prefetch][content=idle]") > 0 ->
       use ignore
-  | None, _ -> ()
+  | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch]") = 0 ->
+      Web.add_listener doc "pointermove" on_move
+  | None -> ()
 
 let stop () =
   Platform.client_navigate := None;
@@ -164,6 +185,7 @@ let stop () =
       Web.remove_listener doc "click" on_click;
       List.iter (fun n -> Web.remove_listener doc n on_link) link_events;
       List.iter (fun n -> Web.remove_listener doc n on_leave) leave_events;
+      Web.remove_listener doc "pointermove" on_move;
       Web.remove_listener (Web.window ()) "popstate" on_popstate
   | None -> ());
   Option.iter (fun r -> r.stop ()) !router;

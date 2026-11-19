@@ -14,25 +14,25 @@ Two pages with the same path shape
   Error: path "/a/:y<string>" has the same shape as "/a/:x<int>" (line 3); both answer `GET
   [1]
 
-An endpoint and a page on one path, both GET
+A Router.get and a page on one path, both GET
 
   $ gen <<'EOF'
   > Router.make
   >   [
   >     Router.route A ~path:"/feed" ~page:Pages.a;
-  >     Router.endpoint B ~path:"/feed" ~method_:`GET ~handler:Handlers.b;
+  >     Router.get B ~path:"/feed" ~handler:Handlers.b;
   >   ]
   > EOF
-  File "Routes.ml", line 4, characters 4-69:
+  File "Routes.ml", line 4, characters 4-50:
   Error: path "/feed" has the same shape as "/feed" (line 3); both answer `GET
   [1]
 
-A redirect answers every method, so it overlaps an action on its path
+A redirect answers every method, so it overlaps a Router.post on its path
 
   $ gen <<'EOF'
   > Router.make
   >   [
-  >     Router.action A ~path:"/old" ~method_:`POST ~handler:Handlers.a;
+  >     Router.post A ~path:"/old" ~handler:Handlers.a;
   >     Router.redirect ~path:"/old" ~to_:(Permanent "/new");
   >   ]
   > EOF
@@ -128,22 +128,30 @@ A redirect target that names an unknown param
   Error: redirect target "/issue/:key" names :key, which is not a param of the path
   [1]
 
-An action with GET
+Router.endpoint and Router.action were removed; the error names the method
+nodes
 
   $ gen <<'EOF'
-  > Router.make [ Router.action A ~path:"/a" ~method_:`GET ~handler:Handlers.a ]
+  > Router.make [ Router.endpoint A ~path:"/a" ~method_:`GET ~handler:Handlers.a ]
   > EOF
-  File "Routes.ml", line 1, characters 50-54:
-  Error: Router.action cannot use `GET; use `POST, `PUT, `PATCH or `DELETE
+  File "Routes.ml", line 1, characters 14-76:
+  Error: Router.endpoint was removed: use Router.get, Router.post, Router.put, Router.patch or Router.delete
   [1]
 
-An unknown method
+  $ gen <<'EOF'
+  > Router.make [ Router.action A ~path:"/a" ~method_:`POST ~handler:Handlers.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 14-75:
+  Error: Router.action was removed: use Router.post, Router.put, Router.patch or Router.delete
+  [1]
+
+A method node takes its method from its name, not from ~method_
 
   $ gen <<'EOF'
-  > Router.make [ Router.endpoint A ~path:"/a" ~method_:`TRACE ~handler:Handlers.a ]
+  > Router.make [ Router.post A ~path:"/a" ~method_:`POST ~handler:Handlers.a ]
   > EOF
-  File "Routes.ml", line 1, characters 52-58:
-  Error: ~method_ must be one of `GET, `POST, `PUT, `PATCH, `DELETE
+  File "Routes.ml", line 1, characters 48-53:
+  Error: Router.post has no argument ~method_; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
   [1]
 
 A catch-all that is not the last segment
@@ -292,19 +300,6 @@ A param name that is a keyword
   Error: param "effect" in path "/a/:effect<string>" is not a lowercase OCaml label
   [1]
 
-A label reserved by the generated code
-
-  $ gen <<'EOF'
-  > Router.make
-  >   [
-  >     Router.route A ~path:"/a" ~page:Pages.a
-  >       ~search:{ with_query = optional string };
-  >   ]
-  > EOF
-  File "Routes.ml", line 4, characters 14-46:
-  Error: label with_query is reserved by the generated code
-  [1]
-
 A param named href, which the route helpers call
 
   $ gen <<'EOF'
@@ -351,16 +346,16 @@ A route name whose helper is a keyword
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.endpoint Method ~path:"/a" ~method_:`GET ~handler:Handlers.a ]
+  > Router.make [ Router.get Method ~path:"/a" ~handler:Handlers.a ]
   > EOF
-  File "Routes.ml", line 1, characters 30-36:
+  File "Routes.ml", line 1, characters 25-31:
   Error: name Method makes the helper Routes.method, which is an OCaml keyword; choose another name
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.action Effect ~path:"/a" ~method_:`POST ~handler:Handlers.a ]
+  > Router.make [ Router.post Effect ~path:"/a" ~handler:Handlers.a ]
   > EOF
-  File "Routes.ml", line 1, characters 28-34:
+  File "Routes.ml", line 1, characters 26-32:
   Error: name Effect makes the helper Routes.effect, which is an OCaml keyword; choose another name
   [1]
 
@@ -381,17 +376,24 @@ A route name whose helper the generated code already defines
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.route With_query ~path:"/a" ~page:Pages.a ]
+  > Router.make [ Router.route Current ~path:"/a" ~page:Pages.a ]
   > EOF
-  File "Routes.ml", line 1, characters 27-37:
-  Error: name With_query makes the helper Routes.with_query, which the generated code already defines; choose another name
+  File "Routes.ml", line 1, characters 27-34:
+  Error: name Current makes the helper Routes.current, which the generated code already defines; choose another name
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.route With_fragment ~path:"/a" ~page:Pages.a ]
+  > Router.make [ Router.route Replace ~path:"/a" ~page:Pages.a ]
   > EOF
-  File "Routes.ml", line 1, characters 27-40:
-  Error: name With_fragment makes the helper Routes.with_fragment, which the generated code already defines; choose another name
+  File "Routes.ml", line 1, characters 27-34:
+  Error: name Replace makes the helper Routes.replace, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route Push ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-31:
+  Error: name Push makes the helper Routes.push, which the generated code already defines; choose another name
   [1]
 
 A bad search kind
@@ -437,7 +439,7 @@ An unknown node
   > Router.make [ Router.page A ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 14-52:
-  Error: unknown node Router.page; the nodes are Router.make, Router.group, Router.route, Router.endpoint, Router.action and Router.redirect (names of the route file syntax, not OCaml values)
+  Error: unknown node Router.page; the nodes are Router.make, Router.group, Router.route, Router.get, Router.post, Router.put, Router.patch, Router.delete and Router.redirect (names of the route file syntax, not OCaml values)
   [1]
 
 A node that is not a Router call
@@ -455,7 +457,7 @@ An unknown argument
   > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~layout:Layouts.a ]
   > EOF
   File "Routes.ml", line 1, characters 62-71:
-  Error: Router.route has no argument ~layout; its labelled arguments are ~path, ~page, ~loader, ~guard, ~search, ~headers, ~cache, ~prerender
+  Error: Router.route has no argument ~layout; its labelled arguments are ~path, ~page, ?overlay, ~loader, ~guard, ~search, ~prefetch, ~headers, ~cache, ~prerender
   [1]
 
 A missing argument
@@ -565,13 +567,49 @@ A page that is not a value path
   Error: ~page must be a value path such as Pages.home
   [1]
 
+An overlay page that is not a value path
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ?overlay:(Some Pages.dialog) ]
+  > EOF
+  File "Routes.ml", line 1, characters 63-82:
+  Error: ?overlay must be a value path such as Pages.home
+  [1]
+
+An overlay page written ~overlay
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~overlay:Pages.dialog ]
+  > EOF
+  File "Routes.ml", line 1, characters 63-75:
+  Error: the overlay page is an optional argument: write ?overlay:Pages.dialog
+  [1]
+
+An overlay on a group
+
+  $ gen <<'EOF'
+  > Router.make [ Router.group ~path:"/a" ?overlay:Pages.dialog [ Router.route A ~path:"/" ~page:Pages.a ] ]
+  > EOF
+  File "Routes.ml", line 1, characters 47-59:
+  Error: Router.group has no argument ?overlay; its labelled arguments are ~path, ~layout, ~loader, ~guard, ~not_found, ~error, ~search, ~prefetch, ~headers, ~cache, ~prerender
+  [1]
+
+An overlay given twice
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ?overlay:Pages.b ?overlay:Pages.c ]
+  > EOF
+  File "Routes.ml", line 1, characters 80-87:
+  Error: argument ?overlay is given twice
+  [1]
+
 A handler that is not a value path
 
   $ gen <<'EOF'
   > Router.make
-  >   [ Router.endpoint A ~path:"/a" ~method_:`GET ~handler:(fun _ -> Handlers.a) ]
+  >   [ Router.get A ~path:"/a" ~handler:(fun _ -> Handlers.a) ]
   > EOF
-  File "Routes.ml", line 2, characters 56-77:
+  File "Routes.ml", line 2, characters 37-58:
   Error: ~handler must be a value path such as Pages.home
   [1]
 
@@ -761,8 +799,8 @@ Valid input, every node kind, exits 0
   >       ~not_found:Pages.nf ~error:Pages.err ~search:{ q = optional string } ~prerender:true
   >       [
   >         Router.route A ~path:"/" ~page:Pages.a;
-  >         Router.endpoint B ~path:"/b" ~method_:`GET ~handler:Handlers.b;
-  >         Router.action C ~path:"/b" ~method_:`POST ~handler:Handlers.c;
+  >         Router.get B ~path:"/b" ~handler:Handlers.b;
+  >         Router.post C ~path:"/b" ~handler:Handlers.c;
   >       ];
   >     Router.redirect ~path:"/x" ~to_:(Temporary "/");
   >   ]
@@ -839,3 +877,83 @@ No named node
   File "Routes.ml", line 1:
   Error: the route tree has no named node
   [1]
+
+~prefetch takes `Off, `Hover, `Trajectory, `Visible or `Idle
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Eager ]
+  > EOF
+  File "Routes.ml", line 1, characters 64-70:
+  Error: ~prefetch must be `Off, `Hover, `Trajectory, `Visible or `Idle
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make ~prefetch:true [ Router.route A ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 22-26:
+  Error: ~prefetch must be `Off, `Hover, `Trajectory, `Visible or `Idle
+  [1]
+
+~prefetch is for pages: a method node and a redirect have none
+
+  $ gen <<'EOF'
+  > Router.make [ Router.get A ~path:"/a" ~handler:Handlers.a ~prefetch:`Off ]
+  > EOF
+  File "Routes.ml", line 1, characters 68-72:
+  Error: Router.get has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~headers, ~cache, ~prerender
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.post A ~path:"/a" ~handler:Handlers.a ~prefetch:`Off ]
+  > EOF
+  File "Routes.ml", line 1, characters 69-73:
+  Error: Router.post has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a; Router.redirect ~path:"/b" ~to_:(Permanent "/a") ~prefetch:`Off ]
+  > EOF
+  File "Routes.ml", line 1, characters 114-118:
+  Error: Router.redirect has no argument ~prefetch; its labelled arguments are ~path, ~to_
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make [ Router.get A ~path:"/a" ~handler:Handlers.a ~prefetch:`Idle ]
+  > EOF
+  File "Routes.ml", line 1, characters 68-73:
+  Error: Router.get has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~headers, ~cache, ~prerender
+  [1]
+
+`Idle needs a ~cache with a max-age: no ~cache, no_store and no_cache are
+errors, and the nearest ~cache of the route decides
+
+  $ gen <<'EOF'
+  > Router.make [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle ]
+  > EOF
+  File "Routes.ml", line 1, characters 64-69:
+  Error: ~prefetch:`Idle needs a ~cache with a max-age; route A has no ~cache
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make ~cache:no_store
+  >   [ Router.route A ~path:"/a" ~page:Pages.a ~prefetch:`Idle ]
+  > EOF
+  File "Routes.ml", line 2, characters 54-59:
+  Error: ~prefetch:`Idle needs a ~cache with a max-age; the ~cache of route A is no_store (line 1)
+  [1]
+
+  $ gen <<'EOF'
+  > Router.make ~prefetch:`Idle
+  >   [
+  >     Router.group ~path:"/g" ~cache:(public ~max_age:60 ())
+  >       [ Router.route A ~path:"/a" ~page:Pages.a; Router.route B ~path:"/b" ~page:Pages.b ~cache:no_cache ];
+  >   ]
+  > EOF
+  File "Routes.ml", line 1, characters 22-27:
+  Error: ~prefetch:`Idle needs a ~cache with a max-age; the ~cache of route B is no_cache (line 4)
+  [1]
+
+  $ gen > /dev/null <<'EOF'
+  > Router.make ~cache:no_store
+  >   [ Router.route A ~path:"/a" ~page:Pages.a ~cache:(private_cache ~max_age:60) ~prefetch:`Idle ]
+  > EOF

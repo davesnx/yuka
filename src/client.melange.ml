@@ -301,12 +301,10 @@ let delegate doc event =
     Web.add_listener doc event (dispatch event)
   end
 
-let unowned : Base.owner = { last = None; gen = 0; catch = None; parent = None }
-
 let add_handler doc el event handler =
-  let owner = match !Base.current_owner with Some o -> o | None -> unowned in
+  let owner = match !(Base.current_owner ()) with Some o -> o | None -> Base.new_owner () in
   if non_bubbling event then begin
-    let handler = acting_as !Base.current_owner handler in
+    let handler = acting_as !(Base.current_owner ()) handler in
     let handler ev = ignore (handle owner handler ev) in
     Web.add_listener el event handler;
     on_dispose (fun () -> Web.remove_listener el event handler)
@@ -323,6 +321,18 @@ let add_handler doc el event handler =
       Web.set_prop el key hs
     end
   end
+
+let has_handler el event run =
+  let hs = prop el (handlers_key event) in
+  let found = ref false in
+  if hs != Js.undefined then begin
+    let hs = defined hs in
+    for i = 0 to Array.length hs - 1 do
+      let h = get hs i in
+      if live h && h.run == run then found := true
+    done
+  end;
+  !found
 
 
 let compile doc svg (template : template) =
@@ -407,7 +417,7 @@ let rec mount_node pos last n =
           instantiate pos template c parts
       | None -> mount_node pos last ((uncurry2 !Template.expander) template parts [@u]))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
-  | Catch { client; _ } -> (!catch_hook) pos last client [@u]
+  | Catch { client; _ } | Provide { client; _ } -> (!catch_hook) pos last client [@u]
   | Each { items; key; equal; render } ->
       last := false;
       mount_each pos false items key equal render
@@ -557,33 +567,43 @@ and mount_each :
     { key = k; value = v; first; last; dispose }
   in
   let entries = ref [||] in
+  let dispose_all es =
+    for i = 0 to Array.length es - 1 do
+      (get es i).dispose ()
+    done
+  in
+  on_dispose (fun () -> dispose_all !entries);
   let first = State.peek source in
+  let seen = Web.table () in
   for i = 0 to Array.length first - 1 do
     let v = get first i in
-    push !entries (make_entry pos (key v) v)
+    let k = key v in
+    if not (Web.table_has seen k) then begin
+      Web.table_set seen k true;
+      push !entries (make_entry pos k v)
+    end
   done;
   let stop = if owned then (drop_to_end pos; Js.null) else some (comment pos "]") in
   let clear_all () =
     if start == Js.null then Web.clear pos.parent ""
     else Web.delete_between pos.parent (node_of start) (node_of stop)
   in
-  let dispose_all es =
-    for i = 0 to Array.length es - 1 do
-      (get es i).dispose ()
-    done
-  in
   let reconcile source =
-    let n = Array.length source in
-    let items = alloc n and keys = alloc n in
-    let wanted = Web.table () in
-    for j = 0 to n - 1 do
+    let items = [||] and keys = [||] and wanted = Web.table () in
+    for j = 0 to Array.length source - 1 do
       let v = get source j in
       let k = key v in
-      if Web.table_has wanted k then failwith ("Yuka.each: duplicate key " ^ k);
-      Web.table_set wanted k true;
-      set items j v;
-      set keys j k
+      if Web.table_has wanted k then begin
+        if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then
+          Web.console_error ("yuka: each: duplicate key " ^ k ^ ", the later item is left out")
+      end
+      else begin
+        Web.table_set wanted k true;
+        push items v;
+        push keys k
+      end
     done;
+    let n = Array.length items in
     let es = !entries in
     let old = Web.table () in
     let removed = [||] in
@@ -628,7 +648,11 @@ and mount_each :
             if not (get keep j) then move_range pos.parent e.first e.last !anchor;
             e
         end
-        else make_entry (fresh !anchor) (get keys j) item
+        else begin
+          let e = make_entry (fresh !anchor) (get keys j) item in
+          push es e;
+          e
+        end
       in
       set next j e;
       anchor := some e.first
@@ -637,8 +661,7 @@ and mount_each :
   in
   Base.run_effect Scheduler.queue (fun () ->
       let next = State.get source in
-      Scheduler.untrack (fun () -> reconcile next));
-  on_dispose (fun () -> dispose_all !entries)
+      Scheduler.untrack (fun () -> reconcile next))
 
 let keep_hook : (Web.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
 
@@ -672,11 +695,12 @@ let mount_element pos tag attrs children =
 
 let mount_await pos async loading failed render =
   let status = Async.watch async in
-  mount_hole pos false (fun () ->
-      match State.get status with
-      | Async.Pending -> loading
-      | Async.Done v -> render v
-      | Async.Failed m -> failed m)
+  Types.with_browser_ids (Types.next_id () ^ "-") (fun () ->
+      mount_hole pos false (fun () ->
+          match State.get status with
+          | Async.Pending -> loading
+          | Async.Done v -> render v
+          | Async.Failed m -> failed m))
 
 let mount_catch pos last client =
   mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
@@ -758,8 +782,7 @@ let on_error : (string -> unit) ref = ref ignore
 
 let live_islands : Web.node list ref = ref []
 
-let transport name input =
-  let result, resolve, _ = Async.make () in
+let transport name input k =
   let id = register ignore in
   let finish () = drop_cleanup id in
   let abort =
@@ -775,28 +798,28 @@ let transport name input =
           !Platform.acted ();
           !Platform.live_mark fields
       | _ -> ());
-      resolve answer)
+      k answer)
     (fun cancelled message ->
       finish ();
-      resolve (Error (Status.Network (if cancelled then "cancelled" else message))))
+      k (Error (Status.Network (if cancelled then "cancelled" else message))))
   in
-  if Web.table_has (cleanups ()) (string_of_int id) then begin
-    set_cleanup id abort;
-    let tie (owner : Base.owner) =
-      let disposer = Base.add_disposer owner abort in
-      Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
-    in
-    match !acting with
-    | Some owner ->
-        let rec chain (o : Base.owner) = (o, o.gen) :: (match o.parent with Some p -> chain p | None -> []) in
-        let owners = chain owner in
-        Web.microtask (fun () ->
-            match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
-            | Some (o, _) -> tie o
-            | None -> abort ())
-    | None -> Option.iter tie !Base.current_owner
-  end;
-  result
+  if Web.table_has (cleanups ()) (string_of_int id) then set_cleanup id abort;
+  abort
+
+let own_call result abort =
+  let tie (owner : Base.owner) =
+    let disposer = Base.add_disposer owner abort in
+    Async.on_settled result (fun _ -> Base.remove_disposer owner disposer)
+  in
+  match !acting with
+  | Some owner ->
+      let rec chain (o : Base.owner) = (o, o.gen) :: (match o.parent with Some p -> chain p | None -> []) in
+      let owners = chain owner in
+      Web.microtask (fun () ->
+          match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
+          | Some (o, _) -> tie o
+          | None -> abort ())
+  | None -> Option.iter tie !(Base.current_owner ())
 
 let started_key = "__yuka_started"
 let is_true = function Some true -> true | Some false | None -> false
@@ -844,7 +867,8 @@ let boot entries props island =
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
-              match Base.with_owner o (fun () -> hydrate island (Kind.of_fn build)) with
+              o.env <- Scheduler.Root (Option.value (Web.get_attribute island "data-ctx") ~default:"");
+              match Base.with_owner o (fun () -> Types.with_browser_ids (id ^ "-") (fun () -> hydrate island (Kind.of_fn build))) with
               | d when !failed ->
                   stop d;
                   Base.dispose_owner o;
@@ -892,7 +916,8 @@ let stop () =
   Web.table_clear (cleanups ());
   Array.iter (fun f -> f ()) pending;
   List.iter (fun island -> Web.set_bool island started_key false) !live_islands;
-  live_islands := []
+  live_islands := [];
+  !Platform.cleared ()
 
 let cleanup_key = "__yuka_cleanup"
 
@@ -978,8 +1003,8 @@ let start_island entries lazy_entries props island =
         cancel ();
         drop_events ())
 
-let transport_hook : (string -> Json.t -> (Json.t, Status.error) result Async.t) ref =
-  ref (fun name _ -> failwith ("Yuka: no action transport for " ^ name ^ ": Action.send did not call Client.use_actions"))
+let transport_hook : (string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit) ref =
+  ref (fun name _ _ -> failwith ("Yuka: no action transport for " ^ name ^ ": Action.send did not call Client.use_actions"))
 
 let use_actions () = transport_hook := transport
 
@@ -989,7 +1014,7 @@ let script_props script =
   | None -> None
 
 let start ?(lazy_entries = []) entries =
-  Types.transport := (fun name input -> !transport_hook name input);
+  Bridge.send := (fun name input k -> !transport_hook name input k);
   Types.async_source := (fun id -> !async_hook id);
   let props = Web.table () in
   let waiting = ref [] in

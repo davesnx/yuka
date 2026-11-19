@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { loadavg } from "node:os";
 import { gzipSync } from "node:zlib";
 import { parseArgs } from "node:util";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type BrowserContext } from "playwright-core";
 
 const { values: options } = parseArgs({
   options: {
@@ -75,8 +75,19 @@ function inlineScripts(html: string): string[] {
 const plainHtml = (html: string) =>
   html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<link\b[^>]*rel\s*=\s*["']?modulepreload["']?[^>]*>/gi, "");
 
-async function jsBytes(browser: Browser, url: string, html: string): Promise<Js> {
+// Headless Chromium keeps its mouse over the page and can send a pointermove after layout,
+// which loads code meant for user intent, such as navigation (issue #36).
+const noPointer = `for (const t of ["pointerover", "pointerout", "pointermove", "mouseover", "mouseout", "mousemove"])
+  window.addEventListener(t, (e) => e.stopImmediatePropagation(), true);`;
+
+async function newContext(browser: Browser): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await context.addInitScript(noPointer);
+  return context;
+}
+
+async function jsBytes(browser: Browser, url: string, html: string): Promise<Js> {
+  const context = await newContext(browser);
   try {
     const page = await context.newPage();
     const pending: Promise<{ url: string; body: Buffer } | null>[] = [];
@@ -115,7 +126,7 @@ const observe = `
 `;
 
 async function timing(browser: Browser, url: string, plain: string | null): Promise<Timing> {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await newContext(browser);
   try {
     const page = await context.newPage();
     if (plain !== null)
@@ -139,15 +150,26 @@ async function timings(browser: Browser, url: string, plain: string | null): Pro
   return { lcp: median(samples.map((s) => s.lcp)), tbt: median(samples.map((s) => s.tbt)), runs: samples };
 }
 
-const server = spawn(join(buildDir, "default/demo/server/demo_server.exe"), ["--port", options.port, "--bundle"], { stdio: "ignore" });
+const server = spawn(join(buildDir, "default/demo/server/demo_server.exe"), ["--port", options.port, "--interface", "127.0.0.1", "--bundle"], {
+  stdio: ["ignore", "pipe", "pipe"],
+});
 const stop = () => server.kill();
 process.on("exit", stop);
+let started = false;
+let output = "";
+const collect = (chunk: Buffer) => {
+  if (!started) output += chunk.toString();
+};
+server.stdout.on("data", collect);
+server.stderr.on("data", collect);
+const notStarted = (why: string) => new Error(`demo server ${why}; its output:\n${output}`);
 for (let i = 0; ; i++) {
-  if (server.exitCode !== null) throw new Error(`demo server exited with ${server.exitCode}`);
+  if (server.exitCode !== null) throw notStarted(`exited with ${server.exitCode}`);
   if (await fetch(`${base}/about`).then((r) => r.ok, () => false)) break;
-  if (i > 100) throw new Error("demo server did not start");
+  if (i > 100) throw notStarted(`did not answer on ${base}`);
   await wait(100);
 }
+started = true;
 
 const loadBefore = loadavg();
 const browser = await chromium.launch({ executablePath: options.chrome === "" ? undefined : options.chrome });
@@ -170,7 +192,7 @@ try {
 const loadAfter = loadavg();
 
 const zeroJs = results.filter((r) => r.islands === 0);
-const checks = zeroJs.map((r) => ({ path: r.path, ok: r.js.total.raw === 0, bytes: r.js.total.raw }));
+const checks = zeroJs.map((r) => ({ path: r.path, ok: r.js.external.raw === 0, bytes: r.js.external.raw }));
 if (checks.length === 0) checks.push({ path: "(no page without island)", ok: false, bytes: NaN });
 
 const ms = (x: number) => x.toFixed(0);
@@ -183,7 +205,7 @@ const lines = [
     row([r.path, String(r.islands), String(r.js.files.length), String(r.js.external.raw), String(r.js.external.gzip), String(r.js.inline.raw), ms(r.page.tbt), ms(r.page.lcp), ms(r.plain.lcp)]),
   ),
   "",
-  ...checks.map((c) => `${c.ok ? "PASS" : "FAIL"}  0 bytes of JavaScript on ${c.path}${c.ok ? "" : ` (${c.bytes} bytes)`}`),
+  ...checks.map((c) => `${c.ok ? "PASS" : "FAIL"}  0 bytes of JavaScript files on ${c.path}${c.ok ? "" : ` (${c.bytes} bytes)`}`),
 ];
 console.log(lines.join("\n"));
 

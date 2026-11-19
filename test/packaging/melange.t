@@ -21,6 +21,12 @@ Most internal modules are private:
   $ printf 'let _ = Yuka__Web.in_browser\n' > native/main.ml
   $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Web'
   Unbound module Yuka__Web
+  $ printf 'let _ = Yuka__Form_core.get\n' > native/main.ml
+  $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Form_core'
+  Unbound module Yuka__Form_core
+  $ printf 'let _ = Yuka__Route.push\n' > native/main.ml
+  $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Route'
+  Unbound module Yuka__Route
   $ printf 'let _ = ignore (Yuka.text "x")\n' > native/main.ml
   $ dune build --root . ./native/main.exe
 
@@ -32,9 +38,12 @@ expand, stay public:
   > let badge = Yuka.element "b" [] []
   > let _ : Yuka.server Yuka.element * Yuka.client Yuka.element = (badge, badge)
   > let _ = Yuka.Status.data
-  > let _ = Yuka.Remote.use
-  > let _ = Yuka.Live.use
+  > let _ = Yuka.Remote.make
+  > let _ = Yuka.Live.make
   > let _ = Yuka.Form.make
   > let _ = Yuka.Router.Param.int
   > EOF
   $ dune build --root . ./native/main.exe
+  $ printf 'let _ = Yuka__Form_core.get\n' > main.ml
+  $ dune build --root . 2>&1 | grep -o 'Unbound module Yuka__Form_core'
+  Unbound module Yuka__Form_core

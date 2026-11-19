@@ -23,6 +23,9 @@ type lazy_entry
 
 val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
 
+val acting : Base.owner option ref
+val own_call : 'a Async.t -> (unit -> unit) -> unit
+
 val render : container -> (unit -> 'k Kind.element) -> unit -> unit
 val hydrate : container -> (unit -> 'k Kind.element) -> unit -> unit
 val render_root : container * (unit -> 'k Kind.element) -> unit
@@ -30,6 +33,7 @@ val stop_roots : unit -> unit
 val start : ?lazy_entries:lazy_entry list -> entry list -> unit
 val stop : unit -> unit
 val stop_within : Web.node -> unit
+val has_handler : Web.node -> string -> (Web.event -> unit) -> bool
 val on_error : (string -> unit) ref
 
 val use_element : unit -> unit

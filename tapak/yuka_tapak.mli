@@ -1,11 +1,12 @@
-(** Runs a Yuka app on tapak, in direct style on Eio. One domain. *)
+(** Runs a Yuka app on tapak, in direct style on Eio. One domain. There is
+    no [prerender] yet: [Yuka_dream.prerender] is the only one for now. *)
 
 val handler :
   sw:Eio.Switch.t ->
   fs:_ Eio.Path.t ->
   ?node:Yuka.Server.Live.node ->
   Yuka.Server.config ->
-  Tapak.Request.t Yuka.Server.app ->
+  Yuka.Server.app ->
   Tapak.handler
 (** Answers every request with the request cycle
     ([Yuka.Server.Adapter.Make]), the WebSocket of {!Yuka.Live} at
@@ -27,6 +28,11 @@ val handler :
     When the config has no [log], messages go to the [Logs] source
     ["yuka"]. *)
 
+val request : Yuka.Server.request -> Tapak.Request.t option
+(** The tapak request of a request that {!handler} made, for a loader,
+    guard, handler or action that needs tapak. [None] for a request from
+    another adapter or from [Yuka.Server.Testing.request]. *)
+
 val sessions : Tapak.middleware
 (** Gives each client a session id cookie ([yuka-session]) and a CSRF
     secret cookie ([yuka-csrf]), both [HttpOnly] and [SameSite=Lax], when
@@ -34,13 +40,18 @@ val sessions : Tapak.middleware
     first request already has a session. The live socket and
     [/_yuka/csrf] need it. *)
 
-val switch : unit -> Eio.Switch.t
-(** The switch of the current request, inside {!handler}. Raises
-    [Invalid_argument] outside a request. *)
+val switch : unit -> Eio.Switch.t option
+(** The switch of the current request, inside {!handler}. [None] outside a
+    request. *)
 
-val await : 'a Yuka.Async.t -> 'a
-(** Waits for the value. A failed [Async] raises [Failure] with its
-    message. *)
+val switch_exn : unit -> Eio.Switch.t
+(** {!switch}, but raises [Invalid_argument] outside a request. *)
+
+val await : 'a Yuka.Async.t -> ('a, string) result
+(** Waits for the value. A failed [Async] gives [Error] with its message. *)
+
+val await_exn : 'a Yuka.Async.t -> 'a
+(** {!await}, but a failed [Async] raises [Failure] with its message. *)
 
 val async : sw:Eio.Switch.t -> (unit -> 'a) -> 'a Yuka.Async.t
 (** Runs the function in a new fiber on [sw]. An exception gives a failed

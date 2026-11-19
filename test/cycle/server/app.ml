@@ -84,18 +84,18 @@ let jot_form key =
       el "div"
         [
           el "input" ~attrs:[ ("name", "body"); ("value", Yuka.Form.value form `Body) ] [];
-          Yuka.Form.error_view form `Body (fun m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
+          Yuka.Form.field_error_view form `Body (fun ~id:_ m -> el "p" [ text ("jot " ^ key ^ " error: " ^ m) ]);
         ])
     ()
 
 let mine = Yuka.Topic.declare ~name:"cycle-mine" ~key:Yuka.Codec.string ~state:Yuka.Codec.string
 let mine_loads = ref 0
 let boom_topic = Yuka.Topic.declare ~name:"cycle-boom" ~key:Yuka.Codec.string ~state:Yuka.Codec.string
-let () = Server.Live.serve boom_topic (fun _ -> Async.failed "boom secret")
+let () = Server.Live.implement boom_topic (fun _ -> Async.failed "boom secret")
 
 let () =
-  Server.Live.serve
-    ~allow:(fun ctx key -> Server.Context.header ctx "x-user" = Some key)
+  Server.Live.implement
+    ~allow:(fun request key -> Server.Request.header request "x-user" = Some key)
     mine
     (fun key ->
       incr mine_loads;
@@ -115,9 +115,9 @@ module Pages = struct
                   [
                     el "input" ~attrs:[ ("name", "title"); ("value", Yuka.Form.value form `Title) ] [];
                     el "input" ~attrs:[ ("name", "count"); ("value", Yuka.Form.value form `Count) ] [];
-                    Yuka.Form.error_view form `Title (fun m -> el "p" [ text ("title error: " ^ m) ]);
-                    Yuka.Form.error_view form `Count (fun m -> el "p" [ text ("count error: " ^ m) ]);
-                    Yuka.Form.errors_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
+                    Yuka.Form.field_error_view form `Title (fun ~id:_ m -> el "p" [ text ("title error: " ^ m) ]);
+                    Yuka.Form.field_error_view form `Count (fun ~id:_ m -> el "p" [ text ("count error: " ^ m) ]);
+                    Yuka.Form.form_errors_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
                   ])
               ();
             jot_form "one";
@@ -158,7 +158,8 @@ module Pages = struct
     Server.page ~title:"Slow" (fun () ->
         Yuka.Await.make ~async:(slow ()) ~loading:(text "wait")
           ~failed:(fun _ -> failwith "timeout secret")
-          ~children:(fun v -> if v = "explode" then failwith "fill secret" else text v)
+          ~children:(fun v ->
+            if v = "explode" then failwith "fill secret" else if v = "island" then island "Late" else text v)
           ())
 
   let twice () =
@@ -173,6 +174,7 @@ module Pages = struct
 
   let broken () = Server.page ~title:"Broken" (fun () -> failwith "shell secret")
   let boom ~exploding () = Server.page (fun () -> text exploding)
+  let greet ~greeting () = Server.page (fun () -> text greeting)
 
   let member ~team ~user ~squad ~profile () =
     Server.page ~title:"Member" (fun () ->
@@ -182,6 +184,10 @@ module Pages = struct
 
   let org_item ~org ~n ~org_item () =
     Server.page (fun () -> text (String.concat " " [ org; string_of_int n; org_item ]))
+
+  let org_dialog ~org ~n ~org_item () =
+    Server.page ~title:"Dialog" (fun () ->
+        el "dialog" [ text (String.concat " " [ "dialog"; org; string_of_int n; org_item ]); island "Counter" ])
 
   let org_missing ~org ~path () =
     Server.page ~title:"Org missing" (fun () -> el "p" [ text ("no org page " ^ path ^ " in " ^ org) ])
@@ -194,7 +200,7 @@ module Pages = struct
   let live () =
     Server.page ~title:"Live" (fun () ->
         Yuka.runtime_island ~name:"Live" ~props:`Null (fun () ->
-            let t = Yuka.Live.use mine (fun () -> "ann") in
+            let t = Yuka.Live.make mine (fun () -> "ann") in
             let shown =
               match Yuka.Live.status t with
               | Yuka.Status.Ready { data; _ } -> "data " ^ data
@@ -203,6 +209,8 @@ module Pages = struct
             in
             el "p" [ text shown ]))
 end
+
+let last_request : Server.request option ref = ref None
 
 module Loaders = struct
   let squad _req ~team =
@@ -217,12 +225,19 @@ module Loaders = struct
     | "wait", _ -> later ()
     | _, 404 -> Async.return (Error Server.Not_found)
     | _, 500 -> Async.failed "loader secret"
-    | _ -> Async.return (Ok (Option.value (header req "x-user") ~default:"anonymous"))
+    | _ -> Async.return (Ok (Option.value (Server.Request.header req "x-user") ~default:"anonymous"))
 
   let org_item _req ~org:_ ~n =
     Async.return (if n = 404 then Error Server.Not_found else Ok "item")
 
   let exploding _req : (string, Server.stop) result Async.t = failwith "loader secret"
+
+  let greeting req =
+    Async.return
+      (Ok
+         (Printf.sprintf "hello %s from %s"
+            (Option.value (Server.Request.query_param req "name") ~default:"-")
+            (Option.value (Server.Request.header req "x-user") ~default:"-")))
 end
 
 module Guards = struct
@@ -247,6 +262,21 @@ module Guards = struct
   let inner _req ~team:_ ~user =
     note "inner";
     Async.return (if user = 0 then Error (Server.Fail "guard secret") else Ok ())
+
+  let greet req =
+    if Server.Request.header req "x-user" = None then Async.return (Error Server.Forbidden)
+    else
+      match Server.Request.meth req with
+      | `POST ->
+          Async.map
+            (function Ok body when body <> "" -> Ok () | _ -> Error Server.Forbidden)
+            (Server.Request.body req ~limit:1000)
+      | _ -> Async.return (Ok ())
+
+  let sum req =
+    Async.map
+      (function Ok (_ :: _) -> Ok () | _ -> Error Server.Forbidden)
+      (Server.Request.json req Yuka.Codec.(list int))
 end
 
 module Api = struct
@@ -254,10 +284,11 @@ module Api = struct
     note "team json";
     if team = "gone" then Server.text ~status:404 "gone" else
     Server.json
+      (Yuka.Codec.make ~encode:Fun.id ~decode:Result.ok)
       (`Assoc
         [
           ("team", `String (team));
-          ("user", `String (Option.value (header req "x-user") ~default:"anonymous"));
+          ("user", `String (Option.value (Server.Request.header req "x-user") ~default:"anonymous"));
         ])
 
   let rename _req ~team:_ =
@@ -279,13 +310,27 @@ module Api = struct
   let cookies _req =
     Server.text ~headers:[ ("set-cookie", "a=1"); ("Set-Cookie", "b=2"); ("x-a", "mine") ] "two cookies"
 
-  let bad_header _req = Async.return (Server.response ~headers:[ ("x-bad", "a\r\nset-cookie: x=1") ] (Server.String "bad"))
+  let bad_header _req = Server.response ~headers:[ ("x-bad", "a\r\nset-cookie: x=1") ] (Server.String "bad")
 
   let thing _req =
     note "thing";
     Server.text "thing"
 
-  let hook _req = Server.text "hook"
+  let hook req =
+    last_request := Some req;
+    Server.text "hook"
+
+  let sum req =
+    Async.bind (Server.Request.json req Yuka.Codec.(list int)) (function
+      | Error _ -> Server.text ~status:400 "bad body"
+      | Ok numbers ->
+          Server.json ~status:201
+            Yuka.Codec.(list string)
+            [
+              string_of_int (List.fold_left ( + ) 0 numbers);
+              Option.value (Server.Request.query_param req "tag") ~default:"-";
+              Option.value (Server.Request.header req "x-user") ~default:"-";
+            ])
 end
 
 let saved = ref []
@@ -293,14 +338,48 @@ let saved = ref []
 let whoami = Yuka.Action.mutation ~name:"whoami" ~input:Yuka.Codec.unit ~output:Yuka.Codec.string
 
 let () =
-  Server.Action.make whoami (fun ctx () ->
+  Server.Action.implement whoami (fun request () ->
       Async.return
         (String.concat " "
            [
-             Option.value (Server.Context.header ctx "x-user") ~default:"-";
-             Option.value (Server.Context.session ctx) ~default:"-";
-             (match Server.Context.meth ctx with `POST -> "POST" | _ -> "other");
-             Server.Context.path ctx;
+             Option.value (Server.Request.header request "x-user") ~default:"-";
+             Option.value (Server.Request.session request) ~default:"-";
+             (match Server.Request.meth request with `POST -> "POST" | _ -> "other");
+             Server.Request.path request;
+           ]))
+
+let inspect = Yuka.Action.mutation ~name:"inspect" ~input:Yuka.Codec.int ~output:Yuka.Codec.string
+
+let () =
+  Server.Action.implement inspect (fun request n ->
+      let module R = Server.Request in
+      let shown = function
+        | Ok s -> s
+        | Error `Too_large -> "too large"
+      in
+      let json_shown = function
+        | Ok n -> string_of_int n
+        | Error `Too_large -> "too large"
+        | Error (`Invalid_json _) -> "invalid json"
+        | Error (`Invalid_value _) -> "invalid value"
+      in
+      Async.bind (R.body request ~limit:100) @@ fun first ->
+      Async.bind (R.body request ~limit:100) @@ fun second ->
+      Async.bind (R.body request ~limit:1) @@ fun small ->
+      Async.bind (R.json request Yuka.Codec.int) @@ fun as_int ->
+      Async.bind (R.json request Yuka.Codec.string) @@ fun as_string ->
+      Async.return
+        (String.concat " | "
+           [
+             string_of_int n;
+             shown first;
+             shown second;
+             shown small;
+             json_shown as_int;
+             (match as_string with Error (`Invalid_value _) -> "invalid value" | _ -> "other");
+             R.target request;
+             String.concat "," (List.map (fun (k, v) -> k ^ "=" ^ v) (R.query request));
+             Option.value (R.cookie request "sid") ~default:"-";
            ]))
 
 let () =
@@ -309,10 +388,10 @@ let () =
     ~redirect:(fun o ->
       if String.exists (fun c -> c = ':' || c < ' ' || c = '\127') o || String.starts_with ~prefix:"/" o then o
       else "/entry?saved=" ^ o)
-    (fun ctx e ->
+    (fun request e ->
       saved := e.title :: !saved;
       match e.title with
-      | "who" -> Async.return (Ok (Option.value (Server.Context.header ctx "x-user") ~default:"none"))
+      | "who" -> Async.return (Ok (Option.value (Server.Request.header request "x-user") ~default:"none"))
       | "taken" -> Async.return (Error [ (Some `Title, "Taken") ])
       | "nope" -> Server.Action.reject "Refused"
       | "boom" -> failwith "secret boom"

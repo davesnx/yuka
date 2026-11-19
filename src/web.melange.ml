@@ -3,8 +3,6 @@ type event
 type 'a promise = 'a Js.Promise.t
 
 let in_browser = true
-let check_state_write _ = ()
-let seal_states () = ()
 
 let window () : node = [%mel.raw "window"]
 external owner_document : node -> node = "ownerDocument" [@@mel.get]
@@ -63,7 +61,15 @@ let exn_to_string : exn -> string =
     }|}]
 
 external encode_uri : string -> string = "encodeURIComponent"
-external decode_uri : string -> string = "decodeURIComponent"
+let decode_uri : string -> string option =
+  [%mel.raw "function (s) { try { return decodeURIComponent(s) } catch (e) { return undefined } }"]
+let encode_cookie_value : string -> string option =
+  [%mel.raw
+    {|function (s) {
+      try {
+        return encodeURIComponent(s).replace(/[!'()*]/g, function (c) { return "%" + c.charCodeAt(0).toString(16).toUpperCase() });
+      } catch (e) { return undefined }
+    }|}]
 
 let contains : node -> node -> bool = [%mel.raw "function (a, b) { return a.contains(b) }"]
 
@@ -116,6 +122,7 @@ external shift_key : event -> bool = "shiftKey" [@@mel.get]
 external alt_key : event -> bool = "altKey" [@@mel.get]
 external client_x : event -> float = "clientX" [@@mel.get]
 external client_y : event -> float = "clientY" [@@mel.get]
+external pointer_type : event -> string = "pointerType" [@@mel.get]
 external stop_propagation : event -> unit = "stopPropagation" [@@mel.send]
 external set_flag : event -> string -> bool -> unit = "" [@@mel.set_index]
 external get_flag : event -> string -> bool option = "" [@@mel.get_index] [@@mel.return nullable]
@@ -126,6 +133,8 @@ let navigate : string -> unit =
 let focus : string -> unit =
   [%mel.raw
     "function (id) { const el = document.getElementById(id); if (el) el.focus() }"]
+
+external focus_node : node -> unit = "focus" [@@mel.send]
 
 let scroll_into_view : string -> unit =
   [%mel.raw
@@ -339,6 +348,16 @@ let history_replace_key : string -> unit =
   [%mel.raw
     "function (k) { window.history.replaceState({ yukaKey: k }, '', window.location.href) }"]
 
+let history_push_key : string -> string -> unit =
+  [%mel.raw
+    "function (k, url) { window.history.pushState({ yukaKey: k }, '', url) }"]
+
+let scroll_y : unit -> float = [%mel.raw "function () { return window.scrollY || 0 }"]
+
+let set_cookie : string -> unit = [%mel.raw "function (cookie) { document.cookie = cookie }"]
+
+let history_back : unit -> unit = [%mel.raw "function () { window.history.back() }"]
+
 let history_replace_url : string -> unit =
   [%mel.raw
     "function (url) { window.history.replaceState(window.history.state, '', url) }"]
@@ -411,6 +430,38 @@ external parse_float : string -> float = "Number"
 let parse_int : string -> int option =
   [%mel.raw "function (t) { const n = Number(t); return (n | 0) === n ? n | 0 : undefined }"]
 
+type json =
+  [ `Null
+  | `Bool of bool
+  | `Int of int
+  | `Float of float
+  | `String of string
+  | `List of json list
+  | `Assoc of (string * json) list ]
+
+let parse_json : string -> (json, string) result =
+  [%mel.raw
+    {|function (s) {
+  function c(v, d) {
+    if (v === null) return "Null";
+    switch (typeof v) {
+      case "boolean": return { NAME: "Bool", VAL: v };
+      case "number": return (v | 0) === v ? { NAME: "Int", VAL: v | 0 } : { NAME: "Float", VAL: v };
+      case "string": return { NAME: "String", VAL: v };
+    }
+    if (d > 512) throw new Error("nesting too deep");
+    let l = 0, i, k;
+    if (Array.isArray(v)) {
+      for (i = v.length; i--; ) l = { hd: c(v[i], d + 1), tl: l };
+      return { NAME: "List", VAL: l };
+    }
+    k = Object.keys(v);
+    for (i = k.length; i--; ) l = { hd: [k[i], c(v[k[i]], d + 1)], tl: l };
+    return { NAME: "Assoc", VAL: l };
+  }
+  try { return { TAG: 0, _0: c(JSON.parse(s), 1) } } catch (e) { return { TAG: 1, _0: String(e && e.message) } }
+}|}]
+
 type socket
 
 let socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket =
@@ -474,7 +525,7 @@ let add_stylesheet : string -> unit =
 
 let read_file (_ : string) : string option = None
 
-let buffers : Buffer.t list ref = ref []
+let buffers : Stdlib.Buffer.t list ref = ref []
 
 let take_buffer () =
   match !buffers with
@@ -485,8 +536,21 @@ let take_buffer () =
 
 let give_buffer b = buffers := b :: !buffers
 
+type 'a local = 'a
+
+let local f = f ()
+let local_get v = v
+
 external lowercase : string -> string = "toLowerCase" [@@mel.send]
+let skip_clean (_ : string) i = i
+external slice : string -> int -> int -> string = "slice" [@@mel.send]
+
+let sub s offset len = slice s offset (offset + len)
+
+external of_char : char -> string = "fromCharCode" [@@mel.scope "String"]
 
 let refuse_url_name : string -> unit =
   [%mel.raw
     {|function (n) { if (n === "" || /[\s"'>\/=<\x00-\x1f\x7f]|^on|^(href|src|action|formaction|xlink:?href|poster|cite|data|background|longdesc|manifest|codebase|icon|srcdoc)$/i.test(n)) throw new Error("Yuka: refused attribute name " + n) }|}]
+
+let tree_digest _ = invalid_arg "Yuka.Server.tree_digest: native only"

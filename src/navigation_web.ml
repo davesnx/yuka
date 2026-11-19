@@ -2,16 +2,20 @@ open Web
 
 type controller = unit
 
-let browser_only () = failwith "Yuka: browser only"
+let browser_only () = invalid_arg "Yuka: browser only"
 let set_title : string -> unit = fun _ -> browser_only ()
-let scroll_y : unit -> float = fun _ -> browser_only ()
+let title : unit -> string = fun _ -> browser_only ()
+let active : unit -> node = fun _ -> browser_only ()
+let refocus : node -> unit = fun _ -> browser_only ()
+let route_script : unit -> (node * node) option = fun _ -> browser_only ()
+let put_back : node * node -> unit = fun _ -> browser_only ()
+let layer : unit -> node = fun _ -> browser_only ()
 let scroll_to : float -> unit = fun _ -> browser_only ()
 let scroll_to_hash : string -> unit = fun _ -> browser_only ()
-let history_push_key : string -> string -> unit = fun _ _ -> browser_only ()
 let new_controller : unit -> controller = fun _ -> browser_only ()
 let abort : controller -> unit = fun _ -> browser_only ()
 let fetch_page :
-    string * string * bool * controller -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller * bool -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
  fun _ _ _ -> browser_only ()
 let hash_of : string -> string = fun _ -> browser_only ()
 let no_hash : string -> string = fun _ -> browser_only ()
@@ -25,7 +29,13 @@ let key_before : string -> string -> bool = fun _ _ -> browser_only ()
 let now : unit -> float = fun _ -> browser_only ()
 let after : int -> (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let save_data : unit -> bool = fun _ -> browser_only ()
-let observe : node array -> (node -> unit) -> unit -> unit = fun _ _ -> browser_only ()
+let hidden_or_slow : unit -> bool = fun _ -> browser_only ()
+let on_visible : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
+let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit = fun _ _ -> browser_only ()
+let trajectory : (node -> string) -> (string -> unit) -> unit -> unit = fun _ _ -> browser_only ()
+let warm : string -> string -> unit = fun _ _ -> browser_only ()
 let transition : string -> (unit -> unit) -> unit = fun _ _ -> browser_only ()
 let swap_page : string -> unit = fun _ -> browser_only ()
 let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()
+let live : unit -> unit = fun _ -> browser_only ()
+let settle : node -> string -> unit = fun _ _ -> browser_only ()

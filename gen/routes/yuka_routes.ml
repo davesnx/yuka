@@ -39,8 +39,8 @@ type ctx = {
 }
 
 let rules = [ "headers"; "cache"; "prerender" ]
-let reserved = [ "with_query"; "with_fragment"; "href"; "fragment"; "req"; "children" ]
-let generated_values = [ "href"; "find"; "with_query"; "with_fragment" ]
+let reserved = [ "href"; "fragment"; "req"; "children" ]
+let generated_values = [ "href"; "find"; "current"; "replace"; "push" ]
 
 let encode text =
   let b = Buffer.create (String.length text) in
@@ -146,6 +146,8 @@ let rec list_items e =
       fail e.pexp_loc
         "the child nodes must be a list such as [ Router.route A ~path:\"/a\" ~page:Pages.a ]"
 
+let arg l = (if l = "overlay" then "?" else "~") ^ l
+
 let element e =
   match e.pexp_desc with
   | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot (Lident "Router", tag); _ }; _ }, args) ->
@@ -154,7 +156,8 @@ let element e =
           (fun (label, v) ->
             match label with
             | Nolabel -> None
-            | Labelled l -> Some (l, v)
+            | Labelled "overlay" -> fail v.pexp_loc "the overlay page is an optional argument: write ?overlay:%s" (Pprintast.string_of_expression v)
+            | Labelled l | Optional ("overlay" as l) -> Some (l, v)
             | Optional l -> fail v.pexp_loc "?%s: optional arguments are not supported" l)
           args
       in
@@ -162,7 +165,7 @@ let element e =
         | [] -> ()
         | (l, _) :: rest ->
             (match List.assoc_opt l rest with
-            | Some v -> fail v.pexp_loc "argument ~%s is given twice" l
+            | Some v -> fail v.pexp_loc "argument %s is given twice" (arg l)
             | None -> ());
             no_dups rest
       in
@@ -177,18 +180,18 @@ let unlabelled tag loc what = function
   | [ v ] -> v
   | _ -> fail loc "Router.%s takes %s as its one unlabelled argument" tag what
 
-let attachments = [ "page"; "layout"; "handler"; "guard"; "not_found"; "error" ]
+let attachments = [ "page"; "overlay"; "layout"; "handler"; "guard"; "not_found"; "error" ]
 
 let check_props tag loc props ~required ~optional =
   List.iter
     (fun (l, v) ->
       if not (List.mem l required || List.mem l optional) then
-        fail v.pexp_loc "Router.%s has no argument ~%s; its labelled arguments are %s" tag l
-          (String.concat ", " (List.map (( ^ ) "~") (required @ optional)));
+        fail v.pexp_loc "Router.%s has no argument %s; its labelled arguments are %s" tag (arg l)
+          (String.concat ", " (List.map arg (required @ optional)));
       match v.pexp_desc with
       | Pexp_ident _ -> ()
       | _ when List.mem l attachments ->
-          fail v.pexp_loc "~%s must be a value path such as Pages.home" l
+          fail v.pexp_loc "%s must be a value path such as Pages.home" (arg l)
       | _ -> ())
     props;
   List.iter
@@ -301,14 +304,6 @@ let parse_name names v =
       n
   | _ -> fail v.pexp_loc "the route name must be a constructor such as Issue"
 
-let parse_method tag v =
-  match v.pexp_desc with
-  | Pexp_variant ((("GET" | "POST" | "PUT" | "PATCH" | "DELETE") as m), None) ->
-      if tag = "action" && m = "GET" then
-        fail v.pexp_loc "Router.action cannot use `GET; use `POST, `PUT, `PATCH or `DELETE";
-      m
-  | _ -> fail v.pexp_loc "~method_ must be one of `GET, `POST, `PUT, `PATCH, `DELETE"
-
 let parse_redirect segs v =
   let permanent, tv =
     match v.pexp_desc with
@@ -333,6 +328,25 @@ let check_prerender props =
   | None ->
       ()
   | Some v -> fail v.pexp_loc "~prerender must be true or false"
+
+let check_prefetch props =
+  match List.assoc_opt "prefetch" props with
+  | Some { pexp_desc = Pexp_variant (("Off" | "Hover" | "Trajectory" | "Visible" | "Idle"), None); _ } | None -> ()
+  | Some v -> fail v.pexp_loc "~prefetch must be `Off, `Hover, `Trajectory, `Visible or `Idle"
+
+let check_idle name levels =
+  let nearest l =
+    List.fold_left (fun acc lv -> match List.assoc_opt l lv.props with Some v -> Some v | None -> acc) None levels
+  in
+  match nearest "prefetch" with
+  | Some { pexp_desc = Pexp_variant ("Idle", None); pexp_loc; _ } -> (
+      let need what = fail pexp_loc "~prefetch:`Idle needs a ~cache with a max-age; %s" what in
+      match nearest "cache" with
+      | None -> need (sprintf "route %s has no ~cache" name)
+      | Some { pexp_desc = Pexp_ident { txt = Lident (("no_store" | "no_cache") as c); _ }; pexp_loc; _ } ->
+          need (sprintf "the ~cache of route %s is %s (line %d)" name c (line pexp_loc))
+      | Some _ -> ())
+  | _ -> ()
 
 let check_cross_origin props =
   match List.assoc_opt "cross_origin" props with
@@ -384,6 +398,7 @@ let read ~server ~items names e =
     let tag, args, props, loc = element e in
     let prop l = List.assoc_opt l props in
     check_prerender props;
+    check_prefetch props;
     let name () =
       parse_name names (unlabelled tag loc "the route name (such as Issue)" args)
     in
@@ -407,7 +422,7 @@ let read ~server ~items names e =
     match tag with
     | "group" ->
         check_props tag loc props ~required:[ "path" ]
-          ~optional:([ "layout"; "loader"; "guard"; "not_found"; "error"; "search" ] @ rules);
+          ~optional:([ "layout"; "loader"; "guard"; "not_found"; "error"; "search"; "prefetch" ] @ rules);
         let children = list_items (unlabelled tag loc "a list of child nodes" args) in
         let text, ploc, segs = own_path () in
         if has_rest segs then fail ploc "a Router.group path cannot hold a catch-all";
@@ -444,11 +459,13 @@ let read ~server ~items names e =
           }
     | "route" ->
         check_props tag loc props ~required:[ "path"; "page" ]
-          ~optional:([ "loader"; "guard"; "search" ] @ rules);
+          ~optional:([ "overlay"; "loader"; "guard"; "search"; "prefetch" ] @ rules);
         let name = name () in
         let text, ploc, segs = own_path () in
         let labels = add_labels ploc ctx.labels (seg_labels segs) |> with_loader in
         let search, _ = with_search labels in
+        let levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ] in
+        check_idle name levels;
         add
           {
             kind = Named { name; meth = "GET"; search = ctx.search @ search };
@@ -456,38 +473,42 @@ let read ~server ~items names e =
             path = join ctx.text text;
             loc;
             tag;
-            levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
+            levels;
           }
-    | "endpoint" | "action" ->
-        check_props tag loc props ~required:[ "path"; "method_"; "handler" ]
-          ~optional:((if tag = "endpoint" then [ "guard"; "cross_origin" ] else [ "guard" ]) @ rules);
+    | "get" | "post" | "put" | "patch" | "delete" ->
+        let optional = if tag = "get" then [ "guard" ] @ rules else [ "guard"; "cross_origin"; "headers" ] in
+        check_props tag loc props ~required:[ "path"; "handler" ] ~optional;
         check_cross_origin props;
         let name = name () in
-        let meth = parse_method tag (List.assoc "method_" props) in
         let text, ploc, segs = own_path () in
         ignore (add_labels ploc ctx.labels (seg_labels segs));
         add
           {
-            kind = Named { name; meth; search = [] };
+            kind = Named { name; meth = String.uppercase_ascii tag; search = [] };
             segs = ctx.prefix @ segs;
             path = join ctx.text text;
             loc;
             tag;
             levels = ctx.levels @ [ level props (ctx.prefix @ segs) loc ];
           }
+    | "endpoint" ->
+        fail loc "Router.endpoint was removed: use Router.get, Router.post, Router.put, Router.patch or Router.delete"
+    | "action" -> fail loc "Router.action was removed: use Router.post, Router.put, Router.patch or Router.delete"
     | "make" -> fail loc "Router.make can only be the root"
     | _ ->
         fail loc
           "unknown node Router.%s; the nodes are Router.make, Router.group, Router.route, \
-           Router.endpoint, Router.action and Router.redirect (names of the route file syntax, not OCaml values)"
+           Router.get, Router.post, Router.put, Router.patch, Router.delete and Router.redirect \
+           (names of the route file syntax, not OCaml values)"
           tag
   in
   let tag, args, props, loc = element e in
   if tag <> "make" then fail loc "the root must be Router.make";
   check_props tag loc props ~required:[]
-    ~optional:([ "layout"; "not_found"; "error"; "guard" ] @ rules);
+    ~optional:([ "layout"; "not_found"; "error"; "guard"; "prefetch" ] @ rules);
   let children = list_items (unlabelled tag loc "a list of child nodes" args) in
   check_prerender props;
+  check_prefetch props;
   let root = [ level props [] loc ] in
   if server then check_fallback root;
   List.iter (walk { prefix = []; text = "/"; search = []; labels = []; levels = root }) children;
@@ -646,27 +667,7 @@ let search_pairs f =
         f.fname
 
 let href nodes =
-  let uses_search = List.exists (fun (_, _, s) -> s <> []) (named nodes) in
-  let helper =
-    if uses_search then
-      [
-        "let with_query path pairs =";
-        "  match pairs with";
-        "  | [] -> path";
-        "  | _ ->";
-        "      Stdlib.String.concat \"\"";
-        "        [";
-        "          path;";
-        "          \"?\";";
-        "          Stdlib.String.concat \"&\"";
-        "            (Stdlib.List.map (fun (k, v) -> Stdlib.String.concat \"=\" [ k; v ]) pairs);";
-        "        ]";
-        "";
-      ]
-    else []
-  in
-  helper
-  @ "let href = function"
+  "let href = function"
     :: List.concat_map
          (fun (name, segs, search) ->
            let head =
@@ -690,18 +691,12 @@ let href nodes =
                      @ [ "   ])" ]
                in
                indent 2
-                 ((sprintf "| %s ->" head :: indent 4 [ "with_query " ^ path ])
+                 ((sprintf "| %s ->" head :: indent 4 [ "Yuka.Router.with_query " ^ path ])
                  @ indent 6 pairs))
          (named nodes)
 
 let helpers nodes =
-  [
-    "";
-    "let with_fragment path fragment =";
-    "  Stdlib.( ^ ) path";
-    "    (match fragment with None -> \"\" | Some fragment -> Stdlib.( ^ ) \"#\" (Yuka.Router.encode fragment))";
-  ]
-  @ List.concat_map
+  List.concat_map
     (fun (name, segs, search) ->
       let required = List.map (fun n -> "~" ^ n) (seg_labels segs) in
       let optional =
@@ -721,7 +716,7 @@ let helpers nodes =
       in
       [
         "";
-        sprintf "let %s %s() = with_fragment (href %s) fragment" (String.uncapitalize_ascii name)
+        sprintf "let %s %s() = Yuka.Router.with_fragment (href %s) fragment" (String.uncapitalize_ascii name)
           (String.concat "" (List.map (fun a -> a ^ " ") (required @ optional)))
           value;
       ])
@@ -749,11 +744,16 @@ let rec decode_params params k =
   match params with
   | [] -> k
   | (i, ty) :: rest -> (
-      let fn = match ty with Int -> Some "Yuka.Router.int_param" | Custom { param = m; _ } -> Some (custom_decode m) | _ -> None in
-      match fn with
+      let call =
+        match ty with
+        | Int -> Some (sprintf "Yuka.Router.int_param p%d" i)
+        | Custom { param = m; _ } -> Some (sprintf "%s (Yuka.Router.of_segment p%d)" (custom_decode m) i)
+        | _ -> None
+      in
+      match call with
       | None -> decode_params rest k
-      | Some fn ->
-          (sprintf "match %s p%d with" fn i
+      | Some call ->
+          (sprintf "match %s with" call
           :: "| None -> Yuka.Router.Missing"
           :: arm (sprintf "Some p%d" i) (decode_params rest k)))
 
@@ -777,7 +777,9 @@ let found name segs search =
       (List.mapi
          (fun i s ->
            match s with
-           | Param (n, _) | Rest n -> [ sprintf "%s = p%d" n i ]
+           | Param (n, String) -> [ sprintf "%s = Yuka.Router.of_segment p%d" n i ]
+           | Rest n -> [ sprintf "%s = Stdlib.List.map Yuka.Router.of_segment p%d" n i ]
+           | Param (n, _) -> [ sprintf "%s = p%d" n i ]
            | Static _ -> [])
          segs)
     @ List.map (fun f -> sprintf "%s = %s" f.fname (decode_search f)) search
@@ -795,6 +797,7 @@ let redirect segs permanent target =
     let name = String.sub p 1 (String.length p - 1) in
     let v = var segs name in
     match List.find (function Param (n, _) | Rest n -> n = name | Static _ -> false) segs with
+    | Param (_, Custom { param = m; _ }) -> Code (sprintf "Yuka.Router.segment (%s)" (custom_encode m v))
     | Param (_, ty) -> Code (to_url ty v)
     | Rest _ ->
         Code (sprintf "Stdlib.String.concat \"/\" (Stdlib.List.map Yuka.Router.encode %s)" v)
@@ -805,7 +808,10 @@ let redirect segs permanent target =
     |> List.map (fun p -> if String.length p > 1 && p.[0] = ':' then param p else Lit p)
     |> List.fold_left (fun acc p -> match acc with [] -> [ p ] | _ -> acc @ [ Lit "/"; p ]) []
   in
-  [ sprintf "Yuka.Router.Redirect { permanent = %b; location = %s }" permanent (concat pieces) ]
+  [
+    sprintf "Yuka.Router.Redirect { location = %s; kind = %s }" (concat pieces)
+      (if permanent then "`Permanent" else "`Temporary");
+  ]
 
 let pattern segs =
   let items =
@@ -875,7 +881,17 @@ let find nodes =
 
 let generate input nodes =
   if named nodes = [] then fail (Location.in_file input) "the route tree has no named node";
-  String.concat "\n" (type_t nodes @ [ "" ] @ href nodes @ helpers nodes @ [ "" ] @ find nodes) ^ "\n"
+  String.concat "\n"
+    (type_t nodes @ [ "" ] @ href nodes @ helpers nodes @ [ "" ] @ find nodes
+    @ [
+        "";
+        "let current () = Yuka.runtime_route_current find";
+        "";
+        "let replace route = Yuka.runtime_route_replace (href route)";
+        "";
+        "let push route = Yuka.runtime_route_push (href route)";
+      ])
+  ^ "\n"
 
 let expr e = Pprintast.string_of_expression e
 let paren e = "(" ^ expr e ^ ")"
@@ -958,9 +974,10 @@ let rules_text levels =
   let last name =
     List.fold_left (fun acc l -> match prop name l with Some v -> Some v | None -> acc) None levels
   in
-  sprintf "Yuka.Server.Generated.rules ~headers:[ %s ]%s ~prerender:%s ()"
+  sprintf "Yuka.Server.Generated.rules ~headers:[ %s ]%s%s ~prerender:%s ()"
     (String.concat "; " headers)
     (match last "cache" with Some c -> sprintf " ~cache:(Yuka.Server.%s [@warning \"-33\"])" (paren c) | None -> "")
+    (match last "prefetch" with Some p -> " ~prefetch:" ^ expr p | None -> "")
     (match last "prerender" with Some p -> expr p | None -> "false")
 
 let fallback_levels levels =
@@ -1069,15 +1086,14 @@ let server_arm ~shared ~rule ~fallback n =
                   (prop "loader" l))
               n.levels
           in
-          let page =
-            sprintf "%s%s ()" (expr (Option.get (prop "page" leaf)))
-              (args (labels @ List.map fst loaders))
-          in
+          let call v = sprintf "%s%s ()" (expr v) (args (labels @ List.map fst loaders)) in
           let plan =
             [ "Yuka.Async.return"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.Generated.layers =" ]
             @ indent 9 (layers_lines n.levels)
             @ [
-                sprintf "       page = %s;" page;
+                sprintf "       page = %s;" (call (Option.get (prop "page" leaf)));
+                sprintf "       overlay = %s;"
+                  (match prop "overlay" leaf with Some v -> sprintf "Some (%s)" (call v) | None -> "None");
                 sprintf "     })%s);" (String.make (List.length loaders) ')');
               ]
           in
@@ -1102,7 +1118,7 @@ let server_arm ~shared ~rule ~fallback n =
             "Yuka.Server.Generated.Handler";
             "  {";
             sprintf "    rules = %s;" rules;
-            sprintf "    action = %b;" (n.tag = "action");
+            sprintf "    action = %b;" (n.tag <> "get");
             sprintf "    cross_origin = %b;" (cross_origin leaf);
             sprintf "    guards = %s;" guards;
             sprintf "    run = (fun () -> %s req%s);"
@@ -1140,14 +1156,14 @@ let check_hidden nodes =
               | Pexp_ident { txt = Lident name; _ } when List.mem prop ("loader" :: attachments) ->
                   if generated_name name then
                     fail v.pexp_loc
-                      "~%s:%s is hidden by a name of the generated server code (req, children, path, \
+                      "%s:%s is hidden by a name of the generated server code (req, children, path, \
                        rules_N, layer_N, fallback_N); write it with its module path"
-                      prop name
+                      (arg prop) name
                   else if prop <> "loader" && List.mem name labels then
                     fail v.pexp_loc
-                      "~%s:%s is hidden by the param, search field or loader result %s of the route \
+                      "%s:%s is hidden by the param, search field or loader result %s of the route \
                        %s; write it with its module path"
-                      prop name name route
+                      (arg prop) name name route
               | _ -> ())
             level.props)
         n.levels)
@@ -1171,6 +1187,15 @@ let generate_server ~shared ~digest (nodes, root) =
   in
   let missing = fallback (fallback_text [ root ]) in
   let arms = List.concat_map (server_arm ~shared ~rule ~fallback) nodes in
+  let pages =
+    List.fold_left
+      (fun acc n ->
+        if n.tag <> "route" then acc
+        else
+          let r = rule (rules_text n.levels) in
+          if List.mem r acc then acc else acc @ [ r ])
+      [] nodes
+  in
   let req = if uses_req nodes then "req" else "_req" in
   String.concat "\n"
     (List.map (fun (n, t) -> sprintf "let %s =\n  %s\n" n t) (rules ())
@@ -1182,7 +1207,7 @@ let generate_server ~shared ~digest (nodes, root) =
           sprintf "let %s : Yuka.Server.Generated.fallback =\n%s\n" n
             (String.concat "\n" (indent 2 (String.split_on_char '\n' t))))
         (fallbacks ())
-    @ [ sprintf "let resolve %s (route : %s.t) : Yuka.Server.Generated.target =" req shared;
+    @ [ sprintf "let resolve (%s : Yuka.Server.request) (route : %s.t) : Yuka.Server.Generated.target =" req shared;
         "  match route with" ]
     @ indent 2 arms
     @ [
@@ -1193,6 +1218,7 @@ let generate_server ~shared ~digest (nodes, root) =
           (match prop "headers" root with Some h -> paren h | None -> "[]");
         sprintf "    ~prerender:[ %s ]"
           (String.concat "; " (List.map (sprintf "%S") (List.filter_map seed nodes)));
+        sprintf "    ~pages:[ %s ]" (String.concat "; " pages);
         sprintf "    ~find:%s.find ~resolve ~missing:%s" shared missing;
       ])
   ^ "\n"

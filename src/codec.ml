@@ -38,18 +38,27 @@ open Types
       decode = (function `Null -> Ok () | j -> mismatch "null" j) }
 
   let list c =
+    let last = ref ([||], [||]) in
     { encode = (fun l -> `List (List.map c.encode l));
       decode =
         (function
         | `List l ->
-            let rec go acc = function
-              | [] -> Ok (List.rev acc)
+            let inputs, outputs = !last in
+            let size = Array.length inputs in
+            let rec go acc next = function
+              | [] ->
+                  let decoded = List.rev acc in
+                  if Web.in_browser then last := (Array.of_list l, Array.of_list decoded);
+                  Ok decoded
               | x :: rest -> (
-                  match c.decode x with
-                  | Ok v -> go (v :: acc) rest
-                  | Error _ as e -> e)
+                  if next < size && inputs.(next) == x then go (outputs.(next) :: acc) (next + 1) rest
+                  else if next + 1 < size && inputs.(next + 1) == x then go (outputs.(next + 1) :: acc) (next + 2) rest
+                  else
+                    match c.decode x with
+                    | Ok v -> go (v :: acc) next rest
+                    | Error _ as e -> e)
             in
-            go [] l
+            go [] 0 l
         | j -> mismatch "list" j) }
 
   let array c =
@@ -84,7 +93,7 @@ let async c : 'a Async.t t =
       (fun a ->
         let j = Async.map c.encode a in
         let id, streaming =
-          match !current_session with
+          match !(current_session ()) with
           | Some s ->
               s.asyncs <- s.asyncs + 1;
               (s.id_prefix ^ "a" ^ string_of_int s.asyncs, s.streaming)
@@ -95,7 +104,7 @@ let async c : 'a Async.t t =
         | Async.Done v -> assoc [ ("ok", v) ]
         | Async.Failed m -> assoc [ ("error", `String (async_error id m)) ]
         | Async.Pending -> (
-            match !current_session with
+            match !(current_session ()) with
             | Some s when streaming ->
                 s.pending <- Pending_async { id; async = j } :: s.pending;
                 assoc []
@@ -118,3 +127,16 @@ let async c : 'a Async.t t =
       | j -> mismatch "async reference" j);
   }
 
+let state c : 'a State.read t =
+  {
+    encode = (fun s -> c.encode (State.peek s));
+    decode =
+      (fun j ->
+        Result.map
+          (fun v ->
+            let s = State.make v in
+            !state_target (fun j ->
+                match c.decode j with Ok v -> State.set s v | Error m -> Web.console_error ("yuka: Codec.state: " ^ m));
+            State.read_only s)
+          (c.decode j));
+  }

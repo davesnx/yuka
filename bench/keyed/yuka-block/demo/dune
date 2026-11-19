@@ -1,0 +1,10 @@
+(library
+ (name block_demo)
+ (modes melange)
+ (libraries yuka demo_shared)
+ (melange.compile_flags
+  (:standard -I src/.yuka.objs/melange))
+ (preprocess
+  (pps melange.ppx)))
+
+(copy_files# ../block.ml)

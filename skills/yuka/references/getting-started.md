@@ -10,10 +10,19 @@ opam pin add yuka-dream git+https://github.com/davesnx/yuka.git
 ```
 
 `yuka` brings Melange, mlx and the `yuka` command. `yuka-dream` runs an
-app on [Dream](https://github.com/camlworks/dream). Another server needs
-one small adapter (`Yuka.Server.Adapter`). `yuka-live-pg` (pin it the same
-way; it needs libpq) carries live data between server nodes over Postgres
-`LISTEN`/`NOTIFY`.
+app on [Dream](https://github.com/camlworks/dream). Pin these the same
+way when you need them:
+
+- `yuka-tapak` runs an app on [tapak](https://github.com/syaiful6/tapak),
+  in direct style on Eio (`Yuka_tapak.handler`). tapak and cows are not
+  on opam: pin them at the commits that `make pin-list` of the Yuka
+  repository prints.
+- `yuka-live-pg` carries live data between server nodes over Postgres
+  `LISTEN`/`NOTIFY`. It needs libpq.
+
+Another server needs one small adapter (`Yuka.Server.Adapter`).
+
+For editor support, `opam install ocamlmerlin-mlx`.
 
 ## Setup
 
@@ -24,7 +33,7 @@ JavaScript (components and islands), the server, and the client entry.
 dune-project
 Routes.ml
 shared/   dune, counter.mlx, counter.css
-server/   dune, pages.mlx, yuka_routes.mli, main.ml
+server/   dune, pages.mlx, main.ml
 client/   dune, main.ml
 ```
 
@@ -45,8 +54,9 @@ client/   dune, main.ml
 ```
 
 `Routes.ml` is the route tree. It is not compiled: `yuka routes` reads it.
-`Router.make`, `Router.group`, `Router.route`, `Router.endpoint`,
-`Router.action` and `Router.redirect` are the nodes of this file, and
+`Router.make`, `Router.group`, `Router.route`, `Router.get`,
+`Router.post`, `Router.put`, `Router.patch`, `Router.delete` and
+`Router.redirect` are the nodes of this file, and
 `~page`, `~layout`, `~loader`, `~guard`, `~handler`, `~not_found` and
 `~error` name functions of the server:
 
@@ -146,14 +156,6 @@ let not_found ~path () =
       <p>(Yuka.text ("No page at " ^ path))</p>)
 ```
 
-`Yuka_routes.app` takes the request type of the adapter from a loader,
-guard or handler. When none of them names it, give it in
-`server/yuka_routes.mli`:
-
-```ocaml
-val app : Dream.request Yuka.Server.app
-```
-
 `server/main.ml` runs the app on Dream:
 
 ```ocaml
@@ -162,10 +164,16 @@ let read file = In_channel.with_open_bin file In_channel.input_all
 let () =
   let dir = "_build/default/client/out" in
   let assets =
-    Yuka.Server.modules ~dir ~entry:"client/main.js"
-      ~manifest:(read "_build/default/client/yuka_islands.json")
-      ~packages:(Array.to_list (Sys.readdir (Filename.concat dir "node_modules")))
-      ~digest:(Yuka_dream.tree_digest dir)
+    match
+      Yuka.Server.modules ~dir ~entry:"client/main.js"
+        ~manifest:(read "_build/default/client/yuka_islands.json")
+        ~packages:(Array.to_list (Sys.readdir (Filename.concat dir "node_modules")))
+        ~digest:(Yuka.Server.tree_digest dir)
+    with
+    | Ok assets -> assets
+    | Error message ->
+        prerr_endline message;
+        exit 1
   in
   let config =
     Yuka.Server.config ~assets ~css:Yuka_css.sheets
@@ -180,6 +188,54 @@ let () =
 The config has no `~log`, so `Yuka_dream.handler` sends the messages of
 Yuka, and of `Yuka.Console` during a request, to the Dream log under the
 name `yuka`.
+
+### Live data on more than one server
+
+With more than one server process, each process joins a bus before it
+serves, so that a publish reaches the pages on every process (see
+[Data](data.md#nodes-and-the-bus)). Add `yuka-live-pg` and `unix` to the
+`libraries` of `server/dune`, and in `main.ml`, before `Dream.run`:
+
+```ocaml
+let name = Printf.sprintf "%s-%d" (Unix.gethostname ()) (Unix.getpid ()) in
+let bus = Yuka_live_pg.bus ~conninfo:"host=db dbname=app user=app" ~channel:"app_live" () in
+Lwt_main.run (Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~name bus));
+```
+
+`Yuka_dream.handler config Yuka_routes.app` then uses the default live
+node, which is on the bus. The name must be unique to the process.
+
+### Static files and prerender
+
+`~public` serves the files of a directory under a URL prefix, and
+`~prerendered` serves the pages that a prerender wrote:
+
+```ocaml
+let config =
+  Yuka.Server.config ~assets ~css:Yuka_css.sheets
+    ~public:[ ("/static", "static") ]
+    ~prerendered:"_build/site"
+    ()
+```
+
+A prerender writes each page whose rules say `~prerender:true` (see
+[Router](router.md)) to a directory. It starts from the nodes with no
+param, follows the links of each page to other such pages, writes
+`404.html`, and copies the client JavaScript and the `public`
+directories. A page that uses `Yuka.Live.make` is not written. Run it as a
+build step, with the config and app of the server:
+
+```ocaml
+match Lwt_main.run (Yuka_dream.prerender ~out:"_build/site" config Yuka_routes.app) with
+| Ok () -> ()
+| Error message ->
+    prerr_endline message;
+    exit 1
+```
+
+With `~prerendered`, a `GET` of such a page, with no query, gets its
+file after the guards run, and the loaders do not run. In dev mode the
+server does not use the files.
 
 `client/dune` builds the browser entry and writes the island registry
 (`Yuka_islands`) and its manifest:
@@ -255,8 +311,8 @@ the chunk of each island and to give the hashed files a long cache time.
 A smaller bundle needs two more steps, which the command line of esbuild
 cannot do: tell esbuild that the modules of Yuka have no side effects, so
 it drops the ones the app does not use, and minify a second time with
-[swc](https://swc.rs). On Yuka's demo the command above gives 53.0 KB
-gzip and this script 50.3 KB. Install `esbuild` and `@swc/core` from npm,
+[swc](https://swc.rs). On Yuka's demo, with each chunk gzipped, the
+command above gives 107.2 KB in all and this script 101.3 KB. Install `esbuild` and `@swc/core` from npm,
 save the script as `client/bundle.mjs` and run it in the place of the
 command above (`node ../../../../../client/bundle.mjs`):
 
@@ -314,10 +370,16 @@ assets (build it before you bundle):
 
 ```ocaml
 let assets =
-  Yuka.Server.bundle ~dir:"_build/default/client/out/client"
-    ~entry:"bundle/main.js"
-    ~manifest:(read "_build/default/client/yuka_islands.json")
-    ~metafile:(read "_build/default/client/meta.json")
+  match
+    Yuka.Server.bundle ~dir:"_build/default/client/out/client"
+      ~entry:"bundle/main.js"
+      ~manifest:(read "_build/default/client/yuka_islands.json")
+      ~metafile:(read "_build/default/client/meta.json")
+  with
+  | Ok assets -> assets
+  | Error message ->
+      prerr_endline message;
+      exit 1
 ```
 
 ## Next
@@ -326,3 +388,5 @@ let assets =
 - [`islands.md`](islands.md): `<Yuka.Client>`, props, start strategies and
   children.
 - [`state.md`](state.md): State, memos, effects and when updates run.
+- [`data.md`](data.md): actions, forms, remote data, live data, `Await`
+  and `Catch`.

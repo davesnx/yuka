@@ -1,0 +1,18 @@
+(melange.emit
+ (target out)
+ (alias melange-ids)
+ (libraries ids_cases yuka)
+ (preprocess
+  (pps melange.ppx))
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (enabled_if
+  (<> %{profile} release))
+ (deps
+  (alias melange-ids))
+ (action
+  (run node %{dep:out/test/ids/melange/run.js} %{dep:../native/filled.html}
+   %{dep:../native/shell.html} %{dep:../native/answer.html})))

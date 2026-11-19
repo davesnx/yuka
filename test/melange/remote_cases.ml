@@ -67,7 +67,7 @@ let show (s : string Status.t) =
   | Status.Failed { error; _ } -> "failed " ^ Status.error_to_string error
 
 let view () =
-  let r = Remote.use ~retry:!retry query (fun () -> State.get input) in
+  let r = Remote.make ~retry:!retry query (fun () -> State.get input) in
   handle := Some r;
   element "b" [] [ hole (fun () -> text (show (Remote.status r))) ]
 
@@ -81,7 +81,7 @@ let late_entry =
             [
               hole (fun () ->
                   if State.get later then (
-                    let r = Remote.use query (fun () -> "late") in
+                    let r = Remote.make query (fun () -> "late") in
                     element "u" [] [ hole (fun () -> text (show (Remote.status r))) ])
                   else empty);
             ])
@@ -113,8 +113,85 @@ let fresh ?(ignore_abort = false) ?(value = "a") ?shown ?answer ?(attempts = Rem
   retry := attempts;
   set_body (island_html ?shown ?answer ())
 
+let mutation = Action.mutation ~name:"m" ~input:Codec.string ~output:Codec.string
+let pick = State.make "a"
+
+let call_text = function
+  | Async.Done (Ok v) -> v
+  | Async.Done (Error e) -> "error " ^ Status.error_to_string e
+  | Async.Failed m -> "failed " ^ m
+  | Async.Pending -> "pending"
+
+let fresh_calls ?(ignore_abort = false) () =
+  Yuka.stop ();
+  setup_fetch ignore_abort;
+  set_body "";
+  Yuka.render ~islands:(runtime_registry []) ~navigation:false ()
+
+let in_effect call =
+  let result = ref (Async.return (Error (Status.Network "not called"))) in
+  let (), dispose = with_owner (fun () -> Effect.after (fun () -> result := call ())) in
+  (result, dispose)
+
 let async =
   [
+    ( "action: a query call in Effect.after whose input changes twice: only the latest answer is written",
+      fun finish ->
+        fresh_calls ();
+        State.set pick "a";
+        let written = ref [] in
+        let (), dispose =
+          with_owner (fun () ->
+              Effect.after (fun () ->
+                  Async.on_settled (Action.call query (State.get pick)) (fun st ->
+                      written := call_text st :: !written)))
+        in
+        State.set pick "b";
+        State.set pick "c";
+        after_ms 10 (fun () ->
+            respond 2 200 {|{"ok":"C"}|};
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "three fetches" "3" (string_of_int (fetches ()));
+                    check "first aborted" "true" (string_of_bool (aborted 0));
+                    check "second aborted" "true" (string_of_bool (aborted 1));
+                    check "third not aborted" "false" (string_of_bool (aborted 2));
+                    check "written" "C" (String.concat "," (List.rev !written));
+                    dispose ();
+                    Yuka.stop ()))) );
+    ( "action: disposing the owner aborts a query call, which stays pending",
+      fun finish ->
+        fresh_calls ();
+        let result, dispose = in_effect (fun () -> Action.call query "x") in
+        dispose ();
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "aborted" "true" (string_of_bool (aborted 0));
+                check "pending" "pending" (call_text (Async.status !result));
+                Yuka.stop ())) );
+    ( "action: disposing the owner does not abort a mutation call",
+      fun finish ->
+        fresh_calls ();
+        let result, dispose = in_effect (fun () -> Action.call mutation "x") in
+        dispose ();
+        after_ms 10 (fun () ->
+            respond 0 200 {|{"ok":"M"}|};
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "not aborted" "false" (string_of_bool (aborted 0));
+                    check "answer" "M" (call_text (Async.status !result));
+                    Yuka.stop ()))) );
+    ( "action: the abort of start stops a mutation call, which stays pending",
+      fun finish ->
+        fresh_calls ~ignore_abort:true ();
+        let result, abort = Action.start mutation "x" in
+        abort ();
+        respond 0 200 {|{"ok":"M"}|};
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "aborted" "true" (string_of_bool (aborted 0));
+                check "pending" "pending" (call_text (Async.status result));
+                Yuka.stop ())) );
     ( "remote: a key change aborts the request in flight",
       fun finish ->
         fresh ();

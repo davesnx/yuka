@@ -8,8 +8,13 @@ let status a =
   | Failed m -> "failed " ^ m
 
 let call () =
-  match !Yuka.Private.call_action "double" (`Int 1) with
-  | a -> status a
+  let answer = ref "pending" in
+  match
+    !Yuka.Private.call_action "double" (`Int 1) (function
+      | Ok _ -> answer := "done"
+      | Error e -> answer := "error " ^ Yuka.Status.error_to_string e)
+  with
+  | (_ : unit -> unit) -> !answer
   | exception Failure m -> "raised " ^ m
 
 let double = Yuka.Action.mutation ~name:"double" ~input:Yuka.Codec.int ~output:Yuka.Codec.int

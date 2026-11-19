@@ -24,7 +24,10 @@ let with_stderr f =
     f;
   In_channel.with_open_bin file In_channel.input_all
 
-let prerender out = Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app)
+let prerender out =
+  match Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app) with
+  | Ok () -> ()
+  | Error m -> Alcotest.fail m
 
 let contains text part =
   let n = String.length part in
@@ -49,6 +52,7 @@ let pages () =
       "post/hello/index.html";
       "post/world/index.html";
       "static/s.css";
+      "whoami.txt";
     ]
     (List.map fst written);
   let file name = List.assoc name written in
@@ -56,6 +60,7 @@ let pages () =
   check_true "crawled from a crawled page" (contains (file "post/world/index.html") "post world");
   check_true "rule header page" (contains (file "post/hello/index.html") "class=\"root\"");
   Alcotest.(check string) "endpoint" "<rss/>" (file "feed.xml");
+  Alcotest.(check string) "the Dream request of a prerender" "/whoami.txt -" (file "whoami.txt");
   check_true "404 page" (contains (file "404.html") "missing /404.html");
   Alcotest.(check string) "static copied" "body{}" (file "static/s.css");
   Alcotest.(check string) "css sheet written" ".w_0a1b{}" (file "_yuka/css/w-0a1b.css");
@@ -64,10 +69,9 @@ let pages () =
   check_true "files are not crawled" (not (contains warnings "/_yuka"));
   check_true "a path that cannot be a file name"
     (contains warnings "yuka-dream prerender: /a%2Fb answered 200 but cannot be a file name, not written");
-  let req = Dream.request ~target:"/" "" in
   List.iter
     (fun (path, expected) ->
-      Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Yuka_routes.app req path))
+      Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Yuka_routes.app path))
     [ ("/guide", true); ("/static/s.css", false); ("/_yuka/app/main.js", false); ("/_yuka", false) ]
 
 let twice () =
@@ -116,7 +120,10 @@ let prerender_dev_off () =
   Unix.putenv "YUKA_DEV_FILE" "/nonexistent/yuka-dev";
   let out = Filename.temp_dir "yuka_out" "" in
   ignore
-    (with_stderr (fun () -> Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ~dev:true ()) Yuka_routes.app)));
+    (with_stderr (fun () ->
+         match Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ~dev:true ()) Yuka_routes.app) with
+         | Ok () -> ()
+         | Error m -> Alcotest.fail m));
   let read name = In_channel.with_open_bin (Filename.concat out name) In_channel.input_all in
   check_true "a page" (contains (read "index.html") "<title>Home</title>");
   check_true "no dev script in a page" (not (contains (read "index.html") "EventSource"));
@@ -129,26 +136,10 @@ let out_inside_a_served_dir () =
   List.iter
     (fun out ->
       match Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app) with
-      | () -> Alcotest.failf "%s accepted" out
-      | exception Invalid_argument m -> check_true "names the directory" (contains m dir))
+      | Ok () -> Alcotest.failf "%s accepted" out
+      | Error m -> check_true "names the directory" (contains m dir))
     [ Filename.concat dir "site"; dir; Filename.concat dir "a/../site" ];
   Alcotest.(check (list string)) "nothing written" [ "s.css" ] (List.map fst (files dir ""))
-
-let tree_digest () =
-  let dir = Filename.temp_dir "yuka_tree" "" in
-  let write name text =
-    Out_channel.with_open_bin (Filename.concat dir name) (fun oc -> output_string oc text)
-  in
-  Sys.mkdir (Filename.concat dir "a") 0o755;
-  write "a/x.js" "one";
-  write "y.js" "two";
-  let first = Yuka_dream.tree_digest dir in
-  Alcotest.(check string) "stable" first (Yuka_dream.tree_digest dir);
-  write "a/x.js" "ONE";
-  let changed = Yuka_dream.tree_digest dir in
-  check_true "content changes it" (changed <> first);
-  write "z.js" "";
-  check_true "a new file changes it" (Yuka_dream.tree_digest dir <> changed)
 
 let dream_log () =
   let get handler = ignore (Lwt_main.run (Dream.body (Dream.test handler (Dream.request ~target:"/warned" "")))) in
@@ -167,7 +158,7 @@ let dream_log () =
   check_true "not in the Dream log" (not (contains output "warned page"))
 
 let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
-let () = Yuka.Server.Action.make echo (fun _ s -> Yuka.Async.return (String.length s))
+let () = Yuka.Server.Action.implement echo (fun _ s -> Yuka.Async.return (String.length s))
 
 let body_limit () =
   let handler = Yuka_dream.handler config Yuka_routes.app in
@@ -188,6 +179,99 @@ let body_limit () =
     (fst (post ~length:2_000_000 (quoted 4)));
   Alcotest.(check (pair int string)) "a small declared length" (200, {|{"ok":2}|}) (post ~length:4 (quoted 4))
 
+let no_sessions () =
+  let got = ref [] in
+  let handler = Yuka_dream.handler (Yuka.Server.config ~log:(fun _ m -> got := m :: !got) ()) Yuka_routes.app in
+  let csrf handler =
+    let headers = [ ("Origin", "http://app.test"); ("Host", "app.test") ] in
+    let response = Dream.test handler (Dream.request ~target:"/_yuka/csrf" ~headers "") in
+    (Dream.status_to_int (Dream.status response), Lwt_main.run (Dream.body response))
+  in
+  let status = ref 0 in
+  ignore (with_stderr (fun () -> status := fst (csrf handler)));
+  Alcotest.(check int) "csrf without the middleware" 500 !status;
+  check_true "the log names the path and the middleware"
+    (match !got with [ m ] -> contains m "/_yuka/csrf" && contains m "session middleware" | _ -> false);
+  got := [];
+  let status, body = csrf (Dream.memory_sessions () handler) in
+  Alcotest.(check int) "csrf with the middleware" 200 status;
+  check_true "a token" (contains body {|{"csrf":"|});
+  Alcotest.(check (list string)) "no log" [] !got
+
+let dream_request () =
+  let handler = Yuka_dream.handler config Yuka_routes.app in
+  let response = Dream.test handler (Dream.request ~target:"/whoami.txt?a=1" ~headers:[ ("x-user", "bob") ] "") in
+  Alcotest.(check string) "inside a Dream request" "/whoami.txt?a=1 bob" (Lwt_main.run (Dream.body response));
+  check_true "a Testing request" (Option.is_none (Yuka_dream.request (Yuka.Server.Testing.request ())))
+
+let handler_reads_the_request () =
+  let handler = Yuka_dream.handler config Yuka_routes.app in
+  let headers =
+    [ ("Content-Type", "application/json"); ("Origin", "http://app.test"); ("Host", "app.test"); ("Cookie", "a=1; theme=dark") ]
+  in
+  let response = Dream.test handler (Dream.request ~method_:`POST ~target:"/sum?tag=t" ~headers "[1,2,3]") in
+  Alcotest.(check (pair int string)) "JSON body, query param and cookie" (201, {|["6","t","dark"]|})
+    (Dream.status_to_int (Dream.status response), Lwt_main.run (Dream.body response))
+
+let free_port () =
+  let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.bind s (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port = match Unix.getsockname s with Unix.ADDR_INET (_, port) -> port | _ -> assert false in
+  Unix.close s;
+  port
+
+let rec connect_to port tries =
+  let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  match Unix.connect s (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
+  | () -> s
+  | exception Unix.Unix_error (Unix.ECONNREFUSED, _, _) when tries > 0 ->
+      Unix.close s;
+      Unix.sleepf 0.05;
+      connect_to port (tries - 1)
+
+let rec wait_child flags pid =
+  match Unix.waitpid flags pid with
+  | state -> state
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_child flags pid
+
+let client_leaves_during_a_stream () =
+  let port = free_port () in
+  match Lwt_unix.fork () with
+  | 0 ->
+      let handler = Yuka_dream.handler config Yuka_routes.app in
+      let stream _ =
+        Dream.stream (fun s ->
+            let rec go n =
+              if n = 0 then Dream.close s
+              else Lwt.bind (Dream.write s "chunk\n") (fun () -> Lwt.bind (Dream.flush s) (fun () -> Lwt.bind (Lwt_unix.sleep 0.05) (fun () -> go (n - 1))))
+            in
+            go 40)
+      in
+      Lwt_main.run
+        (Dream.serve ~interface:"127.0.0.1" ~port (fun request ->
+             if Dream.target request = "/stream" then stream request else handler request));
+      Stdlib.exit 0
+  | child ->
+      let s = connect_to port 100 in
+      let request = "GET /stream HTTP/1.1\r\nHost: x\r\n\r\n" in
+      ignore (Unix.write_substring s request 0 (String.length request));
+      Unix.shutdown s Unix.SHUTDOWN_SEND;
+      Unix.close s;
+      Unix.sleepf 1.;
+      let state = wait_child [ Unix.WNOHANG ] child in
+      if fst state = 0 then begin
+        Unix.kill child Sys.sigkill;
+        ignore (wait_child [] child)
+      end;
+      Alcotest.(check string)
+        "the server process is still running" "running"
+        (match state with
+        | 0, _ -> "running"
+        | _, Unix.WSIGNALED n when n = Sys.sigpipe -> "killed by SIGPIPE"
+        | _, Unix.WSIGNALED n -> Printf.sprintf "killed by signal %d" n
+        | _, Unix.WEXITED n -> Printf.sprintf "exited %d" n
+        | _, Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+
 let () =
   Alcotest.run "yuka-dream"
     [
@@ -199,8 +283,14 @@ let () =
           Alcotest.test_case "YUKA_DEV=1 does not turn on dev mode" `Quick dev_env_ignored;
           Alcotest.test_case "a prerender with ~dev:true writes no dev script" `Quick prerender_dev_off;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
-          Alcotest.test_case "tree digest follows file contents" `Quick tree_digest;
         ] );
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);
+      ("session", [ Alcotest.test_case "no session middleware" `Quick no_sessions ]);
+      ( "request",
+        [
+          Alcotest.test_case "Yuka_dream.request" `Quick dream_request;
+          Alcotest.test_case "a handler reads the request" `Quick handler_reads_the_request;
+        ] );
+      ("serve", [ Alcotest.test_case "a client that leaves during a streamed answer" `Quick client_leaves_during_a_stream ]);
     ]

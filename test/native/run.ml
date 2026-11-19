@@ -158,6 +158,38 @@ let deferred_cases =
   [ test_case "follows the source at once" `Quick follows;
     test_case "a server render prints the value of the source" `Quick server ]
 
+type counter_action = Increment | Reset of int
+
+let reducer_cases =
+  let open Alcotest in
+  let reduce n = function Increment -> n + 1 | Reset m -> m in
+  let dispatches () =
+    let count, dispatch = Yuka.State.reducer reduce 1 in
+    check int "the initial value" 1 (Yuka.State.get count);
+    dispatch Increment;
+    dispatch Increment;
+    check int "each action applies to the current value" 3 (Yuka.State.get count);
+    dispatch (Reset 0);
+    check int "reset" 0 (Yuka.State.get count)
+  in
+  let equal () =
+    let runs = ref 0 in
+    let state, dispatch = Yuka.State.reducer ~equal:( = ) (fun _ n -> [ n ]) [ 1 ] in
+    let (), stop =
+      Yuka.with_owner (fun () ->
+          Yuka.Effect.after (fun () ->
+              ignore (Yuka.State.get state);
+              incr runs))
+    in
+    dispatch 1;
+    check int "an equal value is no change" 1 !runs;
+    dispatch 2;
+    check int "a new value runs the reader" 2 !runs;
+    stop ()
+  in
+  [ test_case "dispatch writes the reduced value" `Quick dispatches;
+    test_case "equal decides a change" `Quick equal ]
+
 let page_cases =
   let open Alcotest in
   let page () =
@@ -248,17 +280,17 @@ let late_gate, late_open, _ = Async.make ()
 let call_gate, call_open, _ = Async.make ()
 
 let () =
-  Server.Action.make create (fun _ i ->
+  Server.Action.implement create (fun _ i ->
       Async.return { i with n = i.n + 1 });
-  Server.Action.make broken (fun _ _ -> failwith "secret detail");
-  Server.Action.make failing (fun _ _ -> Async.failed "secret failure");
-  Server.Action.make rejecting (fun _ _ -> Server.Action.reject "title is empty");
-  Server.Action.make rejecting_late (fun _ _ ->
+  Server.Action.implement broken (fun _ _ -> failwith "secret detail");
+  Server.Action.implement failing (fun _ _ -> Async.failed "secret failure");
+  Server.Action.implement rejecting (fun _ _ -> Server.Action.reject "title is empty");
+  Server.Action.implement rejecting_late (fun _ _ ->
       Async.bind late_gate (fun () -> Server.Action.reject "too late"));
-  Server.Action.make rejecting_chain (fun _ _ ->
+  Server.Action.implement rejecting_chain (fun _ _ ->
       Async.bind (Async.return ()) (fun () -> Server.Action.reject "from a chain"));
-  Server.Action.make late (fun _ n -> Async.map (fun () -> n) call_gate);
-  Server.Action.make forging (fun _ _ -> Async.failed "yuka.reject:forged")
+  Server.Action.implement late (fun _ n -> Async.map (fun () -> n) call_gate);
+  Server.Action.implement forging (fun _ _ -> Async.failed "yuka.reject:forged")
 
 let json_type = Some "application/json"
 
@@ -276,9 +308,9 @@ let post ?content_type ?origin ?host ?fetch_site name body =
 let logged f =
   let messages = ref [] in
   let saved = fun _ m -> prerr_endline m in
-  Yuka.Server.Testing.set_log (fun _ m -> messages := m :: !messages);
-  let result = (try f () with e -> Yuka.Server.Testing.set_log saved; raise e) in
-  Yuka.Server.Testing.set_log saved;
+  Yuka.Server.set_default_log (fun _ m -> messages := m :: !messages);
+  let result = (try f () with e -> Yuka.Server.set_default_log saved; raise e) in
+  Yuka.Server.set_default_log saved;
   (result, List.rev !messages)
 
 let action_cases =
@@ -349,7 +381,7 @@ let action_cases =
   in
   let twice () =
     check bool "raises" true
-      (match Server.Action.make create (fun _ i -> Async.return i) with
+      (match Server.Action.implement create (fun _ i -> Async.return i) with
       | () -> false
       | exception Invalid_argument _ -> true)
   in
@@ -467,65 +499,16 @@ let stream_cases =
         "</body></html>" ]
       (List.tl (chunks ()))
   in
-  let suspend_settled () =
-    let write, chunks = recorder () in
-    get
-      (stream
-         (fun () -> Yuka.suspend ~loading:(Yuka.text "L") (Async.return (Yuka.text "a7")))
-         write);
-    check list_of "inline" [ "a7"; "</body></html>" ] (List.tl (chunks ()));
-    check string "same as Await"
-      (Server.to_string (fun () -> text_await (Async.return 7) "a"))
-      (Server.to_string (fun () ->
-           Yuka.suspend ~loading:(Yuka.text "La") (Async.return (Yuka.text "a7"))))
-  in
-  let suspend_pending () =
-    let a, resolve, _ = Async.make () in
-    let write, chunks = recorder () in
-    let p =
-      stream
-        (fun () -> Yuka.element "div" [] [ Yuka.suspend ~loading:(Yuka.text "La") a ])
-        write
-    in
-    check string "shell" "<div><!--[s1-->La<!--]--></div>" (List.nth (chunks ()) 1);
-    resolve (Yuka.element "b" [] [ Yuka.text "v" ]);
-    get p;
-    check list_of "fill"
-      [ fill "s1" "<b>v</b>"; "</body></html>" ]
-      (List.filteri (fun i _ -> i >= 2) (chunks ()))
-  in
-  let suspend_failure () =
-    let a, _, fail_a = Async.make () in
-    let b, _, fail_b = Async.make () in
-    let write, chunks = recorder () in
-    let p =
-      stream
-        (fun () ->
-          Yuka.fragment
-            [ Yuka.suspend ~loading:(Yuka.text "La")
-                ~failed:(fun m -> Yuka.text ("E:" ^ m)) a;
-              Yuka.suspend ~loading:(Yuka.text "Lb") b ])
-        write
-    in
-    fail_b "x";
-    fail_a "boom";
-    get p;
-    check list_of "failure chunks"
-      [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->";
-        fill "s2" "";
-        fill "s1" "E:server error";
-        "</body></html>" ]
-      (List.tl (chunks ()))
-  in
   let failure_hidden () =
     let html, messages =
       logged (fun () ->
           Server.to_string (fun () ->
               Yuka.fragment
                 [ text_await ~failed:(fun m -> Yuka.text ("E:" ^ m)) (Async.failed "secret detail") "a";
-                  Yuka.suspend ~loading:(Yuka.text "L")
+                  Yuka.Await.make ~loading:(Yuka.text "L")
                     ~failed:(fun m -> Yuka.text ("S:" ^ m))
-                    (Async.map (fun () -> failwith "secret view") (Async.return ())) ]))
+                    ~async:(Async.map (fun () -> failwith "secret view") (Async.return ()))
+                    ~children:Fun.id () ]))
     in
     check bool "no detail in the page" false (contains html "secret");
     check bool "a fixed message" true (contains html "E:server error" && contains html "S:server error");
@@ -578,12 +561,12 @@ let stream_cases =
     let write, chunks = recorder () in
     let logged = ref [] in
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
+    Yuka.Server.set_default_log (fun _ m -> logged := m :: !logged);
     let p = stream (fun () -> Yuka.fragment [ island a; island b ]) write in
     fail_a "db password wrong";
     open_b ();
     get p;
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check list_of "values"
       [ value_script "a2" "{\"error\":\"server error\"}";
         value_script "a1" "{\"error\":\"title is empty\"}";
@@ -594,7 +577,7 @@ let stream_cases =
   let async_errors_inline () =
     let logged = ref [] in
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ m -> logged := m :: !logged);
+    Yuka.Server.set_default_log (fun _ m -> logged := m :: !logged);
     let html =
       Server.to_string (fun () ->
           Yuka.fragment
@@ -602,7 +585,7 @@ let stream_cases =
               island (Server.Action.reject "title is empty");
               island (Async.failed "yuka.reject:forged") ])
     in
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check string "inline values"
       (island_html "i1" "{\"$async\":\"a3\",\"error\":\"server error\"}"
       ^ island_html "i2" "{\"$async\":\"a2\",\"error\":\"title is empty\"}"
@@ -745,9 +728,6 @@ let stream_cases =
     test_case "settled value is inline" `Quick settled_inline;
     test_case "nested await" `Quick nested;
     test_case "failure" `Quick failure;
-    test_case "suspend settled is inline" `Quick suspend_settled;
-    test_case "suspend streams" `Quick suspend_pending;
-    test_case "suspend failure" `Quick suspend_failure;
     test_case "a failure message stays on the server" `Quick failure_hidden;
     test_case "one failure text for Await and Async props" `Quick one_failure_rule;
     test_case "async props" `Quick async_prop;
@@ -1162,7 +1142,7 @@ let navigation_cases =
     let browser_only f =
       match f () with
       | () -> false
-      | exception Failure m -> contains m "browser only"
+      | exception Invalid_argument m -> contains m "browser only"
     in
     check bool "no arguments" true (browser_only (fun () -> Yuka.render ()));
     check bool "registry on native" true
@@ -1369,7 +1349,7 @@ let loading_cases =
   in
   let catch_keeps_link () =
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ _ -> ());
+    Yuka.Server.set_default_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           Yuka.fragment
@@ -1382,7 +1362,7 @@ let loading_cases =
                 ();
               isl "Counter" ])
     in
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check int "the link of a dropped island is printed again" 1 (count out (link "/js/Counter.js"))
   in
   let no_function () =
@@ -1470,7 +1450,7 @@ let loading_cases =
   in
   let nested_in_failed_catch () =
     let saved = fun _ m -> prerr_endline m in
-    Yuka.Server.Testing.set_log (fun _ _ -> ());
+    Yuka.Server.set_default_log (fun _ _ -> ());
     let out =
       shell ~preload (fun () ->
           outer_with (fun () ->
@@ -1482,7 +1462,7 @@ let loading_cases =
                       Yuka.Private.element (Yuka.Private.hole (fun () -> failwith "x")) ])
                 ()))
     in
-    Yuka.Server.Testing.set_log saved;
+    Yuka.Server.set_default_log saved;
     check int "no link for the dropped inner island" 0 (count out (link "/js/Inner.js"))
   in
   let nested_dedup () =
@@ -1527,7 +1507,7 @@ let loading_cases =
   in
   let manifest = {|{"Demo_shared.Counter":"./islands/counter.js","Demo_shared.Related":"demo/shared/related.js"}|} in
   let urls () =
-    let f = Yuka.Private.preload_urls ~manifest ~base:"/assets/" () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest ~base:"/assets/" ()) in
     check (list string) "leading ./ removed" [ "/assets/islands/counter.js" ]
       (f "Demo_shared.Counter");
     check (list string) "plain path" [ "/assets/demo/shared/related.js" ]
@@ -1538,11 +1518,11 @@ let loading_cases =
     {|{"inputs":{},"outputs":{"dist/counter-3F2A.js":{"entryPoint":"islands/counter.js","bytes":10},"dist/chunk-X.js":{"bytes":5},"dist/related-9.js":{"entryPoint":"app/demo/shared/related.js"}}}|}
   in
   let urls_metafile () =
-    let f = Yuka.Private.preload_urls ~manifest ~base:"/" ~metafile () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest ~base:"/" ~metafile ()) in
     check (list string) "exact" [ "/dist/counter-3F2A.js" ] (f "Demo_shared.Counter");
     check (list string) "suffix only is no match" [] (f "Demo_shared.Related");
     let g =
-      Yuka.Private.preload_urls ~manifest:{|{"Other":"other.js"}|} ~base:"/" ~metafile ()
+      Result.get_ok (Yuka.Private.preload_urls ~manifest:{|{"Other":"other.js"}|} ~base:"/" ~metafile ())
     in
     check (list string) "no output" [] (g "Other")
   in
@@ -1550,7 +1530,7 @@ let loading_cases =
     let metafile =
       {|{"outputs":{"o/long.js":{"entryPoint":"x/islands/counter.js"},"o/exact.js":{"entryPoint":"./islands/counter.js"}}}|}
     in
-    let f = Yuka.Private.preload_urls ~manifest ~base:"" ~metafile () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest ~base:"" ~metafile ()) in
     check (list string) "exact first" [ "o/exact.js" ] (f "Demo_shared.Counter")
   in
   let chain_metafile =
@@ -1568,16 +1548,16 @@ let loading_cases =
   in
   let chain_manifest = {|{"A":"islands/a.js","Other":"islands/other.js","Lazy":"islands/lazy.js"}|} in
   let urls_static_imports () =
-    let f = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" () in
+    let f = Result.get_ok (Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" ()) in
     check (list string) "the island, its static closure, then the rest of the entry closure"
       [ "/b/a-1.js"; "/b/chunk-A.js"; "/b/chunk-B.js"; "/b/chunk-C.js"; "/b/chunk-E.js" ]
       (f "A");
-    let g = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile () in
+    let g = Result.get_ok (Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ()) in
     check (list string) "without an entry" [ "/b/a-1.js"; "/b/chunk-A.js"; "/b/chunk-B.js"; "/b/chunk-C.js" ]
       (g "A")
   in
   let static_imports_on_page () =
-    let preload = Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" () in
+    let preload = Result.get_ok (Yuka.Private.preload_urls ~manifest:chain_manifest ~base:"/" ~metafile:chain_metafile ~entry:"b/main.js" ()) in
     let out =
       shell ~preload (fun () ->
           Yuka.fragment [ isl ~start:(`Lazy `Idle) "Lazy"; isl "A"; isl "Other"; isl ~start:`Visible "A" ])
@@ -1590,15 +1570,15 @@ let loading_cases =
       [ "/b/main.js"; "/b/dyn-1.js"; "/b/lazy-1.js"; "/b/chunk-L.js" ]
   in
   let urls_bad () =
-    let bad f = match f () with _ -> false | exception Invalid_argument _ -> true in
-    check bool "bad manifest" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest:"{" ~base:"" ()));
-    check bool "manifest not an object" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest:"[]" ~base:"" ()));
-    check bool "bad metafile" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"x" ()));
-    check bool "metafile without outputs" true
-      (bad (fun () -> Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"{}" ()))
+    let error = function Ok _ -> Alcotest.fail "accepted" | Error m -> m in
+    let starts prefix m = check bool m true (String.starts_with ~prefix m) in
+    starts "Yuka.Server.modules: bad manifest JSON: " (error (Yuka.Private.preload_urls ~manifest:"{" ~base:"" ()));
+    check string "manifest not an object" "Yuka.Server.modules: manifest is not an object"
+      (error (Yuka.Private.preload_urls ~manifest:"[]" ~base:"" ()));
+    starts "Yuka.Server.modules: bad metafile JSON: "
+      (error (Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"x" ()));
+    check string "metafile without outputs" "Yuka.Server.modules: metafile has no outputs object"
+      (error (Yuka.Private.preload_urls ~manifest ~base:"" ~metafile:"{}" ()))
   in
   [ test_case "data-start from the trigger" `Quick data_start;
     test_case "preload once per island name" `Quick once;
@@ -1780,6 +1760,7 @@ let () =
       ("server", page_cases);
       ("module-level State", module_state_cases);
       ("deferred", deferred_cases);
+      ("reducer", reducer_cases);
       ("actions", action_cases);
       ("streaming", stream_cases);
       ("page extras", page_extra_cases);
@@ -1790,4 +1771,5 @@ let () =
       ("review fixes", review_cases);
       ("island loading", loading_cases);
       ("css", css_cases);
+      ("scheduler", List.map (fun (name, case) -> Alcotest.test_case name `Quick case) Scheduler_cases.all);
     ]

@@ -110,10 +110,47 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   whose expression contains `Yuka.State.get`: `hidden=(Yuka.State.get all)`
   above. It does not see a read inside another function, such as
   `shown ()`; write `Yuka.hole (fun () -> ...)` for it.
-- Make a State inside `make`. A State made at the top level of a module is
-  a ppx error, because every request of the server would share it.
+- Make a State inside `make`. Every request of the server shares a State
+  made at the top level of a module, so on the server `State.set` or
+  `State.update` on it raises `Invalid_argument`.
 
 [`state.md`](state.md) explains State, memos and effects.
+
+## Ids for labels
+
+A `label` links to its field by `id`, and `aria-describedby`,
+`aria-labelledby` and `aria-controls` take ids too. A component that a page
+uses more than once cannot write a fixed id, and an id made with a counter
+or a random value is different on the server and in the browser. Use
+`Yuka.with_unique_id`:
+
+```ocaml
+let make ~label () =
+  Yuka.with_unique_id (fun id ->
+      <p>
+        <label for_=id>(Yuka.text label)</label>
+        <input id aria_describedby=(id ^ "-hint") />
+        <small id=(id ^ "-hint")>"At most 80 characters."</small>
+      </p>)
+```
+
+The id is unique on the page. In an island, the browser gets the same id as
+the server when it hydrates, also with several islands on the page, in a
+client navigation answer, in keyed list rows and in a streamed
+`<Yuka.Await>`. Outside an island, and in a component that only the browser
+renders, the id is unique. For a second id, add a suffix that starts with a
+letter, as `-hint` above, or call `with_unique_id` again.
+
+The function runs once and does not track a State that it reads, so the
+`input` keeps its text and focus when that State changes. To show a State
+inside, put a `Yuka.hole` there. An element that the browser makes after the
+island has started (a new list row, an `Await` value that arrives later)
+gets a new id, which the server never printed.
+
+## Form errors
+
+[Data](data.md#form-errors) explains how `Yuka.Form` shows field errors
+and errors for the whole form, with their ids, focus and ARIA attributes.
 
 ## Start strategies
 
@@ -132,12 +169,15 @@ The `start` prop says when the browser downloads and starts the island:
 <Yuka.Client start=(`Lazy `Visible)><Counter initial=0 /></Yuka.Client>
 ```
 
-`` `Lazy `` records the events before the start and replays them.
+Once the page script runs, an island that waits for its start (`` `Idle ``,
+`` `Visible ``, `` `Interaction `` or `` `Lazy ``) records the events inside
+it and replays them when it starts.
 
-A user can type, tick or choose in an island before it starts. The control
-keeps what the user did. When the island starts, Yuka sends `input` and
-`change` to that control, so your `on_input` and `on_change` handlers update
-the State. A click before the script runs is lost.
+Before the page script runs, no island records events. A user can still
+type, tick or choose in an island. The control keeps what the user did.
+When the island starts, Yuka sends `input` and `change` to that control,
+so your `on_input` and `on_change` handlers update the State. A click
+before the page script runs is lost, with every start strategy.
 
 ## Children
 
@@ -179,8 +219,16 @@ A `<Yuka.Client>` in the children is its own island.
   Yuka.client is not compatible with type Yuka.server".
 - An island cannot contain `<Yuka.Client>` in its own markup; that is a
   type error. Pass the inner island as children, as above.
-- An island cannot read the current route or search params as a State.
-  Pass what it needs as props.
+- An island reads the route of the page as a State with
+  `Routes.current ()`, and changes it with `Routes.replace` and
+  `Routes.push`. See [Router](router.md#the-current-route).
+- An island reads a context (`Yuka.Context`) that the page gave outside it
+  only when the context has a codec; islands under one `Provide` share the
+  value. A context without a codec does not reach an island, and one
+  island does not read a context of another. Give the value inside the
+  island, pass it as a prop, or make the context with a codec. See
+  [State](state.md#contexts-that-reach-islands). The children that the page
+  passes to an island belong to the page: they read what the page gave.
 
 ## Build
 

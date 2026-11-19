@@ -15,5 +15,6 @@ val name : (_, _, _) t -> string
 val input : ('i, _, _) t -> 'i Codec.t
 val output : (_, 'o, _) t -> 'o Codec.t
 val form : ('i, 'o, 'kind) t -> ('i, 'o, 'kind) form
-val send : string -> Json.t -> (Json.t, Status.error) result Async.t
+val send : string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit
+val start : ('i, 'o, _) t -> 'i -> ('o, Status.error) result Async.t * (unit -> unit)
 val call : ('i, 'o, _) t -> 'i -> ('o, Status.error) result Async.t

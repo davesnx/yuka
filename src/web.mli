@@ -3,8 +3,6 @@ type event
 type 'a promise
 
 val in_browser : bool
-val check_state_write : Scheduler.node -> unit
-val seal_states : unit -> unit
 val window : unit -> node
 val document : unit -> node
 val owner_document : node -> node
@@ -48,6 +46,7 @@ val shift_key : event -> bool
 val alt_key : event -> bool
 val client_x : event -> float
 val client_y : event -> float
+val pointer_type : event -> string
 val prevent_default : event -> unit
 val stop_propagation : event -> unit
 val set_flag : event -> string -> bool -> unit
@@ -65,7 +64,8 @@ val console_log : string -> unit
 val console_debug : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
-val decode_uri : string -> string
+val decode_uri : string -> string option
+val encode_cookie_value : string -> string option
 val contains : node -> node -> bool
 val fetch_post :
   string ->
@@ -77,6 +77,7 @@ val fetch_post :
 val watch_added : (node array -> bool) -> unit -> unit
 val navigate : string -> unit
 val focus : string -> unit
+val focus_node : node -> unit
 val scroll_into_view : string -> unit
 val has_intersection_observer : node -> bool
 val on_idle : (unit -> unit) -> unit -> unit
@@ -100,6 +101,10 @@ val same_origin : string -> bool
 val fresh_key : unit -> string
 val history_key : unit -> string
 val history_replace_key : string -> unit
+val history_push_key : string -> string -> unit
+val scroll_y : unit -> float
+val set_cookie : string -> unit
+val history_back : unit -> unit
 val history_replace_url : string -> unit
 val manual_scroll : unit -> unit
 val plain_click : event -> bool
@@ -119,6 +124,17 @@ val shortest_float : float -> string
 val parse_float : string -> float
 val parse_int : string -> int option
 
+type json =
+  [ `Null
+  | `Bool of bool
+  | `Int of int
+  | `Float of float
+  | `String of string
+  | `List of json list
+  | `Assoc of (string * json) list ]
+
+val parse_json : string -> (json, string) result
+
 type socket
 
 val socket_open : string -> (unit -> unit) -> (string -> unit) -> (int -> unit) -> socket
@@ -132,7 +148,16 @@ val nonce : unit -> string
 val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val read_file : string -> string option
-val take_buffer : unit -> Buffer.t option
-val give_buffer : Buffer.t -> unit
+val take_buffer : unit -> Stdlib.Buffer.t option
+val give_buffer : Stdlib.Buffer.t -> unit
+
+type 'a local
+
+val local : (unit -> 'a) -> 'a local
+val local_get : 'a local -> 'a
 val lowercase : string -> string
+val skip_clean : string -> int -> int
+val sub : string -> int -> int -> string
+val of_char : char -> string
 val refuse_url_name : string -> unit
+val tree_digest : string -> string

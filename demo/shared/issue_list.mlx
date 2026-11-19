@@ -12,11 +12,11 @@ let index_of id items =
 
 let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Queries.view) ~(query : string)
     ~(chosen : string list) () =
-  let source = Yuka.Live.use Topics.issues (fun () -> { Queries.workspace; view }) in
+  let source = Yuka.Live.make Topics.issues (fun () -> { Queries.workspace; view }) in
   let issues =
     Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
   in
-  let labels = Yuka.Remote.use Queries.labels (fun () -> workspace) in
+  let labels = Yuka.Remote.make Queries.labels (fun () -> workspace) in
   let label_counts =
     Yuka.State.memo ~equal:( = ) (fun () ->
         match Yuka.Remote.status labels with
@@ -40,13 +40,17 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
             Issue.matches ~query issue && List.for_all (fun chosen -> List.mem chosen issue.labels) only)
           (Yuka.State.get issues))
   in
-  let url =
-    Yuka.State.memo (fun () ->
+  let route =
+    Yuka.State.memo ~equal:( = ) (fun () ->
         let q = match Yuka.State.get filter with "" -> None | text -> Some text
         and label = Yuka.State.get chosen_labels in
-        match view with Queries.All -> Links.issues ?q ~label workspace | Mine -> Links.my_issues ?q ~label workspace)
+        match (view, Links.default workspace) with
+        | Queries.All, true -> Routes.Issues { q; label }
+        | All, false -> Workspace_issues { workspace; q; label }
+        | Mine, true -> My_issues { q; label }
+        | Mine, false -> Workspace_my_issues { workspace; q; label })
   in
-  Yuka.Effect.on_change url (fun ~prev:_ ~next -> Yuka.Browser.replace_url next);
+  Yuka.Effect.on_change route (fun ~prev:_ ~next -> Routes.replace next);
   let arranged =
     Yuka.State.memo ~equal:( = ) (fun () ->
         let counts = Yuka.State.get label_counts and first = Yuka.State.get pinned in

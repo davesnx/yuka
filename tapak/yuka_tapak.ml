@@ -1,22 +1,30 @@
-type current = { sw : Eio.Switch.t; mutable read : bool }
+type current = {
+  sw : Eio.Switch.t;
+  mutable read : bool;
+  file : root:string -> path:string -> headers:(string * string) list -> Tapak.Response.t;
+}
 
 let current : current Eio.Fiber.key = Eio.Fiber.create_key ()
 
 exception Request_ended
 
-let switch () =
-  match Eio.Fiber.get current with
-  | Some c -> c.sw
-  | None -> invalid_arg "Yuka_tapak.switch: not inside a request of Yuka_tapak.handler"
+let switch () = Option.map (fun c -> c.sw) (Eio.Fiber.get current)
+
+let switch_exn () =
+  match switch () with
+  | Some sw -> sw
+  | None -> invalid_arg "Yuka_tapak.switch_exn: not inside a request of Yuka_tapak.handler"
 
 let await async =
   match Yuka.Async.status async with
-  | Yuka.Async.Done v -> v
-  | Yuka.Async.Failed m -> failwith m
-  | Yuka.Async.Pending -> (
+  | Yuka.Async.Done v -> Ok v
+  | Yuka.Async.Failed m -> Error m
+  | Yuka.Async.Pending ->
       let p, r = Eio.Promise.create () in
       Yuka.Async.on_result async (Eio.Promise.resolve r);
-      match Eio.Promise.await p with Ok v -> v | Error m -> failwith m)
+      Eio.Promise.await p
+
+let await_exn async = match await async with Ok v -> v | Error m -> failwith m
 
 let async ~sw f =
   let a, ok, fail = Yuka.Async.make () in
@@ -71,11 +79,6 @@ let sessions next request =
       Tapak.Response.add_header name value response)
     (next request) fresh
 
-let required request name =
-  match cookie request name with
-  | Some v -> v
-  | None -> failwith ("no " ^ name ^ " cookie: put Yuka_tapak.sessions around the handler")
-
 module Base = struct
   type request = Tapak.Request.t
   type reply = Tapak.Response.t
@@ -107,11 +110,10 @@ module Base = struct
               Some text
             end)
 
-  let session request = required request session_cookie
+  let session request = cookie request session_cookie
 
   let csrf_token request =
-    ignore (required request csrf_cookie);
-    fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request)
+    Option.map (fun _ -> fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request)) (cookie request csrf_cookie)
 
   let verify_csrf request token =
     Yuka.Async.return (Tapak.Csrf.verify_token ~cookie_name:csrf_cookie ~token request)
@@ -123,7 +125,7 @@ module Base = struct
       | Yuka.Server.String text -> Tapak.Response.of_string ~headers ~status text
       | Yuka.Server.Stream f ->
           Tapak.Response.stream ~headers ~status (fun write flush ->
-              await
+              await_exn
                 (f (fun text ->
                      guard (fun () ->
                          write text;
@@ -163,7 +165,7 @@ module Base = struct
                        ~finally:(fun () -> ignore (Eio.Promise.try_resolve closing ()))
                        (fun () -> try Cows.close ~code conn with Cows.Connection_closed -> ())))
            in
-           Eio.Fiber.first (fun () -> Eio.Promise.await closed) (fun () -> await (run connection)))
+           Eio.Fiber.first (fun () -> Eio.Promise.await closed) (fun () -> await_exn (run connection)))
          request)
 
   let sleep seconds =
@@ -197,19 +199,26 @@ let drain request =
   let rec read () = if not (Bytesrw.Bytes.Slice.is_eod (Bytesrw.Bytes.Reader.read reader)) then read () in
   try read () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
 
-let handler ~sw ~fs ?node config app =
-  let module Cycle = Yuka.Server.Adapter.Make (struct
-    include Base
+module Cycle = Yuka.Server.Adapter.Make (struct
+  include Base
 
-    let file _ ~root ~path ~headers =
-      Yuka.Async.return
-        (if exists ~root ~path then
-           Tapak.Response.file ~headers:(Http.Header.of_list headers) Eio.Path.(fs / root / path)
-         else
-           Tapak.Response.of_string ~status:`Not_found
-             ~headers:(Http.Header.of_list [ ("cache-control", "no-store") ])
-             "Not Found")
-  end) in
+  let file _ ~root ~path ~headers =
+    match Eio.Fiber.get current with
+    | None -> Yuka.Async.failed "Yuka_tapak: file outside a request"
+    | Some c -> Yuka.Async.return (c.file ~root ~path ~headers)
+end)
+
+let request = Cycle.backend_request
+
+let handler ~sw ~fs ?node config app =
+  let file ~root ~path ~headers =
+    if Base.exists ~root ~path then
+      Tapak.Response.file ~headers:(Http.Header.of_list headers) Eio.Path.(fs / root / path)
+    else
+      Tapak.Response.of_string ~status:`Not_found
+        ~headers:(Http.Header.of_list [ ("cache-control", "no-store") ])
+        "Not Found"
+  in
   let config = Yuka.Server.Adapter.default_log log config in
   fun request ->
     let opened, open_ = Eio.Promise.create () and closed, close = Eio.Promise.create () in
@@ -223,11 +232,11 @@ let handler ~sw ~fs ?node config app =
         | Request_ended -> ()
         | Eio.Cancel.Cancelled _ as e -> raise e
         | e -> Logs.err ~src (fun m -> m "request switch failed: %s" (Printexc.to_string e)));
-    let state = { sw = Eio.Promise.await opened; read = false } in
+    let state = { sw = Eio.Promise.await opened; read = false; file } in
     let close () = ignore (Eio.Promise.try_resolve close ()) in
     let bound run = Eio.Fiber.with_binding current state run in
     let later run = Fun.protect ~finally:close (fun () -> bound run) in
-    match bound (fun () -> await (Cycle.handler ?node config app request)) with
+    match bound (fun () -> await_exn (Cycle.handler ?node config app request)) with
     | exception e ->
         close ();
         raise e

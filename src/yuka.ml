@@ -2,10 +2,14 @@ module Json = Json
 module Async = Async
 module Status = Status
 module Codec = Codec
-module State = struct include State end
-module Effect = Base.Effect
+module State = State
+module Effect = struct
+  include Base.Effect
 
-let owner = Base.mount
+  let on_change = State.on_change
+end
+
+let with_owner = Base.mount
 let batch = Scheduler.batch
 
 type server = Types.server
@@ -17,8 +21,7 @@ module Client = struct
   include Client
 
   type registry = {
-    start :
-      bool * [ `Hover | `Visible | `Off ] option * bool option * (string -> unit) option -> unit;
+    start : bool * bool option * (string -> unit) option -> unit;
   }
 end
 module Action = Action
@@ -26,12 +29,16 @@ module Remote = Remote
 module Topic = Topic
 module Live = Live
 module Form = Form
-module Event = Platform.Event
+module Event = Event
 module Browser = Browser
 module Router = struct
   include Router
   module Param = Router_param
 end
+
+let runtime_route_current find = Route.current find
+let runtime_route_replace = Route.replace
+let runtime_route_push = Route.push
 
 module Console = struct
   let send level browser message = if Web.in_browser then browser message else Types.log_message level message
@@ -46,21 +53,14 @@ module Server = struct
   include Server
   include Cycle
 
-  type context = Types.context
+  type request = Types.context
   type log_level = Types.log_level
-
-  module Context = struct
-    let header (c : context) = c.header
-    let session (c : context) = c.session ()
-    let meth (c : context) = c.meth
-    let path (c : context) = c.path
-  end
 
   let to_string build = Server.to_string (Kind.fn build)
   let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
 
   module Action = struct
-    let make = Server.implement
+    let implement = Server.implement
     let reject = Server.reject
   end
 
@@ -72,7 +72,7 @@ module Server = struct
   module Generated = struct
     type rules = Cycle.rules
     type layer = Cycle.layer = { key : string; data : bool; wrap : Types.server Kind.element -> Types.server Kind.element }
-    type plan = Cycle.plan = { layers : layer list; page : Cycle.page }
+    type plan = Cycle.plan = { layers : layer list; page : Cycle.page; overlay : Cycle.page option }
 
     type fallback = Cycle.fallback = {
       layers : layer list;
@@ -123,26 +123,39 @@ module Server = struct
     let served_dirs = Cycle.served_dirs
   end
 
+  let set_default_log f = Types.default_log := f
+
   module Testing = struct
     let live_run = Live_server.run
     let live_mark = Live_server.mark
     let memory_down = Live_server.memory_down
-    let set_log f = Types.default_log := f
+    let bus_send (b : Live.bus) = b.send
+    let bus_listen (b : Live.bus) = b.listen
+    let bus_on_restart (b : Live.bus) = b.on_restart
+    let json_diff = Json_diff.diff
+    let live_state ?node ~sleep request name key = Live_server.ssr_state ~sleep (Live_server.pick node) request name key
+    let json_patch = Json_patch.apply
 
-    let context ?(header = fun _ -> None) ?session () : context =
-      { (Server.empty_context ()) with header; session = (fun () -> session) }
+    let request ?(header = fun _ -> None) ?session ?(meth = `GET) ?(target = "") ?body () : request =
+      let empty = Server.empty_context () in
+      let body =
+        match body with
+        | None -> empty.body
+        | Some text -> Server.read_once (fun ~limit -> Async.return (if String.length text > limit then None else Some text))
+      in
+      { empty with header; session = (fun () -> session); meth; target; path = fst (Router.split_target target); body }
   end
 end
 
-let render ?islands ?navigation ?prefetch ?transitions ?on_error ?root () =
-  if not Web.in_browser then failwith "Yuka.render: browser only";
+let render ?islands ?navigation ?transitions ?on_error ?root () =
+  if not Web.in_browser then invalid_arg "Yuka.render: browser only";
   match (islands, root) with
   | None, None -> invalid_arg "Yuka.render: no ~islands and no ~root"
   | _ -> (
       (match root with Some r -> Client.render_root r | None -> ());
       match islands with
       | Some { Client.start } ->
-          start ((match navigation with Some n -> n | None -> true), prefetch, transitions, on_error)
+          start ((match navigation with Some n -> n | None -> true), transitions, on_error)
       | None -> ())
 
 let stop () =
@@ -175,11 +188,11 @@ let runtime_promise_map = Client.promise_map
 let runtime_registry ?(lazy_entries = []) ?navigation:load entries =
   {
     Client.start =
-      (fun (navigation, prefetch, transitions, on_error) ->
+      (fun (navigation, transitions, on_error) ->
         Option.iter (fun f -> Client.on_error := f) on_error;
         match load with
         | Some load when navigation ->
-            Navigation_stub.start ~load ~lazy_entries ?prefetch ?transitions entries
+            Navigation_stub.start ~load ~lazy_entries ?transitions entries
         | _ -> Client.start ~lazy_entries entries);
   }
 
@@ -193,10 +206,15 @@ module Private = struct
   include Types
   include Printer
 
+  type env = Scheduler.env
+
+  let print s build = print s build
+
   let stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write build =
     Server.stream ?head ?early ?import_map ?timeout ?title ?styles ?scripts ?preload ~sleep ~write (Kind.fn build)
 
-  let settled ?timeout ?preload ~sleep build = Server.settled ?timeout ?preload ~sleep (Kind.fn build)
+  let settled ?timeout ?preload ?id_prefix ~sleep build =
+    Server.settled ?timeout ?preload ?id_prefix ~sleep (Kind.fn build)
   let import_map = Server.import_map
   let set_form (s : session) f = s.form <- Some f
   let set_csrf (s : session) f = s.csrf <- Some f
@@ -236,7 +254,7 @@ module Private = struct
 
   let owned f =
     let o = Base.new_owner () in
-    let parent = !Base.current_owner in
+    let parent = !(Base.current_owner ()) in
     let id =
       Option.map
         (fun p -> (p, Base.add_disposer p (fun () -> Base.dispose_owner o)))
@@ -254,17 +272,25 @@ module Private = struct
         Base.dispose_owner o;
         raise e
 
-  let server_rendering = Base.server_rendering
+  let with_context bindings f =
+    let o = Base.new_owner () in
+    o.env <- add_bindings bindings o.env;
+    Option.iter (fun p -> ignore (Base.add_disposer p (fun () -> Base.dispose_owner o))) !(Base.current_owner ());
+    Base.with_owner o f
+
+  let server_rendering () = !(Base.server_rendering ())
+  let in_browser = Web.in_browser
+  let decode_uri = Web.decode_uri
   let platform = Platform.platform
   let entry_name (e : Island.entry) = e.name
   let entry_decode (e : Island.entry) j = e.decode j
 
   let owner_size () =
-    match !Base.current_owner with
+    match !(Base.current_owner ()) with
     | Some o -> Base.owner_size o
     | None -> 0
 
-  let has_readers (s : _ Signal.t) = Option.is_some s.node.first
+  let has_readers s = Option.is_some (State.signal s).node.first
 
   let slot = slot
 
@@ -272,8 +298,9 @@ module Private = struct
 
   let slot_content (s : slot) = s.content
   let slot_dom (s : slot) = s.dom
-  let call_action = Types.transport
+  let call_action = Bridge.send
   let async_source = Types.async_source
+  let page_contexts () = !Platform.swapped != Platform.no_swap
   let render = Client.render
   let hydrate = Client.hydrate
 end

@@ -156,6 +156,20 @@ let bad_database () =
       add_note "Still on the first database";
       Alcotest.(check int) "and writes" 3 (List.length (note_ids ()))
 
+let stress_round_trip () =
+  let stress = Model.Workspace.Stress in
+  (match
+     Store.change stress (fun () -> Option.to_result ~none:"no STR-2000" (Store.update ~id:"STR-2000" ~status:Model.Issue.Canceled ()))
+   with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.fail "the stress write was refused");
+  let stored = sql "SELECT state FROM yuka_demo_state WHERE workspace = 'stress'" in
+  Alcotest.(check int) "the row holds every stress issue" Stress.issue_count
+    (List.length (Result.get_ok (Result.bind (Yuka.Json.of_string (stored#getvalue 0 0)) (Yuka.Codec.decode Store.saved_codec))).issues);
+  connect ();
+  Alcotest.(check int) "a restart loads every stress issue" Stress.issue_count (List.length (Store.issues stress));
+  Alcotest.(check bool) "with the change" true ((Option.get (Store.find "STR-2000")).status = Model.Issue.Canceled)
+
 let () =
   Printexc.register_printer (function Postgresql.Error error -> Some (Postgresql.string_of_error error) | _ -> None);
   match conninfo with
@@ -180,5 +194,6 @@ let () =
               case "a row older than the reset age gives the seed" old_row_gives_the_seed;
               case "a lost connection: the read keeps the cache, the write connects again" lost_connection;
               case "a database that does not answer: an error without the password" bad_database;
+              case "the stress workspace: a write stores every issue and a restart loads them" stress_round_trip;
             ] );
         ]

@@ -87,7 +87,7 @@ let tapak_log make () =
       check_true "not in Logs" (not (List.exists (fun (_, _, m) -> m = "warned page") !got)))
 
 let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
-let () = Yuka.Server.Action.make echo (fun _ s -> Yuka.Async.return (String.length s))
+let () = Yuka.Server.Action.implement echo (fun _ s -> Yuka.Async.return (String.length s))
 
 let body_limit make () =
   let handler = make config in
@@ -184,14 +184,27 @@ let request_switch_ends ~fs () =
       check_true "answered" (contains body "answered"));
   check_true "the fiber on the request switch ends with the response" (Unix.gettimeofday () -. start < 1.)
 
+let switch_outside_a_request () =
+  check_true "no switch" (Option.is_none (Yuka_tapak.switch ()));
+  match Yuka_tapak.switch_exn () with
+  | _ -> Alcotest.fail "a switch outside a request"
+  | exception Invalid_argument m -> check_true "names the handler" (contains m "Yuka_tapak.handler")
+
 let no_sessions ~sw ~fs () =
+  let logged = ref [] in
+  let config = Yuka.Server.config ~log:(fun _ m -> logged := m :: !logged) () in
   let handler = Yuka_tapak.handler ~sw ~fs config Yuka_routes.app in
   let response, _ = call ~headers:same_origin handler "/_yuka/csrf" in
   Alcotest.(check int) "csrf without the middleware" 500 (status response);
+  check_true "the csrf log names the path and the middleware"
+    (match !logged with [ m ] -> contains m "/_yuka/csrf" && contains m "session middleware" | _ -> false);
+  logged := [];
   let response, _ =
     call ~headers:(("Upgrade", "websocket") :: same_origin) handler "/_yuka/live"
   in
-  Alcotest.(check int) "live without the middleware" 500 (status response)
+  Alcotest.(check int) "live without the middleware" 500 (status response);
+  check_true "the live log names the middleware"
+    (match !logged with [ m ] -> contains m "the live socket needs session middleware" | _ -> false)
 
 let csrf_secret = String.make 32 'k'
 
@@ -317,6 +330,34 @@ let live ~sw ~net make () =
           | `Close (code, _) -> Alcotest.(check int) "a bad token" 4403 code
           | _ -> Alcotest.fail "not a close"))
 
+let tapak_request make () =
+  let handler = make config in
+  let _, body = call ~headers:[ ("x-user", "bob") ] handler "/whoami?a=1" in
+  Alcotest.(check string) "inside a tapak request" "/whoami?a=1 bob" body;
+  check_true "a Testing request" (Option.is_none (Yuka_tapak.request (Yuka.Server.Testing.request ())))
+
+let handler_reads_the_request make () =
+  let handler = make config in
+  let headers = (("Content-Type", "application/json") :: same_origin) @ [ ("Cookie", "a=1; theme=dark") ] in
+  let response, body = call ~meth:`POST ~headers ~body:"[1,2,3]" handler "/sum?tag=t" in
+  Alcotest.(check (pair int string)) "JSON body, query param and cookie" (201, {|["6","t","dark"]|}) (status response, body)
+
+let await_result () =
+  let check = Alcotest.(check (result int string)) in
+  check "done" (Ok 1) (Yuka_tapak.await (Yuka.Async.return 1));
+  check "failed" (Error "down") (Yuka_tapak.await (Yuka.Async.failed "down"));
+  let a, _, fail = Yuka.Async.make () in
+  Eio.Fiber.both (fun () -> check "failed while waiting" (Error "later") (Yuka_tapak.await a)) (fun () -> fail "later")
+
+let await_exn () =
+  Alcotest.(check int) "done" 2 (Yuka_tapak.await_exn (Yuka.Async.return 2));
+  Alcotest.check_raises "failed" (Failure "down") (fun () -> ignore (Yuka_tapak.await_exn (Yuka.Async.failed "down")));
+  let a, _, fail = Yuka.Async.make () in
+  Eio.Fiber.both
+    (fun () ->
+      Alcotest.check_raises "failed while waiting" (Failure "later") (fun () -> ignore (Yuka_tapak.await_exn a)))
+    (fun () -> fail "later")
+
 let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -339,12 +380,23 @@ let () =
           Alcotest.test_case "HEAD then GET on one connection" `Quick (head_then_get ~net make);
         ] );
       ("log", [ Alcotest.test_case "Console reaches Logs" `Quick (tapak_log make) ]);
+      ( "request",
+        [
+          Alcotest.test_case "Yuka_tapak.request" `Quick (tapak_request make);
+          Alcotest.test_case "a handler reads the request" `Quick (handler_reads_the_request make);
+        ] );
+      ( "await",
+        [
+          Alcotest.test_case "await gives a result" `Quick await_result;
+          Alcotest.test_case "await_exn raises Failure" `Quick await_exn;
+        ] );
       ( "session",
         [
           Alcotest.test_case "sessions gives the cookies" `Quick (csrf_cookies make);
           Alcotest.test_case "no sessions middleware" `Quick (no_sessions ~sw ~fs);
           Alcotest.test_case "malformed cookies are replaced" `Quick (bad_cookies make);
           Alcotest.test_case "the request switch ends with the response" `Quick (request_switch_ends ~fs);
+          Alcotest.test_case "no switch outside a request" `Quick switch_outside_a_request;
         ] );
       ("live", [ Alcotest.test_case "hello, ping and close over a socket" `Quick (live ~sw ~net make) ]);
     ]

@@ -21,27 +21,27 @@ Router.make ~layout:Layouts.root ~not_found:Pages.not_found ~error:Pages.error
     Router.group ~path:"/issue/:id<Params.issue_id>" ~loader:Loaders.issue
       ~guard:Guards.signed_in
       [
-        Router.route Issue ~path:"/" ~page:Pages.issue
+        Router.route Issue ~path:"/" ~page:Pages.issue ?overlay:Pages.issue_dialog
           ~search:
             {
               tab = optional Params.Tab.t;
               seen = many int;
               view = default Params.Tab.t Params.Tab.Overview;
             };
-        Router.action Close_issue ~path:"/close" ~method_:`POST
+        Router.post Close_issue ~path:"/close"
           ~handler:Actions.close;
-        Router.endpoint Issue_json ~path:"/json" ~method_:`GET ~handler:Api.issue;
-        Router.action Update_issue ~path:"/json" ~method_:`PUT
+        Router.get Issue_json ~path:"/json" ~handler:Api.issue;
+        Router.put Update_issue ~path:"/json"
           ~handler:Actions.update;
       ];
     Router.route Page_n ~path:"/page/:n<int>" ~page:Pages.page;
     Router.route Cafe ~path:"/café" ~page:Pages.cafe;
     Router.route Doc ~path:"/docs/:parts<string...>" ~page:Pages.doc;
-    Router.endpoint Feed ~path:"/feed.xml" ~method_:`GET ~handler:Feeds.rss
+    Router.get Feed ~path:"/feed.xml" ~handler:Feeds.rss
       ~cache:(Public { max_age = 60; s_max_age = None });
-    Router.action Clear_feed ~path:"/feed.xml" ~method_:`DELETE
+    Router.delete Clear_feed ~path:"/feed.xml"
       ~handler:Actions.clear;
-    Router.endpoint Missing ~path:"/missing" ~method_:`GET ~handler:Api.missing;
+    Router.get Missing ~path:"/missing" ~handler:Api.missing;
     Router.redirect ~path:"/i/:id<Params.issue_id>" ~to_:(Permanent "/issue/:id");
     Router.redirect ~path:"/old-docs/:parts<string...>"
       ~to_:(Temporary "/docs/:parts");

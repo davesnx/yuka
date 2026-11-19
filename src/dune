@@ -2,6 +2,8 @@
  (name yuka)
  (public_name yuka)
  (modes native melange)
+ (libraries threads.posix)
+ (melange.libraries)
  (private_modules
   action
   answers
@@ -10,20 +12,26 @@
   base
   bridge
   browser
+  buffer
   client
   cycle
   dev
   element
   form_core
   island
+  json_diff
+  json_patch
   live_server
   navigation
   navigation_state
   navigation_stub
   navigation_web
   optimistic
+  page_context
   platform
+  prefetch
   printer
+  route
   router
   scheduler
   server

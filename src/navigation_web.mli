@@ -3,14 +3,18 @@ open Web
 type controller
 
 val set_title : string -> unit
-val scroll_y : unit -> float
+val title : unit -> string
+val active : unit -> node
+val refocus : node -> unit
+val route_script : unit -> (node * node) option
+val put_back : node * node -> unit
+val layer : unit -> node
 val scroll_to : float -> unit
 val scroll_to_hash : string -> unit
-val history_push_key : string -> string -> unit
 val new_controller : unit -> controller
 val abort : controller -> unit
 val fetch_page :
-  string * string * bool * controller ->
+  string * string * string * bool * controller * bool ->
   (string -> int -> (string -> string option) -> string -> unit) ->
   (unit -> unit) ->
   unit
@@ -27,6 +31,12 @@ val key_before : string -> string -> bool
 val now : unit -> float
 val after : int -> (unit -> unit) -> unit -> unit
 val save_data : unit -> bool
-val observe : node array -> (node -> unit) -> unit -> unit
+val hidden_or_slow : unit -> bool
+val on_visible : (unit -> unit) -> unit -> unit
+val observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit
+val trajectory : (node -> string) -> (string -> unit) -> unit -> unit
+val warm : string -> string -> unit
 val transition : string -> (unit -> unit) -> unit
 val adopt_stylesheets : unit -> unit
+val live : unit -> unit
+val settle : node -> string -> unit

@@ -1,10 +1,10 @@
 open Demo_shared
 
 let register () =
-  Yuka.Server.Live.serve Topics.issues (fun list ->
+  Yuka.Server.Live.implement Topics.issues (fun list ->
       Store.refresh ();
       Yuka.Async.return (Store.view_issues list));
-  Yuka.Server.Live.serve Topics.issue (fun id ->
+  Yuka.Server.Live.implement Topics.issue (fun id ->
       Store.refresh ();
       match Store.find id with Some issue -> Yuka.Async.return issue | None -> Yuka.Server.Action.reject ("No issue " ^ id));
   Yuka.Server.Form.implement Actions.create_issue
@@ -26,9 +26,9 @@ let register () =
             Yuka.Async.return (Ok issue)
         | Error (Refused message) -> title_error message
         | Error Unavailable -> Yuka.Server.Action.reject Store.unavailable);
-  Yuka.Server.Live.serve Topics.board (fun workspace ->
+  Yuka.Server.Live.implement Topics.board (fun workspace ->
       Store.refresh ();
       Yuka.Async.return (Store.board workspace))
 
-let issues_json (_ : Dream.request) =
-  Yuka.Server.json (Yuka.Codec.encode (Yuka.Codec.list Model.Issue.codec) (Store.issues Model.Workspace.default))
+let issues_json (_ : Yuka.Server.request) =
+  Yuka.Server.json (Yuka.Codec.list Model.Issue.codec) (Store.issues Model.Workspace.default)

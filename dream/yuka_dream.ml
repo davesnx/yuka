@@ -44,8 +44,11 @@ module Adapter = struct
     | Some n when n > limit -> to_async (refuse ())
     | _ -> to_async (read ())
 
-  let session = Dream.session_id
-  let csrf_token request = Dream.csrf_token request
+  let without_session f request =
+    match f request with v -> Some v | exception Failure m when m = "Missing session middleware" -> None
+
+  let session = without_session Dream.session_id
+  let csrf_token = without_session (fun request -> Dream.csrf_token request)
 
   let verify_csrf request token =
     to_async (Lwt.map (function `Ok -> true | _ -> false) (Dream.verify_csrf_token request token))
@@ -104,15 +107,7 @@ module Fresh = Yuka.Server.Adapter.Make (struct
   let exists ~root:_ ~path:_ = false
 end)
 
-let tree_digest dir =
-  let rec files rel =
-    let path = if rel = "" then dir else Filename.concat dir rel in
-    if Sys.is_directory path then
-      Sys.readdir path |> Array.to_list |> List.sort compare
-      |> List.concat_map (fun name -> files (if rel = "" then name else Filename.concat rel name))
-    else [ rel ^ "\000" ^ Digest.to_hex (Digest.file path) ]
-  in
-  Digest.to_hex (Digest.string (String.concat "\n" (files "")))
+let request r = match Cycle.backend_request r with None -> Fresh.backend_request r | found -> found
 
 let dream_log = Dream.sub_log "yuka"
 
@@ -124,6 +119,7 @@ let log level message =
   | `Debug -> dream_log.debug (fun k -> k "%s" message)
 
 let handler ?node config app =
+  if Sys.unix then Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let config = Yuka.Server.Adapter.default_log log config in
   fun request -> to_lwt (Cycle.handler ?node config app request)
 
@@ -180,18 +176,12 @@ let rec inside ~dir path =
 
 let check_out out config =
   let target = absolute out in
-  List.iter
-    (fun (_, dir) ->
-      if inside ~dir:(absolute dir) target then
-        invalid_arg
-          (Printf.sprintf "Yuka_dream.prerender: out %S is inside the served directory %S" out dir))
-    (Yuka.Server.Prerender.served_dirs config)
+  match List.find_opt (fun (_, dir) -> inside ~dir:(absolute dir) target) (Yuka.Server.Prerender.served_dirs config) with
+  | Some (_, dir) -> Error (Printf.sprintf "Yuka_dream.prerender: out %S is inside the served directory %S" out dir)
+  | None -> Ok ()
 
-let prerender ~out config app =
-  let config = Yuka.Server.Prerender.config config in
-  check_out out config;
+let write_pages ~out config app =
   let ( let* ) = Lwt.bind in
-  let request path = Dream.request ~method_:`GET ~target:path "" in
   let seen = Hashtbl.create 64 and queue = Queue.create () in
   let add path =
     if not (Hashtbl.mem seen path) then begin
@@ -204,7 +194,7 @@ let prerender ~out config app =
     match Queue.take_opt queue with
     | None -> Lwt.return_unit
     | Some path -> (
-        let* response = to_lwt (Fresh.handler config app (request path)) in
+        let* response = to_lwt (Fresh.handler config app (Dream.request ~method_:`GET ~target:path "")) in
         let status = Dream.status_to_int (Dream.status response) in
         let* body = Dream.body response in
         let ok = status >= 200 && status < 300 in
@@ -215,7 +205,7 @@ let prerender ~out config app =
               List.iter
                 (fun link ->
                   if (not (Hashtbl.mem seen link))
-                     && Yuka.Server.Prerender.prerenderable config app (request link) link
+                     && Yuka.Server.Prerender.prerenderable config app link
                   then add link)
                 (Yuka.Server.Prerender.links body);
             visit ()
@@ -236,3 +226,9 @@ let prerender ~out config app =
     (fun (prefix, dir) -> copy dir (Filename.concat out (String.sub prefix 1 (String.length prefix - 1))))
     (Yuka.Server.Prerender.served_dirs config);
   Lwt.return_unit
+
+let prerender ~out config app =
+  let config = Yuka.Server.Prerender.config config in
+  match check_out out config with
+  | Error _ as e -> Lwt.return e
+  | Ok () -> Lwt.map Result.ok (write_pages ~out config app)

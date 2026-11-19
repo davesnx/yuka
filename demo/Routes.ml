@@ -12,8 +12,8 @@ let routes =
         [
           Router.route Issues ~path:"/" ~page:Pages.index ~search:{ q = optional string; label = many string };
           Router.route My_issues ~path:"/my" ~page:Pages.my_issues ~search:{ q = optional string; label = many string };
-          Router.route Insights ~path:"/insights" ~page:Pages.insights;
-          Router.route Report ~path:"/report" ~page:Pages.report;
+          Router.route Insights ~path:"/insights" ~page:Pages.insights ?overlay:Pages.insights_dialog;
+          Router.route Report ~path:"/report" ~page:Pages.report ?overlay:Pages.report_dialog;
           Router.route Canvas ~path:"/canvas" ~page:Pages.canvas;
           Router.route Create ~path:"/new" ~page:Pages.create;
           Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue
@@ -26,15 +26,17 @@ let routes =
             ~search:{ q = optional string; label = many string };
           Router.route Workspace_my_issues ~path:"/my" ~page:Pages.Workspace.my_issues
             ~search:{ q = optional string; label = many string };
-          Router.route Workspace_insights ~path:"/insights" ~page:Pages.Workspace.insights;
-          Router.route Workspace_report ~path:"/report" ~page:Pages.Workspace.report;
+          Router.route Workspace_insights ~path:"/insights" ~page:Pages.Workspace.insights
+            ?overlay:Pages.Workspace.insights_dialog;
+          Router.route Workspace_report ~path:"/report" ~page:Pages.Workspace.report
+            ?overlay:Pages.Workspace.report_dialog;
           Router.route Workspace_canvas ~path:"/canvas" ~page:Pages.Workspace.canvas;
           Router.route Workspace_create ~path:"/new" ~page:Pages.Workspace.create;
           Router.group ~path:"/issue/:id<string>" ~loader:Loaders.Workspace.issue
             ~not_found:Pages.Workspace.issue_not_found
             [ Router.route Workspace_issue ~path:"/" ~page:Pages.Workspace.issue ~search:{ comments = optional string } ];
         ];
-      Router.endpoint Issues_json ~path:"/issues.json" ~method_:`GET
+      Router.get Issues_json ~path:"/issues.json"
         ~handler:Handlers.issues_json
         ~cache:(public ~max_age:60 ());
       Router.redirect ~path:"/issues" ~to_:(Permanent "/");

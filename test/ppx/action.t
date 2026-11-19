@@ -21,7 +21,7 @@ implementation. The name is the library, the module path and the binding:
   $ native -cookie 'library-name="demo_shared"' --impl comment.ml
   let add =
     (fun action implementation ->
-       Yuka.Server.Action.make action implementation; action)
+       Yuka.Server.Action.implement action implementation; action)
       (Yuka.Action.mutation ~name:"demo_shared.Comment.add" ~input:input_codec
          ~output:codec) (fun ctx input -> Store.add_comment ctx input)
   let shared = "kept on both targets"
@@ -29,7 +29,7 @@ implementation. The name is the library, the module path and the binding:
     struct
       let range =
         (fun action implementation ->
-           Yuka.Server.Action.make action implementation; action)
+           Yuka.Server.Action.implement action implementation; action)
           (Yuka.Action.query ~name:"demo_shared.Comment.Thread.range"
              ~input:range_codec ~output:(Yuka.Codec.list codec))
           (fun _ctx range -> Yuka.Async.return (Store.comments range))
@@ -65,7 +65,7 @@ Open Yuka makes Action mean Yuka.Action:
   open Yuka
   let stats =
     (fun action implementation ->
-       Yuka.Server.Action.make action implementation; action)
+       Yuka.Server.Action.implement action implementation; action)
       (Action.query ~name:"Opened.stats" ~input:Codec.string ~output:Codec.int)
       (fun _ s -> Async.return (String.length s))
 
@@ -231,6 +231,6 @@ let: here count is the ref, not the action:
   let count = ref 0
   let count =
     (fun action implementation ->
-       Yuka.Server.Action.make action implementation; action)
+       Yuka.Server.Action.implement action implementation; action)
       (Yuka.Action.mutation ~name:"Shadow.count" ~input:i ~output:o)
       (fun _ x -> incr count; x)

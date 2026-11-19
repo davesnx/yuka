@@ -1,10 +1,12 @@
 type 'a t
 
 val make : decode:(string -> 'a option) -> encode:('a -> string) -> 'a t
-(** [decode] gets the text after percent-decoding. For a path param,
-    [None] means the path does not match. For a search field, the value
-    is dropped: an optional field gets [None], a field with a default
-    gets the default, and a list field leaves the value out. [encode]
+(** [decode] gets the text after percent-decoding and, for a path param,
+    after the [~] that [href] adds to an empty or dot value is removed.
+    For a path param, [None] means the path does not match. For a search
+    field, the value is dropped: an optional field gets [None], a field
+    with a default gets the default, and a list field leaves the value
+    out. [encode]
     must be the inverse of [decode]; [href] percent-encodes its result. *)
 
 val int : int t

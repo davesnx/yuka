@@ -36,15 +36,29 @@ let decode ~plus text =
   done;
   Buffer.contents b
 
-let segment text =
-  if text = "" || text = "." || text = ".." then
-    invalid_arg "Yuka.Router.segment: empty, . or .. cannot be a path segment";
-  encode text
+let escaped text =
+  let n = String.length text in
+  let rec tildes i = if i < n && text.[i] = '~' then tildes (i + 1) else i in
+  match String.sub text (tildes 0) (n - tildes 0) with "" | "." | ".." -> true | _ -> false
+
+let segment text = encode (if escaped text then "~" ^ text else text)
+
+let of_segment text =
+  if text <> "" && text.[0] = '~' && escaped text then String.sub text 1 (String.length text - 1)
+  else text
 
 let segments parts =
   match parts with
   | [] -> invalid_arg "Yuka.Router.segments: a catch-all needs one segment"
   | _ -> String.concat "" (List.map (fun p -> "/" ^ segment p) parts)
+
+let with_query path pairs =
+  match pairs with
+  | [] -> path
+  | _ -> String.concat "" [ path; "?"; String.concat "&" (List.map (fun (k, v) -> String.concat "=" [ k; v ]) pairs) ]
+
+let with_fragment path fragment =
+  match fragment with None -> path | Some fragment -> path ^ "#" ^ encode fragment
 
 let int_param text =
   match int_of_string_opt text with
@@ -60,7 +74,7 @@ type meth =
 type 'r lookup =
   | Found of 'r
   | Wrong_method of meth list
-  | Redirect of { permanent : bool; location : string }
+  | Redirect of { location : string; kind : [ `Permanent | `Temporary ] }
   | Missing
 
 let cut text c =

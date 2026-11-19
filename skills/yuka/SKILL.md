@@ -30,27 +30,29 @@ of the `docs/` directory of the Yuka repository.
 Read the one that matches the task:
 
 - [Getting started](references/getting-started.md): install, project
-  layout, every dune rule, the server and client entries, `yuka dev`, the
-  production bundle. Read it to create an app or to fix a build rule.
+  layout, every dune rule, the server and client entries, the Dream and
+  tapak adapters, the live bus, static files and prerender, `yuka dev`,
+  the production bundle. Read it to create an app or to fix a build rule.
 - [Islands](references/islands.md): `let[@client] make`, `<Yuka.Client>`,
   props and codecs, start strategies, children. Read it before you write
   or use an interactive component.
-- [State](references/state.md): State, holes, memos, effects, batches,
-  what runs on the server. Read it before you write code that updates the
-  page.
+- [State](references/state.md): State, holes, keyed lists
+  (`Yuka.each`), memos, effects, batches, contexts, what runs on the
+  server. Read it before you write code that updates the page.
 - [Router](references/router.md): `Routes.ml` nodes, path and search
   params, loaders, guards, layouts, links, client navigation. Read it
   before you add or change a route or a link.
 - [Security](references/security.md): escaping, blocked URL schemes,
   `script` and `style` rules. Read it when markup takes user input, or
   when a URL or attribute does not show as written.
+- [Data](references/data.md): server actions (`Yuka.Action`,
+  `Yuka.Server.Action`), forms (`Yuka.Form`), remote data (`Yuka.Remote`),
+  live data (`Yuka.Live`, `Yuka.Topic`), `<Yuka.Show>`, `<Yuka.Await>` and
+  `<Yuka.Catch>`. Read it before you load, change or push data.
 
-The references do not cover remote data (`Yuka.Remote`), server actions
-(`Yuka.Action`, `Yuka.Server.Action`), forms (`Yuka.Form`), live data
-(`Yuka.Live`, `Yuka.Topic`), `<Yuka.Await>`, `<Yuka.Show>`, `Yuka.each`
-or `Yuka.Catch`. For these, read the doc comments of `yuka.mli`
-(`find "$(opam var lib)/yuka" -name yuka.mli`) and the `demo/` directory
-of <https://github.com/davesnx/yuka>.
+For details the references do not give, read the doc comments of
+`yuka.mli` (`find "$(opam var lib)/yuka" -name yuka.mli`) and the `demo/`
+directory of <https://github.com/davesnx/yuka>.
 
 ## Rules
 
