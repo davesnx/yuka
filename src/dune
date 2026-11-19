@@ -3,20 +3,38 @@
  (public_name yuka)
  (modes native melange)
  (private_modules
+  action
   answers
+  async
   async_reader
+  base
+  bridge
   browser
+  client
   cycle
+  dev
   element
+  form_core
+  island
   live_server
   navigation
   navigation_state
   navigation_stub
+  navigation_web
   optimistic
+  platform
   printer
   router
+  scheduler
   server
   signal
-  topic)
+  state
+  status_error
+  template
+  template_build
+  topic
+  types
+  url
+  web)
  (melange.preprocess
   (pps melange.ppx)))

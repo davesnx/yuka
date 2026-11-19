@@ -18,5 +18,23 @@ Most internal modules are private:
   $ printf 'let _ = Yuka__Signal.create\n' > native/main.ml
   $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Signal'
   Unbound module Yuka__Signal
+  $ printf 'let _ = Yuka__Web.in_browser\n' > native/main.ml
+  $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Web'
+  Unbound module Yuka__Web
   $ printf 'let _ = ignore (Yuka.text "x")\n' > native/main.ml
+  $ dune build --root . ./native/main.exe
+
+Modules that yuka.mli exposes as an alias, or whose types a consumer must
+expand, stay public:
+
+  $ cat > native/main.ml <<'EOF'
+  > let _ : Yuka.Json.t = Yuka.Codec.encode Yuka.Codec.int 1
+  > let badge = Yuka.element "b" [] []
+  > let _ : Yuka.server Yuka.element * Yuka.client Yuka.element = (badge, badge)
+  > let _ = Yuka.Status.data
+  > let _ = Yuka.Remote.use
+  > let _ = Yuka.Live.use
+  > let _ = Yuka.Form.make
+  > let _ = Yuka.Router.Param.int
+  > EOF
   $ dune build --root . ./native/main.exe
