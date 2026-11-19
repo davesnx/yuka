@@ -8,7 +8,7 @@ let remote_view () : Yuka.client Yuka.element =
   let remote = Yuka.Remote.make ~enabled:(fun () -> Yuka.State.get enabled) query (fun () -> "a") in
   <b>
     "status: "
-    (match Yuka.Remote.status remote with
+    (match Yuka.State.get (Yuka.Remote.state remote) with
      | Yuka.Status.Idle -> Yuka.text "idle"
      | Yuka.Status.Loading _ -> Yuka.text "loading"
      | _ -> Yuka.text "other")
@@ -29,8 +29,16 @@ let dynamic_view () : Yuka.client Yuka.element = <p>"a" (Yuka.text (Yuka.State.g
 let conditional_view ~read () : Yuka.client Yuka.element =
   <p>"a" (if read then Yuka.text (Yuka.State.get name) else Yuka.text "none") <i /></p>
 
+let nested_view () : Yuka.client Yuka.element =
+  <p>"a" (Yuka.hole (fun () -> Yuka.hole (fun () -> Yuka.text (Yuka.State.get name)))) <i /></p>
+
+let closure_attr_view () : Yuka.client Yuka.element =
+  <p>(Yuka.hole (fun () -> <i title=(Yuka.State.get name)>"x"</i>))</p>
+
 let static_list_view () : Yuka.client Yuka.element =
   <ul>(Yuka.each ~key:(fun item -> item) (fun () -> [| "x"; "y" |]) (fun item -> <li>(Yuka.text item)</li>))</ul>
+
+let read_name () = ignore (Yuka.State.get name)
 
 module Body = struct
   let runs = ref 0
@@ -38,7 +46,7 @@ module Body = struct
   let make () =
     incr runs;
     let own = Yuka.State.make 0 in
-    ignore (Yuka.State.get name);
+    read_name ();
     <i>(Yuka.int (Yuka.State.get own))</i>
 end
 
@@ -57,7 +65,41 @@ module Styled = struct
   let make ~style () = <i>(Yuka.text style.color)</i>
 end
 
-let styled_view () : Yuka.client Yuka.element = <p><Styled style=({ color = Yuka.State.get name ^ "!" }) /></p>
+let styled_view () : Yuka.client Yuka.element = <p><Styled style=({ color = Yuka.State.peek name ^ "!" }) /></p>
+
+let state_query = Yuka.Action.query ~name:"holes_state" ~input:Yuka.Codec.string ~output:Yuka.Codec.string
+let fetched : string Yuka.Remote.t option ref = ref None
+
+let status_text = function
+  | Yuka.Status.Idle -> "idle"
+  | Yuka.Status.Loading None -> "loading"
+  | Yuka.Status.Loading (Some data) -> "loading " ^ data
+  | Yuka.Status.Ready { data; _ } -> "ready " ^ data
+  | Yuka.Status.Failed { error; last } ->
+      "failed " ^ Yuka.Status.error_to_string error ^ " " ^ Option.value last ~default:"-"
+
+let state_view () : Yuka.client Yuka.element =
+  let remote = Yuka.Remote.make ~retry:Yuka.Remote.no_retry state_query (fun () -> "a") in
+  fetched := Some remote;
+  <b>(Yuka.text (status_text (Yuka.State.get (Yuka.Remote.state remote))))</b>
+
+type note = { body : string } [@@deriving form]
+
+let note_action = Yuka.Form.action ~name:"holes_note" ~fields:note_form ~output:Yuka.Codec.string
+
+let note_answer note =
+  Yuka.Async.return
+    (Ok (if note.body = "bad" then Error [ (Some `Body, "Too short"); (None, "Refused") ] else Ok note.body))
+
+let errors_view () : Yuka.client Yuka.element =
+  <Yuka.Form action=note_action run=note_answer on_ok=(fun _ -> ())>
+    (fun form ->
+      <div>
+        <input name="body" />
+        <b>(Yuka.text (Option.value ~default:"-" (Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors form)) `Body)))</b>
+        <i>(Yuka.text (String.concat "," (Yuka.Form.form_errors (Yuka.State.get (Yuka.Form.errors form)))))</i>
+      </div>)
+  </Yuka.Form>
 
 let unique_id_view () : Yuka.client Yuka.element = <p>(Yuka.with_unique_id (fun id -> Yuka.text (id ^ Yuka.State.get name)))</p>
 

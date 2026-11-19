@@ -191,7 +191,7 @@ function of the form:
       (Yuka.Form.field_error_view form `Title (fun ~id message ->
          <p id class_="error">(Yuka.text message)</p>))
       (Yuka.Form.form_errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
-      <button type_=`submit disabled=(Yuka.Form.pending form)>"Create issue"</button>
+      <button type_=`submit disabled=(Yuka.State.get (Yuka.Form.pending form))>"Create issue"</button>
     </div>)
 </Yuka.Form>
 ```
@@ -201,7 +201,7 @@ function of the form:
   failed post (422); else `""`.
 - In an island, a submit decodes the fields in the browser first (an
   error shows at once, with no request), then calls the action.
-  `Yuka.Form.pending form` is true while it waits; `disabled` above
+  `Yuka.Form.pending form` is a read-only State, true while it waits; `disabled` above
   updates with it. On
   `Ok output`, `on_ok output` runs, or else the page follows the redirect
   of the server with a client navigation.
@@ -237,6 +237,17 @@ The `id` is made from the action name, the `key` of the form and the
 field name. A development build shows an error in the browser console
 when two forms on a page have the same action and key.
 
+To show the errors another way, read `Yuka.Form.errors form`, a read-only
+State, with `Yuka.State.get` in markup, and give its value to
+`Yuka.Form.field_error` (the first error of a field) or
+`Yuka.Form.form_errors` (the errors for the whole form):
+
+```ocaml
+<p class_="error">
+  (Yuka.text (Option.value ~default:"" (Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors form)) `Title)))
+</p>
+```
+
 ## Remote data
 
 `Yuka.Remote.make` runs a query and keeps its status. Call it in a
@@ -253,7 +264,7 @@ let stats = Yuka.Action.query ~name:"user_stats" ~input:input_codec ~output:stat
 module Card = struct
   let make ~workspace ~(user : Model.User.t) () =
     let remote = Yuka.Remote.make stats (fun () -> { workspace; user = user.id }) in
-    <Yuka.Show status=(fun () -> Yuka.Remote.status remote)
+    <Yuka.Show status=(fun () -> Yuka.State.get (Yuka.Remote.state remote))
       loading=(<p>"Loading..."</p>)
       failed=(fun _ -> <p>"Could not load the numbers."</p>)>
       (fun (stats : stats) -> <p>(Yuka.text (Printf.sprintf "%d open" stats.open_))</p>)
@@ -280,7 +291,9 @@ Yuka.Server.Action.implement User_popup.stats (fun _request { workspace; user } 
 
 ## Show a status
 
-`Yuka.Remote.status` and `Yuka.Live.status` give a `Yuka.Status.t`:
+`Yuka.Remote.state` and `Yuka.Live.state` give a read-only State of a
+`Yuka.Status.t`, with the pending optimistic changes applied; read it with
+`Yuka.State.get`. A status is
 `Idle`, `Loading (Some last)`, `Ready { data; stale }` or
 `Failed { error; last }`. `<Yuka.Show>` shows it, as in the sample above:
 
@@ -321,7 +334,7 @@ An island subscribes with `Yuka.Live.make`:
 let[@client] make ~(issue : Model.Issue.t) () =
   let live = Yuka.Live.make Topics.issue (fun () -> issue.id) in
   let current =
-    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:issue)
+    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.State.get (Yuka.Live.state live))) ~default:issue)
   in
   <p>(Yuka.text (Model.Issue.status_label (Yuka.State.get current).status))</p>
 ```

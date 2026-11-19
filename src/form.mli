@@ -54,8 +54,13 @@ val value : ('o, 'f) form -> 'f -> string
 (** The value sent for the field when the page answers a failed post
     (422), else [""]. *)
 
-val field_error : ('o, 'f) form -> 'f -> string option
-(** Tracked read of the first error of the field. *)
+val errors : ('o, 'f) form -> 'f errors State.read
+(** The errors of the last submit, or of a failed post (422). Read it with
+    {!State.get} in markup, and pass the value to {!field_error} or
+    {!form_errors}. *)
+
+val field_error : 'f errors -> 'f -> string option
+(** The first error of the field. *)
 
 val field_error_view : ('o, 'f) form -> 'f -> (id:string -> string -> 'k Kind.element) -> 'k Kind.element
 (** A hole: [view ~id message] for the field's error, or nothing. Give the
@@ -68,19 +73,19 @@ val field_error_view : ('o, 'f) form -> 'f -> (id:string -> string -> 'k Kind.el
     that the author set on another field stays. The [id] is made from the
     action name, the [key] of {!make} and the field name. *)
 
-val form_errors : ('o, 'f) form -> string list
-(** Tracked read of the errors for the whole form, not for one field. *)
+val form_errors : 'f errors -> string list
+(** The errors for the whole form, not for one field. *)
 
 val form_errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.element
 (** A [<div role="alert" tabindex="-1">] that holds the view of each error
-    of {!val-form_errors}, so that a screen reader reads them when they
+    for the whole form, so that a screen reader reads them when they
     show. When a submit in the browser ends with errors for the whole form
     and no field takes the focus, the focus goes to this [div]; on a failed
     post (422) with no field errors, the server prints [autofocus] on it. *)
 
-val pending : ('o, 'f) form -> bool
-(** Tracked: true while an island submit waits for its answer. Read it in
-    a hole ([Yuka.hole]); read in the children directly, it renders the
+val pending : ('o, 'f) form -> bool State.read
+(** True while an island submit waits for its answer. Read it with
+    {!State.get} in markup; read in the component body, it renders the
     enclosing component again, with a new form. *)
 
 val make :

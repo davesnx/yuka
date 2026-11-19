@@ -1,0 +1,30 @@
+(melange.emit
+ (target out)
+ (alias melange-dev-check)
+ (libraries dev_check_cases yuka yuka.js)
+ (preprocess
+  (pps melange.ppx))
+ (module_systems commonjs))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (enabled_if
+  (<> %{profile} release))
+ (deps
+  capture.js
+  (alias melange-dev-check))
+ (action
+  (run node --require ./capture.js %{dep:out/test/dev_check/melange/run.js})))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (enabled_if
+  (<> %{profile} release))
+ (deps
+  capture.js
+  prod.js
+  (alias melange-dev-check))
+ (action
+  (run node --require ./prod.js %{dep:out/test/dev_check/melange/run.js})))

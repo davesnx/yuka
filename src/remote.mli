@@ -36,8 +36,9 @@ val make :
     - Outside the browser and outside a render (tests), it calls the
       implementation directly. *)
 
-val status : 'o t -> 'o Status.t
-(** Tracked read, with the pending {!optimistic} changes applied to the data. *)
+val state : 'o t -> 'o Status.t State.read
+(** The status, with the pending {!optimistic} changes applied to the data.
+    Read it with {!State.get}. *)
 
 val refetch : 'o t -> unit
 (** Sends the request again (the manual retry after [Failed]). *)

@@ -43,8 +43,9 @@ val make : ('k, 's) Topic.t -> (unit -> 'k) -> 's t
       is [Failed Forbidden] until a new use (after a navigation) connects
       again with the token of its page. *)
 
-val status : 's t -> 's Status.t
-(** Tracked read, with the pending {!optimistic} changes applied. *)
+val state : 's t -> 's Status.t State.read
+(** The status, with the pending {!optimistic} changes applied. Read it
+    with {!State.get}. *)
 
 val optimistic :
   ?commit:('r -> 's -> 's) ->

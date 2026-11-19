@@ -113,6 +113,22 @@ let () =
   State.set Holes_cases.name "b";
   check "conditional read, read: after a write" "<p>a<!--[-->b<!--]--><i></i></p>" (html c);
   State.set Holes_cases.name "a";
+  dispose ();
+  let c, dispose =
+    hydrate "a hole that returns a hole that reads" Holes_cases.nested_view "<p>a<!--[--><!--[-->a<!--]--><!--]--><i></i></p>"
+  in
+  State.set Holes_cases.name "b";
+  check "a hole that returns a hole that reads: after a write" "<p>a<!--[--><!--[-->b<!--]--><!--]--><i></i></p>" (html c);
+  State.set Holes_cases.name "a";
+  dispose ();
+  let c, dispose =
+    hydrate "a hole that returns an element with an attribute that reads" Holes_cases.closure_attr_view
+      "<p><i title=\"a\">x</i></p>"
+  in
+  State.set Holes_cases.name "b";
+  check "a hole that returns an element with an attribute that reads: after a write" "<p><i title=\"b\">x</i></p>"
+    (html c);
+  State.set Holes_cases.name "a";
   dispose ()
 
 let () =
@@ -150,4 +166,78 @@ let () =
       ("an over-applied Option.value", Holes_cases.over_applied_view);
     ]
 
-let () = if !failures > 0 then set_exit_code 1 else print_endline "hole cases: ok"
+let submit_with : node -> string -> unit =
+  [%mel.raw
+    {|function (c, v) {
+  c.querySelector("input[name=body]").value = v;
+  c.querySelector("form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+}|}]
+
+let text_in : node -> string -> string = [%mel.raw "function (c, s) { return c.querySelector(s).textContent }"]
+
+let () =
+  let c, dispose = render Holes_cases.errors_view in
+  let shows name field whole =
+    check ("Form.errors in markup: " ^ name) (field ^ " | " ^ whole) (text_in c "b" ^ " | " ^ text_in c "i")
+  in
+  shows "first" "-" "";
+  submit_with c "bad";
+  shows "after a failed submit" "Too short" "Refused";
+  submit_with c "good";
+  shows "after a good submit" "-" "";
+  dispose ()
+
+let install_fetch : unit -> unit =
+  [%mel.raw
+    {|function () {
+  globalThis.__calls = [];
+  globalThis.fetch = function (url, init) {
+    return new Promise(function (resolve) {
+      globalThis.__calls.push(function (status, body) {
+        resolve({ status: status, text: function () { return Promise.resolve(body); } });
+      });
+    });
+  };
+}|}]
+
+let respond : int -> int -> string -> unit = [%mel.raw "function (i, s, b) { globalThis.__calls[i](s, b) }"]
+let after : (unit -> unit) -> unit = [%mel.raw "function (f) { setTimeout(function () { f() }, 0) }"]
+
+let rec steps = function
+  | [] -> if !failures > 0 then set_exit_code 1 else print_endline "hole cases: ok"
+  | step :: rest ->
+      step ();
+      after (fun () -> steps rest)
+
+let () =
+  install_fetch ();
+  let c, dispose = render Holes_cases.state_view in
+  let remote = Option.get !Holes_cases.fetched in
+  let shows name expected () = check ("Remote.state in markup: " ^ name) ("<b>" ^ expected ^ "</b>") (html c) in
+  let rollback = ref (fun (_ : (string, Status.error) result) -> ()) in
+  steps
+    [
+      shows "first" "loading";
+      (fun () -> respond 0 200 {|{"ok":"x"}|});
+      shows "fetch done" "ready x";
+      (fun () ->
+        Remote.refetch remote;
+        shows "refetch" "loading x" ());
+      (fun () -> respond 1 503 "");
+      shows "fetch failed" "failed server error x";
+      (fun () ->
+        Remote.refetch remote;
+        respond 2 200 {|{"ok":"y"}|});
+      shows "refetch done" "ready y";
+      (fun () ->
+        let _ =
+          Remote.optimistic remote ~change:(fun d -> d ^ "!") (fun () ->
+              let result, resolve, _ = Async.make () in
+              rollback := resolve;
+              result)
+        in
+        shows "optimistic change" "ready y!" ());
+      (fun () -> !rollback (Error Status.Server));
+      shows "optimistic rollback" "ready y";
+      dispose;
+    ]

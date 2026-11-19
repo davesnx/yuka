@@ -1,0 +1,6 @@
+(library
+ (name dev_check_cases)
+ (modes melange)
+ (libraries yuka)
+ (preprocess
+  (pps yuka.ppx)))

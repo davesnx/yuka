@@ -26,3 +26,11 @@ let report : (Web.node -> string -> Web.node option -> unit[@u]) =
     } : 0|}]
 
 let mismatch parent expected found = report parent expected found [@u]
+
+let untracked : (unit -> unit[@u]) =
+  [%mel.raw
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function () {
+      console.error("[yuka] State.get with nothing tracking it, during the render of a component.\n  It reads one time and never updates. Read it in markup, a memo or an effect,\n  or use State.peek for one read.", new Error("State.get"));
+    } : 0|}]
+
+let untracked_get () = untracked () [@u]

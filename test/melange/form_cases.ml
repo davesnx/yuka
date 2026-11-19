@@ -98,7 +98,7 @@ let view () =
       fragment
         [
           element "input" [ attr "name" "body"; attr "value" (Form.value form `Body) ] [];
-          element "i" [] [ hole (fun () -> text (if Form.pending form then "pending" else "idle")) ];
+          element "i" [] [ hole (fun () -> text (if State.get (Form.pending form) then "pending" else "idle")) ];
           Form.field_error_view form `Body (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
           Form.form_errors_view form (fun m -> element "u" [] [ text m ]);
         ])

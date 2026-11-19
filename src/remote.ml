@@ -1,4 +1,5 @@
 type 'o t = {
+  state : 'o Status.t State.read;
   base : 'o Status.t State.t;
   changes : ('o -> 'o) Optimistic.t State.t;
   refetch : unit -> unit;
@@ -53,11 +54,10 @@ let on_server ~enabled (q : (_, _, _) Action.t) args base =
 
 let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
     (args : unit -> 'i) : 'o t =
-  let base = State.make (Status.Loading None) in
-  let changes = State.make Optimistic.empty in
+  let base, changes, state = Optimistic.make () in
   if !(Base.server_rendering ()) then begin
     on_server ~enabled q args base;
-    { base; changes; refetch = ignore }
+    { state; base; changes; refetch = ignore }
   end
   else begin
     let send = send () in
@@ -144,13 +144,10 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
     Base.own (fun () ->
         cancel ();
         Web.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
-    { base; changes; refetch }
+    { state; base; changes; refetch }
   end
 
-let status r =
-  let changes = State.get r.changes in
-  let base = State.get r.base in
-  Optimistic.status changes base
+let state r = r.state
 
 let refetch r = r.refetch ()
 let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed (Action.name q))

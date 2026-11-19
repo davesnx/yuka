@@ -174,7 +174,22 @@ let with_listener n f =
       listener := prev;
       raise e
 
-let untrack f = with_listener None f
+let body = ref false
+
+let with_body b f =
+  let prev = !body in
+  body := b;
+  match f () with
+  | v ->
+      body := prev;
+      v
+  | exception e ->
+      body := prev;
+      raise e
+
+let untrack f = if Dev.on then with_body true (fun () -> with_listener None f) else with_listener None f
+let quiet f = with_body false (fun () -> with_listener None f)
+let untracked () = !body && !(listener ()) == None
 
 let set_level n =
   let rec go m = function

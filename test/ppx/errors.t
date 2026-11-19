@@ -940,3 +940,389 @@ open Yuka counts from its place to the next top-level open:
   let other x =
     Show.make ~status:x ~loading:(text "l") ~children:(fun v -> v) ()
   let r2 () = render ~islands ()
+
+A State.get in a component body, outside markup, reads one time (form A):
+
+  $ cat > ra1.mlx <<'Y'
+  > let make ~count () =
+  >   let n = Yuka.State.get count in
+  >   <p>(Yuka.int n)</p>
+  > Y
+  $ run ra1
+  File "ra1.mlx", line 2, characters 10-30:
+  2 |   let n = Yuka.State.get count in
+                ^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > ra2.mlx <<'Y'
+  > open Yuka
+  > let make ~count () =
+  >   let n = State.get count in
+  >   <p>(int n)</p>
+  > Y
+  $ run ra2
+  File "ra2.mlx", line 3, characters 10-25:
+  3 |   let n = State.get count in
+                ^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > ra3.mlx <<'Y'
+  > module State = Yuka.State
+  > let make ~count () =
+  >   let n = State.get count in
+  >   <p>(Yuka.int n)</p>
+  > Y
+  $ run ra3
+  File "ra3.mlx", line 3, characters 10-25:
+  3 |   let n = State.get count in
+                ^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > ra6.mlx <<'Y'
+  > let make ~count () =
+  >   let n = count |> Yuka.State.get in
+  >   <p>(Yuka.int n)</p>
+  > Y
+  $ run ra6
+  File "ra6.mlx", line 2, characters 10-33:
+  2 |   let n = count |> Yuka.State.get in
+                ^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > ra7.mlx <<'Y'
+  > let rec make ~count () =
+  >   let n = Yuka.State.get count in
+  >   <p>(view n)</p>
+  > and view n = Yuka.int n
+  > Y
+  $ run ra7
+  File "ra7.mlx", line 2, characters 10-30:
+  2 |   let n = Yuka.State.get count in
+                ^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > ra4.mlx <<'Y'
+  > module Row = struct
+  >   let make ~(count : int Yuka.State.t) ?(start = Yuka.State.get count) () = <p>(Yuka.int start)</p>
+  > end
+  > Y
+  $ run ra4
+  File "ra4.mlx", line 2, characters 49-69:
+  2 |   let make ~(count : int Yuka.State.t) ?(start = Yuka.State.get count) () = <p>(Yuka.int start)</p>
+                                                       ^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > ra5.mlx <<'Y'
+  > let[@client] make ~(initial : int) () =
+  >   let count = Yuka.State.make initial in
+  >   let label = string_of_int (Yuka.State.get count) in
+  >   <p>(Yuka.text label)</p>
+  > Y
+  $ run ra5
+  File "ra5.mlx", line 3, characters 28-50:
+  3 |   let label = string_of_int (Yuka.State.get count) in
+                                  ^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > ra8.mlx <<'Y'
+  > let make ~f () =
+  >   let e = Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors f)) `Title in
+  >   <p>(Yuka.text (Option.value ~default:"" e))</p>
+  > Y
+  $ run ra8
+  File "ra8.mlx", line 2, characters 32-69:
+  2 |   let e = Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors f)) `Title in
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+
+A State.get in the body result, outside markup (form C):
+
+  $ cat > rc1.mlx <<'Y'
+  > let make ~open_ () =
+  >   if Yuka.State.get open_ then <A /> else <B />
+  > Y
+  $ run rc1
+  File "rc1.mlx", line 2, characters 5-25:
+  2 |   if Yuka.State.get open_ then <A /> else <B />
+           ^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
+
+A State.get in a component prop (form B), also the value of Context.Provide:
+
+  $ cat > rb1.mlx <<'Y'
+  > let make ~name () = <Label text=(Yuka.State.get name) />
+  > Y
+  $ run rb1
+  File "rb1.mlx", line 1, characters 32-53:
+  1 | let make ~name () = <Label text=(Yuka.State.get name) />
+                                      ^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+  [1]
+  $ cat > rb2.mlx <<'Y'
+  > let make ~theme () =
+  >   <Yuka.Context.Provide context=Theme.context value=(Yuka.State.get theme)><p /></Yuka.Context.Provide>
+  > Y
+  $ run rb2
+  File "rb2.mlx", line 2, characters 52-74:
+  2 |   <Yuka.Context.Provide context=Theme.context value=(Yuka.State.get theme)><p /></Yuka.Context.Provide>
+                                                          ^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+  [1]
+  $ cat > rb3.mlx <<'Y'
+  > let make ~start () =
+  >   <Yuka.Client><Counter initial=(Yuka.State.get start) /></Yuka.Client>
+  > Y
+  $ run rb3
+  File "rb3.mlx", line 2, characters 32-54:
+  2 |   <Yuka.Client><Counter initial=(Yuka.State.get start) /></Yuka.Client>
+                                      ^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+  [1]
+  $ cat > rb4.mlx <<'Y'
+  > let make ~query () =
+  >   <Yuka.Await async=(Api.search (Yuka.State.get query)) loading=(Yuka.text "...")>(fun v -> Yuka.text v)</Yuka.Await>
+  > Y
+  $ run rb4
+  File "rb4.mlx", line 2, characters 32-54:
+  2 |   <Yuka.Await async=(Api.search (Yuka.State.get query)) loading=(Yuka.text "...")>(fun v -> Yuka.text v)</Yuka.Await>
+                                      ^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+  [1]
+
+A prop reads one time also when the tag is in a hole:
+
+  $ cat > rb5.mlx <<'Y'
+  > let make ~name () = <span><Label text=(Yuka.State.get name) /></span>
+  > Y
+  $ run rb5
+  File "rb5.mlx", line 1, characters 38-59:
+  1 | let make ~name () = <span><Label text=(Yuka.State.get name) /></span>
+                                            ^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+  [1]
+  $ cat > rb6.mlx <<'Y'
+  > let view name = Yuka.hole (fun () -> <Label text=(Yuka.State.get name) />)
+  > Y
+  $ run rb6
+  File "rb6.mlx", line 1, characters 49-70:
+  1 | let view name = Yuka.hole (fun () -> <Label text=(Yuka.State.get name) />)
+                                                       ^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+  [1]
+
+A State.get at the top of a Yuka.each row function (form E), also in a hole:
+
+  $ cat > re1.mlx <<'Y'
+  > let make ~rows ~sel () =
+  >   <ul>
+  >     (Yuka.each ~key:(fun item -> item.id) (fun () -> Yuka.State.get rows) (fun item ->
+  >        let on = Yuka.State.get sel = item.id in
+  >        <li class_=(if on then "on" else "")>(Yuka.text item.title)</li>))
+  >   </ul>
+  > Y
+  $ run re1
+  File "re1.mlx", line 4, characters 16-34:
+  4 |        let on = Yuka.State.get sel = item.id in
+                      ^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in the row markup, a memo or an effect, or use State.peek.
+  [1]
+  $ cat > re2.mlx <<'Y'
+  > let view rows sel =
+  >   Yuka.hole (fun () ->
+  >     Yuka.each ~key:(fun item -> item.id) rows (fun item ->
+  >       <Row selected=(Yuka.State.get sel = item.id) />))
+  > Y
+  $ run re2
+  File "re2.mlx", line 4, characters 21-39:
+  4 |       <Row selected=(Yuka.State.get sel = item.id) />))
+                           ^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+  [1]
+
+Reads that run again, run later, or run one time at the top level compile:
+
+  $ cat > rok.mlx <<'Y'
+  > let initial = Yuka.State.get global
+  > let label () = Yuka.text (Yuka.State.get name)
+  > let make ~count ~name ~rows ~sel ~query () =
+  >   let double = Yuka.State.memo (fun () -> Yuka.State.get count * 2) in
+  >   Yuka.Effect.after (fun () -> Yuka.Console.log (string_of_int (Yuka.State.get count)));
+  >   let result = Yuka.Remote.make Api.search (fun () -> Yuka.State.get query) in
+  >   let once = Yuka.State.peek count in
+  >   let local () = Yuka.State.get name in
+  >   <div class_=(if Yuka.State.get count > 0 then "on" else "off")>
+  >     <button on_click=(fun _ -> Yuka.State.set count (Yuka.State.get count + 1))>(Yuka.int once)</button>
+  >     (Yuka.int (Yuka.State.get double))
+  >     (Yuka.hole (fun () -> Yuka.text (local ())))
+  >     (label ())
+  >     <Label text=name on_pick=(fun () -> Yuka.State.get sel) />
+  >     (Yuka.each ~key:(fun item -> item.id) (fun () -> Yuka.State.get rows) (fun item ->
+  >        <li class_=(if Yuka.State.get sel = item.id then "on" else "")>(Yuka.text item.title)</li>))
+  >     <Yuka.Await async=(Remote.async result) loading=(Yuka.text "...")>(fun v -> Yuka.text (v ^ Yuka.State.get name))</Yuka.Await>
+  >   </div>
+  > let view () = let n = Yuka.State.get count in <p>(Yuka.int n)</p>
+  > Y
+  $ run rok > /dev/null && echo compiles
+  compiles
+
+A module State that the file defines is not Yuka.State:
+
+  $ cat > rst.mlx <<'Y'
+  > module State = struct let make x = ref x let get r = !r end
+  > let make ~s () = let n = State.get s in <p>(Yuka.int n)</p>
+  > Y
+  $ run rst > /dev/null && echo compiles
+  compiles
+
+Without open Yuka or module State = Yuka.State, State is the project's own module:
+
+  $ cat > rst2.mlx <<'Y'
+  > module C = struct
+  >   let make () = let theme = State.get () in <p>(Yuka.text theme)</p>
+  > end
+  > Y
+  $ run rst2 > /dev/null && echo compiles
+  compiles
+
+Only the binding named make is a component body, and only when its result has a tag:
+
+  $ cat > rmk.mlx <<'Y'
+  > let count = Yuka.State.make 1
+  > module C = struct
+  >   let rec make () = <p>(view ())</p>
+  >   and view () = let n = Yuka.State.get count in Yuka.int n
+  > end
+  > module Doubled = struct
+  >   let make s = Yuka.State.get s * 2
+  > end
+  > let d = Yuka.State.memo (fun () -> Doubled.make count)
+  > Y
+  $ run rmk > /dev/null && echo compiles
+  compiles
+
+A prop that passes State.get as a function compiles:
+
+  $ cat > rfn.mlx <<'Y'
+  > let name = Yuka.State.make "a"
+  > module L = struct let make ~read () = <p>(Yuka.text (read name))</p> end
+  > module C = struct
+  >   let make () = <L read=Yuka.State.get />
+  > end
+  > Y
+  $ run rfn > /dev/null && echo compiles
+  compiles
+
+Other names for Yuka.State hide State.get from the ppx:
+
+  $ cat > lint_open.mlx <<'Y'
+  > open Yuka.State
+  > Y
+  $ run lint_open
+  File "lint_open.mlx", line 1, characters 0-15:
+  1 | open Yuka.State
+      ^^^^^^^^^^^^^^^
+  Error: Yuka: open Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through the open is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > local_open.mlx <<'Y'
+  > let x = Yuka.State.(get s)
+  > Y
+  $ run local_open
+  File "local_open.mlx", line 1, characters 8-26:
+  1 | let x = Yuka.State.(get s)
+              ^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a local open of Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through the open is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > let_open.mlx <<'Y'
+  > let x = let open Yuka.State in get s
+  > Y
+  $ run let_open
+  File "let_open.mlx", line 1, characters 8-36:
+  1 | let x = let open Yuka.State in get s
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: a local open of Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through the open is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > alias.mlx <<'Y'
+  > module S = Yuka.State
+  > Y
+  $ run alias
+  File "alias.mlx", line 1, characters 0-21:
+  1 | module S = Yuka.State
+      ^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: module S = Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through S is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > local_alias.mlx <<'Y'
+  > let x = let module S = Yuka.State in S.get s
+  > Y
+  $ run local_alias
+  File "local_alias.mlx", line 1, characters 8-44:
+  1 | let x = let module S = Yuka.State in S.get s
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: let module S = Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through S is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > incl.mlx <<'Y'
+  > module S = struct include Yuka.State end
+  > Y
+  $ run incl
+  File "incl.mlx", line 1, characters 18-36:
+  1 | module S = struct include Yuka.State end
+                        ^^^^^^^^^^^^^^^^^^
+  Error: Yuka: include Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through the include is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > open_state.mlx <<'Y'
+  > open Yuka
+  > open State
+  > Y
+  $ run open_state
+  File "open_state.mlx", line 2, characters 0-10:
+  2 | open State
+      ^^^^^^^^^^
+  Error: Yuka: open State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through the open is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > alias_state.mlx <<'Y'
+  > open Yuka
+  > module S = State
+  > Y
+  $ run alias_state
+  File "alias_state.mlx", line 2, characters 0-16:
+  2 | module S = State
+      ^^^^^^^^^^^^^^^^
+  Error: Yuka: module S = State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through S is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+  $ cat > local_open_state.mlx <<'Y'
+  > open Yuka
+  > let x = State.(get s)
+  > Y
+  $ run local_open_state
+  File "local_open_state.mlx", line 2, characters 8-21:
+  2 | let x = State.(get s)
+              ^^^^^^^^^^^^^
+  Error: Yuka: a local open of State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through the open is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+  [1]
+
+Without open Yuka, open State and module S = State name the project's own State:
+
+  $ cat > own_state.mlx <<'Y'
+  > open State
+  > module S = State
+  > Y
+  $ run own_state
+  open State
+  module S = State
+
+An interface has no reads, so it can open Yuka.State:
+
+  $ cat > sig_open.mli <<'Y'
+  > open Yuka.State
+  > Y
+  $ ./pp.exe --intf sig_open.mli
+  open Yuka.State
+
+An alias named State keeps the name:
+
+  $ cat > state_alias.mlx <<'Y'
+  > module State = Yuka.State
+  > Y
+  $ run state_alias
+  module State = Yuka.State

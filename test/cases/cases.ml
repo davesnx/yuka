@@ -1018,6 +1018,27 @@ let batch_raises () =
   check "inner exception caught" "ok" nested;
   check "inner raise keeps the outer batch" "0 1 2 after-inner 4" (read ())
 
+let effect_without_reads_not_kept () =
+  let add, read = log () in
+  let count = State.make 0 in
+  let (), dispose =
+    with_owner (fun () ->
+        Effect.before (fun () -> add "static");
+        check "an effect that reads no State keeps no disposer" "0" (string_of_int (Private.owner_size ()));
+        Effect.before (fun () -> if false then add (string_of_int (State.get count)));
+        check "a read in a branch that does not run is no read" "0" (string_of_int (Private.owner_size ()));
+        Effect.before (fun () -> add ("read " ^ string_of_int (State.get count)));
+        check "an effect that reads a State is kept" "1" (string_of_int (Private.owner_size ()));
+        Effect.before (fun () ->
+            Effect.before ~cleanup:(fun () -> add "inner gone") (fun () -> add ("inner " ^ string_of_int (State.get count))));
+        check "an effect that reads nothing keeps what it owns" "2" (string_of_int (Private.owner_size ())))
+  in
+  State.set count 1;
+  dispose ();
+  State.set count 2;
+  check "the reading effects run again until disposed" "static read 0 inner 0 read 1 inner gone inner 1 inner gone"
+    (read ())
+
 let disposal_order () =
   let add, read = log () in
   let (), dispose =
@@ -2321,6 +2342,7 @@ let all =
     ("write back in a flush", write_back_in_flush);
     ("batch with an exception", batch_raises);
     ("owned removed from its parent", owned_removed_from_parent);
+    ("effect without reads not kept", effect_without_reads_not_kept);
     ("disposal order", disposal_order);
     ("disposal order after removal", disposal_order_after_removal);
     ("effect run order", effect_run_order);
