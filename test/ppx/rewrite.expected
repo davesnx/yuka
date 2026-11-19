@@ -1,3 +1,4 @@
+module State = Yuka.State
 open
   struct
     let __yuka_template_rewrite_0 =

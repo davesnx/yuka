@@ -7,9 +7,9 @@ let has_attr name e =
 let is_jsx = has_attr "JSX"
 let strip_jsx e = { e with pexp_attributes = List.filter (fun (a : attribute) -> a.attr_name.txt <> "JSX") e.pexp_attributes }
 
-type scope = { modules : string list; opens_yuka : bool }
+type scope = { modules : string list; opens_yuka : bool; state_alias : bool }
 
-let empty_scope = { modules = []; opens_yuka = false }
+let empty_scope = { modules = []; opens_yuka = false; state_alias = false }
 let scope = ref empty_scope
 let depth = ref 0
 let bound : (string * int) list ref = ref []
@@ -47,14 +47,15 @@ let read_error ~loc = function
 let after_top_item (i : structure_item) =
   let add_module (mb : module_binding) =
     match (mb.pmb_name.txt, mb.pmb_expr.pmod_desc) with
+    | Some "State", Pmod_ident { txt = Ldot (Lident "Yuka", "State"); _ } -> scope := { !scope with state_alias = true }
     | Some n, Pmod_ident { txt = Ldot (Lident "Yuka", n'); _ } when n = n' -> ()
     | Some n, _ -> scope := { !scope with modules = n :: !scope.modules }
     | None, _ -> ()
   in
   match i.pstr_desc with
   | Pstr_open { popen_expr = { pmod_desc = Pmod_ident { txt = Lident "Yuka"; _ }; _ }; _ } ->
-      scope := { modules = []; opens_yuka = true }
-  | Pstr_open _ -> scope := { !scope with opens_yuka = false }
+      scope := { modules = []; opens_yuka = true; state_alias = false }
+  | Pstr_open _ -> scope := { !scope with opens_yuka = false; state_alias = false }
   | Pstr_module mb -> add_module mb
   | Pstr_recmodule mbs -> List.iter add_module mbs
   | _ -> ()
@@ -92,22 +93,37 @@ let free n = not (List.mem_assoc n !bound)
 
 let own_module name = List.mem name !scope.modules
 
+let yuka_state () = (!scope.opens_yuka || !scope.state_alias) && not (own_module "State")
+
 let state_get = function
   | Ldot (Ldot (Lident "Yuka", "State"), "get") -> true
-  | Ldot (Lident "State", "get") -> not (own_module "State")
+  | Ldot (Lident "State", "get") -> yuka_state ()
+  | _ -> false
+
+let applied_read e =
+  match e.pexp_desc with
+  | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) when state_get txt -> true
+  | Pexp_apply
+      ( { pexp_desc = Pexp_ident { txt = Lident ("|>" | "@@" as op); _ }; _ },
+        [ (Nolabel, a); (Nolabel, b) ] ) -> (
+      match (if op = "|>" then b else a).pexp_desc with Pexp_ident { txt; _ } -> state_get txt | _ -> false)
   | _ -> false
 
 let alias_error ~loc subject through =
   Location.raise_errorf ~loc
-    "Yuka: %s hides State.get from the ppx. The ppx checks and compiles reads by the exact names Yuka.State.get and \
+    "Yuka: %s hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and \
      State.get, so a read through %s is not seen, and a read that runs one time is not reported. Write Yuka.State.get \
      or State.get."
     subject through
 
-let is_yuka_state (m : module_expr) =
-  match m.pmod_desc with Pmod_ident { txt = Ldot (Lident "Yuka", "State"); _ } -> true | _ -> false
+let yuka_state_path (m : module_expr) =
+  match m.pmod_desc with
+  | Pmod_ident { txt = Ldot (Lident "Yuka", "State"); _ } -> Some "Yuka.State"
+  | Pmod_ident { txt = Lident "State"; _ } when yuka_state () -> Some "State"
+  | _ -> None
 
-let check_open ~loc subject (o : open_declaration) = if is_yuka_state o.popen_expr then alias_error ~loc subject "the open"
+let check_open ~loc kind (o : open_declaration) =
+  Option.iter (fun path -> alias_error ~loc (kind ^ path) "the open") (yuka_state_path o.popen_expr)
 
 let special_form = function
   | Ldot (Lident (("Await" | "Show" | "Catch" | "Client") as m), "createElement")
@@ -253,7 +269,7 @@ and binding_env vbs =
 
 let call e =
   match e.pexp_desc with
-  | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Ldot ((Lident "State" | Ldot (Lident "Yuka", "State")), "get"); _ }; _ }, _) -> None
+  | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) when state_get txt -> None
   | Pexp_apply (({ pexp_desc = Pexp_ident _; _ } as f), [ (Nolabel, x) ]) when constant x -> Some (f, x)
   | _ -> None
 
@@ -859,15 +875,30 @@ let rewrite_jsx self e =
             (props @ [ (Labelled "children", list_expr ~loc kids); (Nolabel, [%expr ()]) ]))
   | _ -> e
 
-let defines_make (i : structure_item) =
-  match i.pstr_desc with
-  | Pstr_value (_, vbs) ->
-      List.exists
-        (fun (vb : value_binding) ->
-          match vb.pvb_pat.ppat_desc with
-          | Ppat_var { txt = "make"; _ } | Ppat_constraint ({ ppat_desc = Ppat_var { txt = "make"; _ }; _ }, _) -> true
-          | _ -> false)
-        vbs
+let has_jsx e =
+  let found = ref false in
+  let finder =
+    object
+      inherit Ast_traverse.iter as super
+
+      method! expression e = if is_jsx e then found := true else super#expression e
+    end
+  in
+  finder#expression e;
+  !found
+
+let rec result e =
+  match e.pexp_desc with
+  | Pexp_function (_, _, Pfunction_body b) -> result b
+  | Pexp_let (_, _, e) | Pexp_letmodule (_, _, e) | Pexp_letexception (_, e) | Pexp_open (_, e)
+  | Pexp_sequence (_, e) | Pexp_constraint (e, _) | Pexp_newtype (_, e) ->
+      result e
+  | _ -> e
+
+let component (vb : value_binding) =
+  match vb.pvb_pat.ppat_desc with
+  | Ppat_var { txt = "make"; _ } | Ppat_constraint ({ ppat_desc = Ppat_var { txt = "make"; _ }; _ }, _) ->
+      has_jsx (result vb.pvb_expr)
   | _ -> false
 
 let registry_arg = function
@@ -887,8 +918,7 @@ let mapper =
       | Enter reader, Pexp_function _ -> with_lint (Reads reader) (fun () -> self#rewrite e)
       | Enter _, Pexp_constraint _ -> self#rewrite e
       | Enter _, _ | Reads _, (Pexp_function _ | Pexp_lazy _) -> with_lint Off (fun () -> self#rewrite e)
-      | Reads reader, (Pexp_ident { txt; _ } | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _)) when state_get txt ->
-          read_error ~loc:e.pexp_loc reader
+      | Reads reader, _ when applied_read e -> read_error ~loc:e.pexp_loc reader
       | _ -> self#rewrite e
 
     method rewrite e =
@@ -896,10 +926,13 @@ let mapper =
       else
         match e.pexp_desc with
         | Pexp_open (o, _) ->
-            check_open ~loc:e.pexp_loc "a local open of Yuka.State" o;
+            check_open ~loc:e.pexp_loc "a local open of " o;
             super#expression e
-        | Pexp_letmodule ({ txt = Some n; _ }, m, _) when n <> "State" && is_yuka_state m ->
-            alias_error ~loc:e.pexp_loc (Printf.sprintf "let module %s = Yuka.State" n) n
+        | Pexp_letmodule ({ txt = Some n; _ }, m, _) when n <> "State" ->
+            Option.iter
+              (fun path -> alias_error ~loc:e.pexp_loc (Printf.sprintf "let module %s = %s" n path) n)
+              (yuka_state_path m);
+            super#expression e
         | Pexp_apply
             (({ pexp_desc = Pexp_ident { txt = render; _ }; _ } as f), args)
           when yuka_render render ->
@@ -936,20 +969,15 @@ let mapper =
 
     method! structure_item i =
       (match i.pstr_desc with
-       | Pstr_open o -> check_open ~loc:i.pstr_loc "open Yuka.State" o
-       | Pstr_include { pincl_mod; _ } when is_yuka_state pincl_mod ->
-           alias_error ~loc:i.pstr_loc "include Yuka.State" "the include"
-       | Pstr_module { pmb_name = { txt = Some n; _ }; pmb_expr; _ } when n <> "State" && is_yuka_state pmb_expr ->
-           alias_error ~loc:i.pstr_loc (Printf.sprintf "module %s = Yuka.State" n) n
+       | Pstr_open o -> check_open ~loc:i.pstr_loc "open " o
+       | Pstr_include { pincl_mod; _ } ->
+           Option.iter (fun path -> alias_error ~loc:i.pstr_loc ("include " ^ path) "the include") (yuka_state_path pincl_mod)
+       | Pstr_module { pmb_name = { txt = Some n; _ }; pmb_expr; _ } when n <> "State" ->
+           Option.iter
+             (fun path -> alias_error ~loc:i.pstr_loc (Printf.sprintf "module %s = %s" n path) n)
+             (yuka_state_path pmb_expr)
        | _ -> ());
       super#structure_item i
-
-    method! signature_item i =
-      (match i.psig_desc with
-       | Psig_open { popen_expr = { txt = Ldot (Lident "Yuka", "State"); _ }; _ } ->
-           alias_error ~loc:i.psig_loc "open Yuka.State" "the open"
-       | _ -> ());
-      super#signature_item i
 
     method! structure items =
       let top = !depth = 0 in
@@ -967,7 +995,14 @@ let mapper =
                | _ -> ());
               let saved = !hoisted in
               hoisted := [];
-              let mapped = with_lint (if defines_make item then Enter Body else Off) (fun () -> self#structure_item item) in
+              let mapped =
+                with_lint Off (fun () ->
+                    match item.pstr_desc with
+                    | Pstr_value (rf, vbs) when List.exists component vbs ->
+                        let vb b = with_lint (if component b then Enter Body else Off) (fun () -> self#value_binding b) in
+                        { item with pstr_desc = Pstr_value (rf, List.map vb vbs) }
+                    | _ -> self#structure_item item)
+              in
               let found = List.rev !hoisted in
               hoisted := saved;
               (match item.pstr_desc with
@@ -996,6 +1031,3 @@ let () =
       in_hole := false;
       lint := Off;
       mapper#structure (Css_ppx.attach s))
-    ~intf:(fun s ->
-      scope := empty_scope;
-      mapper#signature s)
