@@ -103,6 +103,13 @@ let () =
   dispose ()
 
 let () =
+  let _, dispose = render Dev_check_cases.each_cleanup_read in
+  check "render of an each with an effect cleanup per row" ~fires:false;
+  State.set Dev_check_cases.items [| 1 |];
+  check "a read in the effect cleanup of a removed each row" ~fires:false;
+  dispose ()
+
+let () =
   ignore (State.get Dev_check_cases.count);
   check "a read outside a render" ~fires:false
 

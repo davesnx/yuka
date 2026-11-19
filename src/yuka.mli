@@ -234,7 +234,8 @@ val with_unique_id : (string -> 'k element) -> 'k element
 
     The function runs once and does not track a State that it reads, so
     an [input] in it keeps its text and focus; to show a State, put a
-    {!hole} inside. An element made in the browser
+    {!hole} inside. In [.mlx], the ppx puts a body that is not a constant
+    in a hole. An element made in the browser
     after the island has hydrated (a new list row, a value of an {!Await}
     that arrives later, or a render with no server HTML) gets an [id] that
     is unique but not equal to one from the server. The form of the [id]

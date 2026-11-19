@@ -43,3 +43,14 @@ let peek_read () : Yuka.client Yuka.element =
 let untrack_read () : Yuka.client Yuka.element =
   let n = Yuka.State.untrack (fun () -> Yuka.State.get count) in
   <p>(Yuka.int n)</p>
+
+let items : int array Yuka.State.t = Yuka.State.make [| 1; 2 |]
+
+let each_cleanup_read () : Yuka.client Yuka.element =
+  <ul>
+    (Yuka.each ~key:string_of_int
+       (fun () -> Yuka.State.get items)
+       (fun i ->
+         Yuka.Effect.after ~cleanup:(fun () -> ignore (Yuka.State.get count)) (fun () -> ());
+         <li>(Yuka.int i)</li>))
+  </ul>

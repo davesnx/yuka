@@ -660,7 +660,9 @@ and mount_each :
   in
   Base.run_effect Scheduler.queue (fun () ->
       let next = State.get source in
-      Scheduler.untrack (fun () -> reconcile next))
+      Scheduler.untrack (fun () ->
+          if Dev.on then Scheduler.body := false;
+          reconcile next))
 
 let keep_hook : (Web.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
 
