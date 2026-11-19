@@ -44,24 +44,71 @@ let read_error ~loc = function
       Location.raise_errorf ~loc
         "Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek."
 
-let after_top_item (i : structure_item) =
-  let add_module (mb : module_binding) =
-    match (mb.pmb_name.txt, mb.pmb_expr.pmod_desc) with
-    | Some "State", Pmod_ident { txt = Ldot (Lident "Yuka", "State"); _ } -> scope := { !scope with state_alias = true }
-    | Some n, Pmod_ident { txt = Ldot (Lident "Yuka", n'); _ } when n = n' -> ()
-    | Some n, _ -> scope := { !scope with modules = n :: !scope.modules }
-    | None, _ -> ()
-  in
+let hidden = ""
+let yuka_modules = [ "Await"; "Catch"; "Client"; "Context"; "Form"; "Show"; "Status" ]
+
+let scoped f =
+  let saved_bound = !bound and saved_scope = !scope in
+  Fun.protect
+    ~finally:(fun () ->
+      bound := saved_bound;
+      scope := saved_scope)
+    f
+
+let add_modules names = scope := { !scope with modules = names @ !scope.modules }
+
+let hide () =
+  add_modules [ hidden ];
+  bound := (hidden, 0) :: !bound
+
+let hiding f =
+  scoped (fun () ->
+      hide ();
+      f ())
+
+let rec root = function Lident m -> m | Ldot (l, _) | Lapply (l, _) -> root l
+
+let open_module (m : module_expr) =
+  match m.pmod_desc with
+  | Pmod_ident { txt; _ } when not (List.mem (root txt) !scope.modules || List.mem hidden !scope.modules) ->
+      if txt = Lident "Yuka" then
+        scope := { !scope with modules = List.filter (fun n -> not (List.mem n yuka_modules)) !scope.modules };
+      bound := List.map (fun (n, _) -> (n, 0)) !bound
+  | _ -> hide ()
+
+let module_names (mb : module_binding) =
+  match (mb.pmb_name.txt, mb.pmb_expr.pmod_desc) with
+  | Some n, Pmod_ident { txt = Ldot (Lident "Yuka", n'); _ } when n = n' -> []
+  | Some n, _ -> [ n ]
+  | None, _ -> []
+
+let structure_exit = ref ([], [])
+
+let after_item ~top (i : structure_item) =
   match i.pstr_desc with
-  | Pstr_open { popen_expr = { pmod_desc = Pmod_ident { txt = Lident "Yuka"; _ }; _ }; _ } ->
-      scope := { modules = []; opens_yuka = true; state_alias = false }
-  | Pstr_open _ -> scope := { !scope with opens_yuka = false; state_alias = false }
-  | Pstr_module mb -> add_module mb
-  | Pstr_recmodule mbs -> List.iter add_module mbs
+  | Pstr_include { pincl_mod = { pmod_desc = Pmod_structure _; _ }; _ } ->
+      let inner_bound, inner_modules = !structure_exit in
+      bound := inner_bound;
+      add_modules inner_modules
+  | Pstr_open { popen_expr; _ } ->
+      open_module popen_expr;
+      if top then
+        scope :=
+          {
+            !scope with
+            opens_yuka = (match popen_expr.pmod_desc with Pmod_ident { txt = Lident "Yuka"; _ } -> true | _ -> false);
+            state_alias = false;
+          }
+  | Pstr_include { pincl_mod; _ } -> open_module pincl_mod
+  | Pstr_primitive { pval_name = { txt; _ }; _ } -> bound := (txt, 0) :: !bound
+  | Pstr_module { pmb_name = { txt = Some "State"; _ }; pmb_expr = { pmod_desc = Pmod_ident { txt = Ldot (Lident "Yuka", "State"); _ }; _ }; _ }
+    when top ->
+      scope := { !scope with state_alias = true }
+  | Pstr_module mb -> add_modules (module_names mb)
   | _ -> ()
 
-let pattern_vars p =
-  let names = ref [] in
+let pattern_names p =
+  let names = ref [] and modules = ref [] in
   let finder =
     object
       inherit Ast_traverse.iter as super
@@ -69,19 +116,18 @@ let pattern_vars p =
       method! pattern p =
         (match p.ppat_desc with
          | Ppat_var { txt; _ } | Ppat_alias (_, { txt; _ }) -> names := txt :: !names
+         | Ppat_unpack { txt = Some m; _ } -> modules := m :: !modules
          | _ -> ());
         super#pattern p
     end
   in
   finder#pattern p;
-  !names
+  (!names, !modules)
+
+let pattern_vars p = fst (pattern_names p)
+let pattern_modules p = snd (pattern_names p)
 
 let binding_vars vbs = List.concat_map (fun (vb : value_binding) -> pattern_vars vb.pvb_pat) vbs
-
-let param_vars params =
-  List.concat_map
-    (fun (p : function_param) -> match p.pparam_desc with Pparam_val (_, _, pat) -> pattern_vars pat | Pparam_newtype _ -> [])
-    params
 
 let bind env f =
   let saved = !bound in
@@ -89,9 +135,23 @@ let bind env f =
   Fun.protect ~finally:(fun () -> bound := saved) f
 
 let within names f = bind (List.map (fun n -> (n, 0)) names) f
+
+let within_patterns pats f =
+  scoped (fun () ->
+      add_modules (List.concat_map pattern_modules pats);
+      within (List.concat_map pattern_vars pats) f)
+
+let param_patterns params =
+  List.filter_map (fun (p : function_param) -> match p.pparam_desc with Pparam_val (_, _, pat) -> Some pat | Pparam_newtype _ -> None) params
+
 let free n = not (List.mem_assoc n !bound)
 
+let rec arity_of n = function
+  | [] -> None
+  | (m, a) :: rest -> if m = n then Some a else if m = hidden then Some 0 else arity_of n rest
+
 let own_module name = List.mem name !scope.modules
+let known_module name = not (own_module name || own_module hidden)
 
 let yuka_state () = (!scope.opens_yuka || !scope.state_alias) && not (own_module "State")
 
@@ -140,29 +200,33 @@ let yuka_render = function
 
 let yuka_value name = function
   | Ldot (Lident "Yuka", n) -> n = name
-  | Lident n -> n = name && !scope.opens_yuka && free n
+  | Lident n -> n = name && !scope.opens_yuka && arity_of n !bound = None
   | _ -> false
 
 let pure_stdlib = function
   | "^" | "+" | "-" | "*" | "/" | "mod" | "land" | "lor" | "lxor" | "lsl" | "lsr" | "asr" | "+." | "-." | "*." | "/."
-  | "**" | "~-" | "~-." | "=" | "<>" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "not" | "min" | "max"
-  | "abs" | "succ" | "pred" | "string_of_int" | "string_of_float" | "string_of_bool" | "float_of_int"
-  | "int_of_float" ->
-      true
-  | _ -> false
+  | "**" | "=" | "<>" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "min" | "max" ->
+      2
+  | "~-" | "~-." | "not" | "abs" | "succ" | "pred" | "string_of_int" | "string_of_float" | "string_of_bool"
+  | "float_of_int" | "int_of_float" ->
+      1
+  | _ -> 0
 
 let pure_module m f =
-  (not (own_module m))
-  &&
-  match (m, f) with
-  | ("Int" | "Float" | "Bool"), ("to_string" | "equal" | "compare" | "abs" | "max" | "min" | "of_int" | "to_int") -> true
-  | "List", ("length" | "mem") | "Option", ("value" | "is_some" | "is_none") -> true
-  | "String", ("length" | "sub" | "concat" | "equal" | "make" | "trim" | "uppercase_ascii" | "lowercase_ascii" | "capitalize_ascii") ->
-      true
-  | _ -> false
+  if not (known_module m) then 0
+  else
+    match (m, f) with
+    | ("Int" | "Float" | "Bool"), ("to_string" | "abs" | "of_int" | "to_int") -> 1
+    | ("Int" | "Float" | "Bool"), ("equal" | "compare" | "max" | "min") -> 2
+    | "List", "length" | "Option", ("is_some" | "is_none") -> 1
+    | "List", "mem" | "Option", "value" -> 2
+    | "String", ("length" | "trim" | "uppercase_ascii" | "lowercase_ascii" | "capitalize_ascii") -> 1
+    | "String", ("concat" | "equal" | "make") -> 2
+    | "String", "sub" -> 3
+    | _ -> 0
 
 let higher_order = function
-  | Ldot (Lident m, f) | Ldot (Ldot (Lident "Stdlib", m), f) when not (own_module m) -> (
+  | Ldot (Lident m, f) | Ldot (Ldot (Lident "Stdlib", m), f) when known_module m && known_module "Stdlib" -> (
       match (m, f) with
       | ("List" | "Array"), ("map" | "filter" | "filter_map" | "concat_map" | "exists" | "for_all" | "find_opt") -> Some (0, 1)
       | ("List" | "Array"), ("mapi" | "filteri") -> Some (0, 2)
@@ -171,24 +235,29 @@ let higher_order = function
   | _ -> None
 
 let yuka_pure = function
-  | "Form", ("value" | "field_error_view" | "form_errors_view") | "Status", "error_to_string" -> true
-  | _ -> false
+  | "Form", "field_error_view" -> 3
+  | "Form", ("value" | "form_errors_view") -> 2
+  | "Status", "error_to_string" -> 1
+  | _ -> 0
 
 let yuka_pure_path = function
   | Ldot (Ldot (Lident "Yuka", m), f) -> yuka_pure (m, f)
-  | Ldot (Lident m, f) when !scope.opens_yuka && not (own_module m) -> yuka_pure (m, f)
-  | _ -> false
+  | Ldot (Lident m, f) when !scope.opens_yuka && known_module m -> yuka_pure (m, f)
+  | _ -> 0
 
 let pure_arity = function
-  | path when yuka_pure_path path -> max_int
-  | Lident n -> (
-      match List.assoc_opt n !bound with Some arity -> arity | None -> if pure_stdlib n then max_int else 0)
-  | Ldot (Lident "Stdlib", n) -> if pure_stdlib n then max_int else 0
-  | Ldot (Lident m, f) | Ldot (Ldot (Lident "Stdlib", m), f) -> if pure_module m f then max_int else 0
+  | path when yuka_pure_path path > 0 -> yuka_pure_path path
+  | Lident n -> ( match arity_of n !bound with Some arity -> arity | None -> pure_stdlib n)
+  | Ldot (Lident "Stdlib", n) -> if known_module "Stdlib" then pure_stdlib n else 0
+  | Ldot (Lident m, f) -> pure_module m f
+  | Ldot (Ldot (Lident "Stdlib", m), f) -> if known_module "Stdlib" then pure_module m f else 0
   | _ -> 0
 
 let value_default (p : function_param) =
   match p.pparam_desc with Pparam_val (_, default, _) -> Some default | Pparam_newtype _ -> None
+
+let required (p : function_param) =
+  match p.pparam_desc with Pparam_val (Optional _, _, _) | Pparam_newtype _ -> false | Pparam_val _ -> true
 
 let rec jsx_items e =
   match e.pexp_desc with
@@ -208,7 +277,9 @@ let rec constant e =
     | Pexp_match (e, cases) -> constant e && List.for_all constant_case cases
     | Pexp_let (Nonrecursive, vbs, body) ->
         List.for_all (fun (vb : value_binding) -> constant vb.pvb_expr) vbs
-        && bind (binding_env vbs) (fun () -> constant body)
+        && scoped (fun () ->
+               add_modules (List.concat_map (fun (vb : value_binding) -> pattern_modules vb.pvb_pat) vbs);
+               bind (binding_env vbs) (fun () -> constant body))
     | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args) -> (
         match higher_order txt with
         | Some (at, arity) ->
@@ -241,15 +312,15 @@ and jsx_constant e =
   | _ -> true
 
 and constant_case c =
-  within (pattern_vars c.pc_lhs) (fun () -> Option.fold ~none:true ~some:constant c.pc_guard && constant c.pc_rhs)
+  within_patterns [ c.pc_lhs ] (fun () -> Option.fold ~none:true ~some:constant c.pc_guard && constant c.pc_rhs)
 
 and pure_fun e =
   match e.pexp_desc with
   | Pexp_function (params, _, body) ->
       let defaults = List.filter_map value_default params in
-      let values = List.length defaults in
+      let values = List.length (List.filter required params) in
       if List.for_all (function Some d -> constant d | None -> true) defaults then
-        within (param_vars params) (fun () ->
+        within_patterns (param_patterns params) (fun () ->
             match body with
             | Pfunction_body ({ pexp_desc = Pexp_function _; _ } as inner) -> values + pure_fun inner
             | Pfunction_body b -> if constant b then values else 0
@@ -923,16 +994,15 @@ let mapper =
 
     method rewrite e =
       if is_jsx e then rewrite_jsx self e
-      else
+      else (
+        (match e.pexp_desc with
+         | Pexp_open (o, _) -> check_open ~loc:e.pexp_loc "a local open of " o
+         | Pexp_letmodule ({ txt = Some n; _ }, m, _) when n <> "State" ->
+             Option.iter
+               (fun path -> alias_error ~loc:e.pexp_loc (Printf.sprintf "let module %s = %s" n path) n)
+               (yuka_state_path m)
+         | _ -> ());
         match e.pexp_desc with
-        | Pexp_open (o, _) ->
-            check_open ~loc:e.pexp_loc "a local open of " o;
-            super#expression e
-        | Pexp_letmodule ({ txt = Some n; _ }, m, _) when n <> "State" ->
-            Option.iter
-              (fun path -> alias_error ~loc:e.pexp_loc (Printf.sprintf "let module %s = %s" n path) n)
-              (yuka_state_path m);
-            super#expression e
         | Pexp_apply
             (({ pexp_desc = Pexp_ident { txt = render; _ }; _ } as f), args)
           when yuka_render render ->
@@ -956,16 +1026,63 @@ let mapper =
                 args
             in
             { e with pexp_desc = Pexp_apply (self#expression f, args) }
+        | Pexp_apply (({ pexp_desc = Pexp_ident { txt; _ }; _ } as f), [ (Nolabel, render) ])
+          when yuka_value "with_unique_id" txt && pure_fun render < 1 ->
+            let loc = render.pexp_loc in
+            let render =
+              match render.pexp_desc with
+              | Pexp_function ([ ({ pparam_desc = Pparam_val (Nolabel, None, _); _ } as id) ], c, Pfunction_body body) ->
+                  { render with pexp_desc = Pexp_function ([ id ], c, Pfunction_body [%expr Yuka.runtime_hole (fun () -> [%e body])]) }
+              | _ -> [%expr fun __yuka_id -> Yuka.runtime_hole (fun () -> [%e render] __yuka_id)]
+            in
+            { e with pexp_desc = Pexp_apply (f, [ (Nolabel, hole_scope (fun () -> self#expression render)) ]) }
         | Pexp_let (rf, vbs, body) ->
             let names = binding_vars vbs in
             let env = if rf = Recursive then List.map (fun n -> (n, 0)) names else binding_env vbs in
             let vbs = within (if rf = Recursive then names else []) (fun () -> List.map self#value_binding vbs) in
-            let body = bind env (fun () -> self#expression body) in
+            let body =
+              scoped (fun () ->
+                  add_modules (List.concat_map (fun (vb : value_binding) -> pattern_modules vb.pvb_pat) vbs);
+                  bind env (fun () -> self#expression body))
+            in
             { e with pexp_desc = Pexp_let (rf, vbs, body) }
-        | Pexp_function (params, _, _) -> within (param_vars params) (fun () -> super#expression e)
-        | _ -> super#expression e
+        | Pexp_function (params, _, _) -> within_patterns (param_patterns params) (fun () -> super#expression e)
+        | Pexp_open (od, body) ->
+            let od = self#open_declaration od in
+            let body =
+              scoped (fun () ->
+                  open_module od.popen_expr;
+                  self#expression body)
+            in
+            { e with pexp_desc = Pexp_open (od, body) }
+        | Pexp_letmodule (name, m, body) ->
+            let m = self#module_expr m in
+            let body =
+              scoped (fun () ->
+                  add_modules (Option.to_list name.txt);
+                  self#expression body)
+            in
+            { e with pexp_desc = Pexp_letmodule (name, m, body) }
+        | Pexp_letop { let_; ands; body } ->
+            let let_ = self#binding_op let_ and ands = List.map self#binding_op ands in
+            let body =
+              within_patterns (List.map (fun (b : binding_op) -> b.pbop_pat) (let_ :: ands)) (fun () -> self#expression body)
+            in
+            { e with pexp_desc = Pexp_letop { let_; ands; body } }
+        | _ -> super#expression e)
 
-    method! case c = within (pattern_vars c.pc_lhs) (fun () -> super#case c)
+    method! case c = within_patterns [ c.pc_lhs ] (fun () -> super#case c)
+
+    method! module_expr m =
+      match m.pmod_desc with
+      | Pmod_functor (Named ({ txt = Some n; _ }, _), _) ->
+          scoped (fun () ->
+              add_modules [ n ];
+              super#module_expr m)
+      | _ -> super#module_expr m
+
+    method! class_expr c = hiding (fun () -> super#class_expr c)
+    method! class_structure c = hiding (fun () -> super#class_structure c)
 
     method! structure_item i =
       (match i.pstr_desc with
@@ -981,17 +1098,20 @@ let mapper =
 
     method! structure items =
       let top = !depth = 0 in
-      let saved_bound = !bound in
+      let saved_bound = !bound and saved_scope = !scope in
       incr depth;
       Fun.protect
         ~finally:(fun () ->
           decr depth;
-          bound := saved_bound)
+          structure_exit := (!bound, !scope.modules);
+          bound := saved_bound;
+          scope := saved_scope)
         (fun () ->
           List.concat_map
             (fun item ->
               (match item.pstr_desc with
                | Pstr_value (Recursive, vbs) -> bound := List.map (fun n -> (n, 0)) (binding_vars vbs) @ !bound
+               | Pstr_recmodule mbs -> add_modules (List.concat_map module_names mbs)
                | _ -> ());
               let saved = !hoisted in
               hoisted := [];
@@ -1008,7 +1128,7 @@ let mapper =
               (match item.pstr_desc with
                | Pstr_value (Nonrecursive, vbs) -> bound := binding_env vbs @ !bound
                | _ -> ());
-              if top then after_top_item item;
+              after_item ~top item;
               match found with
               | [] -> [ mapped ]
               | _ ->

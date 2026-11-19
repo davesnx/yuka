@@ -76,3 +76,27 @@ let state_view () : Yuka.client Yuka.element =
   let remote = Yuka.Remote.make ~retry:Yuka.Remote.no_retry state_query (fun () -> "a") in
   fetched := Some remote;
   <b>(Yuka.text (status_text (Yuka.State.get (Yuka.Remote.state remote))))</b>
+
+let unique_id_view () : Yuka.client Yuka.element = <p>(Yuka.with_unique_id (fun id -> Yuka.text (id ^ Yuka.State.get name)))</p>
+
+let shown text = text
+
+module Reads = struct
+  let shown _ = Yuka.State.get name
+end
+
+let local_open_view () : Yuka.client Yuka.element = let open Reads in <p>(Yuka.text (shown "x"))</p>
+
+module Nested = struct
+  module Int = struct
+    let to_string _ = Yuka.State.get name
+  end
+
+  let view () : Yuka.client Yuka.element = <p>(Yuka.text (Int.to_string 1))</p>
+end
+
+let format ?(sep = "") () = fun () -> sep ^ Yuka.State.get name
+let optional_view () : Yuka.client Yuka.element = <p>(Yuka.text (format () ()))</p>
+
+let over_applied_view () : Yuka.client Yuka.element =
+  <p>(Yuka.text (Option.value None ~default:(fun _ -> Yuka.State.get name) "x"))</p>
