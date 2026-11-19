@@ -236,7 +236,8 @@ let higher_order = function
 
 let yuka_pure = function
   | "Form", "field_error_view" -> 3
-  | "Form", ("value" | "form_errors_view") -> 2
+  | "Form", ("value" | "field_error" | "form_errors_view") -> 2
+  | "Form", "form_errors" -> 1
   | "Status", "error_to_string" -> 1
   | _ -> 0
 

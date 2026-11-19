@@ -1670,83 +1670,113 @@ let helper_with_prop_read_call =
   Yuka.runtime_instance __yuka_template_rewrite_64
     [|(Yuka.runtime_child
          (Yuka.runtime_hole (fun () -> helper_with_prop_read ())))|]
-let shown x = x
-module Reads =
-  struct let shown _ = State.get s
-         let string_of_int _ = State.get s end
 open
   struct
     let __yuka_template_rewrite_65 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
-let let_open_hides =
-  let open Reads in
-    Yuka.runtime_instance __yuka_template_rewrite_65
-      [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
+let field_error_read f =
+  Yuka.runtime_instance __yuka_template_rewrite_65
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole
+            (fun () ->
+               Yuka.text
+                 (Option.value ~default:""
+                    (Yuka.Form.field_error (State.get (Yuka.Form.errors f))
+                       `Title)))))|]
 open
   struct
     let __yuka_template_rewrite_66 =
-      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
-        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+      Yuka.runtime_template "\001p\005\002\007\006" ~html:"<p></p>"
+        ~walk:[||] ~kids:[|1;0;(-1);19;0|] ~attrs:[|0;0;2|] ~values:[||]
+        ~clones:1
   end
-let local_open_hides =
-  let open Reads in
-    Yuka.runtime_instance __yuka_template_rewrite_66
-      [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
+let field_error_value errors =
+  Yuka.runtime_instance __yuka_template_rewrite_66
+    [|(Yuka.runtime_attribute
+         (Yuka.runtime_attr "title"
+            (String.concat "," (Yuka.Form.form_errors errors) : string)));(
+      Yuka.runtime_child
+        (Yuka.text
+           (Option.value ~default:"" (Yuka.Form.field_error errors `Title))))|]
+let shown x = x
+module Reads =
+  struct let shown _ = State.get s
+         let string_of_int _ = State.get s end
 open
   struct
     let __yuka_template_rewrite_67 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
-let letop_hides =
-  let* shown = reader
-   in
-  Yuka.runtime_instance __yuka_template_rewrite_67
-    [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
+let let_open_hides =
+  let open Reads in
+    Yuka.runtime_instance __yuka_template_rewrite_67
+      [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
 open
   struct
     let __yuka_template_rewrite_68 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
-let let_module_hides =
-  let module List = Reads in
+let local_open_hides =
+  let open Reads in
     Yuka.runtime_instance __yuka_template_rewrite_68
-      [|(Yuka.runtime_child
-           (Yuka.runtime_hole (fun () -> Yuka.int (List.length []))))|]
+      [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
 open
   struct
     let __yuka_template_rewrite_69 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
-let unpack_hides ((module R)  : (module Reader)) =
-  let open R in
-    Yuka.runtime_instance __yuka_template_rewrite_69
-      [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
+let letop_hides =
+  let* shown = reader
+   in
+  Yuka.runtime_instance __yuka_template_rewrite_69
+    [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
 open
   struct
     let __yuka_template_rewrite_70 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
+let let_module_hides =
+  let module List = Reads in
+    Yuka.runtime_instance __yuka_template_rewrite_70
+      [|(Yuka.runtime_child
+           (Yuka.runtime_hole (fun () -> Yuka.int (List.length []))))|]
+open
+  struct
+    let __yuka_template_rewrite_71 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let unpack_hides ((module R)  : (module Reader)) =
+  let open R in
+    Yuka.runtime_instance __yuka_template_rewrite_71
+      [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
+open
+  struct
+    let __yuka_template_rewrite_72 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
 let unpack_module_hides ((module String)  : (module Reader)) =
-  Yuka.runtime_instance __yuka_template_rewrite_70
+  Yuka.runtime_instance __yuka_template_rewrite_72
     [|(Yuka.runtime_child (Yuka.runtime_text_call String.trim "x"))|]
 module Opened =
   struct
     open Reads
     open
       struct
-        let __yuka_template_rewrite_71 =
+        let __yuka_template_rewrite_73 =
           Yuka.runtime_template "\001p\002\007\007\006" ~html:"<p></p>"
             ~walk:[||] ~kids:[|0;0;(-1);18;0;1;0;(-1);16;0|] ~attrs:[||]
             ~values:[||] ~clones:1
       end
     let open_hides =
-      Yuka.runtime_instance __yuka_template_rewrite_71
+      Yuka.runtime_instance __yuka_template_rewrite_73
         [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"));(Yuka.runtime_child
                                                                     (Yuka.runtime_text_call
                                                                     string_of_int
@@ -1757,13 +1787,13 @@ module Included =
     include Reads
     open
       struct
-        let __yuka_template_rewrite_72 =
+        let __yuka_template_rewrite_74 =
           Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>"
             ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||]
             ~clones:1
       end
     let include_hides =
-      Yuka.runtime_instance __yuka_template_rewrite_72
+      Yuka.runtime_instance __yuka_template_rewrite_74
         [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
   end
 module Included_struct =
@@ -1771,13 +1801,13 @@ module Included_struct =
     include struct let shown _ = State.get s end
     open
       struct
-        let __yuka_template_rewrite_73 =
+        let __yuka_template_rewrite_75 =
           Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>"
             ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||]
             ~clones:1
       end
     let include_struct_hides =
-      Yuka.runtime_instance __yuka_template_rewrite_73
+      Yuka.runtime_instance __yuka_template_rewrite_75
         [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
   end
 module External =
@@ -1785,26 +1815,26 @@ module External =
     external shown : string -> string = "shown"
     open
       struct
-        let __yuka_template_rewrite_74 =
+        let __yuka_template_rewrite_76 =
           Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>"
             ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||]
             ~clones:1
       end
     let external_hides =
-      Yuka.runtime_instance __yuka_template_rewrite_74
+      Yuka.runtime_instance __yuka_template_rewrite_76
         [|(Yuka.runtime_child (Yuka.runtime_text_call shown "x"))|]
   end
 module Functor(String:Reader) =
   struct
     open
       struct
-        let __yuka_template_rewrite_75 =
+        let __yuka_template_rewrite_77 =
           Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>"
             ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||]
             ~clones:1
       end
     let functor_parameter_hides =
-      Yuka.runtime_instance __yuka_template_rewrite_75
+      Yuka.runtime_instance __yuka_template_rewrite_77
         [|(Yuka.runtime_child (Yuka.runtime_text_call String.trim "x"))|]
   end
 module Nested =
@@ -1812,109 +1842,109 @@ module Nested =
     module Int = struct let to_string _ = State.get s end
     open
       struct
-        let __yuka_template_rewrite_76 =
+        let __yuka_template_rewrite_78 =
           Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>"
             ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||]
             ~clones:1
       end
     let nested_module =
-      Yuka.runtime_instance __yuka_template_rewrite_76
+      Yuka.runtime_instance __yuka_template_rewrite_78
         [|(Yuka.runtime_child (Yuka.runtime_text_call Int.to_string 1))|]
   end
 let optional_format ?(sep= "") () = fun () -> sep ^ (State.get s)
 open
   struct
-    let __yuka_template_rewrite_77 =
+    let __yuka_template_rewrite_79 =
       Yuka.runtime_template "\001p\005\002\bx\006" ~html:"<p>x</p>"
         ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|] ~values:[||] ~clones:1
   end
 let optional_over_applied =
-  Yuka.runtime_instance __yuka_template_rewrite_77
+  Yuka.runtime_instance __yuka_template_rewrite_79
     [|(Yuka.runtime_attribute
          (Yuka.runtime_hole_attr "title"
             (fun () -> Some (optional_format () () : string))))|]
 let optional_pure ?(sep= "") () = sep
 open
   struct
-    let __yuka_template_rewrite_78 =
-      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
-        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
-  end
-let optional_pure_call =
-  Yuka.runtime_instance __yuka_template_rewrite_78
-    [|(Yuka.runtime_child (Yuka.text (optional_pure ())))|]
-open
-  struct
-    let __yuka_template_rewrite_79 =
-      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
-        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
-  end
-let option_value_over_applied f =
-  Yuka.runtime_instance __yuka_template_rewrite_79
-    [|(Yuka.runtime_child
-         (Yuka.runtime_hole
-            (fun () ->
-               Yuka.text (Option.value f ~default:(fun _ -> State.get s) "x"))))|]
-open
-  struct
     let __yuka_template_rewrite_80 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
-let max_over_applied a b =
+let optional_pure_call =
   Yuka.runtime_instance __yuka_template_rewrite_80
-    [|(Yuka.runtime_child
-         (Yuka.runtime_hole (fun () -> Yuka.text (max a b ()))))|]
+    [|(Yuka.runtime_child (Yuka.text (optional_pure ())))|]
 open
   struct
     let __yuka_template_rewrite_81 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
-let unique_id_read =
+let option_value_over_applied f =
   Yuka.runtime_instance __yuka_template_rewrite_81
     [|(Yuka.runtime_child
-         (Yuka.with_unique_id
-            (fun id ->
-               Yuka.runtime_hole (fun () -> Yuka.text (id ^ (State.get s))))))|]
+         (Yuka.runtime_hole
+            (fun () ->
+               Yuka.text (Option.value f ~default:(fun _ -> State.get s) "x"))))|]
 open
   struct
     let __yuka_template_rewrite_82 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
-let unique_id_helper =
+let max_over_applied a b =
   Yuka.runtime_instance __yuka_template_rewrite_82
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole (fun () -> Yuka.text (max a b ()))))|]
+open
+  struct
+    let __yuka_template_rewrite_83 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let unique_id_read =
+  Yuka.runtime_instance __yuka_template_rewrite_83
+    [|(Yuka.runtime_child
+         (Yuka.with_unique_id
+            (fun id ->
+               Yuka.runtime_hole (fun () -> Yuka.text (id ^ (State.get s))))))|]
+open
+  struct
+    let __yuka_template_rewrite_84 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let unique_id_helper =
+  Yuka.runtime_instance __yuka_template_rewrite_84
     [|(Yuka.runtime_child
          (Yuka.with_unique_id
             (fun __yuka_id ->
                Yuka.runtime_hole (fun () -> render_with_id __yuka_id))))|]
 open
   struct
-    let __yuka_template_rewrite_83 =
+    let __yuka_template_rewrite_85 =
       Yuka.runtime_template "\001label\005\002\bx\006"
         ~html:"<label>x</label>" ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|]
         ~values:[||] ~clones:3
-    and __yuka_template_rewrite_84 =
+    and __yuka_template_rewrite_86 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
 let unique_id_constant =
-  Yuka.runtime_instance __yuka_template_rewrite_84
+  Yuka.runtime_instance __yuka_template_rewrite_86
     [|(Yuka.runtime_child
          (Yuka.with_unique_id
             (fun id ->
-               Yuka.runtime_instance __yuka_template_rewrite_83
+               Yuka.runtime_instance __yuka_template_rewrite_85
                  [|(Yuka.runtime_attribute
                       (Yuka.runtime_attr "for" (id : string)))|])))|]
 module String = struct let uppercase_ascii _ = State.get s end
 open Yuka
 open
   struct
-    let __yuka_template_rewrite_85 =
+    let __yuka_template_rewrite_87 =
       Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
         [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
   end
 let own_module_after_open_yuka =
-  Yuka.runtime_instance __yuka_template_rewrite_85
+  Yuka.runtime_instance __yuka_template_rewrite_87
     [|(Yuka.runtime_child (Yuka.runtime_text_call String.uppercase_ascii "x"))|]

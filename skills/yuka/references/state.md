@@ -121,6 +121,7 @@ A constant is an expression that the ppx can prove reads no State:
   not optional;
 - `Yuka.text`, `Yuka.int`, `Yuka.float`, `Yuka.fragment`, `Yuka.each`,
   `Yuka.hole`, `Yuka.with_unique_id`, `Yuka.Form.value`,
+  `Yuka.Form.field_error`, `Yuka.Form.form_errors`,
   `Yuka.Form.field_error_view`, `Yuka.Form.form_errors_view` and
   `Yuka.Status.error_to_string` applied to constants.
 
@@ -154,8 +155,10 @@ let label () = Yuka.text (Yuka.State.get name) in
 ```
 
 A hole runs one time when it is mounted, and again after each change of a
-State that it read. A hole that reads no State never runs again, but it
-keeps its place in the scheduler and its markers, as any hole.
+State that it read. A hole whose first run reads no State never runs
+again, and the browser keeps nothing in the scheduler for it; it keeps its
+markers, as any hole. A read in a branch that the first run does not take
+is no read. An effect whose first run reads no State is not kept either.
 
 A component tag and a plain call are different in a hole:
 

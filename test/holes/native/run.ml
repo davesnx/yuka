@@ -15,6 +15,8 @@ let () =
   check "a module-level State read is a hole" "<p>a<!--[-->a<!--]--><i></i></p>" (server Holes_cases.dynamic_view);
   check "conditional read, not read" "<p>a<!--[-->none<!--]--><i></i></p>" (server (Holes_cases.conditional_view ~read:false));
   check "conditional read, read" "<p>a<!--[-->a<!--]--><i></i></p>" (server (Holes_cases.conditional_view ~read:true));
+  check "a hole that returns a hole that reads" "<p>a<!--[--><!--[-->a<!--]--><!--]--><i></i></p>" (server Holes_cases.nested_view);
+  check "a hole that returns an element with an attribute that reads" "<p><i title=\"a\">x</i></p>" (server Holes_cases.closure_attr_view);
   check "static list" "<ul><li>x</li><li>y</li></ul>" (server Holes_cases.static_list_view);
   check "a record prop of a component tag takes the type of make" "<p><i>a!</i></p>" (server Holes_cases.styled_view);
   if !failures > 0 then exit 1

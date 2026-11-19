@@ -1024,6 +1024,17 @@ A State.get in a component body, outside markup, reads one time (form A):
                                   ^^^^^^^^^^^^^^^^^^^^^^
   Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
   [1]
+  $ cat > ra8.mlx <<'Y'
+  > let make ~f () =
+  >   let e = Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors f)) `Title in
+  >   <p>(Yuka.text (Option.value ~default:"" e))</p>
+  > Y
+  $ run ra8
+  File "ra8.mlx", line 2, characters 32-69:
+  2 |   let e = Yuka.Form.field_error (Yuka.State.get (Yuka.Form.errors f)) `Title in
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+  [1]
 
 A State.get in the body result, outside markup (form C):
 
