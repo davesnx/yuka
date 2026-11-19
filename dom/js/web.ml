@@ -398,6 +398,22 @@ external table_clear : 'a table -> unit = "clear" [@@mel.send]
 let table_values : 'a table -> 'a array =
   [%mel.raw "function (t) { return Array.from(t.values()) }"]
 
+type ('k, 'v) keyed
+
+external keyed_map : unit -> ('k, 'v) keyed = "Map" [@@mel.new]
+
+let keyed _ = keyed_map ()
+
+external keyed_get : ('k, 'v) keyed -> 'k -> 'v option = "get"
+[@@mel.send] [@@mel.return undefined_to_opt]
+external keyed_set : ('k, 'v) keyed -> 'k -> 'v -> unit = "set" [@@mel.send]
+external keyed_size : ('k, 'v) keyed -> int = "size" [@@mel.get]
+external keyed_clear : ('k, 'v) keyed -> unit = "clear" [@@mel.send]
+
+let keyed_keep : ('k, 'v) keyed -> ('v -> bool) -> unit =
+  [%mel.raw
+    "function (t, keep) { t.forEach(function (v, k) { if (!keep(v)) t.delete(k) }) }"]
+
 let shortest_float : float -> string =
   [%mel.raw
     {|function (f) {

@@ -66,6 +66,30 @@ val deferred : ?equal:('a -> 'a -> bool) -> ('a, _) signal -> 'a read
     dropped. On the server and on native it always has the value of the
     source. [equal] is as in {!make}. *)
 
+val select : ('a, _) signal -> 'a -> bool
+(** [let is_selected = select source] makes a selector, in the style of
+    Solid's [createSelector]. [is_selected key] is [true] when the value of
+    [source] is [key], by identity as the default [equal] of {!make}: two
+    equal records are two keys. Use ints, chars, bools, strings, constant
+    constructors or records as keys. Do not use an option: in the browser
+    [Some id] is [id], so [is_selected (Some id)] is [true] there and
+    [false] on native. A [nan] key is never selected.
+
+    Read in an effect, a memo or a hole, [is_selected key] is tracked for
+    [key] only. A change of [source] from [a] to [b] runs the readers of
+    [a] and of [b], not the readers of other keys, so a selection in a list
+    of [n] rows costs O(1), not O(n). Its readers see the answer for the
+    new value of [source] in the same update as the readers of [source].
+    Outside a tracked read, and on the server, it reads [source] and
+    records nothing.
+
+    Make it where you make a State: at the top of a component, an island or
+    a module, not in a hole. Each key read in a tracked read has an entry
+    while it has a reader; entries with no reader are removed as the table
+    grows. When the owner of the selector is disposed, it stops: its table
+    is cleared, a change of [source] runs none of its readers, and a read
+    gives the answer for the last value it saw. *)
+
 external read_only : 'a t -> 'a read = "%identity"
 (** The same State, typed so that {!set} and {!update} on it do not
     compile. *)
@@ -87,6 +111,8 @@ val untrack : (unit -> 'a) -> 'a
 val runtime_untrack : (unit -> 'a) -> 'a
 (** {!untrack} for a component tag inside a hole. In a dev build, a {!get}
     in the body of that component writes a console error. *)
+
+val select_with_size : ('a, _) signal -> ('a -> bool) * (unit -> int)
 
 val on_change : ?equal:('a -> 'a -> bool) -> ('a, _) signal -> (prev:'a -> next:'a -> unit) -> unit
 external signal : ('a, _) signal -> 'a Signal.t = "%identity"
