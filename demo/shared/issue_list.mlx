@@ -13,13 +13,14 @@ let index_of id items =
 let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Queries.view) ~(query : string)
     ~(chosen : string list) () =
   let source = Yuka.Live.make Topics.issues (fun () -> { Queries.workspace; view }) in
+  let loaded = Yuka.Live.state source in
   let issues =
-    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
+    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.State.get loaded)) ~default:[])
   in
   let labels = Yuka.Remote.make Queries.labels (fun () -> workspace) in
   let label_counts =
     Yuka.State.memo ~equal:( = ) (fun () ->
-        match Yuka.Remote.status labels with
+        match Yuka.State.get (Yuka.Remote.state labels) with
         | Yuka.Status.Ready { data; _ } | Yuka.Status.Loading (Some data) -> data
         | _ -> [])
   in
@@ -236,7 +237,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
       <span>(Yuka.text title)</span>
       <span class_="group-count">(Yuka.int (List.length (Yuka.State.get issues)))</span>
       (Yuka.hole (fun () ->
-         match Yuka.Live.status source with
+         match Yuka.State.get loaded with
          | Yuka.Status.Ready { stale = true; _ } -> <span class_="offline">"Offline, reconnecting"</span>
          | _ -> Yuka.empty))
     </header>
@@ -280,7 +281,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
     <div class_="list">
       (Yuka.each ~equal:( = ) ~key:(fun (status, _) -> Issue.status_slug status) (fun () -> Array.of_list (Yuka.State.get groups)) group)
     </div>
-    <Yuka.Show status=(fun () -> Yuka.Live.status source)
+    <Yuka.Show status=(fun () -> Yuka.State.get loaded)
       loading=(<p class_="list-empty">"Loading issues..."</p>)
       failed=(fun error ->
         <p class_="list-empty error">
@@ -289,7 +290,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
         </p>)>
       (fun _ -> Yuka.empty)
     </Yuka.Show>
-    (if Yuka.State.get visible = [] && Option.is_some (Yuka.Status.data (Yuka.Live.status source)) then
+    (if Yuka.State.get visible = [] && Option.is_some (Yuka.Status.data (Yuka.State.get loaded)) then
        <p class_="list-empty">"No issues match."</p>
      else Yuka.empty)
   </div>

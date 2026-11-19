@@ -103,7 +103,7 @@ let form_errors_view form view =
     @ if autofocus then [ Static ("autofocus", "") ] else [])
     [ Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (form_errors form)))) ]
 
-let pending form = State.get form.busy
+let pending form = State.read_only form.busy
 let parse_sent sent =
   match Json.of_string sent with
   | Ok (`Assoc fields) -> (

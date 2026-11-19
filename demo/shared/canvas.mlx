@@ -10,7 +10,7 @@ let scale_text percent = px (percent / 100) ^ "." ^ (if percent mod 100 < 10 the
 
 let[@client] make ~(workspace : Workspace.t) ~children () =
   let live = Yuka.Live.make Topics.board (fun () -> workspace) in
-  let items = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:[]) in
+  let items = Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.State.get (Yuka.Live.state live))) ~default:[]) in
   let spots =
     Yuka.State.memo (fun () ->
         let table = Hashtbl.create 256 in
@@ -142,7 +142,7 @@ let[@client] make ~(workspace : Workspace.t) ~children () =
        then <span class_=Css.limit data_limit="true">(Yuka.text ("The board shows at most " ^ px Board.card_limit ^ " issues"))</span>
        else Yuka.empty)
       (Yuka.hole (fun () ->
-         match Yuka.Live.status live with
+         match Yuka.State.get (Yuka.Live.state live) with
          | Yuka.Status.Ready { stale = true; _ } -> <span class_="offline">"Offline"</span>
          | _ -> Yuka.empty))
     </header>

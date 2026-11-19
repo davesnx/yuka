@@ -15,7 +15,7 @@ type use = {
 }
 
 type 's t = {
-  base : 's Status.t State.t;
+  state : 's Status.t State.read;
   changes : ('s -> 's) Optimistic.t State.t;
   use : use option;
 }
@@ -330,11 +330,10 @@ let on_server (topic : (_, _) Topic.t) key base =
   end
 
 let make (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
-  let base = State.make (Status.Loading None) in
-  let changes = State.make Optimistic.empty in
+  let base, changes, state = Optimistic.make () in
   if !(Base.server_rendering ()) || not Web.in_browser then begin
     on_server topic (Codec.encode (Topic.key topic) (args ())) base;
-    { base; changes; use = None }
+    { state; changes; use = None }
   end
   else begin
     let data () = Status.data (State.peek base) in
@@ -405,13 +404,10 @@ let make (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
                 else if m.live then send_sub m u
                 else if Option.is_none m.socket && not m.waiting then connect m));
     Base.own (fun () -> detach m u);
-    { base; changes; use = Some u }
+    { state; changes; use = Some u }
   end
 
-let status t =
-  let changes = State.get t.changes in
-  let base = State.get t.base in
-  Optimistic.status changes base
+let state t = t.state
 
 let optimistic ?commit t ~change run =
   let added, id = Optimistic.add (State.peek t.changes) change in

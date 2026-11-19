@@ -78,9 +78,9 @@ val form_errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.e
     and no field takes the focus, the focus goes to this [div]; on a failed
     post (422) with no field errors, the server prints [autofocus] on it. *)
 
-val pending : ('o, 'f) form -> bool
-(** Tracked: true while an island submit waits for its answer. Read it in
-    a hole ([Yuka.hole]); read in the children directly, it renders the
+val pending : ('o, 'f) form -> bool State.read
+(** True while an island submit waits for its answer. Read it with
+    {!State.get} in markup; read in the component body, it renders the
     enclosing component again, with a new form. *)
 
 val make :

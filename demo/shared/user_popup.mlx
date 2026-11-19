@@ -23,7 +23,7 @@ module Card = struct
           <div class_=Css.handle>(Yuka.text ("@" ^ user.id))</div>
         </div>
       </div>
-      <Yuka.Show status=(fun () -> Yuka.Remote.status stats)
+      <Yuka.Show status=(fun () -> Yuka.State.get (Yuka.Remote.state stats))
         loading=(<p class_=Css.note>"Loading..."</p>)
         failed=(fun _ -> <p class_=Css.note>"Could not load the numbers."</p>)>
         (fun (stats : stats) ->

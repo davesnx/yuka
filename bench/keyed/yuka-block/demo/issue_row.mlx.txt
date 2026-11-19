@@ -6,7 +6,7 @@ type menu = Status of string | Priority of string
 let[@client] make ~(workspace : Model.Workspace.t) ~(view : Queries.view) () =
   let source = Yuka.Live.make Topics.issues (fun () -> { Queries.workspace; view }) in
   let issues =
-    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[])
+    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.State.get (Yuka.Live.state source))) ~default:[])
   in
   let selected : string option Yuka.State.t = Yuka.State.make None in
   let menu : menu option Yuka.State.t = Yuka.State.make None in

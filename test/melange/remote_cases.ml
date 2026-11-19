@@ -69,7 +69,7 @@ let show (s : string Status.t) =
 let view () =
   let r = Remote.make ~retry:!retry query (fun () -> State.get input) in
   handle := Some r;
-  element "b" [] [ hole (fun () -> text (show (Remote.status r))) ]
+  element "b" [] [ hole (fun () -> text (show (State.get (Remote.state r)))) ]
 
 let later = State.make false
 
@@ -82,7 +82,7 @@ let late_entry =
               hole (fun () ->
                   if State.get later then (
                     let r = Remote.make query (fun () -> "late") in
-                    element "u" [] [ hole (fun () -> text (show (Remote.status r))) ])
+                    element "u" [] [ hole (fun () -> text (show (State.get (Remote.state r)))) ])
                   else empty);
             ])
         (Codec.decode Codec.unit json))

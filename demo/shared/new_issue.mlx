@@ -29,7 +29,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
                  <div class_="dialog-actions">
                    <button class_="button" type_=`button on_click=(fun _ -> close ())>"Cancel"</button>
                    (Yuka.hole (fun () ->
-                      <button class_="button primary" type_=`submit disabled=(Yuka.Form.pending form)>"Create issue"</button>))
+                      <button class_="button primary" type_=`submit disabled=(Yuka.State.get (Yuka.Form.pending form))>"Create issue"</button>))
                  </div>
                </div>)
            </Yuka.Form>

@@ -8,7 +8,7 @@ let remote_view () : Yuka.client Yuka.element =
   let remote = Yuka.Remote.make ~enabled:(fun () -> Yuka.State.get enabled) query (fun () -> "a") in
   <b>
     "status: "
-    (match Yuka.Remote.status remote with
+    (match Yuka.State.get (Yuka.Remote.state remote) with
      | Yuka.Status.Idle -> Yuka.text "idle"
      | Yuka.Status.Loading _ -> Yuka.text "loading"
      | _ -> Yuka.text "other")
@@ -58,3 +58,19 @@ module Styled = struct
 end
 
 let styled_view () : Yuka.client Yuka.element = <p><Styled style=({ color = Yuka.State.get name ^ "!" }) /></p>
+
+let state_query = Yuka.Action.query ~name:"holes_state" ~input:Yuka.Codec.string ~output:Yuka.Codec.string
+let fetched : string Yuka.Remote.t option ref = ref None
+
+let status_text = function
+  | Yuka.Status.Idle -> "idle"
+  | Yuka.Status.Loading None -> "loading"
+  | Yuka.Status.Loading (Some data) -> "loading " ^ data
+  | Yuka.Status.Ready { data; _ } -> "ready " ^ data
+  | Yuka.Status.Failed { error; last } ->
+      "failed " ^ Yuka.Status.error_to_string error ^ " " ^ Option.value last ~default:"-"
+
+let state_view () : Yuka.client Yuka.element =
+  let remote = Yuka.Remote.make ~retry:Yuka.Remote.no_retry state_query (fun () -> "a") in
+  fetched := Some remote;
+  <b>(Yuka.text (status_text (Yuka.State.get (Yuka.Remote.state remote))))</b>

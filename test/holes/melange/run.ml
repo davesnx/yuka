@@ -125,4 +125,57 @@ let () =
   State.set Holes_cases.name "a";
   dispose ()
 
-let () = if !failures > 0 then set_exit_code 1 else print_endline "hole cases: ok"
+let install_fetch : unit -> unit =
+  [%mel.raw
+    {|function () {
+  globalThis.__calls = [];
+  globalThis.fetch = function (url, init) {
+    return new Promise(function (resolve) {
+      globalThis.__calls.push(function (status, body) {
+        resolve({ status: status, text: function () { return Promise.resolve(body); } });
+      });
+    });
+  };
+}|}]
+
+let respond : int -> int -> string -> unit = [%mel.raw "function (i, s, b) { globalThis.__calls[i](s, b) }"]
+let after : (unit -> unit) -> unit = [%mel.raw "function (f) { setTimeout(function () { f() }, 0) }"]
+
+let rec steps = function
+  | [] -> if !failures > 0 then set_exit_code 1 else print_endline "hole cases: ok"
+  | step :: rest ->
+      step ();
+      after (fun () -> steps rest)
+
+let () =
+  install_fetch ();
+  let c, dispose = render Holes_cases.state_view in
+  let remote = Option.get !Holes_cases.fetched in
+  let shows name expected () = check ("Remote.state in markup: " ^ name) ("<b>" ^ expected ^ "</b>") (html c) in
+  let rollback = ref (fun (_ : (string, Status.error) result) -> ()) in
+  steps
+    [
+      shows "first" "loading";
+      (fun () -> respond 0 200 {|{"ok":"x"}|});
+      shows "fetch done" "ready x";
+      (fun () ->
+        Remote.refetch remote;
+        shows "refetch" "loading x" ());
+      (fun () -> respond 1 503 "");
+      shows "fetch failed" "failed server error x";
+      (fun () ->
+        Remote.refetch remote;
+        respond 2 200 {|{"ok":"y"}|});
+      shows "refetch done" "ready y";
+      (fun () ->
+        let _ =
+          Remote.optimistic remote ~change:(fun d -> d ^ "!") (fun () ->
+              let result, resolve, _ = Async.make () in
+              rollback := resolve;
+              result)
+        in
+        shows "optimistic change" "ready y!" ());
+      (fun () -> !rollback (Error Status.Server));
+      shows "optimistic rollback" "ready y";
+      dispose;
+    ]
