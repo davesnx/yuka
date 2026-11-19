@@ -1,7 +1,0 @@
-(library
- (name yuka_js)
- (public_name yuka.js)
- (implements yuka)
- (modes melange)
- (preprocess
-  (pps melange.ppx)))

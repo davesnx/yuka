@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias size-page)
- (libraries size_page yuka yuka.js)
+ (libraries size_page yuka)
  (preprocess
   (pps yuka.ppx melange.ppx))
  (module_systems

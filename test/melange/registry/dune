@@ -11,7 +11,7 @@
 (melange.emit
  (target out)
  (alias melange-registry)
- (libraries reg_islands yuka yuka.js)
+ (libraries reg_islands yuka)
  (preprocess
   (pps yuka.ppx melange.ppx))
  (module_systems commonjs))

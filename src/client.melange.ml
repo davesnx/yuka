@@ -1,5 +1,6 @@
 include Island
 open Types
+open Async_reader
 
 type container = Web.node
 type 'a promise = 'a Web.promise
@@ -755,30 +756,7 @@ let stop_roots () =
 
 let on_error : (string -> unit) ref = ref ignore
 
-let cleanup_table : (unit -> unit) Web.table option ref = ref None
-
-let cleanups () =
-  match !cleanup_table with
-  | Some t -> t
-  | None ->
-      let t = Web.table () in
-      cleanup_table := Some t;
-      t
-
-let set_cleanup id f = Web.table_set (cleanups ()) (string_of_int id) f
-let drop_cleanup id = Web.table_delete (cleanups ()) (string_of_int id)
 let live_islands : Web.node list ref = ref []
-let next_cleanup = ref 0
-
-let register cleanup =
-  incr next_cleanup;
-  set_cleanup !next_cleanup cleanup;
-  !next_cleanup
-
-let field name fields =
-  List.find_map (fun (k, v) -> if String.equal k name then Some v else None) fields
-
-let has_value value id = match value with Some v -> String.equal v id | None -> false
 
 let transport name input =
   let result, resolve, _ = Async.make () in
@@ -817,55 +795,6 @@ let transport name input =
             | Some (o, _) -> tie o
             | None -> abort ())
     | None -> Option.iter tie !Base.current_owner
-  end;
-  result
-
-let async_value id =
-  let result, resolve, fail = Async.make () in
-  let find () =
-    let found =
-      List.find_opt
-        (fun s -> has_value (Web.get_attribute s "data-yuka-async") id)
-        (Array.to_list
-           (Web.query_all (Web.document ()) "script[data-yuka-async]"))
-    in
-    match found with
-    | None -> false
-    | Some script when Web.text_content script = "" -> false
-    | Some script when
-        Web.ready_state () = "loading"
-        && Result.is_error (Json.of_string (Web.text_content script)) ->
-        false
-    | Some script ->
-        (match Json.of_string (Web.text_content script) with
-        | Ok (`Assoc fields) -> (
-            match (field "ok" fields, field "error" fields) with
-            | Some value, _ -> resolve value
-            | None, Some (`String message) -> fail message
-            | None, _ -> fail ("async value " ^ id ^ ": unexpected shape"))
-        | Ok _ -> fail ("async value " ^ id ^ ": unexpected shape")
-        | Error message -> fail ("async value " ^ id ^ ": bad JSON: " ^ message));
-        true
-  in
-  if not (find ()) then begin
-    let cleanup_id = register ignore in
-    let touches nodes =
-      Array.exists
-        (fun n ->
-          let own = if Web.local_name n = "script" then [| n |] else [||] in
-          Array.exists
-            (fun s -> has_value (Web.get_attribute s "data-yuka-async") id)
-            (Array.append own (Web.query_all n "script[data-yuka-async]")))
-        nodes
-    in
-    let disconnect =
-      Web.watch_added (fun nodes ->
-          touches nodes
-          && find ()
-          && (drop_cleanup cleanup_id;
-              true))
-    in
-    set_cleanup cleanup_id disconnect
   end;
   result
 
@@ -1053,11 +982,6 @@ let transport_hook : (string -> Json.t -> (Json.t, Status.error) result Async.t)
   ref (fun name _ -> failwith ("Yuka: no action transport for " ^ name ^ ": Action.send did not call Client.use_actions"))
 
 let use_actions () = transport_hook := transport
-
-let async_hook : (string -> Json.t Async.t) ref =
-  ref (fun id -> failwith ("Yuka: no reader for async value " ^ id ^ ": Codec.async did not call Client.use_async"))
-
-let use_async () = async_hook := async_value
 
 let script_props script =
   match Web.get_attribute script "data-yuka-props" with

@@ -1,5 +1,0 @@
-(library
- (name yuka_native)
- (public_name yuka.native)
- (implements yuka)
- (modes native))

@@ -2,9 +2,9 @@
  (name yuka)
  (public_name yuka)
  (modes native melange)
- (virtual_modules web dev client navigation_web)
  (private_modules
   answers
+  async_reader
   browser
   cycle
   element
@@ -18,4 +18,5 @@
   server
   signal
   topic)
- (default_implementation yuka.native))
+ (melange.preprocess
+  (pps melange.ppx)))

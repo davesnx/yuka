@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias routes-client)
- (libraries routes_fixture yuka yuka.js)
+ (libraries routes_fixture yuka)
  (module_systems
   (esm js)))
 

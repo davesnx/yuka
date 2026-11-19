@@ -112,7 +112,7 @@ let async c : 'a Async.t t =
           | [ ("ok", j) ] -> Ok (of_json j)
           | [ ("error", `String m) ] -> Ok (Async.failed m)
           | [] ->
-              Client.use_async ();
+              Async_reader.use_async ();
               Ok (Async.bind (!async_source id) of_json)
           | _ -> Error "bad async reference")
       | j -> mismatch "async reference" j);

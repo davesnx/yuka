@@ -37,7 +37,7 @@ jobs:
           - macos-latest
           - ubuntu-latest
         ocaml-compiler:
-          - 5.4.0
+          - 5.5.2
 
     steps:
       - name: Checkout code
