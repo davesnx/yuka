@@ -63,16 +63,18 @@ Each rule prevents a build error or a bug that the references explain.
   file name is the tag (`counter.mlx` gives `<Counter />`).
 - A page must wrap an island in `<Yuka.Client>`. Without it, the component
   prints HTML only and gets no code in the browser.
-- An event handler or a hole outside an island does not compile ("Type
-  Yuka.client is not compatible with type Yuka.server"). Move it to an
-  island.
+- An event handler or a `Yuka.hole` outside an island does not compile
+  ("Type Yuka.client is not compatible with type Yuka.server"). Move it to
+  an island.
 - An island cannot contain `<Yuka.Client>` in its own markup. Pass the
   inner island as children from the page.
 - Each island prop needs a codec. Put `[@@deriving codec]` on your records
   and variants. A function cannot be a prop.
-- The ppx makes a hole only where the expression itself contains
-  `Yuka.State.get`. For a read inside another function, write
-  `Yuka.hole (fun () -> ...)`.
+- Each child and attribute value of an HTML tag that is not a constant
+  is a hole, also a call such as `(label ())` or `(Model.label x)`. A
+  component tag (`<View />`) in a hole runs its body untracked; a plain
+  call `(view ())` in a hole runs again when it reads a State, so make a
+  State in a tag, not in a plain call.
 - Create a State inside `make`, not at the top level of a module.
 - Do not copy one State into another with an effect. Use `Yuka.State.memo`.
 - Code that needs the browser goes in an effect or an event handler:

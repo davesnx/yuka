@@ -1,0 +1,6 @@
+(library
+ (name holes_cases)
+ (modes native melange)
+ (libraries yuka)
+ (preprocess
+  (pps yuka.ppx)))

@@ -58,7 +58,7 @@ let card =
           Block.class_name Css.handle;
           Block.text ("@" ^ user.id);
           Block_stubs.node
-            (match Yuka.Remote.status stats with
+            (match Yuka.State.get (Yuka.Remote.state stats) with
             | Yuka.Status.Ready { data = stats; _ } | Yuka.Status.Loading (Some stats) ->
                 Block_stubs.block stats_template
                   [|

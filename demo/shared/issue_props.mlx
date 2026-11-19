@@ -3,7 +3,7 @@ open Model
 let[@client] make ~(issue : Model.Issue.t) ~children () =
   let live = Yuka.Live.make Topics.issue (fun () -> issue.id) in
   let current =
-    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status live)) ~default:issue)
+    Yuka.State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.State.get (Yuka.Live.state live))) ~default:issue)
   in
   let error : string option Yuka.State.t = Yuka.State.make None in
   let change ?status ?priority () =
@@ -60,7 +60,7 @@ let[@client] make ~(issue : Model.Issue.t) ~children () =
        | Some message -> <p class_="error">(Yuka.text message)</p>
        | None -> Yuka.empty)
       (Yuka.hole (fun () ->
-         match Yuka.Live.status live with
+         match Yuka.State.get (Yuka.Live.state live) with
          | Yuka.Status.Ready { stale = true; _ } -> <p class_="offline">"Offline"</p>
          | _ -> Yuka.empty))
       children

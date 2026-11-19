@@ -80,18 +80,17 @@ type ('o, 'f) form = {
 
 let value form f = Option.value (List.assoc_opt (form.field_name f) form.sent) ~default:""
 
-let field_error form f =
-  List.find_map
-    (fun (g, m) -> match g with Some g when g == f -> Some m | _ -> None)
-    (State.get form.failed)
-
-let form_errors form =
-  List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) (State.get form.failed)
+let errors form = State.read_only form.failed
+let field_error (errors : _ errors) f = List.find_map (fun (g, m) -> match g with Some g when g == f -> Some m | _ -> None) errors
+let form_errors (errors : _ errors) = List.filter_map (fun (g, m) -> match g with None -> Some m | Some _ -> None) errors
 
 let field_error_view form f view =
   Kind.of_node
     (Hole
-       (fun () -> match field_error form f with Some m -> Kind.to_node (view ~id:(form.error_id f) m) | None -> Fragment []))
+       (fun () ->
+         match field_error (State.get form.failed) f with
+         | Some m -> Kind.to_node (view ~id:(form.error_id f) m)
+         | None -> Fragment []))
 
 let form_errors_view form view =
   let autofocus =
@@ -101,9 +100,9 @@ let form_errors_view form view =
   Element.element "div"
     ([ Static ("role", "alert"); Static ("tabindex", "-1"); Static ("data-yuka-errors", "") ]
     @ if autofocus then [ Static ("autofocus", "") ] else [])
-    [ Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (form_errors form)))) ]
+    [ Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (form_errors (State.get form.failed))))) ]
 
-let pending form = State.get form.busy
+let pending form = State.read_only form.busy
 let parse_sent sent =
   match Json.of_string sent with
   | Ok (`Assoc fields) -> (

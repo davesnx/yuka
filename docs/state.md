@@ -42,7 +42,9 @@ order of the calls.
 `State.make value` creates a State that holds `value`.
 
 - `State.get state` reads the value. Inside a hole, a memo or an effect, the
-  read is recorded.
+  read is recorded. In a dev build, a `State.get` that nothing records while
+  a component body runs in the browser writes a console error with a stack,
+  also from a helper in another module: that read never updates.
 - `State.peek state` reads the value and records nothing.
 - `State.set state value` writes a value. `State.update state change` writes `change` of the
   current value.
@@ -97,9 +99,42 @@ let count, dispatch = Yuka.State.reducer reduce initial in
 
 ## Holes
 
-In an `.mlx` file, a child or an attribute value that contains `State.get`
-becomes a hole. A hole is the only part of the markup that changes after
-the first render.
+In an `.mlx` file, each child and each attribute value of an HTML tag is a
+hole, except a constant. A hole is the only part of the markup that changes
+after the first render.
+
+A constant is an expression that the ppx can prove reads no State:
+
+- a literal, a name (`label`, `item.title`), a function (an event
+  handler), or a tuple, record, list or constructor of constants;
+- an HTML tag, `<Yuka.Client>`, or a component tag whose props are
+  constants;
+- `if`, `match` and `let` made of constants;
+- an operator or a function of the standard library that calls no
+  function you give it (`^`, `+`, `=`, `string_of_int`, `Int.to_string`,
+  `String.sub`, `List.length`), applied to constants;
+- `List.map`, `List.filter` or `List.init` (also on `Array`) with a
+  function whose body is a constant;
+- a function defined with `let` in the same file whose body is a
+  constant, such as `let badge ~count = <b>(Yuka.int count)</b>`, applied
+  to constants and to no more arguments than it has parameters that are
+  not optional;
+- `Yuka.text`, `Yuka.int`, `Yuka.float`, `Yuka.fragment`, `Yuka.each`,
+  `Yuka.hole`, `Yuka.with_unique_id`, `Yuka.Form.value`,
+  `Yuka.Form.field_error`, `Yuka.Form.form_errors`,
+  `Yuka.Form.field_error_view`, `Yuka.Form.form_errors_view` and
+  `Yuka.Status.error_to_string` applied to constants.
+
+An `open`, `include`, `let*`, `let module` or `external` can hide a
+function of the same file, so after one the ppx does not use that
+function as a constant. After an `open` of a module of the same file, of a
+first-class module or of a functor result, also a function or module of
+the standard library is a hole. In `Yuka.with_unique_id (fun id -> ...)`,
+the ppx puts a body that is not a constant in a hole, so the body updates
+and keeps its `id`.
+
+A call of a function from another module, `(Model.label issue)`, is a
+hole: the ppx cannot see whether it reads a State.
 
 ```ocaml
 <p class_=(if Yuka.State.get active then "on" else "off")>
@@ -111,13 +146,116 @@ This paragraph has two holes. A write to `active` sets the `class`
 attribute. A write to `name` sets the text. Each write touches one place
 in the DOM.
 
-The ppx looks for `State.get` in the expression itself. It does not see a
-read inside another function that the expression calls. Wrap such a call:
-`(Yuka.hole (fun () -> label ()))`.
+A read inside a function that the hole calls counts too. Here the text
+updates when `name` changes:
+
+```ocaml
+let label () = Yuka.text (Yuka.State.get name) in
+<p>"Name: " (label ())</p>
+```
+
+A hole runs one time when it is mounted, and again after each change of a
+State that it read. A hole whose first run reads no State never runs
+again, and the browser keeps nothing in the scheduler for it; it keeps its
+markers, as any hole. A read in a branch that the first run does not take
+is no read. An effect whose first run reads no State is not kept either.
+
+A component tag and a plain call are different in a hole:
+
+- A component tag, `<View />`, inside a hole runs its body untracked. The
+  hole does not run the body again when a State that the body reads
+  changes, so a State that the body makes stays. The props are read by the
+  hole around the tag.
+- A plain call, `(view ())`, belongs to the hole that contains it. When the
+  call reads a State, a change runs `view` again, and a State that `view`
+  makes is made again. Use a tag for a part that makes a State. A tag
+  inside the body of `view` is not untracked.
+
+`Yuka.hole (fun () -> ...)` makes a hole by hand, for example in code
+without mlx.
 
 A hole that returns elements, not text, removes its old elements and
 creates new ones each time it runs. Keep such a hole small, or read the
 State deeper in the tree, so that less is created again.
+
+## Reads that run one time
+
+A `State.get` that runs while a component builds its markup reads the
+value one time. The body does not run again, so the page never shows a
+change. The ppx reports such a read as a compile error:
+
+```
+Yuka: this State.get runs one time and never updates. Read it in markup, a memo or an effect, or use State.peek.
+```
+
+The ppx checks two places:
+
+- The body of a component: a function bound to `make` at the top of a
+  file or of a module, as in `let make ~count () = ...` or
+  `let[@client] make ...`, whose result contains an HTML or component
+  tag. The tag `<Counter />` calls `Counter.make`. The ppx has no other
+  mark for a component. A `make` whose result has no tag, such as
+  `let make s = State.get s * 2`, is not checked, and in
+  `let rec make () = ... and view () = ...` only `make` is checked.
+- The row function of `Yuka.each`, `(fun item -> ...)`, in any place: a
+  row renders untracked, also inside a hole.
+
+In these two places, a `State.get` is correct only inside:
+
+- markup: a child or an attribute value of an HTML tag, which is a hole;
+- a function: an event handler, a helper such as
+  `let label () = ...`, `State.memo`, `Effect.after`, `Effect.before`,
+  `Yuka.hole`, the input of `Remote.make`, or any other `fun`;
+- `lazy`.
+
+| Error | Fix |
+|---|---|
+| `let n = State.get count in <p>(Yuka.int n)</p>` | `<p>(Yuka.int (State.get count))</p>`, or a memo |
+| `if State.get open_ then <A /> else <B />` as the body result | `(Yuka.hole (fun () -> if State.get open_ then <A /> else <B />))`, or make the `if` a child of an HTML tag |
+| `<Label text=(State.get name) />` | `<Label text=name />`, and read `name` in `Label` |
+| `(fun item -> let on = State.get sel = item.id in <li class_=(if on then "on" else "")> ... </li>)` in `Yuka.each` | `(fun item -> <li class_=(if State.get sel = item.id then "on" else "")> ... </li>)` |
+
+A prop of a component tag is not a hole. A `State.get` in a prop is an
+error, also in `value` of `Yuka.Context.Provide`, `async` of
+`Yuka.Await`, `status` of `Yuka.Show` and the props of an island in
+`Yuka.Client`:
+
+```
+Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek.
+```
+
+This is an error in every place, also when the tag is inside a hole or
+`Yuka.hole`: there a change builds the whole component again. A prop that
+is a function, such as `on_pick=(fun () -> Yuka.State.get sel)` or
+`read=Yuka.State.get`, is correct, because the read runs later. A component that takes a value
+that changes takes a `State.read`.
+
+To read one time on purpose, use `State.peek`. The top level of a module
+runs one time by design and is not checked. On the server every read is
+one time: a `State.get` in a server-only `make` is an error too, so use
+`State.peek` there.
+
+The check finds `Yuka.State.get`, and `State.get` in a file that has
+`open Yuka` or `module State = Yuka.State`, by name. In a file without
+them, `State` is a module of the project and is not checked. The ppx also
+uses these names to choose its output. So another name for `Yuka.State`
+is an error: `open Yuka.State`, `Yuka.State.(...)`,
+`let open Yuka.State in`, `include Yuka.State`, `module S = Yuka.State`
+and `let module S = Yuka.State in`, and after `open Yuka` also
+`open State` and `module S = State`. The alias
+`module State = Yuka.State` is correct. An interface (`.mli`) has no
+reads, so it can open `Yuka.State`.
+
+```
+Yuka: module S = Yuka.State hides State.get from the ppx. The ppx optimizes and checks reads by the exact names Yuka.State.get and State.get, so a read through S is not seen, and a read that runs one time is not reported. Write Yuka.State.get or State.get.
+```
+
+The check does not see:
+
+- a read inside a function of another file, or inside a helper that the
+  body calls outside markup (`let n = label () in`);
+- a read in a function that is not `make`, such as `let view () = ...`,
+  or in a `make` whose result has no tag.
 
 ## Keyed lists
 
@@ -136,6 +274,9 @@ A row whose key stays keeps its nodes, and renders again only when
 `~equal:( = )` for items that are rebuilt with the same content. Of two
 items with the same key, only the first shows. `each` keeps the items,
 not the array: to show a change, give a new array.
+
+The view of one item runs one time for each row. Read a State in its
+markup, not at its top: see [Reads that run one time](#reads-that-run-one-time).
 
 ## Memos
 

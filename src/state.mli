@@ -84,6 +84,10 @@ val untrack : (unit -> 'a) -> 'a
 
 (**/**)
 
+val runtime_untrack : (unit -> 'a) -> 'a
+(** {!untrack} for a component tag inside a hole. In a dev build, a {!get}
+    in the body of that component writes a console error. *)
+
 val on_change : ?equal:('a -> 'a -> bool) -> ('a, _) signal -> (prev:'a -> next:'a -> unit) -> unit
 external signal : ('a, _) signal -> 'a Signal.t = "%identity"
 external of_signal : 'a Signal.t -> ('a, _) signal = "%identity"
