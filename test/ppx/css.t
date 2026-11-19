@@ -134,7 +134,7 @@ A class that the file does not have is a compile error:
   > module Css = [%yuka.css "a.css"]
   > let make () = (Yuka.text Css.missing : _ Yuka.element)
   > X
-  $ run missing > missing.pp.ml && ocamlfind ocamlc -c yuka.ml missing.pp.ml 2>&1 | grep -v '^ *[0-9]* |\|^ *\^'
+  $ run missing > missing.pp.ml && ocamlfind ocamlc -c -color never yuka.ml missing.pp.ml 2>&1 | grep -v '^ *[0-9]* |\|^ *\^'
   File "missing.pp.ml", line 3, characters 21-44:
   Error: Unbound value Yuka.runtime_stylesheet
 
