@@ -1,10 +1,11 @@
 SWITCH ?= $(shell d="$(CURDIR)"; while [ "$$d" != / ]; do [ -d "$$d/_opam" ] && { echo "$$d"; break; }; d=$$(dirname "$$d"); done)
 BUILD_DIR ?= _build
 PORT ?= 8080
-OCAML_VERSION ?= 5.4.1
+OCAML_VERSION ?= 5.5.2
 
 DUNE = opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- dune
 export DUNE_BUILD_DIR = $(BUILD_DIR)
+export DUNE_ROOT = $(CURDIR)
 
 .PHONY: help
 help: ## Print this help message
@@ -16,51 +17,51 @@ help: ## Print this help message
 
 .PHONY: build
 build: ## Build everything (native and Melange)
-	$(DUNE) build --root . --profile=dev
+	$(DUNE) build --profile=dev
 
 .PHONY: build-prod
 build-prod: ## Build with --profile=release
-	$(DUNE) build --root . --profile=release
+	$(DUNE) build --profile=release
 
 .PHONY: dev
 dev: ## Build in watch mode
-	$(DUNE) build --root . -w --profile=dev
+	$(DUNE) build -w --profile=dev
 
 .PHONY: clean
 clean: ## Clean artifacts
-	$(DUNE) clean --root .
+	$(DUNE) clean
 
 .PHONY: test
 test: ## Run all tests
-	$(DUNE) build --root . @runtest
+	$(DUNE) build @runtest
 
 .PHONY: test-watch
 test-watch: ## Run all tests in watch mode
-	$(DUNE) build --root . @runtest -w
+	$(DUNE) build @runtest -w
 
 .PHONY: test-promote
 test-promote: ## Run all tests and promote snapshots
-	$(DUNE) build --root . @runtest --auto-promote
+	$(DUNE) build @runtest --auto-promote
 
 .PHONY: ppx-test
 ppx-test: ## Run ppx tests
-	$(DUNE) build --root . @test/ppx/runtest
+	$(DUNE) build @test/ppx/runtest
 
 .PHONY: ppx-test-watch
 ppx-test-watch: ## Run ppx tests in watch mode
-	$(DUNE) build --root . @test/ppx/runtest -w
+	$(DUNE) build @test/ppx/runtest -w
 
 .PHONY: ppx-test-promote
 ppx-test-promote: ## Run ppx tests and promote snapshots
-	$(DUNE) build --root . @test/ppx/runtest --auto-promote
+	$(DUNE) build @test/ppx/runtest --auto-promote
 
 .PHONY: demo-build
 demo-build: ## Build the demo (server and client)
-	$(DUNE) build --root . --profile=dev @demo/all
+	$(DUNE) build --profile=dev @demo/all
 
 .PHONY: demo-build-watch
 demo-build-watch: ## Build the demo in watch mode
-	$(DUNE) build --root . --profile=dev @demo/all -w
+	$(DUNE) build --profile=dev @demo/all -w
 
 .PHONY: demo-bundle
 demo-bundle: demo-build ## Bundle the demo client with esbuild
@@ -72,15 +73,15 @@ demo-serve: demo-build ## Serve the demo on PORT
 
 .PHONY: demo-dev
 demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
-	$(DUNE) build --root . --profile=dev ./gen/yuka_cli.exe
+	$(DUNE) build --profile=dev ./gen/yuka_cli.exe
 	opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- $(BUILD_DIR)/default/gen/yuka_cli.exe dev \
-	  --build 'dune build --root . --watch --profile=dev @demo/all' \
+	  --build 'dune build --watch --profile=dev @demo/all' \
 	  --assets $(BUILD_DIR)/default/demo/static --assets $(BUILD_DIR)/default/demo/client/out \
 	  -- $(BUILD_DIR)/default/demo/server/demo_server.exe --port $(PORT)
 
 .PHONY: demo-test
 demo-test: ## Run the demo tests
-	$(DUNE) build --root . @demo/runtest --force
+	$(DUNE) build @demo/runtest --force
 
 .PHONY: e2e
 e2e: ## Browser check of the demo (native ES modules)
@@ -96,7 +97,7 @@ e2e-shared: ## Two server processes on one database (YUKA_DEMO_DATABASE): a chan
 
 .PHONY: bench
 bench: ## Build and run the browser benchmark
-	$(DUNE) build --root . --profile=release @bench/bench
+	$(DUNE) build --profile=release @bench/bench
 	node bench/run.ts $(BUILD_DIR)/default/bench/out
 
 BENCH_RUNS ?= 10
@@ -104,13 +105,13 @@ BENCH_OUT ?= $(BUILD_DIR)/bench-keyed/result.json
 
 .PHONY: bench-keyed
 bench-keyed: ## Run the keyed table benchmark: yuka, solid, vanillajs (BENCH_RUNS, BENCH_OUT, CHROME_PATH)
-	$(DUNE) build --root . --profile=release @bench/keyed/bench-keyed
+	$(DUNE) build --profile=release @bench/keyed/bench-keyed
 	BUILD_DIR=$(BUILD_DIR) bench/keyed/build.sh
 	node bench/keyed/run.ts --site $(BUILD_DIR)/bench-keyed --runs $(BENCH_RUNS) --out $(BENCH_OUT)
 
 .PHONY: size
 size: ## Bundle the keyed benchmark app, the demo and three one-island pages, print raw and gzip bytes and the JavaScript each page loads at start, check the budget in bench/size/budget.json
-	$(DUNE) build --root . --profile=release @bench/keyed/bench-keyed @demo/all @bench/size/page/client/size-page @bench/size/codec_page/client/size-codec-page @bench/size/remote_page/client/size-remote-page
+	$(DUNE) build --profile=release @bench/keyed/bench-keyed @demo/all @bench/size/page/client/size-page @bench/size/codec_page/client/size-codec-page @bench/size/remote_page/client/size-remote-page
 	node bench/size/size.ts --build-dir $(BUILD_DIR)
 
 SSR_ROWS ?= 100
@@ -118,7 +119,7 @@ SSR_CONNECTIONS ?= 32
 
 .PHONY: bench-ssr
 bench-ssr: ## SSR throughput of the same issue list page: yuka, dream, server-reason-react, react, solid (SSR_ROWS, SSR_CONNECTIONS)
-	$(DUNE) build --root . --profile=release @bench/ssr/ocaml/all
+	$(DUNE) build --profile=release @bench/ssr/ocaml/all
 	[ -d bench/ssr/node/node_modules ] || npm ci --prefix bench/ssr/node --no-audit --no-fund
 	node bench/ssr/run.ts --build-dir $(BUILD_DIR) --rows $(SSR_ROWS) --connections $(SSR_CONNECTIONS)
 
@@ -160,10 +161,10 @@ endif
 init: system-deps create-switch pin install install-npm ## Set up the dev environment: system packages, local switch, opam and npm dependencies
 
 .PHONY: install
-install: ## Install the opam dependencies, the dev packages, ocaml-lsp-server and the mlx reader for it
+install: ## Install the opam dependencies, the dev packages and the editor tools
 	opam update
 	opam install . --deps-only --with-test --with-doc -y
-	opam install -y $(DEV_PACKAGES) ocaml-lsp-server ocamlmerlin-mlx
+	opam install -y $(DEV_PACKAGES) ocaml-lsp-server ocamlmerlin-mlx ocamlformat ocamlformat-mlx
 
 # server-reason-react is out until quickjs supports dune 3.25: see bench/ssr/ocaml/dune
 DEV_PACKAGES = cmarkit ochre tm-grammars jsonkit

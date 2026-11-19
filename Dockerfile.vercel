@@ -1,4 +1,4 @@
-FROM ocaml/opam:debian-12-ocaml-5.4 AS build
+FROM ocaml/opam:debian-12-ocaml-5.5 AS build
 WORKDIR /home/opam/yuka
 COPY --chown=opam Makefile yuka.opam yuka-dream.opam yuka-live-pg.opam ./
 RUN sudo apt-get update \
