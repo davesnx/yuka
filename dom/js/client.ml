@@ -310,6 +310,7 @@ let add_handler doc el event handler =
   end
   else begin
     delegate doc event;
+    on_dispose ignore;
     let key = handlers_key event in
     let h = { run = handler; owner; gen = owner.gen } in
     let hs = prop el key in
