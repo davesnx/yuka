@@ -1,3 +1,5 @@
+module State = Yuka.State
+
 let static_attrs = <a class_="nav" href="/x" tabindex=3>"home"</a>
 
 let bool_and_optional = <input type_=`text disabled=true hidden=flag ?placeholder ?autofocus />
@@ -26,7 +28,7 @@ let component_one_child = <Ui.Card title="t"><p>"body"</p></Ui.Card>
 
 let component_children = <Ui.Card title="t">"a" (State.get s) <b>"c"</b></Ui.Card>
 
-let component_prop_no_hole = <Ui.Card title=(State.get s) />
+let component_prop_no_hole = <Ui.Card title=(State.peek s) />
 
 let nested = <ul class_="list"><li>"one"</li><li><a href="/y">(State.get name)</a></li></ul>
 
@@ -165,3 +167,120 @@ let animate_values u = <svg><animate values=u from=u /></svg>
 let style_parts c = <style>"a{color:"(Yuka.text (State.get c))"}"</style>
 
 let reparsed c = <p class_="p"><div id=c>"x"<a href="/y">(Yuka.text c)</a></div></p>
+
+let pure_ops ~n ~label = <p class_=("row-" ^ label) title=(if n > 1 then "many" else "one")>(Yuka.text (string_of_int (n + 1)))</p>
+
+let pure_helper ~label = <b>(Yuka.text label)</b>
+
+let pure_helper_call = <div>(pure_helper ~label:"x")</div>
+
+let reading_helper () = Yuka.text (State.get name)
+
+let reading_helper_call = <div>(reading_helper ())</div>
+
+let over_applied x = fun () -> State.get x
+
+let over_applied_call = <p>(Yuka.text (over_applied s ()))</p>
+
+let mapped items = <ul>(Yuka.fragment (List.map (fun i -> <li>(Yuka.text i)</li>) items))</ul>
+
+let mapped_unknown items = <ul>(Yuka.fragment (List.map reading_item items))</ul>
+
+let helper_text_call = <p>(Yuka.text (Model.label item))</p>
+
+let helper_attr_call = <p class_=(Model.slug item) />
+
+let component_in_hole = <div>(if State.get on then <Ui.Badge x=1 /> else Yuka.empty)</div>
+
+let component_prop_read_child = <div><Ui.Badge label=(State.peek s) /></div>
+
+let helper_with_prop_read () = <Ui.Badge label=(State.peek s) />
+
+let helper_with_prop_read_call = <div>(helper_with_prop_read ())</div>
+
+let field_error_read f = <p>(Yuka.text (Option.value ~default:"" (Yuka.Form.field_error (State.get (Yuka.Form.errors f)) `Title)))</p>
+
+let field_error_value errors = <p title=(String.concat "," (Yuka.Form.form_errors errors))>(Yuka.text (Option.value ~default:"" (Yuka.Form.field_error errors `Title)))</p>
+
+let shown x = x
+
+module Reads = struct
+  let shown _ = State.get s
+  let string_of_int _ = State.get s
+end
+
+let let_open_hides = let open Reads in <p>(Yuka.text (shown "x"))</p>
+
+let local_open_hides = Reads.(<p>(Yuka.text (shown "x"))</p>)
+
+let letop_hides = let* shown = reader in <p>(Yuka.text (shown "x"))</p>
+
+let let_module_hides = let module List = Reads in <p>(Yuka.int (List.length []))</p>
+
+let unpack_hides (module R : Reader) = let open R in <p>(Yuka.text (shown "x"))</p>
+
+let unpack_module_hides (module String : Reader) = <p>(Yuka.text (String.trim "x"))</p>
+
+module Opened = struct
+  open Reads
+
+  let open_hides = <p>(Yuka.text (shown "x")) (Yuka.text (string_of_int 1))</p>
+end
+
+module Included = struct
+  include Reads
+
+  let include_hides = <p>(Yuka.text (shown "x"))</p>
+end
+
+module Included_struct = struct
+  include struct
+    let shown _ = State.get s
+  end
+
+  let include_struct_hides = <p>(Yuka.text (shown "x"))</p>
+end
+
+module External = struct
+  external shown : string -> string = "shown"
+
+  let external_hides = <p>(Yuka.text (shown "x"))</p>
+end
+
+module Functor (String : Reader) = struct
+  let functor_parameter_hides = <p>(Yuka.text (String.trim "x"))</p>
+end
+
+module Nested = struct
+  module Int = struct
+    let to_string _ = State.get s
+  end
+
+  let nested_module = <p>(Yuka.text (Int.to_string 1))</p>
+end
+
+let optional_format ?(sep = "") () = fun () -> sep ^ State.get s
+
+let optional_over_applied = <p title=(optional_format () ())>"x"</p>
+
+let optional_pure ?(sep = "") () = sep
+
+let optional_pure_call = <p>(Yuka.text (optional_pure ()))</p>
+
+let option_value_over_applied f = <p>(Yuka.text (Option.value f ~default:(fun _ -> State.get s) "x"))</p>
+
+let max_over_applied a b = <p>(Yuka.text (max a b ()))</p>
+
+let unique_id_read = <p>(Yuka.with_unique_id (fun id -> Yuka.text (id ^ State.get s)))</p>
+
+let unique_id_helper = <p>(Yuka.with_unique_id render_with_id)</p>
+
+let unique_id_constant = <p>(Yuka.with_unique_id (fun id -> <label for_=id>"x"</label>))</p>
+
+module String = struct
+  let uppercase_ascii _ = State.get s
+end
+
+open Yuka
+
+let own_module_after_open_yuka = <p>(Yuka.text (String.uppercase_ascii "x"))</p>

@@ -23,7 +23,7 @@ let show (s : string Status.t) =
       "failed " ^ Status.error_to_string error
       ^ match last with Some d -> " last " ^ d | None -> ""
 
-let check_status msg expected r = Alcotest.(check string) msg expected (show (Remote.status r))
+let check_status msg expected r = Alcotest.(check string) msg expected (show (State.get (Remote.state r)))
 let logged = ref []
 let () = Yuka.Server.set_default_log (fun _ m -> logged := m :: !logged)
 
@@ -83,7 +83,7 @@ let transport =
         check_status "unknown" "failed not found" r;
         let wrong = Action.query ~name:"echo" ~input:Codec.int ~output:Codec.string in
         let r, _ = in_owner (fun () -> Remote.make wrong (fun () -> 1)) in
-        Alcotest.(check bool) "bad input" true (contains (show (Remote.status r)) "failed invalid input") );
+        Alcotest.(check bool) "bad input" true (contains (show (State.get (Remote.state r))) "failed invalid input") );
     ( "a key change sends a new call and the old answer is dropped",
       fun () ->
         reset ();
@@ -160,7 +160,7 @@ let transport =
 let island q input =
   runtime_island ~name:"Query" ~props:`Null (fun () ->
       let r = Remote.make q (fun () -> input) in
-      element "b" [] [ text (show (Remote.status r)) ])
+      element "b" [] [ text (show (State.get (Remote.state r))) ])
 
 let answers =
   [
@@ -184,7 +184,7 @@ let answers =
         let html =
           Server.to_string (fun () ->
               let r = Remote.make echo (fun () -> "out") in
-              element "b" [] [ text (show (Remote.status r)) ])
+              element "b" [] [ text (show (State.get (Remote.state r))) ])
         in
         Alcotest.(check bool) "data" true (contains html "ready echo out");
         Alcotest.(check bool) "no answer" false (contains html "data-yuka-answer") );
@@ -266,7 +266,7 @@ let fill_and_rollback =
                   Await.make ~async:value ~loading:(text "wait")
                     ~children:(fun v ->
                       let r = Remote.make echo (fun () -> v) in
-                      element "b" [] [ text (show (Remote.status r)) ])
+                      element "b" [] [ text (show (State.get (Remote.state r))) ])
                     ()))
         in
         resolve "f";

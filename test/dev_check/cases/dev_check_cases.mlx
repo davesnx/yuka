@@ -1,0 +1,56 @@
+let count : int Yuka.State.t = Yuka.State.make 1
+let user : string Yuka.State.t = Yuka.State.make "ada"
+let show : bool Yuka.State.t = Yuka.State.make false
+let at_load = Yuka.State.get count
+
+let read_count () = Yuka.State.get count
+
+module Body_read = struct
+  let make () =
+    let n = read_count () in
+    <p>(Yuka.int n)</p>
+end
+
+module Helper_read = struct
+  let make () =
+    let n = Helpers.user_name user in
+    <p>(Yuka.text n)</p>
+end
+
+let body_read () : Yuka.client Yuka.element = <Body_read />
+let helper_read () : Yuka.client Yuka.element = <Helper_read />
+let body_read_in_hole () : Yuka.client Yuka.element = <div>(if Yuka.State.get show then <Body_read /> else Yuka.text "")</div>
+
+let handler_read () : Yuka.client Yuka.element =
+  <button on_click=(fun _ -> ignore (Yuka.State.get count))>"go"</button>
+
+let effect_read () : Yuka.client Yuka.element =
+  Yuka.Effect.after (fun () -> ignore (Yuka.State.get count));
+  Yuka.Effect.before (fun () -> ignore (Yuka.State.get count));
+  Yuka.Effect.on_change count (fun ~prev:_ ~next:_ -> ignore (Yuka.State.get user));
+  <p />
+
+let memo_read () : Yuka.client Yuka.element =
+  let doubled = Yuka.State.memo (fun () -> Yuka.State.get count * 2) in
+  <p>(Yuka.int (Yuka.State.get doubled))</p>
+
+let hole_read () : Yuka.client Yuka.element = <p>(Yuka.int (Yuka.State.get count))</p>
+
+let peek_read () : Yuka.client Yuka.element =
+  let n = Yuka.State.peek count in
+  <p>(Yuka.int n)</p>
+
+let untrack_read () : Yuka.client Yuka.element =
+  let n = Yuka.State.untrack (fun () -> Yuka.State.get count) in
+  <p>(Yuka.int n)</p>
+
+let items : int array Yuka.State.t = Yuka.State.make [| 1; 2 |]
+
+let each_cleanup_read () : Yuka.client Yuka.element =
+  <ul>
+    (Yuka.each ~key:string_of_int
+       (fun () -> Yuka.State.get items)
+       (fun i ->
+         Yuka.Effect.after ~cleanup:(fun () -> ignore (Yuka.State.get count)) (fun () -> ());
+         <li>(Yuka.int i)</li>))
+  </ul>

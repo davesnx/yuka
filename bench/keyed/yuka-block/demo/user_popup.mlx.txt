@@ -23,7 +23,7 @@ module Card = struct
           <div class_=Css.handle>(Yuka.text ("@" ^ user.id))</div>
         </div>
       </div>
-      (match Yuka.Remote.status stats with
+      (match Yuka.State.get (Yuka.Remote.state stats) with
        | Yuka.Status.Ready { data = stats; _ } | Yuka.Status.Loading (Some stats) ->
            <dl class_=Css.stats>
              (stat "Open" stats.open_)

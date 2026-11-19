@@ -54,7 +54,7 @@ let make =
   Block_stubs.component ~markup:{|<div class="list"></div>|} ~walk:[||] ~targets:[| 0 |] ~kinds:[| Block_stubs.Rows |]
     (fun (workspace, view) ->
       let source = Yuka.Live.make Topics.issues (fun () -> { Queries.workspace; view }) in
-      let issues = State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.Live.status source)) ~default:[]) in
+      let issues = State.memo (fun () -> Option.value (Yuka.Status.data (Yuka.State.get (Yuka.Live.state source))) ~default:[]) in
       let selected : string option State.t = State.make None in
       let menu : menu option State.t = State.make None in
       let toast : string option State.t = State.make None in

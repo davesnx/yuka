@@ -310,6 +310,7 @@ let add_handler doc el event handler =
   end
   else begin
     delegate doc event;
+    on_dispose ignore;
     let key = handlers_key event in
     let h = { run = handler; owner; gen = owner.gen } in
     let hs = prop el key in
@@ -660,7 +661,9 @@ and mount_each :
   in
   Base.run_effect Scheduler.queue (fun () ->
       let next = State.get source in
-      Scheduler.untrack (fun () -> reconcile next))
+      Scheduler.untrack (fun () ->
+          if Dev.on then Scheduler.body := false;
+          reconcile next))
 
 let keep_hook : (Web.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
 
@@ -720,7 +723,7 @@ let start ~adopt container f =
   let (), dispose =
     Scheduler.batch (fun () ->
         Base.mount (fun () ->
-            let n = f () in
+            let n = if Dev.on then Scheduler.with_body true f else f () in
             if not adopt then Web.clear container "";
             let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
             if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then begin

@@ -17,3 +17,7 @@ let status t (base : _ Status.t) : _ Status.t =
     | Loading d -> Loading (Option.map f d)
     | Ready { data; stale } -> Ready { data = f data; stale }
     | Failed { error; last } -> Failed { error; last = Option.map f last }
+
+let make () =
+  let base = State.make (Status.Loading None) and changes = State.make empty in
+  (base, changes, State.memo (fun () -> status (State.get changes) (State.get base)))

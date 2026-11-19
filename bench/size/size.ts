@@ -267,9 +267,9 @@ const devOnly = [
   ...keyed.chunks.map((c) => join(outDir, "keyed", c.name)),
   ...demo.chunks.map((c) => join(outDir, "demo", c.name)),
   ...pages.flatMap((p) => p.bundle.chunks.map((c) => join(outDir, p.dir, c.name))),
-].filter((file) => readFileSync(file, "utf8").includes("hydration mismatch"));
+].filter((file) => ["hydration mismatch", "nothing tracking it"].some((log) => readFileSync(file, "utf8").includes(log)));
 if (devOnly.length > 0) {
-  console.error(`size: the hydration mismatch log is in a release bundle: ${devOnly.join(", ")}`);
+  console.error(`size: a dev log is in a release bundle: ${devOnly.join(", ")}`);
   process.exit(1);
 }
 console.log(`size: keyed benchmark app ${app.gzip} B gzip, budget ${budget.keyed_gzip} B`);

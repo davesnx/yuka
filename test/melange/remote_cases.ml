@@ -69,7 +69,7 @@ let show (s : string Status.t) =
 let view () =
   let r = Remote.make ~retry:!retry query (fun () -> State.get input) in
   handle := Some r;
-  element "b" [] [ hole (fun () -> text (show (Remote.status r))) ]
+  element "b" [] [ hole (fun () -> text (show (State.get (Remote.state r)))) ]
 
 let later = State.make false
 
@@ -82,7 +82,7 @@ let late_entry =
               hole (fun () ->
                   if State.get later then (
                     let r = Remote.make query (fun () -> "late") in
-                    element "u" [] [ hole (fun () -> text (show (Remote.status r))) ])
+                    element "u" [] [ hole (fun () -> text (show (State.get (Remote.state r)))) ])
                   else empty);
             ])
         (Codec.decode Codec.unit json))
@@ -237,6 +237,24 @@ let async =
             finish (fun () ->
                 check "one fetch" "1" (string_of_int (fetches ()));
                 check "rejected" "failed bad title" (shown ());
+                Yuka.stop ())) );
+    ( "action: disposing the owner aborts a query call from a handler in a hole that reads nothing",
+      fun finish ->
+        fresh_calls ();
+        let c = Dom_cases.container "" in
+        let dispose =
+          Private.render (Dom_cases.as_element c) (fun () ->
+              element "div" []
+                [
+                  hole (fun () ->
+                      element "button" [ attr "id" "sx"; on "click" (fun _ -> ignore (Action.call query "x")) ] []);
+                ])
+        in
+        Dom_cases.click (Dom_cases.query c "#sx");
+        dispose ();
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "aborted" "true" (string_of_bool (aborted 0));
                 Yuka.stop ())) );
     ( "remote: stop aborts",
       fun finish ->

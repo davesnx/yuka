@@ -118,6 +118,8 @@ let () =
             element "p" []
               [ element "label" [ attr "for" id ] [ text (State.get title) ]; element "input" [ attr "id" id ] [] ]))
   in
+  check "state read: the dev check reports it" "true"
+    (string_of_bool (String.starts_with ~prefix:"[yuka] State.get with nothing tracking it" (errors ())));
   let input = last_input () in
   let id = id_of input in
   type_and_focus input "typed";

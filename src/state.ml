@@ -17,7 +17,8 @@ let reducer ?equal reduce initial =
   let s = make ?equal initial in
   (read_only s, fun action -> update s (fun value -> reduce value action))
 
-let untrack = Scheduler.untrack
+let runtime_untrack = Scheduler.untrack
+let untrack f = if Dev.on then Scheduler.quiet f else Scheduler.untrack f
 
 let memo ?equal f =
   let s = Signal.computed ?equal f in
@@ -159,7 +160,9 @@ let on_change ?equal (state : (_, _) signal) f =
       if (not created) && Signal.differs equal !prev next then begin
         let p = !prev in
         prev := next;
-        Scheduler.untrack (fun () -> f ~prev:p ~next)
+        Scheduler.untrack (fun () ->
+            if Dev.on then Scheduler.body := false;
+            f ~prev:p ~next)
       end)
 
 external signal : ('a, _) signal -> 'a Signal.t = "%identity"

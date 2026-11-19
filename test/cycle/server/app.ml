@@ -202,7 +202,7 @@ module Pages = struct
         Yuka.runtime_island ~name:"Live" ~props:`Null (fun () ->
             let t = Yuka.Live.make mine (fun () -> "ann") in
             let shown =
-              match Yuka.Live.status t with
+              match Yuka.State.get (Yuka.Live.state t) with
               | Yuka.Status.Ready { data; _ } -> "data " ^ data
               | Yuka.Status.Failed { error = Yuka.Status.Forbidden; _ } -> "forbidden"
               | _ -> "other"

@@ -46,6 +46,7 @@ let peek s =
   s.value
 
 let get s =
+  if Dev.on && Scheduler.untracked () then Dev.untracked_get ();
   Scheduler.pull s.node;
   (if s.node.state <> 0 then
      try Scheduler.fresh s.node
