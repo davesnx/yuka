@@ -51,6 +51,7 @@ let stack = ref 0
 let listener = ref None
 let queue = ref []
 let late = ref []
+let selects = ref []
 let depth = ref 0
 let nest = ref 0
 let writes = ref 0
@@ -61,6 +62,7 @@ type domain = {
   listener : node option ref;
   queue : node list ref;
   late : node list ref;
+  selects : node list ref;
   depth : int ref;
   nest : int ref;
   writes : int ref;
@@ -79,6 +81,7 @@ let key =
              listener = ref None;
              queue = ref [];
              late = ref [];
+             selects = ref [];
              depth = ref 0;
              nest = ref 0;
              writes = ref 0;
@@ -90,7 +93,7 @@ let key =
 let here r f = match key with Some k when not js -> f (Web.local_get k) | _ -> r
 let stack () = here stack (fun d -> d.stack)
 let listener () = here listener (fun d -> d.listener)
-let mine q = here q (fun d -> if q == late then d.late else d.queue)
+let mine q = here q (fun d -> if q == late then d.late else if q == selects then d.selects else d.queue)
 let depth () = here depth (fun d -> d.depth)
 let nest () = here nest (fun d -> d.nest)
 let writes () = here writes (fun d -> d.writes)
@@ -375,7 +378,9 @@ let flush () =
   let error = ref None and rounds = ref 0 in
   let fail e = match !error with None -> error := Some e | Some _ -> () in
   let rec round () =
-    let queue = mine queue and late = mine late in
+    let queue = mine queue and late = mine late and selects = mine selects in
+    queue := rev_onto !selects !queue;
+    selects := [];
     (match !queue with
     | [] ->
         queue := !late;
@@ -459,3 +464,12 @@ let batch f =
 
 let fresh n =
   if n.state <> 0 && (n.head != None || !(listener ()) != None) then batch (fun () -> settle 100 n)
+
+let pull n =
+  let rec go = function
+    | w :: rest ->
+        (try fresh w with _ -> ());
+        go rest
+    | [] -> ()
+  in
+  if n.head != None then go !(mine selects)

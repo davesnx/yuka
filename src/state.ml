@@ -92,14 +92,7 @@ let deferred ?equal (source : (_, _) signal) =
 
 let select_with_size (source : (_, _) signal) =
   let watch =
-    let stack = Scheduler.stack () in
-    let outer = !stack in
-    stack := -1;
-    let first_in_each_round =
-      Scheduler.make (Some (Scheduler.mine Scheduler.queue)) Scheduler.never
-    in
-    stack := outer;
-    first_in_each_round
+    Scheduler.make (Some (Scheduler.mine Scheduler.selects)) Scheduler.never
   in
   let current =
     match Scheduler.with_listener (Some watch) (fun () -> get source) with
@@ -112,7 +105,7 @@ let select_with_size (source : (_, _) signal) =
   let write key answer =
     match Web.keyed_get keys key with Some s -> Signal.set s answer | None -> ()
   in
-  Scheduler.set_level watch;
+  watch.level <- -1;
   watch.fn <-
     (fun () ->
       let value = get source and prev = !current in
@@ -141,12 +134,17 @@ let select_with_size (source : (_, _) signal) =
         s
   in
   let read key =
-    if !live && !(Scheduler.listener ()) != None then begin
+    if
+      !live
+      && !(Scheduler.listener ()) != None
+      && Signal.same key key
+      && (Scheduler.js || (watch.id > !Scheduler.sealed && not !(Base.server_rendering ())))
+    then begin
       (* An exception of [watch] reaches its owner when the flush runs it. *)
       (try Scheduler.fresh watch with _ -> ());
       Signal.get (entry key)
     end
-    else Signal.same (if !live then Signal.peek source else !current) key
+    else Signal.same (if !live then get source else !current) key
   in
   (read, fun () -> Web.keyed_size keys)
 

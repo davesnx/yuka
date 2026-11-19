@@ -70,14 +70,18 @@ val select : ('a, _) signal -> 'a -> bool
 (** [let is_selected = select source] makes a selector, in the style of
     Solid's [createSelector]. [is_selected key] is [true] when the value of
     [source] is [key], by identity as the default [equal] of {!make}: two
-    equal records are two keys.
+    equal records are two keys. Use ints, chars, bools, strings, constant
+    constructors or records as keys. Do not use an option: in the browser
+    [Some id] is [id], so [is_selected (Some id)] is [true] there and
+    [false] on native. A [nan] key is never selected.
 
     Read in an effect, a memo or a hole, [is_selected key] is tracked for
     [key] only. A change of [source] from [a] to [b] runs the readers of
     [a] and of [b], not the readers of other keys, so a selection in a list
     of [n] rows costs O(1), not O(n). Its readers see the answer for the
     new value of [source] in the same update as the readers of [source].
-    Outside a tracked read, it reads [source] and records nothing.
+    Outside a tracked read, and on the server, it reads [source] and
+    records nothing.
 
     Make it where you make a State: at the top of a component, an island or
     a module, not in a hole. Each key read in a tracked read has an entry

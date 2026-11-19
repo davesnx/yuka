@@ -105,6 +105,9 @@ let module_count =
   Yuka.State.set s 1;
   s
 
+let module_selected = Yuka.State.make 3
+let module_is_selected, module_select_size = Yuka.State.select_with_size module_selected
+
 let module_state_cases =
   let open Alcotest in
   let refused name f =
@@ -134,10 +137,34 @@ let module_state_cases =
            Yuka.State.set s 2;
            Yuka.int (Yuka.State.get s)))
   in
+  let select () =
+    let render is_selected =
+      Server.to_string (fun () ->
+          let answers = List.init 10 (fun key -> Yuka.State.memo (fun () -> is_selected key)) in
+          Yuka.text (String.concat "" (List.map (fun m -> if Yuka.State.get m then "x" else "-") answers)))
+    in
+    check string "a module-level selector answers" "---x------" (render module_is_selected);
+    check string "a second render" "---x------" (render module_is_selected);
+    check int "a module-level selector keeps no entry" 0 (module_select_size ());
+    let size = ref (-1) in
+    let html =
+      Server.to_string (fun () ->
+          let selected = Yuka.State.make 5 in
+          let is_selected, entries = Yuka.State.select_with_size selected in
+          let answers = List.init 10 (fun key -> Yuka.State.memo (fun () -> is_selected key)) in
+          Yuka.State.set selected 7;
+          let text = String.concat "" (List.map (fun m -> if Yuka.State.get m then "x" else "-") answers) in
+          size := entries ();
+          Yuka.text text)
+    in
+    check string "a selector made in a render follows its State" "-------x--" html;
+    check int "a server render keeps no entry" 0 !size
+  in
   [ test_case "a write before the first render" `Quick before_seal;
     test_case "a render reads a module-level State" `Quick read;
     test_case "a write after the first render raises" `Quick write;
-    test_case "a State made in a component" `Quick local ]
+    test_case "a State made in a component" `Quick local;
+    test_case "a selector on the server" `Quick select ]
 
 let deferred_cases =
   let open Alcotest in

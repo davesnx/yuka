@@ -184,6 +184,118 @@ let records_are_keys_by_identity () =
     (bools (List.mem "first false" !log) ^ " " ^ bools (List.mem "twin true" !log));
   dispose ()
 
+let memo_of_answers_only_in_a_batch () =
+  let source = State.make 3 in
+  let (three, seven), dispose =
+    with_owner (fun () ->
+        let is_selected = State.select source in
+        (State.memo (fun () -> is_selected 3), State.memo (fun () -> is_selected 7)))
+  in
+  let inside =
+    batch (fun () ->
+        State.set source 7;
+        bools (State.get three) ^ " " ^ bools (State.get seven))
+  in
+  check "a memo over one answer, read in a batch" "false true" inside;
+  check "after the batch" "false true" (bools (State.get three) ^ " " ^ bools (State.get seven));
+  dispose ()
+
+let memo_of_answers_only_in_an_effect () =
+  let source = State.make 3 and go = State.make false in
+  let seen = ref [] in
+  let (), dispose =
+    with_owner (fun () ->
+        let is_selected = State.select source in
+        let three = State.memo (fun () -> is_selected 3) in
+        Effect.before (fun () ->
+            if State.get go then begin
+              State.set source 7;
+              seen := bools (State.get three) :: !seen
+            end))
+  in
+  State.set go true;
+  check "a memo over one answer, read after a write in an effect" "false"
+    (String.concat " " !seen);
+  dispose ()
+
+let same_key_twice () =
+  let source = State.make 3 in
+  let (is_selected, size), dispose = with_owner (fun () -> State.select_with_size source) in
+  let runs = ref 0 in
+  let (), dispose_readers =
+    with_owner (fun () ->
+        Effect.before (fun () ->
+            ignore (is_selected 3);
+            ignore (is_selected 3);
+            incr runs);
+        Effect.before (fun () ->
+            ignore (is_selected 3);
+            incr runs))
+  in
+  check "readers of one key share an entry" "1" (ints (size ()));
+  runs := 0;
+  State.set source 4;
+  check "each reader runs once" "2" (ints !runs);
+  dispose_readers ();
+  State.set source 3;
+  check "the entry stays until the table grows" "1" (ints (size ()));
+  dispose ()
+
+let nan_key () =
+  let source = State.make nan in
+  let (is_selected, size), dispose = with_owner (fun () -> State.select_with_size source) in
+  let answers = ref [] in
+  let (), dispose_readers =
+    with_owner (fun () ->
+        for _ = 1 to 5 do
+          Effect.before (fun () -> answers := bools (is_selected nan) :: !answers)
+        done)
+  in
+  check "a nan key has no entry" "0" (ints (size ()));
+  check "a nan key is not selected" "false false false false false" (String.concat " " !answers);
+  dispose_readers ();
+  dispose ()
+
+let removed_with_its_parent select_like () =
+  let items = State.make [ 1; 2 ] in
+  let (), dispose =
+    with_owner (fun () ->
+        Effect.before (fun () ->
+            match State.get items with
+            | [] -> ()
+            | _ :: _ ->
+                let first = State.memo (fun () -> List.hd (State.get items)) in
+                select_like first))
+  in
+  let raised = match State.set items [] with () -> "no" | exception e -> Printexc.to_string e in
+  check "a write that removes the child raises nothing" "no" raised;
+  dispose ()
+
+let removed_after_a_memo_read () =
+  let items = State.make [ 1; 2 ] in
+  let length, dispose =
+    with_owner (fun () ->
+        Effect.before (fun () ->
+            match State.get items with
+            | [] -> ()
+            | _ :: _ ->
+                let first = State.memo (fun () -> List.hd (State.get items)) in
+                let is_selected = State.select first in
+                Effect.before (fun () -> ignore (is_selected 1)));
+        State.memo (fun () -> List.length (State.get items)))
+  in
+  let raised =
+    match
+      batch (fun () ->
+          State.set items [];
+          State.get length)
+    with
+    | n -> ints n
+    | exception e -> Printexc.to_string e
+  in
+  check "a memo read in a batch before the parent runs raises nothing" "0" raised;
+  dispose ()
+
 let all =
   [
     ("select: a change runs the readers of two keys", change_runs_two_readers);
@@ -196,4 +308,15 @@ let all =
     ("select: a reader of a memo runs once", reader_of_a_memo_runs_once);
     ("select: a memo read in a batch sees the new answer", memo_read_in_a_batch);
     ("select: records are keys by identity", records_are_keys_by_identity);
+    ("select: a memo over one answer is up to date in a batch", memo_of_answers_only_in_a_batch);
+    ("select: a memo over one answer is up to date in an effect", memo_of_answers_only_in_an_effect);
+    ("select: readers of one key share an entry", same_key_twice);
+    ("select: a nan key has no entry", nan_key);
+    ( "select: an effect that removes a child effect raises nothing",
+      removed_with_its_parent (fun first -> Effect.before (fun () -> ignore (State.get first))) );
+    ( "select: an effect that removes a child selector raises nothing",
+      removed_with_its_parent (fun first ->
+          let is_selected = State.select first in
+          Effect.before (fun () -> ignore (is_selected 1))) );
+    ("select: a removed selector pulled by a memo read raises nothing", removed_after_a_memo_read);
   ]

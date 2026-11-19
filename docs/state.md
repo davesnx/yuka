@@ -181,16 +181,19 @@ let is_selected = Yuka.State.select selected in
 - A hole, memo or effect that calls `is_selected key` runs again only when
   the answer for `key` changes. A change of `selected` from one row to
   another runs two holes, not one per row.
-- Keys compare as the default `equal` of `State.make`: ints, strings and
-  constant constructors by value, records and other values by identity,
-  so two equal records are two keys.
+- Keys compare as the default `equal` of `State.make`: ints, chars,
+  bools, strings and constant constructors by value, records by
+  identity, so two equal records are two keys. Do not use an option as a
+  key: the browser compiles `Some id` to `id`, so `is_selected (Some id)`
+  is `true` in the browser and `false` on the server. A `nan` key is
+  never selected.
 - The ppx makes a hole only where it sees `State.get`. It does not see a
   call to `is_selected`, so wrap the markup that calls it in
   `Yuka.hole`, as above.
 - Make the selector where you make a State, not inside a hole. When its
   owner goes away, it stops.
-- Outside a hole, a memo and an effect, `is_selected key` only reads
-  `source`.
+- Outside a hole, a memo and an effect, and on the server,
+  `is_selected key` only reads `source`.
 
 ## Deferred State
 

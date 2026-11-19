@@ -41,10 +41,12 @@ let quiet_set s value =
   s.old <- value
 
 let peek s =
+  Scheduler.pull s.node;
   Scheduler.fresh s.node;
   s.value
 
 let get s =
+  Scheduler.pull s.node;
   (if s.node.state <> 0 then
      try Scheduler.fresh s.node
      with e ->
