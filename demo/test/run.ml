@@ -312,11 +312,11 @@ let rules () =
 let action_route () =
   let status, _, body =
     call ~meth:`POST ~headers:[ ("Content-Type", "application/json"); ("Origin", "http://demo.test"); ("Host", "demo.test") ]
-      ~body:{|{"issue_id":"YUK-2","body":"From the test"}|} "/_yuka/action/add_comment"
+      ~body:{|{"issue_id":"YUK-2","body":"From the test"}|} "/_yuka/action/demo_shared.Comment.add"
   in
   Alcotest.(check int) "status" 200 status;
   has body "From the test";
-  let status, _, _ = call "/_yuka/action/add_comment" in
+  let status, _, _ = call "/_yuka/action/demo_shared.Comment.add" in
   Alcotest.(check int) "GET" 405 status
 
 let fst3 (first, _, _) = first
@@ -430,9 +430,9 @@ let comment_range () =
     (List.init 142 (fun index -> Printf.sprintf "STR-9-c%d" (index + 54)))
     (ids (range 53 142));
   let headers = [ ("Content-Type", "application/json"); ("Origin", "http://demo.test"); ("Host", "demo.test") ] in
-  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"STR-9","offset":-1,"limit":5}|} "/_yuka/action/comment_range" in
+  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"STR-9","offset":-1,"limit":5}|} "/_yuka/action/demo_shared.Comment.range" in
   Alcotest.(check int) "a negative offset is refused" 400 status;
-  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"NOPE-1","offset":0,"limit":5}|} "/_yuka/action/comment_range" in
+  let status, _, _ = call ~meth:`POST ~headers ~body:{|{"issue":"NOPE-1","offset":0,"limit":5}|} "/_yuka/action/demo_shared.Comment.range" in
   Alcotest.(check int) "an unknown issue is refused" 400 status
 
 let stress_actions () =
@@ -671,7 +671,7 @@ let markdown_safety () =
   Alcotest.(check int) "raw HTML shown as text in the description" 1 (count html {|&lt;img src="x" onerror="alert('inline')"&gt;|});
   let status, _, answer =
     call ~meth:`POST ~headers:[ ("Content-Type", "application/json"); ("Origin", "http://demo.test"); ("Host", "demo.test") ]
-      ~body:(Yuka.Json.to_string (`Assoc [ ("issue_id", `String created.id); ("body", `String hostile) ])) "/_yuka/action/add_comment"
+      ~body:(Yuka.Json.to_string (`Assoc [ ("issue_id", `String created.id); ("body", `String hostile) ])) "/_yuka/action/demo_shared.Comment.add"
   in
   Alcotest.(check int) "comment status" 200 status;
   List.iter (lacks answer) [ {|"href":"java|}; {|"href":"JAVA|}; {|"href":"data|}; "<script" ];

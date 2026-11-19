@@ -238,14 +238,12 @@ file after the guards run, and the loaders do not run. In dev mode the
 server does not use the files.
 
 `client/dune` builds the browser entry and writes the island registry
-(`Yuka_islands`) and its manifest. The client lists `yuka.js`, the browser
-implementation of `yuka`; without it the build fails ("The library
-yuka.native ... not compatible with melange"):
+(`Yuka_islands`) and its manifest:
 
 ```
 (melange.emit
  (target out)
- (libraries app_shared yuka yuka.js)
+ (libraries app_shared yuka)
  (preprocess
   (pps yuka.ppx melange.ppx))
  (module_systems

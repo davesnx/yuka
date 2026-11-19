@@ -1,11 +1,11 @@
 (melange.emit
  (target out)
  (alias size-remote-page)
- (libraries size_remote_page yuka yuka.js)
+ (libraries size_remote_page yuka)
  (preprocess
   (pps yuka.ppx melange.ppx))
  (module_systems
-  (es6 js)))
+  (esm js)))
 
 (rule
  (targets yuka_islands.ml)

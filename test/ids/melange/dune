@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias melange-ids)
- (libraries ids_cases yuka yuka.js)
+ (libraries ids_cases yuka)
  (preprocess
   (pps melange.ppx))
  (module_systems commonjs))

@@ -85,7 +85,7 @@ Each rule prevents a build error or a bug that the references explain.
   errors of `yuka routes`.
 - In `Routes.ml`, write a custom param type with its module path
   (`:tab<Model.tab>`), and define `tab_param` in the shared library.
-- The client `dune` lists `yuka.js` in `libraries`, and the shared library
+- The client `dune` lists `yuka` in `libraries`, and the shared library
   has `(modes native melange)`.
 
 ## Check

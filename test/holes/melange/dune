@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias melange-holes)
- (libraries holes_cases yuka yuka.js)
+ (libraries holes_cases yuka)
  (preprocess
   (pps melange.ppx))
  (module_systems commonjs))

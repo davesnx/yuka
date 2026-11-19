@@ -1,4 +1,3 @@
-open Demo_shared
 open Model
 
 let issue_count = 2000
@@ -145,7 +144,7 @@ let issue ~(users : User.t array) number : Issue.t =
 
 let issues ~users = List.init issue_count (fun index -> issue ~users (index + 1))
 
-let comments ~(users : User.t array) (issue : Issue.t) : Comment.t list =
+let comments ~(users : User.t array) (issue : Issue.t) : Comment_types.t list =
   let number = Issue.number issue in
   if number < 1 || number > issue_count then []
   else
@@ -160,7 +159,7 @@ let comments ~(users : User.t array) (issue : Issue.t) : Comment.t list =
               (List.init sentences (fun sentence -> remarks.((first + (sentence * 7)) mod Array.length remarks)))
         in
         {
-          Comment.id = Printf.sprintf "%s-c%d" issue.id (index + 1);
+          Comment_types.id = Printf.sprintf "%s-c%d" issue.id (index + 1);
           author = pick (seed 5) users;
           body = Markdown.render body;
           created_at = Printf.sprintf "Nov %d" (1 + (index * 6 / comments_per_issue));

@@ -6,9 +6,7 @@
  (alias runtest)
  (package yuka)
  (deps
-  (glob_files %{project_root}/src/*.ml)
-  (glob_files %{project_root}/dom/js/*.ml)
-  (glob_files %{project_root}/dom/native/*.ml))
+  (glob_files %{project_root}/src/*.ml))
  (action
   (run
    %{exe:check.exe}

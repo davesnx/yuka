@@ -14,6 +14,10 @@ let scope = ref empty_scope
 let depth = ref 0
 let bound : (string * int) list ref = ref []
 let in_hole = ref false
+let submodules : string loc list ref = ref []
+let in_expression = ref false
+let in_functor = ref false
+let in_anonymous = ref false
 
 type reader = Body | Row | Prop
 
@@ -192,6 +196,35 @@ let special_form = function
   | Ldot (Ldot (Lident "Context", "Provide"), "createElement") when !scope.opens_yuka && not (own_module "Context") ->
       Ldot (Ldot (Ldot (Lident "Yuka", "Context"), "Provide"), "createElement")
   | path -> path
+
+let is_action_module = function
+  | Ldot (Lident "Yuka", "Action") -> true
+  | Lident "Action" -> !scope.opens_yuka && not (own_module "Action")
+  | _ -> false
+
+let is_action_extension name = name = "action" || name = "yuka.action"
+
+let expand_action item =
+  match item.pstr_desc with
+  | Pstr_extension (({ txt; loc = name_loc }, payload), _) when is_action_extension txt ->
+      let loc = item.pstr_loc in
+      if !in_expression then
+        Location.raise_errorf ~loc "[yuka] let%%action must be in a module, not in an expression."
+      else if !in_functor then
+        Location.raise_errorf ~loc
+          "[yuka] let%%action cannot be in a functor: each application would register the same action name."
+      else if !in_anonymous then
+        Location.raise_errorf ~loc
+          "[yuka] let%%action cannot be in an anonymous module: its name would be the same as an action outside it."
+      else
+        Action_gen.expand ~is_action_module ~submodules:(List.rev !submodules) ~library:!Island.library ~loc
+          ~name_loc payload
+  | _ -> [ item ]
+
+let with_ref r v f =
+  let saved = !r in
+  r := v;
+  Fun.protect ~finally:(fun () -> r := saved) f
 
 let yuka_render = function
   | Ldot (Lident "Yuka", "render") -> true
@@ -984,6 +1017,7 @@ let mapper =
     inherit Ast_traverse.map as super
 
     method! expression e =
+      with_ref in_expression true @@ fun () ->
       match (!lint, e.pexp_desc) with
       | Enter reader, Pexp_function (_, _, Pfunction_body { pexp_desc = Pexp_function _; _ }) ->
           with_lint (Enter reader) (fun () -> self#rewrite e)
@@ -1004,6 +1038,8 @@ let mapper =
                (yuka_state_path m)
          | _ -> ());
         match e.pexp_desc with
+        | Pexp_extension ({ txt; loc }, _) when is_action_extension txt ->
+            Location.raise_errorf ~loc "[yuka] let%%action must be in a module, not in an expression."
         | Pexp_apply
             (({ pexp_desc = Pexp_ident { txt = render; _ }; _ } as f), args)
           when yuka_render render ->
@@ -1077,9 +1113,11 @@ let mapper =
     method! module_expr m =
       match m.pmod_desc with
       | Pmod_functor (Named ({ txt = Some n; _ }, _), _) ->
-          scoped (fun () ->
-              add_modules [ n ];
-              super#module_expr m)
+          with_ref in_functor true (fun () ->
+              scoped (fun () ->
+                  add_modules [ n ];
+                  super#module_expr m))
+      | Pmod_functor _ -> with_ref in_functor true (fun () -> super#module_expr m)
       | _ -> super#module_expr m
 
     method! class_expr c = hiding (fun () -> super#class_expr c)
@@ -1097,6 +1135,11 @@ let mapper =
        | _ -> ());
       super#structure_item i
 
+    method! module_binding mb =
+      match mb.pmb_name with
+      | { txt = Some name; loc } -> with_ref submodules ({ txt = name; loc } :: !submodules) (fun () -> super#module_binding mb)
+      | { txt = None; _ } -> with_ref in_anonymous true (fun () -> super#module_binding mb)
+
     method! structure items =
       let top = !depth = 0 in
       let saved_bound = !bound and saved_scope = !scope in
@@ -1110,33 +1153,36 @@ let mapper =
         (fun () ->
           List.concat_map
             (fun item ->
-              (match item.pstr_desc with
-               | Pstr_value (Recursive, vbs) -> bound := List.map (fun n -> (n, 0)) (binding_vars vbs) @ !bound
-               | Pstr_recmodule mbs -> add_modules (List.concat_map module_names mbs)
-               | _ -> ());
-              let saved = !hoisted in
-              hoisted := [];
-              let mapped =
-                with_lint Off (fun () ->
-                    match item.pstr_desc with
-                    | Pstr_value (rf, vbs) when List.exists component vbs ->
-                        let vb b = with_lint (if component b then Enter Body else Off) (fun () -> self#value_binding b) in
-                        { item with pstr_desc = Pstr_value (rf, List.map vb vbs) }
-                    | _ -> self#structure_item item)
-              in
-              let found = List.rev !hoisted in
-              hoisted := saved;
-              (match item.pstr_desc with
-               | Pstr_value (Nonrecursive, vbs) -> bound := binding_env vbs @ !bound
-               | _ -> ());
-              after_item ~top item;
-              match found with
-              | [] -> [ mapped ]
-              | _ ->
-                  let loc = mapped.pstr_loc in
-                  [ pstr_open ~loc
-                      (open_infos ~loc ~override:Fresh ~expr:(pmod_structure ~loc [ pstr_value ~loc Nonrecursive found ]));
-                    mapped ])
+              List.concat_map
+                (fun item ->
+                  (match item.pstr_desc with
+                   | Pstr_value (Recursive, vbs) -> bound := List.map (fun n -> (n, 0)) (binding_vars vbs) @ !bound
+                   | Pstr_recmodule mbs -> add_modules (List.concat_map module_names mbs)
+                   | _ -> ());
+                  let saved = !hoisted in
+                  hoisted := [];
+                  let mapped =
+                    with_lint Off (fun () ->
+                        match item.pstr_desc with
+                        | Pstr_value (rf, vbs) when List.exists component vbs ->
+                            let vb b = with_lint (if component b then Enter Body else Off) (fun () -> self#value_binding b) in
+                            { item with pstr_desc = Pstr_value (rf, List.map vb vbs) }
+                        | _ -> self#structure_item item)
+                  in
+                  let found = List.rev !hoisted in
+                  hoisted := saved;
+                  (match item.pstr_desc with
+                   | Pstr_value (Nonrecursive, vbs) -> bound := binding_env vbs @ !bound
+                   | _ -> ());
+                  after_item ~top item;
+                  match found with
+                  | [] -> [ mapped ]
+                  | _ ->
+                      let loc = mapped.pstr_loc in
+                      [ pstr_open ~loc
+                          (open_infos ~loc ~override:Fresh ~expr:(pmod_structure ~loc [ pstr_value ~loc Nonrecursive found ]));
+                        mapped ])
+                (expand_action item))
             items)
   end
 

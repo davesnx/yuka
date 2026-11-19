@@ -1,6 +1,0 @@
-(library
- (name yuka_native)
- (public_name yuka.native)
- (implements yuka)
- (libraries threads.posix)
- (modes native))

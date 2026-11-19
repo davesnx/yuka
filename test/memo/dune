@@ -10,10 +10,10 @@
    (progn
     (with-accepted-exit-codes
      2
-     (run %{ocamlc} -c -I ../../src/.yuka.objs/byte read_only.ml))
+     (run %{ocamlc} -c -color never -I ../../src/.yuka.objs/byte read_only.ml))
     (with-accepted-exit-codes
      2
-     (run %{ocamlc} -c -I ../../src/.yuka.objs/byte update.ml))))))
+     (run %{ocamlc} -c -color never -I ../../src/.yuka.objs/byte update.ml))))))
 
 (rule
  (alias runtest)

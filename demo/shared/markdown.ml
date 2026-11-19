@@ -1,5 +1,4 @@
 open Cmarkit
-open Demo_shared
 
 let element ?(attributes = []) tag children = Markup.Element { tag; attributes; children }
 

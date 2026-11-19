@@ -1,47 +1,12 @@
 open Demo_shared
 
-let view_issues ({ workspace; view } : Queries.issue_list) =
-  match view with Queries.All -> Store.issues workspace | Mine -> Store.mine workspace
-
-let publish_board workspace =
-  let board = Store.board workspace in
-  Yuka.Server.Live.publish Topics.board workspace board;
-  Yuka.Async.return board
-
-let publish_issue (issue : Model.Issue.t) =
-  Yuka.Server.Live.publish Topics.issue issue.id issue;
-  Yuka.Server.Live.publish Topics.board issue.workspace (Store.board issue.workspace);
-  List.iter
-    (fun view ->
-      let list = { Queries.workspace = issue.workspace; view } in
-      Yuka.Server.Live.publish Topics.issues list (view_issues list))
-    [ Queries.All; Queries.Mine ]
-
-let write workspace f k =
-  match Store.change workspace f with
-  | Ok value -> k value
-  | Error (Store.Refused message) -> Yuka.Server.Action.reject message
-  | Error Unavailable -> Yuka.Server.Action.reject Store.unavailable
-
 let register () =
-  Yuka.Server.Action.implement Queries.labels (fun _ workspace -> Yuka.Async.return (Store.label_counts workspace));
-  Yuka.Server.Action.implement User_popup.stats (fun _ { workspace; user } -> Yuka.Async.return (Store.user_stats workspace user));
   Yuka.Server.Live.implement Topics.issues (fun list ->
       Store.refresh ();
-      Yuka.Async.return (view_issues list));
+      Yuka.Async.return (Store.view_issues list));
   Yuka.Server.Live.implement Topics.issue (fun id ->
       Store.refresh ();
       match Store.find id with Some issue -> Yuka.Async.return issue | None -> Yuka.Server.Action.reject ("No issue " ^ id));
-  Yuka.Server.Action.implement Actions.update_issue
-    (fun _ ({ id; status; priority } : Actions.update_input) ->
-      match Store.workspace_of id with
-      | None -> Yuka.Server.Action.reject ("No issue " ^ id)
-      | Some workspace ->
-          write workspace
-            (fun () -> Option.to_result ~none:("No issue " ^ id) (Store.update ~id ?status ?priority ()))
-            (fun issue ->
-              publish_issue issue;
-              Yuka.Async.return issue));
   Yuka.Server.Form.implement Actions.create_issue
     ~redirect:(fun (issue : Model.Issue.t) -> Links.issue issue.workspace ~id:issue.id)
     (fun _ { workspace; title; description; status; priority } ->
@@ -57,56 +22,13 @@ let register () =
               | None -> Ok (Store.create workspace ~title ~description ~status ~priority))
         with
         | Ok issue ->
-            publish_issue issue;
+            Store.publish_issue issue;
             Yuka.Async.return (Ok issue)
         | Error (Refused message) -> title_error message
         | Error Unavailable -> Yuka.Server.Action.reject Store.unavailable);
-  Yuka.Server.Action.implement Comment.add
-    (fun _ { issue_id; body } ->
-      match Store.workspace_of issue_id with
-      | None -> Yuka.Server.Action.reject "No such issue"
-      | Some workspace ->
-          write workspace
-            (fun () ->
-              match Store.find issue_id with
-              | Some issue when String.trim body <> "" -> Ok (Store.add_comment issue ~body)
-              | Some _ -> Error "Comment is empty"
-              | None -> Error "No such issue")
-            Yuka.Async.return);
-  Yuka.Server.Action.implement Comment.range (fun _ (range : Comment.range) ->
-      match Store.find range.issue with
-      | Some _ when range.offset >= 0 && range.limit >= 0 -> Yuka.Async.return (Store.comment_range range)
-      | Some _ -> Yuka.Server.Action.reject "Offset and limit must not be negative"
-      | None -> Yuka.Server.Action.reject "No such issue");
   Yuka.Server.Live.implement Topics.board (fun workspace ->
       Store.refresh ();
-      Yuka.Async.return (Store.board workspace));
-  Yuka.Server.Action.implement Board.move (fun _ { workspace; id; x; y } ->
-      write workspace
-        (fun () ->
-          if not (Store.on_board workspace id) then Error ("No item " ^ id)
-          else if not (Board.inside ~x ~y) then Error "The position is outside the board"
-          else Ok (Store.move_item workspace ~id ~x ~y))
-        (fun () -> publish_board workspace));
-  Yuka.Server.Action.implement Board.add_note (fun _ { workspace; text } ->
-      let text = String.trim text in
-      if text = "" then Yuka.Server.Action.reject "Note is empty"
-      else if not (String.is_valid_utf_8 text) then Yuka.Server.Action.reject "Note is not valid UTF-8 text"
-      else if String.fold_left (fun count char -> if Char.code char land 0xC0 = 0x80 then count else count + 1) 0 text > Board.note_length then
-        Yuka.Server.Action.reject (Printf.sprintf "Note is too long (at most %d characters)" Board.note_length)
-      else
-        write workspace
-          (fun () ->
-            if Store.note_total workspace >= Board.note_limit then
-              Error (Printf.sprintf "The board has %d notes, the most it can have" Board.note_limit)
-            else Ok (Store.add_note workspace ~text))
-          (fun () -> publish_board workspace));
-  Yuka.Server.Action.implement Board.remove_note (fun _ { workspace; note_id } ->
-      write workspace
-        (fun () -> if Store.remove_note workspace ~id:note_id then Ok () else Error ("No note " ^ note_id))
-        (fun () -> publish_board workspace));
-  Yuka.Server.Action.implement Board.shuffle (fun _ workspace ->
-      write workspace (fun () -> Ok (Store.shuffle workspace)) (fun () -> publish_board workspace))
+      Yuka.Async.return (Store.board workspace))
 
 let issues_json (_ : Yuka.Server.request) =
   Yuka.Server.json (Yuka.Codec.list Model.Issue.codec) (Store.issues Model.Workspace.default)

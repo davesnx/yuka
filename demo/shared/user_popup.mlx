@@ -1,10 +1,11 @@
 open Model
 module Css = [%yuka.css "user_popup.css"]
 
-type input = { workspace : Workspace.t; user : string } [@@deriving codec]
-type stats = { open_ : int; in_progress : int; done_ : int } [@@deriving codec]
+include User_popup_types
 
-let stats = Yuka.Action.query ~name:"user_stats" ~input:input_codec ~output:stats_codec
+let%action stats =
+  Yuka.Action.query ~input:input_codec ~output:stats_codec (fun _ { workspace; user } ->
+      Yuka.Async.return (Store.user_stats workspace user))
 
 module Card = struct
   let make ~workspace ~(user : User.t) ~id () : Yuka.client Yuka.element =

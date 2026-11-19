@@ -2,26 +2,46 @@
  (name yuka)
  (public_name yuka)
  (modes native melange)
- (virtual_modules web dev client navigation_web buffer)
+ (libraries threads.posix)
+ (melange.libraries)
  (private_modules
+  action
   answers
+  async
+  async_reader
+  base
+  bridge
+  browser
+  buffer
+  client
   cycle
+  dev
   element
   form_core
+  island
   json_diff
   json_patch
   live_server
   navigation
   navigation_state
   navigation_stub
+  navigation_web
   optimistic
   page_context
+  platform
   prefetch
   printer
   route
   router
+  scheduler
   server
   signal
+  state
   status_error
-  topic)
- (default_implementation yuka.native))
+  template
+  template_build
+  topic
+  types
+  url)
+ (melange.preprocess
+  (pps melange.ppx)))

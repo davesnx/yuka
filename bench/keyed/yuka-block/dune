@@ -1,8 +1,10 @@
 (melange.emit
  (target out)
  (alias bench-keyed)
- (libraries yuka yuka.js)
+ (libraries yuka)
+ (compile_flags
+  (:standard -I src/.yuka.objs/melange))
  (preprocess
   (pps melange.ppx))
  (module_systems
-  (es6 js)))
+  (esm js)))

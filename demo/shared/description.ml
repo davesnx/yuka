@@ -75,7 +75,7 @@ let yuk_10 =
   {|POST the new status and answer with the updated issue.
 
 ```shell
-curl -X POST http://localhost:8080/_yuka/action/update_issue \
+curl -X POST http://localhost:8080/_yuka/action/demo_shared.Actions.update_issue \
   -H 'Content-Type: application/json' \
   -d '{"id":"YUK-4","status":"Done"}'
 ```

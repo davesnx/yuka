@@ -22,7 +22,7 @@ let () =
   check "before render ~islands: the default" "failed no async transport" (read ());
   start_islands ();
   check "after render ~islands, before a Codec.async reference: raises"
-    "raised Yuka: no reader for async value a1: Codec.async did not call Client.use_async" (read ());
+    "raised Yuka: no reader for async value a1: Codec.async did not call Async_reader.use_async" (read ());
   check "a Codec.async reference waits for the page" "pending" (decode ());
   check "after it: the page reader" "pending" (read ());
   Yuka.stop ();

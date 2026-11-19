@@ -1,5 +1,3 @@
-open Demo_shared
-
 let colors = function
   | Theme.Code.Dark_plus -> Ochre.Theme.dark
   | One_dark -> Ochre.Theme.one_dark

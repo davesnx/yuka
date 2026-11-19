@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias melange-tests)
- (libraries cases yuka yuka.js)
+ (libraries cases yuka)
  (preprocess
   (pps melange.ppx))
  (module_systems commonjs))

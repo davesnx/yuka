@@ -3,5 +3,5 @@
  (deps %{bin:yuka}))
 
 (cram
- (applies_to dune-rules)
+ (applies_to dune-rules.t)
  (deps ../../docs/getting-started.md))
