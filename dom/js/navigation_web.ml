@@ -3,7 +3,7 @@ open Web
 let set_title : string -> unit = [%mel.raw "function (t) { document.title = t }"]
 let title : unit -> string = [%mel.raw "function () { return document.title }"]
 let active : unit -> node = [%mel.raw "function () { return document.activeElement || document.body }"]
-let refocus : node -> unit = [%mel.raw "function (n) { n.focus() }"]
+let refocus : node -> unit = [%mel.raw "function (n) { n.focus({ preventScroll: true }) }"]
 
 let route_script : unit -> (node * node) option =
   [%mel.raw

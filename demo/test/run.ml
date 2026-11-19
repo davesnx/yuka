@@ -98,11 +98,17 @@ let navigation () =
   lacks html "skeleton";
   lacks html "__yukaFill";
   let _, response, html = call ~headers:[ ("Yuka-Navigate", "L0"); ("Yuka-Overlay", "1") ] "/issue/YUK-1" in
-  Alcotest.(check (option string)) "overlay" (Some "overlay") (header response "yuka-layer");
-  has html "class=\"issue-dialog\"";
-  has html "data-name=\"Demo_shared.Close_button\"";
+  Alcotest.(check (option string)) "an issue is a page" None (header response "yuka-layer");
+  lacks html "class=\"overlay-dialog\"";
   has html "Please add a test with an empty filter result.";
-  lacks html "class=\"sidebar\""
+  List.iter
+    (fun (layout, path) ->
+      let _, response, html = call ~headers:[ ("Yuka-Navigate", layout); ("Yuka-Overlay", "1") ] path in
+      Alcotest.(check (option string)) ("overlay " ^ path) (Some "overlay") (header response "yuka-layer");
+      has html "class=\"overlay-dialog\"";
+      has html "data-name=\"Demo_shared.Close_button\"";
+      lacks html "class=\"sidebar\"")
+    [ ("L0", "/insights"); ("L0", "/report"); ("L1/stress", "/w/stress/report") ]
 
 let not_found () =
   let status, response, html = call "/issue/NOPE" in
