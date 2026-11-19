@@ -191,8 +191,7 @@ function of the form:
       (Yuka.Form.field_error_view form `Title (fun ~id message ->
          <p id class_="error">(Yuka.text message)</p>))
       (Yuka.Form.form_errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
-      (Yuka.hole (fun () ->
-         <button type_=`submit disabled=(Yuka.Form.pending form)>"Create issue"</button>))
+      <button type_=`submit disabled=(Yuka.Form.pending form)>"Create issue"</button>
     </div>)
 </Yuka.Form>
 ```
@@ -202,7 +201,8 @@ function of the form:
   failed post (422); else `""`.
 - In an island, a submit decodes the fields in the browser first (an
   error shows at once, with no request), then calls the action.
-  `Yuka.Form.pending form` is true while it waits; read it in a hole. On
+  `Yuka.Form.pending form` is true while it waits; `disabled` above
+  updates with it. On
   `Ok output`, `on_ok output` runs, or else the page follows the redirect
   of the server with a client navigation.
 - Two forms of one action on a page need different `key`s:

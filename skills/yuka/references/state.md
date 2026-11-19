@@ -97,9 +97,32 @@ let count, dispatch = Yuka.State.reducer reduce initial in
 
 ## Holes
 
-In an `.mlx` file, a child or an attribute value that contains `State.get`
-becomes a hole. A hole is the only part of the markup that changes after
-the first render.
+In an `.mlx` file, each child and each attribute value of an HTML tag is a
+hole, except a constant. A hole is the only part of the markup that changes
+after the first render.
+
+A constant is an expression that the ppx can prove reads no State:
+
+- a literal, a name (`label`, `item.title`), a function (an event
+  handler), or a tuple, record, list or constructor of constants;
+- an HTML tag, `<Yuka.Client>`, or a component tag whose props are
+  constants;
+- `if`, `match` and `let` made of constants;
+- an operator or a function of the standard library that calls no
+  function you give it (`^`, `+`, `=`, `string_of_int`, `Int.to_string`,
+  `String.sub`, `List.length`), applied to constants;
+- `List.map`, `List.filter` or `List.init` (also on `Array`) with a
+  function whose body is a constant;
+- a function defined with `let` in the same file whose body is a
+  constant, such as `let badge ~count = <b>(Yuka.int count)</b>`, applied
+  to constants;
+- `Yuka.text`, `Yuka.int`, `Yuka.float`, `Yuka.fragment`, `Yuka.each`,
+  `Yuka.hole`, `Yuka.with_unique_id`, `Yuka.Form.value`,
+  `Yuka.Form.field_error_view`, `Yuka.Form.form_errors_view` and
+  `Yuka.Status.error_to_string` applied to constants.
+
+A call of a function from another module, `(Model.label issue)`, is a
+hole: the ppx cannot see whether it reads a State.
 
 ```ocaml
 <p class_=(if Yuka.State.get active then "on" else "off")>
@@ -111,9 +134,31 @@ This paragraph has two holes. A write to `active` sets the `class`
 attribute. A write to `name` sets the text. Each write touches one place
 in the DOM.
 
-The ppx looks for `State.get` in the expression itself. It does not see a
-read inside another function that the expression calls. Wrap such a call:
-`(Yuka.hole (fun () -> label ()))`.
+A read inside a function that the hole calls counts too. Here the text
+updates when `name` changes:
+
+```ocaml
+let label () = Yuka.text (Yuka.State.get name) in
+<p>"Name: " (label ())</p>
+```
+
+A hole runs one time when it is mounted, and again after each change of a
+State that it read. A hole that reads no State never runs again, but it
+keeps its place in the scheduler and its markers, as any hole.
+
+A component tag and a plain call are different in a hole:
+
+- A component tag, `<View />`, inside a hole runs its body untracked. The
+  hole does not run the body again when a State that the body reads
+  changes, so a State that the body makes stays. The props are read by the
+  hole around the tag.
+- A plain call, `(view ())`, belongs to the hole that contains it. When the
+  call reads a State, a change runs `view` again, and a State that `view`
+  makes is made again. Use a tag for a part that makes a State. A tag
+  inside the body of `view` is not untracked.
+
+`Yuka.hole (fun () -> ...)` makes a hole by hand, for example in code
+without mlx.
 
 A hole that returns elements, not text, removes its old elements and
 creates new ones each time it runs. Keep such a hole small, or read the

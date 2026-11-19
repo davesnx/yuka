@@ -548,7 +548,7 @@ type runtime_router
 type 'f runtime_form_decoding
 
 val runtime_attr : string -> string -> 'kind attribute
-val runtime_hole_attr : string -> (unit -> string option) -> client attribute
+val runtime_hole_attr : string -> (unit -> string option) -> 'kind attribute
 (** {!attr} and {!hole_attr} for names that the ppx proved are not URL
     attributes. They raise [Invalid_argument] on a URL attribute name,
     [srcdoc], or a name that {!attr} refuses (an [on] name too). They do
@@ -557,8 +557,19 @@ val runtime_hole_attr : string -> (unit -> string option) -> client attribute
     [Failure] when the app links no URL check. *)
 
 val runtime_url_attr : string -> string -> string -> 'kind attribute
-val runtime_url_hole_attr : string -> string -> (unit -> string option) -> client attribute
+val runtime_url_hole_attr : string -> string -> (unit -> string option) -> 'kind attribute
 (** [runtime_url_attr tag name value] is {!attr} that knows the element. *)
+
+val runtime_hole : (unit -> 'kind element) -> 'kind element
+(** {!hole} for a child expression of a JSX tag. On a server element it
+    never runs again: only the browser updates holes. *)
+
+val runtime_text_call : ('a -> string) -> 'a -> 'kind element
+val runtime_call_attr : string -> ('a -> string) -> 'a -> 'kind attribute
+(** [runtime_text_call f x] is [runtime_hole (fun () -> text (f x))] and
+    [runtime_call_attr name f x] is
+    [runtime_hole_attr name (fun () -> Some (f x))]: one shared closure for
+    a child or attribute that calls a function on a constant. *)
 
 val runtime_template :
   string ->

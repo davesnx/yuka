@@ -24,62 +24,6 @@ Unknown tag:
   Error: [yuka] HTML tag 'blorp' does not exist.
   [1]
 
-Lint, open:
-
-  $ cat > lint_open.mlx <<'X'
-  > open Yuka.State
-  > X
-  $ run lint_open
-  File "lint_open.mlx", line 1, characters 0-15:
-  1 | open Yuka.State
-      ^^^^^^^^^^^^^^^
-  Error: [yuka] open Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
-  [1]
-
-Lint, local open:
-
-  $ cat > local_open.mlx <<'X'
-  > let x = Yuka.State.(get s)
-  > X
-  $ run local_open
-  File "local_open.mlx", line 1, characters 8-26:
-  1 | let x = Yuka.State.(get s)
-              ^^^^^^^^^^^^^^^^^^
-  Error: [yuka] a local open of Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
-  [1]
-
-Lint, let open:
-
-  $ cat > let_open.mlx <<'X'
-  > let x = let open Yuka.State in get s
-  > X
-  $ run let_open
-  File "let_open.mlx", line 1, characters 8-36:
-  1 | let x = let open Yuka.State in get s
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] a local open of Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
-  [1]
-
-Lint, module alias:
-
-  $ cat > alias.mlx <<'X'
-  > module Store = Yuka.State
-  > X
-  $ run alias
-  File "alias.mlx", line 1, characters 0-25:
-  1 | module Store = Yuka.State
-      ^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: [yuka] a module alias of Yuka.State is not allowed: reads must be written State.get so that the ppx can find holes (open Yuka is allowed: State.get still works).
-  [1]
-
-Allowed alias named State:
-
-  $ cat > state_alias.mlx <<'X'
-  > module State = Yuka.State
-  > X
-  $ run state_alias
-  module State = Yuka.State
-
 Polymorphic variant:
 
   $ cat > h0.mlx <<'X'
@@ -948,28 +892,6 @@ the file defines a module of that name:
   > Y
   $ run op3
   let a x = Await.make ~async:x ~loading:"l" ~children:(fun v -> v) ()
-
-The State checks go by name; a module State that the file defines is not
-Yuka.State:
-
-  $ cat > st1.mlx <<'Y'
-  > module State = struct let make x = ref x let get r = !r end
-  > let initial = State.make 0
-  > let view () = <p>(State.get initial)</p>
-  > Y
-  $ run st1
-  module State = struct let make x = ref x
-                        let get r = !r end
-  let initial = State.make 0
-  open
-    struct
-      let __yuka_template_st1_0 =
-        Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
-          [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
-    end
-  let view () =
-    Yuka.runtime_instance __yuka_template_st1_0
-      [|(Yuka.runtime_child (State.get initial))|]
 
 The islands binding counts only where it is in scope:
 

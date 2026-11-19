@@ -165,3 +165,33 @@ let animate_values u = <svg><animate values=u from=u /></svg>
 let style_parts c = <style>"a{color:"(Yuka.text (State.get c))"}"</style>
 
 let reparsed c = <p class_="p"><div id=c>"x"<a href="/y">(Yuka.text c)</a></div></p>
+
+let pure_ops ~n ~label = <p class_=("row-" ^ label) title=(if n > 1 then "many" else "one")>(Yuka.text (string_of_int (n + 1)))</p>
+
+let pure_helper ~label = <b>(Yuka.text label)</b>
+
+let pure_helper_call = <div>(pure_helper ~label:"x")</div>
+
+let reading_helper () = Yuka.text (State.get name)
+
+let reading_helper_call = <div>(reading_helper ())</div>
+
+let over_applied x = fun () -> State.get x
+
+let over_applied_call = <p>(Yuka.text (over_applied s ()))</p>
+
+let mapped items = <ul>(Yuka.fragment (List.map (fun i -> <li>(Yuka.text i)</li>) items))</ul>
+
+let mapped_unknown items = <ul>(Yuka.fragment (List.map reading_item items))</ul>
+
+let helper_text_call = <p>(Yuka.text (Model.label item))</p>
+
+let helper_attr_call = <p class_=(Model.slug item) />
+
+let component_in_hole = <div>(if State.get on then <Ui.Badge x=1 /> else Yuka.empty)</div>
+
+let component_prop_read_child = <div><Ui.Badge label=(State.get s) /></div>
+
+let helper_with_prop_read () = <Ui.Badge label=(State.get s) />
+
+let helper_with_prop_read_call = <div>(helper_with_prop_read ())</div>

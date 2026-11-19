@@ -79,7 +79,7 @@ open
   end
 let hole_child =
   Yuka.runtime_instance __yuka_template_rewrite_6
-    [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get count)))|]
+    [|(Yuka.runtime_child (Yuka.runtime_hole (fun () -> State.get count)))|]
 open
   struct
     let __yuka_template_rewrite_7 =
@@ -88,7 +88,8 @@ open
   end
 let qualified_hole_child =
   Yuka.runtime_instance __yuka_template_rewrite_7
-    [|(Yuka.runtime_child (Yuka.hole (fun () -> Yuka.State.get count)))|]
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole (fun () -> Yuka.State.get count)))|]
 open
   struct
     let __yuka_template_rewrite_8 =
@@ -153,7 +154,7 @@ let component_children =
   Ui.Card.make ~title:"t"
     ~children:(Yuka.fragment
                  [Yuka.text "a";
-                 Yuka.hole (fun () -> State.get s);
+                 Yuka.runtime_hole (fun () -> State.get s);
                  Yuka.runtime_instance __yuka_template_rewrite_13 [||]]) ()
 let component_prop_no_hole = Ui.Card.make ~title:(State.get s) ()
 open
@@ -167,7 +168,7 @@ open
   end
 let nested =
   Yuka.runtime_instance __yuka_template_rewrite_14
-    [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get name)))|]
+    [|(Yuka.runtime_child (Yuka.runtime_hole (fun () -> State.get name)))|]
 let lowercase_function = Ui.button ~label:"l" ~children:[Yuka.text "txt"] ()
 open
   struct
@@ -1139,7 +1140,7 @@ module Templates =
     let fixed =
       Yuka.runtime_instance __yuka_template_rewrite_25
         [|(Yuka.runtime_attribute (Yuka.on "click" (fun _ -> ())));(Yuka.runtime_child
-                                                                    (Yuka.hole
+                                                                    (Yuka.runtime_hole
                                                                     (fun ()
                                                                     ->
                                                                     State.get
@@ -1216,7 +1217,7 @@ module Templates =
       end
     let single_with_hole =
       Yuka.runtime_instance __yuka_template_rewrite_32
-        [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get n)))|]
+        [|(Yuka.runtime_child (Yuka.runtime_hole (fun () -> State.get n)))|]
     open
       struct
         let __yuka_template_rewrite_33 =
@@ -1240,12 +1241,8 @@ module Templates =
       end
     let hole_with_fixed_inside =
       Yuka.runtime_instance __yuka_template_rewrite_34
-        [|(Yuka.runtime_child (Yuka.hole (fun () -> State.get n)));(Yuka.runtime_child
-                                                                    (Yuka.hole
-                                                                    (fun ()
-                                                                    ->
-                                                                    State.get
-                                                                    m)))|]
+        [|(Yuka.runtime_child (Yuka.runtime_hole (fun () -> State.get n)));(
+          Yuka.runtime_child (Yuka.runtime_hole (fun () -> State.get m)))|]
     open
       struct
         let __yuka_template_rewrite_35 =
@@ -1261,7 +1258,7 @@ module Templates =
     let template_in_hole =
       Yuka.runtime_instance __yuka_template_rewrite_36
         [|(Yuka.runtime_child
-             (Yuka.hole
+             (Yuka.runtime_hole
                 (fun () ->
                    if State.get ok
                    then Yuka.runtime_instance __yuka_template_rewrite_35 [||]
@@ -1311,7 +1308,8 @@ module Awaiting =
         ~children:(fun items ->
                      Yuka.runtime_instance __yuka_template_rewrite_38
                        [|(Yuka.runtime_child
-                            (Yuka.hole (fun () -> State.get n)))|]) ()
+                            (Yuka.runtime_hole (fun () -> State.get n)))|])
+        ()
     open
       struct
         let __yuka_template_rewrite_40 =
@@ -1362,8 +1360,8 @@ module Awaiting =
                 ~children:(fun v ->
                              Yuka.runtime_instance __yuka_template_rewrite_43
                                [|(Yuka.runtime_child
-                                    (Yuka.hole (fun () -> State.get n)))|])
-                ()))|]
+                                    (Yuka.runtime_hole
+                                       (fun () -> State.get n)))|]) ()))|]
   end
 open
   struct
@@ -1519,7 +1517,7 @@ let animate_values u =
         ((Yuka.runtime_url_attr "animate") "from" (u : string)))|]
 let style_parts c =
   Yuka.element "style" []
-    [Yuka.hole
+    [Yuka.runtime_hole
        (fun () ->
           Yuka.text (Stdlib.String.concat "" ["a{color:"; State.get c; "}"]))]
 let reparsed c =
@@ -1527,3 +1525,146 @@ let reparsed c =
     [Yuka.element "div" [Yuka.runtime_attr "id" (c : string)]
        [Yuka.text "x";
        Yuka.element "a" [Yuka.runtime_url_attr "a" "href" "/y"] [Yuka.text c]]]
+open
+  struct
+    let __yuka_template_rewrite_52 =
+      Yuka.runtime_template "\001p\005\005\002\007\006" ~html:"<p></p>"
+        ~walk:[||] ~kids:[|2;0;(-1);19;0|] ~attrs:[|0;0;2;0;1;2|]
+        ~values:[||] ~clones:1
+  end
+let pure_ops ~n ~label =
+  Yuka.runtime_instance __yuka_template_rewrite_52
+    [|(Yuka.runtime_attribute
+         (Yuka.runtime_attr "class" ("row-" ^ label : string)));(Yuka.runtime_attribute
+                                                                   (Yuka.runtime_attr
+                                                                    "title"
+                                                                    (if n > 1
+                                                                    then
+                                                                    "many"
+                                                                    else
+                                                                    "one" : 
+                                                                    string)));(
+      Yuka.runtime_child (Yuka.text (string_of_int (n + 1))))|]
+open
+  struct
+    let __yuka_template_rewrite_53 =
+      Yuka.runtime_template "\001b\002\007\006" ~html:"<b></b>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let pure_helper ~label =
+  Yuka.runtime_instance __yuka_template_rewrite_53
+    [|(Yuka.runtime_child (Yuka.text label))|]
+open
+  struct
+    let __yuka_template_rewrite_54 =
+      Yuka.runtime_template "\001div\002\007\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let pure_helper_call =
+  Yuka.runtime_instance __yuka_template_rewrite_54
+    [|(Yuka.runtime_child (pure_helper ~label:"x"))|]
+let reading_helper () = Yuka.text (State.get name)
+open
+  struct
+    let __yuka_template_rewrite_55 =
+      Yuka.runtime_template "\001div\002\007\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let reading_helper_call =
+  Yuka.runtime_instance __yuka_template_rewrite_55
+    [|(Yuka.runtime_child (Yuka.runtime_hole (fun () -> reading_helper ())))|]
+let over_applied x = fun () -> State.get x
+open
+  struct
+    let __yuka_template_rewrite_56 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let over_applied_call =
+  Yuka.runtime_instance __yuka_template_rewrite_56
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole (fun () -> Yuka.text (over_applied s ()))))|]
+open
+  struct
+    let __yuka_template_rewrite_57 =
+      Yuka.runtime_template "\001li\002\007\006" ~html:"<li></li>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+    and __yuka_template_rewrite_58 =
+      Yuka.runtime_template "\001ul\002\007\006" ~html:"<ul></ul>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let mapped items =
+  Yuka.runtime_instance __yuka_template_rewrite_58
+    [|(Yuka.runtime_child
+         (Yuka.fragment
+            (List.map
+               (fun i ->
+                  Yuka.runtime_instance __yuka_template_rewrite_57
+                    [|(Yuka.runtime_child (Yuka.text i))|]) items)))|]
+open
+  struct
+    let __yuka_template_rewrite_59 =
+      Yuka.runtime_template "\001ul\002\007\006" ~html:"<ul></ul>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let mapped_unknown items =
+  Yuka.runtime_instance __yuka_template_rewrite_59
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole
+            (fun () -> Yuka.fragment (List.map reading_item items))))|]
+open
+  struct
+    let __yuka_template_rewrite_60 =
+      Yuka.runtime_template "\001p\002\007\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let helper_text_call =
+  Yuka.runtime_instance __yuka_template_rewrite_60
+    [|(Yuka.runtime_child (Yuka.runtime_text_call Model.label item))|]
+open
+  struct
+    let __yuka_template_rewrite_61 =
+      Yuka.runtime_template "\001p\005\002\006" ~html:"<p></p>" ~walk:
+        [||] ~kids:[||] ~attrs:[|0;0;2|] ~values:[||] ~clones:1
+  end
+let helper_attr_call =
+  Yuka.runtime_instance __yuka_template_rewrite_61
+    [|(Yuka.runtime_attribute
+         (Yuka.runtime_call_attr "class" Model.slug item))|]
+open
+  struct
+    let __yuka_template_rewrite_62 =
+      Yuka.runtime_template "\001div\002\007\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let component_in_hole =
+  Yuka.runtime_instance __yuka_template_rewrite_62
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole
+            (fun () ->
+               if State.get on
+               then Yuka.State.untrack (Ui.Badge.make ~x:1)
+               else Yuka.empty)))|]
+open
+  struct
+    let __yuka_template_rewrite_63 =
+      Yuka.runtime_template "\001div\002\007\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let component_prop_read_child =
+  Yuka.runtime_instance __yuka_template_rewrite_63
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole
+            (fun () ->
+               Yuka.State.untrack (Ui.Badge.make ~label:(State.get s)))))|]
+let helper_with_prop_read () = Ui.Badge.make ~label:(State.get s) ()
+open
+  struct
+    let __yuka_template_rewrite_64 =
+      Yuka.runtime_template "\001div\002\007\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let helper_with_prop_read_call =
+  Yuka.runtime_instance __yuka_template_rewrite_64
+    [|(Yuka.runtime_child
+         (Yuka.runtime_hole (fun () -> helper_with_prop_read ())))|]
