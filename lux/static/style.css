@@ -1,0 +1,56 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #030305;
+  color: #c9c4b8;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.lux-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
+.lux-bar {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgb(10 10 14 / 0.75);
+}
+
+.lux-button {
+  font: inherit;
+  color: inherit;
+  background: #1a1a22;
+  border: 1px solid #2e2e3a;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.lux-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lux-readout {
+  font-variant-numeric: tabular-nums;
+  min-width: 18ch;
+}
+
+.lux-problem {
+  color: #ff8a7a;
+}

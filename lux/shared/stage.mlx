@@ -1,0 +1,39 @@
+let[@client] make () =
+  let readout = Yuka.State.make "" in
+  let following = Yuka.State.make true in
+  let problem : string option Yuka.State.t = Yuka.State.make None in
+  let engine = ref None in
+  Yuka.Effect.after
+    ~cleanup:(fun () ->
+      Option.iter Engine.stop !engine;
+      engine := None)
+    (fun () ->
+      match Engine.start ~canvas_id:"lux" with
+      | Error message -> Yuka.State.set problem (Some message)
+      | Ok started ->
+          engine := Some started;
+          let shown = ref 0. in
+          Yuka.Browser.on_frame (fun time ->
+              Engine.frame started time;
+              if time -. !shown >= 500. then begin
+                shown := time;
+                Yuka.State.set readout (Engine.readout started);
+                Yuka.State.set following (Engine.following started)
+              end));
+  let act f _ =
+    Option.iter f !engine;
+    Yuka.State.set following true
+  in
+  <div class_="lux">
+    <canvas id="lux" class_="lux-canvas" />
+    <div class_="lux-bar">
+      <button class_="lux-button" type_=`button disabled=(Yuka.State.get following) on_click=(act Engine.follow)>
+        "Follow"
+      </button>
+      <button class_="lux-button" type_=`button on_click=(act Engine.restart)>"Restart"</button>
+      <span class_="lux-readout" data_readout="true">(Yuka.text (Yuka.State.get readout))</span>
+      (match Yuka.State.get problem with
+       | Some message -> <span class_="lux-problem" data_problem="true">(Yuka.text message)</span>
+       | None -> Yuka.empty)
+    </div>
+  </div>
