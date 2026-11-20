@@ -1,3 +1,4 @@
 open Lux_shared
 
 let index () = Yuka.Server.page ~title:"lux" (fun () -> <Yuka.Client><Stage /></Yuka.Client>)
+let dom ~n () = Yuka.Server.page ~title:"lux DOM" (fun () -> <Yuka.Client><Dom_stage n /></Yuka.Client>)

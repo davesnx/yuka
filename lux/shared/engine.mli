@@ -15,7 +15,8 @@ val follow : t -> unit
 (** The camera fits the lit cards again. *)
 
 val restart : t -> unit
-(** New seeds, the camera at zoom 1. *)
+(** New seeds. The camera stays where it is and follows them with the
+    spring. *)
 
 val following : t -> bool
 

@@ -1,16 +1,8 @@
 type renderer
-type event
-type remover
 
 let grid = 1024
 let tile = 32
 let tiles = grid / tile
-let period = 120.
-let margin = 3.
-let cards_at_zoom_one = 200.
-let omega = 6.
-let min_zoom = log 0.002
-let max_zoom = log 8.
 
 let create_renderer : string -> int -> renderer =
   [%mel.raw
@@ -291,87 +283,32 @@ let dispose : renderer -> unit =
   if (lose) lose.loseContext();
 }|}]
 
-let listen : renderer -> string -> (event -> unit) -> remover =
-  [%mel.raw
-    {|function (r, name, handler) {
-  var f = function (e) { handler(e) };
-  r.canvas.addEventListener(name, f, { passive: false });
-  return function () { r.canvas.removeEventListener(name, f) };
-}|}]
-
-let unlisten : remover -> unit = [%mel.raw {|function (remove) { remove() }|}]
-
-let capture : renderer -> event -> unit =
-  [%mel.raw {|function (r, e) { try { r.canvas.setPointerCapture(e.pointerId) } catch (error) {} }|}]
-
-let inner_width : unit -> float = [%mel.raw {|function () { return window.innerWidth }|}]
-let inner_height : unit -> float = [%mel.raw {|function () { return window.innerHeight }|}]
 let pixel_ratio : unit -> float = [%mel.raw {|function () { return window.devicePixelRatio || 1 }|}]
-let random_seed : unit -> int = [%mel.raw {|function () { return Math.floor(Math.random() * 1073741823) }|}]
-let fixed : float -> int -> string = [%mel.raw {|function (x, digits) { return x.toFixed(digits) }|}]
-
-external client_x : event -> float = "clientX" [@@mel.get]
-external client_y : event -> float = "clientY" [@@mel.get]
-external delta_y : event -> float = "deltaY" [@@mel.get]
-external delta_mode : event -> int = "deltaMode" [@@mel.get]
-external pointer_id : event -> int = "pointerId" [@@mel.get]
-external prevent_default : event -> unit = "preventDefault" [@@mel.send]
-
-type pointer = { mutable id : int; mutable x : float; mutable y : float }
 
 type t = {
   r : renderer;
-  mutable spread : Spread.t;
+  run : Run.t;
+  mutable input : Input.t option;
   dirty : Bytes.t;
   dirty_list : int array;
   mutable dirty_len : int;
-  mutable following : bool;
   mutable stopped : bool;
-  mutable cx : float;
-  mutable cy : float;
-  mutable lz : float;
-  mutable vx : float;
-  mutable vy : float;
-  mutable vz : float;
-  mutable bx0 : float;
-  mutable by0 : float;
-  mutable bx1 : float;
-  mutable by1 : float;
-  mutable width : float;
-  mutable height : float;
-  mutable dpr : float;
-  mutable base : float;
-  mutable last : float;
-  mutable origin : float;
-  mutable stepped : float;
-  mutable next_step : float;
-  mutable frames : int;
-  mutable fps_from : float;
-  mutable fps : float;
-  pointers : pointer array;
-  mutable removers : remover list;
 }
 
-let following t = t.following
-let ppc_css t = exp t.lz *. t.base
-
-let readout t =
-  fixed t.fps 0 ^ " fps | zoom " ^ fixed (exp t.lz) 3 ^ " | " ^ string_of_int (Spread.lit_count t.spread) ^ " lit"
+let following t = Run.following t.run
+let readout t = Run.readout t.run
+let follow t = Run.follow t.run
 
 let measure t =
-  let width = inner_width () and height = inner_height () and dpr = Float.min 2. (pixel_ratio ()) in
-  if width > 0. && height > 0. && (width <> t.width || height <> t.height || dpr <> t.dpr) then begin
-    let base = sqrt (width *. height /. cards_at_zoom_one) in
-    if t.width > 0. then t.lz <- t.lz +. log (t.base /. base);
-    t.width <- width;
-    t.height <- height;
-    t.dpr <- dpr;
-    t.base <- base;
-    resize t.r (int_of_float (Float.round (width *. dpr))) (int_of_float (Float.round (height *. dpr)))
-  end
+  let dpr = Float.min 2. (pixel_ratio ()) in
+  Run.resize t.run ~width:(Input.width ()) ~height:(Input.height ());
+  resize t.r
+    (int_of_float (Float.round (Run.width t.run *. dpr)))
+    (int_of_float (Float.round (Run.height t.run *. dpr)));
+  dpr
 
 let take_fresh t =
-  let spread = t.spread in
+  let spread = Run.spread t.run in
   let size = Spread.size spread and level = Spread.level spread in
   for i = 0 to Spread.fresh_count spread - 1 do
     let cell = Spread.fresh spread i in
@@ -388,201 +325,49 @@ let take_fresh t =
     Bytes.set_uint8 t.dirty index 0;
     upload t.r (index mod tiles * tile) (index / tiles * tile) tile
   done;
-  t.dirty_len <- 0;
-  let x0, y0, x1, y1 = Spread.bounds spread in
-  t.bx0 <- float_of_int x0;
-  t.by0 <- float_of_int y0;
-  t.bx1 <- float_of_int (x1 + 1);
-  t.by1 <- float_of_int (y1 + 1)
+  t.dirty_len <- 0
 
-let target_zoom t =
-  let fit = Float.min (t.width /. t.base /. (t.bx1 -. t.bx0 +. (2. *. margin))) (t.height /. t.base /. (t.by1 -. t.by0 +. (2. *. margin))) in
-  Float.max min_zoom (log (Float.min 1. fit))
-
-let snap t =
-  t.cx <- (t.bx0 +. t.bx1) /. 2.;
-  t.cy <- (t.by0 +. t.by1) /. 2.;
-  t.lz <- target_zoom t;
-  t.vx <- 0.;
-  t.vy <- 0.;
-  t.vz <- 0.
-
-let seed t =
-  let cols = int_of_float (t.width /. t.base) and rows = int_of_float (t.height /. t.base) in
-  t.spread <- Spread.create ~size:grid ~seed:(random_seed ()) ~cols ~rows ();
+let reload t =
   clear_cells t.r;
   upload t.r 0 0 grid;
-  take_fresh t;
-  t.following <- true
-
-let settle_x omega dt e d v = (d +. ((v +. (omega *. d)) *. dt)) *. e
-let settle_v omega dt e d v = (v -. (omega *. (v +. (omega *. d)) *. dt)) *. e
-
-let follow_step t dt =
-  let e = exp (-.omega *. dt) in
-  let dx = t.cx -. ((t.bx0 +. t.bx1) /. 2.) and dy = t.cy -. ((t.by0 +. t.by1) /. 2.) and dz = t.lz -. target_zoom t in
-  t.cx <- t.cx -. dx +. settle_x omega dt e dx t.vx;
-  t.vx <- settle_v omega dt e dx t.vx;
-  t.cy <- t.cy -. dy +. settle_x omega dt e dy t.vy;
-  t.vy <- settle_v omega dt e dy t.vy;
-  t.lz <- t.lz -. dz +. settle_x omega dt e dz t.vz;
-  t.vz <- settle_v omega dt e dz t.vz
-
-let manual t =
-  t.following <- false;
-  t.vx <- 0.;
-  t.vy <- 0.;
-  t.vz <- 0.
-
-let zoom_at t px py change =
-  let before = ppc_css t in
-  let wx = t.cx +. ((px -. (t.width /. 2.)) /. before) and wy = t.cy +. ((py -. (t.height /. 2.)) /. before) in
-  t.lz <- Float.max min_zoom (Float.min max_zoom (t.lz +. change));
-  let after = ppc_css t in
-  t.cx <- wx -. ((px -. (t.width /. 2.)) /. after);
-  t.cy <- wy -. ((py -. (t.height /. 2.)) /. after)
-
-let pan t dx dy =
-  let scale = ppc_css t in
-  t.cx <- t.cx -. (dx /. scale);
-  t.cy <- t.cy -. (dy /. scale)
-
-let active t = (if t.pointers.(0).id >= 0 then 1 else 0) + if t.pointers.(1).id >= 0 then 1 else 0
-let slot t id = if t.pointers.(0).id = id then Some t.pointers.(0) else if t.pointers.(1).id = id then Some t.pointers.(1) else None
-
-let on_wheel t event =
-  prevent_default event;
-  let unit = match delta_mode event with 1 -> 16. | 2 -> t.height | _ -> 1. in
-  manual t;
-  zoom_at t (client_x event) (client_y event) (-.delta_y event *. unit *. 0.0015)
-
-let on_down t event =
-  match slot t (-1) with
-  | Some p ->
-      p.id <- pointer_id event;
-      p.x <- client_x event;
-      p.y <- client_y event;
-      capture t.r event
-  | None -> ()
-
-let on_move t event =
-  match slot t (pointer_id event) with
-  | None -> ()
-  | Some p ->
-      let x = client_x event and y = client_y event in
-      if active t = 2 then begin
-        let a = t.pointers.(0) and b = t.pointers.(1) in
-        let mid_x = (a.x +. b.x) /. 2. and mid_y = (a.y +. b.y) /. 2. in
-        let span = Float.hypot (a.x -. b.x) (a.y -. b.y) in
-        p.x <- x;
-        p.y <- y;
-        let span' = Float.hypot (a.x -. b.x) (a.y -. b.y) in
-        let mid_x' = (a.x +. b.x) /. 2. and mid_y' = (a.y +. b.y) /. 2. in
-        manual t;
-        pan t (mid_x' -. mid_x) (mid_y' -. mid_y);
-        if span > 0. && span' > 0. then zoom_at t mid_x' mid_y' (log (span' /. span))
-      end
-      else begin
-        manual t;
-        pan t (x -. p.x) (y -. p.y);
-        p.x <- x;
-        p.y <- y
-      end
-
-let on_up t event = match slot t (pointer_id event) with Some p -> p.id <- -1 | None -> ()
+  take_fresh t
 
 let start ~canvas_id =
   let r = create_renderer canvas_id grid in
   match renderer_error r with
   | "" ->
+      let run = Run.create ~size:grid ~seed:(Input.random_seed ()) ~width:(Input.width ()) ~height:(Input.height ()) in
       let t =
         {
           r;
-          spread = Spread.create ~size:grid ~seed:0 ~cols:1 ~rows:1 ();
+          run;
+          input = None;
           dirty = Bytes.make (tiles * tiles) '\000';
           dirty_list = Array.make (tiles * tiles) 0;
           dirty_len = 0;
-          following = true;
           stopped = false;
-          cx = 0.;
-          cy = 0.;
-          lz = 0.;
-          vx = 0.;
-          vy = 0.;
-          vz = 0.;
-          bx0 = 0.;
-          by0 = 0.;
-          bx1 = 1.;
-          by1 = 1.;
-          width = 0.;
-          height = 0.;
-          dpr = 0.;
-          base = 1.;
-          last = -1.;
-          origin = 0.;
-          stepped = 0.;
-          next_step = 0.;
-          frames = 0;
-          fps_from = 0.;
-          fps = 0.;
-          pointers = [| { id = -1; x = 0.; y = 0. }; { id = -1; x = 0.; y = 0. } |];
-          removers = [];
         }
       in
-      measure t;
-      seed t;
-      snap t;
-      t.removers <-
-        [
-          listen r "wheel" (on_wheel t);
-          listen r "pointerdown" (on_down t);
-          listen r "pointermove" (on_move t);
-          listen r "pointerup" (on_up t);
-          listen r "pointercancel" (on_up t);
-        ];
+      reload t;
+      t.input <- Input.attach canvas_id run;
       Ok t
   | message -> Error message
 
 let frame t now =
   if not t.stopped then begin
-    if t.last < 0. then begin
-      t.origin <- now;
-      t.stepped <- now;
-      t.next_step <- now +. period;
-      t.fps_from <- now;
-      t.last <- now
-    end;
-    let dt = Float.min 0.1 ((now -. t.last) /. 1000.) in
-    t.last <- now;
-    measure t;
-    if now >= t.next_step && not (Spread.finished t.spread) then begin
-      if Spread.step t.spread then take_fresh t;
-      t.stepped <- now;
-      t.next_step <- (if now -. t.next_step > period then now +. period else t.next_step +. period)
-    end;
-    if t.following then follow_step t dt;
-    t.frames <- t.frames + 1;
-    if now -. t.fps_from >= 500. then begin
-      t.fps <- float_of_int t.frames *. 1000. /. (now -. t.fps_from);
-      t.frames <- 0;
-      t.fps_from <- now
-    end;
-    draw t.r t.cx t.cy (ppc_css t *. t.dpr) ((now -. t.origin) /. 1000.)
-      (float_of_int (Spread.level t.spread) +. ((now -. t.stepped) /. period))
+    let dpr = measure t in
+    if Run.tick t.run now then take_fresh t;
+    draw t.r (Run.center_x t.run) (Run.center_y t.run) (Run.scale t.run *. dpr) (Run.seconds t.run) (Run.glow_level t.run)
   end
 
-let follow t =
-  t.following <- true
-
 let restart t =
-  seed t;
-  t.stepped <- t.last;
-  t.next_step <- t.last +. period
+  Run.restart t.run ~seed:(Input.random_seed ());
+  reload t
 
 let stop t =
   if not t.stopped then begin
     t.stopped <- true;
-    List.iter unlisten t.removers;
-    t.removers <- [];
+    Option.iter Input.detach t.input;
+    t.input <- None;
     dispose t.r
   end

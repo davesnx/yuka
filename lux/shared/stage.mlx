@@ -31,6 +31,7 @@ let[@client] make () =
         "Follow"
       </button>
       <button class_="lux-button" type_=`button on_click=(act Engine.restart)>"Restart"</button>
+      <a class_="lux-button" href="/dom">"DOM"</a>
       <span class_="lux-readout" data_readout="true">(Yuka.text (Yuka.State.get readout))</span>
       (match Yuka.State.get problem with
        | Some message -> <span class_="lux-problem" data_problem="true">(Yuka.text message)</span>
