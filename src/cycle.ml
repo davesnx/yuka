@@ -235,12 +235,13 @@ let dev_state () =
   in
   { state }
 
-let dev_script state =
+let dev_script ~base state =
   let json = String.concat "\\u003c" (String.split_on_char '<' state) in
   "<script>(function(){var s=" ^ json
-  ^ {|,b=s.build,p=s.page,k="yuka-dev-scroll",o=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){try{sessionStorage.setItem(k,String(scrollY))}catch(x){}s.session=d.session;p=d.page;location.reload();return}if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
+  ^ {|,b=s.build,p=s.page,k="yuka-dev-scroll",o=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}var e=new EventSource(|} ^ Json.to_string (`String (base ^ "/_yuka/dev")) ^ {|);e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){try{sessionStorage.setItem(k,String(scrollY))}catch(x){}s.session=d.session;p=d.page;location.reload();return}if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
 
 type config = {
+  base : string;
   dev : dev option;
   assets : assets option;
   public : (string list * string) list;
@@ -267,9 +268,28 @@ let public_prefix (prefix, dir) =
        ^ " has no segment; it would hide every route")
   | segments -> (segments, dir)
 
-let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
+let base_char = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~' | '%' | '/' | '!' | '$' | '&' | '\'' | ',' | ';'
+  | '=' | '@' ->
+      true
+  | _ -> false
+
+let valid_base base =
+  base = ""
+  || String.for_all base_char base
+     && base.[0] = '/'
+     && List.for_all (fun s -> valid_file_segment (Router.decode ~plus:false s)) (List.tl (String.split_on_char '/' base))
+
+let config ?(base = "") ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
     ?(dev = false) ?origins ?log () =
+  if not (valid_base base) then
+    invalid_arg
+      (Printf.sprintf
+         "Yuka.Server.config: base %S is not a path prefix: it must start with /, have no trailing /, no empty, . or .. segment, and only the characters A-Z a-z 0-9 - . _ ~ %% ! $ & ' , ; = @"
+         base);
+  Types.config_base := base;
   {
+    base;
     dev = (if dev then Some (dev_state ()) else None);
     origins;
     log;
@@ -417,29 +437,38 @@ let rec shared sent (layers : layer list) =
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
   | _ -> 0
 
-let speculation_rules =
-  {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
+let speculation_rules base =
+  {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":|}
+  ^ Json.to_string (`String (if base = "" then "/*" else base ^ "{/*}?"))
+  ^ {|},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
 
 let render ?(overlay = false) env ~status ~headers layers (page : page) =
-  let assets = env.config.assets in
-  let preload = Option.map (fun (a : assets) -> a.preload) assets in
+  let assets = env.config.assets and base = env.config.base in
+  let preload =
+    Option.map
+      (fun (a : assets) -> if base = "" then a.preload else fun name -> List.map (Site.join base) (a.preload name))
+      assets
+  in
   let entry =
     Option.map
       (fun (a : assets) ->
         "<script type=\"module\" async src=\""
-        ^ Printer.escape ~quote:true ("/_yuka/app/" ^ a.entry)
+        ^ Printer.escape ~quote:true (base ^ "/_yuka/app/" ^ a.entry)
         ^ "\"></script>")
       assets
   in
-  let import_map = match assets with Some a -> a.import_map | None -> [] in
+  let import_map =
+    match assets with Some a -> List.map (fun (k, v) -> (k, Site.join base v)) a.import_map | None -> []
+  in
   let head extra =
     Server.head
       ~extra:
         ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
         ^ (if env.prefetch = Prefetch.default then ""
            else "<meta name=\"yuka-prefetch\" content=\"" ^ Prefetch.name env.prefetch ^ "\">")
+        ^ (if base = "" then "" else "<meta name=\"yuka-base\" content=\"" ^ Printer.escape ~quote:true base ^ "\">")
         ^ (match (env.config.dev, env.navigate) with
-          | Some dev, None -> dev_script (dev.state ())
+          | Some dev, None -> dev_script ~base (dev.state ())
           | _ -> "")
         ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()
@@ -500,7 +529,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
     in
     let written () = String.concat "" (List.rev !early) in
     let close islands =
-      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+      (if islands || env.prefetch = `Off then "" else speculation_rules base) ^ "</body></html>"
     in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
@@ -783,7 +812,7 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
                                 recover_with env.config ~last:(fun () -> Respond (internal_error ()))
                                   (Async.bind answer (function
                                     | Server.Saved location ->
-                                        let location = Option.value location ~default:(path ^ query_suffix query) in
+                                        let location = Option.value location ~default:(Site.join env.config.base (path ^ query_suffix query)) in
                                         if Server.local_location ?origins:env.config.origins ~host:(r.header "host") location then
                                           reply
                                             (empty 303
@@ -838,7 +867,10 @@ let route env (App a) (r : request) ~path ~raw ~query =
   let refuse (rules : rules) level = refusal rules.headers level in
   match a.find r.meth segments (Router.query r.target) with
   | Router.Redirect { location; kind } ->
-      reply (empty (match kind with `Permanent -> 308 | `Temporary -> 307) [ ("location", location ^ suffix) ])
+      reply
+        (empty
+           (match kind with `Permanent -> 308 | `Temporary -> 307)
+           [ ("location", Site.join env.config.base location ^ suffix) ])
   | Router.Missing -> page_or_error (not_found_page env a.missing path)
   | Router.Wrong_method ms -> (
       match r.meth with
@@ -947,8 +979,10 @@ let live_answer env (r : request) =
                     ~token:r.csrf_token)))
   | _ -> reply (method_not_allowed "GET")
 
-let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r : request) =
+let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (sent : request) =
   Scheduler.seal ();
+  let inside = Site.strip config.base sent.target in
+  let r = match inside with Some target -> { sent with target } | None -> sent in
   let path, query = Router.split_target r.target in
   Live_server.use_log node (log config);
   let live_used = ref false in
@@ -966,6 +1000,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
           live_used := true;
           Live_server.ssr_state ~sleep node context name key);
       backend = Some r.backend;
+      base = config.base;
     }
   in
   let env =
@@ -980,8 +1015,8 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
       overlay = r.header "yuka-overlay" = Some "1";
       build = build_id config (App a);
       prefetch = a.prefetch;
-      current = path;
-      route = path ^ query_suffix query;
+      current = Site.join config.base path;
+      route = Site.join config.base (path ^ query_suffix query);
       root_headers = a.headers;
       exists;
       form = None;
@@ -1010,8 +1045,11 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
   in
   let static serve = if Option.is_some (r.header "yuka-prefetch") then refusal [] `Off else serve () in
   let run () =
-    match (parts, public) with
-    | "" :: "_yuka" :: _, _ -> (
+    match (inside, parts, public) with
+    | None, _, _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
+    | Some _, _, _ when config.base <> "" && String.equal (fst (Router.split_target sent.target)) (config.base ^ "/") ->
+        reply (empty 308 [ ("location", config.base ^ query_suffix query) ])
+    | Some _, "" :: "_yuka" :: _, _ -> (
         match (List.tl raw, config.dev) with
         | [ "dev" ], Some dev -> (
             let headers = [ ("content-type", "text/event-stream"); ("cache-control", "no-store") ] in
@@ -1057,17 +1095,17 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
                     in
                     serve_file r.meth ~root:assets.dir ~headers rest))
         | _ -> reply (asset_miss ()))
-    | "" :: _, Some (dir, rest) -> static (fun () -> serve_file r.meth ~root:dir ~headers:[] rest)
-    | "" :: _, None when String.contains path '\\' ->
+    | Some _, "" :: _, Some (dir, rest) -> static (fun () -> serve_file r.meth ~root:dir ~headers:[] rest)
+    | Some _, "" :: _, None when String.contains path '\\' ->
         Async.map (fun x -> Respond x) (not_found_page env a.missing path)
-    | "" :: rest, None ->
-        let canonical = "/" ^ String.concat "/" raw in
+    | Some _, "" :: rest, None ->
+        let canonical = Site.join config.base ("/" ^ String.concat "/" raw) in
         let trailing = List.exists (fun s -> s = "") rest && rest <> [ "" ] in
         if trailing then
           let suffix = query_suffix query in
           reply (empty 308 [ ("location", canonical ^ suffix) ])
         else route env app r ~path ~raw ~query
-    | _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
+    | Some _, _, _ -> Async.map (fun x -> Respond x) (not_found_page env a.missing path)
   in
   let bodyless = function
     | Respond ({ body = String text; _ } as r) when env.head_only ->
@@ -1139,6 +1177,8 @@ module Make (Backend : ADAPTER) = struct
 end
 
 let prerender_seeds (App a) = a.prerender
+let prerender_target config path = Site.join config.base path
+let prerender_path config target = Site.strip config.base target
 
 let prerenderable config (App a) target =
   let path, _ = Router.split_target target in
@@ -1230,12 +1270,12 @@ let missing_page config (App a) ~sleep =
       build = build_id config (App a);
       prefetch = a.prefetch;
       current = "";
-      route = "/404.html";
+      route = Site.join config.base "/404.html";
       root_headers = a.headers;
       exists = (fun ~root:_ ~path:_ -> false);
       form = None;
       csrf = None;
-      context = Server.empty_context ();
+      context = { (Server.empty_context ()) with base = config.base };
       node = Live_server.main ();
       live_used = ref false;
     }

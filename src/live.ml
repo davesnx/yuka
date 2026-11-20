@@ -132,7 +132,7 @@ let rec connect m =
       List.iter (fun u -> u.ended <- true) m.uses
   | None ->
   if m.uses != [] && Option.is_none m.dead && Option.is_none m.socket then
-    match Web.socket_open (Web.live_url ()) (fun () -> opened m) (fun text -> heard m text) (fun code -> closed m code) with
+    match Web.socket_open (Web.live_url () ^ Web.base () ^ "/_yuka/live") (fun () -> opened m) (fun text -> heard m text) (fun code -> closed m code) with
     | s -> m.socket <- Some s
     | exception _ -> retry m
 
@@ -227,7 +227,7 @@ and closed m code =
   | Some Status.Forbidden when not m.renewed ->
       m.renewed <- true;
       List.iter (fun u -> if not u.ended then u.on_stale ()) m.uses;
-      Web.fetch_text "/_yuka/csrf"
+      Web.fetch_text (Web.base () ^ "/_yuka/csrf")
         (fun status body ->
           match (status, Json.of_string body) with
           | 200, Ok (`Assoc [ ("csrf", `String t) ]) ->

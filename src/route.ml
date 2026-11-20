@@ -9,10 +9,13 @@ let get () =
       c
 
 let typed find url =
-  let path, _ = Router.split_target url in
-  match find `GET (List.map (Router.decode ~plus:false) (Router.split_path path)) (Router.query url) with
-  | Router.Found r -> Some r
-  | Router.Wrong_method _ | Router.Redirect _ | Router.Missing -> None
+  match Site.strip (Site.base ()) url with
+  | None -> None
+  | Some url -> (
+      let path, _ = Router.split_target url in
+      match find `GET (List.map (Router.decode ~plus:false) (Router.split_path path)) (Router.query url) with
+      | Router.Found r -> Some r
+      | Router.Wrong_method _ | Router.Redirect _ | Router.Missing -> None)
 
 let current find =
   match Element.Context.get (get ()) with

@@ -36,6 +36,7 @@
   scheduler
   server
   signal
+  site
   state
   status_error
   template

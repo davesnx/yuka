@@ -8,17 +8,17 @@ let home () =
   Yuka.Server.page ~title:"Home" (fun () ->
       el "main"
         [
-          link "/post/hello";
-          link "/post/missing";
-          link "/secret";
+          link (Yuka.Router.url "/post/hello");
+          link (Yuka.Router.url "/post/missing");
+          link (Yuka.Router.url "/secret");
           link "https://example.com/away";
           link "//example.com/away";
-          link "/post/hello";
-          link "/docs#top";
-          link "/static/s.css";
-          link "/_yuka/app.js";
-          link "/guide";
-          link "/a%2Fb";
+          link (Yuka.Router.url "/post/hello");
+          link (Yuka.Router.url "/docs#top");
+          link (Yuka.Router.url "/static/s.css");
+          link (Yuka.Router.url "/_yuka/app.js");
+          link (Yuka.Router.url "/guide");
+          link (Yuka.Router.url "/a%2Fb");
         ])
 
 let docs () = Yuka.Server.page ~title:"Docs" (fun () -> el "p" [ Yuka.text "docs" ])
@@ -29,7 +29,7 @@ let post (_ : Yuka.Server.request) ~slug =
 
 let post_page ~slug ~post () =
   Yuka.Server.page ~title:slug (fun () ->
-      el "article" [ Yuka.text ("post " ^ post); link "/post/world"; link "/" ])
+      el "article" [ Yuka.text ("post " ^ post); link (Yuka.Router.url "/post/world"); link (Yuka.Router.url "/") ])
 
 let page ~parts () =
   Yuka.Server.page (fun () -> el "p" [ Yuka.text ("page " ^ String.concat "/" parts) ])

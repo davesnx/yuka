@@ -34,6 +34,8 @@ module Browser = Browser
 module Router = struct
   include Router
   module Param = Router_param
+
+  let url = Site.url
 end
 
 let runtime_route_current find = Route.current find
@@ -115,6 +117,8 @@ module Server = struct
   module Prerender = struct
     let config = Cycle.prerender_config
     let seeds = Cycle.prerender_seeds
+    let target = Cycle.prerender_target
+    let path = Cycle.prerender_path
     let prerenderable = Cycle.prerenderable
     let links = Cycle.links
     let file = Cycle.prerender_file
@@ -227,7 +231,7 @@ module Private = struct
   let handle_action ~name ~header ~body =
     Server.handle_action ~live:(Live_server.mark_json (Live_server.main ())) ~name ~header ~body
 
-  let dev_script = Cycle.dev_script
+  let dev_script ?(base = "") state = Cycle.dev_script ~base state
   let dev_events = Cycle.dev_events ~log:(fun level m -> !Types.default_log level m)
   let node = Kind.to_node
 

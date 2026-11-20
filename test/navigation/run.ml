@@ -206,6 +206,23 @@ let click_fetches finish =
       check "pushed" "/issue/1" (location_ ());
       finish ())
 
+let add_base : string -> unit =
+  [%mel.raw
+    {|function (b) { const m = document.createElement("meta"); m.name = "yuka-base"; m.content = b; document.head.appendChild(m) }|}]
+
+let base_scope finish =
+  setup (page {|<a id="out" href="/other">out</a><a id="near" href="/apple">near</a><a id="root" href="/app">root</a><a id="in" href="/app/issue/1?q=1">in</a>|});
+  add_base "/app";
+  plain_start ();
+  check "a link outside the base is not intercepted" "false" (bools (click "#out" ""));
+  check "a longer first segment is outside" "false" (bools (click "#near" ""));
+  check "no fetch for them" "0" (ints (calls ()));
+  check "the base itself is intercepted" "true" (bools (click "#root" ""));
+  check "fetched the base" "http://localhost/app" (call_url 0);
+  check "a link under the base is intercepted" "true" (bools (click "#in" ""));
+  check "fetched under the base" "http://localhost/app/issue/1?q=1" (call_url 1);
+  finish ()
+
 let not_intercepted finish =
   let cases =
     [
@@ -3193,6 +3210,7 @@ let all =
     ("pointer, focus and touch off links load no navigation code", events_off_links_load_nothing);
     ("the first click loads the navigation code and is not lost", cold_click);
     ("click fetches and swaps", click_fetches);
+    ("under a base, only links under it are client navigations", base_scope);
     ("dev: a new page build reloads and keeps the scroll", dev_reload);
     ("dev: a css build swaps the stylesheets", dev_css);
     ("dev: a new session reloads", dev_session);
