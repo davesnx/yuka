@@ -41,13 +41,5 @@ val use_await : unit -> unit
 val use_slot : unit -> unit
 val use_catch : unit -> unit
 val use_actions : unit -> unit
-(** The node constructors call the first four, so that the client links
-    the mount code of a node kind only when the app makes such a node.
-    [Action.send] calls [use_actions] and a [Codec.async] reference calls
-    [Async_reader.use_async], so that the action transport and the reader of
-    streamed async values are linked only when the app uses them. *)
 
 val use_url_check : unit -> unit
-(** Links the URL check of the attributes the client sets. {!Yuka.attr},
-    {!Yuka.hole_attr} (and their ppx forms) and [use_element] call it.
-    Without it, setting a URL attribute raises [Failure]. *)

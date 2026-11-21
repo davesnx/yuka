@@ -75,8 +75,6 @@ function inlineScripts(html: string): string[] {
 const plainHtml = (html: string) =>
   html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<link\b[^>]*rel\s*=\s*["']?modulepreload["']?[^>]*>/gi, "");
 
-// Headless Chromium keeps its mouse over the page and can send a pointermove after layout,
-// which loads code meant for user intent, such as navigation (issue #36).
 const noPointer = `for (const t of ["pointerover", "pointerout", "pointermove", "mouseover", "mouseout", "mousemove"])
   window.addEventListener(t, (e) => e.stopImmediatePropagation(), true);`;
 

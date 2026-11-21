@@ -804,10 +804,6 @@ let refusal headers level =
     (empty 204
        (navigation_vary (merge_headers [ headers; [ ("yuka-prefetch", Prefetch.name level); no_store_header ] ])))
 
-(* A non-ok status makes the browser drop a speculative prefetch and fetch again at the click; a
-   2xx such as 204 would be kept and used for the click. "supports prefetch" in
-   https://wicg.github.io/nav-speculation/prefetch.html; 503 as in
-   https://developer.chrome.com/docs/web-platform/prerender-pages *)
 let speculation_refusal headers =
   reply (empty 503 (add_vary "Sec-Purpose" (navigation_vary (merge_headers [ headers; [ no_store_header ] ]))))
 

@@ -56,7 +56,6 @@ let is_ident_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '\'' -> true
   | _ -> false
 
-(* OCaml 5.3 made effect a keyword; ppxlib's Keyword list does not hold it. *)
 let is_keyword s = Keyword.is_keyword s || s = "effect"
 
 let is_label s =

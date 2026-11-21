@@ -80,11 +80,6 @@ module Adapter = struct
     Sys.file_exists file && not (Sys.is_directory file)
 
   let upgrade _request run =
-    (* Calling Dream.close_websocket after the connection is gone spins at
-       100% CPU: https://github.com/camlworks/dream/issues/467. [run] closes
-       only a live connection: never after [receive] gave [None], and not
-       after a timeout (4408) or a failed send or receive (1011), when the
-       client is likely gone. *)
     to_async
       (Dream.websocket ~close:false (fun ws ->
            to_lwt
