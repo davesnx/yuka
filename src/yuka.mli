@@ -386,11 +386,25 @@ end
 
 module Status = Status
 
+type exit
+(** How a removed item of {!each} or the old content of {!Show} goes away. *)
+
+val exit_after : (Browser.element -> unit Async.t) -> exit
+(** [exit_after f] delays the removal: the browser calls [f] with the element and
+    removes it when the [Async] settles, as [Done] or [Failed]. Until then
+    it stays live: its holes and handlers work. Use it for an exit
+    animation: add a CSS class and settle on [animationend], or settle
+    when [element.animate(...).finished] settles. Only content of one
+    element waits; other content goes at once. An exception in [f]
+    removes the element at once. When the list or the [Show] itself goes
+    away, its content goes at once. The server does not call [f]. *)
+
 module Show : sig
   val make :
     status:(unit -> 'a Status.t) ->
     loading:'k element ->
     ?failed:(Status.error -> 'k element) ->
+    ?exit:exit ->
     children:('a -> 'k element) ->
     unit ->
     'k element
@@ -399,7 +413,10 @@ module Show : sig
       [children data], so data stays on screen while it loads again; [Idle]
       and [Loading None] show [loading]; [Failed] shows [failed error]
       (default: nothing). The children render again only when the data
-      changes, by the default equality of {!State.make}. *)
+      changes, by the default equality of {!State.make}.
+
+      With [exit] (see {!exit_after}), the old content stays until its
+      [Async] settles, and the new content shows at once, after it. *)
 end
 
 val on : string -> (Event.t -> unit) -> client attribute
@@ -407,6 +424,7 @@ val on : string -> (Event.t -> unit) -> client attribute
 
 val each :
   ?equal:('a -> 'a -> bool) ->
+  ?exit:exit ->
   key:('a -> string) ->
   (unit -> 'a array) ->
   ('a -> client element) ->
@@ -420,7 +438,11 @@ val each :
     while it renders: it keeps the items, not the array, so a later write
     into that array changes nothing on the page. To show a change, give a
     new array ({!State.set} with the same array is no change). For a list,
-    [fun () -> Array.of_list (State.get items)]. *)
+    [fun () -> Array.of_list (State.get items)].
+
+    With [exit] (see {!exit_after}), a removed item stays until its [Async]
+    settles. An item that comes back with the same key during its exit
+    gets a new row; the old row still goes when its [Async] settles. *)
 
 type stylesheet
 (** A CSS file of a module, made by [module Css = [%yuka.css "file.css"]].
@@ -697,13 +719,7 @@ module Private : sig
         -> node
     | Slot of slot
     | Template of { template : template; parts : part array }
-    | Each : {
-        items : unit -> 'a array;
-        key : 'a -> string;
-        equal : 'a -> 'a -> bool;
-        render : 'a -> node;
-      }
-        -> node
+    | Each : 'a each -> node
     | Catch of {
         children : unit -> node;
         fallback : error:string -> reset:(unit -> unit) -> node;
@@ -719,6 +735,14 @@ module Private : sig
     | Static of string * string
     | Dynamic of string * (unit -> string option)
     | Handler of string * (Event.t -> unit)
+
+  and 'a each = {
+    items : unit -> 'a array;
+    key : 'a -> string;
+    equal : 'a -> 'a -> bool;
+    render : 'a -> node;
+    exit : exit option;
+  }
 
   and template = runtime_template
   and part = Child of node | Attribute of attr | No_attribute

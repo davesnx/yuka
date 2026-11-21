@@ -1,3 +1,7 @@
+type element = Web.node
+(** A DOM element. In Melange, give it to an [external] to call a method of
+    the element, for example [classList.add] or [animate]. *)
+
 val on_window : string -> (Event.t -> unit) -> unit
 (** Listens on [window] until the current owner is disposed. The handler
     runs in a {!Yuka.batch}. Browser only: call it inside [Effect.after]. *)

@@ -478,6 +478,46 @@ start with a letter or `_`, and contain only letters, digits, `_` and
 `-`. Two elements with the same name make the browser skip the
 animation; the update still applies.
 
+`Yuka.exit_after f` keeps content on the page while it animates out. Give
+it as `~exit` to `Yuka.each` or `<Yuka.Show>`. When a row goes away, or
+the content of `Show` changes, the browser calls `f` with the element and
+removes it when the `Async` that `f` gives settles. This list fades out a
+removed row with the Web Animations API, in a Melange module:
+
+```ocaml
+type animation
+
+external animate : Yuka.Browser.element -> < opacity : float array > Js.t -> float -> animation
+  = "animate" [@@mel.send]
+
+external on_finish : animation -> (Yuka.Event.t -> unit) -> unit = "onfinish" [@@mel.set]
+
+let fade_out el =
+  let async, resolve, _ = Yuka.Async.make () in
+  on_finish (animate el [%mel.obj { opacity = [| 1.; 0. |] }] 200.) (fun _ -> resolve ());
+  async
+
+let fade = Yuka.exit_after fade_out
+...
+(Yuka.each ~exit:fade ~key:Fun.id
+   (fun () -> Array.of_list (Yuka.State.get items))
+   (fun id -> <li>(Yuka.text id)</li>))
+```
+
+With CSS, add a class in `f` and settle the `Async` on `animationend`.
+
+- Until the `Async` settles, the row is live: its holes update and its
+  handlers run. Then Yuka removes it and stops its effects.
+- `Done` and `Failed` both remove the row. An exception in `f` removes it
+  at once.
+- Only a row of one element waits. A row of more than one node goes at
+  once, and `f` does not run.
+- An item that comes back with the same key during its exit gets a new
+  row. The old row goes when its `Async` settles.
+- When the list itself goes away, its exiting rows go at once.
+- In `Show`, the new content shows at once, next to the old content.
+- The server does not call `f`.
+
 ## Lifetime
 
 Effects and memos belong to the component, hole or list row that created

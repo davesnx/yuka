@@ -69,8 +69,33 @@ let hole_attr_unchecked name f =
   Dynamic (name, f)
 let on name handler = Handler (name, handler)
 
-let each ?(equal = Signal.same) ~key items render =
-  Kind.of_node (Each { items; key; equal; render = Kind.fn render })
+type exit = Types.exit
+
+let exit_after f () =
+  let owner = !(Base.current_owner ()) in
+  {
+    leave =
+      (fun e ->
+        e.first == e.last
+        &&
+        let drop () =
+          e.dispose ();
+          Web.remove e.first
+        in
+        match owner with
+        | None -> false
+        | Some owner ->
+            let c = Base.add_disposer owner drop in
+            Async.on_settled (Async.guard f e.first) (fun _ ->
+                if c.live then begin
+                  Base.remove_disposer owner c;
+                  drop ()
+                end);
+            true);
+  }
+
+let each ?(equal = Signal.same) ?exit ~key items render =
+  Kind.of_node (Each { items; key; equal; render = Kind.fn render; exit })
 
 module Await = struct
   let make ~async ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
@@ -196,7 +221,7 @@ module Context = struct
 end
 
 module Show = struct
-  let make ~status ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
+  let make ~status ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ?exit ~children () =
     let view =
       State.memo
         ~equal:(fun a b ->
@@ -211,11 +236,25 @@ module Show = struct
           | Idle | Loading None -> `Loading
           | Failed { error; _ } -> `Failed error)
     in
-    Kind.of_node
-      (Hole
-         (fun () ->
-           match State.get view with
-           | `Data d -> Kind.to_node (Scheduler.untrack (fun () -> children d))
-           | `Loading -> Kind.to_node loading
-           | `Failed e -> Kind.to_node (Scheduler.untrack (fun () -> failed e))))
+    let show = function
+      | `Data d -> Kind.to_node (Scheduler.untrack (fun () -> children d))
+      | `Loading -> Kind.to_node loading
+      | `Failed e -> Kind.to_node (Scheduler.untrack (fun () -> failed e))
+    in
+    match exit with
+    | None -> Kind.of_node (Hole (fun () -> show (State.get view)))
+    | Some _ ->
+        let n = ref 0 in
+        Kind.of_node
+          (Each
+             {
+               items =
+                 (fun () ->
+                   incr n;
+                   [| (string_of_int !n, State.get view) |]);
+               key = fst;
+               equal = Signal.same;
+               render = (fun (_, v) -> show v);
+               exit;
+             })
 end

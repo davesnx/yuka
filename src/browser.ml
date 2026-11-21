@@ -1,5 +1,7 @@
 open Platform
 
+type element = Web.node
+
 let on_window name handler = Base.own (!platform.on_window name (fun e -> Scheduler.batch (fun () -> handler e)))
 let navigate url = if Url.unsafe ~tag:"a" "href" url then Types.log "navigate" url else !platform.navigate url
 let back () = match !Navigation_stub.router with Some r -> r.back () | None -> Web.history_back ()

@@ -6,6 +6,17 @@ type start = [ `Load | trigger | `Lazy of trigger ]
 type log_level = [ `Error | `Warn | `Info | `Debug ]
 type backend = ..
 
+type 'a row = {
+  key : string;
+  mutable value : 'a;
+  mutable first : Web.node;
+  mutable last : Web.node;
+  mutable dispose : unit -> unit;
+}
+
+type leave = { leave : 'a. 'a row -> bool }
+type exit = unit -> leave
+
 
   type node =
     | Text of string
@@ -27,13 +38,7 @@ type backend = ..
         -> node
     | Slot of slot
     | Template of { template : template; parts : part array }
-    | Each : {
-        items : unit -> 'a array;
-        key : 'a -> string;
-        equal : 'a -> 'a -> bool;
-        render : 'a -> node;
-      }
-        -> node
+    | Each : 'a each -> node
     | Catch of {
         children : unit -> node;
         fallback : error:string -> reset:(unit -> unit) -> node;
@@ -44,6 +49,14 @@ type backend = ..
         children : unit -> node;
         client : Obj.t option -> node;
       }
+
+  and 'a each = {
+    items : unit -> 'a array;
+    key : 'a -> string;
+    equal : 'a -> 'a -> bool;
+    render : 'a -> node;
+    exit : exit option;
+  }
 
   and slot = { content : node option; dom : Obj.t list ref }
 

@@ -44,13 +44,6 @@ type pos = {
   svg : bool;
 }
 
-type 'a row = {
-  key : string;
-  mutable value : 'a;
-  mutable first : Web.node;
-  mutable last : Web.node;
-  mutable dispose : unit -> unit;
-}
 
 let svg_ns = "http://www.w3.org/2000/svg"
 
@@ -414,9 +407,9 @@ let rec mount_node pos last n =
       | None -> mount_node pos last ((uncurry2 !Template.expander) template parts [@u]))
   | Island _ -> failwith "Yuka.Client: islands are not supported yet"
   | Catch { client; _ } | Provide { client; _ } -> (!catch_hook) pos last client [@u]
-  | Each { items; key; equal; render } ->
+  | Each each ->
       last := false;
-      mount_each pos false items key equal render
+      mount_each pos false each
 
 and mount_list pos last = function
   | [] -> ()
@@ -432,7 +425,7 @@ and mount_attrs doc svg el adopted = function
 
 and mount_children pos = function
   | [ Hole f ] -> mount_hole pos true f
-  | [ Each { items; key; equal; render } ] -> mount_each pos true items key equal render
+  | [ Each each ] -> mount_each pos true each
   | children -> mount_list pos (ref false) children
 
 and instantiate pos (template : template) c parts =
@@ -527,42 +520,36 @@ and mount_hole pos owned f =
               place { pos with cur = !stop; adopt = false } n
             end)
 
-and mount_each :
-    type a.
-    pos ->
-    bool ->
-    (unit -> a array) ->
-    (a -> string) ->
-    (a -> a -> bool) ->
-    (a -> node) ->
-    unit =
- fun pos owned items key equal render ->
+and mount_each : type a. pos -> bool -> a each -> unit =
+ fun pos owned { items; key; equal; render; exit } ->
   let start = if owned then Js.null else some (comment pos "[") in
   let source = State.memo ~equal:(fun _ _ -> false) items in
-  let mount_row pos v =
-    let first = ref pos.parent and last = ref pos.parent in
+  let mount_row pos e v =
     let (), dispose =
       Base.mount (fun () ->
           Scheduler.untrack (fun () ->
               let n = render v in
               if Template.single_element n then begin
                 mount_node pos (ref false) n;
-                first := before pos;
-                last := !first
+                e.first <- before pos;
+                e.last <- e.first
               end
               else begin
-                first := comment pos "[";
+                e.first <- comment pos "[";
                 mount_node pos (ref false) n;
-                last := comment pos "]"
+                e.last <- comment pos "]"
               end))
     in
-    (!first, !last, dispose)
+    e.dispose <- dispose;
+    e.value <- v
   in
   let make_entry pos k v =
-    let first, last, dispose = mount_row pos v in
-    { key = k; value = v; first; last; dispose }
+    let e = { key = k; value = v; first = pos.parent; last = pos.parent; dispose = ignore } in
+    mount_row pos e v;
+    e
   in
   let entries = ref [||] in
+  let leave = match exit with Some f -> f () | None -> { leave = (fun _ -> false) } in
   let dispose_all es =
     for i = 0 to Array.length es - 1 do
       (get es i).dispose ()
@@ -607,15 +594,17 @@ and mount_each :
       let e = get es i in
       if Web.table_has wanted e.key then Web.table_set old e.key (i, e) else push removed e
     done;
-    if Web.table_size old = 0 && Array.length es > 0 then begin
+    if Web.table_size old = 0 && Array.length es > 0 && exit == None then begin
       dispose_all es;
       clear_all ()
     end
     else
       for i = 0 to Array.length removed - 1 do
         let e = get removed i in
-        e.dispose ();
-        remove_range e.first e.last
+        if not (leave.leave e) then begin
+          e.dispose ();
+          remove_range e.first e.last
+        end
       done;
     let order = alloc n in
     for j = 0 to n - 1 do
@@ -633,13 +622,10 @@ and mount_each :
         if o != Js.undefined then begin
           let e = snd (defined o) in
             if not (equal e.value item) then begin
+              let first = e.first and last = e.last in
               e.dispose ();
-              let first, last, dispose = mount_row (fresh (some e.first)) item in
-              remove_range e.first e.last;
-              e.first <- first;
-              e.last <- last;
-              e.dispose <- dispose;
-              e.value <- item
+              mount_row (fresh (some first)) e item;
+              remove_range first last
             end;
             if not (get keep j) then move_range pos.parent e.first e.last !anchor;
             e
