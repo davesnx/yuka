@@ -22,7 +22,7 @@ let fetch_page :
     (unit -> unit) ->
     unit =
  fun _ _ _ _ _ -> browser_only ()
-let put : node -> string -> string -> unit = fun _ _ _ -> browser_only ()
+let put : node -> string -> string -> node = fun _ _ _ -> browser_only ()
 let hold : node -> int -> bool -> unit = fun _ _ _ -> browser_only ()
 let hash_of : string -> string = fun _ -> browser_only ()
 let no_hash : string -> string = fun _ -> browser_only ()

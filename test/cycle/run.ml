@@ -63,6 +63,7 @@ end
 
 module Cycle = Server.Adapter.Make (Test_adapter)
 
+let raw_sleep = ref Test_adapter.sleep
 let held_writes : (string * (unit -> unit)) list ref = ref []
 let stream_ended = ref false
 let late_writes = ref 0
@@ -90,11 +91,10 @@ module Held_adapter = struct
 
   let file _ ~root:_ ~path:_ ~headers:_ = assert false
   let upgrade _ _ = assert false
+  let sleep s = !raw_sleep s
 end
 
 module Held = Server.Adapter.Make (Held_adapter)
-
-let raw_sleep = ref Test_adapter.sleep
 
 module Raw = Server.Adapter.Make (struct
   include Test_adapter
@@ -1252,6 +1252,100 @@ let render =
         | _ -> Alcotest.fail "not a stream" );
   ]
 
+let late_and_shared =
+  let with_budget () =
+    let budget = ref ignore in
+    (raw_sleep :=
+       fun s ->
+         let a, resolve, _ = Async.make () in
+         if s < 1. then budget := resolve;
+         a);
+    budget
+  in
+  let stream_end (a : Server.response Async.t) =
+    match Async.status a with
+    | Async.Done { body = Server.Stream f; _ } -> f (fun _ -> Async.return ())
+    | _ -> Alcotest.fail "not a stream"
+  in
+  [
+    ( "a public page with a Live.make in a late fill waits and is sent private, no-store",
+      fun () ->
+        let settled headers target =
+          let budget = with_budget () in
+          let a =
+            Raw.handler config Cycle_server.Yuka_routes.app
+              (request ~headers:(("x-user", "ann") :: headers) target)
+          in
+          !budget ();
+          check_true "waits for the fill" (Async.status a = Async.Pending);
+          App.finish_slow "live";
+          match Async.status a with
+          | Async.Done { body = Server.String text; headers; status } ->
+              let r = { status; headers; body = text } in
+              check_header r "cache-control" [ "private, no-store" ];
+              check_header r "yuka-stream" [];
+              check_true "live data" (contains text "data secret of ann")
+          | _ -> Alcotest.fail "not one string"
+        in
+        settled [ ("Yuka-Navigate", "L0") ] "/slow-public";
+        settled [] "/slow-public" );
+    ( "a page without a shared cache rule still streams",
+      fun () ->
+        let streams headers =
+          let budget = with_budget () in
+          let a = Raw.handler config Cycle_server.Yuka_routes.app (request ~headers "/slow") in
+          !budget ();
+          match Async.status a with
+          | Async.Done { body = Server.Stream _; _ } -> ()
+          | _ -> Alcotest.fail "not a stream"
+        in
+        streams [ ("Yuka-Navigate", "L0") ];
+        streams [] );
+    ( "a logger that raises still ends the stream",
+      fun () ->
+        let ended headers =
+          let budget = with_budget () in
+          let a = Raw.handler config Cycle_server.Yuka_routes.app (request ~headers "/slow") in
+          log_hook := (fun _ _ -> failwith "log down");
+          !budget ();
+          let ended = stream_end a in
+          App.finish_slow "explode";
+          check_true "ended" (Async.status ended = Async.Done ())
+        in
+        ended [ ("Yuka-Navigate", "L0") ];
+        ended [] );
+    ( "Yuka-Navigate: a failed render waits for the writes in flight",
+      fun () ->
+        let budget = with_budget () in
+        held_writes := [];
+        stream_ended := false;
+        late_writes := 0;
+        let a =
+          Held.handler config Cycle_server.Yuka_routes.app (request ~headers:[ ("Yuka-Navigate", "L0") ] "/twice")
+        in
+        !budget ();
+        let ended =
+          match Async.status a with
+          | Async.Done r -> r.Held_adapter.ended
+          | _ -> Alcotest.fail "no response"
+        in
+        App.finish_slow "ready";
+        App.finish_second "explode";
+        let rec release n =
+          match !held_writes with
+          | [] -> n
+          | (_, resolve) :: rest ->
+              check_true "not ended while a write is held" (Async.status ended = Async.Pending);
+              held_writes := rest;
+              resolve ();
+              release (n + 1)
+        in
+        let written = release 0 in
+        Alcotest.(check int) "the shell line and the first fill" 2 written;
+        Alcotest.(check int) "no write after the end" 0 !late_writes;
+        check_true "ended" (Async.status ended = Async.Done ()) );
+  ]
+
 let navigation =
   let nav keys target = get ~headers:[ ("Yuka-Navigate", keys) ] target in
   let build = Server.Adapter.build_id config Cycle_server.Yuka_routes.app in
@@ -2147,6 +2241,7 @@ let () =
       ("review", cases reviewed);
       ("loaders", cases loaders);
       ("render", cases render);
+      ("late and shared", cases late_and_shared);
       ("navigation", cases navigation);
       ("forms", cases forms);
       ("prefetch", cases prefetch);
