@@ -2023,9 +2023,73 @@ let set_cookie () =
   check "nothing was written for the lone surrogate" "false" (string_of_bool (Cases.contains (cookies ()) "lone="));
   check "nothing was written by a refused call" "false" (string_of_bool (Cases.contains (cookies ()) "n=x"))
 
+let stub_view_transition : unit -> unit =
+  [%mel.raw
+    {|function () {
+  const t = globalThis.__viewTransitions = [];
+  document.startViewTransition = function (cb) {
+    t.push(cb);
+    return { ready: Promise.reject(new Error("skipped")), finished: Promise.resolve() };
+  };
+}|}]
+
+let remove_view_transition : unit -> unit =
+  [%mel.raw "function () { delete document.startViewTransition; delete globalThis.__viewTransitions }"]
+
+let view_transitions : unit -> int = [%mel.raw "function () { return globalThis.__viewTransitions.length }"]
+let run_view_transition : int -> unit = [%mel.raw "function (i) { globalThis.__viewTransitions[i]() }"]
+
+let sortable () =
+  let items = State.make [ "c"; "a"; "b" ] in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        element "ul" []
+          [
+            each ~key:Fun.id
+              (fun () -> Array.of_list (State.get items))
+              (fun id -> element "li" [ attr "style" (view_transition_name ("row-" ^ id)) ] [ text id ]);
+          ])
+  in
+  (items, c, dispose)
+
+let view_transition_sort () =
+  stub_view_transition ();
+  let items, c, dispose = sortable () in
+  let a = query c "li:nth-child(2)" in
+  view_transition (fun () -> State.update items (List.sort String.compare));
+  check "one transition starts" "1" (ints (view_transitions ()));
+  check "the page waits for the transition" "c,a,b" (order c);
+  run_view_transition 0;
+  check "the transition sorts the list" "a,b,c" (order c);
+  check "row a keeps its name" "view-transition-name:row-a"
+    (Option.value ~default:"" (get_attribute (query c "li") "style"));
+  same "row a keeps its node" a (query c "li");
+  remove_view_transition ();
+  dispose ()
+
+let view_transition_fallback () =
+  let items, c, dispose = sortable () in
+  let runs = ref 0 in
+  let _, stop =
+    Yuka.with_owner (fun () ->
+        Effect.after (fun () ->
+            ignore (State.get items);
+            incr runs))
+  in
+  view_transition (fun () ->
+      State.set items [ "b"; "a"; "c" ];
+      State.update items (List.sort String.compare));
+  check "the update applies at once" "a,b,c" (order c);
+  check "the writes run the effect one time" "2" (ints !runs);
+  stop ();
+  dispose ()
+
 let all =
   [
     ("Browser.set_cookie", set_cookie);
+    ("view_transition: a sort runs in the transition", view_transition_sort);
+    ("view_transition: without the API, a batch at once", view_transition_fallback);
     ("handlers run in a batch", handler_batched);
     ("after: reads the DOM of the same change", after_sees_dom);
     ("after: the first run finds the element", after_finds_own_element);

@@ -328,6 +328,16 @@ let location_assign : string -> unit =
   [%mel.raw
     "function (url) { window.location.assign(url) }"]
 
+let view_transition : (unit -> unit) -> unit =
+  [%mel.raw
+    {|function (f) {
+  const d = document;
+  if (typeof d.startViewTransition !== "function") { f(); return; }
+  d.startViewTransition(function () {
+    try { f(); } catch (e) { d.defaultView.setTimeout(function () { throw e; }); }
+  }).ready.then(null, function () {});
+}|}]
+
 let same_origin : string -> bool =
   [%mel.raw
     "function (url) { try { return new URL(url, window.location.href).origin === window.location.origin } catch (e) { return false } }"]

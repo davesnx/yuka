@@ -2245,9 +2245,35 @@ let nested_batches_old_source k () =
     (string_of_int v ^ " " ^ string_of_int !bs);
   dispose ()
 
+let view_transition_runs_body () =
+  let a = State.make 0 in
+  let runs = ref 0 in
+  let _, stop =
+    with_owner (fun () ->
+        Effect.before (fun () ->
+            ignore (State.get a);
+            incr runs))
+  in
+  view_transition (fun () ->
+      State.set a 1;
+      State.set a 2);
+  check "the body runs at once, in one batch" "2 2" (string_of_int (State.peek a) ^ " " ^ string_of_int !runs);
+  stop ()
+
+let view_transition_names () =
+  check "a name" "view-transition-name:row-1_a" (view_transition_name "row-1_a");
+  check "a name that starts with _" "view-transition-name:_x" (view_transition_name "_x");
+  List.iter
+    (fun bad ->
+      check ("refused: " ^ bad) "refused"
+        (match view_transition_name bad with _ -> "accepted" | exception Invalid_argument _ -> "refused"))
+    [ ""; "1a"; "-a"; "a b"; "a;color:red"; "a:b" ]
+
 let all =
   [
     ("catch: server fallback", catch_server_fallback);
+    ("view_transition: runs the body in a batch", view_transition_runs_body);
+    ("view_transition_name: checks the name", view_transition_names);
     ("catch: server children", catch_server_children);
     ("catch: server outside an island", catch_server_outside_island);
     ("catch: server nested", catch_server_nested);

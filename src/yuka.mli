@@ -206,6 +206,29 @@ val attr : string -> string -> 'kind attribute
     or [=] raises [Invalid_argument] (in the browser here, on the server
     when printed). *)
 
+val view_transition : (unit -> unit) -> unit
+(** [view_transition body] runs [body] in a {!batch} inside
+    [document.startViewTransition], so the browser animates from the old
+    page to the page that the writes of [body] make. [body] runs later, when
+    the browser calls it, not before [view_transition] returns. An exception
+    of [body] is thrown again in a task, as an uncaught error, and does not
+    go to a {!Catch} or island. Where [document.startViewTransition] does not
+    exist, and on the server, [view_transition body] is [batch body]: [body]
+    runs at once and its exception goes to the caller.
+
+    Give each element that must move on its own a name with
+    {!view_transition_name}, for example each row of a list that a sort
+    changes. *)
+
+val view_transition_name : string -> string
+(** [view_transition_name name] is ["view-transition-name:" ^ name], a
+    declaration for a [style] attribute:
+    [<li style=(Yuka.view_transition_name ("row-" ^ id))>]. Join it with
+    other declarations with [";"]. When two elements on the page have the
+    same name, the browser skips the transition and only applies the
+    update. [name] starts with a letter or [_], and the other characters
+    are letters, digits, [_] or [-], else [Invalid_argument]. *)
+
 val hole : (unit -> client element) -> client element
 (** A part that changes after the first render. The function runs once; it
     runs again when a State it read changes, and its output replaces the old

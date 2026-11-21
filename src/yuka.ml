@@ -17,6 +17,21 @@ type client = Types.client
 type trigger = Types.trigger
 type start = Types.start
 include Element
+
+let view_transition f = Web.view_transition (fun () -> batch f)
+
+let view_transition_name name =
+  let rec ok i =
+    i = String.length name
+    || (match name.[i] with
+       | 'a' .. 'z' | 'A' .. 'Z' | '_' -> true
+       | '0' .. '9' | '-' -> i > 0
+       | _ -> false)
+       && ok (i + 1)
+  in
+  if String.length name > 0 && ok 0 then "view-transition-name:" ^ name
+  else invalid_arg ("Yuka.view_transition_name: " ^ name)
+
 module Client = struct
   include Client
 

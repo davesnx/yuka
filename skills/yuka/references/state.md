@@ -451,6 +451,33 @@ Yuka.Effect.after (fun () ->
 A `State.deferred` changes later than the rest: after the next paint, in
 its own batch. See [Deferred State](#deferred-state).
 
+`Yuka.view_transition body` runs `body` in a batch inside
+`document.startViewTransition`, so the browser animates from the old page
+to the new page. Give each element that must move on its own a name with
+`Yuka.view_transition_name`, a declaration for its `style`. This list
+animates its rows to their new places when it is sorted:
+
+```ocaml
+<button
+  on_click=(fun _ ->
+    Yuka.view_transition (fun () ->
+        Yuka.State.update items (List.sort compare)))>
+  "Sort"
+</button>
+<ul>
+  (Yuka.each ~key:Fun.id
+     (fun () -> Array.of_list (Yuka.State.get items))
+     (fun id -> <li style=(Yuka.view_transition_name ("row-" ^ id))>(Yuka.text id)</li>))
+</ul>
+```
+
+`body` runs later, when the browser calls it, and an exception in it is an
+uncaught error. Where the browser has no view transitions, and on the
+server, `Yuka.view_transition body` is `Yuka.batch body`. The name must
+start with a letter or `_`, and contain only letters, digits, `_` and
+`-`. Two elements with the same name make the browser skip the
+animation; the update still applies.
+
 ## Lifetime
 
 Effects and memos belong to the component, hole or list row that created
