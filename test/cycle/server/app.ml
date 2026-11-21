@@ -77,6 +77,17 @@ module Layouts = struct
     el "section" ~attrs:[ ("class", "team") ] [ text ("squad " ^ squad); children ]
 end
 
+module Heads = struct
+  let org ~org () =
+    Server.Head.make ~title:("Org " ^ org) ~description:("Org <" ^ org ^ "> & co")
+      ~og:[ ("title", "Org"); ("image", "/a.png"); ("image", "/b.png") ]
+      ~twitter:[ ("card", "summary") ]
+      ~json_ld:[ `Assoc [ ("@type", `String "Organization"); ("name", `String "</script><b>") ] ]
+      ()
+
+  let x ~org:_ () = Server.Head.make ~robots:"noindex" ~canonical:"https://example.com/x?a=1&b=\"2\"" ()
+end
+
 let jot_form key =
   let open Forms_shared.Entry in
   Yuka.Form.make ~action:jot ~key
@@ -183,7 +194,13 @@ module Pages = struct
              [ team; string_of_int user; squad; profile ]))
 
   let org_item ~org ~n ~org_item () =
-    Server.page (fun () -> text (String.concat " " [ org; string_of_int n; org_item ]))
+    Server.page
+      ~head:
+        (Server.Head.make ~description:"Item" ~og:[ ("title", "Item \"2\"") ]
+           ~alternates:[ ("es", "/es/x") ]
+           ~json_ld:[ `Assoc [ ("@type", `String "Article") ] ]
+           ())
+      (fun () -> text (String.concat " " [ org; string_of_int n; org_item ]))
 
   let org_dialog ~org ~n ~org_item () =
     Server.page ~title:"Dialog" (fun () ->

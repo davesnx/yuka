@@ -11,14 +11,17 @@ type stop =
   | Redirect_off_site of { location : string; kind : redirect }
   | Fail of string
 
-type page = { title : string; head : string; html : string; body : unit -> node }
+type page = { head : Head.t; html : string; body : unit -> node }
 
-let page ?(title = "") ?lang ?(html_attributes = []) ?(head = "") body =
+let page ?title ?lang ?(html_attributes = []) ?(head = Head.empty) body =
   let b = Buffer.create 16 in
   List.iter
     (fun (name, value) -> Printer.add_attr b ~tag:"html" name value)
     (match lang with Some l -> ("lang", l) :: html_attributes | None -> html_attributes);
-  { title; head; html = Buffer.contents b; body }
+  { head = Head.merge head (Head.make ?title ()); html = Buffer.contents b; body }
+
+let with_heads heads (p : page) = { p with head = List.fold_right Head.merge heads p.head }
+let page_title (p : page) = Option.value p.head.title ~default:""
 
 type layer = { key : string; data : bool; wrap : server Kind.element -> server Kind.element }
 type plan = { layers : layer list; page : page; overlay : page option }
@@ -447,7 +450,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
           | Some dev, None -> dev_script (dev.state ())
           | _ -> "")
         ^ extra)
-      ~head:(env.config.head ^ page.head) ~html:page.html ~import_map ~title:page.title ~styles:env.config.styles ()
+      ~head:(env.config.head ^ Head.to_html page.head) ~html:page.html ~import_map ~title:(page_title page) ~styles:env.config.styles ()
   in
   let route = State.read_only (State.make env.route) in
   let routed body () = Kind.to_node (Element.Context.provide (Route.get ()) route (fun () -> Kind.of_node (body ()))) in
@@ -470,7 +473,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
               [
                 headers;
                 (if overlay then ("yuka-layer", "overlay") else ("yuka-outlet", outlet))
-                :: ("yuka-title", Router.encode page.title)
+                :: ("yuka-title", Router.encode (page_title page))
                 :: (if overlay || page.html = "" then [] else [ ("yuka-html", Router.encode page.html) ]);
               ]
           in
@@ -487,7 +490,9 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
           let script = Printer.context_script "route" Types.route_name (`String env.route) in
           Async.map
             (fun body ->
-              { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
+              let tags = if overlay then "" else Head.to_html page.head in
+              let body = if mentions body {|data-yuka-context="route"|} then body else script ^ body in
+              { status; headers; body = String (if tags = "" then body else "<template data-yuka-head>" ^ tags ^ "</template>" ^ body) })
             (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(if overlay then "overlay-" else outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                below))
   | None ->

@@ -47,7 +47,59 @@ let post (_ : Yuka.Server.request) ~slug =
 `<html>` of the page. It does not remove an attribute that the new page
 does not give, so give the same names on each page. Every document has
 `<meta name="viewport" content="width=device-width, initial-scale=1">`
-in its head; do not add it again in `~head`.
+in its head; do not add it again in the `~head` of `Yuka.Server.config`.
+
+## Head tags
+
+`Yuka.Server.Head.make` gives the head tags of a page: `~title`,
+`~description`, `~canonical`, `~robots`, `~og`, `~twitter`,
+`~alternates` and `~json_ld`. A page gives one with `~head`. A `~head`
+attachment on `Router.make` or `Router.group` gives the defaults of the
+routes below it:
+
+```ocaml
+(* Routes.ml *)
+Router.make ~head:Heads.site
+  [
+    Router.group ~path:"/blog" ~head:Heads.blog
+      [ Router.route Post ~path:"/:slug<string>" ~page:Pages.post ];
+  ]
+
+(* heads.ml *)
+let site () =
+  Yuka.Server.Head.make ~title:"Yuka" ~og:[ ("site_name", "Yuka") ]
+    ~twitter:[ ("card", "summary") ] ()
+
+let blog () = Yuka.Server.Head.make ~description:"The blog" ()
+
+(* pages.mlx *)
+let post ~slug () =
+  Yuka.Server.page ~title:slug
+    ~head:
+      (Yuka.Server.Head.make ~description:("Post " ^ slug)
+         ~og:[ ("type", "article") ]
+         ~json_ld:[ `Assoc [ ("@type", `String "BlogPosting") ] ]
+         ())
+    (fun () -> <article>(Yuka.text slug)</article>)
+```
+
+`/blog/hello` gets the title `hello`, the description `Post hello`,
+`og:site_name`, `og:type`, `twitter:card` and the JSON-LD.
+
+- The heads merge from the root to the page. A `~title`,
+  `~description`, `~canonical` or `~robots` below replaces the one
+  above. In `~og`, `~twitter` and `~alternates`, a name replaces all
+  the pairs of that name above; a name repeated in one list is kept
+  (two `og:image`). `~json_ld` adds to the values above.
+- The `~title` of `Yuka.Server.page` replaces the title of its `~head`.
+- The not-found and error pages get the heads of the nodes above them.
+- Yuka escapes each value. `~json_ld` is written with `<` as `\u003c`.
+- Each tag has the attribute `data-yuka-head`. A client navigation
+  removes these tags from `<head>` and adds those of the new page. An
+  outlet answer starts with `<template data-yuka-head>` that holds them.
+  An overlay does not change them.
+- Raw HTML for the head of every page goes in the `~head` of
+  `Yuka.Server.config`.
 
 ## Nodes
 
@@ -161,6 +213,7 @@ needs the request of the server gets it from the adapter:
 | `~page` | route | `~params ~search ~loaded () -> Yuka.Server.page` |
 | `?overlay` | route | as `~page` |
 | `~layout` | make, group | `~params ~loaded ~children () -> Yuka.server Yuka.element` |
+| `~head` | make, group | `~params ~loaded () -> Yuka.Server.Head.t` |
 | `~loader` | group, route | `req -> ~params -> ('a, Yuka.Server.stop) result Yuka.Async.t` |
 | `~guard` | all but redirect | `req -> ~params -> (unit, Yuka.Server.stop) result Yuka.Async.t` |
 | `~handler` | method nodes | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
@@ -168,19 +221,19 @@ needs the request of the server gets it from the adapter:
 | `~error` | make, group | `~params () -> Yuka.Server.page` |
 
 - `~params` are the path params of the node and the groups above it. A
-  layout gets those of its group, and a client navigation keeps it only
+  layout or a head gets those of its group, and a client navigation keeps it only
   while they do not change.
 - `~loaded` are the loader results. Each result is labelled with the last
-  name of the loader: `~loader:Loaders.post` gives `~post`. A layout gets
-  the results of the loaders on its group and above.
+  name of the loader: `~loader:Loaders.post` gives `~post`. A layout or a
+  head gets the results of the loaders on its group and above.
 - Params, search fields and loader results share one set of labels: a
   name used twice is an error. `href`, `fragment`, `with_query`,
   `with_fragment`, `req` and `children` are reserved labels.
 - A stop is `Not_found`, `Forbidden` (403), `Redirect`,
   `Redirect_off_site` or `Fail`.
 - `not_found` and `error` use the nearest one above the node. A
-  `not_found` or `error` below a layout that takes a loader result is an
-  error.
+  `not_found` or `error` below a layout or a head that takes a loader
+  result is an error.
 
 Rules, on any node except a redirect. `Router.post`, `Router.put`,
 `Router.patch` and `Router.delete` take no `~cache` and no `~prerender`:

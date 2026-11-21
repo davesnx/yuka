@@ -64,6 +64,7 @@ let swap target final header text =
   match target with
   | Some el ->
       fill el header text;
+      Navigation_web.set_head el;
       mark_links el (Navigation_web.path_of final)
   | None ->
       Client.stop ();

@@ -18,6 +18,7 @@
   dev
   element
   form_core
+  head
   island
   json_diff
   json_patch

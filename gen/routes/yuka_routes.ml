@@ -179,7 +179,7 @@ let unlabelled tag loc what = function
   | [ v ] -> v
   | _ -> fail loc "Router.%s takes %s as its one unlabelled argument" tag what
 
-let attachments = [ "page"; "overlay"; "layout"; "handler"; "guard"; "not_found"; "error" ]
+let attachments = [ "page"; "overlay"; "layout"; "head"; "handler"; "guard"; "not_found"; "error" ]
 
 let check_props tag loc props ~required ~optional =
   List.iter
@@ -369,12 +369,18 @@ let check_fallback levels =
         | [] -> ()
         | l :: rest ->
             let above = above @ [ l ] in
-            if Option.is_some l.layout && takes_loader above then
-              fail v.pexp_loc
-                "%s here renders inside the layout at line %d, which takes a loader \
-                 result; declare %s on a node above the loader"
-                prop (line l.lloc) prop
-            else scan above rest
+            let what =
+              if Option.is_some l.layout then Some "layout"
+              else if List.mem_assoc "head" l.props then Some "head"
+              else None
+            in
+            match what with
+            | Some what when takes_loader above ->
+                fail v.pexp_loc
+                  "%s here renders inside the %s at line %d, which takes a loader \
+                   result; declare %s on a node above the loader"
+                  prop what (line l.lloc) prop
+            | _ -> scan above rest
       in
       scan [] levels
 
@@ -421,7 +427,7 @@ let read ~server ~items names e =
     match tag with
     | "group" ->
         check_props tag loc props ~required:[ "path" ]
-          ~optional:([ "layout"; "loader"; "guard"; "not_found"; "error"; "search"; "prefetch" ] @ rules);
+          ~optional:([ "layout"; "head"; "loader"; "guard"; "not_found"; "error"; "search"; "prefetch" ] @ rules);
         let children = list_items (unlabelled tag loc "a list of child nodes" args) in
         let text, ploc, segs = own_path () in
         if has_rest segs then fail ploc "a Router.group path cannot hold a catch-all";
@@ -504,7 +510,7 @@ let read ~server ~items names e =
   let tag, args, props, loc = element e in
   if tag <> "make" then fail loc "the root must be Router.make";
   check_props tag loc props ~required:[]
-    ~optional:([ "layout"; "not_found"; "error"; "guard"; "prefetch" ] @ rules);
+    ~optional:([ "layout"; "head"; "not_found"; "error"; "guard"; "prefetch" ] @ rules);
   let children = list_items (unlabelled tag loc "a list of child nodes" args) in
   check_prerender props;
   check_prefetch props;
@@ -921,6 +927,22 @@ let layer_text ~loaders level =
     (expr (Option.get (prop "layout" level)))
     (args (seg_labels level.scope @ loaders))
 
+let with_heads levels page =
+  let rec go above = function
+    | [] -> []
+    | l :: rest ->
+        let above = above @ [ l ] in
+        (match prop "head" l with
+        | Some h -> [ sprintf "%s%s ()" (expr h) (args (seg_labels l.scope @ loader_labels above)) ]
+        | None -> [])
+        @ go above rest
+  in
+  match go [] levels with
+  | [] -> page
+  | heads -> sprintf "Yuka.Server.Generated.with_heads [ %s ] (%s)" (String.concat "; " heads) page
+
+let has_head levels = List.exists (fun l -> List.mem_assoc "head" l.props) levels
+
 let layer_name level = sprintf "layer_%d" (Option.get level.layout)
 
 let loader_free_layers levels =
@@ -992,7 +1014,9 @@ let nearest_fallback name levels =
     None (fallback_levels levels)
 
 let fallback_uses_params levels =
-  List.exists (fun l -> l.layout <> None && seg_labels l.scope <> []) (fallback_levels levels)
+  List.exists
+    (fun l -> (l.layout <> None || List.mem_assoc "head" l.props) && seg_labels l.scope <> [])
+    (fallback_levels levels)
   || List.exists
        (fun name ->
          match nearest_fallback name levels with
@@ -1007,9 +1031,13 @@ let fallback_text levels =
     | Some (f, l), Some label ->
         if List.mem label (seg_labels l.scope) then
           fail f.pexp_loc "%s takes ~%s, so no param of its path can be named %s" name label label;
-        sprintf "(fun %s -> %s%s ~%s ())" label (expr f) (args (seg_labels l.scope)) label
-    | Some (f, l), None -> sprintf "(fun () -> %s%s ())" (expr f) (args (seg_labels l.scope))
-    | None, _ -> default
+        sprintf "(fun %s -> %s)" label
+          (with_heads upto (sprintf "%s%s ~%s ()" (expr f) (args (seg_labels l.scope)) label))
+    | Some (f, l), None ->
+        sprintf "(fun () -> %s)" (with_heads upto (sprintf "%s%s ()" (expr f) (args (seg_labels l.scope))))
+    | None, _ when not (has_head upto) -> default
+    | None, Some label -> sprintf "(fun %s -> %s)" label (with_heads upto (sprintf "%s %s" default label))
+    | None, None -> sprintf "(fun () -> %s)" (with_heads upto (default ^ " ()"))
   in
   String.concat "\n"
     (("{" :: "  Yuka.Server.Generated.layers =" :: indent 4 (layers_lines upto))
@@ -1090,9 +1118,11 @@ let server_arm ~shared ~rule ~fallback n =
             [ "Yuka.Async.return"; "  (Stdlib.Ok"; "     {"; "       Yuka.Server.Generated.layers =" ]
             @ indent 9 (layers_lines n.levels)
             @ [
-                sprintf "       page = %s;" (call (Option.get (prop "page" leaf)));
+                sprintf "       page = %s;" (with_heads n.levels (call (Option.get (prop "page" leaf))));
                 sprintf "       overlay = %s;"
-                  (match prop "overlay" leaf with Some v -> sprintf "Some (%s)" (call v) | None -> "None");
+                  (match prop "overlay" leaf with
+                  | Some v -> sprintf "Some (%s)" (with_heads n.levels (call v))
+                  | None -> "None");
                 sprintf "     })%s);" (String.make (List.length loaders) ')');
               ]
           in

@@ -324,6 +324,15 @@ await step("3c. partial navigation", async () => {
   await page.waitForSelector("[data-nav-progress=finished]");
   check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
+  const owned = await page.evaluate(() =>
+    Array.from(document.head.querySelectorAll("[data-yuka-head]"), (m) => `${m.getAttribute("name") ?? m.getAttribute("property")}=${m.getAttribute("content")}`).join("|"),
+  );
+  const issueTitle = (await page.locator(".issue-title").textContent())?.trim();
+  check(
+    "3c.5b the head tags with data-yuka-head are those of the new page, merged with the group defaults",
+    owned === `description=${issueTitle}|og:site_name=Yuka demo|og:title=${issueTitle}`,
+    owned,
+  );
   const focusState = () =>
     page.evaluate(() => {
       const a = document.activeElement!, outlet = document.querySelector("yuka-outlet")!;

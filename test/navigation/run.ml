@@ -3211,6 +3211,41 @@ let idle_loads_router finish =
   plain_start ();
   until "the page level idle loads the navigation code at start" router_loaded finish 100
 
+let head_tags : unit -> string =
+  [%mel.raw
+    {|function () { return Array.from(document.head.querySelectorAll("meta[name=description],meta[name=other]"), function (m) { return m.getAttribute("name") + "=" + m.getAttribute("content") + (m.hasAttribute("data-yuka-head") ? "*" : ""); }).join(" ") }|}]
+
+let add_head : string -> unit = [%mel.raw "function (h) { document.head.insertAdjacentHTML('beforeend', h) }"]
+
+let head_tags_replaced finish =
+  setup (page {|<a id="l" href="/one">one</a>|});
+  add_head {|<meta name="description" content="old" data-yuka-head><meta name="other" content="kept">|};
+  plain_start ();
+  ignore (click "#l" "");
+  resolve_call 0
+    {|<!doctype html><html><head><title>One</title><meta name="other" content="not copied"><meta name="description" content="one" data-yuka-head></head><body><main>one</main></body></html>|}
+    "";
+  tick (fun () ->
+      check "document: owned tags replaced, others kept" "other=kept description=one*" (head_tags ());
+      setup "";
+      outlet_page ();
+      add_head {|<meta name="description" content="old" data-yuka-head><meta name="other" content="kept">|};
+      render ~islands:(runtime_registry [ probe_entry ]) ();
+      ignore (click "#two" "");
+      resolve_headers 0
+        {|<template data-yuka-head><meta name="description" content="two" data-yuka-head></template><p id="new">new</p>|}
+        200
+        [| ("yuka-outlet", "L0"); ("yuka-title", "Two"); ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "outlet: owned tags replaced, others kept" "other=kept description=two*" (head_tags ());
+          check "outlet: template removed" "0" (ints (count_selector "template"));
+          check "outlet: content" "new" (attr_text "#new");
+          ignore (click "#home" "");
+          resolve_headers 1 "<p>home</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-title", "Home"); ("yuka-build", "b1") |];
+          tick (fun () ->
+              check "outlet without a template: owned tags removed" "other=kept" (head_tags ());
+              finish ())))
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -3254,6 +3289,7 @@ let all =
     ("500 is shown in place", shown_in_place 500);
     ("partial response replaces the outlet", partial);
     ("a navigation answer sets the attributes of <html>", html_attributes);
+    ("a navigation answer replaces the head tags with data-yuka-head", head_tags_replaced);
     ("overlay: shown over the page, Back removes it with no request, Forward shows it", overlay);
     ("overlay: Routes.current and the focus follow the overlay", route_overlay);
     ("overlay: replaced from inside, Browser.back loads the background, a background link closes it", overlay_replaced);

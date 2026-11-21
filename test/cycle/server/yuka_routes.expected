@@ -524,8 +524,8 @@ let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.S
                 layer_0;
                 layer_2;
               ];
-            not_found = (fun path -> App.Pages.org_missing ~org ~path ());
-            error = (fun () -> error ());
+            not_found = (fun path -> Yuka.Server.Generated.with_heads [ App.Heads.org ~org (); App.Heads.x ~org () ] (App.Pages.org_missing ~org ~path ()));
+            error = (fun () -> Yuka.Server.Generated.with_heads [ App.Heads.org ~org (); App.Heads.x ~org () ] (error ()));
           };
           load =
             (fun () ->
@@ -539,8 +539,8 @@ let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.S
                          layer_0;
                          layer_2;
                        ];
-                     page = App.Pages.org_item ~org ~n ~org_item ();
-                     overlay = Some (App.Pages.org_dialog ~org ~n ~org_item ());
+                     page = Yuka.Server.Generated.with_heads [ App.Heads.org ~org (); App.Heads.x ~org () ] (App.Pages.org_item ~org ~n ~org_item ());
+                     overlay = Some (Yuka.Server.Generated.with_heads [ App.Heads.org ~org (); App.Heads.x ~org () ] (App.Pages.org_dialog ~org ~n ~org_item ()));
                    })));
         }
   | Cycle_shared.Routes.Feed ->
@@ -572,7 +572,7 @@ let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.S
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"e51c0b556f1752539db2de557d4e3ec9"
+  Yuka.Server.Generated.app ~build:"70e454d572ec228d22ca151917a57f34"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11 ]

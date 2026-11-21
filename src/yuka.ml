@@ -57,6 +57,8 @@ module Server = struct
   type log_level = Types.log_level
 
   let to_string build = Server.to_string (Kind.fn build)
+  module Head = Head
+
   let page ?title ?lang ?html_attributes ?head body = Cycle.page ?title ?lang ?html_attributes ?head (Kind.fn body)
 
   module Action = struct
@@ -98,6 +100,7 @@ module Server = struct
     let rules = Cycle.rules
     let default_not_found = Cycle.default_not_found
     let default_error = Cycle.default_error
+    let with_heads = Cycle.with_heads
     let loaded = Cycle.loaded
     let app = Cycle.app
   end

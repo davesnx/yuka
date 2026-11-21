@@ -74,7 +74,13 @@ let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yu
   let description = Markup_view.nodes (Markdown.render issue.description) in
   <Views.Issue_page issue description comments props />
 
-let issue ~id ~issue ~comments () = Yuka.Server.page ~title:id (fun () -> issue_view ~comments issue)
+let site_head () =
+  Yuka.Server.Head.make ~description:"An issue tracker built with Yuka" ~og:[ ("site_name", "Yuka demo") ] ()
+
+let issue ~id ~issue ~comments () =
+  Yuka.Server.page ~title:id
+    ~head:(Yuka.Server.Head.make ~description:issue.Model.Issue.title ~og:[ ("title", issue.title) ] ())
+    (fun () -> issue_view ~comments issue)
 
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->

@@ -56,9 +56,9 @@ let routes =
         ~guard:App.Guards.thing;
       Router.post Hook ~path:"/hook" ~handler:App.Api.hook
         ~cross_origin:true;
-      Router.group ~path:"/org/:org<string>" ~layout:App.Layouts.org
+      Router.group ~path:"/org/:org<string>" ~layout:App.Layouts.org ~head:App.Heads.org
         [
-          Router.group ~path:"/x" ~not_found:App.Pages.org_missing
+          Router.group ~path:"/x" ~not_found:App.Pages.org_missing ~head:App.Heads.x
             [
               Router.route Org_item ~path:"/:n<int>" ~page:App.Pages.org_item
                 ?overlay:App.Pages.org_dialog ~loader:App.Loaders.org_item;

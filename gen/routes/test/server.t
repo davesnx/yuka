@@ -87,6 +87,37 @@ the param is bound
             };
             load =
 
+~head on make and group: the heads of the path, outermost first, with the
+params and loader results of their node, are merged below the page, its
+overlay and the fallback pages
+
+  $ gen <<'EOF'
+  > Router.make ~head:Heads.site
+  >   [
+  >     Router.group ~path:"/t/:id<string>" ~loader:Loaders.team ~head:Heads.team
+  >       [ Router.route T ~path:"/:n<int>" ~page:Pages.t ?overlay:Pages.dialog ];
+  >   ]
+  > EOF
+  $ grep -e 'page =' -e 'overlay =' -e 'not_found =' -e 'error =' out.ml
+      not_found = (fun path -> Yuka.Server.Generated.with_heads [ Heads.site () ] (Yuka.Server.Generated.default_not_found path));
+      error = (fun () -> Yuka.Server.Generated.with_heads [ Heads.site () ] (Yuka.Server.Generated.default_error ()));
+                       page = Yuka.Server.Generated.with_heads [ Heads.site (); Heads.team ~id ~team () ] (Pages.t ~id ~n ~team ());
+                       overlay = Some (Yuka.Server.Generated.with_heads [ Heads.site (); Heads.team ~id ~team () ] (Pages.dialog ~id ~n ~team ()));
+
+not_found under a ~head that takes a loader result
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.group ~path:"/issue/:id<string>" ~loader:Loaders.issue ~head:Heads.issue
+  >       ~not_found:Pages.missing
+  >       [ Router.route Issue ~path:"/" ~page:Pages.issue ];
+  >   ]
+  > EOF
+  File "Routes.ml", line 4, characters 17-30:
+  Error: not_found here renders inside the head at line 3, which takes a loader result; declare not_found on a node above the loader
+  [1]
+
 Router.get answers GET and HEAD and follows the cache rules; Router.post,
 Router.put, Router.patch and Router.delete are never cached. ~cross_origin:true
 skips the origin check

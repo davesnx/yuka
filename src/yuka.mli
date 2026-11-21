@@ -1172,14 +1172,16 @@ val render :
     [Yuka-Outlet: KEY] answer it stops only the islands inside that outlet
     (and aborts their action calls), replaces its content, sets
     [document.title] from [Yuka-Title] (the raw value if it does not
-    decode), sets the [<html>] attributes from [Yuka-Html] (see
-    [Server.page]), and sets [aria-current="page"] on the links outside the outlet
+    decode), sets the [<html>] attributes from [Yuka-Html] and the head
+    tags with [data-yuka-head] from the [<template data-yuka-head>] of the
+    answer (see [Server.page]), and sets [aria-current="page"] on the links outside the outlet
     and outside islands whose [href] is the new path and that have no
     [aria-current], removing it from the others that have [page]; islands
     outside the outlet keep running. If that outlet is not on the page, it
     does [location.assign]. Without [Yuka-Outlet] it stops every island and
-    replaces [<body>] and [document.title] with those of the response and
-    sets the attributes of its [<html>]. Then it starts
+    replaces [<body>], [document.title] and the head tags with
+    [data-yuka-head] with those of the response and sets the attributes
+    of its [<html>]. Then it starts
     the new islands, pushes a history entry (after the page loaded) and
     scrolls to the fragment or to the top. It then writes the new
     [document.title] (or, when it is empty, the text of the first [h1] of
@@ -1608,22 +1610,70 @@ module Server : sig
         (** The error page, status 500. The message goes to [log],
             never to the page. *)
 
+  (** The head tags of a page that Yuka owns: title, description, robots,
+      canonical, alternates, Open Graph, Twitter and JSON-LD. A page gives
+      one with [page ~head]; a [~head] attachment of [Router.make] or
+      [Router.group] in [Routes.ml] gives the defaults of the routes below
+      it. *)
+  module Head : sig
+    type t
+
+    val make :
+      ?title:string ->
+      ?description:string ->
+      ?canonical:string ->
+      ?robots:string ->
+      ?og:(string * string) list ->
+      ?twitter:(string * string) list ->
+      ?alternates:(string * string) list ->
+      ?json_ld:Json.t list ->
+      unit ->
+      t
+    (** Each value is escaped when it is printed. In this order:
+        - [description], [robots]: [<meta name="description" content="...">].
+        - [canonical]: [<link rel="canonical" href="...">].
+        - [alternates]: [(hreflang, href)] pairs,
+          [<link rel="alternate" hreflang="..." href="...">].
+        - [og]: [("title", "Post")] gives
+          [<meta property="og:title" content="Post">].
+        - [twitter]: [("card", "summary")] gives
+          [<meta name="twitter:card" content="summary">].
+        - [json_ld]: one [<script type="application/ld+json">] for each
+          value, with [<] written as [\u003c].
+
+        Each tag has the attribute [data-yuka-head]. [title] is the
+        [<title>].
+
+        A head below replaces the one above it, from the root to the
+        page: [title], [description], [canonical] and [robots] replace the
+        value above when they are given. In [og], [twitter] and
+        [alternates], a name replaces all the pairs of that name above; a
+        name repeated in one list is kept (two [og:image]). [json_ld] adds
+        to the values above. *)
+  end
+
   type page
-  (** What a page function returns: a title, the [<html>] attributes,
-      extra head HTML and the body. *)
+  (** What a page function returns: its head, the [<html>] attributes
+      and the body. *)
 
   val page :
     ?title:string ->
     ?lang:string ->
     ?html_attributes:(string * string) list ->
-    ?head:string ->
+    ?head:Head.t ->
     (unit -> server element) ->
     page
   (** [page ~title body]. The cycle calls [body] when it renders, for
-      [HEAD] too (to send the length of the [GET] answer). [head] is raw
-      HTML added to the document head, after
+      [HEAD] too (to send the length of the [GET] answer). [title]
+      replaces the title of [head]. The tags of [head], merged with the
+      [~head] attachments of the route (see {!Head.make}), come after
       [<meta name="viewport" content="width=device-width, initial-scale=1">],
-      which every document has.
+      which every document has, and after the [head] of {!config}.
+
+      A client navigation replaces the tags with [data-yuka-head] in
+      [<head>] with those of the new page: from the new document, or, for
+      an outlet answer, from a [<template data-yuka-head>] at the start of
+      the answer. An overlay answer does not change them.
 
       [lang] and [html_attributes] are the attributes of [<html>], in this
       order: [page ~lang:"es" ~html_attributes:[ ("class", "dark") ]]
@@ -2063,6 +2113,10 @@ module Server : sig
     val default_error : unit -> page
     (** An [<h1>Internal Server Error</h1>] page, for a [Routes.ml] without
         [error]. *)
+
+    val with_heads : Head.t list -> page -> page
+    (** The page with the [~head] attachments of its route, outermost
+        first, merged below its own head. *)
 
     (** What a matched route runs. *)
     type target =

@@ -591,7 +591,7 @@ An overlay on a group
   > Router.make [ Router.group ~path:"/a" ?overlay:Pages.dialog [ Router.route A ~path:"/" ~page:Pages.a ] ]
   > EOF
   File "Routes.ml", line 1, characters 47-59:
-  Error: Router.group has no argument ?overlay; its labelled arguments are ~path, ~layout, ~loader, ~guard, ~not_found, ~error, ~search, ~prefetch, ~headers, ~cache, ~prerender
+  Error: Router.group has no argument ?overlay; its labelled arguments are ~path, ~layout, ~head, ~loader, ~guard, ~not_found, ~error, ~search, ~prefetch, ~headers, ~cache, ~prerender
   [1]
 
 An overlay given twice

@@ -1259,6 +1259,25 @@ let navigation =
           (String.starts_with
              ~prefix:{|<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Plain</title>|}
              (get "/plain").body) );
+    ( "typed head: the ~head of the groups merged below the page, escaped, in the document and in an outlet answer",
+      fun () ->
+        let tags =
+          {|<meta name="description" content="Item" data-yuka-head><meta name="robots" content="noindex" data-yuka-head><link rel="canonical" href="https://example.com/x?a=1&amp;b=&quot;2&quot;" data-yuka-head><link rel="alternate" hreflang="es" href="/es/x" data-yuka-head><meta property="og:image" content="/a.png" data-yuka-head><meta property="og:image" content="/b.png" data-yuka-head><meta property="og:title" content="Item &quot;2&quot;" data-yuka-head><meta name="twitter:card" content="summary" data-yuka-head><script type="application/ld+json" data-yuka-head>{"@type":"Organization","name":"\u003c/script>\u003cb>"}</script><script type="application/ld+json" data-yuka-head>{"@type":"Article"}</script>|}
+        in
+        let r = get "/org/acme/x/2" in
+        check_true "layout title" (contains r.body "<title>Org acme</title>");
+        check_true "merged tags in the head" (contains r.body ({|<meta name="yuka-prefetch" content="idle">|} ^ tags ^ {|<link rel="stylesheet"|}));
+        let r = nav "L0" "/org/acme/x/2" in
+        check_header r "yuka-title" [ "Org%20acme" ];
+        check_true "outlet answer starts with the tags" (String.starts_with ~prefix:("<template data-yuka-head>" ^ tags ^ "</template>") r.body);
+        let r = get ~headers:[ ("Yuka-Navigate", "L0"); ("Yuka-Overlay", "1") ] "/org/acme/x/2" in
+        check_true "no tags in an overlay answer" (not (contains r.body "data-yuka-head"));
+        let r = get "/org/acme/x/404" in
+        check_true "not found: own title" (contains r.body "<title>Org missing</title>");
+        check_true "not found: group tags"
+          (contains r.body {|<meta name="description" content="Org &lt;acme> &amp; co" data-yuka-head><meta name="robots" content="noindex" data-yuka-head>|});
+        check_true "no tags outside the group" (not (contains (get "/plain").body "data-yuka-head"));
+        check_true "no template outside the group" (not (contains (nav "L0" "/plain").body "data-yuka-head")) );
     ( "a streamed document has the build meta",
       fun () ->
         let r = get "/plain" in

@@ -236,6 +236,16 @@ let swap_page : string -> unit =
   document.title = parsed.title;
   for (const a of parsed.documentElement.attributes) document.documentElement.setAttribute(a.name, a.value);
   document.body.innerHTML = parsed.body.innerHTML;
+  document.head.querySelectorAll("[data-yuka-head]").forEach(function (e) { e.remove(); });
+  document.head.append.apply(document.head, parsed.head.querySelectorAll("[data-yuka-head]"));
+}|}]
+
+let set_head : node -> unit =
+  [%mel.raw
+    {|function (el) {
+  const h = document.head, t = el.querySelector(":scope > template[data-yuka-head]");
+  h.querySelectorAll("[data-yuka-head]").forEach(function (e) { e.remove(); });
+  if (t) { h.append(t.content); t.remove(); }
 }|}]
 
 let set_html : string -> unit =
