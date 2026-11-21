@@ -1,0 +1,198 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #030305;
+  color: #c9c4b8;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.lux-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
+.lux-bar {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgb(10 10 14 / 0.75);
+}
+
+.lux-button {
+  font: inherit;
+  color: inherit;
+  background: #1a1a22;
+  border: 1px solid #2e2e3a;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.lux-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lux-readout {
+  font-variant-numeric: tabular-nums;
+  min-width: 18ch;
+}
+
+.lux-problem {
+  color: #ff8a7a;
+}
+
+a.lux-button {
+  text-decoration: none;
+}
+
+.lux-dom {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+
+.lux-grid {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  display: grid;
+  grid-template-columns: repeat(var(--n), 100px);
+  grid-auto-rows: 100px;
+}
+
+@property --g {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes breathe {
+  50% {
+    background-color: rgb(255 255 255 / 0.035);
+  }
+}
+
+@keyframes flicker {
+  0%,
+  100% {
+    background-color: rgb(0 0 0 / 0.06);
+  }
+  17% {
+    background-color: rgb(0 0 0 / 0.16);
+  }
+  31% {
+    background-color: rgb(0 0 0 / 0.02);
+  }
+  52% {
+    background-color: rgb(0 0 0 / 0.1);
+  }
+  74% {
+    background-color: rgb(0 0 0 / 0);
+  }
+}
+
+@keyframes ignite {
+  from {
+    --g: 1;
+  }
+  to {
+    --g: 0;
+  }
+}
+
+.c {
+  position: relative;
+  margin: 6px;
+  border-radius: 16px;
+  background: #13151c;
+}
+
+.c::before,
+.c::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.c::after {
+  animation: breathe 7s ease-in-out var(--d) infinite;
+}
+
+.s0,
+.s1,
+.s2,
+.s3,
+.s4 {
+  animation: ignite 0.9s ease-out;
+}
+
+.s0::after,
+.s1::after,
+.s2::after,
+.s3::after,
+.s4::after {
+  animation: flicker 1.3s linear var(--d) infinite;
+}
+
+.s0 {
+  background:
+    linear-gradient(rgb(255 225 180 / calc(var(--g) * 0.7)) 0 0),
+    radial-gradient(circle, rgb(255 205 140), rgb(214 108 32) 30%, rgb(110 40 8) 62%, transparent 72%),
+    #13151c;
+}
+
+.s1 {
+  background:
+    linear-gradient(rgb(255 225 180 / calc(var(--g) * 0.7)) 0 0),
+    radial-gradient(ellipse 32% 95% at 50% 0%, rgb(160 195 255), rgb(30 80 225) 45%, transparent 100%),
+    #13151c;
+}
+
+.s2 {
+  background:
+    linear-gradient(rgb(255 225 180 / calc(var(--g) * 0.7)) 0 0),
+    repeating-radial-gradient(circle at 30% 70%, rgb(0 0 0 / 0.28) 0 5px, transparent 5px 12px),
+    radial-gradient(circle at 30% 70%, rgb(170 255 120), rgb(60 200 40) 25%, rgb(20 90 10) 55%, transparent 80%),
+    #13151c;
+}
+
+.s3 {
+  background:
+    linear-gradient(rgb(255 225 180 / calc(var(--g) * 0.7)) 0 0),
+    radial-gradient(circle, transparent 0 20%, rgb(150 70 255) 29%, rgb(225 170 255) 33%, rgb(150 70 255) 37%, transparent 47%),
+    radial-gradient(circle, rgb(60 20 110), transparent 70%),
+    #13151c;
+}
+
+.s4 {
+  background:
+    linear-gradient(rgb(255 225 180 / calc(var(--g) * 0.7)) 0 0),
+    linear-gradient(to top, rgb(255 120 40), rgb(200 30 8) 35%, rgb(60 8 2) 75%, transparent),
+    #13151c;
+}
+
+.b1::before { background: rgb(0 0 0 / 0.21); }
+.b2::before { background: rgb(0 0 0 / 0.36); }
+.b3::before { background: rgb(0 0 0 / 0.46); }
+.b4::before { background: rgb(0 0 0 / 0.52); }
+.b5::before { background: rgb(0 0 0 / 0.57); }
+.b6::before { background: rgb(0 0 0 / 0.6); }
+.b7::before { background: rgb(0 0 0 / 0.62); }

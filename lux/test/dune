@@ -1,0 +1,4 @@
+(tests
+ (names spread_test run_test)
+ (package yuka-dream)
+ (libraries alcotest lux_shared))

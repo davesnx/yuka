@@ -1,0 +1,74 @@
+let buckets = 8
+let names = Array.init ((Spread.styles * buckets) + 1) (fun code -> if code = 0 then "c" else "c s" ^ string_of_int ((code - 1) / buckets) ^ " b" ^ string_of_int ((code - 1) mod buckets))
+let code ~style ~level = 1 + (style * buckets) + min (buckets - 1) ((level - 1) / 24)
+let delay i = "--d:-" ^ string_of_int ((((i * 1103515245) + 12345) lsr 8) mod 7000) ^ "ms"
+
+let[@client] make ~(n : int) () =
+  let n = max 8 (min 512 n) in
+  let readout = Yuka.State.make "" in
+  let following = Yuka.State.make true in
+  let ready = Yuka.State.make false in
+  let cards = ref [||] in
+  let run = ref None in
+  let input = ref None in
+  let light (r : Run.t) =
+    let spread = Run.spread r in
+    let level = Spread.level spread in
+    for i = 0 to Spread.fresh_count spread - 1 do
+      let cell = Spread.fresh spread i in
+      Yuka.State.set !cards.(cell) (code ~style:(Option.value (Spread.style spread cell) ~default:0) ~level)
+    done
+  in
+  Yuka.Effect.after
+    ~cleanup:(fun () ->
+      Option.iter Input.detach !input;
+      input := None;
+      run := None)
+    (fun () ->
+      let r = Run.create ~size:n ~seed:(Input.random_seed ()) ~width:(Input.width ()) ~height:(Input.height ()) in
+      cards := Array.init (n * n) (fun _ -> Yuka.State.make 0);
+      light r;
+      run := Some r;
+      input := Input.attach "lux-dom" r;
+      Yuka.State.set ready true;
+      let shown = ref 0. in
+      Yuka.Browser.on_frame (fun time ->
+          Run.resize r ~width:(Input.width ()) ~height:(Input.height ());
+          if Run.tick r time then light r;
+          let scale = Run.scale r in
+          Input.set_transform "lux-grid"
+            ((Run.width r /. 2.) -. (Run.center_x r *. scale))
+            ((Run.height r /. 2.) -. (Run.center_y r *. scale))
+            (scale /. 100.);
+          if time -. !shown >= 500. then begin
+            shown := time;
+            Yuka.State.set readout (Run.readout r ^ " | " ^ string_of_int (n * n) ^ " cards");
+            Yuka.State.set following (Run.following r)
+          end));
+  let follow _ =
+    Option.iter Run.follow !run;
+    Yuka.State.set following true
+  in
+  let restart _ =
+    match !run with
+    | None -> ()
+    | Some r ->
+        Run.restart r ~seed:(Input.random_seed ());
+        Array.iter (fun card -> Yuka.State.set card 0) !cards;
+        light r;
+        Yuka.State.set following true
+  in
+  let card i = <div class_=names.(Yuka.State.get !cards.(i)) style=(delay i) /> in
+  <div class_="lux">
+    <div id="lux-dom" class_="lux-dom">
+      <div id="lux-grid" class_="lux-grid" style=("--n:" ^ string_of_int n)>
+        (Yuka.hole (fun () -> if Yuka.State.get ready then Yuka.fragment (List.init (n * n) card) else Yuka.empty))
+      </div>
+    </div>
+    <div class_="lux-bar">
+      <button class_="lux-button" type_=`button disabled=(Yuka.State.get following) on_click=follow>"Follow"</button>
+      <button class_="lux-button" type_=`button on_click=restart>"Restart"</button>
+      <a class_="lux-button" href="/">"WebGL"</a>
+      <span class_="lux-readout" data_readout="true">(Yuka.text (Yuka.State.get readout))</span>
+    </div>
+  </div>
