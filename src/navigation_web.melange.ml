@@ -177,6 +177,16 @@ let on_visible : (unit -> unit) -> unit -> unit =
   return function () { d.removeEventListener("visibilitychange", h); };
 }|}]
 
+let on_input : (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (f) {
+  const w = window, names = ["wheel", "touchstart", "keydown", "pointerdown"], o = { capture: true, passive: true };
+  const off = function () { names.forEach(function (n) { w.removeEventListener(n, h, o); }); };
+  const h = function () { off(); f(); };
+  names.forEach(function (n) { w.addEventListener(n, h, o); });
+  return off;
+}|}]
+
 let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit =
   [%mel.raw
     {|function (els, f) {

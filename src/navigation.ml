@@ -318,11 +318,13 @@ let pass () =
 let following : (Web.node * (unit -> unit)) list ref = ref []
 let owners = ref 0
 
-let follow root s =
+let follow root place s =
   incr owners;
-  let owner = !owners and live = ref true in
+  let owner = !owners and live = ref true and place = ref place in
+  let unlisten = ref ignore in
   let rec stop () =
     live := false;
+    !unlisten ();
     following := without (fun (_, f) -> f == stop) !following;
     s.next <- ignore;
     s.cancel ();
@@ -333,19 +335,25 @@ let follow root s =
     Navigation_web.adopt_stylesheets ()
   in
   List.iter put (List.rev s.parts);
+  !place ();
   if Option.is_none s.result then begin
     Navigation_web.hold root owner false;
     following := (root, stop) :: !following;
+    unlisten := Navigation_web.on_input (fun () -> place := ignore);
     s.next <-
       (fun p ->
         if !live then
           match p with
-          | Some (("", _) as p) -> put p
+          | Some (("", _) as p) ->
+              put p;
+              !place ()
           | Some p ->
               put p;
+              !place ();
               Navigation_web.hold root owner false;
               !start_islands ()
           | None ->
+              !unlisten ();
               following := without (fun (_, f) -> f == stop) !following;
               Navigation_web.hold root owner true;
               !start_islands ())
@@ -398,9 +406,6 @@ let show ~dir ~push ~restore url a =
               hide ();
               swap target final a.header a.text;
               Platform.kept := [];
-              (match restore with
-              | Some y -> Navigation_web.scroll_to y
-              | None -> Navigation_web.scroll_to_hash (hash_of final));
               target
             end
           in
@@ -408,7 +413,16 @@ let show ~dir ~push ~restore url a =
           let page = Web.document () in
           following :=
             without (fun (r, stop) -> (Web.contains root r || not (Web.contains page r)) && (stop (); true)) !following;
-          Option.iter (follow root) a.stream;
+          let place =
+            match (over, restore, hash_of final) with
+            | true, _, _ -> ignore
+            | false, Some y, _ -> fun () -> Navigation_web.scroll_to y
+            | false, None, "" ->
+                Navigation_web.scroll_to 0.;
+                ignore
+            | false, None, h -> fun () -> Navigation_web.scroll_to_hash h
+          in
+          (match a.stream with Some s -> follow root place s | None -> place ());
           !Platform.swapped target;
           !start_islands ();
           Navigation_web.live ();

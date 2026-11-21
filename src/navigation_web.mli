@@ -37,6 +37,7 @@ val after : int -> (unit -> unit) -> unit -> unit
 val save_data : unit -> bool
 val hidden_or_slow : unit -> bool
 val on_visible : (unit -> unit) -> unit -> unit
+val on_input : (unit -> unit) -> unit -> unit
 val observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit
 val trajectory : (node -> string) -> (string -> unit) -> unit -> unit
 val warm : string -> string -> unit

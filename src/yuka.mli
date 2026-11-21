@@ -1204,8 +1204,13 @@ val render :
     shown as soon as its first line comes: the page with the [loading]
     content of each pending [await]. The title, history, scroll,
     announcer and focus change then, and {!Browser.navigating} becomes
-    [false]. Each fill that comes later replaces the [loading] content of
-    its [await] inside the new content (the outlet, the overlay or
+    [false]. On Back or Forward, the fills that the navigation cache
+    holds are put in place before the scroll to the saved position, and
+    the page scrolls to that position again after each later fill, until
+    a [wheel], [touchstart], [keydown] or [pointerdown] event or the end
+    of the stream. A fragment whose element comes in a later fill is
+    scrolled to by the same rule. Each fill that comes later replaces the
+    [loading] content of its [await] inside the new content (the outlet, the overlay or
     [<body>]), each async value is added at its end, and the islands of a
     fill start when it comes. An island that holds a pending [await]
     starts after the fill of that [await], so it hydrates the settled

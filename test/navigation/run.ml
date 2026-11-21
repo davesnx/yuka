@@ -778,6 +778,112 @@ let streamed_broken finish =
               check "a broken stream is not kept in the cache" "3" (ints (calls ()));
               finish ())))
 
+let scroll_needs : string -> unit =
+  [%mel.raw
+    {|function (sel) { window.scrollTo = function (x, y) { globalThis.__log.push("scroll:" + y + (document.querySelector(sel) ? "" : ":short")); }; }|}]
+
+let log_scrolls : unit -> string =
+  [%mel.raw
+    "function () { return globalThis.__log.filter(function (s) { return s.startsWith('scroll') || s.startsWith('into') }).join('|') }"]
+
+let fire_input : string -> unit = [%mel.raw "function (n) { window.dispatchEvent(new window.Event(n)) }"]
+
+let append_body : string -> unit = [%mel.raw "function (h) { document.body.insertAdjacentHTML('beforeend', h) }"]
+
+let streamed_shell = {|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]--><!--[L0-s2--><i>wait</i><!--]-->|}
+
+let away_and_back i k =
+  set_scroll 500.;
+  ignore (click "#home" "");
+  resolve_headers i {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      log_clear ();
+      back k)
+
+let streamed_back_cached finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  scroll_needs "#done";
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0"); ("cache-control", "max-age=60") |];
+  push_text 0 (json_line streamed_shell);
+  tick (fun () ->
+      push_text 0 (part_line "L0-s1" {|<b id="done">done</b>|});
+      push_text 0 (part_line "L0-s2" "<b>more</b>");
+      push_text 0 "[]\n";
+      push_end 0;
+      tick (fun () ->
+          away_and_back 1 (fun () ->
+              check "no new request" "2" (ints (calls ()));
+              check "Back to a cached stream scrolls once, after its parts" "scroll:500" (log_scrolls ());
+              finish ())))
+
+let streamed_back_live finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  scroll_needs "#done";
+  ignore (click "#two" "");
+  resolve_headers 0 streamed_shell 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      away_and_back 1 (fun () ->
+          resolve_stream 2 [| ("yuka-outlet", "L0") |];
+          push_text 2 (json_line streamed_shell);
+          tick (fun () ->
+              check "the shell is too short" "scroll:500:short" (log_scrolls ());
+              push_text 2 (part_line "L0-s1" {|<b id="done">done</b>|});
+              tick (fun () ->
+                  check "the saved position is applied again after a fill" "scroll:500:short|scroll:500" (log_scrolls ());
+                  push_text 2 "[]\n";
+                  push_end 2;
+                  tick (fun () ->
+                      check "nothing after the stream settles" "scroll:500:short|scroll:500" (log_scrolls ());
+                      finish ())))))
+
+let streamed_back_user_scrolled finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  scroll_needs "#done";
+  ignore (click "#two" "");
+  resolve_headers 0 streamed_shell 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      away_and_back 1 (fun () ->
+          resolve_stream 2 [| ("yuka-outlet", "L0") |];
+          push_text 2 (json_line streamed_shell);
+          tick (fun () ->
+              fire_input "wheel";
+              push_text 2 (part_line "L0-s1" {|<b id="done">done</b>|});
+              tick (fun () ->
+                  check "a fill after the user scrolled keeps the scroll" "scroll:500:short" (log_scrolls ());
+                  check "the fill is shown" "done" (attr "#done" "id");
+                  finish ()))))
+
+let streamed_fragment_in_fill finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  append_body {|<a id="frag" href="/two#late">late</a>|};
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  log_clear ();
+  ignore (click "#frag" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0 (json_line streamed_shell);
+  tick (fun () ->
+      check "no target in the shell: the top" "scroll:0" (log_scrolls ());
+      push_text 0 (part_line "L0-s1" {|<h2 id="late">late</h2>|});
+      tick (fun () ->
+          check "a fragment target in a later fill is scrolled to" "scroll:0|into:late" (log_scrolls ());
+          finish ()))
+
 let call_overlay : int -> string =
   [%mel.raw "function (i) { return String(globalThis.__calls[i].init.headers['Yuka-Overlay']) }"]
 
@@ -3533,6 +3639,10 @@ let all =
     ("a streamed answer into an inner outlet stops when the outer outlet is replaced", streamed_inner_replaced);
     ("the end of a body stream leaves the islands of a newer outlet stream held", streamed_outlet_under_body_stream);
     ("a streamed answer that a newer navigation replaces before its transition runs is aborted", streamed_superseded_before_apply);
+    ("Back to a cached streamed page restores the scroll after its parts", streamed_back_cached);
+    ("Back to a live streamed page applies the scroll again after each fill", streamed_back_live);
+    ("Back to a live streamed page keeps the scroll once the user scrolled", streamed_back_user_scrolled);
+    ("a fragment target in a later fill of a streamed page is scrolled to", streamed_fragment_in_fill);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);
     ("other outlet keys miss", keys_miss);

@@ -300,8 +300,12 @@ each `Await`, and `navigating` becomes `false`. Each `Await` then replaces
 its `loading` content when its value comes, and its islands start. An
 island that holds a pending `Await` starts after that `Await` is filled.
 The title, focus, scroll and announcer change when the new page is shown,
-not with each fill. A newer navigation stops the fills of the page it
-replaces.
+not with each fill. On Back or Forward, the page first gets the fills
+that the navigation cache holds, then scrolls to its saved position. It
+scrolls to that position again after each fill that comes later, until
+the user scrolls, touches, clicks or types, or the stream ends. A URL
+fragment whose element comes in a later fill is scrolled to by the same
+rule. A newer navigation stops the fills of the page it replaces.
 
 After a client navigation to another page, Yuka tells screen readers
 about it and moves the focus, as a full page load does:
