@@ -4,12 +4,14 @@ import { dirname, join } from "node:path";
 import { request } from "node:http";
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
+import { createRequire } from "node:module";
 import { readFileSync, writeFileSync, openSync } from "node:fs";
 
 const playwrightPath =
   process.env.PLAYWRIGHT_CORE ??
   "/home/me/workplace/davesnx/sancho.dev/node_modules/playwright-core/index.mjs";
 const { chromium } = await import(playwrightPath);
+const axeSource = readFileSync(createRequire(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json")).resolve("axe-core/axe.min.js"), "utf8");
 
 const base = (process.argv[2] ?? "http://127.0.0.1:8123").replace(/\/$/, "");
 const shots = join(dirname(fileURLToPath(import.meta.url)), "screenshots");
@@ -1522,7 +1524,7 @@ await step("6h. insights", async () => {
   await pg.waitForFunction(() => Number((document.querySelector('[data-metric="nodes"]')?.textContent ?? "").replace(/,/g, "")) === document.querySelectorAll("[data-chart] *").length).catch(() => {});
   const nodeCounts = await counted();
   check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > hundredPoints && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
-  const hud = pg.locator("aside[data-hud]");
+  const hud = pg.locator("[data-hud]");
   const toggle = hud.locator("button[aria-controls]");
   await pg.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const pinned = await hud.evaluate((element) => {
@@ -1547,7 +1549,7 @@ await step("6h. insights", async () => {
   await pg.waitForSelector("#insights-dates:popover-open");
   const narrow = await pg.evaluate(() => {
     const inside = (selector: string) => { const box = document.querySelector(selector)!.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; };
-    return { overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hud: inside("aside[data-hud]"), dialog: inside("#insights-dates"), animate: inside("button[data-animate]") };
+    return { overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hud: inside("[data-hud]"), dialog: inside("#insights-dates"), animate: inside("button[data-animate]") };
   });
   check("6h.26 at 390 px nothing scrolls sideways and the panel, the range dialog and Animate fit", narrow.overflow <= 0 && narrow.hud && narrow.dialog && narrow.animate, JSON.stringify(narrow));
   await pg.keyboard.press("Escape");
@@ -2579,6 +2581,44 @@ await step("9. screenshots", async () => {
   expectedFailures = 0;
   await page.screenshot({ path: join(shots, "not-found.png") });
   check("9 screenshots written to e2e/screenshots", true);
+});
+
+const axePages = ["/", "/my", "/insights", "/report", "/canvas", "/new", "/issue/YUK-1", "/issue/NOPE", "/about", "/before-hydration"];
+const axeWorkspacePages = ["/w/stress", "/w/stress/my", "/w/stress/insights", "/w/stress/report", "/w/stress/canvas", "/w/stress/new", "/w/stress/issue/STR-1", "/w/stress/issue/NOPE"];
+const axeListPages = ["/", "/my", "/w/stress", "/w/stress/my"];
+const axeKnown: Record<string, string[]> = {
+  "html-has-lang": [...axePages, ...axeWorkspacePages],
+  "label-content-name-mismatch": axeListPages,
+  "page-has-heading-one": [...axeListPages, "/insights", "/report", "/canvas", "/w/stress/insights", "/w/stress/report", "/w/stress/canvas"],
+  "heading-order": ["/issue/YUK-1"],
+};
+const axeViolations = async (p: Page) => {
+  await p.addScriptTag({ content: axeSource });
+  return p.evaluate(async () => {
+    const result = await (window as any).axe.run(document);
+    return (result.violations as { id: string; nodes: { target: string[] }[] }[]).map((v) => ({ id: v.id, targets: v.nodes.map((n) => n.target.join(" ")) }));
+  });
+};
+
+await step("13. axe", async () => {
+  for (const path of [...axePages, ...axeWorkspacePages]) {
+    const p = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await p.goto(base + path, { waitUntil: "networkidle" });
+    await p.waitForFunction(() => [...document.querySelectorAll("yuka-island")].every((i) => (i as any).__yuka_started));
+    const violations = await axeViolations(p);
+    const known = Object.keys(axeKnown).filter((id) => axeKnown[id].includes(path));
+    const found = violations.filter((v) => !known.includes(v.id));
+    check(`13.1 axe finds no violation on ${path}`, found.length === 0, found.map((v) => `${v.id}: ${v.targets.slice(0, 3).join(", ")}`).join(" | "));
+    const fixed = known.filter((id) => !violations.some((v) => v.id === id));
+    check(`13.2 each known violation on ${path} still occurs`, fixed.length === 0, fixed.join(","));
+    await p.close();
+  }
+  const p = await browser.newPage();
+  await p.goto(base + "/about", { waitUntil: "networkidle" });
+  await p.evaluate(() => document.body.append(document.createElement("img")));
+  const planted = (await axeViolations(p)).map((v) => v.id);
+  check("13.3 axe reports a violation added on purpose", planted.includes("image-alt"), planted.join(","));
+  await p.close();
 });
 
 check("10 no page errors in whole run", pageErrors.length === 0, pageErrors.join(" | "));

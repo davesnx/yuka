@@ -710,7 +710,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
              (tooltip (hover_in "label"))
            </svg>)
     </div>
-    <aside class_=Css.hud role=`status aria_live=`off aria_label="Performance" data_hud="true">
+    <div class_=Css.hud role=`status aria_live=`off aria_label="Performance" data_hud="true">
       <div class_=Css.hud_head>
         <span class_=Css.hud_fps>
           <span class_=Css.hud_label>"FPS"</span>
@@ -741,5 +741,5 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
            <p class_=Css.hud_note>"Last 60 frames. Long frames: over 50 ms in the last 10 s."</p>
          </div>
        else Yuka.empty)
-    </aside>
+    </div>
   </div>

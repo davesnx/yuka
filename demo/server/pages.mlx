@@ -112,7 +112,7 @@ let before_hydration () =
 
 let create_in workspace =
   Yuka.Server.page ~title:"New issue" (fun () ->
-      <main class_="new-issue-page">
+      <div class_="new-issue-page">
         <h1>"New issue"</h1>
         <Yuka.Form action=Actions.create_issue>
           (fun form ->
@@ -121,7 +121,7 @@ let create_in workspace =
               <button class_="button primary" type_=`submit>"Create issue"</button>
             </div>)
         </Yuka.Form>
-      </main>)
+      </div>)
 
 let create () = create_in Model.Workspace.default
 

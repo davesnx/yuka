@@ -160,7 +160,7 @@ module Issue_page = struct
           <h2 class_="section-title">"Activity"</h2>
           comments
         </article>
-        <aside class_="properties">props</aside>
+        <aside class_="properties" aria_label="Properties">props</aside>
       </div>
     </div>
 end

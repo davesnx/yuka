@@ -3,6 +3,7 @@
   "private": true,
   "devDependencies": {
     "@swc/core": "1.16.22",
+    "axe-core": "4.14.0",
     "esbuild": "^0.28.2",
     "jsdom": "^31.0.0",
     "playwright-core": "^1.62.1"

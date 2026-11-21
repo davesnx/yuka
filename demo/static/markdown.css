@@ -6,8 +6,7 @@
 .markdown h2 { font-size: 20px; }
 .markdown h3 { font-size: 17px; }
 .markdown h4, .markdown h5, .markdown h6 { font-size: 15px; }
-.markdown a { color: var(--accent); }
-.markdown a:hover { text-decoration: underline; }
+.markdown a { color: var(--accent); text-decoration: underline; }
 .markdown strong { color: var(--text); font-weight: 600; }
 .markdown ul, .markdown ol { padding-left: 22px; }
 .markdown li + li { margin-top: 3px; }
