@@ -637,6 +637,31 @@ let partial finish =
       check "outer kept, inner stopped, new running" "g1/3|g1/1" (log_g ());
       finish ())
 
+let keep_html_attr : unit -> unit = [%mel.raw "function () { document.documentElement.setAttribute('data-mode', 'keep') }"]
+
+let html_attributes finish =
+  setup (page {|<a id="l" href="/one">one</a>|});
+  keep_html_attr ();
+  plain_start ();
+  ignore (click "#l" "");
+  resolve_call 0 {|<!doctype html><html lang="fr" dir="rtl"><head><title>One</title></head><body><main>one</main></body></html>|} "";
+  tick (fun () ->
+      check "document: lang" "fr" (attr "html" "lang");
+      check "document: dir" "rtl" (attr "html" "dir");
+      check "document: other attribute kept" "keep" (attr "html" "data-mode");
+      setup "";
+      outlet_page ();
+      keep_html_attr ();
+      render ~islands:(runtime_registry [ probe_entry ]) ();
+      ignore (click "#two" "");
+      resolve_headers 0 "<p>new</p>" 200
+        [| ("yuka-outlet", "L0"); ("yuka-title", "Two"); ("yuka-build", "b1"); ("yuka-html", "%20lang%3D%22es%22%20class%3D%22a%26quot%3Bb%22") |];
+      tick (fun () ->
+          check "outlet: lang" "es" (attr "html" "lang");
+          check "outlet: escaped value" {|a"b|} (attr "html" "class");
+          check "outlet: other attribute kept" "keep" (attr "html" "data-mode");
+          finish ()))
+
 let count_selector : string -> int = [%mel.raw "function (sel) { return document.querySelectorAll(sel).length }"]
 
 let call_overlay : int -> string =
@@ -3228,6 +3253,7 @@ let all =
     ("404 is shown in place", shown_in_place 404);
     ("500 is shown in place", shown_in_place 500);
     ("partial response replaces the outlet", partial);
+    ("a navigation answer sets the attributes of <html>", html_attributes);
     ("overlay: shown over the page, Back removes it with no request, Forward shows it", overlay);
     ("overlay: Routes.current and the focus follow the overlay", route_overlay);
     ("overlay: replaced from inside, Browser.back loads the background, a background link closes it", overlay_replaced);

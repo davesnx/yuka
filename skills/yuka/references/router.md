@@ -41,6 +41,14 @@ let post (_ : Yuka.Server.request) ~slug =
     (if slug = "hello" then Ok "Hello, world" else Error Yuka.Server.Not_found)
 ```
 
+`Yuka.Server.page` also takes the attributes of `<html>`:
+`~lang:"es"` and `~html_attributes:[ ("class", "dark") ]` give
+`<html lang="es" class="dark">`. A client navigation sets them on the
+`<html>` of the page. It does not remove an attribute that the new page
+does not give, so give the same names on each page. Every document has
+`<meta name="viewport" content="width=device-width, initial-scale=1">`
+in its head; do not add it again in `~head`.
+
 ## Nodes
 
 - `Router.make [ nodes ]`: the root.

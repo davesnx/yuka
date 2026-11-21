@@ -234,7 +234,15 @@ let swap_page : string -> unit =
     {|function (text) {
   const parsed = new document.defaultView.DOMParser().parseFromString(text, "text/html");
   document.title = parsed.title;
+  for (const a of parsed.documentElement.attributes) document.documentElement.setAttribute(a.name, a.value);
   document.body.innerHTML = parsed.body.innerHTML;
+}|}]
+
+let set_html : string -> unit =
+  [%mel.raw
+    {|function (v) {
+  try { v = decodeURIComponent(v) } catch (e) {}
+  for (const a of new document.defaultView.DOMParser().parseFromString("<html" + v + ">", "text/html").documentElement.attributes) document.documentElement.setAttribute(a.name, a.value);
 }|}]
 
 let adopt_stylesheets : unit -> unit =

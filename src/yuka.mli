@@ -1172,12 +1172,14 @@ val render :
     [Yuka-Outlet: KEY] answer it stops only the islands inside that outlet
     (and aborts their action calls), replaces its content, sets
     [document.title] from [Yuka-Title] (the raw value if it does not
-    decode), and sets [aria-current="page"] on the links outside the outlet
+    decode), sets the [<html>] attributes from [Yuka-Html] (see
+    [Server.page]), and sets [aria-current="page"] on the links outside the outlet
     and outside islands whose [href] is the new path and that have no
     [aria-current], removing it from the others that have [page]; islands
     outside the outlet keep running. If that outlet is not on the page, it
     does [location.assign]. Without [Yuka-Outlet] it stops every island and
-    replaces [<body>] and [document.title] with those of the response. Then it starts
+    replaces [<body>] and [document.title] with those of the response and
+    sets the attributes of its [<html>]. Then it starts
     the new islands, pushes a history entry (after the page loaded) and
     scrolls to the fragment or to the top. It then writes the new
     [document.title] (or, when it is empty, the text of the first [h1] of
@@ -1607,12 +1609,30 @@ module Server : sig
             never to the page. *)
 
   type page
-  (** What a page function returns: a title, extra head HTML and the body. *)
+  (** What a page function returns: a title, the [<html>] attributes,
+      extra head HTML and the body. *)
 
-  val page : ?title:string -> ?head:string -> (unit -> server element) -> page
+  val page :
+    ?title:string ->
+    ?lang:string ->
+    ?html_attributes:(string * string) list ->
+    ?head:string ->
+    (unit -> server element) ->
+    page
   (** [page ~title body]. The cycle calls [body] when it renders, for
       [HEAD] too (to send the length of the [GET] answer). [head] is raw
-      HTML added to the document head. *)
+      HTML added to the document head, after
+      [<meta name="viewport" content="width=device-width, initial-scale=1">],
+      which every document has.
+
+      [lang] and [html_attributes] are the attributes of [<html>], in this
+      order: [page ~lang:"es" ~html_attributes:[ ("class", "dark") ]]
+      prints [<html lang="es" class="dark">]. The values are escaped. An
+      attribute name that is not valid raises [Invalid_argument], and the
+      page is the error page. A client navigation sets these attributes on
+      the [<html>] of the page, from the new document or, for an outlet
+      answer, from the header [Yuka-Html]. It does not remove an attribute
+      that the new page does not give: give the same names on each page. *)
 
   type cache
   (** The [cache-control] value of a route rule. In [Routes.ml], the

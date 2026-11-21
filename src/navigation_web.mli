@@ -25,6 +25,7 @@ val keys : unit -> string
 val is_html : string -> bool
 val event_type : event -> string
 val swap_page : string -> unit
+val set_html : string -> unit
 val absolute : string -> string
 val max_age : string -> int
 val key_before : string -> string -> bool

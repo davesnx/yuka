@@ -23,7 +23,7 @@ let import_map ~url packages =
     (fun pkg -> (pkg ^ "/", url ^ "/node_modules/" ^ pkg ^ "/"))
     packages
 
-let head ~extra ?head ?(early = false) ?(import_map = []) ?(title = "")
+let head ~extra ?head ?(html = "") ?(early = false) ?(import_map = []) ?(title = "")
     ?(styles = []) ?(scripts = []) () =
   let attr = Printer.escape ~quote:true in
   let styles =
@@ -40,7 +40,9 @@ let head ~extra ?head ?(early = false) ?(import_map = []) ?(title = "")
       scripts
   in
   String.concat ""
-    ([ "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>";
+    ([ "<!DOCTYPE html><html";
+       html;
+       "><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>";
        Printer.escape ~quote:false title;
        "</title>" ]
     @ import_map_script import_map

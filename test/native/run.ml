@@ -225,7 +225,7 @@ let page_cases =
         (fun () -> Yuka.element "p" [] [ Yuka.text "hi" ])
     in
     check string "document"
-      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>A &amp; B</title><link rel=\"stylesheet\" href=\"/a.css\"><script type=\"module\" src=\"/m.js\"></script></head><body><p>hi</p></body></html>"
+      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>A &amp; B</title><link rel=\"stylesheet\" href=\"/a.css\"><script type=\"module\" src=\"/m.js\"></script></head><body><p>hi</p></body></html>"
       html
   in
   let to_string () =
@@ -265,7 +265,7 @@ let page_cases =
     get
       (Yuka.Private.stream ~sleep:never_sleep ~write (fun () -> Yuka.text "x"));
     check string "body"
-      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title></title></head><body>x</body></html>"
+      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title></title></head><body>x</body></html>"
       (String.concat "" (chunks ()))
   in
   let component_effect () =
@@ -777,7 +777,7 @@ let page_extra_cases =
         (fun () -> Yuka.text "x")
     in
     check string "head content"
-      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>T</title><script type=\"importmap\">{\"imports\":{\"yuka/\":\"/js/node_modules/yuka/\",\"m\\u003c\":\"/m\"}}</script><meta name=\"x\" content=\"y\"><link rel=\"stylesheet\" href=\"/a.css\"><script type=\"module\" src=\"/m.js\"></script></head><body>x</body></html>"
+      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>T</title><script type=\"importmap\">{\"imports\":{\"yuka/\":\"/js/node_modules/yuka/\",\"m\\u003c\":\"/m\"}}</script><meta name=\"x\" content=\"y\"><link rel=\"stylesheet\" href=\"/a.css\"><script type=\"module\" src=\"/m.js\"></script></head><body>x</body></html>"
       html
   in
   let no_import_map () =

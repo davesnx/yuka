@@ -57,7 +57,8 @@ let fill el header text =
   Navigation_web.adopt_stylesheets ();
   Web.set_inner_html el text;
   Navigation_web.adopt_stylesheets ();
-  Option.iter Navigation_web.set_title title
+  Option.iter Navigation_web.set_title title;
+  Option.iter Navigation_web.set_html (header "yuka-html")
 
 let swap target final header text =
   match target with

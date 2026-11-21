@@ -36,6 +36,7 @@ let trajectory : (node -> string) -> (string -> unit) -> unit -> unit = fun _ _ 
 let warm : string -> string -> unit = fun _ _ -> browser_only ()
 let transition : string -> (unit -> unit) -> unit = fun _ _ -> browser_only ()
 let swap_page : string -> unit = fun _ -> browser_only ()
+let set_html : string -> unit = fun _ -> browser_only ()
 let adopt_stylesheets : unit -> unit = fun _ -> browser_only ()
 let live : unit -> unit = fun _ -> browser_only ()
 let settle : node -> string -> unit = fun _ _ -> browser_only ()

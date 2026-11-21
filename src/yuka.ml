@@ -57,7 +57,7 @@ module Server = struct
   type log_level = Types.log_level
 
   let to_string build = Server.to_string (Kind.fn build)
-  let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
+  let page ?title ?lang ?html_attributes ?head body = Cycle.page ?title ?lang ?html_attributes ?head (Kind.fn body)
 
   module Action = struct
     let implement = Server.implement

@@ -133,7 +133,7 @@ module Pages = struct
   let plain () = Server.page ~title:"Plain" (fun () -> el "p" [ text "plain" ])
 
   let find ~q ~tag () =
-    Server.page ~title:"Caf\xc3\xa9 \xe2\x9c\x93" (fun () ->
+    Server.page ~title:"Caf\xc3\xa9 \xe2\x9c\x93" ~lang:"es" ~html_attributes:[ ("data-theme", "a\"b") ] (fun () ->
         text (Option.value q ~default:"-" ^ "|" ^ String.concat "," tag))
 
   let island name =

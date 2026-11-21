@@ -1246,6 +1246,19 @@ let navigation =
       fun () ->
         let r = nav "L0" "/find" in
         check_header r "yuka-title" [ "Caf%C3%A9%20%E2%9C%93" ] );
+    ( "lang and html attributes: on <html> in a document, in Yuka-Html in an outlet answer",
+      fun () ->
+        let shell = {|<!DOCTYPE html><html lang="es" data-theme="a&quot;b"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>|} in
+        check_true "streamed document" (String.starts_with ~prefix:shell (get "/find").body);
+        let r = nav "X0" "/find" in
+        check_true "full-document navigation answer" (String.starts_with ~prefix:shell r.body);
+        check_header r "yuka-html" [];
+        check_header (nav "L0" "/find") "yuka-html" [ "%20lang%3D%22es%22%20data-theme%3D%22a%26quot%3Bb%22" ];
+        check_header (nav "L0" "/plain") "yuka-html" [];
+        check_true "no attributes"
+          (String.starts_with
+             ~prefix:{|<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Plain</title>|}
+             (get "/plain").body) );
     ( "a streamed document has the build meta",
       fun () ->
         let r = get "/plain" in
