@@ -331,6 +331,20 @@ await step("3b. router", async () => {
   await popup.close();
   const reloadLinks = await page.locator("a[data-yuka-reload]").count();
   console.log(`SKIP  3b.11 data-yuka-reload: the demo has no such link (${reloadLinks} found)`);
+  const entries = await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.id = "e2e-replace";
+    a.href = "/issue/YUK-3";
+    a.setAttribute("data-yuka-replace", "");
+    a.textContent = "replace";
+    document.body.prepend(a);
+    return history.length;
+  });
+  await page.locator("#e2e-replace").click();
+  await page.waitForURL("**/issue/YUK-3");
+  await page.waitForSelector(".comment-input");
+  const replaced = await page.evaluate(() => history.length);
+  check("3b.12 a link with data-yuka-replace is a client navigation that replaces the entry", replaced === entries && (await marker()) === "alive", `history.length ${entries} -> ${replaced} marker=${await marker()}`);
 });
 
 await step("3c. partial navigation", async () => {

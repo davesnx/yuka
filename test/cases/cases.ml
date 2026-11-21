@@ -710,7 +710,7 @@ let platform_delegation () =
       alt_key = (fun _ -> false);
       client_x = (fun _ -> 12.5);
       client_y = (fun _ -> 34.);
-      navigate = (fun url -> add ("go:" ^ url));
+      navigate = (fun ~replace url -> add ((if replace then "replace:" else "go:") ^ url));
       focus = (fun id -> add ("focus:" ^ id));
       scroll_into_view = (fun id -> add ("scroll:" ^ id));
     }
@@ -721,10 +721,11 @@ let platform_delegation () =
       add (string_of_bool (Event.alt_key event));
       add (Printf.sprintf "%g,%g" (Event.client_x event) (Event.client_y event));
       Browser.navigate "/a?b=1";
+      Browser.navigate ~replace:true "/c";
       Browser.focus "box";
       Browser.scroll_into_view "row-2");
   check "calls reach the platform"
-    "stop li true false 12.5,34 go:/a?b=1 focus:box scroll:row-2" (read ())
+    "stop li true false 12.5,34 go:/a?b=1 replace:/c focus:box scroll:row-2" (read ())
 
 let async_on_result () =
   let add, read = log () in

@@ -16,9 +16,9 @@ let cancel_pending () =
       Navigation_web.abort c
   | None -> ()
 
-let assign url =
+let assign ~replace url =
   Navigation_state.set false;
-  Web.location_assign url
+  Web.navigate replace url
 
 let save_scroll = Navigation_stub.save_scroll
 
@@ -371,14 +371,14 @@ let follow root place s =
               !start_islands ())
   end
 
-let show ~dir ~push ~restore url a =
+let show ~dir ~push ~replace ~restore url a =
   let final =
     match hash_of url with
     | "" -> a.final
     | h -> Navigation_web.no_hash a.final ^ h
   in
   match swappable a with
-  | None -> assign final
+  | None -> assign ~replace final
   | Some target ->
       let over = is "overlay" (a.header "yuka-layer") in
       if push then begin
@@ -395,10 +395,10 @@ let show ~dir ~push ~restore url a =
                   title = Navigation_web.title ();
                   focus = Navigation_web.active ();
                   route = Navigation_web.route_script ();
-                  direct = true;
+                  direct = not replace;
                 })
             :: !overlays;
-        if String.equal (Navigation_web.no_hash final) (Web.current_url ()) then begin
+        if replace || String.equal (Navigation_web.no_hash final) (Web.current_url ()) then begin
           Web.table_delete (scrolls ()) !current_key;
           Navigation_web.replace_entry key final
         end
@@ -446,8 +446,8 @@ let show ~dir ~push ~restore url a =
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 
-let load ~overlay ~dir ~push ~restore url =
-  if not !started then assign url
+let load ~overlay ~dir ~push ~replace ~restore url =
+  if not !started then assign ~replace url
   else begin
     cancel_pending ();
     !hover ();
@@ -456,8 +456,8 @@ let load ~overlay ~dir ~push ~restore url =
     let gen = !nav in
     let apply = function
       | _ when !nav <> gen -> ()
-      | Some a -> show ~dir ~push ~restore url a
-      | None -> assign url
+      | Some a -> show ~dir ~push ~replace ~restore url a
+      | None -> assign ~replace url
     in
     let key = page_key url in
     take key;
@@ -481,7 +481,7 @@ let load ~overlay ~dir ~push ~restore url =
         (ended s (fun () -> Option.iter drop !cached))
         (fun () ->
           pending := None;
-          assign url)
+          assign ~replace url)
     in
     match lookup overlay key with
     | Some e -> (
@@ -497,15 +497,15 @@ let load ~overlay ~dir ~push ~restore url =
     | None -> fetch ()
   end
 
-let navigate url =
+let navigate ~replace url =
   save_scroll ();
-  load ~overlay:true ~dir:"push" ~push:true ~restore:None url
+  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:None url
 
 let back () =
   match showing () with
   | Some o when not o.direct ->
       save_scroll ();
-      load ~overlay:false ~dir:"back" ~push:true ~restore:None o.url
+      load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None o.url
   | _ -> Web.history_back ()
 
 let on_over e =
@@ -587,7 +587,7 @@ let on_popstate _ =
   else
     load
       ~overlay:(List.exists (fun (o : overlay) -> String.equal o.key next && String.equal o.under (beneath ())) !overlays)
-      ~dir ~push:false
+      ~dir ~push:false ~replace:false
       ~restore:(Some y) (Web.current_url ())
 
 let handle e =

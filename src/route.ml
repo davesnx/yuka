@@ -28,7 +28,7 @@ let replace url =
     Platform.loaded := Web.current_url ();
     moved ()
   end
-  else Browser.navigate url
+  else Browser.navigate ~replace:true url
 
 let push url =
   if same_page url then begin

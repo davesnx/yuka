@@ -286,6 +286,18 @@ shown (the fragment does not count), for example a click on the link of
 the current page or the reload after a form succeeds, replaces the current
 entry, as the browser does. So Back goes to the page before.
 
+To replace the current entry also for another URL, use
+`Yuka.Browser.navigate ~replace:true url`, or give the link a
+`data-yuka-replace` attribute:
+
+```ocaml
+<a href=(Routes.blog ~tag:"bug" ()) data_yuka_replace="">(Yuka.text "Bugs")</a>
+```
+
+Without client navigation, `~replace:true` does `location.replace`, so
+the full page load also replaces the entry. On a page with no island, a
+link with `data-yuka-replace` is a plain link and adds an entry.
+
 `Yuka.Browser.navigating` is a read-only State: `true` from the click
 until the new page is shown (or a full page load starts in its place). An
 island can read it to show a progress bar:
@@ -415,7 +427,10 @@ that is shown with no request: the URL (`history.replaceState` or
 `history.pushState`) and the State, so every island that reads
 `Routes.current` shows the new route. After `push`, Back and Forward set the
 State again with no request. A route of another page (another node, or
-another path param) is a client navigation, as `Yuka.Browser.navigate`.
+another path param) is a client navigation: `Routes.replace` replaces the
+current history entry, as `Yuka.Browser.navigate ~replace:true`, and
+`Routes.push` adds an entry, as `Yuka.Browser.navigate`. So a search field
+that calls `Routes.replace` on each key adds no entries.
 A reload loads the new URL, and the server renders the page with it.
 
 To keep the state of a page in its URL, such as a filter that a user can

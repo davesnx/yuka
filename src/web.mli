@@ -75,7 +75,7 @@ val fetch_post :
   unit ->
   unit
 val watch_added : (node array -> bool) -> unit -> unit
-val navigate : string -> unit
+val navigate : bool -> string -> unit
 val focus : string -> unit
 val focus_node : node -> unit
 val scroll_into_view : string -> unit
@@ -95,7 +95,6 @@ val fire : node -> unit
 val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
 val promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit
 
-val location_assign : string -> unit
 val current_url : unit -> string
 val same_origin : string -> bool
 val fresh_key : unit -> string
@@ -109,6 +108,7 @@ val history_replace_url : string -> unit
 val manual_scroll : unit -> unit
 val plain_click : event -> bool
 val link_href : bool -> node -> string
+val link_flag : string -> node -> bool
 type 'a table
 
 val table : unit -> 'a table

@@ -903,7 +903,7 @@ module Private : sig
     alt_key : Event.t -> bool;
     client_x : Event.t -> float;
     client_y : Event.t -> float;
-    navigate : string -> unit;
+    navigate : replace:bool -> string -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
   }
@@ -1106,10 +1106,12 @@ val runtime_route_current :
 
 val runtime_route_replace : string -> unit
 (** [Routes.replace]: a URL of the page shown is written with [history.replaceState] and sets
-    the route; another page is a client navigation. *)
+    the route; another page is a client navigation that replaces the current history entry,
+    as [Browser.navigate ~replace:true]. *)
 
 val runtime_route_push : string -> unit
-(** [Routes.push]: as {!runtime_route_replace}, with [history.pushState]. *)
+(** [Routes.push]: as {!runtime_route_replace}, with [history.pushState]; another page is
+    a client navigation that adds a history entry. *)
 
 (**/**)
 
@@ -1164,7 +1166,9 @@ val render :
       event is already prevented, a modifier key is down, the link has a
       [target] other than [_self], a [download] attribute or a
       [data-yuka-reload] attribute, the URL is on another origin, or the URL
-      differs from the current one only by its fragment.
+      differs from the current one only by its fragment. A link with a
+      [data-yuka-replace] attribute replaces the current history entry, as
+      [Browser.navigate ~replace:true].
     - [popstate] loads the entry's URL without pushing history.
     - {!Browser.navigate} is a client navigation.
 

@@ -127,8 +127,8 @@ external stop_propagation : event -> unit = "stopPropagation" [@@mel.send]
 external set_flag : event -> string -> bool -> unit = "" [@@mel.set_index]
 external get_flag : event -> string -> bool option = "" [@@mel.get_index] [@@mel.return nullable]
 
-let navigate : string -> unit =
-  [%mel.raw "function (url) { window.location.assign(url) }"]
+let navigate : bool -> string -> unit =
+  [%mel.raw "function (replace, url) { if (replace) window.location.replace(url); else window.location.assign(url) }"]
 
 let focus : string -> unit =
   [%mel.raw
@@ -324,10 +324,6 @@ let fire : node -> unit =
   n.dispatchEvent(new w.Event("change", { bubbles: true }));
 }|}]
 
-let location_assign : string -> unit =
-  [%mel.raw
-    "function (url) { window.location.assign(url) }"]
-
 let same_origin : string -> bool =
   [%mel.raw
     "function (url) { try { return new URL(url, window.location.href).origin === window.location.origin } catch (e) { return false } }"]
@@ -383,6 +379,9 @@ let link_href : bool -> node -> string =
   if (a.hash && a.pathname === l.pathname && a.search === l.search) return "";
   return a.href;
 }|}]
+
+let link_flag : string -> node -> bool =
+  [%mel.raw "function (name, t) { return t.closest(\"a[href]\").hasAttribute(name) }"]
 
 type 'a table
 

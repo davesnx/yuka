@@ -111,7 +111,7 @@ let go f fail =
       end;
       load ()
 
-let navigate href = go (fun r -> r.navigate href) (fun () -> Web.location_assign href)
+let navigate ~replace href = go (fun r -> r.navigate ~replace href) (fun () -> Web.navigate replace href)
 
 let on_click e =
   if (not !failed) && Web.plain_click e then
@@ -119,7 +119,7 @@ let on_click e =
     | "" -> ()
     | href ->
         Web.prevent_default e;
-        navigate href
+        navigate ~replace:(Web.link_flag "data-yuka-replace" (Web.target e)) href
 
 let on_link e =
   if Option.is_some !router || Web.link_href true (Web.target e) <> "" then
@@ -136,7 +136,7 @@ let on_leave e = if !loading || Option.is_some !router then use (fun r -> r.hand
 let on_popstate e =
   go
     (fun r -> r.handle e)
-    (fun () -> if Web.current_url () <> !loaded then Web.location_assign (Web.current_url ()))
+    (fun () -> if Web.current_url () <> !loaded then Web.navigate false (Web.current_url ()))
 
 let start ~load ?lazy_entries ?(transitions = false) entries =
   on := true;

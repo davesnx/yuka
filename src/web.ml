@@ -96,7 +96,7 @@ let decode_uri s =
 let contains : node -> node -> bool = fun _ _ -> browser_only ()
 let fetch_post : string -> string -> (int -> string -> unit) -> (bool -> string -> unit) -> unit -> unit = fun _ _ _ _ _ -> browser_only ()
 let watch_added : (node array -> bool) -> unit -> unit = fun _ _ -> browser_only ()
-let navigate : string -> unit = fun _ -> browser_only ()
+let navigate : bool -> string -> unit = fun _ _ -> browser_only ()
 let focus : string -> unit = fun _ -> browser_only ()
 let focus_node : node -> unit = fun _ -> browser_only ()
 let scroll_into_view : string -> unit = fun _ -> browser_only ()
@@ -116,7 +116,6 @@ let fire : node -> unit = fun _ -> browser_only ()
 let promise_map : ('a -> 'b) -> 'a promise -> 'b promise = fun _ _ -> browser_only ()
 let promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit = fun _ _ _ -> browser_only ()
 
-let location_assign : string -> unit = fun _ -> browser_only ()
 let current_url : unit -> string = fun _ -> browser_only ()
 let same_origin : string -> bool = fun _ -> browser_only ()
 let fresh_key : unit -> string = fun _ -> browser_only ()
@@ -130,6 +129,7 @@ let history_replace_url : string -> unit = fun _ -> browser_only ()
 let manual_scroll : unit -> unit = fun _ -> browser_only ()
 let plain_click : event -> bool = fun _ -> browser_only ()
 let link_href : bool -> node -> string = fun _ _ -> browser_only ()
+let link_flag : string -> node -> bool = fun _ _ -> browser_only ()
 type 'a table = (string, 'a) Hashtbl.t
 
 let table () = Hashtbl.create 8

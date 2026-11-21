@@ -170,7 +170,7 @@ let island_of name view = runtime_island ~name ~props:`Null view
 
 let record_navigation () =
   navigated := [];
-  Private.platform := { !Private.platform with navigate = (fun u -> navigated := !navigated @ [ u ]) }
+  Private.platform := { !Private.platform with navigate = (fun ~replace:_ u -> navigated := !navigated @ [ u ]) }
 
 let submit_in : string -> unit =
   [%mel.raw

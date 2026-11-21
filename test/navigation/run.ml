@@ -2894,6 +2894,38 @@ let same_url_replaces finish =
                           finish ()))))))
     100
 
+let replace_navigations finish =
+  let links = page {|<a id="r" href="/a" data-yuka-replace>a</a><a id="p" href="/p">p</a>|} in
+  setup links;
+  plain_start ();
+  let length = history_length () in
+  ignore (click "#r" "");
+  until "the click fetches" (fun () -> calls () > 0)
+    (fun () ->
+      resolve_call 0 (doc "A" links) "";
+      tick (fun () ->
+          check "a link with data-yuka-replace adds no entry" (ints length) (ints (history_length ()));
+          check "at the URL of the link" "/a" (location_ ());
+          Browser.navigate ~replace:true "/b";
+          resolve_call 1 (doc "B" links) "";
+          tick (fun () ->
+              check "Browser.navigate ~replace:true adds no entry" (ints length) (ints (history_length ()));
+              check "at its URL" "/b" (location_ ());
+              Yuka.runtime_route_replace "/c";
+              check "Routes.replace to another page loads it" "3" (ints (calls ()));
+              resolve_call 2 (doc "C" links) "";
+              tick (fun () ->
+                  check "Routes.replace to another page adds no entry" (ints length) (ints (history_length ()));
+                  check "at the replaced URL" "/c" (location_ ());
+                  ignore (click "#p" "");
+                  resolve_call 3 (doc "P" links) "";
+                  tick (fun () ->
+                      check "a link with no attribute pushes" (ints (length + 1)) (ints (history_length ()));
+                      back (fun () ->
+                          check "Back goes to the entry that the replace navigations wrote" "/c" (location_ ());
+                          finish ()))))))
+    100
+
 let fire_touch : string -> string -> unit =
   [%mel.raw
     "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
@@ -3648,6 +3680,7 @@ let all =
     ("Browser.replace_url", replace_url);
     ("back to an entry loads its replaced URL", replace_url_back);
     ("a navigation to the URL shown replaces its entry", same_url_replaces);
+    ("a replace navigation from a link, Browser.navigate and Routes.replace replaces its entry", replace_navigations);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);
