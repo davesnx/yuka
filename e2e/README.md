@@ -29,3 +29,17 @@ two pages, all through the proxy:
 
 `BUNDLE=1 e2e/run.sh` runs `demo/bundle.sh` and starts the server with
 `--bundle`. The check then expects one script and no import map.
+
+## sketch
+
+`e2e/sketch.sh` (or `make sketch-e2e`) builds the sketch demo, starts it on
+`PORT` (default 8130) under `/demo/sketch`, and runs `sketch.ts`: every
+whiteboard feature, a phone with touch, and the dark theme. Screenshots go to
+`SHOTS` (default `e2e/screenshots/sketch/`). Against a running server:
+
+    node e2e/sketch.ts http://127.0.0.1:8130/demo/sketch DIR
+
+`sketch_perf.ts` loads a board of 500 shapes and prints the frame times of a
+pen stroke, a drag of 50 shapes and a pan. `CPU_THROTTLE=4` slows the CPU:
+
+    node e2e/sketch_perf.ts http://127.0.0.1:8130/demo/sketch

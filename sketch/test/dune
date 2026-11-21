@@ -1,0 +1,4 @@
+(tests
+ (names geometry_test editor_test)
+ (package yuka-dream)
+ (libraries alcotest sketch_shared yuka))

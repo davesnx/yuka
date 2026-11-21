@@ -83,6 +83,26 @@ demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browse
 demo-test: ## Run the demo tests
 	$(DUNE) build @demo/runtest --force
 
+.PHONY: sketch-build
+sketch-build: ## Build the sketch whiteboard demo (server and client)
+	$(DUNE) build --profile=dev @sketch/all
+
+.PHONY: sketch-bundle
+sketch-bundle: sketch-build ## Bundle the sketch client with esbuild
+	BUILD_DIR=$(BUILD_DIR) demo/bundle.sh sketch
+
+.PHONY: sketch-serve
+sketch-serve: sketch-build ## Serve the sketch demo on PORT
+	$(BUILD_DIR)/default/sketch/server/sketch_server.exe --port $(PORT)
+
+.PHONY: sketch-test
+sketch-test: ## Run the sketch tests (geometry, editor)
+	$(DUNE) build @sketch/runtest --force
+
+.PHONY: sketch-e2e
+sketch-e2e: ## Browser check of every sketch feature, with screenshots (PORT, SHOTS)
+	SWITCH=$(SWITCH) BUILD_DIR=$(BUILD_DIR) e2e/sketch.sh
+
 .PHONY: e2e
 e2e: ## Browser check of the demo (native ES modules)
 	SWITCH=$(SWITCH) BUILD_DIR=$(BUILD_DIR) e2e/run.sh

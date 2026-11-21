@@ -1,0 +1,16 @@
+(library
+ (name sketch_shared)
+ (modes native melange)
+ (libraries yuka)
+ (melange.libraries yuka)
+ (preprocess
+  (pps yuka.ppx))
+ (melange.preprocess
+  (pps yuka.ppx melange.ppx)))
+
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka} routes --shared --source %{dep:../Routes.ml}))))

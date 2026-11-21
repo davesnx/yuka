@@ -1,0 +1,414 @@
+let canvas_id = "sketch-canvas"
+let text_id = "sketch-text"
+let storage_key = "sketch.board.v1"
+let n = Num.to_string
+let ink c = "var(--ink-" ^ Shape.color_name c ^ ")"
+let tint c = "var(--tint-" ^ Shape.color_name c ^ ")"
+let paint = function Render.Ink c -> ink c | Tint c -> tint c | No_paint -> "none"
+
+let part (p : Render.part) =
+  match p with
+  | Path { d; fill; stroke; width } ->
+      <path d fill=(paint fill) stroke=(paint stroke) stroke_width=(n width) stroke_linecap=`round
+        stroke_linejoin=`round />
+  | Text { lines; x; size; color } ->
+      <text class_="shape-text" font_size=(n size) fill=(ink color)>
+        (Yuka.fragment (List.map (fun (line, y) -> <tspan x=(n x) y=(n y)>(Yuka.text line)</tspan>) lines))
+      </text>
+
+let pi = Float.pi
+let keep_focus event = Yuka.Event.prevent_default event
+
+let cursor_css = function
+  | Editor.Default -> "default"
+  | Cross -> "crosshair"
+  | Grab -> "grab"
+  | Grabbing -> "grabbing"
+  | Move -> "move"
+  | Text_cursor -> "text"
+  | Rotate_cursor -> "var(--cursor-rotate)"
+  | Resize angle ->
+      let a = Geom.normalize_angle angle in
+      let a = if a >= pi then a -. pi else a in
+      let step = Float.to_int (Float.round (a /. (pi /. 4.))) mod 4 in
+      (match step with 0 -> "ew-resize" | 1 -> "nwse-resize" | 2 -> "ns-resize" | _ -> "nesw-resize")
+
+type overlay = {
+  frame : Vec.t list;
+  angle : float;
+  handles : (Editor.handle * Vec.t) list;
+  boxes : Vec.t list list;
+  marquee : (Vec.t * Vec.t) option;
+}
+
+let crisp (p : Vec.t) = Vec.make (Float.of_int (Float.to_int (Float.round p.x)) +. 0.5) (Float.of_int (Float.to_int (Float.round p.y)) +. 0.5)
+
+let overlay_of e =
+  let camera = Editor.camera e in
+  let screen p = crisp (Camera.to_screen camera p) in
+  let frame, angle =
+    let lone_line = match Editor.handles e with [ (Start, _); (End, _) ] -> true | _ -> false in
+    match (Editor.editing e, Editor.selection_frame e) with
+    | None, Some f when not lone_line -> (Array.to_list (Array.map screen (Geom.Frame.corners f)), f.rotation)
+    | _ -> ([], 0.)
+  in
+  let marquee =
+    Option.map
+      (fun (b : Geom.Box.t) -> (screen (Vec.make b.x b.y), screen (Vec.make (b.x +. b.w) (b.y +. b.h))))
+      (Editor.marquee e)
+  in
+  let boxes = List.map (fun f -> Array.to_list (Array.map screen (Geom.Frame.corners f))) (Editor.selection_boxes e) in
+  { frame; angle; handles = List.map (fun (h, p) -> (h, crisp p)) (Editor.handles e); boxes; marquee }
+
+let points ps = String.concat " " (List.map (fun (p : Vec.t) -> n p.x ^ "," ^ n p.y) ps)
+let degrees a = n (a *. 180. /. pi)
+
+let handle_view ~angle (h, (p : Vec.t)) =
+  match (h : Editor.handle) with
+  | N | S | E | W ->
+      let bw, bh = match h with N | S -> (12., 4.) | _ -> (4., 12.) in
+      <rect class_="handle edge" x=(n (p.x -. (bw /. 2.))) y=(n (p.y -. (bh /. 2.))) width=(n bw) height=(n bh) rx="2"
+        transform=("rotate(" ^ degrees angle ^ " " ^ n p.x ^ " " ^ n p.y ^ ")")
+        data_handle=(match h with N -> "n" | S -> "s" | E -> "e" | _ -> "w") />
+  | Rotate -> <circle class_="handle rotate" cx=(n p.x) cy=(n p.y) r="4.5" data_handle="rotate" />
+  | Start | End -> <circle class_="handle end" cx=(n p.x) cy=(n p.y) r="5" data_handle=(if h = Start then "start" else "end") />
+  | NE | NW | SE | SW ->
+      <rect class_="handle" x=(n (p.x -. 4.)) y=(n (p.y -. 4.)) width="8" height="8" rx="1.5"
+        transform=("rotate(" ^ degrees angle ^ " " ^ n p.x ^ " " ^ n p.y ^ ")")
+        data_handle=(match h with NE -> "ne" | NW -> "nw" | SE -> "se" | _ -> "sw") />
+
+let selected_shapes board selection =
+  match selection with
+  | [] -> []
+  | ids ->
+      let table = Hashtbl.create 16 in
+      List.iter (fun id -> Hashtbl.replace table id ()) ids;
+      List.filter (fun (s : Shape.t) -> Hashtbl.mem table s.id) (Array.to_list (Board.shapes board))
+
+let outline_view cls (s : Shape.t) = <path class_=cls d=(Render.outline s) transform=(Render.transform s) />
+
+let icon d = <svg class_="icon" view_box="0 0 24 24" width="20" height="20" aria_hidden=true><path d /></svg>
+
+let tool_icon = function
+  | Editor.Select -> icon "M6 3.5l12.5 7.3-5.6 1.4-2.6 5.6z"
+  | Hand ->
+      icon
+        "M8.5 12.5V6a1.5 1.5 0 0 1 3 0v5.5M11.5 11V4.5a1.5 1.5 0 0 1 3 0V11M14.5 11V6a1.5 1.5 0 0 1 3 0v7.5c0 3.6-2.6 6.5-6.2 6.5-2.3 0-3.7-1-4.9-2.7l-2.6-3.9a1.5 1.5 0 0 1 2.4-1.8l1.8 1.9"
+  | Draw -> icon "M4 19.5c2.2-.3 3.4-2 4.6-4.6 1.4-3 2.3-6.3 4.4-8.5 1.5-1.6 3.6-2 5-.6 1.3 1.3.9 3.3-.6 4.7-2.6 2.4-6.4 2.4-7.4 5.4-.6 1.8.6 3.2 2.6 3.1"
+  | Rect -> icon "M5 6.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 16V8A1.5 1.5 0 0 1 5 6.5z"
+  | Ellipse -> icon "M12 5.5c4.7 0 8.5 2.9 8.5 6.5s-3.8 6.5-8.5 6.5-8.5-2.9-8.5-6.5 3.8-6.5 8.5-6.5z"
+  | Arrow -> icon "M5 19L19 5M11 5h8v8"
+  | Line -> icon "M5 19L19 5"
+  | Text -> icon "M5.5 7V5h13v2M12 5v14M9 19h6"
+  | Eraser -> icon "M8 20h11M5.6 14.4l8-8.1a2 2 0 0 1 2.8 0l2.3 2.3a2 2 0 0 1 0 2.8L12 18.2a2 2 0 0 1-1.4.6H8.4a2 2 0 0 1-1.4-.6l-1.4-1.4a2 2 0 0 1 0-2.4z"
+
+let sizes = [ Shape.S; M; L ]
+let fills = [ Shape.Hollow; Semi; Solid ]
+
+let fill_icon = function
+  | Shape.Hollow -> <svg class_="icon" view_box="0 0 24 24" width="18" height="18" aria_hidden=true><rect x="5" y="5" width="14" height="14" rx="3" /></svg>
+  | Semi ->
+      <svg class_="icon" view_box="0 0 24 24" width="18" height="18" aria_hidden=true>
+        <rect x="5" y="5" width="14" height="14" rx="3" class_="semi" />
+      </svg>
+  | Solid ->
+      <svg class_="icon" view_box="0 0 24 24" width="18" height="18" aria_hidden=true>
+        <rect x="5" y="5" width="14" height="14" rx="3" class_="solid" />
+      </svg>
+
+let grid_spacing zoom =
+  let rec go g = if g *. zoom < 14. then go (g *. 4.) else g in
+  go 24. *. zoom
+
+let zoom_label zoom = Int.to_string (Float.to_int (Float.round (zoom *. 100.))) ^ "%"
+
+let text_style board editing camera =
+  match editing with
+  | None -> "display:none"
+  | Some id -> (
+      match Board.find board id with
+      | None -> "display:none"
+      | Some (s : Shape.t) ->
+          let z = camera.Camera.zoom in
+          let f = Shape.frame s in
+          let o = Camera.to_screen camera f.origin in
+          let font = Shape.font_size s *. z in
+          let pad = Shape.text_padding *. font in
+          "left:" ^ n o.x ^ "px;top:" ^ n o.y ^ "px;width:" ^ n ((s.w *. z) +. font) ^ "px;height:" ^ n (s.h *. z)
+          ^ "px;padding:0 " ^ n pad ^ "px;font-size:" ^ n font ^ "px;color:" ^ ink s.style.color ^ ";transform:rotate(" ^ degrees s.rotation
+          ^ "deg);font-family:" ^ Export.font_family)
+
+let save_json e =
+  "{\"board\":" ^ Board.to_json_text (Editor.board e) ^ ",\"camera\":" ^ Camera.to_json_text (Editor.camera e) ^ "}"
+
+let restore metrics e text =
+  match Yuka.Json.of_string text with
+  | Ok (`Assoc fields) -> (
+      let camera = Option.value (Option.bind (List.assoc_opt "camera" fields) Camera.of_json) ~default:Camera.initial in
+      match Option.map (Board.of_json metrics) (List.assoc_opt "board" fields) with
+      | Some (Ok board) -> Editor.load e board camera
+      | _ -> e)
+  | _ -> e
+
+let[@client] make () =
+  let metrics = Input.metrics () in
+  let editor = Yuka.State.make (Editor.create ~metrics ~width:1280. ~height:800.) in
+  let dispatch f = Yuka.State.update editor f in
+  let board = Yuka.State.memo (fun () -> Editor.board (Yuka.State.get editor)) in
+  let shapes = Yuka.State.memo (fun () -> Board.shapes (Yuka.State.get board)) in
+  let camera = Yuka.State.memo (fun () -> Editor.camera (Yuka.State.get editor)) in
+  let selection = Yuka.State.memo (fun () -> Editor.selection (Yuka.State.get editor)) in
+  let tool = Yuka.State.memo (fun () -> Editor.tool (Yuka.State.get editor)) in
+  let style = Yuka.State.memo ~equal:( = ) (fun () -> Editor.style (Yuka.State.get editor)) in
+  let hover = Yuka.State.memo (fun () -> Editor.hover (Yuka.State.get editor)) in
+  let editing = Yuka.State.memo (fun () -> Editor.editing (Yuka.State.get editor)) in
+  let erasing = Yuka.State.memo (fun () -> Editor.erasing (Yuka.State.get editor)) in
+  let drawing = Yuka.State.memo (fun () -> Editor.drawing (Yuka.State.get editor)) in
+  let transforming = Yuka.State.memo (fun () -> Editor.transforming (Yuka.State.get editor)) in
+  let overlay = Yuka.State.memo ~equal:( = ) (fun () -> overlay_of (Yuka.State.get editor)) in
+  let cursor = Yuka.State.memo (fun () -> cursor_css (Editor.cursor (Yuka.State.get editor))) in
+  let can_undo = Yuka.State.memo (fun () -> Editor.can_undo (Yuka.State.get editor)) in
+  let can_redo = Yuka.State.memo (fun () -> Editor.can_redo (Yuka.State.get editor)) in
+  let busy = Yuka.State.memo (fun () -> Editor.busy (Yuka.State.get editor)) in
+  let loaded = Yuka.State.make false in
+  let panel_open = Yuka.State.make false in
+  Yuka.Effect.after
+    ~cleanup:(fun input -> Option.iter Input.detach input)
+    (fun () ->
+      let width, height = Input.viewport canvas_id in
+      Yuka.State.update editor (fun e ->
+          let e = Editor.resize_viewport e ~width ~height in
+          match Input.load storage_key with Some text -> restore metrics e text | None -> e);
+      Yuka.State.set loaded true;
+      Input.attach canvas_id
+        {
+          down =
+            (fun p ->
+              Yuka.batch (fun () ->
+                  Yuka.State.set panel_open false;
+                  dispatch (fun e -> Editor.pointer_down e p)));
+          move = (fun ps -> dispatch (fun e -> Editor.pointer_move e ps));
+          up = (fun p -> dispatch (fun e -> Editor.pointer_up e p));
+          cancel = (fun id -> dispatch (fun e -> Editor.pointer_cancel e id));
+          wheel = (fun ~at ~dx ~dy ~ctrl -> dispatch (fun e -> Editor.wheel e ~at ~dx ~dy ~ctrl));
+          double_click = (fun at -> dispatch (fun e -> Editor.double_click e at));
+          resize = (fun ~width ~height -> dispatch (fun e -> Editor.resize_viewport e ~width ~height));
+          blur = (fun () -> dispatch Editor.blur);
+        });
+  let stored = ref None in
+  Yuka.Effect.after (fun () ->
+      if Yuka.State.get loaded && not (Yuka.State.get busy) then begin
+        let b = Yuka.State.get board and c = Yuka.State.get camera in
+        let same = match !stored with Some (b0, c0) -> b0 == b && c0 == c | None -> false in
+        if not same then begin
+          stored := Some (b, c);
+          Input.save storage_key (fun () -> save_json (Yuka.State.peek editor))
+        end
+      end);
+  Yuka.Effect.after (fun () ->
+      match Yuka.State.get editing with
+      | Some id ->
+          let text =
+            match Board.find (Yuka.State.peek board) id with
+            | Some s -> Option.value (Shape.text_of s) ~default:""
+            | None -> ""
+          in
+          Input.start_text text_id text
+      | None -> ());
+  Yuka.Effect.after (fun () ->
+      let key_of event =
+        {
+          Editor.key = Yuka.Event.key event;
+          shift = Yuka.Event.shift_key event;
+          alt = Yuka.Event.alt_key event;
+          ctrl = Yuka.Event.ctrl_key event || Yuka.Event.meta_key event;
+        }
+      in
+      let typing event = match Yuka.Event.target_tag event with "textarea" | "input" -> true | _ -> false in
+      Yuka.Browser.on_window "keydown" (fun event ->
+          if not (typing event) then begin
+            let e, used = Editor.key_down (Yuka.State.peek editor) (key_of event) in
+            if used then Yuka.Event.prevent_default event;
+            Yuka.State.set editor e
+          end);
+      Yuka.Browser.on_window "keyup" (fun event ->
+          if not (typing event) then Yuka.State.update editor (fun e -> Editor.key_up e (key_of event))));
+  let export _ =
+    match Export.svg metrics (Yuka.State.peek board) with
+    | Some svg -> Input.download ~name:"sketch.svg" ~mime:"image/svg+xml" svg
+    | None -> ()
+  in
+  let shape_row (s : Shape.t) =
+    <g transform=(Render.transform s) data_shape=(Int.to_string s.id)
+      opacity=(if Yuka.State.get editing = Some s.id then "0"
+               else if List.exists (fun id -> id = s.id) (Yuka.State.get erasing) then "0.25"
+               else "1")>
+      (Yuka.fragment (List.map part (Render.parts metrics s)))
+    </g>
+  in
+  let tool_button t =
+    <button on_mousedown=keep_focus class_=(if Yuka.State.get tool = t then "tool on" else "tool") type_=`button
+      title=(Editor.tool_name t ^ " \xe2\x80\x94 " ^ Editor.tool_key t) aria_label=(Editor.tool_name t)
+      aria_pressed=(if Yuka.State.get tool = t then `true_ else `false_) data_tool=(String.lowercase_ascii (Editor.tool_name t))
+      on_pointerdown=(fun _ -> dispatch (fun e -> Editor.set_tool e t))
+      on_click=(fun _ -> dispatch (fun e -> Editor.set_tool e t))>
+      (tool_icon t)
+      <span class_="key">(Yuka.text (Editor.tool_key t))</span>
+    </button>
+  in
+  let color_button c =
+    <button on_mousedown=keep_focus class_=(if (Yuka.State.get style).color = c then "swatch on" else "swatch") type_=`button
+      title=(String.capitalize_ascii (Shape.color_name c)) aria_label=(Shape.color_name c) data_color=(Shape.color_name c)
+      on_pointerdown=(fun _ -> dispatch (fun e -> Editor.set_color e c))
+      on_click=(fun _ -> dispatch (fun e -> Editor.set_color e c))>
+      <span style=("background:" ^ ink c) />
+    </button>
+  in
+  let size_button s =
+    <button on_mousedown=keep_focus class_=(if (Yuka.State.get style).size = s then "chip on" else "chip") type_=`button
+      aria_label=("Size " ^ String.uppercase_ascii (Shape.size_name s)) data_size=(Shape.size_name s)
+      on_pointerdown=(fun _ -> dispatch (fun e -> Editor.set_size e s))
+      on_click=(fun _ -> dispatch (fun e -> Editor.set_size e s))>
+      (Yuka.text (String.uppercase_ascii (Shape.size_name s)))
+    </button>
+  in
+  let fill_button f =
+    <button on_mousedown=keep_focus class_=(if (Yuka.State.get style).fill = f then "chip on" else "chip") type_=`button
+      title=("Fill: " ^ Shape.fill_name f) aria_label=("Fill " ^ Shape.fill_name f) data_fill=(Shape.fill_name f)
+      on_pointerdown=(fun _ -> dispatch (fun e -> Editor.set_fill e f))
+      on_click=(fun _ -> dispatch (fun e -> Editor.set_fill e f))>
+      (fill_icon f)
+    </button>
+  in
+  let action ~label ~name f content =
+    <button on_mousedown=keep_focus class_="action" type_=`button title=label aria_label=label data_action=name
+      on_click=(fun _ -> dispatch f)>
+      content
+    </button>
+  in
+  <div class_="sketch">
+    <svg id=canvas_id class_="canvas" style=("cursor:" ^ Yuka.State.get cursor)>
+      <defs>
+        <pattern id="sketch-dots" pattern_units="userSpaceOnUse"
+          width=(n (grid_spacing (Yuka.State.get camera).zoom)) height=(n (grid_spacing (Yuka.State.get camera).zoom))
+          x=(let c = Yuka.State.get camera in n (Float.rem c.x (grid_spacing c.zoom) -. (grid_spacing c.zoom /. 2.)))
+          y=(let c = Yuka.State.get camera in n (Float.rem c.y (grid_spacing c.zoom) -. (grid_spacing c.zoom /. 2.)))>
+          <circle class_="dot" cx=(n (grid_spacing (Yuka.State.get camera).zoom /. 2.)) cy=(n (grid_spacing (Yuka.State.get camera).zoom /. 2.))
+            r=(n (Num.clamp ~lo:0.7 ~hi:1.4 (Yuka.State.get camera).zoom)) />
+        </pattern>
+      </defs>
+      <rect class_="grid" width="100%" height="100%" fill="url(#sketch-dots)" />
+      <g data_layer="world"
+        transform=(let c = Yuka.State.get camera in "translate(" ^ n c.x ^ " " ^ n c.y ^ ") scale(" ^ Num.to_string ~digits:6 c.zoom ^ ")")>
+        <g data_layer="shapes">
+          (Yuka.each ~key:(fun (s : Shape.t) -> Int.to_string s.id) (fun () -> Yuka.State.get shapes) shape_row)
+        </g>
+        <g data_layer="outlines">
+          (if Yuka.State.get transforming then Yuka.empty
+           else
+             let chosen = selected_shapes (Yuka.State.get board) (Yuka.State.get selection) in
+             let hovered =
+               match Yuka.State.get hover with
+               | Some id when not (List.exists (fun (s : Shape.t) -> s.id = id) chosen) -> Board.find (Yuka.State.get board) id
+               | _ -> None
+             in
+             match hovered with Some s -> outline_view "outline hover" s | None -> Yuka.empty)
+        </g>
+        (match Yuka.State.get drawing with
+        | Some (d, style) -> <path class_="live" d fill=(ink style.color) data_live="true" />
+        | None -> Yuka.empty)
+      </g>
+      <g data_layer="overlay">
+        (let o = Yuka.State.get overlay in
+         Yuka.fragment
+           [
+             (match o.marquee with
+             | Some (a, b) ->
+                 let box = Geom.Box.of_corners a b in
+                 <rect class_="marquee" x=(n box.x) y=(n box.y) width=(n box.w) height=(n box.h) />
+             | None -> Yuka.empty);
+             (match o.boxes with
+             | [] -> Yuka.empty
+             | boxes ->
+                 <path class_="select-box" data_boxes=(Int.to_string (List.length boxes))
+                   d=(String.concat "" (List.map (fun box -> "M" ^ points box ^ "Z") boxes)) />);
+             (match o.frame with [] -> Yuka.empty | corners -> <polygon class_="frame" points=(points corners) />);
+             Yuka.fragment (List.map (handle_view ~angle:o.angle) o.handles);
+           ])
+      </g>
+    </svg>
+    <textarea id=text_id class_="text-editor" spellcheck=false aria_label="Text" rows=1
+      style=(text_style (Yuka.State.get board) (Yuka.State.get editing) (Yuka.State.get camera))
+      on_input=(fun event -> dispatch (fun e -> Editor.set_text e (Yuka.Event.target_value event)))
+      on_blur=(fun _ -> dispatch Editor.stop_editing)
+      on_keydown=(fun event ->
+        match Yuka.Event.key event with
+        | "Escape" ->
+            Yuka.Event.prevent_default event;
+            dispatch Editor.stop_editing
+        | "Enter" when Yuka.Event.ctrl_key event || Yuka.Event.meta_key event ->
+            Yuka.Event.prevent_default event;
+            dispatch Editor.stop_editing
+        | _ -> ()) />
+    <div class_="brand">
+      <svg class_="logo" view_box="0 0 24 24" width="22" height="22" aria_hidden=true>
+        <path d="M4 17c3-6 5.5-9 8-9s1.5 6 4 6 3-3 4-5" />
+      </svg>
+      <span>"sketch"</span>
+    </div>
+    <nav class_="toolbar" aria_label="Tools">(Yuka.fragment (List.map tool_button Editor.tools))</nav>
+    <button on_mousedown=keep_focus class_="style-toggle" type_=`button aria_label="Style" data_action="style"
+      aria_expanded=(Yuka.State.get panel_open)
+      on_click=(fun _ -> Yuka.State.update panel_open not)>
+      <span style=("background:" ^ ink (Yuka.State.get style).color) />
+    </button>
+    <aside id="sketch-style" class_=(if Yuka.State.get panel_open then "panel open" else "panel") aria_label="Style">
+      <div class_="swatches">(Yuka.fragment (List.map color_button Shape.colors))</div>
+      <div class_="row" role=`group aria_label="Stroke size">(Yuka.fragment (List.map size_button sizes))</div>
+      <div class_="row" role=`group aria_label="Fill">(Yuka.fragment (List.map fill_button fills))</div>
+      <div class_="row actions">
+        (action ~label:"Bring to front \xe2\x80\x94 ]" ~name:"front" Editor.to_front
+           (icon "M8 8h11v11H8zM5 15V5h10"))
+        (action ~label:"Send to back \xe2\x80\x94 [" ~name:"back" Editor.to_back
+           (icon "M5 5h11v11H5zM19 9v10H9"))
+        (action ~label:"Duplicate \xe2\x80\x94 Ctrl+D" ~name:"duplicate" Editor.duplicate
+           (icon "M9 9h10v10H9zM5 15V5h10"))
+        (action ~label:"Delete \xe2\x80\x94 Del" ~name:"delete" Editor.delete
+           (icon "M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"))
+      </div>
+      <button on_mousedown=keep_focus class_="export" type_=`button data_action="export" on_click=export>
+        (icon "M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14")
+        "Export SVG"
+      </button>
+    </aside>
+    <div class_="dock">
+      <button on_mousedown=keep_focus class_="action" type_=`button title="Undo \xe2\x80\x94 Ctrl+Z" aria_label="Undo" data_action="undo"
+        disabled=(not (Yuka.State.get can_undo)) on_click=(fun _ -> dispatch Editor.undo)>
+        (icon "M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11")
+      </button>
+      <button on_mousedown=keep_focus class_="action" type_=`button title="Redo \xe2\x80\x94 Ctrl+Shift+Z" aria_label="Redo" data_action="redo"
+        disabled=(not (Yuka.State.get can_redo)) on_click=(fun _ -> dispatch Editor.redo)>
+        (icon "M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13")
+      </button>
+      <span class_="sep" />
+      <button on_mousedown=keep_focus class_="action" type_=`button title="Zoom out \xe2\x80\x94 -" aria_label="Zoom out" data_action="zoom-out"
+        on_click=(fun _ -> dispatch Editor.zoom_out)>
+        (icon "M5 12h14")
+      </button>
+      <button on_mousedown=keep_focus class_="zoom" type_=`button title="Reset to 100% \xe2\x80\x94 Shift+0" data_action="zoom-reset"
+        on_click=(fun _ -> dispatch Editor.zoom_reset)>
+        (Yuka.text (zoom_label (Yuka.State.get camera).zoom))
+      </button>
+      <button on_mousedown=keep_focus class_="action" type_=`button title="Zoom in \xe2\x80\x94 +" aria_label="Zoom in" data_action="zoom-in"
+        on_click=(fun _ -> dispatch Editor.zoom_in)>
+        (icon "M5 12h14M12 5v14")
+      </button>
+      <button on_mousedown=keep_focus class_="action" type_=`button title="Zoom to fit \xe2\x80\x94 Shift+1" aria_label="Zoom to fit" data_action="zoom-fit"
+        on_click=(fun _ -> dispatch Editor.zoom_to_fit)>
+        (icon "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5")
+      </button>
+    </div>
+    (if Yuka.State.get loaded && Board.length (Yuka.State.get board) = 0 && not (Yuka.State.get busy) then
+       <p class_="hint">"Pick a tool below, or press D and draw."</p>
+     else Yuka.empty)
+  </div>

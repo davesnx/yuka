@@ -1,0 +1,19 @@
+(executable
+ (name sketch_server)
+ (libraries sketch_shared yuka yuka-dream dream)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Sketch_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))

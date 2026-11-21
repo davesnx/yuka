@@ -1,0 +1,3 @@
+open Sketch_shared
+
+let index () = Yuka.Server.page ~title:"sketch" (fun () -> <Yuka.Client><Whiteboard /></Yuka.Client>)
