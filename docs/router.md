@@ -292,6 +292,17 @@ let[@client] make () =
 
 It is always `false` on the server.
 
+A page with a `Yuka.Await` streams on a client navigation as on a first
+load. The server waits a short time (100 ms) for every `Await` and async
+value. When they settle in time, the new page comes in one piece. When
+they do not, the new page is shown at once with the `loading` content of
+each `Await`, and `navigating` becomes `false`. Each `Await` then replaces
+its `loading` content when its value comes, and its islands start. An
+island that holds a pending `Await` starts after that `Await` is filled.
+The title, focus, scroll and announcer change when the new page is shown,
+not with each fill. A newer navigation stops the fills of the page it
+replaces.
+
 After a client navigation to another page, Yuka tells screen readers
 about it and moves the focus, as a full page load does:
 

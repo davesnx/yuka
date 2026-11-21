@@ -1196,9 +1196,31 @@ val render :
     neither. A navigation started while
     another one loads aborts the first. Any 2xx or 4xx/5xx status is shown
     in place. If the request fails, the status is 1xx or 3xx, the response
-    is not [text/html], its [Yuka-Build] differs from the
+    is not [text/html] or streamed, its [Yuka-Build] differs from the
     [<meta name="yuka-build">] of the page, or it was redirected to another
     origin, it does [location.assign url].
+
+    A streamed answer ([Yuka-Stream: 1], see {!Server.Adapter.Make}) is
+    shown as soon as its first line comes: the page with the [loading]
+    content of each pending [await]. The title, history, scroll,
+    announcer and focus change then, and {!Browser.navigating} becomes
+    [false]. Each fill that comes later replaces the [loading] content of
+    its [await] inside the new content (the outlet, the overlay or
+    [<body>]), each async value is added at its end, and the islands of a
+    fill start when it comes. An island that holds a pending [await]
+    starts after the fill of that [await], so it hydrates the settled
+    content, as on a first load. The stream keeps going while a newer
+    navigation loads. It stops when a newer answer replaces the content
+    that it fills or the element that holds it, and when a newer
+    navigation replaces its page before it is shown; then the request of
+    a navigation is aborted. A stream that breaks keeps the content that
+    came and starts the islands that it held. The navigation cache keeps
+    a streamed answer with its fills: a later navigation to it shows the
+    fills that came and takes the others as they come, and a stream that
+    breaks leaves the cache. So that the cache entry is complete, the
+    request of a prefetch, or of a navigation whose answer has
+    [max-age] above 0, is read to its end even when no page shows it;
+    {!stop} aborts it.
 
     Prefetch: the [~prefetch] rule of [Routes.ml] sets the level of each
     page route ([`Off], [`Hover], [`Trajectory] (default), [`Visible] or
@@ -1901,16 +1923,28 @@ module Server : sig
           + With a [Yuka-Navigate] header (the outlet keys of the page):
             let [shared] be the length of the common prefix of the sent keys and
             the layer keys of the page (or of the fallback, for a 404 or
-            500). [shared = 0]: the settled document in one string. [shared >= 1]:
-            only what goes inside outlet [shared], settled, with the headers
+            500). [shared = 0]: the document. [shared >= 1]:
+            only what goes inside outlet [shared], with the headers
             [Yuka-Outlet] (its key) and [Yuka-Title] (percent-encoded);
             island, await and async ids get the prefix [KEY-]. Both have
-            [Yuka-Build] ({!build_id}).
+            [Yuka-Build] ({!build_id}). The server waits 100 ms for every
+            [await] and async value to settle. When they do, the answer is
+            settled, in one string, as above. When they do not, the answer
+            is streamed, with [Yuka-Stream: 1] and [content-type:
+            application/x-ndjson; charset=utf-8], one JSON value on each
+            line: first a string, the answer with the [loading] content of
+            each pending [await] (in [<!--[ID-->] ... [<!--]-->] markers)
+            and the fills and values that settled in time; then
+            [["ID","HTML"]] for each fill when it settles, and [["","HTML"]]
+            for HTML to add at the end (an async value, an answer, a
+            stylesheet or module link); then [[]] when everything has
+            settled. A failure after the first line goes to [log] and ends
+            the stream without [[]].
           + With [Yuka-Overlay: 1] as well, a route with an overlay page
             and [shared >= 1]: the overlay page, rendered inside the layers
-            and cut out of the innermost outlet, settled, with the headers
+            and cut out of the innermost outlet, with the headers
             [Yuka-Layer: overlay] and [Yuka-Title]; ids get the prefix
-            [overlay-]. Page answers have [vary: Yuka-Navigate,
+            [overlay-]. It is settled or streamed as above. Page answers have [vary: Yuka-Navigate,
             Yuka-Prefetch, Yuka-Overlay].
 
           A 404 or 500 page has the root [headers] and [no-store]. A

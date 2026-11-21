@@ -15,9 +15,13 @@ val new_controller : unit -> controller
 val abort : controller -> unit
 val fetch_page :
   string * string * string * bool * controller * bool ->
-  (string -> int -> (string -> string option) -> string -> unit) ->
+  (string -> int -> (string -> string option) -> string -> bool -> unit) ->
+  (string -> string -> unit) ->
+  (bool -> unit) ->
   (unit -> unit) ->
   unit
+val put : node -> string -> string -> unit
+val hold : node -> int -> bool -> unit
 val hash_of : string -> string
 val no_hash : string -> string
 val path_of : string -> string

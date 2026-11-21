@@ -1155,6 +1155,101 @@ let render =
             check_true "settled" (contains r.body "ready");
             check_true "no fill script" (not (contains r.body "__yukaFill"))
         | _ -> Alcotest.fail "not done" );
+    ( "Yuka-Navigate: an await that settles within the budget gives one settled answer",
+      fun () ->
+        let timers = ref [] in
+        (raw_sleep :=
+           fun s ->
+             let a, resolve, _ = Async.make () in
+             timers := (s, resolve) :: !timers;
+             a);
+        let a = Raw.handler config Cycle_server.Yuka_routes.app (request ~headers:[ ("Yuka-Navigate", "L0") ] "/slow") in
+        Alcotest.(check (list (float 0.))) "a short budget and the timeout" [ 0.1; 10. ]
+          (List.sort compare (List.map fst !timers));
+        App.finish_slow "ready";
+        match Async.status a with
+        | Async.Done { body = Server.String text; headers; _ } ->
+            let r = { status = 200; headers; body = text } in
+            check_header r "yuka-stream" [];
+            check_header r "content-type" [ "text/html; charset=utf-8" ];
+            check_true "settled" (contains text "ready");
+            check_true "no loading" (not (contains text "wait"))
+        | _ -> Alcotest.fail "not one string" );
+    ( "Yuka-Navigate: an await past the budget streams the shell, then each fill",
+      fun () ->
+        let budget = ref ignore in
+        (raw_sleep :=
+           fun s ->
+             let a, resolve, _ = Async.make () in
+             if s < 1. then budget := resolve;
+             a);
+        let streamed keys =
+          let a = Raw.handler config Cycle_server.Yuka_routes.app (request ~headers:[ ("Yuka-Navigate", keys) ] "/slow") in
+          check_true "waits for the budget" (Async.status a = Async.Pending);
+          !budget ();
+          match Async.status a with
+          | Async.Done { body = Server.Stream f; headers; status } ->
+              let b = Buffer.create 64 in
+              let ended = f (fun s -> Buffer.add_string b s; Async.return ()) in
+              let shell = Buffer.contents b in
+              App.finish_slow "ready";
+              check_true "ended" (Async.status ended = Async.Done ());
+              ({ status; headers; body = "" }, shell, Buffer.contents b)
+          | _ -> Alcotest.fail "not a stream"
+        in
+        let r, shell, body = streamed "L0" in
+        check_status r 200;
+        check_header r "yuka-stream" [ "1" ];
+        check_header r "content-type" [ "application/x-ndjson; charset=utf-8" ];
+        check_header r "yuka-outlet" [ "L0" ];
+        Alcotest.(check string) "shell line"
+          ({|"\u003cscript type=\"application/json\" data-yuka-context=\"route\" data-name=\"yuka.route\">\"/slow\"\u003c/script>\u003c!--[L0-s1-->wait\u003c!--]-->"|} ^ "\n")
+          shell;
+        Alcotest.(check string) "then the fill and the end" (shell ^ {|["L0-s1","ready"]|} ^ "\n[]\n") body;
+        let r, shell, body = streamed "-" in
+        check_header r "yuka-outlet" [];
+        check_true "full document" (String.starts_with ~prefix:{|"\u003c!DOCTYPE html>|} shell);
+        check_true "no fill script" (not (contains body "__yukaFill"));
+        check_true "fill" (String.ends_with ~suffix:("\n" ^ {|["s1","ready"]|} ^ "\n[]\n") body) );
+    ( "Yuka-Navigate: an island that first comes in a streamed fill does not repeat the route script",
+      fun () ->
+        let budget = ref ignore in
+        (raw_sleep :=
+           fun s ->
+             let a, resolve, _ = Async.make () in
+             if s < 1. then budget := resolve;
+             a);
+        let a = Raw.handler config Cycle_server.Yuka_routes.app (request ~headers:[ ("Yuka-Navigate", "L0") ] "/slow") in
+        !budget ();
+        match Async.status a with
+        | Async.Done { body = Server.Stream f; _ } ->
+            let b = Buffer.create 64 in
+            let ended = f (fun s -> Buffer.add_string b s; Async.return ()) in
+            App.finish_slow "island";
+            check_true "ended" (Async.status ended = Async.Done ());
+            let body = Buffer.contents b in
+            check_true "the fill has the island" (contains body {|data-name=\"Late\"|});
+            Alcotest.(check int) "one route script" 1 (count body {|data-yuka-context=\"route\"|})
+        | _ -> Alcotest.fail "not a stream" );
+    ( "Yuka-Navigate: a fill that fails after the shell ends the stream without the end line",
+      fun () ->
+        let budget = ref ignore in
+        (raw_sleep :=
+           fun s ->
+             let a, resolve, _ = Async.make () in
+             if s < 1. then budget := resolve;
+             a);
+        let a = Raw.handler config Cycle_server.Yuka_routes.app (request ~headers:[ ("Yuka-Navigate", "L0") ] "/slow") in
+        !budget ();
+        match Async.status a with
+        | Async.Done { body = Server.Stream f; _ } ->
+            let b = Buffer.create 64 in
+            let ended = f (fun s -> Buffer.add_string b s; Async.return ()) in
+            App.finish_slow "explode";
+            check_true "ended" (Async.status ended = Async.Done ());
+            Alcotest.(check int) "only the shell line" 1 (count (Buffer.contents b) "\n");
+            Alcotest.(check int) "one log" 1 (List.length !logged)
+        | _ -> Alcotest.fail "not a stream" );
   ]
 
 let navigation =

@@ -74,14 +74,32 @@ let html header =
   | Some t -> Navigation_web.is_html t
   | None -> false
 
-type answer = { final : string; status : int; header : string -> string option; text : string }
+type stream = {
+  mutable parts : (string * string) list;
+  mutable result : bool option;
+  mutable next : (string * string) option -> unit;
+  mutable cancel : unit -> unit;
+}
+
+type answer = { final : string; status : int; header : string -> string option; text : string; stream : stream option }
+
+let stream cancel = { parts = []; result = None; next = ignore; cancel }
+
+let got s id html =
+  s.parts <- (id, html) :: s.parts;
+  s.next (Some (id, html))
+
+let ended s broke complete =
+  s.result <- Some complete;
+  if not complete then broke ();
+  s.next None
 
 let swappable a =
   let stale = match a.header "yuka-build" with Some b -> not (is b (build ())) | None -> false in
   let shown = (a.status >= 200 && a.status < 300) || a.status >= 400 in
   match outlet a.header with
   | Some None -> None
-  | _ when stale || (not shown) || not (html a.header) -> None
+  | _ when stale || (not shown) || not (Option.is_some a.stream || html a.header) -> None
   | target -> Some (Option.join target)
 
 let warm a = if Option.is_some (swappable a) then Navigation_web.warm a.final a.text
@@ -201,9 +219,10 @@ let rec start (trigger : Prefetch.level) key url =
       List.iter (fun f -> f a) (List.rev w);
       pump ()
     in
+    let s = stream ignore in
     Navigation_web.fetch_page (url, keys (), Prefetch.name trigger, low, e.controller, true)
-      (fun final status header text ->
-        let a = { final; status; header; text } and waited = match e.waiters with [] -> false | _ -> true in
+      (fun final status header text streamed ->
+        let a = { final; status; header; text; stream = (if streamed then Some s else None) } and waited = match e.waiters with [] -> false | _ -> true in
         if status = 204 then begin
           drop e;
           Option.iter
@@ -223,6 +242,8 @@ let rec start (trigger : Prefetch.level) key url =
           settle e.answer;
           if e.warm && not waited then warm a
         end)
+      (got s)
+      (ended s (fun () -> drop e))
       (fun () ->
         drop e;
         settle None)
@@ -294,6 +315,42 @@ let pass () =
     true
   end
 
+let following : (Web.node * (unit -> unit)) list ref = ref []
+let owners = ref 0
+
+let follow root s =
+  incr owners;
+  let owner = !owners and live = ref true in
+  let rec stop () =
+    live := false;
+    following := without (fun (_, f) -> f == stop) !following;
+    s.next <- ignore;
+    s.cancel ();
+    Navigation_web.hold root owner true
+  in
+  let put (id, html) =
+    Navigation_web.put root id html;
+    Navigation_web.adopt_stylesheets ()
+  in
+  List.iter put (List.rev s.parts);
+  if Option.is_none s.result then begin
+    Navigation_web.hold root owner false;
+    following := (root, stop) :: !following;
+    s.next <-
+      (fun p ->
+        if !live then
+          match p with
+          | Some (("", _) as p) -> put p
+          | Some p ->
+              put p;
+              Navigation_web.hold root owner false;
+              !start_islands ()
+          | None ->
+              following := without (fun (_, f) -> f == stop) !following;
+              Navigation_web.hold root owner true;
+              !start_islands ())
+  end
+
 let show ~dir ~push ~restore url a =
   let final =
     match hash_of url with
@@ -347,11 +404,17 @@ let show ~dir ~push ~restore url a =
               target
             end
           in
+          let root = Option.value target ~default:(Web.document ()) in
+          let page = Web.document () in
+          following :=
+            without (fun (r, stop) -> (Web.contains root r || not (Web.contains page r)) && (stop (); true)) !following;
+          Option.iter (follow root) a.stream;
           !Platform.swapped target;
           !start_islands ();
           Navigation_web.live ();
           Navigation_web.settle (Option.value target ~default:(Web.document ())) (hash_of final)
         end
+        else Option.iter (fun s -> s.cancel ()) a.stream
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 
@@ -372,17 +435,22 @@ let load ~overlay ~dir ~push ~restore url =
     take key;
     let fetch () =
       let controller = Navigation_web.new_controller () in
-      let asked = !era in
+      let asked = !era and s = stream (fun () -> Navigation_web.abort controller) and cached = ref None in
       pending := Some controller;
       Navigation_web.fetch_page (url, keys (), "", false, controller, overlay)
-        (fun final status header text ->
+        (fun final status header text streamed ->
           pending := None;
-          let a = { final; status; header; text } in
+          let a = { final; status; header; text; stream = (if streamed then Some s else None) } in
           if max_age header > 0 && asked = !era then begin
-            add { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false; overlay; warm = false };
+            let e = { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false; overlay; warm = false } in
+            s.cancel <- ignore;
+            cached := Some e;
+            add e;
             pump ()
           end;
           apply (Some a))
+        (got s)
+        (ended s (fun () -> Option.iter drop !cached))
         (fun () ->
           pending := None;
           assign url)
@@ -531,6 +599,7 @@ let boot (transitions, islands) =
 
 let stop () =
   cancel_pending ();
+  List.iter (fun (_, f) -> f ()) !following;
   started := false;
   Navigation_state.set false;
   start_islands := (fun () -> ());
@@ -541,7 +610,7 @@ let stop () =
   untrack := ignore;
   incr nav;
   overlays := [];
-  Array.iter (fun e -> if Option.is_none e.answer then Navigation_web.abort e.controller) (Web.table_values (cache ()));
+  Array.iter (fun e -> Navigation_web.abort e.controller) (Web.table_values (cache ()));
   clear ();
   Platform.acted := ignore
 

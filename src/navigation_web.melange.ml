@@ -42,16 +42,22 @@ let abort : controller -> unit =
     "function (c) { c.abort() }"]
 
 let fetch_page :
-    string * string * string * bool * controller * bool -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller * bool ->
+    (string -> int -> (string -> string option) -> string -> bool -> unit) ->
+    (string -> string -> unit) ->
+    (bool -> unit) ->
+    (unit -> unit) ->
+    unit =
   [%mel.raw
-    {|function (a, ok, fail) {
+    {|function (a, ok, part, ended, fail) {
   const url = a[0], keys = a[1], prefetch = a[2], low = a[3], controller = a[4];
   const signal = controller.signal;
   const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
   if (a[5]) init.headers["Yuka-Overlay"] = "1";
   if (prefetch) { init.headers["Yuka-Prefetch"] = prefetch; init.cache = "no-store"; }
   if (low) init.priority = "low";
-  let request;
+  let request, shown = false;
+  const broke = function () { if (shown) ended(false); else if (!signal.aborted) fail(); };
   try {
     request = fetch(url, init);
   } catch (e) {
@@ -60,18 +66,66 @@ let fetch_page :
   }
   request
     .then(function (r) {
-      return r.text().then(function (text) { return { r: r, text: text }; });
+      const base = window.location.href;
+      const target = new URL(typeof r.url === "string" && r.url ? r.url : url, base);
+      const header = function (name) { const v = r.headers && r.headers.get ? r.headers.get(name) : null; return v === null ? undefined : v; };
+      const show = function (text, streamed) {
+        if (signal.aborted) return false;
+        if (target.origin !== window.location.origin) { fail(); return false; }
+        shown = true;
+        ok(target.pathname + target.search + (target.hash || new URL(url, base).hash), r.status, header, text, streamed);
+        return true;
+      };
+      if (!header("yuka-stream") || !r.body) return r.text().then(function (text) { show(text, false); });
+      const reader = r.body.getReader(), decoder = new TextDecoder();
+      let buffer = "", complete = false;
+      const step = function (x) {
+        buffer += decoder.decode(x.value, { stream: !x.done });
+        let i;
+        while ((i = buffer.indexOf("\n")) >= 0) {
+          const v = JSON.parse(buffer.slice(0, i));
+          buffer = buffer.slice(i + 1);
+          if (!shown) { if (!show(v, true)) { reader.cancel().catch(function () {}); return; } }
+          else if (v.length) part(v[0], v[1]);
+          else complete = true;
+        }
+        if (!x.done) return reader.read().then(step);
+        if (shown) ended(complete); else fail();
+      };
+      return reader.read().then(step);
     })
-    .then(
-      function (x) {
-        if (signal.aborted) return;
-        const base = window.location.href;
-        const target = new URL(typeof x.r.url === "string" && x.r.url ? x.r.url : url, base);
-        if (target.origin !== window.location.origin) { fail(); return; }
-        const hash = target.hash || new URL(url, base).hash;
-        ok(target.pathname + target.search + hash, x.r.status, function (name) { const v = x.r.headers && x.r.headers.get ? x.r.headers.get(name) : null; return v === null ? undefined : v; }, x.text);
-      },
-      function () { if (!signal.aborted) fail(); });
+    .then(null, broke);
+}|}]
+
+let put : node -> string -> string -> unit =
+  [%mel.raw
+    {|function (root, id, html) {
+  const d = document, t = d.createElement("template");
+  root = root.body || root;
+  t.innerHTML = html;
+  if (!id) { root.appendChild(t.content); return; }
+  const w = d.createTreeWalker(root, 128);
+  let c, n, k = 1;
+  while ((c = w.nextNode()) && c.data !== "[" + id);
+  if (!c) return;
+  while ((n = c.nextSibling) && !(n.nodeType === 8 && (n.data[0] === "[" ? !++k : n.data === "]" && !--k))) n.remove();
+  c.parentNode.insertBefore(t.content, n);
+  c.data = "[";
+}|}]
+
+let hold : node -> int -> bool -> unit =
+  [%mel.raw
+    {|function (root, owner, release) {
+  const d = document;
+  const pending = function (i) {
+    const w = d.createTreeWalker(i, 128);
+    let c;
+    while ((c = w.nextNode())) if (c.data[0] === "[" && c.data.length > 2) return true;
+    return false;
+  };
+  for (const i of (root.body || root).querySelectorAll("yuka-island"))
+    if (i.__yukaHeld === owner) { if (release || !pending(i)) i.__yuka_started = i.__yukaHeld = undefined; }
+    else if (!release && !i.__yuka_started && pending(i)) { i.__yukaHeld = owner; i.__yuka_started = true; }
 }|}]
 
 let hash_of : string -> string =

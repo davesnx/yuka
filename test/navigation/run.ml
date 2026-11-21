@@ -46,10 +46,11 @@ let setup : string -> unit =
     const call = { url: url, init: init };
     globalThis.__calls.push(call);
     return new Promise(function (res, rej) {
-      call.resolve = function (text, finalUrl, status, type, extra) {
+      call.resolve = function (text, finalUrl, status, type, extra, body) {
         res({
           url: finalUrl,
           status: status,
+          body: body,
           headers: { get: function (n) { n = n.toLowerCase(); return n === "content-type" ? type : (extra && n in extra ? extra[n] : null); } },
           text: function () { return Promise.resolve(text); },
         });
@@ -638,6 +639,144 @@ let partial finish =
       finish ())
 
 let count_selector : string -> int = [%mel.raw "function (sel) { return document.querySelectorAll(sel).length }"]
+
+let resolve_stream : int -> (string * string) array -> unit =
+  [%mel.raw
+    {|function (i, pairs) {
+  const call = globalThis.__calls[i], queue = [], waiting = [];
+  const extra = { "yuka-stream": "1", "yuka-build": "b1" };
+  pairs.forEach(function (p) { extra[p[0]] = p[1]; });
+  call.push = function (x) { if (waiting.length) waiting.shift()(x); else queue.push(x); };
+  call.init.signal.addEventListener("abort", function () { call.push(new Error("aborted")); });
+  const read = function () {
+    return new Promise(function (res, rej) {
+      const give = function (x) { if (x instanceof Error) rej(x); else res(x); };
+      if (queue.length) give(queue.shift()); else waiting.push(give);
+    });
+  };
+  call.resolve("", undefined, 200, "application/x-ndjson; charset=utf-8", extra, { getReader: function () { return { read: read, cancel: function () { return Promise.resolve(); } }; } });
+}|}]
+
+let push_text : int -> string -> unit =
+  [%mel.raw "function (i, t) { globalThis.__calls[i].push({ value: new TextEncoder().encode(t), done: false }) }"]
+
+let push_end : int -> unit = [%mel.raw "function (i) { globalThis.__calls[i].push({ value: undefined, done: true }) }"]
+let push_error : int -> unit = [%mel.raw "function (i) { globalThis.__calls[i].push(new Error('cut')) }"]
+let json_line : string -> string = [%mel.raw "function (s) { return JSON.stringify(s) + '\\n' }"]
+let part_line : string -> string -> string = [%mel.raw "function (id, h) { return JSON.stringify([id, h]) + '\\n' }"]
+
+let streamed finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  log_clear ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0"); ("yuka-title", "Two") |];
+  let line = part_line "L0-s1" ({|<b id="done">done</b>|} ^ island_at "L0-i5" 5) in
+  push_text 0
+    (json_line
+       ({|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|}
+       ^ {|<yuka-island data-name="Probe" data-id="L0-i4" style="display:contents"><!--[L0-s2--><span>p</span><!--]--></yuka-island><script type="application/json" data-yuka-props="L0-i4">4</script>|}));
+  tick (fun () ->
+      check "shell in the outlet" "new" (attr "#new" "id");
+      check "loading shown" "wait" (attr "#wait" "id");
+      check "layout kept" "/two" (attr "#two" "href");
+      check "title" "Two" (title ());
+      check "pushed" "/two" (location_ ());
+      check "not navigating once the shell is shown" "false" (navigating ());
+      check "an island around a pending fill waits" "" (log_g ());
+      push_text 0 (String.sub line 0 10);
+      push_text 0 (String.sub line 10 (String.length line - 10));
+      push_text 0 (part_line "" {|<script type="application/json" data-yuka-async="L0-a1">{"ok":1}</script>|});
+      tick (fun () ->
+          check "fill replaces the loading content" "none" (attr "#wait" "id");
+          check "fill in the outlet" "1" (ints (count_selector "yuka-outlet #done"));
+          check "island of the fill started" "g0/5" (log_g ());
+          check "value inside the outlet" "1" (ints (count_selector "yuka-outlet script[data-yuka-async]"));
+          push_text 0 (part_line "L0-s2" "<span>p</span>");
+          push_text 0 "[]\n";
+          push_end 0;
+          tick (fun () ->
+              check "the held island starts after its fill" "g0/5|g0/4" (log_g ());
+              check "one request" "1" (ints (calls ()));
+              finish ())))
+
+let streamed_superseded finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0 (json_line {|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|});
+  tick (fun () ->
+      check "shell shown" "wait" (attr "#wait" "id");
+      ignore (click "#home" "");
+      check "a newer navigation keeps the stream of the shown page" "false" (bools (call_aborted 0));
+      push_text 0 (part_line "L0-s1" {|<b id="early">early</b>|});
+      tick (fun () ->
+          check "fills still land while the next page loads" "early" (attr "#early" "id");
+          resolve_headers 1 {|<p id="home-page">home</p><!--[L0-s2-->|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+          tick (fun () ->
+              check "newer page shown" "home-page" (attr "#home-page" "id");
+              check "the older stream is aborted at the swap" "true" (bools (call_aborted 0));
+              push_text 0 (part_line "L0-s2" {|<b id="late">late</b>|});
+              tick (fun () ->
+                  check "a late fill of the older page is dropped" "none" (attr "#late" "id");
+                  finish ()))))
+
+let streamed_cache finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0"); ("cache-control", "max-age=60") |];
+  push_text 0 (json_line {|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|});
+  tick (fun () ->
+      push_text 0 (part_line "L0-s1" {|<b id="done">done</b>|});
+      push_text 0 "[]\n";
+      push_end 0;
+      tick (fun () ->
+          ignore (click "#home" "");
+          resolve_headers 1 {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+          tick (fun () ->
+              ignore (click "#two" "");
+              tick (fun () ->
+                  check "no new request" "2" (ints (calls ()));
+                  check "the cached answer is complete" "done" (attr "#done" "id");
+                  check "no loading content" "none" (attr "#wait" "id");
+                  finish ()))))
+
+let streamed_broken finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  log_clear ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0"); ("cache-control", "max-age=60") |];
+  push_text 0
+    (json_line
+       ({|<p id="new">new</p>|}
+       ^ {|<yuka-island data-name="Probe" data-id="L0-i4" style="display:contents"><!--[L0-s1--><span>p</span><!--]--></yuka-island><script type="application/json" data-yuka-props="L0-i4">4</script>|}));
+  tick (fun () ->
+      check "held" "" (log_g ());
+      push_error 0;
+      tick (fun () ->
+          check "a broken stream keeps the page and starts the held island" "new|g0/4" (attr "#new" "id" ^ "|" ^ log_g ());
+          check "no full load" "" (String.concat "" (List.filter (String.equal "assign") (String.split_on_char '|' (log_read ()))));
+          ignore (click "#home" "");
+          resolve_headers 1 {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+          tick (fun () ->
+              ignore (click "#two" "");
+              check "a broken stream is not kept in the cache" "3" (ints (calls ()));
+              finish ())))
 
 let call_overlay : int -> string =
   [%mel.raw "function (i) { return String(globalThis.__calls[i].init.headers['Yuka-Overlay']) }"]
@@ -2039,6 +2178,105 @@ let raising_transition : unit -> unit =
   };
 }|}]
 
+let held_island id n marker =
+  {|<yuka-island data-name="Probe" data-id="|} ^ id ^ {|" style="display:contents"><!--[|} ^ marker
+  ^ {|--><span>p</span><!--]--></yuka-island><script type="application/json" data-yuka-props="|} ^ id ^ "\">" ^ ints n ^ "</script>"
+
+let streamed_broken_before_apply finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  deferred_transitions ();
+  render ~islands:(runtime_registry [ probe_entry ]) ~transitions:true ();
+  log_clear ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0 (json_line ({|<p id="new">new</p>|} ^ held_island "L0-i4" 4 "L0-s1"));
+  tick (fun () ->
+      push_error 0;
+      tick (fun () ->
+          run_transition 0;
+          tick (fun () ->
+              check "a stream that broke before the swap starts the island around its pending fill" "new|g0/4"
+                (attr "#new" "id" ^ "|" ^ log_g ());
+              finish ())))
+
+let nested_outlets () =
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<a id="two" href="/two">two</a><a id="three" href="/three">three</a>|}
+    ^ {|<yuka-outlet data-k="L0" style="display:contents"><p>outer</p><yuka-outlet data-k="L1" style="display:contents"><p id="inner">inner</p></yuka-outlet></yuka-outlet>|})
+
+let streamed_inner_replaced finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  nested_outlets ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  ignore (click "#two" "");
+  check "keys" "L0 L1" (call_header 0);
+  resolve_stream 0 [| ("yuka-outlet", "L1") |];
+  push_text 0 (json_line {|<p id="new">new</p><!--[L1-s1--><i id="wait">wait</i><!--]-->|});
+  tick (fun () ->
+      check "inner outlet streams" "wait" (attr "#wait" "id");
+      ignore (click "#three" "");
+      resolve_headers 1 {|<p id="outer-new">outer</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "outer outlet replaced" "outer-new" (attr "#outer-new" "id");
+          check "the stream of the replaced inner outlet is aborted" "true" (bools (call_aborted 0));
+          finish ()))
+
+let streamed_outlet_under_body_stream finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  log_clear ();
+  ignore (click "#two" "");
+  resolve_stream 0 [||];
+  push_text 0
+    (json_line
+       (doc "Two"
+          ({|<a id="three" href="/three">three</a><!--[s1--><i id="body-wait">wait</i><!--]-->|}
+          ^ {|<yuka-outlet data-k="L0" style="display:contents"><p>old</p></yuka-outlet>|})));
+  tick (fun () ->
+      check "body shell shown" "body-wait" (attr "#body-wait" "id");
+      ignore (click "#three" "");
+      resolve_stream 1 [| ("yuka-outlet", "L0") |];
+      push_text 1 (json_line ({|<p id="three-page">three</p>|} ^ held_island "L0-i4" 4 "L0-s1"));
+      tick (fun () ->
+          check "outlet shell shown, its island held" "three-page|" (attr "#three-page" "id" ^ "|" ^ log_g ());
+          push_text 0 (part_line "s1" "<b>body fill</b>");
+          push_text 0 "[]\n";
+          push_end 0;
+          tick (fun () ->
+              check "the end of the body stream does not start an island that the outlet stream holds" "" (log_g ());
+              push_text 1 (part_line "L0-s1" "<span>p</span>");
+              push_text 1 "[]\n";
+              push_end 1;
+              tick (fun () ->
+                  check "it starts after its own fill" "g0/4" (log_g ());
+                  finish ()))))
+
+let streamed_superseded_before_apply finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  deferred_transitions ();
+  render ~islands:(runtime_registry [ probe_entry ]) ~transitions:true ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0 (json_line {|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|});
+  tick (fun () ->
+      ignore (click "#home" "");
+      run_transition 0;
+      tick (fun () ->
+          check "a stream whose page is never shown is aborted" "none|true" (attr "#new" "id" ^ "|" ^ bools (call_aborted 0));
+          finish ()))
+
 let action_after_navigation_started finish =
   setup links;
   plain_start ();
@@ -3287,6 +3525,14 @@ let all =
     ("warm: a bad href is skipped and a waiting click completes", warm_bad_href);
     ("warm: press then click before the answer warms nothing", press_then_click);
     ("max-age reuses a page", max_age_cache);
+    ("a streamed answer: the shell at once, then fills, values and islands", streamed);
+    ("a streamed answer: kept until a newer page swaps the outlet", streamed_superseded);
+    ("a streamed answer: a complete one is cached and replayed", streamed_cache);
+    ("a streamed answer: a broken one keeps the page and is not cached", streamed_broken);
+    ("a streamed answer that broke before its transition ran starts the islands around its fills", streamed_broken_before_apply);
+    ("a streamed answer into an inner outlet stops when the outer outlet is replaced", streamed_inner_replaced);
+    ("the end of a body stream leaves the islands of a newer outlet stream held", streamed_outlet_under_body_stream);
+    ("a streamed answer that a newer navigation replaces before its transition runs is aborted", streamed_superseded_before_apply);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);
     ("other outlet keys miss", keys_miss);

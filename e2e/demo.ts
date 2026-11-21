@@ -64,10 +64,21 @@ page.on("console", (m) => {
   if (m.text().includes("hydration mismatch")) mismatches.push(m.text());
 });
 page.on("pageerror", (e) => pageErrors.push(String(e)));
-page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url()} ${r.failure()?.errorText}`));
+const streamed = new Set<unknown>();
+const streamEnds: { url: string; how: string }[] = [];
+const streamFailures: { url: string; line: string; at: string }[] = [];
+await page.exposeBinding("__streamEnded", (_source, url: string, how: string) => {
+  streamEnds.push({ url, how });
+});
+page.on("requestfailed", (r) => {
+  const line = `${r.method()} ${r.url()} ${r.failure()?.errorText}`;
+  if (streamed.has(r) && r.failure()?.errorText === "net::ERR_ABORTED") streamFailures.push({ url: r.url(), line, at: page.url() });
+  else failedRequests.push(line);
+});
 const responses: Response[] = [];
 page.on("response", (r) => {
   responses.push(r);
+  if (r.headers()["yuka-stream"] === "1") streamed.add(r.request());
   if (r.status() >= 400 && r.status() !== expectedFailures) failedRequests.push(`${r.status()} ${r.url()}`);
 });
 const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch?: string }[] = [];
@@ -117,6 +128,39 @@ const installProbes = () => {
   } as typeof IntersectionObserver;
 };
 await page.addInitScript(installProbes);
+await page.addInitScript(() => {
+  const w = window as any;
+  const f = w.fetch;
+  w.fetch = function (input: any, init: any) {
+    const url = new URL(String(input), location.href).href;
+    let streamed = false, ended = false;
+    if (init && init.signal)
+      init.signal.addEventListener("abort", () => {
+        if (streamed && !ended) w.__streamEnded(url, "aborted by the page");
+      });
+    return f.call(this, input, init).then((r: any) => {
+      if (r.headers.get("yuka-stream") !== "1" || !r.body) return r;
+      streamed = true;
+      const decoder = new TextDecoder();
+      let text = "";
+      const watched = r.body.pipeThrough(
+        new TransformStream({
+          transform(chunk: any, out: any) {
+            text += decoder.decode(chunk, { stream: true });
+            out.enqueue(chunk);
+          },
+          flush() {
+            ended = true;
+            if (text.endsWith("\n[]\n")) w.__streamEnded(url, "complete");
+          },
+        }),
+      );
+      const answer = new Response(watched, { status: r.status, statusText: r.statusText, headers: r.headers });
+      Object.defineProperty(answer, "url", { value: r.url });
+      return answer;
+    });
+  };
+});
 
 const routerLoaded = async (p: Page) => {
   const loaded = p.waitForResponse((r) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url()).pathname)).then(() => true, () => false);
@@ -320,9 +364,18 @@ await step("3c. partial navigation", async () => {
   const response = await outlet;
   await page.waitForURL("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
-  check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
-  await page.waitForSelector("[data-nav-progress=finished]");
-  check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
+  const headers = response.headers();
+  check("3c.3 partial response for the shell outlet", headers["yuka-outlet"] === "L0", String(headers["yuka-outlet"]));
+  check("3c.3a the issue answer streams", headers["yuka-stream"] === "1" && headers["content-type"] === "application/x-ndjson; charset=utf-8", JSON.stringify(headers));
+  await page.waitForSelector("[data-nav-progress]:not([data-nav-progress=loading])", { state: "attached" });
+  check("3c.4 the shell progress bar kept its element and its state (finished, or idle when the streamed page came within the bar delay)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
+  await page.waitForFunction(() =>
+    !document.querySelector("yuka-outlet .skeleton") && [...document.querySelectorAll("yuka-outlet yuka-island")].every((i) => (i as any).__yuka_started), undefined, { timeout: 10000 });
+  const filled = await page.evaluate(() => ({
+    comments: document.querySelectorAll("yuka-outlet .comment").length,
+    islands: document.querySelectorAll("yuka-outlet yuka-island").length,
+  }));
+  check("3c.3b the fills replace the skeleton in the outlet and every island there starts", filled.comments > 0 && filled.islands > 0, JSON.stringify(filled));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
   const focusState = () =>
     page.evaluate(() => {
@@ -391,7 +444,7 @@ await step("3l. overlay route", async () => {
     answer.headers()["yuka-layer"] === "overlay" && open.report === 1 && open.rows > 0 && y > 0 && open.title === "Report" && (await marker()) === "alive",
     JSON.stringify(open),
   );
-  await page.mouse.move(1270, 790);
+  await page.mouse.move(20, 790);
   let mark = allRequests.length;
   await page.goBack();
   await page.waitForSelector("yuka-overlay", { state: "detached" });
@@ -1669,7 +1722,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   await page.keyboard.press("Escape");
   check("6h.7 Escape closes the card", (await openCard()) === "");
   await trigger.click();
-  await page.mouse.click(640, 20);
+  await page.mouse.click(20, 790);
   check("6h.8 a click outside closes the card", (await openCard()) === "" && page.url().endsWith("/w/stress"));
   await trigger.focus();
   await page.keyboard.press("Enter");
@@ -2585,6 +2638,11 @@ check("10 no page errors in whole run", pageErrors.length === 0, pageErrors.join
 const lateConsole = consoleErrors.filter((e) => !/status of (500|404)/.test(e));
 check("11 no unexpected console errors in whole run", lateConsole.length === 0, lateConsole.join(" | "));
 check("11b no hydration mismatch in whole run", mismatches.length === 0, mismatches.join(" | "));
+for (const f of streamFailures) {
+  const i = streamEnds.findIndex((e) => e.url === f.url);
+  if (i >= 0) streamEnds.splice(i, 1);
+  else failedRequests.push(`${f.line} (stream neither complete nor aborted by the page, page ${f.at})`);
+}
 check("12 no unexpected failed requests in whole run", failedRequests.length === 0, failedRequests.join(" | "));
 
 await browser.close();

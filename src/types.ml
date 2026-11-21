@@ -162,6 +162,7 @@ type backend = ..
     mutable held : string list;
     mutable context : context option;
     mutable shared : (Scheduler.binding * string) list;
+    mutable route_printed : bool;
     mutable contexts : int;
     mutable id_scope : string;
     mutable id_count : int;
@@ -176,7 +177,7 @@ type backend = ..
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused } =
+        csrf; sheets; held; context; shared; route_printed = _; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;

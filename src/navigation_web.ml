@@ -15,8 +15,15 @@ let scroll_to_hash : string -> unit = fun _ -> browser_only ()
 let new_controller : unit -> controller = fun _ -> browser_only ()
 let abort : controller -> unit = fun _ -> browser_only ()
 let fetch_page :
-    string * string * string * bool * controller * bool -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
- fun _ _ _ -> browser_only ()
+    string * string * string * bool * controller * bool ->
+    (string -> int -> (string -> string option) -> string -> bool -> unit) ->
+    (string -> string -> unit) ->
+    (bool -> unit) ->
+    (unit -> unit) ->
+    unit =
+ fun _ _ _ _ _ -> browser_only ()
+let put : node -> string -> string -> unit = fun _ _ _ -> browser_only ()
+let hold : node -> int -> bool -> unit = fun _ _ _ -> browser_only ()
 let hash_of : string -> string = fun _ -> browser_only ()
 let no_hash : string -> string = fun _ -> browser_only ()
 let path_of : string -> string = fun _ -> browser_only ()
