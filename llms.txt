@@ -1,0 +1,18 @@
+# Yuka
+
+> Yuka is a web framework for OCaml. The server renders pages to HTML and streams slow parts when they are ready. Islands are components that Melange compiles to JavaScript and that hydrate in the browser. Components are written in mlx (JSX for OCaml) and use signals.
+
+Yuka is experimental and its API changes. Read the page for the task before you write Yuka code.
+
+## Docs
+
+- [Data](https://raw.githubusercontent.com/davesnx/yuka/main/docs/data.md)
+- [Getting started](https://raw.githubusercontent.com/davesnx/yuka/main/docs/getting-started.md)
+- [Islands](https://raw.githubusercontent.com/davesnx/yuka/main/docs/islands.md)
+- [Router](https://raw.githubusercontent.com/davesnx/yuka/main/docs/router.md)
+- [Security](https://raw.githubusercontent.com/davesnx/yuka/main/docs/security.md)
+- [State, memos and effects](https://raw.githubusercontent.com/davesnx/yuka/main/docs/state.md)
+
+## Optional
+
+- [Agent skill](https://raw.githubusercontent.com/davesnx/yuka/main/skills/yuka/SKILL.md): rules and a guide to the docs for a coding agent. The `yuka` opam package installs it in `share/yuka/skills/yuka`.

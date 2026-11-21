@@ -146,9 +146,10 @@ bench-gate: ## Run bench-keyed (yuka and solid), bench-ssr (yuka-stream and its 
 	$(MAKE) bench-check
 
 .PHONY: docs
-docs: ## Copy docs/ to the references of the agent skill in skills/yuka (make test fails when they differ)
+docs: ## Copy docs/ to the references of the agent skill in skills/yuka and write llms.txt (make test fails when they differ)
 	rm -rf skills/yuka/references
 	cp -r docs skills/yuka/references
+	sh scripts/llms_txt.sh docs/*.md > llms.txt
 
 .PHONY: install-npm
 install-npm: ## Install npm dependencies (esbuild, jsdom)

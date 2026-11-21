@@ -6,3 +6,11 @@
  (action
   (system
    "diff -r ../../docs references || { echo 'skills/yuka/references differs from docs/. Run: make docs'; exit 1; }")))
+
+(install
+ (section share)
+ (package yuka)
+ (files
+  (SKILL.md as skills/yuka/SKILL.md)
+  (glob_files
+   (references/*.md with_prefix skills/yuka/references))))

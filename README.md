@@ -80,5 +80,7 @@ Router.make ~not_found:Pages.not_found
 ## For coding agents
 
 [`skills/yuka`](skills/yuka) is a skill that teaches Yuka to a coding agent.
-Its references are copies of `docs/`: `make docs` updates them, and
-`make test` fails when they differ.
+The `yuka` opam package installs it in `$(opam var share)/yuka/skills/yuka`.
+Its references are copies of `docs/`. [`llms.txt`](llms.txt) lists the
+docs pages for a language model. `make docs` updates both, and `make test`
+fails when they differ from `docs/`.

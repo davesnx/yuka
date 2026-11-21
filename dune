@@ -3,3 +3,16 @@
 (env
  (dev
   (flags :standard %{dune-warnings})))
+
+(rule
+ (deps
+  (glob_files docs/*.md))
+ (action
+  (with-stdout-to
+   llms.txt.gen
+   (run sh %{dep:scripts/llms_txt.sh} %{deps}))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff llms.txt llms.txt.gen)))
