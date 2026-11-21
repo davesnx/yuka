@@ -298,6 +298,38 @@ let visible =
 - A reader never sees a memo that is out of date. In the example at the
   top, no code can observe the new `count` together with the old `double`.
 
+## Async memos
+
+`Yuka.Async.memo compute` is a memo of a value that loads. `compute` gives
+a `('a, Yuka.Status.error) result Yuka.Async.t`, which is the result type of
+`Yuka.Action.call`. The memo gives a read-only State of a `Yuka.Status.t`:
+
+```ocaml
+let results =
+  Yuka.Async.memo (fun () -> Yuka.Action.call search (Yuka.State.get filter))
+```
+
+For a local computation, use `Yuka.Async.map Result.ok`.
+
+- `compute` runs one time when you create the memo, and again when a State
+  that it reads changes.
+- Only the latest run writes the status. When the filter changes two
+  times, the answer of the older run does not show, also when it comes
+  last.
+- The next run, or the disposal of the owner of the memo, aborts a query
+  `Action.call` of an older run.
+- The status starts as `Loading None`. While a new run loads, it is
+  `Loading (Some last)`, so the old data stays on the page. `Error error`
+  gives `Failed`; a failed `Async` or an exception in `compute` gives
+  `Failed` with `Server`, and the message goes to the log.
+- `?equal` compares the data of two `Ready` values: equal data is not a
+  change.
+- In a server render, `compute` runs one time. Inside an island, the
+  answer of a query `Action.call` is written in the page, and the first
+  run in the browser reads it with no request.
+
+Read the status with `<Yuka.Show>` (see `data.md`, "Show a status").
+
 ## Selectors
 
 `State.select source` gives a function `is_selected` such that

@@ -1,6 +1,6 @@
 type found = Found of (Json.t, Status.error) result | Pending | Absent
 
-let key name input = "r:" ^ name ^ " " ^ Json.to_string input
+let key = Embedded.key
 
 let error_codec : Status.error Codec.t =
   let open Status in

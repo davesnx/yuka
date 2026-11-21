@@ -14,6 +14,13 @@ let lazy_entry ~name:_ _ = ()
 let acting : Base.owner option ref = ref None
 let own_call _ _ = ()
 
+let query name input k =
+  let raw, resolve, _ = Async.make () in
+  let stop = !Bridge.send name input resolve in
+  Answers.record (Answers.key name input) (match Async.status raw with Async.Done r -> Some r | _ -> None) raw;
+  Async.on_settled raw (function Async.Done r -> k r | Async.Pending | Async.Failed _ -> ());
+  stop
+
 let browser_only () = invalid_arg "Yuka: browser only"
 let render _ _ = browser_only ()
 let hydrate _ _ = browser_only ()

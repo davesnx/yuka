@@ -56,3 +56,58 @@
     State.read_only s
 
   let guard f x = match f x with a -> a | exception e -> failed (Web.exn_to_string e)
+
+  let ready_equal equal a b =
+    match (a, b) with
+    | Status.Ready { data = x; _ }, Status.Ready { data = y; _ } -> equal x y
+    | _ -> a == b
+
+  let memo ?equal f =
+    let out =
+      State.make ?equal:(match equal with Some e -> Some (ready_equal e) | None -> None) (Status.Loading None)
+    in
+    let source = Source.join () and run = ref 0 and first = ref Web.in_browser and last = ref None in
+    let write g st () =
+      if g = !run then
+        State.set out
+          (match st with
+          | Done (Ok data) ->
+              last := Some data;
+              Status.Ready { data; stale = false }
+          | Done (Error error) -> Status.Failed { error; last = !last }
+          | Failed _ -> Status.Failed { error = Status.Server; last = !last }
+          | Pending -> Status.Loading !last)
+    in
+    let settle g st =
+      if g = !run then begin
+        (match st with Failed m -> !Source.log m | Done _ | Pending -> ());
+        Source.settle source (write g st)
+      end
+    in
+    let start () =
+      incr run;
+      let g = !run in
+      let a =
+        if !first then begin
+          first := false;
+          let reading = !Embedded.reading in
+          Embedded.reading := Some Embedded.answer;
+          let a = guard f () in
+          Embedded.reading := reading;
+          a
+        end
+        else guard f ()
+      in
+      (match a.status with
+      | Pending -> Source.run source (fun () -> State.set out (Status.Loading !last))
+      | Done _ | Failed _ -> ());
+      on_settled a (settle g)
+    in
+    if !(Base.server_rendering ()) then start ()
+    else begin
+      Base.run_effect Scheduler.queue start;
+      Base.own (fun () ->
+          incr run;
+          Source.leave source)
+    end;
+    State.read_only out

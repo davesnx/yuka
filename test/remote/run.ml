@@ -43,6 +43,10 @@ let settle i v =
   let _, (_, resolve, _) = List.nth !gates i in
   resolve v
 
+let settle_input input v =
+  let _, (_, resolve, _) = List.find (fun (i, _) -> String.equal i input) (List.rev !gates) in
+  resolve v
+
 let fail i m =
   let _, (_, _, failure) = List.nth !gates i in
   failure m
@@ -146,6 +150,31 @@ let transport =
         dispose ();
         settle 0 "A";
         check_status "still loading" "loading" r );
+    ( "Remote in a boundary: the first answer waits for the second, then both switch",
+      fun () ->
+        reset ();
+        let (a, b, busy), _ =
+          in_owner (fun () ->
+              let (a, b), busy =
+                Private.boundary (fun () ->
+                    (Remote.make gated (fun () -> "one"), Remote.make gated (fun () -> "two")))
+              in
+              (a, b, busy))
+        in
+        Alcotest.(check bool) "busy" true (State.peek busy);
+        settle_input "one" "ONE";
+        check_status "the first answer waits" "loading" a;
+        Alcotest.(check bool) "still busy" true (State.peek busy);
+        settle_input "two" "TWO";
+        check_status "first" "ready ONE" a;
+        check_status "second" "ready TWO" b;
+        Alcotest.(check bool) "not busy" false (State.peek busy);
+        Remote.refetch a;
+        check_status "a refetch keeps the old data" "ready ONE" a;
+        Alcotest.(check bool) "busy again" true (State.peek busy);
+        settle_input "one" "ONE'";
+        check_status "switched" "ready ONE'" a;
+        Alcotest.(check bool) "not busy at the end" false (State.peek busy) );
     ( "a failed refetch keeps the last data",
       fun () ->
         reset ();
@@ -229,6 +258,54 @@ let answers =
         Alcotest.(check bool) "done" true (Async.status p = Async.Done ());
         Alcotest.(check bool) "timeout" true
           (contains (String.concat "" !chunks) {|{"error":{"kind":"network","message":"timeout"}}|}) );
+    ( "Async.memo: a query call in an island writes its answer",
+      fun () ->
+        reset ();
+        let html =
+          Server.to_string (fun () ->
+              runtime_island ~name:"Memo" ~props:`Null (fun () ->
+                  let r = Async.memo (fun () -> Action.call echo "m") in
+                  element "b" [] [ text (show (State.get r)) ]))
+        in
+        Alcotest.(check bool) "data in the HTML" true (contains html "<b>ready echo m</b>");
+        Alcotest.(check bool) "answer written" true
+          (contains html {|data-yuka-answer="r:echo &quot;m&quot;">{"ok":"echo m"}</script>|}) );
+    ( "Async.memo: a query call outside an island writes no answer",
+      fun () ->
+        reset ();
+        let html =
+          Server.to_string (fun () ->
+              let r = Async.memo (fun () -> Action.call echo "o") in
+              element "b" [] [ text (show (State.get r)) ])
+        in
+        Alcotest.(check bool) "data" true (contains html "<b>ready echo o</b>");
+        Alcotest.(check bool) "no answer" false (contains html "data-yuka-answer") );
+    ( "Async.memo: streaming a pending query call, then its full answer",
+      fun () ->
+        reset ();
+        let chunks = ref [] in
+        let write c =
+          chunks := c :: !chunks;
+          Async.return ()
+        in
+        let never _ =
+          let a, _, _ = Async.make () in
+          a
+        in
+        let p =
+          Private.stream ~sleep:never ~write (fun () ->
+              runtime_island ~name:"Memo" ~props:`Null (fun () ->
+                  let r = Async.memo (fun () -> Action.call gated "s") in
+                  element "b" [] [ text (show (State.get r)) ]))
+        in
+        let all () = String.concat "" (List.rev !chunks) in
+        Alcotest.(check bool) "pending element" true
+          (contains (all ()) {|data-yuka-answer="r:gated &quot;s&quot;" data-pending></script>|});
+        Alcotest.(check bool) "loading shown" true (contains (all ()) "<b>loading</b>");
+        settle 0 "S";
+        Alcotest.(check bool) "done" true (Async.status p = Async.Done ());
+        Alcotest.(check bool) "full element later" true
+          (contains (all ()) {|data-yuka-answer="r:gated &quot;s&quot;">{"ok":"S"}</script>|}) );
     ( "settled render writes every answer",
       fun () ->
         reset ();

@@ -1006,6 +1006,14 @@ let transport_hook : (string -> Json.t -> ((Json.t, Status.error) result -> unit
 
 let use_actions () = transport_hook := transport
 
+let query name input k =
+  use_actions ();
+  match match !Embedded.reading with Some read -> read name input | None -> None with
+  | Some r ->
+      k r;
+      ignore
+  | None -> !Bridge.send name input k
+
 let script_props script =
   match Web.get_attribute script "data-yuka-props" with
   | Some id -> Some (id, Web.text_content script)

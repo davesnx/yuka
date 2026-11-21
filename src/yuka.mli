@@ -878,6 +878,14 @@ module Private : sig
       installed by the first [Action.call] or island form submit, and a call
       before it raises [Failure]. *)
 
+  val boundary : (unit -> 'a) -> 'a * bool State.read
+  (** Runs the function under a new pending boundary, in a new owner that the
+      current owner disposes. A {!Async.memo} or a {!Remote.make} made in it
+      joins the boundary: while one of them has a run in flight, the status
+      writes wait, and the read is [true]. When the last run settles, every
+      waiting write is done in one batch and the read becomes [false]. For
+      tests, until [Pending]. *)
+
   val server_rendering : unit -> bool
   (** True during a server render on this domain; then [Effect.after] and
       [Effect.before] do nothing. *)

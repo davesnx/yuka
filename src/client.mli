@@ -25,6 +25,7 @@ val lazy_entry : name:string -> (unit -> entry promise) -> lazy_entry
 
 val acting : Base.owner option ref
 val own_call : 'a Async.t -> (unit -> unit) -> unit
+val query : string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit
 
 val render : container -> (unit -> 'k Kind.element) -> unit -> unit
 val hydrate : container -> (unit -> 'k Kind.element) -> unit -> unit

@@ -60,14 +60,18 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
     { state; base; changes; refetch = ignore }
   end
   else begin
-    let send = send () in
+    let send = send () and source = Source.join () in
+    let loading () = State.set base (Status.Loading (Status.data (State.peek base))) in
     let generation = ref 0 and stop = ref ignore and current = ref None and first = ref true in
     let cancel () =
       incr generation;
       !stop ();
       stop := ignore
     in
-    let finish g r = if g = !generation then State.set base (decode q (Status.data (State.peek base)) r) in
+    let finish g r =
+      if g = !generation then
+        Source.settle source (fun () -> State.set base (decode q (Status.data (State.peek base)) r))
+    in
     let rec attempt g input n = stop := send (Action.name q) input (answered g input n)
     and answered g input n r =
       if g = !generation then
@@ -83,7 +87,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
           stop :=
             Web.set_timeout (retry.delay_ms 1) (fun () ->
                 if g = !generation then begin
-                  State.set base (Status.Loading (Status.data (State.peek base)));
+                  Source.run source loading;
                   attempt g input 2
                 end)
       | _ -> ()
@@ -91,7 +95,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
     let start input ~read =
       cancel ();
       let g = !generation in
-      State.set base (Status.Loading (Status.data (State.peek base)));
+      Source.run source loading;
       if not read then attempt g input 1
       else
         let key = Answers.key (Action.name q) input in
@@ -136,13 +140,14 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
           current := None;
           first := false;
           cancel ();
-          State.set base Status.Idle
+          Source.settle source (fun () -> State.set base Status.Idle)
         end);
     incr next_use;
     let id = !next_use in
     Web.table_set (uses ()) (Action.name q) ((id, refetch) :: listed (Action.name q));
     Base.own (fun () ->
         cancel ();
+        Source.leave source;
         Web.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
     { state; base; changes; refetch }
   end

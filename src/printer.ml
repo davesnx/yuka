@@ -24,6 +24,7 @@ open Base
     done;
     Buffer.add_substring b s !start (n - !start)
 
+  let log_memo m = ignore (shown "Async.memo" m)
   let blocked_logged = ref false
 
   let log_blocked name value =
@@ -734,6 +735,7 @@ open Base
     Atomic.incr rendering;
     server_rendering := true;
     Scheduler.seal ();
+    Source.log := log_memo;
     current_session := Some s;
     let restore () =
       let others = Atomic.fetch_and_add rendering (-1) > 1 in

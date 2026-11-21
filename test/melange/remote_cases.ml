@@ -133,8 +133,72 @@ let in_effect call =
   let (), dispose = with_owner (fun () -> Effect.after (fun () -> result := call ())) in
   (result, dispose)
 
+let memo_entry =
+  runtime_entry ~name:"Query" (fun json ->
+      Result.map
+        (fun () () ->
+          let r = Async.memo (fun () -> Action.call query (State.get input)) in
+          element "b" [] [ hole (fun () -> text (show (State.get r))) ])
+        (Codec.decode Codec.unit json))
+
+let start_memo () = Yuka.render ~islands:(runtime_registry [ memo_entry ]) ~navigation:false ()
+
 let async =
   [
+    ( "async memo: a new run aborts the query of the older run, and only the latest answer is written",
+      fun finish ->
+        fresh_calls ~ignore_abort:true ();
+        State.set pick "a";
+        let rows, dispose = with_owner (fun () -> Async.memo (fun () -> Action.call query (State.get pick))) in
+        State.set pick "b";
+        after_ms 10 (fun () ->
+            respond 1 200 {|{"ok":"B"}|};
+            respond 0 200 {|{"ok":"A"}|};
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "two fetches" "2" (string_of_int (fetches ()));
+                    check "first aborted" "true" (string_of_bool (aborted 0));
+                    check "second not aborted" "false" (string_of_bool (aborted 1));
+                    check "latest" "ready B" (show (State.peek rows));
+                    dispose ();
+                    Yuka.stop ()))) );
+    ( "async memo: disposing the memo aborts the query in flight",
+      fun finish ->
+        fresh_calls ();
+        let rows, dispose = with_owner (fun () -> Async.memo (fun () -> Action.call query "x")) in
+        dispose ();
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "aborted" "true" (string_of_bool (aborted 0));
+                check "loading" "loading" (show (State.peek rows));
+                Yuka.stop ())) );
+    ( "async memo: the first run reads the embedded answer at hydration, with no fetch; a later run fetches",
+      fun finish ->
+        fresh ~shown:"ready A" ~answer:(answer_for "a" {|{"ok":"A"}|}) ();
+        capture_warnings ();
+        start_memo ();
+        let logged = warnings () in
+        let at_start = shown () and sent = fetches () in
+        State.set input "b";
+        after_ms 10 (fun () ->
+            respond 0 200 {|{"ok":"B"}|};
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "no fetch at hydration" "0" (string_of_int sent);
+                    check "ready at hydration" "ready A" at_start;
+                    check "no mismatch" "" logged;
+                    check "a later run fetches" {|"b"|} (fetch_body 0);
+                    check "ready" "ready B" (shown ());
+                    Yuka.stop ()))) );
+    ( "async memo: with no embedded answer the first run fetches",
+      fun finish ->
+        fresh ();
+        start_memo ();
+        let sent = fetches () in
+        finish (fun () ->
+            check "one fetch" "1" (string_of_int sent);
+            check "loading" "loading" (shown ());
+            Yuka.stop ()) );
     ( "action: a query call in Effect.after whose input changes twice: only the latest answer is written",
       fun finish ->
         fresh_calls ();

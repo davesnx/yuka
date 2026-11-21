@@ -22,7 +22,7 @@
     Client.use_actions ();
     !Bridge.send name json k
 
-  let start a i =
+  let start_with send a i =
     let settled, resolve, _ = Async.make () in
     let live = ref true in
     let stop =
@@ -41,8 +41,13 @@
     in
     (settled, abort)
 
+  let start a i = start_with send a i
+
   let call : type i o kind. (i, o, kind) t -> i -> (o, Status.error) result Async.t =
    fun a i ->
-    let settled, abort = start a i in
-    (match a.form with Query -> Client.own_call settled abort | Mutation | Form _ -> ());
-    settled
+    match a.form with
+    | Query ->
+        let settled, abort = start_with Client.query a i in
+        Client.own_call settled abort;
+        settled
+    | Mutation | Form _ -> fst (start a i)

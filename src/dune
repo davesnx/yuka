@@ -10,6 +10,7 @@
   async
   async_reader
   base
+  boundary
   bridge
   browser
   buffer
@@ -17,6 +18,7 @@
   cycle
   dev
   element
+  embedded
   form_core
   island
   json_diff
@@ -36,6 +38,7 @@
   scheduler
   server
   signal
+  source
   state
   status_error
   template

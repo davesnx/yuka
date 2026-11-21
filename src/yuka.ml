@@ -303,6 +303,7 @@ module Private = struct
   let slot_dom (s : slot) = s.dom
   let call_action = Bridge.send
   let async_source = Types.async_source
+  let boundary = Boundary.make
   let page_contexts () = !Platform.swapped != Platform.no_swap
   let render = Client.render
   let hydrate = Client.hydrate
