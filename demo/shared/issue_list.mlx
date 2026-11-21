@@ -170,7 +170,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
   let popup items : Yuka.client Yuka.element =
     Yuka.fragment
       [
-        <div class_="backdrop" on_click=(fun _ -> Yuka.State.set menu None) />;
+        <div class_="backdrop" aria_hidden=true on_click=(fun _ -> Yuka.State.set menu None) />;
         <ul class_="menu">(Yuka.fragment items)</ul>;
       ]
   in

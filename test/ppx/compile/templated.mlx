@@ -3,13 +3,13 @@ let count : int Yuka.State.t = Yuka.State.make 0
 let fixed : Yuka.client Yuka.element =
   <ul class_="list">
     <li>"one"</li>
-    <li on_click=(fun _ -> Yuka.State.update count succ)>(Yuka.text (string_of_int (Yuka.State.get count)))</li>
+    <li role=`button tabindex=0 on_click=(fun _ -> Yuka.State.update count succ)>(Yuka.text (string_of_int (Yuka.State.get count)))</li>
   </ul>
 
 let by_hand : Yuka.client Yuka.element =
   Yuka.element "ul" [ Yuka.attr "class" "list" ]
     [ Yuka.element "li" [] [ Yuka.text "one" ];
-      Yuka.element "li" [ Yuka.on "click" (fun _ -> Yuka.State.update count succ) ]
+      Yuka.element "li" [ Yuka.attr "role" "button"; Yuka.attr "tabindex" "0"; Yuka.on "click" (fun _ -> Yuka.State.update count succ) ]
         [ Yuka.hole (fun () -> Yuka.text (string_of_int (Yuka.State.get count))) ] ]
 
 let static_tree : Yuka.server Yuka.element =

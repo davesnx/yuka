@@ -107,7 +107,7 @@ let[@client] make () =
     </button>
     (if Yuka.State.get opened then
        <div>
-         <div class_="backdrop" on_click=(fun _ -> close ~refocus:false) />
+         <div class_="backdrop" aria_hidden=true on_click=(fun _ -> close ~refocus:false) />
          <div class_=("menu " ^ Css.menu) role=`menu aria_label="Theme and code style">
            (group ~id:"theme-group" ~label:"Theme" theme_choices)
            (group ~id:"code-group" ~label:"Code" code_choices)

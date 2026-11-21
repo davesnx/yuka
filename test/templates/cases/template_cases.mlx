@@ -13,7 +13,7 @@ let cases : (string * (unit -> Yuka.client Yuka.element)) list =
         <p>"a" (Yuka.text "x") "b" (Yuka.text "y") (Yuka.text "z") "c" (Yuka.text "w")</p> );
     ( "attribute parts",
       fun () ->
-        <div id="d" class_=(if Yuka.State.get on then "on" else "off") on_click=(fun _ -> ())>
+        <div id="d" role=`button tabindex=0 class_=(if Yuka.State.get on then "on" else "off") on_click=(fun _ -> ())>
           <span title=(Yuka.State.get label)>"s"</span>
         </div> );
     ( "svg",

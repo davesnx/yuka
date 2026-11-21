@@ -1139,13 +1139,11 @@ module Templates =
             ~values:[||] ~clones:1
       end
     let fixed =
-      Yuka.runtime_instance __yuka_template_rewrite_25
-        [|(Yuka.runtime_attribute (Yuka.on "click" (fun _ -> ())));(Yuka.runtime_child
-                                                                    (Yuka.runtime_hole
-                                                                    (fun ()
-                                                                    ->
-                                                                    State.get
-                                                                    n)))|]
+      ((Yuka.runtime_instance __yuka_template_rewrite_25
+          [|(Yuka.runtime_attribute (Yuka.on "click" (fun _ -> ())));(
+            Yuka.runtime_child (Yuka.runtime_hole (fun () -> State.get n)))|])
+      [@ocaml.ppwarning
+        "[yuka] <li> has on_click but a keyboard cannot use it. Use <button>, or add role and tabindex."])
     open
       struct
         let __yuka_template_rewrite_26 =

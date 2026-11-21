@@ -15,7 +15,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
     <button id="new-issue-button" class_="new-issue-button" on_click=(fun _ -> open_ ())>"+ New issue (c)"</button>
     (if Yuka.State.get Ui.dialog_open then
        <div class_="dialog-wrap">
-         <div class_="backdrop dim" on_click=(fun _ -> close ()) />
+         <div class_="backdrop dim" aria_hidden=true on_click=(fun _ -> close ()) />
          <div class_="dialog">
            <h2>"New issue"</h2>
            <Yuka.Form action=Actions.create_issue

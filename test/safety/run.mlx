@@ -220,7 +220,7 @@ let mlx () =
   let state = State.make url in
   check_client "a hole from mlx" {|<a href="about:blank#blocked">x</a>|} <a href=(State.get state)>"x"</a>;
   let data = "data:image/png;base64,iVBORw0KGgo=" in
-  check_html "a data image in mlx" {|<img src="data:image/png;base64,iVBORw0KGgo=">|} <img src=data />
+  check_html "a data image in mlx" {|<img src="data:image/png;base64,iVBORw0KGgo=" alt="">|} <img src=data alt="" />
 
 let escape_reference ~quote s =
   String.concat ""

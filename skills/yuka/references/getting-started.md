@@ -382,6 +382,24 @@ let assets =
       exit 1
 ```
 
+### Accessibility warnings
+
+The ppx gives warning 22 (`[preprocessor]`) at an HTML tag in `.mlx`
+for these problems:
+
+- An `<img>` has no `alt`. Write `alt=""` when the image is decoration.
+- An HTML tag that is not interactive has `on_click`, but no `role` and
+  `tabindex`. A keyboard cannot use it. Use `<button>`, or add `role` and
+  `tabindex`. `<a>`, `<area>`, `<button>`, `<details>`, `<input>`,
+  `<option>`, `<select>`, `<summary>` and `<textarea>` are interactive.
+  A tag with `aria_hidden` and an SVG tag such as `<g>` get no warning.
+- A `<label>` has no `for_` and no control in it: no `<button>`, `<input>`,
+  `<meter>`, `<output>`, `<progress>`, `<select>`, `<textarea>` or
+  component tag.
+
+In the dune `dev` profile, a warning is an error. To stop these warnings
+in one file, write `[@@@warning "-22"]` at its top.
+
 ## Next
 
 - [`router.md`](router.md): routes, params, loaders, guards and links.

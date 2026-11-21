@@ -856,6 +856,67 @@ let template ~self ~loc ~fnloc tag args =
   | Some clones -> emit_template ~loc built parts clones
   | None -> lower_shape ~loc parts built
 
+let interactive = function
+  | "a" | "area" | "button" | "details" | "input" | "option" | "select" | "summary" | "textarea" -> true
+  | _ -> false
+
+let labelable = function
+  | "button" | "input" | "meter" | "output" | "progress" | "select" | "textarea" -> true
+  | _ -> false
+
+let has_control children =
+  let found = ref false in
+  let finder =
+    object
+      inherit Ast_traverse.iter as super
+
+      method! expression e =
+        match e.pexp_desc with
+        | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; _ }; _ }, _) when is_jsx e && not (labelable tag) ->
+            super#expression e
+        | Pexp_apply ({ pexp_desc = Pexp_ident _; _ }, _) when is_jsx e -> found := true
+        | _ -> super#expression e
+    end
+  in
+  List.iter finder#expression children;
+  !found
+
+let rec a11y_warnings ~loc tag args =
+  let props, children = split_args args in
+  let has name = List.exists (fun (l, _) -> l = Labelled name || l = Optional name) props in
+  let own =
+    List.filter_map Fun.id
+      [ (if tag = "img" && not (has "alt") then
+           Some "<img> has no alt. Add alt=\"...\" that tells what the image shows, or alt=\"\" when the image is decoration."
+         else None);
+        (if
+           has "on_click" && Html.is_html_element tag && (not (interactive tag)) && (not (has "aria_hidden"))
+           && not (has "role" && has "tabindex")
+         then
+           Some
+             (Printf.sprintf
+                "<%s> has on_click but a keyboard cannot use it. Use <button>, or add role and tabindex." tag)
+         else None);
+        (if tag = "label" && (not (has "for_")) && not (has_control children) then
+           Some "<label> has no control. Add for_=\"id\", or put the control in the label."
+         else None) ]
+  in
+  List.map (fun m -> (loc, "[yuka] " ^ m)) own
+  @ List.concat_map
+      (fun c ->
+        match c.pexp_desc with
+        | Pexp_apply ({ pexp_desc = Pexp_ident { txt = Lident tag; _ }; _ }, args) when is_jsx c ->
+            a11y_warnings ~loc:c.pexp_loc tag args
+        | _ -> [])
+      children
+
+let with_warnings warnings e =
+  let warning (loc, message) =
+    attribute ~loc ~name:{ txt = "ocaml.ppwarning"; loc }
+      ~payload:(PStr [ pstr_eval ~loc (estring ~loc message) [] ])
+  in
+  { e with pexp_attributes = e.pexp_attributes @ List.rev_map warning warnings }
+
 let rewrite_jsx self e =
   let loc = e.pexp_loc in
   let e = strip_jsx e in
@@ -865,8 +926,8 @@ let rewrite_jsx self e =
       match special_form fn with
       | Lident tag when raw_text_element tag ->
           if not (Html.is_html_element tag) then Location.raise_errorf ~loc:fnloc "[yuka] HTML tag '%s' does not exist." tag;
-          lower_element ~self ~loc ~fnloc tag args
-      | Lident tag -> template ~self ~loc ~fnloc tag args
+          with_warnings (a11y_warnings ~loc tag args) (lower_element ~self ~loc ~fnloc tag args)
+      | Lident tag -> with_warnings (a11y_warnings ~loc tag args) (template ~self ~loc ~fnloc tag args)
       | Ldot (Ldot (Lident "Yuka", ("Await" | "Show" as m)), "createElement") ->
           let first, takes = if m = "Await" then ("async", "async, loading and failed") else ("status", "status, loading and failed") in
           let find name =
