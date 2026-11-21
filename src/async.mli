@@ -12,7 +12,6 @@ val failed : string -> 'a t
 (** A value that is already [Failed] with this message. *)
 
 val status : 'a t -> 'a status
-(** The status now. *)
 
 val on_settled : 'a t -> ('a status -> unit) -> unit
 (** Callbacks run in registration order; now, if already settled. *)

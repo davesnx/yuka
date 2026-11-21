@@ -18,9 +18,6 @@ let get = Array.unsafe_get
 let set = Array.unsafe_set
 external fill : 'a array -> 'a -> 'a array = "fill" [@@mel.send]
 
-(* Each kind of a component's template fixes the type of the slot at its
-   index, as the ppx would generate both from one JSX tree; the casts in
-   [patch] read the slot back at that type. *)
 type kind =
   | Text
   | Class
@@ -77,8 +74,6 @@ let template_of doc component =
       component.template <- Js.Null.return root;
       root
 
-(* Melange compiles a tuple to a JS array, and the ppx gives every props
-   value a tuple of at least two parts, so props read as an array. *)
 let same (old : Obj.t) (next : Obj.t) =
   let old : Obj.t array = Obj.magic old and next : Obj.t array = Obj.magic next in
   let at = ref (Array.length next - 1) in

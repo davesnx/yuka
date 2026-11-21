@@ -5,9 +5,6 @@ type 'a t = {
   node : Scheduler.node;
 }
 
-(* Melange floats are JS numbers, so [js] is true only there. On native,
-   tags 252 and 253 are [Obj.string_tag] and [Obj.double_tag]; the casts
-   follow those tags. *)
 let js = Obj.is_int (Obj.repr 0.5)
 
 let native_same a b =
