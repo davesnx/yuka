@@ -1799,6 +1799,54 @@ let client_hand_written_template () =
   check "srcdoc" {|<iframe srcdoc=""></iframe>|} (render_html (fun () -> runtime_instance t [||]));
   refused "a bad name" (fun () -> Private.template Private.Template.(element "a" [ fixed "x onclick=alert(1)" "" ] []))
 
+let define_user_card : unit -> unit =
+  [%mel.raw
+    {|function () {
+  if (window.customElements.get("user-card")) return;
+  window.customElements.define("user-card", class extends window.HTMLElement {
+    set user(v) { this._user = v; this.setAttribute("data-user", v.name); }
+    get user() { return this._user; }
+    pick(bubbles) {
+      this.dispatchEvent(new window.CustomEvent("card-select", { bubbles: bubbles, detail: { id: 7 } }));
+    }
+  });
+}|}]
+
+external get_by_id : node -> string -> node = "getElementById" [@@mel.send]
+external set_user : node -> < name : string > Js.t -> unit = "user" [@@mel.set]
+external pick : node -> bool -> unit = "pick" [@@mel.send]
+external detail : Event.t -> < id : int > Js.t = "detail" [@@mel.get]
+
+let custom_element () =
+  define_user_card ();
+  let label = State.make "Ada" and picked = State.make 0 in
+  let tree () =
+    Effect.after (fun () ->
+        set_user (get_by_id (document ()) "card") [%mel.obj { name = State.get label }]);
+    element "user-card"
+      [ attr "id" "card";
+        hole_attr "label" (fun () -> Some (State.get label));
+        on "card-select" (fun e -> State.set picked (detail e)##id) ]
+      [ hole (fun () -> text (ints (State.get picked))) ]
+  in
+  let c = container (Private.render_html (fun () -> Private.node (tree ()))) in
+  let card = query c "user-card" in
+  check "server attribute" "Ada" (Option.value ~default:"" (get_attribute card "label"));
+  check "no property before hydration" "" (Option.value ~default:"" (get_attribute card "data-user"));
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
+  same "element kept" card (query c "user-card");
+  check "property set" "Ada" (Option.value ~default:"" (get_attribute card "data-user"));
+  pick card true;
+  check "custom event detail" "7" (ints (State.peek picked));
+  check "text after the event" "7" (text_content card);
+  State.set label "Grace";
+  check "attribute follows the state" "Grace" (Option.value ~default:"" (get_attribute card "label"));
+  check "property follows the state" "Grace" (Option.value ~default:"" (get_attribute card "data-user"));
+  State.set picked 0;
+  pick card false;
+  check "a custom event that does not bubble does not reach the handler" "0" (ints (State.peek picked));
+  dispose ()
+
 let client_tag_names () =
   List.iter
     (fun tag ->
@@ -2043,6 +2091,7 @@ let all =
     ("client: hand-written templates are checked", client_hand_written_template);
     ("client: script and style take one text in every namespace", client_raw_text_namespaces);
     ("client: tag names are refused", client_tag_names);
+    ("custom element: attribute, property and custom event", custom_element);
     ("client: event handler names are refused", client_event_names);
     ("client: base href is empty", client_base_href);
     ("client: URL checks with the element known at the sink", client_sink_urls);

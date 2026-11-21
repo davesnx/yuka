@@ -145,6 +145,67 @@ attribute inside that reads a State is a hole of its own and updates. An element
 island has started (a new list row, an `Await` value that arrives later)
 gets a new id, which the server never printed.
 
+## Custom elements
+
+A custom element has a `-` in its tag, as `user-card`. `.mlx` does not
+parse such a tag, and the ppx accepts only HTML and SVG tags. Make the
+element with `Yuka.element`, and its attributes with `Yuka.attr`,
+`Yuka.hole_attr` and `Yuka.on`. Put it in markup as a child:
+
+```ocaml
+(* shared/card.mlx *)
+let[@client] make ~(name : string) () =
+  let label = Yuka.State.make name and picked = Yuka.State.make 0 in
+  Yuka.Effect.after (fun () -> Card_dom.set_user "card" (Yuka.State.get label));
+  <div>
+    (Yuka.element "user-card"
+       [ Yuka.attr "id" "card";
+         Yuka.hole_attr "label" (fun () -> Some (Yuka.State.get label));
+         Yuka.on "card-select" (fun event ->
+             Yuka.State.set picked (Card_dom.detail_id event)) ]
+       [ Yuka.hole (fun () -> Yuka.int (Yuka.State.get picked)) ])
+  </div>
+```
+
+- The server prints the tag, the attributes and the children. The browser
+  keeps that element when it hydrates.
+- `Yuka.on "card-select"` receives a custom event. Yuka listens for it on
+  the document, so the element must dispatch it with `bubbles: true`. A
+  custom event that does not bubble does not reach the handler.
+- `Yuka.Event` has no function for `detail`, and Yuka sets only `value`,
+  `checked` and `selected` as properties (all other names are
+  attributes). To read `detail` or to set another property, such as an
+  object, use Melange externals. The effect above runs after the element
+  is in the document, and again when a State that it reads changes. The
+  server does not set properties.
+
+A library with `(modes native melange)` compiles a module for the server
+too, so put the externals in a module with two files: `card_dom.ml` for
+the server and `card_dom.melange.ml` for the browser. Melange externals
+need `melange.ppx`:
+
+```ocaml
+(* shared/dune *)
+(library
+ (name shared)
+ (modes native melange)
+ (libraries yuka)
+ (preprocess (pps yuka.ppx))
+ (melange.preprocess (pps yuka.ppx melange.ppx)))
+
+(* shared/card_dom.ml *)
+let set_user (_ : string) (_ : string) = ()
+let detail_id (_ : Yuka.Event.t) = 0
+
+(* shared/card_dom.melange.ml *)
+type element
+external get_by_id : string -> element = "getElementById" [@@mel.scope "document"]
+external set_user_prop : element -> < name : string > Js.t -> unit = "user" [@@mel.set]
+external detail : Yuka.Event.t -> < id : int > Js.t = "detail" [@@mel.get]
+let set_user id name = set_user_prop (get_by_id id) [%mel.obj { name }]
+let detail_id event = (detail event)##id
+```
+
 ## Form errors
 
 [Data](data.md#form-errors) explains how `Yuka.Form` shows field errors
