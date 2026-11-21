@@ -1273,6 +1273,16 @@ let forms =
     App.saved := [];
     get ~meth:`POST ~headers ~body target
   in
+  let multipart_post ?(headers = [ ("origin", "http://app.example"); ("host", "app.example") ]) ?(target = "/entry") parts =
+    let headers = ("content-type", "multipart/form-data; boundary=\"XyZ-b0undary\"") :: headers in
+    let part (name, file, content) =
+      "--XyZ-b0undary\r\nContent-Disposition: form-data; name=\"" ^ name ^ "\""
+      ^ (match file with Some f -> "; filename=\"" ^ f ^ "\"\r\nContent-Type: text/plain" | None -> "")
+      ^ "\r\n\r\n" ^ content ^ "\r\n"
+    in
+    App.saved := [];
+    get ~meth:`POST ~headers ~body:(String.concat "" (List.map part parts) ^ "--XyZ-b0undary--\r\n") target
+  in
   [
     ( "a valid post is 303 to the redirect",
       fun () ->
@@ -1359,6 +1369,78 @@ let forms =
         let r = get ~meth:`POST ~headers:json_headers ~body:{|[["body","hello"]]|} "/_yuka/action/jot" in
         check_status r 200;
         Alcotest.(check string) "answer" {|{"ok":{"value":5}}|} r.body );
+    ( "a multipart post with a file is 303, and the function gets the bytes",
+      fun () ->
+        let content = "line one\r\n--not the end\r\n\000\255" in
+        let r =
+          multipart_post [ ("_yuka_action", None, "upload"); ("caption", None, "Cat"); ("photo", Some "C:\\pics\\cat.txt", content) ]
+        in
+        check_status r 303;
+        check_header r "location" [ "/entry" ];
+        Alcotest.(check (list string)) "called with the file" [ "Cat|cat.txt|text/plain|" ^ content ] !App.saved );
+    ( "a file over its limit is 422 with the field error, and the text values stay",
+      fun () ->
+        let r =
+          multipart_post
+            [ ("_yuka_action", None, "upload"); ("caption", None, "Big"); ("photo", Some "big.txt", String.make 101 'x') ]
+        in
+        check_status r 422;
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        check_true "field error" (contains r.body "photo error: File is too large (at most 100 bytes)");
+        check_true "caption kept" (contains r.body {|name="caption" value="Big"|});
+        check_true "multipart form" (contains r.body {|enctype="multipart/form-data"|}) );
+    ( "no file chosen is a Missing field error",
+      fun () ->
+        let r = multipart_post [ ("_yuka_action", None, "upload"); ("caption", None, "c"); ("photo", Some "", "") ] in
+        check_status r 422;
+        check_true "missing" (contains r.body "photo error: Missing") );
+    ( "a multipart body over the upload limit is 413 without reading past the limit",
+      fun () ->
+        body_read := 0;
+        let limit = (1024 * 1024) + 100 in
+        let r =
+          multipart_post [ ("_yuka_action", None, "upload"); ("photo", Some "huge.bin", String.make (3 * 1024 * 1024) 'x') ]
+        in
+        check_status r 413;
+        check_true "stopped near the limit" (!body_read <= limit + 4096);
+        body_read := 0;
+        let r =
+          multipart_post ~target:"/_yuka/action/upload"
+            [ ("photo", Some "huge.bin", String.make (3 * 1024 * 1024) 'x') ]
+        in
+        check_status r 413;
+        check_true "the action endpoint stops near the limit too" (!body_read <= limit + 4096) );
+    ( "a bad multipart body is 400",
+      fun () ->
+        let r =
+          get ~meth:`POST
+            ~headers:[ ("content-type", "multipart/form-data; boundary=b"); ("origin", "http://app.example"); ("host", "app.example") ]
+            ~body:"--b\r\nContent-Disposition: form-data; name=\"x\"\r\n\r\nno end" "/entry"
+        in
+        check_status r 400 );
+    ( "the action endpoint answers a multipart post of a form with JSON",
+      fun () ->
+        let r =
+          multipart_post ~target:"/_yuka/action/upload"
+            [ ("_yuka_action", None, "upload"); ("caption", None, "Cat"); ("photo", Some "cat.txt", "meow") ]
+        in
+        check_status r 200;
+        Alcotest.(check string) "answer" {|{"ok":{"value":"cat.txt"}}|} r.body;
+        Alcotest.(check (list string)) "called" [ "Cat|cat.txt|text/plain|meow" ] !App.saved;
+        let r =
+          multipart_post ~target:"/_yuka/action/upload" [ ("caption", None, "c"); ("photo", Some "b.txt", String.make 101 'x') ]
+        in
+        Alcotest.(check string) "field error" {|{"ok":{"errors":[["photo","File is too large (at most 100 bytes)"]]}}|} r.body;
+        body_read := 0;
+        let r =
+          multipart_post ~target:"/_yuka/action/upload"
+            ~headers:[ ("origin", "https://evil.example"); ("host", "app.example") ]
+            [ ("photo", Some "cat.txt", "meow") ]
+        in
+        check_status r 403;
+        Alcotest.(check int) "foreign origin: body not read" 0 !body_read;
+        let r = multipart_post ~target:"/_yuka/action/whoami" [ ("photo", Some "cat.txt", "meow") ] in
+        check_status r 415 );
     ( "foreign origin to the action endpoint reads 0 bytes",
       fun () ->
         let refused name headers status =

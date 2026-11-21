@@ -29,6 +29,7 @@ module Remote = Remote
 module Topic = Topic
 module Live = Live
 module Form = Form
+module Runtime_form_upload = Upload
 module Event = Event
 module Browser = Browser
 module Router = struct
@@ -200,6 +201,7 @@ let runtime_registry ?(lazy_entries = []) ?navigation:load entries =
   }
 
 let runtime_form_fields = Form_core.fields
+
 let runtime_form_field = Form_core.field
 let runtime_form_get = Form_core.get
 let runtime_form_finish = Form_core.finish

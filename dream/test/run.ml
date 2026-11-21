@@ -160,6 +160,47 @@ let dream_log () =
 let echo = Yuka.Action.mutation ~name:"echo" ~input:Yuka.Codec.string ~output:Yuka.Codec.int
 let () = Yuka.Server.Action.implement echo (fun _ s -> Yuka.Async.return (String.length s))
 
+type upload = { caption : string; photo : Yuka.Form.file; [@max_bytes 10] } [@@deriving form]
+
+let upload = Yuka.Form.action ~name:"upload" ~fields:upload_form ~output:Yuka.Codec.string
+let uploaded = ref []
+
+let () =
+  Yuka.Server.Form.implement upload (fun _ u ->
+      uploaded := (u.caption ^ "|" ^ u.photo.filename ^ "|" ^ u.photo.content_type ^ "|" ^ u.photo.content) :: !uploaded;
+      Yuka.Async.return (Ok u.photo.filename))
+
+let file_upload () =
+  let handler = Yuka_dream.handler config Yuka_routes.app in
+  let post target parts =
+    uploaded := [];
+    let part (name, file, content) =
+      "--b0und\r\nContent-Disposition: form-data; name=\"" ^ name ^ "\""
+      ^ (match file with Some f -> "; filename=\"" ^ f ^ "\"\r\nContent-Type: text/plain" | None -> "")
+      ^ "\r\n\r\n" ^ content ^ "\r\n"
+    in
+    let headers =
+      [ ("Content-Type", "multipart/form-data; boundary=b0und"); ("Origin", "http://app.test"); ("Host", "app.test") ]
+    in
+    let body = String.concat "" (List.map part parts) ^ "--b0und--\r\n" in
+    let response = Dream.test handler (Dream.request ~method_:`POST ~target ~headers body) in
+    (Dream.status_to_int (Dream.status response), Lwt_main.run (Dream.body response))
+  in
+  let status, _ = post "/" [ ("_yuka_action", None, "upload"); ("caption", None, "Cat"); ("photo", Some "cat.txt", "meow") ] in
+  Alcotest.(check int) "a page post is 303" 303 status;
+  Alcotest.(check (list string)) "the function gets the file" [ "Cat|cat.txt|text/plain|meow" ] !uploaded;
+  let status, _ = post "/" [ ("_yuka_action", None, "upload"); ("caption", None, "c"); ("photo", Some "big.txt", String.make 11 'x') ] in
+  Alcotest.(check (pair int (list string))) "a file over the limit is 422, no call" (422, []) (status, !uploaded);
+  Alcotest.(check (pair int string))
+    "the island post answers JSON" (200, {|{"ok":{"value":"cat.txt"}}|})
+    (post "/_yuka/action/upload" [ ("caption", None, "Cat"); ("photo", Some "cat.txt", "meow") ]);
+  Alcotest.(check (pair int string))
+    "the island post of a file over the limit has the field error"
+    (200, {|{"ok":{"errors":[["photo","File is too large (at most 10 bytes)"]]}}|})
+    (post "/_yuka/action/upload" [ ("caption", None, "c"); ("photo", Some "big.txt", String.make 11 'x') ]);
+  Alcotest.(check int) "a body over the upload limit is 413" 413
+    (fst (post "/_yuka/action/upload" [ ("photo", Some "huge.txt", String.make (2 * 1_048_576) 'x') ]))
+
 let body_limit () =
   let handler = Yuka_dream.handler config Yuka_routes.app in
   let post ?length body =
@@ -284,7 +325,11 @@ let () =
           Alcotest.test_case "a prerender with ~dev:true writes no dev script" `Quick prerender_dev_off;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
         ] );
-      ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
+      ( "body",
+        [
+          Alcotest.test_case "the body limit" `Quick body_limit;
+          Alcotest.test_case "a multipart post with a file" `Quick file_upload;
+        ] );
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);
       ("session", [ Alcotest.test_case "no session middleware" `Quick no_sessions ]);
       ( "request",

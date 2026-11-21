@@ -128,6 +128,15 @@ module Pages = struct
                     Yuka.Form.field_error_view form `Email (fun ~id:_ m -> el "p" [ text ("email error: " ^ m) ]);
                   ])
               ();
+            Yuka.Form.make ~action:upload
+              ~children:(fun form ->
+                el "div"
+                  [
+                    el "input" ~attrs:[ ("name", "caption"); ("value", Yuka.Form.value form `Caption) ] [];
+                    el "input" ~attrs:[ ("name", "photo"); ("type", "file") ] [];
+                    Yuka.Form.field_error_view form `Photo (fun ~id:_ m -> el "p" [ text ("photo error: " ^ m) ]);
+                  ])
+              ();
             jot_form "one";
             jot_form "two";
           ])
@@ -404,6 +413,9 @@ let () =
       | "nope" -> Server.Action.reject "Refused"
       | "boom" -> failwith "secret boom"
       | t -> Async.return (Ok t));
+  Server.Form.implement upload (fun _ u ->
+      saved := String.concat "|" [ u.caption; u.photo.filename; u.photo.content_type; u.photo.content ] :: !saved;
+      Async.return (Ok u.photo.filename));
   Server.Form.implement sign_up (fun _ s ->
       saved := ("sign up " ^ s.email) :: !saved;
       Async.return (Ok s.email));

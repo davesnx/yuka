@@ -21,6 +21,9 @@ let email_check email = if String.contains email '@' then Ok () else Error "Emai
 
 type signup = { email : string; [@check email_check] name : string } [@@deriving form]
 
+type upload = { caption : string; photo : Yuka.Form.file; [@max_bytes 100] } [@@deriving form]
+
+let upload = Yuka.Form.action ~name:"upload" ~fields:upload_form ~output:Yuka.Codec.string
 let save = Yuka.Form.action ~name:"save_entry" ~fields:entry_form ~output:Yuka.Codec.string
 let jot = Yuka.Form.action ~name:"jot" ~fields:note_form ~output:Yuka.Codec.int
 let sign_up = Yuka.Form.action ~name:"sign_up" ~fields:signup_form ~output:Yuka.Codec.string

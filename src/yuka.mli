@@ -493,6 +493,11 @@ module Live = Live
 
 module Form = Form
 
+module Runtime_form_upload = Upload
+(** [make limits]: the file fields of a form, each with its [max_bytes].
+    A module alias, so that only the code of a form with a file field
+    loads the browser upload code. *)
+
 module Browser = Browser
 
 module Console : sig
@@ -634,9 +639,11 @@ val runtime_registry :
     as with [~navigation:false]. *)
 
 val runtime_form_fields :
+  ?uploads:Runtime_form_upload.t ->
   names:('f * string) list ->
   decode:('f runtime_form_decoding -> ('i, 'f Form.errors) result) ->
   encode:('i -> (string * string) list) ->
+  unit ->
   ('i, 'f) Form.t
 
 val runtime_form_field : 'f runtime_form_decoding -> 'f -> string -> 'a Form.field_kind -> 'a option
@@ -1567,9 +1574,15 @@ module Server : sig
         [Error], a decode error or {!Action.reject}. The form field
         [_yuka_action] names the action, so a post to any [GET] page can run
         any form action: the function checks permissions itself, as for
-        {!Action.implement}. Only [application/x-www-form-urlencoded] posts
-        reach a form action; a [multipart/form-data] post (a file input) is
-        a 405. The 303, 403 and 413 carry the page's rule headers. A
+        {!Action.implement}. [application/x-www-form-urlencoded] and
+        [multipart/form-data] posts reach a form action; another type is a
+        405. A [multipart/form-data] body (a form with a {!Yuka.Form.file}
+        field) can be 1 MiB plus the largest sum of the [max_bytes] of the
+        file fields of a registered form; the cycle stops to read at that
+        limit (413), and a part that does not parse is a 400. A file over
+        its [max_bytes] is a field error (422). The island path also takes
+        a [multipart/form-data] post of a form action, with the same limit,
+        and answers JSON. The 303, 403 and 413 carry the page's rule headers. A
         [redirect output] that is not a path ([/x], not [//x]) or an [http:] or
         [https:] URL of the request [Host] or of [config ~origins] (the
         island answer too), or that holds a control character (below space,

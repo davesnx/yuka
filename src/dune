@@ -22,6 +22,7 @@
   json_diff
   json_patch
   live_server
+  multipart
   navigation
   navigation_state
   navigation_stub

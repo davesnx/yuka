@@ -237,6 +237,51 @@ type sign_up = { email : string; [@check email_check] name : string } [@@derivin
 - The check runs only when the field reads: a missing field shows
   "Missing".
 
+### File fields
+
+A field of type `Yuka.Form.file` is a file input. It needs
+`[@max_bytes n]`, the largest file in bytes. Use
+`Yuka.Form.file option` for a file that the user can leave out:
+
+```ocaml
+(* shared/attach_form.mlx *)
+type attachment = { note : string; file : Yuka.Form.file; [@max_bytes 64_000] } [@@deriving form]
+
+let attach = Yuka.Form.action ~name:"attach" ~fields:attachment_form ~output:Yuka.Codec.string
+```
+
+On the server, the implementation gets the file as a record:
+`filename` (the name the browser gives, with no path), `content_type`,
+`size` and `content` (the bytes):
+
+```ocaml
+(* server/handlers.ml *)
+Yuka.Server.Form.implement Attach_form.attach (fun _request { note; file } ->
+    Yuka.Async.return (Ok (note ^ ": " ^ file.filename ^ ", " ^ string_of_int file.size ^ " bytes")))
+```
+
+- `<Yuka.Form action>` prints `enctype="multipart/form-data"` when the
+  form has a file field. Write the input as
+  `<input type_=`file name="file" />`.
+- A file with more than `max_bytes` bytes gives the field error
+  "File is too large (at most N bytes)". No file gives "Missing".
+- With no JavaScript, the browser posts the form as `multipart/form-data`.
+  The server reads at most 1 MiB plus the largest sum of `max_bytes` of
+  a form with file fields, and stops to read at that limit (413). A file
+  larger than its `max_bytes`, in a body inside that limit, gives a 422
+  page with the field error.
+- In an island, the submit checks the size of the file in the browser,
+  so a file that is too large shows the error with no request. Then the
+  island sends the form as `multipart/form-data` to `/_yuka/action/NAME`
+  with an `XMLHttpRequest`, because `fetch` gives no upload progress.
+  `Yuka.Form.progress form` is a read-only State: `Some fraction` (from
+  `0.` to `1.`) while the browser sends the body, else `None`.
+- In the browser, the `content` of the file is `""`: the browser sends
+  the file. `Yuka.Form.encode` writes no value for a file, so
+  `Yuka.Action.call` cannot send one.
+- The browser code of the upload is only in the JavaScript of a form
+  with a file field.
+
 ### Form errors
 
 `Yuka.Form.field_error_view` gives the view of a field error an `id`. Put

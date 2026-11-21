@@ -1,0 +1,25 @@
+type attachment = { note : string; file : Yuka.Form.file; [@max_bytes 64_000] } [@@deriving form]
+
+let attach = Yuka.Form.action ~name:"attach" ~fields:attachment_form ~output:Yuka.Codec.string
+let percent p = string_of_int (int_of_float (p *. 100.)) ^ "%"
+
+let[@client] make () =
+  let got = Yuka.State.make "" in
+  <Yuka.Form action=attach on_ok=(fun summary -> Yuka.State.set got summary)>
+    (fun form ->
+      <div class_="attach-form">
+        <label for_="attach-note">"Note"</label>
+        <input id="attach-note" type_=`text name="note" value=(Yuka.Form.value form `Note) />
+        <label for_="attach-file">"File (at most 64,000 bytes)"</label>
+        <input id="attach-file" type_=`file name="file" />
+        (Yuka.Form.field_error_view form `File (fun ~id message -> <p id class_="error">(Yuka.text message)</p>))
+        (Yuka.hole (fun () ->
+           match Yuka.State.get (Yuka.Form.progress form) with
+           | Some p -> <p class_="attach-progress">(Yuka.text (percent p))</p>
+           | None -> Yuka.empty))
+        (Yuka.hole (fun () ->
+           <button class_="button primary" type_=`submit disabled=(Yuka.State.get (Yuka.Form.pending form))>"Upload"</button>))
+        (Yuka.hole (fun () ->
+           match Yuka.State.get got with "" -> Yuka.empty | summary -> <p class_="attach-got">(Yuka.text summary)</p>))
+      </div>)
+  </Yuka.Form>

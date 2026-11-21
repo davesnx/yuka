@@ -1,6 +1,8 @@
 open Types
 include Form_core
 
+let file ~max_bytes = file max_bytes
+
 type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Form ]) Action.t
 
 let pairs_json values : Json.t = `List (List.map (fun (k, v) -> `List [ `String k; `String v ]) values)
@@ -67,6 +69,7 @@ type ('o, 'f) form = {
   sent : (string * string) list;
   failed : 'f errors State.t;
   busy : bool State.t;
+  progress : float option State.t;
   field_name : 'f -> string;
   error_id : 'f -> string;
 }
@@ -96,6 +99,7 @@ let form_errors_view form view =
     [ Kind.of_node (Hole (fun () -> Fragment (List.map (Kind.fn view) (form_errors (State.get form.failed))))) ]
 
 let pending form = State.read_only form.busy
+let progress form = State.read_only form.progress
 let parse_sent sent =
   match Json.of_string sent with
   | Ok (`Assoc fields) -> (
@@ -171,6 +175,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
       sent = (match sent with Some (v, _) -> v | None -> []);
       failed = State.make (match sent with Some (_, e) -> unnamed t e | None -> []);
       busy = State.make false;
+      progress = State.make None;
       field_name = name t;
       error_id = (fun f -> error_id ~action:(Action.name action) ~key (name t f));
     }
@@ -179,41 +184,65 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
   let blurred = ref false in
   let gone = ref false in
   Base.own (fun () -> gone := true);
+  let inputs ev =
+    let texts = List.map (fun (k, v) -> (k, Text v)) (Array.to_list (Web.form_values ev)) in
+    match t.uploads with Some u -> texts @ u.files ev | None -> texts
+  in
   let rec submit ev =
     Web.prevent_default ev;
     Web.remove_attribute (Web.target ev) "data-yuka-sent";
     blurred := false;
-    match decode t (Array.to_list (Web.form_values ev)) with
+    match decode_inputs t (inputs ev) with
     | Error e -> State.set form.failed e
     | Ok input -> (
         State.set form.failed [];
         State.set form.busy true;
-        match run with
-        | Some f ->
+        match (run, t.uploads) with
+        | Some f, _ ->
             Async.on_result (f input) (function
               | Ok (Ok r) -> finish (Ok r) None
               | Ok (Error e) -> failed e
               | Error m -> finish (Error m) None)
-        | None -> call input)
+        | None, Some u -> upload u ev
+        | None, None -> call input)
   and finish result redirect =
     if not !gone then begin
       blurred := false;
       State.set form.busy false;
+      State.set form.progress None;
       match result with
       | Ok (Ok o) -> ( match on_ok with Some f -> f o | None -> follow redirect)
       | Ok (Error e) -> State.set form.failed e
       | Error m -> State.set form.failed [ (None, m) ]
     end
   and failed e = finish (Error (Status.error_to_string e)) None
+  and answer = function
+    | Ok j -> (
+        match read_answer output j with
+        | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
+        | Error m -> finish (Error m) None)
+    | Error e -> failed e
   and call input =
     let json = Codec.encode (Action.input action) input in
+    let (_ : unit -> unit) = Action.send (Action.name action) json answer in
+    ()
+  and upload u ev =
+    State.set form.progress (Some 0.);
     let (_ : unit -> unit) =
-      Action.send (Action.name action) json (function
-        | Ok j -> (
-            match read_answer output j with
-            | Ok { result; redirect } -> finish (Ok (Result.map_error (unnamed t) result)) redirect
-            | Error m -> finish (Error m) None)
-        | Error e -> failed e)
+      u.send
+        ("/_yuka/action/" ^ Web.encode_uri (Action.name action))
+        ev
+        (fun p -> if not !gone then State.set form.progress (Some p))
+        (fun status body ->
+          let fields = Bridge.fields body in
+          let result = Bridge.of_response status fields in
+          (match (result, fields) with
+          | Ok _, Some fields ->
+              !Platform.acted ();
+              !Platform.live_mark fields
+          | _ -> ());
+          answer result)
+        (fun cancelled m -> failed (Status.Network (if cancelled then "cancelled" else m)))
     in
     ()
   and follow = function
@@ -238,7 +267,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     | Some f ->
         let own (g, _) = match g with Some g -> g == f | None -> false in
         let mine =
-          match decode t (Array.to_list (Web.form_values ev)) with Ok _ -> [] | Error e -> List.filter own e
+          match decode_inputs t (inputs ev) with Ok _ -> [] | Error e -> List.filter own e
         in
         blurred := true;
         State.update form.failed (fun current ->
@@ -274,6 +303,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
   in
   Element.element "form"
     ([ Static ("method", "post"); Static ("data-yuka-action", Action.name action); Static ("data-yuka-key", key) ]
+    @ (match t.uploads with Some _ -> [ Static ("enctype", "multipart/form-data") ] | None -> [])
     @ sent_attr
     @ [ Handler ("submit", submit); Handler ("focusout", blur) ])
     ((hidden "_yuka_action" (Action.name action) :: (if key = "" then [] else [ hidden "_yuka_key" key ]))

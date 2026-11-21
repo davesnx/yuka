@@ -433,7 +433,13 @@ let implement action f = register action ~decode:(decode_input action) f (fun o 
 
 type form_outcome = Saved of string option | Unprocessable of (string option * string) list
 
-let forms : (string * (Types.context -> (string * string) list -> form_outcome Async.t)) list ref = ref []
+type form = {
+  run : Types.context -> (string * Form_core.input) list -> form_outcome Async.t;
+  answer : Types.context -> (string * Form_core.input) list -> answer Async.t;
+  upload : int;
+}
+
+let forms : (string * form) list ref = ref []
 let find_form name = List.assoc_opt name !forms
 
 let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ `Form ]) Action.t) ?redirect
@@ -454,7 +460,7 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ 
   in
   register action ~decode f encode;
   let run context values =
-    match Form_core.decode t values with
+    match Form_core.decode_inputs t values with
     | Error e -> Async.return (Unprocessable (Form_core.named t e))
     | Ok input ->
         Async.map
@@ -463,9 +469,15 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ 
             | Error e -> Unprocessable (Form_core.named t e))
           (call f context input)
   in
-  forms := (Action.name action, run) :: !forms
+  let answer context values =
+    match Form_core.decode_inputs t values with
+    | Error e -> Async.return (encode (Error e))
+    | Ok input -> Async.map encode (call f context input)
+  in
+  forms := (Action.name action, { run; answer; upload = Form_core.upload_limit t }) :: !forms
 
 let max_body = 1_048_576
+let upload_limit () = max_body + List.fold_left (fun n (_, form) -> max n form.upload) 0 !forms
 
 let read_once read =
   let first = ref None in
@@ -576,31 +588,33 @@ let accept_action ?origins ~name header =
         if is_json (header "content-type") then Ok handler
         else Error (action_error 415 "content type must be application/json")
 
-let answer_action ?origins ~(context : Types.context) ~live ~name handler body =
+let answer_with ?origins ~(context : Types.context) ~live ~name answer =
   let host = context.header "host" in
   let live () = match live () with Some m -> [ ("live", m) ] | None -> [] in
+  let result, resolve, _ = Async.make () in
+  Async.on_settled answer (function
+    | Async.Done (Bad_input m) -> resolve (action_error 400 ("invalid input: " ^ m))
+    | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc (("ok", j) :: live ())))
+    | Async.Done (Redirect (j, location)) ->
+        if local_location ?origins ~host location then
+          resolve (200, Json.to_string (`Assoc (("ok", with_redirect j location) :: live ())))
+        else begin
+          context.log `Error ("form " ^ name ^ " redirect to " ^ String.escaped location ^ " is not a path on this site");
+          resolve (action_error 500 "action failed")
+        end
+    | Async.Failed m -> (
+        match rejection m with
+        | Some message -> resolve (action_error 400 message)
+        | None ->
+            context.log `Error ("action " ^ name ^ " failed: " ^ m);
+            resolve (action_error 500 "action failed"))
+    | Async.Pending -> ());
+  result
+
+let answer_action ?origins ~(context : Types.context) ~live ~name handler body =
   match Json.of_string body with
   | Error m -> Async.return (action_error 400 ("invalid JSON: " ^ m))
-  | Ok json ->
-      let result, resolve, _ = Async.make () in
-      Async.on_settled (call handler context json) (function
-        | Async.Done (Bad_input m) -> resolve (action_error 400 ("invalid input: " ^ m))
-        | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc (("ok", j) :: live ())))
-        | Async.Done (Redirect (j, location)) ->
-            if local_location ?origins ~host location then
-              resolve (200, Json.to_string (`Assoc (("ok", with_redirect j location) :: live ())))
-            else begin
-              context.log `Error ("form " ^ name ^ " redirect to " ^ String.escaped location ^ " is not a path on this site");
-              resolve (action_error 500 "action failed")
-            end
-        | Async.Failed m -> (
-            match rejection m with
-            | Some message -> resolve (action_error 400 message)
-            | None ->
-                context.log `Error ("action " ^ name ^ " failed: " ^ m);
-                resolve (action_error 500 "action failed"))
-        | Async.Pending -> ());
-      result
+  | Ok json -> answer_with ?origins ~context ~live ~name (call handler context json)
 
 let handle_action ~live ~name ~header ~body =
   match accept_action ~name header with

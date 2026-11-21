@@ -4,14 +4,29 @@ open Ast_builder.Default
 let fail ~loc fmt = Location.raise_errorf ~loc ("[yuka] " ^^ fmt)
 let suffixed n s = if n = "t" then s else n ^ "_" ^ s
 
-let rec kind (t : core_type) =
+let is_file (t : core_type) =
+  match t.ptyp_desc with
+  | Ptyp_constr ({ txt = Ldot (Ldot (Lident "Yuka", "Form"), "file"); _ }, []) -> true
+  | _ -> false
+
+let file_field (t : core_type) =
+  match t.ptyp_desc with
+  | Ptyp_constr ({ txt = Lident "option"; _ }, [ a ]) -> is_file a
+  | _ -> is_file t
+
+let rec kind ?max_bytes (t : core_type) =
   let loc = t.ptyp_loc in
   match t.ptyp_desc with
+  | _ when is_file t -> (
+      match max_bytes with
+      | Some n -> [%expr Yuka.Form.file ~max_bytes:[%e n]]
+      | None -> fail ~loc "a Yuka.Form.file field needs [@max_bytes n]")
   | Ptyp_constr ({ txt = Lident "string" | Ldot (Lident "String", "t"); _ }, []) -> [%expr Yuka.Form.string]
   | Ptyp_constr ({ txt = Lident "int" | Ldot (Lident "Int", "t"); _ }, []) -> [%expr Yuka.Form.int]
   | Ptyp_constr ({ txt = Lident "float" | Ldot (Lident "Float", "t"); _ }, []) -> [%expr Yuka.Form.float]
   | Ptyp_constr ({ txt = Lident "bool" | Ldot (Lident "Bool", "t"); _ }, []) -> [%expr Yuka.Form.bool]
-  | Ptyp_constr ({ txt = Lident "option"; _ }, [ a ]) -> [%expr Yuka.Form.option [%e kind a]]
+  | Ptyp_constr ({ txt = Lident "option"; _ }, [ a ]) -> [%expr Yuka.Form.option [%e kind ?max_bytes a]]
+  | Ptyp_constr ({ txt = Lident "list"; _ }, [ a ]) when file_field a -> fail ~loc "a file field cannot be a list"
   | Ptyp_constr ({ txt = Lident "list"; _ }, [ a ]) -> [%expr Yuka.Form.list [%e kind a]]
   | Ptyp_constr ({ txt = Ldot (m, "t"); _ }, []) ->
       let of_string = pexp_ident ~loc { loc; txt = Ldot (m, "of_string") }
@@ -19,16 +34,26 @@ let rec kind (t : core_type) =
       [%expr Yuka.Form.custom [%e of_string] [%e to_string]]
   | _ ->
       fail ~loc
-        "a form field must be string, int, float, bool, an option or list of those, or Email.t with Email.of_string and Email.to_string"
+        "a form field must be string, int, float, bool, an option or list of those, Email.t with Email.of_string and Email.to_string, or Yuka.Form.file"
 
 let check_attr =
   Attribute.declare "yuka.check" Attribute.Context.label_declaration Ast_pattern.(single_expr_payload __) Fun.id
 
+let max_bytes_attr =
+  Attribute.declare "yuka.max_bytes" Attribute.Context.label_declaration Ast_pattern.(single_expr_payload __) Fun.id
+
+let max_bytes (l : label_declaration) =
+  match Attribute.get max_bytes_attr l with
+  | Some n when not (file_field l.pld_type) -> fail ~loc:n.pexp_loc "[@max_bytes] is for a Yuka.Form.file field"
+  | found -> found
+
+let field_kind (l : label_declaration) = kind ?max_bytes:(max_bytes l) l.pld_type
+
 let checked (l : label_declaration) =
   let loc = l.pld_loc in
   match Attribute.get check_attr l with
-  | Some f -> [%expr Yuka.Form.check [%e kind l.pld_type] [%e f]]
-  | None -> kind l.pld_type
+  | Some f -> [%expr Yuka.Form.check [%e field_kind l] [%e f]]
+  | None -> field_kind l
 
 let labels (td : type_declaration) =
   (match td.ptype_params with
@@ -91,9 +116,18 @@ let str_items (td : type_declaration) =
       (List.map
          (fun l ->
            [%expr
-             Yuka.runtime_form_put [%e estring ~loc l.pld_name.txt] [%e kind l.pld_type]
+             Yuka.runtime_form_put [%e estring ~loc l.pld_name.txt] [%e field_kind l]
                [%e pexp_field ~loc [%expr _yuka_v] { loc; txt = Lident l.pld_name.txt }]])
          ls)
+  in
+  let uploads =
+    match List.filter_map (fun l -> Option.map (fun n -> (l, n)) (max_bytes l)) ls with
+    | [] -> None
+    | files ->
+        Some
+          [%expr
+            Yuka.Runtime_form_upload.make
+              [%e elist ~loc (List.map (fun (l, n) -> [%expr [%e estring ~loc l.pld_name.txt], [%e n]]) files)]]
   in
   let name_fn =
     pexp_function_cases ~loc
@@ -104,9 +138,15 @@ let str_items (td : type_declaration) =
     [%stri let [%p pvar ~loc (suffixed n "field_name")] = [%e name_fn]];
     [%stri
       let [%p ppat_constraint ~loc (pvar ~loc (suffixed n "form")) [%type: ([%t record_ty], [%t field_ty]) Yuka.Form.t]] =
-        Yuka.runtime_form_fields ~names:[%e names]
-          ~decode:(fun _yuka_d -> [%e decode])
-          ~encode:(fun (_yuka_v : [%t record_ty]) -> Stdlib.List.concat [%e encode])];
+        [%e
+          pexp_apply ~loc [%expr Yuka.runtime_form_fields]
+            ((match uploads with Some u -> [ (Labelled "uploads", u) ] | None -> [])
+            @ [
+                (Labelled "names", names);
+                (Labelled "decode", [%expr fun _yuka_d -> [%e decode]]);
+                (Labelled "encode", [%expr fun (_yuka_v : [%t record_ty]) -> Stdlib.List.concat [%e encode]]);
+                (Nolabel, [%expr ()]);
+              ])]];
   ]
 
 let sig_items (td : type_declaration) =

@@ -23,4 +23,8 @@
  (name run)
  (package yuka-dream)
  (modules app routes yuka_routes run)
- (libraries alcotest yuka yuka-dream dream lwt lwt.unix unix))
+ (libraries alcotest yuka yuka-dream dream lwt lwt.unix unix)
+ (preprocess
+  (per_module
+   ((pps yuka.ppx)
+    run))))

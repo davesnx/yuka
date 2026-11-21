@@ -31,6 +31,23 @@ val list : 'a field_kind -> 'a list field_kind
 val custom : (string -> 'a option) -> ('a -> string) -> 'a field_kind
 (** ["Not valid"] when [of_string] gives [None]. *)
 
+type file = Form_core.file = { filename : string; content_type : string; size : int; content : string }
+(** A posted file. [filename] is the name the browser gives (no path),
+    [content_type] is the type the browser gives (["application/octet-stream"]
+    when it gives none), [size] is the length in bytes. On the server,
+    [content] holds the bytes. In the browser, [content] is [""]: the
+    browser sends the file itself. *)
+
+val file : max_bytes:int -> file field_kind
+(** A file input ([<input type="file">]). ["Missing"] when no file is
+    chosen, ["File is too large (at most N bytes)"] when it has more than
+    [max_bytes] bytes. In a [[@@deriving form]] record, write
+    [photo : Yuka.Form.file; [@max_bytes 100_000]] (or
+    [Yuka.Form.file option] when the file is optional). A form with a file
+    field posts as [multipart/form-data]; see {!make} and
+    {!Yuka.Server.Form.implement}. {!encode} writes no value for a file, so
+    {!Action.call} cannot send one. *)
+
 val check : 'a field_kind -> ('a -> (unit, string) result) -> 'a field_kind
 (** [check kind f] reads as [kind], then gives the [Error message] of
     [f value]. [[@check f]] on a field of a [[@@deriving form]] record
@@ -91,6 +108,11 @@ val form_errors_view : ('o, 'f) form -> (string -> 'k Kind.element) -> 'k Kind.e
     and no field takes the focus, the focus goes to this [div]; on a failed
     post (422) with no field errors, the server prints [autofocus] on it. *)
 
+val progress : ('o, 'f) form -> float option State.read
+(** While an island submit of a form with a file field sends its body:
+    [Some fraction], the part of the body that the browser sent, from [0.]
+    to [1.]. Else [None]. *)
+
 val pending : ('o, 'f) form -> bool State.read
 (** True while an island submit waits for its answer. Read it with
     {!State.get} in markup; read in the component body, it renders the
@@ -107,7 +129,8 @@ val make :
 (** [<Yuka.Form action>(fun form -> ...)</Yuka.Form>]: a
     [<form method="post">] with no [action] attribute (it posts to the
     page URL) and a hidden [_yuka_action] field, so it works with no
-    JavaScript. Two forms of one action on a page need different [key]s:
+    JavaScript. A form with a {!file} field also gets
+    [enctype="multipart/form-data"]. Two forms of one action on a page need different [key]s:
     after a failed post (422) only the form with the posted key shows the
     sent values and errors, and the error ids are made from the key. In a
     development build, the browser console shows an error when two forms
@@ -117,7 +140,9 @@ val make :
     in the browser: the fields (with the submit button's [name] and
     [value]) are decoded first (an error shows at once, with no request),
     then [run input] (default: the action call) runs while [pending] is
-    true; field errors show, an [Error error] shows as a form error with the
+    true. With a file field and no [run], the island sends the form as
+    [multipart/form-data] to the action, as the browser posts it with no
+    JavaScript, and {!progress} follows the upload; field errors show, an [Error error] shows as a form error with the
     text of {!Status.error_to_string}, and on [Ok output] [on_ok output] runs, or
     else the page
     follows the server's [redirect] (with [run], the page URL) with a

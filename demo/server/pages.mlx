@@ -110,6 +110,14 @@ let before_hydration () =
         <Yuka.Client><Before_hydration /></Yuka.Client>
       </main>)
 
+let attach ~got () =
+  Yuka.Server.page ~title:"Attach a file" (fun () ->
+      <main class_="about">
+        <h1>"Attach a file"</h1>
+        (match got with Some summary -> <p class_="attach-sent">(Yuka.text summary)</p> | None -> Yuka.empty)
+        <Yuka.Client><Attach_form /></Yuka.Client>
+      </main>)
+
 let create_in workspace =
   Yuka.Server.page ~title:"New issue" (fun () ->
       <main class_="new-issue-page">

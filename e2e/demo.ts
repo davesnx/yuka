@@ -1292,6 +1292,70 @@ await step("6f. new issue form with JavaScript off", async () => {
   await ctx.close();
 });
 
+await step("6f2. a file field with and without JavaScript", async () => {
+  const small = { name: "note.txt", mimeType: "text/plain", buffer: Buffer.from("hello upload") };
+  const big = { name: "big.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(70_000, 97) };
+  const ctx = await browser.newContext();
+  const pg = await ctx.newPage();
+  const errors: string[] = [];
+  pg.on("pageerror", (e) => errors.push(String(e)));
+  pg.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  const posts: { url: string; type: string }[] = [];
+  pg.on("request", (r) => { if (r.method() === "POST") posts.push({ url: r.url(), type: r.headers()["content-type"] ?? "" }); });
+  await pg.goto(base + "/attach", { waitUntil: "load" });
+  await islandsStarted(pg);
+  check("6f2.1 the form posts multipart", (await pg.getAttribute("form[data-yuka-action=attach]", "enctype")) === "multipart/form-data");
+  await pg.evaluate(() => {
+    const seen: string[] = ((window as any).__progress = []);
+    new MutationObserver(() => {
+      const p = document.querySelector(".attach-progress")?.textContent;
+      if (p && seen[seen.length - 1] !== p) seen.push(p);
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+  await pg.fill("#attach-note", "js");
+  await pg.setInputFiles("#attach-file", big);
+  await pg.locator("form[data-yuka-action=attach] button[type=submit]").click();
+  await pg.waitForSelector("form[data-yuka-action=attach] .error");
+  check("6f2.2 a file over the limit is a field error, with no request",
+    (await pg.locator("form[data-yuka-action=attach] .error").textContent()) === "File is too large (at most 64000 bytes)" && posts.length === 0,
+    JSON.stringify(posts));
+  await pg.setInputFiles("#attach-file", small);
+  await pg.locator("form[data-yuka-action=attach] button[type=submit]").click();
+  await pg.waitForSelector(".attach-got");
+  const got = await pg.locator(".attach-got").textContent();
+  check("6f2.3 the island uploads the file and shows the answer",
+    got === "js: note.txt, text/plain, 12 bytes, starts with hello" && new URL(pg.url()).pathname === "/attach", `${got} ${pg.url()}`);
+  check("6f2.4 the island sends multipart to the action",
+    posts.length === 1 && posts[0].url.endsWith("/_yuka/action/attach") && posts[0].type.startsWith("multipart/form-data"), JSON.stringify(posts));
+  const progress = await pg.evaluate(() => (window as any).__progress as string[]);
+  check("6f2.5 the progress State reaches 100% and goes away",
+    progress[progress.length - 1] === "100%" && (await pg.locator(".attach-progress").count()) === 0 && (await pg.locator("form[data-yuka-action=attach] .error").count()) === 0,
+    JSON.stringify(progress));
+  check("6f2.6 no console error", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+
+  const off = await browser.newContext({ javaScriptEnabled: false });
+  const nojs = await off.newPage();
+  const statuses: number[] = [];
+  nojs.on("response", (r) => { if (r.request().method() === "POST") statuses.push(r.status()); });
+  await nojs.goto(base + "/attach", { waitUntil: "load" });
+  await nojs.fill("#attach-note", "plain");
+  await nojs.setInputFiles("#attach-file", big);
+  await nojs.locator("form[data-yuka-action=attach] button[type=submit]").click();
+  await nojs.waitForLoadState("load");
+  check("6f2.7 no JavaScript: a file over the limit is a 422 page with the field error, the note kept",
+    statuses[0] === 422 && (await nojs.locator("form[data-yuka-action=attach] .error").textContent()) === "File is too large (at most 64000 bytes)"
+      && (await nojs.inputValue("#attach-note")) === "plain",
+    JSON.stringify(statuses));
+  await nojs.setInputFiles("#attach-file", small);
+  await nojs.locator("form[data-yuka-action=attach] button[type=submit]").click();
+  await nojs.waitForURL("**/attach?got=*");
+  check("6f2.8 no JavaScript: the post uploads the file, 303 to the page with the answer",
+    statuses[1] === 303 && (await nojs.locator(".attach-sent").textContent()) === "plain: note.txt, text/plain, 12 bytes, starts with hello",
+    `${statuses} ${nojs.url()}`);
+  await off.close();
+});
+
 await step("6g. workspaces", async () => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(base + "/w/stress", { waitUntil: "networkidle" });

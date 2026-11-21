@@ -622,7 +622,7 @@ deriving form refuses a field type it cannot read:
   File "form2.mlx", line 1, characters 16-25:
   1 | type t = { at : int * int } [@@deriving form]
                       ^^^^^^^^^
-  Error: [yuka] a form field must be string, int, float, bool, an option or list of those, or Email.t with Email.of_string and Email.to_string
+  Error: [yuka] a form field must be string, int, float, bool, an option or list of those, Email.t with Email.of_string and Email.to_string, or Yuka.Form.file
   [1]
 
 deriving form refuses type parameters and labels that start with an underscore:
@@ -646,6 +646,47 @@ deriving form refuses type parameters and labels that start with an underscore:
                  ^^^^^^^
   Error: [yuka] a form field name cannot start with '_' (the form uses _yuka_ fields)
   [1]
+
+A file field needs [@max_bytes n], only a file field takes it, and a file field is not a list:
+
+  $ cat > form6.mlx <<'X'
+  > type t = { photo : Yuka.Form.file } [@@deriving form]
+  > X
+  $ run form6
+  File "form6.mlx", line 1, characters 19-33:
+  1 | type t = { photo : Yuka.Form.file } [@@deriving form]
+                         ^^^^^^^^^^^^^^
+  Error: [yuka] a Yuka.Form.file field needs [@max_bytes n]
+  [1]
+
+  $ cat > form7.mlx <<'X'
+  > type t = { name : string; [@max_bytes 10] } [@@deriving form]
+  > X
+  $ run form7
+  File "form7.mlx", line 1, characters 38-40:
+  1 | type t = { name : string; [@max_bytes 10] } [@@deriving form]
+                                            ^^
+  Error: [yuka] [@max_bytes] is for a Yuka.Form.file field
+  [1]
+
+  $ cat > form8.mlx <<'X'
+  > type t = { photos : Yuka.Form.file list } [@@deriving form]
+  > X
+  $ run form8
+  File "form8.mlx", line 1, characters 20-39:
+  1 | type t = { photos : Yuka.Form.file list } [@@deriving form]
+                          ^^^^^^^^^^^^^^^^^^^
+  Error: [yuka] a file field cannot be a list
+  [1]
+
+A file field gives the upload limits to the form:
+
+  $ cat > form9.mlx <<'X'
+  > type t = { photo : Yuka.Form.file; [@max_bytes 10] cover : Yuka.Form.file option; [@max_bytes 20] } [@@deriving form]
+  > X
+  $ run form9 | grep -A1 'Yuka.Runtime_form_upload.make'
+          ~uploads:(Yuka.Runtime_form_upload.make
+                      [("photo", 10); ("cover", 20)])
 
 String.t, Int.t, Float.t and Bool.t are the base kinds, not custom modules:
 

@@ -670,6 +670,17 @@ let action env (r : request) raw =
       in
       let name = Router.decode ~plus:false name in
       let origins = env.config.origins in
+      let live = Live_server.mark_json env.node in
+      match (Option.bind (r.header "content-type") Multipart.boundary, Server.find_form name) with
+      | Some boundary, Some form when Server.trusted_origin ?origins r.header ->
+          Async.bind (r.body ~limit:(Server.upload_limit ())) (function
+            | Error `Too_large -> Async.return (json (Server.action_error 413 "request too large"))
+            | Ok body -> (
+                match Multipart.parse ~boundary body with
+                | Error m -> Async.return (json (Server.action_error 400 ("invalid multipart body: " ^ m)))
+                | Ok values ->
+                    Async.map json (Server.answer_with ?origins ~context ~live ~name (Server.call form.Server.answer context values))))
+      | _ -> (
       match Server.accept_action ?origins ~name r.header with
       | Error e -> Async.return (json e)
       | Ok handler ->
@@ -677,7 +688,7 @@ let action env (r : request) raw =
             | Error `Too_large -> Async.return (json (Server.action_error 413 "request too large"))
             | Ok body ->
                 Async.map json
-                  (Server.answer_action ?origins ~context ~live:(Live_server.mark_json env.node) ~name handler body)))
+                  (Server.answer_action ?origins ~context ~live ~name handler body))))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
 
@@ -740,7 +751,8 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
                            Option.value overlay ~default:plan.page))
                       (live_checked env fallback ~path)))))
 
-let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
+let is_form ct =
+  Server.media_type ct = Some "application/x-www-form-urlencoded" || Option.is_some (Option.bind ct Multipart.boundary)
 
 let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
@@ -756,22 +768,34 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
             Async.bind (run_guards guards) (function
               | Error stop -> page_or_error (stopped env fallback path stop)
               | Ok () ->
-                  Async.bind (r.body ~limit:Server.max_body) (function
+                  let multipart = Option.bind (r.header "content-type") Multipart.boundary in
+                  let limit = match multipart with Some _ -> Server.upload_limit () | None -> Server.max_body in
+                  Async.bind (r.body ~limit) (function
                     | Error `Too_large -> reply (plain 413 "Request Too Large")
                     | Ok body -> (
-                        let fields = Router.query ("?" ^ body) in
-                        match List.assoc_opt "_yuka_action" fields with
+                        let fields =
+                          match multipart with
+                          | Some boundary -> Multipart.parse ~boundary body
+                          | None -> Ok (List.map (fun (k, v) -> (k, Form_core.Text v)) (Router.query ("?" ^ body)))
+                        in
+                        let text fields name =
+                          List.find_map (function k, Form_core.Text v when String.equal k name -> Some v | _ -> None) fields
+                        in
+                        match fields with
+                        | Error _ -> reply (plain 400 "Bad Request")
+                        | Ok fields -> (
+                        match text fields "_yuka_action" with
                         | None -> reply (method_not_allowed allowed)
                         | Some name -> (
                             match Server.find_form name with
                             | None -> reply (plain 404 "Not Found")
-                            | Some run ->
-                                let key = Option.value (List.assoc_opt "_yuka_key" fields) ~default:"" in
+                            | Some { Server.run; _ } ->
+                                let key = Option.value (text fields "_yuka_key") ~default:"" in
                                 let values =
                                   List.filter (fun (k, _) -> k <> "_yuka_action" && k <> "_yuka_key") fields
                                 in
                                 let unprocessable errors =
-                                  serve_page { env with form = Some (name, key, values, errors) } r ~path ~query
+                                  serve_page { env with form = Some (name, key, Form_core.texts values, errors) } r ~path ~query
                                     ~status:422 ~rules ~guards:[] ~load ~fallback
                                 in
                                 let context = env.context in
@@ -796,7 +820,7 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
                                   (fun m ->
                                     match Server.rejection m with
                                     | Some shown -> unprocessable [ (None, shown) ]
-                                    | None -> page_or_error (fail_page env a.missing m)))))))
+                                    | None -> page_or_error (fail_page env a.missing m))))))))
   | _ -> reply (method_not_allowed allowed)
 
 let refusal headers level =

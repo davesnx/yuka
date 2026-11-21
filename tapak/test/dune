@@ -23,4 +23,8 @@
  (name run)
  (package yuka-tapak)
  (modules app routes yuka_routes run)
- (libraries alcotest yuka yuka-tapak tapak cows eio eio_main eio.unix http bytesrw logs unix))
+ (libraries alcotest yuka yuka-tapak tapak cows eio eio_main eio.unix http bytesrw logs unix)
+ (preprocess
+  (per_module
+   ((pps yuka.ppx)
+    run))))

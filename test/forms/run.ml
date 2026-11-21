@@ -103,6 +103,27 @@ let valid_fields () =
   let other = render ~form:(action, "other", values, errors) () in
   Alcotest.(check (list string)) "another key: no aria-invalid" [] (attribute_values other "aria-invalid")
 
+let file_field () =
+  let show values =
+    match Yuka.Form.decode upload_form values with
+    | Ok u -> "ok " ^ u.caption ^ " " ^ u.photo.filename
+    | Error e -> String.concat "; " (List.map (fun (f, m) -> Option.fold ~none:"form" ~some:upload_field_name f ^ ": " ^ m) e)
+  in
+  Alcotest.(check string) "a text value is not a file" "photo: Not a file" (show [ ("caption", "c"); ("photo", "x") ]);
+  Alcotest.(check string) "no file is Missing" "photo: Missing" (show [ ("caption", "c") ]);
+  let photo = { Yuka.Form.filename = "a.png"; content_type = "image/png"; size = 3; content = "abc" } in
+  Alcotest.(check (list (pair string string)))
+    "encode writes no value for the file" [ ("caption", "c") ]
+    (Yuka.Form.encode upload_form { caption = "c"; photo });
+  let form action =
+    let session = Yuka.Private.session ~streaming:false ~islands_only:false in
+    Yuka.Private.print session (fun () ->
+        Yuka.Private.node (Yuka.Form.make ~action ~children:(fun _ -> Yuka.text "x") () : Yuka.server Yuka.element))
+  in
+  let multipart = {|enctype="multipart/form-data"|} in
+  Alcotest.(check bool) "a form with a file field posts multipart" true (contains (form upload) multipart);
+  Alcotest.(check bool) "a form with no file field does not" false (contains (form jot) multipart)
+
 let () =
   Alcotest.run "forms"
     [
@@ -112,6 +133,7 @@ let () =
           Alcotest.test_case "round trip" `Quick round_trip;
           Alcotest.test_case "names" `Quick names;
           Alcotest.test_case "a field check" `Quick checked;
+          Alcotest.test_case "a file field" `Quick file_field;
         ] );
       ( "errors",
         [

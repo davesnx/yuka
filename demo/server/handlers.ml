@@ -22,6 +22,15 @@ let register () =
           Yuka.Async.return (Ok issue)
       | Error (Refused message) -> Yuka.Async.return (Error [ (Some `Title, message) ])
       | Error Unavailable -> Yuka.Server.Action.reject Store.unavailable);
+  Yuka.Server.Form.implement Attach_form.attach
+    ~redirect:(fun summary -> Routes.attach ~got:summary ())
+    (fun _ { note; file } ->
+      let content = file.content in
+      Yuka.Async.return
+        (Ok
+           (Printf.sprintf "%s: %s, %s, %d bytes, starts with %s" note file.filename file.content_type
+              (String.length content)
+              (String.sub content 0 (min 5 (String.length content))))));
   Yuka.Server.Live.implement Topics.board (fun workspace ->
       Store.refresh ();
       Yuka.Async.return (Store.board workspace))

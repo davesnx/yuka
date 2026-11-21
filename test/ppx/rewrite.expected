@@ -1459,7 +1459,7 @@ include
                        _yuka_v.plan;
                      Yuka.runtime_form_put "news" Yuka.Form.bool _yuka_v.news;
                      Yuka.runtime_form_put "tags"
-                       (Yuka.Form.list Yuka.Form.string) _yuka_v.tags])
+                       (Yuka.Form.list Yuka.Form.string) _yuka_v.tags]) ()
     let _ = signup_form
   end[@@ocaml.doc "@inline"][@@merlin.hide ]
 open
