@@ -68,7 +68,7 @@ let[@client] make ~(n : int) () =
     <div class_="lux-bar">
       <button class_="lux-button" type_=`button disabled=(Yuka.State.get following) on_click=follow>"Follow"</button>
       <button class_="lux-button" type_=`button on_click=restart>"Restart"</button>
-      <a class_="lux-button" href="/">"WebGL"</a>
+      <a class_="lux-button" href=(Routes.index ())>"WebGL"</a>
       <span class_="lux-readout" data_readout="true">(Yuka.text (Yuka.State.get readout))</span>
     </div>
   </div>

@@ -87,6 +87,10 @@ demo-test: ## Run the demo tests
 lux-build: ## Build the lux demo (server and client)
 	$(DUNE) build --profile=dev @lux/all
 
+.PHONY: lux-bundle
+lux-bundle: lux-build ## Bundle the lux client with esbuild
+	BUILD_DIR=$(BUILD_DIR) demo/bundle.sh lux
+
 .PHONY: lux-serve
 lux-serve: lux-build ## Serve the lux demo on PORT
 	$(BUILD_DIR)/default/lux/server/lux_server.exe --port $(PORT)
