@@ -3246,6 +3246,60 @@ let head_tags_replaced finish =
               check "outlet without a template: owned tags removed" "other=kept" (head_tags ());
               finish ())))
 
+let title_count = State.make 0
+
+let titled_entry =
+  runtime_entry ~name:"Titled" (fun json ->
+      Result.map
+        (fun name () ->
+          Browser.title (fun () -> name ^ " " ^ ints (State.get title_count));
+          element "span" [] [ text "t" ])
+        (Codec.decode Codec.string json))
+
+let titled id name =
+  {|<yuka-island data-name="Titled" data-id="|} ^ id
+  ^ {|" style="display:contents"><span>t</span></yuka-island><script type="application/json" data-yuka-props="|}
+  ^ id ^ {|">"|} ^ name ^ {|"</script>|}
+
+let title_page island_outside island_inside =
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<nav><a id="two" href="/two">two</a><a id="three" href="/three">three</a></nav>|} ^ island_outside
+   ^ {|<yuka-outlet data-k="L0" style="display:contents"><p id="old">old</p>|} ^ island_inside ^ "</yuka-outlet>")
+
+let island_title finish =
+  Yuka.stop ();
+  State.set title_count 0;
+  setup "";
+  title_page "" (titled "i1" "inner");
+  render ~islands:(runtime_registry [ titled_entry ]) ();
+  check "outlet island: sets the title at start" "inner 0" (title ());
+  State.set title_count 1;
+  check "outlet island: a State change sets the title" "inner 1" (title ());
+  ignore (click "#two" "");
+  resolve_headers 0 "<p>two</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-title", "Two"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "outlet island: the navigation sets the title of the new page" "Two" (title ());
+      State.set title_count 2;
+      check "outlet island: a disposed island does not set the title" "Two" (title ());
+      Yuka.stop ();
+      State.set title_count 0;
+      setup "";
+      title_page (titled "i1" "layout") "";
+      render ~islands:(runtime_registry [ titled_entry ]) ();
+      check "layout island: sets the title at start" "layout 0" (title ());
+      ignore (click "#two" "");
+      resolve_headers 0 "<p>two</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-title", "Two"); ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "layout island: the navigation sets the title of the new page" "Two" (title ());
+          State.set title_count 1;
+          check "layout island: the next State change sets the title again" "layout 1" (title ());
+          ignore (click "#three" "");
+          resolve_headers 1 "<p>three</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-title", "Three"); ("yuka-build", "b1") |];
+          tick (fun () ->
+              check "layout island: the next navigation sets the title again" "Three" (title ());
+              finish ())))
+
 let all =
   [
     ("navigate before start", navigate_before_start);
@@ -3290,6 +3344,7 @@ let all =
     ("partial response replaces the outlet", partial);
     ("a navigation answer sets the attributes of <html>", html_attributes);
     ("a navigation answer replaces the head tags with data-yuka-head", head_tags_replaced);
+    ("Browser.title: a State change sets the title, a navigation sets the title of the new page", island_title);
     ("overlay: shown over the page, Back removes it with no request, Forward shows it", overlay);
     ("overlay: Routes.current and the focus follow the overlay", route_overlay);
     ("overlay: replaced from inside, Browser.back loads the background, a background link closes it", overlay_replaced);

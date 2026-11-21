@@ -2000,6 +2000,26 @@ let now_and_count_elements () =
   check "count_elements counts the matches in the document" "2" (ints (Browser.count_elements ".yuka-count span"));
   set_html c ""
 
+let document_title : unit -> string = [%mel.raw "function () { return document.title }"]
+let set_document_title : string -> unit = [%mel.raw "function (t) { document.title = t }"]
+
+let title_until_dispose () =
+  set_document_title "page";
+  let unread = State.make 0 in
+  let (), stop = with_owner (fun () -> Browser.title (fun () -> ints (State.get unread) ^ " unread")) in
+  check "the first run sets the title" "0 unread" (document_title ());
+  State.set unread 3;
+  check "a State change sets the title" "3 unread" (document_title ());
+  stop ();
+  check "dispose gives back the title before the first set" "page" (document_title ());
+  State.set unread 4;
+  check "no set after dispose" "page" (document_title ());
+  let (), stop = with_owner (fun () -> Browser.title (fun () -> ints (State.get unread) ^ " unread")) in
+  check "a second island sets the title" "4 unread" (document_title ());
+  set_document_title "next page";
+  stop ();
+  check "dispose keeps a title that another writer set" "next page" (document_title ())
+
 let cookies () : string = [%mel.raw "document.cookie"]
 
 let set_cookie () =
@@ -2036,6 +2056,7 @@ let all =
     ("window handlers run in a batch", on_window_batched);
     ("frame handlers run in a batch until dispose", frames_batched_until_dispose);
     ("now and count_elements", now_and_count_elements);
+    ("Browser.title sets the title until dispose", title_until_dispose);
     ("client: attribute names are refused", client_attribute_names);
     ("client: srcdoc is empty", client_srcdoc);
     ("client: script src and href", client_script_src);

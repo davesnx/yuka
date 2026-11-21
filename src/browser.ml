@@ -53,4 +53,16 @@ let on_frame handler =
              Base.in_frame := false;
              raise e))
 let now () = Web.now ()
+
+let title text =
+  let before = ref None and shown = ref None in
+  Base.Effect.after (fun () ->
+      let t = text () in
+      if Option.is_none !before then before := Some (Web.title ());
+      shown := Some t;
+      Web.set_title t);
+  Base.own (fun () ->
+      match (!before, !shown) with
+      | Some b, Some s when String.equal (Web.title ()) s -> Web.set_title b
+      | _ -> ())
 let count_elements selector = Array.length (Web.query_all (Web.document ()) selector)

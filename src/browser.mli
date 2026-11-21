@@ -79,6 +79,19 @@ val now : unit -> float
 (** Milliseconds since the page opened, with a fraction
     ([performance.now]). Browser only: raises [Invalid_argument] on native. *)
 
+val title : (unit -> string) -> unit
+(** [title (fun () -> State.get unread ^ " unread")] sets [document.title]
+    to the result, and sets it again after each change of a State that the
+    function reads, with the timing of {!Yuka.Effect.after}. Call it in the
+    body of an island component. During a server render it does nothing:
+    the server prints the title of the page.
+
+    When the owner is disposed (for example, a client navigation replaces
+    the island) and [document.title] is still the last value that it set,
+    the title before its first set comes back. A client navigation sets
+    the title of the new page; an island that stays (in a layout) sets its
+    title again at the next change of a State that the function reads. *)
+
 val count_elements : string -> int
 (** The number of elements in the document that match the CSS selector
     ([querySelectorAll]). Browser only: raises [Invalid_argument] on native. *)

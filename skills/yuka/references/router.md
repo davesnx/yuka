@@ -101,6 +101,30 @@ let post ~slug () =
 - Raw HTML for the head of every page goes in the `~head` of
   `Yuka.Server.config`.
 
+### Title from an island
+
+An island cannot use `Yuka.Server.Head`. To change the title after a
+client action, call `Yuka.Browser.title` in the body of the island:
+
+```ocaml
+(* shared/inbox.mlx *)
+let[@client] make ~(count : int) () =
+  let unread = Yuka.State.make count in
+  Yuka.Browser.title (fun () ->
+      string_of_int (Yuka.State.get unread) ^ " unread");
+  <button on_click=(fun _ -> Yuka.State.set unread 0)>"Read all"</button>
+```
+
+- It sets `document.title` after the island starts, and again after each
+  change of a State that the function reads.
+- The server prints the title of the page. `Yuka.Browser.title` does
+  nothing during a server render.
+- When the island is disposed, and the title is still the last value
+  that it set, the title before the island comes back.
+- A client navigation sets the title of the new page. An island that
+  stays, as in a layout, sets its title again at the next change of a
+  State that it reads.
+
 ## Nodes
 
 - `Router.make [ nodes ]`: the root.

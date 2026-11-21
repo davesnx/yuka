@@ -319,6 +319,17 @@ let html_effect_skipped () =
   dispose ();
   check "runs in mount" "2" (string_of_int !runs)
 
+let title_server_skipped () =
+  let reads = ref 0 in
+  let component () =
+    Browser.title (fun () ->
+        incr reads;
+        "t");
+    element "p" [] []
+  in
+  check "server render prints no title" "<p></p>" (Private.render_html (fun () -> Private.node (component ())));
+  check "server render does not call the function" "0" (string_of_int !reads)
+
 let show_json = Json.to_string
 
 let parse s =
@@ -2254,6 +2265,7 @@ let all =
     ("catch: server drops the islands of failed children", catch_server_keeps_islands);
     ("catch: server drops the fills of failed children", catch_server_drops_pending);
     ("show: server states", show_server);
+    ("Browser.title: nothing during a server render", title_server_skipped);
     ("catch: server select value", catch_server_select);
     ("memo is lazy without readers", memo_lazy_without_readers);
     ("memo diamond", memo_diamond);

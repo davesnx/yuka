@@ -188,6 +188,8 @@ let on_frame : (float -> unit) -> unit -> unit =
 }|}]
 
 let now : unit -> float = [%mel.raw "function () { return document.defaultView.performance.now() }"]
+let title : unit -> string = [%mel.raw "function () { return document.title }"]
+let set_title : string -> unit = [%mel.raw "function (t) { document.title = t }"]
 
 let on_visible : node -> (unit -> unit) -> unit -> unit =
   [%mel.raw
