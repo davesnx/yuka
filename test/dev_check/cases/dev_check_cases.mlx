@@ -54,3 +54,14 @@ let each_cleanup_read () : Yuka.client Yuka.element =
          Yuka.Effect.after ~cleanup:(fun () -> ignore (Yuka.State.get count)) (fun () -> ());
          <li>(Yuka.int i)</li>))
   </ul>
+
+let named : int Yuka.State.t = Yuka.State.make 5 |> Yuka.State.debug_name "named"
+let read_named () = Yuka.State.get named
+
+module Named_read = struct
+  let make () =
+    let n = read_named () in
+    <p>(Yuka.int n)</p>
+end
+
+let named_read () : Yuka.client Yuka.element = <Named_read />

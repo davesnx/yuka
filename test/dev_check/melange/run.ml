@@ -113,6 +113,105 @@ let () =
   ignore (State.get Dev_check_cases.count);
   check "a read outside a render" ~fires:false
 
+let expect name messages =
+  let errors = take () in
+  let expected = if dev then Array.of_list messages else [||] in
+  if errors <> expected then begin
+    incr failures;
+    print_endline
+      ("FAIL " ^ name ^ "\n  expected: [" ^ String.concat " | " (Array.to_list expected) ^ "]\n  got:      ["
+     ^ String.concat " | " (Array.to_list errors) ^ "]")
+  end
+  else print_endline ("ok " ^ name)
+
+let () =
+  let _, dispose = render Dev_check_cases.named_read in
+  expect "a read of a named State in a component body"
+    [
+      "[yuka] State `named`: State.get with nothing tracking it, during the render of a component.\n\
+      \  It reads one time and never updates. Read it in markup, a memo or an effect,\n\
+      \  or use State.peek for one read. +stack";
+    ];
+  dispose ()
+
+let () =
+  let fail = State.make false in
+  let (), dispose =
+    with_owner (fun () ->
+        owner_debug_name "Page";
+        let (), _ =
+          with_owner (fun () ->
+              owner_debug_name "Room";
+              Effect.after (effect_debug_name "boom" (fun () -> if State.get fail then raise Exit)))
+        in
+        ())
+  in
+  (try State.set fail true with Exit -> ());
+  expect "a named effect that raises, in named owners" [ "[yuka] effect `boom` in `Page` > `Room` raised an exception +stack" ];
+  dispose ()
+
+let () =
+  let fail = State.make false in
+  let (), dispose =
+    with_owner (fun () ->
+        owner_debug_name "Page";
+        Effect.after (effect_debug_name "boom" (fun () -> if State.get fail then raise Exit)))
+  in
+  (try State.set fail true with Exit -> ());
+  expect "a named effect that raises, in a named owner" [ "[yuka] effect `boom` in `Page` raised an exception +stack" ];
+  dispose ()
+
+let () =
+  let fail = State.make false in
+  let (), dispose =
+    with_owner (fun () ->
+        let total = State.memo (fun () -> if State.get fail then raise Not_found else 1) |> State.debug_name "total" in
+        Effect.after (fun () -> ignore (State.get total)))
+  in
+  (try State.set fail true with Not_found -> ());
+  expect "a named memo that raises, one time for each compute"
+    [ "[yuka] State `total` raised an exception +stack"; "[yuka] State `total` raised an exception +stack" ];
+  dispose ()
+
+let () =
+  let go = State.make false and n = State.make 0 in
+  let (), dispose =
+    with_owner (fun () ->
+        Effect.after (effect_debug_name "spin" (fun () -> if State.get go then State.set n (State.get n + 1))))
+  in
+  (try State.set go true with Failure _ -> ());
+  expect "a named effect that keeps changing a State it reads"
+    [ "[yuka] effect `spin` keeps changing a State it reads +stack" ];
+  dispose ()
+
+let () =
+  let go = State.make false and n = State.make 0 in
+  let (), dispose =
+    with_owner (fun () ->
+        let grow =
+          State.memo (fun () ->
+              let v = State.get n in
+              if State.get go then State.set n (v + 1);
+              v)
+          |> State.debug_name "grow"
+        in
+        Effect.after (fun () -> ignore (State.get grow)))
+  in
+  (try State.set go true with Failure _ -> ());
+  expect "a named memo that keeps changing a State it reads, one time for each compute"
+    [
+      "[yuka] State `grow` keeps changing a State it reads +stack";
+      "[yuka] State `grow` keeps changing a State it reads +stack";
+    ];
+  dispose ()
+
+let () =
+  let fail = State.make false in
+  let (), dispose = with_owner (fun () -> Effect.after (fun () -> if State.get fail then raise Exit)) in
+  (try State.set fail true with Exit -> ());
+  expect "an effect with no name that raises" [];
+  dispose ()
+
 let () =
   if !failures > 0 then set_exit_code 1
   else print_endline (if dev then "dev check (dev build): ok" else "dev check (__YUKA_DEV__ = false): ok")

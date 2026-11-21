@@ -7,6 +7,28 @@ val with_owner : (unit -> 'a) -> 'a * (unit -> unit)
     so call the returned function yourself. An exception in an effect of the
     new owner goes to the same {!Catch} or island as the current owner. *)
 
+val effect_debug_name : string -> (unit -> 'r) -> unit -> 'r
+(** [effect_debug_name name body] is [body], with a name for dev messages.
+    Give it to {!Effect.after} or {!Effect.before}:
+    [Effect.after (effect_debug_name "save" (fun () -> ...))]. In a dev
+    build, when the body raises, [console.error] gets
+    [[yuka] effect `save` raised an exception] and the exception; when the
+    effect keeps changing a State it reads for more than 100 update rounds,
+    it gets [[yuka] effect `save` keeps changing a State it reads]. The
+    message also gives the names of its owners (see {!owner_debug_name}).
+    The exception goes on as before. In a production bundle (see {!render})
+    the name is not kept. *)
+
+val owner_debug_name : string -> unit
+(** [owner_debug_name name] gives a name to the current owner: that of the
+    {!with_owner} body, effect, hole, list row, island or {!render} tree
+    that calls it. A component has no owner of its own, so a call in a
+    component body names the owner around the component. A dev message
+    about a named effect or State gives the names of its owners, from the
+    outside in, as [effect `save` in `Page` > `Editor` raised an
+    exception]. Outside an owner it does nothing. In a production bundle
+    (see {!render}) it does nothing and the name is not kept. *)
+
 module State = State
 
 val batch : (unit -> 'a) -> 'a

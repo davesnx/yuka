@@ -116,6 +116,7 @@ let run_effect queue ?cleanup body =
     teardown ()
   in
   node.owner <- Some child;
+  if Dev.on then (match Dev.name_of body with Some s -> Dev.name node s | None -> ());
   if queue == Scheduler.late && !(Scheduler.depth ()) > 0 then begin
     node.state <- 2;
     let late = Scheduler.mine queue in

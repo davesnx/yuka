@@ -27,10 +27,36 @@ let report : (Web.node -> string -> Web.node option -> unit[@u]) =
 
 let mismatch parent expected found = report parent expected found [@u]
 
-let untracked : (unit -> unit[@u]) =
+let untracked : (string option -> unit[@u]) =
   [%mel.raw
-    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function () {
-      console.error("[yuka] State.get with nothing tracking it, during the render of a component.\n  It reads one time and never updates. Read it in markup, a memo or an effect,\n  or use State.peek for one read.", new Error("State.get"));
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function (name) {
+      console.error("[yuka] " + (name === undefined ? "" : name + ": ") + "State.get with nothing tracking it, during the render of a component.\n  It reads one time and never updates. Read it in markup, a memo or an effect,\n  or use State.peek for one read.", new Error("State.get"));
     } : 0|}]
 
-let untracked_get () = untracked () [@u]
+let untracked_get name = untracked name [@u]
+
+let names : (Obj.t -> string -> unit[@u]) * (Obj.t -> string option[@u]) =
+  [%mel.raw
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? (function () {
+      var m = new WeakMap();
+      return [function (o, s) { m.set(o, s) }, function (o) { return m.get(o) }];
+    })() : 0|}]
+
+let name o s = (fst names) (Obj.repr o) s [@u]
+let name_of o = (snd names) (Obj.repr o) [@u]
+
+let report : (string -> Obj.t -> unit[@u]) =
+  [%mel.raw
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function (message, e) {
+      console.error("[yuka] " + message, e);
+    } : 0|}]
+
+let error message e = report message e [@u]
+
+let protect : ((unit -> Obj.t[@u]) -> (Obj.t -> unit[@u]) -> Obj.t[@u]) =
+  [%mel.raw
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function (f, failed) {
+      try { return f() } catch (e) { failed(e); throw e }
+    } : 0|}]
+
+let guard f failed = protect f failed [@u]

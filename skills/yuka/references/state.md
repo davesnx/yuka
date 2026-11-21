@@ -528,6 +528,42 @@ effect is stopped before the outer effect runs again.
 `Yuka.with_owner body` runs `body` and returns a function that stops everything `body`
 created. Use it for effects that must live outside a component.
 
+## Debug names
+
+Give a name to a State, an effect or an owner to find it in dev messages:
+
+```ocaml
+let room = Yuka.State.make "lobby" |> Yuka.State.debug_name "room"
+
+let (), stop =
+  Yuka.with_owner (fun () ->
+      Yuka.owner_debug_name "Chat";
+      Yuka.Effect.after
+        (Yuka.effect_debug_name "sync_room" (fun () -> connect (Yuka.State.get room))))
+```
+
+In a dev build, the console shows these messages for a named State or
+effect:
+
+- ``[yuka] effect `sync_room` in `Chat` raised an exception``, with the
+  exception, when the body raises. A named memo gives the same message
+  with `State` in place of `effect`, one time for each compute that raises.
+- ``[yuka] effect `sync_room` keeps changing a State it reads``, when Yuka
+  stops after 100 rounds.
+- ``[yuka] State `room`: State.get with nothing tracking it, ...``, for a
+  read in a component body that runs one time.
+
+The owners are the named owners around the effect, from the outside in,
+as ``in `Page` > `Chat` ``. `Yuka.owner_debug_name` names the current
+owner: that of a `with_owner` body, an effect, a hole, a list row, an
+island or a `render` tree. A component has no owner of its own, so a call
+in a component body names the owner around the component. A State
+or effect with no name gives the messages it gave before. The exception
+goes on as before.
+
+A production bundle (`__YUKA_DEV__` defined as `false`) keeps no name.
+The names cost no bytes there when you do not call these functions.
+
 ## Context
 
 A context gives a value to every component below one place of the page,

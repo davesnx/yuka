@@ -101,6 +101,18 @@ val reducer : ?equal:('a -> 'a -> bool) -> ('a -> 'action -> 'a) -> 'a -> 'a rea
     It is {!make} and {!update}: a component runs one time, so [dispatch]
     stays the same function. [equal] is as in {!make}. *)
 
+val debug_name : string -> ('a, 'access) signal -> ('a, 'access) signal
+(** [debug_name name state] is [state], with a name for dev messages:
+    [let room = State.make "" |> State.debug_name "room"]. In a dev build,
+    a {!get} of it that nothing tracks in a component body writes
+    [[yuka] State `room`: State.get with nothing tracking it, ...]. For a
+    {!memo}, when its function raises, [console.error] gets
+    [[yuka] State `room` raised an exception] and the exception, and when it
+    keeps changing a State it reads, [[yuka] State `room` keeps changing a
+    State it reads]. A memo gets its name after its first compute, so that
+    compute has no name. In a production bundle (see {!Yuka.render}) the
+    name is not kept. *)
+
 val untrack : (unit -> 'a) -> 'a
 (** Runs the function and returns its result. Its {!get} reads are not
     tracked: inside an effect or a memo, a change of such a State does not

@@ -11,6 +11,11 @@ let set (s : _ t) value =
   Signal.set s value
 
 let update s f = set s (f s.value)
+
+let debug_name name (s : (_, _) signal) =
+  if Dev.on then Dev.name s.node ("State `" ^ name ^ "`");
+  s
+
 external read_only : 'a t -> 'a read = "%identity"
 
 let reducer ?equal reduce initial =

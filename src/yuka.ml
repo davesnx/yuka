@@ -10,6 +10,14 @@ module Effect = struct
 end
 
 let with_owner = Base.mount
+
+let effect_debug_name name body =
+  if Dev.on then Dev.name body ("effect `" ^ name ^ "`");
+  body
+
+let owner_debug_name name =
+  if Dev.on then match !(Base.current_owner ()) with Some o -> Dev.name o ("`" ^ name ^ "`") | None -> ()
+
 let batch = Scheduler.batch
 
 type server = Types.server

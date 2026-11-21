@@ -228,10 +228,36 @@ let mark n state =
             next := l)
   done
 
+let report (n : node) message e =
+  match Dev.name_of n with
+  | Some name ->
+      let rec owners acc = function
+        | Some o -> owners (match Dev.name_of o with Some s -> s :: acc | None -> acc) o.parent
+        | None -> acc
+      in
+      let rec join = function [] -> "" | [ s ] -> s | s :: r -> s ^ " > " ^ join r in
+      let where = match owners [] n.owner with [] -> "" | l -> " in " ^ join l in
+      Dev.error (name ^ where ^ message) e
+  | None -> ()
+
+let guarded n =
+  match Dev.name_of n with
+  | None -> with_listener (Some n) n.fn
+  | Some _ ->
+      Obj.obj
+        (Dev.guard
+           (fun [@u] () -> Obj.repr (with_listener (Some n) n.fn))
+           (fun [@u] e -> report n " raised an exception" e))
+
 let loop =
   Failure
     "Yuka: an effect or a memo keeps changing a State it reads (more than 100 \
      update rounds in one flush)"
+
+let report_loop error q =
+  match error with
+  | Some e when e == loop -> ()
+  | _ -> List.iter (fun n -> report n " keeps changing a State it reads" (Obj.repr loop)) q
 
 let rec restore = function
   | (c, f) :: rest ->
@@ -252,7 +278,7 @@ let rec run n =
   let outer = !stack in
   stack := n.depth + 1;
   let changed =
-    try with_listener (Some n) n.fn
+    try if Dev.on then guarded n else with_listener (Some n) n.fn
     with e ->
       stack := outer;
       let rec refresh = function
@@ -302,7 +328,10 @@ and settle left n =
                      run n;
                      n.eff = None && n.state > 0
                    end
-           then if left = 0 then raise loop else settle (left - 1) n
+           then if left = 0 then begin
+             if Dev.on then report n " keeps changing a State it reads" (Obj.repr loop);
+             raise loop
+           end else settle (left - 1) n
          with
         | () -> ()
         | exception e -> (
@@ -412,6 +441,7 @@ let flush () =
                 if n.state <> 3 then (try stale n with e -> fail e);
                 drop rest
           in
+          if Dev.on then report_loop !error q;
           fail loop;
           drop q
         end
