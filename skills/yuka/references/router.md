@@ -281,6 +281,11 @@ page with no island, links load full pages. In an island,
 on_click=(fun _ -> Yuka.Browser.navigate (Routes.blog ~tag:"bug" ()))
 ```
 
+A navigation to another URL adds a history entry. A navigation to the URL
+shown (the fragment does not count), for example a click on the link of
+the current page or the reload after a form succeeds, replaces the current
+entry, as the browser does. So Back goes to the page before.
+
 `Yuka.Browser.navigating` is a read-only State: `true` from the click
 until the new page is shown (or a full page load starts in its place). An
 island can read it to show a progress bar:

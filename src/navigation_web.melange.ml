@@ -133,6 +133,10 @@ let hash_of : string -> string =
   [%mel.raw "function (u) { const i = u.indexOf('#'); return i < 0 ? '' : u.slice(i) }"]
 
 let no_hash : string -> string = [%mel.raw "function (u) { return u.split('#')[0] }"]
+
+let replace_entry : string -> string -> unit =
+  [%mel.raw "function (k, url) { window.history.replaceState({ yukaKey: k }, '', url) }"]
+
 let path_of : string -> string = [%mel.raw "function (u) { return u.split('#')[0].split('?')[0] }"]
 
 let keys : unit -> string =

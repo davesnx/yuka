@@ -24,6 +24,7 @@ val put : node -> string -> string -> node
 val hold : node -> int -> bool -> unit
 val hash_of : string -> string
 val no_hash : string -> string
+val replace_entry : string -> string -> unit
 val path_of : string -> string
 val keys : unit -> string
 val is_html : string -> bool

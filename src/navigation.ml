@@ -398,7 +398,11 @@ let show ~dir ~push ~restore url a =
                   direct = true;
                 })
             :: !overlays;
-        Web.history_push_key key final;
+        if String.equal (Navigation_web.no_hash final) (Web.current_url ()) then begin
+          Web.table_delete (scrolls ()) !current_key;
+          Navigation_web.replace_entry key final
+        end
+        else Web.history_push_key key final;
         current_key := key
       end;
       let gen = !nav in

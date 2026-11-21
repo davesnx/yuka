@@ -2861,6 +2861,39 @@ let replace_url_back finish =
               100)))
     100
 
+let same_url_replaces finish =
+  let links = page {|<a id="here" href="/start?x=1">here</a><a id="a" href="/a">a</a>|} in
+  setup links;
+  plain_start ();
+  let length = history_length () and first = history_state_key () in
+  ignore (click "#here" "");
+  until "the click fetches" (fun () -> calls () > 0)
+    (fun () ->
+      resolve_call 0 (doc "Start" links) "";
+      tick (fun () ->
+          let second = history_state_key () in
+          check "a click on the link of the shown page adds no entry" (ints length) (ints (history_length ()));
+          check "the entry gets a new key" "true" (bools (second <> "" && second <> first));
+          Browser.navigate (location_ ());
+          resolve_call 1 (doc "Start" links) "";
+          tick (fun () ->
+              check "a navigation to the URL shown, as after a form success, adds no entry" (ints length)
+                (ints (history_length ()));
+              check "at the same URL" "/start?x=1" (location_ ());
+              set_scroll 120.;
+              ignore (click "#a" "");
+              resolve_call 2 (doc "A" (page "<p>a</p>")) "";
+              tick (fun () ->
+                  check "a navigation to another URL pushes" (ints (length + 1)) (ints (history_length ()));
+                  log_clear ();
+                  back (fun () ->
+                      check "one Back returns to the page" "/start?x=1" (location_ ());
+                      resolve_call 3 (doc "Start" links) "";
+                      tick (fun () ->
+                          check "its scroll is restored" "scroll:120" (log_read ());
+                          finish ()))))))
+    100
+
 let fire_touch : string -> string -> unit =
   [%mel.raw
     "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
@@ -3614,6 +3647,7 @@ let all =
     ("Browser.navigate refuses script URLs, navigation off and on", navigate_refuses_scripts);
     ("Browser.replace_url", replace_url);
     ("back to an entry loads its replaced URL", replace_url_back);
+    ("a navigation to the URL shown replaces its entry", same_url_replaces);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);

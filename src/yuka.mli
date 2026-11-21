@@ -1180,8 +1180,9 @@ val render :
     outside the outlet keep running. If that outlet is not on the page, it
     does [location.assign]. Without [Yuka-Outlet] it stops every island and
     replaces [<body>] and [document.title] with those of the response. Then it starts
-    the new islands, pushes a history entry (after the page loaded) and
-    scrolls to the fragment or to the top. It then writes the new
+    the new islands, pushes a history entry (after the page loaded; when
+    the new URL without its fragment is the URL shown, it replaces the
+    current entry) and scrolls to the fragment or to the top. It then writes the new
     [document.title] (or, when it is empty, the text of the first [h1] of
     the new content) into a visually hidden
     [<div id="yuka-announcer" aria-live="assertive" aria-atomic="true">],
