@@ -2,14 +2,17 @@ val on_window : string -> (Event.t -> unit) -> unit
 (** Listens on [window] until the current owner is disposed. The handler
     runs in a {!Yuka.batch}. Browser only: call it inside [Effect.after]. *)
 
-val navigate : ?replace:bool -> string -> unit
+val navigate : ?replace:bool -> ?keep_scroll:bool -> string -> unit
 (** Browser only: raises [Invalid_argument] on native. Loads the URL. After [render ~islands] with navigation (the default), it
     is a client navigation, as a click on a link; see {!Yuka.render}. Otherwise it
     does [location.assign url]. The navigation adds a history entry, except
     to the URL shown, where it replaces the current entry. With
     [~replace:true] (default [false]) it always replaces the current entry
     and does [location.replace url] in place of [location.assign url], so
-    Back goes to the page before. A [javascript:], [vbscript:] or [data:]
+    Back goes to the page before. With [~keep_scroll:true] (default
+    [false]) a client navigation does not scroll to the top or to the URL
+    fragment, so the scroll position stays as it was; focus and the
+    announcer change as for other navigations. A [javascript:], [vbscript:] or [data:]
     URL (read as {!Yuka.attr} reads a URL) does nothing; a dev build logs the
     first one. *)
 

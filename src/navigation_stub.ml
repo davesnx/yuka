@@ -111,7 +111,8 @@ let go f fail =
       end;
       load ()
 
-let navigate ~replace href = go (fun r -> r.navigate ~replace href) (fun () -> Web.navigate replace href)
+let navigate ~replace ~keep_scroll href =
+  go (fun r -> r.navigate ~replace ~keep_scroll href) (fun () -> Web.navigate replace href)
 
 let on_click e =
   if (not !failed) && Web.plain_click e then
@@ -119,7 +120,10 @@ let on_click e =
     | "" -> ()
     | href ->
         Web.prevent_default e;
-        navigate ~replace:(Web.link_flag "data-yuka-replace" (Web.target e)) href
+        navigate
+          ~replace:(Web.link_flag "data-yuka-replace" (Web.target e))
+          ~keep_scroll:(Web.link_flag "data-yuka-keep-scroll" (Web.target e))
+          href
 
 let on_link e =
   if Option.is_some !router || Web.link_href true (Web.target e) <> "" then

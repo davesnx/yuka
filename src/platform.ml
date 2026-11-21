@@ -3,7 +3,7 @@ open Types
 let stopped_key = "__yuka_stopped"
 let acted : (unit -> unit) ref = ref ignore
 let live_mark : ((string * Json.t) list -> unit) ref = ref ignore
-let client_navigate : (replace:bool -> string -> unit) option ref = ref None
+let client_navigate : (replace:bool -> keep_scroll:bool -> string -> unit) option ref = ref None
 let loaded = ref ""
 let no_swap (_ : Web.node option) = ()
 let swapped = ref no_swap
@@ -29,7 +29,9 @@ let platform =
       alt_key = Web.alt_key;
       client_x = Web.client_x;
       client_y = Web.client_y;
-      navigate = (fun ~replace url -> match !client_navigate with Some f -> f ~replace url | None -> Web.navigate replace url);
+      navigate =
+        (fun ~replace ~keep_scroll url ->
+          match !client_navigate with Some f -> f ~replace ~keep_scroll url | None -> Web.navigate replace url);
       focus = Web.focus;
       scroll_into_view = Web.scroll_into_view;
       on_window =

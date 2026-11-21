@@ -903,7 +903,7 @@ module Private : sig
     alt_key : Event.t -> bool;
     client_x : Event.t -> float;
     client_y : Event.t -> float;
-    navigate : replace:bool -> string -> unit;
+    navigate : replace:bool -> keep_scroll:bool -> string -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
   }
@@ -1168,7 +1168,9 @@ val render :
       [data-yuka-reload] attribute, the URL is on another origin, or the URL
       differs from the current one only by its fragment. A link with a
       [data-yuka-replace] attribute replaces the current history entry, as
-      [Browser.navigate ~replace:true].
+      [Browser.navigate ~replace:true]. A link with a [data-yuka-keep-scroll]
+      attribute keeps the scroll position, as
+      [Browser.navigate ~keep_scroll:true].
     - [popstate] loads the entry's URL without pushing history.
     - {!Browser.navigate} is a client navigation.
 

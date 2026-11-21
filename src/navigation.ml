@@ -497,9 +497,9 @@ let load ~overlay ~dir ~push ~replace ~restore url =
     | None -> fetch ()
   end
 
-let navigate ~replace url =
+let navigate ~replace ~keep_scroll url =
   save_scroll ();
-  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:None url
+  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some (Web.scroll_y ()) else None) url
 
 let back () =
   match showing () with

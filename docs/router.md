@@ -298,6 +298,21 @@ Without client navigation, `~replace:true` does `location.replace`, so
 the full page load also replaces the entry. On a page with no island, a
 link with `data-yuka-replace` is a plain link and adds an entry.
 
+A client navigation scrolls to the top of the new page, or to the
+element of the URL fragment. For a filter or a tab that loads a new page
+from the server, keep the scroll position: use
+`Yuka.Browser.navigate ~keep_scroll:true url`, or give the link a
+`data-yuka-keep-scroll` attribute:
+
+```ocaml
+<a href=(Routes.blog ~tag:"bug" ()) data_yuka_keep_scroll="">(Yuka.text "Bugs")</a>
+```
+
+The page does not scroll to the top or to the fragment. The focus and
+the announcer change as for other navigations. You can use both
+attributes on one link. Without client navigation, the full page load
+scrolls as the browser does.
+
 `Yuka.Browser.navigating` is a read-only State: `true` from the click
 until the new page is shown (or a full page load starts in its place). An
 island can read it to show a progress bar:

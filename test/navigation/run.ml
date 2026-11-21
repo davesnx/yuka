@@ -2926,6 +2926,37 @@ let replace_navigations finish =
                           finish ()))))))
     100
 
+let keep_scroll finish =
+  let links = page {|<a id="k" href="/a#sec" data-yuka-keep-scroll>k</a>|} in
+  setup links;
+  plain_start ();
+  set_scroll 300.;
+  log_clear ();
+  ignore (click "#k" "");
+  resolve_call 0 (doc "A" (page {|<h1 id="h">A</h1><h2 id="sec">s</h2>|} ^ links)) "";
+  tick (fun () ->
+      check "a link with data-yuka-keep-scroll keeps the scroll" "true"
+        (bools (List.mem (log_scrolls ()) [ ""; "scroll:300" ]));
+      check "at the URL of the link" "/a#sec" (location_ ());
+      check "the focus still moves to the fragment target" "sec" (focused ());
+      check "the title is still announced" "A" (announced ());
+      set_scroll 120.;
+      log_clear ();
+      Browser.navigate ~keep_scroll:true "/b";
+      resolve_call 1 (doc "B" (page {|<h1 id="hb">B</h1>|})) "";
+      tick (fun () ->
+          check "Browser.navigate ~keep_scroll:true keeps the scroll" "true"
+            (bools (List.mem (log_scrolls ()) [ ""; "scroll:120" ]));
+          check "at its URL" "/b" (location_ ());
+          check "the focus still moves to the h1" "hb" (focused ());
+          check "the title is still announced" "B" (announced ());
+          log_clear ();
+          Browser.navigate "/c";
+          resolve_call 2 (doc "C" (page "c")) "";
+          tick (fun () ->
+              check "a navigation with no option scrolls to the top" "scroll:0" (log_scrolls ());
+              finish ())))
+
 let fire_touch : string -> string -> unit =
   [%mel.raw
     "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
@@ -3681,6 +3712,7 @@ let all =
     ("back to an entry loads its replaced URL", replace_url_back);
     ("a navigation to the URL shown replaces its entry", same_url_replaces);
     ("a replace navigation from a link, Browser.navigate and Routes.replace replaces its entry", replace_navigations);
+    ("a keep-scroll navigation from a link and Browser.navigate keeps the scroll", keep_scroll);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);
