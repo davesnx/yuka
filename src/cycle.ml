@@ -406,12 +406,6 @@ let html_headers rule_headers extra =
   add_vary "Yuka-Overlay" @@ navigation_vary
     (merge_headers [ rule_headers; [ ("content-type", "text/html; charset=utf-8") ]; extra ])
 
-let mentions text part =
-  let n = String.length part and m = String.length text in
-  let rec at i j = j = n || (text.[i + j] = part.[j] && at i (j + 1)) in
-  let rec from i = i + n <= m && (at i 0 || from (i + 1)) in
-  from 0
-
 let rec shared sent (layers : layer list) =
   match (sent, layers) with
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
@@ -452,11 +446,29 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
   | Some sent -> (
       let headers = set_header ("yuka-build", env.build) headers in
       let keys = List.map (fun (l : layer) -> l.key) layers in
+      let answer headers wrap ?id_prefix ?route_printed ?entry build =
+        Async.map
+          (function
+            | Server.Settled text -> { status; headers; body = String (wrap text) }
+            | Server.Streamed (shell, rest) ->
+                let stream write =
+                  let result, resolve, _ = Async.make () in
+                  Async.on_settled (Server.streamed_body (wrap shell) rest write) (function
+                    | Async.Failed m ->
+                        log env.config `Error m;
+                        resolve ()
+                    | _ -> resolve ());
+                  result
+                in
+                let headers =
+                  merge_headers [ headers; [ ("yuka-stream", "1"); ("content-type", "application/x-ndjson; charset=utf-8") ] ]
+                in
+                { status; headers; body = Stream stream })
+          (Server.navigation ~budget:Server.budget ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
+             ~context:env.context ~current ~timeout ~sleep:env.sleep build)
+      in
       match shared sent layers with
-      | 0 ->
-          Async.map
-            (fun body -> { status; headers; body = String (head "" ^ body ^ "</body></html>") })
-            (Server.settled ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build)
+      | 0 -> answer headers (fun body -> head "" ^ body ^ "</body></html>") ?entry build
       | n ->
           let n = if overlay then List.length layers else n in
           let outlet = List.nth keys (n - 1) in
@@ -478,11 +490,11 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
                 routed (nest (List.filteri (fun i _ -> i >= n) layers) page.body) ()
           in
           let script = Printer.context_script "route" Types.route_name (`String env.route) in
-          Async.map
-            (fun body ->
-              { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
-            (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(if overlay then "overlay-" else outlet ^ "-") ~current ~timeout ~sleep:env.sleep
-               below))
+          answer headers
+            (fun body -> script ^ body)
+            ~id_prefix:(if overlay then "overlay-" else outlet ^ "-")
+            ~route_printed:true
+            below)
   | None ->
     let early = ref [] in
     let writer =

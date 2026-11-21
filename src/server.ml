@@ -64,7 +64,7 @@ let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
   | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeout ~sleep build ~on_shell
+let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ~timeout ~sleep build ~on_shell
     ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.context <- context;
@@ -74,6 +74,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeo
   session.entry <- entry;
   session.current <- current;
   session.id_prefix <- id_prefix;
+  session.route_printed <- route_printed;
   session.id_scope <- id_prefix ^ "p-";
   let shell = Printer.print session (fun () -> build ()) in
   let fills =
@@ -243,23 +244,67 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build =
-  let document = ref "" in
-  let values = Buffer.create 64 in
+type navigation = Settled of string | Streamed of string * ((string -> unit Async.t) -> unit Async.t)
+
+let budget = 0.1
+let line (json : Json.t) = Json.to_string json ^ "\n"
+let part id html = line (`List [ `String id; `String html ])
+let streamed_body shell rest write = Async.bind (write (line (`String shell))) (fun () -> rest write)
+
+let navigation ?(timeout = 10.) ?budget ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~sleep build =
+  let document = ref "" and values = Buffer.create 64 and streaming = ref false in
+  let early = ref [] in
+  let writer = ref (fun text ->
+    early := text :: !early;
+    Async.return ())
+  in
+  let send text = !writer text in
+  let finished =
+    drive ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~timeout ~sleep
+      (fun () -> build ())
+      ~on_shell:(fun ~fills:_ shell ->
+        document := shell;
+        Async.return ())
+      ~on_fill:(fun id inside links html ->
+        if !streaming then Async.bind (if links = "" then Async.return () else send (part "" links)) (fun () -> send (part id html))
+        else begin
+          document := fill_marker !document id ~inside html;
+          Buffer.add_string values links;
+          Async.return ()
+        end)
+      ~on_value:(fun html ->
+        if !streaming then send (part "" html)
+        else begin
+          Buffer.add_string values html;
+          Async.return ()
+        end)
+  in
+  let result, resolve, fail = Async.make () in
+  let decided = ref false in
+  let decide f = if not !decided then begin decided := true; f () end in
+  Async.on_settled finished (function
+    | Async.Done _ -> decide (fun () -> resolve (Settled (!document ^ Buffer.contents values)))
+    | Async.Failed m -> decide (fun () -> fail m)
+    | Async.Pending -> ());
+  let rest write =
+    let flushed = List.fold_left (fun a text -> Async.bind a (fun () -> write text)) (Async.return ()) (List.rev !early) in
+    early := [];
+    writer := (fun text -> Async.bind flushed (fun () -> write text));
+    Async.bind finished (fun _ -> send (line (`List [])))
+  in
+  (match budget with
+  | Some seconds when not !decided ->
+      Async.on_settled (sleep seconds) (fun _ ->
+          decide (fun () ->
+              streaming := true;
+              resolve (Streamed (!document ^ Buffer.contents values, rest))))
+  | _ -> ());
+  result
+
+let settled ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build =
   Async.map
-    (fun _ -> !document ^ Buffer.contents values)
-    (drive ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~timeout ~sleep
-       (fun () -> build ())
-       ~on_shell:(fun ~fills:_ shell ->
-         document := shell;
-         Async.return ())
-       ~on_fill:(fun id inside links html ->
-         document := fill_marker !document id ~inside html;
-         Buffer.add_string values links;
-         Async.return ())
-       ~on_value:(fun html ->
-         Buffer.add_string values html;
-         Async.return ()))
+    (function Settled text | Streamed (text, _) -> text)
+    (navigation ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build)
 
 let normalize path =
   let rec go p =

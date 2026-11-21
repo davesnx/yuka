@@ -98,7 +98,7 @@ open Base
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
-      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0;
+      csrf = None; sheets = []; held = []; context = None; shared = []; route_printed = false; contexts = 0;
       id_scope = "p-"; id_count = 0; page_scope = "p-"; page_count = 0;
       invalid = []; invalid_focused = false }
 
@@ -134,6 +134,9 @@ open Base
       (fun (name, b) ->
         match List.assq_opt b s.shared with
         | Some id -> (name, id, "")
+        | None when s.route_printed && String.equal name route_name ->
+            s.shared <- (b, "route") :: s.shared;
+            (name, "route", "")
         | None ->
             let id =
               if String.equal name route_name then "route"

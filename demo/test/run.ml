@@ -94,8 +94,15 @@ let streaming () =
 let navigation () =
   let _, response, html = call ~headers:[ ("Yuka-Navigate", "1") ] "/issue/YUK-1" in
   Alcotest.(check (option string)) "vary" (Some "Yuka-Navigate, Yuka-Prefetch, Yuka-Overlay") (header response "vary");
-  has html "Please add a test with an empty filter result.";
-  lacks html "skeleton";
+  Alcotest.(check (option string)) "streamed" (Some "1") (header response "yuka-stream");
+  let shell, rest =
+    match String.index_opt html '\n' with
+    | Some i -> (String.sub html 0 i, String.sub html i (String.length html - i))
+    | None -> Alcotest.fail "no line"
+  in
+  has shell "skeleton";
+  lacks shell "Please add a test with an empty filter result.";
+  has rest "Please add a test with an empty filter result.";
   lacks html "__yukaFill";
   let _, response, html = call ~headers:[ ("Yuka-Navigate", "L0"); ("Yuka-Overlay", "1") ] "/issue/YUK-1" in
   Alcotest.(check (option string)) "an issue is a page" None (header response "yuka-layer");

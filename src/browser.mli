@@ -20,8 +20,9 @@ val back : unit -> unit
 val navigating : bool State.read
 (** [true] while a client navigation is in flight: from the click on a
     link, [popstate] or {!navigate} (also while the navigation code
-    loads) until the new page is shown, a full page load starts in its
-    place, or {!Yuka.stop}. A navigation that a newer one aborts leaves it
+    loads) until the new page is shown (for a streamed answer, its first
+    part, with the [loading] content of the pending [await]s), a full page
+    load starts in its place, or {!Yuka.stop}. A navigation that a newer one aborts leaves it
     [true] for the newer one. Read it with {!Yuka.State.get} in an island, for
     example to show a progress bar. Always [false] on the server and
     without client navigation. *)

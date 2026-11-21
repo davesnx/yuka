@@ -68,6 +68,19 @@ let mask_node text =
   go 0;
   Buffer.contents buffer
 
+let readable response body =
+  match Dream.header response "yuka-stream" with
+  | None -> body
+  | Some _ ->
+      String.split_on_char '\n' body
+      |> List.filter_map (fun line ->
+             match Yuka.Json.of_string line with
+             | Ok (`String shell) -> Some shell
+             | Ok (`List [ `String id; `String html ]) -> Some ("---- part " ^ id ^ "\n" ^ html)
+             | Ok (`List []) -> Some "---- end"
+             | Ok _ | Error _ -> if line = "" then None else Some ("---- bad line " ^ line))
+      |> String.concat "\n"
+
 let () =
   Handlers.register ();
   List.iter
@@ -75,7 +88,7 @@ let () =
       let response = Dream.test handler (Dream.request ~target ~headers "") in
       Printf.printf "==== %s %d\n%s\n" target
         (Dream.status_to_int (Dream.status response))
-        (mask_node (mask (Lwt_main.run (Dream.body response)))))
+        (mask_node (mask (readable response (Lwt_main.run (Dream.body response))))))
     [
       ("/", []);
       ("/my", []);
