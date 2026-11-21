@@ -276,9 +276,15 @@ let form_post () =
 
 let prerendered () =
   let out = Filename.temp_dir "yuka_demo" "" in
-  (match Lwt_main.run (Yuka_dream.prerender ~out (Yuka.Server.config ()) Yuka_routes.app) with
+  (match Lwt_main.run (Yuka_dream.prerender ~site:"https://yuka.example" ~out (Yuka.Server.config ()) Yuka_routes.app) with
   | Ok () -> ()
   | Error m -> Alcotest.fail m);
+  Alcotest.(check string) "sitemap.xml"
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+     <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
+     <url><loc>https://yuka.example/about</loc></url>\n\
+     </urlset>\n"
+    (In_channel.with_open_bin (Filename.concat out "sitemap.xml") In_channel.input_all);
   let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ()) Yuka_routes.app
   in
   let call meth =
@@ -706,7 +712,7 @@ let () =
           Alcotest.test_case "canvas" `Quick canvas;
           Alcotest.test_case "about has no JavaScript" `Quick about;
           Alcotest.test_case "redirect, 405, HEAD, endpoint, assets" `Quick rules;
-          Alcotest.test_case "prerendered /about, GET and HEAD" `Quick prerendered;
+          Alcotest.test_case "prerendered /about, GET and HEAD, sitemap.xml" `Quick prerendered;
           Alcotest.test_case "the new issue form posts with no JavaScript" `Quick form_post;
           Alcotest.test_case "action route" `Quick action_route;
           Alcotest.test_case "markdown in the issue page" `Quick markdown_page;

@@ -129,6 +129,40 @@ let prerender_dev_off () =
   check_true "no dev script in a page" (not (contains (read "index.html") "EventSource"));
   check_true "no dev script in 404.html" (not (contains (read "404.html") "EventSource"))
 
+let sitemap () =
+  let out = Filename.temp_dir "yuka_out" "" in
+  ignore
+    (with_stderr (fun () ->
+         match Lwt_main.run (Yuka_dream.prerender ~site:"https://example.com" ~out config Yuka_routes.app) with
+         | Ok () -> ()
+         | Error m -> Alcotest.fail m));
+  let text = In_channel.with_open_bin (Filename.concat out "sitemap.xml") In_channel.input_all in
+  Alcotest.(check string) "sitemap.xml"
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+     <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
+     <url><loc>https://example.com/</loc></url>\n\
+     <url><loc>https://example.com/docs</loc></url>\n\
+     <url><loc>https://example.com/post/hello</loc></url>\n\
+     <url><loc>https://example.com/guide</loc></url>\n\
+     <url><loc>https://example.com/post/world</loc></url>\n\
+     </urlset>\n"
+    text;
+  check_true "no sitemap without ~site"
+    (let out = Filename.temp_dir "yuka_out" "" in
+     ignore (with_stderr (fun () -> prerender out));
+     not (Sys.file_exists (Filename.concat out "sitemap.xml")))
+
+let bad_site () =
+  List.iter
+    (fun site ->
+      let out = Filename.concat (Filename.temp_dir "yuka_out" "") "site" in
+      match Lwt_main.run (Yuka_dream.prerender ~site ~out config Yuka_routes.app) with
+      | Ok () -> Alcotest.failf "%s accepted" site
+      | Error m ->
+          check_true "names the site" (contains m (Printf.sprintf "%S" site));
+          check_true "nothing written" (not (Sys.file_exists out)))
+    [ "example.com"; "https://"; "ftp://example.com"; "https://example.com/?a"; "https://exa mple.com" ]
+
 let out_inside_a_served_dir () =
   let dir = Filename.temp_dir "yuka_static" "" in
   Out_channel.with_open_bin (Filename.concat dir "s.css") (fun oc -> output_string oc "x");
@@ -283,6 +317,8 @@ let () =
           Alcotest.test_case "YUKA_DEV=1 does not turn on dev mode" `Quick dev_env_ignored;
           Alcotest.test_case "a prerender with ~dev:true writes no dev script" `Quick prerender_dev_off;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
+          Alcotest.test_case "~site writes sitemap.xml of the HTML pages" `Quick sitemap;
+          Alcotest.test_case "a site that is not an origin is refused" `Quick bad_site;
         ] );
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);

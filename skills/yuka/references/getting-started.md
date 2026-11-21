@@ -233,6 +233,13 @@ match Lwt_main.run (Yuka_dream.prerender ~out:"_build/site" config Yuka_routes.a
     exit 1
 ```
 
+Give `~site:"https://example.com"`, the origin of the site, to also
+write `sitemap.xml`. It has the absolute URL of each HTML page that the
+prerender wrote. Pages that the prerender did not write, files that are
+not HTML and `404.html` are not in it. Your static host must serve the
+file at `/sitemap.xml`; the request cycle does not serve it from the
+`~prerendered` directory.
+
 With `~prerendered`, a `GET` of such a page, with no query, gets its
 file after the guards run, and the loaders do not run. In dev mode the
 server does not use the files.

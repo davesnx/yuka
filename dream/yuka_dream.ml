@@ -175,9 +175,20 @@ let check_out out config =
   | Some (_, dir) -> Error (Printf.sprintf "Yuka_dream.prerender: out %S is inside the served directory %S" out dir)
   | None -> Ok ()
 
-let write_pages ~out config app =
+let check_site = function
+  | None -> Ok ()
+  | Some site ->
+      let host prefix =
+        String.starts_with ~prefix site
+        && String.length site > String.length prefix
+        && not (String.exists (fun c -> c = '?' || c = '#' || c <= ' ' || c >= '\127') site)
+      in
+      if host "https://" || host "http://" then Ok ()
+      else Error (Printf.sprintf "Yuka_dream.prerender: site %S is not an http or https origin" site)
+
+let write_pages ?site ~out config app =
   let ( let* ) = Lwt.bind in
-  let seen = Hashtbl.create 64 and queue = Queue.create () in
+  let seen = Hashtbl.create 64 and queue = Queue.create () and pages = ref [] and written = ref [] in
   let add path =
     if not (Hashtbl.mem seen path) then begin
       Hashtbl.add seen path ();
@@ -196,13 +207,16 @@ let write_pages ~out config app =
         match Yuka.Server.Prerender.file path with
         | Some file when ok ->
             write_file (Filename.concat out file) body;
-            if is_html response then
+            written := file :: !written;
+            if is_html response then begin
+              pages := path :: !pages;
               List.iter
                 (fun link ->
                   if (not (Hashtbl.mem seen link))
                      && Yuka.Server.Prerender.prerenderable config app link
                   then add link)
-                (Yuka.Server.Prerender.links body);
+                (Yuka.Server.Prerender.links body)
+            end;
             visit ()
         | None when ok ->
             warn path "answered %d but cannot be a file name, not written" status;
@@ -216,14 +230,19 @@ let write_pages ~out config app =
   let* page = to_lwt (Yuka.Server.Prerender.missing_page config app ~sleep:Adapter.sleep) in
   let* text = to_lwt (drain page) in
   write_file (Filename.concat out "404.html") text;
+  Option.iter
+    (fun site ->
+      if List.mem "sitemap.xml" !written then warn "/sitemap.xml" "is a page of the app, no sitemap written"
+      else write_file (Filename.concat out "sitemap.xml") (Yuka.Server.Prerender.sitemap ~site (List.rev !pages)))
+    site;
   List.iter (fun (path, css) -> write_file (Filename.concat out path) css) (Yuka.Server.Prerender.css_files config);
   List.iter
     (fun (prefix, dir) -> copy dir (Filename.concat out (String.sub prefix 1 (String.length prefix - 1))))
     (Yuka.Server.Prerender.served_dirs config);
   Lwt.return_unit
 
-let prerender ~out config app =
+let prerender ?site ~out config app =
   let config = Yuka.Server.Prerender.config config in
-  match check_out out config with
+  match Result.bind (check_site site) (fun () -> check_out out config) with
   | Error _ as e -> Lwt.return e
-  | Ok () -> Lwt.map Result.ok (write_pages ~out config app)
+  | Ok () -> Lwt.map Result.ok (write_pages ?site ~out config app)

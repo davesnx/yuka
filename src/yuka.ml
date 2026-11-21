@@ -118,6 +118,7 @@ module Server = struct
     let seeds = Cycle.prerender_seeds
     let prerenderable = Cycle.prerenderable
     let links = Cycle.links
+    let sitemap = Cycle.sitemap
     let file = Cycle.prerender_file
     let missing_page = Cycle.missing_page
     let css_files = Cycle.css_files

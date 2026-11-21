@@ -54,6 +54,7 @@ let () =
   let bundle = ref false in
   let prerender = ref "" in
   let prerendered = ref "" in
+  let site = ref "" in
   let second = ref 0 in
   let bus = ref "memory" in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
@@ -87,6 +88,7 @@ let () =
       ("--metafile", Arg.Set_string metafile, "esbuild metafile, with --bundle");
       ("--static-dir", Arg.Set_string static_dir, "Directory of style.css");
       ("--prerender", Arg.Set_string prerender, "Write the prerendered pages to DIR and exit");
+      ("--site", Arg.Set_string site, "With --prerender: the origin of the site, such as https://example.com; also write sitemap.xml");
       ("--prerendered", Arg.Set_string prerendered, "Serve the prerendered pages of DIR");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
@@ -101,7 +103,7 @@ let () =
         "The data starts again from the seed when it is older than this many days (default: $YUKA_DEMO_RESET_DAYS, or 7)" );
     ]
     (fun _ -> ())
-    "demo_server [--port N] [--interface ADDRESS] [--bundle] [--prerender DIR] [--prerendered DIR]";
+    "demo_server [--port N] [--interface ADDRESS] [--bundle] [--prerender DIR [--site URL]] [--prerendered DIR]";
   let manifest = read_file !manifest in
   let client = Filename.concat !js_dir "demo/client" in
   let assets =
@@ -150,7 +152,7 @@ let () =
   end;
   let app = Demo_app.Yuka_routes.app in
   if !prerender <> "" then (
-    match Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app) with Ok () -> () | Error message -> stop message)
+    match Lwt_main.run (Yuka_dream.prerender ?site:(if !site = "" then None else Some !site) ~out:!prerender config app) with Ok () -> () | Error message -> stop message)
   else if !second = 0 then
     Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ refresh_store @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
     @@ Yuka_dream.handler config app

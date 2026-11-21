@@ -1989,6 +1989,13 @@ module Server : sig
         entities decoded, query and fragment removed, once each, in order.
         A link to another origin ([//host]) is not one. *)
 
+    val sitemap : site:string -> string list -> string
+    (** The [sitemap.xml] text of the paths, in order: one [<url>] for each
+        path, with [<loc>] [site ^ path]. [site] is the origin, such as
+        [https://example.com]; a slash at its end is removed. A byte that
+        is a space, a control byte or not ASCII is percent-encoded, and
+        [&], [<], [>] and the two quote marks are XML entities. *)
+
     val file : string -> string option
     (** The file of a path, relative to the output directory: [/] gives
         [index.html], [/a/b] gives [a/b/index.html], and a last segment

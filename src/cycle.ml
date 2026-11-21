@@ -1215,6 +1215,29 @@ let links html =
   in
   scan 0 []
 
+let sitemap ~site paths =
+  let site = if String.ends_with ~suffix:"/" site then String.sub site 0 (String.length site - 1) else site in
+  let b = Buffer.create 256 in
+  Buffer.add_string b
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";
+  List.iter
+    (fun path ->
+      Buffer.add_string b "<url><loc>";
+      String.iter
+        (function
+          | '&' -> Buffer.add_string b "&amp;"
+          | '<' -> Buffer.add_string b "&lt;"
+          | '>' -> Buffer.add_string b "&gt;"
+          | '"' -> Buffer.add_string b "&quot;"
+          | '\'' -> Buffer.add_string b "&apos;"
+          | c when c <= ' ' || c >= '\127' -> Buffer.add_string b (Printf.sprintf "%%%02X" (Char.code c))
+          | c -> Buffer.add_char b c)
+        (site ^ path);
+      Buffer.add_string b "</loc></url>\n")
+    paths;
+  Buffer.add_string b "</urlset>\n";
+  Buffer.contents b
+
 let missing_page config (App a) ~sleep =
   let config = prerender_config config in
   let env =

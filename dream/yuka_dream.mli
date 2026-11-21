@@ -25,7 +25,7 @@ val handler :
     node. *)
 
 val prerender :
-  out:string -> Yuka.Server.config -> Yuka.Server.app -> (unit, string) result Lwt.t
+  ?site:string -> out:string -> Yuka.Server.config -> Yuka.Server.app -> (unit, string) result Lwt.t
 (** Writes the pages of the app to the directory [out]:
 
     - It starts from [Yuka.Server.Prerender.seeds] and renders each path
@@ -37,6 +37,11 @@ val prerender :
       is rendered once.
     - It writes [404.html] ([Yuka.Server.Prerender.missing_page]) and
       copies [Yuka.Server.Prerender.served_dirs] under their prefixes.
+    - With [site], the origin of the site such as [https://example.com],
+      it writes [sitemap.xml] ([Yuka.Server.Prerender.sitemap]) with each
+      HTML page that it wrote, in the order of the crawl. Files that are
+      not HTML ([feed.xml]) and [404.html] are not in it. When a page of
+      the app is [/sitemap.xml], that page stays, and a warning is printed.
 
     It renders with [Yuka.Server.Prerender.config]: dev mode is off, and a
     page that renders a [Yuka.Live.make] is a 500 with a log message, so it is
@@ -44,7 +49,9 @@ val prerender :
     read. Files already in [out] are replaced; running it twice gives the
     same files. Gives [Error] with a message that names the directory, and
     writes nothing, when [out] is inside a directory of
-    [Yuka.Server.Prerender.served_dirs]. *)
+    [Yuka.Server.Prerender.served_dirs], or when [site] does not start
+    with [http://] or [https://] followed by a host, or holds a [?], a
+    [#], a space, a control byte or a byte that is not ASCII. *)
 
 val request : Yuka.Server.request -> Dream.request option
 (** The Dream request of a request that {!handler} or {!prerender} made,

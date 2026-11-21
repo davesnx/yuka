@@ -412,6 +412,22 @@ let prerender =
           [ "/a"; "/b&c"; "/"; "/caf%C3%A9"; "/c/d"; "/eA"; "/f\xc3\xa9&bogus;&amp" ]
           (Server.Prerender.links
              {|<a href="/a?x=1#y"></a><a href="//evil.com/x"></a><a href="https://e.com/"></a><a href="/b&amp;c"></a><link href="/"><a href="/a"><a href="#top"><a href="/caf%C3%A9"><a href="&#x2F;c&#47;d"><a href="/e&#X41;"><a href="/f&#233;&bogus;&amp;amp">|}) );
+    ( "sitemap of paths",
+      fun () ->
+        Alcotest.(check string) "sitemap"
+          "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+           <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
+           <url><loc>https://e.com/</loc></url>\n\
+           <url><loc>https://e.com/b&amp;c</loc></url>\n\
+           <url><loc>https://e.com/caf%C3%A9</loc></url>\n\
+           <url><loc>https://e.com/a%20b&apos;&lt;&gt;&quot;</loc></url>\n\
+           </urlset>\n"
+          (Server.Prerender.sitemap ~site:"https://e.com/" [ "/"; "/b&c"; "/caf\xc3\xa9"; "/a b'<>\"" ]);
+        Alcotest.(check string) "no paths"
+          "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+           <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
+           </urlset>\n"
+          (Server.Prerender.sitemap ~site:"https://e.com" []) );
     ( "file of a path",
       fun () ->
         List.iter
