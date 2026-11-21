@@ -181,12 +181,15 @@ install: ## Install the opam dependencies, the dev packages and the editor tools
 	opam install . --deps-only --with-test --with-doc -y
 	opam install -y $(DEV_PACKAGES) ocaml-lsp-server ocamlmerlin-mlx ocamlformat ocamlformat-mlx
 
+# server-reason-react is out until quickjs supports dune 3.25: see bench/ssr/ocaml/dune
 DEV_PACKAGES = cmarkit ochre tm-grammars jsonkit
 
 .PHONY: dev-packages
 dev-packages: ## List opam packages the benchmarks and the demo need that are not in the opam files
 	@echo "$(DEV_PACKAGES)"
 
+# dune 3.25.0 with https://github.com/ocaml/dune/pull/16699, 16939 and 16941; Melange 7.0.1-55 with
+# https://github.com/melange-re/melange/pull/2211, for https://github.com/ocaml/dune/issues/17020
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
 	@echo "ache git+https://github.com/davesnx/ache.git#5827338a3c35d39feec2f772a7cc4014ebef7a7c"
