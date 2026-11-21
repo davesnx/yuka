@@ -283,9 +283,14 @@ Yuka.Server.Action.implement User_popup.stats (fun _request { workspace; user } 
   is written in the page, and the browser reads it with no request.
 - A `Network` or `Server` error is tried again two times, after 500 ms
   and 1500 ms (`?retry`). `?enabled` stops the query while it is false.
-- `Yuka.Remote.refetch remote` sends it again. `Yuka.Remote.invalidate query`
-  sends again every use of the query on the page, for example after an
-  action changed the data.
+- In the browser, two uses of the same query with the same input share
+  one request and its answer, also in two islands. When one use is
+  disposed, the request continues for the other use. A use made after
+  the answer sends a new request.
+- `Yuka.Remote.refetch remote` sends a new request for this use.
+  `Yuka.Remote.invalidate query` sends again every use of the query on
+  the page, one request for each input, for example after an action
+  changed the data.
 - `Yuka.Remote.optimistic` shows a change at once and removes it when
   the action fails.
 

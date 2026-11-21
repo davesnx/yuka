@@ -24,6 +24,10 @@ val make :
       the query runs again only when the key changes. A new key,
       {!refetch} or {!invalidate} aborts the request in flight, and only
       the latest request writes the status.
+    - In the browser, uses with the same key share the request in flight
+      and its answer: a second use sends no request. The request is
+      aborted only when every use that waits for it stops waiting. A use
+      made after the answer sends a new request.
     - [enabled ()] false gives [Idle] and aborts the request.
     - [Network] and [Server] errors are tried again by [retry] (default
       {!default_retry}); the others fail at once.
@@ -41,10 +45,12 @@ val state : 'o t -> 'o Status.t State.read
     Read it with {!State.get}. *)
 
 val refetch : 'o t -> unit
-(** Sends the request again (the manual retry after [Failed]). *)
+(** Sends a new request (the manual retry after [Failed]). Other uses
+    with the same key keep the request they wait for. *)
 
 val invalidate : (_, _, [ `Query ]) Action.t -> unit
-(** {!refetch} every mounted use of this query, for every input. *)
+(** Sends the query again for every mounted use, for every input: one
+    request for each key. *)
 
 val optimistic :
   ?commit:('r -> 'o -> 'o) ->

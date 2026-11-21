@@ -19,9 +19,60 @@ let fetch name input k =
     (fun cancelled message -> if not cancelled then k (Error (Status.Network message)))
 
 let send () = if Web.in_browser then fetch else !Bridge.send
+let next_use = ref 0
+
+type flight = {
+  name : string;
+  key : string;
+  mutable waiting : (int * ((Json.t, Status.error) result -> unit)) list;
+  mutable abort : unit -> unit;
+}
+
+let flights_table : flight Web.table option ref = ref None
+
+let flights () =
+  match !flights_table with
+  | Some t -> t
+  | None ->
+      let t = Web.table () in
+      flights_table := Some t;
+      t
+
+let forget t (f : flight) =
+  match Web.table_get t f.key with Some g when g == f -> Web.table_delete t f.key | _ -> ()
+
+let join send name input k =
+  let t = flights () and key = Answers.key name input in
+  incr next_use;
+  let id = !next_use in
+  let f =
+    match Web.table_get t key with
+    | Some f ->
+        f.waiting <- (id, k) :: f.waiting;
+        f
+    | None ->
+        let f = { name; key; waiting = [ (id, k) ]; abort = ignore } in
+        Web.table_set t key f;
+        f.abort <-
+          send name input (fun r ->
+              forget t f;
+              let waiting = f.waiting in
+              f.waiting <- [];
+              List.iter (fun (_, k) -> k r) waiting);
+        f
+  in
+  fun () ->
+    f.waiting <- List.filter (fun (i, _) -> i <> id) f.waiting;
+    if f.waiting == [] then begin
+      forget t f;
+      f.abort ()
+    end
+
+let forget_name name =
+  let t = flights () in
+  Array.iter (fun (f : flight) -> if String.equal f.name name then Web.table_delete t f.key) (Web.table_values t)
 
 let table : (int * (unit -> unit)) list Web.table option ref = ref None
-let next_use = ref 0
 
 let uses () =
   match !table with
@@ -68,7 +119,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
       stop := ignore
     in
     let finish g r = if g = !generation then State.set base (decode q (Status.data (State.peek base)) r) in
-    let rec attempt g input n = stop := send (Action.name q) input (answered g input n)
+    let rec attempt g input n = stop := join send (Action.name q) input (answered g input n)
     and answered g input n r =
       if g = !generation then
         match r with
@@ -119,7 +170,14 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
                     match Answers.find key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
             stop := release
     in
-    let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
+    let restart () = match !current with Some (_, input) -> start input ~read:false | None -> () in
+    let refetch () =
+      match !current with
+      | Some (key, input) ->
+          Web.table_delete (flights ()) key;
+          start input ~read:false
+      | None -> ()
+    in
     Base.run_effect Scheduler.queue (fun () ->
         if enabled () then begin
           let input = Codec.encode (Action.input q) (args ()) in
@@ -140,7 +198,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
         end);
     incr next_use;
     let id = !next_use in
-    Web.table_set (uses ()) (Action.name q) ((id, refetch) :: listed (Action.name q));
+    Web.table_set (uses ()) (Action.name q) ((id, restart) :: listed (Action.name q));
     Base.own (fun () ->
         cancel ();
         Web.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
@@ -150,7 +208,9 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
 let state r = r.state
 
 let refetch r = r.refetch ()
-let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed (Action.name q))
+let invalidate (q : (_, _, [ `Query ]) Action.t) =
+  forget_name (Action.name q);
+  List.iter (fun (_, f) -> f ()) (listed (Action.name q))
 
 let optimistic ?commit r ~change run =
   let added, id = Optimistic.add (State.peek r.changes) change in

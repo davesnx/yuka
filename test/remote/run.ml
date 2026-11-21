@@ -47,7 +47,11 @@ let fail i m =
   let _, (_, _, failure) = List.nth !gates i in
   failure m
 
+let owners = ref []
+
 let reset () =
+  List.iter (fun dispose -> dispose ()) !owners;
+  owners := [];
   gates := [];
   calls := [];
   logged := []
@@ -66,7 +70,10 @@ let () =
       incr counted;
       failwith "secret detail")
 
-let in_owner f = Yuka.with_owner f
+let in_owner f =
+  let ((_, dispose) as r) = Yuka.with_owner f in
+  owners := dispose :: !owners;
+  r
 
 let transport =
   [
@@ -155,6 +162,66 @@ let transport =
         check_status "loading with last" "loading A" r;
         fail 1 "down";
         check_status "failed with last" "failed server error last A" r );
+  ]
+
+let shared =
+  [
+    ( "two uses with the same query and input send one request",
+      fun () ->
+        reset ();
+        let a, _ = in_owner (fun () -> Remote.make gated (fun () -> "s")) in
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "s")) in
+        Alcotest.(check (list string)) "one call" [ "s" ] !calls;
+        settle 0 "S";
+        check_status "first" "ready S" a;
+        check_status "second" "ready S" b );
+    ( "disposing one use keeps the request the other needs",
+      fun () ->
+        reset ();
+        let _, dispose = in_owner (fun () -> Remote.make gated (fun () -> "d")) in
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "d")) in
+        dispose ();
+        settle 0 "D";
+        check_status "the other gets the answer" "ready D" b );
+    ( "a use made after the answer sends a new request",
+      fun () ->
+        reset ();
+        let _ = in_owner (fun () -> Remote.make gated (fun () -> "n")) in
+        settle 0 "N";
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "n")) in
+        Alcotest.(check int) "two calls" 2 (List.length !calls);
+        settle 1 "N2";
+        check_status "new answer" "ready N2" b );
+    ( "after every use is disposed, a new use sends a new request",
+      fun () ->
+        reset ();
+        let _, da = in_owner (fun () -> Remote.make gated (fun () -> "g")) in
+        let _, db = in_owner (fun () -> Remote.make gated (fun () -> "g")) in
+        da ();
+        db ();
+        let c, _ = in_owner (fun () -> Remote.make gated (fun () -> "g")) in
+        Alcotest.(check int) "two calls" 2 (List.length !calls);
+        settle 0 "old";
+        check_status "the aborted answer is not shown" "loading" c;
+        settle 1 "G";
+        check_status "new answer" "ready G" c );
+    ( "refetch of one use sends a new request, invalidate sends one per input",
+      fun () ->
+        reset ();
+        let a, _ = in_owner (fun () -> Remote.make gated (fun () -> "r")) in
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "r")) in
+        Remote.refetch a;
+        Alcotest.(check int) "refetch sends" 2 (List.length !calls);
+        settle 1 "A";
+        check_status "refetched use" "ready A" a;
+        check_status "other use waits for its request" "loading" b;
+        settle 0 "B";
+        check_status "other use" "ready B" b;
+        Remote.invalidate gated;
+        Alcotest.(check int) "invalidate sends one" 3 (List.length !calls);
+        settle 2 "C";
+        check_status "first" "ready C" a;
+        check_status "second" "ready C" b );
   ]
 
 let island q input =
@@ -397,6 +464,7 @@ let () =
   Alcotest.run "remote"
     [
       ("transport", cases transport);
+      ("shared", cases shared);
       ("answers", cases answers);
       ("fill and rollback", cases fill_and_rollback);
       ("optimistic", cases optimistic);

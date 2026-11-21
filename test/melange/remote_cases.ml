@@ -344,6 +344,41 @@ let async =
             check "no fetch" "0" (string_of_int (fetches ()));
             check "ready" "ready L" (shown_late ());
             Yuka.stop ()) );
+    ( "remote: two uses with the same query and input send one request",
+      fun finish ->
+        fresh_calls ();
+        let a, _ = with_owner (fun () -> Remote.make query (fun () -> "s")) in
+        let b, _ = with_owner (fun () -> Remote.make query (fun () -> "s")) in
+        let sent = fetches () in
+        respond 0 200 {|{"ok":"S"}|};
+        after_ms 10 (fun () ->
+            finish (fun () ->
+                check "one fetch" "1" (string_of_int sent);
+                check "first" "ready S" (show (State.get (Remote.state a)));
+                check "second" "ready S" (show (State.get (Remote.state b)));
+                Yuka.stop ())) );
+    ( "remote: disposing one use does not abort the request the other needs",
+      fun finish ->
+        fresh_calls ();
+        let _, dispose = with_owner (fun () -> Remote.make query (fun () -> "d")) in
+        let b, dispose_b = with_owner (fun () -> Remote.make query (fun () -> "d")) in
+        let sent = fetches () in
+        dispose ();
+        let cut = aborted 0 in
+        respond 0 200 {|{"ok":"D"}|};
+        after_ms 10 (fun () ->
+            let shown_b = show (State.get (Remote.state b)) in
+            let _, dispose_c = with_owner (fun () -> Remote.make query (fun () -> "e")) in
+            let _, dispose_d = with_owner (fun () -> Remote.make query (fun () -> "e")) in
+            dispose_c ();
+            dispose_d ();
+            finish (fun () ->
+                check "one fetch" "1" (string_of_int sent);
+                check "not aborted" "false" (string_of_bool cut);
+                check "the other gets the answer" "ready D" shown_b;
+                check "the last dispose aborts" "true" (string_of_bool (aborted 1));
+                dispose_b ();
+                Yuka.stop ())) );
     ( "remote: refetch after hydration sends a request",
       fun finish ->
         fresh ~shown:"ready A" ~answer:(answer_for "a" {|{"ok":"A"}|}) ();
