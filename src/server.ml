@@ -243,11 +243,11 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build =
+let settle ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build =
   let document = ref "" in
   let values = Buffer.create 64 in
   Async.map
-    (fun _ -> !document ^ Buffer.contents values)
+    (fun islands -> (!document ^ Buffer.contents values, islands))
     (drive ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~timeout ~sleep
        (fun () -> build ())
        ~on_shell:(fun ~fills:_ shell ->
@@ -260,6 +260,9 @@ let settled ?(timeout = 10.) ?preload ?entry ?current ?id_prefix ?form ?csrf ?co
        ~on_value:(fun html ->
          Buffer.add_string values html;
          Async.return ()))
+
+let settled ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build =
+  Async.map fst (settle ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build)
 
 let normalize path =
   let rec go p =

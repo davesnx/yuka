@@ -248,6 +248,7 @@ type config = {
   css : (string * string) list;
   head : string;
   timeout : float;
+  bots : string list;
   prerendered : string option;
   origins : string list option;
   log : (Types.log_level -> string -> unit) option;
@@ -267,8 +268,10 @@ let public_prefix (prefix, dir) =
        ^ " has no segment; it would hide every route")
   | segments -> (segments, dir)
 
+let bots = [ "bot"; "crawl"; "spider"; "slurp"; "facebookexternalhit"; "whatsapp" ]
+
 let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
-    ?(dev = false) ?origins ?log () =
+    ?(bots = bots) ?(dev = false) ?origins ?log () =
   {
     dev = (if dev then Some (dev_state ()) else None);
     origins;
@@ -286,6 +289,7 @@ let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head
         css;
     head;
     timeout;
+    bots = List.filter (fun b -> b <> "") (List.map String.lowercase_ascii bots);
     prerendered;
   }
 
@@ -358,6 +362,7 @@ type env = {
   config : config;
   sleep : float -> unit Async.t;
   head_only : bool;
+  bot : bool;
   navigate : string list option;
   overlay : bool;
   build : string;
@@ -412,6 +417,15 @@ let mentions text part =
   let rec from i = i + n <= m && (at i 0 || from (i + 1)) in
   from 0
 
+let shared_cache value =
+  let v = String.lowercase_ascii value in
+  let has part =
+    let n = String.length part in
+    let rec at i = i + n <= String.length v && (String.sub v i n = part || at (i + 1)) in
+    at 0
+  in
+  has "public" || has "s-maxage"
+
 let rec shared sent (layers : layer list) =
   match (sent, layers) with
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
@@ -448,6 +462,9 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let routed body () = Kind.to_node (Element.Context.provide (Route.get ()) route (fun () -> Kind.of_node (body ()))) in
   let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
+  let close islands =
+    (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+  in
   match env.navigate with
   | Some sent -> (
       let headers = set_header ("yuka-build", env.build) headers in
@@ -483,6 +500,11 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
               { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
             (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(if overlay then "overlay-" else outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                below))
+  | None when env.bot || Option.fold ~none:false ~some:shared_cache (answer_cache headers None) ->
+      Async.map
+        (fun (body, islands) -> { status; headers; body = String (head "" ^ body ^ close islands) })
+        (Server.settle ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout
+           ~sleep:env.sleep build)
   | None ->
     let early = ref [] in
     let writer =
@@ -499,9 +521,6 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
         ~on_value:write
     in
     let written () = String.concat "" (List.rev !early) in
-    let close islands =
-      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
-    in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
     | Async.Done islands ->
@@ -688,15 +707,6 @@ let rec strip_prefix prefix parts =
   | _ -> None
 
 let query_suffix = function Some q when q <> "" -> "?" ^ q | _ -> ""
-
-let shared_cache value =
-  let v = String.lowercase_ascii value in
-  let has part =
-    let n = String.length part in
-    let rec at i = i + n <= String.length v && (String.sub v i n = part || at (i + 1)) in
-    at 0
-  in
-  has "public" || has "s-maxage"
 
 let live_checked env fallback ~path (resp : response) =
   if not !(env.live_used) then Async.return resp
@@ -970,6 +980,12 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
       config;
       sleep;
       head_only = (match r.meth with `HEAD -> true | _ -> false);
+      bot =
+        (match r.header "user-agent" with
+        | Some agent ->
+            let agent = String.lowercase_ascii agent in
+            List.exists (mentions agent) config.bots
+        | None -> false);
       navigate =
         Option.map
           (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
@@ -1245,6 +1261,7 @@ let missing_page config (App a) ~sleep =
       config;
       sleep;
       head_only = false;
+      bot = false;
       navigate = None;
       overlay = false;
       build = build_id config (App a);

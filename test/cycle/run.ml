@@ -1160,6 +1160,60 @@ let render =
         check_true "error page" (contains r.body "error page");
         check_true "no message" (not (contains r.body "secret"));
         Alcotest.(check (list string)) "log" [ "Failure(\"shell secret\")" ] !logged );
+    ( "a bot gets the settled page, a person gets the stream",
+      fun () ->
+        let settled agent =
+          let a = call (request ~headers:[ ("User-Agent", agent) ] "/slow") in
+          let pending = Async.status a = Async.Pending in
+          App.finish_slow "ready";
+          match Async.status a with
+          | Async.Done r ->
+              check_status r 200;
+              check_true "doctype" (String.starts_with ~prefix:"<!DOCTYPE html>" r.body);
+              check_true "end" (String.ends_with ~suffix:"</body></html>" r.body);
+              check_true "filled" (contains r.body "ready");
+              pending && (not (contains r.body "wait")) && (not (contains r.body "__yukaFill"))
+              && not (contains r.body "data-yuka-fill")
+          | _ -> Alcotest.fail "not done"
+        in
+        check_true "googlebot" (settled "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)");
+        check_true "bingbot" (settled "Mozilla/5.0 (compatible; bingbot/2.0)");
+        check_true "browser streams"
+          (not (settled "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"));
+        let a = call (request "/slow") in
+        App.finish_slow "ready";
+        match Async.status a with
+        | Async.Done r -> check_true "no agent streams" (contains r.body "<template data-yuka-fill")
+        | _ -> Alcotest.fail "not done" );
+    ( "bots of the config replace the default list",
+      fun () ->
+        let config = config_with ~assets:modules ~bots:[ "MyCrawler" ] () in
+        let body agent =
+          let a = call ~config (request ~headers:[ ("User-Agent", agent) ] "/slow") in
+          App.finish_slow "ready";
+          match Async.status a with Async.Done r -> r.body | _ -> Alcotest.fail "not done"
+        in
+        check_true "own pattern, any case" (not (contains (body "mycrawler/1.0") "data-yuka-fill"));
+        check_true "default pattern off" (contains (body "Googlebot/2.1") "data-yuka-fill");
+        let config = config_with ~assets:modules ~bots:[] () in
+        let a = call ~config (request ~headers:[ ("User-Agent", "Googlebot/2.1") ] "/slow") in
+        App.finish_slow "ready";
+        match Async.status a with
+        | Async.Done r -> check_true "empty list streams" (contains r.body "data-yuka-fill")
+        | _ -> Alcotest.fail "not done" );
+    ( "a page that a shared cache keeps is settled for every request",
+      fun () ->
+        let a = call (request "/slow-public") in
+        App.finish_slow "ready";
+        match Async.status a with
+        | Async.Done r ->
+            check_header r "cache-control" [ "public, max-age=60" ];
+            check_true "no vary on the agent"
+              (not (List.exists (fun (n, v) -> String.lowercase_ascii n = "vary" && contains (String.lowercase_ascii v) "user-agent") r.headers));
+            check_true "filled" (contains r.body "ready");
+            check_true "no fallback" (not (contains r.body "wait"));
+            check_true "no fill script" (not (contains r.body "__yukaFill"))
+        | _ -> Alcotest.fail "not done" );
     ( "Yuka-Navigate gives the settled document",
       fun () ->
         let a = call (request ~headers:[ ("Yuka-Navigate", "1") ] "/slow") in

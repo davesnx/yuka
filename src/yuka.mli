@@ -1715,6 +1715,10 @@ module Server : sig
 
   type config
 
+  val bots : string list
+  (** The default [bots] of {!config}:
+      [["bot"; "crawl"; "spider"; "slurp"; "facebookexternalhit"; "whatsapp"]]. *)
+
   val config :
     ?assets:assets ->
     ?public:(string * string) list ->
@@ -1723,6 +1727,7 @@ module Server : sig
     ?css:(string * string) list ->
     ?head:string ->
     ?timeout:float ->
+    ?bots:string list ->
     ?dev:bool ->
     ?origins:string list ->
     ?log:(log_level -> string -> unit) ->
@@ -1742,6 +1747,18 @@ module Server : sig
       has a hash of the text); another path under [/_yuka/css/] is a 404
       with [no-store]. [timeout] (default 10 seconds) bounds a streamed
       render.
+
+      [bots] (default {!bots}) lists parts of a [User-Agent], compared
+      without case. A full page for a request whose [User-Agent] contains
+      one of them is not streamed: the cycle waits until each [Await] is
+      filled or [timeout] ends, and sends the settled document in one
+      string, without the fill script and without fallbacks. A crawler
+      that does not run JavaScript thus reads the values. A full page whose
+      [Cache-Control] lets a shared cache keep it ([public] or [s-maxage])
+      is also settled for every request: a shared cache keeps the same
+      document for a bot and for a person, and the page needs no
+      [Vary: User-Agent]. Other pages stream. With [~bots:[]], only those
+      shared-cache pages are settled.
 
       [dev] (default false) is for [yuka dev] only: the cycle answers
       [GET /_yuka/dev] with Server-Sent Events of the state file named by

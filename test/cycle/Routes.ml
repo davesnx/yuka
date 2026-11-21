@@ -71,4 +71,5 @@ let routes =
         ~handler:App.Api.clear;
       Router.redirect ~path:"/old" ~to_:(Permanent "/");
       Router.redirect ~path:"/tmp/:x<string>" ~to_:(Temporary "/team/:x/json");
+      Router.route Slow_public ~path:"/slow-public" ~page:App.Pages.slow ~cache:minute;
     ]

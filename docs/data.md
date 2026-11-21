@@ -434,6 +434,21 @@ let[@client] make ~(related : Model.Issue.t list Yuka.Async.t) () =
 
 `<Yuka.Await>` works on the server page and in an island. An `Async`
 prop of an island streams the same way (see [Islands](islands.md#props)).
+
+A crawler that does not run JavaScript sees only `loading` in a streamed
+page. Thus the server does not stream a full page in two cases. It waits
+until each value is filled (or the `timeout` of `Yuka.Server.config`
+ends) and sends the settled page, without `loading` and without the fill
+script:
+
+- The `User-Agent` of the request contains one of the `bots` of
+  `Yuka.Server.config`, compared without case. The default is
+  `Yuka.Server.bots`: `bot`, `crawl`, `spider`, `slurp`,
+  `facebookexternalhit` and `whatsapp`. Give your own list with
+  `~bots:[ ... ]`; `~bots:[]` turns this off.
+- The `Cache-Control` of the page lets a shared cache keep it (`public` or
+  `s-maxage`). Then a shared cache keeps the same page for a bot and for a
+  person, and the page needs no `Vary: User-Agent`.
 In a server render, `message` is the message of a
 `Yuka.Server.Action.reject`, else `"server error"`, so the HTML never has
 the detail of a failure.
