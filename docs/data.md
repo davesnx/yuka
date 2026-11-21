@@ -397,6 +397,8 @@ let[@client] make ~(related : Model.Issue.t list Yuka.Async.t) () =
 
 `<Yuka.Await>` works on the server page and in an island. An `Async`
 prop of an island streams the same way (see [Islands](islands.md#props)).
+A page whose `Cache-Control` is shared (`public` or `s-maxage`) does not
+stream: the server sends it when every `Await` has settled.
 In a server render, `message` is the message of a
 `Yuka.Server.Action.reject`, else `"server error"`, so the HTML never has
 the detail of a failure.

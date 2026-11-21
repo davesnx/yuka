@@ -301,7 +301,10 @@ its `loading` content when its value comes, and its islands start. An
 island that holds a pending `Await` starts after that `Await` is filled.
 The title, focus, scroll and announcer change when the new page is shown,
 not with each fill. A newer navigation stops the fills of the page it
-replaces.
+replaces. A page whose `Cache-Control` is shared (`public` or `s-maxage`)
+does not stream, on a client navigation or a first load: the server waits
+for every `Await` and sends the settled page, so a `Live.make` in a late
+fill still sends it with `private, no-store`.
 
 After a client navigation to another page, Yuka tells screen readers
 about it and moves the focus, as a full page load does:

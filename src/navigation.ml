@@ -195,7 +195,13 @@ let take key =
 
 let opened () =
   let n = ref 0 in
-  Array.iter (fun e -> if Option.is_none e.answer then incr n) (Web.table_values (cache ()));
+  Array.iter
+    (fun e ->
+      match e.answer with
+      | None -> incr n
+      | Some { stream = Some { result = None; _ }; _ } when e.prefetched -> incr n
+      | Some _ -> ())
+    (Web.table_values (cache ()));
   !n
 
 let allowed () =
@@ -243,7 +249,9 @@ let rec start (trigger : Prefetch.level) key url =
           if e.warm && not waited then warm a
         end)
       (got s)
-      (ended s (fun () -> drop e))
+      (fun complete ->
+        ended s (fun () -> drop e) complete;
+        pump ())
       (fun () ->
         drop e;
         settle None)
@@ -318,6 +326,10 @@ let pass () =
 let following : (Web.node * (unit -> unit)) list ref = ref []
 let owners = ref 0
 
+let unfollow gone =
+  let page = Web.document () in
+  following := without (fun (r, stop) -> (gone r || not (Web.contains page r)) && (stop (); true)) !following
+
 let follow root s =
   incr owners;
   let owner = !owners and live = ref true in
@@ -329,7 +341,7 @@ let follow root s =
     Navigation_web.hold root owner true
   in
   let put (id, html) =
-    Navigation_web.put root id html;
+    Client.stop_within (Navigation_web.put root id html);
     Navigation_web.adopt_stylesheets ()
   in
   List.iter put (List.rev s.parts);
@@ -405,9 +417,7 @@ let show ~dir ~push ~restore url a =
             end
           in
           let root = Option.value target ~default:(Web.document ()) in
-          let page = Web.document () in
-          following :=
-            without (fun (r, stop) -> (Web.contains root r || not (Web.contains page r)) && (stop (); true)) !following;
+          unfollow (Web.contains root);
           Option.iter (follow root) a.stream;
           !Platform.swapped target;
           !start_islands ();
@@ -540,6 +550,7 @@ let on_popstate _ =
     Option.iter
       (fun o ->
         hide ();
+        unfollow (fun _ -> false);
         Navigation_web.set_title o.title;
         Option.iter
           (fun r ->

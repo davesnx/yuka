@@ -54,6 +54,15 @@ let answer_cache headers cache =
   | Some (_, v) -> Some v
   | None -> cache
 
+let shared_cache value =
+  let v = String.lowercase_ascii value in
+  let has part =
+    let n = String.length part in
+    let rec at i = i + n <= String.length v && (String.sub v i n = part || at (i + 1)) in
+    at 0
+  in
+  has "public" || has "s-maxage"
+
 let lasting cache =
   List.exists
     (fun d ->
@@ -295,6 +304,7 @@ let build_id config (App a) =
   | Some assets -> a.build ^ assets.digest
 
 let log config = match config.log with Some f -> f | None -> fun level m -> !Types.default_log level m
+let log_quietly config level m = try log config level m with _ -> ()
 let default_log sink config = match config.log with Some _ -> config | None -> { config with log = Some sink }
 
 let prerender_config config = { config with dev = None; prerendering = true }
@@ -442,6 +452,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let routed body () = Kind.to_node (Element.Context.provide (Route.get ()) route (fun () -> Kind.of_node (body ()))) in
   let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
+  let shared_rule = List.exists (fun (n, v) -> same_name n "cache-control" && shared_cache v) headers in
   match env.navigate with
   | Some sent -> (
       let headers = set_header ("yuka-build", env.build) headers in
@@ -455,7 +466,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
                   let result, resolve, _ = Async.make () in
                   Async.on_settled (Server.streamed_body (wrap shell) rest write) (function
                     | Async.Failed m ->
-                        log env.config `Error m;
+                        log_quietly env.config `Error m;
                         resolve ()
                     | _ -> resolve ());
                   result
@@ -464,7 +475,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
                   merge_headers [ headers; [ ("yuka-stream", "1"); ("content-type", "application/x-ndjson; charset=utf-8") ] ]
                 in
                 { status; headers; body = Stream stream })
-          (Server.navigation ~budget:Server.budget ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
+          (Server.navigation ?budget:(if shared_rule then None else Some Server.budget) ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
              ~context:env.context ~current ~timeout ~sleep:env.sleep build)
       in
       match shared sent layers with
@@ -514,28 +525,28 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
     let close islands =
       (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
     in
-    match Async.status finished with
-    | Async.Failed m -> Async.failed m
-    | Async.Done islands ->
-        early := close islands :: !early;
-        Async.return { status; headers; body = String (written ()) }
-    | Async.Pending ->
-    let stream w =
-      let flushed = w (written ()) in
-      writer := (fun text -> Async.bind flushed (fun () -> w text));
-      let result, resolve, _ = Async.make () in
-      Async.on_settled finished (function
-        | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
-        | Async.Failed m ->
-            log env.config `Error m;
-            Async.on_settled flushed (fun _ -> resolve ())
-        | Async.Pending -> ());
-      result
+    let settled islands =
+      early := close islands :: !early;
+      { status; headers; body = String (written ()) }
     in
-    Async.return { status; headers; body = Stream stream }
+    match Async.status finished with
+    | Async.Pending when not shared_rule ->
+        let stream w =
+          let flushed = w (written ()) in
+          writer := (fun text -> Async.bind flushed (fun () -> w text));
+          let result, resolve, _ = Async.make () in
+          Async.on_settled finished (function
+            | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
+            | Async.Failed m ->
+                log_quietly env.config `Error m;
+                Async.on_settled flushed (fun _ -> resolve ())
+            | Async.Pending -> ());
+          result
+        in
+        Async.return { status; headers; body = Stream stream }
+    | _ -> Async.map settled finished
 
 let internal_error () = plain 500 "Internal Server Error" []
-let log_quietly config level m = try log config level m with _ -> ()
 
 let recover_with config ~last a f =
   let r, resolve, _ = Async.make () in
@@ -700,15 +711,6 @@ let rec strip_prefix prefix parts =
   | _ -> None
 
 let query_suffix = function Some q when q <> "" -> "?" ^ q | _ -> ""
-
-let shared_cache value =
-  let v = String.lowercase_ascii value in
-  let has part =
-    let n = String.length part in
-    let rec at i = i + n <= String.length v && (String.sub v i n = part || at (i + 1)) in
-    at 0
-  in
-  has "public" || has "s-maxage"
 
 let live_checked env fallback ~path (resp : response) =
   if not !(env.live_used) then Async.return resp

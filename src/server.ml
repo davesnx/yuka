@@ -290,7 +290,13 @@ let navigation ?(timeout = 10.) ?budget ?preload ?entry ?current ?id_prefix ?rou
     let flushed = List.fold_left (fun a text -> Async.bind a (fun () -> write text)) (Async.return ()) (List.rev !early) in
     early := [];
     writer := (fun text -> Async.bind flushed (fun () -> write text));
-    Async.bind finished (fun _ -> send (line (`List [])))
+    let ended, resolve, fail = Async.make () in
+    Async.on_settled finished (function
+      | Async.Done _ ->
+          Async.on_result (send (line (`List []))) (function Ok () -> resolve () | Error m -> fail m)
+      | Async.Failed m -> Async.on_settled flushed (fun _ -> fail m)
+      | Async.Pending -> ());
+    ended
   in
   (match budget with
   | Some seconds when not !decided ->

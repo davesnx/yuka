@@ -2277,6 +2277,57 @@ let streamed_superseded_before_apply finish =
           check "a stream whose page is never shown is aborted" "none|true" (attr "#new" "id" ^ "|" ^ bools (call_aborted 0));
           finish ()))
 
+let streamed_fill_stops_island finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  log_clear ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0 (json_line ({|<p id="new">new</p><!--[L0-s1-->|} ^ island_at "L0-i6" 6 ^ "<!--]-->"));
+  tick (fun () ->
+      check "an island in the loading content starts" "g0/6" (log_g ());
+      push_text 0 (part_line "L0-s1" {|<b id="done">done</b>|});
+      push_text 0 "[]\n";
+      push_end 0;
+      tick (fun () ->
+          check "the fill replaces the loading content" "done|0" (attr "#done" "id" ^ "|" ^ ints (count_selector "[data-id=L0-i6]"));
+          log_clear ();
+          State.set probe_runs 1;
+          check "the island that the fill removed is stopped" "g1/1" (log_g ());
+          finish ()))
+
+let streamed_prefetch_slot finish =
+  visible_page (numbered 6);
+  resolve_stream 0 [||];
+  push_text 0 (json_line (doc "P0" (page {|<!--[s1--><i>wait</i><!--]-->|})));
+  tick (fun () ->
+      check "a prefetch keeps its place while its answer streams" "4" (ints (calls ()));
+      push_text 0 (part_line "s1" "<b>done</b>");
+      push_text 0 "[]\n";
+      push_end 0;
+      tick (fun () ->
+          check "the end of its stream starts the newest waiting link" "http://localhost/p5" (urls 4);
+          finish ()))
+
+let streamed_overlay_back finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-layer", "overlay") |];
+  push_text 0 (json_line ({|<p id="ov">ov</p>|} ^ held_island "overlay-i4" 4 "s1"));
+  tick (fun () ->
+      check "the overlay streams" "1|false" (ints (count_selector "yuka-overlay #ov") ^ "|" ^ bools (call_aborted 0));
+      back (fun () ->
+          check "Back removes the overlay" "0" (ints (count_selector "yuka-overlay"));
+          check "Back stops the stream of the overlay" "true" (bools (call_aborted 0));
+          finish ()))
+
 let action_after_navigation_started finish =
   setup links;
   plain_start ();
@@ -3533,6 +3584,9 @@ let all =
     ("a streamed answer into an inner outlet stops when the outer outlet is replaced", streamed_inner_replaced);
     ("the end of a body stream leaves the islands of a newer outlet stream held", streamed_outlet_under_body_stream);
     ("a streamed answer that a newer navigation replaces before its transition runs is aborted", streamed_superseded_before_apply);
+    ("a fill stops the islands of the loading content it replaces", streamed_fill_stops_island);
+    ("a streamed prefetch keeps its place until its stream ends", streamed_prefetch_slot);
+    ("Back from a streamed overlay stops its stream", streamed_overlay_back);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);
     ("other outlet keys miss", keys_miss);

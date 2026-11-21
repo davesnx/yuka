@@ -20,7 +20,7 @@ val fetch_page :
   (bool -> unit) ->
   (unit -> unit) ->
   unit
-val put : node -> string -> string -> unit
+val put : node -> string -> string -> node
 val hold : node -> int -> bool -> unit
 val hash_of : string -> string
 val no_hash : string -> string

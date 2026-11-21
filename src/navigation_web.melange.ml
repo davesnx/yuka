@@ -97,20 +97,21 @@ let fetch_page :
     .then(null, broke);
 }|}]
 
-let put : node -> string -> string -> unit =
+let put : node -> string -> string -> node =
   [%mel.raw
     {|function (root, id, html) {
-  const d = document, t = d.createElement("template");
+  const d = document, t = d.createElement("template"), g = d.createDocumentFragment();
   root = root.body || root;
   t.innerHTML = html;
-  if (!id) { root.appendChild(t.content); return; }
+  if (!id) { root.appendChild(t.content); return g; }
   const w = d.createTreeWalker(root, 128);
   let c, n, k = 1;
   while ((c = w.nextNode()) && c.data !== "[" + id);
-  if (!c) return;
-  while ((n = c.nextSibling) && !(n.nodeType === 8 && (n.data[0] === "[" ? !++k : n.data === "]" && !--k))) n.remove();
+  if (!c) return g;
+  while ((n = c.nextSibling) && !(n.nodeType === 8 && (n.data[0] === "[" ? !++k : n.data === "]" && !--k))) g.appendChild(n);
   c.parentNode.insertBefore(t.content, n);
   c.data = "[";
+  return g;
 }|}]
 
 let hold : node -> int -> bool -> unit =

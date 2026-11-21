@@ -65,14 +65,15 @@ page.on("console", (m) => {
 });
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 const streamed = new Set<unknown>();
-const streamEnds: { url: string; how: string }[] = [];
-const streamFailures: { url: string; line: string; at: string }[] = [];
-await page.exposeBinding("__streamEnded", (_source, url: string, how: string) => {
-  streamEnds.push({ url, how });
+const streamEnds: { id: string; how: string }[] = [];
+const streamFailures: { id: string; line: string; at: string }[] = [];
+await page.exposeBinding("__streamEnded", (_source, id: string, how: string) => {
+  streamEnds.push({ id, how });
 });
 page.on("requestfailed", (r) => {
   const line = `${r.method()} ${r.url()} ${r.failure()?.errorText}`;
-  if (streamed.has(r) && r.failure()?.errorText === "net::ERR_ABORTED") streamFailures.push({ url: r.url(), line, at: page.url() });
+  if (streamed.has(r) && r.failure()?.errorText === "net::ERR_ABORTED")
+    streamFailures.push({ id: r.headers()["x-e2e-request"] ?? "", line, at: page.url() });
   else failedRequests.push(line);
 });
 const responses: Response[] = [];
@@ -131,12 +132,14 @@ await page.addInitScript(installProbes);
 await page.addInitScript(() => {
   const w = window as any;
   const f = w.fetch;
+  let count = 0;
   w.fetch = function (input: any, init: any) {
-    const url = new URL(String(input), location.href).href;
+    const id = `${performance.timeOrigin}-${++count}`;
+    if (init && init.headers && "Yuka-Navigate" in init.headers) init = { ...init, headers: { ...init.headers, "X-E2E-Request": id } };
     let streamed = false, ended = false;
     if (init && init.signal)
       init.signal.addEventListener("abort", () => {
-        if (streamed && !ended) w.__streamEnded(url, "aborted by the page");
+        if (streamed && !ended) w.__streamEnded(id, "aborted by the page");
       });
     return f.call(this, input, init).then((r: any) => {
       if (r.headers.get("yuka-stream") !== "1" || !r.body) return r;
@@ -151,7 +154,7 @@ await page.addInitScript(() => {
           },
           flush() {
             ended = true;
-            if (text.endsWith("\n[]\n")) w.__streamEnded(url, "complete");
+            if (text.endsWith("\n[]\n")) w.__streamEnded(id, "complete");
           },
         }),
       );
@@ -2639,7 +2642,7 @@ const lateConsole = consoleErrors.filter((e) => !/status of (500|404)/.test(e));
 check("11 no unexpected console errors in whole run", lateConsole.length === 0, lateConsole.join(" | "));
 check("11b no hydration mismatch in whole run", mismatches.length === 0, mismatches.join(" | "));
 for (const f of streamFailures) {
-  const i = streamEnds.findIndex((e) => e.url === f.url);
+  const i = streamEnds.findIndex((e) => e.id === f.id);
   if (i >= 0) streamEnds.splice(i, 1);
   else failedRequests.push(`${f.line} (stream neither complete nor aborted by the page, page ${f.at})`);
 }
