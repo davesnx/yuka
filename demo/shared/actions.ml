@@ -28,9 +28,15 @@ module Workspace_field = struct
   let to_string = Workspace.slug
 end
 
+let title_check title =
+  let title = String.trim title in
+  if title = "" then Error "Title is required"
+  else if String.length title > 80 then Error "Title is too long (at most 80 characters)"
+  else Ok ()
+
 type new_issue = {
   workspace : Workspace_field.t;
-  title : string;
+  title : string; [@check title_check]
   description : string;
   status : Status_field.t;
   priority : Priority_field.t;

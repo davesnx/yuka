@@ -1297,6 +1297,21 @@ let forms =
         check_true "error" (contains r.body "count error: Not a whole number");
         check_true "the jot forms are empty" (contains r.body {|name="body" value=""|});
         check_true "no JavaScript" (not (contains r.body "<script type=\"module\"" || contains r.body "__yukaFill")) );
+    ( "a field check is 422 with its message, and no call",
+      fun () ->
+        let r = post "_yuka_action=sign_up&email=nope&name=n" in
+        check_status r 422;
+        Alcotest.(check (list string)) "not called" [] !App.saved;
+        check_true "error" (contains r.body "email error: Email is not valid");
+        check_true "value kept" (contains r.body {|name="email" value="nope"|});
+        let r = post "_yuka_action=sign_up&email=a%40b&name=n" in
+        check_status r 303;
+        Alcotest.(check (list string)) "called" [ "sign up a@b" ] !App.saved;
+        App.saved := [];
+        let r = get ~meth:`POST ~headers:json_headers ~body:{|[["email","nope"],["name","n"]]|} "/_yuka/action/sign_up" in
+        check_status r 200;
+        Alcotest.(check string) "the action RPC answers the field error" {|{"ok":{"errors":[["email","Email is not valid"]]}}|} r.body;
+        Alcotest.(check (list string)) "not called over RPC" [] !App.saved );
     ( "Error and reject show their messages",
       fun () ->
         let r = post "_yuka_action=save_entry&title=taken&count=1&level=low" in

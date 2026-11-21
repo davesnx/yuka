@@ -21,6 +21,15 @@ let rec kind (t : core_type) =
       fail ~loc
         "a form field must be string, int, float, bool, an option or list of those, or Email.t with Email.of_string and Email.to_string"
 
+let check_attr =
+  Attribute.declare "yuka.check" Attribute.Context.label_declaration Ast_pattern.(single_expr_payload __) Fun.id
+
+let checked (l : label_declaration) =
+  let loc = l.pld_loc in
+  match Attribute.get check_attr l with
+  | Some f -> [%expr Yuka.Form.check [%e kind l.pld_type] [%e f]]
+  | None -> kind l.pld_type
+
 let labels (td : type_declaration) =
   (match td.ptype_params with
   | [] -> ()
@@ -71,7 +80,7 @@ let str_items (td : type_declaration) =
       (fun (i, l) body ->
         [%expr
           let [%p pvar ~loc (var i)] =
-            Yuka.runtime_form_field _yuka_d [%e ctor ~loc l] [%e estring ~loc l.pld_name.txt] [%e kind l.pld_type]
+            Yuka.runtime_form_field _yuka_d [%e ctor ~loc l] [%e estring ~loc l.pld_name.txt] [%e checked l]
           in
           [%e body]])
       (List.mapi (fun i l -> (i, l)) ls)

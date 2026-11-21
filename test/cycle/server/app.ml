@@ -120,6 +120,14 @@ module Pages = struct
                     Yuka.Form.form_errors_view form (fun m -> el "p" [ text ("form error: " ^ m) ]);
                   ])
               ();
+            Yuka.Form.make ~action:sign_up
+              ~children:(fun form ->
+                el "div"
+                  [
+                    el "input" ~attrs:[ ("name", "email"); ("value", Yuka.Form.value form `Email) ] [];
+                    Yuka.Form.field_error_view form `Email (fun ~id:_ m -> el "p" [ text ("email error: " ^ m) ]);
+                  ])
+              ();
             jot_form "one";
             jot_form "two";
           ])
@@ -396,6 +404,9 @@ let () =
       | "nope" -> Server.Action.reject "Refused"
       | "boom" -> failwith "secret boom"
       | t -> Async.return (Ok t));
+  Server.Form.implement sign_up (fun _ s ->
+      saved := ("sign up " ^ s.email) :: !saved;
+      Async.return (Ok s.email));
   Server.Form.implement jot (fun _ n ->
       saved := ("jot " ^ n.body) :: !saved;
       if n.body = "x" then Async.return (Error [ (Some `Body, "Too short") ])

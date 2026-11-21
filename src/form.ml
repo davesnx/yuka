@@ -5,13 +5,6 @@ type ('i, 'o, 'f) action = ('i, ('o, 'f errors) result, [ `Form ]) Action.t
 
 let pairs_json values : Json.t = `List (List.map (fun (k, v) -> `List [ `String k; `String v ]) values)
 
-let all f items =
-  List.fold_right (fun x acc -> match (f x, acc) with Some y, Some ys -> Some (y :: ys) | _ -> None) items (Some [])
-
-let pairs_of_json = function
-  | `List items -> all (function `List [ `String k; `String v ] -> Some (k, v) | _ -> None) items
-  | _ -> None
-
 let names_json errors : Json.t =
   `List
     (List.map
@@ -183,11 +176,13 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     }
   in
   let first = ref true in
+  let blurred = ref false in
   let gone = ref false in
   Base.own (fun () -> gone := true);
   let rec submit ev =
     Web.prevent_default ev;
     Web.remove_attribute (Web.target ev) "data-yuka-sent";
+    blurred := false;
     match decode t (Array.to_list (Web.form_values ev)) with
     | Error e -> State.set form.failed e
     | Ok input -> (
@@ -202,6 +197,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
         | None -> call input)
   and finish result redirect =
     if not !gone then begin
+      blurred := false;
       State.set form.busy false;
       match result with
       | Ok (Ok o) -> ( match on_ok with Some f -> f o | None -> follow redirect)
@@ -227,17 +223,41 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     | Some location -> Browser.navigate location
     | None -> Browser.navigate (Web.current_url ())
   in
+  let to_button ev =
+    match Web.related_target ev with
+    | Some el -> (
+        match (Web.local_name el, Web.get_attribute el "type") with
+        | "button", _ | "input", Some ("submit" | "button" | "reset" | "image") -> true
+        | _ -> false)
+    | None -> false
+  in
+  let blur ev =
+    match Option.bind (Web.get_attribute (Web.target ev) "name") (of_name t) with
+    | Some _ when to_button ev -> ()
+    | None -> ()
+    | Some f ->
+        let own (g, _) = match g with Some g -> g == f | None -> false in
+        let mine =
+          match decode t (Array.to_list (Web.form_values ev)) with Ok _ -> [] | Error e -> List.filter own e
+        in
+        blurred := true;
+        State.update form.failed (fun current ->
+            match (mine, List.exists own current) with
+            | [], false -> current
+            | _ -> List.filter (fun e -> not (own e)) current @ mine)
+  in
   Base.Effect.after (fun () ->
       let failed = State.get form.failed in
       let names = List.filter_map (function Some f, _ -> Some (name t f) | None, _ -> None) failed in
       let whole = List.exists (fun (g, _) -> Option.is_none g) failed in
-      let focus = not !first in
+      let again = not !first in
+      let focus = again && not !blurred in
       if !first && Dev.on && List.length (forms_of (Action.name action) key) > 1 then
         Web.console_error
           ("yuka: two forms on this page have the action " ^ Action.name action ^ " and the key \"" ^ key
          ^ "\": give each a different key");
       first := false;
-      if (match names with [] -> focus | _ -> true) then
+      if (match names with [] -> again | _ -> true) then
         List.iter
           (mark ~action:(Action.name action) ~key ~focus ~whole names)
           (List.filter
@@ -255,6 +275,6 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
   Element.element "form"
     ([ Static ("method", "post"); Static ("data-yuka-action", Action.name action); Static ("data-yuka-key", key) ]
     @ sent_attr
-    @ [ Handler ("submit", submit) ])
+    @ [ Handler ("submit", submit); Handler ("focusout", blur) ])
     ((hidden "_yuka_action" (Action.name action) :: (if key = "" then [] else [ hidden "_yuka_key" key ]))
     @ [ children form ])

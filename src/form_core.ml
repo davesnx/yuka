@@ -43,6 +43,15 @@ let custom of_string to_string =
     write = (fun v -> [ to_string v ]);
   }
 
+let check k f = { k with read = (fun vs -> Result.bind (k.read vs) (fun v -> Result.map (fun () -> v) (f v))) }
+
+let all f items =
+  List.fold_right (fun x acc -> match (f x, acc) with Some y, Some ys -> Some (y :: ys) | _ -> None) items (Some [])
+
+let pairs_of_json : Json.t -> _ = function
+  | `List items -> all (function `List [ `String k; `String v ] -> Some (k, v) | _ -> None) items
+  | _ -> None
+
 type 'f decoding = { values : (string * string) list; mutable failed : 'f errors }
 
 let field d f name k =

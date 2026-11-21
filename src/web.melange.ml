@@ -33,6 +33,7 @@ external get_prop : node -> string -> 'a option = "" [@@mel.get_index] [@@mel.re
 external add_listener : node -> string -> (event -> unit) -> unit = "addEventListener" [@@mel.send]
 external remove_listener : node -> string -> (event -> unit) -> unit = "removeEventListener" [@@mel.send]
 external target : event -> node = "target" [@@mel.get]
+external related_target : event -> node option = "relatedTarget" [@@mel.get] [@@mel.return nullable]
 external value : node -> string = "value" [@@mel.get]
 external checked : node -> bool = "checked" [@@mel.get]
 external key : event -> string = "key" [@@mel.get]
@@ -149,7 +150,7 @@ let has_intersection_observer : node -> bool =
 let form_values : event -> (string * string) array =
   [%mel.raw
     {|function (ev) {
-  const el = ev.target, out = [];
+  const t = ev.target, el = t.localName === "form" ? t : t.form || t.closest("form"), out = [];
   new el.ownerDocument.defaultView.FormData(el).forEach(function (v, k) { if (typeof v === "string") out.push([k, v]); });
   const s = ev.submitter;
   if (s && s.name) out.push([s.name, s.value]);

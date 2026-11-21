@@ -1188,10 +1188,25 @@ await step("6. new issue dialog", async () => {
   check("6c0e duplicate title shows the existing id", (await errText()) === "An issue with this title already exists: YUK-25", await errText());
   check("6c0f typed errors cause no console error", consoleErrors.length === 0, consoleErrors.join(" | "));
   check("6c0g typed errors do not navigate", page.url() === listUrl, `${listUrl} -> ${page.url()}`);
+  const actionCalls: string[] = [];
+  const onRequest = (r: { url(): string }) => { if (r.url().includes("/_yuka/action/")) actionCalls.push(r.url()); };
+  page.on("request", onRequest);
+  await page.fill(".dialog-title", "x".repeat(81));
+  await page.locator(".dialog-description").focus();
+  await page.waitForFunction(() => /too long/.test(document.querySelector(".dialog .error")?.textContent ?? "")).catch(() => {});
+  const blurred = {
+    error: await errText(),
+    marks: await fieldMarks(page, ".dialog"),
+    descriptionFocused: await page.evaluate(() => document.activeElement?.getAttribute("name") === "description"),
+  };
+  page.off("request", onRequest);
+  check("6c0k a field check shows on blur, with no request, and the focus stays",
+    blurred.error === "Title is too long (at most 80 characters)" && blurred.marks.invalid === "true" && blurred.descriptionFocused && actionCalls.length === 0,
+    JSON.stringify({ blurred, actionCalls }));
   const headerBefore = Number((await page.locator(".page-header .group-count").first().textContent()) ?? "NaN");
   const title = `E2E issue ${run}`;
   await page.fill(".dialog-title", title);
-  await page.fill(".dialog-description", "Created by the browser check.");
+  await page.evaluate(() => { (document.querySelector(".dialog-description") as HTMLTextAreaElement).value = "Created by the browser check."; });
   const before = await page.locator(".row").count();
   await page.evaluate(() => ((window as any).__created = "alive"));
   const markedBefore = await fieldMarks(page, ".dialog");
@@ -1264,6 +1279,11 @@ await step("6f. new issue form with JavaScript off", async () => {
     noJsMarks.invalid === "true" && noJsMarks.describedBy === "Title is required" && noJsMarks.focused, JSON.stringify(noJsMarks));
   check("6f.3c the description has no error and no mark",
     noJsMarks.descriptionInvalid === null && noJsMarks.descriptionDescribedBy === null, JSON.stringify(noJsMarks));
+  await pg.fill('input[name="title"]', "x".repeat(81));
+  await pg.locator('button[type="submit"]').click();
+  await pg.waitForLoadState("load");
+  check("6f.3d too long title: 422 with the message of the field check",
+    statuses.filter((s) => s === 422).length === 2 && (await pg.locator(".error").first().textContent()) === "Title is too long (at most 80 characters)", JSON.stringify(statuses));
   const title = `No-JS issue ${run}`;
   await pg.fill('input[name="title"]', title);
   await pg.locator('button[type="submit"]').click();

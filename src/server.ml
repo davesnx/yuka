@@ -414,22 +414,22 @@ let send name input k =
             context.log `Error ("action " ^ name ^ " failed: " ^ m);
             Error Status.Server))
 
-let register action f encode =
+let register action ~decode f encode =
   let name = Action.name action in
   if Option.is_some (find_action name) then
     invalid_arg ("Yuka.Server.Action.implement: already implemented: " ^ name);
-  let input = Action.input action in
   registry :=
     ( name,
       fun context json ->
-        match Codec.decode input json with
-        | Error m -> Async.return (Bad_input m)
+        match decode json with
+        | Error answer -> Async.return answer
         | Ok v ->
             Async.map encode (call f context v) )
     :: !registry;
   Bridge.send := send
 
-let implement action f = register action f (fun o -> Output (Codec.encode (Action.output action) o))
+let decode_input action json = Result.map_error (fun m -> Bad_input m) (Codec.decode (Action.input action) json)
+let implement action f = register action ~decode:(decode_input action) f (fun o -> Output (Codec.encode (Action.output action) o))
 
 type form_outcome = Saved of string option | Unprocessable of (string option * string) list
 
@@ -446,7 +446,13 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ 
     | Ok o, Some r -> Redirect (Codec.encode output result, r o)
     | _ -> Output (Codec.encode output result)
   in
-  register action f encode;
+  let decode json =
+    match Option.map (Form_core.decode t) (Form_core.pairs_of_json json) with
+    | Some (Ok input) -> Ok input
+    | Some (Error e) -> Error (encode (Error e))
+    | None -> decode_input action json
+  in
+  register action ~decode f encode;
   let run context values =
     match Form_core.decode t values with
     | Error e -> Async.return (Unprocessable (Form_core.named t e))

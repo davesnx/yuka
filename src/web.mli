@@ -37,6 +37,7 @@ val get_prop : node -> string -> 'a option
 val add_listener : node -> string -> (event -> unit) -> unit
 val remove_listener : node -> string -> (event -> unit) -> unit
 val target : event -> node
+val related_target : event -> node option
 val value : node -> string
 val checked : node -> bool
 val key : event -> string

@@ -200,13 +200,42 @@ function of the form:
 - `Yuka.Form.value form field` is the value that the user sent, after a
   failed post (422); else `""`.
 - In an island, a submit decodes the fields in the browser first (an
-  error shows at once, with no request), then calls the action.
+  error shows at once, with no request), then calls the action. When a
+  field loses the focus, the browser decodes it and shows its errors.
   `Yuka.Form.pending form` is a read-only State, true while it waits; `disabled` above
   updates with it. On
   `Ok output`, `on_ok output` runs, or else the page follows the redirect
   of the server with a client navigation.
 - Two forms of one action on a page need different `key`s:
   `<Yuka.Form action key="top">`.
+
+### Field checks
+
+`[@check f]` on a field adds a check to the field. `f` gets the read
+value and gives `Ok ()` or `Error message`. The check runs each time the
+form decodes: in the browser, when the field loses the focus and at
+submit, and on the server, before the implementation. So the browser and
+the server give the same message:
+
+```ocaml
+(* shared/actions.ml *)
+let email_check email = if String.contains email '@' then Ok () else Error "Email is not valid"
+
+type sign_up = { email : string; [@check email_check] name : string } [@@deriving form]
+```
+
+- In an island, when a field loses the focus, the form reads that field
+  again and shows its errors, with no request. The focus does not move.
+  This also removes an error of the server for that field, if the field
+  now reads with no error. When the focus goes to a button, the form does
+  not check: an error that shows above the button can move it before the
+  click ends. The submit then checks every field.
+- With no JavaScript, a post with a failed check answers 422 with the
+  message, and the implementation does not run.
+- An action call (`/_yuka/action/NAME`) with a failed check answers the
+  field errors, as the implementation does.
+- The check runs only when the field reads: a missing field shows
+  "Missing".
 
 ### Form errors
 

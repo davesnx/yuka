@@ -145,6 +145,23 @@ let button_view () =
     ~children:(fun _ -> element "button" [ attr "type" "submit"; attr "name" "body"; attr "value" "from-button" ] [ text "go" ])
     ()
 
+let signup_view () =
+  Form.make ~action:sign_up
+    ~children:(fun form ->
+      fragment
+        [
+          element "input" [ attr "name" "email"; attr "value" (Form.value form `Email) ] [];
+          element "input" [ attr "name" "name" ] [];
+          element "button" [ attr "type" "submit" ] [ text "Sign up" ];
+          Form.field_error_view form `Email (fun ~id m -> element "b" [ attr "id" id ] [ text m ]);
+        ])
+    ()
+
+let focus_input : string -> unit =
+  [%mel.raw "function (name) { document.querySelector('input[name=' + name + ']').focus() }"]
+
+let focus_button : unit -> unit = [%mel.raw "function () { document.querySelector('button').focus() }"]
+
 let tick = State.make 0
 
 let toggled_view () =
@@ -164,6 +181,7 @@ let entries =
     entry_of "Author" author_view;
     entry_of "Toggled" toggled_view;
     entry_of "Invalid" Forms_shared.Invalid.view;
+    entry_of "Signup" signup_view;
   ]
 
 let island_of name view = runtime_island ~name ~props:`Null view
@@ -207,6 +225,35 @@ let start html =
 
 let async =
   [
+    ( "form: a field check shows on blur, with no request, and keeps the focus",
+      fun finish ->
+        start (Server.to_string (fun () -> island_of "Signup" signup_view));
+        focus_input "email";
+        set_input "email" "nope";
+        focus_input "name";
+        after_ms 10 (fun () ->
+            let shown = text_of "b" in
+            let invalid = attribute "input[name=email]" "aria-invalid" in
+            let focus = focused_name () in
+            focus_input "email";
+            set_input "email" "a@b";
+            focus_input "name";
+            after_ms 10 (fun () ->
+                let fixed = text_of "b" in
+                let fixed_mark = attribute "input[name=email]" "aria-invalid" in
+                focus_input "email";
+                set_input "email" "bad";
+                focus_button ();
+                after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "error on blur" "Email is not valid" shown;
+                    check "marked" "true" invalid;
+                    check "focus stays on the next field" "name" focus;
+                    check "no fetch" "0" (string_of_int (fetches ()));
+                    check "fixed: no error" "none" fixed;
+                    check "fixed: no mark" "none" fixed_mark;
+                    check "to a button: no check, so the button does not move before the click" "none" (text_of "b");
+                    Yuka.stop ())))) );
     ( "form: a decode error shows at once, with no request",
       fun finish ->
         start (Server.to_string island);

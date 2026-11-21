@@ -31,6 +31,12 @@ val list : 'a field_kind -> 'a list field_kind
 val custom : (string -> 'a option) -> ('a -> string) -> 'a field_kind
 (** ["Not valid"] when [of_string] gives [None]. *)
 
+val check : 'a field_kind -> ('a -> (unit, string) result) -> 'a field_kind
+(** [check kind f] reads as [kind], then gives the [Error message] of
+    [f value]. [[@check f]] on a field of a [[@@deriving form]] record
+    adds it: the check runs where the form decodes, in the browser and on
+    the server, so both give the same message. *)
+
 type ('i, 'f) t = ('i, 'f) Form_core.t
 (** The fields of a form: decode, encode and names. *)
 
@@ -45,7 +51,9 @@ val name : ('i, 'f) t -> 'f -> string
 
 val action : name:string -> fields:('i, 'f) t -> output:'o Codec.t -> ('i, 'o, 'f) action
 (** An action whose input is a form: {!Action.call} sends the encoded
-    fields; the answer is [Ok (Ok output)] or [Ok (Error field_errors)]. *)
+    fields; the answer is [Ok (Ok output)] or [Ok (Error field_errors)].
+    Fields that do not decode on the server, as a failed [[@check]], also
+    give [Ok (Error field_errors)]. *)
 
 type ('o, 'f) form
 (** What the children of {!make} get. *)
@@ -116,7 +124,11 @@ val make :
     client navigation, as a post with no JavaScript does. A [redirect] to
     another origin is not followed: it shows as the form error
     ["protocol error: refused a redirect"], and in a development build the
-    browser console shows its URL.
+    browser console shows its URL. In an island, when a field of the form
+    loses the focus, the form decodes it and its errors replace the errors
+    of that field, with no request and with no focus change. When the
+    focus goes to a button, there is no such check: a new error above the
+    button could move it before the click ends.
 
     A screen reader hears the field errors of a failed submit: when a
     submit in the browser ends with field errors, the focus goes to the

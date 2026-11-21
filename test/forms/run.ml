@@ -14,6 +14,17 @@ let round_trip () =
     values;
   Alcotest.(check bool) "decodes back" true (Yuka.Form.decode entry_form values = Ok e)
 
+let checked () =
+  let show values =
+    match Yuka.Form.decode signup_form values with
+    | Ok s -> "ok " ^ s.email
+    | Error e -> String.concat "; " (List.map (fun (f, m) -> Option.fold ~none:"form" ~some:signup_field_name f ^ ": " ^ m) e)
+  in
+  Alcotest.(check (list string))
+    "the check runs after the read"
+    [ "email: Email is not valid"; "ok a@b"; "email: Missing" ]
+    (List.map show [ [ ("email", "nope"); ("name", "n") ]; [ ("email", "a@b"); ("name", "n") ]; [ ("name", "n") ] ])
+
 let names () =
   Alcotest.(check (list string)) "field names" [ "title"; "count"; "level" ]
     (List.map entry_field_name [ `Title; `Count; `Level ]);
@@ -100,6 +111,7 @@ let () =
           Alcotest.test_case "decode" `Quick decode;
           Alcotest.test_case "round trip" `Quick round_trip;
           Alcotest.test_case "names" `Quick names;
+          Alcotest.test_case "a field check" `Quick checked;
         ] );
       ( "errors",
         [
