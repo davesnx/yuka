@@ -1,1 +1,0 @@
-let () = Yuka.render ~islands ()

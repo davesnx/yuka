@@ -1,4 +1,0 @@
-(rule
- (alias all)
- (deps style.css)
- (action (progn)))

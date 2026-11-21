@@ -83,22 +83,6 @@ demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browse
 demo-test: ## Run the demo tests
 	$(DUNE) build @demo/runtest --force
 
-.PHONY: lux-build
-lux-build: ## Build the lux demo (server and client)
-	$(DUNE) build --profile=dev @lux/all
-
-.PHONY: lux-bundle
-lux-bundle: lux-build ## Bundle the lux client with esbuild
-	BUILD_DIR=$(BUILD_DIR) demo/bundle.sh lux
-
-.PHONY: lux-serve
-lux-serve: lux-build ## Serve the lux demo on PORT
-	$(BUILD_DIR)/default/lux/server/lux_server.exe --port $(PORT)
-
-.PHONY: lux-test
-lux-test: ## Run the lux tests
-	$(DUNE) build @lux/runtest --force
-
 .PHONY: e2e
 e2e: ## Browser check of the demo (native ES modules)
 	SWITCH=$(SWITCH) BUILD_DIR=$(BUILD_DIR) e2e/run.sh
