@@ -379,6 +379,29 @@ let async =
                 check "the last dispose aborts" "true" (string_of_bool (aborted 1));
                 dispose_b ();
                 Yuka.stop ())) );
+    ( "remote: a mutation answer with a tag refetches the tagged query once",
+      fun finish ->
+        fresh_calls ();
+        let a, _ = with_owner (fun () -> Remote.make ~tags:(fun i -> [ "t:" ^ i ]) query (fun () -> "s")) in
+        let _ = with_owner (fun () -> Remote.make ~tags:(fun i -> [ "t:" ^ i ]) query (fun () -> "s")) in
+        let plain, _ = with_owner (fun () -> Remote.make query (fun () -> "u")) in
+        respond 0 200 {|{"ok":"S"}|};
+        respond 1 200 {|{"ok":"U"}|};
+        after_ms 10 (fun () ->
+            let called = Action.call mutation "x" in
+            respond 2 200 {|{"ok":"X","tags":["t:s","other"]}|};
+            after_ms 10 (fun () ->
+                let sent = fetches () in
+                let body = if sent > 3 then fetch_body 3 else "none" in
+                if sent > 3 then respond 3 200 {|{"ok":"S2"}|};
+                after_ms 10 (fun () ->
+                    finish (fun () ->
+                        check "mutation" "X" (call_text (Async.status called));
+                        check "one refetch" "4" (string_of_int sent);
+                        check "refetch input" {|"s"|} body;
+                        check "tagged" "ready S2" (show (State.get (Remote.state a)));
+                        check "untagged" "ready U" (show (State.get (Remote.state plain)));
+                        Yuka.stop ())))) );
     ( "remote: refetch after hydration sends a request",
       fun finish ->
         fresh ~shown:"ready A" ~answer:(answer_for "a" {|{"ok":"A"}|}) ();

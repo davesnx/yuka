@@ -62,6 +62,7 @@ module Server = struct
   module Action = struct
     let implement = Server.implement
     let reject = Server.reject
+    let invalidate = Server.invalidate
   end
 
   module Form = struct

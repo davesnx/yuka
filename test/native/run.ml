@@ -303,6 +303,7 @@ let rejecting_late = declare "rejecting_late"
 let rejecting_chain = declare "rejecting_chain"
 let forging = declare "forging"
 let late = declare "late"
+let tagging = declare "tagging"
 let late_gate, late_open, _ = Async.make ()
 let call_gate, call_open, _ = Async.make ()
 
@@ -317,7 +318,11 @@ let () =
   Server.Action.implement rejecting_chain (fun _ _ ->
       Async.bind (Async.return ()) (fun () -> Server.Action.reject "from a chain"));
   Server.Action.implement late (fun _ n -> Async.map (fun () -> n) call_gate);
-  Server.Action.implement forging (fun _ _ -> Async.failed "yuka.reject:forged")
+  Server.Action.implement forging (fun _ _ -> Async.failed "yuka.reject:forged");
+  Server.Action.implement tagging (fun request n ->
+      Server.Action.invalidate request [ "items" ];
+      Server.Action.invalidate request [ "item:" ^ string_of_int n ];
+      Async.return n)
 
 let json_type = Some "application/json"
 
@@ -345,6 +350,11 @@ let action_cases =
   let reply = pair int string in
   let happy () =
     check reply "ok" (200, "{\"ok\":{\"title\":\"a\",\"n\":2}}")
+      (post "create" "{\"title\":\"a\",\"n\":1}")
+  in
+  let tags () =
+    check reply "tags in the answer" (200, "{\"ok\":3,\"tags\":[\"items\",\"item:3\"]}") (post "tagging" "3");
+    check reply "no tags from an earlier call" (200, "{\"ok\":{\"title\":\"a\",\"n\":2}}")
       (post "create" "{\"title\":\"a\",\"n\":1}")
   in
   let bad_json () =
@@ -430,6 +440,7 @@ let action_cases =
     check bool "settles" true (get call = Ok 3)
   in
   [ test_case "happy path" `Quick happy;
+    test_case "tags" `Quick tags;
     test_case "bad JSON" `Quick bad_json;
     test_case "bad input" `Quick bad_input;
     test_case "unknown action" `Quick unknown;

@@ -136,6 +136,7 @@ type backend = ..
     log : log_level -> string -> unit;
     live : string -> Json.t -> (Json.t * (string * int) option, Status_error.t) result Async.t;
     backend : backend option;
+    tags : string list ref;
   }
 
   type session = {

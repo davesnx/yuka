@@ -224,6 +224,69 @@ let shared =
         check_status "second" "ready C" b );
   ]
 
+let changed = Action.mutation ~name:"changed" ~input:(Codec.list Codec.string) ~output:Codec.unit
+
+let () =
+  Server.Action.implement changed (fun request tags ->
+      Server.Action.invalidate request tags;
+      Async.return ())
+
+let item_tags input = [ "items"; "item:" ^ input ]
+
+let settle_last input v =
+  let _, (_, resolve, _) = List.find (fun (i, _) -> String.equal i input) (List.rev !gates) in
+  resolve v
+
+let sent_after n = List.sort String.compare (List.filteri (fun i _ -> i < List.length !calls - n) !calls)
+
+let tags =
+  [
+    ( "a mutation that returns a tag refetches each tagged query once",
+      fun () ->
+        reset ();
+        let a, _ = in_owner (fun () -> Remote.make ~tags:item_tags gated (fun () -> "x")) in
+        let b, _ = in_owner (fun () -> Remote.make ~tags:item_tags gated (fun () -> "x")) in
+        let c, _ = in_owner (fun () -> Remote.make ~tags:item_tags gated (fun () -> "y")) in
+        settle 0 "X";
+        settle 1 "Y";
+        let _ = Action.call changed [ "items" ] in
+        Alcotest.(check (list string)) "one call for each input" [ "x"; "y" ] (sent_after 2);
+        check_status "a refetches" "loading X" a;
+        settle_last "x" "X2";
+        settle_last "y" "Y2";
+        check_status "a" "ready X2" a;
+        check_status "b shares the request" "ready X2" b;
+        check_status "c" "ready Y2" c );
+    ( "queries without the tag do not refetch",
+      fun () ->
+        reset ();
+        let x, _ = in_owner (fun () -> Remote.make ~tags:item_tags gated (fun () -> "x")) in
+        let y, _ = in_owner (fun () -> Remote.make ~tags:item_tags gated (fun () -> "y")) in
+        let plain, _ = in_owner (fun () -> Remote.make gated (fun () -> "z")) in
+        settle 0 "X";
+        settle 1 "Y";
+        settle 2 "Z";
+        let _ = Action.call changed [ "item:y"; "other" ] in
+        Alcotest.(check (list string)) "only y" [ "y" ] (sent_after 3);
+        check_status "x keeps its data" "ready X" x;
+        check_status "y refetches" "loading Y" y;
+        check_status "plain keeps its data" "ready Z" plain;
+        let _ = Action.call changed [] in
+        Alcotest.(check int) "no tag, no call" 4 (List.length !calls) );
+    ( "a disposed or disabled use does not refetch",
+      fun () ->
+        reset ();
+        let on = State.make true in
+        let _, dispose = in_owner (fun () -> Remote.make ~tags:item_tags gated (fun () -> "x")) in
+        let _ = in_owner (fun () -> Remote.make ~tags:item_tags ~enabled:(fun () -> State.get on) gated (fun () -> "y")) in
+        settle 0 "X";
+        settle 1 "Y";
+        dispose ();
+        State.set on false;
+        let _ = Action.call changed [ "items" ] in
+        Alcotest.(check int) "no call" 2 (List.length !calls) );
+  ]
+
 let island q input =
   runtime_island ~name:"Query" ~props:`Null (fun () ->
       let r = Remote.make q (fun () -> input) in
@@ -465,6 +528,7 @@ let () =
     [
       ("transport", cases transport);
       ("shared", cases shared);
+      ("tags", cases tags);
       ("answers", cases answers);
       ("fill and rollback", cases fill_and_rollback);
       ("optimistic", cases optimistic);

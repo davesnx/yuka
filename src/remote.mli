@@ -14,7 +14,12 @@ val default_retry : retry
 val no_retry : retry
 
 val make :
-  ?retry:retry -> ?enabled:(unit -> bool) -> ('i, 'o, [ `Query ]) Action.t -> (unit -> 'i) -> 'o t
+  ?retry:retry ->
+  ?enabled:(unit -> bool) ->
+  ?tags:('i -> string list) ->
+  ('i, 'o, [ `Query ]) Action.t ->
+  (unit -> 'i) ->
+  'o t
 (** Runs the query for the input that the function returns, and again
     when a State that the function or [enabled] reads changes. Call it in
     a component body: when its owner is disposed, the request in flight
@@ -29,6 +34,10 @@ val make :
       aborted only when every use that waits for it stops waiting. A use
       made after the answer sends a new request.
     - [enabled ()] false gives [Idle] and aborts the request.
+    - [tags input] gives the tags of the data for this input. When an
+      action answer names one of these tags ([Yuka.Server.Action.invalidate]),
+      the query is sent again: one request for each key, for all uses
+      that have the tag. Uses without the tag do not send again.
     - [Network] and [Server] errors are tried again by [retry] (default
       {!default_retry}); the others fail at once.
     - In a server render it runs the implementation once. If it settles

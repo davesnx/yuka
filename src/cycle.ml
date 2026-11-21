@@ -962,6 +962,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
           live_used := true;
           Live_server.ssr_state ~sleep node context name key);
       backend = Some r.backend;
+      tags = ref [];
     }
   in
   let env =

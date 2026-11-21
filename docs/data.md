@@ -294,6 +294,38 @@ Yuka.Server.Action.implement User_popup.stats (fun _request { workspace; user } 
 - `Yuka.Remote.optimistic` shows a change at once and removes it when
   the action fails.
 
+### Tags
+
+A tag is a name for a part of the data, for example `"issues"` or
+`"issue:42"`. A query use gives the tags of its input with `?tags`. An
+action gives the tags of the data that it changed with
+`Yuka.Server.Action.invalidate`. Then each use that has one of these tags
+sends its query again:
+
+```ocaml
+(* shared *)
+let issue_tags id = [ "issues"; "issue:" ^ id ]
+let remote = Yuka.Remote.make ~tags:issue_tags Issue.get (fun () -> id)
+
+(* server *)
+Yuka.Server.Action.implement Issue.rename (fun request { id; title } ->
+    Store.rename id title;
+    Yuka.Server.Action.invalidate request [ "issue:" ^ id ];
+    Yuka.Async.return ())
+```
+
+- The answer of the action holds the tags:
+  `{"ok": output, "tags": ["issue:42"]}`. The server decides them, so
+  the island that calls the action does not need to know which queries
+  show the data.
+- Each tagged query is sent again one time for each input: uses with the
+  same input share one request. Uses that do not have one of the tags,
+  disposed uses and uses with `enabled` false do not send again.
+- A failed action sends no tags.
+- Tags work only for `Yuka.Remote.make` uses in islands (and in tests,
+  for `Yuka.Action.call` on the server). A server-rendered page does not
+  change.
+
 ## Show a status
 
 `Yuka.Remote.state` and `Yuka.Live.state` give a read-only State of a

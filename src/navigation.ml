@@ -517,7 +517,7 @@ let boot (transitions, islands) =
      | `Trajectory | `Visible | `Idle -> Navigation_web.trajectory (Web.link_href true) predict
      | `Off | `Hover -> ignore);
   (Platform.acted :=
-     fun () ->
+     fun _ ->
        clear ();
        watch ());
   clear ();

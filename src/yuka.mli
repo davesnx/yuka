@@ -1398,6 +1398,15 @@ module Server : sig
         request; outside a request it gets a request with no header and no
         session. *)
 
+    val invalidate : request -> string list -> unit
+    (** [invalidate request tags], in an implementation, names the tags of
+        the data that the action changed. The answer sends them
+        ([{"ok": output, "tags": tags}]), and each {!Remote.make} use with
+        one of these tags sends its query again. [Action.call] on the server
+        gives them to the {!Remote} uses of the process. Call it before the
+        [Async] of the implementation is done; a later call, a call outside
+        an implementation, and tags of a failed action are ignored. *)
+
     val reject : string -> 'a Async.t
     (** A failed [Async] that refuses the input: the action call answers
         400 [{"error": message}], [Action.call] on the server gives

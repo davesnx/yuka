@@ -362,6 +362,7 @@ let empty_context () : Types.context =
     log = (fun level m -> !Types.default_log level m);
     live = (fun name key -> !Bridge.live_state name key);
     backend = None;
+    tags = ref [];
   }
 
 let current_context () =
@@ -373,7 +374,11 @@ type answer = Output of Json.t | Redirect of Json.t * string | Bad_input of stri
 
 let with_redirect j location = match j with `Assoc fields -> `Assoc (fields @ [ ("redirect", `String location) ]) | j -> j
 
-let registry : (string * (Types.context -> Json.t -> answer Async.t)) list ref = ref []
+let registry : (string * (Types.context -> Json.t -> (answer * string list) Async.t)) list ref = ref []
+
+let invalidate (context : Types.context) tags = context.tags := !(context.tags) @ tags
+let tags_field = function [] -> [] | tags -> [ ("tags", `List (List.map (fun t -> `String t) tags)) ]
+let tagged = function [] -> () | tags -> !Platform.acted (tags_field tags)
 
 let find_action name =
   Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
@@ -391,9 +396,13 @@ let run context name input k =
       Async.on_settled (handler context input) (fun st ->
           if !live then
             match st with
-            | Async.Done (Output j) -> k (Ok j)
-            | Async.Done (Redirect (j, location)) -> k (Ok (with_redirect j location))
-            | Async.Done (Bad_input m) -> k (Error (Bad m))
+            | Async.Done (Output j, tags) ->
+                tagged tags;
+                k (Ok j)
+            | Async.Done (Redirect (j, location), tags) ->
+                tagged tags;
+                k (Ok (with_redirect j location))
+            | Async.Done (Bad_input m, _) -> k (Error (Bad m))
             | Async.Failed m -> (
                 match rejection m with
                 | Some message -> k (Error (Refused message))
@@ -423,9 +432,10 @@ let register action f encode =
     ( name,
       fun context json ->
         match Codec.decode input json with
-        | Error m -> Async.return (Bad_input m)
+        | Error m -> Async.return (Bad_input m, [])
         | Ok v ->
-            Async.map encode (call f context v) )
+            let tags = ref [] in
+            Async.map (fun o -> (encode o, !tags)) (call f { context with tags } v) )
     :: !registry;
   Bridge.send := send
 
@@ -578,11 +588,12 @@ let answer_action ?origins ~(context : Types.context) ~live ~name handler body =
   | Ok json ->
       let result, resolve, _ = Async.make () in
       Async.on_settled (call handler context json) (function
-        | Async.Done (Bad_input m) -> resolve (action_error 400 ("invalid input: " ^ m))
-        | Async.Done (Output j) -> resolve (200, Json.to_string (`Assoc (("ok", j) :: live ())))
-        | Async.Done (Redirect (j, location)) ->
+        | Async.Done (Bad_input m, _) -> resolve (action_error 400 ("invalid input: " ^ m))
+        | Async.Done (Output j, tags) -> resolve (200, Json.to_string (`Assoc ((("ok", j) :: tags_field tags) @ live ())))
+        | Async.Done (Redirect (j, location), tags) ->
             if local_location ?origins ~host location then
-              resolve (200, Json.to_string (`Assoc (("ok", with_redirect j location) :: live ())))
+              resolve
+                (200, Json.to_string (`Assoc ((("ok", with_redirect j location) :: tags_field tags) @ live ())))
             else begin
               context.log `Error ("form " ^ name ^ " redirect to " ^ String.escaped location ^ " is not a path on this site");
               resolve (action_error 500 "action failed")

@@ -84,6 +84,28 @@ let uses () =
 
 let listed name = Option.value (Web.table_get (uses ()) name) ~default:[]
 
+type tagged = { use : int; hit : Json.t list -> bool; again : unit -> unit }
+
+let tagged_uses : tagged list ref = ref []
+
+let on_answer fields =
+  match List.assoc_opt "tags" fields with
+  | Some (`List tags) -> List.iter (fun u -> u.again ()) (List.filter (fun u -> u.hit tags) !tagged_uses)
+  | _ -> ()
+
+let chained = ref ignore
+
+let listen () =
+  if !Platform.acted != !chained then begin
+    let before = !Platform.acted in
+    let f fields =
+      before fields;
+      on_answer fields
+    in
+    chained := f;
+    Platform.acted := f
+  end
+
 let decode (q : (_, _, _) Action.t) last = function
   | Ok j -> (
       match Codec.decode (Action.output q) j with
@@ -103,7 +125,7 @@ let on_server ~enabled (q : (_, _, _) Action.t) args base =
         Answers.record (Answers.key (Action.name q) input) (Some r) settled
     | _ -> Answers.record (Answers.key (Action.name q) input) None settled
 
-let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
+let make ?(retry = default_retry) ?(enabled = fun () -> true) ?tags (q : ('i, 'o, [ `Query ]) Action.t)
     (args : unit -> 'i) : 'o t =
   let base, changes, state = Optimistic.make () in
   if !(Base.server_rendering ()) then begin
@@ -112,7 +134,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
   end
   else begin
     let send = send () in
-    let generation = ref 0 and stop = ref ignore and current = ref None and first = ref true in
+    let generation = ref 0 and stop = ref ignore and current = ref None and first = ref true and named = ref [] in
     let cancel () =
       incr generation;
       !stop ();
@@ -180,12 +202,14 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
     in
     Base.run_effect Scheduler.queue (fun () ->
         if enabled () then begin
-          let input = Codec.encode (Action.input q) (args ()) in
+          let i = args () in
+          let input = Codec.encode (Action.input q) i in
           let key = Answers.key (Action.name q) input in
           match !current with
           | Some (k, _) when String.equal k key -> ()
           | _ ->
               current := Some (key, input);
+              Option.iter (fun f -> named := f i) tags;
               let read = !first && Web.in_browser in
               first := false;
               start input ~read
@@ -199,8 +223,22 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
     incr next_use;
     let id = !next_use in
     Web.table_set (uses ()) (Action.name q) ((id, restart) :: listed (Action.name q));
+    if Option.is_some tags then begin
+      listen ();
+      let hit changed =
+        match !current with
+        | Some (key, _)
+          when List.exists (fun t -> List.exists (function `String c -> String.equal c t | _ -> false) changed) !named
+          ->
+            Web.table_delete (flights ()) key;
+            true
+        | _ -> false
+      in
+      tagged_uses := { use = id; hit; again = restart } :: !tagged_uses
+    end;
     Base.own (fun () ->
         cancel ();
+        tagged_uses := List.filter (fun u -> u.use <> id) !tagged_uses;
         Web.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
     { state; base; changes; refetch }
   end

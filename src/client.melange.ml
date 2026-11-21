@@ -793,7 +793,7 @@ let transport name input k =
       let answer = Bridge.of_response status fields in
       (match (answer, fields) with
       | Ok _, Some fields ->
-          !Platform.acted ();
+          !Platform.acted fields;
           !Platform.live_mark fields
       | _ -> ());
       k answer)
