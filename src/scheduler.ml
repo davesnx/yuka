@@ -201,6 +201,30 @@ let set_level n =
   in
   n.level <- 1 + go 0 n.head
 
+let where (n : node) =
+  let rec owners acc = function
+    | Some o -> owners (match Dev.name_of o with Some s -> s :: acc | None -> acc) o.parent
+    | None -> acc
+  in
+  let rec join = function [] -> "" | [ s ] -> s | s :: r -> s ^ " > " ^ join r in
+  match owners [] n.owner with [] -> "" | l -> " in " ^ join l
+
+let report (n : node) message e =
+  match Dev.name_of n with Some name -> Dev.error (name ^ where n ^ message) e | None -> ()
+
+let label (n : node) =
+  match Dev.name_of n with
+  | Some name -> name
+  | None -> (match n.eff with Some _ -> "effect #" | None -> "State #") ^ string_of_int n.id
+
+let trace_run n =
+  Dev.trace
+    (label n ^ where n
+    ^
+    match Dev.take_cause n with
+    | Some cause -> " runs: " ^ cause ^ " changed"
+    | None -> if n.runs = 1 then " runs for the first time" else " runs")
+
 let mark n state =
   let stack = ref [] and next = ref n.first in
   while !next != None || !stack != [] do
@@ -215,7 +239,9 @@ let mark n state =
           o.state <- (if was < 0 then 2 else state);
           if was <= 0 then
             match o.eff with
-            | Some q -> q := o :: !q
+            | Some q ->
+                if Dev.on && Dev.tracing () then Dev.cause o (label n);
+                q := o :: !q
             | None ->
                 stack := !next :: !stack;
                 next := o.first
@@ -227,18 +253,6 @@ let mark n state =
             stack := rest;
             next := l)
   done
-
-let report (n : node) message e =
-  match Dev.name_of n with
-  | Some name ->
-      let rec owners acc = function
-        | Some o -> owners (match Dev.name_of o with Some s -> s :: acc | None -> acc) o.parent
-        | None -> acc
-      in
-      let rec join = function [] -> "" | [ s ] -> s | s :: r -> s ^ " > " ^ join r in
-      let where = match owners [] n.owner with [] -> "" | l -> " in " ^ join l in
-      Dev.error (name ^ where ^ message) e
-  | None -> ()
 
 let guarded n =
   match Dev.name_of n with
@@ -274,6 +288,7 @@ let rec run n =
   n.tail <- None;
   n.runs <- n.runs + 1;
   n.state <- 0;
+  if Dev.on && n.eff != None && Dev.tracing () then trace_run n;
   let stack = stack () in
   let outer = !stack in
   stack := n.depth + 1;

@@ -29,6 +29,28 @@ val owner_debug_name : string -> unit
     exception]. Outside an owner it does nothing. In a production bundle
     (see {!render}) it does nothing and the name is not kept. *)
 
+module Dev : sig
+  val trace : bool -> unit
+  (** [trace true] starts the trace and [trace false] stops it. The trace is
+      off at the start. In a dev build, while the trace is on, [console.log]
+      gets a line before each run of an effect, with the State whose write
+      made it run, and a line when an island starts and stops:
+      {v
+[yuka] island Counter #y1 starts
+[yuka] effect `save` in `Page` runs for the first time
+[yuka] effect `save` in `Page` runs: State `count` changed
+[yuka] effect #42 runs: State #7 changed
+[yuka] island Counter #y1 stops
+      v}
+      The names come from {!State.debug_name}, {!effect_debug_name} and
+      {!owner_debug_name}. A State or effect with no name shows as
+      [State #n] or [effect #n], where [n] is a number that Yuka gives each
+      one; the holes, attributes and lists of the markup also show as
+      [effect #n]. When one batch writes more than one State, the line gives
+      the first write. A change of a memo gives the State that made the memo
+      change. In a production bundle (see {!render}) it does nothing. *)
+end
+
 module State = State
 
 val batch : (unit -> 'a) -> 'a

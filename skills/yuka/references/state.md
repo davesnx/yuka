@@ -564,6 +564,37 @@ goes on as before.
 A production bundle (`__YUKA_DEV__` defined as `false`) keeps no name.
 The names cost no bytes there when you do not call these functions.
 
+## Trace
+
+To see why an effect runs, start the trace:
+
+```ocaml
+let () = Yuka.Dev.trace true
+```
+
+In a dev build, while the trace is on, `console.log` gets a line before
+each run of an effect, and a line when an island starts and stops:
+
+```
+[yuka] island Chat #i1 starts
+[yuka] effect `sync_room` in `Chat` runs for the first time
+[yuka] effect `sync_room` in `Chat` runs: State `room` changed
+[yuka] effect #42 runs: State #7 changed
+[yuka] island Chat #i1 stops
+```
+
+The line gives the State whose write made the effect run. When an effect
+reads a memo, it gives the State that made the memo change. When one
+batch writes more than one State that the effect reads, it gives the
+first write. The names come from [Debug names](#debug-names). A State or
+effect with no name shows as `State #n` or `effect #n`, where `n` is a
+number that Yuka gives each one. The holes, attributes and lists of the
+markup also update in effects, so they also show as `effect #n`.
+
+`Yuka.Dev.trace false` stops the trace. Call `Yuka.Dev.trace true`
+before `Yuka.render` to see the islands start. In a production bundle,
+`Yuka.Dev.trace` does nothing.
+
 ## Context
 
 A context gives a value to every component below one place of the page,

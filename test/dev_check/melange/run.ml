@@ -212,6 +212,94 @@ let () =
   expect "an effect with no name that raises" [];
   dispose ()
 
+
+let logs : unit -> string array =
+  [%mel.raw
+    {|function () { const l = globalThis.__logs; globalThis.__logs = []; return l.map(function (x) { return x.replace(/#\d+/g, "#N"); }) }|}]
+
+let set_html : string -> unit = [%mel.raw "function (h) { document.body.innerHTML = h }"]
+
+let expect_trace name lines =
+  let got = logs () in
+  let expected = if dev then Array.of_list lines else [||] in
+  if got <> expected then begin
+    incr failures;
+    print_endline
+      ("FAIL " ^ name ^ "\n  expected: [" ^ String.concat " | " (Array.to_list expected) ^ "]\n  got:      ["
+     ^ String.concat " | " (Array.to_list got) ^ "]")
+  end
+  else print_endline ("ok " ^ name)
+
+let () =
+  let count = State.make 0 |> State.debug_name "count" in
+  Dev.trace true;
+  let (), dispose =
+    with_owner (fun () ->
+        owner_debug_name "Page";
+        Effect.after (effect_debug_name "save" (fun () -> ignore (State.get count))))
+  in
+  State.set count 1;
+  State.set count 2;
+  Dev.trace false;
+  expect_trace "the trace of a named effect and the State write that made it run"
+    [
+      "[yuka] effect `save` in `Page` runs for the first time";
+      "[yuka] effect `save` in `Page` runs: State `count` changed";
+      "[yuka] effect `save` in `Page` runs: State `count` changed";
+    ];
+  dispose ()
+
+let () =
+  let a = State.make 0 and b = State.make 0 in
+  Dev.trace true;
+  let (), dispose = with_owner (fun () -> Effect.after (fun () -> ignore (State.get a + State.get b))) in
+  State.set b 1;
+  batch (fun () ->
+      State.set a 1;
+      State.set b 2);
+  Dev.trace false;
+  expect_trace "the trace of an effect and a State with no name, and of a batch"
+    [
+      "[yuka] effect #N runs for the first time";
+      "[yuka] effect #N runs: State #N changed";
+      "[yuka] effect #N runs: State #N changed";
+    ];
+  dispose ()
+
+let () =
+  let n = State.make 1 |> State.debug_name "n" in
+  Dev.trace true;
+  let (), dispose =
+    with_owner (fun () ->
+        let double = State.memo (fun () -> State.get n * 2) |> State.debug_name "double" in
+        Effect.after (effect_debug_name "show" (fun () -> ignore (State.get double))))
+  in
+  State.set n 2;
+  Dev.trace false;
+  expect_trace "the trace of an effect that reads a memo gives the State written"
+    [ "[yuka] effect `show` runs for the first time"; "[yuka] effect `show` runs: State `n` changed" ];
+  dispose ()
+
+let () =
+  let n = State.make 0 in
+  let (), dispose = with_owner (fun () -> Effect.after (fun () -> ignore (State.get n))) in
+  State.set n 1;
+  expect_trace "no trace when it is off" [];
+  dispose ()
+
+let () =
+  let view () = element "p" [] [ text "hi" ] in
+  set_html
+    (Private.render_html (fun () ->
+         Private.node (runtime_island ~name:"Hello" ~props:(Codec.encode Codec.int 0) view)));
+  Dev.trace true;
+  Yuka.render ~islands:(runtime_registry [ runtime_entry ~name:"Hello" (fun _ -> Ok view) ]) ~navigation:false ();
+  Yuka.stop ();
+  Dev.trace false;
+  set_html "";
+  expect_trace "the trace of an island start and stop"
+    [ "[yuka] island Hello #i1 starts"; "[yuka] island Hello #i1 stops" ]
+
 let () =
   if !failures > 0 then set_exit_code 1
   else print_endline (if dev then "dev check (dev build): ok" else "dev check (__YUKA_DEV__ = false): ok")

@@ -60,3 +60,29 @@ let protect : ((unit -> Obj.t[@u]) -> (Obj.t -> unit[@u]) -> Obj.t[@u]) =
     } : 0|}]
 
 let guard f failed = protect f failed [@u]
+
+let tracer :
+    (bool -> unit[@u]) * (unit -> bool[@u]) * (Obj.t -> string -> unit[@u]) * (Obj.t -> string option[@u]) =
+  [%mel.raw
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? (function () {
+      var on = false, m = new WeakMap();
+      return [
+        function (b) { on = b },
+        function () { return on },
+        function (o, s) { m.set(o, s) },
+        function (o) { var s = m.get(o); m.delete(o); return s }
+      ];
+    })() : 0|}]
+
+let set_trace b = (let f, _, _, _ = tracer in f) b [@u]
+let tracing () = (let _, f, _, _ = tracer in f) () [@u]
+let cause o s = (let _, _, f, _ = tracer in f) (Obj.repr o) s [@u]
+let take_cause o = (let _, _, _, f = tracer in f) (Obj.repr o) [@u]
+
+let print : (string -> unit[@u]) =
+  [%mel.raw
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function (message) {
+      console.log("[yuka] " + message);
+    } : 0|}]
+
+let trace message = print message [@u]

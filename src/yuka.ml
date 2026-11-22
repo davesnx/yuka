@@ -18,6 +18,10 @@ let effect_debug_name name body =
 let owner_debug_name name =
   if Dev.on then match !(Base.current_owner ()) with Some o -> Dev.name o ("`" ^ name ^ "`") | None -> ()
 
+module Dev = struct
+  let trace on = if Dev.on then Dev.set_trace on
+end
+
 let batch = Scheduler.batch
 
 type server = Types.server
