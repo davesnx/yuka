@@ -381,9 +381,10 @@ shows how to wire it.
 
 ## Values that load: Await
 
-`<Yuka.Await>` shows a `Yuka.Async.t`. The server sends the page at once,
-with `loading`, and streams the value in the same response when it is
-ready:
+`<Yuka.Await>` shows a `Yuka.Async.t`. The server waits a short time for
+the value before it sends the page. A value that is ready by then is in
+the page; for the others the page has `loading`, and the server streams
+each value in the same response when it is ready:
 
 ```ocaml
 (* shared/related.mlx *)
@@ -397,8 +398,32 @@ let[@client] make ~(related : Model.Issue.t list Yuka.Async.t) () =
 
 `<Yuka.Await>` works on the server page and in an island. An `Async`
 prop of an island streams the same way (see [Islands](islands.md#props)).
+
+`blocking` says how long the server waits for the value, on a first load
+and on a client navigation:
+
+- `` `Yes ``: until the value settles, or the request timeout ends. Use
+  it for the main content of the page, such as the title of an issue.
+- `` `No ``: the server does not wait. Use it for content that can come
+  later, such as a slow sidebar.
+- `` `Timeout s `` (the default is `` `Timeout 0.1 ``): up to `s` seconds.
+
+```ocaml
+<Yuka.Await async=issue blocking=`Yes loading=(<Skeleton />)>
+  (fun issue -> <h1>(Yuka.text issue.title)</h1>)
+</Yuka.Await>
+```
+
+The server sends the page when each pending value is settled or past its
+own limit, so the page waits at most the largest limit among the values
+still pending. A value that settles in that time is in the page, whatever
+its own limit: it has no `loading` flash and no fill script. The wait
+delays the first byte of the page: a page with a slow value sends its
+first byte up to that largest limit later.
+
 A page whose `Cache-Control` is shared (`public` or `s-maxage`) does not
-stream: the server sends it when every `Await` has settled.
+stream: the server sends it when every `Await` has settled, whatever
+`blocking` says.
 In a server render, `message` is the message of a
 `Yuka.Server.Action.reject`, else `"server error"`, so the HTML never has
 the detail of a failure.

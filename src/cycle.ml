@@ -453,6 +453,22 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
   let shared_rule = List.exists (fun (n, v) -> same_name n "cache-control" && shared_cache v) headers in
+  let respond ?id_prefix ?route_printed ?entry build =
+    Server.page ~stream:(not shared_rule) ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
+      ~context:env.context ~current ~timeout ~sleep:env.sleep build
+  in
+  let streamed first piece last rest write =
+    let ( >>= ) = Async.bind in
+    let result, resolve, _ = Async.make () in
+    Async.on_settled
+      (write first >>= fun () -> rest (fun p -> write (piece p)) >>= fun islands -> write (last islands))
+      (function
+        | Async.Failed m ->
+            log_quietly env.config `Error m;
+            resolve ()
+        | _ -> resolve ());
+    result
+  in
   match env.navigate with
   | Some sent -> (
       let headers = set_header ("yuka-build", env.build) headers in
@@ -460,23 +476,14 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
       let answer headers wrap ?id_prefix ?route_printed ?entry build =
         Async.map
           (function
-            | Server.Settled text -> { status; headers; body = String (wrap text) }
-            | Server.Streamed (shell, rest) ->
-                let stream write =
-                  let result, resolve, _ = Async.make () in
-                  Async.on_settled (Server.streamed_body (wrap shell) rest write) (function
-                    | Async.Failed m ->
-                        log_quietly env.config `Error m;
-                        resolve ()
-                    | _ -> resolve ());
-                  result
-                in
+            | Server.Settled { body; _ } -> { status; headers; body = String (wrap body) }
+            | Server.Streamed { shell; rest; _ } ->
+                let piece = function Server.Fill (id, html) -> Server.part id html | Server.Value html -> Server.part "" html in
                 let headers =
                   merge_headers [ headers; [ ("yuka-stream", "1"); ("content-type", "application/x-ndjson; charset=utf-8") ] ]
                 in
-                { status; headers; body = Stream stream })
-          (Server.navigation ?budget:(if shared_rule then None else Some Server.budget) ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
-             ~context:env.context ~current ~timeout ~sleep:env.sleep build)
+                { status; headers; body = Stream (streamed (Server.line (`String (wrap shell))) piece (fun _ -> Server.line (`List [])) rest) })
+          (respond ?id_prefix ?route_printed ?entry build)
       in
       match shared sent layers with
       | 0 -> answer headers (fun body -> head "" ^ body ^ "</body></html>") ?entry build
@@ -507,44 +514,16 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
             ~route_printed:true
             below)
   | None ->
-    let early = ref [] in
-    let writer =
-      ref (fun text ->
-          early := text :: !early;
-          Async.return ())
-    in
-    let write text = !writer text in
-    let finished =
-      Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build
-        ~on_shell:(fun ~fills shell ->
-          Async.bind (write (head (if fills then Printer.fill_script else ""))) (fun () -> write shell))
-        ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
-        ~on_value:write
-    in
-    let written () = String.concat "" (List.rev !early) in
-    let close islands =
-      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
-    in
-    let settled islands =
-      early := close islands :: !early;
-      { status; headers; body = String (written ()) }
-    in
-    match Async.status finished with
-    | Async.Pending when not shared_rule ->
-        let stream w =
-          let flushed = w (written ()) in
-          writer := (fun text -> Async.bind flushed (fun () -> w text));
-          let result, resolve, _ = Async.make () in
-          Async.on_settled finished (function
-            | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
-            | Async.Failed m ->
-                log_quietly env.config `Error m;
-                Async.on_settled flushed (fun _ -> resolve ())
-            | Async.Pending -> ());
-          result
-        in
-        Async.return { status; headers; body = Stream stream }
-    | _ -> Async.map settled finished
+      let close islands =
+        (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+      in
+      Async.map
+        (function
+          | Server.Settled { body; islands } -> { status; headers; body = String (head "" ^ body ^ close islands) }
+          | Server.Streamed { shell; fills; rest } ->
+              let piece = function Server.Fill (id, html) -> Server.fill_chunk id html | Server.Value html -> html in
+              { status; headers; body = Stream (streamed (head (if fills then Printer.fill_script else "") ^ shell) piece close rest) })
+        (respond ?entry build)
 
 let internal_error () = plain 500 "Internal Server Error" []
 

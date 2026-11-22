@@ -247,6 +247,7 @@ module Await : sig
     async:'a Async.t ->
     loading:'k element ->
     ?failed:(string -> 'k element) ->
+    ?blocking:[ `Yes | `No | `Timeout of float ] ->
     children:('a -> 'k element) ->
     unit ->
     'k element
@@ -256,7 +257,24 @@ module Await : sig
       In a server render, [message] is the message of a
       {!Server.Action.reject}, else ["server error"], and the failure
       message goes to the [log] of {!Server.val-config}, so the HTML never has the
-      detail. *)
+      detail.
+
+      [blocking] says how long the server waits for the value before it
+      sends the page, on a first load and on a client navigation:
+      - [`Yes]: until the value settles, or the request timeout ends;
+      - [`No]: it does not wait; the value comes later in the same
+        response;
+      - [`Timeout s] (default [`Timeout 0.1]): up to [s] seconds from when
+        the [Await] is printed.
+
+      The server sends the page when each pending value is settled or past
+      its own limit, so the page waits at most the largest limit among the
+      values still pending. A value that settles before the page is sent
+      is in the page, whatever its own limit; the others show [loading]
+      and come later. The wait delays the first byte of the page: a page
+      with a slow value sends its first byte up to its largest limit later.
+      A page whose [Cache-Control] is shared ([public] or [s-maxage])
+      waits for every value, whatever [blocking] says. *)
 end
 
 module Catch : sig
@@ -670,6 +688,7 @@ module Private : sig
         loading : node;
         failed : string -> node;
         render : 'a -> node;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
         -> node
     | Slot of slot
@@ -790,6 +809,7 @@ module Private : sig
         fill : unit -> string;
         fill_failed : string -> string;
         inside_island : bool;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
     | Pending_async of { id : string; async : Json.t Async.t }
     | Pending_answer of { key : string; answer : Json.t Async.t }

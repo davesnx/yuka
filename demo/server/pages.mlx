@@ -51,7 +51,7 @@ let canvas () = canvas_in Model.Workspace.default
 let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
   let all = comments = Some "all" in
   let comments =
-    <Yuka.Await async=(Store.thread_async ~delay ~all issue.id)
+    <Yuka.Await async=(Store.thread_async ~delay ~all issue.id) blocking=`No
       loading=(<Views.Skeleton lines=3 />)
       failed=(fun message -> <p class_="error">(Yuka.text ("Could not load comments: " ^ message))</p>)>
       (fun (thread : Comment.thread) ->

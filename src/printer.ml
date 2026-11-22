@@ -337,7 +337,7 @@ open Base
           marker "<!--[-->";
           go (f ());
           marker "<!--]-->"
-      | Await { async; loading; failed; render } -> (
+      | Await { async; loading; failed; render; blocking } -> (
           let ids = next_id () ^ "-" in
           let in_ids f =
             let scope = s.id_scope and count = s.id_count in
@@ -392,6 +392,7 @@ open Base
                     fill_failed =
                       (fun m -> held (fun () -> in_ids (fun () -> print ~env s (fun () -> failed m))));
                     inside_island = inside;
+                    blocking;
                   }
                 :: s.pending;
               let start = Buffer.length b and outer_held = s.held in

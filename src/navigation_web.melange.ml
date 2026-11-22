@@ -119,7 +119,7 @@ let hold : node -> int -> bool -> unit =
     {|function (root, owner, release) {
   const d = document;
   const pending = function (i) {
-    const w = d.createTreeWalker(i, 128);
+    const w = d.createTreeWalker(i, 129, function (n) { return n.nodeType === 8 ? 1 : n.localName === "yuka-island" ? 2 : 3; });
     let c;
     while ((c = w.nextNode())) if (c.data[0] === "[" && c.data.length > 2) return true;
     return false;
