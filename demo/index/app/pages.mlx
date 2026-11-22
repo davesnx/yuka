@@ -12,6 +12,11 @@ let demos =
       description = "A feed of notifications from many sources, with filters in the URL and events streamed live.";
       path = "/async-feed";
     };
+    {
+      name = "Posters";
+      description = "A generative poster playground: one island draws the SVG, and the settings live in the URL.";
+      path = "/posters";
+    };
   ]
 
 let head =

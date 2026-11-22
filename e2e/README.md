@@ -35,6 +35,14 @@ screenshot to `DIR`:
 
     node e2e/async-feed.ts http://127.0.0.1:8125/async-feed
 
-`BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh` and
-`demo/async-feed/bundle.sh` and starts the server with
-`--bundle`. The check then expects one script and no import map.
+Last, `posters.ts` runs under `/posters`: a new seed, Shuffle, the columns
+slider, the light preset and the title change the preview and the URL, the
+browser draws the same grid as the server, a reload keeps the poster, and
+Download SVG and Download PNG give the files. `POSTERS_SCREENSHOTS=DIR`
+saves a dark and a light screenshot to `DIR`:
+
+    node e2e/posters.ts http://127.0.0.1:8125/posters
+
+`BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh`,
+`demo/async-feed/bundle.sh` and `demo/posters/bundle.sh` and starts the
+server with `--bundle`. The check then expects one script and no import map.

@@ -1,0 +1,4 @@
+(test
+ (name run)
+ (package yuka-dream)
+ (libraries alcotest posters_app posters_shared yuka yuka-dream dream lwt))

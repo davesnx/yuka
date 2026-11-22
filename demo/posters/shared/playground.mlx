@@ -1,0 +1,149 @@
+let route ~(defaults : Poster.settings) (s : Poster.settings) =
+  let int value default = if value = default then None else Some value in
+  let text value default = if String.equal value default then None else Some value in
+  let color value default = if String.equal value default then None else Some (String.sub value 1 6) in
+  Routes.Home
+    {
+      seed = int s.seed defaults.seed;
+      columns = int s.columns defaults.columns;
+      rows = int s.rows defaults.rows;
+      half = int s.half defaults.half;
+      empty = int s.empty defaults.empty;
+      block = int s.block defaults.block;
+      bar = int s.bar defaults.bar;
+      bg = color s.background defaults.background;
+      fg = color s.foreground defaults.foreground;
+      title = text s.title defaults.title;
+      subtitle = text s.subtitle defaults.subtitle;
+      year = text s.year defaults.year;
+      day = text s.day defaults.day;
+      weekday = text s.weekday defaults.weekday;
+    }
+
+let file (s : Poster.settings) = "poster-" ^ Int.to_string s.seed
+
+let[@client] make ~(initial : Poster.settings) ~(defaults : Poster.settings) () =
+  let settings = Yuka.State.make initial in
+  let current () = Yuka.State.get settings in
+  let set f = Yuka.State.update settings (fun s -> Poster.normalize ~defaults (f s)) in
+  let url = Yuka.State.memo ~equal:( = ) (fun () -> route ~defaults (current ())) in
+  Yuka.Effect.on_change url (fun ~prev:_ ~next -> Routes.replace next);
+  let grid = Yuka.State.memo ~equal:String.equal (fun () -> Poster.grid (current ())) in
+  let labels = Yuka.State.memo ~equal:( = ) (fun () -> Poster.labels (current ())) in
+  let number event f = match int_of_string_opt (Yuka.Event.target_value event) with Some n -> set (f n) | None -> () in
+  let slider ~id ~label ~low ~high ~value ~update : Yuka.client Yuka.element =
+    <div class_="field">
+      <div class_="field-row">
+        <label for_=id>(Yuka.text label)</label>
+        <span class_="field-value">(Yuka.text (Int.to_string (value (current ()))))</span>
+      </div>
+      <input id type_=`range min=(Int.to_string low) max=(Int.to_string high)
+        value=(Int.to_string (value (current ()))) on_input=(fun event -> number event update) />
+    </div>
+  in
+  let text_field ~id ~label ~value ~update : Yuka.client Yuka.element =
+    <div class_="field">
+      <label for_=id>(Yuka.text label)</label>
+      <input id class_="input" type_=`text maxlength=Poster.max_text value=(value (current ()))
+        on_input=(fun event ->
+          let text = Yuka.Event.target_value event in
+          set (fun s -> update s text)) />
+    </div>
+  in
+  let color_field ~id ~label ~value ~update : Yuka.client Yuka.element =
+    <div class_="field color-field">
+      <input id class_="swatch" type_=`color value=(value (current ()))
+        on_input=(fun event ->
+          let color = Yuka.Event.target_value event in
+          set (fun s -> update s color)) />
+      <label for_=id>(Yuka.text label)</label>
+      <span class_="field-value mono">(Yuka.text (value (current ())))</span>
+    </div>
+  in
+  let preset ~label ~colors:(background, foreground) : Yuka.client Yuka.element =
+    <button class_="preset" type_=`button
+      aria_pressed=(if (current ()).background = background && (current ()).foreground = foreground then `true_
+                    else `false_)
+      on_click=(fun _ -> set (fun s -> { s with background; foreground }))>
+      <span class_="preset-dot" style=("background:" ^ background ^ ";color:" ^ foreground) />
+      (Yuka.text label)
+    </button>
+  in
+  let label (l : Poster.label) : Yuka.client Yuka.element =
+    <text x=(Int.to_string l.x) y=(Int.to_string l.y) font_size=(Int.to_string l.size)
+      font_weight=(if l.bold then "700" else "400") letter_spacing=(Int.to_string l.spacing)
+      text_anchor=(if l.end_ then "end" else "start")>(Yuka.text l.text)</text>
+  in
+  <div class_="playground">
+    <figure class_="preview">
+      <svg class_="poster" view_box=Poster.view_box role=`img aria_label="Poster preview">
+        <rect width=(Int.to_string Poster.width) height=(Int.to_string Poster.height) fill=(current ()).background />
+        <path class_="poster-grid" fill=(current ()).foreground d=(Yuka.State.get grid) />
+        <g fill=(current ()).foreground font_family=Poster.font>
+          (Yuka.fragment (List.map label (Yuka.State.get labels)))
+        </g>
+      </svg>
+    </figure>
+    <aside class_="panel" aria_label="Poster settings">
+      <section class_="group">
+        <h2>"Pattern"</h2>
+        <div class_="field">
+          <label for_="seed">"Seed"</label>
+          <div class_="seed-row">
+            <input id="seed" class_="input mono" type_=`number min="0" max=(Int.to_string Poster.max_seed)
+              value=(Int.to_string (current ()).seed)
+              on_input=(fun event -> number event (fun seed s -> { s with seed })) />
+            <button class_="button" type_=`button
+              on_click=(fun _ -> set (fun s -> { s with seed = Poster.shuffle s.seed }))>"Shuffle"</button>
+          </div>
+        </div>
+        (slider ~id:"columns" ~label:"Columns" ~low:4 ~high:24 ~value:(fun s -> s.Poster.columns)
+           ~update:(fun columns s -> { s with columns }))
+        (slider ~id:"rows" ~label:"Rows" ~low:4 ~high:30 ~value:(fun s -> s.Poster.rows)
+           ~update:(fun rows s -> { s with rows }))
+      </section>
+      <section class_="group">
+        <h2>"Shape mix"</h2>
+        (slider ~id:"half" ~label:"Half discs" ~low:0 ~high:100 ~value:(fun s -> s.Poster.half)
+           ~update:(fun half s -> { s with half }))
+        (slider ~id:"empty" ~label:"Empty" ~low:0 ~high:100 ~value:(fun s -> s.Poster.empty)
+           ~update:(fun empty s -> { s with empty }))
+        (slider ~id:"block" ~label:"Blocks" ~low:0 ~high:100 ~value:(fun s -> s.Poster.block)
+           ~update:(fun block s -> { s with block }))
+        (slider ~id:"bar" ~label:"Bars" ~low:0 ~high:100 ~value:(fun s -> s.Poster.bar)
+           ~update:(fun bar s -> { s with bar }))
+      </section>
+      <section class_="group">
+        <h2>"Colours"</h2>
+        <div class_="presets">
+          (preset ~label:"Dark" ~colors:Poster.dark)
+          (preset ~label:"Light" ~colors:Poster.light)
+          <button class_="preset" type_=`button
+            on_click=(fun _ -> set (fun s -> { s with background = s.foreground; foreground = s.background }))>
+            "Swap"
+          </button>
+        </div>
+        (color_field ~id:"background" ~label:"Background" ~value:(fun s -> s.Poster.background)
+           ~update:(fun s background -> { s with background }))
+        (color_field ~id:"foreground" ~label:"Shapes and text" ~value:(fun s -> s.Poster.foreground)
+           ~update:(fun s foreground -> { s with foreground }))
+      </section>
+      <section class_="group">
+        <h2>"Text"</h2>
+        (text_field ~id:"title" ~label:"Title" ~value:(fun s -> s.Poster.title)
+           ~update:(fun s title -> { s with title }))
+        (text_field ~id:"subtitle" ~label:"Subtitle" ~value:(fun s -> s.Poster.subtitle)
+           ~update:(fun s subtitle -> { s with subtitle }))
+        (text_field ~id:"year" ~label:"Line 1" ~value:(fun s -> s.Poster.year) ~update:(fun s year -> { s with year }))
+        (text_field ~id:"day" ~label:"Line 2" ~value:(fun s -> s.Poster.day) ~update:(fun s day -> { s with day }))
+        (text_field ~id:"weekday" ~label:"Line 3" ~value:(fun s -> s.Poster.weekday)
+           ~update:(fun s weekday -> { s with weekday }))
+      </section>
+      <div class_="actions">
+        <button class_="button primary" type_=`button
+          on_click=(fun _ -> !Download.svg (file (current ()) ^ ".svg") (Poster.svg (current ())))>"Download SVG"</button>
+        <button class_="button" type_=`button
+          on_click=(fun _ -> !Download.png (file (current ()) ^ ".png") (Poster.svg (current ())))>"Download PNG"</button>
+      </div>
+    </aside>
+  </div>

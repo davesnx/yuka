@@ -72,6 +72,7 @@ let () =
   let bus = ref "memory" in
   let base = ref "" in
   let async_feed = ref (Filename.concat here "../../async-feed") in
+  let posters = ref (Filename.concat here "../../posters") in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
   let database =
     ref
@@ -106,6 +107,7 @@ let () =
       ("--prerendered", Arg.Set_string prerendered, "Serve the prerendered pages of DIR");
       ("--base", Arg.Set_string base, "Serve the app under this path prefix, as /mini-linear, and the list of demos at every other path (default: none)");
       ("--async-feed", Arg.Set_string async_feed, "With --base: directory of the Async demo (client/ and static/), served under /async-feed");
+      ("--posters", Arg.Set_string posters, "With --base: directory of the Posters demo (client/ and static/), served under /posters");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
         Arg.Set_int second,
@@ -141,14 +143,20 @@ let () =
   let others =
     if base = "" then []
     else if base = "/async-feed" then stop "--base /async-feed is the path of the Async demo"
+    else if base = "/posters" then stop "--base /posters is the path of the Posters demo"
     else
-      match
-        Async_feed_app.Serve.make ~base:"/async-feed" ~bundle:!bundle ~dir:!async_feed ~secret:!secret
-          ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
-          ()
-      with
-      | Ok async -> [ (async.config, async.handler) ]
-      | Error message -> stop ("the Async demo: " ^ message)
+      let dev = !prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1" in
+      let async =
+        match Async_feed_app.Serve.make ~base:"/async-feed" ~bundle:!bundle ~dir:!async_feed ~secret:!secret ~dev () with
+        | Ok async -> (async.config, async.handler)
+        | Error message -> stop ("the Async demo: " ^ message)
+      in
+      let posters =
+        match Posters_app.Serve.make ~base:"/posters" ~bundle:!bundle ~dir:!posters ~dev () with
+        | Ok posters -> (posters.config, posters.handler)
+        | Error message -> stop ("the Posters demo: " ^ message)
+      in
+      [ async; posters ]
   in
   let config =
     match

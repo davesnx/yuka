@@ -1,0 +1,56 @@
+open Posters_shared
+
+let shell ~children () =
+  <div class_="app">
+    <header class_="header">
+      <a class_="brand" href=(Routes.home ())>
+        <svg class_="brand-mark" view_box="0 0 24 24" width="22" height="22" aria_hidden=true>
+          <rect width="24" height="24" rx="6" />
+          <path d="M4 4h8a4 4 0 0 1-8 0zM12 12a4 4 0 0 1 8 0zM12 20a4 4 0 0 1-8 0z" />
+        </svg>
+        <span>"Posters"</span>
+      </a>
+      <span class_="header-note">"Generative posters, drawn by one OCaml function on the server and in the browser"</span>
+    </header>
+    <main class_="main">children</main>
+  </div>
+
+let today () =
+  let now = Unix.gmtime (Unix.time ()) in
+  Poster.defaults ~year:(now.tm_year + 1900) ~month:now.tm_mon ~day:now.tm_mday ~weekday:now.tm_wday
+
+let home ~seed ~columns ~rows ~half ~empty ~block ~bar ~bg ~fg ~title ~subtitle ~year ~day ~weekday () =
+  let defaults = today () in
+  let ( |? ) value default = Option.value value ~default in
+  let color value default = match value with Some hex -> "#" ^ hex | None -> default in
+  let initial =
+    Poster.normalize ~defaults
+      {
+        seed = seed |? defaults.seed;
+        columns = columns |? defaults.columns;
+        rows = rows |? defaults.rows;
+        half = half |? defaults.half;
+        empty = empty |? defaults.empty;
+        block = block |? defaults.block;
+        bar = bar |? defaults.bar;
+        background = color bg defaults.background;
+        foreground = color fg defaults.foreground;
+        title = title |? defaults.title;
+        subtitle = subtitle |? defaults.subtitle;
+        year = year |? defaults.year;
+        day = day |? defaults.day;
+        weekday = weekday |? defaults.weekday;
+      }
+  in
+  Yuka.Server.page ~title:"Posters" (fun () -> <Yuka.Client><Playground initial defaults /></Yuka.Client>)
+
+let message ~title ~text =
+  Yuka.Server.page ~title (fun () ->
+      <section class_="message">
+        <h1>(Yuka.text title)</h1>
+        <p>(Yuka.text text)</p>
+        <a class_="button" href=(Routes.home ())>"Back to the playground"</a>
+      </section>)
+
+let not_found ~path () = message ~title:"Page not found" ~text:("There is no page at " ^ path ^ ".")
+let error () = message ~title:"Something went wrong" ~text:"The poster could not be drawn."

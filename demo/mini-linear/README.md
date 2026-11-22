@@ -18,9 +18,9 @@ Flags: `--port` (default `$PORT`, or 8080), `--interface` (default
 `--manifest`, `--metafile`, `--bundle`, `--prerender DIR` (write the
 prerendered pages to `DIR` and exit), `--prerendered DIR` (serve them),
 `--base PREFIX` (serve Mini Linear under `PREFIX`, the Async demo under
-`/async-feed` and the list of demos at every other path), `--async-feed
-DIR` (with `--base`: the directory of the Async demo, with `client/` and
-`static/`).
+`/async-feed`, the Posters demo under `/posters` and the list of demos at
+every other path), `--async-feed DIR` and `--posters DIR` (with `--base`:
+the directory of that demo, with `client/` and `static/`).
 Defaults are relative to the executable, so any build directory works.
 
 ## Workspaces
