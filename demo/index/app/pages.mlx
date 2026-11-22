@@ -14,7 +14,7 @@ let demos =
     };
     {
       name = "Posters";
-      description = "A generative poster playground: one island draws the SVG, and the settings live in the URL.";
+      description = "A generative poster playground: one Poster component in an island, an SVG route and a prerendered gallery.";
       path = "/posters";
     };
   ]

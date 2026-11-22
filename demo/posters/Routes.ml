@@ -22,5 +22,7 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
               day = optional string;
               weekday = optional string;
             };
+        Router.route Gallery ~path:"/gallery" ~page:Pages.gallery ~prerender:true;
       ];
+    Router.get Poster_svg ~path:"/poster.svg" ~handler:Handlers.poster_svg ~cache:(public ~max_age:3600 ());
   ]

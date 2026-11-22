@@ -1,0 +1,24 @@
+let cell (cell : Pattern.cell) = <path d=cell.d />
+
+let label (l : Pattern.label) =
+  <text x=(Int.to_string l.x) y=(Int.to_string l.y) font_size=(Int.to_string l.size)
+    font_weight=(if l.bold then "700" else "400") letter_spacing=(Int.to_string l.spacing)
+    text_anchor=(if l.end_ then "end" else "start")>(Yuka.text l.text)</text>
+
+let make ~(background : unit -> string) ~(foreground : unit -> string) ~(labels : unit -> Pattern.label list) ~grid () =
+  <svg xmlns="http://www.w3.org/2000/svg" class_="poster" width=(Int.to_string Pattern.width)
+    height=(Int.to_string Pattern.height) view_box=Pattern.view_box role=`img aria_label="Poster">
+    <rect width=(Int.to_string Pattern.width) height=(Int.to_string Pattern.height) fill=(background ()) />
+    <g class_="poster-grid" fill=(foreground ()) stroke=(foreground ()) stroke_width="2">grid</g>
+    <g class_="poster-text" fill=(foreground ()) font_family=Pattern.font>
+      (Yuka.fragment (List.map label (labels ())))
+    </g>
+  </svg>
+
+let still (s : Pattern.settings) =
+  make
+    ~background:(fun () -> s.colours.background)
+    ~foreground:(fun () -> s.colours.foreground)
+    ~labels:(fun () -> Pattern.labels s.text)
+    ~grid:(Yuka.fragment (Array.to_list (Array.map cell (Pattern.cells s.grid s.mix))))
+    ()

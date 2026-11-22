@@ -35,11 +35,14 @@ screenshot to `DIR`:
 
     node e2e/async-feed.ts http://127.0.0.1:8125/async-feed
 
-Last, `posters.ts` runs under `/posters`: a new seed, Shuffle, the columns
-slider, the light preset and the title change the preview and the URL, the
-browser draws the same grid as the server, a reload keeps the poster, and
-Download SVG and Download PNG give the files. `POSTERS_SCREENSHOTS=DIR`
-saves a dark and a light screenshot to `DIR`:
+Last, `posters.ts` runs under `/posters`: a new seed, Shuffle, the sliders,
+the light preset and the title change the preview and the URL, the browser
+draws the same cells as the server, a colour change keeps every cell node,
+a reload keeps the poster, the Download SVG link points to `/poster.svg`
+with the same query, Download PNG gives a PNG, the gallery opens a preset
+in the playground, and it prints the time of a slider change with 24 x 30
+cells. `POSTERS_SCREENSHOTS=DIR` saves the playground (dark and light) and
+the gallery to `DIR`:
 
     node e2e/posters.ts http://127.0.0.1:8125/posters
 

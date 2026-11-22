@@ -1,6 +1,6 @@
 (library
  (name posters_app)
- (modules pages yuka_routes serve)
+ (modules pages handlers yuka_routes serve)
  (libraries posters_shared yuka yuka-dream dream unix)
  (preprocess
   (pps yuka.ppx)))

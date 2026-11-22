@@ -60,7 +60,9 @@ h1, h2 { margin: 0; }
 .brand-mark rect { fill: var(--accent); }
 .brand-mark path { fill: var(--accent-text); }
 
-.header-note { color: var(--muted); font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nav { display: flex; gap: 4px; }
+.nav a { padding: 4px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-weight: 500; }
+.nav a:hover { background: var(--hover); color: var(--text); }
 
 .main { padding: 24px 16px 48px; }
 
@@ -86,7 +88,7 @@ h1, h2 { margin: 0; }
   border-radius: 8px;
 }
 
-.poster {
+.preview .poster {
   display: block;
   width: auto;
   height: calc(100vh - 200px);
@@ -193,10 +195,45 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 16px; }
 
+.gallery-link { padding: 0 16px 16px; color: var(--muted); font-size: 13px; }
+
+.gallery { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+.gallery-head { display: flex; flex-direction: column; gap: 4px; }
+.gallery-head h1 { font-size: 24px; letter-spacing: -0.02em; }
+.gallery-head p { margin: 0; color: var(--muted); }
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.gallery-item > a { display: block; border-radius: 4px; }
+.gallery-item .poster { width: 100%; height: auto; box-shadow: 0 4px 12px rgb(0 0 0 / 0.1); }
+.gallery-item > a:hover .poster { box-shadow: 0 8px 20px rgb(0 0 0 / 0.18); }
+.gallery-caption { display: flex; justify-content: space-between; align-items: center; font-weight: 500; }
+.gallery-svg { color: var(--muted); font-size: 13px; }
+
 .message { max-width: 560px; margin: 48px auto; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
 
 @media (max-width: 860px) {
   .playground { grid-template-columns: 1fr; }
   .preview { position: static; min-height: 0; padding: 16px; }
-  .poster { height: auto; width: 100%; }
+  .preview .poster { height: auto; width: 100%; }
 }
+
+.poster-grid path { vector-effect: non-scaling-stroke; stroke-width: 1.5px; }
