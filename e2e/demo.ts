@@ -326,7 +326,7 @@ await step("3b. router", async () => {
     ctx.waitForEvent("page"),
     page.locator('.row[data-id="YUK-2"] .row-title').click({ modifiers: ["Control"] }),
   ]);
-  await popup.waitForLoadState();
+  await popup.waitForURL("**/issue/YUK-2").catch(() => {});
   check("3b.10 ctrl-click is not intercepted (opens a new page)", popup.url().endsWith("/issue/YUK-2") && new URL(page.url()).pathname === "/", `${popup.url()} current=${page.url()}`);
   await popup.close();
   const reloadLinks = await page.locator("a[data-yuka-reload]").count();
@@ -345,6 +345,89 @@ await step("3b. router", async () => {
   await page.waitForSelector(".comment-input");
   const replaced = await page.evaluate(() => history.length);
   check("3b.12 a link with data-yuka-replace is a client navigation that replaces the entry", replaced === entries && (await marker()) === "alive", `history.length ${entries} -> ${replaced} marker=${await marker()}`);
+});
+
+await step("3m. GET forms", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    (document.querySelector(".sidebar-extra yuka-island") as any).__kept = true;
+  });
+  const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
+  const kept = () => page.evaluate(() => !!(document.querySelector(".sidebar-extra yuka-island") as any)?.__kept);
+  const entries = await page.evaluate(() => history.length);
+  await page.fill(".search input", "keyboard");
+  await page.press(".search input", "Enter");
+  await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=keyboard");
+  await page.waitForFunction(() => (document.querySelector(".filter") as HTMLInputElement | null)?.value === "keyboard").catch(() => {});
+  const after = await page.evaluate(() => ({ filter: (document.querySelector(".filter") as HTMLInputElement | null)?.value, rows: document.querySelectorAll(".row").length, entries: history.length }));
+  check("3m.1 the sidebar search form is a client navigation that keeps the layout island", (await marker()) === "alive" && (await kept()) && after.filter === "keyboard" && after.entries === entries + 1, `marker=${await marker()} kept=${await kept()} ${JSON.stringify(after)}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.id = "e2e-get";
+    f.action = "/nowhere";
+    f.innerHTML = '<input name="q" value="a b"><button id="e2e-get-submit" name="label" value="bug" formaction="/my">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-get-submit").click();
+  await page.waitForURL((u) => u.pathname === "/my");
+  const my = new URL(page.url());
+  check("3m.2 a form with no method uses the submitter name, value and formaction", (await marker()) === "alive" && my.searchParams.get("q") === "a b" && my.searchParams.get("label") === "bug", `${my.pathname}${my.search} marker=${await marker()}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.method = "post";
+    f.action = "/";
+    f.innerHTML = '<button id="e2e-post-get" formmethod="get" name="q" value="sync">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-post-get").click();
+  await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=sync");
+  check("3m.3 formmethod=get on the submitter of a POST form is a client navigation", (await marker()) === "alive", `marker=${await marker()}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.action = "/my";
+    f.target = "_blank";
+    f.innerHTML = '<input name="q" value="new"><button id="e2e-blank">go</button>';
+    document.body.prepend(f);
+  });
+  const [popup] = await Promise.all([page.context().waitForEvent("page"), page.locator("#e2e-blank").click()]);
+  await popup.waitForLoadState();
+  check("3m.4 a form with target=_blank is not intercepted", new URL(popup.url()).pathname === "/my" && new URL(page.url()).search === "?q=sync" && (await marker()) === "alive", `${popup.url()} current=${page.url()}`);
+  await popup.close();
+  await page.evaluate(() => {
+    const f = document.querySelector(".search") as HTMLFormElement;
+    f.setAttribute("data-yuka-reload", "");
+    (f.querySelector("input") as HTMLInputElement).value = "full";
+  });
+  await Promise.all([page.waitForEvent("load"), page.press(".search input", "Enter")]);
+  check("3m.5 a form with data-yuka-reload does a full page load", new URL(page.url()).search === "?q=full" && (await marker()) === undefined, `${page.url()} marker=${await marker()}`);
+  await page.waitForSelector(".search input");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    const f = document.createElement("form");
+    f.action = "/my";
+    f.innerHTML = '<input name="q" value="kept"><button id="e2e-prevented">go</button>';
+    document.body.prepend(f);
+    document.addEventListener("submit", (e) => { if (e.target === f) { e.preventDefault(); (window as any).__prevented = location.href; } });
+  });
+  await page.locator("#e2e-prevented").click();
+  await page.waitForFunction(() => (window as any).__prevented !== undefined);
+  await page.waitForTimeout(300);
+  check("3m.7 a submit that a document listener prevents is left alone", new URL(page.url()).search === "?q=full" && (await marker()) === "alive", `${page.url()} marker=${await marker()}`);
+  await page.route("http://e2e-other.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<p id=other>other</p>" }));
+  await page.waitForSelector(".search input");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    const f = document.createElement("form");
+    f.action = "http://e2e-other.test/find";
+    f.innerHTML = '<input name="q" value="x"><button id="e2e-other">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-other").click();
+  await page.waitForSelector("#other");
+  check("3m.6 a form to another origin does a full page load", page.url() === "http://e2e-other.test/find?q=x", page.url());
+  await page.unroute("http://e2e-other.test/**");
 });
 
 await step("3c. partial navigation", async () => {
@@ -1372,6 +1455,15 @@ await step("6j. a draft blocks leaving", async () => {
   await p.waitForTimeout(300);
   const kept = { url: new URL(p.url()).pathname, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft) };
   check("6j.3 a link click asks with the dialog of the app; Cancel stays", dialogs.at(-1) === "confirm:Discard the new issue?" && kept.url === "/my" && kept.title === "Draft" && kept.marker === marker, JSON.stringify({ dialogs, kept }));
+  dialogs.length = 0;
+  await p.evaluate(() => {
+    const f = document.querySelector(".search") as HTMLFormElement;
+    (f.querySelector("input") as HTMLInputElement).value = "blocked";
+    f.requestSubmit();
+  });
+  await p.waitForTimeout(300);
+  const searched = { url: new URL(p.url()).pathname + new URL(p.url()).search, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft), pending: await p.evaluate(() => document.querySelector(".search")!.hasAttribute("data-yuka-pending")) };
+  check("6j.3b a GET form submit asks too; Cancel stays", dialogs.join() === "confirm:Discard the new issue?" && searched.url === "/my" && searched.title === "Draft" && searched.marker === marker && !searched.pending, JSON.stringify({ dialogs, searched }));
   dialogs.length = 0;
   await p.evaluate(() => { location.reload(); }).catch(() => {});
   await p.waitForTimeout(300);
@@ -2734,6 +2826,82 @@ await step("8e. a client that leaves during a streamed page", async () => {
   await new Promise((r) => setTimeout(r, 2000));
   const status = await fetch(base + "/").then((r) => r.status, (e) => String(e));
   check("8e.1 the server still answers after clients closed their connections during streamed responses", status === 200, String(status));
+});
+
+await step("8f. a stream that breaks shows the failed view of each pending Await", async () => {
+  const errorsOf = (p: Page) => {
+    const errors: string[] = [];
+    p.on("console", (m) => {
+      if (m.type() === "error" || m.text().includes("hydration mismatch")) errors.push(m.text());
+    });
+    p.on("pageerror", (e) => errors.push(String(e)));
+    return errors;
+  };
+  const shown = (p: Page, text: string) =>
+    p.waitForFunction((t) => [...document.querySelectorAll(".error")].some((e) => e.textContent === t), text, { timeout: 5000 }).then(() => true, () => false);
+  const nav = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const navErrors = errorsOf(nav);
+  await nav.addInitScript(() => {
+    const w = window as any, f = w.fetch;
+    w.fetch = function (input: any, init: any) {
+      return f.call(this, input, init).then((r: any) => {
+        if (r.headers.get("yuka-stream") !== "1" || !r.body) return r;
+        let seen = "";
+        const cut = r.body.pipeThrough(
+          new TransformStream({
+            transform(chunk: any, out: any) {
+              seen += new TextDecoder().decode(chunk);
+              const i = seen.indexOf("\n");
+              if (i < 0) return;
+              out.enqueue(new TextEncoder().encode(seen.slice(0, i + 1)));
+              out.error(new Error("cut by the test"));
+            },
+          }),
+        );
+        const answer = new Response(cut, { status: r.status, statusText: r.statusText, headers: r.headers });
+        Object.defineProperty(answer, "url", { value: r.url });
+        return answer;
+      });
+    };
+  });
+  await nav.goto(base + "/", { waitUntil: "networkidle" });
+  await nav.waitForSelector(".row");
+  await routerLoaded(nav);
+  await nav.evaluate(() => ((window as any).__marker = "alive"));
+  await nav.locator('.row[data-id="YUK-8"] .row-title').click();
+  await nav.waitForURL("**/issue/YUK-8");
+  const navComments = await shown(nav, "Could not load comments: broken");
+  const navRelated = await shown(nav, "Could not load: broken");
+  const navState = await nav.evaluate(() => ({
+    marker: (window as any).__marker,
+    skeletons: document.querySelectorAll(".issue-page .skeleton").length,
+    templates: document.querySelectorAll("template[data-yuka-failed]").length,
+  }));
+  check("8f.1 a client navigation whose stream breaks shows the failed view of each pending Await, in the page and in an island", navComments && navRelated && navState.marker === "alive" && navState.skeletons === 0 && navState.templates === 0, JSON.stringify({ navComments, navRelated, ...navState }));
+  check("8f.2 no console error or hydration mismatch after the break", navErrors.length === 0, navErrors.join(" | "));
+  await nav.close();
+
+  const first = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const firstErrors = errorsOf(first);
+  await first.route("**/issue/YUK-3", async (route) => {
+    const r = await route.fetch();
+    const body = await r.text();
+    const i = body.indexOf("<template data-yuka-fill");
+    const headers = { ...r.headers() };
+    delete headers["content-length"];
+    delete headers["transfer-encoding"];
+    await route.fulfill({ status: r.status(), headers, body: i < 0 ? body : body.slice(0, i) });
+  });
+  await first.goto(base + "/issue/YUK-3", { waitUntil: "domcontentloaded" });
+  const firstComments = await shown(first, "Could not load comments: broken");
+  const firstRelated = await shown(first, "Could not load: broken");
+  const firstState = await first.evaluate(() => ({
+    skeletons: document.querySelectorAll(".issue-page .skeleton").length,
+    templates: document.querySelectorAll("template[data-yuka-failed]").length,
+  }));
+  check("8f.3 a first load whose stream breaks shows the failed view of each pending Await, in the page and in an island", firstComments && firstRelated && firstState.skeletons === 0 && firstState.templates === 0, JSON.stringify({ firstComments, firstRelated, ...firstState }));
+  check("8f.4 no console error or hydration mismatch after the break", firstErrors.length === 0, firstErrors.join(" | "));
+  await first.close();
 });
 
 await step("9. screenshots", async () => {

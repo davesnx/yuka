@@ -868,7 +868,7 @@ let rewrite_jsx self e =
           lower_element ~self ~loc ~fnloc tag args
       | Lident tag -> template ~self ~loc ~fnloc tag args
       | Ldot (Ldot (Lident "Yuka", ("Await" | "Show" as m)), "createElement") ->
-          let first, takes = if m = "Await" then ("async", "async, loading and failed") else ("status", "status, loading and failed") in
+          let first, takes = if m = "Await" then ("async", "async, loading, failed and blocking") else ("status", "status, loading and failed") in
           let find name =
             List.find_opt (fun (l, _) -> l = Labelled name || l = Optional name) props
           in
@@ -876,6 +876,7 @@ let rewrite_jsx self e =
             (fun (l, _) ->
               match l with
               | Labelled ("loading" | "failed") | Optional "failed" -> ()
+              | Labelled "blocking" | Optional "blocking" when m = "Await" -> ()
               | Labelled n when n = first -> ()
               | _ ->
                   Location.raise_errorf ~loc:fnloc "[yuka] Yuka.%s takes %s" m takes)
@@ -892,6 +893,11 @@ let rewrite_jsx self e =
             | Some (l, v) -> [ (l, hole_scope (fun () -> self#expression v)) ]
             | None -> []
           in
+          let blocking =
+            match find "blocking" with
+            | Some (l, v) -> [ (l, prop_scope (fun () -> self#expression v)) ]
+            | None -> []
+          in
           let body =
             match children with
             | [ ({ pexp_desc = Pexp_function _; _ } as f) ] -> hole_scope (fun () -> self#expression f)
@@ -904,7 +910,7 @@ let rewrite_jsx self e =
                { txt = Ldot (Ldot (Lident "Yuka", m), "make"); loc = fnloc })
             ([ (Labelled first, prop_scope (fun () -> self#expression source));
                (Labelled "loading", rewrite_child ~self loading) ]
-            @ failed
+            @ failed @ blocking
             @ [ (Labelled "children", body); (Nolabel, [%expr ()]) ])
       | Ldot (Ldot (Lident "Yuka", "Catch"), "createElement") ->
           let fallback =

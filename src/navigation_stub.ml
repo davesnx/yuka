@@ -99,8 +99,8 @@ let use f =
         load ()
       end
 
-let go kind url f fail =
-  Navigation_state.set (Some { Navigation_state.url; from = !loaded; kind });
+let go ?link kind url f fail =
+  Navigation_state.set ?link (Some { Navigation_state.url; from = !loaded; kind });
   let fail () =
     Navigation_state.set None;
     fail ()
@@ -119,10 +119,10 @@ let go kind url f fail =
 let blocks : (string -> bool) list ref = ref []
 let hold = Web.prevent_default
 
-let navigate ~replace ~keep_scroll href =
+let navigate ?link ~replace ~keep_scroll href =
   let url = Web.local_url href in
   if not (List.exists (fun check -> check url) !blocks) then
-    go
+    go ?link
       (if replace || String.equal url (Web.current_url ()) then `Replace else `Push)
       url
       (fun r -> r.navigate ~replace ~keep_scroll href)
@@ -130,16 +130,28 @@ let navigate ~replace ~keep_scroll href =
 
 let refresh () = go `Reload (Web.current_url ()) (fun r -> r.refresh ()) Platform.reload
 
+let prefetch url =
+  if !on && Web.same_origin url
+     && Array.length (Web.query_all (Web.document ()) "meta[name=yuka-prefetch][content=off]") = 0
+  then use (fun r -> r.prefetch url)
+
 let on_click e =
   if (not !failed) && Web.plain_click e then
     match Web.link_href false (Web.target e) with
     | "" -> ()
     | href ->
+        let link = Web.link (Web.target e) in
+        let flag name = Option.is_some (Web.get_attribute link name) in
         Web.prevent_default e;
-        navigate
-          ~replace:(Web.link_flag "data-yuka-replace" (Web.target e))
-          ~keep_scroll:(Web.link_flag "data-yuka-keep-scroll" (Web.target e))
-          href
+        navigate ~link ~replace:(flag "data-yuka-replace") ~keep_scroll:(flag "data-yuka-keep-scroll") href
+
+let on_submit e =
+  if not !failed then
+    match Web.form_url e with
+    | "" -> ()
+    | href ->
+        Web.prevent_default e;
+        navigate ~link:(Web.target e) ~replace:false ~keep_scroll:false href
 
 let on_link e =
   if Option.is_some !router || Web.link_href true (Web.target e) <> "" then
@@ -197,9 +209,10 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
   | Some d when d == doc -> ()
   | _ ->
       listening := Some doc;
-      Web.add_listener doc "click" on_click;
+      Web.add_listener (Web.window ()) "click" on_click;
       List.iter (fun n -> Web.add_listener doc n on_link) link_events;
       List.iter (fun n -> Web.add_listener doc n on_leave) leave_events;
+      Web.add_listener (Web.window ()) "submit" on_submit;
       Web.add_listener (Web.window ()) "popstate" on_popstate;
       Web.add_listener (Web.window ()) "pagehide" on_pagehide);
   islands ();
@@ -209,7 +222,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
       scroll_table := Some t;
       Option.iter Web.scroll_to (Web.table_get t !shown_key)
   | Some _ -> ());
-  Platform.client_navigate := Some navigate;
+  Platform.client_navigate := Some (navigate ?link:None);
   Platform.client_refresh := refresh;
   match !router with
   | Some r -> r.boot !settings
@@ -231,10 +244,11 @@ let stop () =
   (match !listening with
   | Some doc ->
       listening := None;
-      Web.remove_listener doc "click" on_click;
+      Web.remove_listener (Web.window ()) "click" on_click;
       List.iter (fun n -> Web.remove_listener doc n on_link) link_events;
       List.iter (fun n -> Web.remove_listener doc n on_leave) leave_events;
       Web.remove_listener doc "pointermove" on_move;
+      Web.remove_listener (Web.window ()) "submit" on_submit;
       Web.remove_listener (Web.window ()) "popstate" on_popstate;
       Web.remove_listener (Web.window ()) "pagehide" on_pagehide
   | None -> ());

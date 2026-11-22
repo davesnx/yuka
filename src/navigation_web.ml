@@ -23,6 +23,8 @@ let fetch_page :
     unit =
  fun _ _ _ _ _ -> browser_only ()
 let put : node -> string -> string -> node = fun _ _ _ -> browser_only ()
+let failed_views : node -> (string * string) array = fun _ -> browser_only ()
+let fail_values : node -> unit = fun _ -> browser_only ()
 let hold : node -> int -> bool -> unit = fun _ _ _ -> browser_only ()
 let hash_of : string -> string = fun _ -> browser_only ()
 let no_hash : string -> string = fun _ -> browser_only ()

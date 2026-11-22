@@ -34,9 +34,9 @@ val refresh : unit -> unit
 val block : (target:string -> bool) -> unit
 (** [block check] keeps the user on the page until the current owner is
     disposed. Browser only: call it inside [Effect.after]. Before a client
-    navigation starts (a click on a link or {!navigate}), it calls
-    [check ~target], with [target] as in {!navigation}. When [check] gives
-    [true], the user stays: the navigation does not start. When it gives
+    navigation starts (a click on a link, the submit of a GET form or
+    {!navigate}), it calls [check ~target], with [target] as in
+    {!navigation}. When [check] gives [true], the user stays: the navigation does not start. When it gives
     [false], the navigation continues. With more than one [block], the
     navigation stops at the first [check] that gives [true]. Back and
     Forward to a page with another path or query, and a Back or {!back}
@@ -60,6 +60,24 @@ val confirm : string -> bool
 (** [confirm message] shows [message] in the dialog of the browser
     ([window.confirm]) and gives [true] when the user accepts. Browser
     only: raises [Invalid_argument] on native. *)
+
+val prefetch : string -> unit
+(** Fetches the page at the URL into the navigation cache, as a hover
+    on a link to it does, so a client navigation to it later uses the
+    answer with no second request. Use it when the page knows the next
+    URL before a link shows it, for example in a list with keyboard
+    navigation. The same rules apply as for the prefetch of a link (see
+    {!Yuka.render}): the request has [Yuka-Prefetch: hover]; it is not
+    sent when the page level is [`Off] ([<meta name="yuka-prefetch"
+    content="off">]), under [saveData], when the server refused this
+    level for the URL before ([204] with [Yuka-Prefetch]), or when the
+    cache holds an answer or a request for the URL. A refused answer is
+    not used, and the navigation fetches the page. When the navigation
+    code is not loaded yet, the call loads it and prefetches after.
+    Does nothing for a URL of another origin, without client navigation
+    (before {!Yuka.render}, with [~navigation:false], after {!Yuka.stop})
+    and on the server. A [javascript:], [vbscript:] or [data:] URL does
+    nothing; a dev build logs the first one. *)
 
 val back : unit -> unit
 (** Browser only: raises [Invalid_argument] on native. Closes the overlay
@@ -98,6 +116,19 @@ val navigation : navigation option State.read
     bar for a [`Reload], or to animate Back and Forward. [Routes.pending]
     gives the target as a typed route. Always [None] on the server and
     without client navigation. *)
+
+val stream : [ `Filling | `Done | `Broken ] State.read
+(** The fills of the page shown after a client navigation.
+    [`Filling] while a streamed answer that the page shows still sends
+    the fills of its pending [await]s; [`Broken] when such a stream broke
+    before its end; else [`Done]. It changes when the page shows a new
+    answer, when a stream ends and when {!Yuka.stop} runs. When a stream
+    breaks, each pending [await] in the content that it fills shows its
+    [failed] view with the message ["broken"], as for a rejected value: the
+    server sends that view with the page, and the client puts it in place
+    of the [loading] content. Use [`Broken] to offer a reload, for
+    example with {!refresh}. Always [`Done] on the server, without client
+    navigation and for the first page load. *)
 
 val replace_url : string -> unit
 (** Browser only: raises [Invalid_argument] on native. Sets the URL of the current

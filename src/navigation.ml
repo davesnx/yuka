@@ -324,11 +324,25 @@ let pass () =
   end
 
 let following : (Web.node * (unit -> unit)) list ref = ref []
+let broken : Web.node list ref = ref []
 let owners = ref 0
+
+let report () =
+  let value = match (!following, !broken) with _ :: _, _ -> `Filling | [], _ :: _ -> `Broken | [], [] -> `Done in
+  Scheduler.batch (fun () -> Signal.set Navigation_state.stream value)
 
 let unfollow gone =
   let page = Web.document () in
-  following := without (fun (r, stop) -> (gone r || not (Web.contains page r)) && (stop (); true)) !following
+  let gone r = gone r || not (Web.contains page r) in
+  following := without (fun (r, stop) -> gone r && (stop (); true)) !following;
+  broken := without gone !broken;
+  report ()
+
+let break root =
+  Array.iter (fun (id, html) -> Client.stop_within (Navigation_web.put root id html)) (Navigation_web.failed_views root);
+  Navigation_web.fail_values root;
+  Navigation_web.adopt_stylesheets ();
+  broken := root :: !broken
 
 let follow root place s =
   incr owners;
@@ -347,6 +361,7 @@ let follow root place s =
     Navigation_web.adopt_stylesheets ()
   in
   List.iter put (List.rev s.parts);
+  (match s.result with Some false -> break root | _ -> ());
   !place ();
   if Option.is_none s.result then begin
     Navigation_web.hold root owner false;
@@ -367,9 +382,12 @@ let follow root place s =
           | None ->
               !unlisten ();
               following := without (fun (_, f) -> f == stop) !following;
+              (match s.result with Some false -> break root | _ -> ());
               Navigation_web.hold root owner true;
-              !start_islands ())
-  end
+              !start_islands ();
+              report ())
+  end;
+  report ()
 
 let show ~dir ~push ~replace ~restore ~refresh url a =
   let final =
@@ -637,6 +655,8 @@ let boot (transitions, islands) =
 let stop () =
   cancel_pending ();
   List.iter (fun (_, f) -> f ()) !following;
+  broken := [];
+  report ();
   started := false;
   Navigation_state.set None;
   start_islands := (fun () -> ());
@@ -651,4 +671,4 @@ let stop () =
   clear ();
   Platform.acted := ignore
 
-let router : Types.router = { boot; navigate; refresh; back; handle; stop }
+let router : Types.router = { boot; navigate; refresh; prefetch; back; handle; stop }

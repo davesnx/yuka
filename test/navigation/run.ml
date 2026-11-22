@@ -199,7 +199,7 @@ let click_fetches finish =
   check "fetched url" "http://localhost/issue/1" (call_url 0);
   check "header" "-" (call_header 0);
   check "not pushed before the page loaded" "/start?x=1" (location_ ());
-  check "body unchanged while loading" (page {|<a id="l" href="/issue/1"><span id="in">go</span></a>|}) (body_html ());
+  check "body unchanged while loading, the link pending" (page {|<a id="l" href="/issue/1" data-yuka-pending=""><span id="in">go</span></a>|}) (body_html ());
   resolve_call 0 (doc "Issue 1" (page "<p>one</p>")) "";
   tick (fun () ->
       check "body swapped" (page "<p>one</p>") (body_html ());
@@ -767,6 +767,42 @@ let push_end : int -> unit = [%mel.raw "function (i) { globalThis.__calls[i].pus
 let push_error : int -> unit = [%mel.raw "function (i) { globalThis.__calls[i].push(new Error('cut')) }"]
 let json_line : string -> string = [%mel.raw "function (s) { return JSON.stringify(s) + '\\n' }"]
 let part_line : string -> string -> string = [%mel.raw "function (id, h) { return JSON.stringify([id, h]) + '\\n' }"]
+
+let pending_link finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  let pending sel = attr sel "data-yuka-pending" in
+  check "no link pending at start" "null" (pending "#two");
+  ignore (click "#two" "");
+  check "the clicked link is pending" "" (pending "#two");
+  ignore (click "#home" "");
+  check "a newer navigation clears the older link" "null" (pending "#two");
+  check "the newer link is pending" "" (pending "#home");
+  resolve_headers 1 {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "page shown" "home-page" (attr "#home-page" "id");
+      check "cleared once the page is shown" "null" (pending "#home");
+      ignore (click "#two" "");
+      check "pending again" "" (pending "#two");
+      log_clear ();
+      reject_call 2;
+      tick (fun () ->
+          check "a failed request is a full load" "assign" (log_read ());
+          check "cleared when the navigation fails" "null" (pending "#two");
+          ignore (click "#two" "");
+          resolve_stream 3 [| ("yuka-outlet", "L0") |];
+          push_text 3 (json_line {|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|});
+          tick (fun () ->
+              check "shell shown" "wait" (attr "#wait" "id");
+              check "cleared once the stream shell is shown" "null" (pending "#two");
+              ignore (click "#home" "");
+              check "pending before stop" "" (pending "#home");
+              stop ();
+              check "cleared by stop" "null" (pending "#home");
+              finish ())))
 
 let streamed finish =
   Yuka.stop ();
@@ -2366,7 +2402,7 @@ let waits_for_prefetch finish =
   check "the prefetch is not aborted" "false" (bools (call_aborted 0));
   resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
   tick (fun () ->
-      check "the superseded navigation shows nothing" links (body_html ());
+      check "the superseded navigation shows nothing" (page {|<a id="l" href="/two">two</a><a id="m" href="/three" data-yuka-pending="">three</a>|}) (body_html ());
       resolve_call 1 (doc "Three" (page "<p>three</p>")) "";
       tick (fun () ->
           check "the last navigation wins" (page "<p>three</p>") (body_html ());
@@ -2508,6 +2544,89 @@ let nested_outlets () =
     ({|<a id="two" href="/two">two</a><a id="three" href="/three">three</a>|}
     ^ {|<yuka-outlet data-k="L0" style="display:contents"><p>outer</p><yuka-outlet data-k="L1" style="display:contents"><p id="inner">inner</p></yuka-outlet></yuka-outlet>|})
 
+let inner_html : string -> string =
+  [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.innerHTML.replace(/<!--[^>]*-->/g, '') : 'none' }"]
+
+let text_of : string -> string =
+  [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.textContent : 'none' }"]
+
+let stream_state () =
+  match State.peek Browser.stream with `Filling -> "filling" | `Done -> "done" | `Broken -> "broken"
+
+let waiter_entry =
+  runtime_entry ~name:"Waiter" (fun json ->
+      Result.map
+        (fun async () ->
+          Await.make ~async
+            ~loading:(element "span" [] [ text "w" ])
+            ~failed:(fun m -> element "b" [] [ text ("F:" ^ m) ])
+            ~children:(fun n -> element "span" [] [ text (ints n) ])
+            ())
+        (Codec.decode (Codec.async Codec.int) json))
+
+let streamed_complete_state finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  check "done at start" "done" (stream_state ());
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0
+    (json_line
+       ({|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|}
+       ^ {|<template data-yuka-failed="L0-s1"><b id="failed">failed</b></template>|}));
+  tick (fun () ->
+      check "filling while the fills come" "filling" (stream_state ());
+      push_text 0 (part_line "L0-s1" {|<b id="done">done</b>|});
+      tick (fun () ->
+          check "a fill removes its failed view" "done|0" (attr "#done" "id" ^ "|" ^ ints (count_selector "template"));
+          check "still filling before the end" "filling" (stream_state ());
+          push_text 0 "[]\n";
+          push_end 0;
+          tick (fun () ->
+              check "done at the end" "done" (stream_state ());
+              check "no failed view" "none" (attr "#failed" "id");
+              finish ())))
+
+let streamed_broken_failed finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry; waiter_entry ]) ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0
+    (json_line
+       ({|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]--><!--[L0-s3--><i id="wait3">w</i><!--]-->|}
+       ^ {|<div id="plain"><!--[L0-s4--><i id="wait4">w</i><!--]--></div>|}
+       ^ {|<yuka-island data-name="Waiter" data-id="L0-i4" style="display:contents"><!--[L0-s2--><span>w</span><!--]--></yuka-island><script type="application/json" data-yuka-props="L0-i4">{"$async":"L0-a1"}</script>|}
+       ^ {|<template data-yuka-failed="L0-s1"><b id="failed">could not load</b></template>|}
+       ^ {|<template data-yuka-failed="L0-s2"><b>F:broken</b></template>|}
+       ^ {|<template data-yuka-failed="L0-s3"><b id="failed3">no</b></template>|}
+       ^ {|<template data-yuka-failed="L0-s4"></template>|}));
+  tick (fun () ->
+      check "filling" "filling" (stream_state ());
+      check "the island around a pending fill waits" "none" (attr "yuka-island b" "id");
+      push_text 0 (part_line "L0-s3" {|<i id="came">came</i>|});
+      tick (fun () ->
+          push_error 0;
+          tick (fun () ->
+              check "broken" "broken" (stream_state ());
+              check "a pending await shows its failed view" "failed|none" (attr "#failed" "id" ^ "|" ^ attr "#wait" "id");
+              check "a fill that came stays" "came|none" (attr "#came" "id" ^ "|" ^ attr "#failed3" "id");
+              check "the default failed view is empty" "" (inner_html "#plain");
+              check "no failed view is left to show" "0" (ints (count_selector "template"));
+              check "the island shows the failed view of its await" "F:broken" (text_of "yuka-island[data-id=L0-i4]");
+              check "its async value failed" {|{"error":"broken"}|} (text_of {|script[data-yuka-async="L0-a1"]|});
+              ignore (click "#home" "");
+              resolve_headers 1 {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+              tick (fun () ->
+                  check "a new page is done" "done" (stream_state ());
+                  finish ()))))
+
 let streamed_inner_replaced finish =
   Yuka.stop ();
   State.set probe_runs 0;
@@ -2612,6 +2731,55 @@ let streamed_prefetch_slot finish =
           check "the end of its stream starts the newest waiting link" "http://localhost/p5" (urls 4);
           finish ()))
 
+let holder_entry =
+  runtime_entry ~name:"Holder" (fun _ ->
+      Ok
+        (fun () ->
+          Effect.after (fun () -> log "gholder");
+          element "div" [] [ Private.slot (Private.Slot.empty ()) ]))
+
+let streamed_nested_hold finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry; holder_entry ]) ();
+  log_clear ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0
+    (json_line
+       ({|<yuka-island data-name="Holder" data-id="L0-i3" style="display:contents"><div><!--[$-->|}
+       ^ held_island "L0-i4" 4 "L0-s1"
+       ^ {|<!--]--></div></yuka-island><script type="application/json" data-yuka-props="L0-i3">0</script>|}));
+  tick (fun () ->
+      check "an island whose pending fill is only inside a nested island starts at once" "gholder" (log_g ());
+      push_text 0 (part_line "L0-s1" "<span>p</span>");
+      push_text 0 "[]\n";
+      push_end 0;
+      tick (fun () ->
+          check "the nested island starts after its fill" "gholder|g0/4" (log_g ());
+          finish ()))
+
+let own_link_entry =
+  runtime_entry ~name:"Own" (fun _ ->
+      Ok
+        (fun () ->
+          element "a"
+            [ Yuka.attr "id" "own"; Yuka.attr "href" "/two"; on "click" (fun e -> Event.prevent_default e; log "own") ]
+            [ text "own" ]))
+
+let island_link_prevented finish =
+  Yuka.stop ();
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    {|<yuka-island data-name="Own" data-id="i1" style="display:contents"><a id="own" href="/two">own</a></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|};
+  render ~islands:(runtime_registry [ own_link_entry ]) ();
+  let prevented = click "#own" "" in
+  check "a link click that an island handles is not navigated" "true|own|0" (bools prevented ^ "|" ^ log_read () ^ "|" ^ ints (calls ()));
+  finish ()
+
 let streamed_overlay_back finish =
   Yuka.stop ();
   State.set probe_runs 0;
@@ -2691,7 +2859,7 @@ let transition_token finish =
   resolve_call 0 (doc "Two" (page {|<a id="m" href="/three">three</a>|})) "";
   tick (fun () ->
       check "state is updated before the transition runs" "/two" (location_ ());
-      check "the DOM waits for the callback" links (body_html ());
+      check "the DOM waits for the callback" (page {|<a id="l" href="/two" data-yuka-pending="">two</a><a id="m" href="/three">three</a>|}) (body_html ());
       run_transition 0;
       check "swapped in the callback" (page {|<a id="m" href="/three">three</a>|}) (body_html ());
       ignore (click "#m" "");
@@ -2746,14 +2914,14 @@ let back_before_transition finish =
                             "scroll:300|scroll:0|g0/2" (log_read ());
                           finish ()))))))
 
-let newer_before_transition fetched (start_newer : unit -> unit) finish =
+let newer_before_transition fetched kept (start_newer : unit -> unit) finish =
   race_start ();
   tick (fun () ->
       log_clear ();
       start_newer ();
       check "the newer navigation fetches" fetched (call_url 1);
       run_transition 0;
-      check "the abandoned page is never put in the DOM" (race_page "<p>start</p>" 1) (body_html ());
+      check "the abandoned page is never put in the DOM" kept (body_html ());
       check "still navigating" "true" (navigating ());
       check "no scroll, no island started" "" (log_read ());
       resolve_call 1 (doc "Three" (page ("<p>three</p>" ^ island 3))) "";
@@ -3199,6 +3367,90 @@ let refresh_in_place finish =
                     100))
             100))
     100
+
+let browser_prefetch finish =
+  setup links;
+  plain_start ();
+  Browser.prefetch "/two";
+  until "Browser.prefetch fetches" (fun () -> calls () > 0)
+    (fun () ->
+      check "the URL" "/two" (call_url 0);
+      check "as a hover prefetch" "hover" (prefetch_header 0);
+      Browser.prefetch "/two";
+      check "a URL in flight is not fetched again" "1" (ints (calls ()));
+      resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          Browser.navigate "/two";
+          tick (fun () ->
+              check "the navigation uses the prefetched answer, no second request" "1" (ints (calls ()));
+              check "page shown" (page "<p>two</p>") (body_html ());
+              check "pushed" "/two" (location_ ());
+              finish ())))
+    100
+
+let browser_prefetch_rules finish =
+  setup (level "off" ^ links);
+  plain_start ();
+  Browser.prefetch "/two";
+  setup links;
+  save_data ();
+  plain_start ();
+  Browser.prefetch "/two";
+  setup links;
+  plain_start ();
+  Browser.prefetch "http://example.com/two";
+  Browser.prefetch "javascript:alert(1)";
+  wait 30 (fun () ->
+      check "no request at the level off, under saveData, to another origin or for an unsafe URL" "0" (ints (calls ()));
+      Browser.prefetch "/two";
+      resolve_headers 0 "" 204 (refusal "off");
+      tick (fun () ->
+          Browser.prefetch "/two";
+          check "a URL the server refused is not prefetched again" "1" (ints (calls ()));
+          fire "#m" "pointerdown";
+          resolve_headers 1 "" 204 (refusal "visible");
+          tick (fun () ->
+              Browser.prefetch "/three";
+              check "a URL refused above hover is prefetched" "/three|hover" (urls 2 ^ "|" ^ prefetch_header 2);
+              Browser.navigate "/two";
+              check "the navigation to the refused URL fetches" "4|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 3);
+              resolve_call 3 (doc "Two" (page "<p>two</p>")) "";
+              tick (fun () ->
+                  check "shown" "/two" (location_ ());
+                  finish ()))))
+
+let cold_prefetch finish =
+  setup links;
+  Browser.prefetch "/two";
+  setup links;
+  render ~islands:(runtime_registry []) ~navigation:false ();
+  Browser.prefetch "/two";
+  setup (level "off" ^ links);
+  plain_start ();
+  Browser.prefetch "/two";
+  wait 30 (fun () ->
+      check "before render, without navigation and at the level off: no navigation code" "false" (bools (router_loaded ()));
+      check "and no request" "0" (ints (calls ()));
+      setup links;
+      plain_start ();
+      Browser.prefetch "/two";
+      check "no fetch before the code loads" "0" (ints (calls ()));
+      until "the prefetch fetches once the code loads" (fun () -> calls () > 0)
+        (fun () ->
+          check "navigation code loaded" "true" (bools (router_loaded ()));
+          check "a hover prefetch" "/two|hover" (call_url 0 ^ "|" ^ prefetch_header 0);
+          ignore (click "#l" "");
+          check "the click uses the prefetch" "1" (ints (calls ()));
+          resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+          tick (fun () ->
+              check "page shown" (page "<p>two</p>") (body_html ());
+              check "still one request" "1" (ints (calls ()));
+              stop ();
+              Browser.prefetch "/three";
+              wait 30 (fun () ->
+                  check "after stop: no request" "1" (ints (calls ()));
+                  finish ())))
+        100)
 
 let fire_touch : string -> string -> unit =
   [%mel.raw
@@ -3961,6 +4213,8 @@ let all =
     ("a replace navigation from a link, Browser.navigate and Routes.replace replaces its entry", replace_navigations);
     ("a keep-scroll navigation from a link and Browser.navigate keeps the scroll", keep_scroll);
     ("Browser.refresh swaps in fresh content and keeps the entry, the scroll and the focus", refresh_in_place);
+    ("Browser.prefetch fills the cache and the navigation uses it", browser_prefetch);
+    ("Browser.prefetch follows the page level, saveData, the origin and the server refusals", browser_prefetch_rules);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);
@@ -4030,10 +4284,13 @@ let all =
     ("warm: press then click before the answer warms nothing", press_then_click);
     ("max-age reuses a page", max_age_cache);
     ("a streamed answer: the shell at once, then fills, values and islands", streamed);
+    ("the clicked link is pending until its page is shown, it fails or a newer one replaces it", pending_link);
     ("a streamed answer: kept until a newer page swaps the outlet", streamed_superseded);
     ("a streamed answer: a complete one is cached and replayed", streamed_cache);
     ("a streamed answer: a broken one keeps the page and is not cached", streamed_broken);
     ("a streamed answer that broke before its transition ran starts the islands around its fills", streamed_broken_before_apply);
+    ("Browser.stream is filling until a complete stream ends, then done", streamed_complete_state);
+    ("a broken stream shows the failed view of each pending await and Browser.stream is broken", streamed_broken_failed);
     ("a streamed answer into an inner outlet stops when the outer outlet is replaced", streamed_inner_replaced);
     ("the end of a body stream leaves the islands of a newer outlet stream held", streamed_outlet_under_body_stream);
     ("a streamed answer that a newer navigation replaces before its transition runs is aborted", streamed_superseded_before_apply);
@@ -4044,6 +4301,8 @@ let all =
     ("a fill stops the islands of the loading content it replaces", streamed_fill_stops_island);
     ("Back from a streamed overlay stops its stream", streamed_overlay_back);
     ("a streamed prefetch keeps its place until its stream ends", streamed_prefetch_slot);
+    ("an island is not held for a pending fill inside a nested island", streamed_nested_hold);
+    ("a link click that an island prevents is not navigated", island_link_prevented);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);
     ("other outlet keys miss", keys_miss);
@@ -4063,8 +4322,8 @@ let all =
     ("transitions: state first, one attribute owner", transition_token);
     ("transitions: an error in the update is reported", transition_error);
     ("transitions: back before the update runs keeps the shown page", back_before_transition);
-    ("transitions: a click before the update runs drops the older page", newer_before_transition "http://localhost/three" (fun () -> ignore (click "#m" "")));
-    ("transitions: a popstate before the update runs drops the older page", newer_before_transition "/three" (fun () -> popstate_to "/three"));
+    ("transitions: a click before the update runs drops the older page", newer_before_transition "http://localhost/three" (page ({|<a id="l" href="/two">two</a><a id="m" href="/three" data-yuka-pending="">three</a><p>start</p>|} ^ island 1)) (fun () -> ignore (click "#m" "")));
+    ("transitions: a popstate before the update runs drops the older page", newer_before_transition "/three" (race_page "<p>start</p>" 1) (fun () -> popstate_to "/three"));
     ("transitions: stop before the update runs drops the page", stop_before_transition);
     ("transitions: back then forward before the update runs starts the page at the top", back_forward_before_transition);
     ("a popstate that replaces a popstate load keeps the scroll of the shown page", popstate_replaced_scroll);
@@ -4148,6 +4407,7 @@ let () =
         [ ("a data-yuka-prefetch=visible link does not load the navigation code", marked_link_loads_nothing);
           ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
     | "move" -> [ ("the first mouse movement loads the navigation code", move_loads_router) ]
+    | "prefetch" -> [ ("Browser.prefetch loads the navigation code, then prefetches", cold_prefetch) ]
     | "idle" -> [ ("the page level idle loads the navigation code at start", idle_loads_router) ]
     | "replay" -> [ ("an error while the waiting events run", replay_error) ]
     | "stall" ->

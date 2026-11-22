@@ -134,7 +134,8 @@ let history_replace_url : string -> unit = fun _ -> browser_only ()
 let manual_scroll : unit -> unit = fun _ -> browser_only ()
 let plain_click : event -> bool = fun _ -> browser_only ()
 let link_href : bool -> node -> string = fun _ _ -> browser_only ()
-let link_flag : string -> node -> bool = fun _ _ -> browser_only ()
+let link : node -> node = fun _ -> browser_only ()
+let form_url : event -> string = fun _ -> browser_only ()
 type 'a table = (string, 'a) Hashtbl.t
 
 let table () = Hashtbl.create 8

@@ -321,6 +321,26 @@ the announcer change as for other navigations. You can use both
 attributes on one link. Without client navigation, the full page load
 scrolls as the browser does.
 
+A form with `method="get"` (or with no method) is also a client
+navigation. When the user submits it, Yuka makes the URL from the action
+of the form and its fields, as the browser does, and loads that URL as a
+click on a link does. A search form in the layout thus keeps the islands
+of the layout:
+
+```ocaml
+<form method_=`get action=(Routes.blog ()) role=`search>
+  <input type_=`search name="q" />
+</form>
+```
+
+The `formmethod`, `formaction` and `formtarget` attributes and the name
+and value of the submit button count. Yuka does not change a submit that
+is already prevented (for example by `Yuka.Form`), a form with a
+`target` other than `_self`, a form with an action URL on another
+origin, or a form with a `data-yuka-reload` attribute: these do a full
+page load or what the browser does. While the navigation is in flight,
+the form has a `data-yuka-pending` attribute, as a clicked link has.
+
 After an `Action.call`, the server-rendered parts of the page can show
 old data. `Yuka.Browser.refresh ()` loads the URL shown again from the
 server, with no cached answer, and puts in the new content:
@@ -381,8 +401,8 @@ let[@client] make () =
 
 `Yuka.Browser.block check` keeps the user on the page, for example when
 a form has text that is not saved. Before a client navigation starts (a
-click on a link or `Yuka.Browser.navigate`), Yuka calls
-`check ~target`, with `target` as the `url` of
+click on a link, the submit of a GET form or `Yuka.Browser.navigate`),
+Yuka calls `check ~target`, with `target` as the `url` of
 `Yuka.Browser.navigation`. When `check` gives `true`, the user stays and
 the navigation does not start. When it gives `false`, the navigation
 continues. Back and Forward to a page with another path or query, and
@@ -392,8 +412,8 @@ shows the target while `check` runs; when `check` gives `true`, Yuka
 moves the history back to the entry the user left (`history.go`) and
 the page and the URL stay as they were. `Yuka.Browser.refresh ()` and a
 Back or Forward to the same page (only the fragment changes, or an
-entry of `Routes.push`) do not call `check`. While a `block` exists, the browser shows its own prompt when
-the user closes or reloads the tab or a full page load starts; the
+entry of `Routes.push`) do not call `check`. While a `block` exists,
+the browser shows its own prompt when the user closes or reloads the tab or a full page load starts; the
 browser does not show it before the user interacted with the page. The
 `block` stays until its owner is disposed, so register it in an effect
 that runs only while there is something to lose. `Yuka.Browser.confirm`
@@ -410,11 +430,28 @@ let[@client] make () =
   <textarea on_input=(fun e -> Yuka.State.set draft (Yuka.Event.target_value e)) />
 ```
 
+The link that the user clicked has a `data-yuka-pending` attribute while
+its navigation is in flight. Use it in CSS to show a spinner on that
+link:
+
+```css
+a[data-yuka-pending]::after { content: ""; /* a spinner */ }
+```
+
+Yuka removes the attribute when the new page (or the first part of a
+streamed page) is shown, when the navigation fails or becomes a full page
+load, and when a newer navigation starts. `aria-current` changes only
+after the new page is shown. Yuka does not set `aria-busy` on the link,
+because `aria-busy` tells assistive technology that the content of the
+element changes, and the content of the link does not change. For
+assistive technology, Yuka announces the title of the new page.
+
 A page with a `Yuka.Await` streams on a client navigation as on a first
-load. The server waits a short time (100 ms) for every `Await` and async
-value. When they settle in time, the new page comes in one piece. When
-they do not, the new page is shown at once with the `loading` content of
-each `Await`, and `navigating` becomes `false`. Each `Await` then replaces
+load. The server waits for each `Await` as its `blocking` says (by
+default 100 ms; see [Data](data.md#values-that-load-await)). When every
+value settles in time, the new page comes in one piece. When one does
+not, the new page is shown at once with the `loading` content of each
+pending `Await`, and `navigating` becomes `false`. Each `Await` then replaces
 its `loading` content when its value comes, and its islands start. An
 island that holds a pending `Await` starts after that `Await` is filled.
 The title, focus, scroll and announcer change when the new page is shown,
@@ -428,6 +465,24 @@ to its saved position. It scrolls to that position again after each
 fill that comes later, until the user scrolls, touches, clicks or types,
 or the stream ends. A URL fragment whose element comes in a later fill
 is scrolled to by the same rule.
+
+When the connection breaks before the stream ends, each `Await` that is
+still pending shows its `failed` view with the message `"broken"`, as
+for a rejected value. The server sends that view with the page, so the
+browser can show it when nothing more comes. The fills that came stay.
+This is also true on a first load. `Yuka.Browser.stream` is a
+read-only State that tells the app about the fills of the page shown:
+`` `Filling `` while a streamed answer still sends fills, `` `Broken ``
+after its stream broke, else `` `Done ``. Use it to offer a reload:
+
+```ocaml
+let[@client] make () =
+  <p class_=(match Yuka.State.get Yuka.Browser.stream with `Broken -> "notice" | `Filling | `Done -> "hidden")>
+    <button on_click=(fun _ -> Yuka.Browser.refresh ())>"Reload"</button>
+  </p>
+```
+
+`Yuka.Browser.stream` is `` `Done `` for a first load.
 
 After a client navigation to another page, Yuka tells screen readers
 about it and moves the focus, as a full page load does:
@@ -672,6 +727,23 @@ of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
 
 On a link, `data-yuka-prefetch="off"` stops its prefetch.
 `navigator.connection.saveData` stops all prefetch.
+
+`Yuka.Browser.prefetch url` prefetches a URL that no link shows yet, for
+example the next item of a list with keyboard navigation. It is a hover
+prefetch (`Yuka-Prefetch: hover`) with the same rules: no request when the
+highest level is `` `Off ``, under `saveData`, when the server refused
+`hover` or a lower level for the URL before, or when the cache holds an
+answer or a request for the URL. A client navigation to the URL then uses
+the answer with no second request. When the navigation code is not loaded
+yet, the call loads it. Without client navigation, and for a URL of
+another origin, it does nothing.
+
+```ocaml
+let on_key ~next event =
+  match Yuka.Event.key event with
+  | "ArrowDown" -> Yuka.Browser.prefetch (Routes.href (Routes.Doc { slug = next }))
+  | _ -> ()
+```
 
 A page with no island loads no navigation code, so the browser prefetches
 for it. At the end of the body of such a page, the server prints one

@@ -15,6 +15,7 @@ let block check =
       if List.is_empty !blocks then Web.remove_listener (Web.window ()) "beforeunload" hold)
 
 let confirm message = Web.confirm message
+let prefetch url = if Url.unsafe ~tag:"a" "href" url then Types.log "prefetch" url else Navigation_stub.prefetch url
 let back () = match !Navigation_stub.router with Some r -> r.back () | None -> Web.history_back ()
 let navigating : bool State.read = State.of_signal Navigation_state.navigating
 
@@ -25,6 +26,7 @@ type navigation = Navigation_state.navigation = {
 }
 
 let navigation : navigation option State.read = State.of_signal Navigation_state.navigation
+let stream : [ `Filling | `Done | `Broken ] State.read = State.of_signal Navigation_state.stream
 
 let replace_url url =
   if Url.unsafe ~tag:"a" "href" url || not (Web.same_origin url) then Types.log "replace_url" url
