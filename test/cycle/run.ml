@@ -152,6 +152,8 @@ let contains text part =
   let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
   at 0
 
+let render_logs () = List.filter (fun m -> not (contains m "failed view failed")) !logged
+
 let index text part =
   let n = String.length part in
   let rec at i =
@@ -1000,7 +1002,7 @@ let render =
         check_true "not ended while a write is held" (Async.status ended = Async.Pending);
         List.iter (fun (_, resolve) -> resolve ()) !held_writes;
         check_true "ended" (Async.status ended = Async.Done ());
-        Alcotest.(check int) "one log" 1 (List.length !logged) );
+        Alcotest.(check int) "one log" 1 (List.length (render_logs ())) );
     ( "a failed render writes nothing after the stream ended",
       fun () ->
         past_limit ();
@@ -1122,7 +1124,7 @@ let render =
             check_status r 200;
             check_true "shell sent" (contains r.body "wait");
             check_true "no end" (not (String.ends_with ~suffix:"</body></html>" r.body));
-            Alcotest.(check int) "one log" 1 (List.length !logged)
+            Alcotest.(check int) "one log" 1 (List.length (render_logs ()))
         | _ -> Alcotest.fail "not done" );
     ( "a settled page is one string, a page with a pending Await streams",
       fun () ->
@@ -1215,6 +1217,8 @@ let render =
           ({|"\u003cscript type=\"application/json\" data-yuka-context=\"route\" data-name=\"yuka.route\">\"/slow\"\u003c/script>\u003c!--[L0-s1-->wait\u003c!--]-->\u003ctemplate data-yuka-failed=\"L0-s1\">\u003c/template>"|} ^ "\n")
           shell;
         Alcotest.(check string) "then the fill and the end" (shell ^ {|["L0-s1","ready"]|} ^ "\n[]\n") body;
+        check_true "the failed view that raised is logged"
+          (List.exists (fun m -> contains m "await L0-s1 failed view failed") !logged);
         let r, shell, body = streamed "-" in
         check_header r "yuka-outlet" [];
         check_true "full document" (String.starts_with ~prefix:{|"\u003c!DOCTYPE html>|} shell);
@@ -1257,7 +1261,7 @@ let render =
             App.finish_slow "explode";
             check_true "ended" (Async.status ended = Async.Done ());
             Alcotest.(check int) "only the shell line" 1 (count (Buffer.contents b) "\n");
-            Alcotest.(check int) "one log" 1 (List.length !logged)
+            Alcotest.(check int) "one log" 1 (List.length (render_logs ()))
         | _ -> Alcotest.fail "not a stream" );
   ]
 

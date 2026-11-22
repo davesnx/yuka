@@ -66,12 +66,19 @@ let pending_id = function
 
 let is_await = function Types.Pending_await _ -> true | Types.Pending_async _ | Types.Pending_answer _ -> false
 
-let broken items =
+let broken session items =
   String.concat ""
     (List.filter_map
        (function
          | Types.Pending_await { id; fill_broken; _ } ->
-             let html = match fill_broken () with html -> html | exception _ -> "" in
+             let html =
+               match fill_broken () with
+               | html -> html
+               | exception e ->
+                   (try Types.log_in (Some session) `Error ("await " ^ id ^ " failed view failed: " ^ Web.exn_to_string e)
+                    with _ -> ());
+                   ""
+             in
              Some ("<template data-yuka-failed=\"" ^ id ^ "\">" ^ html ^ "</template>")
          | Types.Pending_async _ | Types.Pending_answer _ -> None)
        items)
@@ -92,7 +99,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
   let fills = List.exists is_await session.pending in
   let result, resolve, fail = Async.make () in
   let shown = ref shown in
-  let chain = ref (on_shell ~fills ~failed:(fun () -> broken (List.rev session.pending)) shell) in
+  let chain = ref (on_shell ~fills ~failed:(fun () -> broken session (List.rev session.pending)) shell) in
   let emit f = chain := Async.bind !chain f in
   let outstanding = ref [] in
   let finished = ref false in
@@ -125,7 +132,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
     | Some on_ready when !started && (not !ready) && !held = [] ->
         ready := true;
         shown := true;
-        on_ready ~fills:(List.exists is_await !outstanding) ~failed:(broken !outstanding)
+        on_ready ~fills:(List.exists is_await !outstanding) ~failed:(broken session !outstanding)
     | Some _ | None -> ()
   in
   let release id =
@@ -137,7 +144,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
   let rec register ?(ahead = true) () =
     let items = Printer.take_pending session in
     outstanding := !outstanding @ items;
-    let failed = if ahead && !shown then broken items else "" in
+    let failed = if ahead && !shown then broken session items else "" in
     List.iter
       (function
         | Types.Pending_await { id; blocking = `Yes | `Timeout _; _ } when Option.is_some on_ready && not !ready -> held := id :: !held
