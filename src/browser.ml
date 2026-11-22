@@ -4,6 +4,7 @@ let on_window name handler = Base.own (!platform.on_window name (fun e -> Schedu
 let navigate ?(replace = false) ?(keep_scroll = false) url =
   if Url.unsafe ~tag:"a" "href" url then Types.log "navigate" url else !platform.navigate ~replace ~keep_scroll url
 let refresh () = !platform.refresh ()
+let prefetch url = if Url.unsafe ~tag:"a" "href" url then Types.log "prefetch" url else Navigation_stub.prefetch url
 let back () = match !Navigation_stub.router with Some r -> r.back () | None -> Web.history_back ()
 let navigating : bool State.read = State.of_signal Navigation_state.navigating
 

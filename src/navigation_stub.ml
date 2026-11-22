@@ -121,6 +121,11 @@ let navigate ~replace ~keep_scroll href =
 
 let refresh () = go `Reload (Web.current_url ()) (fun r -> r.refresh ()) Platform.reload
 
+let prefetch url =
+  if !on && Web.same_origin url
+     && Array.length (Web.query_all (Web.document ()) "meta[name=yuka-prefetch][content=off]") = 0
+  then use (fun r -> r.prefetch url)
+
 let on_click e =
   if (not !failed) && Web.plain_click e then
     match Web.link_href false (Web.target e) with

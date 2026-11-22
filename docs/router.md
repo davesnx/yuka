@@ -634,6 +634,23 @@ of a static file (a public directory, `/_yuka/app/`, `/_yuka/css/`) gets
 On a link, `data-yuka-prefetch="off"` stops its prefetch.
 `navigator.connection.saveData` stops all prefetch.
 
+`Yuka.Browser.prefetch url` prefetches a URL that no link shows yet, for
+example the next item of a list with keyboard navigation. It is a hover
+prefetch (`Yuka-Prefetch: hover`) with the same rules: no request when the
+highest level is `` `Off ``, under `saveData`, when the server refused
+`hover` or a lower level for the URL before, or when the cache holds an
+answer or a request for the URL. A client navigation to the URL then uses
+the answer with no second request. When the navigation code is not loaded
+yet, the call loads it. Without client navigation, and for a URL of
+another origin, it does nothing.
+
+```ocaml
+let on_key ~next event =
+  match Yuka.Event.key event with
+  | "ArrowDown" -> Yuka.Browser.prefetch (Routes.href (Routes.Doc { slug = next }))
+  | _ -> ()
+```
+
 A page with no island loads no navigation code, so the browser prefetches
 for it. At the end of the body of such a page, the server prints one
 speculation rule (JSON, not JavaScript):

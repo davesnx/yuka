@@ -31,6 +31,24 @@ val refresh : unit -> unit
     [location.replace] with the URL shown, a full page load. A form
     success with no redirect and no [on_ok] calls it. *)
 
+val prefetch : string -> unit
+(** Fetches the page at the URL into the navigation cache, as a hover
+    on a link to it does, so a client navigation to it later uses the
+    answer with no second request. Use it when the page knows the next
+    URL before a link shows it, for example in a list with keyboard
+    navigation. The same rules apply as for the prefetch of a link (see
+    {!Yuka.render}): the request has [Yuka-Prefetch: hover]; it is not
+    sent when the page level is [`Off] ([<meta name="yuka-prefetch"
+    content="off">]), under [saveData], when the server refused this
+    level for the URL before ([204] with [Yuka-Prefetch]), or when the
+    cache holds an answer or a request for the URL. A refused answer is
+    not used, and the navigation fetches the page. When the navigation
+    code is not loaded yet, the call loads it and prefetches after.
+    Does nothing for a URL of another origin, without client navigation
+    (before {!Yuka.render}, with [~navigation:false], after {!Yuka.stop})
+    and on the server. A [javascript:], [vbscript:] or [data:] URL does
+    nothing; a dev build logs the first one. *)
+
 val back : unit -> unit
 (** Browser only: raises [Invalid_argument] on native. Closes the overlay
     that a client navigation to a route with [?overlay] showed: when the

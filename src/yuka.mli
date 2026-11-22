@@ -1276,6 +1276,7 @@ val render :
     and starts after every waiting visible link. After an action call that succeeds,
     the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
     and the highest level [`Off] turn it off, and so does [navigator.connection.saveData].
+    {!Browser.prefetch} sends a hover prefetch for a URL, by the same rules.
     A navigation to a URL whose prefetch is in flight waits for it.
     When a hover, focus or press prefetch arrives, the browser starts to
     load the island chunks ([<link rel="modulepreload">]) and the

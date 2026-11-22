@@ -3054,6 +3054,90 @@ let refresh_in_place finish =
             100))
     100
 
+let browser_prefetch finish =
+  setup links;
+  plain_start ();
+  Browser.prefetch "/two";
+  until "Browser.prefetch fetches" (fun () -> calls () > 0)
+    (fun () ->
+      check "the URL" "/two" (call_url 0);
+      check "as a hover prefetch" "hover" (prefetch_header 0);
+      Browser.prefetch "/two";
+      check "a URL in flight is not fetched again" "1" (ints (calls ()));
+      resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+      tick (fun () ->
+          Browser.navigate "/two";
+          tick (fun () ->
+              check "the navigation uses the prefetched answer, no second request" "1" (ints (calls ()));
+              check "page shown" (page "<p>two</p>") (body_html ());
+              check "pushed" "/two" (location_ ());
+              finish ())))
+    100
+
+let browser_prefetch_rules finish =
+  setup (level "off" ^ links);
+  plain_start ();
+  Browser.prefetch "/two";
+  setup links;
+  save_data ();
+  plain_start ();
+  Browser.prefetch "/two";
+  setup links;
+  plain_start ();
+  Browser.prefetch "http://example.com/two";
+  Browser.prefetch "javascript:alert(1)";
+  wait 30 (fun () ->
+      check "no request at the level off, under saveData, to another origin or for an unsafe URL" "0" (ints (calls ()));
+      Browser.prefetch "/two";
+      resolve_headers 0 "" 204 (refusal "off");
+      tick (fun () ->
+          Browser.prefetch "/two";
+          check "a URL the server refused is not prefetched again" "1" (ints (calls ()));
+          fire "#m" "pointerdown";
+          resolve_headers 1 "" 204 (refusal "visible");
+          tick (fun () ->
+              Browser.prefetch "/three";
+              check "a URL refused above hover is prefetched" "/three|hover" (urls 2 ^ "|" ^ prefetch_header 2);
+              Browser.navigate "/two";
+              check "the navigation to the refused URL fetches" "4|undefined" (ints (calls ()) ^ "|" ^ prefetch_header 3);
+              resolve_call 3 (doc "Two" (page "<p>two</p>")) "";
+              tick (fun () ->
+                  check "shown" "/two" (location_ ());
+                  finish ()))))
+
+let cold_prefetch finish =
+  setup links;
+  Browser.prefetch "/two";
+  setup links;
+  render ~islands:(runtime_registry []) ~navigation:false ();
+  Browser.prefetch "/two";
+  setup (level "off" ^ links);
+  plain_start ();
+  Browser.prefetch "/two";
+  wait 30 (fun () ->
+      check "before render, without navigation and at the level off: no navigation code" "false" (bools (router_loaded ()));
+      check "and no request" "0" (ints (calls ()));
+      setup links;
+      plain_start ();
+      Browser.prefetch "/two";
+      check "no fetch before the code loads" "0" (ints (calls ()));
+      until "the prefetch fetches once the code loads" (fun () -> calls () > 0)
+        (fun () ->
+          check "navigation code loaded" "true" (bools (router_loaded ()));
+          check "a hover prefetch" "/two|hover" (call_url 0 ^ "|" ^ prefetch_header 0);
+          ignore (click "#l" "");
+          check "the click uses the prefetch" "1" (ints (calls ()));
+          resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+          tick (fun () ->
+              check "page shown" (page "<p>two</p>") (body_html ());
+              check "still one request" "1" (ints (calls ()));
+              stop ();
+              Browser.prefetch "/three";
+              wait 30 (fun () ->
+                  check "after stop: no request" "1" (ints (calls ()));
+                  finish ())))
+        100)
+
 let fire_touch : string -> string -> unit =
   [%mel.raw
     "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
@@ -3812,6 +3896,8 @@ let all =
     ("a replace navigation from a link, Browser.navigate and Routes.replace replaces its entry", replace_navigations);
     ("a keep-scroll navigation from a link and Browser.navigate keeps the scroll", keep_scroll);
     ("Browser.refresh swaps in fresh content and keeps the entry, the scroll and the focus", refresh_in_place);
+    ("Browser.prefetch fills the cache and the navigation uses it", browser_prefetch);
+    ("Browser.prefetch follows the page level, saveData, the origin and the server refusals", browser_prefetch_rules);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);
@@ -3999,6 +4085,7 @@ let () =
         [ ("a data-yuka-prefetch=visible link does not load the navigation code", marked_link_loads_nothing);
           ("a hover on a link loads the navigation code", hover_loads_and_prefetches) ]
     | "move" -> [ ("the first mouse movement loads the navigation code", move_loads_router) ]
+    | "prefetch" -> [ ("Browser.prefetch loads the navigation code, then prefetches", cold_prefetch) ]
     | "idle" -> [ ("the page level idle loads the navigation code at start", idle_loads_router) ]
     | "replay" -> [ ("an error while the waiting events run", replay_error) ]
     | "stall" ->

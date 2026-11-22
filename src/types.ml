@@ -112,6 +112,7 @@ type backend = ..
     boot : bool * (unit -> unit) -> unit;
     navigate : replace:bool -> keep_scroll:bool -> string -> unit;
     refresh : unit -> unit;
+    prefetch : string -> unit;
     back : unit -> unit;
     handle : event -> unit;
     stop : unit -> unit;

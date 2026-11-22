@@ -648,4 +648,4 @@ let stop () =
   clear ();
   Platform.acted := ignore
 
-let router : Types.router = { boot; navigate; refresh; back; handle; stop }
+let router : Types.router = { boot; navigate; refresh; prefetch; back; handle; stop }
