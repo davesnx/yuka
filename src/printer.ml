@@ -91,8 +91,43 @@ open Base
     | [ Hole f ] -> ( match f () with Text t -> t | Fragment [] -> "" | _ -> refuse ())
     | _ -> refuse ()
 
-  let fill_script =
-    "<script>window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};</script>"
+  let nonce_attr = function None -> "" | Some n -> " nonce=\"" ^ n ^ "\""
+
+  let executable type_ =
+    javascript_type type_
+    || match Option.map (fun t -> String.lowercase_ascii (String.trim t)) type_ with
+       | Some ("importmap" | "speculationrules") -> true
+       | _ -> false
+
+  let add_nonce nonce html =
+    match nonce with
+    | None -> html
+    | Some _ ->
+        let n = String.length html and b = Buffer.create (String.length html + 64) in
+        let start_tag i =
+          i + 7 <= n
+          && String.lowercase_ascii (String.sub html i 7) = "<script"
+          && (i + 7 = n || match html.[i + 7] with ' ' | '\t' | '\n' | '\r' | '\012' | '>' | '/' -> true | _ -> false)
+        in
+        let rec go from i =
+          if i >= n then Buffer.add_substring b html from (n - from)
+          else if start_tag i then begin
+            Buffer.add_substring b html from (i + 7 - from);
+            Buffer.add_string b (nonce_attr nonce);
+            go (i + 7) (i + 7)
+          end
+          else go from (i + 1)
+        in
+        go 0 0;
+        Buffer.contents b
+
+  let inline_script ?nonce code = "<script" ^ nonce_attr nonce ^ ">" ^ code ^ "</script>"
+
+  let fill_script_with nonce =
+    inline_script ?nonce
+      "window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};"
+
+  let fill_script = fill_script_with None
 
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
@@ -100,7 +135,7 @@ open Base
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
       csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0;
       id_scope = "p-"; id_count = 0; page_scope = "p-"; page_count = 0;
-      invalid = []; invalid_focused = false }
+      invalid = []; invalid_focused = false; nonce = None }
 
   let answer_script key json =
     "<script type=\"application/json\" data-yuka-answer=\"" ^ escape ~quote:true key ^ "\">"
@@ -522,7 +557,7 @@ open Base
                 (fun url ->
                   if not (List.mem url s.preloaded) then begin
                     s.preloaded <- url :: s.preloaded;
-                    let link = "<link rel=\"modulepreload\" href=\"" ^ escape ~quote:true url ^ "\">" in
+                    let link = "<link rel=\"modulepreload\" href=\"" ^ escape ~quote:true url ^ "\"" ^ nonce_attr s.nonce ^ ">" in
                     if direct then Buffer.add_string b link else s.queued <- link :: s.queued
                   end)
                 (f name));
@@ -604,6 +639,7 @@ open Base
               | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
               | Handler _ -> ())
             attrs;
+          if lt = "script" && executable (Option.join type_) then Buffer.add_string b (nonce_attr s.nonce);
           Buffer.add_char b '>';
           if namespace () = Html then add_raw b ~tag:lt ~type_:(Option.join type_) text
           else add_escaped b ~quote:false text;

@@ -52,6 +52,20 @@ const rowsBetween = (p: Page, low: number, high: number) =>
   }, [low, high]).catch(() => {});
 
 const browser = await chromium.launch({ headless: true });
+const cspViolations: string[] = [];
+const reportCsp = () =>
+  document.addEventListener("securitypolicyviolation", (e) => console.warn(`[csp] ${e.violatedDirective} ${e.blockedURI} ${e.sample}`), true);
+const newContext = browser.newContext.bind(browser);
+browser.newContext = async (options?: Parameters<typeof newContext>[0]) => {
+  const ctx = await newContext(options);
+  await ctx.addInitScript(reportCsp);
+  ctx.on("page", (p: Page) =>
+    p.on("console", (m) => {
+      if (m.text().startsWith("[csp] ") || m.text().includes("Content Security Policy")) cspViolations.push(`${p.url()} ${m.text()}`);
+    }),
+  );
+  return ctx;
+};
 const page: Page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 const consoleErrors: string[] = [];
@@ -466,6 +480,37 @@ await step("3l. overlay route", async () => {
   await page.locator(".crumb").click();
   await page.waitForURL(base + "/");
   await page.waitForSelector("yuka-outlet .row");
+});
+
+await step("3c2. Content-Security-Policy nonce", async () => {
+  const pg = await browser.newPage();
+  const nonces: string[] = [];
+  for (const path of ["/issue/YUK-2", "/issue/YUK-2", "/about"]) {
+    const res = await pg.goto(base + path, { waitUntil: "networkidle" });
+    const policy = res?.headers()["content-security-policy"] ?? "";
+    const nonce = /^script-src 'nonce-([0-9a-f]{32})' 'strict-dynamic'; object-src 'none'; base-uri 'none'$/.exec(policy)?.[1] ?? "";
+    nonces.push(nonce);
+    const scripts = await pg.evaluate(() =>
+      [...document.scripts].filter((s) => !/json/.test(s.type)).map((s) => ({ nonce: s.nonce, attribute: s.getAttribute("nonce") })),
+    );
+    check(`3c2.1 ${path} has a nonce policy, and each script that the page keeps has its nonce`,
+      nonce !== "" && scripts.length > 0 && scripts.every((s) => s.nonce === nonce && s.attribute === ""), `${policy} ${JSON.stringify(scripts)}`);
+  }
+  check("3c2.2 each request gets a new nonce", new Set(nonces).size === 3, nonces.join(" "));
+  await pg.close();
+  const ctx = await browser.newContext();
+  await ctx.route(base + "/about", async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: (await res.text()).replace("</body>", "<script>window.__injected=1</script></body>") });
+  });
+  const before = cspViolations.length;
+  const injected = await ctx.newPage();
+  await injected.goto(base + "/about", { waitUntil: "networkidle" });
+  const ran = await injected.evaluate(() => (window as any).__injected === 1);
+  const reported = await until(() => cspViolations.length > before, 5000);
+  check("3c2.3 the policy holds and a violation is seen: an inline script with no nonce does not run and is reported", !ran && reported, `ran=${ran} ${cspViolations.slice(before).join(" | ")}`);
+  cspViolations.length = before;
+  await ctx.close();
 });
 
 await step("3d. a page with no island loads no script", async () => {
@@ -2595,6 +2640,7 @@ const lateConsole = consoleErrors.filter((e) => !/status of (500|404)/.test(e));
 check("11 no unexpected console errors in whole run", lateConsole.length === 0, lateConsole.join(" | "));
 check("11b no hydration mismatch in whole run", mismatches.length === 0, mismatches.join(" | "));
 check("12 no unexpected failed requests in whole run", failedRequests.length === 0, failedRequests.join(" | "));
+check("13 no Content-Security-Policy violation in whole run", cspViolations.length === 0, cspViolations.join(" | "));
 
 await browser.close();
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILED`);

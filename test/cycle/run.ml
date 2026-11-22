@@ -2069,6 +2069,120 @@ let request_api =
           [ ("content-type", "text/plain; charset=utf-8"); ("x-a", "1") ] r.headers );
   ]
 
+let csp =
+  let with_csp ?(head = "") () = config_with ~assets:modules ~csp:`Nonce ~head () in
+  let policy r =
+    match header r "content-security-policy" with
+    | [ p ] -> p
+    | l -> Alcotest.failf "%d Content-Security-Policy headers" (List.length l)
+  in
+  let nonce_of r =
+    let p = policy r in
+    let start = String.length "script-src 'nonce-" in
+    match String.index_from_opt p start '\'' with
+    | Some stop when String.starts_with ~prefix:"script-src 'nonce-" p ->
+        Alcotest.(check string) "policy"
+          ("script-src 'nonce-" ^ String.sub p start (stop - start) ^ "' 'strict-dynamic'; object-src 'none'; base-uri 'none'")
+          p;
+        String.sub p start (stop - start)
+    | _ -> Alcotest.failf "policy %S" p
+  in
+  let script_tags body =
+    let lower = String.lowercase_ascii body in
+    let rec scan from acc =
+      match index (String.sub lower from (String.length lower - from)) "<script" with
+      | -1 -> List.rev acc
+      | i ->
+          let start = from + i in
+          let stop = String.index_from body start '>' in
+          scan (stop + 1) (String.sub body start (stop - start + 1) :: acc)
+    in
+    scan 0 []
+  in
+  let all_nonced nonce body =
+    let tags = script_tags body in
+    check_true "has scripts" (tags <> []);
+    List.iter
+      (fun tag ->
+        if contains tag {|type="application/json"|} then check_true ("no nonce on " ^ tag) (not (contains tag "nonce"))
+        else check_true ("nonce on " ^ tag) (contains tag (" nonce=\"" ^ nonce ^ "\"")))
+      tags
+  in
+  let streamed config value =
+    let a = call ~config (request "/slow") in
+    App.finish_slow value;
+    match Async.status a with Async.Done r -> r | _ -> Alcotest.fail "not done"
+  in
+  [
+    ( "every script of a page has the nonce of its header",
+      fun () ->
+        let config = with_csp ~head:{|<script>window.h=1</script><SCRIPT src="/x.js"></SCRIPT><meta name="x">|} () in
+        let r = get ~config "/islands" in
+        let nonce = nonce_of r in
+        all_nonced nonce r.body;
+        check_true "head scripts" (contains r.body ({|<script nonce="|} ^ nonce ^ {|">window.h=1</script><SCRIPT nonce="|} ^ nonce ^ {|" src="/x.js">|}));
+        check_true "import map" (contains r.body ({|<script type="importmap" nonce="|} ^ nonce ^ {|">|}));
+        check_true "module script" (contains r.body ({|<script type="module" async src="/_yuka/app/app/main.js" nonce="|} ^ nonce ^ {|"></script>|}));
+        check_true "preload" (contains r.body ({|<link rel="modulepreload" href="/_yuka/app/app/counter.js" nonce="|} ^ nonce ^ {|">|})) );
+    ( "the speculation rules have the nonce",
+      fun () ->
+        let r = get ~config:(with_csp ()) "/plain" in
+        let nonce = nonce_of r in
+        all_nonced nonce r.body;
+        check_true "rules" (contains r.body ({|<script type="speculationrules" nonce="|} ^ nonce ^ {|">|})) );
+    ( "streamed fills and the scripts in them have the nonce, JSON scripts do not",
+      fun () ->
+        let r = streamed (with_csp ()) "scripts" in
+        let nonce = nonce_of r in
+        all_nonced nonce r.body;
+        check_true "fill script" (contains r.body (Yuka.Private.fill_script_with (Some nonce)));
+        check_true "fill call" (contains r.body ({|<script nonce="|} ^ nonce ^ {|">__yukaFill("|}));
+        check_true "page script" (contains r.body ({|<script nonce="|} ^ nonce ^ {|">window.a=1</script>|}));
+        check_true "JSON script" (contains r.body {|<script type="application/json">{}</script>|}) );
+    ( "each request gets a new nonce",
+      fun () ->
+        let config = with_csp () in
+        let nonces = List.init 3 (fun _ -> nonce_of (get ~config "/plain")) in
+        List.iter
+          (fun n ->
+            Alcotest.(check int) "32 hex digits" 32 (String.length n);
+            check_true "hex" (String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) n))
+          nonces;
+        Alcotest.(check int) "all different" 3 (List.length (List.sort_uniq compare nonces)) );
+    ( "the error page has the nonce",
+      fun () ->
+        let r = get ~config:(with_csp ()) "/broken" in
+        check_status r 500;
+        all_nonced (nonce_of r) r.body );
+    ( "the dev script has the nonce",
+      fun () ->
+        Unix.putenv "YUKA_DEV_FILE" "/nonexistent/yuka-dev";
+        let r = get ~config:(config_with ~dev:true ~csp:`Nonce ()) "/plain" in
+        let nonce = nonce_of r in
+        all_nonced nonce r.body;
+        check_true "dev script" (contains r.body ({|<script nonce="|} ^ nonce ^ {|">(function(){var s=|})) );
+    ( "a navigation answer has no nonce and no header",
+      fun () ->
+        let config = with_csp () in
+        List.iter
+          (fun keys ->
+            let r = get ~config ~headers:[ ("Yuka-Navigate", keys) ] "/islands" in
+            check_status r 200;
+            check_header r "content-security-policy" [];
+            check_true "no nonce" (not (contains r.body "nonce")))
+          [ "L0"; "-" ] );
+    ( "a prerender has no nonce and no header",
+      fun () ->
+        let r = get ~config:(Server.Prerender.config (with_csp ())) "/plain" in
+        check_header r "content-security-policy" [];
+        check_true "no nonce" (not (contains r.body "nonce")) );
+    ( "without ~csp: no nonce and no header",
+      fun () ->
+        let r = streamed config "scripts" in
+        check_header r "content-security-policy" [];
+        check_true "no nonce" (not (contains r.body "nonce")) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -2090,4 +2204,5 @@ let () =
       ("speculation", cases speculation);
       ("layout values", cases layout_values);
       ("request api", cases request_api);
+      ("csp", cases csp);
     ]

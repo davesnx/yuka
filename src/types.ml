@@ -169,6 +169,7 @@ type backend = ..
     mutable page_count : int;
     mutable invalid : (string * string) list;
     mutable invalid_focused : bool;
+    mutable nonce : string option;
   }
 
   let snapshot s = { s with streaming = s.streaming }
@@ -176,7 +177,7 @@ type backend = ..
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused } =
+        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused; nonce = _ } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;

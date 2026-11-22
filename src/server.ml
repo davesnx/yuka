@@ -3,13 +3,13 @@ let to_string build =
     (Printer.session ~streaming:false ~islands_only:true)
     (fun () -> build ())
 
-let import_map_script = function
+let import_map_script ?nonce = function
   | [] -> []
   | entries ->
       let imports : Json.t =
         `Assoc (List.map (fun (k, v) -> (k, `String v)) entries)
       in
-      [ "<script type=\"importmap\">"
+      [ "<script type=\"importmap\"" ^ Printer.nonce_attr nonce ^ ">"
         ^ Json.to_string (`Assoc [ ("imports", imports) ])
         ^ "</script>" ]
 
@@ -23,7 +23,7 @@ let import_map ~url packages =
     (fun pkg -> (pkg ^ "/", url ^ "/node_modules/" ^ pkg ^ "/"))
     packages
 
-let head ~extra ?head ?(html = "") ?(early = false) ?(import_map = []) ?(title = "")
+let head ?nonce ~extra ?head ?(html = "") ?(early = false) ?(import_map = []) ?(title = "")
     ?(styles = []) ?(scripts = []) () =
   let attr = Printer.escape ~quote:true in
   let styles =
@@ -36,7 +36,7 @@ let head ~extra ?head ?(html = "") ?(early = false) ?(import_map = []) ?(title =
       (fun s ->
         "<script type=\"module\""
         ^ (if early then " async" else "")
-        ^ " src=\"" ^ attr s ^ "\"></script>")
+        ^ " src=\"" ^ attr s ^ "\"" ^ Printer.nonce_attr nonce ^ "></script>")
       scripts
   in
   String.concat ""
@@ -45,7 +45,7 @@ let head ~extra ?head ?(html = "") ?(early = false) ?(import_map = []) ?(title =
        "><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>";
        Printer.escape ~quote:false title;
        "</title>" ]
-    @ import_map_script import_map
+    @ import_map_script ?nonce import_map
     @ [ extra; Option.value head ~default:"" ]
     @ styles @ scripts @ [ "</head><body>" ])
 
@@ -53,9 +53,9 @@ let value_script id (json : Json.t) =
   "<script type=\"application/json\" data-yuka-async=\"" ^ id ^ "\">"
   ^ Json.to_string json ^ "</script>"
 
-let fill_chunk id html =
+let fill_chunk ?nonce id html =
   "<template data-yuka-fill=\"" ^ id ^ "\">" ^ html
-  ^ "</template><script>__yukaFill(\"" ^ id ^ "\")</script>"
+  ^ "</template>" ^ Printer.inline_script ?nonce ("__yukaFill(\"" ^ id ^ "\")")
 
 let rejection = Types.rejection
 
@@ -66,7 +66,7 @@ let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
   | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeout ~sleep build ~on_shell
+let drive ?nonce ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeout ~sleep build ~on_shell
     ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.context <- context;
@@ -77,6 +77,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?form ?csrf ?context ~timeo
   session.current <- current;
   session.id_prefix <- id_prefix;
   session.id_scope <- id_prefix ^ "p-";
+  session.nonce <- nonce;
   let shell = Printer.print session (fun () -> build ()) in
   let fills =
     List.exists

@@ -243,9 +243,9 @@ let dev_state () =
   in
   { state }
 
-let dev_script state =
+let dev_script ?nonce state =
   let json = String.concat "\\u003c" (String.split_on_char '<' state) in
-  "<script>(function(){var s=" ^ json
+  "<script" ^ Printer.nonce_attr nonce ^ ">(function(){var s=" ^ json
   ^ {|,b=s.build,p=s.page,k="yuka-dev-scroll",o=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){try{sessionStorage.setItem(k,String(scrollY))}catch(x){}s.session=d.session;p=d.page;location.reload();return}if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
 
 type config = {
@@ -261,6 +261,7 @@ type config = {
   log : (Types.log_level -> string -> unit) option;
   prerendering : bool;
   warned : string list ref;
+  csp : [ `Nonce ] option;
 }
 
 let valid_file_segment s =
@@ -276,8 +277,9 @@ let public_prefix (prefix, dir) =
   | segments -> (segments, dir)
 
 let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
-    ?(dev = false) ?origins ?log () =
+    ?(dev = false) ?origins ?log ?csp () =
   {
+    csp;
     dev = (if dev then Some (dev_state ()) else None);
     origins;
     log;
@@ -305,7 +307,7 @@ let build_id config (App a) =
 let log config = match config.log with Some f -> f | None -> fun level m -> !Types.default_log level m
 let default_log sink config = match config.log with Some _ -> config | None -> { config with log = Some sink }
 
-let prerender_config config = { config with dev = None; prerendering = true }
+let prerender_config config = { config with dev = None; prerendering = true; csp = None }
 
 let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
@@ -425,10 +427,22 @@ let rec shared sent (layers : layer list) =
   | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
   | _ -> 0
 
-let speculation_rules =
-  {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
+let speculation_rules nonce =
+  {|<script type="speculationrules"|} ^ Printer.nonce_attr nonce ^ {|>{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
+
+let csp_policy nonce = "script-src 'nonce-" ^ nonce ^ "' 'strict-dynamic'; object-src 'none'; base-uri 'none'"
 
 let render ?(overlay = false) env ~status ~headers layers (page : page) =
+  match
+    match (env.config.csp, env.navigate) with
+    | Some `Nonce, None -> Option.map Option.some (Web.random_hex 16)
+    | _ -> Some None
+  with
+  | None -> Async.failed "Content-Security-Policy nonce: cannot read random bytes from /dev/urandom"
+  | Some nonce ->
+  let headers =
+    match nonce with Some n -> headers @ [ ("content-security-policy", csp_policy n) ] | None -> headers
+  in
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
   let entry =
@@ -436,21 +450,21 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
       (fun (a : assets) ->
         "<script type=\"module\" async src=\""
         ^ Printer.escape ~quote:true ("/_yuka/app/" ^ a.entry)
-        ^ "\"></script>")
+        ^ "\"" ^ Printer.nonce_attr nonce ^ "></script>")
       assets
   in
   let import_map = match assets with Some a -> a.import_map | None -> [] in
   let head extra =
-    Server.head
+    Server.head ?nonce
       ~extra:
         ("<meta name=\"yuka-build\" content=\"" ^ Printer.escape ~quote:true env.build ^ "\">"
         ^ (if env.prefetch = Prefetch.default then ""
            else "<meta name=\"yuka-prefetch\" content=\"" ^ Prefetch.name env.prefetch ^ "\">")
         ^ (match (env.config.dev, env.navigate) with
-          | Some dev, None -> dev_script (dev.state ())
+          | Some dev, None -> dev_script ?nonce (dev.state ())
           | _ -> "")
         ^ extra)
-      ~head:(env.config.head ^ Head.to_html page.head) ~html:page.html ~import_map ~title:(page_title page) ~styles:env.config.styles ()
+      ~head:(Printer.add_nonce nonce env.config.head ^ Head.to_html page.head) ~html:page.html ~import_map ~title:(page_title page) ~styles:env.config.styles ()
   in
   let route = State.read_only (State.make env.route) in
   let routed body () = Kind.to_node (Element.Context.provide (Route.get ()) route (fun () -> Kind.of_node (body ()))) in
@@ -504,15 +518,15 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
     in
     let write text = !writer text in
     let finished =
-      Server.drive ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build
+      Server.drive ?nonce ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout ~sleep:env.sleep build
         ~on_shell:(fun ~fills shell ->
-          Async.bind (write (head (if fills then Printer.fill_script else ""))) (fun () -> write shell))
-        ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk id html))
+          Async.bind (write (head (if fills then Printer.fill_script_with nonce else ""))) (fun () -> write shell))
+        ~on_fill:(fun id _ links html -> write (links ^ Server.fill_chunk ?nonce id html))
         ~on_value:write
     in
     let written () = String.concat "" (List.rev !early) in
     let close islands =
-      (if islands || env.prefetch = `Off then "" else speculation_rules) ^ "</body></html>"
+      (if islands || env.prefetch = `Off then "" else speculation_rules nonce) ^ "</body></html>"
     in
     match Async.status finished with
     | Async.Failed m -> Async.failed m

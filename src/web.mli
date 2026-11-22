@@ -159,6 +159,7 @@ val nonce : unit -> string
 val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val read_file : string -> string option
+val random_hex : int -> string option
 val take_buffer : unit -> Stdlib.Buffer.t option
 val give_buffer : Stdlib.Buffer.t -> unit
 

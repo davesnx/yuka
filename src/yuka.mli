@@ -797,6 +797,9 @@ module Private : sig
   (** The inline script that streaming writes in the head. It defines
       [window.__yukaFill(id)]. *)
 
+  val fill_script_with : string option -> string
+  (** {!fill_script} with [nonce="N"] for [Some N]. *)
+
   type session
   (** One server render. Counts ids and collects pending parts. *)
 
@@ -1787,6 +1790,7 @@ module Server : sig
     ?dev:bool ->
     ?origins:string list ->
     ?log:(log_level -> string -> unit) ->
+    ?csp:[ `Nonce ] ->
     unit ->
     config
   (** [public] maps URL prefixes to directories ([("/static", "static")]).
@@ -1826,7 +1830,19 @@ module Server : sig
       header) or [`Warn], and the {!Yuka.Console} calls of a server render
       of a request. Without it, the adapter may give its own log
       ({!Adapter.default_log}); else messages go to the default sink: one
-      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
+      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug].
+
+      [csp] (default none): with [`Nonce], each full page that the cycle
+      renders gets a new random nonce, and the header
+      [Content-Security-Policy: script-src 'nonce-N' 'strict-dynamic';
+      object-src 'none'; base-uri 'none']. Each script that Yuka prints in
+      the page has [nonce="N"]: the module scripts, the import map, the
+      streamed fills, the speculation rules, the dev script, a JavaScript
+      [<script>], import map or speculation rules of the page tree, and each
+      [<script] start tag in [head]. JSON scripts do not get it. A
+      navigation answer has no nonce and no header: the client does not run
+      the scripts of an answer. A prerendered file and a prerender do not
+      get a nonce ({!Prerender.config}). *)
 
   val set_default_log : (log_level -> string -> unit) -> unit
   (** Replaces the default sink: where messages go outside a request (a
@@ -2030,7 +2046,8 @@ module Server : sig
   module Prerender : sig
     val config : config -> config
     (** The config a prerender renders with: [dev] off, whatever [~dev]
-        says, so no static file gets the dev script or the dev state; and a
+        says, so no static file gets the dev script or the dev state; [csp]
+        off, so no static file has a nonce that every visitor shares; and a
         page that renders a {!Yuka.Live.make} gives the 500 page and a log
         message instead of a file, since its state depends on the request.
         {!missing_page} uses it too. *)

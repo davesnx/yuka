@@ -230,7 +230,7 @@ module Private = struct
   let handle_action ~name ~header ~body =
     Server.handle_action ~live:(Live_server.mark_json (Live_server.main ())) ~name ~header ~body
 
-  let dev_script = Cycle.dev_script
+  let dev_script state = Cycle.dev_script state
   let dev_events = Cycle.dev_events ~log:(fun level m -> !Types.default_log level m)
   let node = Kind.to_node
 

@@ -125,7 +125,7 @@ let () =
         ^ theme_script ^ Demo_shared.Code_style.head)
       ~styles:[ "/static/style.css"; "/static/markdown.css" ] ~css:Demo_app.Yuka_css.sheets
       ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
-      ()
+      ~csp:`Nonce ()
   in
   Demo_app.Handlers.register ();
   if !reset_days < 1 then stop "the reset age must be at least 1 day";

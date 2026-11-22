@@ -542,6 +542,7 @@ let add_stylesheet : string -> unit =
 }|}]
 
 let read_file (_ : string) : string option = None
+let random_hex (_ : int) : string option = None
 
 let buffers : Stdlib.Buffer.t list ref = ref []
 

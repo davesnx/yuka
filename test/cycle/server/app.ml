@@ -170,7 +170,13 @@ module Pages = struct
         Yuka.Await.make ~async:(slow ()) ~loading:(text "wait")
           ~failed:(fun _ -> failwith "timeout secret")
           ~children:(fun v ->
-            if v = "explode" then failwith "fill secret" else if v = "island" then island "Late" else text v)
+            if v = "explode" then failwith "fill secret"
+            else if v = "island" then island "Late"
+            else if v = "scripts" then
+              Yuka.fragment
+                [ el "script" [ text "window.a=1" ];
+                  el "script" ~attrs:[ ("type", "application/json") ] [ text "{}" ] ]
+            else text v)
           ())
 
   let twice () =

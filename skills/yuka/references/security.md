@@ -47,9 +47,9 @@
   start tag and read the text as markup.
 - A page with no island ends with an inline
   `<script type="speculationrules">` (see "Prefetch" in
-  [Router](router.md)). Yuka sends no `Content-Security-Policy`. An app
-  that sets `script-src` must allow this element: add the hash of its
-  text, `'sha256-noc9jWPkx7Sf6fj4Eowojtg1qcTXxDSHRgItGG0axUw='`. The hash
+  [Router](router.md)). With ``~csp:`Nonce`` (see below) it has the nonce
+  of the page. An app that sets its own `script-src` must allow this
+  element: add the hash of its text, `'sha256-noc9jWPkx7Sf6fj4Eowojtg1qcTXxDSHRgItGG0axUw='`. The hash
   works in every browser that runs the rule. It is the hash of the text of
   this release and changes when the text changes. In tests with Chromium
   151 and Chromium 156, `'inline-speculation-rules'` also allowed the
@@ -57,3 +57,43 @@
   works and has no prefetch, and each page with no island reports a CSP
   violation (in the console, and to `report-uri` or `report-to` when the
   policy has one).
+
+## Content-Security-Policy
+
+Without `csp`, Yuka sends no `Content-Security-Policy`.
+``Yuka.Server.config ~csp:`Nonce`` makes a new random nonce for each full
+page that the cycle renders (128 bits from `/dev/urandom`, as 32 hex
+digits) and sends this header with the page:
+
+```
+Content-Security-Policy: script-src 'nonce-N' 'strict-dynamic'; object-src 'none'; base-uri 'none'
+```
+
+Each script that Yuka prints in the page gets `nonce="N"`:
+
+- the import map, the module script and each `modulepreload` link;
+- the fill script and each streamed fill (`__yukaFill`);
+- the speculation rules and the dev reload script;
+- each JavaScript `<script>`, import map and speculation rules in the
+  page tree, also in a streamed fill;
+- each `<script` start tag in the `~head` of the config. Write the start
+  tag as `<script>` or `<script ...>`.
+
+JSON scripts (`type="application/json"`, JSON-LD) do not get the nonce:
+the browser does not run them. With `'strict-dynamic'`, the scripts that
+these scripts load (`import()` of an island) need no nonce.
+
+- A navigation answer (a request with `Yuka-Navigate`) has no nonce and no
+  header. The client puts the answer in the page with `innerHTML`, so the
+  browser does not run its scripts; a nonce there would only show the
+  value to more readers.
+- Each response gets a new nonce, also an error or a not-found page.
+  Do not give a page with a nonce a shared cache rule (`Server.public`): a
+  cache would give the same nonce to all its readers.
+- A prerender (`Yuka.Server.Prerender.config`) turns `csp` off, and a
+  prerendered file is sent with no header.
+- When the route rules also give a `Content-Security-Policy` header, the
+  response has the two headers, and the browser applies the two. Do not
+  give a `script-src` there that blocks the scripts of Yuka.
+- When the server cannot read `/dev/urandom`, the page is a 500 and the
+  log tells why.
