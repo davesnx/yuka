@@ -47,7 +47,9 @@ let canvas_in workspace =
       </Yuka.Client>)
 let canvas () = canvas_in Model.Workspace.default
 
-let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
+let seconds_of_ms = function None -> 0. | Some ms -> Float.of_int (Int.min 6_000 (Int.max 0 ms)) /. 1000.
+
+let issue_view ~delay ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
   let all = comments = Some "all" in
   let comments =
     <Yuka.Await async=(Store.thread_async ~delay ~all issue.id)
@@ -73,7 +75,7 @@ let issue_view ?(delay = 0.6) ~comments (issue : Model.Issue.t) : Yuka.server Yu
   let description = Markup_view.nodes (Markdown.render issue.description) in
   <Views.Issue_page issue description comments props />
 
-let issue ~id ~issue ~comments () = Yuka.Server.page ~title:id (fun () -> issue_view ~comments issue)
+let issue ~id ~issue ~comments ~delay () = Yuka.Server.page ~title:id (fun () -> issue_view ~delay:(seconds_of_ms delay) ~comments issue)
 
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
@@ -134,7 +136,8 @@ module Workspace = struct
   let settings_dialog ~workspace:_ () = settings_dialog ()
   let canvas ~workspace () = canvas_in workspace
   let create ~workspace () = create_in workspace
-  let issue ~workspace:_ ~id ~issue:found ~comments () = Yuka.Server.page ~title:id (fun () -> issue_view ~comments found)
+  let issue ~workspace:_ ~id ~issue:found ~comments ~delay () =
+    Yuka.Server.page ~title:id (fun () -> issue_view ~delay:(seconds_of_ms delay) ~comments found)
   let issue_not_found ~workspace ~id ~path:_ () = issue_not_found_in workspace ~id
 
 end

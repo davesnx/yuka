@@ -315,10 +315,12 @@ await step("3c. partial navigation", async () => {
     [atTop, atEnd].every((box) => box.top >= 0 && box.bottom <= box.height) && atEnd.scrollY > 0,
     JSON.stringify({ atTop, atEnd }),
   );
-  const outlet = page.waitForResponse((r) => r.url().endsWith("/issue/YUK-3"));
+  await page.route("**/issue/YUK-3", (route) => route.continue({ url: route.request().url() + "?delay=600" }));
+  const outlet = page.waitForResponse((r) => new URL(r.url()).pathname === "/issue/YUK-3");
   await page.locator('.row[data-id="YUK-3"] .row-title').click();
   const response = await outlet;
   await page.waitForURL("**/issue/YUK-3");
+  await page.unroute("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
   check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
   await page.waitForSelector("[data-nav-progress=finished]");
@@ -1742,7 +1744,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   await page.keyboard.press("Escape");
   check("6h.7 Escape closes the card", (await openCard()) === "");
   await trigger.click();
-  await page.mouse.click(640, 20);
+  await page.mouse.click(100, 790);
   check("6h.8 a click outside closes the card", (await openCard()) === "" && page.url().endsWith("/w/stress"));
   await trigger.focus();
   await page.keyboard.press("Enter");
@@ -1838,7 +1840,7 @@ await step("7a. streaming", async () => {
           };
     }).observe(document, { childList: true, subtree: true });
   });
-  await early.goto(base + issuePath, { waitUntil: "commit" });
+  await early.goto(base + issuePath + "?delay=600", { waitUntil: "commit" });
   await early.waitForSelector("[class^=related-list_] li");
   type Seen = { order: number; t: number; skeleton: number; comments: number; related: number; title: string };
   const seen: Record<string, Seen | undefined> = await early.evaluate(() => (window as any).__firstSeen);
@@ -2038,7 +2040,7 @@ await step("7f. early start", async () => {
     }, 5);
   });
   const p = await ctx.newPage();
-  await p.goto(base + "/issue/YUK-1", { waitUntil: "networkidle" });
+  await p.goto(base + "/issue/YUK-1?delay=600", { waitUntil: "networkidle" });
   await p.waitForFunction(() => (window as any).__themeMenuStarted !== undefined && (window as any).__fills.length >= 2).catch(() => {});
   const r = await p.evaluate(() => ({
     started: (window as any).__themeMenuStarted as number | undefined,
@@ -2629,7 +2631,7 @@ await step("8e. a client that leaves during a streamed page", async () => {
   for (let i = 0; i < 3; i++)
     await new Promise<void>((done) => {
       const s = connect(Number(port), hostname, () =>
-        s.end(`GET /issue/YUK-2 HTTP/1.1\r\nHost: ${hostname}\r\n\r\n`, () => {
+        s.end(`GET /issue/YUK-2?delay=600 HTTP/1.1\r\nHost: ${hostname}\r\n\r\n`, () => {
           s.destroy();
           done();
         }),
