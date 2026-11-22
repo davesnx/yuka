@@ -1181,6 +1181,25 @@ let actions_of_stopped_islands finish =
       check "outer island action still running" "false" (bools (call_aborted 1));
       finish ())
 
+let own_link_entry =
+  runtime_entry ~name:"Own" (fun _ ->
+      Ok
+        (fun () ->
+          element "a"
+            [ Yuka.attr "id" "own"; Yuka.attr "href" "/two"; on "click" (fun e -> Event.prevent_default e; log "own") ]
+            [ text "own" ]))
+
+let island_link_prevented finish =
+  Yuka.stop ();
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    {|<yuka-island data-name="Own" data-id="i1" style="display:contents"><a id="own" href="/two">own</a></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|};
+  render ~islands:(runtime_registry [ own_link_entry ]) ();
+  let prevented = click "#own" "" in
+  check "a link click that an island handles is not navigated" "true|own|0" (bools prevented ^ "|" ^ log_read () ^ "|" ^ ints (calls ()));
+  finish ()
+
 let rerender_entry =
   runtime_entry ~name:"Rerender" (fun json ->
       Result.map
@@ -3240,6 +3259,7 @@ let all =
     ("unknown outlet is a full load", unknown_outlet);
     ("a bad title still navigates", bad_title);
     ("stop_within aborts the query calls of the islands it stops", actions_of_stopped_islands);
+    ("a link click that an island prevents is not navigated", island_link_prevented);
     ("a query call survives the render that its handler's writes cause", action_survives_own_render);
     ("that call is still aborted when its island stops", rerendered_call_aborted_by_outlet);
     ( "a query call then a navigation in one handler: the call is aborted",
