@@ -445,3 +445,12 @@ a.version:hover { color: var(--text); }
   .properties { width: auto; border-left: 0; border-top: 1px solid var(--border); min-height: 0; }
   .not-found, .about, .new-issue-page { padding: 24px 16px; }
 }
+
+[data-font-size="small"] body { zoom: 0.9; }
+[data-font-size="large"] body { zoom: 1.125; }
+[data-density="compact"] .row { height: 34px; }
+[data-density="compact"] .group-header { height: 30px; }
+[data-issue-ids="hidden"] .row-id { display: none; }
+[data-motion="reduced"] *, [data-motion="reduced"] *::before, [data-motion="reduced"] *::after { animation: none !important; transition: none !important; }
+[data-motion="reduced"]::view-transition-group(*), [data-motion="reduced"]::view-transition-old(*),
+[data-motion="reduced"]::view-transition-new(*) { animation: none !important; }

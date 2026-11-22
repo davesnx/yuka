@@ -1,0 +1,14 @@
+.settings { display: flex; flex-direction: column; }
+.row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 19px; border-bottom: 1px solid var(--border);
+}
+.name { font-size: 14px; }
+.choices { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.choice {
+  font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0;
+  padding: 4px 10px; cursor: pointer; white-space: nowrap;
+}
+.choice + .choice { border-left: 1px solid var(--border); }
+.choice:hover { color: var(--text); background: var(--bg-hover); }
+.choice[aria-pressed=true] { color: var(--text); background: var(--bg-selected); }
