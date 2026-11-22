@@ -7,10 +7,11 @@ exits 0; a usage error exits 2; a failure on valid arguments exits 1.
   yuka: unknown command frobnicate
   $ yuka frobnicate > /dev/null 2>&1; echo $?
   2
-  $ for c in routes islands css dev; do yuka $c --help > help; echo "$c $? $(head -1 help)"; done
+  $ for c in routes islands css i18n dev; do yuka $c --help > help; echo "$c $? $(head -1 help)"; done
   routes 0 usage: yuka routes --source FILE --shared
   islands 0 usage: yuka islands [--manifest] --dir DIR [--dir DIR]...
   css 0 usage: yuka css --dir DIR [--dir DIR]...
+  i18n 0 usage: yuka i18n --dir DIR --base LOCALE
   dev 0 usage: yuka dev [--build COMMAND] [--assets DIR]... [--state FILE] [--kill-after SECONDS] [--watch-exe FILE] -- SERVER [ARG]...
 
 yuka routes reads the file given by --source, not stdin, with the flags in any

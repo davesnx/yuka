@@ -75,6 +75,8 @@ module Layouts = struct
 
   let team ~team:_ ~squad ~children () =
     el "section" ~attrs:[ ("class", "team") ] [ text ("squad " ^ squad); children ]
+
+  let locale ~locale ~children () = Yuka.Context.provide I18n_shared.Messages.context locale (fun () -> children)
 end
 
 module Heads = struct
@@ -146,6 +148,14 @@ module Pages = struct
   let find ~q ~tag () =
     Server.page ~title:"Caf\xc3\xa9 \xe2\x9c\x93" ~lang:"es" ~html_attributes:[ ("data-theme", "a\"b") ] (fun () ->
         text (Option.value q ~default:"-" ^ "|" ^ String.concat "," tag))
+
+  let hello ~locale () =
+    let open I18n_shared in
+    Server.page ~lang:(Messages.tag locale) ~title:(Messages.title locale) (fun () ->
+        el "main"
+          [ el "h1" [ text (Messages.hello locale ~name:"Ada") ];
+            Yuka.runtime_island ~name:"Greeting" ~props:`Null (fun () ->
+                el "p" [ text (Messages.hello (Messages.current ()) ~name:"island") ]) ])
 
   let island name =
     Yuka.runtime_island ~name ~props:`Null (fun () ->

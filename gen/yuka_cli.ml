@@ -3,6 +3,7 @@ let commands =
     ("routes", Yuka_routes_cmd.main, "Write the shared or the server module of a Routes.ml route tree");
     ("islands", Yuka_islands.main, "Write the island registry or manifest of the island libraries");
     ("css", Yuka_css.main, "Write the module with the sheets of every [%yuka.css] declaration");
+    ("i18n", Yuka_i18n.main, "Write the module of typed message functions, one module per locale");
     ("dev", Yuka_dev.main, "Rebuild in watch mode, restart the server and reload the browser");
   ]
 

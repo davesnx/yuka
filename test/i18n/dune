@@ -1,0 +1,13 @@
+(library
+ (name i18n_shared)
+ (modes native melange)
+ (libraries yuka))
+
+(rule
+ (targets messages.ml)
+ (deps
+  (glob_files messages/*.messages))
+ (action
+  (with-stdout-to
+   messages.ml
+   (run %{bin:yuka} i18n --dir messages --base en))))

@@ -76,6 +76,7 @@ Router.make ~not_found:Pages.not_found
 - [`docs/router.md`](docs/router.md): routes, params and links.
 - [`docs/data.md`](docs/data.md): actions, forms, remote data and live data.
 - [`docs/security.md`](docs/security.md): what Yuka escapes and blocks.
+- [`docs/i18n.md`](docs/i18n.md): typed messages for each locale.
 
 ## For coding agents
 

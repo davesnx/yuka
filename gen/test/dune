@@ -5,3 +5,8 @@
 (cram
  (applies_to dune-rules.t)
  (deps ../../docs/getting-started.md))
+
+(cram
+ (applies_to i18n.t)
+ (deps
+  (package yuka)))

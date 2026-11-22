@@ -69,6 +69,8 @@ let routes =
       Router.get Later ~path:"/later" ~handler:App.Api.later;
       Router.delete Clear_feed ~path:"/feed.xml"
         ~handler:App.Api.clear;
+      Router.group ~path:"/:locale<I18n_shared.Messages.locale>" ~layout:App.Layouts.locale
+        [ Router.route Hello ~path:"/hello" ~page:App.Pages.hello ];
       Router.redirect ~path:"/old" ~to_:(Permanent "/");
       Router.redirect ~path:"/tmp/:x<string>" ~to_:(Temporary "/team/:x/json");
     ]

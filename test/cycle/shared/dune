@@ -1,6 +1,6 @@
 (library
  (name cycle_shared)
- (libraries yuka))
+ (libraries yuka i18n_shared))
 
 (rule
  (targets routes.ml)

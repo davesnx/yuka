@@ -2252,6 +2252,25 @@ let csp =
 
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
+let i18n =
+  [
+    ( "a locale route group: lang, title and messages of the locale, and the locale for islands",
+      fun () ->
+        let es = get "/es/hello" in
+        check_status es 200;
+        check_true "lang es" (contains es.body {|<html lang="es">|});
+        check_true "title es" (contains es.body "<title>Mensajes</title>");
+        check_true "page message" (contains es.body "<h1>\xc2\xa1Hola, Ada!</h1>");
+        check_true "island message on the server" (contains es.body "<p>\xc2\xa1Hola, island!</p>");
+        check_true "locale written for the islands"
+          (contains es.body {|data-name="yuka.locale">"es"</script>|});
+        let en = get "/en/hello" in
+        check_true "lang en" (contains en.body {|<html lang="en">|});
+        check_true "page message en" (contains en.body "<h1>Hello, Ada!</h1>");
+        check_true "island message en" (contains en.body "<p>Hello, island!</p>");
+        check_status (get "/fr/hello") 404 );
+  ]
+
 let () =
   Alcotest.run "cycle"
     [
@@ -2272,4 +2291,5 @@ let () =
       ("layout values", cases layout_values);
       ("request api", cases request_api);
       ("csp", cases csp);
+      ("i18n", cases i18n);
     ]

@@ -1,0 +1,3 @@
+title = Mensajes
+hello = ¡Hola, {name}!
+braces = {{literal}} y {count} de {count}

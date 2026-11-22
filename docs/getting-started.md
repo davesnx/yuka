@@ -390,3 +390,4 @@ let assets =
 - [`state.md`](state.md): State, memos, effects and when updates run.
 - [`data.md`](data.md): actions, forms, remote data, live data, `Await`
   and `Catch`.
+- [`i18n.md`](i18n.md): typed messages for each locale with `yuka i18n`.
