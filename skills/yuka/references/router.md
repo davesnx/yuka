@@ -313,6 +313,25 @@ the announcer change as for other navigations. You can use both
 attributes on one link. Without client navigation, the full page load
 scrolls as the browser does.
 
+After an `Action.call`, the server-rendered parts of the page can show
+old data. `Yuka.Browser.refresh ()` loads the URL shown again from the
+server, with no cached answer, and puts in the new content:
+
+```ocaml
+Yuka.Async.on_result (Yuka.Action.call Actions.close_issue issue.id) (function
+  | Ok (Ok ()) -> Yuka.Browser.refresh ()
+  | Ok (Error _) | Error _ -> ())
+```
+
+The refresh replaces the current history entry, so Back does not change.
+The page does not scroll, and the announcer does not change. The focus
+stays on the focused element when it is still in the page. Else it goes
+to the new element with the same `id`, or else to the new element at the
+same place with the same tag. When there is no such element, the focus
+moves as for other navigations. A form success with no redirect and no
+`on_ok` calls `Yuka.Browser.refresh ()`. Without client navigation, the
+refresh is a full page load of the URL shown.
+
 `Yuka.Browser.navigating` is a read-only State: `true` from the click
 until the new page is shown (or a full page load starts in its place). An
 island can read it to show a progress bar:
@@ -322,7 +341,8 @@ let[@client] make () =
   <div class_=(if State.get Yuka.Browser.navigating then "progress on" else "progress") />
 ```
 
-It is always `false` on the server.
+It is also `true` during `Yuka.Browser.refresh ()`, until the new
+content is shown. It is always `false` on the server.
 
 A page with a `Yuka.Await` streams on a client navigation as on a first
 load. The server waits a short time (100 ms) for every `Await` and async

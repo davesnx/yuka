@@ -45,4 +45,5 @@ val warm : string -> string -> unit
 val transition : string -> (unit -> unit) -> unit
 val adopt_stylesheets : unit -> unit
 val live : unit -> unit
-val settle : node -> string -> unit
+val settle : node -> string -> bool -> unit
+val hold_focus : unit -> unit -> bool

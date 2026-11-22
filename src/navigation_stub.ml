@@ -114,6 +114,8 @@ let go f fail =
 let navigate ~replace ~keep_scroll href =
   go (fun r -> r.navigate ~replace ~keep_scroll href) (fun () -> Web.navigate replace href)
 
+let refresh () = go (fun r -> r.refresh ()) Platform.reload
+
 let on_click e =
   if (not !failed) && Web.plain_click e then
     match Web.link_href false (Web.target e) with
@@ -167,6 +169,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
       Web.add_listener (Web.window ()) "popstate" on_popstate);
   islands ();
   Platform.client_navigate := Some navigate;
+  Platform.client_refresh := refresh;
   match !router with
   | Some r -> r.boot !settings
   | None when Array.length (Web.query_all doc "meta[name=yuka-prefetch][content=visible],meta[name=yuka-prefetch][content=idle]") > 0 ->
@@ -177,6 +180,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
 
 let stop () =
   Platform.client_navigate := None;
+  Platform.client_refresh := Platform.reload;
   Navigation_state.set false;
   on := false;
   cancel ();

@@ -2957,6 +2957,55 @@ let keep_scroll finish =
               check "a navigation with no option scrolls to the top" "scroll:0" (log_scrolls ());
               finish ())))
 
+let refresh_in_place finish =
+  let body n extra =
+    page ({|<h1 id="h">|} ^ n ^ {|</h1>|} ^ extra ^ {|<p><button>go</button></p><a id="a" href="/a">a</a>|})
+  in
+  setup (body "one" {|<input id="q">|});
+  plain_start ();
+  let length = history_length () and before = announced () in
+  set_scroll 300.;
+  focus_on "#q";
+  log_clear ();
+  Browser.refresh ();
+  check "Browser.navigating is true during a refresh" "true" (navigating ());
+  until "the refresh fetches" (fun () -> calls () > 0)
+    (fun () ->
+      check "it asks for the URL shown" "true" (bools (Js.String.includes ~search:"/start?x=1" (call_url 0)));
+      resolve_headers 0 (doc "Two" (body "two" {|<input id="q">|})) 200 [| ("cache-control", "private, max-age=60") |];
+      tick (fun () ->
+          check "the fresh server content is shown" "two" (attr_text "#h");
+          check "Browser.navigating is false after it" "false" (navigating ());
+          check "no new history entry" (ints length) (ints (history_length ()));
+          check "at the same URL" "/start?x=1" (location_ ());
+          check "the scroll is kept" "true" (bools (List.mem (log_scrolls ()) [ ""; "scroll:300" ]));
+          check "the focus stays on the field with the same id" "q" (focused ());
+          check "the announcer does not change" before (announced ());
+          focus_on "button";
+          set_scroll 120.;
+          log_clear ();
+          Browser.refresh ();
+          until "a refresh does not use the cached answer" (fun () -> calls () > 1)
+            (fun () ->
+              resolve_call 1 (doc "Three" (body "three" {|<input id="q">|})) "";
+              tick (fun () ->
+                  check "new content again" "three" (attr_text "#h");
+                  check "the focus stays on the button at the same place" "button" (focused ());
+                  check "the scroll is kept again" "true" (bools (List.mem (log_scrolls ()) [ ""; "scroll:120" ]));
+                  focus_on "#a";
+                  Browser.refresh ();
+                  until "the third refresh fetches" (fun () -> calls () > 2)
+                    (fun () ->
+                      resolve_call 2 (doc "Four" (page {|<h1 id="h">four</h1>|})) "";
+                      tick (fun () ->
+                          check "when the focused element is gone, the focus moves to the h1" "h" (focused ());
+                          check "the announcer still does not change" before (announced ());
+                          check "still no new history entry" (ints length) (ints (history_length ()));
+                          finish ()))
+                    100))
+            100))
+    100
+
 let fire_touch : string -> string -> unit =
   [%mel.raw
     "function (sel, name) { document.querySelector(sel).dispatchEvent(new window.Event(name, { bubbles: true })) }"]
@@ -3713,6 +3762,7 @@ let all =
     ("a navigation to the URL shown replaces its entry", same_url_replaces);
     ("a replace navigation from a link, Browser.navigate and Routes.replace replaces its entry", replace_navigations);
     ("a keep-scroll navigation from a link and Browser.navigate keeps the scroll", keep_scroll);
+    ("Browser.refresh swaps in fresh content and keeps the entry, the scroll and the focus", refresh_in_place);
     ("start twice adds listeners once", start_twice_listeners);
     ("mount starts islands, navigation off", mount_without_navigation);
     ("mount starts islands, navigation on", mount_with_navigation);

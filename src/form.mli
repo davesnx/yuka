@@ -112,8 +112,11 @@ val make :
     true; field errors show, an [Error error] shows as a form error with the
     text of {!Status.error_to_string}, and on [Ok output] [on_ok output] runs, or
     else the page
-    follows the server's [redirect] (with [run], the page URL) with a
-    client navigation, as a post with no JavaScript does. A [redirect] to
+    follows the server's [redirect] with a
+    client navigation, as a post with no JavaScript does. With no
+    [redirect] (and with [run]) the page calls {!Browser.refresh}: it loads
+    the page URL again and keeps the history entry, the scroll and the
+    focus. A [redirect] to
     another origin is not followed: it shows as the form error
     ["protocol error: refused a redirect"], and in a development build the
     browser console shows its URL.

@@ -16,6 +16,21 @@ val navigate : ?replace:bool -> ?keep_scroll:bool -> string -> unit
     URL (read as {!Yuka.attr} reads a URL) does nothing; a dev build logs the
     first one. *)
 
+val refresh : unit -> unit
+(** Browser only: raises [Invalid_argument] on native. Loads the URL shown
+    again from the server (the fragment does not count), with no cached
+    answer, and swaps in the new content. Use it after an [Action.call]
+    to show the new server data. After [render ~islands] with navigation,
+    it is a client navigation that replaces the current history entry,
+    does not scroll, does not change the announcer, and keeps the focus:
+    on the focused element when it is still in the page, else on the new
+    element with the same [id], else on the new element at the same place
+    with the same tag. When it finds no such element, the focus moves as
+    for other navigations. {!navigating} is [true] until the new content
+    shows, as for other navigations. Otherwise it does
+    [location.replace] with the URL shown, a full page load. A form
+    success with no redirect and no [on_ok] calls it. *)
+
 val back : unit -> unit
 (** Browser only: raises [Invalid_argument] on native. Closes the overlay
     that a client navigation to a route with [?overlay] showed: when the

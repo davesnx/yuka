@@ -204,7 +204,9 @@ function of the form:
   `Yuka.Form.pending form` is a read-only State, true while it waits; `disabled` above
   updates with it. On
   `Ok output`, `on_ok output` runs, or else the page follows the redirect
-  of the server with a client navigation.
+  of the server with a client navigation. With no redirect, the page
+  calls `Yuka.Browser.refresh ()`: it loads the page again from the server
+  and keeps the history entry, the scroll position and the focus.
 - Two forms of one action on a page need different `key`s:
   `<Yuka.Form action key="top">`.
 

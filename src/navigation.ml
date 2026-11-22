@@ -371,7 +371,7 @@ let follow root place s =
               !start_islands ())
   end
 
-let show ~dir ~push ~replace ~restore url a =
+let show ~dir ~push ~replace ~restore ~refresh url a =
   let final =
     match hash_of url with
     | "" -> a.final
@@ -408,6 +408,7 @@ let show ~dir ~push ~replace ~restore url a =
       let gen = !nav in
       let apply () =
         if !nav = gen then begin
+          let kept = if refresh then Navigation_web.hold_focus () else fun () -> false in
           loaded := Web.current_url ();
           shown_key := !current_key;
           Navigation_state.set false;
@@ -440,13 +441,13 @@ let show ~dir ~push ~replace ~restore url a =
           !Platform.swapped target;
           !start_islands ();
           Navigation_web.live ();
-          Navigation_web.settle (Option.value target ~default:(Web.document ())) (hash_of final)
+          if not (kept ()) then Navigation_web.settle root (hash_of final) (not refresh)
         end
         else Option.iter (fun s -> s.cancel ()) a.stream
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 
-let load ~overlay ~dir ~push ~replace ~restore url =
+let load ~overlay ~dir ~push ~replace ~restore ~refresh url =
   if not !started then assign ~replace url
   else begin
     cancel_pending ();
@@ -456,7 +457,7 @@ let load ~overlay ~dir ~push ~replace ~restore url =
     let gen = !nav in
     let apply = function
       | _ when !nav <> gen -> ()
-      | Some a -> show ~dir ~push ~replace ~restore url a
+      | Some a -> show ~dir ~push ~replace ~restore ~refresh url a
       | None -> assign ~replace url
     in
     let key = page_key url in
@@ -483,7 +484,7 @@ let load ~overlay ~dir ~push ~replace ~restore url =
           pending := None;
           assign ~replace url)
     in
-    match lookup overlay key with
+    match if refresh then None else lookup overlay key with
     | Some e -> (
         let use = function
           | Some a when e.prefetched && a.status = 204 -> if !nav = gen then fetch ()
@@ -497,15 +498,18 @@ let load ~overlay ~dir ~push ~replace ~restore url =
     | None -> fetch ()
   end
 
-let navigate ~replace ~keep_scroll url =
+let go ~replace ~keep_scroll ~refresh url =
   save_scroll ();
-  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some (Web.scroll_y ()) else None) url
+  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some (Web.scroll_y ()) else None) ~refresh url
+
+let navigate ~replace ~keep_scroll url = go ~replace ~keep_scroll ~refresh:false url
+let refresh () = go ~replace:true ~keep_scroll:true ~refresh:true (Web.current_url ())
 
 let back () =
   match showing () with
   | Some o when not o.direct ->
       save_scroll ();
-      load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None o.url
+      load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None ~refresh:false o.url
   | _ -> Web.history_back ()
 
 let on_over e =
@@ -588,7 +592,7 @@ let on_popstate _ =
     load
       ~overlay:(List.exists (fun (o : overlay) -> String.equal o.key next && String.equal o.under (beneath ())) !overlays)
       ~dir ~push:false ~replace:false
-      ~restore:(Some y) (Web.current_url ())
+      ~restore:(Some y) ~refresh:false (Web.current_url ())
 
 let handle e =
   match Navigation_web.event_type e with
@@ -643,4 +647,4 @@ let stop () =
   clear ();
   Platform.acted := ignore
 
-let router : Types.router = { boot; navigate; back; handle; stop }
+let router : Types.router = { boot; navigate; refresh; back; handle; stop }

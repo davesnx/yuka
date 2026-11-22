@@ -904,6 +904,7 @@ module Private : sig
     client_x : Event.t -> float;
     client_y : Event.t -> float;
     navigate : replace:bool -> keep_scroll:bool -> string -> unit;
+    refresh : unit -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
   }
@@ -1172,7 +1173,9 @@ val render :
       attribute keeps the scroll position, as
       [Browser.navigate ~keep_scroll:true].
     - [popstate] loads the entry's URL without pushing history.
-    - {!Browser.navigate} is a client navigation.
+    - {!Browser.navigate} is a client navigation. {!Browser.refresh} is a
+      client navigation to the URL shown that keeps the history entry, the
+      scroll and the focus.
 
     A client navigation loads the URL with the header [Yuka-Navigate] set
     to the [data-k] keys of the [<yuka-outlet>] elements of the page, in

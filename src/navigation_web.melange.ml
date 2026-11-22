@@ -335,11 +335,11 @@ let live : unit -> unit =
   if (!r.isConnected && d.body) d.body.appendChild(r);
 }|}]
 
-let settle : node -> string -> unit =
+let settle : node -> string -> bool -> unit =
   [%mel.raw
-    {|function (root, hash) {
+    {|function (root, hash, say) {
   const d = document, h = (root = root.body || root).querySelector("h1"), a = d.activeElement;
-  if (d.__yukaLive) d.__yukaLive.textContent = d.title || (h ? h.textContent.trim() : "");
+  if (say && d.__yukaLive) d.__yukaLive.textContent = d.title || (h ? h.textContent.trim() : "");
   if (a && a !== d.body && (a.matches("input,textarea,select,[contenteditable]") || (a !== root && root.contains(a)))) return;
   const f = function (t) {
     if (!t) return false;
@@ -354,4 +354,22 @@ let settle : node -> string -> unit =
   try { id = decodeURIComponent(id) } catch (e) {}
   if (f(root.querySelector("[autofocus]")) || f(id && d.getElementById(id)) || f(h) || f(root)) return;
   for (const t of root.querySelectorAll("*")) if (f(t)) return;
+}|}]
+
+let hold_focus : unit -> unit -> bool =
+  [%mel.raw
+    {|function () {
+  const d = document, a = d.activeElement, p = [];
+  if (!a || a === d.body) return function () { return false };
+  for (let n = a; n.parentElement && n !== d.body; n = n.parentElement) p.unshift(Array.prototype.indexOf.call(n.parentElement.children, n));
+  return function () {
+    let t = a;
+    if (!a.isConnected) {
+      t = a.id ? d.getElementById(a.id) : d.body;
+      if (!a.id) for (const i of p) t = t && t.children[i];
+    }
+    if (!t || t.tagName !== a.tagName) return false;
+    t.focus({ preventScroll: true });
+    return d.activeElement === t;
+  };
 }|}]
