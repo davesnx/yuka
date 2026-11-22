@@ -680,6 +680,14 @@ let markdown_safety () =
   unsafe_markdown html;
   Alcotest.(check int) "raw HTML shown as text in the description and the comment" 2 (count html {|&lt;img src="x" onerror="alert('inline')"&gt;|})
 
+let code_style_transpose () =
+  let check = Alcotest.(check (option (list (list int)))) in
+  check "rows of the same length" (Some [ [ 1; 3 ]; [ 2; 4 ] ]) (Code_style.transpose [ [ 1; 2 ]; [ 3; 4 ] ]);
+  check "a later row is shorter" None (Code_style.transpose [ [ 1; 2 ]; [ 3 ] ]);
+  check "a later row is longer" None (Code_style.transpose [ [ 1 ]; [ 3; 4 ] ]);
+  check "no rows" (Some []) (Code_style.transpose []);
+  check "empty rows" (Some []) (Code_style.transpose [ []; [] ])
+
 let region_of_host () =
   Alcotest.(check (option string)) "neon" (Some "eu-central-1, aws") (Store.region_of_host "ep-name-123456.eu-central-1.aws.neon.tech");
   Alcotest.(check (option string)) "neon with a cell" (Some "us-east-1, aws")
@@ -712,6 +720,7 @@ let () =
           Alcotest.test_case "markdown in the issue page" `Quick markdown_page;
           Alcotest.test_case "markdown keeps out HTML and unsafe links" `Quick markdown_safety;
           Alcotest.test_case "code in the seed data is highlighted" `Quick seed_code_is_highlighted;
+          Alcotest.test_case "code style transpose refuses rows of different lengths" `Quick code_style_transpose;
         ] );
       ( "actions",
         [

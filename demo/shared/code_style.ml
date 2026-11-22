@@ -60,12 +60,21 @@ let rec merge_spans = function
   | node :: rest -> node :: merge_spans rest
   | [] -> []
 
-let rec transpose = function [] | [] :: _ -> [] | rows -> List.map List.hd rows :: transpose (List.map List.tl rows)
+let rec transpose rows =
+  match List.partition_map (function first :: rest -> Left (first, rest) | [] -> Right ()) rows with
+  | [], _ -> Some []
+  | split, [] -> Option.map (List.cons (List.map fst split)) (transpose (List.map snd split))
+  | _ :: _, _ :: _ -> None
+
+let rec themed_tokens = function
+  | [] -> Some []
+  | line :: lines -> Option.bind (transpose line) (fun tokens -> Option.map (List.cons tokens) (themed_tokens lines))
 
 let highlight grammar source =
   match List.map (fun theme -> Ochre.to_tokens highlighter ~theme ~lang:grammar source) themes with
   | lines_per_theme ->
-      Some (merge_spans (List.concat_map (fun lines -> List.map token_node (transpose lines)) (transpose lines_per_theme)))
+      Option.bind (transpose lines_per_theme) themed_tokens
+      |> Option.map (fun lines -> merge_spans (List.concat_map (List.map token_node) lines))
   | exception (Failure _ | Invalid_argument _ | Not_found) -> None
 
 let cache : (string * string, Markup.node) Hashtbl.t = Hashtbl.create 64
