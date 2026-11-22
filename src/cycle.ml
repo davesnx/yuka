@@ -15,7 +15,9 @@ type page = { title : string; head : string; body : unit -> node }
 
 let page ?(title = "") ?(head = "") body = { title; head; body }
 
-type layer = { key : string; data : bool; wrap : server Kind.element -> server Kind.element }
+type layer = { key : string; wrap : server Kind.element -> server Kind.element }
+
+let data_key key data = key ^ "#" ^ Option.value (Data_digest.of_value data) ~default:"-"
 type plan = { layers : layer list; page : page; overlay : page option }
 
 type cache = string
@@ -434,7 +436,7 @@ let mentions text part =
 
 let rec shared sent (layers : layer list) =
   match (sent, layers) with
-  | s :: sent, l :: layers when (not l.data) && String.equal s l.key -> 1 + shared sent layers
+  | s :: sent, l :: layers when String.equal s l.key && not (String.ends_with ~suffix:"#-" s) -> 1 + shared sent layers
   | _ -> 0
 
 let speculation_rules base =

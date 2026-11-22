@@ -223,11 +223,13 @@ end
 let last_request : Server.request option ref = ref None
 
 module Loaders = struct
+  let squad_version = ref ""
+
   let squad _req ~team =
     note "squad start";
     match team with
     | "wait" -> later ()
-    | t -> Async.return (Ok ("of " ^ t))
+    | t -> Async.return (Ok ("of " ^ t ^ !squad_version))
 
   let profile req ~team ~user =
     note "profile start";

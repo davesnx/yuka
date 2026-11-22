@@ -2077,11 +2077,23 @@ module Server : sig
         (case-insensitive) of a later list replaces that name of the
         earlier ones; a name repeated in one list is kept. *)
 
-    type layer = { key : string; data : bool; wrap : server element -> server element }
-    (** A layout on the path of a route. [key] names its outlet; [data] is
-        true when the layout takes a loader result, so a client navigation
-        renders it again instead of keeping it; [wrap] puts the layout
-        around its children. *)
+    type layer = { key : string; wrap : server element -> server element }
+    (** A layout on the path of a route. [key] names its outlet: a client
+        navigation keeps the layout when the page in the browser has an
+        outlet with the same key. [wrap] puts the layout around its
+        children. *)
+
+    val data_key : string -> 'a -> string
+    (** [data_key key data] is the key of a layout that takes loader
+        results: [key], then [#] and the MD5 hex digest of a random secret
+        of the process followed by [Marshal.to_string data [Closures]]. The
+        secret keeps the page from showing a plain digest of loader data that
+        it does not render; another process has another secret, so its first
+        navigation renders the layout again. A client navigation keeps the
+        layout while its loader results stay the same, and renders it again
+        when they change. When [Marshal] refuses [data] (a custom block that
+        has no serializer), the key ends with [#-], which never matches: the
+        layout renders again on each navigation. *)
 
     type plan = { layers : layer list; page : page; overlay : page option }
     (** What a page route renders. [layers] are outermost first. [overlay]
