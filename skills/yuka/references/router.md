@@ -408,10 +408,11 @@ element changes, and the content of the link does not change. For
 assistive technology, Yuka announces the title of the new page.
 
 A page with a `Yuka.Await` streams on a client navigation as on a first
-load. The server waits a short time (100 ms) for every `Await` and async
-value. When they settle in time, the new page comes in one piece. When
-they do not, the new page is shown at once with the `loading` content of
-each `Await`, and `navigating` becomes `false`. Each `Await` then replaces
+load. The server waits for each `Await` as its `blocking` says (by
+default 100 ms; see [Data](data.md#values-that-load-await)). When every
+value settles in time, the new page comes in one piece. When one does
+not, the new page is shown at once with the `loading` content of each
+pending `Await`, and `navigating` becomes `false`. Each `Await` then replaces
 its `loading` content when its value comes, and its islands start. An
 island that holds a pending `Await` starts after that `Await` is filled.
 The title, focus, scroll and announcer change when the new page is shown,

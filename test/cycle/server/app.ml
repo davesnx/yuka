@@ -41,6 +41,17 @@ let finish_second v =
   let _, resolve, _ = !second_state in
   resolve v
 
+let fast_state : (string Async.t * (string -> unit) * (string -> unit)) ref =
+  ref (Async.make ())
+
+let finish_fast v =
+  let _, resolve, _ = !fast_state in
+  resolve v
+
+let fail_slow m =
+  let _, _, fail = !slow_state in
+  fail m
+
 let fail_first = ref false
 let in_home = ref ignore
 
@@ -50,7 +61,8 @@ let reset () =
   events := [];
   waiting := [];
   slow_state := Async.make ();
-  second_state := Async.make ()
+  second_state := Async.make ();
+  fast_state := Async.make ()
 
 let el tag ?(attrs = []) children =
   Yuka.element tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
@@ -185,6 +197,14 @@ module Pages = struct
     in
     let first, _, _ = !slow_state and second, _, _ = !second_state in
     Server.page ~title:"Twice" (fun () -> el "main" [ await first; await second ])
+
+  let blocking () =
+    let await blocking async =
+      Yuka.Await.make ~async ~loading:(text "wait") ~failed:(fun _ -> text "failed") ~blocking ~children:text ()
+    in
+    let first, _, _ = !slow_state and second, _, _ = !second_state and third, _, _ = !fast_state in
+    Server.page ~title:"Blocking" (fun () ->
+        el "main" [ await `Yes first; await `No second; await (`Timeout 0.5) third ])
 
   let broken () = Server.page ~title:"Broken" (fun () -> failwith "shell secret")
   let boom ~exploding () = Server.page (fun () -> text exploding)

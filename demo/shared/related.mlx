@@ -4,7 +4,7 @@ module Css = [%yuka.css "related.css"]
 let[@client] make ~(related : Model.Issue.t list Yuka.Async.t) () =
   <div class_=Css.related>
     <h2 class_="section-title">"Related issues"</h2>
-    <Yuka.Await async=related
+    <Yuka.Await async=related blocking=`No
        loading=(<Views.Skeleton lines=3 />)
        failed=(fun message -> <p class_="error">(Yuka.text ("Could not load: " ^ message))</p>)>
        (fun issues ->

@@ -180,7 +180,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
   | Some d when d == doc -> ()
   | _ ->
       listening := Some doc;
-      Web.add_listener doc "click" on_click;
+      Web.add_listener (Web.window ()) "click" on_click;
       List.iter (fun n -> Web.add_listener doc n on_link) link_events;
       List.iter (fun n -> Web.add_listener doc n on_leave) leave_events;
       Web.add_listener (Web.window ()) "submit" on_submit;
@@ -208,7 +208,7 @@ let stop () =
   (match !listening with
   | Some doc ->
       listening := None;
-      Web.remove_listener doc "click" on_click;
+      Web.remove_listener (Web.window ()) "click" on_click;
       List.iter (fun n -> Web.remove_listener doc n on_link) link_events;
       List.iter (fun n -> Web.remove_listener doc n on_leave) leave_events;
       Web.remove_listener doc "pointermove" on_move;

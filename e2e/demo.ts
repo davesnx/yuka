@@ -326,7 +326,7 @@ await step("3b. router", async () => {
     ctx.waitForEvent("page"),
     page.locator('.row[data-id="YUK-2"] .row-title').click({ modifiers: ["Control"] }),
   ]);
-  await popup.waitForLoadState();
+  await popup.waitForURL("**/issue/YUK-2").catch(() => {});
   check("3b.10 ctrl-click is not intercepted (opens a new page)", popup.url().endsWith("/issue/YUK-2") && new URL(page.url()).pathname === "/", `${popup.url()} current=${page.url()}`);
   await popup.close();
   const reloadLinks = await page.locator("a[data-yuka-reload]").count();
