@@ -50,6 +50,8 @@ let routes =
       Router.route Live_public ~path:"/live-public" ~page:App.Pages.live
         ~cache:(public ~max_age:60 ());
       Router.route Plain_public ~path:"/plain-public" ~page:plain ~cache:minute ~prefetch:`Visible;
+      Router.route Framed ~path:"/framed" ~page:plain
+        ~headers:[ ("X-Content-Type-Options", ""); ("referrer-policy", ""); ("x-frame-options", "") ];
       Router.get Cookies ~path:"/cookies" ~handler:App.Api.cookies;
       Router.get Bad_header ~path:"/bad-header" ~handler:App.Api.bad_header;
       Router.put Put_thing ~path:"/thing" ~handler:App.Api.thing

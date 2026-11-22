@@ -1910,7 +1910,8 @@ module Server : sig
             action call ([POST] with a JSON body; answers as described for
             {!Action.reject}), else 405. From the headers first: the origin
             (403, see [config ~origins]), the action name (404) and the
-            content type (415); then at most 1 MiB of body (413).
+            content type (415); then at most 1 MiB of body (413). The
+            answers have the root rule headers.
             [/_yuka/csrf]: for [GET] and [HEAD] with the same origin rule,
             [{"csrf":TOKEN}] from {!Backend.csrf_token} with [no-store] (the live
             client renews an expired token with it); 403 for another
@@ -2079,9 +2080,13 @@ module Server : sig
       prerender:bool ->
       unit ->
       rules
-    (** [headers] holds one list per node from the root down. A header name
-        (case-insensitive) of a later list replaces that name of the
-        earlier ones; a name repeated in one list is kept. *)
+    (** [headers] holds one list per node from the root down, after the
+        default list [x-content-type-options: nosniff],
+        [referrer-policy: strict-origin-when-cross-origin] and
+        [x-frame-options: SAMEORIGIN]. A header name (case-insensitive) of
+        a later list replaces that name of the earlier ones; a name
+        repeated in one list is kept. A header with an empty value is not
+        sent. *)
 
     type layer = { key : string; data : bool; wrap : server element -> server element }
     (** A layout on the path of a route. [key] names its outlet; [data] is
@@ -2139,7 +2144,9 @@ module Server : sig
       missing:fallback ->
       app
     (** [build] is a digest of the route tree. [headers] are the rule
-        headers of the root, sent with every 404 and 500 page. [prerender]
+        headers of the root, after the defaults of {!rules}, sent with
+        every 404 and 500 page and every answer of
+        [/_yuka/action/<name>]. [prerender]
         lists the paths where {!Prerender.seeds} starts. [pages] are the
         rules of the page routes; each page prints the highest prefetch
         level among them. [missing] gives the page when no route matches. *)

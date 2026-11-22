@@ -42,6 +42,16 @@ let merge_headers lists =
     (fun acc l -> List.filter (fun (n, _) -> not (has_header n l)) acc @ l)
     [] lists
 
+let security_headers =
+  [
+    ("x-content-type-options", "nosniff");
+    ("referrer-policy", "strict-origin-when-cross-origin");
+    ("x-frame-options", "SAMEORIGIN");
+  ]
+
+let rule_headers lists =
+  List.filter (fun (_, v) -> not (String.equal v "")) (merge_headers (security_headers :: lists))
+
 type rules = {
   headers : (string * string) list;
   cache : cache option;
@@ -63,7 +73,7 @@ let lasting cache =
     (String.split_on_char ',' cache)
 
 let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
-  let headers = merge_headers headers in
+  let headers = rule_headers headers in
   let prefetch =
     match prefetch with
     | `Idle when not (Option.fold ~none:false ~some:lasting (answer_cache headers cache)) -> `Visible
@@ -128,7 +138,7 @@ let app ~build ~headers ~prerender ~pages ~find ~resolve ~missing =
   App
     {
       build;
-      headers = merge_headers [ headers ];
+      headers = rule_headers [ headers ];
       prerender;
       prefetch = List.fold_left highest `Off pages;
       find;
@@ -719,7 +729,12 @@ let action env (r : request) raw =
   | [ name ], `POST -> (
       let context = env.context in
       let json (status, body) =
-        Respond { status; headers = [ ("content-type", "application/json"); no_store_header ]; body = String body }
+        Respond
+          {
+            status;
+            headers = merge_headers [ env.root_headers; [ ("content-type", "application/json"); no_store_header ] ];
+            body = String body;
+          }
       in
       let name = Router.decode ~plus:false name in
       let origins = env.config.origins in

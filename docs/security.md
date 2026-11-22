@@ -45,6 +45,40 @@
   SVG `<foreignObject>`) they are ordinary elements and their text is
   escaped; so it is inside `<select>`, where an HTML parser can drop the
   start tag and read the text as markup.
+- Default headers. Every page, handler answer, action answer
+  (`/_yuka/action/NAME`), 403 of a stop, and 404 or 500 page has these
+  headers. The `~headers` of the route rules come after them:
+
+  | Header | Value |
+  |---|---|
+  | `X-Content-Type-Options` | `nosniff` |
+  | `Referrer-Policy` | `strict-origin-when-cross-origin` |
+  | `X-Frame-Options` | `SAMEORIGIN` |
+
+  `nosniff` stops the browser from reading a text answer as a script or a
+  style sheet. `strict-origin-when-cross-origin` sends the full URL to this
+  origin, only the origin to another site, and nothing from HTTPS to
+  HTTP: a path or a query that holds a token does not go to other sites,
+  and analytics still see the site. It is the default of current
+  browsers; the header gives it to older ones. `SAMEORIGIN` lets only
+  pages of this origin put the page in a frame, against clickjacking.
+  Yuka does not use `Content-Security-Policy: frame-ancestors`, because an
+  app or a later Yuka version can send its own `Content-Security-Policy`,
+  and when there are two such headers, both apply. A browser ignores
+  `X-Frame-Options` when a `Content-Security-Policy` has `frame-ancestors`.
+
+  A route rule replaces a default with its own value, or removes it with
+  an empty value. The rules of a node apply to its children:
+
+  ```ocaml
+  Router.route Widget ~path:"/widget" ~page:widget
+    ~headers:[ ("x-frame-options", "") ]
+  ```
+
+  Action answers and the 404, 500 and 403 pages use the rules of the
+  root. A static file (`/_yuka/app`, a `public` prefix, a prerendered
+  file) does not get these headers: the server that serves it must send
+  them.
 - A page with no island ends with an inline
   `<script type="speculationrules">` (see "Prefetch" in
   [Router](router.md)). Yuka sends no `Content-Security-Policy`. An app

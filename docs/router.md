@@ -178,7 +178,9 @@ Rules, on any node except a redirect. `Router.post`, `Router.put`,
 `Router.patch` and `Router.delete` take no `~cache` and no `~prerender`:
 
 - `~headers:[ ("x-frame-options", "DENY") ]`: response headers. A node
-  replaces a header of the same name set above it.
+  replaces a header of the same name set above it. An empty value removes
+  the header, also a default one (see "Default headers" in
+  [Security](security.md)).
 - `~cache`: `no_store`, `no_cache`, `private_cache ~max_age:5`,
   `public ~max_age:60 ()` (with an optional `~s_max_age`) or
   `immutable`. The nearest one wins.

@@ -536,7 +536,36 @@ let matching =
   ]
 
 let head_and_rules =
+  let security r =
+    check_header r "x-content-type-options" [ "nosniff" ];
+    check_header r "referrer-policy" [ "strict-origin-when-cross-origin" ]
+  in
   [
+    ( "pages, handlers, actions and error pages send the security headers",
+      fun () ->
+        let origin = [ ("origin", "http://app.example"); ("host", "app.example") ] in
+        List.iter
+          (fun (meth, headers, body, target, status) ->
+            let r = get ~meth ~headers ~body target in
+            check_status r status;
+            security r;
+            check_header r "x-frame-options" [ "DENY" ])
+          [
+            (`GET, [], "", "/", 200);
+            (`GET, [], "", "/asset.txt", 200);
+            (`GET, [], "", "/nowhere", 404);
+            (`POST, ("content-type", "application/json") :: origin, "[1]", "/sum", 201);
+            (`POST, ("content-type", "application/json") :: origin, "null", "/_yuka/action/whoami", 200);
+            (`POST, ("content-type", "application/json") :: origin, "1", "/_yuka/action/x", 404);
+          ] );
+    ( "a route turns each security header off with an empty value",
+      fun () ->
+        let r = get "/framed" in
+        check_status r 200;
+        List.iter
+          (fun name -> check_header r name [])
+          [ "x-content-type-options"; "referrer-policy"; "x-frame-options" ];
+        check_header r "x-a" [ "root" ] );
     ( "HEAD on a page: GET status and headers with the GET length, no body",
       fun () ->
         let g = get "/" in
