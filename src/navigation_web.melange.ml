@@ -135,7 +135,8 @@ let hash_of : string -> string =
 let no_hash : string -> string = [%mel.raw "function (u) { return u.split('#')[0] }"]
 
 let replace_entry : string -> string -> unit =
-  [%mel.raw "function (k, url) { window.history.replaceState({ yukaKey: k }, '', url) }"]
+  [%mel.raw
+    "function (k, url) { const s = window.history.state; window.history.replaceState({ yukaKey: k, yukaAt: s && s.yukaAt || 0 }, '', url) }"]
 
 let path_of : string -> string = [%mel.raw "function (u) { return u.split('#')[0].split('?')[0] }"]
 

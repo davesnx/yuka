@@ -377,8 +377,14 @@ click on a link or `Yuka.Browser.navigate`), Yuka calls
 `check ~target`, with `target` as the `url` of
 `Yuka.Browser.navigation`. When `check` gives `true`, the user stays and
 the navigation does not start. When it gives `false`, the navigation
-continues. `Yuka.Browser.refresh ()`, Back and Forward do not call
-`check`. While a `block` exists, the browser shows its own prompt when
+continues. Back and Forward to a page with another path or query, and
+a Back that closes an overlay (also `Yuka.Browser.back ()`), call
+`check` too. The browser changes the URL before Yuka can ask, so the URL
+shows the target while `check` runs; when `check` gives `true`, Yuka
+moves the history back to the entry the user left (`history.go`) and
+the page and the URL stay as they were. `Yuka.Browser.refresh ()` and a
+Back or Forward to the same page (only the fragment changes, or an
+entry of `Routes.push`) do not call `check`. While a `block` exists, the browser shows its own prompt when
 the user closes or reloads the tab or a full page load starts; the
 browser does not show it before the user interacted with the page. The
 `block` stays until its owner is disposed, so register it in an effect

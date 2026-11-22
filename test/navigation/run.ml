@@ -993,6 +993,103 @@ let call_overlay : int -> string =
 
 let overlay_answer i body = resolve_headers i body 200 [| ("yuka-layer", "overlay"); ("yuka-title", "Two"); ("yuka-build", "b1") |]
 
+let go_by : int -> unit = [%mel.raw "function (n) { window.history.go(n) }"]
+
+let block_back finish =
+  setup (page {|<a id="a" href="/a">a</a>|});
+  plain_start ();
+  ignore (click "#a" "");
+  resolve_call 0 (doc "A" (page {|<a id="b" href="/b">b</a>|})) "";
+  tick (fun () ->
+      ignore (click "#b" "");
+      resolve_call 1 (doc "B" (page "<p>bee</p>")) "";
+      tick (fun () ->
+          let asked = ref [] and stay = ref true and during = ref [] in
+          let (), dispose =
+            with_owner (fun () ->
+                Browser.block (fun ~target ->
+                    asked := target :: !asked;
+                    during := location_ () :: !during;
+                    !stay))
+          in
+          log_clear ();
+          go_back ();
+          until "a refused Back comes back to b"
+            (fun () -> List.length !asked = 1 && location_ () = "/b")
+            (fun () ->
+              tick (fun () ->
+                  check "Back asks with the target" "/a" (String.concat "," !asked);
+                  check "the URL during the check is the target" "/a" (String.concat "," !during);
+                  check "a refused Back does not fetch" "2" (ints (calls ()));
+                  check "the page stays" (page "<p>bee</p>") (body_html ());
+                  check "nothing in flight" "none" (in_flight ());
+                  check "the popstate of the undo is ignored: no scroll" "" (log_scrolls ());
+                  go_by (-2);
+                  until "a refused jump of two entries comes back to b"
+                    (fun () -> List.length !asked = 2 && location_ () = "/b")
+                    (fun () ->
+                      tick (fun () ->
+                          check "a jump of two entries asks with its target" "/start?x=1,/a" (String.concat "," !asked);
+                          check "still no fetch" "2" (ints (calls ()));
+                          stay := false;
+                          back (fun () ->
+                              check "an accepted Back asks" "3" (ints (List.length !asked));
+                              check "an accepted Back fetches a" "/a" (call_url 2);
+                              check "an accepted Back is a traverse" "/a from /b traverse" (in_flight ());
+                              resolve_call 2 (doc "A" (page "<p>ay</p>")) "";
+                              tick (fun () ->
+                                  check "a is shown" (page "<p>ay</p>") (body_html ());
+                                  check "at a" "/a" (location_ ());
+                                  dispose ();
+                                  forward (fun () ->
+                                      check "no block: Forward does not ask" "3" (ints (List.length !asked));
+                                      check "no block: Forward fetches b" "/b" (call_url 3);
+                                      finish ())))))
+                    100))
+            100))
+
+let block_overlay_back finish =
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  ignore (click "#two" "");
+  overlay_answer 0 {|<p id="ov">ov</p><a id="next" href="/three">3</a>|};
+  tick (fun () ->
+      let asked = ref [] in
+      let (), dispose =
+        with_owner (fun () ->
+            Browser.block (fun ~target ->
+                asked := target :: !asked;
+                true))
+      in
+      go_back ();
+      until "a refused Back keeps the overlay"
+        (fun () -> List.length !asked = 1 && location_ () = "/two")
+        (fun () ->
+          tick (fun () ->
+              check "Back that closes an overlay asks" "/start?x=1" (String.concat "," !asked);
+              check "the overlay stays" "1" (ints (count_selector "yuka-overlay #ov"));
+              ignore (click "#next" "");
+              check "a link in the overlay asks" "/three,/start?x=1" (String.concat "," !asked);
+              dispose ();
+              ignore (click "#next" "");
+              overlay_answer 1 {|<p id="three">3</p>|};
+              tick (fun () ->
+                  check "a replaced overlay" "/three" (location_ ());
+                  let (), dispose =
+                    with_owner (fun () ->
+                        Browser.block (fun ~target ->
+                            asked := target :: !asked;
+                            true))
+                  in
+                  Browser.back ();
+                  check "Browser.back from a replaced overlay asks" "/start?x=1,/three,/start?x=1" (String.concat "," !asked);
+                  check "and does not fetch" "2" (ints (calls ()));
+                  check "the overlay stays" "three" (attr "yuka-overlay #three" "id");
+                  dispose ();
+                  finish ())))
+        100)
+
 let overlay finish =
   Yuka.stop ();
   State.set probe_runs 0;
@@ -3850,6 +3947,8 @@ let all =
     ("Browser.navigating follows the navigation in flight", navigating_flag);
     ("Browser.navigation and Routes.pending give the navigation in flight", navigation_in_flight);
     ("Browser.block keeps the page until its owner is disposed", block_leaving);
+    ("Browser.block asks on Back and undoes a refused Back", block_back);
+    ("Browser.block asks when Back or Browser.back closes an overlay", block_overlay_back);
     ("fetch throwing falls back", sync_failure_falls_back);
     ("redirects", redirect);
     ("navigate", navigate_api);

@@ -148,10 +148,29 @@ let rec on_move e =
 
 let on_leave e = if !loading || Option.is_some !router then use (fun r -> r.handle e)
 
+let at = ref 0
+let undo = ref None
+
 let on_popstate e =
-  go `Traverse (Web.current_url ())
-    (fun r -> r.handle e)
-    (fun () -> if Web.current_url () <> !loaded then Web.navigate false (Web.current_url ()))
+  let next = Web.history_at () and url = Web.current_url () in
+  match !undo with
+  | Some n when n = next -> undo := None
+  | _ ->
+      undo := None;
+      if
+        next <> !at && url <> !loaded
+        && (not (List.exists (String.equal (Web.history_key ())) !Platform.kept))
+        && List.exists (fun check -> check url) !blocks
+      then begin
+        undo := Some !at;
+        Web.history_go (!at - next)
+      end
+      else begin
+        at := next;
+        go `Traverse url
+          (fun r -> r.handle e)
+          (fun () -> if Web.current_url () <> !loaded then Web.navigate false (Web.current_url ()))
+      end
 
 let start ~load ?lazy_entries ?(transitions = false) entries =
   on := true;
@@ -166,6 +185,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
     Web.history_replace_key !current_key
   end;
   shown_key := !current_key;
+  at := Web.history_at ();
   loaded := Web.current_url ();
   let doc = Web.document () in
   (match !listening with

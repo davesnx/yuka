@@ -1356,6 +1356,22 @@ await step("6j. a draft blocks leaving", async () => {
   await p.evaluate(() => (document.querySelector('.nav-link[href="/my"]') as HTMLElement).click());
   await p.waitForURL("**/my");
   check("6j.7 OK leaves and discards the draft", dialogs.join() === "confirm:Discard the new issue?" && (await p.locator(".dialog").count()) === 0, dialogs.join(" | "));
+  dialogs.length = 0;
+  answer = false;
+  await p.locator(".new-issue-button").click();
+  await p.waitForSelector(".dialog");
+  await p.locator(".dialog-title").fill("Draft");
+  await p.evaluate(() => ((window as any).__draft = "back"));
+  await p.evaluate(() => history.back());
+  await p.waitForTimeout(500);
+  const backed = { url: new URL(p.url()).pathname, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft) };
+  check("6j.8 Back asks with the dialog of the app; Cancel keeps the URL, the page and the draft", dialogs.join() === "confirm:Discard the new issue?" && backed.url === "/my" && backed.title === "Draft" && backed.marker === "back", JSON.stringify({ dialogs, backed }));
+  dialogs.length = 0;
+  answer = true;
+  await p.evaluate(() => history.back());
+  await p.waitForURL(base + "/");
+  await p.waitForSelector(".row");
+  check("6j.9 Back with OK goes back and discards the draft", dialogs.join() === "confirm:Discard the new issue?" && (await p.locator(".dialog").count()) === 0 && (await p.evaluate(() => (window as any).__draft)) === "back", dialogs.join(" | "));
   await p.close();
 });
 

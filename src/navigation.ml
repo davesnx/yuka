@@ -403,7 +403,8 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
           Navigation_web.replace_entry key final
         end
         else Web.history_push_key key final;
-        current_key := key
+        current_key := key;
+        Navigation_stub.at := Web.history_at ()
       end;
       let gen = !nav in
       let apply () =
@@ -508,9 +509,11 @@ let refresh () = go ~replace:true ~keep_scroll:true ~refresh:true (Web.current_u
 let back () =
   match showing () with
   | Some o when not o.direct ->
-      save_scroll ();
-      Navigation_state.set (Some { Navigation_state.url = o.url; from = !loaded; kind = `Push });
-      load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None ~refresh:false o.url
+      if not (List.exists (fun check -> check o.url) !Navigation_stub.blocks) then begin
+        save_scroll ();
+        Navigation_state.set (Some { Navigation_state.url = o.url; from = !loaded; kind = `Push });
+        load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None ~refresh:false o.url
+      end
   | _ -> Web.history_back ()
 
 let on_over e =

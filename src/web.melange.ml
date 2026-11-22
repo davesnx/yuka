@@ -352,7 +352,12 @@ let history_replace_key : string -> unit =
 
 let history_push_key : string -> string -> unit =
   [%mel.raw
-    "function (k, url) { window.history.pushState({ yukaKey: k }, '', url) }"]
+    "function (k, url) { const s = window.history.state; window.history.pushState({ yukaKey: k, yukaAt: (s && s.yukaAt || 0) + 1 }, '', url) }"]
+
+let history_at : unit -> int =
+  [%mel.raw "function () { const s = window.history.state; return s && s.yukaAt || 0 }"]
+
+external history_go : int -> unit = "go" [@@mel.scope "window", "history"]
 
 let scroll_y : unit -> float = [%mel.raw "function () { return window.scrollY || 0 }"]
 

@@ -38,8 +38,13 @@ val block : (target:string -> bool) -> unit
     [check ~target], with [target] as in {!navigation}. When [check] gives
     [true], the user stays: the navigation does not start. When it gives
     [false], the navigation continues. With more than one [block], the
-    navigation stops at the first [check] that gives [true]. {!refresh},
-    Back and Forward do not call [check].
+    navigation stops at the first [check] that gives [true]. Back and
+    Forward to a page with another path or query, and a Back or {!back}
+    that closes an overlay, call [check] too: the URL already shows the
+    target, and when [check] gives [true], the history moves back to the
+    entry the user left, so the page and the URL stay as they were.
+    {!refresh} and a Back or Forward to the same page do not call
+    [check].
 
     While one or more [block]s exist, closing or reloading the tab, and a
     full page load, show the prompt of the browser. The browser does not
