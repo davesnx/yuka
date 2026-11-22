@@ -71,10 +71,12 @@ let issue_page () =
   has html "<yuka-island data-name=\"Demo_shared.Issue_props\"";
   has html "data-start=\"interaction\"";
   has html "data-start=\"visible\"";
-  has html "\"$async\":\"a"
+  has html "\"$async\":\"a";
+  lacks html "class=\"skeleton\"";
+  List.iter (fun path -> lacks (get path) "class=\"skeleton\"") [ "/issue/YUK-1?delay=-600"; "/issue/YUK-1?delay=abc"; "/issue/YUK-1?delay=0" ]
 
 let streaming () =
-  let html = get "/issue/YUK-1" in
+  let html = get "/issue/YUK-1?delay=600" in
   let index_of needle =
     let needle_length = String.length needle in
     let rec go index =
@@ -89,7 +91,8 @@ let streaming () =
   let related = index_of "data-yuka-async=\"a1\"" in
   Alcotest.(check bool) "shell first" true (shell < fill);
   Alcotest.(check bool) "comments before related" true (fill < related);
-  Alcotest.(check bool) "fill script" true (index_of "__yukaFill" < shell)
+  Alcotest.(check bool) "fill script" true (index_of "__yukaFill" < shell);
+  has (get "/w/stress/issue/STR-1?delay=50") "<div class=\"skeleton\">"
 
 let navigation () =
   let _, response, html = call ~headers:[ ("Yuka-Navigate", "1") ] "/issue/YUK-1" in
