@@ -140,9 +140,9 @@ any other method is Wrong_method with the methods of the path
   [1]
 
   $ gen <<'EOF'
-  > Router.make [ Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cache:immutable ]
+  > Router.make [ Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cache:no_store ]
   > EOF
-  File "Routes.ml", line 1, characters 75-84:
+  File "Routes.ml", line 1, characters 75-83:
   Error: Router.post has no argument ~cache; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
   [1]
 

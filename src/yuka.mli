@@ -1651,9 +1651,6 @@ module Server : sig
   val public : ?s_max_age:int -> max_age:int -> unit -> cache
   (** [public, max-age=N], and [, s-maxage=M] when given. *)
 
-  val immutable : cache
-  (** [public, max-age=31536000, immutable] *)
-
   type body =
     | String of string
     | Stream of ((string -> unit Async.t) -> unit Async.t)
@@ -1721,7 +1718,7 @@ module Server : sig
       name of each output and its static imports from it. [dir] is the directory esbuild ran in, so that the
       [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
       the path of the entry output. Outputs other than [entry] get
-      {!immutable}; other files get {!no_cache}. [Error] with a message
+      [public, max-age=31536000, immutable]; other files get {!no_cache}. [Error] with a message
       when [manifest] or [metafile] is not valid JSON of that shape. *)
 
   type config
@@ -1777,7 +1774,7 @@ module Server : sig
       loaders. [styles] are stylesheet URLs and [head] raw HTML for the head
       of every page. [css] lists the sheets of [[%yuka.css]], as file name
       and text; the generator [yuka css] writes it ([Yuka_css.sheets]). The
-      cycle serves each at [/_yuka/css/FILE] with {!immutable} (the name
+      cycle serves each at [/_yuka/css/FILE] with [public, max-age=31536000, immutable] (the name
       has a hash of the text); another path under [/_yuka/css/] is a 404
       with [no-store]. [timeout] (default 10 seconds) bounds a streamed
       render.

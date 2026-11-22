@@ -578,7 +578,7 @@ let head_and_rules =
         let r = get "/team/a/json" in
         check_header r "cache-control" [ "public, max-age=60, s-maxage=600" ];
         let r = get "/asset.txt" in
-        check_header r "cache-control" [ "public, max-age=31536000, immutable" ] );
+        check_header r "cache-control" [ "public, max-age=3600" ] );
     ( "vary values are joined",
       fun () ->
         let r = get "/varied" in
