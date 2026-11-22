@@ -97,6 +97,7 @@ val promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit
 
 val location_assign : string -> unit
 val current_url : unit -> string
+val base : unit -> string
 val same_origin : string -> bool
 val fresh_key : unit -> string
 val history_key : unit -> string

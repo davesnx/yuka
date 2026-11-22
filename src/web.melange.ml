@@ -370,19 +370,29 @@ let plain_click : event -> bool =
   [%mel.raw
     "function (e) { return !(e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) }"]
 
-let link_href : bool -> node -> string =
+let base : unit -> string =
   [%mel.raw
-    {|function (prefetch, t) {
+    {|function () {
+  const d = document;
+  if (d.__yukaBase === undefined) { const m = d.querySelector('meta[name="yuka-base"]'); d.__yukaBase = m ? m.content : "" }
+  return d.__yukaBase;
+}|}]
+
+let link_in : bool -> node -> string -> string =
+  [%mel.raw
+    {|function (prefetch, t, b) {
   const a = t && t.closest ? t.closest("a[href]") : null;
   if (!a) return "";
   const target = a.getAttribute("target");
   if ((target && target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-yuka-reload")) return "";
   if (prefetch && a.getAttribute("data-yuka-prefetch") === "off") return "";
   const l = window.location;
-  if (a.origin !== l.origin) return "";
+  if (a.origin !== l.origin || (b && a.pathname !== b && !a.pathname.startsWith(b + "/"))) return "";
   if (a.hash && a.pathname === l.pathname && a.search === l.search) return "";
   return a.href;
 }|}]
+
+let link_href prefetch t = link_in prefetch t (base ())
 
 type 'a table
 
@@ -498,7 +508,7 @@ let socket_close : socket -> int -> unit =
 
 let live_url : unit -> string =
   [%mel.raw
-    {|function () { const l = window.location; return (l.protocol === "https:" ? "wss://" : "ws://") + l.host + "/_yuka/live" }|}]
+    {|function () { const l = window.location; return (l.protocol === "https:" ? "wss://" : "ws://") + l.host }|}]
 
 let online : unit -> bool =
   [%mel.raw "function () { const n = window.navigator; return !n || n.onLine !== false }"]

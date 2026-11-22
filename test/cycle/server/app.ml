@@ -43,10 +43,12 @@ let finish_second v =
 
 let fail_first = ref false
 let in_home = ref ignore
+let typed_links = ref false
 
 let reset () =
   fail_first := false;
   in_home := ignore;
+  typed_links := false;
   events := [];
   waiting := [];
   slow_state := Async.make ();
@@ -128,7 +130,15 @@ module Pages = struct
     Server.page ~title:"Home" (fun () ->
         note "home body";
         !in_home ();
-        text "home")
+        if !typed_links then
+          el "p"
+            [
+              el "a" ~attrs:[ ("href", Routes.home ()) ] [ text "typed home" ];
+              el "a" ~attrs:[ ("href", Routes.member ~team:"a" ~user:1 ()) ] [ text "typed member" ];
+              el "img" ~attrs:[ ("src", Yuka.Router.url "/static/s.png") ] [];
+              Yuka.use_css (Yuka.runtime_stylesheet "/_yuka/css/a-1234.css") (text "styled");
+            ]
+        else text "home")
 
   let plain () = Server.page ~title:"Plain" (fun () -> el "p" [ text "plain" ])
 

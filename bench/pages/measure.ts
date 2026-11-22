@@ -148,7 +148,7 @@ async function timings(browser: Browser, url: string, plain: string | null): Pro
   return { lcp: median(samples.map((s) => s.lcp)), tbt: median(samples.map((s) => s.tbt)), runs: samples };
 }
 
-const server = spawn(join(buildDir, "default/demo/server/demo_server.exe"), ["--port", options.port, "--interface", "127.0.0.1", "--bundle"], {
+const server = spawn(join(buildDir, "default/demo/mini-linear/server/demo_server.exe"), ["--port", options.port, "--interface", "127.0.0.1", "--bundle"], {
   stdio: ["ignore", "pipe", "pipe"],
 });
 const stop = () => server.kill();

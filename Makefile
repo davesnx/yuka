@@ -65,19 +65,19 @@ demo-build-watch: ## Build the demo in watch mode
 
 .PHONY: demo-bundle
 demo-bundle: demo-build ## Bundle the demo client with esbuild
-	BUILD_DIR=$(BUILD_DIR) demo/bundle.sh
+	BUILD_DIR=$(BUILD_DIR) demo/mini-linear/bundle.sh
 
 .PHONY: demo-serve
 demo-serve: demo-build ## Serve the demo on PORT
-	$(BUILD_DIR)/default/demo/server/demo_server.exe --port $(PORT)
+	$(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: demo-dev
 demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
 	$(DUNE) build --profile=dev ./gen/yuka_cli.exe
 	opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- $(BUILD_DIR)/default/gen/yuka_cli.exe dev \
 	  --build 'dune build --watch --profile=dev @demo/all' \
-	  --assets $(BUILD_DIR)/default/demo/static --assets $(BUILD_DIR)/default/demo/client/out \
-	  -- $(BUILD_DIR)/default/demo/server/demo_server.exe --port $(PORT)
+	  --assets $(BUILD_DIR)/default/demo/mini-linear/static --assets $(BUILD_DIR)/default/demo/mini-linear/client/out \
+	  -- $(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: demo-test
 demo-test: ## Run the demo tests

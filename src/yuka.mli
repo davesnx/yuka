@@ -764,9 +764,10 @@ module Private : sig
     state:(unit -> string) -> sleep:(float -> unit Async.t) -> (string -> unit Async.t) -> unit Async.t
   (** The body of [/_yuka/dev] for a state function (tests). *)
 
-  val dev_script : string -> string
+  val dev_script : ?base:string -> string -> string
   (** The script that a page gets with [Server.config ~dev:true], for the
-      state JSON given (tests). *)
+      state JSON given (tests). [base] (default [""]) is the base of the
+      config: the script listens on [base/_yuka/dev]. *)
 
   val element : node -> 'kind element
 
@@ -1094,6 +1095,25 @@ module Router : sig
       in order. *)
 
   (**/**)
+
+  val url : string -> string
+  (** [url path] is [path] under the base of the app ([Server.config
+      ~base]): ["/demo/lux"] and ["/issues"] give ["/demo/lux/issues"],
+      ["/"] gives ["/demo/lux"], ["/?q=a"] gives ["/demo/lux?q=a"]. Without
+      a base, and for a string that does not start with one [/] (a full
+      URL, [//host], a relative path, [""]), it is the string unchanged. The
+      generated [href] and link functions call it, so typed links have the
+      base; call it for a path that the app writes by hand, such as
+      [/static/logo.svg].
+
+      In the browser, the base is the [<meta name="yuka-base">] of the page,
+      which the server writes when the config has a base. On the server, in
+      a render, it is the base of the config of the request; elsewhere (a
+      loader, a guard, a handler, a module), the base of the last config
+      that {!Server.config} made. A process that serves more than one app
+      makes the config whose app needs this base last. A link
+      made at module initialization, before the config, has no base: make
+      links in functions. *)
 end
 
 (**/**)
@@ -1310,8 +1330,8 @@ module Server : sig
       - [/_yuka/live]: the WebSocket of {!Yuka.Live}.
       - [/_yuka/app/FILE]: the client JavaScript of [assets].
 
-      Any other path under [/_yuka/] is a 404. The app must be served at
-      the root of its origin: there is no base path. *)
+      Any other path under [/_yuka/] is a 404. With [config ~base], each of
+      these paths is under the base, as [/demo/lux/_yuka/live]. *)
 
   val to_string : (unit -> server element) -> string
   (** The tree as HTML. Hydration markers are written only inside an island,
@@ -1707,6 +1727,7 @@ module Server : sig
   type config
 
   val config :
+    ?base:string ->
     ?assets:assets ->
     ?public:(string * string) list ->
     ?prerendered:string ->
@@ -1719,7 +1740,34 @@ module Server : sig
     ?log:(log_level -> string -> unit) ->
     unit ->
     config
-  (** [public] maps URL prefixes to directories ([("/static", "static")]).
+  (** [base] (default [""]: none) serves the app under a path prefix, as
+      ["/demo/lux"], for a proxy that forwards that prefix to the app
+      unchanged. It starts with [/] and has no trailing [/]; its segments
+      are not empty, [.] or [..] (also when percent-decoded); it holds only
+      the characters [A-Z a-z 0-9 - . _ ~ % ! $ & ' , ; = @], so no [?],
+      [#], or character that a URL pattern of the speculation rules reads
+      ([( ) * + : { }]). Another value raises [Invalid_argument] with the value.
+      With a base:
+      - The cycle answers only requests under it: a path that is not the
+        base or under [base/] (["/demo/luxe"]) gets the not-found page,
+        404. [base/] is a 308 to [base]. The base is removed first, so
+        routes, [public] prefixes, the reserved paths and
+        {!Request.path} and {!Request.target} use the path without it.
+      - What the cycle writes has the base: the client script, the import
+        map and the [modulepreload] links, the [[%yuka.css]] links, the
+        locations of a [Router.redirect], of a trailing-slash 308 and of a
+        form that saved without [?redirect], the dev reload script, the
+        speculation rules, and the [aria-current] check. Every page gets
+        [<meta name="yuka-base" content="BASE">]; the browser reads it for
+        the action, CSRF and live socket URLs, {!Router.url}, the route of
+        [Routes.current], and client navigation and prefetch, which take
+        only links under the base.
+      - Typed links ([Routes.issue ~id ()]) call {!Router.url}. A URL that
+        the app writes itself is used as written: a location of a guard,
+        a loader, a [?redirect] or {!see_other}, the [styles] and [head]
+        strings, a cookie path. Use typed links or {!Router.url} there.
+
+      [public] maps URL prefixes to directories ([("/static", "static")]).
       A prefix with no segment (["/"]) raises [Invalid_argument]: files
       under a prefix are never routed, so it would hide every route.
       [prerendered] is the directory that a prerender wrote: a [GET] or
@@ -1968,6 +2016,17 @@ module Server : sig
     val seeds : app -> string list
     (** The paths of the nodes with no param whose rules say
         [prerender]. *)
+
+    val target : config -> string -> string
+    (** The request target of a path of the app: the path under [base] of
+        the config, as {!Router.url}. A prerender requests this. *)
+
+    val path : config -> string -> string option
+    (** The path of the app for a path of the site: [base] of the config
+        removed, [None] when the path is not under it. The output
+        directory of a prerender holds the site under the base, so a
+        prerender takes the {!links} of a page through it before {!file}
+        and {!prerenderable}. Without a base, [Some] of the path. *)
 
     val prerenderable : config -> app -> string -> bool
     (** Whether a [GET] of this path matches a page or a [Router.get] node whose

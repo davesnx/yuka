@@ -27,11 +27,14 @@ let theme_script =
     (Demo_shared.Preference.storage_key "") (Demo_shared.Preference.attribute "")
     (pattern (List.map slug all)) attribute (pattern (List.map Code.slug Code.all)) Code.attribute
 
-let refresh_store inner req =
+let refresh_store base inner req =
   let target = Dream.target req in
-  if not (String.starts_with ~prefix:"/static/" target || String.starts_with ~prefix:"/_yuka/app/" target) then
+  if not (String.starts_with ~prefix:(base ^ "/static/") target || String.starts_with ~prefix:(base ^ "/_yuka/app/") target) then
     Demo_shared.Store.refresh ();
   inner req
+
+let with_index index config app req =
+  match Yuka.Server.Prerender.path config (Dream.target req) with Some _ -> app req | None -> index req
 
 let node_name () =
   Printf.sprintf "%s-%d-%s" (Unix.gethostname ()) (Unix.getpid ()) Demo_shared.Store.process_id
@@ -63,6 +66,7 @@ let () =
   let prerendered = ref "" in
   let second = ref 0 in
   let bus = ref "memory" in
+  let base = ref "" in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
   let database =
     ref
@@ -95,6 +99,7 @@ let () =
       ("--static-dir", Arg.Set_string static_dir, "Directory of style.css");
       ("--prerender", Arg.Set_string prerender, "Write the prerendered pages to DIR and exit");
       ("--prerendered", Arg.Set_string prerendered, "Serve the prerendered pages of DIR");
+      ("--base", Arg.Set_string base, "Serve the app under this path prefix, as /mini-linear, and the list of demos at every other path (default: none)");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
         Arg.Set_int second,
@@ -108,31 +113,37 @@ let () =
         "The data starts again from the seed when it is older than this many days (default: $YUKA_DEMO_RESET_DAYS, or 7)" );
     ]
     (fun _ -> ())
-    "demo_server [--port N] [--interface ADDRESS] [--bundle] [--prerender DIR] [--prerendered DIR]";
+    "demo_server [--port N] [--interface ADDRESS] [--bundle] [--prerender DIR] [--prerendered DIR] [--base PREFIX]";
   let manifest = read_file !manifest in
-  let client = Filename.concat !js_dir "demo/client" in
+  let client = Filename.concat !js_dir "demo/mini-linear/client" in
   let assets =
     match
       if !bundle then
         Yuka.Server.bundle ~dir:client ~entry:"bundle/main.js" ~manifest
           ~metafile:(read_file !metafile)
       else
-        Yuka.Server.modules ~dir:!js_dir ~entry:"demo/client/main.js" ~manifest
+        Yuka.Server.modules ~dir:!js_dir ~entry:"demo/mini-linear/client/main.js" ~manifest
           ~packages:(packages !js_dir) ~digest:(Yuka.Server.tree_digest !js_dir)
     with
     | Ok assets -> assets
     | Error message -> stop message
   in
+  let index = Yuka_dream.handler (Yuka.Server.config ~head:Demo_index.Pages.head ()) Demo_index.Yuka_routes.app in
+  let base = !base in
   let config =
-    Yuka.Server.config ~assets
-      ~public:[ ("/static", !static_dir) ]
-      ?prerendered:(if !prerendered = "" then None else Some !prerendered)
-      ~head:
-        ({|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="/static/favicon.svg">|}
-        ^ theme_script ^ Demo_shared.Code_style.head)
-      ~styles:[ "/static/style.css"; "/static/markdown.css" ] ~css:Demo_app.Yuka_css.sheets
-      ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
-      ()
+    match
+      Yuka.Server.config ~base ~assets
+        ~public:[ ("/static", !static_dir) ]
+        ?prerendered:(if !prerendered = "" then None else Some !prerendered)
+        ~head:
+          ({|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="|}
+          ^ base ^ {|/static/favicon.svg">|} ^ theme_script ^ Demo_shared.Code_style.head)
+        ~styles:[ base ^ "/static/style.css"; base ^ "/static/markdown.css" ] ~css:Demo_app.Yuka_css.sheets
+        ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
+        ()
+    with
+    | config -> config
+    | exception Invalid_argument message -> stop message
   in
   Demo_app.Handlers.register ();
   if !reset_days < 1 then stop "the reset age must be at least 1 day";
@@ -159,8 +170,8 @@ let () =
   if !prerender <> "" then (
     match Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app) with Ok () -> () | Error message -> stop message)
   else if !second = 0 then
-    Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ refresh_store @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
-    @@ Yuka_dream.handler config app
+    Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ with_index index config @@ refresh_store base @@ late_script @@ Dream.set_secret !secret
+    @@ Dream.cookie_sessions @@ Yuka_dream.handler config app
   else begin
     let make_bus =
       match String.index_opt !bus ':' with
@@ -175,8 +186,8 @@ let () =
     in
     let other = Yuka.Server.Live.node () in
     let serve ?node port =
-      Dream.serve ~interface:!interface ~port @@ Dream.logger @@ refresh_store @@ late_script @@ Dream.set_secret !secret @@ Dream.cookie_sessions
-      @@ Yuka_dream.handler ?node config app
+      Dream.serve ~interface:!interface ~port @@ Dream.logger @@ with_index index config @@ refresh_store base @@ late_script @@ Dream.set_secret !secret
+      @@ Dream.cookie_sessions @@ Yuka_dream.handler ?node config app
     in
     Lwt_main.run
       (let open Lwt.Syntax in

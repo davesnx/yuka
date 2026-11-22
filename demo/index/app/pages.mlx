@@ -1,0 +1,29 @@
+type demo = { name : string; description : string; path : string }
+
+let demos =
+  [
+    {
+      name = "Mini Linear";
+      description = "An issue tracker: streamed pages, islands, live updates and a shared store.";
+      path = "/mini-linear";
+    };
+  ]
+
+let head =
+  {|<meta name="viewport" content="width=device-width, initial-scale=1"><style>:root{color-scheme:light dark}body{font-family:system-ui,sans-serif;line-height:1.5;max-width:40rem;margin:4rem auto;padding:0 16px}</style>|}
+
+let home () =
+  Yuka.Server.page ~title:"Yuka demos" (fun () ->
+      <main>
+        <h1>"Yuka demos"</h1>
+        <ul>
+          (Yuka.fragment
+             (List.map
+                (fun demo ->
+                  <li>
+                    <a href=demo.path target=`_blank rel="noopener">(Yuka.text demo.name)</a>
+                    (Yuka.text (": " ^ demo.description))
+                  </li>)
+                demos))
+        </ul>
+      </main>)

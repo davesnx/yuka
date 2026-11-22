@@ -2,8 +2,9 @@
 
 This page explains how a page reads and changes data on the server:
 actions, forms, remote data and live data, and how to show a value that
-loads. The samples come from Yuka's demo (`demo/shared` and
-`demo/server/handlers.ml`). The exact API is in
+loads. The samples come from Yuka's Mini Linear demo
+(`demo/mini-linear/shared` and `demo/mini-linear/server/handlers.ml`). The
+exact API is in
 [`src/yuka.mli`](https://github.com/davesnx/yuka/blob/main/src/yuka.mli),
 [`src/form.mli`](https://github.com/davesnx/yuka/blob/main/src/form.mli),
 [`src/remote.mli`](https://github.com/davesnx/yuka/blob/main/src/remote.mli)

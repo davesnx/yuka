@@ -1,0 +1,26 @@
+(library
+ (name demo_index)
+ (libraries yuka)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets routes.ml)
+ (action
+  (with-stdout-to
+   routes.ml
+   (run %{bin:yuka} routes --shared --source %{dep:../Routes.ml}))))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Routes
+    --source
+    %{dep:../Routes.ml}))))

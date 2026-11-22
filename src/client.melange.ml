@@ -785,7 +785,7 @@ let transport name input k =
   let finish () = drop_cleanup id in
   let abort =
     Web.fetch_post
-    ("/_yuka/action/" ^ Web.encode_uri name)
+    (Web.base () ^ "/_yuka/action/" ^ Web.encode_uri name)
     (Json.to_string input)
     (fun status body ->
       finish ();
