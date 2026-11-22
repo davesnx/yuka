@@ -127,8 +127,10 @@ external stop_propagation : event -> unit = "stopPropagation" [@@mel.send]
 external set_flag : event -> string -> bool -> unit = "" [@@mel.set_index]
 external get_flag : event -> string -> bool option = "" [@@mel.get_index] [@@mel.return nullable]
 
-let navigate : string -> unit =
-  [%mel.raw "function (url) { window.location.assign(url) }"]
+let navigate : bool -> string -> unit =
+  [%mel.raw "function (replace, url) { if (replace) window.location.replace(url); else window.location.assign(url) }"]
+
+external confirm : string -> bool = "confirm" [@@mel.scope "window"]
 
 let focus : string -> unit =
   [%mel.raw
@@ -324,10 +326,6 @@ let fire : node -> unit =
   n.dispatchEvent(new w.Event("change", { bubbles: true }));
 }|}]
 
-let location_assign : string -> unit =
-  [%mel.raw
-    "function (url) { window.location.assign(url) }"]
-
 let same_origin : string -> bool =
   [%mel.raw
     "function (url) { try { return new URL(url, window.location.href).origin === window.location.origin } catch (e) { return false } }"]
@@ -335,6 +333,10 @@ let same_origin : string -> bool =
 let current_url : unit -> string =
   [%mel.raw
     "function () { const l = window.location; return l.pathname + l.search }"]
+
+let local_url : string -> string =
+  [%mel.raw
+    "function (u) { try { const x = new URL(u, window.location.href); return x.origin === window.location.origin ? x.pathname + x.search : x.href } catch (e) { return u } }"]
 
 let fresh_key : unit -> string =
   [%mel.raw
@@ -350,9 +352,15 @@ let history_replace_key : string -> unit =
 
 let history_push_key : string -> string -> unit =
   [%mel.raw
-    "function (k, url) { window.history.pushState({ yukaKey: k }, '', url) }"]
+    "function (k, url) { const s = window.history.state; window.history.pushState({ yukaKey: k, yukaAt: (s && s.yukaAt || 0) + 1 }, '', url) }"]
+
+let history_at : unit -> int =
+  [%mel.raw "function () { const s = window.history.state; return s && s.yukaAt || 0 }"]
+
+external history_go : int -> unit = "go" [@@mel.scope "window", "history"]
 
 let scroll_y : unit -> float = [%mel.raw "function () { return window.scrollY || 0 }"]
+let scroll_to : float -> unit = [%mel.raw "function (y) { window.scrollTo(0, y) }"]
 
 let set_cookie : string -> unit = [%mel.raw "function (cookie) { document.cookie = cookie }"]
 
@@ -384,6 +392,24 @@ let link_href : bool -> node -> string =
   return a.href;
 }|}]
 
+external link : node -> (_[@mel.as "a[href]"]) -> node = "closest" [@@mel.send]
+
+let form_url : event -> string =
+  [%mel.raw
+    {|function (e) {
+  const f = e.target, s = e.submitter;
+  if (e.defaultPrevented || !e.isTrusted || !(f instanceof HTMLFormElement)) return "";
+  const a = function (n) { return s && s.hasAttribute("form" + n) ? s.getAttribute("form" + n) : f.getAttribute(n); };
+  const t = a("target");
+  if ((a("method") || "get").toLowerCase() !== "get" || (t && t !== "_self") || f.hasAttribute("data-yuka-reload")) return "";
+  try {
+    const u = new URL(a("action") || "", document.baseURI);
+    if (u.origin !== window.location.origin) return "";
+    u.search = new URLSearchParams(Array.from(new FormData(f, s), function (p) { return [p[0], typeof p[1] === "string" ? p[1] : p[1].name]; })).toString();
+    return u.href;
+  } catch (x) { return ""; }
+}|}]
+
 type 'a table
 
 external table : unit -> 'a table = "Map" [@@mel.new]
@@ -394,6 +420,14 @@ external table_has : 'a table -> string -> bool = "has" [@@mel.send]
 external table_delete : 'a table -> string -> unit = "delete" [@@mel.send]
 external table_size : 'a table -> int = "size" [@@mel.get]
 external table_clear : 'a table -> unit = "clear" [@@mel.send]
+
+let stored_scrolls : unit -> float table =
+  [%mel.raw
+    {|function () { try { return new Map(JSON.parse(sessionStorage.getItem("yuka-scroll")).filter((e) => typeof e[0] === "string" && typeof e[1] === "number")) } catch (e) { return new Map() } }|}]
+
+let store_scrolls : float table -> unit =
+  [%mel.raw
+    {|function (t) { try { sessionStorage.setItem("yuka-scroll", JSON.stringify(Array.from(t).slice(-100))) } catch (e) {} }|}]
 
 let table_values : 'a table -> 'a array =
   [%mel.raw "function (t) { return Array.from(t.values()) }"]

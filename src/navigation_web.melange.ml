@@ -20,9 +20,7 @@ let layer : unit -> node =
 
 type controller
 
-let scroll_to : float -> unit =
-  [%mel.raw
-    "function (y) { window.scrollTo(0, y) }"]
+let scroll_to = Web.scroll_to
 
 let scroll_to_hash : string -> unit =
   [%mel.raw
@@ -42,16 +40,22 @@ let abort : controller -> unit =
     "function (c) { c.abort() }"]
 
 let fetch_page :
-    string * string * string * bool * controller * bool -> (string -> int -> (string -> string option) -> string -> unit) -> (unit -> unit) -> unit =
+    string * string * string * bool * controller * bool ->
+    (string -> int -> (string -> string option) -> string -> bool -> unit) ->
+    (string -> string -> unit) ->
+    (bool -> unit) ->
+    (unit -> unit) ->
+    unit =
   [%mel.raw
-    {|function (a, ok, fail) {
+    {|function (a, ok, part, ended, fail) {
   const url = a[0], keys = a[1], prefetch = a[2], low = a[3], controller = a[4];
   const signal = controller.signal;
   const init = { headers: { "Yuka-Navigate": keys }, credentials: "same-origin", signal: signal };
   if (a[5]) init.headers["Yuka-Overlay"] = "1";
   if (prefetch) { init.headers["Yuka-Prefetch"] = prefetch; init.cache = "no-store"; }
   if (low) init.priority = "low";
-  let request;
+  let request, shown = false;
+  const broke = function () { if (shown) ended(false); else if (!signal.aborted) fail(); };
   try {
     request = fetch(url, init);
   } catch (e) {
@@ -60,24 +64,102 @@ let fetch_page :
   }
   request
     .then(function (r) {
-      return r.text().then(function (text) { return { r: r, text: text }; });
+      const base = window.location.href;
+      const target = new URL(typeof r.url === "string" && r.url ? r.url : url, base);
+      const header = function (name) { const v = r.headers && r.headers.get ? r.headers.get(name) : null; return v === null ? undefined : v; };
+      const show = function (text, streamed) {
+        if (signal.aborted) return false;
+        if (target.origin !== window.location.origin) { fail(); return false; }
+        shown = true;
+        ok(target.pathname + target.search + (target.hash || new URL(url, base).hash), r.status, header, text, streamed);
+        return true;
+      };
+      if (!header("yuka-stream") || !r.body) return r.text().then(function (text) { show(text, false); });
+      const reader = r.body.getReader(), decoder = new TextDecoder();
+      let buffer = "", complete = false;
+      const step = function (x) {
+        buffer += decoder.decode(x.value, { stream: !x.done });
+        let i;
+        while ((i = buffer.indexOf("\n")) >= 0) {
+          const v = JSON.parse(buffer.slice(0, i));
+          buffer = buffer.slice(i + 1);
+          if (!shown) { if (!show(v, true)) { reader.cancel().catch(function () {}); return; } }
+          else if (v.length) part(v[0], v[1]);
+          else complete = true;
+        }
+        if (!x.done) return reader.read().then(step);
+        if (shown) ended(complete); else fail();
+      };
+      return reader.read().then(step);
     })
-    .then(
-      function (x) {
-        if (signal.aborted) return;
-        const base = window.location.href;
-        const target = new URL(typeof x.r.url === "string" && x.r.url ? x.r.url : url, base);
-        if (target.origin !== window.location.origin) { fail(); return; }
-        const hash = target.hash || new URL(url, base).hash;
-        ok(target.pathname + target.search + hash, x.r.status, function (name) { const v = x.r.headers && x.r.headers.get ? x.r.headers.get(name) : null; return v === null ? undefined : v; }, x.text);
-      },
-      function () { if (!signal.aborted) fail(); });
+    .then(null, broke);
+}|}]
+
+let put : node -> string -> string -> node =
+  [%mel.raw
+    {|function (root, id, html) {
+  const d = document, t = d.createElement("template"), g = d.createDocumentFragment();
+  root = root.body || root;
+  t.innerHTML = html;
+  if (!id) { root.appendChild(t.content); return g; }
+  const b = root.querySelector('template[data-yuka-failed="' + id + '"]');
+  if (b) b.remove();
+  const w = d.createTreeWalker(root, 128);
+  let c, n, k = 1;
+  while ((c = w.nextNode()) && c.data !== "[" + id);
+  if (!c) return g;
+  while ((n = c.nextSibling) && !(n.nodeType === 8 && (n.data[0] === "[" ? !++k : n.data === "]" && !--k))) g.appendChild(n);
+  c.parentNode.insertBefore(t.content, n);
+  c.data = "[";
+  return g;
+}|}]
+
+let failed_views : node -> (string * string) array =
+  [%mel.raw
+    {|function (root) {
+  return Array.from((root.body || root).querySelectorAll("template[data-yuka-failed]"), function (t) { return [t.getAttribute("data-yuka-failed"), t.innerHTML]; });
+}|}]
+
+let fail_values : node -> unit =
+  [%mel.raw
+    {|function (root) {
+  const d = document;
+  root = root.body || root;
+  for (const s of root.querySelectorAll('script[type="application/json"]'))
+    for (const m of s.textContent.matchAll(/"\$async":"([^"\\]*)"\}/g))
+      if (!d.querySelector('script[data-yuka-async="' + m[1] + '"]')) {
+        const e = d.createElement("script");
+        e.type = "application/json";
+        e.setAttribute("data-yuka-async", m[1]);
+        e.textContent = '{"error":"broken"}';
+        root.appendChild(e);
+      }
+}|}]
+
+let hold : node -> int -> bool -> unit =
+  [%mel.raw
+    {|function (root, owner, release) {
+  const d = document;
+  const pending = function (i) {
+    const w = d.createTreeWalker(i, 129, function (n) { return n.nodeType === 8 ? 1 : n.localName === "yuka-island" ? 2 : 3; });
+    let c;
+    while ((c = w.nextNode())) if (c.data[0] === "[" && c.data.length > 2) return true;
+    return false;
+  };
+  for (const i of (root.body || root).querySelectorAll("yuka-island"))
+    if (i.__yukaHeld === owner) { if (release || !pending(i)) i.__yuka_started = i.__yukaHeld = undefined; }
+    else if (!release && !i.__yuka_started && pending(i)) { i.__yukaHeld = owner; i.__yuka_started = true; }
 }|}]
 
 let hash_of : string -> string =
   [%mel.raw "function (u) { const i = u.indexOf('#'); return i < 0 ? '' : u.slice(i) }"]
 
 let no_hash : string -> string = [%mel.raw "function (u) { return u.split('#')[0] }"]
+
+let replace_entry : string -> string -> unit =
+  [%mel.raw
+    "function (k, url) { const s = window.history.state; window.history.replaceState({ yukaKey: k, yukaAt: s && s.yukaAt || 0 }, '', url) }"]
+
 let path_of : string -> string = [%mel.raw "function (u) { return u.split('#')[0].split('?')[0] }"]
 
 let keys : unit -> string =
@@ -121,6 +203,16 @@ let on_visible : (unit -> unit) -> unit -> unit =
   const d = document, h = function () { if (!d.hidden) f(); };
   d.addEventListener("visibilitychange", h);
   return function () { d.removeEventListener("visibilitychange", h); };
+}|}]
+
+let on_input : (unit -> unit) -> unit -> unit =
+  [%mel.raw
+    {|function (f) {
+  const w = window, names = ["wheel", "touchstart", "keydown", "pointerdown"], o = { capture: true, passive: true };
+  const off = function () { names.forEach(function (n) { w.removeEventListener(n, h, o); }); };
+  const h = function () { off(); f(); };
+  names.forEach(function (n) { w.addEventListener(n, h, o); });
+  return off;
 }|}]
 
 let observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit =
@@ -266,11 +358,11 @@ let live : unit -> unit =
   if (!r.isConnected && d.body) d.body.appendChild(r);
 }|}]
 
-let settle : node -> string -> unit =
+let settle : node -> string -> bool -> unit =
   [%mel.raw
-    {|function (root, hash) {
+    {|function (root, hash, say) {
   const d = document, h = (root = root.body || root).querySelector("h1"), a = d.activeElement;
-  if (d.__yukaLive) d.__yukaLive.textContent = d.title || (h ? h.textContent.trim() : "");
+  if (say && d.__yukaLive) d.__yukaLive.textContent = d.title || (h ? h.textContent.trim() : "");
   if (a && a !== d.body && (a.matches("input,textarea,select,[contenteditable]") || (a !== root && root.contains(a)))) return;
   const f = function (t) {
     if (!t) return false;
@@ -285,4 +377,22 @@ let settle : node -> string -> unit =
   try { id = decodeURIComponent(id) } catch (e) {}
   if (f(root.querySelector("[autofocus]")) || f(id && d.getElementById(id)) || f(h) || f(root)) return;
   for (const t of root.querySelectorAll("*")) if (f(t)) return;
+}|}]
+
+let hold_focus : unit -> unit -> bool =
+  [%mel.raw
+    {|function () {
+  const d = document, a = d.activeElement, p = [];
+  if (!a || a === d.body) return function () { return false };
+  for (let n = a; n.parentElement && n !== d.body; n = n.parentElement) p.unshift(Array.prototype.indexOf.call(n.parentElement.children, n));
+  return function () {
+    let t = a;
+    if (!a.isConnected) {
+      t = a.id ? d.getElementById(a.id) : d.body;
+      if (!a.id) for (const i of p) t = t && t.children[i];
+    }
+    if (!t || t.tagName !== a.tagName) return false;
+    t.focus({ preventScroll: true });
+    return d.activeElement === t;
+  };
 }|}]

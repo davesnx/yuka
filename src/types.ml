@@ -23,6 +23,7 @@ type backend = ..
         loading : node;
         failed : string -> node;
         render : 'a -> node;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
         -> node
     | Slot of slot
@@ -102,14 +103,17 @@ type backend = ..
     alt_key : event -> bool;
     client_x : event -> float;
     client_y : event -> float;
-    navigate : string -> unit;
+    navigate : replace:bool -> keep_scroll:bool -> string -> unit;
+    refresh : unit -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
   }
 
   type router = {
     boot : bool * (unit -> unit) -> unit;
-    navigate : string -> unit;
+    navigate : replace:bool -> keep_scroll:bool -> string -> unit;
+    refresh : unit -> unit;
+    prefetch : string -> unit;
     back : unit -> unit;
     handle : event -> unit;
     stop : unit -> unit;
@@ -121,7 +125,9 @@ type backend = ..
         subscribe : (unit -> unit) -> unit;
         fill : unit -> string;
         fill_failed : string -> string;
+        fill_broken : unit -> string;
         inside_island : bool;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
     | Pending_async of { id : string; async : Json.t Async.t }
     | Pending_answer of { key : string; answer : Json.t Async.t }
@@ -162,6 +168,7 @@ type backend = ..
     mutable held : string list;
     mutable context : context option;
     mutable shared : (Scheduler.binding * string) list;
+    mutable route_printed : bool;
     mutable contexts : int;
     mutable id_scope : string;
     mutable id_count : int;
@@ -176,7 +183,7 @@ type backend = ..
   let restore s
       { streaming = _; islands_only = _; islands; asyncs; awaits; pending; preload;
         preloaded; depth; queued; id_prefix; entry; current; in_fill; select_value; answers; answered; form;
-        csrf; sheets; held; context; shared; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused } =
+        csrf; sheets; held; context; shared; route_printed = _; contexts; id_scope; id_count; page_scope; page_count; invalid; invalid_focused } =
     s.islands <- islands;
     s.asyncs <- asyncs;
     s.awaits <- awaits;

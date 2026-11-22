@@ -40,7 +40,7 @@ type ctx = {
 
 let rules = [ "headers"; "cache"; "prerender" ]
 let reserved = [ "href"; "fragment"; "req"; "children" ]
-let generated_values = [ "href"; "find"; "current"; "replace"; "push" ]
+let generated_values = [ "href"; "find"; "current"; "pending"; "replace"; "push" ]
 
 let encode text =
   let b = Buffer.create (String.length text) in
@@ -885,6 +885,8 @@ let generate input nodes =
     @ [
         "";
         "let current () = Yuka.runtime_route_current find";
+        "";
+        "let pending () = Yuka.runtime_route_pending find";
         "";
         "let replace route = Yuka.runtime_route_replace (href route)";
         "";

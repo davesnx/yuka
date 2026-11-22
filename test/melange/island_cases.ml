@@ -332,6 +332,45 @@ let fill_script_removed () =
     "<div>x<!--[s1--><section><!--[-->4<!--]--><!--[--><i>z</i><!--]-->t</section><!--]--><p></p></div>"
     (Dom_cases.html (doc_body doc))
 
+let parsed : Dom_cases.node -> unit =
+  [%mel.raw {|function (doc) { doc.dispatchEvent(new doc.defaultView.Event("DOMContentLoaded")) }|}]
+
+let first_load_broken () =
+  let page =
+    {|<div><!--[s1-->L1<!--]--><!--[s2-->L2<!--]--><!--[s3-->L3<!--]--></div>|}
+    ^ {|<yuka-island data-id="i1"><!--[s4--><i>w</i><!--]--></yuka-island>|}
+    ^ {|<script type="application/json" data-yuka-props="i1">{"$async":"a1"}</script>|}
+    ^ {|<script type="application/json" data-yuka-props="i2">{"$async":"a2","ok":1}</script>|}
+    ^ {|<template data-yuka-failed="s1"><b>F1</b></template><template data-yuka-failed="s2"></template>|}
+    ^ {|<template data-yuka-failed="s3">x</template><template data-yuka-failed="s4"><b>F4</b></template>|}
+    ^ {|<template data-yuka-fill="s3">D3</template>|}
+  in
+  let doc = fresh_doc "outside-only" in
+  let body = doc_body doc in
+  eval_in doc fill_js;
+  Dom_cases.set_html body page;
+  eval_in doc {|window.__yukaFill("s3")|};
+  check "a fill removes its failed view" "3" (ints (Array.length (Dom_cases.query_all body "template")));
+  parsed doc;
+  check "each pending await shows its failed view, an island one too, and its async value fails"
+    ({|<div><!--[--><b>F1</b><!--]--><!--[--><!--]--><!--[s3-->D3<!--]--></div>|}
+    ^ {|<yuka-island data-id="i1"><!--[--><b>F4</b><!--]--></yuka-island>|}
+    ^ {|<script type="application/json" data-yuka-props="i1">{"$async":"a1"}</script>|}
+    ^ {|<script type="application/json" data-yuka-props="i2">{"$async":"a2","ok":1}</script>|}
+    ^ {|<script type="application/json" data-yuka-async="a1">{"error":"broken"}</script>|})
+    (Dom_cases.html body);
+  let doc = fresh_doc "outside-only" in
+  let body = doc_body doc in
+  eval_in doc fill_js;
+  Dom_cases.set_html body
+    ({|<div><!--[s1-->L1<!--]--></div><script type="application/json" data-yuka-props="i1">{"$async":"a1"}</script>|}
+    ^ {|<template data-yuka-failed="s1"><b>F1</b></template><template data-yuka-fill="s1">D1</template>|});
+  eval_in doc {|window.__yukaFill("s1")|};
+  parsed doc;
+  check "a complete stream changes nothing at the end"
+    {|<div><!--[s1-->D1<!--]--></div><script type="application/json" data-yuka-props="i1">{"$async":"a1"}</script>|}
+    (Dom_cases.html body)
+
 let fill_then_hydrate () =
   let a, shell, (id, chunk) = streamed () in
   let doc = fresh_doc "outside-only" in
@@ -775,7 +814,7 @@ let platform_override_survives () =
   let c = Dom_cases.container (Dom_cases.server (page [ select_island () ])) in
   start_islands [ select_entry ];
   Private.platform :=
-    { !Private.platform with navigate = (fun url -> navigations := url :: !navigations) };
+    { !Private.platform with navigate = (fun ~replace:_ ~keep_scroll:_ url -> navigations := url :: !navigations) };
   fire (Dom_cases.query c "select") "pointerover";
   Browser.navigate "/next";
   check "the override is still installed after an island started" "/next"
@@ -1154,6 +1193,7 @@ let all =
     ("start interaction each event", strategy_interaction_each_event);
     ("stream fill script runs", fill_runs);
     ("stream fill removes template and script", fill_script_removed);
+    ("a first load whose stream breaks shows the failed view of each pending await", first_load_broken);
     ("stream fill then hydrate", fill_then_hydrate);
     ("async prop value in page", async_prop_value);
     ("async prop error in page", async_prop_error);

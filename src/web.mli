@@ -75,7 +75,8 @@ val fetch_post :
   unit ->
   unit
 val watch_added : (node array -> bool) -> unit -> unit
-val navigate : string -> unit
+val navigate : bool -> string -> unit
+val confirm : string -> bool
 val focus : string -> unit
 val focus_node : node -> unit
 val scroll_into_view : string -> unit
@@ -95,20 +96,25 @@ val fire : node -> unit
 val promise_map : ('a -> 'b) -> 'a promise -> 'b promise
 val promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit
 
-val location_assign : string -> unit
 val current_url : unit -> string
+val local_url : string -> string
 val same_origin : string -> bool
 val fresh_key : unit -> string
 val history_key : unit -> string
 val history_replace_key : string -> unit
 val history_push_key : string -> string -> unit
 val scroll_y : unit -> float
+val scroll_to : float -> unit
 val set_cookie : string -> unit
+val history_at : unit -> int
+val history_go : int -> unit
 val history_back : unit -> unit
 val history_replace_url : string -> unit
 val manual_scroll : unit -> unit
 val plain_click : event -> bool
 val link_href : bool -> node -> string
+val link : node -> node
+val form_url : event -> string
 type 'a table
 
 val table : unit -> 'a table
@@ -119,6 +125,8 @@ val table_delete : 'a table -> string -> unit
 val table_size : 'a table -> int
 val table_values : 'a table -> 'a array
 val table_clear : 'a table -> unit
+val stored_scrolls : unit -> float table
+val store_scrolls : float table -> unit
 
 type ('k, 'v) keyed
 
