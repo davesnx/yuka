@@ -402,7 +402,7 @@ let rec mount_node pos last n =
   | Hole f ->
       last := false;
       mount_hole pos false f
-  | Await { async; loading; failed; render } ->
+  | Await { async; loading; failed; render; _ } ->
       last := false;
       !await_hook.run pos async loading failed render [@u]
   | Slot slot ->

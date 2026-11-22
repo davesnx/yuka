@@ -23,6 +23,7 @@ type backend = ..
         loading : node;
         failed : string -> node;
         render : 'a -> node;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
         -> node
     | Slot of slot
@@ -122,6 +123,7 @@ type backend = ..
         fill : unit -> string;
         fill_failed : string -> string;
         inside_island : bool;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
     | Pending_async of { id : string; async : Json.t Async.t }
     | Pending_answer of { key : string; answer : Json.t Async.t }

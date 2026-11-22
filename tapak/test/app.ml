@@ -37,7 +37,7 @@ let slow () =
       el "main"
         [
           Yuka.text "before";
-          Yuka.Await.make ~async:data ~loading:(Yuka.text "loading") ~children:(fun s -> el "p" [ Yuka.text s ]) ();
+          Yuka.Await.make ~async:data ~loading:(Yuka.text "loading") ~blocking:`No ~children:(fun s -> el "p" [ Yuka.text s ]) ();
         ])
 
 let stuck () =

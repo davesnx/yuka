@@ -64,8 +64,10 @@ let pending_id = function
   | Types.Pending_await { id; _ } | Types.Pending_async { id; _ } -> id
   | Types.Pending_answer { key; _ } -> "answer:" ^ key
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ~timeout ~sleep build ~on_shell
-    ~on_fill ~on_value =
+let is_await = function Types.Pending_await _ -> true | Types.Pending_async _ | Types.Pending_answer _ -> false
+
+let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ?on_ready
+    ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.context <- context;
   session.form <- form;
@@ -77,11 +79,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
   session.route_printed <- route_printed;
   session.id_scope <- id_prefix ^ "p-";
   let shell = Printer.print session (fun () -> build ()) in
-  let fills =
-    List.exists
-      (function Types.Pending_await _ -> true | Types.Pending_async _ | Types.Pending_answer _ -> false)
-      session.pending
-  in
+  let fills = List.exists is_await session.pending in
   let result, resolve, fail = Async.make () in
   let chain = ref (on_shell ~fills shell) in
   let emit f = chain := Async.bind !chain f in
@@ -110,13 +108,35 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
     outstanding := List.filter (fun p -> pending_id p <> id) !outstanding
   in
   let is_outstanding id = List.exists (fun p -> pending_id p = id) !outstanding in
+  let held = ref [] and started = ref false and ready = ref false in
+  let check_ready () =
+    match on_ready with
+    | Some on_ready when !started && (not !ready) && !held = [] ->
+        ready := true;
+        on_ready ~fills:(List.exists is_await !outstanding)
+    | Some _ | None -> ()
+  in
+  let release id =
+    if List.mem id !held then begin
+      held := List.filter (fun h -> h <> id) !held;
+      check_ready ()
+    end
+  in
   let rec register () =
     let items = Printer.take_pending session in
     outstanding := !outstanding @ items;
     List.iter
+      (function
+        | Types.Pending_await { id; blocking = `Yes | `Timeout _; _ } when Option.is_some on_ready && not !ready -> held := id :: !held
+        | Types.Pending_await _ | Types.Pending_async _ | Types.Pending_answer _ -> ())
+      items;
+    List.iter
       (fun pending ->
         match pending with
-        | Types.Pending_await { id; subscribe; fill; inside_island; _ } ->
+        | Types.Pending_await { id; subscribe; fill; inside_island; blocking; _ } ->
+            (match blocking with
+            | `Timeout seconds when List.mem id !held -> Async.on_settled (sleep seconds) (fun _ -> release id)
+            | `Timeout _ | `Yes | `No -> ());
             subscribe (fun () -> settled_fill id inside_island fill)
         | Types.Pending_async { id; async } ->
             Async.on_settled async (fun status -> settled_value id status)
@@ -132,7 +152,8 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
           register ();
           let links = Printer.take_answers session ^ Printer.take_links session in
           emit (fun () -> on_fill id inside links html);
-          check_done ()
+          check_done ();
+          release id
       | exception exn -> abort exn
     end
   and settled_value id status =
@@ -192,7 +213,9 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
           | None -> ()
           | Some f ->
               on_timeout := None;
-              f ())
+              f ());
+      started := true;
+      check_ready ()
     end;
   result
 
@@ -244,73 +267,80 @@ let fill_marker doc id ~inside html =
       String.sub doc 0 start ^ opening ^ html
       ^ String.sub doc (stop + closing) (String.length doc - stop - closing)
 
-type navigation = Settled of string | Streamed of string * ((string -> unit Async.t) -> unit Async.t)
+type piece = Fill of string * string | Value of string
 
-let budget = 0.1
+type page =
+  | Settled of { body : string; islands : bool }
+  | Streamed of { shell : string; fills : bool; rest : (piece -> unit Async.t) -> bool Async.t }
+
 let line (json : Json.t) = Json.to_string json ^ "\n"
 let part id html = line (`List [ `String id; `String html ])
-let streamed_body shell rest write = Async.bind (write (line (`String shell))) (fun () -> rest write)
 
-let navigation ?(timeout = 10.) ?budget ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~sleep build =
+let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~sleep build =
   let document = ref "" and values = Buffer.create 64 and streaming = ref false in
   let early = ref [] in
-  let writer = ref (fun text ->
-    early := text :: !early;
+  let writer = ref (fun piece ->
+    early := piece :: !early;
     Async.return ())
   in
-  let send text = !writer text in
-  let finished =
+  let send piece = !writer piece in
+  let finished, finish, fail_finished = Async.make () in
+  let result, resolve, fail = Async.make () in
+  let decided = ref false and driven = ref false and ready = ref None in
+  let decide f = if not !decided then begin decided := true; f () end in
+  let rest write =
+    let flushed = List.fold_left (fun a piece -> Async.bind a (fun () -> write piece)) (Async.return ()) (List.rev !early) in
+    early := [];
+    writer := (fun piece -> Async.bind flushed (fun () -> write piece));
+    let ended, resolve, fail = Async.make () in
+    Async.on_settled finished (function
+      | Async.Done islands -> Async.on_settled flushed (function Async.Failed m -> fail m | _ -> resolve islands)
+      | Async.Failed m -> Async.on_settled flushed (fun _ -> fail m)
+      | Async.Pending -> ());
+    ended
+  in
+  let send_shell ~fills =
+    decide (fun () ->
+        streaming := true;
+        resolve (Streamed { shell = !document ^ Buffer.contents values; fills; rest }))
+  in
+  let driven_result =
     drive ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~timeout ~sleep
+      ?on_ready:(if stream then Some (fun ~fills -> if !driven then send_shell ~fills else ready := Some fills) else None)
       (fun () -> build ())
       ~on_shell:(fun ~fills:_ shell ->
         document := shell;
         Async.return ())
       ~on_fill:(fun id inside links html ->
-        if !streaming then Async.bind (if links = "" then Async.return () else send (part "" links)) (fun () -> send (part id html))
+        if !streaming then Async.bind (if links = "" then Async.return () else send (Value links)) (fun () -> send (Fill (id, html)))
         else begin
           document := fill_marker !document id ~inside html;
           Buffer.add_string values links;
           Async.return ()
         end)
       ~on_value:(fun html ->
-        if !streaming then send (part "" html)
+        if !streaming then send (Value html)
         else begin
           Buffer.add_string values html;
           Async.return ()
         end)
   in
-  let result, resolve, fail = Async.make () in
-  let decided = ref false in
-  let decide f = if not !decided then begin decided := true; f () end in
-  Async.on_settled finished (function
-    | Async.Done _ -> decide (fun () -> resolve (Settled (!document ^ Buffer.contents values)))
-    | Async.Failed m -> decide (fun () -> fail m)
+  driven := true;
+  Async.on_settled driven_result (function
+    | Async.Done islands ->
+        finish islands;
+        decide (fun () -> resolve (Settled { body = !document ^ Buffer.contents values; islands }))
+    | Async.Failed m ->
+        fail_finished m;
+        decide (fun () -> fail m)
     | Async.Pending -> ());
-  let rest write =
-    let flushed = List.fold_left (fun a text -> Async.bind a (fun () -> write text)) (Async.return ()) (List.rev !early) in
-    early := [];
-    writer := (fun text -> Async.bind flushed (fun () -> write text));
-    let ended, resolve, fail = Async.make () in
-    Async.on_settled finished (function
-      | Async.Done _ ->
-          Async.on_result (send (line (`List []))) (function Ok () -> resolve () | Error m -> fail m)
-      | Async.Failed m -> Async.on_settled flushed (fun _ -> fail m)
-      | Async.Pending -> ());
-    ended
-  in
-  (match budget with
-  | Some seconds when not !decided ->
-      Async.on_settled (sleep seconds) (fun _ ->
-          decide (fun () ->
-              streaming := true;
-              resolve (Streamed (!document ^ Buffer.contents values, rest))))
-  | _ -> ());
+  Option.iter (fun fills -> send_shell ~fills) !ready;
   result
 
 let settled ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build =
   Async.map
-    (function Settled text | Streamed (text, _) -> text)
-    (navigation ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build)
+    (function Settled { body; _ } -> body | Streamed { shell; _ } -> shell)
+    (page ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build)
 
 let normalize path =
   let rec go p =

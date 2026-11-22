@@ -2312,6 +2312,55 @@ let streamed_prefetch_slot finish =
           check "the end of its stream starts the newest waiting link" "http://localhost/p5" (urls 4);
           finish ()))
 
+let holder_entry =
+  runtime_entry ~name:"Holder" (fun _ ->
+      Ok
+        (fun () ->
+          Effect.after (fun () -> log "gholder");
+          element "div" [] [ Private.slot (Private.Slot.empty ()) ]))
+
+let streamed_nested_hold finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry; holder_entry ]) ();
+  log_clear ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0
+    (json_line
+       ({|<yuka-island data-name="Holder" data-id="L0-i3" style="display:contents"><div><!--[$-->|}
+       ^ held_island "L0-i4" 4 "L0-s1"
+       ^ {|<!--]--></div></yuka-island><script type="application/json" data-yuka-props="L0-i3">0</script>|}));
+  tick (fun () ->
+      check "an island whose pending fill is only inside a nested island starts at once" "gholder" (log_g ());
+      push_text 0 (part_line "L0-s1" "<span>p</span>");
+      push_text 0 "[]\n";
+      push_end 0;
+      tick (fun () ->
+          check "the nested island starts after its fill" "gholder|g0/4" (log_g ());
+          finish ()))
+
+let own_link_entry =
+  runtime_entry ~name:"Own" (fun _ ->
+      Ok
+        (fun () ->
+          element "a"
+            [ Yuka.attr "id" "own"; Yuka.attr "href" "/two"; on "click" (fun e -> Event.prevent_default e; log "own") ]
+            [ text "own" ]))
+
+let island_link_prevented finish =
+  Yuka.stop ();
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    {|<yuka-island data-name="Own" data-id="i1" style="display:contents"><a id="own" href="/two">own</a></yuka-island><script type="application/json" data-yuka-props="i1">0</script>|};
+  render ~islands:(runtime_registry [ own_link_entry ]) ();
+  let prevented = click "#own" "" in
+  check "a link click that an island handles is not navigated" "true|own|0" (bools prevented ^ "|" ^ log_read () ^ "|" ^ ints (calls ()));
+  finish ()
+
 let streamed_overlay_back finish =
   Yuka.stop ();
   State.set probe_runs 0;
@@ -3587,6 +3636,8 @@ let all =
     ("a fill stops the islands of the loading content it replaces", streamed_fill_stops_island);
     ("a streamed prefetch keeps its place until its stream ends", streamed_prefetch_slot);
     ("Back from a streamed overlay stops its stream", streamed_overlay_back);
+    ("an island is not held for a pending fill inside a nested island", streamed_nested_hold);
+    ("a link click that an island prevents is not navigated", island_link_prevented);
     ("back and forward use the cache", back_forward_cache);
     ("no-store: a prefetch is used once within 10 s", no_store_once);
     ("other outlet keys miss", keys_miss);
