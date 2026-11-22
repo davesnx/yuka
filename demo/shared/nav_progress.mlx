@@ -13,12 +13,7 @@ let[@client] make () =
       else Yuka.State.set phase (if !shown then Finished else Idle));
   Yuka.Effect.after (fun () ->
       Yuka.Browser.on_window "keydown" (fun event ->
-          if
-            Yuka.Event.key event = "c"
-            && not
-                 (Ui.typing event || Yuka.State.peek Ui.dialog_open
-                 || Yuka.Event.ctrl_key event || Yuka.Event.meta_key event)
-          then begin
+          if Yuka.Event.key event = "c" && Ui.shortcut event then begin
             Yuka.Event.prevent_default event;
             Yuka.State.set Ui.dialog_asked true;
             Yuka.Browser.focus "new-issue-button"

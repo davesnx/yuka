@@ -439,6 +439,29 @@ await step("3l. overlay route", async () => {
     allRequests.slice(mark).filter((r) => r.navigate).length === 0 && new URL(page.url()).pathname === "/" && (await state()).rows > 0 && (await marker()) === "alive",
     page.url(),
   );
+  const selected = () => page.evaluate(() => document.querySelector("yuka-outlet .row.selected")?.getAttribute("data-id"));
+  await page.keyboard.press("j");
+  await until(async () => (await selected()) !== undefined, 5_000);
+  const first = await selected();
+  await page.locator('.nav-link[href="/settings"]').click();
+  await page.waitForSelector("yuka-overlay .overlay-dialog [data-settings]");
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay [data-settings]")?.closest("yuka-island") as any)?.__yuka_started);
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay .close-button")?.closest("yuka-island") as any)?.__yuka_started);
+  await page.locator('yuka-overlay [data-setting="motion"] button', { hasText: "Full" }).focus();
+  mark = allRequests.length;
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("j");
+  await page.waitForTimeout(500);
+  check(
+    "3l.5b Enter on a Settings button in the overlay does not open the issue selected in the list, and j does not move the selection",
+    allRequests.slice(mark).filter((r) => r.url.includes("/issue/")).length === 0 && new URL(page.url()).pathname === "/settings" && (await state()).settings === 1 && (await selected()) === first,
+    JSON.stringify({ url: page.url(), first, selected: await selected(), requests: allRequests.slice(mark).map((r) => r.url) }),
+  );
+  await page.locator("yuka-overlay .close-button").click();
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
+  await page.keyboard.press("j");
+  await until(async () => (await selected()) !== first, 5_000);
+  check("3l.5c after the overlay closes, j moves the selection in the list again", (await selected()) !== first && (await selected()) !== undefined, JSON.stringify({ first, selected: await selected() }));
   const look = () =>
     page.evaluate(() => ({
       theme: document.documentElement.getAttribute("data-theme"),
@@ -476,6 +499,19 @@ await step("3l. overlay route", async () => {
     reloaded.path === "/settings" && reloaded.overlays === 0 && reloaded.page === 1 && reloaded.rows === 0 && kept.theme === after.theme && kept.zoom === "1.125" && pressed === "Large",
     JSON.stringify({ reloaded, kept, pressed }),
   );
+  const themeRow = () => page.locator('yuka-outlet [data-setting="theme"] button[aria-pressed="true"]').textContent();
+  const menuTheme = kept.theme === "gray" ? "pale" : "gray";
+  await page.click("#theme-button");
+  await page.waitForSelector("[role=menu]");
+  await page.click(`#theme-${menuTheme}`);
+  await until(async () => (await themeRow())?.toLowerCase() === menuTheme, 5_000);
+  check("3l.7a a theme chosen in the header menu shows as chosen on the Settings page", (await themeRow())?.toLowerCase() === menuTheme, JSON.stringify({ menuTheme, row: await themeRow() }));
+  await choose("yuka-outlet", "theme", "Light");
+  await page.click("#theme-button");
+  await page.waitForSelector("[role=menu]");
+  check("3l.7c a theme chosen on the Settings page shows as checked in the header menu", (await page.getAttribute("#theme-light", "aria-checked")) === "true" && (await page.getAttribute(`#theme-${menuTheme}`, "aria-checked")) === "false");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("[role=menu]", { state: "detached" });
   await choose("yuka-outlet", "issue-ids", "Hide");
   await choose("yuka-outlet", "font-size", "Default");
   await page.locator('.nav-link[href="/"]').click();

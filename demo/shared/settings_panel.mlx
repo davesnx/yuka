@@ -2,8 +2,7 @@ module Css = [%yuka.css "settings_panel.css"]
 
 let[@client] make () =
   let row (preference : Preference.t) =
-    let value = Yuka.State.make "" in
-    Yuka.Effect.after (fun () -> Yuka.State.set value (Preference.current preference));
+    Yuka.Effect.after (fun () -> Yuka.State.set preference.value (Preference.current preference));
     let id = "setting-" ^ preference.key in
     <div class_=Css.row>
       <span id class_=Css.name>(Yuka.text preference.name)</span>
@@ -12,10 +11,8 @@ let[@client] make () =
            (List.map
               (fun (slug, label) ->
                 <button class_=Css.choice type_=`button
-                  aria_pressed=(if Yuka.State.get value = slug then `true_ else `false_)
-                  on_click=(fun _ ->
-                    Preference.apply preference slug;
-                    Yuka.State.set value slug)>
+                  aria_pressed=(if Yuka.State.get preference.value = slug then `true_ else `false_)
+                  on_click=(fun _ -> Preference.apply preference slug)>
                   (Yuka.text label)
                 </button>)
               preference.choices))
