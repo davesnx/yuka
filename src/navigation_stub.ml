@@ -136,6 +136,14 @@ let on_click e =
         Web.prevent_default e;
         navigate ~link ~replace:(flag "data-yuka-replace") ~keep_scroll:(flag "data-yuka-keep-scroll") href
 
+let on_submit e =
+  if not !failed then
+    match Web.form_url e with
+    | "" -> ()
+    | href ->
+        Web.prevent_default e;
+        navigate ~link:(Web.target e) ~replace:false ~keep_scroll:false href
+
 let on_link e =
   if Option.is_some !router || Web.link_href true (Web.target e) <> "" then
     use (fun r -> r.handle e)
@@ -175,6 +183,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
       Web.add_listener doc "click" on_click;
       List.iter (fun n -> Web.add_listener doc n on_link) link_events;
       List.iter (fun n -> Web.add_listener doc n on_leave) leave_events;
+      Web.add_listener (Web.window ()) "submit" on_submit;
       Web.add_listener (Web.window ()) "popstate" on_popstate);
   islands ();
   Platform.client_navigate := Some (navigate ?link:None);
@@ -203,6 +212,7 @@ let stop () =
       List.iter (fun n -> Web.remove_listener doc n on_link) link_events;
       List.iter (fun n -> Web.remove_listener doc n on_leave) leave_events;
       Web.remove_listener doc "pointermove" on_move;
+      Web.remove_listener (Web.window ()) "submit" on_submit;
       Web.remove_listener (Web.window ()) "popstate" on_popstate
   | None -> ());
   Option.iter (fun r -> r.stop ()) !router;

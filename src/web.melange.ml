@@ -386,6 +386,22 @@ let link_href : bool -> node -> string =
 
 external link : node -> (_[@mel.as "a[href]"]) -> node = "closest" [@@mel.send]
 
+let form_url : event -> string =
+  [%mel.raw
+    {|function (e) {
+  const f = e.target, s = e.submitter;
+  if (e.defaultPrevented || !e.isTrusted || !(f instanceof HTMLFormElement)) return "";
+  const a = function (n) { return s && s.hasAttribute("form" + n) ? s.getAttribute("form" + n) : f.getAttribute(n); };
+  const t = a("target");
+  if ((a("method") || "get").toLowerCase() !== "get" || (t && t !== "_self") || f.hasAttribute("data-yuka-reload")) return "";
+  try {
+    const u = new URL(a("action") || "", document.baseURI);
+    if (u.origin !== window.location.origin) return "";
+    u.search = new URLSearchParams(Array.from(new FormData(f, s), function (p) { return [p[0], typeof p[1] === "string" ? p[1] : p[1].name]; })).toString();
+    return u.href;
+  } catch (x) { return ""; }
+}|}]
+
 type 'a table
 
 external table : unit -> 'a table = "Map" [@@mel.new]

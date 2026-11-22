@@ -347,6 +347,89 @@ await step("3b. router", async () => {
   check("3b.12 a link with data-yuka-replace is a client navigation that replaces the entry", replaced === entries && (await marker()) === "alive", `history.length ${entries} -> ${replaced} marker=${await marker()}`);
 });
 
+await step("3m. GET forms", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    (document.querySelector(".sidebar-extra yuka-island") as any).__kept = true;
+  });
+  const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
+  const kept = () => page.evaluate(() => !!(document.querySelector(".sidebar-extra yuka-island") as any)?.__kept);
+  const entries = await page.evaluate(() => history.length);
+  await page.fill(".search input", "keyboard");
+  await page.press(".search input", "Enter");
+  await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=keyboard");
+  await page.waitForFunction(() => (document.querySelector(".filter") as HTMLInputElement | null)?.value === "keyboard").catch(() => {});
+  const after = await page.evaluate(() => ({ filter: (document.querySelector(".filter") as HTMLInputElement | null)?.value, rows: document.querySelectorAll(".row").length, entries: history.length }));
+  check("3m.1 the sidebar search form is a client navigation that keeps the layout island", (await marker()) === "alive" && (await kept()) && after.filter === "keyboard" && after.entries === entries + 1, `marker=${await marker()} kept=${await kept()} ${JSON.stringify(after)}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.id = "e2e-get";
+    f.action = "/nowhere";
+    f.innerHTML = '<input name="q" value="a b"><button id="e2e-get-submit" name="label" value="bug" formaction="/my">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-get-submit").click();
+  await page.waitForURL((u) => u.pathname === "/my");
+  const my = new URL(page.url());
+  check("3m.2 a form with no method uses the submitter name, value and formaction", (await marker()) === "alive" && my.searchParams.get("q") === "a b" && my.searchParams.get("label") === "bug", `${my.pathname}${my.search} marker=${await marker()}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.method = "post";
+    f.action = "/";
+    f.innerHTML = '<button id="e2e-post-get" formmethod="get" name="q" value="sync">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-post-get").click();
+  await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=sync");
+  check("3m.3 formmethod=get on the submitter of a POST form is a client navigation", (await marker()) === "alive", `marker=${await marker()}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.action = "/my";
+    f.target = "_blank";
+    f.innerHTML = '<input name="q" value="new"><button id="e2e-blank">go</button>';
+    document.body.prepend(f);
+  });
+  const [popup] = await Promise.all([page.context().waitForEvent("page"), page.locator("#e2e-blank").click()]);
+  await popup.waitForLoadState();
+  check("3m.4 a form with target=_blank is not intercepted", new URL(popup.url()).pathname === "/my" && new URL(page.url()).search === "?q=sync" && (await marker()) === "alive", `${popup.url()} current=${page.url()}`);
+  await popup.close();
+  await page.evaluate(() => {
+    const f = document.querySelector(".search") as HTMLFormElement;
+    f.setAttribute("data-yuka-reload", "");
+    (f.querySelector("input") as HTMLInputElement).value = "full";
+  });
+  await Promise.all([page.waitForEvent("load"), page.press(".search input", "Enter")]);
+  check("3m.5 a form with data-yuka-reload does a full page load", new URL(page.url()).search === "?q=full" && (await marker()) === undefined, `${page.url()} marker=${await marker()}`);
+  await page.waitForSelector(".search input");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    const f = document.createElement("form");
+    f.action = "/my";
+    f.innerHTML = '<input name="q" value="kept"><button id="e2e-prevented">go</button>';
+    document.body.prepend(f);
+    document.addEventListener("submit", (e) => { if (e.target === f) { e.preventDefault(); (window as any).__prevented = location.href; } });
+  });
+  await page.locator("#e2e-prevented").click();
+  await page.waitForFunction(() => (window as any).__prevented !== undefined);
+  await page.waitForTimeout(300);
+  check("3m.7 a submit that a document listener prevents is left alone", new URL(page.url()).search === "?q=full" && (await marker()) === "alive", `${page.url()} marker=${await marker()}`);
+  await page.route("http://e2e-other.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<p id=other>other</p>" }));
+  await page.waitForSelector(".search input");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    const f = document.createElement("form");
+    f.action = "http://e2e-other.test/find";
+    f.innerHTML = '<input name="q" value="x"><button id="e2e-other">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-other").click();
+  await page.waitForSelector("#other");
+  check("3m.6 a form to another origin does a full page load", page.url() === "http://e2e-other.test/find?q=x", page.url());
+  await page.unroute("http://e2e-other.test/**");
+});
+
 await step("3c. partial navigation", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");

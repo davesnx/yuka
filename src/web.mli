@@ -110,6 +110,7 @@ val manual_scroll : unit -> unit
 val plain_click : event -> bool
 val link_href : bool -> node -> string
 val link : node -> node
+val form_url : event -> string
 type 'a table
 
 val table : unit -> 'a table

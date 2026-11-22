@@ -1179,6 +1179,14 @@ val render :
       [data-yuka-pending] attribute until the new page (or the first part
       of a streamed page) is shown, the navigation fails or becomes a full
       page load, or a newer navigation starts.
+    - A submit of a [<form>] whose method is [get] (or not set) is a client
+      navigation to the action URL with the form fields as query, unless:
+      the event is already prevented or does not come from the browser, the
+      form has a [target] other than [_self] or a [data-yuka-reload]
+      attribute, or the URL is on another origin. The [formmethod],
+      [formaction] and [formtarget] attributes and the name and value of the
+      submit button count, as in the browser. The form has a
+      [data-yuka-pending] attribute as a clicked link has.
     - [popstate] loads the entry's URL without pushing history.
     - {!Browser.navigate} is a client navigation. {!Browser.refresh} is a
       client navigation to the URL shown that keeps the history entry, the

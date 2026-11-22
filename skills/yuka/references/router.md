@@ -313,6 +313,26 @@ the announcer change as for other navigations. You can use both
 attributes on one link. Without client navigation, the full page load
 scrolls as the browser does.
 
+A form with `method="get"` (or with no method) is also a client
+navigation. When the user submits it, Yuka makes the URL from the action
+of the form and its fields, as the browser does, and loads that URL as a
+click on a link does. A search form in the layout thus keeps the islands
+of the layout:
+
+```ocaml
+<form method_=`get action=(Routes.blog ()) role=`search>
+  <input type_=`search name="q" />
+</form>
+```
+
+The `formmethod`, `formaction` and `formtarget` attributes and the name
+and value of the submit button count. Yuka does not change a submit that
+is already prevented (for example by `Yuka.Form`), a form with a
+`target` other than `_self`, a form with an action URL on another
+origin, or a form with a `data-yuka-reload` attribute: these do a full
+page load or what the browser does. While the navigation is in flight,
+the form has a `data-yuka-pending` attribute, as a clicked link has.
+
 After an `Action.call`, the server-rendered parts of the page can show
 old data. `Yuka.Browser.refresh ()` loads the URL shown again from the
 server, with no cached answer, and puts in the new content:
