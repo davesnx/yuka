@@ -33,10 +33,10 @@ let refresh_store base inner req =
     Demo_shared.Store.refresh ();
   inner req
 
-let with_index index config app req =
+let with_index index apps req =
   let target = Dream.target req in
-  match Yuka.Server.Prerender.path config target with
-  | Some _ -> app req
+  match List.find_opt (fun (config, _) -> Yuka.Server.Prerender.path config target <> None) apps with
+  | Some (_, app) -> app req
   | None when String.starts_with ~prefix:"/_yuka/" target -> Dream.empty `Not_Found
   | None -> index req
 
@@ -71,6 +71,7 @@ let () =
   let second = ref 0 in
   let bus = ref "memory" in
   let base = ref "" in
+  let async_feed = ref (Filename.concat here "../../async-feed") in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
   let database =
     ref
@@ -104,6 +105,7 @@ let () =
       ("--prerender", Arg.Set_string prerender, "Write the prerendered pages to DIR and exit");
       ("--prerendered", Arg.Set_string prerendered, "Serve the prerendered pages of DIR");
       ("--base", Arg.Set_string base, "Serve the app under this path prefix, as /mini-linear, and the list of demos at every other path (default: none)");
+      ("--async-feed", Arg.Set_string async_feed, "With --base: directory of the Async demo (client/ and static/), served under /async-feed");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
         Arg.Set_int second,
@@ -136,6 +138,18 @@ let () =
   let base = !base in
   if base <> "" && not (List.exists (fun (demo : Demo_index.Pages.demo) -> demo.path = base) Demo_index.Pages.demos) then
     stop ("--base must be the path of a demo in the index: " ^ base);
+  let others =
+    if base = "" then []
+    else if base = "/async-feed" then stop "--base /async-feed is the path of the Async demo"
+    else
+      match
+        Async_feed_app.Serve.make ~base:"/async-feed" ~bundle:!bundle ~dir:!async_feed ~secret:!secret
+          ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
+          ()
+      with
+      | Ok async -> [ (async.config, async.handler) ]
+      | Error message -> stop ("the Async demo: " ^ message)
+  in
   let config =
     match
       Yuka.Server.config ~base ~assets
@@ -176,8 +190,8 @@ let () =
   if !prerender <> "" then (
     match Lwt_main.run (Yuka_dream.prerender ~out:!prerender config app) with Ok () -> () | Error message -> stop message)
   else if !second = 0 then
-    Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ with_index index config @@ refresh_store base @@ late_script @@ Dream.set_secret !secret
-    @@ Dream.cookie_sessions @@ Yuka_dream.handler config app
+    Dream.run ~interface:!interface ~port:!port @@ Dream.logger @@ with_index index ((config, refresh_store base @@ late_script @@ Dream.set_secret !secret
+    @@ Dream.cookie_sessions @@ Yuka_dream.handler config app) :: others)
   else begin
     let make_bus =
       match String.index_opt !bus ':' with
@@ -192,8 +206,8 @@ let () =
     in
     let other = Yuka.Server.Live.node () in
     let serve ?node port =
-      Dream.serve ~interface:!interface ~port @@ Dream.logger @@ with_index index config @@ refresh_store base @@ late_script @@ Dream.set_secret !secret
-      @@ Dream.cookie_sessions @@ Yuka_dream.handler ?node config app
+      Dream.serve ~interface:!interface ~port @@ Dream.logger @@ with_index index ((config, refresh_store base @@ late_script @@ Dream.set_secret !secret
+      @@ Dream.cookie_sessions @@ Yuka_dream.handler ?node config app) :: others)
     in
     Lwt_main.run
       (let open Lwt.Syntax in

@@ -7,6 +7,11 @@ let demos =
       description = "An issue tracker: streamed pages, islands, live updates and a shared store.";
       path = "/mini-linear";
     };
+    {
+      name = "Async";
+      description = "A feed of notifications from many sources, with filters in the URL and events streamed live.";
+      path = "/async-feed";
+    };
   ]
 
 let head =

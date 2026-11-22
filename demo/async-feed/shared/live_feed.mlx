@@ -1,0 +1,23 @@
+let[@client] make ~(filter : Model.filter) ~(since : int) ~(top : bool) () =
+  let live = Yuka.Live.make Feed.recent (fun () -> ()) in
+  let running = Yuka.State.make false in
+  let fresh () =
+    match Yuka.Status.data (Yuka.State.get (Yuka.Live.state live)) with
+    | Some events when top -> List.filter (fun (event : Model.event) -> event.id > since && Model.matches filter event) events
+    | _ -> []
+  in
+  let simulate _ =
+    Yuka.State.set running true;
+    Yuka.Async.on_result (Yuka.Action.call Feed.simulate ()) (fun _ -> Yuka.State.set running false)
+  in
+  <div>
+    <ol class_="feed feed-live" aria_live=`polite>
+      (Yuka.each ~key:(fun (event : Model.event) -> Int.to_string event.id) ~equal:( = )
+         (fun () -> Array.of_list (fresh ()))
+         (fun event -> <Card event fresh=true />))
+    </ol>
+    <button class_="simulate" type_=`button disabled=(Yuka.State.get running) on_click=simulate>
+      <span class_="pulse" aria_hidden=true />
+      (Yuka.text (if Yuka.State.get running then "Streaming events" else "Simulate events"))
+    </button>
+  </div>

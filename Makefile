@@ -66,10 +66,15 @@ demo-build-watch: ## Build the demo in watch mode
 .PHONY: demo-bundle
 demo-bundle: demo-build ## Bundle the demo client with esbuild
 	BUILD_DIR=$(BUILD_DIR) demo/mini-linear/bundle.sh
+	BUILD_DIR=$(BUILD_DIR) demo/async-feed/bundle.sh
 
 .PHONY: demo-serve
-demo-serve: demo-build ## Serve the demo on PORT
+demo-serve: demo-build ## Serve the demos on PORT: the list at /, Mini Linear at /mini-linear, Async at /async-feed
 	$(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
+
+.PHONY: async-feed-serve
+async-feed-serve: demo-build ## Serve the Async demo alone, at the root, on PORT
+	$(BUILD_DIR)/default/demo/async-feed/server/async_server.exe --port $(PORT)
 
 .PHONY: demo-dev
 demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
@@ -77,6 +82,7 @@ demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browse
 	opam exec $(if $(SWITCH),--switch=$(SWITCH)) -- $(BUILD_DIR)/default/gen/yuka_cli.exe dev \
 	  --build 'dune build --watch --profile=dev @demo/all' \
 	  --assets $(BUILD_DIR)/default/demo/mini-linear/static --assets $(BUILD_DIR)/default/demo/mini-linear/client/out \
+	  --assets $(BUILD_DIR)/default/demo/async-feed/static --assets $(BUILD_DIR)/default/demo/async-feed/client/out \
 	  -- $(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: demo-test

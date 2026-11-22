@@ -1,0 +1,67 @@
+open Async_feed_shared
+
+let page_size = 50
+
+let shell ~children () =
+  <div class_="app">
+    <header class_="header">
+      <a class_="brand" href=(Routes.feed ())>
+        <svg class_="brand-mark" view_box="0 0 24 24" width="22" height="22" aria_hidden=true>
+          <rect width="24" height="24" rx="6" />
+          <path d="M6 16.5 L12 6 L18 16.5 M8.5 13 H15.5" fill="none" stroke_width="2" />
+        </svg>
+        <span>"Async"</span>
+      </a>
+      <Yuka.Client><Filters /></Yuka.Client>
+      <div class_="header-end">
+        <span class_="avatar" role=`img aria_label="Signed in as Ana Ruiz" title="Ana Ruiz">"AR"</span>
+        <Yuka.Client><Settings_menu /></Yuka.Client>
+        <Yuka.Client><Theme_toggle /></Yuka.Client>
+      </div>
+    </header>
+    <main class_="main">children</main>
+  </div>
+
+let summary ~shown ~total ~before =
+  Printf.sprintf "%d of %d events%s" shown total
+    (match before with Some time -> ", before " ^ Clock.utc time | None -> "")
+
+let feed ~project ~team ~assignee ~before () =
+  let filter = { Model.projects = project; teams = team; assignees = assignee } in
+  let { Store.events; total } = Store.page ~filter ~before ~limit:page_size in
+  let since = Store.newest_id () in
+  let top = before = None in
+  let older =
+    match List.rev events with
+    | (last : Model.event) :: _ when List.length events = page_size ->
+        <a class_="pager" href=(Routes.feed ~project ~team ~assignee ~before:last.time ())>"Older events"</a>
+    | _ -> Yuka.empty
+  in
+  Yuka.Server.page ~title:"Async" (fun () ->
+      <section class_="feed-wrap">
+        <div class_="feed-head">
+          <h1>"Notifications"</h1>
+          <p class_="feed-count">(Yuka.text (summary ~shown:(List.length events) ~total ~before))</p>
+          (if top then Yuka.empty
+           else <a class_="pager" href=(Routes.feed ~project ~team ~assignee ())>"Back to latest"</a>)
+        </div>
+        <Yuka.Client><Live_feed filter since top /></Yuka.Client>
+        <ol class_="feed">(Yuka.fragment (List.map (fun event -> <Card event />) events))</ol>
+        (if events = [] then <p class_="empty">"No event matches these filters."</p> else Yuka.empty)
+        older
+      </section>)
+
+let not_found ~path () =
+  Yuka.Server.page ~title:"Not found" (fun () ->
+      <section class_="feed-wrap">
+        <h1>"Page not found"</h1>
+        <p>(Yuka.text ("There is no page at " ^ path ^ "."))</p>
+        <a class_="pager" href=(Routes.feed ())>"Back to the feed"</a>
+      </section>)
+
+let error () =
+  Yuka.Server.page ~title:"Error" (fun () ->
+      <section class_="feed-wrap">
+        <h1>"Something went wrong"</h1>
+        <a class_="pager" href=(Routes.feed ())>"Back to the feed"</a>
+      </section>)

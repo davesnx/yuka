@@ -1,0 +1,24 @@
+let flip value values = if List.mem value values then List.filter (fun other -> other <> value) values else values @ [ value ]
+
+let[@client] make () =
+  let route = Routes.current () in
+  let current () =
+    match Yuka.State.get route with
+    | Some (Routes.Feed { project; team; assignee; _ }) -> (project, team, assignee)
+    | None -> ([], [], [])
+  in
+  let go (project, team, assignee) = Yuka.Browser.navigate (Routes.feed ~project ~team ~assignee ()) in
+  let projects () = let project, _, _ = current () in project in
+  let teams () = let _, team, _ = current () in team in
+  let assignees () = let _, _, assignee = current () in assignee in
+  <nav class_="filters" aria_label="Filters">
+    <Dropdown id="project" label="Project" options=Model.projects selected=projects
+      toggle=(fun value -> go (flip value (projects ()), teams (), assignees ()))
+      clear=(fun () -> go ([], teams (), assignees ())) />
+    <Dropdown id="team" label="Team" options=Model.teams selected=teams
+      toggle=(fun value -> go (projects (), flip value (teams ()), assignees ()))
+      clear=(fun () -> go (projects (), [], assignees ())) />
+    <Dropdown id="assignee" label="Assignee" options=Model.people selected=assignees
+      toggle=(fun value -> go (projects (), teams (), flip value (assignees ())))
+      clear=(fun () -> go (projects (), teams (), [])) />
+  </nav>

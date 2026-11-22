@@ -1,0 +1,35 @@
+let monogram = function
+  | Model.New_relic -> "NR"
+  | Vercel -> "V"
+  | Figma -> "F"
+  | Reddit -> "R"
+  | Github -> "GH"
+
+let logo source =
+  <svg class_=("logo logo-" ^ Model.source_slug source) view_box="0 0 32 32" width="32" height="32" role=`img
+    aria_label=(Model.source_label source)>
+    <rect width="32" height="32" rx="8" />
+    <text x="16" y="20.5">(Yuka.text (monogram source))</text>
+  </svg>
+
+let make ~(event : Model.event) ?(fresh = false) () =
+  <li class_=(if fresh then "card card-new" else "card") data_id=(Int.to_string event.id)>
+    (logo event.source)
+    <div class_="card-body">
+      <div class_="card-meta">
+        <span class_="card-source">(Yuka.text (Model.source_label event.source))</span>
+        <span class_="card-author">(Yuka.text event.author)</span>
+        <time class_="card-time" datetime=(Clock.iso event.time) title=(Clock.iso event.time)
+          data_ts=(Int.to_string event.time)>
+          (Yuka.text (Clock.utc event.time))
+        </time>
+      </div>
+      <h2 class_="card-title">(Yuka.text event.title)</h2>
+      <p class_="card-text">(Yuka.text event.description)</p>
+      <div class_="card-tags">
+        <span class_="tag">(Yuka.text event.project)</span>
+        <span class_="tag">(Yuka.text event.team)</span>
+        <span class_="tag">(Yuka.text event.assignee)</span>
+      </div>
+    </div>
+  </li>

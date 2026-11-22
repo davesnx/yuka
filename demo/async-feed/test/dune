@@ -1,0 +1,4 @@
+(test
+ (name run)
+ (package yuka-dream)
+ (libraries alcotest async_feed_app async_feed_shared yuka yuka-dream dream lwt))

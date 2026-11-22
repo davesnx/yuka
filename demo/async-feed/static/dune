@@ -1,0 +1,5 @@
+(rule
+ (alias all)
+ (deps style.css favicon.svg)
+ (action
+  (progn)))
