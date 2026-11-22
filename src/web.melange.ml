@@ -360,6 +360,7 @@ let history_at : unit -> int =
 external history_go : int -> unit = "go" [@@mel.scope "window", "history"]
 
 let scroll_y : unit -> float = [%mel.raw "function () { return window.scrollY || 0 }"]
+let scroll_to : float -> unit = [%mel.raw "function (y) { window.scrollTo(0, y) }"]
 
 let set_cookie : string -> unit = [%mel.raw "function (cookie) { document.cookie = cookie }"]
 
@@ -404,6 +405,14 @@ external table_has : 'a table -> string -> bool = "has" [@@mel.send]
 external table_delete : 'a table -> string -> unit = "delete" [@@mel.send]
 external table_size : 'a table -> int = "size" [@@mel.get]
 external table_clear : 'a table -> unit = "clear" [@@mel.send]
+
+let stored_scrolls : unit -> float table =
+  [%mel.raw
+    {|function () { try { return new Map(JSON.parse(sessionStorage.getItem("yuka-scroll")).filter((e) => typeof e[0] === "string" && typeof e[1] === "number")) } catch (e) { return new Map() } }|}]
+
+let store_scrolls : float table -> unit =
+  [%mel.raw
+    {|function (t) { try { sessionStorage.setItem("yuka-scroll", JSON.stringify(Array.from(t).slice(-100))) } catch (e) {} }|}]
 
 let table_values : 'a table -> 'a array =
   [%mel.raw "function (t) { return Array.from(t.values()) }"]

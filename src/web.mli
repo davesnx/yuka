@@ -104,6 +104,7 @@ val history_key : unit -> string
 val history_replace_key : string -> unit
 val history_push_key : string -> string -> unit
 val scroll_y : unit -> float
+val scroll_to : float -> unit
 val set_cookie : string -> unit
 val history_at : unit -> int
 val history_go : int -> unit
@@ -123,6 +124,8 @@ val table_delete : 'a table -> string -> unit
 val table_size : 'a table -> int
 val table_values : 'a table -> 'a array
 val table_clear : 'a table -> unit
+val stored_scrolls : unit -> float table
+val store_scrolls : float table -> unit
 
 type ('k, 'v) keyed
 

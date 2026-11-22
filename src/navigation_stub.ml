@@ -14,6 +14,11 @@ let table r =
 let scroll_table : float Web.table option ref = ref None
 let save_scroll () = Web.table_set (table scroll_table) !shown_key (Web.scroll_y ())
 
+let on_pagehide _ =
+  Web.table_delete (table scroll_table) !shown_key;
+  save_scroll ();
+  Web.store_scrolls (table scroll_table)
+
 let loaded = Platform.loaded
 let on = ref false
 let router : router option ref = ref None
@@ -195,8 +200,15 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
       Web.add_listener doc "click" on_click;
       List.iter (fun n -> Web.add_listener doc n on_link) link_events;
       List.iter (fun n -> Web.add_listener doc n on_leave) leave_events;
-      Web.add_listener (Web.window ()) "popstate" on_popstate);
+      Web.add_listener (Web.window ()) "popstate" on_popstate;
+      Web.add_listener (Web.window ()) "pagehide" on_pagehide);
   islands ();
+  (match !scroll_table with
+  | None ->
+      let t = Web.stored_scrolls () in
+      scroll_table := Some t;
+      Option.iter Web.scroll_to (Web.table_get t !shown_key)
+  | Some _ -> ());
   Platform.client_navigate := Some navigate;
   Platform.client_refresh := refresh;
   match !router with
@@ -223,7 +235,8 @@ let stop () =
       List.iter (fun n -> Web.remove_listener doc n on_link) link_events;
       List.iter (fun n -> Web.remove_listener doc n on_leave) leave_events;
       Web.remove_listener doc "pointermove" on_move;
-      Web.remove_listener (Web.window ()) "popstate" on_popstate
+      Web.remove_listener (Web.window ()) "popstate" on_popstate;
+      Web.remove_listener (Web.window ()) "pagehide" on_pagehide
   | None -> ());
   Option.iter (fun r -> r.stop ()) !router;
   Client.stop ()

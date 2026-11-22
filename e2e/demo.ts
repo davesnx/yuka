@@ -529,6 +529,42 @@ await step("3l. overlay route", async () => {
   await page.waitForSelector("yuka-outlet .row");
 });
 
+await step("3m. scroll positions survive a reload and a cross-document Back", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const pg = await ctx.newPage();
+  await pg.goto(base + "/", { waitUntil: "networkidle" });
+  await islandsStarted(pg);
+  const scrollTo = async (y: number) => {
+    await pg.evaluate((y) => window.scrollTo(0, y), y);
+    return pg.evaluate(() => Math.round(window.scrollY));
+  };
+  const near = (y: number) => pg.waitForFunction((y) => Math.abs(Math.round(scrollY) - y) <= 2, y, { timeout: 5000 }).catch(() => {});
+  const seen = () => pg.evaluate(() => ({ y: Math.round(scrollY), fresh: (window as any).__scrollMarker === undefined }));
+  const y1 = await scrollTo(300);
+  await pg.evaluate(() => {
+    (window as any).__scrollMarker = 1;
+    addEventListener("pagehide", () => {
+      const kept = JSON.parse(sessionStorage.getItem("yuka-scroll") ?? "[]");
+      sessionStorage.setItem("yuka-scroll", JSON.stringify([...Array.from({ length: 150 }, (_, i) => ["old" + i, i]), ...kept]));
+    });
+  });
+  await pg.reload({ waitUntil: "networkidle" });
+  await near(y1);
+  const reloaded = await seen();
+  check("3m.1 a reload of a scrolled page restores its position", reloaded.fresh && y1 > 0 && Math.abs(reloaded.y - y1) <= 2, `before=${y1} after=${JSON.stringify(reloaded)}`);
+  const y2 = await scrollTo(150);
+  const key = await pg.evaluate(() => history.state?.yukaKey);
+  await pg.evaluate(() => ((window as any).__scrollMarker = 1));
+  await pg.goto("about:blank");
+  await pg.goBack({ waitUntil: "networkidle" });
+  await near(y2);
+  const back = await seen();
+  check("3m.2 Back from another origin (no bfcache) restores the position", back.fresh && y2 > 0 && y2 !== y1 && Math.abs(back.y - y2) <= 2 && new URL(pg.url()).pathname === "/", `before=${y2} after=${JSON.stringify(back)}`);
+  const stored = await pg.evaluate(() => JSON.parse(sessionStorage.getItem("yuka-scroll") ?? "[]") as [string, number][]);
+  check("3m.3 the stored table keeps at most 100 entries and the last one shown", stored.length === 100 && stored[stored.length - 1][0] === key && Math.abs(stored[stored.length - 1][1] - y2) <= 2, `${stored.length} last=${JSON.stringify(stored[stored.length - 1])} key=${key}`);
+  await ctx.close();
+});
+
 await step("3d. a page with no island loads no script", async () => {
   const pg = await browser.newPage();
   const scripts: string[] = [];

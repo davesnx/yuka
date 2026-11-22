@@ -125,6 +125,7 @@ let history_key : unit -> string = fun _ -> browser_only ()
 let history_replace_key : string -> unit = fun _ -> browser_only ()
 let history_push_key : string -> string -> unit = fun _ _ -> browser_only ()
 let scroll_y : unit -> float = fun _ -> browser_only ()
+let scroll_to : float -> unit = fun _ -> browser_only ()
 let set_cookie : string -> unit = fun _ -> browser_only ()
 let history_at : unit -> int = fun _ -> browser_only ()
 let history_go : int -> unit = fun _ -> browser_only ()
@@ -144,6 +145,8 @@ let table_delete = Hashtbl.remove
 let table_size = Hashtbl.length
 let table_values t = Array.of_seq (Hashtbl.to_seq_values t)
 let table_clear = Hashtbl.reset
+let stored_scrolls : unit -> float table = fun _ -> browser_only ()
+let store_scrolls : float table -> unit = fun _ -> browser_only ()
 
 type ('k, 'v) keyed = {
   equal : 'k -> 'k -> bool;

@@ -20,9 +20,7 @@ let layer : unit -> node =
 
 type controller
 
-let scroll_to : float -> unit =
-  [%mel.raw
-    "function (y) { window.scrollTo(0, y) }"]
+let scroll_to = Web.scroll_to
 
 let scroll_to_hash : string -> unit =
   [%mel.raw

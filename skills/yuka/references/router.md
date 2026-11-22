@@ -286,6 +286,14 @@ shown (the fragment does not count), for example a click on the link of
 the current page or the reload after a form succeeds, replaces the current
 entry, as the browser does. So Back goes to the page before.
 
+Yuka keeps the scroll position of each history entry, and Back and
+Forward go to the saved position. When the page goes away (a reload, or
+a link to another site), Yuka writes the positions of the last 100
+entries to `sessionStorage`, with the key `yuka-scroll`. When the page
+loads again in the same tab, for example after a reload or after Back
+from another site, it scrolls to the saved position of its entry. When
+`sessionStorage` is not available, the page loads at the top.
+
 To replace the current entry also for another URL, use
 `Yuka.Browser.navigate ~replace:true url`, or give the link a
 `data-yuka-replace` attribute:
