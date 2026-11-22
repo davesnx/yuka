@@ -73,7 +73,9 @@ module Server = struct
   module Live = Live_server
   module Generated = struct
     type rules = Cycle.rules
-    type layer = Cycle.layer = { key : string; data : bool; wrap : Types.server Kind.element -> Types.server Kind.element }
+    type layer = Cycle.layer = { key : string; wrap : Types.server Kind.element -> Types.server Kind.element }
+    let data_key = Cycle.data_key
+
     type plan = Cycle.plan = { layers : layer list; page : Cycle.page; overlay : Cycle.page option }
 
     type fallback = Cycle.fallback = {

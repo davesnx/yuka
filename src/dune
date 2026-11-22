@@ -15,6 +15,7 @@
   buffer
   client
   cycle
+  data_digest
   dev
   element
   form_core

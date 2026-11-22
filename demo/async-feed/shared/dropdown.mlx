@@ -12,35 +12,49 @@ let check =
     <path d="M3 7.5 L6 10.5 L11 4" fill="none" stroke="currentColor" stroke_width="1.75" />
   </svg>
 
+let rec position key index = function
+  | [] -> None
+  | first :: rest -> if first = key then Some index else position key (index + 1) rest
+
+let clear_key = ""
+
 let make ~id ~label ~(options : string list) ~(selected : unit -> string list) ~(toggle : string -> unit)
     ~(clear : unit -> unit) () =
   let opened = Yuka.State.make false in
   let query = Yuka.State.make "" in
-  let active = Yuka.State.make 0 in
+  let active = Yuka.State.make clear_key in
+  let is_active = Yuka.State.select active in
   let button_id = id ^ "-button" and input_id = id ^ "-input" and list_id = id ^ "-list" in
-  let item_id index = Printf.sprintf "%s-item-%d" id index in
-  let count () = List.length (matching options (Yuka.State.peek query)) + if selected () = [] then 0 else 1 in
+  let row_id key =
+    match position key 0 options with
+    | Some index -> Printf.sprintf "%s-item-%d" id index
+    | None -> id ^ "-clear"
+  in
+  let rows query = matching options query @ if selected () = [] then [] else [ clear_key ] in
+  let first () = match rows (Yuka.State.peek query) with key :: _ -> key | [] -> clear_key in
   let close ~refocus =
     Yuka.State.set opened false;
     if refocus then Yuka.Browser.focus button_id
   in
   let open_menu () =
     Yuka.State.set query "";
-    Yuka.State.set active 0;
+    Yuka.State.set active (first ());
     Yuka.State.set opened true;
     Yuka.Browser.focus input_id
   in
-  let choose index =
-    match List.nth_opt (matching options (Yuka.State.peek query)) index with
-    | Some option -> toggle option
-    | None ->
-        clear ();
-        close ~refocus:true
+  let choose key =
+    if key = clear_key then begin
+      clear ();
+      close ~refocus:true
+    end
+    else toggle key
   in
-  let move step =
-    let total = count () in
-    if total > 0 then Yuka.State.set active ((Yuka.State.peek active + step + total) mod total)
+  let go pick =
+    let keys = Array.of_list (rows (Yuka.State.peek query)) in
+    let total = Array.length keys in
+    if total > 0 then Yuka.State.set active keys.(pick total (position (Yuka.State.peek active) 0 (Array.to_list keys)))
   in
+  let move step = go (fun total -> function Some index -> (index + step + total) mod total | None -> 0) in
   let on_key event =
     match Yuka.Event.key event with
     | "ArrowDown" ->
@@ -51,13 +65,13 @@ let make ~id ~label ~(options : string list) ~(selected : unit -> string list) ~
         move (-1)
     | "Home" ->
         Yuka.Event.prevent_default event;
-        Yuka.State.set active 0
+        go (fun _ _ -> 0)
     | "End" ->
         Yuka.Event.prevent_default event;
-        Yuka.State.set active (max 0 (count () - 1))
+        go (fun total _ -> total - 1)
     | "Enter" ->
         Yuka.Event.prevent_default event;
-        if count () > 0 then choose (Yuka.State.peek active)
+        if List.mem (Yuka.State.peek active) (rows (Yuka.State.peek query)) then choose (Yuka.State.peek active)
     | "Escape" ->
         Yuka.Event.prevent_default event;
         close ~refocus:true
@@ -70,17 +84,25 @@ let make ~id ~label ~(options : string list) ~(selected : unit -> string list) ~
     | [ one ] -> one
     | many -> Printf.sprintf "%s · %d" label (List.length many)
   in
-  let option index name =
-    let on = List.mem name (selected ()) in
-    <li id=(item_id index) role=`option aria_selected=on
-      class_=(if Yuka.State.get active = index then "option active" else "option")
-      on_mousedown=(fun event -> Yuka.Event.prevent_default event)
-      on_click=(fun _ ->
-        Yuka.State.set active index;
-        choose index)>
-      <span class_="option-check">(if on then check else Yuka.empty)</span>
-      (Yuka.text name)
-    </li>
+  let row key =
+    if key = clear_key then
+      <li id=(row_id key) role=`option aria_selected=false
+        class_=(if is_active key then "option clear active" else "option clear")
+        on_mousedown=(fun event -> Yuka.Event.prevent_default event)
+        on_click=(fun _ -> choose key)>
+        <span class_="option-check" />
+        "Clear selection"
+      </li>
+    else
+      <li id=(row_id key) role=`option aria_selected=(List.mem key (selected ()))
+        class_=(if is_active key then "option active" else "option")
+        on_mousedown=(fun event -> Yuka.Event.prevent_default event)
+        on_click=(fun _ ->
+          Yuka.State.set active key;
+          choose key)>
+        <span class_="option-check">(if List.mem key (selected ()) then check else Yuka.empty)</span>
+        (Yuka.text key)
+      </li>
   in
   <div class_="dropdown">
     <button id=button_id type_=`button
@@ -98,35 +120,21 @@ let make ~id ~label ~(options : string list) ~(selected : unit -> string list) ~
         <path d="M3 4.5 L6 7.5 L9 4.5" fill="none" stroke="currentColor" stroke_width="1.5" />
       </svg>
     </button>
-    (if Yuka.State.get opened then
-       <div>
-         <div class_="backdrop" on_click=(fun _ -> close ~refocus:false) />
-         <div class_="popover">
-           <input id=input_id class_="popover-search" type_=`text placeholder=("Filter " ^ String.lowercase_ascii label)
-             role=`combobox aria_controls=list_id aria_expanded=true aria_autocomplete=`list
-             aria_activedescendant=(item_id (Yuka.State.get active))
-             on_input=(fun event ->
-               Yuka.State.set query (Yuka.Event.target_value event);
-               Yuka.State.set active 0)
-             on_keydown=on_key />
-           <ul id=list_id role=`listbox aria_label=label aria_multiselectable=true>
-             (let shown = matching options (Yuka.State.get query) in
-              Yuka.fragment
-                (List.mapi option shown
-                @ (if selected () = [] then []
-                   else
-                     [
-                       <li id=(item_id (List.length shown)) role=`option aria_selected=false
-                         class_=(if Yuka.State.get active = List.length shown then "option clear active" else "option clear")
-                         on_mousedown=(fun event -> Yuka.Event.prevent_default event)
-                         on_click=(fun _ -> choose (List.length shown))>
-                         <span class_="option-check" />
-                         "Clear selection"
-                       </li>;
-                     ])
-                @ if shown = [] then [ <li class_="option-none" role=`presentation>"No match"</li> ] else []))
-           </ul>
-         </div>
-       </div>
-     else Yuka.empty)
+    <Popover opened close=(fun () -> close ~refocus:false)>
+      <div class_="popover">
+        <input id=input_id class_="popover-search" type_=`text placeholder=("Filter " ^ String.lowercase_ascii label)
+          role=`combobox aria_controls=list_id aria_expanded=true aria_autocomplete=`list
+          aria_activedescendant=(row_id (Yuka.State.get active))
+          on_input=(fun event ->
+            Yuka.State.set query (Yuka.Event.target_value event);
+            Yuka.State.set active (first ()))
+          on_keydown=on_key />
+        <ul id=list_id role=`listbox aria_label=label aria_multiselectable=true>
+          (Yuka.each ~key:(fun key -> key) (fun () -> Array.of_list (rows (Yuka.State.get query))) row)
+          (if matching options (Yuka.State.get query) = [] then
+             <li class_="option-none" role=`presentation>"No match"</li>
+           else Yuka.empty)
+        </ul>
+      </div>
+    </Popover>
   </div>

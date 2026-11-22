@@ -23,9 +23,7 @@ const step = async (name: string, f: () => Promise<void>) => {
 
 const browser = await chromium.launch({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, timezoneId: "UTC", colorScheme: "light" });
-await ctx.addInitScript(() => {
-  if (!localStorage.getItem("async-feed-zone")) localStorage.setItem("async-feed-zone", "Asia/Tokyo");
-});
+await ctx.addCookies([{ name: "async-feed-zone", value: "Asia%2FTokyo", url: new URL(app).origin }]);
 const problems: string[] = [];
 const started = (p: Page) =>
   p.waitForFunction(() => {
@@ -45,6 +43,7 @@ const open = async (path = "") => {
   await started(p);
   return p;
 };
+const settled = (p: Page) => p.waitForFunction(() => !document.documentElement.hasAttribute("data-yuka-nav"));
 const timeOf = (p: Page, id: string) => p.locator(`.card[data-id="${id}"] time`).first().textContent();
 
 let A: Page;
@@ -96,6 +95,30 @@ await step("a2. Simulate events streams cards one by one to every open page", as
   await A.getByRole("button", { name: "Simulate events" }).waitFor({ timeout: 5000 });
   check("a2.7 the button is enabled again", await A.getByRole("button", { name: "Simulate events" }).isEnabled());
   await B.close();
+  for (let i = 1; i < 10; i++) {
+    await A.getByRole("button", { name: "Simulate events" }).click();
+    await A.getByRole("button", { name: "Simulate events" }).waitFor({ timeout: 10000 });
+  }
+  const live = await A.locator(".feed-live .card").count();
+  check("a2.8 after 10 clicks all 40 live cards stay", live === 40, String(live));
+  const ids = await A.locator(".feed-live .card").evaluateAll((cards) => cards.map((c) => Number(c.getAttribute("data-id"))));
+  check("a2.9 the live cards are the newest 40", ids[0] === 5040 && ids[39] === 5001, `${ids[0]} ${ids[39]}`);
+  const zone = (await timeOf(A, "5040")) ?? "";
+  check("a2.10 a live card shows its time in the zone", zone.endsWith("GMT+9"), zone);
+});
+
+await step("a8. an older page opens no live socket", async () => {
+  const O = await ctx.newPage();
+  const sockets: string[] = [];
+  O.on("websocket", (w) => sockets.push(w.url()));
+  await O.goto(app + "/?before=1795165300", { waitUntil: "networkidle" });
+  await started(O);
+  await O.waitForTimeout(500);
+  check("a8.1 no live feed on an older page", (await O.locator(".feed-live").count()) === 0);
+  check("a8.2 no WebSocket", sockets.length === 0, sockets.join(" "));
+  const header = (await O.locator(".feed-count time").textContent()) ?? "";
+  check("a8.3 the feed header date is in the zone", header === "Nov 20, 2026, 18:01:40 GMT+9", header);
+  await O.close();
 });
 
 await step("a3. the project filter works with the keyboard", async () => {
@@ -108,6 +131,27 @@ await step("a3. the project filter works with the keyboard", async () => {
   await A.keyboard.type("bill");
   const options = await A.locator("#project-list [role=option]").allTextContents();
   check("a3.2 typing filters the options", options.length === 1 && options[0].trim() === "Billing", options.join("|"));
+  await A.keyboard.press("Backspace");
+  await A.keyboard.press("Backspace");
+  await A.keyboard.press("Backspace");
+  await A.keyboard.press("Backspace");
+  const rows = await A.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        const changed = new Set<Element>();
+        const observer = new MutationObserver((records) => records.forEach((r) => changed.add(r.target as Element)));
+        observer.observe(document.querySelector("#project-list")!, { attributes: true, subtree: true, attributeFilter: ["class"] });
+        document.querySelector("#project-input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+        setTimeout(() => {
+          observer.disconnect();
+          resolve(changed.size);
+        }, 100);
+      }),
+  );
+  check("a3.2b an arrow key updates two rows", rows === 2, String(rows));
+  const active = await A.locator("#project-input").getAttribute("aria-activedescendant");
+  check("a3.2c the active row is the second option", active === "project-item-1" && (await A.locator("#project-item-1").getAttribute("class")) === "option active", active ?? "");
+  await A.keyboard.type("bill");
   await A.keyboard.press("Enter");
   await A.waitForURL((url) => url.searchParams.getAll("project").join() === "Billing");
   await A.waitForFunction(() => document.querySelector('#project-list [role=option][aria-selected="true"]') !== null);
@@ -123,8 +167,8 @@ await step("a3. the project filter works with the keyboard", async () => {
   check("a3.7 End reaches Clear selection", ((await A.locator("#project-list .option.active").textContent()) ?? "").includes("Clear selection"));
   await A.keyboard.press("Enter");
   await A.waitForURL((url) => !url.searchParams.has("project"));
-  await A.waitForFunction(() => document.querySelector(".feed-count")?.textContent?.includes("of 5004 events"));
-  check("a3.8 Clear removes the filter", (await A.locator(".feed .card").first().getAttribute("data-id")) === "5004");
+  await A.waitForFunction(() => document.querySelector(".feed-count")?.textContent?.includes("of 5040 events"));
+  check("a3.8 Clear removes the filter", (await A.locator(".feed .card").first().getAttribute("data-id")) === "5040");
 });
 
 await step("a4. the settings change the time zone and jump to a date", async () => {
@@ -138,7 +182,7 @@ await step("a4. the settings change the time zone and jump to a date", async () 
   await A.waitForFunction(() => document.querySelector(".feed-count")?.textContent?.includes("before"));
   const before = Number(new URL(A.url()).searchParams.get("before"));
   check("a4.2 the date is read in the zone", before === Date.UTC(2026, 10, 1, 17, 1) / 1000, String(before));
-  const first = Number(await A.locator(".feed .card time").first().getAttribute("data-ts"));
+  const first = Date.parse((await A.locator(".feed .card time").first().getAttribute("datetime")) ?? "") / 1000;
   check("a4.3 the feed starts at that date", first < before && before - first < 1200, `${first} ${before}`);
   await A.reload({ waitUntil: "networkidle" });
   check("a4.4 the zone is kept after a reload", ((await A.locator(".feed .card time").first().textContent()) ?? "").endsWith("EST"));
@@ -148,16 +192,105 @@ await step("a5. the theme toggle", async () => {
   await A.goto(app, { waitUntil: "networkidle" });
   await started(A);
   if (shots) await A.screenshot({ path: `${shots}/async-feed-light.png` });
-  const theme = () => A.evaluate(() => document.documentElement.getAttribute("data-theme"));
-  check("a5.1 the theme follows the system first", (await theme()) === "light");
-  await A.getByRole("button", { name: "Toggle light and dark theme" }).click();
-  check("a5.2 a click turns it dark", (await theme()) === "dark");
+  const background = () => A.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const toggle = A.locator("#theme");
+  check("a5.1 the theme follows the system first", (await toggle.getAttribute("data-theme")) === "system" && (await background()) === "rgb(250, 250, 250)", await background());
+  await toggle.click();
+  check("a5.2 a click turns it dark", (await toggle.getAttribute("aria-pressed")) === "true" && (await background()) === "rgb(10, 10, 10)", await background());
+  const html = await (await ctx.request.get(app)).text();
+  check("a5.3 the first HTML after a reload is dark, with no script", html.includes('data-theme="dark" aria-pressed="true"') && !html.includes("localStorage"));
   await A.reload({ waitUntil: "networkidle" });
-  check("a5.3 the choice is kept before the first paint", (await theme()) === "dark");
+  await started(A);
+  check("a5.4 the choice is kept after a reload", (await background()) === "rgb(10, 10, 10)" && (await toggle.getAttribute("aria-pressed")) === "true");
+  if (shots) await A.screenshot({ path: `${shots}/async-feed-dark.png` });
+  await toggle.click();
+  check("a5.5 a second click turns it light", (await toggle.getAttribute("aria-pressed")) === "false" && (await background()) === "rgb(250, 250, 250)");
+  const dark = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: "dark" });
+  const D = await dark.newPage();
+  await D.goto(app, { waitUntil: "networkidle" });
+  check("a5.6 with no cookie a dark system gets the dark theme", (await D.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(10, 10, 10)");
+  await dark.close();
+});
+
+await step("a7. the comments panel of a notification", async () => {
+  const P = await open();
+  const base = new URL(app).pathname;
+  const button = P.locator('.card[data-id="4999"] .comment-button');
+  const count = Number(await button.textContent());
+  check("a7.1 a card shows its comment count", count === 2, String(count));
+  const sheet = P.locator(".sheet-panel");
+  await button.click();
+  await P.waitForURL((url) => url.pathname === `${base}/item/4999`);
+  await sheet.waitFor();
+  await started(P);
+  await settled(P);
+  check("a7.2 the icon opens the panel at the item URL", (await P.getByRole("dialog", { name: /New post in r\/acme/ }).count()) === 1, P.url());
+  check("a7.3 the feed stays under the panel", (await P.locator(".feed .card").count()) === 50);
+  const moved = await sheet.evaluate((e) => getComputedStyle(e).animationName);
+  check("a7.4 the panel slides in", moved === "sheet-in", moved);
+  const link = sheet.locator(".source-link");
+  check(
+    "a7.5 the source link opens a new tab",
+    (await link.getAttribute("target")) === "_blank" && (await link.getAttribute("rel")) === "noopener" && ((await link.getAttribute("href")) ?? "").startsWith("https://www.reddit.com/r/acme/"),
+    (await link.getAttribute("href")) ?? "",
+  );
+  check("a7.6 the details have source fields", (await sheet.locator("dt", { hasText: "Subreddit" }).count()) === 1);
+  const zoned = (await sheet.locator(".detail-time").textContent()) ?? "";
+  check("a7.7 the time is in the chosen zone", zoned.endsWith("EST"), zoned);
+  const said = (await sheet.locator(".comment-time").first().textContent()) ?? "";
+  check("a7.7b a comment time is in the chosen zone", said.endsWith("EST"), said);
+  check("a7.8 the seeded comments show", (await sheet.locator(".comment").count()) === 2);
   if (shots) {
-    await started(A);
-    await A.screenshot({ path: `${shots}/async-feed-dark.png` });
+    await P.waitForTimeout(700);
+    await P.evaluate(() => (document.getElementById("theme") as HTMLElement).click());
+    await P.screenshot({ path: `${shots}/async-feed-panel-dark.png` });
+    await P.evaluate(() => (document.getElementById("theme") as HTMLElement).click());
+    await P.screenshot({ path: `${shots}/async-feed-panel-light.png` });
   }
+
+  await P.getByRole("button", { name: "Comment", exact: true }).click();
+  await P.locator(".comment-error", { hasText: "Write a comment first." }).waitFor({ timeout: 5000 });
+  check("a7.9 an empty comment is refused", (await sheet.locator(".comment").count()) === 2);
+  await P.locator("#overlay-comment-text").fill("Replied from the company account.");
+  await P.getByRole("button", { name: "Comment", exact: true }).click();
+  await P.waitForFunction(() => document.querySelectorAll(".sheet-panel .comment").length === 3, null, { timeout: 5000 });
+  check("a7.10 the new comment shows in the thread", ((await sheet.locator(".comment").last().textContent()) ?? "").includes("Replied from the company account."));
+  const added = (await sheet.locator(".comment .comment-time").last().textContent()) ?? "";
+  check("a7.10b a comment added in the browser shows the chosen zone", added.endsWith("EST"), added);
+  check("a7.11 the field is empty again", (await P.locator("#overlay-comment-text").inputValue()) === "");
+  check("a7.12 the card count updates", (await button.textContent())?.trim() === "3", (await button.textContent()) ?? "");
+
+  await P.goBack();
+  await P.waitForURL((url) => url.pathname === base || url.pathname === `${base}/`);
+  await sheet.waitFor({ state: "detached" });
+  check("a7.13 Back closes the panel", (await P.locator(".sheet").count()) === 0);
+  check("a7.14 the count stays after Back", (await button.textContent())?.trim() === "3");
+
+  await button.click();
+  await sheet.waitFor();
+  await started(P);
+  await settled(P);
+  await P.keyboard.press("Escape");
+  await sheet.waitFor({ state: "detached" });
+  check("a7.15 Escape closes the panel", !P.url().includes("/item/"), P.url());
+
+  await button.click();
+  await sheet.waitFor();
+  await started(P);
+  await settled(P);
+  await P.mouse.click(40, 450);
+  await sheet.waitFor({ state: "detached" });
+  check("a7.16 a click on the backdrop closes the panel", !P.url().includes("/item/"), P.url());
+  await P.close();
+
+  const D = await open("/item/4999");
+  check("a7.17 a direct load shows the panel over the feed", (await D.locator(".sheet-panel").count()) === 1 && (await D.locator(".feed .card").count()) === 50);
+  check("a7.18 the comment is kept by the server", (await D.locator(".sheet-panel .comment").count()) === 3);
+  await D.getByRole("button", { name: "Close" }).click();
+  await D.waitForURL((url) => !url.pathname.includes("/item/"));
+  await D.locator(".sheet").waitFor({ state: "detached" });
+  check("a7.19 Close after a direct load shows the feed", (await D.locator(".feed .card").count()) === 50);
+  await D.close();
 });
 
 check("a6 no console errors, page errors, hydration mismatches or failed requests", problems.length === 0, problems.join(" | "));

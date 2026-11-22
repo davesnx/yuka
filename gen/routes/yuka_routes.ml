@@ -918,8 +918,10 @@ let loader_labels levels =
   List.filter_map (fun l -> Option.map loader_label (prop "loader" l)) levels
 
 let layer_text ~loaders level =
-  sprintf "{ Yuka.Server.Generated.key = %s; data = %b; wrap = (fun children -> %s%s ~children ()) }"
-    (key_text level) (loaders <> [])
+  sprintf "{ Yuka.Server.Generated.key = %s; wrap = (fun children -> %s%s ~children ()) }"
+    (match loaders with
+    | [] -> key_text level
+    | _ -> sprintf "Yuka.Server.Generated.data_key (%s) (%s)" (key_text level) (String.concat ", " loaders))
     (expr (Option.get (prop "layout" level)))
     (args (seg_labels level.scope @ loaders))
 

@@ -1,6 +1,6 @@
 (library
  (name async_feed_app)
- (modules data store handlers pages yuka_routes serve)
+ (modules data store loaders handlers pages yuka_routes serve)
  (libraries async_feed_shared yuka yuka-dream dream lwt lwt.unix unix)
  (preprocess
   (pps yuka.ppx)))

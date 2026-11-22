@@ -1,0 +1,8 @@
+let[@client] make ~(time : int) ~(class_ : string) () =
+  let saved = Zone.saved_zone () in
+  let ready = Yuka.State.make false in
+  Yuka.Effect.after (fun () -> Yuka.State.set ready true);
+  <time class_ datetime=(Clock.iso time)
+    title=(if Yuka.State.get ready then Env.long ~zone:(Zone.current saved) time else Clock.iso time)>
+    (Yuka.text (if Yuka.State.get ready then Env.short ~zone:(Zone.current saved) time else Clock.utc time))
+  </time>

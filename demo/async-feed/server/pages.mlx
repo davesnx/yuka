@@ -2,7 +2,8 @@ open Async_feed_shared
 
 let page_size = 50
 
-let shell ~children () =
+let shell ~(settings : Model.settings) ~children () =
+  <Yuka.Context.Provide context=Zone.saved value=settings.zone>
   <div class_="app">
     <header class_="header">
       <a class_="brand" href=(Routes.feed ())>
@@ -16,17 +17,25 @@ let shell ~children () =
       <div class_="header-end">
         <span class_="avatar" role=`img aria_label="Signed in as Ana Ruiz" title="Ana Ruiz">"AR"</span>
         <Yuka.Client><Settings_menu /></Yuka.Client>
-        <Yuka.Client><Theme_toggle /></Yuka.Client>
+        <Yuka.Client><Theme_toggle theme=settings.theme /></Yuka.Client>
       </div>
     </header>
     <main class_="main">children</main>
   </div>
+  </Yuka.Context.Provide>
+
+let time ~class_ time = <Yuka.Client><Local_time time class_ /></Yuka.Client>
 
 let summary ~shown ~total ~before =
-  Printf.sprintf "%d of %d events%s" shown total
-    (match before with Some time -> ", before " ^ Clock.utc time | None -> "")
+  <p class_="feed-count">
+    (Yuka.text (Printf.sprintf "%d of %d events" shown total))
+    (match before with Some before -> Yuka.fragment [ Yuka.text ", before "; time ~class_:"feed-before" before ] | None -> Yuka.empty)
+  </p>
 
-let feed ~project ~team ~assignee ~before () =
+let card (event : Model.event) =
+  <Card event time=(time ~class_:"card-time" event.time) comments=(<Yuka.Client><Comment_button id=event.id count=(Store.comment_count event) /></Yuka.Client>) />
+
+let feed_view ~project ~team ~assignee ~before =
   let filter = { Model.projects = project; teams = team; assignees = assignee } in
   let { Store.events; total } = Store.page ~filter ~before ~limit:page_size in
   let since = Store.newest_id () in
@@ -37,19 +46,65 @@ let feed ~project ~team ~assignee ~before () =
         <a class_="pager" href=(Routes.feed ~project ~team ~assignee ~before:last.time ())>"Older events"</a>
     | _ -> Yuka.empty
   in
-  Yuka.Server.page ~title:"Async" (fun () ->
-      <section class_="feed-wrap">
-        <div class_="feed-head">
-          <h1>"Notifications"</h1>
-          <p class_="feed-count">(Yuka.text (summary ~shown:(List.length events) ~total ~before))</p>
-          (if top then Yuka.empty
-           else <a class_="pager" href=(Routes.feed ~project ~team ~assignee ())>"Back to latest"</a>)
+  <section class_="feed-wrap">
+    <div class_="feed-head">
+      <h1>"Notifications"</h1>
+      (summary ~shown:(List.length events) ~total ~before)
+      (if top then Yuka.empty
+       else <a class_="pager" href=(Routes.feed ~project ~team ~assignee ())>"Back to latest"</a>)
+    </div>
+    (if top then <Yuka.Client><Live_feed filter since /></Yuka.Client> else Yuka.empty)
+    <ol class_="feed">(Yuka.fragment (List.map card events))</ol>
+    (if events = [] then <p class_="empty">"No event matches these filters."</p> else Yuka.empty)
+    older
+  </section>
+
+let feed ~project ~team ~assignee ~before ~settings:_ () =
+  Yuka.Server.page ~title:"Async" (fun () -> feed_view ~project ~team ~assignee ~before)
+
+let sheet ~layer (event : Model.event) =
+  let label = Model.source_label event.source in
+  <Yuka.Client>
+    <Sheet title=event.title layer>
+      <article class_="detail">
+        <div class_="detail-meta">
+          (Card.logo event.source)
+          <div>
+            <div class_="detail-source">(Yuka.text label)</div>
+            <div class_="detail-author">(Yuka.text event.author)</div>
+          </div>
+          (time ~class_:"detail-time" event.time)
         </div>
-        <Yuka.Client><Live_feed filter since top /></Yuka.Client>
-        <ol class_="feed">(Yuka.fragment (List.map (fun event -> <Card event />) events))</ol>
-        (if events = [] then <p class_="empty">"No event matches these filters."</p> else Yuka.empty)
-        older
-      </section>)
+        <h2 class_="detail-title">(Yuka.text event.title)</h2>
+        <p class_="detail-text">(Yuka.text event.description)</p>
+        <a class_="small-button source-link" href=(Data.link event) target=`_blank rel="noopener">
+          (Yuka.text ("Open in " ^ label))
+          <svg view_box="0 0 16 16" width="12" height="12" aria_hidden=true>
+            <path d="M6 3.5h6.5V10M12.5 3.5 4 12" fill="none" stroke="currentColor" stroke_width="1.5" />
+          </svg>
+        </a>
+        <dl class_="details">
+          (Yuka.fragment
+             (List.map
+                (fun (name, value) -> <div><dt>(Yuka.text name)</dt><dd>(Yuka.text value)</dd></div>)
+                (Data.details event
+                @ [ ("Project", event.project); ("Team", event.team); ("Assignee", event.assignee) ])))
+        </dl>
+      </article>
+      (let thread = Store.thread event in
+       <Yuka.Client>
+         <Comment_thread item=event.id count=(List.length thread)>
+           (Yuka.fragment (List.map (Comment_thread.comment ~time:(time ~class_:"comment-time")) thread))
+         </Comment_thread>
+       </Yuka.Client>)
+    </Sheet>
+  </Yuka.Client>
+
+let item ~id:_ ~item ~settings:_ () =
+  Yuka.Server.page ~title:item.Model.title (fun () ->
+      Yuka.fragment [ feed_view ~project:[] ~team:[] ~assignee:[] ~before:None; sheet ~layer:false item ])
+
+let item_panel ~id:_ ~item ~settings:_ () = Yuka.Server.page ~title:item.Model.title (fun () -> sheet ~layer:true item)
 
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->

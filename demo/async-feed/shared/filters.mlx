@@ -2,10 +2,13 @@ let flip value values = if List.mem value values then List.filter (fun other -> 
 
 let[@client] make () =
   let route = Routes.current () in
+  let last = ref ([], [], []) in
   let current () =
     match Yuka.State.get route with
-    | Some (Routes.Feed { project; team; assignee; _ }) -> (project, team, assignee)
-    | None -> ([], [], [])
+    | Some (Routes.Feed { project; team; assignee; _ }) ->
+        last := (project, team, assignee);
+        !last
+    | Some (Routes.Item _) | None -> !last
   in
   let go (project, team, assignee) = Yuka.Browser.navigate (Routes.feed ~project ~team ~assignee ()) in
   let projects () = let project, _, _ = current () in project in

@@ -33,6 +33,12 @@ Under `/async-feed` with `make demo-serve`, at `/` alone:
   server renders the filtered feed.
 - `/async-feed?before=1793552460`: the events before this time (Unix
   seconds). "Older events" and the date picker in the settings use it.
+- `/async-feed/item/4999`: the panel of one notification, with a link to
+  its source, the fields of its source and its comments. It is an overlay
+  route: the comment icon of a card opens it over the feed with a client
+  navigation, and Back, Escape, a click beside it or Close remove it. A
+  direct load or a reload shows it over the newest events; Close then goes
+  to the feed.
 
 ## Header
 
@@ -43,29 +49,48 @@ Under `/async-feed` with `make demo-serve`, at `/` alone:
 - Settings: the time zone, and a date and time to jump to (read in that
   zone). Each date of the feed shows in the zone, with the full time in the
   `title` and the instant in `datetime`.
-- The theme toggle: light or dark.
+- The theme toggle: light or dark. Without a choice the page follows the
+  color scheme of the system.
 
-The zone and the theme are kept in `localStorage` (`async-feed-zone`,
-`async-feed-theme`). A script in the head applies them before the first
-paint: it sets `data-theme` and writes each `<time data-ts>` in the zone
-as the parser adds it. Without a stored zone it uses the zone of the
-browser; the server writes the dates in UTC.
+The zone and the theme are kept in cookies (`async-feed-zone`,
+`async-feed-theme`), which `Loaders.settings`, the loader of the layout,
+reads. The layout prints the theme on the toggle button (`data-theme`,
+`aria-pressed`), and the CSS picks the colors from it with
+`:root:has(#theme[data-theme=...])`, so the first paint is right with no
+script. The layout gives the zone to the islands with a `Yuka.Context` that
+has a codec. Each time is a `Local_time` island: the server prints the
+UTC time, and the browser writes it in the zone with `Intl.DateTimeFormat`
+(`shared/env.melange.ml`). Without a saved zone it uses the zone of the
+browser. A zone chosen in Settings is a module-level State that only the
+browser writes, so every time island shows it at once.
 
 ## Simulate events
 
 The button at the bottom calls the `async_feed_simulate` action. The
-server then adds 4 events, one every 0.7 s, and publishes the 30 newest
+server then adds 4 events, one every 0.7 s, and publishes the 500 newest
 added events on the `async_feed_recent` topic of `Yuka.Live` after each
 one. Every open page of the feed gets them over its live socket and shows
-the ones that match its filters at the top, with a short animation (none
+the ones that match its filters at the top (a page of older events has no
+live part and opens no socket), with a short animation (none
 with `prefers-reduced-motion`). The events stay in memory until the
 server stops.
+
+## Comments
+
+The comments are in memory: generated ones for most of the 5000 events,
+and the ones that the form adds with the `async_feed_comment` action. The
+server refuses an empty comment and one longer than 1000 characters. After
+a comment is added, the count on the card of that event changes with no
+request. The panel slides in from the right (0.5 s,
+`cubic-bezier(0.32, 0.72, 0, 1)`, the curve of the Vaul drawer); with
+`prefers-reduced-motion` it fades in.
 
 ## Tests
 
     make demo-test
 
-`test/run.ml` renders the pages and checks the cards, the filters and the
-dates in UTC. `e2e/async-feed.ts` (run by `make e2e`) checks the events
-that arrive one by one, the keyboard of a filter, the time zone and the
-theme in a browser.
+`test/run.ml` renders the pages and checks the cards, the filters, the
+dates in UTC, the panel of an item and the comment action.
+`e2e/async-feed.ts` (run by `make e2e`) checks the events that arrive one
+by one, the keyboard of a filter, the time zone, the theme and the
+comments panel in a browser.

@@ -1,6 +1,6 @@
 let[@client] make () =
+  let saved = Zone.saved_zone () in
   let opened = Yuka.State.make false in
-  let zone = Yuka.State.make "UTC" in
   let moment = Yuka.State.make "" in
   let route = Routes.current () in
   let close ~refocus =
@@ -11,11 +11,11 @@ let[@client] make () =
     match Yuka.State.peek route with
     | Some (Routes.Feed { project; team; assignee; _ }) ->
         Yuka.Browser.navigate (Routes.feed ~project ~team ~assignee ?before ())
-    | None -> Yuka.Browser.navigate (Routes.feed ?before ())
+    | Some (Routes.Item _) | None -> Yuka.Browser.navigate (Routes.feed ?before ())
   in
   let zones () =
-    let current = Yuka.State.get zone in
-    if List.mem current Prefs.zones then Prefs.zones else current :: Prefs.zones
+    let current = Zone.current saved in
+    if List.mem current Zone.zones then Zone.zones else current :: Zone.zones
   in
   <div class_="settings">
     <button id="settings-button" class_="icon-button" type_=`button aria_label="Settings" title="Settings"
@@ -23,7 +23,6 @@ let[@client] make () =
       on_click=(fun _ ->
         if Yuka.State.peek opened then close ~refocus:false
         else begin
-          Yuka.State.set zone (!Prefs.zone ());
           Yuka.State.set opened true;
           Yuka.Browser.focus "settings-zone"
         end)>
@@ -33,47 +32,40 @@ let[@client] make () =
         <circle cx="10" cy="11.5" r="1.75" fill="var(--panel)" stroke="currentColor" stroke_width="1.5" />
       </svg>
     </button>
-    (if Yuka.State.get opened then
-       <div>
-         <div class_="backdrop" on_click=(fun _ -> close ~refocus:false) />
-         <div class_="popover settings-panel" role=`dialog aria_label="Settings"
-           on_keydown=(fun event -> if Yuka.Event.key event = "Escape" then close ~refocus:true)>
-           <label class_="field">
-             <span>"Time zone"</span>
-             <select id="settings-zone"
-               on_change=(fun event ->
-                 let next = Yuka.Event.target_value event in
-                 !Prefs.set_zone next;
-                 Yuka.State.set zone next)>
-               (Yuka.fragment
-                  (List.map
-                     (fun name -> <option value=name selected=(name = Yuka.State.get zone)>(Yuka.text name)</option>)
-                     (zones ())))
-             </select>
-           </label>
-           <form class_="field"
-             on_submit=(fun event ->
-               Yuka.Event.prevent_default event;
-               let time = !Prefs.to_time (Yuka.State.peek moment) in
-               if time > 0 then begin
-                 close ~refocus:false;
-                 jump (Some (time + 60))
-               end)>
-             <label for_="settings-date">"Jump to date"</label>
-             <div class_="row">
-               <input id="settings-date" type_=`datetime_local
-                 on_input=(fun event -> Yuka.State.set moment (Yuka.Event.target_value event)) />
-               <button class_="small-button" type_=`submit>"Go"</button>
-             </div>
-           </form>
-           <button class_="link-button" type_=`button
-             on_click=(fun _ ->
-               close ~refocus:false;
-               jump None)>
-             "Show latest"
-           </button>
-           <p class_="hint">"Dates use this zone. Both choices stay in this browser."</p>
-         </div>
-       </div>
-     else Yuka.empty)
+    <Popover opened close=(fun () -> close ~refocus:false)>
+      <div class_="popover settings-panel" role=`dialog aria_label="Settings"
+        on_keydown=(fun event -> if Yuka.Event.key event = "Escape" then close ~refocus:true)>
+        <label class_="field">
+          <span>"Time zone"</span>
+          <select id="settings-zone" on_change=(fun event -> Zone.choose (Yuka.Event.target_value event))>
+            (Yuka.fragment
+               (List.map
+                  (fun name -> <option value=name selected=(name = Zone.current saved)>(Yuka.text name)</option>)
+                  (zones ())))
+          </select>
+        </label>
+        <form class_="field"
+          on_submit=(fun event ->
+            Yuka.Event.prevent_default event;
+            match Env.to_time ~zone:(Zone.current saved) (Yuka.State.peek moment) with
+            | Some time ->
+                close ~refocus:false;
+                jump (Some (time + 60))
+            | None -> ())>
+          <label for_="settings-date">"Jump to date"</label>
+          <div class_="row">
+            <input id="settings-date" type_=`datetime_local
+              on_input=(fun event -> Yuka.State.set moment (Yuka.Event.target_value event)) />
+            <button class_="small-button" type_=`submit>"Go"</button>
+          </div>
+        </form>
+        <button class_="link-button" type_=`button
+          on_click=(fun _ ->
+            close ~refocus:false;
+            jump None)>
+          "Show latest"
+        </button>
+        <p class_="hint">"Dates use this zone. Both choices stay in this browser."</p>
+      </div>
+    </Popover>
   </div>
