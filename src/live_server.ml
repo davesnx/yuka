@@ -70,6 +70,7 @@ and node = {
   table : entry Web.table;
   mutable log : Types.log_level -> string -> unit;
   own_log : bool;
+  mutable on_event : (Types.cycle_event -> unit) option;
   max_sockets : int;
   max_sockets_per_session : int;
   max_kept_states : int;
@@ -104,6 +105,7 @@ let node ?log ?(max_sockets = 10_000) ?(max_sockets_per_session = 16) ?(max_kept
     table = Web.table ();
     log = (match log with Some f -> f | None -> fun level m -> !Types.default_log level m);
     own_log = Option.is_some log;
+    on_event = None;
     max_sockets;
     max_sockets_per_session;
     max_kept_states;
@@ -134,6 +136,14 @@ let main () =
 
 let pick = function Some n -> n | None -> main ()
 let use_log node log = if not node.own_log then node.log <- log
+let use_events node on_event = if Option.is_some on_event then node.on_event <- on_event
+
+let published node topic =
+  match node.on_event with
+  | None -> ()
+  | Some f -> (
+      try f (Types.Publish { topic })
+      with e -> node.log `Error ("on_event raised: " ^ Web.exn_to_string e))
 
 let entry_key topic wire = topic ^ " " ^ wire
 
@@ -637,6 +647,7 @@ let publish ?node (topic : ('k, 's) Topic.t) key state =
   | Some e ->
       if e.loading then e.again <- true;
       store e (Codec.encode (Topic.state topic) state));
+  published node (Topic.name topic);
   note node (Topic.name topic) wire
 
 let changed ?node (topic : ('k, 's) Topic.t) key =
@@ -647,6 +658,7 @@ let changed ?node (topic : ('k, 's) Topic.t) key =
   | Some e when e.members <> [] -> reload e
   | Some e -> drop_idle e
   | None -> ());
+  published node (Topic.name topic);
   note node (Topic.name topic) wire
 
 let heard node text =

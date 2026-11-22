@@ -57,6 +57,17 @@ module Server = struct
   type request = Types.context
   type log_level = Types.log_level
 
+  type event = Types.cycle_event =
+    | Route of { request : request; seconds : float }
+    | Guards of { request : request; seconds : float; passed : bool }
+    | Loaders of { request : request; seconds : float; ok : bool }
+    | Action of { request : request; name : string; seconds : float; status : int }
+    | Render_start of { request : request }
+    | Render_end of { request : request; status : int; seconds : float; ok : bool }
+    | Stream_end of { request : request; seconds : float; ok : bool }
+    | Live_connect of { request : request; sockets : int }
+    | Publish of { topic : string }
+
   let to_string build = Server.to_string (Kind.fn build)
   let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
 

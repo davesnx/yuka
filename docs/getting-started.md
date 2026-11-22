@@ -189,6 +189,34 @@ The config has no `~log`, so `Yuka_dream.handler` sends the messages of
 Yuka, and of `Yuka.Console` during a request, to the Dream log under the
 name `yuka`.
 
+### Events of the request cycle
+
+To measure the server, give `~on_event` to the config. The function gets
+one `Yuka.Server.event` for each step of a request: `Route` (the router
+match), `Guards`, `Loaders`, `Action`, `Render_start`, `Render_end`,
+`Stream_end` (the last write of a streamed page) and `Live_connect`. A
+`Live.publish` or `Live.changed` gives `Publish`. Each step has its
+duration in `seconds`. The events of one request have the same `request`
+value, so you can group them, or read a trace header with
+`Yuka.Server.Request.header`.
+
+```ocaml
+let on_event : Yuka.Server.event -> unit = function
+  | Render_end { request; status; seconds; _ } ->
+      Dream.log "%s %d %.1f ms" (Yuka.Server.Request.path request) status (seconds *. 1000.)
+  | _ -> ()
+
+let config = Yuka.Server.config ~assets ~on_event ()
+```
+
+The function runs on the request path. Keep it short. When it raises an
+exception, Yuka logs the exception and the request continues. Without
+`~on_event`, Yuka does not read the clock.
+
+With `~dev:true`, each answer has a `Server-Timing` header with the
+durations of the route match, the guards, the loaders, the action and
+the render. The Network panel of the browser developer tools shows them.
+
 ### Live data on more than one server
 
 With more than one server process, each process joins a bus before it

@@ -138,6 +138,17 @@ type backend = ..
     backend : backend option;
   }
 
+  type cycle_event =
+    | Route of { request : context; seconds : float }
+    | Guards of { request : context; seconds : float; passed : bool }
+    | Loaders of { request : context; seconds : float; ok : bool }
+    | Action of { request : context; name : string; seconds : float; status : int }
+    | Render_start of { request : context }
+    | Render_end of { request : context; status : int; seconds : float; ok : bool }
+    | Stream_end of { request : context; seconds : float; ok : bool }
+    | Live_connect of { request : context; sockets : int }
+    | Publish of { topic : string }
+
   type session = {
     streaming : bool;
     mutable islands : int;

@@ -2134,6 +2134,130 @@ let request_api =
           [ ("content-type", "text/plain; charset=utf-8"); ("x-a", "1") ] r.headers );
   ]
 
+module Upgrading = Server.Adapter.Make (struct
+  include Test_adapter
+
+  let upgrade (_ : request) run =
+    let pending () = fst3 (Async.make ()) in
+    let c =
+      Server.Live.connection ~send:(fun _ -> Async.return ()) ~receive:pending ~close:(fun _ -> Async.return ())
+    in
+    ignore (run c);
+    Async.return { status = 101; headers = []; body = "" }
+end)
+
+let events =
+  let seen = ref [] in
+  let on_event e = seen := e :: !seen in
+  let name : Server.event -> string = function
+    | Route _ -> "route"
+    | Guards { passed; _ } -> "guards " ^ string_of_bool passed
+    | Loaders { ok; _ } -> "loaders " ^ string_of_bool ok
+    | Action { name; status; _ } -> Printf.sprintf "action %s %d" name status
+    | Render_start _ -> "render start"
+    | Render_end { status; ok; _ } -> Printf.sprintf "render end %d %b" status ok
+    | Stream_end { ok; _ } -> "stream end " ^ string_of_bool ok
+    | Live_connect { sockets; _ } -> "live connect " ^ string_of_int sockets
+    | Publish { topic } -> "publish " ^ topic
+  in
+  let parts : Server.event -> (Server.request * float) option = function
+    | Route { request; seconds }
+    | Guards { request; seconds; _ }
+    | Loaders { request; seconds; _ }
+    | Action { request; seconds; _ }
+    | Render_end { request; seconds; _ }
+    | Stream_end { request; seconds; _ } -> Some (request, seconds)
+    | Render_start { request } -> Some (request, 0.)
+    | Live_connect { request; _ } -> Some (request, 0.)
+    | Publish _ -> None
+  in
+  let check_seen expected =
+    let events = List.rev !seen in
+    Alcotest.(check (list string)) "events" expected (List.map name events);
+    match List.filter_map parts events with
+    | [] -> ()
+    | (first, _) :: _ as all ->
+        List.iter
+          (fun (request, seconds) ->
+            check_true "one request" (request == first);
+            check_true "a duration" (Float.is_finite seconds && seconds >= 0.))
+          all
+  in
+  let config () =
+    seen := [];
+    config_with ~on_event ()
+  in
+  let same = [ ("origin", "https://app.example"); ("host", "app.example") ] in
+  [
+    ( "a page request gets its events in order, with durations",
+      fun () ->
+        let config = config () in
+        let r = get ~config ~headers:[ ("x-user", "ann") ] "/greet?name=x" in
+        check_status r 200;
+        check_seen [ "route"; "guards true"; "loaders true"; "render start"; "render end 200 true" ];
+        seen := [];
+        let r = get ~config "/greet" in
+        check_status r 403;
+        check_seen [ "route"; "guards false" ] );
+    ( "a streamed page ends with a stream end",
+      fun () ->
+        let config = config () in
+        let a = call ~config (request "/slow") in
+        check_seen [ "route"; "loaders true"; "render start"; "render end 200 true" ];
+        App.finish_slow "ready";
+        check_true "done" (match Async.status a with Async.Done _ -> true | _ -> false);
+        check_seen [ "route"; "loaders true"; "render start"; "render end 200 true"; "stream end true" ] );
+    ( "a failed render, then the error page",
+      fun () ->
+        let config = config () in
+        let r = get ~config "/broken" in
+        check_status r 500;
+        check_seen [ "route"; "loaders true"; "render start"; "render end 200 false"; "render start"; "render end 500 true" ] );
+    ( "an action call",
+      fun () ->
+        let config = config () in
+        let r =
+          get ~config ~meth:`POST
+            ~headers:([ ("content-type", "application/json"); ("x-user", "ana") ] @ same)
+            ~body:"null" "/_yuka/action/whoami"
+        in
+        check_status r 200;
+        check_seen [ "action whoami 200" ] );
+    ( "a live connect and a publish",
+      fun () ->
+        let config = config () in
+        let node = Server.Live.node () in
+        let a =
+          Upgrading.handler ~node config Cycle_server.Yuka_routes.app
+            (request ~headers:(("upgrade", "websocket") :: same) "/_yuka/live")
+        in
+        check_true "upgraded" (match Async.status a with Async.Done r -> r.status = 101 | _ -> false);
+        Server.Live.publish ~node App.mine "ann" "new";
+        check_seen [ "live connect 1"; "publish cycle-mine" ] );
+    ( "a handler that raises does not break the request",
+      fun () ->
+        let config = config_with ~on_event:(fun _ -> failwith "handler bug") () in
+        let r = get ~config ~headers:[ ("x-user", "ann") ] "/greet?name=x" in
+        check_status r 200;
+        check_true "the page" (contains r.body "hello x from ann");
+        check_true "logged" (List.exists (fun m -> contains m "on_event raised" && contains m "handler bug") !logged) );
+    ( "dev answers carry server-timing",
+      fun () ->
+        Unix.putenv "YUKA_DEV_FILE" "/nonexistent/yuka-dev";
+        let r = get ~config:(config_with ~dev:true ()) ~headers:[ ("x-user", "ann") ] "/greet?name=x" in
+        check_status r 200;
+        match header r "server-timing" with
+        | [ v ] ->
+            let names = List.map (fun e -> List.hd (String.split_on_char ';' (String.trim e))) (String.split_on_char ',' v) in
+            Alcotest.(check (list string)) "steps" [ "route"; "guard"; "loader"; "render" ] names;
+            check_true "durations" (count v ";dur=" = 4)
+        | _ -> Alcotest.fail "no single server-timing header" );
+    ( "no server-timing without dev",
+      fun () ->
+        let r = get ~config:(config ()) ~headers:[ ("x-user", "ann") ] "/greet?name=x" in
+        check_header r "server-timing" [] );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -2155,4 +2279,5 @@ let () =
       ("speculation", cases speculation);
       ("layout values", cases layout_values);
       ("request api", cases request_api);
+      ("events", cases events);
     ]

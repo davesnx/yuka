@@ -251,6 +251,7 @@ type config = {
   prerendered : string option;
   origins : string list option;
   log : (Types.log_level -> string -> unit) option;
+  on_event : (Types.cycle_event -> unit) option;
   prerendering : bool;
   warned : string list ref;
 }
@@ -268,11 +269,12 @@ let public_prefix (prefix, dir) =
   | segments -> (segments, dir)
 
 let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
-    ?(dev = false) ?origins ?log () =
+    ?(dev = false) ?origins ?log ?on_event () =
   {
     dev = (if dev then Some (dev_state ()) else None);
     origins;
     log;
+    on_event;
     prerendering = false;
     warned = ref [];
     assets;
@@ -371,7 +373,19 @@ type env = {
   context : Types.context;
   node : Live_server.node;
   live_used : bool ref;
+  emit : (Types.cycle_event -> unit) option;
 }
+
+let timed env f x event =
+  match env.emit with
+  | None -> f x
+  | Some emit ->
+      let start = Web.clock () in
+      let a = f x in
+      Async.on_settled a (function
+        | Async.Pending -> ()
+        | st -> emit (event env.context (Web.clock () -. start) st));
+      a
 
 let outlet key inner =
   Element
@@ -420,7 +434,7 @@ let rec shared sent (layers : layer list) =
 let speculation_rules =
   {|<script type="speculationrules">{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
 
-let render ?(overlay = false) env ~status ~headers layers (page : page) =
+let render_now ?(overlay = false) env ~stream_end ~status ~headers layers (page : page) =
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
   let entry =
@@ -513,14 +527,39 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
       writer := (fun text -> Async.bind flushed (fun () -> w text));
       let result, resolve, _ = Async.make () in
       Async.on_settled finished (function
-        | Async.Done islands -> Async.on_settled (write (close islands)) (fun _ -> resolve ())
+        | Async.Done islands ->
+            Async.on_settled (write (close islands)) (fun st ->
+                Option.iter (fun f -> f (match st with Async.Done () -> true | _ -> false)) stream_end;
+                resolve ())
         | Async.Failed m ->
             log env.config `Error m;
+            Option.iter (fun f -> f false) stream_end;
             Async.on_settled flushed (fun _ -> resolve ())
         | Async.Pending -> ());
       result
     in
     Async.return { status; headers; body = Stream stream }
+
+let render ?overlay env ~status ~headers layers page =
+  match env.emit with
+  | None -> render_now ?overlay env ~stream_end:None ~status ~headers layers page
+  | Some emit -> (
+      let request = env.context in
+      emit (Types.Render_start { request });
+      let start = Web.clock () in
+      let seconds () = Web.clock () -. start in
+      let stream_end = Some (fun ok -> emit (Types.Stream_end { request; seconds = seconds (); ok })) in
+      let ended status ok = emit (Types.Render_end { request; status; seconds = seconds (); ok }) in
+      match render_now ?overlay env ~stream_end ~status ~headers layers page with
+      | a ->
+          Async.on_settled a (function
+            | Async.Done (r : response) -> ended r.status true
+            | Async.Failed _ -> ended status false
+            | Async.Pending -> ());
+          a
+      | exception e ->
+          ended status false;
+          raise e)
 
 let internal_error () = plain 500 "Internal Server Error" []
 let log_quietly config level m = try log config level m with _ -> ()
@@ -595,12 +634,26 @@ let stopped env fallback target = function
              (merge_headers [ env.root_headers; [ ("location", location); no_store_header ] ]))
   | Fail m -> fail_page env fallback m
 
-let rec run_guards = function
+let rec guard_chain = function
   | [] -> Async.return (Ok ())
   | g :: rest ->
       Async.bind (protect g) (function
-        | Ok () -> run_guards rest
+        | Ok () -> guard_chain rest
         | Error _ as e -> Async.return e)
+
+let run_guards env = function
+  | [] -> guard_chain []
+  | guards ->
+      timed env guard_chain guards (fun request seconds st ->
+          Types.Guards { request; seconds; passed = (match st with Async.Done (Ok ()) -> true | _ -> false) })
+
+let run_load env load =
+  timed env protect load (fun request seconds st ->
+      Types.Loaders { request; seconds; ok = (match st with Async.Done (Ok _) -> true | _ -> false) })
+
+let timed_action env name f =
+  timed env f () (fun request seconds st ->
+      Types.Action { request; name; seconds; status = (match st with Async.Done (status, _) -> status | _ -> 500) })
 
 let rule_cache (rules : rules) headers =
   match answer_cache headers rules.cache with
@@ -679,7 +732,9 @@ let action env (r : request) raw =
                 match Multipart.parse ~boundary body with
                 | Error m -> Async.return (json (Server.action_error 400 ("invalid multipart body: " ^ m)))
                 | Ok values ->
-                    Async.map json (Server.answer_with ?origins ~context ~live ~name (Server.call form.Server.answer context values))))
+                    Async.map json
+                      (timed_action env name (fun () ->
+                           Server.answer_with ?origins ~context ~live ~name (Server.call form.Server.answer context values)))))
       | _ -> (
       match Server.accept_action ?origins ~name r.header with
       | Error e -> Async.return (json e)
@@ -688,7 +743,7 @@ let action env (r : request) raw =
             | Error `Too_large -> Async.return (json (Server.action_error 413 "request too large"))
             | Ok body ->
                 Async.map json
-                  (Server.answer_action ?origins ~context ~live ~name handler body))))
+                  (timed_action env name (fun () -> Server.answer_action ?origins ~context ~live ~name handler body)))))
   | [ _ ], _ -> reply (plain 405 "Method Not Allowed" [ ("allow", "POST") ])
   | _ -> reply (asset_miss ())
 
@@ -729,7 +784,7 @@ let live_checked env fallback ~path (resp : response) =
 let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
     ~(load : unit -> (plan, stop) result Async.t) ~(fallback : fallback) =
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
-  Async.bind (run_guards guards) (function
+  Async.bind (run_guards env guards) (function
     | Error stop -> page_or_error (stopped env fallback path stop)
     | Ok () -> (
         let headers = rule_cache rules (html_headers rules.headers []) in
@@ -738,7 +793,7 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
         | Some (root, file) -> Async.return (File { root; path = file; headers })
         | None ->
             page_or_error
-              (Async.bind (protect load) (function
+              (Async.bind (run_load env load) (function
                 | Error stop -> stopped env fallback path stop
                 | Ok plan ->
                     let overlay =
@@ -765,7 +820,7 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
           let plain status message = plain status message rules.headers in
           if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden")
           else
-            Async.bind (run_guards guards) (function
+            Async.bind (run_guards env guards) (function
               | Error stop -> page_or_error (stopped env fallback path stop)
               | Ok () ->
                   let multipart = Option.bind (r.header "content-type") Multipart.boundary in
@@ -800,9 +855,21 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
                                 in
                                 let context = env.context in
                                 let answer =
-                                  match run context values with
-                                  | a -> a
-                                  | exception e -> Async.failed (Web.exn_to_string e)
+                                  timed env
+                                    (fun () ->
+                                      match run context values with
+                                      | a -> a
+                                      | exception e -> Async.failed (Web.exn_to_string e))
+                                    ()
+                                    (fun request seconds st ->
+                                      let status =
+                                        match st with
+                                        | Async.Done (Server.Saved _) -> 303
+                                        | Async.Done (Server.Unprocessable _) -> 422
+                                        | Async.Failed m when Option.is_some (Server.rejection m) -> 422
+                                        | _ -> 500
+                                      in
+                                      Types.Action { request; name; seconds; status })
                                 in
                                 recover_with env.config ~last:(fun () -> Respond (internal_error ()))
                                   (Async.bind answer (function
@@ -856,7 +923,16 @@ let route env (App a) (r : request) ~path ~raw ~query =
   let suffix = query_suffix query in
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
   let refuse (rules : rules) level = refusal rules.headers level in
-  match a.find r.meth segments (Router.query r.target) with
+  let found =
+    match env.emit with
+    | None -> a.find r.meth segments (Router.query r.target)
+    | Some emit ->
+        let start = Web.clock () in
+        let found = a.find r.meth segments (Router.query r.target) in
+        emit (Types.Route { request = env.context; seconds = Web.clock () -. start });
+        found
+  in
+  match found with
   | Router.Redirect { location; kind } ->
       reply (empty (match kind with `Permanent -> 308 | `Temporary -> 307) [ ("location", location ^ suffix) ])
   | Router.Missing -> page_or_error (not_found_page env a.missing path)
@@ -886,7 +962,7 @@ let route env (App a) (r : request) ~path ~raw ~query =
           then reply (plain 403 "Forbidden" [])
           else
           page_or_error
-            (Async.bind (run_guards guards) (function
+            (Async.bind (run_guards env guards) (function
               | Error stop -> stopped env a.missing path stop
               | Ok () ->
                     let ran =
@@ -947,6 +1023,30 @@ let checked_headers config outcome =
       log_quietly config `Error ("response header " ^ String.escaped name ^ " holds CR, LF or NUL; answered 500");
       Respond (internal_error ())
 
+let server_timing timing outcome =
+  let entry = function
+    | Types.Route { seconds; _ } -> Some ("route", seconds)
+    | Guards { seconds; _ } -> Some ("guard", seconds)
+    | Loaders { seconds; _ } -> Some ("loader", seconds)
+    | Action { seconds; _ } -> Some ("action", seconds)
+    | Render_end { seconds; _ } -> Some ("render", seconds)
+    | Render_start _ | Stream_end _ | Live_connect _ | Publish _ -> None
+  in
+  match timing with
+  | None -> outcome
+  | Some events -> (
+      match List.filter_map entry (List.rev !events) with
+      | [] -> outcome
+      | entries -> (
+          let header =
+            ( "server-timing",
+              String.concat ", " (List.map (fun (n, s) -> Printf.sprintf "%s;dur=%.3f" n (s *. 1000.)) entries) )
+          in
+          match outcome with
+          | Respond r -> Respond { r with headers = r.headers @ [ header ] }
+          | File f -> File { f with headers = f.headers @ [ header ] }
+          | Upgrade _ -> outcome))
+
 let live_answer env (r : request) =
   match r.meth with
   | `GET ->
@@ -963,14 +1063,35 @@ let live_answer env (r : request) =
             let context = { env.context with session = (fun () -> Some session) } in
             Async.return
               (Upgrade
-                 (Live_server.run ~node:env.node ~sleep:env.sleep context ~verify_csrf:r.verify_csrf
-                    ~token:r.csrf_token)))
+                 (fun c ->
+                   let finished =
+                     Live_server.run ~node:env.node ~sleep:env.sleep context ~verify_csrf:r.verify_csrf
+                       ~token:r.csrf_token c
+                   in
+                   (match env.emit with
+                   | Some emit when List.exists (fun (x : Live_server.conn) -> x.c == c) env.node.conns ->
+                       emit (Types.Live_connect { request = context; sockets = List.length env.node.conns })
+                   | _ -> ());
+                   finished)))
   | _ -> reply (method_not_allowed "GET")
 
 let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r : request) =
   Scheduler.seal ();
   let path, query = Router.split_target r.target in
   Live_server.use_log node (log config);
+  Live_server.use_events node config.on_event;
+  let timing = match config.dev with Some _ -> Some (ref []) | None -> None in
+  let emit =
+    match (config.on_event, timing) with
+    | None, None -> None
+    | handler, timing ->
+        Some
+          (fun event ->
+            Option.iter (fun t -> t := event :: !t) timing;
+            match handler with
+            | Some f -> ( try f event with e -> log_quietly config `Error ("on_event raised: " ^ Web.exn_to_string e))
+            | None -> ())
+  in
   let live_used = ref false in
   let rec context : Types.context =
     {
@@ -1016,6 +1137,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
       context;
       node;
       live_used;
+      emit;
     }
   in
   let parts = String.split_on_char '/' path in
@@ -1114,7 +1236,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
         log_quietly config `Error (Web.exn_to_string e);
         Async.return (last ())
   in
-  Async.map (fun o -> checked_headers config (bodyless o)) answer
+  Async.map (fun o -> checked_headers config (server_timing timing (bodyless o))) answer
 
 module type ADAPTER = sig
   type request
@@ -1258,6 +1380,7 @@ let missing_page config (App a) ~sleep =
       context = Server.empty_context ();
       node = Live_server.main ();
       live_used = ref false;
+      emit = None;
     }
   in
   not_found_page env a.missing "/404.html"

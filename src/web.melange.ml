@@ -189,6 +189,7 @@ let on_frame : (float -> unit) -> unit -> unit =
 }|}]
 
 let now : unit -> float = [%mel.raw "function () { return document.defaultView.performance.now() }"]
+let clock : unit -> float = [%mel.raw "function () { return Date.now() / 1000 }"]
 
 let on_visible : node -> (unit -> unit) -> unit -> unit =
   [%mel.raw

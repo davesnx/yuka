@@ -1717,6 +1717,42 @@ module Server : sig
       {!immutable}; other files get {!no_cache}. [Error] with a message
       when [manifest] or [metafile] is not valid JSON of that shape. *)
 
+  type event =
+    | Route of { request : request; seconds : float }
+        (** The router found what the path matches (a route, a redirect, a
+            miss). *)
+    | Guards of { request : request; seconds : float; passed : bool }
+        (** All guards of a route, when it has one or more. [passed] is
+            false when a guard stopped the request or failed. *)
+    | Loaders of { request : request; seconds : float; ok : bool }
+        (** All loaders of a page, which run at the same time, and the
+            plan of the page. [ok] is false when a loader stopped the
+            request or failed. *)
+    | Action of { request : request; name : string; seconds : float; status : int }
+        (** An action call ([/_yuka/action/<name>]) or a form post. [status]:
+            the status of the action answer; for a form post, 303 when it
+            saved, 422 when it refused the values, 500 when it failed. *)
+    | Render_start of { request : request }
+        (** A page render starts: the page, a 404 page or a 500 page. *)
+    | Render_end of { request : request; status : int; seconds : float; ok : bool }
+        (** The answer of the render is ready to send: the shell of a
+            streamed page, or the full text. [ok] is false when the render
+            failed (then an error page renders). *)
+    | Stream_end of { request : request; seconds : float; ok : bool }
+        (** The last write of a streamed page, [seconds] after
+            [Render_start]. [ok] is false when a fill failed or a write
+            failed. Only a streamed page has it. *)
+    | Live_connect of { request : request; sockets : int }
+        (** The node accepted a live socket. [sockets]: the open sockets
+            of the node, this one included. *)
+    | Publish of { topic : string }
+        (** {!Live.publish} or {!Live.changed} on a node that a handler
+            with [on_event] used. It has no request. *)
+  (** The steps of the request cycle, for [on_event] of {!val-config}.
+      [seconds] is the duration of the step (wall clock). The events of a
+      request have the same [request] value (compare with [==]): use it
+      to group them, and {!Request.header} to read a trace header. *)
+
   type config
 
   val config :
@@ -1730,6 +1766,7 @@ module Server : sig
     ?dev:bool ->
     ?origins:string list ->
     ?log:(log_level -> string -> unit) ->
+    ?on_event:(event -> unit) ->
     unit ->
     config
   (** [public] maps URL prefixes to directories ([("/static", "static")]).
@@ -1769,7 +1806,19 @@ module Server : sig
       header) or [`Warn], and the {!Yuka.Console} calls of a server render
       of a request. Without it, the adapter may give its own log
       ({!Adapter.default_log}); else messages go to the default sink: one
-      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
+      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug].
+
+      [on_event] gets each {!type-event} of a request, in order, when the
+      step ends ([Render_start] when it starts). It runs on the request
+      path: keep it short, and send the events elsewhere to do slow work.
+      When it raises, the cycle sends the exception to [log] as [`Error]
+      and the request continues. Without [on_event] and without [dev],
+      the cycle does not read the clock and makes no event.
+
+      With [dev], each answer has a [server-timing] header with the
+      durations in milliseconds of the steps before the answer: [route],
+      [guard], [loader], [action] and [render]. Browser developer tools
+      show it. *)
 
   val set_default_log : (log_level -> string -> unit) -> unit
   (** Replaces the default sink: where messages go outside a request (a

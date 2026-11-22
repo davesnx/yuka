@@ -105,6 +105,7 @@ let has_intersection_observer : node -> bool = fun _ -> browser_only ()
 let on_idle : (unit -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let on_frame : (float -> unit) -> unit -> unit = fun _ _ -> browser_only ()
 let now : unit -> float = fun () -> browser_only ()
+let clock = Unix.gettimeofday
 let set_timeout : int -> (unit -> unit) -> unit -> unit = fun _ _ () -> ()
 let microtask f = f ()
 let form_values : event -> (string * string) array = fun _ -> browser_only ()
