@@ -5,13 +5,13 @@ let initials name =
   |> List.map (fun part -> String.make 1 (Char.uppercase_ascii part.[0]))
   |> String.concat ""
 
-let comment (entry : Model.comment) =
+let comment ~time (entry : Model.comment) =
   <li class_="comment">
     <span class_="comment-avatar" aria_hidden=true>(Yuka.text (initials entry.author))</span>
     <div class_="comment-body">
       <div class_="comment-meta">
         <span class_="comment-author">(Yuka.text entry.author)</span>
-        (Card.time ~class_:"comment-time" entry.time)
+        (time entry.time)
       </div>
       <p class_="comment-text">(Yuka.text entry.text)</p>
     </div>
@@ -51,7 +51,8 @@ let[@client] make ~(item : int) ~(count : int) ~children () =
       (if total () = 0 then <p class_="hint">"No comments yet. Start the discussion."</p> else Yuka.empty)
       <ol class_="comment-list">
         children
-        (Yuka.fragment (List.map comment (Yuka.State.get added)))
+        (Yuka.fragment
+           (List.map (comment ~time:(fun time -> <Local_time time class_="comment-time" />)) (Yuka.State.get added)))
       </ol>
     </section>
     <form class_="comment-form"

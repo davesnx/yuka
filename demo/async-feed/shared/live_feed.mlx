@@ -1,9 +1,9 @@
-let[@client] make ~(filter : Model.filter) ~(since : int) ~(top : bool) () =
+let[@client] make ~(filter : Model.filter) ~(since : int) () =
   let live = Yuka.Live.make Feed.recent (fun () -> ()) in
   let running = Yuka.State.make false in
   let fresh () =
     match Yuka.Status.data (Yuka.State.get (Yuka.Live.state live)) with
-    | Some events when top -> List.filter (fun (event : Model.event) -> event.id > since && Model.matches filter event) events
+    | Some events -> List.filter (fun (event : Model.event) -> event.id > since && Model.matches filter event) events
     | _ -> []
   in
   let simulate _ =
@@ -12,9 +12,10 @@ let[@client] make ~(filter : Model.filter) ~(since : int) ~(top : bool) () =
   in
   <div>
     <ol class_="feed feed-live" aria_live=`polite>
-      (Yuka.each ~key:(fun (event : Model.event) -> Int.to_string event.id) ~equal:( = )
+      (Yuka.each ~key:(fun (event : Model.event) -> Int.to_string event.id)
          (fun () -> Array.of_list (fresh ()))
-         (fun (event : Model.event) -> <Card event fresh=true comments=(<Comment_button id=event.id count=0 />) />))
+         (fun (event : Model.event) -> <Card event fresh=true time=(<Local_time time=event.time class_="card-time" />)
+           comments=(<Comment_button id=event.id count=0 />) />))
     </ol>
     <button class_="simulate" type_=`button disabled=(Yuka.State.get running) on_click=simulate>
       <span class_="pulse" aria_hidden=true />

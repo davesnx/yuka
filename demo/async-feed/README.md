@@ -49,21 +49,29 @@ Under `/async-feed` with `make demo-serve`, at `/` alone:
 - Settings: the time zone, and a date and time to jump to (read in that
   zone). Each date of the feed shows in the zone, with the full time in the
   `title` and the instant in `datetime`.
-- The theme toggle: light or dark.
+- The theme toggle: light or dark. Without a choice the page follows the
+  color scheme of the system.
 
-The zone and the theme are kept in `localStorage` (`async-feed-zone`,
-`async-feed-theme`). A script in the head applies them before the first
-paint: it sets `data-theme` and writes each `<time data-ts>` in the zone
-as the parser adds it. Without a stored zone it uses the zone of the
-browser; the server writes the dates in UTC.
+The zone and the theme are kept in cookies (`async-feed-zone`,
+`async-feed-theme`), which `Loaders.settings`, the loader of the layout,
+reads. The layout prints the theme on the toggle button (`data-theme`,
+`aria-pressed`), and the CSS picks the colors from it with
+`:root:has(#theme[data-theme=...])`, so the first paint is right with no
+script. The layout gives the zone to the islands with a `Yuka.Context` that
+has a codec. Each time is a `Local_time` island: the server prints the
+UTC time, and the browser writes it in the zone with `Intl.DateTimeFormat`
+(`shared/env.melange.ml`). Without a saved zone it uses the zone of the
+browser. A zone chosen in Settings is a module-level State that only the
+browser writes, so every time island shows it at once.
 
 ## Simulate events
 
 The button at the bottom calls the `async_feed_simulate` action. The
-server then adds 4 events, one every 0.7 s, and publishes the 30 newest
+server then adds 4 events, one every 0.7 s, and publishes the 500 newest
 added events on the `async_feed_recent` topic of `Yuka.Live` after each
 one. Every open page of the feed gets them over its live socket and shows
-the ones that match its filters at the top, with a short animation (none
+the ones that match its filters at the top (a page of older events has no
+live part and opens no socket), with a short animation (none
 with `prefers-reduced-motion`). The events stay in memory until the
 server stops.
 

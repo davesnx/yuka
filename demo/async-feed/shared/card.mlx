@@ -12,19 +12,14 @@ let logo source =
     <text x="16" y="20.5">(Yuka.text (monogram source))</text>
   </svg>
 
-let time ~class_ time =
-  <time class_ datetime=(Clock.iso time) title=(Clock.iso time) data_ts=(Int.to_string time)>
-    (Yuka.text (Clock.utc time))
-  </time>
-
-let make ~(event : Model.event) ?(fresh = false) ~comments () =
+let make ~(event : Model.event) ?(fresh = false) ~time ~comments () =
   <li class_=(if fresh then "card card-new" else "card") data_id=(Int.to_string event.id)>
     (logo event.source)
     <div class_="card-body">
       <div class_="card-meta">
         <span class_="card-source">(Yuka.text (Model.source_label event.source))</span>
         <span class_="card-author">(Yuka.text event.author)</span>
-        (time ~class_:"card-time" event.time)
+        time
       </div>
       <h2 class_="card-title">(Yuka.text event.title)</h2>
       <p class_="card-text">(Yuka.text event.description)</p>

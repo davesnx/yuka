@@ -15,7 +15,7 @@ let page ~filter ~before ~limit =
   let matching = Seq.filter (Model.matches filter) (all ()) in
   { events = List.of_seq (Seq.take limit (Seq.filter older matching)); total = Seq.length matching }
 
-let recent () = List.filteri (fun index _ -> index < 30) !simulated
+let recent () = List.filteri (fun index _ -> index < Feed.kept) !simulated
 
 let add ~now =
   let last = newest () in

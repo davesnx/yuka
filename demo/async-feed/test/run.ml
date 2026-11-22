@@ -26,6 +26,11 @@ let count html needle =
   go 0 0
 
 let contains html needle = count html needle > 0
+
+let find html needle =
+  let n = String.length needle in
+  let rec go i = if i + n > String.length html then None else if String.sub html i n = needle then Some i else go (i + 1) in
+  go 0
 let check_has html name needle = Alcotest.(check bool) name true (contains html needle)
 
 let clock () =
@@ -34,13 +39,60 @@ let clock () =
   Alcotest.(check string) "iso" "2000-02-29T13:05:09Z" (Clock.iso 951829509);
   Alcotest.(check string) "newest" "Nov 20, 2026, 09:01:40 UTC" (Clock.utc 1795165300)
 
+let outlet_key html =
+  let start = String.length {|<yuka-outlet data-k="|} + Option.get (find html {|<yuka-outlet data-k="|}) in
+  String.sub html start (String.index_from html start '"' - start)
+
+let with_cookie cookie target =
+  let _, _, body = call ~headers:[ ("Cookie", cookie) ] target in
+  body
+
+let theme () =
+  let toggle theme pressed =
+    Printf.sprintf {|<button id="theme" class="icon-button theme-toggle" type="button" aria-label="Dark theme" title="Toggle theme" data-theme="%s" aria-pressed="%s">|}
+      theme pressed
+  in
+  check_has (snd (get "/")) "no cookie follows the system" (toggle "system" "false");
+  check_has (with_cookie "async-feed-theme=dark" "/") "the dark cookie" (toggle "dark" "true");
+  check_has (with_cookie "async-feed-theme=light" "/item/4999") "the light cookie" (toggle "light" "false");
+  check_has (with_cookie "async-feed-theme=blue" "/") "an unknown value follows the system" (toggle "system" "false")
+
+let zone () =
+  let script zone = Printf.sprintf {|data-name="zone">%s</script>|} zone in
+  check_has (snd (get "/")) "no zone cookie" (script "null");
+  check_has (with_cookie "async-feed-zone=America%2FNew_York" "/") "the zone cookie, decoded" (script {|"America/New_York"|});
+  check_has (with_cookie "async-feed-zone=%3Cscript%3E" "/") "a zone with other characters is dropped" (script "null")
+
+let kept_layout () =
+  let key = outlet_key (snd (get "/")) in
+  let _, response, html = call ~headers:[ ("Yuka-Navigate", key) ] "/?project=Billing" in
+  Alcotest.(check (option string)) "a filter navigation keeps the layout" (Some key) (Dream.header response "yuka-outlet");
+  Alcotest.(check bool) "no header" false (contains html {|class="header"|});
+  let _, response, _ = call ~headers:[ ("Yuka-Navigate", key); ("Cookie", "async-feed-theme=dark") ] "/?project=Billing" in
+  Alcotest.(check (option string)) "another theme renders the layout again" None (Dream.header response "yuka-outlet")
+
+let local_time () =
+  let _, html = get "/" in
+  check_has html "the server prints the UTC time"
+    {|<time class="card-time" datetime="2026-11-20T09:01:40Z" title="2026-11-20T09:01:40Z">Nov 20, 2026, 09:01:40 UTC</time>|};
+  check_has html "as an island" {|<yuka-island data-name="Async_feed_shared.Local_time"|};
+  check_has html "with the instant as a prop" {|{"time":1795165300,"class_":"card-time"}|};
+  let _, html = get "/?before=1795165300" in
+  check_has html "the feed header time" {|, before <yuka-island data-name="Async_feed_shared.Local_time"|};
+  check_has html "the feed header UTC text" ">Nov 20, 2026, 09:01:40 UTC</time>"
+
+let live_part () =
+  let _, html = get "/" in
+  check_has html "the latest page has the live feed" "Async_feed_shared.Live_feed";
+  let _, html = get "/?before=1795165300" in
+  Alcotest.(check bool) "an older page has no live feed" false (contains html "Async_feed_shared.Live_feed")
+
 let feed () =
   let status, html = get "/" in
   Alcotest.(check int) "status" 200 status;
   Alcotest.(check int) "one page of cards" 50 (count html {|<li class="card" |});
   check_has html "newest first" {|data-id="5000"|};
-  check_has html "time in UTC"
-    {|<time class="card-time" datetime="2026-11-20T09:01:40Z" title="2026-11-20T09:01:40Z" data-ts="1795165300">Nov 20, 2026, 09:01:40 UTC</time>|};
+  Alcotest.(check int) "a time island on each card" 50 (count html {|{"time":|});
   check_has html "count" "50 of 5000 events";
   check_has html "filters" {|aria-label="Filters"|};
   check_has html "project filter" ">Project</span>";
@@ -48,7 +100,7 @@ let feed () =
   check_has html "assignee filter" ">Assignee</span>";
   check_has html "simulate button" "Simulate events";
   check_has html "settings" {|aria-label="Settings"|};
-  check_has html "theme toggle" {|aria-label="Toggle light and dark theme"|};
+  check_has html "theme toggle" {|aria-label="Dark theme"|};
   check_has html "older link" {|href="/?before=|};
   List.iter
     (fun source -> check_has html ("logo " ^ Model.source_label source) ("logo-" ^ Model.source_slug source))
@@ -78,6 +130,14 @@ let simulated () =
   check_has html "new event on top" {|data-id="5001"|};
   Alcotest.(check bool) "in the live state" true (List.exists (fun (e : Model.event) -> e.id = 5001) (Store.recent ()))
 
+let live_kept () =
+  for _ = 1 to Feed.kept + 10 do
+    ignore (Store.add ~now:0)
+  done;
+  let recent = Store.recent () in
+  Alcotest.(check int) "the live state keeps 500 events" 500 (List.length recent);
+  Alcotest.(check int) "the newest first" (Store.newest_id ()) (List.hd recent).id
+
 let post_comment item text =
   let status, _, body =
     call ~meth:`POST
@@ -101,7 +161,8 @@ let item_page () =
   check_has html "the source link opens a new tab" {|target="_blank" rel="noopener"|};
   check_has html "a source-specific field" "<dt>Subreddit</dt>";
   check_has html "the seeded comments" {|class="comment-text"|};
-  check_has html "the exact time in UTC before the zone script" {|class="detail-time" datetime=|};
+  check_has html "the detail time island" {|"class_":"detail-time"|};
+  check_has html "the comment time island" {|"class_":"comment-time"|};
   check_has html "the form" {|id="overlay-comment-text"|};
   let status, _ = get "/item/99999" in
   Alcotest.(check int) "an unknown item" 404 status;
@@ -110,7 +171,8 @@ let item_page () =
   check_has html "New Relic fields" "<dt>Severity</dt>"
 
 let item_overlay () =
-  let _, response, html = call ~headers:[ ("Yuka-Navigate", "L0"); ("Yuka-Overlay", "1") ] "/item/4999" in
+  let key = outlet_key (snd (get "/")) in
+  let _, response, html = call ~headers:[ ("Yuka-Navigate", key); ("Yuka-Overlay", "1") ] "/item/4999" in
   Alcotest.(check (option string)) "an overlay answer" (Some "overlay") (Dream.header response "yuka-layer");
   check_has html "the panel" {|class="sheet-panel"|};
   Alcotest.(check bool) "no feed under it" false (contains html {|<li class="card"|});
@@ -148,6 +210,11 @@ let () =
       ( "pages",
         [
           Alcotest.test_case "feed" `Quick feed;
+          Alcotest.test_case "local time" `Quick local_time;
+          Alcotest.test_case "theme cookie" `Quick theme;
+          Alcotest.test_case "zone cookie" `Quick zone;
+          Alcotest.test_case "kept layout" `Quick kept_layout;
+          Alcotest.test_case "live part" `Quick live_part;
           Alcotest.test_case "filters" `Quick filtered;
           Alcotest.test_case "before" `Quick before;
           Alcotest.test_case "simulated event" `Quick simulated;
@@ -159,4 +226,5 @@ let () =
           Alcotest.test_case "item overlay" `Quick item_overlay;
           Alcotest.test_case "add a comment" `Quick add_comment;
         ] );
+      ("live", [ Alcotest.test_case "kept events" `Quick live_kept ]);
     ]

@@ -14,6 +14,13 @@ type event = {
 [@@deriving codec]
 
 type comment = { author : string; time : int; text : string } [@@deriving codec]
+type theme = Light | Dark [@@deriving codec]
+type settings = { theme : theme option; zone : string option }
+
+let theme_cookie = "async-feed-theme"
+let theme_of_string = function "light" -> Some Light | "dark" -> Some Dark | _ -> None
+let theme_to_string = function Light -> "light" | Dark -> "dark"
+
 type filter = { projects : string list; teams : string list; assignees : string list } [@@deriving codec]
 
 let projects = [ "Checkout"; "Dashboard"; "Mobile app"; "Marketing site"; "Search"; "Billing" ]
