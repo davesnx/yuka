@@ -1105,6 +1105,10 @@ val runtime_route_current :
   (Router.meth -> string list -> (string * string) list -> 'r Router.lookup) -> 'r option State.read
 (** [Routes.current]: the route of the page that the framework provides, typed by [find]. *)
 
+val runtime_route_pending :
+  (Router.meth -> string list -> (string * string) list -> 'r Router.lookup) -> 'r option State.read
+(** [Routes.pending]: the target of {!Browser.navigation}, typed by [find]. *)
+
 val runtime_route_replace : string -> unit
 (** [Routes.replace]: a URL of the page shown is written with [history.replaceState] and sets
     the route; another page is a client navigation that replaces the current history entry,
@@ -1213,8 +1217,8 @@ val render :
     A streamed answer ([Yuka-Stream: 1], see {!Server.Adapter.Make}) is
     shown as soon as its first line comes: the page with the [loading]
     content of each pending [await]. The title, history, scroll,
-    announcer and focus change then, and {!Browser.navigating} becomes
-    [false]. On Back or Forward, the fills that the navigation cache
+    announcer and focus change then, {!Browser.navigating} becomes
+    [false] and {!Browser.navigation} becomes [None]. On Back or Forward, the fills that the navigation cache
     holds are put in place before the scroll to the saved position, and
     the page scrolls to that position again after each later fill, until
     a [wheel], [touchstart], [keydown] or [pointerdown] event or the end

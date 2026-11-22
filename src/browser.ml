@@ -7,6 +7,14 @@ let refresh () = !platform.refresh ()
 let back () = match !Navigation_stub.router with Some r -> r.back () | None -> Web.history_back ()
 let navigating : bool State.read = State.of_signal Navigation_state.navigating
 
+type navigation = Navigation_state.navigation = {
+  url : string;
+  from : string;
+  kind : [ `Push | `Replace | `Traverse | `Reload ];
+}
+
+let navigation : navigation option State.read = State.of_signal Navigation_state.navigation
+
 let replace_url url =
   if Url.unsafe ~tag:"a" "href" url || not (Web.same_origin url) then Types.log "replace_url" url
   else begin

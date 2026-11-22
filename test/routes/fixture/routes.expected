@@ -176,6 +176,8 @@ let find (meth : Yuka.Router.meth) (path : string list)
 
 let current () = Yuka.runtime_route_current find
 
+let pending () = Yuka.runtime_route_pending find
+
 let replace route = Yuka.runtime_route_replace (href route)
 
 let push route = Yuka.runtime_route_push (href route)

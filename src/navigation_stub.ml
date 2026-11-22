@@ -43,7 +43,7 @@ let rec cancel () =
 
 and on_unload _ =
   waiting := [];
-  Navigation_state.set false;
+  Navigation_state.set None;
   cancel ()
 
 let give_up message =
@@ -94,10 +94,10 @@ let use f =
         load ()
       end
 
-let go f fail =
-  Navigation_state.set true;
+let go kind url f fail =
+  Navigation_state.set (Some { Navigation_state.url; from = !loaded; kind });
   let fail () =
-    Navigation_state.set false;
+    Navigation_state.set None;
     fail ()
   in
   match !router with
@@ -112,9 +112,14 @@ let go f fail =
       load ()
 
 let navigate ~replace ~keep_scroll href =
-  go (fun r -> r.navigate ~replace ~keep_scroll href) (fun () -> Web.navigate replace href)
+  let url = Web.local_url href in
+  go
+    (if replace || String.equal url (Web.current_url ()) then `Replace else `Push)
+    url
+    (fun r -> r.navigate ~replace ~keep_scroll href)
+    (fun () -> Web.navigate replace href)
 
-let refresh () = go (fun r -> r.refresh ()) Platform.reload
+let refresh () = go `Reload (Web.current_url ()) (fun r -> r.refresh ()) Platform.reload
 
 let on_click e =
   if (not !failed) && Web.plain_click e then
@@ -140,7 +145,7 @@ let rec on_move e =
 let on_leave e = if !loading || Option.is_some !router then use (fun r -> r.handle e)
 
 let on_popstate e =
-  go
+  go `Traverse (Web.current_url ())
     (fun r -> r.handle e)
     (fun () -> if Web.current_url () <> !loaded then Web.navigate false (Web.current_url ()))
 
@@ -181,7 +186,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
 let stop () =
   Platform.client_navigate := None;
   Platform.client_refresh := Platform.reload;
-  Navigation_state.set false;
+  Navigation_state.set None;
   on := false;
   cancel ();
   incr attempt;

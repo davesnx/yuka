@@ -344,6 +344,33 @@ let[@client] make () =
 It is also `true` during `Yuka.Browser.refresh ()`, until the new
 content is shown. It is always `false` on the server.
 
+`Yuka.Browser.navigation` is a read-only State that tells which
+navigation is in flight. It is `Some` for the same time as `navigating`
+is `true`, else `None`. The value has three fields:
+
+- `url`: the target. For a URL of the page origin, it is the path and
+  the query (the fragment does not count). Else it is the full URL.
+- `from`: the path and the query of the page shown when the navigation
+  started.
+- `kind`: `` `Push `` adds a history entry. `` `Replace `` replaces the
+  current entry (`navigate ~replace:true`, a link with
+  `data-yuka-replace`, or a navigation to the URL shown). `` `Traverse ``
+  is Back or Forward. `` `Reload `` is `Yuka.Browser.refresh ()`.
+
+A newer navigation replaces the value. To show no progress bar for a
+refresh:
+
+```ocaml
+let[@client] make () =
+  <div
+    class_=(match Yuka.State.get Yuka.Browser.navigation with
+            | Some { Yuka.Browser.kind = `Reload; _ } | None -> "progress"
+            | Some _ -> "progress on") />
+```
+
+`Routes.pending ()` gives the target as a typed route; see
+[The current route](#the-current-route).
+
 A page with a `Yuka.Await` streams on a client navigation as on a first
 load. The server waits a short time (100 ms) for every `Await` and async
 value. When they settle in time, the new page comes in one piece. When
@@ -442,11 +469,12 @@ own state, keep that state in a search field and change it with
 
 ## The current route
 
-The shared `Routes` module also has three functions for the route of the
-page that is shown:
+The shared `Routes` module also has four functions for the route of the
+page that is shown and of the page that loads:
 
 ```ocaml
 val current : unit -> t option Yuka.State.read
+val pending : unit -> t option Yuka.State.read
 val replace : t -> unit
 val push : t -> unit
 ```
@@ -456,6 +484,22 @@ on the server and in an island. It is `None` when the URL matches no page
 route, and in a tree that `Yuka.render ~root` builds. Call it in the body of
 a component and read the State in a hole. A client navigation sets the
 State, also in an island of a layout that stays on the screen.
+
+`Routes.pending ()` gives the target of the client navigation in flight
+(`Yuka.Browser.navigation`) as a read-only State. It is `None` when no
+navigation is in flight, when the target matches no page route, and on
+the server. When the new page is shown, it becomes `None` and
+`Routes.current` gives the new route. Use it to mark the link of the
+target while the page loads:
+
+```ocaml
+let[@client] make () =
+  let pending = Routes.pending () in
+  <a href=(Routes.href Routes.Issues)
+     class_=(match Yuka.State.get pending with Some Routes.Issues -> "loading" | _ -> "")>
+    (Yuka.text "Issues")
+  </a>
+```
 
 `Routes.replace route` and `Routes.push route` change the route of the page
 that is shown with no request: the URL (`history.replaceState` or

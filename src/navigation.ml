@@ -17,7 +17,7 @@ let cancel_pending () =
   | None -> ()
 
 let assign ~replace url =
-  Navigation_state.set false;
+  Navigation_state.set None;
   Web.navigate replace url
 
 let save_scroll = Navigation_stub.save_scroll
@@ -411,7 +411,7 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
           let kept = if refresh then Navigation_web.hold_focus () else fun () -> false in
           loaded := Web.current_url ();
           shown_key := !current_key;
-          Navigation_state.set false;
+          Navigation_state.set None;
           let target =
             if over then begin
               let el = Navigation_web.layer () in
@@ -509,6 +509,7 @@ let back () =
   match showing () with
   | Some o when not o.direct ->
       save_scroll ();
+      Navigation_state.set (Some { Navigation_state.url = o.url; from = !loaded; kind = `Push });
       load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None ~refresh:false o.url
   | _ -> Web.history_back ()
 
@@ -568,7 +569,7 @@ let on_popstate _ =
     shown_key := next;
     cancel_pending ();
     incr nav;
-    Navigation_state.set false;
+    Navigation_state.set None;
     Option.iter
       (fun o ->
         hide ();
@@ -634,7 +635,7 @@ let stop () =
   cancel_pending ();
   List.iter (fun (_, f) -> f ()) !following;
   started := false;
-  Navigation_state.set false;
+  Navigation_state.set None;
   start_islands := (fun () -> ());
   on_out ();
   !unwatch ();

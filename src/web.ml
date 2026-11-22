@@ -117,6 +117,7 @@ let promise_map : ('a -> 'b) -> 'a promise -> 'b promise = fun _ _ -> browser_on
 let promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit = fun _ _ _ -> browser_only ()
 
 let current_url : unit -> string = fun _ -> browser_only ()
+let local_url : string -> string = fun _ -> browser_only ()
 let same_origin : string -> bool = fun _ -> browser_only ()
 let fresh_key : unit -> string = fun _ -> browser_only ()
 let history_key : unit -> string = fun _ -> browser_only ()

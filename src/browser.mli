@@ -49,6 +49,26 @@ val navigating : bool State.read
     example to show a progress bar. Always [false] on the server and
     without client navigation. *)
 
+type navigation = {
+  url : string;
+      (** The target: the path and query for a URL of the page origin (the fragment does not count), else the full URL. *)
+  from : string;  (** The path and query of the page shown when the navigation started. *)
+  kind : [ `Push | `Replace | `Traverse | `Reload ];
+      (** [`Push] adds a history entry. [`Replace] replaces the current
+          entry: {!navigate} with [~replace:true], a link with
+          [data-yuka-replace], or a navigation to the URL shown.
+          [`Traverse] is Back or Forward ([popstate]). [`Reload] is {!refresh}. *)
+}
+
+val navigation : navigation option State.read
+(** The client navigation in flight: [Some] for the same time as
+    {!navigating} is [true], else [None]. A newer navigation replaces the
+    value. Read it with {!Yuka.State.get} in an island, for example to
+    mark the link of the target while the page loads, to show no progress
+    bar for a [`Reload], or to animate Back and Forward. [Routes.pending]
+    gives the target as a typed route. Always [None] on the server and
+    without client navigation. *)
+
 val replace_url : string -> unit
 (** Browser only: raises [Invalid_argument] on native. Sets the URL of the current
     history entry ([history.replaceState]) and loads nothing: no request,

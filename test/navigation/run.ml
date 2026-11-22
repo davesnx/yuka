@@ -423,6 +423,60 @@ let navigating_flag finish =
           check "not navigating after stop" "false" (navigating ());
           finish ()))
 
+let rt_find _ segments query =
+  match segments with
+  | [ "start" ] -> Yuka.Router.Found (`Start (String.concat "," (Yuka.Router.search query "x")))
+  | [ "two" ] -> Yuka.Router.Found `Two
+  | _ -> Yuka.Router.Missing
+
+let rt_show = function Some (`Start x) -> "start " ^ x | Some `Two -> "two" | None -> "none"
+
+let in_flight () =
+  match State.peek Browser.navigation with
+  | None -> "none"
+  | Some { url; from; kind } ->
+      url ^ " from " ^ from ^ " "
+      ^ (match kind with `Push -> "push" | `Replace -> "replace" | `Traverse -> "traverse" | `Reload -> "reload")
+
+let navigation_in_flight finish =
+  setup (page {|<a id="two" href="/two">two</a>|});
+  plain_start ();
+  let pending = Yuka.runtime_route_pending rt_find in
+  check "no navigation at start" "none" (in_flight ());
+  check "no pending route at start" "none" (rt_show (State.peek pending));
+  ignore (click "#two" "");
+  check "a link click is a push to its path" "/two from /start?x=1 push" (in_flight ());
+  check "Routes.pending gives the typed target" "two" (rt_show (State.peek pending));
+  resolve_call 0 (doc "Two" (page {|<a id="r" href="/start#f" data-yuka-replace>r</a>|})) "";
+  tick (fun () ->
+      check "cleared once the page is shown" "none" (in_flight ());
+      check "no pending route once the page is shown" "none" (rt_show (State.peek pending));
+      ignore (click "#r" "");
+      check "a data-yuka-replace link is a replace, the fragment is left out" "/start from /two replace" (in_flight ());
+      Browser.navigate "/start?x=7";
+      check "Browser.navigate is a push" "/start?x=7 from /two push" (in_flight ());
+      tick (fun () ->
+          check "Routes.pending decodes the query" "start 7" (rt_show (State.peek pending));
+          Browser.navigate ~replace:true "nowhere";
+          check "a newer navigation replaces the value, a relative URL is resolved" "/nowhere from /two replace"
+            (in_flight ());
+          check "an unknown target has no route" "none" (rt_show (State.peek pending));
+          Browser.navigate "/two";
+          check "a navigation to the URL shown is a replace" "/two from /two replace" (in_flight ());
+          resolve_call 4 (doc "Two" (page "two")) "";
+          tick (fun () ->
+              Browser.refresh ();
+              check "Browser.refresh is a reload of the URL shown" "/two from /two reload" (in_flight ());
+              resolve_call 5 (doc "Two" (page "two")) "";
+              tick (fun () ->
+                  check "cleared after the refresh" "none" (in_flight ());
+                  back (fun () ->
+                      check "Back is a traverse" "/start?x=1 from /two traverse" (in_flight ());
+                      check "Routes.pending on Back" "start 1" (rt_show (State.peek pending));
+                      stop ();
+                      check "cleared by stop" "none" (in_flight ());
+                      finish ())))))
+
 let sync_failure_falls_back finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -686,6 +740,7 @@ let streamed finish =
       check "title" "Two" (title ());
       check "pushed" "/two" (location_ ());
       check "not navigating once the shell is shown" "false" (navigating ());
+      check "no navigation in flight once the shell is shown" "none" (in_flight ());
       check "an island around a pending fill waits" "" (log_g ());
       push_text 0 (String.sub line 0 10);
       push_text 0 (String.sub line 10 (String.length line - 10));
@@ -943,6 +998,7 @@ let overlay_replaced finish =
           check "pushed" "/three" (location_ ());
           Browser.back ();
           check "Browser.back loads the background" "3" (ints (calls ()));
+          check "Browser.back is a push to the background" "/start?x=1 from /three push" (in_flight ());
           check "the background URL" "/start?x=1" (call_url 2);
           check "without an overlay" "undefined" (call_overlay 2);
           resolve_headers 2 {|<p id="back">back</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
@@ -1022,14 +1078,6 @@ let capture_warn : unit -> unit =
   [%mel.raw "function () { globalThis.__warns = []; globalThis.__warn0 = console.warn; console.warn = function (m) { globalThis.__warns.push(String(m)) } }"]
 
 let warns : unit -> string = [%mel.raw "function () { console.warn = globalThis.__warn0; return globalThis.__warns.join('|') }"]
-
-let rt_find _ segments query =
-  match segments with
-  | [ "start" ] -> Yuka.Router.Found (`Start (String.concat "," (Yuka.Router.search query "x")))
-  | [ "two" ] -> Yuka.Router.Found `Two
-  | _ -> Yuka.Router.Missing
-
-let rt_show = function Some (`Start x) -> "start " ^ x | Some `Two -> "two" | None -> "none"
 
 let rt_view () =
   let r = Yuka.runtime_route_current rt_find in
@@ -3751,6 +3799,7 @@ let all =
     ("late response of an aborted request", superseded_late_response);
     ("fetch failure falls back", failure_falls_back);
     ("Browser.navigating follows the navigation in flight", navigating_flag);
+    ("Browser.navigation and Routes.pending give the navigation in flight", navigation_in_flight);
     ("fetch throwing falls back", sync_failure_falls_back);
     ("redirects", redirect);
     ("navigate", navigate_api);

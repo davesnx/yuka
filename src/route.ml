@@ -19,6 +19,9 @@ let current find =
   | Some url -> State.memo (fun () -> typed find (State.get url))
   | None -> State.read_only (State.make None)
 
+let pending find =
+  State.memo (fun () -> Option.bind (State.get Browser.navigation) (fun n -> typed find n.Browser.url))
+
 let moved () = Page_context.set "route" Types.route_name (`String (Web.current_url ()))
 let same_page url = String.equal (fst (Router.split_target url)) (fst (Router.split_target (Web.current_url ())))
 

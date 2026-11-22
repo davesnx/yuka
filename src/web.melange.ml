@@ -332,6 +332,10 @@ let current_url : unit -> string =
   [%mel.raw
     "function () { const l = window.location; return l.pathname + l.search }"]
 
+let local_url : string -> string =
+  [%mel.raw
+    "function (u) { try { const x = new URL(u, window.location.href); return x.origin === window.location.origin ? x.pathname + x.search : x.href } catch (e) { return u } }"]
+
 let fresh_key : unit -> string =
   [%mel.raw
     "function () { globalThis.__yukaKeys = (globalThis.__yukaKeys || 0) + 1; return Date.now() + '-' + globalThis.__yukaKeys }"]

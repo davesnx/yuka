@@ -383,6 +383,13 @@ A route name whose helper the generated code already defines
   [1]
 
   $ gen <<'EOF'
+  > Router.make [ Router.route Pending ~path:"/a" ~page:Pages.a ]
+  > EOF
+  File "Routes.ml", line 1, characters 27-34:
+  Error: name Pending makes the helper Routes.pending, which the generated code already defines; choose another name
+  [1]
+
+  $ gen <<'EOF'
   > Router.make [ Router.route Replace ~path:"/a" ~page:Pages.a ]
   > EOF
   File "Routes.ml", line 1, characters 27-34:
