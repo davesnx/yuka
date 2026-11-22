@@ -31,6 +31,31 @@ val refresh : unit -> unit
     [location.replace] with the URL shown, a full page load. A form
     success with no redirect and no [on_ok] calls it. *)
 
+val block : (target:string -> bool) -> unit
+(** [block check] keeps the user on the page until the current owner is
+    disposed. Browser only: call it inside [Effect.after]. Before a client
+    navigation starts (a click on a link or {!navigate}), it calls
+    [check ~target], with [target] as in {!navigation}. When [check] gives
+    [true], the user stays: the navigation does not start. When it gives
+    [false], the navigation continues. With more than one [block], the
+    navigation stops at the first [check] that gives [true]. {!refresh},
+    Back and Forward do not call [check].
+
+    While one or more [block]s exist, closing or reloading the tab, and a
+    full page load, show the prompt of the browser. The browser does not
+    show it before the user interacted with the page. Register the [block]
+    only while there is something to lose, for example:
+    {[
+      Effect.after (fun () ->
+          if State.get dirty then
+            Browser.block (fun ~target:_ -> not (Browser.confirm "Discard the draft?")))
+    ]} *)
+
+val confirm : string -> bool
+(** [confirm message] shows [message] in the dialog of the browser
+    ([window.confirm]) and gives [true] when the user accepts. Browser
+    only: raises [Invalid_argument] on native. *)
+
 val back : unit -> unit
 (** Browser only: raises [Invalid_argument] on native. Closes the overlay
     that a client navigation to a route with [?overlay] showed: when the

@@ -371,6 +371,31 @@ let[@client] make () =
 `Routes.pending ()` gives the target as a typed route; see
 [The current route](#the-current-route).
 
+`Yuka.Browser.block check` keeps the user on the page, for example when
+a form has text that is not saved. Before a client navigation starts (a
+click on a link or `Yuka.Browser.navigate`), Yuka calls
+`check ~target`, with `target` as the `url` of
+`Yuka.Browser.navigation`. When `check` gives `true`, the user stays and
+the navigation does not start. When it gives `false`, the navigation
+continues. `Yuka.Browser.refresh ()`, Back and Forward do not call
+`check`. While a `block` exists, the browser shows its own prompt when
+the user closes or reloads the tab or a full page load starts; the
+browser does not show it before the user interacted with the page. The
+`block` stays until its owner is disposed, so register it in an effect
+that runs only while there is something to lose. `Yuka.Browser.confirm`
+shows the dialog of the browser (`window.confirm`) and gives `true` when
+the user accepts:
+
+```ocaml
+let[@client] make () =
+  let draft = Yuka.State.make "" in
+  Yuka.Effect.after (fun () ->
+      if Yuka.State.get draft <> "" then
+        Yuka.Browser.block (fun ~target:_ ->
+            not (Yuka.Browser.confirm "Discard the draft?")));
+  <textarea on_input=(fun e -> Yuka.State.set draft (Yuka.Event.target_value e)) />
+```
+
 A page with a `Yuka.Await` streams on a client navigation as on a first
 load. The server waits a short time (100 ms) for every `Await` and async
 value. When they settle in time, the new page comes in one piece. When

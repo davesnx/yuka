@@ -111,13 +111,17 @@ let go kind url f fail =
       end;
       load ()
 
+let blocks : (string -> bool) list ref = ref []
+let hold = Web.prevent_default
+
 let navigate ~replace ~keep_scroll href =
   let url = Web.local_url href in
-  go
-    (if replace || String.equal url (Web.current_url ()) then `Replace else `Push)
-    url
-    (fun r -> r.navigate ~replace ~keep_scroll href)
-    (fun () -> Web.navigate replace href)
+  if not (List.exists (fun check -> check url) !blocks) then
+    go
+      (if replace || String.equal url (Web.current_url ()) then `Replace else `Push)
+      url
+      (fun r -> r.navigate ~replace ~keep_scroll href)
+      (fun () -> Web.navigate replace href)
 
 let refresh () = go `Reload (Web.current_url ()) (fun r -> r.refresh ()) Platform.reload
 

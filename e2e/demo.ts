@@ -1313,6 +1313,52 @@ await step("6. new issue dialog", async () => {
   check("6e keyboard works after dialog closed", (await page.locator(".row.selected").count()) === 1);
 });
 
+await step("6j. a draft blocks leaving", async () => {
+  const p = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const dialogs: string[] = [];
+  let answer = false;
+  p.on("dialog", (d) => {
+    dialogs.push(`${d.type()}:${d.message()}`);
+    void (answer ? d.accept() : d.dismiss());
+  });
+  await p.goto(base + "/", { waitUntil: "networkidle" });
+  await p.waitForSelector(".row");
+  await p.locator(".new-issue-button").click();
+  await p.waitForSelector(".dialog");
+  const leaveByLink = () => p.evaluate(() => (document.querySelector('.nav-link[href="/my"]') as HTMLElement).click());
+  await leaveByLink();
+  check("6j.1 with an empty dialog a link leaves with no question", dialogs.length === 0, dialogs.join(" | "));
+  await p.waitForURL("**/my");
+  await p.locator(".dialog-title").fill("Draft");
+  check("6j.2 the dialog is still open on the kept sidebar and has the draft", (await p.inputValue(".dialog-title")) === "Draft");
+  const marker = await p.evaluate(() => ((window as any).__draft = "alive"));
+  await p.evaluate(() => (document.querySelector('.nav-link[href="/"]') as HTMLElement).click());
+  await p.waitForTimeout(300);
+  const kept = { url: new URL(p.url()).pathname, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft) };
+  check("6j.3 a link click asks with the dialog of the app; Cancel stays", dialogs.at(-1) === "confirm:Discard the new issue?" && kept.url === "/my" && kept.title === "Draft" && kept.marker === marker, JSON.stringify({ dialogs, kept }));
+  dialogs.length = 0;
+  await p.evaluate(() => { location.reload(); }).catch(() => {});
+  await p.waitForTimeout(300);
+  const after = { url: new URL(p.url()).pathname, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft) };
+  check("6j.4 a reload shows the prompt of the browser; Cancel stays", dialogs.length === 1 && dialogs[0].startsWith("beforeunload:"), JSON.stringify({ dialogs, after }));
+  check("6j.5 the page and the draft stay", after.title === "Draft" && after.marker === "alive", JSON.stringify(after));
+  dialogs.length = 0;
+  await p.keyboard.press("Escape");
+  await p.waitForSelector(".dialog", { state: "detached" });
+  await p.evaluate(() => (document.querySelector('.nav-link[href="/"]') as HTMLElement).click());
+  await p.waitForURL(base + "/");
+  await p.reload({ waitUntil: "networkidle" });
+  check("6j.6 after the dialog closes, a link and a reload ask nothing", dialogs.length === 0, dialogs.join(" | "));
+  await p.locator(".new-issue-button").click();
+  await p.waitForSelector(".dialog");
+  await p.locator(".dialog-title").fill("Draft");
+  answer = true;
+  await p.evaluate(() => (document.querySelector('.nav-link[href="/my"]') as HTMLElement).click());
+  await p.waitForURL("**/my");
+  check("6j.7 OK leaves and discards the draft", dialogs.join() === "confirm:Discard the new issue?" && (await p.locator(".dialog").count()) === 0, dialogs.join(" | "));
+  await p.close();
+});
+
 const issuePath = "/issue/YUK-1";
 await step("6f. new issue form with JavaScript off", async () => {
   const ctx = await browser.newContext({ javaScriptEnabled: false });

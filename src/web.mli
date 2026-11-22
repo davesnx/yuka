@@ -76,6 +76,7 @@ val fetch_post :
   unit
 val watch_added : (node array -> bool) -> unit -> unit
 val navigate : bool -> string -> unit
+val confirm : string -> bool
 val focus : string -> unit
 val focus_node : node -> unit
 val scroll_into_view : string -> unit

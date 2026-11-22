@@ -477,6 +477,55 @@ let navigation_in_flight finish =
                       check "cleared by stop" "none" (in_flight ());
                       finish ())))))
 
+let unload_prevented : unit -> bool =
+  [%mel.raw
+    "function () { const e = new window.Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented }"]
+
+let answer_confirm : bool -> unit =
+  [%mel.raw "function (answer) { window.confirm = function (m) { globalThis.__log.push('confirm:' + m); return answer } }"]
+
+let block_leaving finish =
+  setup (page {|<a id="two" href="/two?a=1#f">two</a>|});
+  plain_start ();
+  check "no block: unload not prevented" "false" (bools (unload_prevented ()));
+  let asked = ref [] in
+  let stay = ref true in
+  let (), dispose =
+    with_owner (fun () ->
+        Browser.block (fun ~target ->
+            asked := target :: !asked;
+            !stay))
+  in
+  check "a block prevents unload" "true" (bools (unload_prevented ()));
+  check "a refused click is still prevented" "true" (bools (click "#two" ""));
+  Browser.navigate "/three";
+  check "a refused click or navigate does not fetch" "0" (ints (calls ()));
+  check "nothing in flight" "none" (in_flight ());
+  check "the check gets the target" "/three,/two?a=1" (String.concat "," !asked);
+  Browser.refresh ();
+  check "refresh does not ask" "2" (ints (List.length !asked));
+  stay := false;
+  Browser.navigate "/three";
+  check "an accepted navigation fetches" "/three" (call_url 1);
+  let (), dispose_confirm =
+    with_owner (fun () -> Browser.block (fun ~target:_ -> not (Browser.confirm "Leave?")))
+  in
+  answer_confirm false;
+  log_clear ();
+  Browser.navigate "/four";
+  check "the confirm helper asks, cancel stays" "confirm:Leave?|2" (log_read () ^ "|" ^ ints (calls ()));
+  answer_confirm true;
+  Browser.navigate "/four";
+  check "OK leaves" "3" (ints (calls ()));
+  dispose ();
+  check "one block left: unload still prevented" "true" (bools (unload_prevented ()));
+  dispose_confirm ();
+  check "all disposed: unload not prevented" "false" (bools (unload_prevented ()));
+  check "a disposed check is not asked" "4" (ints (List.length !asked));
+  ignore (click "#two" "");
+  check "all disposed: a click navigates" "4" (ints (calls ()));
+  finish ()
+
 let sync_failure_falls_back finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -3800,6 +3849,7 @@ let all =
     ("fetch failure falls back", failure_falls_back);
     ("Browser.navigating follows the navigation in flight", navigating_flag);
     ("Browser.navigation and Routes.pending give the navigation in flight", navigation_in_flight);
+    ("Browser.block keeps the page until its owner is disposed", block_leaving);
     ("fetch throwing falls back", sync_failure_falls_back);
     ("redirects", redirect);
     ("navigate", navigate_api);

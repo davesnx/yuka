@@ -130,6 +130,8 @@ external get_flag : event -> string -> bool option = "" [@@mel.get_index] [@@mel
 let navigate : bool -> string -> unit =
   [%mel.raw "function (replace, url) { if (replace) window.location.replace(url); else window.location.assign(url) }"]
 
+external confirm : string -> bool = "confirm" [@@mel.scope "window"]
+
 let focus : string -> unit =
   [%mel.raw
     "function (id) { const el = document.getElementById(id); if (el) el.focus() }"]
