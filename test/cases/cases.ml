@@ -2245,6 +2245,25 @@ let nested_batches_old_source k () =
     (string_of_int v ^ " " ^ string_of_int !bs);
   dispose ()
 
+type pick = { id : int; label : string }
+
+let pick_codec =
+  Codec.make
+    ~encode:(fun p -> `Assoc [ ("id", `Int p.id); ("label", `String p.label) ])
+    ~decode:(function
+      | `Assoc fields -> (
+          match (List.assoc_opt "id" fields, List.assoc_opt "label" fields) with
+          | Some (`Int id), Some (`String label) -> Ok { id; label }
+          | _ -> Error "pick: expected id and label")
+      | _ -> Error "pick: expected an object")
+
+let on_pick seen =
+  on "pick" (fun e ->
+      seen :=
+        match Event.detail pick_codec e with
+        | Ok p -> string_of_int p.id ^ " " ^ p.label
+        | Error message -> "error: " ^ message)
+
 let all =
   [
     ("catch: server fallback", catch_server_fallback);

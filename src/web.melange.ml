@@ -128,6 +128,9 @@ external stop_propagation : event -> unit = "stopPropagation" [@@mel.send]
 external set_flag : event -> string -> bool -> unit = "" [@@mel.set_index]
 external get_flag : event -> string -> bool option = "" [@@mel.get_index] [@@mel.return nullable]
 
+let detail_json : event -> string option =
+  [%mel.raw "function (e) { try { return JSON.stringify(e.detail) } catch (x) { return undefined } }"]
+
 let navigate : string -> unit =
   [%mel.raw "function (url) { window.location.assign(url) }"]
 

@@ -52,6 +52,7 @@ val prevent_default : event -> unit
 val stop_propagation : event -> unit
 val set_flag : event -> string -> bool -> unit
 val get_flag : event -> string -> bool option
+val detail_json : event -> string option
 val query_all : node -> string -> node array
 val get_attribute : node -> string -> string option
 val text_content : node -> string

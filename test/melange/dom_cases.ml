@@ -774,6 +774,25 @@ let modifiers () =
   check "plain click" "falsefalse 0,0" !seen;
   dispose ()
 
+let custom_event : string -> string -> node =
+  [%mel.raw
+    "function (name, detail) { return new window.CustomEvent(name, { bubbles: true, detail: JSON.parse(detail) }) }"]
+
+let custom_event_detail () =
+  let seen = ref "" in
+  let c = container "" in
+  let dispose =
+    Yuka.Private.render (as_element c) (fun () ->
+        div [ Cases.on_pick seen ] [ element "button" [] [] ])
+  in
+  dispatch (query c "button") (custom_event "pick" {|{"id":7,"label":"seven"}|});
+  check "detail read with a codec" "7 seven" !seen;
+  dispatch (query c "button") (custom_event "pick" {|{"id":"7"}|});
+  check "bad detail" "error: pick: expected id and label" !seen;
+  dispatch (query c "button") (event "pick");
+  check "no detail" "error: Event.detail: the detail is not a JSON value" !seen;
+  dispose ()
+
 let browser_functions () =
   let c = container "" in
   let dispose =
@@ -2089,6 +2108,7 @@ let all =
     ("dom await hydrates pending", await_hydrates_pending_then_settles);
     ("dom stop propagation and target tag", stop_propagation_and_tag);
     ("dom modifier keys", modifiers);
+    ("dom CustomEvent detail through a codec", custom_event_detail);
     ("dom browser functions", browser_functions);
     ("dom textarea hydrate", textarea_hydrate);
     ("hydrate keeps what the user changed and the State learns it", hydrate_keeps_user_input);

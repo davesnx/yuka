@@ -14,3 +14,10 @@ let shift_key e = !platform.shift_key e
 let alt_key e = !platform.alt_key e
 let client_x e = !platform.client_x e
 let client_y e = !platform.client_y e
+
+let detail codec e =
+  if not Web.in_browser then Error "Event.detail: there is no event on the server"
+  else
+    match Web.detail_json e with
+    | None -> Error "Event.detail: the detail is not a JSON value"
+    | Some text -> Result.bind (Json.of_string text) (Codec.decode codec)

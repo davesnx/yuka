@@ -30,3 +30,10 @@ val client_x : t -> float
 val client_y : t -> float
 (** The vertical position of the pointer, in CSS pixels from the top edge
     of the viewport ([clientY]). For a mouse or pointer event only. *)
+
+val detail : 'a Codec.t -> t -> ('a, string) result
+(** Reads the [detail] of a [CustomEvent] with [codec]. The value goes
+    through [JSON.stringify], so a [Date] becomes a string and a function
+    is not kept. An event without [detail], or a [detail] that
+    [JSON.stringify] cannot write, gives [Error]. The server build gives
+    [Error] for each event. *)

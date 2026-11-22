@@ -1777,6 +1777,14 @@ let css_cases =
     test_case "each rows with a sheet" `Quick rows;
     test_case "streamed chunks get their links" `Quick streamed ]
 
+let server_event_detail () =
+  (* Safe: the server build of Event.detail returns before it reads the event. *)
+  let event : Yuka.Event.t = Obj.magic () in
+  match Yuka.Event.detail Yuka.Codec.int event with
+  | Ok _ -> Alcotest.fail "expected an Error on the server"
+  | Error message ->
+      Alcotest.(check string) "message" "Event.detail: there is no event on the server" message
+
 let () =
   Alcotest.run "yuka"
     [
@@ -1798,5 +1806,6 @@ let () =
       ("review fixes", review_cases);
       ("island loading", loading_cases);
       ("css", css_cases);
+      ("event", [ Alcotest.test_case "Event.detail on the server is an Error" `Quick server_event_detail ]);
       ("scheduler", List.map (fun (name, case) -> Alcotest.test_case name `Quick case) Scheduler_cases.all);
     ]

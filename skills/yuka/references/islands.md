@@ -114,6 +114,33 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
 
 [`state.md`](state.md) explains State, memos and effects.
 
+## Custom events
+
+A custom element or a script can send a `CustomEvent` with a value in
+`detail`. `Yuka.Event.detail codec event` reads that value with a codec.
+It gives `Error message` when the value does not decode, when the event
+has no `detail`, or when `JSON.stringify` cannot write it. The value goes
+through JSON, so a `Date` becomes a string. Attach the handler with
+`Yuka.on "name"`. This code compiles in a library with
+`(modes native melange)`, so you do not need a `.melange.ml` file. The
+handler runs only in the browser.
+
+```ocaml
+(* shared/picker.ml *)
+type pick = { id : int; label : string } [@@deriving codec]
+
+let view () =
+  let picked = Yuka.State.make "nothing" in
+  Yuka.element "color-picker"
+    [
+      Yuka.on "pick" (fun event ->
+          match Yuka.Event.detail pick_codec event with
+          | Ok pick -> Yuka.State.set picked pick.label
+          | Error message -> Yuka.State.set picked message);
+    ]
+    [ Yuka.hole (fun () -> Yuka.text (Yuka.State.get picked)) ]
+```
+
 ## Ids for labels
 
 A `label` links to its field by `id`, and `aria-describedby`,
