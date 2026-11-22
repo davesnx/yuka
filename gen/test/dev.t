@@ -8,6 +8,7 @@ Arguments:
     routes   Write the shared or the server module of a Routes.ml route tree
     islands  Write the island registry or manifest of the island libraries
     css      Write the module with the sheets of every [%yuka.css] declaration
+    assets   Copy images with a hash in the name and write their module of sizes
     dev      Rebuild in watch mode, restart the server and reload the browser
   
   yuka COMMAND --help shows the options of a command.

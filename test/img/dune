@@ -1,0 +1,20 @@
+(rule
+ (targets no_alt.actual)
+ (deps
+  no_alt.ml
+  with_alt.ml
+  (glob_files ../../src/.yuka.objs/byte/*.cmi))
+ (action
+  (with-outputs-to
+   no_alt.actual
+   (progn
+    (run %{ocamlc} -c -color never -I ../../src/.yuka.objs/byte with_alt.ml)
+    (with-accepted-exit-codes
+     2
+     (run %{ocamlc} -c -color never -I ../../src/.yuka.objs/byte no_alt.ml))))))
+
+(rule
+ (alias runtest)
+ (package yuka)
+ (action
+  (diff no_alt.expected no_alt.actual)))

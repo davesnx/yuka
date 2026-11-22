@@ -226,3 +226,23 @@ module Show = struct
            | `Loading -> Kind.to_node loading
            | `Failed e -> Kind.to_node (Scheduler.untrack (fun () -> failed e))))
 end
+
+module Image = struct
+  type t = { src : string; width : int; height : int; srcset : (string * int) list }
+end
+
+module Img = struct
+  let make ~(src : Image.t) ~alt ?sizes ?(loading = `Lazy) ?class_ () =
+    let srcset =
+      match src.srcset with
+      | [] -> []
+      | set -> [ attr "srcset" (String.concat ", " (List.map (fun (url, w) -> url ^ " " ^ string_of_int w ^ "w") set)) ]
+    in
+    let optional name = function Some v -> [ attr name v ] | None -> [] in
+    element "img"
+      ([ attr "src" src.src; attr "alt" alt; attr "width" (string_of_int src.width); attr "height" (string_of_int src.height) ]
+      @ srcset @ optional "sizes" sizes
+      @ [ attr "loading" (match loading with `Lazy -> "lazy" | `Eager -> "eager"); attr "decoding" "async" ]
+      @ optional "class" class_)
+      []
+end

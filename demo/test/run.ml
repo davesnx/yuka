@@ -139,7 +139,8 @@ let header_links () =
   has html {|<a class="workspace-link" href="/w/stress" aria-current="false">|};
   has html {|<a class="topbar-link" href="https://github.com/davesnx/yuka" target="_blank" rel="noopener"|};
   has html {|<a class="topbar-link" href="https://x.com/davesnx" target="_blank" rel="noopener">|};
-  has html {|src="/static/davesnx.jpg"|};
+  has html
+    {|<img src="/_yuka/img/davesnx-115637ff.jpg" alt="" width="96" height="96" srcset="/_yuka/img/davesnx-115637ff.jpg 96w" sizes="22px" loading="eager" decoding="async" class="profile-avatar">|};
   has html "@davesnx";
   let html = get "/w/stress/my" in
   has html {|<a class="workspace-link" href="/w/stress" aria-current="true">|};

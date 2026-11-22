@@ -49,6 +49,7 @@ let () =
   let interface = ref "localhost" in
   let js_dir = ref (Filename.concat here "../client/out") in
   let static_dir = ref (Filename.concat here "../static") in
+  let image_dir = ref (Filename.concat here "../shared/img") in
   let manifest = ref (Filename.concat here "../client/yuka_islands.json") in
   let metafile = ref (Filename.concat here "../client/meta.json") in
   let bundle = ref false in
@@ -87,6 +88,7 @@ let () =
       ("--manifest", Arg.Set_string manifest, "Island manifest (yuka_islands.json)");
       ("--metafile", Arg.Set_string metafile, "esbuild metafile, with --bundle");
       ("--static-dir", Arg.Set_string static_dir, "Directory of style.css");
+      ("--image-dir", Arg.Set_string image_dir, "Directory that yuka assets wrote");
       ("--prerender", Arg.Set_string prerender, "Write the prerendered pages to DIR and exit");
       ("--site", Arg.Set_string site, "With --prerender: the origin of the site, such as https://example.com; also write sitemap.xml");
       ("--prerendered", Arg.Set_string prerendered, "Serve the prerendered pages of DIR");
@@ -125,7 +127,7 @@ let () =
       ~head:
         ({|<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="/static/favicon.svg">|}
         ^ theme_script ^ Demo_shared.Code_style.head)
-      ~styles:[ "/static/style.css"; "/static/markdown.css" ] ~css:Demo_app.Yuka_css.sheets
+      ~styles:[ "/static/style.css"; "/static/markdown.css" ] ~css:Demo_app.Yuka_css.sheets ~images:!image_dir
       ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
       ()
   in

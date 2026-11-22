@@ -1,0 +1,7 @@
+File "no_alt.ml", line 2, characters 38-65:
+2 | let page : Yuka.server Yuka.element = Yuka.Img.make ~src:image ()
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This expression has type alt:string -> 'a Yuka.element
+       but an expression was expected of type
+         Yuka.server Yuka.element = Yuka.server Yuka__Kind.element
+Hint: This function application is partial, maybe some arguments are missing.

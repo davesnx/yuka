@@ -30,3 +30,14 @@
   (with-stdout-to
    routes.ml
    (run %{bin:yuka} routes --shared --source %{dep:../Routes.ml}))))
+
+(rule
+ (targets
+  images.ml
+  (dir img))
+ (deps
+  (glob_files ../images/*))
+ (action
+  (with-stdout-to
+   images.ml
+   (run %{bin:yuka} assets --dir ../images --out img))))

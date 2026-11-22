@@ -1285,8 +1285,15 @@ await step("6g. workspaces", async () => {
   check("6g.4 GitHub and X links open apart with rel=noopener",
     (await github.getAttribute("rel")) === "noopener" && (await github.getAttribute("target")) === "_blank" &&
     (await x.getAttribute("rel")) === "noopener" && (await x.getAttribute("target")) === "_blank" && (await x.textContent()) === "@davesnx");
-  const avatar = await page.evaluate(() => (document.querySelector(".profile-avatar") as HTMLImageElement | null)?.naturalWidth ?? 0);
-  check("6g.5 the avatar loads from /static", avatar > 0, String(avatar));
+  const avatar = await page.evaluate(() => {
+    const img = document.querySelector(".profile-avatar") as HTMLImageElement | null;
+    return img ? { natural: img.naturalWidth, src: img.getAttribute("src") ?? "", width: img.getAttribute("width"), height: img.getAttribute("height"), srcset: img.getAttribute("srcset") ?? "", decoding: img.getAttribute("decoding") } : null;
+  });
+  check("6g.5 the avatar loads from /_yuka/img with width, height and srcset",
+    avatar !== null && avatar.natural > 0 && avatar.src.startsWith("/_yuka/img/davesnx-") && avatar.width === "96" && avatar.height === "96" &&
+    avatar.srcset === `${avatar.src} 96w` && avatar.decoding === "async", JSON.stringify(avatar));
+  const avatarResponse = avatar === null ? null : await page.request.get(base + avatar.src);
+  check("6g.5b the avatar file is served immutable", avatarResponse?.headers()["cache-control"] === "public, max-age=31536000, immutable", String(avatarResponse?.headers()["cache-control"]));
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check("6g.6 no horizontal overflow at 1280 px", (await overflow()) <= 0, String(await overflow()));
   await page.setViewportSize({ width: 390, height: 800 });

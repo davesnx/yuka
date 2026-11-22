@@ -1,7 +1,7 @@
 (executable
  (name yuka_cli)
  (public_name yuka)
- (modules yuka_cli cli yuka_routes_cmd yuka_islands yuka_css css_scan yuka_dev source_text)
+ (modules yuka_cli cli yuka_routes_cmd yuka_islands yuka_css yuka_assets css_scan yuka_dev source_text)
  (libraries unix yuka_routes)
  (package yuka))
 

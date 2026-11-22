@@ -1639,6 +1639,25 @@ let loading_cases =
     test_case "preload_urls follows static imports" `Quick urls_static_imports;
     test_case "preload the static imports of the islands and the entry" `Quick static_imports_on_page ]
 
+let img_cases =
+  let open Alcotest in
+  let image srcset = { Yuka.Image.src = "/_yuka/img/hero-1.jpg"; width = 1600; height = 900; srcset } in
+  let html f = Server.to_string (fun () -> f ()) in
+  let attributes () =
+    check string "all attributes"
+      {|<img src="/_yuka/img/hero-1.jpg" alt="A hill" width="1600" height="900" srcset="/_yuka/img/hero-640w-2.jpg 640w, /_yuka/img/hero-1.jpg 1600w" sizes="100vw" loading="lazy" decoding="async" class="hero">|}
+      (html (fun () ->
+           Yuka.Img.make
+             ~src:(image [ ("/_yuka/img/hero-640w-2.jpg", 640); ("/_yuka/img/hero-1.jpg", 1600) ])
+             ~alt:"A hill" ~sizes:"100vw" ~class_:"hero" ()))
+  in
+  let minimal () =
+    check string "no srcset, eager"
+      {|<img src="/_yuka/img/hero-1.jpg" alt="" width="1600" height="900" loading="eager" decoding="async">|}
+      (html (fun () -> Yuka.Img.make ~src:(image []) ~alt:"" ~loading:`Eager ()))
+  in
+  [ test_case "width, height, srcset, loading, decoding" `Quick attributes; test_case "no srcset" `Quick minimal ]
+
 let css_cases =
   let open Alcotest in
   let sheet name = Yuka.runtime_stylesheet ("/_yuka/css/" ^ name ^ ".css") in
@@ -1809,5 +1828,6 @@ let () =
       ("review fixes", review_cases);
       ("island loading", loading_cases);
       ("css", css_cases);
+      ("img", img_cases);
       ("scheduler", List.map (fun (name, case) -> Alcotest.test_case name `Quick case) Scheduler_cases.all);
     ]

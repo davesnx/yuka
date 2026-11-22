@@ -427,6 +427,31 @@ val use_css : stylesheet -> 'k element -> 'k element
     document has none for this sheet. The ppx calls it in every function
     named [make] that comes after [[%yuka.css]] in the same file. *)
 
+module Image : sig
+  type t = { src : string; width : int; height : int; srcset : (string * int) list }
+  (** An image file. [src] is its URL, [width] and [height] its size in
+      pixels, and [srcset] each copy of it (URL and width in pixels, the
+      file itself included), from the smallest. The generator
+      [yuka assets] writes one value per file of a directory. *)
+end
+
+module Img : sig
+  val make :
+    src:Image.t ->
+    alt:string ->
+    ?sizes:string ->
+    ?loading:[ `Lazy | `Eager ] ->
+    ?class_:string ->
+    unit ->
+    'k element
+  (** [<Yuka.Img src=Images.hero alt="..." />]: an [<img>] with [src],
+      [alt], [width] and [height] of the image (the browser keeps the space
+      before the file loads), [srcset] when [src.srcset] is not empty,
+      [sizes], [loading] (default [`Lazy]) and [decoding="async"]. [alt] is
+      required: give [alt=""] for an image that only decorates. Use
+      [loading=`Eager] for an image that is visible when the page opens. *)
+end
+
 module Client : sig
   type registry
   (** The islands of an app. [yuka islands] writes it; pass it to
@@ -1785,6 +1810,7 @@ module Server : sig
     ?prerendered:string ->
     ?styles:string list ->
     ?css:(string * string) list ->
+    ?images:string ->
     ?head:string ->
     ?timeout:float ->
     ?bots:string list ->
@@ -1806,8 +1832,11 @@ module Server : sig
       and text; the generator [yuka css] writes it ([Yuka_css.sheets]). The
       cycle serves each at [/_yuka/css/FILE] with {!immutable} (the name
       has a hash of the text); another path under [/_yuka/css/] is a 404
-      with [no-store]. [timeout] (default 10 seconds) bounds a streamed
-      render.
+      with [no-store]. [images] is the directory that [yuka assets --out]
+      wrote: the cycle serves its files at [/_yuka/img/FILE] with
+      {!immutable} (each name has a hash of the content); another path
+      under [/_yuka/img/] is a 404 with [no-store]. [timeout] (default 10
+      seconds) bounds a streamed render.
 
       [bots] (default {!bots}) lists parts of a [User-Agent], compared
       without case. A full page for a request whose [User-Agent] contains
@@ -2097,8 +2126,8 @@ module Server : sig
 
     val served_dirs : config -> (string * string) list
     (** The URL prefixes and directories that the cycle serves files from:
-        [("/_yuka/app", dir)] of [assets], then each [public] prefix. A
-        prerender copies them. *)
+        [("/_yuka/app", dir)] of [assets], [("/_yuka/img", images)], then
+        each [public] prefix. A prerender copies them. *)
   end
 
   (**/**)

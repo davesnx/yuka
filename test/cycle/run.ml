@@ -4,7 +4,7 @@ module App = Cycle_server.App
 
 type reply = { status : int; headers : (string * string) list; body : string }
 
-let files = [ ("pre/plain/index.html", "prerendered plain"); ("js/app/main.js", "main"); ("pub/s.css", "css"); ("b/bundle/chunk-X1.js", "c"); ("b/bundle/main.js", "m") ]
+let files = [ ("pre/plain/index.html", "prerendered plain"); ("js/app/main.js", "main"); ("pub/s.css", "css"); ("b/bundle/chunk-X1.js", "c"); ("b/bundle/main.js", "m"); ("img/a-1234.png", "png") ]
 let file_calls = ref []
 let body_read = ref 0
 let body_calls = ref 0
@@ -256,6 +256,22 @@ let assets =
         Alcotest.(check (list string)) "no file asked" [] !file_calls;
         Alcotest.(check (list (pair string string)))
           "css_files" [ ("_yuka/css/a-1234.css", ".a_1234{}") ] (Server.Prerender.css_files config) );
+    ( "images are served immutable, a missing one is 404 no-store",
+      fun () ->
+        let config = config_with ~assets:modules ~images:"img" () in
+        let r = get ~config "/_yuka/img/a-1234.png" in
+        check_status r 200;
+        Alcotest.(check string) "body" "png" r.body;
+        check_header r "cache-control" [ "public, max-age=31536000, immutable" ];
+        let r = get ~config "/_yuka/img/b-1234.png" in
+        check_status r 404;
+        check_header r "cache-control" [ "no-store" ];
+        let r = get ~config "/_yuka/img/%2e%2e/secret" in
+        check_status r 404;
+        let r = get ~config:(config_with ()) "/_yuka/img/a-1234.png" in
+        check_status r 404;
+        Alcotest.(check (list (pair string string)))
+          "served_dirs" [ ("/_yuka/app", "js"); ("/_yuka/img", "img") ] (Server.Prerender.served_dirs config) );
     ( "css names are decoded, other methods are 405, bad names are refused",
       fun () ->
         let config = config_with ~css:[ ("a b.css", "x") ] () in

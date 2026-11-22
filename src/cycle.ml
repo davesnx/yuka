@@ -252,6 +252,7 @@ type config = {
   public : (string list * string) list;
   styles : string list;
   css : (string * string) list;
+  images : string option;
   head : string;
   timeout : float;
   bots : string list;
@@ -277,7 +278,7 @@ let public_prefix (prefix, dir) =
 
 let bots = [ "bot"; "crawl"; "spider"; "slurp"; "facebookexternalhit"; "whatsapp" ]
 
-let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
+let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?images ?(head = "") ?(timeout = 10.)
     ?(bots = bots) ?(dev = false) ?origins ?log ?(keep_bytes = 67_108_864) () =
   {
     keep_bytes;
@@ -295,6 +296,7 @@ let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head
           if valid_file_segment name then (name, text)
           else invalid_arg (Printf.sprintf "Yuka.Server.config: css file name %S is not one path segment" name))
         css;
+    images;
     head;
     timeout;
     bots = List.filter (fun b -> b <> "") (List.map String.lowercase_ascii bots);
@@ -315,6 +317,7 @@ let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)
 
 let served_dirs config =
   Option.to_list (Option.map (fun (a : assets) -> ("/_yuka/app", a.dir)) config.assets)
+  @ Option.to_list (Option.map (fun dir -> ("/_yuka/img", dir)) config.images)
   @ List.map (fun (prefix, dir) -> ("/" ^ String.concat "/" prefix, dir)) config.public
 
 type request = {
@@ -1132,6 +1135,10 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
                           }
                     | None -> reply (asset_miss ()))
                 | _ -> reply (method_not_allowed "GET, HEAD"))
+        | "img" :: rest -> (
+            match config.images with
+            | None -> reply (asset_miss ())
+            | Some dir -> static (fun () -> serve_file r.meth ~root:dir ~headers:[ ("cache-control", immutable.control) ] rest))
         | "app" :: rest -> (
             match config.assets with
             | None -> reply (asset_miss ())

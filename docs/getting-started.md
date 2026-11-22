@@ -389,6 +389,59 @@ let assets =
       exit 1
 ```
 
+### Images
+
+`yuka assets` reads the PNG, JPEG, GIF and WebP files of a directory. It
+copies each file to the `--out` directory with a hash of its content in
+the name, and prints a module with one `Yuka.Image.t` per file: its URL,
+its width and height (read from the header of the file) and its
+`srcset`. The value has the name of the file without its extension, in
+lowercase, with `_` in place of other characters (`Hero.jpg` gives
+`hero`). `shared/dune` runs it over `images/`. The `(dir img)` target
+needs `(lang dune 3.24)` or later, or `(using directory-targets 0.1)` in
+`dune-project`:
+
+```
+(rule
+ (targets
+  images.ml
+  (dir img))
+ (deps
+  (glob_files ../images/*))
+ (action
+  (with-stdout-to
+   images.ml
+   (run %{bin:yuka} assets --dir ../images --out img))))
+```
+
+`~images` of `Yuka.Server.config` is that directory. The cycle serves
+its files at `/_yuka/img/FILE` with `cache-control: public,
+max-age=31536000, immutable`, and a prerender copies them:
+
+```ocaml
+Yuka.Server.config ~assets ~images:"_build/default/shared/img" ()
+```
+
+`<Yuka.Img>` prints the `<img>`:
+
+```ocaml
+<Yuka.Img src=Images.hero alt="A hill at dawn" sizes="100vw" />
+```
+
+It prints `width` and `height`, so the browser keeps the space of the
+image before the file loads and the page does not move. It also prints
+`srcset`, `loading="lazy"` and `decoding="async"`. `alt` is required:
+without it, the code does not compile. Give `alt=""` for an image that
+only decorates. Give ``loading=`Eager`` for an image that is visible when
+the page opens.
+
+Smaller copies are optional. Give `--widths 640,1280` and install
+[libvips](https://www.libvips.org/): for each width that is smaller than
+the file, `yuka assets` runs `vips thumbnail` and adds the copy to
+`srcset`. When `vips` is not on `PATH`, it writes a warning and only the
+files, and the module stays correct. The copies are written at build
+time, so put `vips` on the build machine, not on the server.
+
 ## Next
 
 - [`router.md`](router.md): routes, params, loaders, guards and links.

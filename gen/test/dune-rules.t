@@ -23,3 +23,19 @@ files during the same build
   {
     "App_shared.Counter": "../shared/counter.js"
   }
+
+The rule of getting-started.md that runs yuka assets writes the module and
+the directory of hashed files:
+
+  $ cd ..
+  $ mkdir -p media/shared media/images
+  $ printf '(lang dune 3.16)\n(using directory-targets 0.1)\n' > media/dune-project
+  $ awk -v RS= '/\(rule/ && /bin:yuka} assets/' ../../docs/getting-started.md | grep -v '^```' > media/shared/dune
+  $ printf 'GIF89a\012\000\005\000' > media/images/dot.gif
+  $ (cd media && dune build --root . shared/images.ml shared/img)
+  $ cat media/_build/default/shared/images.ml
+  let dot : Yuka.Image.t =
+    { Yuka.Image.src = "/_yuka/img/dot-cc3a4e41.gif"; width = 10; height = 5;
+      srcset = [ ("/_yuka/img/dot-cc3a4e41.gif", 10) ] }
+  $ ls media/_build/default/shared/img
+  dot-cc3a4e41.gif
