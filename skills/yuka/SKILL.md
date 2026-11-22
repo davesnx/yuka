@@ -44,7 +44,7 @@ Read the one that matches the task:
   before you add or change a route or a link.
 - [Messages](references/i18n.md): `yuka i18n`, message files, the
   generated `Messages` module, a locale route group, the locale in
-  islands. Read it when a site has more than one language.
+  islands, number and date formats (`Yuka.Locale`). Read it when a site has more than one language.
 - [Security](references/security.md): escaping, blocked URL schemes,
   `script` and `style` rules. Read it when markup takes user input, or
   when a URL or attribute does not show as written.

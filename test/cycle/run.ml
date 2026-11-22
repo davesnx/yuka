@@ -2269,6 +2269,13 @@ let i18n =
         check_true "page message en" (contains en.body "<h1>Hello, Ada!</h1>");
         check_true "island message en" (contains en.body "<p>Hello, island!</p>");
         check_status (get "/fr/hello") 404 );
+    ( "locale formats: the island prints the numbers and the date of the locale on the server",
+      fun () ->
+        check_true "es formats" (contains (get "/es/hello").body "<span>1.234,50 | 98.765 | 22 de noviembre de 2026</span>");
+        check_true "en formats" (contains (get "/en/hello").body "<span>1,234.50 | 98,765 | November 22, 2026</span>") );
+    ( "locale formats: the same samples as in the browser",
+      fun () ->
+        Alcotest.(check (list string)) "samples" I18n_shared.Format_samples.expected (I18n_shared.Format_samples.samples ()) );
   ]
 
 let () =

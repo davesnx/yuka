@@ -115,3 +115,56 @@ Errors name the file and the line:
   $ yuka i18n --dir messages --base en
   yuka i18n: messages/1x.messages: "1x" is not a locale name; use letters, digits and -, starting with a letter
   [1]
+
+Lines that start with @ give the number and date formats of the locale.
+A file with one format line has all four, and each locale has them when
+the base locale has them. The module gets a Yuka.Locale.t for each locale:
+
+  $ rm messages/1x.messages
+  $ printf 'a = x\n@decimal = .\n@group = ,\n@months = Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec\n@date = {month} {day}, {year}\n' > messages/en.messages
+  $ printf 'a = x\n@decimal = ,\n@group = .\n@months = ene, feb, mar, abr, may, jun, jul, ago, sep, oct, nov, dic\n@date = {dd}/{mm}/{year}\n' > messages/es.messages
+  $ yuka i18n --dir messages --base en > messages.ml
+  $ grep -A3 'let format :' messages.ml; grep '^let format' messages.ml
+    let format : Yuka.Locale.t =
+      { decimal = {js|.|js}; group = {js|,|js};
+        months = [| {js|Jan|js}; {js|Feb|js}; {js|Mar|js}; {js|Apr|js}; {js|May|js}; {js|Jun|js}; {js|Jul|js}; {js|Aug|js}; {js|Sep|js}; {js|Oct|js}; {js|Nov|js}; {js|Dec|js} |];
+        date = {js|{month} {day}, {year}|js} }
+  --
+    let format : Yuka.Locale.t =
+      { decimal = {js|,|js}; group = {js|.|js};
+        months = [| {js|ene|js}; {js|feb|js}; {js|mar|js}; {js|abr|js}; {js|may|js}; {js|jun|js}; {js|jul|js}; {js|ago|js}; {js|sep|js}; {js|oct|js}; {js|nov|js}; {js|dic|js} |];
+        date = {js|{dd}/{mm}/{year}|js} }
+  let format = function En -> En.format | Es -> Es.format
+  $ printf '(lang dune 3.16)\n' > dune-project
+  $ printf '(executable (name main) (libraries yuka))\n' > dune
+  $ cat > main.ml <<'EOF'
+  > let f = Messages.format Messages.Es
+  > let () = print_endline (Yuka.Locale.float f ~digits:2 (-1234567.891) ^ " " ^ Yuka.Locale.date f ~year:2026 ~month:3 ~day:7)
+  > EOF
+  $ dune build --root . ./main.exe 2>&1
+  $ ./_build/default/main.exe
+  -1.234.567,89 07/03/2026
+  $ rm main.ml dune dune-project
+
+Errors in format lines:
+
+  $ printf 'a = x\n' > messages/es.messages
+  $ yuka i18n --dir messages --base en
+  yuka i18n: messages/es.messages: no format lines, but messages/en.messages has them
+  [1]
+  $ printf 'a = x\n' > messages/en.messages
+  $ printf 'a = x\n@decimal = ,\n@group = .\n@months = 1,2,3,4,5,6,7,8,9,10,11,12\n@date = {day}\n' > messages/es.messages
+  $ yuka i18n --dir messages --base en
+  yuka i18n: messages/es.messages: format lines, but messages/en.messages has none
+  [1]
+  $ rm messages/es.messages
+  $ for line in '@decimal = .' '@decimal = .\n@decimal = ,' '@size = 1' '@months = a, b' '@months = a,,c,d,e,f,g,h,i,j,k,l' '@date = {week}' '@date = {day' '@group = |js}'; do
+  >   printf "a = x\n$line\n" > messages/en.messages; yuka i18n --dir messages --base en > /dev/null; done; true
+  yuka i18n: messages/en.messages:2: no @group; a file with a format line needs @decimal, @group, @months, @date
+  yuka i18n: messages/en.messages:3: @decimal is already at line 2
+  yuka i18n: messages/en.messages:2: @size is not a format line; use @decimal, @group, @months, @date
+  yuka i18n: messages/en.messages:2: @months takes the 12 month names, separated by commas
+  yuka i18n: messages/en.messages:2: @months takes the 12 month names, separated by commas
+  yuka i18n: messages/en.messages:2: {week} is not a date field; use {year}, {month}, {mm}, {day}, {dd}
+  yuka i18n: messages/en.messages:2: a { with no }; write {{ for the character
+  yuka i18n: messages/en.messages:2: the text cannot contain |js}

@@ -138,6 +138,8 @@ module Async = Async
 
 module Codec = Codec
 
+module Locale = Locale
+
 type server
 (** The kind of an element that only the server prints. *)
 

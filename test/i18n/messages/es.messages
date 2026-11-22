@@ -1,3 +1,7 @@
 title = Mensajes
 hello = ¡Hola, {name}!
 braces = {{literal}} y {count} de {count}
+@decimal = ,
+@group = .
+@months = enero, febrero, marzo, abril, mayo, junio, julio, agosto, septiembre, octubre, noviembre, diciembre
+@date = {day} de {month} de {year}

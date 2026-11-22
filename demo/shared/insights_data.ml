@@ -32,10 +32,12 @@ let day_of_date text =
       match (find 0, int_of_string_opt day) with Some month, Some day -> month_start month + day - 1 | _ -> 0)
   | _ -> 0
 
+let locale = { Yuka.Locale.decimal = "."; group = ","; months; date = "{month} {day}" }
+
 let date_of_day day =
   let rec find month = if month < 11 && day >= month_start (month + 1) then find (month + 1) else month in
   let month = find 0 in
-  months.(month) ^ " " ^ Int.to_string (day - month_start month + 1)
+  Yuka.Locale.date locale ~year:0 ~month:(month + 1) ~day:(day - month_start month + 1)
 
 let hash value =
   let first = ((value * 7919) + 104729) mod 65521 in
@@ -137,16 +139,6 @@ let ticks ~count highest =
 
 let scale ~highest ~length value = if highest <= 0 then 0 else value * length / highest
 
-let format_int number =
-  let digits = Int.to_string (abs number) in
-  let length = String.length digits in
-  let buffer = Buffer.create (length + 4) in
-  if number < 0 then Buffer.add_char buffer '-';
-  String.iteri
-    (fun index digit ->
-      if index > 0 && (length - index) mod 3 = 0 then Buffer.add_char buffer ',';
-      Buffer.add_char buffer digit)
-    digits;
-  Buffer.contents buffer
+let format_int number = Yuka.Locale.int locale number
 
 let format_tenths tenths = Int.to_string (tenths / 10) ^ "." ^ Int.to_string (tenths mod 10)

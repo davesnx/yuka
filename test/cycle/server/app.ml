@@ -155,7 +155,9 @@ module Pages = struct
         el "main"
           [ el "h1" [ text (Messages.hello locale ~name:"Ada") ];
             Yuka.runtime_island ~name:"Greeting" ~props:`Null (fun () ->
-                el "p" [ text (Messages.hello (Messages.current ()) ~name:"island") ]) ])
+                el "div"
+                  [ el "p" [ text (Messages.hello (Messages.current ()) ~name:"island") ];
+                    el "span" [ text (Format_samples.line (Messages.current ())) ] ]) ])
 
   let island name =
     Yuka.runtime_island ~name ~props:`Null (fun () ->

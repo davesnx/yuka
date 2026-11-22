@@ -4,9 +4,12 @@ let extension = ".messages"
 
 type part = Text of string | Arg of string
 type message = { key : string; line : int; parts : part list }
-type locale = { tag : string; file : string; messages : message list }
+type format = { decimal : string; group : string; months : string list; date : string }
+type locale = { tag : string; file : string; messages : message list; format : format option }
 
-let reserved = [ "locales"; "base"; "tag"; "of_tag"; "locale_param"; "locale_codec"; "context"; "current" ]
+let reserved = [ "locales"; "base"; "tag"; "of_tag"; "locale_param"; "locale_codec"; "context"; "current"; "format" ]
+let directives = [ "decimal"; "group"; "months"; "date" ]
+let date_fields = [ "year"; "month"; "mm"; "day"; "dd" ]
 
 let valid_tag tag =
   tag <> ""
@@ -59,9 +62,41 @@ let trim_right s =
   let rec at i = if i > 0 && (s.[i - 1] = ' ' || s.[i - 1] = '\t' || s.[i - 1] = '\r') then at (i - 1) else i in
   String.sub s 0 (at (String.length s))
 
+let directive ~where name value =
+  if not (List.mem name directives) then
+    fail "%s: @%s is not a format line; use @%s" where name (String.concat ", @" directives);
+  if Source_text.find_from ~sub:"|js}" value 0 <> None then fail "%s: the text cannot contain |js}" where;
+  match name with
+  | "months" ->
+      let months = List.map (fun m -> trim_left (trim_right m)) (String.split_on_char ',' value) in
+      if List.length months <> 12 || List.mem "" months then
+        fail "%s: @months takes the 12 month names, separated by commas" where
+  | "date" ->
+      List.iter
+        (function
+          | Arg a when not (List.mem a date_fields) ->
+              fail "%s: {%s} is not a date field; use {%s}" where a (String.concat "}, {" date_fields)
+          | _ -> ())
+        (parts ~where value)
+  | _ -> ()
+
+let format_of ~file found =
+  match found with
+  | [] -> None
+  | (_, first, _) :: _ ->
+      let value name =
+        match List.find_opt (fun (n, _, _) -> n = name) found with
+        | Some (_, _, v) -> v
+        | None -> fail "%s:%d: no @%s; a file with a format line needs @%s" file first name (String.concat ", @" directives)
+      in
+      let decimal = value "decimal" in
+      let group = value "group" in
+      let months = List.map (fun m -> trim_left (trim_right m)) (String.split_on_char ',' (value "months")) in
+      Some { decimal; group; months; date = value "date" }
+
 let parse_file file =
   let lines = String.split_on_char '\n' (read file) in
-  let messages =
+  let entries =
     List.concat
       (List.mapi
          (fun i raw ->
@@ -72,13 +107,28 @@ let parse_file file =
            else
              match String.index_opt s '=' with
              | None -> fail "%s: expected key = text" where
+             | Some e when s.[0] = '@' ->
+                 let name = trim_right (String.sub s 1 (e - 1)) in
+                 let value = trim_left (String.sub s (e + 1) (String.length s - e - 1)) in
+                 directive ~where name value;
+                 [ Either.Right (name, line, value) ]
              | Some e ->
                  let key = trim_right (String.sub s 0 e) in
                  if not (Yuka_routes.is_label key) then
                    fail "%s: %S is not a valid key; use a lowercase OCaml name that is not a keyword" where key;
                  if List.mem key reserved then fail "%s: the key %s is a name of the generated module; choose another key" where key;
-                 [ { key; line; parts = parts ~where (trim_left (String.sub s (e + 1) (String.length s - e - 1))) } ])
+                 [ Either.Left { key; line; parts = parts ~where (trim_left (String.sub s (e + 1) (String.length s - e - 1))) } ])
          lines)
+  in
+  let messages, found = List.partition_map Fun.id entries in
+  let _ =
+    List.fold_left
+      (fun seen (name, line, _) ->
+        (match List.assoc_opt name seen with
+        | Some first -> fail "%s:%d: @%s is already at line %d" file line name first
+        | None -> ());
+        (name, line) :: seen)
+      [] found
   in
   let _ =
     List.fold_left
@@ -89,7 +139,7 @@ let parse_file file =
         (m.key, m.line) :: seen)
       [] messages
   in
-  messages
+  (messages, format_of ~file found)
 
 let args m =
   List.fold_left (fun acc p -> match p with Arg a when not (List.mem a acc) -> acc @ [ a ] | _ -> acc) [] m.parts
@@ -99,6 +149,10 @@ let same_set a b = List.for_all (fun x -> List.mem x b) a && List.for_all (fun x
 let check ~base locales =
   List.iter
     (fun l ->
+      (match (base.format, l.format) with
+      | Some _, None -> fail "%s: no format lines, but %s has them" l.file base.file
+      | None, Some _ -> fail "%s: format lines, but %s has none" l.file base.file
+      | _ -> ());
       List.iter
         (fun m ->
           match List.find_opt (fun (b : message) -> b.key = m.key) base.messages with
@@ -147,8 +201,18 @@ let print ~base locales =
     (fun l ->
       p "\nmodule %s = struct\n" (ctor l);
       List.iter (fun m -> p "  let %s%s = %s\n" m.key (labels m) (expression m.parts)) l.messages;
+      Option.iter
+        (fun f ->
+          let js s = "{js|" ^ s ^ "|js}" in
+          p "  let format : Yuka.Locale.t =\n    { decimal = %s; group = %s;\n      months = [| %s |];\n      date = %s }\n"
+            (js f.decimal) (js f.group)
+            (String.concat "; " (List.map js f.months))
+            (js f.date))
+        l.format;
       p "end\n")
     locales;
+  if base.format <> None then
+    p "\nlet format = function %s\n" (String.concat " | " (List.map (fun l -> Printf.sprintf "%s -> %s.format" (ctor l) (ctor l)) locales));
   List.iter
     (fun (b : message) ->
       p "\nlet %s locale%s =\n  match locale with\n" b.key (labels b);
@@ -185,7 +249,8 @@ let main argv =
                let file = Filename.concat !dir name in
                if not (valid_tag tag) then
                  fail "%s: %S is not a locale name; use letters, digits and -, starting with a letter" file tag;
-               { tag; file; messages = parse_file file })
+               let messages, format = parse_file file in
+               { tag; file; messages; format })
       in
       List.iter
         (fun l ->
