@@ -1306,7 +1306,7 @@ module Server : sig
       - [/_yuka/csrf]: a fresh CSRF token for the live socket.
       - [/_yuka/css/FILE]: the sheets of [[%yuka.css]] (when [config] has
         [css]).
-      - [/_yuka/dev]: the dev reload events (when [config] has [~dev:true]).
+      - [/_yuka/dev]: the dev events (when [config] has [~dev:true]).
       - [/_yuka/live]: the WebSocket of {!Yuka.Live}.
       - [/_yuka/app/FILE]: the client JavaScript of [assets].
 
@@ -1736,8 +1736,9 @@ module Server : sig
 
       [dev] (default false) is for [yuka dev] only: the cycle answers
       [GET /_yuka/dev] with Server-Sent Events of the state file named by
-      the environment variable [YUKA_DEV_FILE], full pages get the reload
-      script in their head, and [prerendered] is not used. Never set it in
+      the environment variable [YUKA_DEV_FILE], full pages get the dev
+      script in their head (it reloads the page, or swaps its markup after a
+      server-only build), and [prerendered] is not used. Never set it in
       production: [/_yuka/dev] streams that file. A prerender turns it off
       ({!Prerender.config}).
 

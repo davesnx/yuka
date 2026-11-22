@@ -8,7 +8,7 @@ Arguments:
     routes   Write the shared or the server module of a Routes.ml route tree
     islands  Write the island registry or manifest of the island libraries
     css      Write the module with the sheets of every [%yuka.css] declaration
-    dev      Rebuild in watch mode, restart the server and reload the browser
+    dev      Rebuild in watch mode, restart the server and update the browser
   
   yuka COMMAND --help shows the options of a command.
   [2]
@@ -22,7 +22,10 @@ Arguments:
   yuka dev: option '--watch-exe' needs an argument.
 
 A fake dune prints build results and changes files between them; a fake
-server logs its starts and stops. The session is random per run:
+server logs its starts and stops, with the state it sees. The session is
+random per run. A new client file sets "page" (the browser reloads); a new
+server only sets "server" (the browser swaps the markup). The state changes
+after the old server stopped:
 
   $ mkdir static
   $ echo 'body{}' > static/a.css
@@ -31,7 +34,7 @@ server logs its starts and stops. The session is random per run:
   > #!/bin/sh
   > echo "start $YUKA_DEV $(sed 's/"session":"[0-9a-f]*"/"session":S/' $YUKA_DEV_FILE)" >> log
   > echo $$ > server.pid
-  > trap 'echo stop >> log; exit 0' TERM
+  > trap 'echo "stop $(sed "s/\"session\":\"[0-9a-f]*\"/\"session\":S/" $YUKA_DEV_FILE)" >> log; exit 0' TERM
   > while true; do sleep 0.05; done
   > X
   $ chmod +x server
@@ -60,23 +63,23 @@ server logs its starts and stops. The session is random per run:
   $ yuka dev --build './fake-dune build --watch @x' --assets static --state deep/er/state -- ./server 2> err
   $ cat log
   args: build --watch @x
-  start 1 {"session":S,"build":1,"page":1,"error":null}
-  state {"session":S,"build":1,"page":1,"error":null}
-  state {"session":S,"build":2,"page":1,"error":null}
-  stop
-  start 1 {"session":S,"build":3,"page":3,"error":null}
-  state {"session":S,"build":3,"page":3,"error":null}
-  stop
-  start 1 {"session":S,"build":4,"page":4,"error":null}
-  state {"session":S,"build":4,"page":4,"error":null}
-  state {"session":S,"build":4,"page":4,"error":null}
-  state {"session":S,"build":4,"page":4,"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
-  stop
-  start 1 {"session":S,"build":5,"page":5,"error":null}
-  state {"session":S,"build":5,"page":5,"error":null}
-  start 1 {"session":S,"build":6,"page":6,"error":null}
-  state {"session":S,"build":6,"page":6,"error":null}
-  stop
+  start 1 {"session":S,"build":1,"page":1,"server":0,"error":null}
+  state {"session":S,"build":1,"page":1,"server":0,"error":null}
+  state {"session":S,"build":2,"page":1,"server":0,"error":null}
+  stop {"session":S,"build":2,"page":1,"server":0,"error":null}
+  start 1 {"session":S,"build":3,"page":3,"server":0,"error":null}
+  state {"session":S,"build":3,"page":3,"server":0,"error":null}
+  stop {"session":S,"build":3,"page":3,"server":0,"error":null}
+  start 1 {"session":S,"build":4,"page":4,"server":0,"error":null}
+  state {"session":S,"build":4,"page":4,"server":0,"error":null}
+  state {"session":S,"build":4,"page":4,"server":0,"error":null}
+  state {"session":S,"build":4,"page":4,"server":0,"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
+  stop {"session":S,"build":4,"page":4,"server":0,"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
+  start 1 {"session":S,"build":5,"page":4,"server":5,"error":null}
+  state {"session":S,"build":5,"page":4,"server":5,"error":null}
+  start 1 {"session":S,"build":6,"page":4,"server":6,"error":null}
+  state {"session":S,"build":6,"page":4,"server":6,"error":null}
+  stop {"session":S,"build":6,"page":4,"server":6,"error":null}
   $ grep -c "restarting the server" err
   3
 
@@ -127,8 +130,8 @@ An error after the server started stops it and dune:
   $ yuka dev --build './fake-dune5 build --watch' --state s5dir/state -- ./server 2>&1 | grep -c "yuka dev: Sys_error"
   1
   $ sleep 2.5; cat log
-  start 1 {"session":S,"build":1,"page":1,"error":null}
-  stop
+  start 1 {"session":S,"build":1,"page":1,"server":0,"error":null}
+  stop 
 
 A server that ignores SIGTERM is killed after --kill-after, also when the
 CLI gets SIGTERM in the middle of a restart:
@@ -171,7 +174,7 @@ DUNE_BUILD_DIR when no --state is given:
   $ head -1 log
   args: build --watch --profile=dev @a b
   $ sed 's/"session":"[0-9a-f]*"/"session":S/' out/.yuka-dev
-  {"session":S,"build":1,"page":1,"error":null}
+  {"session":S,"build":1,"page":1,"server":0,"error":null}
 
 The build command is any shell command: an assignment, a cd and a pipeline
 work, and yuka dev stops every process of the command:

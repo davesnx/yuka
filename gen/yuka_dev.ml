@@ -19,7 +19,7 @@ let parse argv =
       usage =
         "usage: yuka dev [--build COMMAND] [--assets DIR]... [--state FILE] [--kill-after SECONDS] [--watch-exe FILE] \
          -- SERVER [ARG]...\n\
-         Run COMMAND, a dune build in watch mode; restart SERVER after each build that changes it and reload the browser.";
+         Run COMMAND, a dune build in watch mode; restart SERVER after each build that changes it and update the browser.";
       specs =
         [ ("--build", Arg.Set_string build, "COMMAND The build command, run by /bin/sh (default: dune build --watch)");
           ("--assets", Arg.String (fun d -> assets := !assets @ [ d ]), "DIR A directory of files that the server serves");
@@ -35,9 +35,10 @@ let parse argv =
 
 let log fmt = Printf.ksprintf (fun s -> prerr_endline ("yuka dev: " ^ s)) fmt
 
-let write_state file ~session ~build ~page ~error =
+let write_state file ~session ~build ~page ~server ~error =
   let text =
-    Printf.sprintf {|{"session":%s,"build":%d,"page":%d,"error":%s}|} (Source_text.json_string session) build page
+    Printf.sprintf {|{"session":%s,"build":%d,"page":%d,"server":%d,"error":%s}|} (Source_text.json_string session) build
+      page server
       (match error with None -> "null" | Some e -> Source_text.json_string e)
   in
   let tmp = file ^ ".tmp" in
@@ -171,12 +172,12 @@ let session_id () =
 let run o =
   let session = session_id () in
   let server = { pid = None } in
-  let build = ref 0 and page = ref 0 in
+  let build = ref 0 and page = ref 0 and served = ref 0 in
   let exe = ref None and assets = ref [] in
   let output = Buffer.create 1024 in
   let watched = executable o in
   mkdir_p (Filename.dirname o.state);
-  let write ~error = write_state o.state ~session ~build:!build ~page:!page ~error in
+  let write ~error = write_state o.state ~session ~build:!build ~page:!page ~server:!served ~error in
   let r, w = Unix.pipe ~cloexec:true () in
   let dune_pid =
     match Unix.fork () with
@@ -213,18 +214,16 @@ let run o =
     let now_exe = stamp watched and now_assets = snapshot o.assets in
     let first = !build = 0 in
     let moved = if first then [] else changed !assets now_assets in
-    let restart =
-      first || now_exe = None || now_exe <> !exe || not (running server)
-      || not (List.for_all plain_css moved)
-    in
+    let client = first || not (List.for_all plain_css moved) in
+    let restart = client || now_exe = None || now_exe <> !exe || not (running server) in
     exe := now_exe;
     assets := now_assets;
     if restart then begin
       incr build;
-      page := !build;
-      write ~error:None;
+      if client then page := !build else served := !build;
       if server.pid <> None then log "restarting the server";
       stop o server;
+      write ~error:None;
       start o server
     end
     else if moved <> [] then begin

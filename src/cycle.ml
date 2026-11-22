@@ -221,7 +221,7 @@ let bundle ~dir ~entry ~manifest ~metafile =
 
 type dev = { state : unit -> string }
 
-let dev_default = {|{"session":"","build":0,"page":0,"error":null}|}
+let dev_default = {|{"session":"","build":0,"page":0,"server":0,"error":null}|}
 
 let dev_state () =
   let file = Sys.getenv_opt "YUKA_DEV_FILE" in
@@ -238,7 +238,25 @@ let dev_state () =
 let dev_script state =
   let json = String.concat "\\u003c" (String.split_on_char '<' state) in
   "<script>(function(){var s=" ^ json
-  ^ {|,b=s.build,p=s.page,k="yuka-dev-scroll",o=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){try{sessionStorage.setItem(k,String(scrollY))}catch(x){}s.session=d.session;p=d.page;location.reload();return}if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
+  ^ {|,b=s.build,p=s.page,v=s.server,k="yuka-dev-scroll",o=null,c=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}|}
+  ^ {|function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}|}
+  ^ {|function reload(){if(c){c.abort();c=null}try{sessionStorage.setItem(k,String(scrollY))}catch(x){}location.reload()}|}
+  ^ {|function skip(n){return n.nodeType===1&&(n.id==="yuka-dev-error"||n.id==="yuka-announcer"||n.localName==="yuka-overlay"||n.localName==="link"&&n.hasAttribute("data-yuka-css"))}|}
+  ^ {|function kids(n){return Array.prototype.filter.call(n.childNodes,function(x){return!skip(x)})}|}
+  ^ {|function has(n){return n.nodeType===1&&(n.localName==="yuka-island"||!!n.querySelector("yuka-island"))}|}
+  ^ {|function same(a,b){if(a.attributes.length!==b.attributes.length)return false;for(var i=0;i<b.attributes.length;i++)if(a.getAttribute(b.attributes[i].name)!==b.attributes[i].value)return false;return true}|}
+  ^ {|function props(d){var m={};d.querySelectorAll("script[data-yuka-props]").forEach(function(x){m[x.getAttribute("data-yuka-props")]=x.textContent});return m}|}
+  ^ {|function patch(a,b,go,P,Q){var i;if(a.nodeType===1&&a.localName==="yuka-island")return b.nodeType===1&&b.localName==="yuka-island"&&same(a,b)&&P[a.getAttribute("data-id")]===Q[b.getAttribute("data-id")];|}
+  ^ {|if(a.nodeType!==b.nodeType||a.nodeName!==b.nodeName){if(has(a)||has(b))return false;if(go)a.parentNode.replaceChild(document.importNode(b,true),a);return true}|}
+  ^ {|if(a.nodeType!==1){if(go&&a.nodeValue!==b.nodeValue)a.nodeValue=b.nodeValue;return true}|}
+  ^ {|if(go&&!same(a,b)){for(i=a.attributes.length-1;i>=0;i--)if(!b.hasAttribute(a.attributes[i].name))a.removeAttribute(a.attributes[i].name);for(i=0;i<b.attributes.length;i++)a.setAttribute(b.attributes[i].name,b.attributes[i].value)}|}
+  ^ {|var x=kids(a),z=kids(b),r=x.length?x[x.length-1].nextSibling:a.firstChild;for(i=0;i<x.length||i<z.length;i++){if(i>=z.length){if(has(x[i]))return false;if(go)a.removeChild(x[i])}else if(i>=x.length){if(has(z[i]))return false;if(go)a.insertBefore(document.importNode(z[i],true),r)}else if(!patch(x[i],z[i],go,P,Q))return false}return true}|}
+  ^ {|function swap(){if(c)c.abort();var a=c=new AbortController();fetch(location.href,{headers:{"Yuka-Navigate":"-"},credentials:"same-origin",cache:"no-store",signal:a.signal}).then(function(r){return r.text().then(function(t){if(a!==c)return;|}
+  ^ {|var m=document.querySelector('meta[name="yuka-build"]'),h=(r.headers.get("content-type")||"").toLowerCase();if(r.redirected||r.status<200||r.status>299||h.indexOf("text/html")!==0||!m||m.getAttribute("content")!==r.headers.get("yuka-build")||document.querySelector("yuka-overlay"))return reload();|}
+  ^ {|var n=new DOMParser().parseFromString(t,"text/html"),P=props(document),Q=props(n);if(!patch(document.body,n.body,false,P,Q))return reload();patch(document.body,n.body,true,P,Q);document.title=n.title;|}
+  ^ {|n.querySelectorAll("link[data-yuka-css]").forEach(function(l){var u=l.getAttribute("href");if(!Array.prototype.some.call(document.querySelectorAll("link[data-yuka-css]"),function(e){return e.getAttribute("href")===u}))document.head.appendChild(document.importNode(l,true))});c=null})}).catch(function(){if(a===c)reload()})}|}
+  ^ {|var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){s.session=d.session;p=d.page;reload();return}if(d.server>v){v=d.server;swap()}|}
+  ^ {|if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
 
 type config = {
   dev : dev option;

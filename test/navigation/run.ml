@@ -1209,6 +1209,72 @@ let action_survives_own_render finish =
       check "the call is not aborted by that render" "false" (bools (call_aborted 0));
       finish ())
 
+let dev_island n =
+  {|<yuka-island data-name="Rerender" data-id="i1" style="display:contents"><!--[--><button id="b">0</button><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">|}
+  ^ ints n ^ "</script>"
+
+let dev_markup title text island =
+  doc title
+    ({|<nav><a id="home" href="/">home</a></nav><main><h1 id="h">|} ^ text ^ "</h1>" ^ island ^ "</main>")
+
+let dev_swap_page () =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<nav><a id="home" href="/">home</a></nav><main><h1 id="h">old</h1>|} ^ dev_island 1 ^ "</main>");
+  render ~islands:(runtime_registry [ rerender_entry ]) ();
+  ignore (click "#b" "");
+  run_dev (Private.dev_script {|{"session":"a","build":2,"page":1,"server":1,"error":null}|});
+  dev_send {|{"session":"a","build":3,"page":1,"server":3,"error":null}|}
+
+let dev_swap finish =
+  dev_swap_page ();
+  tick (fun () ->
+      check "the island has state" "1" (attr_text "#b");
+      let i = calls () - 1 in
+      check "a server build fetches the page" "http://localhost/start?x=1" (call_url i);
+      check "as a client navigation of the whole page" "-" (call_header i);
+      resolve_headers i (dev_markup "new" "new" (dev_island 1)) 200 [| ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "no reload" "" (log_read ());
+          check "the markup is swapped" "new" (attr_text "#h");
+          check "the title follows" "new" (title ());
+          check "the island outside the change keeps its state" "1" (attr_text "#b");
+          finish ()))
+
+let dev_swap_island finish =
+  dev_swap_page ();
+  tick (fun () ->
+      resolve_headers (calls () - 1) (dev_markup "new" "new" (dev_island 2)) 200 [| ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "new island props: a reload" "assign" (log_read ());
+          check "nothing swapped" "old" (attr_text "#h");
+          finish ()))
+
+let dev_swap_build finish =
+  dev_swap_page ();
+  tick (fun () ->
+      resolve_headers (calls () - 1) (dev_markup "new" "new" (dev_island 1)) 200 [| ("yuka-build", "b2") |];
+      tick (fun () ->
+          check "a new client build: a reload" "assign" (log_read ());
+          check "nothing swapped" "old" (attr_text "#h");
+          finish ()))
+
+let dev_swap_down finish =
+  dev_swap_page ();
+  tick (fun () ->
+      reject_call (calls () - 1);
+      tick (fun () ->
+          check "no answer: a reload" "assign" (log_read ());
+          finish ()))
+
+let dev_swap_error finish =
+  dev_page ();
+  dev_send {|{"session":"a","build":3,"page":1,"server":3,"error":"File a.ml: Error"}|};
+  check "the overlay shows the error" "File a.ml: Error" (attr_text "#yuka-dev-error");
+  check "no fetch while the build fails" "0" (ints (calls ()));
+  finish ()
+
 let not_a_page status type_ finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -3198,6 +3264,11 @@ let all =
     ("dev: a new session reloads", dev_session);
     ("dev: a build error shows an overlay", dev_error);
     ("dev: the scroll position comes back after the reload", after_scroll);
+    ("dev: a server build swaps the page and keeps the islands", dev_swap);
+    ("dev: a server build that changes an island reloads", dev_swap_island);
+    ("dev: a server build with a new client build reloads", dev_swap_build);
+    ("dev: a server build with no answer reloads", dev_swap_down);
+    ("dev: a build error with a server build shows the overlay", dev_swap_error);
     ("css: sheets of a partial navigation move to the head", partial_css);
     ("css: sheets of a full swap move to the head", full_swap_css);
     ("css: sheets of the first page move to the head at start", first_load_css);

@@ -284,8 +284,13 @@ dune build
 ./_build/default/server/main.exe
 ```
 
-`yuka dev` rebuilds on change, restarts the server and reloads the
-browser. It starts the server with `YUKA_DEV=1`, so `main.ml` passes
+`yuka dev` rebuilds on change and restarts the server. When only the
+server changed, the browser gets the page again as a client navigation
+and changes only the markup that is different: the scroll position and
+the state of each island that did not change stay. When the client code
+changed (a file in an `--assets` directory that is not a `.css` file),
+or the change adds, removes or changes an island, the browser reloads
+the page. It starts the server with `YUKA_DEV=1`, so `main.ml` passes
 `~dev:true` to the config:
 
 ```sh
