@@ -69,7 +69,6 @@ val state : 'a t -> 'a State.read t
     another codec. *)
 
 val encode : 'a t -> 'a -> Json.t
-(** [encode codec value] writes [value] as JSON. *)
 
 val decode : 'a t -> Json.t -> ('a, string) result
 (** [decode codec json] reads [json]. The error of a codec of this module

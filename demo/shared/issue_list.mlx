@@ -154,8 +154,7 @@ let[@client] make ~(workspace : Model.Workspace.t) ~(title : string) ~(view : Qu
       Yuka.Browser.scroll_into_view ("row-" ^ next)
   in
   let on_key event =
-    if not (Ui.typing event || Yuka.State.peek Ui.dialog_open || Yuka.Event.ctrl_key event || Yuka.Event.meta_key event)
-    then
+    if Ui.shortcut event then
       match Yuka.Event.key event with
       | "j" -> move 1
       | "k" -> move (-1)

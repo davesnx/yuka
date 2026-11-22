@@ -14,6 +14,9 @@ let insights workspace =
 let report workspace =
   if default workspace then Routes.report () else Routes.workspace_report ~workspace ()
 
+let settings workspace =
+  if default workspace then Routes.settings () else Routes.workspace_settings ~workspace ()
+
 let canvas workspace =
   if default workspace then Routes.canvas () else Routes.workspace_canvas ~workspace ()
 

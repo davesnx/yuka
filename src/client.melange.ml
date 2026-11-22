@@ -25,16 +25,11 @@ external flag : Web.event -> string -> bool Js.undefined = "" [@@mel.get_index]
 external find : 'a Web.table -> string -> 'a Js.undefined = "get" [@@mel.send]
 external defined : 'a Js.undefined -> 'a = "%identity"
 
-(* Melange represents [Some x] as [x] when [x] is neither undefined nor an
-   option; a DOM node is neither. *)
 external present : Web.node -> Obj.t option = "%identity"
 external by_id : string -> Web.node Js.nullable = "getElementById" [@@mel.scope "document"]
 
 let container id = Js.Nullable.toOption (by_id id)
 
-(* Safe only for [Template.expander] and [Template.check]: every value stored
-   in them is a lambda of two parameters, which Melange compiles to a
-   JavaScript function of two parameters. *)
 let uncurry2 : ('a -> 'b -> 'c) -> ('a -> 'b -> 'c [@u]) = Obj.magic
 
 let get = Array.unsafe_get

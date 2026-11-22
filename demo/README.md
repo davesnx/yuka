@@ -127,10 +127,15 @@ installs them) and the oniguruma library (`conf-oniguruma`).
   the servers send changes to each other over `LISTEN`/`NOTIFY`. It also
   shows the Vercel region of the server (`VERCEL_REGION`) and a random id
   of the server process, so you can see when another instance answers.
-- `http://localhost:8080/issue/YUK-1`: an issue; comments and related
-  issues stream in after a delay. An issue with more than 12 comments
-  shows the first 3 and the last 5; a band between them gives the number
-  of hidden comments, "Load 50 more" (the next ones after the first group)
+- `http://localhost:8080/issue/YUK-1`: an issue. The fake database
+  answers at once. Add `?delay=600` to make it slow on purpose: the page
+  then streams, the comments come after 600 ms and the related issues
+  after 900 ms (1.5 times the delay). The delay is in milliseconds, from
+  0 to 6000, so the related issues come before the 10 s render timeout;
+  a value out of range is clamped, and a value that is not a number
+  counts as no delay. `/w/:workspace/issue/:id` takes it too.
+  An issue with more than 12 comments shows the first 3 and the last 5;
+  a band between them gives the number of hidden comments, "Load 50 more" (the next ones after the first group)
   and "Load all". The page does not send the hidden comments: the island
   gets them with the `Comment.range` query (`shared/comment.ml`).
   "Load all" is a link to `?comments=all`, which the server renders with

@@ -798,8 +798,7 @@ module Private : sig
   val element : node -> 'kind element
 
   val hole : (unit -> node) -> node
-  (** [Hole compute]. [node] is private, so that a test cannot build a node kind
-      without the constructor that installs its client code. *)
+  (** [Hole compute]. *)
 
   val owned : (unit -> 'a) -> 'a * (unit -> unit)
   (** Like {!with_owner}, but the new owner belongs to the current owner: it is
@@ -1069,7 +1068,6 @@ module Router : sig
 
   type meth =
     [ `GET | `HEAD | `POST | `PUT | `PATCH | `DELETE | `OPTIONS | `Other of string ]
-  (** A request method. *)
 
   (** The result of the generated [Routes.find]. *)
   type 'r lookup =
@@ -1437,7 +1435,6 @@ module Server : sig
         request has no session (with Dream: no session middleware). *)
 
     val meth : request -> Router.meth
-    (** The request method. *)
 
     val path : request -> string
     (** The request path, without the query. *)
@@ -1725,9 +1722,6 @@ module Server : sig
   val public : ?s_max_age:int -> max_age:int -> unit -> cache
   (** [public, max-age=N], and [, s-maxage=M] when given. *)
 
-  val immutable : cache
-  (** [public, max-age=31536000, immutable] *)
-
   type body =
     | String of string
     | Stream of ((string -> unit Async.t) -> unit Async.t)
@@ -1795,7 +1789,7 @@ module Server : sig
       name of each output and its static imports from it. [dir] is the directory esbuild ran in, so that the
       [outputs] keys of the [metafile] JSON text are paths in it; [entry] is
       the path of the entry output. Outputs other than [entry] get
-      {!immutable}; other files get {!no_cache}. [Error] with a message
+      [public, max-age=31536000, immutable]; other files get {!no_cache}. [Error] with a message
       when [manifest] or [metafile] is not valid JSON of that shape. *)
 
   type config
@@ -1823,7 +1817,7 @@ module Server : sig
       loaders. [styles] are stylesheet URLs and [head] raw HTML for the head
       of every page. [css] lists the sheets of [[%yuka.css]], as file name
       and text; the generator [yuka css] writes it ([Yuka_css.sheets]). The
-      cycle serves each at [/_yuka/css/FILE] with {!immutable} (the name
+      cycle serves each at [/_yuka/css/FILE] with [public, max-age=31536000, immutable] (the name
       has a hash of the text); another path under [/_yuka/css/] is a 404
       with [no-store]. [timeout] (default 10 seconds) bounds a streamed
       render.
@@ -1870,7 +1864,6 @@ module Server : sig
       (** The response type of the server. *)
 
       val meth : request -> Router.meth
-      (** The request method. *)
 
       val target : request -> string
       (** The path and query, as sent. *)
@@ -2272,13 +2265,10 @@ module Server : sig
         notes and loaded the key again. *)
 
     val bus_send : Live.bus -> string -> unit Async.t
-    (** The [send] function of the bus. *)
 
     val bus_listen : Live.bus -> (string -> unit) -> unit Async.t
-    (** The [listen] function of the bus. *)
 
     val bus_on_restart : Live.bus -> (unit -> unit) -> unit
-    (** The [on_restart] function of the bus. *)
 
     val memory_down : Live.memory -> bool -> unit
     (** [memory_down memory true] drops notes; [false] brings the bus back and

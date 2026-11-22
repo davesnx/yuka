@@ -48,7 +48,7 @@ let routes =
       Router.route Varied ~path:"/varied" ~page:App.Pages.plain
         ~headers:[ ("Vary", "Cookie") ];
       Router.get Asset ~path:"/asset.txt" ~handler:App.Api.asset
-        ~cache:immutable;
+        ~cache:(public ~max_age:3600 ());
       Router.route Live_page ~path:"/live" ~page:App.Pages.live;
       Router.route Live_public ~path:"/live-public" ~page:App.Pages.live
         ~cache:(public ~max_age:60 ());

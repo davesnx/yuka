@@ -37,6 +37,10 @@ end
 let read : (string -> string) ref = ref (fun _ -> "")
 let write : (string -> string -> string -> unit) ref = ref (fun _ _ _ -> ())
 let current () = of_slug (!read attribute)
-let apply theme = !write attribute storage_key (slug theme)
+let chosen = Yuka.State.make ""
+
+let apply theme =
+  !write attribute storage_key (slug theme);
+  Yuka.State.set chosen (slug theme)
 let current_code () = Code.of_slug (!read Code.attribute)
 let apply_code code = !write Code.attribute Code.storage_key (match code with Some code -> Code.slug code | None -> "")

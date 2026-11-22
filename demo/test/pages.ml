@@ -93,7 +93,7 @@ let () =
       ("/", []);
       ("/my", []);
       ("/issue/YUK-1", []);
-      ("/issue/YUK-2", [ ("Yuka-Navigate", "L0") ]);
+      ("/issue/YUK-2?delay=600", [ ("Yuka-Navigate", "L0") ]);
       ("/about", []);
       ("/new", []);
       ("/issue/NOPE", []);

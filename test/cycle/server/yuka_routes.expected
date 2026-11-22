@@ -36,7 +36,7 @@ let rules_9 =
   Yuka.Server.Generated.rules ~headers:[ root_headers; [("Vary", "Cookie")] ] ~cache:(Yuka.Server.(no_store) [@warning "-33"]) ~prerender:false ()
 
 let rules_10 =
-  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(immutable) [@warning "-33"]) ~prerender:false ()
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(public ~max_age:3600 ()) [@warning "-33"]) ~prerender:false ()
 
 let rules_11 =
   Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(public ~max_age:60 ()) [@warning "-33"]) ~prerender:false ()
@@ -632,7 +632,7 @@ let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.S
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"0fea0b21a5a0068e9e53367bddba07c9"
+  Yuka.Server.Generated.app ~build:"e0218141d5cbd383a77c7b7bd7bfd005"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_7; rules_9; rules_11; rules_12 ]

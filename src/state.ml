@@ -70,10 +70,7 @@ let deferred ?equal (source : (_, _) signal) =
       if !live then
         match Signal.peek source with
         | value -> Signal.set s value
-        | exception _ ->
-            (* [watch] reads the same stale source in this batch and raises the
-               same exception to its owner. *)
-            ()
+        | exception _ -> ()
     in
     Scheduler.set_level watch;
     watch.fn <-
@@ -141,7 +138,6 @@ let select_with_size (source : (_, _) signal) =
       && Signal.same key key
       && (Scheduler.js || (watch.id > !Scheduler.sealed && not !(Base.server_rendering ())))
     then begin
-      (* An exception of [watch] reaches its owner when the flush runs it. *)
       (try Scheduler.fresh watch with _ -> ());
       Signal.get (entry key)
     end
