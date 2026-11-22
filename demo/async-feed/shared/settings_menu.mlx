@@ -11,7 +11,7 @@ let[@client] make () =
     match Yuka.State.peek route with
     | Some (Routes.Feed { project; team; assignee; _ }) ->
         Yuka.Browser.navigate (Routes.feed ~project ~team ~assignee ?before ())
-    | None -> Yuka.Browser.navigate (Routes.feed ?before ())
+    | Some (Routes.Item _) | None -> Yuka.Browser.navigate (Routes.feed ?before ())
   in
   let zones () =
     let current = Yuka.State.get zone in

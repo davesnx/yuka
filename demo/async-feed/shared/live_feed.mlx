@@ -14,7 +14,7 @@ let[@client] make ~(filter : Model.filter) ~(since : int) ~(top : bool) () =
     <ol class_="feed feed-live" aria_live=`polite>
       (Yuka.each ~key:(fun (event : Model.event) -> Int.to_string event.id) ~equal:( = )
          (fun () -> Array.of_list (fresh ()))
-         (fun event -> <Card event fresh=true />))
+         (fun (event : Model.event) -> <Card event fresh=true comments=(<Comment_button id=event.id count=0 />) />))
     </ol>
     <button class_="simulate" type_=`button disabled=(Yuka.State.get running) on_click=simulate>
       <span class_="pulse" aria_hidden=true />

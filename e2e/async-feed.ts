@@ -45,6 +45,7 @@ const open = async (path = "") => {
   await started(p);
   return p;
 };
+const settled = (p: Page) => p.waitForFunction(() => !document.documentElement.hasAttribute("data-yuka-nav"));
 const timeOf = (p: Page, id: string) => p.locator(`.card[data-id="${id}"] time`).first().textContent();
 
 let A: Page;
@@ -158,6 +159,83 @@ await step("a5. the theme toggle", async () => {
     await started(A);
     await A.screenshot({ path: `${shots}/async-feed-dark.png` });
   }
+});
+
+await step("a7. the comments panel of a notification", async () => {
+  const P = await open();
+  const base = new URL(app).pathname;
+  const button = P.locator('.card[data-id="4999"] .comment-button');
+  const count = Number(await button.textContent());
+  check("a7.1 a card shows its comment count", count === 2, String(count));
+  const sheet = P.locator(".sheet-panel");
+  await button.click();
+  await P.waitForURL((url) => url.pathname === `${base}/item/4999`);
+  await sheet.waitFor();
+  await started(P);
+  await settled(P);
+  check("a7.2 the icon opens the panel at the item URL", (await P.getByRole("dialog", { name: /New post in r\/acme/ }).count()) === 1, P.url());
+  check("a7.3 the feed stays under the panel", (await P.locator(".feed .card").count()) === 50);
+  const moved = await sheet.evaluate((e) => getComputedStyle(e).animationName);
+  check("a7.4 the panel slides in", moved === "sheet-in", moved);
+  const link = sheet.locator(".source-link");
+  check(
+    "a7.5 the source link opens a new tab",
+    (await link.getAttribute("target")) === "_blank" && (await link.getAttribute("rel")) === "noopener" && ((await link.getAttribute("href")) ?? "").startsWith("https://www.reddit.com/r/acme/"),
+    (await link.getAttribute("href")) ?? "",
+  );
+  check("a7.6 the details have source fields", (await sheet.locator("dt", { hasText: "Subreddit" }).count()) === 1);
+  const zoned = (await sheet.locator(".detail-time").textContent()) ?? "";
+  check("a7.7 the time is in the chosen zone", zoned.endsWith("EST"), zoned);
+  check("a7.8 the seeded comments show", (await sheet.locator(".comment").count()) === 2);
+  if (shots) {
+    await P.waitForTimeout(700);
+    await P.evaluate(() => (window as any).asyncFeed.setTheme("dark"));
+    await P.screenshot({ path: `${shots}/async-feed-panel-dark.png` });
+    await P.evaluate(() => (window as any).asyncFeed.setTheme("light"));
+    await P.screenshot({ path: `${shots}/async-feed-panel-light.png` });
+  }
+
+  await P.getByRole("button", { name: "Comment", exact: true }).click();
+  await P.locator(".comment-error", { hasText: "Write a comment first." }).waitFor({ timeout: 5000 });
+  check("a7.9 an empty comment is refused", (await sheet.locator(".comment").count()) === 2);
+  await P.locator("#overlay-comment-text").fill("Replied from the company account.");
+  await P.getByRole("button", { name: "Comment", exact: true }).click();
+  await P.waitForFunction(() => document.querySelectorAll(".sheet-panel .comment").length === 3, null, { timeout: 5000 });
+  check("a7.10 the new comment shows in the thread", ((await sheet.locator(".comment").last().textContent()) ?? "").includes("Replied from the company account."));
+  check("a7.11 the field is empty again", (await P.locator("#overlay-comment-text").inputValue()) === "");
+  check("a7.12 the card count updates", (await button.textContent())?.trim() === "3", (await button.textContent()) ?? "");
+
+  await P.goBack();
+  await P.waitForURL((url) => url.pathname === base || url.pathname === `${base}/`);
+  await sheet.waitFor({ state: "detached" });
+  check("a7.13 Back closes the panel", (await P.locator(".sheet").count()) === 0);
+  check("a7.14 the count stays after Back", (await button.textContent())?.trim() === "3");
+
+  await button.click();
+  await sheet.waitFor();
+  await started(P);
+  await settled(P);
+  await P.keyboard.press("Escape");
+  await sheet.waitFor({ state: "detached" });
+  check("a7.15 Escape closes the panel", !P.url().includes("/item/"), P.url());
+
+  await button.click();
+  await sheet.waitFor();
+  await started(P);
+  await settled(P);
+  await P.mouse.click(40, 450);
+  await sheet.waitFor({ state: "detached" });
+  check("a7.16 a click on the backdrop closes the panel", !P.url().includes("/item/"), P.url());
+  await P.close();
+
+  const D = await open("/item/4999");
+  check("a7.17 a direct load shows the panel over the feed", (await D.locator(".sheet-panel").count()) === 1 && (await D.locator(".feed .card").count()) === 50);
+  check("a7.18 the comment is kept by the server", (await D.locator(".sheet-panel .comment").count()) === 3);
+  await D.getByRole("button", { name: "Close" }).click();
+  await D.waitForURL((url) => !url.pathname.includes("/item/"));
+  await D.locator(".sheet").waitFor({ state: "detached" });
+  check("a7.19 Close after a direct load shows the feed", (await D.locator(".feed .card").count()) === 50);
+  await D.close();
 });
 
 check("a6 no console errors, page errors, hydration mismatches or failed requests", problems.length === 0, problems.join(" | "));

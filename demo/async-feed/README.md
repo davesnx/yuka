@@ -33,6 +33,12 @@ Under `/async-feed` with `make demo-serve`, at `/` alone:
   server renders the filtered feed.
 - `/async-feed?before=1793552460`: the events before this time (Unix
   seconds). "Older events" and the date picker in the settings use it.
+- `/async-feed/item/4999`: the panel of one notification, with a link to
+  its source, the fields of its source and its comments. It is an overlay
+  route: the comment icon of a card opens it over the feed with a client
+  navigation, and Back, Escape, a click beside it or Close remove it. A
+  direct load or a reload shows it over the newest events; Close then goes
+  to the feed.
 
 ## Header
 
@@ -61,11 +67,22 @@ the ones that match its filters at the top, with a short animation (none
 with `prefers-reduced-motion`). The events stay in memory until the
 server stops.
 
+## Comments
+
+The comments are in memory: generated ones for most of the 5000 events,
+and the ones that the form adds with the `async_feed_comment` action. The
+server refuses an empty comment and one longer than 1000 characters. After
+a comment is added, the count on the card of that event changes with no
+request. The panel slides in from the right (0.5 s,
+`cubic-bezier(0.32, 0.72, 0, 1)`, the curve of the Vaul drawer); with
+`prefers-reduced-motion` it fades in.
+
 ## Tests
 
     make demo-test
 
-`test/run.ml` renders the pages and checks the cards, the filters and the
-dates in UTC. `e2e/async-feed.ts` (run by `make e2e`) checks the events
-that arrive one by one, the keyboard of a filter, the time zone and the
-theme in a browser.
+`test/run.ml` renders the pages and checks the cards, the filters, the
+dates in UTC, the panel of an item and the comment action.
+`e2e/async-feed.ts` (run by `make e2e`) checks the events that arrive one
+by one, the keyboard of a filter, the time zone, the theme and the
+comments panel in a browser.

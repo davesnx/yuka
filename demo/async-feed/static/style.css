@@ -12,6 +12,8 @@
   --accent-text: #fafafa;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.02);
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 0.08), 0 2px 6px rgb(0 0 0 / 0.04);
+  --scrim: rgb(0 0 0 / 0.4);
+  --sheet-ease: cubic-bezier(0.32, 0.72, 0, 1);
   color-scheme: light;
 }
 
@@ -27,6 +29,7 @@
   --accent-text: #0a0a0a;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
+  --scrim: rgb(0 0 0 / 0.6);
   color-scheme: dark;
 }
 
@@ -42,7 +45,7 @@ body {
 
 a { color: inherit; }
 
-button, input, select { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
 
 :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
@@ -219,6 +222,19 @@ button, input, select { font: inherit; color: inherit; }
 .card-title { margin: 2px 0 2px; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
 .card-text { margin: 0; color: var(--muted); }
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.comment-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+.comment-button:hover { background: var(--hover); color: var(--text); }
 .tag { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 11.5px; color: var(--muted); }
 
 .pager { display: inline-block; margin-top: 16px; color: var(--muted); font-size: 13px; }
@@ -254,6 +270,123 @@ button, input, select { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .simulate:disabled .pulse { animation: none; }
 }
+
+:root:has(.sheet) { overflow: hidden; }
+
+.sheet { position: fixed; inset: 0; z-index: 30; }
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  animation: sheet-fade 0.5s var(--sheet-ease);
+  view-transition-name: sheet-backdrop;
+}
+.sheet-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100vw);
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  animation: sheet-in 0.5s var(--sheet-ease);
+  view-transition-name: sheet-panel;
+}
+
+@keyframes sheet-in { from { transform: translateX(100%); } }
+@keyframes sheet-out { to { transform: translateX(100%); } }
+@keyframes sheet-fade { from { opacity: 0; } }
+@keyframes sheet-fade-out { to { opacity: 0; } }
+
+::view-transition-new(sheet-panel), ::view-transition-new(sheet-backdrop) { animation: none; }
+::view-transition-old(sheet-panel) { animation: sheet-out 0.3s var(--sheet-ease) forwards; }
+::view-transition-old(sheet-backdrop) { animation: sheet-fade-out 0.3s var(--sheet-ease) forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-panel, .sheet-backdrop { animation: sheet-fade 0.15s ease-out; }
+  ::view-transition-old(sheet-panel), ::view-transition-old(sheet-backdrop) { animation: sheet-fade-out 0.15s ease-out forwards; }
+}
+
+.sheet-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-bar-title { font-weight: 600; }
+.sheet-body { flex: 1; overflow: auto; overscroll-behavior: contain; }
+.thread { display: contents; }
+
+.detail { padding: 20px; border-bottom: 1px solid var(--border); }
+.detail-meta { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.detail-source { font-weight: 600; }
+.detail-author { color: var(--muted); }
+.detail-time { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.detail-title { margin: 16px 0 4px; font-size: 18px; letter-spacing: -0.02em; line-height: 1.35; }
+.detail-text { margin: 0 0 16px; color: var(--muted); }
+.source-link { text-decoration: none; font-size: 13px; font-weight: 500; }
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 20px 0 0;
+  font-size: 13px;
+}
+.details div { display: contents; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+.comments { padding: 20px; }
+.section-title { margin: 0 0 12px; font-size: 13px; font-weight: 600; }
+.muted { color: var(--muted); font-weight: 400; }
+.comment-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.comment { display: grid; grid-template-columns: 28px 1fr; gap: 10px; }
+.comment-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--hover);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+}
+.comment-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 12px; }
+.comment-author { font-weight: 600; }
+.comment-time { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.comment-text { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.comment-form {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+.comment-form textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  resize: vertical;
+}
+.comment-form textarea[aria-invalid="true"] { border-color: #e5484d; }
+.comment-actions { display: flex; align-items: center; gap: 12px; }
+.comment-error { flex: 1; margin: 0; color: #e5484d; font-size: 12px; }
+.small-button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.small-button.primary:hover { background: var(--accent); opacity: 0.9; }
+.small-button:disabled { opacity: 0.6; cursor: progress; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 @media (max-width: 720px) {
   .header { height: auto; flex-wrap: wrap; padding: 10px 16px; }

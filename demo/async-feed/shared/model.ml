@@ -13,6 +13,7 @@ type event = {
 }
 [@@deriving codec]
 
+type comment = { author : string; time : int; text : string } [@@deriving codec]
 type filter = { projects : string list; teams : string list; assignees : string list } [@@deriving codec]
 
 let projects = [ "Checkout"; "Dashboard"; "Mobile app"; "Marketing site"; "Search"; "Billing" ]

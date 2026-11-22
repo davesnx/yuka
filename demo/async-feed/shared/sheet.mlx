@@ -1,0 +1,18 @@
+let[@client] make ~(title : string) ~(layer : bool) ~children () =
+  let close () = if layer then Yuka.Browser.back () else Yuka.Browser.navigate (Routes.feed ()) in
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "keydown" (fun event -> if Yuka.Event.key event = "Escape" then close ()));
+  <div class_="sheet">
+    <div class_="sheet-backdrop" aria_hidden=true on_click=(fun _ -> close ()) />
+    <aside class_="sheet-panel" role=`dialog aria_modal=true aria_label=title>
+      <div class_="sheet-bar">
+        <span class_="sheet-bar-title">"Notification"</span>
+        <button class_="icon-button" type_=`button aria_label="Close" title="Close (Esc)" on_click=(fun _ -> close ())>
+          <svg view_box="0 0 16 16" width="16" height="16" aria_hidden=true>
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke_width="1.5" stroke_linecap=`round />
+          </svg>
+        </button>
+      </div>
+      <div class_="sheet-body">children</div>
+    </aside>
+  </div>
