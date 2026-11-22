@@ -104,6 +104,18 @@ let[@client] make ~(tags : Model.Tag.t list) ?(limit : int = 3) () =
   `alt_key`, `meta_key`) and the pointer position in the viewport
   (`client_x`, `client_y`). `prevent_default` and `stop_propagation`
   act on it.
+- `on_click` and `Yuka.on "click"` listen on the document, one listener
+  for each event name. The handlers run from the target to the outer
+  elements. `stop_propagation`, or a handler that raises, stops the
+  handlers of the outer elements. Only `focus`, `blur`, `mouseenter`,
+  `mouseleave`, `load`, `error` and `scroll` listen on the element.
+- An event that does not bubble does not get to the document, so a
+  handler from `Yuka.on` never runs for it. A custom element can send such
+  an event: `new CustomEvent("card-select")` has `bubbles: false`. Use
+  `Yuka.on_element "card-select" handler`: it listens on the element. When
+  the event bubbles, this handler runs before the event gets to the
+  document, thus before the `Yuka.on` handlers of the outer elements, and
+  its `stop_propagation` stops them.
 - A hole is a part of the markup that updates when a State it reads
   changes. The ppx makes a hole of each child or attribute of an HTML tag
   that is not a constant: `hidden=(Yuka.State.get all)` and the list that

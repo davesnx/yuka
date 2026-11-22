@@ -448,7 +448,7 @@ open Base
                               match parts.(i) with
                               | Attribute (Static (n, v)) -> add n v
                               | Attribute (Dynamic (n, f)) -> Option.iter (add n) (f ())
-                              | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                              | Attribute (Handler _ | Element_handler _) | Child _ | No_attribute -> ()))
                         attrs;
                       (match !href with
                       | Some h when String.equal h path && not !current -> add_attr b ~tag "aria-current" "page"
@@ -462,7 +462,7 @@ open Base
                                 match parts.(i) with
                                 | Attribute (Static (n, v)) -> add false n v
                                 | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f ())
-                                | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                                | Attribute (Handler _ | Element_handler _) | Child _ | No_attribute -> ()))
                           attrs
                       in
                       field_attrs ~tag each (fun literal n v -> add_attr b ~literal ~tag n v));
@@ -602,7 +602,7 @@ open Base
             (function
               | Static (name, v) -> add_attr b ~tag name v
               | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
-              | Handler _ -> ())
+              | Handler _ | Element_handler _ -> ())
             attrs;
           Buffer.add_char b '>';
           if namespace () = Html then add_raw b ~tag:lt ~type_:(Option.join type_) text
@@ -622,7 +622,7 @@ open Base
                       (function
                         | Static (name, v) -> add false name v
                         | Dynamic (name, f) -> Option.iter (add false name) (f ())
-                        | Handler _ -> ())
+                        | Handler _ | Element_handler _ -> ())
                       attrs)
                   (fun _ name v -> add_attr b ~tag name v);
                 None
@@ -679,7 +679,7 @@ open Base
           (function
             | Static (name, value) -> Some (name, value)
             | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f ())
-            | Handler _ -> None)
+            | Handler _ | Element_handler _ -> None)
           attrs
       in
       let value = List.assoc_opt "value" resolved in

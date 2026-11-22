@@ -205,6 +205,18 @@ let html_escaping () =
   check "attribute" "<a href=\"x&amp;y&quot;&lt;>\"></a>"
     (html (element "a" [ attr "href" "x&y\"<>" ] []))
 
+let html_custom_element () =
+  let label = State.make "Ada" in
+  check "custom tag, attributes and a handler"
+    {|<user-card name="Ada" data-id="7"><span slot="title">Hi</span></user-card>|}
+    (chtml
+       (element "user-card"
+          [ hole_attr "name" (fun () -> Some (State.get label));
+            attr "data-id" "7";
+            on "card-select" (fun _ -> ());
+            on_element "card-close" (fun _ -> ()) ]
+          [ element "span" [ attr "slot" "title" ] [ text "Hi" ] ]))
+
 let decode_uri () =
   let decoded s = match Private.decode_uri s with Some d -> d | None -> "None" in
   let valid s = string_of_bool (Option.is_some (Private.decode_uri s)) in
@@ -2272,6 +2284,7 @@ let view_transition_names () =
 let all =
   [
     ("catch: server fallback", catch_server_fallback);
+    ("html: custom element", html_custom_element);
     ("view_transition: runs the body in a batch", view_transition_runs_body);
     ("view_transition_name: checks the name", view_transition_names);
     ("catch: server children", catch_server_children);

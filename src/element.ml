@@ -68,6 +68,7 @@ let hole_attr_unchecked name f =
   Web.refuse_url_name name;
   Dynamic (name, f)
 let on name handler = Handler (name, handler)
+let on_element name handler = Element_handler (name, handler)
 
 type exit = Types.exit
 

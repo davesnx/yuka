@@ -99,6 +99,7 @@ type exit = unit -> leave
     | Static of string * string
     | Dynamic of string * (unit -> string option)
     | Handler of string * (event -> unit)
+    | Element_handler of string * (event -> unit)
 
 
   type platform = {

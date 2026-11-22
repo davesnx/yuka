@@ -464,7 +464,18 @@ module Show : sig
 end
 
 val on : string -> (Event.t -> unit) -> client attribute
-(** [on "click" handler]. *)
+(** [on "click" handler]. One listener on the document for each event name
+    runs the handlers from the target to the outer elements. Only [focus],
+    [blur], [mouseenter], [mouseleave], [load], [error] and [scroll] listen
+    on the element. An event that does not bubble, such as a [CustomEvent]
+    with no [bubbles: true], does not get to the document: use
+    {!on_element} for it. *)
+
+val on_element : string -> (Event.t -> unit) -> client attribute
+(** [on_element "card-select" handler] listens on the element, for an
+    event that does not bubble. When the event bubbles, the handler runs
+    before the {!on} handlers of the outer elements, and
+    {!Event.stop_propagation} stops them. *)
 
 val each :
   ?equal:('a -> 'a -> bool) ->
@@ -779,6 +790,7 @@ module Private : sig
     | Static of string * string
     | Dynamic of string * (unit -> string option)
     | Handler of string * (Event.t -> unit)
+    | Element_handler of string * (Event.t -> unit)
 
   and 'a each = {
     items : unit -> 'a array;

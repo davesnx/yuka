@@ -289,9 +289,9 @@ let delegate doc event =
     Web.add_listener doc event (dispatch event)
   end
 
-let add_handler doc el event handler =
+let add_handler doc el here event handler =
   let owner = match !(Base.current_owner ()) with Some o -> o | None -> Base.new_owner () in
-  if non_bubbling event then begin
+  if here || non_bubbling event then begin
     let handler = acting_as !(Base.current_owner ()) handler in
     let handler ev = ignore (handle owner handler ev) in
     Web.add_listener el event handler;
@@ -477,7 +477,8 @@ and instantiate pos (template : template) c parts =
 and mount_attr doc svg el adopted = function
   | Static (name, value) -> if not adopted then set_attr svg el name (Some value)
   | Dynamic (name, f) -> Base.run_effect Scheduler.queue (fun () -> set_attr svg el name (f ()))
-  | Handler (event, handler) -> add_handler doc el event handler
+  | Handler (event, handler) -> add_handler doc el false event handler
+  | Element_handler (event, handler) -> add_handler doc el true event handler
 
 and mount_hole pos owned f =
   let start = if owned then Js.null else some (hole_start pos) in
