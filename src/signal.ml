@@ -31,6 +31,7 @@ let make ?equal value =
       let c = differs equal s.old s.value in
       s.old <- s.value;
       c);
+  if Dev.on then Dev.state s.node (fun () -> s.value);
   s
 
 let quiet_set s value =
@@ -84,6 +85,7 @@ let computed ?equal compute =
            s.value <- next;
            true
          end);
+  if Dev.on then Dev.state s.node (fun () -> peek s);
   s
 
 let dispose_computed s = Scheduler.dispose s.node

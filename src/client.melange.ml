@@ -852,6 +852,7 @@ let boot entries props island =
               let o = Base.new_owner () in
               o.catch <- Some catch;
               o.env <- Scheduler.Root (Option.value (Web.get_attribute island "data-ctx") ~default:"");
+              if Dev.on then Dev.island name id o;
               if Dev.on && Dev.tracing () then Dev.trace ("island " ^ name ^ " #" ^ id ^ " starts");
               match Base.with_owner o (fun () -> Types.with_browser_ids (id ^ "-") (fun () -> hydrate island (Kind.of_fn build))) with
               | d when !failed ->

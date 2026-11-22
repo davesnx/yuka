@@ -595,6 +595,35 @@ markup also update in effects, so they also show as `effect #n`.
 before `Yuka.render` to see the islands start. In a production bundle,
 `Yuka.Dev.trace` does nothing.
 
+## Dev panel
+
+In dev mode (`~dev:true` in the server config, as `yuka dev` sets it),
+each page has a **Yuka** button at the bottom right. Click it to open
+the panel. The panel shows each island that runs on the page, with its
+States and their current values, under the named owners that hold them:
+
+```
+Chat #i1
+  `Chat`
+    State `room` = "lobby"
+    State #12 = {name: "ada", tags: ["a", "b"]}
+  `Chat` > `Composer`
+    State `draft` = ""
+```
+
+The values update while the page runs. The panel shows a memo with its
+current value, and drops a State when its owner is disposed. The names
+come from [Debug names](#debug-names). A State with no name shows as
+`State #n`. Yuka also makes States for its own use, for example for the
+status of an `Async` or a form, so some `State #n` lines can come from
+Yuka. The panel shows the value as the browser keeps it: a record as
+`{field: value}`, a list or an array as `[a, b]`, `None` as `None`, and
+`Some x` as `x`. A constructor shows as a number, or as an object with
+`TAG`.
+
+A production bundle (`__YUKA_DEV__` defined as `false`) keeps no list
+of islands or States, and the server does not add the button.
+
 ## Context
 
 A context gives a value to every component below one place of the page,

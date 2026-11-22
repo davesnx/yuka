@@ -300,6 +300,99 @@ let () =
   expect_trace "the trace of an island start and stop"
     [ "[yuka] island Hello #i1 starts"; "[yuka] island Hello #i1 stops" ]
 
+let panel : unit -> string array =
+  [%mel.raw
+    {|function () {
+  var d = globalThis.__yuka_dev, r = [];
+  if (!d) return r;
+  d.islands().forEach(function (i) {
+    r.push(i.name + " #" + i.id);
+    i.states.forEach(function (x) { r.push("  " + (x.owner ? x.owner + " | " : "") + x.name + " = " + x.value) });
+  });
+  return r.map(function (x) { return x.replace(/#\d+/g, "#N") });
+}|}]
+
+let expect_panel name lines =
+  let got = panel () in
+  let expected = if dev then Array.of_list lines else [||] in
+  if got <> expected then begin
+    incr failures;
+    print_endline
+      ("FAIL " ^ name ^ "\n  expected: [" ^ String.concat " | " (Array.to_list expected) ^ "]\n  got:      ["
+     ^ String.concat " | " (Array.to_list got) ^ "]")
+  end
+  else print_endline ("ok " ^ name)
+
+type user = { name : string; tags : string list }
+
+let counter : int State.t option ref = ref None
+
+let () =
+  let counter_view () =
+    owner_debug_name "Counter";
+    let count = State.make 1 |> State.debug_name "count" in
+    counter := Some count;
+    let double = State.memo (fun () -> State.get count * 2) |> State.debug_name "double" in
+    ignore double;
+    ignore (State.make { name = "ada"; tags = [ "a"; "b" ] });
+    let (), _ =
+      with_owner (fun () ->
+          owner_debug_name "Row";
+          ignore (State.make (Some true) |> State.debug_name "open"))
+    in
+    Effect.after (fun () -> ignore (State.make (State.get count) |> State.debug_name "seen"));
+    element "p" [] [ text "count" ]
+  in
+  let hello_view () =
+    ignore (State.make "hi" |> State.debug_name "greeting");
+    element "p" [] [ text "hi" ]
+  in
+  let outside = State.make 0 |> State.debug_name "outside" in
+  ignore outside;
+  set_html
+    (Private.render_html (fun () ->
+         Private.node
+           (fragment
+              [
+                runtime_island ~name:"Counter" ~props:(Codec.encode Codec.int 0) counter_view;
+                runtime_island ~name:"Hello" ~props:(Codec.encode Codec.int 0) hello_view;
+              ])));
+  expect_panel "the panel data before the islands start" [];
+  Yuka.render
+    ~islands:
+      (runtime_registry
+         [
+           runtime_entry ~name:"Counter" (fun _ -> Ok counter_view);
+           runtime_entry ~name:"Hello" (fun _ -> Ok hello_view);
+         ])
+    ~navigation:false ();
+  expect_panel "the panel data lists each island with its owners and States"
+    [
+      "Counter #i1";
+      "  `Counter` | State `count` = 1";
+      "  `Counter` | State `double` = 2";
+      "  `Counter` | State #N = {name: \"ada\", tags: [\"a\", \"b\"]}";
+      "  `Counter` > `Row` | State `open` = true";
+      "  `Counter` | State `seen` = 1";
+      "Hello #i2";
+      "  State `greeting` = \"hi\"";
+    ];
+  (match !counter with Some c -> State.set c 5 | None -> ());
+  expect_panel "the panel data shows the new values after a write"
+    [
+      "Counter #i1";
+      "  `Counter` | State `count` = 5";
+      "  `Counter` | State `double` = 10";
+      "  `Counter` | State #N = {name: \"ada\", tags: [\"a\", \"b\"]}";
+      "  `Counter` > `Row` | State `open` = true";
+      "  `Counter` | State `seen` = 5";
+      "Hello #i2";
+      "  State `greeting` = \"hi\"";
+    ];
+  Yuka.stop ();
+  set_html "";
+  expect_panel "the panel data is empty after the islands stop" []
+
 let () =
   if !failures > 0 then set_exit_code 1
   else print_endline (if dev then "dev check (dev build): ok" else "dev check (__YUKA_DEV__ = false): ok")

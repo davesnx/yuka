@@ -15,6 +15,7 @@ type owner = Scheduler.owner = {
 
 let current_owner : owner option ref = ref None
 let current_owner () = Scheduler.here current_owner (fun d -> d.owner)
+let () = if Dev.on then Dev.owners (fun () -> !(current_owner ()))
 
 let new_owner () =
   let current_owner = current_owner () in

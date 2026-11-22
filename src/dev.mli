@@ -10,3 +10,6 @@ val tracing : unit -> bool
 val cause : 'a -> string -> unit
 val take_cause : 'a -> string option
 val trace : string -> unit
+val island : string -> string -> 'a -> unit
+val state : 'a -> (unit -> 'b) -> unit
+val owners : (unit -> 'a option) -> unit

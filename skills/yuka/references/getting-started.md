@@ -293,6 +293,10 @@ yuka dev --build 'dune build --watch' --assets _build/default/client/out \
   -- ./_build/default/server/main.exe
 ```
 
+In dev mode, each page has a **Yuka** button at the bottom right. It
+opens a panel with the islands of the page and their States. See
+[Dev panel](state.md#dev-panel).
+
 For production, bundle the client and define `__YUKA_DEV__` as `false`.
 Without the define, the bundle keeps the dev checks. The bundle goes in
 the build directory, so make it after the last `dune build` (a build

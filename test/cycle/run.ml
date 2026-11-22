@@ -1576,6 +1576,8 @@ let dev =
             let page = (get ~config "/plain").body in
             check_true "script in the head" (index page "new EventSource(\"/_yuka/dev\")" < index page "</head>");
             check_true "state in the script, < escaped" (contains page {|var s={"build":3,"page":2,"error":"\u003c\/script>"}|});
+            check_true "the panel reads the islands from the runtime" (contains page "window.__yuka_dev");
+            check_true "the panel toggle" (contains page {|b.id="yuka-dev-toggle"|});
             let partial = get ~config ~headers:[ ("Yuka-Navigate", "L0") ] "/plain" in
             check_header partial "yuka-outlet" [ "L0" ];
             check_true "no script in a partial answer" (not (contains partial.body "EventSource"));

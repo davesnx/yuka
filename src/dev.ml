@@ -10,3 +10,6 @@ let tracing () = false
 let cause _ _ = ()
 let take_cause _ = None
 let trace _ = ()
+let island _ _ _ = ()
+let state _ _ = ()
+let owners _ = ()
