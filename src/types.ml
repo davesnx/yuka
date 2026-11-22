@@ -125,6 +125,7 @@ type backend = ..
         subscribe : (unit -> unit) -> unit;
         fill : unit -> string;
         fill_failed : string -> string;
+        fill_broken : unit -> string;
         inside_island : bool;
         blocking : [ `Yes | `No | `Timeout of float ];
       }

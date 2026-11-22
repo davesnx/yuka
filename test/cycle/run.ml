@@ -1212,7 +1212,7 @@ let render =
         check_header r "content-type" [ "application/x-ndjson; charset=utf-8" ];
         check_header r "yuka-outlet" [ "L0" ];
         Alcotest.(check string) "shell line"
-          ({|"\u003cscript type=\"application/json\" data-yuka-context=\"route\" data-name=\"yuka.route\">\"/slow\"\u003c/script>\u003c!--[L0-s1-->wait\u003c!--]-->"|} ^ "\n")
+          ({|"\u003cscript type=\"application/json\" data-yuka-context=\"route\" data-name=\"yuka.route\">\"/slow\"\u003c/script>\u003c!--[L0-s1-->wait\u003c!--]-->\u003ctemplate data-yuka-failed=\"L0-s1\">\u003c/template>"|} ^ "\n")
           shell;
         Alcotest.(check string) "then the fill and the end" (shell ^ {|["L0-s1","ready"]|} ^ "\n[]\n") body;
         let r, shell, body = streamed "-" in
@@ -1326,7 +1326,7 @@ let blocking =
         let r, b, ended = open_stream a in
         check_header r "yuka-stream" [ "1" ];
         Alcotest.(check string) "shell line"
-          ({|"\u003cscript type=\"application/json\" data-yuka-context=\"route\" data-name=\"yuka.route\">\"/blocking\"\u003c/script>\u003cmain>first\u003c!--[L0-s2-->wait\u003c!--]-->fast\u003c/main>"|} ^ "\n")
+          ({|"\u003cscript type=\"application/json\" data-yuka-context=\"route\" data-name=\"yuka.route\">\"/blocking\"\u003c/script>\u003cmain>first\u003c!--[L0-s2-->wait\u003c!--]-->fast\u003c/main>\u003ctemplate data-yuka-failed=\"L0-s2\">failed\u003c/template>"|} ^ "\n")
           (Buffer.contents b);
         App.finish_second "second";
         check_true "ended" (Async.status ended = Async.Done ());

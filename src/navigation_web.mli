@@ -21,6 +21,8 @@ val fetch_page :
   (unit -> unit) ->
   unit
 val put : node -> string -> string -> node
+val failed_views : node -> (string * string) array
+val fail_values : node -> unit
 val hold : node -> int -> bool -> unit
 val hash_of : string -> string
 val no_hash : string -> string

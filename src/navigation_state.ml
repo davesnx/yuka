@@ -12,3 +12,5 @@ let set ?link:a value =
   Scheduler.batch (fun () ->
       Signal.set navigating (Option.is_some value);
       Signal.set navigation value)
+
+let stream : [ `Filling | `Done | `Broken ] Signal.t = Signal.make `Done

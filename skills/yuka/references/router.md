@@ -427,6 +427,24 @@ fill that comes later, until the user scrolls, touches, clicks or types,
 or the stream ends. A URL fragment whose element comes in a later fill
 is scrolled to by the same rule.
 
+When the connection breaks before the stream ends, each `Await` that is
+still pending shows its `failed` view with the message `"broken"`, as
+for a rejected value. The server sends that view with the page, so the
+browser can show it when nothing more comes. The fills that came stay.
+This is also true on a first load. `Yuka.Browser.stream` is a
+read-only State that tells the app about the fills of the page shown:
+`` `Filling `` while a streamed answer still sends fills, `` `Broken ``
+after its stream broke, else `` `Done ``. Use it to offer a reload:
+
+```ocaml
+let[@client] make () =
+  <p class_=(match Yuka.State.get Yuka.Browser.stream with `Broken -> "notice" | `Filling | `Done -> "hidden")>
+    <button on_click=(fun _ -> Yuka.Browser.refresh ())>"Reload"</button>
+  </p>
+```
+
+`Yuka.Browser.stream` is `` `Done `` for a first load.
+
 After a client navigation to another page, Yuka tells screen readers
 about it and moves the focus, as a full page load does:
 

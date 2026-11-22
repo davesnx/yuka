@@ -430,6 +430,11 @@ In a server render, `message` is the message of a
 `Yuka.Server.Action.reject`, else `"server error"`, so the HTML never has
 the detail of a failure.
 
+When the connection breaks before a pending value comes, the `Await`
+shows `failed "broken"`, on a first load and on a client navigation.
+The server sends that view with the page, so keep `failed` small. The
+values that came stay. See [Router](router.md) for `Yuka.Browser.stream`.
+
 ## Errors: Catch
 
 `<Yuka.Catch>` is an error boundary. An exception that its children raise

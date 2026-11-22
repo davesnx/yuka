@@ -104,6 +104,8 @@ let put : node -> string -> string -> node =
   root = root.body || root;
   t.innerHTML = html;
   if (!id) { root.appendChild(t.content); return g; }
+  const b = root.querySelector('template[data-yuka-failed="' + id + '"]');
+  if (b) b.remove();
   const w = d.createTreeWalker(root, 128);
   let c, n, k = 1;
   while ((c = w.nextNode()) && c.data !== "[" + id);
@@ -112,6 +114,28 @@ let put : node -> string -> string -> node =
   c.parentNode.insertBefore(t.content, n);
   c.data = "[";
   return g;
+}|}]
+
+let failed_views : node -> (string * string) array =
+  [%mel.raw
+    {|function (root) {
+  return Array.from((root.body || root).querySelectorAll("template[data-yuka-failed]"), function (t) { return [t.getAttribute("data-yuka-failed"), t.innerHTML]; });
+}|}]
+
+let fail_values : node -> unit =
+  [%mel.raw
+    {|function (root) {
+  const d = document;
+  root = root.body || root;
+  for (const s of root.querySelectorAll('script[type="application/json"]'))
+    for (const m of s.textContent.matchAll(/"\$async":"([^"\\]*)"\}/g))
+      if (!d.querySelector('script[data-yuka-async="' + m[1] + '"]')) {
+        const e = d.createElement("script");
+        e.type = "application/json";
+        e.setAttribute("data-yuka-async", m[1]);
+        e.textContent = '{"error":"broken"}';
+        root.appendChild(e);
+      }
 }|}]
 
 let hold : node -> int -> bool -> unit =

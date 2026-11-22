@@ -274,7 +274,15 @@ module Await : sig
       and come later. The wait delays the first byte of the page: a page
       with a slow value sends its first byte up to its largest limit later.
       A page whose [Cache-Control] is shared ([public] or [s-maxage])
-      waits for every value, whatever [blocking] says. *)
+      waits for every value, whatever [blocking] says.
+
+      With each pending value it sends, the server also sends [failed
+      "broken"], in a [<template data-yuka-failed="ID">]. When the
+      response stops before the value comes (the connection breaks), the
+      browser shows that view in place of [loading], on a first load
+      and on a client navigation, and an async value of an island that did
+      not come fails with ["broken"]. If [failed] raises, the view is
+      empty. *)
 end
 
 module Catch : sig
@@ -808,6 +816,7 @@ module Private : sig
         subscribe : (unit -> unit) -> unit;
         fill : unit -> string;
         fill_failed : string -> string;
+        fill_broken : unit -> string;
         inside_island : bool;
         blocking : [ `Yes | `No | `Timeout of float ];
       }
@@ -816,7 +825,11 @@ module Private : sig
 
   val fill_script : string
   (** The inline script that streaming writes in the head. It defines
-      [window.__yukaFill(id)]. *)
+      [window.__yukaFill(id)], which also removes the
+      [<template data-yuka-failed="ID">] of the fill. At [DOMContentLoaded]
+      it puts each such template that is left in place of the [loading]
+      content of its [await], and fails each async value that did not come
+      with ["broken"]. *)
 
   type session
   (** One server render. Counts ids and collects pending parts. *)
@@ -841,7 +854,10 @@ module Private : sig
       session, a pending [Await] is printed as [<!--[sN-->] loading
       [<!--]-->] and recorded as [Pending_await]; [fill] prints the settled
       content later with the same session, and [fill_failed message] prints
-      the [failed] element instead (for a timeout). *)
+      the [failed] element instead (for a timeout). [fill_broken ()] prints
+      [failed "broken"] with its links and leaves the session as it was,
+      except for its id counters: the client shows it when the stream
+      breaks. *)
 
   val take_pending : session -> pending list
   (** The parts recorded since the last call, in order. *)
@@ -1264,7 +1280,9 @@ val render :
     that it fills or the element that holds it, and when a newer
     navigation replaces its page before it is shown; then the request of
     a navigation is aborted. A stream that breaks keeps the content that
-    came and starts the islands that it held. The navigation cache keeps
+    came, shows the [failed] view of each [await] that is still pending
+    (see {!Await.make}), and starts the islands that it held;
+    {!Browser.stream} is then [`Broken]. The navigation cache keeps
     a streamed answer with its fills: a later navigation to it shows the
     fills that came and takes the others as they come, and a stream that
     breaks leaves the cache. So that the cache entry is complete, the

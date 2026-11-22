@@ -2721,6 +2721,82 @@ await step("8e. a client that leaves during a streamed page", async () => {
   check("8e.1 the server still answers after clients closed their connections during streamed responses", status === 200, String(status));
 });
 
+await step("8f. a stream that breaks shows the failed view of each pending Await", async () => {
+  const errorsOf = (p: Page) => {
+    const errors: string[] = [];
+    p.on("console", (m) => {
+      if (m.type() === "error" || m.text().includes("hydration mismatch")) errors.push(m.text());
+    });
+    p.on("pageerror", (e) => errors.push(String(e)));
+    return errors;
+  };
+  const shown = (p: Page, text: string) =>
+    p.waitForFunction((t) => [...document.querySelectorAll(".error")].some((e) => e.textContent === t), text, { timeout: 5000 }).then(() => true, () => false);
+  const nav = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const navErrors = errorsOf(nav);
+  await nav.addInitScript(() => {
+    const w = window as any, f = w.fetch;
+    w.fetch = function (input: any, init: any) {
+      return f.call(this, input, init).then((r: any) => {
+        if (r.headers.get("yuka-stream") !== "1" || !r.body) return r;
+        let seen = "";
+        const cut = r.body.pipeThrough(
+          new TransformStream({
+            transform(chunk: any, out: any) {
+              seen += new TextDecoder().decode(chunk);
+              const i = seen.indexOf("\n");
+              if (i < 0) return;
+              out.enqueue(new TextEncoder().encode(seen.slice(0, i + 1)));
+              out.error(new Error("cut by the test"));
+            },
+          }),
+        );
+        const answer = new Response(cut, { status: r.status, statusText: r.statusText, headers: r.headers });
+        Object.defineProperty(answer, "url", { value: r.url });
+        return answer;
+      });
+    };
+  });
+  await nav.goto(base + "/", { waitUntil: "networkidle" });
+  await nav.waitForSelector(".row");
+  await routerLoaded(nav);
+  await nav.evaluate(() => ((window as any).__marker = "alive"));
+  await nav.locator('.row[data-id="YUK-8"] .row-title').click();
+  await nav.waitForURL("**/issue/YUK-8");
+  const navComments = await shown(nav, "Could not load comments: broken");
+  const navRelated = await shown(nav, "Could not load: broken");
+  const navState = await nav.evaluate(() => ({
+    marker: (window as any).__marker,
+    skeletons: document.querySelectorAll(".issue-page .skeleton").length,
+    templates: document.querySelectorAll("template[data-yuka-failed]").length,
+  }));
+  check("8f.1 a client navigation whose stream breaks shows the failed view of each pending Await, in the page and in an island", navComments && navRelated && navState.marker === "alive" && navState.skeletons === 0 && navState.templates === 0, JSON.stringify({ navComments, navRelated, ...navState }));
+  check("8f.2 no console error or hydration mismatch after the break", navErrors.length === 0, navErrors.join(" | "));
+  await nav.close();
+
+  const first = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const firstErrors = errorsOf(first);
+  await first.route("**/issue/YUK-3", async (route) => {
+    const r = await route.fetch();
+    const body = await r.text();
+    const i = body.indexOf("<template data-yuka-fill");
+    const headers = { ...r.headers() };
+    delete headers["content-length"];
+    delete headers["transfer-encoding"];
+    await route.fulfill({ status: r.status(), headers, body: i < 0 ? body : body.slice(0, i) });
+  });
+  await first.goto(base + "/issue/YUK-3", { waitUntil: "domcontentloaded" });
+  const firstComments = await shown(first, "Could not load comments: broken");
+  const firstRelated = await shown(first, "Could not load: broken");
+  const firstState = await first.evaluate(() => ({
+    skeletons: document.querySelectorAll(".issue-page .skeleton").length,
+    templates: document.querySelectorAll("template[data-yuka-failed]").length,
+  }));
+  check("8f.3 a first load whose stream breaks shows the failed view of each pending Await, in the page and in an island", firstComments && firstRelated && firstState.skeletons === 0 && firstState.templates === 0, JSON.stringify({ firstComments, firstRelated, ...firstState }));
+  check("8f.4 no console error or hydration mismatch after the break", firstErrors.length === 0, firstErrors.join(" | "));
+  await first.close();
+});
+
 await step("9. screenshots", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");

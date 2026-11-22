@@ -15,6 +15,7 @@ type navigation = Navigation_state.navigation = {
 }
 
 let navigation : navigation option State.read = State.of_signal Navigation_state.navigation
+let stream : [ `Filling | `Done | `Broken ] State.read = State.of_signal Navigation_state.stream
 
 let replace_url url =
   if Url.unsafe ~tag:"a" "href" url || not (Web.same_origin url) then Types.log "replace_url" url

@@ -87,6 +87,19 @@ val navigation : navigation option State.read
     gives the target as a typed route. Always [None] on the server and
     without client navigation. *)
 
+val stream : [ `Filling | `Done | `Broken ] State.read
+(** The fills of the page shown after a client navigation.
+    [`Filling] while a streamed answer that the page shows still sends
+    the fills of its pending [await]s; [`Broken] when such a stream broke
+    before its end; else [`Done]. It changes when the page shows a new
+    answer, when a stream ends and when {!Yuka.stop} runs. When a stream
+    breaks, each pending [await] in the content that it fills shows its
+    [failed] view with the message ["broken"], as for a rejected value: the
+    server sends that view with the page, and the client puts it in place
+    of the [loading] content. Use [`Broken] to offer a reload, for
+    example with {!refresh}. Always [`Done] on the server, without client
+    navigation and for the first page load. *)
+
 val replace_url : string -> unit
 (** Browser only: raises [Invalid_argument] on native. Sets the URL of the current
     history entry ([history.replaceState]) and loads nothing: no request,

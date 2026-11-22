@@ -2398,6 +2398,89 @@ let nested_outlets () =
     ({|<a id="two" href="/two">two</a><a id="three" href="/three">three</a>|}
     ^ {|<yuka-outlet data-k="L0" style="display:contents"><p>outer</p><yuka-outlet data-k="L1" style="display:contents"><p id="inner">inner</p></yuka-outlet></yuka-outlet>|})
 
+let inner_html : string -> string =
+  [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.innerHTML.replace(/<!--[^>]*-->/g, '') : 'none' }"]
+
+let text_of : string -> string =
+  [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.textContent : 'none' }"]
+
+let stream_state () =
+  match State.peek Browser.stream with `Filling -> "filling" | `Done -> "done" | `Broken -> "broken"
+
+let waiter_entry =
+  runtime_entry ~name:"Waiter" (fun json ->
+      Result.map
+        (fun async () ->
+          Await.make ~async
+            ~loading:(element "span" [] [ text "w" ])
+            ~failed:(fun m -> element "b" [] [ text ("F:" ^ m) ])
+            ~children:(fun n -> element "span" [] [ text (ints n) ])
+            ())
+        (Codec.decode (Codec.async Codec.int) json))
+
+let streamed_complete_state finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  check "done at start" "done" (stream_state ());
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0
+    (json_line
+       ({|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|}
+       ^ {|<template data-yuka-failed="L0-s1"><b id="failed">failed</b></template>|}));
+  tick (fun () ->
+      check "filling while the fills come" "filling" (stream_state ());
+      push_text 0 (part_line "L0-s1" {|<b id="done">done</b>|});
+      tick (fun () ->
+          check "a fill removes its failed view" "done|0" (attr "#done" "id" ^ "|" ^ ints (count_selector "template"));
+          check "still filling before the end" "filling" (stream_state ());
+          push_text 0 "[]\n";
+          push_end 0;
+          tick (fun () ->
+              check "done at the end" "done" (stream_state ());
+              check "no failed view" "none" (attr "#failed" "id");
+              finish ())))
+
+let streamed_broken_failed finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry; waiter_entry ]) ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0
+    (json_line
+       ({|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]--><!--[L0-s3--><i id="wait3">w</i><!--]-->|}
+       ^ {|<div id="plain"><!--[L0-s4--><i id="wait4">w</i><!--]--></div>|}
+       ^ {|<yuka-island data-name="Waiter" data-id="L0-i4" style="display:contents"><!--[L0-s2--><span>w</span><!--]--></yuka-island><script type="application/json" data-yuka-props="L0-i4">{"$async":"L0-a1"}</script>|}
+       ^ {|<template data-yuka-failed="L0-s1"><b id="failed">could not load</b></template>|}
+       ^ {|<template data-yuka-failed="L0-s2"><b>F:broken</b></template>|}
+       ^ {|<template data-yuka-failed="L0-s3"><b id="failed3">no</b></template>|}
+       ^ {|<template data-yuka-failed="L0-s4"></template>|}));
+  tick (fun () ->
+      check "filling" "filling" (stream_state ());
+      check "the island around a pending fill waits" "none" (attr "yuka-island b" "id");
+      push_text 0 (part_line "L0-s3" {|<i id="came">came</i>|});
+      tick (fun () ->
+          push_error 0;
+          tick (fun () ->
+              check "broken" "broken" (stream_state ());
+              check "a pending await shows its failed view" "failed|none" (attr "#failed" "id" ^ "|" ^ attr "#wait" "id");
+              check "a fill that came stays" "came|none" (attr "#came" "id" ^ "|" ^ attr "#failed3" "id");
+              check "the default failed view is empty" "" (inner_html "#plain");
+              check "no failed view is left to show" "0" (ints (count_selector "template"));
+              check "the island shows the failed view of its await" "F:broken" (text_of "yuka-island[data-id=L0-i4]");
+              check "its async value failed" {|{"error":"broken"}|} (text_of {|script[data-yuka-async="L0-a1"]|});
+              ignore (click "#home" "");
+              resolve_headers 1 {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+              tick (fun () ->
+                  check "a new page is done" "done" (stream_state ());
+                  finish ()))))
+
 let streamed_inner_replaced finish =
   Yuka.stop ();
   State.set probe_runs 0;
@@ -4057,6 +4140,8 @@ let all =
     ("a streamed answer: a complete one is cached and replayed", streamed_cache);
     ("a streamed answer: a broken one keeps the page and is not cached", streamed_broken);
     ("a streamed answer that broke before its transition ran starts the islands around its fills", streamed_broken_before_apply);
+    ("Browser.stream is filling until a complete stream ends, then done", streamed_complete_state);
+    ("a broken stream shows the failed view of each pending await and Browser.stream is broken", streamed_broken_failed);
     ("a streamed answer into an inner outlet stops when the outer outlet is replaced", streamed_inner_replaced);
     ("the end of a body stream leaves the islands of a newer outlet stream held", streamed_outlet_under_body_stream);
     ("a streamed answer that a newer navigation replaces before its transition runs is aborted", streamed_superseded_before_apply);

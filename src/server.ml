@@ -66,8 +66,18 @@ let pending_id = function
 
 let is_await = function Types.Pending_await _ -> true | Types.Pending_async _ | Types.Pending_answer _ -> false
 
+let broken items =
+  String.concat ""
+    (List.filter_map
+       (function
+         | Types.Pending_await { id; fill_broken; _ } ->
+             let html = match fill_broken () with html -> html | exception _ -> "" in
+             Some ("<template data-yuka-failed=\"" ^ id ^ "\">" ^ html ^ "</template>")
+         | Types.Pending_async _ | Types.Pending_answer _ -> None)
+       items)
+
 let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ?on_ready
-    ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
+    ?(shown = false) ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.context <- context;
   session.form <- form;
@@ -81,7 +91,8 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
   let shell = Printer.print session (fun () -> build ()) in
   let fills = List.exists is_await session.pending in
   let result, resolve, fail = Async.make () in
-  let chain = ref (on_shell ~fills shell) in
+  let shown = ref shown in
+  let chain = ref (on_shell ~fills ~failed:(fun () -> broken (List.rev session.pending)) shell) in
   let emit f = chain := Async.bind !chain f in
   let outstanding = ref [] in
   let finished = ref false in
@@ -113,7 +124,8 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
     match on_ready with
     | Some on_ready when !started && (not !ready) && !held = [] ->
         ready := true;
-        on_ready ~fills:(List.exists is_await !outstanding)
+        shown := true;
+        on_ready ~fills:(List.exists is_await !outstanding) ~failed:(broken !outstanding)
     | Some _ | None -> ()
   in
   let release id =
@@ -122,9 +134,10 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
       check_ready ()
     end
   in
-  let rec register () =
+  let rec register ?(ahead = true) () =
     let items = Printer.take_pending session in
     outstanding := !outstanding @ items;
+    let failed = if ahead && !shown then broken items else "" in
     List.iter
       (function
         | Types.Pending_await { id; blocking = `Yes | `Timeout _; _ } when Option.is_some on_ready && not !ready -> held := id :: !held
@@ -142,15 +155,16 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
             Async.on_settled async (fun status -> settled_value id status)
         | Types.Pending_answer { key; answer } ->
             Async.on_settled answer (fun status -> settled_answer key status))
-      items
+      items;
+    failed
   and check_done () = if !outstanding = [] then conclude ()
   and settled_fill id inside fill =
     if (not !finished) && is_outstanding id then begin
       remove id;
       match fill () with
       | html ->
-          register ();
-          let links = Printer.take_answers session ^ Printer.take_links session in
+          let failed = register () in
+          let links = Printer.take_answers session ^ Printer.take_links session ^ failed in
           emit (fun () -> on_fill id inside links html);
           check_done ();
           release id
@@ -190,8 +204,8 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
         | Types.Pending_await { id; fill_failed; inside_island; _ } -> (
             match fill_failed "timeout" with
             | html ->
-                register ();
-                let links = Printer.take_answers session ^ Printer.take_links session in
+                let failed = register () in
+                let links = Printer.take_answers session ^ Printer.take_links session ^ failed in
                 emit (fun () -> on_fill id inside_island links html);
                 expire ()
             | exception exn -> abort exn)
@@ -203,7 +217,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
             emit (fun () -> on_value (Printer.answer_script key (timeout_answer ())));
             expire ())
   in
-  register ();
+  ignore (register ~ahead:false ());
   if !outstanding = [] then conclude ()
   else
     begin
@@ -222,13 +236,13 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
 let stream ?head:head_html ?early ?import_map ?(timeout = 10.) ?title ?styles
     ?scripts ?preload ~sleep ~write build =
   let ( >>= ) = Async.bind in
-  drive ?preload ~timeout ~sleep
+  drive ?preload ~shown:true ~timeout ~sleep
     (fun () -> build ())
-    ~on_shell:(fun ~fills shell ->
+    ~on_shell:(fun ~fills ~failed shell ->
       write
         (head ~extra:(if fills then Printer.fill_script else "") ?head:head_html ?early ?import_map ?title
            ?styles ?scripts ())
-      >>= fun () -> write shell)
+      >>= fun () -> write (shell ^ failed ()))
     ~on_fill:(fun id _ links html -> write (links ^ fill_chunk id html))
     ~on_value:write
   >>= fun _ -> write "</body></html>"
@@ -299,16 +313,16 @@ let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix 
       | Async.Pending -> ());
     ended
   in
-  let send_shell ~fills =
+  let send_shell ~fills ~failed =
     decide (fun () ->
         streaming := true;
-        resolve (Streamed { shell = !document ^ Buffer.contents values; fills; rest }))
+        resolve (Streamed { shell = !document ^ Buffer.contents values ^ failed; fills; rest }))
   in
   let driven_result =
     drive ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~timeout ~sleep
-      ?on_ready:(if stream then Some (fun ~fills -> if !driven then send_shell ~fills else ready := Some fills) else None)
+      ?on_ready:(if stream then Some (fun ~fills ~failed -> if !driven then send_shell ~fills ~failed else ready := Some (fills, failed)) else None)
       (fun () -> build ())
-      ~on_shell:(fun ~fills:_ shell ->
+      ~on_shell:(fun ~fills:_ ~failed:_ shell ->
         document := shell;
         Async.return ())
       ~on_fill:(fun id inside links html ->
@@ -334,7 +348,7 @@ let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix 
         fail_finished m;
         decide (fun () -> fail m)
     | Async.Pending -> ());
-  Option.iter (fun fills -> send_shell ~fills) !ready;
+  Option.iter (fun (fills, failed) -> send_shell ~fills ~failed) !ready;
   result
 
 let settled ?timeout ?preload ?entry ?current ?id_prefix ?form ?csrf ?context ~sleep build =
