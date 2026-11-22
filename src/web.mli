@@ -109,7 +109,7 @@ val history_replace_url : string -> unit
 val manual_scroll : unit -> unit
 val plain_click : event -> bool
 val link_href : bool -> node -> string
-val link_flag : string -> node -> bool
+val link : node -> node
 type 'a table
 
 val table : unit -> 'a table

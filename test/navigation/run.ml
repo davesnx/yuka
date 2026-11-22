@@ -199,7 +199,7 @@ let click_fetches finish =
   check "fetched url" "http://localhost/issue/1" (call_url 0);
   check "header" "-" (call_header 0);
   check "not pushed before the page loaded" "/start?x=1" (location_ ());
-  check "body unchanged while loading" (page {|<a id="l" href="/issue/1"><span id="in">go</span></a>|}) (body_html ());
+  check "body unchanged while loading, the link pending" (page {|<a id="l" href="/issue/1" data-yuka-pending=""><span id="in">go</span></a>|}) (body_html ());
   resolve_call 0 (doc "Issue 1" (page "<p>one</p>")) "";
   tick (fun () ->
       check "body swapped" (page "<p>one</p>") (body_html ());
@@ -718,6 +718,42 @@ let push_end : int -> unit = [%mel.raw "function (i) { globalThis.__calls[i].pus
 let push_error : int -> unit = [%mel.raw "function (i) { globalThis.__calls[i].push(new Error('cut')) }"]
 let json_line : string -> string = [%mel.raw "function (s) { return JSON.stringify(s) + '\\n' }"]
 let part_line : string -> string -> string = [%mel.raw "function (id, h) { return JSON.stringify([id, h]) + '\\n' }"]
+
+let pending_link finish =
+  Yuka.stop ();
+  State.set probe_runs 0;
+  setup "";
+  outlet_page ();
+  render ~islands:(runtime_registry [ probe_entry ]) ();
+  let pending sel = attr sel "data-yuka-pending" in
+  check "no link pending at start" "null" (pending "#two");
+  ignore (click "#two" "");
+  check "the clicked link is pending" "" (pending "#two");
+  ignore (click "#home" "");
+  check "a newer navigation clears the older link" "null" (pending "#two");
+  check "the newer link is pending" "" (pending "#home");
+  resolve_headers 1 {|<p id="home-page">home</p>|} 200 [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "page shown" "home-page" (attr "#home-page" "id");
+      check "cleared once the page is shown" "null" (pending "#home");
+      ignore (click "#two" "");
+      check "pending again" "" (pending "#two");
+      log_clear ();
+      reject_call 2;
+      tick (fun () ->
+          check "a failed request is a full load" "assign" (log_read ());
+          check "cleared when the navigation fails" "null" (pending "#two");
+          ignore (click "#two" "");
+          resolve_stream 3 [| ("yuka-outlet", "L0") |];
+          push_text 3 (json_line {|<p id="new">new</p><!--[L0-s1--><i id="wait">wait</i><!--]-->|});
+          tick (fun () ->
+              check "shell shown" "wait" (attr "#wait" "id");
+              check "cleared once the stream shell is shown" "null" (pending "#two");
+              ignore (click "#home" "");
+              check "pending before stop" "" (pending "#home");
+              stop ();
+              check "cleared by stop" "null" (pending "#home");
+              finish ())))
 
 let streamed finish =
   Yuka.stop ();
@@ -2220,7 +2256,7 @@ let waits_for_prefetch finish =
   check "the prefetch is not aborted" "false" (bools (call_aborted 0));
   resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
   tick (fun () ->
-      check "the superseded navigation shows nothing" links (body_html ());
+      check "the superseded navigation shows nothing" (page {|<a id="l" href="/two">two</a><a id="m" href="/three" data-yuka-pending="">three</a>|}) (body_html ());
       resolve_call 1 (doc "Three" (page "<p>three</p>")) "";
       tick (fun () ->
           check "the last navigation wins" (page "<p>three</p>") (body_html ());
@@ -2545,7 +2581,7 @@ let transition_token finish =
   resolve_call 0 (doc "Two" (page {|<a id="m" href="/three">three</a>|})) "";
   tick (fun () ->
       check "state is updated before the transition runs" "/two" (location_ ());
-      check "the DOM waits for the callback" links (body_html ());
+      check "the DOM waits for the callback" (page {|<a id="l" href="/two" data-yuka-pending="">two</a><a id="m" href="/three">three</a>|}) (body_html ());
       run_transition 0;
       check "swapped in the callback" (page {|<a id="m" href="/three">three</a>|}) (body_html ());
       ignore (click "#m" "");
@@ -2600,14 +2636,14 @@ let back_before_transition finish =
                             "scroll:300|scroll:0|g0/2" (log_read ());
                           finish ()))))))
 
-let newer_before_transition fetched (start_newer : unit -> unit) finish =
+let newer_before_transition fetched kept (start_newer : unit -> unit) finish =
   race_start ();
   tick (fun () ->
       log_clear ();
       start_newer ();
       check "the newer navigation fetches" fetched (call_url 1);
       run_transition 0;
-      check "the abandoned page is never put in the DOM" (race_page "<p>start</p>" 1) (body_html ());
+      check "the abandoned page is never put in the DOM" kept (body_html ());
       check "still navigating" "true" (navigating ());
       check "no scroll, no island started" "" (log_read ());
       resolve_call 1 (doc "Three" (page ("<p>three</p>" ^ island 3))) "";
@@ -3967,6 +4003,7 @@ let all =
     ("warm: press then click before the answer warms nothing", press_then_click);
     ("max-age reuses a page", max_age_cache);
     ("a streamed answer: the shell at once, then fills, values and islands", streamed);
+    ("the clicked link is pending until its page is shown, it fails or a newer one replaces it", pending_link);
     ("a streamed answer: kept until a newer page swaps the outlet", streamed_superseded);
     ("a streamed answer: a complete one is cached and replayed", streamed_cache);
     ("a streamed answer: a broken one keeps the page and is not cached", streamed_broken);
@@ -4000,8 +4037,8 @@ let all =
     ("transitions: state first, one attribute owner", transition_token);
     ("transitions: an error in the update is reported", transition_error);
     ("transitions: back before the update runs keeps the shown page", back_before_transition);
-    ("transitions: a click before the update runs drops the older page", newer_before_transition "http://localhost/three" (fun () -> ignore (click "#m" "")));
-    ("transitions: a popstate before the update runs drops the older page", newer_before_transition "/three" (fun () -> popstate_to "/three"));
+    ("transitions: a click before the update runs drops the older page", newer_before_transition "http://localhost/three" (page ({|<a id="l" href="/two">two</a><a id="m" href="/three" data-yuka-pending="">three</a><p>start</p>|} ^ island 1)) (fun () -> ignore (click "#m" "")));
+    ("transitions: a popstate before the update runs drops the older page", newer_before_transition "/three" (race_page "<p>start</p>" 1) (fun () -> popstate_to "/three"));
     ("transitions: stop before the update runs drops the page", stop_before_transition);
     ("transitions: back then forward before the update runs starts the page at the top", back_forward_before_transition);
     ("a popstate that replaces a popstate load keeps the scroll of the shown page", popstate_replaced_scroll);

@@ -94,8 +94,8 @@ let use f =
         load ()
       end
 
-let go kind url f fail =
-  Navigation_state.set (Some { Navigation_state.url; from = !loaded; kind });
+let go ?link kind url f fail =
+  Navigation_state.set ?link (Some { Navigation_state.url; from = !loaded; kind });
   let fail () =
     Navigation_state.set None;
     fail ()
@@ -111,9 +111,9 @@ let go kind url f fail =
       end;
       load ()
 
-let navigate ~replace ~keep_scroll href =
+let navigate ?link ~replace ~keep_scroll href =
   let url = Web.local_url href in
-  go
+  go ?link
     (if replace || String.equal url (Web.current_url ()) then `Replace else `Push)
     url
     (fun r -> r.navigate ~replace ~keep_scroll href)
@@ -131,11 +131,10 @@ let on_click e =
     match Web.link_href false (Web.target e) with
     | "" -> ()
     | href ->
+        let link = Web.link (Web.target e) in
+        let flag name = Option.is_some (Web.get_attribute link name) in
         Web.prevent_default e;
-        navigate
-          ~replace:(Web.link_flag "data-yuka-replace" (Web.target e))
-          ~keep_scroll:(Web.link_flag "data-yuka-keep-scroll" (Web.target e))
-          href
+        navigate ~link ~replace:(flag "data-yuka-replace") ~keep_scroll:(flag "data-yuka-keep-scroll") href
 
 let on_link e =
   if Option.is_some !router || Web.link_href true (Web.target e) <> "" then
@@ -178,7 +177,7 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
       List.iter (fun n -> Web.add_listener doc n on_leave) leave_events;
       Web.add_listener (Web.window ()) "popstate" on_popstate);
   islands ();
-  Platform.client_navigate := Some navigate;
+  Platform.client_navigate := Some (navigate ?link:None);
   Platform.client_refresh := refresh;
   match !router with
   | Some r -> r.boot !settings

@@ -384,8 +384,7 @@ let link_href : bool -> node -> string =
   return a.href;
 }|}]
 
-let link_flag : string -> node -> bool =
-  [%mel.raw "function (name, t) { return t.closest(\"a[href]\").hasAttribute(name) }"]
+external link : node -> (_[@mel.as "a[href]"]) -> node = "closest" [@@mel.send]
 
 type 'a table
 

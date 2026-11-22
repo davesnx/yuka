@@ -1175,7 +1175,10 @@ val render :
       [data-yuka-replace] attribute replaces the current history entry, as
       [Browser.navigate ~replace:true]. A link with a [data-yuka-keep-scroll]
       attribute keeps the scroll position, as
-      [Browser.navigate ~keep_scroll:true].
+      [Browser.navigate ~keep_scroll:true]. The clicked link has a
+      [data-yuka-pending] attribute until the new page (or the first part
+      of a streamed page) is shown, the navigation fails or becomes a full
+      page load, or a newer navigation starts.
     - [popstate] loads the entry's URL without pushing history.
     - {!Browser.navigate} is a client navigation. {!Browser.refresh} is a
       client navigation to the URL shown that keeps the history entry, the

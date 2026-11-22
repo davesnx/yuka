@@ -371,6 +371,22 @@ let[@client] make () =
 `Routes.pending ()` gives the target as a typed route; see
 [The current route](#the-current-route).
 
+The link that the user clicked has a `data-yuka-pending` attribute while
+its navigation is in flight. Use it in CSS to show a spinner on that
+link:
+
+```css
+a[data-yuka-pending]::after { content: ""; /* a spinner */ }
+```
+
+Yuka removes the attribute when the new page (or the first part of a
+streamed page) is shown, when the navigation fails or becomes a full page
+load, and when a newer navigation starts. `aria-current` changes only
+after the new page is shown. Yuka does not set `aria-busy` on the link,
+because `aria-busy` tells assistive technology that the content of the
+element changes, and the content of the link does not change. For
+assistive technology, Yuka announces the title of the new page.
+
 A page with a `Yuka.Await` streams on a client navigation as on a first
 load. The server waits a short time (100 ms) for every `Await` and async
 value. When they settle in time, the new page comes in one piece. When
