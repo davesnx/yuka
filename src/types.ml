@@ -37,13 +37,26 @@ type backend = ..
     | Catch of {
         children : unit -> node;
         fallback : error:string -> reset:(unit -> unit) -> node;
-        client : Obj.t option -> node;
+        client : Obj.t -> node;
       }
     | Provide of {
         add : Scheduler.env -> Scheduler.env;
         children : unit -> node;
-        client : Obj.t option -> node;
+        client : Obj.t -> node;
+        pending : pending_region option;
       }
+
+  and pending_region = { fallback : node; build : Scheduler.env -> boundary * Scheduler.env * node }
+
+  and boundary = {
+    bind : Scheduler.env -> Scheduler.env;
+    built : unit -> unit;
+    idle : unit -> bool;
+    on_idle : (unit -> unit) -> unit;
+    on_switch : (unit -> unit) -> unit;
+    reveal : unit -> unit;
+    mark : unit -> unit -> bool;
+  }
 
   and slot = { content : node option; dom : Obj.t list ref }
 

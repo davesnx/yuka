@@ -30,6 +30,8 @@
   navigation_web
   optimistic
   page_context
+  pending
+  pending_dom
   platform
   prefetch
   printer

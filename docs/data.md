@@ -401,6 +401,76 @@ In a server render, `message` is the message of a
 `Yuka.Server.Action.reject`, else `"server error"`, so the HTML never has
 the detail of a failure.
 
+`loading` is optional. With no `loading`, the value joins the nearest
+`<Yuka.Pending>` above it (see the next section). With no `loading` and no
+`Pending` above, the `Await` shows nothing until the value is ready, and a
+dev build writes a console error.
+
+## Wait for many values: Pending
+
+`<Yuka.Pending>` makes many values that load change the page one time.
+Use it when one input, for example a filter, starts more than one query:
+
+```ocaml
+let[@client] make ~filter () =
+  <Yuka.Pending fallback=(<p>"Loading..."</p>)>
+    (fun () ->
+      let issues = Yuka.Async.memo (fun () -> Yuka.Action.call Issues.search (Yuka.State.get filter)) in
+      let counts = Yuka.Async.memo (fun () -> Yuka.Action.call Issues.counts (Yuka.State.get filter)) in
+      let busy = Yuka.Pending.busy () in
+      <div class_=(if Yuka.State.get busy then "busy" else "")>
+        <Counts status=(fun () -> Yuka.State.get counts) />
+        <Issue_list status=(fun () -> Yuka.State.get issues) />
+      </div>)
+  </Yuka.Pending>
+```
+
+The child is a function, `(fun () -> ...)`; it runs one time. Markup
+children are also correct (`<Yuka.Pending fallback>
+<Panel /></Yuka.Pending>`): the ppx puts them in a function. But a markup
+child that is not a constant is a hole, and a source that a hole makes
+starts only when the hole runs. On the server that is too late to hold
+the boundary, so make the sources in the function.
+
+A source is a value that loads under the `Pending`: a `Yuka.Async.memo`, a
+`Yuka.Remote.make`, or an `<Yuka.Await>` with no `loading`. A source joins
+the nearest `Pending` above it.
+
+- `fallback` shows until every source has its first value. Then the
+  children show. In the browser, the children are made off the page and
+  move in at that time.
+- After that, when the filter changes, the old view stays. When the last
+  source has its new value, all new values show in one step. A failure
+  changes with the others.
+- A hole whose new content makes new sources keeps its old content until
+  they are ready. During that time the old content does not update and
+  its event handlers do not run.
+- A State that is not a source changes at once. The filter input above
+  shows the new text at once. To keep a part in step with the data, read
+  the input from the data: for example, make the memo give the filter
+  together with the rows.
+- `Yuka.Pending.busy ()` gives a `bool` State of the nearest `Pending`: it
+  is `true` from the time a source starts to load until the view changes.
+  Call it in the children, where `Yuka.Context.get` works. Outside a
+  `Pending` it stays `false`, and a dev build writes a console error.
+- Each `Pending` changes alone. An inner `Pending` waits only for its own
+  sources. On the first load, an inner `Pending` that is ready before the
+  outer one shows its content when the outer one shows its children.
+- An `<Yuka.Await>` with its own `loading` is not a source. It shows its
+  own `loading`, as before.
+
+On the server, the children are made one time. When every source is
+ready at the end of the render, the children print in place. Else a
+streamed page sends `fallback` first and the children later, in one part.
+A page that is not streamed shows `fallback`. A source that a hole makes
+only when that part prints does not hold the part: it shows its own
+state.
+
+At hydration, when every source has its value, the children use the
+server HTML, as usual. When a source is still loading in the browser,
+the server HTML stays as it is, with no event handlers, until the sources
+are ready; then the new nodes replace it one time.
+
 ## Errors: Catch
 
 `<Yuka.Catch>` is an error boundary. An exception that its children raise

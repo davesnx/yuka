@@ -110,6 +110,14 @@ let before_hydration () =
         <Yuka.Client><Before_hydration /></Yuka.Client>
       </main>)
 
+let pending () =
+  Yuka.Server.page ~title:"Pending" (fun () ->
+      <main class_="about">
+        <h1>"Three queries, one change"</h1>
+        <p>"Each part loads with its own delay. Type in the field: the three parts change together."</p>
+        <Yuka.Client start=(`Lazy `Idle)><Pending_demo /></Yuka.Client>
+      </main>)
+
 let create_in workspace =
   Yuka.Server.page ~title:"New issue" (fun () ->
       <main class_="new-issue-page">

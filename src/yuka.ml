@@ -17,6 +17,7 @@ type client = Types.client
 type trigger = Types.trigger
 type start = Types.start
 include Element
+module Pending = Pending
 module Client = struct
   include Client
 
@@ -303,7 +304,6 @@ module Private = struct
   let slot_dom (s : slot) = s.dom
   let call_action = Bridge.send
   let async_source = Types.async_source
-  let boundary = Boundary.make
   let page_contexts () = !Platform.swapped != Platform.no_swap
   let render = Client.render
   let hydrate = Client.hydrate

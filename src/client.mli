@@ -41,6 +41,13 @@ val use_element : unit -> unit
 val use_await : unit -> unit
 val use_slot : unit -> unit
 val use_catch : unit -> unit
+val at : Obj.t -> Obj.t option
+val mount_at : Obj.t -> bool ref -> Types.node -> unit
+val hole_start_at : Obj.t -> Web.node
+val comment_at : Obj.t -> string -> Web.node
+val drop_rest_at : Obj.t -> unit
+val skip_region : Obj.t -> unit
+val off_page_at : Obj.t -> Web.node -> Obj.t
 val use_actions : unit -> unit
 
 val use_url_check : unit -> unit

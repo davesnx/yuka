@@ -767,6 +767,143 @@ let stream_cases =
     test_case "writes are sequenced" `Quick write_order;
     test_case "a failed write fails the stream" `Quick write_failure ]
 
+let pending_cases =
+  let open Alcotest in
+  let list_of = list string in
+  let calls = Hashtbl.create 8 in
+  let call label =
+    let a, resolve, _ = Async.make () in
+    Hashtbl.replace calls label resolve;
+    a
+  in
+  let resolve label v = (Hashtbl.find calls label) v in
+  let named name a = Yuka.Await.make ~async:a ~children:(fun n -> Yuka.text (name ^ "=" ^ string_of_int n)) () in
+  let source name = named name (call name) in
+  let pending ?(fallback = "F") children = Yuka.Pending.make ~fallback:(Yuka.text fallback) ~children () in
+  let run build =
+    Hashtbl.reset calls;
+    let write, chunks = recorder () in
+    let p = stream build write in
+    (p, fun () -> List.tl (chunks ()))
+  in
+  let all_settled () =
+    let p, chunks =
+      run (fun () -> pending (fun () -> Yuka.fragment [ named "a" (Async.return 1); named "b" (Async.return 2) ]))
+    in
+    get p;
+    check list_of "S1: settled during the render, the children print inline" [ "a=1b=2"; "</body></html>" ]
+      (chunks ())
+  in
+  let one_fill () =
+    let p, chunks = run (fun () -> pending (fun () -> Yuka.fragment [ source "a"; source "b"; source "c" ])) in
+    resolve "b" 2;
+    resolve "a" 1;
+    let before = chunks () in
+    resolve "c" 3;
+    get p;
+    check list_of "S2: no fill before the last source" [ "<!--[s1-->F<!--]-->" ] before;
+    check list_of "S2: one fill after the last source"
+      [ "<!--[s1-->F<!--]-->"; fill "s1" "a=1b=2c=3"; "</body></html>" ]
+      (chunks ())
+  in
+  let inner_await_first () =
+    let w, set_w, _ = Async.make () in
+    let p, chunks = run (fun () -> pending (fun () -> Yuka.fragment [ source "a"; text_await w "w" ])) in
+    set_w 9;
+    resolve "a" 1;
+    get p;
+    check list_of "S3a: an inner Await that settled first prints inline in the fill"
+      [ "<!--[s1-->F<!--]-->"; fill "s1" "a=1w9"; "</body></html>" ]
+      (chunks ())
+  in
+  let inner_await_later () =
+    let w, set_w, _ = Async.make () in
+    let p, chunks = run (fun () -> pending (fun () -> Yuka.fragment [ source "a"; text_await w "w" ])) in
+    resolve "a" 1;
+    set_w 9;
+    get p;
+    check list_of "S3b: an inner Await that settles later gets its own later chunk"
+      [ "<!--[s1-->F<!--]-->"; fill "s1" "a=1<!--[s2-->Lw<!--]-->"; fill "s2" "w9"; "</body></html>" ]
+      (chunks ())
+  in
+  let nested first =
+    let p, chunks =
+      run (fun () ->
+          pending ~fallback:"FO" (fun () -> Yuka.fragment [ source "a"; pending ~fallback:"FI" (fun () -> source "b") ]))
+    in
+    List.iter (fun (l, v) -> resolve l v) first;
+    get p;
+    chunks ()
+  in
+  let nested_inner_first () =
+    check list_of "S4a: an inner boundary that settled first prints inline in the outer fill"
+      [ "<!--[s1-->FO<!--]-->"; fill "s1" "a=1b=2"; "</body></html>" ]
+      (nested [ ("b", 2); ("a", 1) ])
+  in
+  let nested_outer_first () =
+    check list_of "S4b: the outer fill prints the inner fallback, then the inner fill"
+      [ "<!--[s1-->FO<!--]-->"; fill "s1" "a=1<!--[s2-->FI<!--]-->"; fill "s2" "b=2"; "</body></html>" ]
+      (nested [ ("a", 1); ("b", 2) ])
+  in
+  let not_streamed () =
+    Hashtbl.reset calls;
+    check string "S6: a render that does not stream prints the fallback" "F"
+      (Server.to_string (fun () -> pending (fun () -> source "a")))
+  in
+  let timeout () =
+    Hashtbl.reset calls;
+    let sleep, fire, _ = manual_sleep () in
+    let write, chunks = recorder () in
+    let p = stream ~sleep (fun () -> pending (fun () -> source "a")) write in
+    fire ();
+    get p;
+    check list_of "a timeout fills the fallback; outside an island it has no markers"
+      [ "<!--[s1-->F<!--]-->"; fill "s1" "F"; "</body></html>" ]
+      (List.tl (chunks ()))
+  in
+  let island_view () =
+    let shown r =
+      Yuka.hole (fun () ->
+          Yuka.text
+            (match Yuka.State.get r with
+            | Yuka.Status.Ready { data; _ } -> string_of_int data
+            | Yuka.Status.Loading _ -> "loading"
+            | Yuka.Status.Failed _ -> "failed"
+            | Yuka.Status.Idle -> "idle"))
+    in
+    Yuka.runtime_island ~name:"Widget" ~props:`Null (fun () ->
+        Yuka.Pending.make ~fallback:(Yuka.text "F")
+          ~children:(fun () ->
+            let a = Yuka.Async.memo (fun () -> Async.map Result.ok (call "a")) in
+            Yuka.fragment
+              [ shown a;
+                Yuka.hole (fun () ->
+                    let late = Yuka.Async.memo (fun () -> Async.map Result.ok (call "late")) in
+                    shown late) ])
+          ())
+  in
+  let island_memos () =
+    let p, chunks = run island_view in
+    resolve "a" 1;
+    resolve "late" 5;
+    get p;
+    check list_of
+      "memos in an island hold the fill; a memo made when the fill prints shows its own state (S5)"
+      [ island_wrap "i1" "<!--[s1-->F<!--]-->";
+        fill "s1" "<!--[-->1<!--]--><!--[--><!--[-->loading<!--]--><!--]-->";
+        "</body></html>" ]
+      (chunks ())
+  in
+  [ test_case "S1 settled inline" `Quick all_settled;
+    test_case "S2 one fill" `Quick one_fill;
+    test_case "S3a inner Await settles first" `Quick inner_await_first;
+    test_case "S3b inner Await settles later" `Quick inner_await_later;
+    test_case "S4a nested, inner first" `Quick nested_inner_first;
+    test_case "S4b nested, outer first" `Quick nested_outer_first;
+    test_case "S6 not streamed" `Quick not_streamed;
+    test_case "timeout" `Quick timeout;
+    test_case "Async.memo in an island" `Quick island_memos ]
+
 let page_extra_cases =
   let open Alcotest in
   let page_head () =
@@ -1790,6 +1927,7 @@ let () =
       ("reducer", reducer_cases);
       ("actions", action_cases);
       ("streaming", stream_cases);
+      ("pending", pending_cases);
       ("page extras", page_extra_cases);
       ("reject", reject_cases);
       ("timeout", timeout_cases);

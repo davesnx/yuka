@@ -50,7 +50,9 @@ let on_server ~enabled (q : (_, _, _) Action.t) args base =
     | Async.Done r ->
         State.set base (decode q None r);
         Answers.record (Answers.key (Action.name q) input) (Some r) settled
-    | _ -> Answers.record (Answers.key (Action.name q) input) None settled
+    | _ ->
+        Answers.record (Answers.key (Action.name q) input) None settled;
+        !Async.waiter.wait settled (fun r -> State.set base (decode q None r))
 
 let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Query ]) Action.t)
     (args : unit -> 'i) : 'o t =

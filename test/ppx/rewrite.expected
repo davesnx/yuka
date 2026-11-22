@@ -1948,3 +1948,42 @@ open
 let own_module_after_open_yuka =
   Yuka.runtime_instance __yuka_template_rewrite_87
     [|(Yuka.runtime_child (Yuka.runtime_text_call String.uppercase_ascii "x"))|]
+open
+  struct
+    let __yuka_template_rewrite_88 =
+      Yuka.runtime_template "\001b\002\bx\006" ~html:"<b>x</b>" ~walk:
+        [||] ~kids:[||] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let await_no_loading =
+  Yuka.Await.make ~async:comments
+    ~children:(fun v -> Yuka.runtime_instance __yuka_template_rewrite_88 [||])
+    ()
+open
+  struct
+    let __yuka_template_rewrite_89 =
+      Yuka.runtime_template "\001p\002\bwait\006" ~html:"<p>wait</p>"
+        ~walk:[||] ~kids:[||] ~attrs:[||] ~values:[||] ~clones:1
+    and __yuka_template_rewrite_90 =
+      Yuka.runtime_template "\001b\002\bx\006" ~html:"<b>x</b>" ~walk:
+        [||] ~kids:[||] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let pending =
+  Yuka.Pending.make
+    ~fallback:(Yuka.runtime_instance __yuka_template_rewrite_89 [||])
+    ~children:(fun () ->
+                 Yuka.fragment
+                   [Panel.make ();
+                   Yuka.runtime_instance __yuka_template_rewrite_90 [||]]) ()
+open
+  struct
+    let __yuka_template_rewrite_91 =
+      Yuka.runtime_template "\001b\002\007\006" ~html:"<b></b>" ~walk:
+        [||] ~kids:[|0;0;(-1);19;0|] ~attrs:[||] ~values:[||] ~clones:1
+  end
+let pending_fn =
+  Yuka.Pending.make ~fallback:(Yuka.text "wait")
+    ~children:(fun () ->
+                 let s = State.make 0 in
+                 Yuka.runtime_instance __yuka_template_rewrite_91
+                   [|(Yuka.runtime_child
+                        (Yuka.runtime_hole (fun () -> State.get s)))|]) ()

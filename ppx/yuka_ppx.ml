@@ -49,7 +49,7 @@ let read_error ~loc = function
         "Yuka: a prop reads one time; pass the State (<Label text=name />), or use State.peek."
 
 let hidden = ""
-let yuka_modules = [ "Await"; "Catch"; "Client"; "Context"; "Form"; "Show"; "Status" ]
+let yuka_modules = [ "Await"; "Catch"; "Client"; "Context"; "Form"; "Pending"; "Show"; "Status" ]
 
 let scoped f =
   let saved_bound = !bound and saved_scope = !scope in
@@ -190,7 +190,7 @@ let check_open ~loc kind (o : open_declaration) =
   Option.iter (fun path -> alias_error ~loc (kind ^ path) "the open") (yuka_state_path o.popen_expr)
 
 let special_form = function
-  | Ldot (Lident (("Await" | "Show" | "Catch" | "Client") as m), "createElement")
+  | Ldot (Lident (("Await" | "Show" | "Catch" | "Pending" | "Client") as m), "createElement")
     when !scope.opens_yuka && not (own_module m) ->
       Ldot (Ldot (Lident "Yuka", m), "createElement")
   | Ldot (Ldot (Lident "Context", "Provide"), "createElement") when !scope.opens_yuka && not (own_module "Context") ->
@@ -886,7 +886,13 @@ let rewrite_jsx self e =
             | _ ->
                 Location.raise_errorf ~loc:fnloc "[yuka] Yuka.%s needs the prop '%s'" m name
           in
-          let source = required first and loading = required "loading" in
+          let source = required first in
+          let loading =
+            match find "loading" with
+            | Some (Labelled _, v) -> Some v
+            | _ when m = "Await" -> None
+            | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.%s needs the prop '%s'" m "loading"
+          in
           let failed =
             match find "failed" with
             | Some (l, v) -> [ (l, hole_scope (fun () -> self#expression v)) ]
@@ -902,10 +908,26 @@ let rewrite_jsx self e =
           pexp_apply ~loc
             (pexp_ident ~loc:fnloc
                { txt = Ldot (Ldot (Lident "Yuka", m), "make"); loc = fnloc })
-            ([ (Labelled first, prop_scope (fun () -> self#expression source));
-               (Labelled "loading", rewrite_child ~self loading) ]
+            ((Labelled first, prop_scope (fun () -> self#expression source))
+             :: (match loading with Some v -> [ (Labelled "loading", rewrite_child ~self v) ] | None -> [])
             @ failed
             @ [ (Labelled "children", body); (Nolabel, [%expr ()]) ])
+      | Ldot (Ldot (Lident "Yuka", "Pending"), "createElement") ->
+          let fallback =
+            match props with
+            | [ (Labelled "fallback", v) ] -> rewrite_child ~self v
+            | _ -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Pending takes one prop, fallback"
+          in
+          let children =
+            match children with
+            | [ ({ pexp_desc = Pexp_function _; _ } as f) ] -> self#expression f
+            | _ -> (
+                match List.map (rewrite_child ~self) children with
+                | [] -> Location.raise_errorf ~loc:fnloc "[yuka] Yuka.Pending needs children"
+                | [ k ] -> [%expr fun () -> [%e k]]
+                | ks -> [%expr fun () -> Yuka.fragment [%e list_expr ~loc ks]])
+          in
+          [%expr Yuka.Pending.make ~fallback:[%e fallback] ~children:[%e children] ()]
       | Ldot (Ldot (Lident "Yuka", "Catch"), "createElement") ->
           let fallback =
             match props with

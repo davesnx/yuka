@@ -60,3 +60,7 @@ val memo : ?equal:('a -> 'a -> bool) -> (unit -> ('a, Status.error) result t) ->
 (**/**)
 
 val guard : ('a -> 'b t) -> 'a -> 'b t
+
+type waiter = { wait : 'a. 'a t -> ('a -> unit) -> unit }
+
+val waiter : waiter ref

@@ -374,16 +374,40 @@ Await without async:
   Error: [yuka] Yuka.Await needs the prop 'async'
   [1]
 
-Await without loading:
+Show without loading:
 
   $ cat > w1.mlx <<'X'
-  > let x = <Yuka.Await async=a>(fun v -> <p />)</Yuka.Await>
+  > let x = <Yuka.Show status=s>(fun v -> <p />)</Yuka.Show>
   > X
   $ run w1
-  File "w1.mlx", line 1, characters 8-19:
-  1 | let x = <Yuka.Await async=a>(fun v -> <p />)</Yuka.Await>
-              ^^^^^^^^^^^
-  Error: [yuka] Yuka.Await needs the prop 'loading'
+  File "w1.mlx", line 1, characters 8-18:
+  1 | let x = <Yuka.Show status=s>(fun v -> <p />)</Yuka.Show>
+              ^^^^^^^^^^
+  Error: [yuka] Yuka.Show needs the prop 'loading'
+  [1]
+
+Pending without fallback:
+
+  $ cat > pe0.mlx <<'X'
+  > let x = <Yuka.Pending><p /></Yuka.Pending>
+  > X
+  $ run pe0
+  File "pe0.mlx", line 1, characters 8-21:
+  1 | let x = <Yuka.Pending><p /></Yuka.Pending>
+              ^^^^^^^^^^^^^
+  Error: [yuka] Yuka.Pending takes one prop, fallback
+  [1]
+
+Pending without children:
+
+  $ cat > pe1.mlx <<'X'
+  > let x = <Yuka.Pending fallback="f" />
+  > X
+  $ run pe1
+  File "pe1.mlx", line 1, characters 8-21:
+  1 | let x = <Yuka.Pending fallback="f" />
+              ^^^^^^^^^^^^^
+  Error: [yuka] Yuka.Pending needs children
   [1]
 
 Await with a child that is not a function:

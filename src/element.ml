@@ -73,14 +73,22 @@ let each ?(equal = Signal.same) ~key items render =
   Kind.of_node (Each { items; key; equal; render = Kind.fn render })
 
 module Await = struct
-  let make ~async ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
+  let make ~async ?loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
     Client.use_await ();
-    Kind.of_node (Await { async; loading = Kind.to_node loading; failed = Kind.fn failed; render = Kind.fn children })
+    let loading =
+      match loading with
+      | Some l -> Kind.to_node l
+      | None ->
+          !Async.waiter.wait async ignore;
+          Fragment []
+    in
+    Kind.of_node (Await { async; loading; failed = Kind.fn failed; render = Kind.fn children })
 end
 
 module Catch = struct
   let make ~fallback ~children () =
-    let client at =
+    let client pos =
+      let at = Client.at pos in
       let outer = Option.bind !(Base.current_owner ()) (fun o -> o.catch) in
       let failed =
         match at with
@@ -154,7 +162,7 @@ let provide_bindings bindings children =
         Kind.to_node (Scheduler.untrack children))
   in
   Client.use_catch ();
-  Kind.of_node (Provide { add; children = Kind.fn children; client })
+  Kind.of_node (Provide { add; children = Kind.fn children; client; pending = None })
 
 module Context = struct
   type binding = Scheduler.binding

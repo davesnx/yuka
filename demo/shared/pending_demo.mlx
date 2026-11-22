@@ -1,0 +1,23 @@
+let part status =
+  <Yuka.Show status loading="">(fun text -> <span class_="part">(Yuka.text text)</span>)</Yuka.Show>
+
+let[@client] make () =
+  let filter = Yuka.State.make "a" in
+  <div>
+    <input id="pending-filter" type_=`text value=(Yuka.State.get filter)
+      on_input=(fun event -> Yuka.State.set filter (Yuka.Event.target_value event)) />
+    <p id="pending-typed">(Yuka.text ("Typed: " ^ Yuka.State.get filter))</p>
+    <Yuka.Pending fallback=(<p id="pending-fallback">"Loading the three parts..."</p>)>
+      (fun () ->
+       let query q = Yuka.Remote.state (Yuka.Remote.make q (fun () -> Yuka.State.get filter)) in
+       let first = query Pending_queries.first
+       and second = query Pending_queries.second
+       and third = query Pending_queries.third in
+       let busy = Yuka.Pending.busy () in
+       <div id="pending-view" data_busy=(if Yuka.State.get busy then "true" else "false")>
+         (part (fun () -> Yuka.State.get first))
+         (part (fun () -> Yuka.State.get second))
+         (part (fun () -> Yuka.State.get third))
+       </div>)
+    </Yuka.Pending>
+  </div>

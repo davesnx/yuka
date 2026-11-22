@@ -241,7 +241,7 @@ open Base
   let kept_buffer = 1_048_576
   let rendering = Web.local (fun () -> Atomic.make 0)
 
-  let rec print ?env s build =
+  let rec print ?env ?(marked = false) s build =
     let owner = new_owner () in
     Option.iter (fun e -> owner.env <- e) env;
     let scoped e f =
@@ -323,6 +323,27 @@ open Base
           unwrap body
       | None -> n
     in
+    let in_ids ids f =
+      let scope = s.id_scope and count = s.id_count in
+      let restore () =
+        s.id_scope <- scope;
+        s.id_count <- count
+      in
+      s.id_scope <- ids;
+      s.id_count <- 0;
+      match f () with
+      | r ->
+          restore ();
+          r
+      | exception e ->
+          restore ();
+          raise e
+    in
+    let shown_fallback f =
+      marker "<!--[?-->";
+      f ();
+      marker "<!--]-->"
+    in
     let rec go n =
       match unwrap n with
       | Text "" -> ()
@@ -337,22 +358,6 @@ open Base
           marker "<!--]-->"
       | Await { async; loading; failed; render } -> (
           let ids = next_id () ^ "-" in
-          let in_ids f =
-            let scope = s.id_scope and count = s.id_count in
-            let restore () =
-              s.id_scope <- scope;
-              s.id_count <- count
-            in
-            s.id_scope <- ids;
-            s.id_count <- 0;
-            match f () with
-            | r ->
-                restore ();
-                r
-            | exception e ->
-                restore ();
-                raise e
-          in
           let body () =
             match Async.status async with
             | Async.Done v -> render v
@@ -361,64 +366,34 @@ open Base
           in
           match Async.status async with
           | Async.Pending when s.streaming ->
-              let inside = s.depth > 0 in
-              let held f =
-                let outer = s.depth and outer_fill = s.in_fill in
-                s.depth <- (if inside then max outer 1 else outer);
-                s.in_fill <- true;
-                let restore () =
-                  s.depth <- outer;
-                  s.in_fill <- outer_fill
-                in
-                match f () with
-                | r ->
-                    restore ();
-                    r
-                | exception e ->
-                    restore ();
-                    raise e
-              in
-              s.awaits <- s.awaits + 1;
-              let id = s.id_prefix ^ "s" ^ string_of_int s.awaits and env = owner.env in
-              s.pending <-
-                Pending_await
-                  {
-                    id;
-                    subscribe =
-                      (fun cb -> Async.on_settled async (fun _ -> cb ()));
-                    fill = (fun () -> held (fun () -> in_ids (fun () -> print ~env s body)));
-                    fill_failed =
-                      (fun m -> held (fun () -> in_ids (fun () -> print ~env s (fun () -> failed m))));
-                    inside_island = inside;
-                  }
-                :: s.pending;
-              let start = Buffer.length b and outer_held = s.held in
-              s.held <- [];
-              incr holding;
-              Buffer.add_string b ("<!--[" ^ id ^ "-->");
-              after_text := false;
-              (match in_ids (fun () -> go loading) with
-              | () -> decr holding
-              | exception e ->
-                  decr holding;
-                  s.held <- outer_held;
-                  raise e);
-              Buffer.add_string b "<!--]-->";
-              after_text := false;
-              let mine = s.held in
-              s.held <- outer_held;
-              if mine <> [] then
-                if hydrating () || !holding > 0 then s.held <- mine @ outer_held
-                else begin
-                  let region = Buffer.sub b start (Buffer.length b - start) in
-                  cut start;
-                  Buffer.add_string b (String.concat "" (List.rev mine));
-                  Buffer.add_string b region
-                end
+              let env = owner.env in
+              streamed ids
+                (fun cb -> Async.on_settled async (fun _ -> cb ()))
+                (fun () -> print ~env s body)
+                (fun m -> print ~env s (fun () -> failed m))
+                loading
           | _ ->
               marker "<!--[-->";
-              in_ids (fun () -> go (body ()));
+              in_ids ids (fun () -> go (body ()));
               marker "<!--]-->")
+      | Provide { pending = Some { fallback; build }; _ } ->
+          let ids = next_id () ^ "-" and outer = owner.env in
+          let p, env, tree = build outer in
+          if p.idle () then begin
+            marker "<!--[-->";
+            scoped env (fun () -> in_ids ids (fun () -> go tree));
+            marker "<!--]-->"
+          end
+          else if s.streaming then
+            streamed ids p.on_idle
+              (fun () -> print ~env s (fun () -> tree))
+              (fun _ -> print ~env:outer ~marked:true s (fun () -> fallback))
+              fallback
+          else begin
+            marker "<!--[-->";
+            shown_fallback (fun () -> in_ids ids (fun () -> go fallback));
+            marker "<!--]-->"
+          end
       | Template { template; parts } ->
           Array.iter
             (function
@@ -673,6 +648,59 @@ open Base
             after_text := false
           end;
           s.invalid <- outer
+    and streamed ids subscribe fill fill_failed loading =
+      let inside = s.depth > 0 in
+      let held f =
+        let outer = s.depth and outer_fill = s.in_fill in
+        s.depth <- (if inside then max outer 1 else outer);
+        s.in_fill <- true;
+        let restore () =
+          s.depth <- outer;
+          s.in_fill <- outer_fill
+        in
+        match f () with
+        | r ->
+            restore ();
+            r
+        | exception e ->
+            restore ();
+            raise e
+      in
+      s.awaits <- s.awaits + 1;
+      let id = s.id_prefix ^ "s" ^ string_of_int s.awaits in
+      s.pending <-
+        Pending_await
+          {
+            id;
+            subscribe;
+            fill = (fun () -> held (fun () -> in_ids ids fill));
+            fill_failed = (fun m -> held (fun () -> in_ids ids (fun () -> fill_failed m)));
+            inside_island = inside;
+          }
+        :: s.pending;
+      let start = Buffer.length b and outer_held = s.held in
+      s.held <- [];
+      incr holding;
+      Buffer.add_string b ("<!--[" ^ id ^ "-->");
+      after_text := false;
+      (match in_ids ids (fun () -> go loading) with
+      | () -> decr holding
+      | exception e ->
+          decr holding;
+          s.held <- outer_held;
+          raise e);
+      Buffer.add_string b "<!--]-->";
+      after_text := false;
+      let mine = s.held in
+      s.held <- outer_held;
+      if mine <> [] then
+        if hydrating () || !holding > 0 then s.held <- mine @ outer_held
+        else begin
+          let region = Buffer.sub b start (Buffer.length b - start) in
+          cut start;
+          Buffer.add_string b (String.concat "" (List.rev mine));
+          Buffer.add_string b region
+        end
     and special tag attrs =
       let lt = String.lowercase_ascii tag in
       let resolved =
@@ -758,7 +786,7 @@ open Base
       failwith
         "Yuka.Server: two server renders overlapped: while this render was suspended, another render on the same system thread, for example in another fiber, changed the state that they share. Do not suspend a fiber during a server render."
     in
-    (match with_owner owner (fun () -> go (build ()); owned ()) with
+    (match with_owner owner (fun () -> (if marked then shown_fallback (fun () -> go (build ())) else go (build ())); owned ()) with
     | true when kept () ->
         restore ();
         dispose_owner owner
@@ -788,6 +816,7 @@ open Base
       | Await { async; render; _ } -> ( match Async.status async with Async.Done v -> find (render v) | _ -> None)
       | Template { parts; _ } ->
           first (Array.fold_right (fun p acc -> match p with Child n -> n :: acc | _ -> acc) parts [])
+      | Provide { pending = Some _; _ } -> None
       | Provide { add; children; _ } -> (
           let e = o.env in
           o.env <- add e;

@@ -245,7 +245,7 @@ val with_unique_id : (string -> 'k element) -> 'k element
 module Await : sig
   val make :
     async:'a Async.t ->
-    loading:'k element ->
+    ?loading:'k element ->
     ?failed:(string -> 'k element) ->
     children:('a -> 'k element) ->
     unit ->
@@ -256,8 +256,16 @@ module Await : sig
       In a server render, [message] is the message of a
       {!Server.Action.reject}, else ["server error"], and the failure
       message goes to the [log] of {!Server.val-config}, so the HTML never has the
-      detail. *)
+      detail.
+
+      With no [loading], the value joins the nearest {!Pending} above it:
+      the [Pending] shows its fallback, or keeps its old view, until this
+      value is settled too. With no [loading] and no [Pending] above, the
+      [Await] shows nothing until the value is settled, and a dev build
+      writes a console error. *)
 end
+
+module Pending = Pending
 
 module Catch : sig
   val make :
@@ -684,13 +692,26 @@ module Private : sig
     | Catch of {
         children : unit -> node;
         fallback : error:string -> reset:(unit -> unit) -> node;
-        client : Obj.t option -> node;
+        client : Obj.t -> node;
       }
     | Provide of {
         add : env -> env;
         children : unit -> node;
-        client : Obj.t option -> node;
+        client : Obj.t -> node;
+        pending : pending_region option;
       }
+
+  and pending_region = { fallback : node; build : env -> boundary * env * node }
+
+  and boundary = {
+    bind : env -> env;
+    built : unit -> unit;
+    idle : unit -> bool;
+    on_idle : (unit -> unit) -> unit;
+    on_switch : (unit -> unit) -> unit;
+    reveal : unit -> unit;
+    mark : unit -> unit -> bool;
+  }
 
   and attr =
     | Static of string * string
@@ -877,14 +898,6 @@ module Private : sig
       [render ~islands] sets it to the browser transport; that transport is
       installed by the first [Action.call] or island form submit, and a call
       before it raises [Failure]. *)
-
-  val boundary : (unit -> 'a) -> 'a * bool State.read
-  (** Runs the function under a new pending boundary, in a new owner that the
-      current owner disposes. A {!Async.memo} or a {!Remote.make} made in it
-      joins the boundary: while one of them has a run in flight, the status
-      writes wait, and the read is [true]. When the last run settles, every
-      waiting write is done in one batch and the read becomes [false]. For
-      tests, until [Pending]. *)
 
   val server_rendering : unit -> bool
   (** True during a server render on this domain; then [Effect.after] and

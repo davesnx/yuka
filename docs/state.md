@@ -329,6 +329,8 @@ For a local computation, use `Yuka.Async.map Result.ok`.
   run in the browser reads it with no request.
 
 Read the status with `<Yuka.Show>` (see `data.md`, "Show a status").
+To change the page one time when many memos load, put them under a
+`<Yuka.Pending>` (see `data.md`, "Wait for many values: Pending").
 
 ## Selectors
 

@@ -62,7 +62,7 @@ let latest_wins_in_a_boundary () =
   let filter = State.make "a" in
   let (history, busy), dispose =
     with_owner (fun () ->
-        let rows, busy = Private.boundary (fun () -> Async.memo (fun () -> call (State.get filter))) in
+        let rows, busy = Pending.boundary (fun () -> Async.memo (fun () -> call (State.get filter))) in
         (screen (fun () -> show (State.get rows) ^ busy_text busy), busy))
   in
   resolve "a" 1;
@@ -84,7 +84,7 @@ let pending_source_disposed () =
   let (history, busy), dispose =
     with_owner (fun () ->
         let (one, two), busy =
-          Private.boundary (fun () ->
+          Pending.boundary (fun () ->
               let one = Async.memo (fun () -> call ("1" ^ State.get filter)) in
               let two = State.make None in
               Effect.before (fun () ->
@@ -114,7 +114,7 @@ let boundary_disposed_in_flight () =
   let rows = ref None in
   let busy, dispose =
     with_owner (fun () ->
-        let r, busy = Private.boundary (fun () -> Async.memo (fun () -> call "late")) in
+        let r, busy = Pending.boundary (fun () -> Async.memo (fun () -> call "late")) in
         rows := Some r;
         busy)
   in
@@ -191,7 +191,7 @@ let boundary_switches_once () =
   let history, dispose =
     with_owner (fun () ->
         let (a, b), busy =
-          Private.boundary (fun () ->
+          Pending.boundary (fun () ->
               (Async.memo (fun () -> call ("a" ^ State.get filter)), Async.memo (fun () -> call ("b" ^ State.get filter))))
         in
         screen (fun () -> show (State.get a) ^ "," ^ show (State.get b) ^ busy_text busy))

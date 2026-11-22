@@ -111,3 +111,18 @@
           Source.leave source)
     end;
     State.read_only out
+
+  type waiter = { wait : 'a. 'a t -> ('a -> unit) -> unit }
+
+  let waiter =
+    ref
+      {
+        wait =
+          (fun a _ ->
+            if Dev.on then
+              match a.status with
+              | Pending ->
+                  Web.console_error
+                    "yuka: an Await with no loading has no Pending above it, so it shows nothing until its value is settled"
+              | Done _ | Failed _ -> ());
+      }

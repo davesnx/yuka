@@ -156,7 +156,7 @@ let transport =
         let (a, b, busy), _ =
           in_owner (fun () ->
               let (a, b), busy =
-                Private.boundary (fun () ->
+                Pending.boundary (fun () ->
                     (Remote.make gated (fun () -> "one"), Remote.make gated (fun () -> "two")))
               in
               (a, b, busy))
@@ -239,6 +239,34 @@ let answers =
         Alcotest.(check bool) "full element later" true
           (contains (List.nth (List.rev !chunks) (List.length !chunks - 2))
              {|data-yuka-answer="r:gated &quot;s&quot;">{"ok":"S"}</script>|}) );
+    ( "streaming: a pending query under a Pending holds the fill until its answer",
+      fun () ->
+        reset ();
+        let chunks = ref [] in
+        let write c =
+          chunks := c :: !chunks;
+          Async.return ()
+        in
+        let never _ =
+          let a, _, _ = Async.make () in
+          a
+        in
+        let p =
+          Private.stream ~sleep:never ~write (fun () ->
+              runtime_island ~name:"Query" ~props:`Null (fun () ->
+                  Pending.make ~fallback:(text "F")
+                    ~children:(fun () ->
+                      let r = Remote.make gated (fun () -> "p") in
+                      element "b" [] [ hole (fun () -> text (show (State.get (Remote.state r)))) ])
+                    ()))
+        in
+        let all () = String.concat "" (List.rev !chunks) in
+        Alcotest.(check bool) "the fallback first" true (contains (all ()) "<!--[s1-->F<!--]-->");
+        Alcotest.(check bool) "no loading" false (contains (all ()) "loading");
+        settle 0 "P";
+        Alcotest.(check bool) "done" true (Async.status p = Async.Done ());
+        Alcotest.(check bool) "the fill has the data" true
+          (contains (all ()) {|<template data-yuka-fill="s1"><b>ready P</b></template>|}) );
     ( "streaming timeout writes a network error",
       fun () ->
         reset ();

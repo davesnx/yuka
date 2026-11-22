@@ -380,7 +380,7 @@ let element_hook : (pos -> string -> attr list -> node list -> unit [@u]) ref =
 let await_hook = ref { run = (fun [@u] _ _ _ _ _ -> unset "Yuka.Await.make") }
 let slot_hook : (pos -> slot -> unit [@u]) ref = ref (fun [@u] _ _ -> unset "Yuka.runtime_slot")
 
-let catch_hook : (pos -> bool ref -> (Obj.t option -> node) -> unit [@u]) ref =
+let catch_hook : (pos -> bool ref -> (Obj.t -> node) -> unit [@u]) ref =
   ref (fun [@u] _ _ _ -> unset "Yuka.Catch.make")
 
 let rec mount_node pos last n =
@@ -701,7 +701,19 @@ let mount_await pos async loading failed render =
           | Async.Failed m -> failed m))
 
 let mount_catch pos last client =
-  mount_node pos last (client (if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None))
+  last := false;
+  mount_node pos last (client (Obj.repr pos))
+
+let at pos =
+  let pos : pos = Obj.obj pos in
+  if pos.adopt && pos.cur != Js.null then present (node_of pos.cur) else None
+
+let mount_at : Obj.t -> bool ref -> node -> unit = Obj.magic mount_node
+let hole_start_at : Obj.t -> Web.node = Obj.magic hole_start
+let comment_at : Obj.t -> string -> Web.node = Obj.magic comment
+let drop_rest_at : Obj.t -> unit = Obj.magic drop_to_end
+let skip_region (pos : Obj.t) = walk_region (Obj.obj pos) (fun [@u] _ -> ())
+let off_page_at (pos : Obj.t) parent = Obj.repr { (Obj.obj pos : pos) with parent; cur = Js.null; adopt = false }
 
 let use_url_check () = url_hook := fun [@u] tag name v -> Url.check ~tag ~log:Types.log name v
 

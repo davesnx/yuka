@@ -7,6 +7,7 @@ let routes =
     [
       Router.route About ~path:"/about" ~page:Pages.about ~prerender:true;
       Router.route Before_hydration ~path:"/before-hydration" ~page:Pages.before_hydration;
+      Router.route Pending ~path:"/pending" ~page:Pages.pending;
       Router.group ~path:"/" ~layout:Pages.shell ~not_found:Pages.not_found
         ~error:Pages.error
         [

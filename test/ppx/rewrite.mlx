@@ -284,3 +284,7 @@ end
 open Yuka
 
 let own_module_after_open_yuka = <p>(Yuka.text (String.uppercase_ascii "x"))</p>
+
+let await_no_loading = <Yuka.Await async=comments>(fun v -> <b>"x"</b>)</Yuka.Await>
+let pending = <Yuka.Pending fallback=(<p>"wait"</p>)><Panel /><b>"x"</b></Yuka.Pending>
+let pending_fn = <Yuka.Pending fallback="wait">(fun () -> let s = State.make 0 in <b>(State.get s)</b>)</Yuka.Pending>

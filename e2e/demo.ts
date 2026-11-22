@@ -2498,6 +2498,38 @@ await step("7k. markdown and code style", async () => {
   });
 });
 
+await step("7m. Pending: three queries change the view one time", async () => {
+  const before = mismatches.length;
+  await page.goto(base + "/pending");
+  await islandsStarted(page);
+  await page.waitForLoadState("networkidle");
+  const parts = () => page.$$eval("#pending-view .part", (ns) => ns.map((n) => n.textContent ?? "").join(","));
+  const loaded = await parts();
+  check("pending: the page has the three parts of the first input", loaded === "first:a,second:a,third:a", loaded);
+  check("pending: no fallback after the page loads", (await page.$("#pending-fallback")) === null);
+  check("pending: no hydration mismatch", mismatches.length === before, mismatches.slice(before).join(" | "));
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as any).__pendingSeen = seen;
+    const view = () => [...document.querySelectorAll("#pending-view .part")].map((n) => n.textContent).join(",");
+    seen.push(view());
+    new MutationObserver(() => {
+      const v = view();
+      if (seen[seen.length - 1] !== v) seen.push(v);
+    }).observe(document.querySelector("main")!, { subtree: true, childList: true, characterData: true, attributes: true });
+  });
+  await page.fill("#pending-filter", "b");
+  const typed = await page.textContent("#pending-typed");
+  check("pending: a read that is not a source changes at once", typed === "Typed: b", typed ?? "");
+  const busy = await page.getAttribute("#pending-view", "data-busy");
+  check("pending: busy while the parts load", busy === "true", busy ?? "");
+  const done = await until(async () => (await parts()) === "first:b,second:b,third:b", 10_000);
+  const idle = await page.getAttribute("#pending-view", "data-busy");
+  const seen = await page.evaluate(() => (window as any).__pendingSeen as string[]);
+  check("pending: the three parts change one time", done && seen.join(" | ") === "first:a,second:a,third:a | first:b,second:b,third:b", seen.join(" | "));
+  check("pending: not busy after the change", idle === "false", idle ?? "");
+});
+
 await step("8. 404", async () => {
   expectedFailures = 404;
   const res = await page.goto(base + "/issue/NOPE", { waitUntil: "networkidle" });

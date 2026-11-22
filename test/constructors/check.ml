@@ -1,5 +1,5 @@
 let guarded = [ "Element"; "Await"; "Slot"; "Catch" ]
-let allowed = [ "src/element.ml"; "src/template.ml"; "src/cycle.ml" ]
+let allowed = [ "src/element.ml"; "src/template.ml"; "src/cycle.ml"; "src/pending_dom.melange.ml" ]
 
 let name (lid : Longident.t) =
   match lid with Lident n -> n | Ldot (_, n) -> n.txt | Lapply _ -> ""
