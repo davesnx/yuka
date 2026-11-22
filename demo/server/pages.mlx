@@ -48,7 +48,7 @@ let canvas_in workspace =
       </Yuka.Client>)
 let canvas () = canvas_in Model.Workspace.default
 
-let seconds_of_ms = function None -> 0. | Some ms -> Float.of_int (Int.min 10_000 (Int.max 0 ms)) /. 1000.
+let seconds_of_ms = function None -> 0. | Some ms -> Float.of_int (Int.min 6_000 (Int.max 0 ms)) /. 1000.
 
 let issue_view ~delay ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
   let all = comments = Some "all" in
