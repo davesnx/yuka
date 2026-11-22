@@ -15,10 +15,7 @@ let of_response status fields : (Json.t, Status.error) result =
   | s, _ when s >= 500 -> Error Status.Server
   | _ -> Error (Status.Protocol ("unexpected response (HTTP " ^ string_of_int status ^ ")"))
 
-let send : (string -> Json.t -> ((Json.t, Status.error) result -> unit) -> unit -> unit) ref =
-  ref (fun _ _ k ->
-      k (Error (Status.Network "no action transport"));
-      ignore)
+let send = Embedded.send
 
 let live_state : (string -> Json.t -> (Json.t * (string * int) option, Status.error) result Async.t) ref =
   ref (fun name _ -> Async.return (Error (Status.Network ("no live topic " ^ name))))

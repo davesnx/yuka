@@ -326,7 +326,10 @@ For a local computation, use `Yuka.Async.map Result.ok`.
   change.
 - In a server render, `compute` runs one time. Inside an island, the
   answer of a query `Action.call` is written in the page, and the first
-  run in the browser reads it with no request.
+  run in the browser reads it with no request. When the server still
+  streams that answer, for example under a `<Yuka.Pending>`, the first run
+  waits for it. It sends the request only if the page ends with no
+  answer.
 
 Read the status with `<Yuka.Show>` (see `data.md`, "Show a status").
 To change the page one time when many memos load, put them under a

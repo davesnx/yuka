@@ -2500,14 +2500,16 @@ await step("7k. markdown and code style", async () => {
 
 await step("7m. Pending: three queries change the view one time", async () => {
   const before = mismatches.length;
+  const mark = allRequests.length;
   await page.goto(base + "/pending");
   await islandsStarted(page);
-  await page.waitForLoadState("networkidle");
   const parts = () => page.$$eval("#pending-view .part", (ns) => ns.map((n) => n.textContent ?? "").join(","));
   const loaded = await parts();
   check("pending: the page has the three parts of the first input", loaded === "first:a,second:a,third:a", loaded);
   check("pending: no fallback after the page loads", (await page.$("#pending-fallback")) === null);
   check("pending: no hydration mismatch", mismatches.length === before, mismatches.slice(before).join(" | "));
+  const sent = allRequests.slice(mark).filter((r) => r.url.includes("/_yuka/action/")).map((r) => r.url);
+  check("pending: the first load sends no query", sent.length === 0, sent.join(" | "));
   await page.evaluate(() => {
     const seen: string[] = [];
     (window as any).__pendingSeen = seen;

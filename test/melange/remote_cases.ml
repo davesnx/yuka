@@ -143,6 +143,24 @@ let memo_entry =
 
 let start_memo () = Yuka.render ~islands:(runtime_registry [ memo_entry ]) ~navigation:false ()
 
+let pending_memo_entry =
+  runtime_entry ~name:"Query" (fun json ->
+      Result.map
+        (fun () () ->
+          element "b" []
+            [
+              Pending.make
+                ~fallback:(element "i" [] [ text "F" ])
+                ~children:(fun () ->
+                  let r = Async.memo (fun () -> Action.call query (State.get input)) in
+                  hole (fun () -> text (show (State.get r))))
+                ();
+            ])
+        (Codec.decode Codec.unit json))
+
+let streamed_html = {|<!--[s0--><i>F</i><!--]-->|}
+let start_pending_memo () = Yuka.render ~islands:(runtime_registry [ pending_memo_entry ]) ~navigation:false ()
+
 let async =
   [
     ( "async memo: a new run aborts the query of the older run, and only the latest answer is written",
@@ -199,6 +217,38 @@ let async =
             check "one fetch" "1" (string_of_int sent);
             check "loading" "loading" (shown ());
             Yuka.stop ()) );
+    ( "async memo: under a streamed Pending, a pending answer, then the full one, gives no fetch",
+      fun finish ->
+        fresh ~shown:streamed_html ~answer:(pending_for "a") ();
+        set_ready "loading";
+        start_pending_memo ();
+        let before = shown () in
+        append_html (answer_for "a" {|{"ok":"late"}|});
+        after_ms 10 (fun () ->
+            clear_ready ();
+            finish (fun () ->
+                check "fallback first" "F" before;
+                check "ready" "ready late" (shown ());
+                check "no fetch" "0" (string_of_int (fetches ()));
+                Yuka.stop ())) );
+    ( "async memo: under a streamed Pending, a pending answer that never comes is fetched when the document ends",
+      fun finish ->
+        fresh ~shown:streamed_html ~answer:(pending_for "a") ();
+        set_ready "loading";
+        start_pending_memo ();
+        let before = fetches () in
+        set_ready "interactive";
+        dispatch_ready ();
+        after_ms 10 (fun () ->
+            clear_ready ();
+            let sent = fetches () in
+            if sent > 0 then respond 0 200 {|{"ok":"A"}|};
+            after_ms 10 (fun () ->
+                finish (fun () ->
+                    check "no fetch while loading" "0" (string_of_int before);
+                    check "one fetch" "1" (string_of_int sent);
+                    check "ready" "ready A" (shown ());
+                    Yuka.stop ()))) );
     ( "action: a query call in Effect.after whose input changes twice: only the latest answer is written",
       fun finish ->
         fresh_calls ();

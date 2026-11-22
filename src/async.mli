@@ -54,7 +54,9 @@ val memo : ?equal:('a -> 'a -> bool) -> (unit -> ('a, Status.error) result t) ->
       change. Default: every new status is a change.
     - In the browser, a query {!Action.call} in the first run reads the
       answer that the server render of the island wrote in the page, if
-      there is one, and sends no request.
+      there is one, and sends no request. When the server still streams
+      that answer, the run waits for it, and sends the request only if
+      the page ends with no answer.
     - In a server render, the function runs one time. *)
 
 (**/**)
