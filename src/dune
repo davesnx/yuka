@@ -21,6 +21,7 @@
   island
   json_diff
   json_patch
+  kept
   live_server
   navigation
   navigation_state

@@ -208,11 +208,25 @@ module Pages = struct
               | _ -> "other"
             in
             el "p" [ text shown ]))
+
+  let kept ~n:_ ~kept () = Server.page ~title:"Kept" (fun () -> el "p" [ text kept ])
+  let kept_private ~kept_private () = Server.page ~title:"Kept" (fun () -> el "p" [ text kept_private ])
 end
 
 let last_request : Server.request option ref = ref None
 
+let kept_loads = ref 0
+
 module Loaders = struct
+  let kept req ~n =
+    incr kept_loads;
+    Server.tag req [ "product:" ^ string_of_int n ];
+    if n = 0 then later () else Async.return (Ok ("product " ^ string_of_int n))
+
+  let kept_private req =
+    incr kept_loads;
+    Async.return (Ok (Option.value (Server.Request.session req) ~default:"-"))
+
   let squad _req ~team =
     note "squad start";
     match team with
@@ -347,6 +361,13 @@ let () =
              (match Server.Request.meth request with `POST -> "POST" | _ -> "other");
              Server.Request.path request;
            ]))
+
+let restock = Yuka.Action.mutation ~name:"restock" ~input:Yuka.Codec.int ~output:Yuka.Codec.int
+
+let () =
+  Server.Action.implement restock (fun request n ->
+      Server.Action.invalidate request [ "product:" ^ string_of_int n ];
+      Async.return n)
 
 let inspect = Yuka.Action.mutation ~name:"inspect" ~input:Yuka.Codec.int ~output:Yuka.Codec.string
 

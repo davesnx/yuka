@@ -72,4 +72,8 @@ let routes =
       Router.redirect ~path:"/old" ~to_:(Permanent "/");
       Router.redirect ~path:"/tmp/:x<string>" ~to_:(Temporary "/team/:x/json");
       Router.route Slow_public ~path:"/slow-public" ~page:App.Pages.slow ~cache:minute;
+      Router.route Kept ~path:"/kept/:n<int>" ~page:App.Pages.kept ~loader:App.Loaders.kept
+        ~cache:(keep ~tags:[ "products" ] no_cache);
+      Router.route Kept_private ~path:"/kept-private" ~page:App.Pages.kept_private
+        ~loader:App.Loaders.kept_private ~cache:(keep no_cache);
     ]

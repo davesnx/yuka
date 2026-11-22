@@ -366,6 +366,7 @@ let empty_context () : Types.context =
     live = (fun name key -> !Bridge.live_state name key);
     backend = None;
     tags = ref [];
+    page_tags = ref [];
   }
 
 let current_context () =
@@ -380,8 +381,14 @@ let with_redirect j location = match j with `Assoc fields -> `Assoc (fields @ [ 
 let registry : (string * (Types.context -> Json.t -> (answer * string list) Async.t)) list ref = ref []
 
 let invalidate (context : Types.context) tags = context.tags := !(context.tags) @ tags
+let tag (context : Types.context) tags = context.page_tags := !(context.page_tags) @ tags
+let revalidate_tag tag = Kept.drop [ tag ]
 let tags_field = function [] -> [] | tags -> [ ("tags", `List (List.map (fun t -> `String t) tags)) ]
-let tagged = function [] -> () | tags -> !Platform.acted (tags_field tags)
+let tagged = function
+  | [] -> ()
+  | tags ->
+      Kept.drop tags;
+      !Platform.acted (tags_field tags)
 
 let find_action name =
   Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
@@ -592,8 +599,11 @@ let answer_action ?origins ~(context : Types.context) ~live ~name handler body =
       let result, resolve, _ = Async.make () in
       Async.on_settled (call handler context json) (function
         | Async.Done (Bad_input m, _) -> resolve (action_error 400 ("invalid input: " ^ m))
-        | Async.Done (Output j, tags) -> resolve (200, Json.to_string (`Assoc ((("ok", j) :: tags_field tags) @ live ())))
+        | Async.Done (Output j, tags) ->
+            Kept.drop tags;
+            resolve (200, Json.to_string (`Assoc ((("ok", j) :: tags_field tags) @ live ())))
         | Async.Done (Redirect (j, location), tags) ->
+            Kept.drop tags;
             if local_location ?origins ~host location then
               resolve
                 (200, Json.to_string (`Assoc ((("ok", with_redirect j location) :: tags_field tags) @ live ())))

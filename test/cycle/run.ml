@@ -2107,6 +2107,107 @@ let request_api =
           [ ("content-type", "text/plain; charset=utf-8"); ("x-a", "1") ] r.headers );
   ]
 
+let kept_renders f =
+  let before = !App.kept_loads in
+  let r = f () in
+  (r, !App.kept_loads - before)
+
+let kept_get ?config ?meth ?headers target = kept_renders (fun () -> get ?config ?meth ?headers target)
+
+let action_post name body =
+  get ~meth:`POST
+    ~headers:[ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example") ]
+    ~body ("/_yuka/action/" ^ name)
+
+let keep =
+  [
+    ( "a second request for a kept page does not render again",
+      fun () ->
+        Server.revalidate_tag "products";
+        let first, n = kept_get "/kept/1" in
+        Alcotest.(check int) "first renders" 1 n;
+        check_status first 200;
+        check_true "body" (contains first.body "product 1");
+        check_header first "cache-control" [ "no-cache" ];
+        let second, n = kept_get "/kept/1" in
+        Alcotest.(check int) "second is kept" 0 n;
+        Alcotest.(check string) "same body" first.body second.body;
+        Alcotest.(check (list (pair string string))) "same headers" first.headers second.headers;
+        let head, n = kept_get ~meth:`HEAD "/kept/1" in
+        Alcotest.(check int) "HEAD is kept" 0 n;
+        Alcotest.(check string) "HEAD body" "" head.body;
+        check_header head "content-length" [ string_of_int (String.length first.body) ];
+        let _, n = kept_get "/kept/1?x=1" in
+        Alcotest.(check int) "another query renders" 1 n;
+        let nav, n = kept_get ~headers:[ ("Yuka-Navigate", "root") ] "/kept/1" in
+        Alcotest.(check int) "a navigation renders" 1 n;
+        let nav2, n = kept_get ~headers:[ ("Yuka-Navigate", "root") ] "/kept/1" in
+        Alcotest.(check int) "a second navigation is kept" 0 n;
+        Alcotest.(check string) "same navigation body" nav.body nav2.body );
+    ( "revalidate_tag makes the next request render again",
+      fun () ->
+        Server.revalidate_tag "products";
+        ignore (kept_get "/kept/1");
+        ignore (kept_get "/kept/2");
+        Server.revalidate_tag "product:9";
+        Alcotest.(check int) "other tag keeps" 0 (snd (kept_get "/kept/1"));
+        Server.revalidate_tag "product:1";
+        Alcotest.(check int) "tag of the request renders" 1 (snd (kept_get "/kept/1"));
+        Alcotest.(check int) "then kept again" 0 (snd (kept_get "/kept/1"));
+        Alcotest.(check int) "untagged page kept" 0 (snd (kept_get "/kept/2"));
+        Server.revalidate_tag "products";
+        Alcotest.(check int) "rule tag renders 1" 1 (snd (kept_get "/kept/1"));
+        Alcotest.(check int) "rule tag renders 2" 1 (snd (kept_get "/kept/2")) );
+    ( "an action that names a tag drops the kept pages",
+      fun () ->
+        Server.revalidate_tag "products";
+        ignore (kept_get "/kept/1");
+        ignore (kept_get "/kept/2");
+        let r = action_post "restock" "1" in
+        check_status r 200;
+        Alcotest.(check string) "answer" {|{"ok":1,"tags":["product:1"]}|} r.body;
+        Alcotest.(check int) "dropped" 1 (snd (kept_get "/kept/1"));
+        Alcotest.(check int) "other kept" 0 (snd (kept_get "/kept/2")) );
+    ( "a kept page that reads the request is not kept",
+      fun () ->
+        let _, n = kept_get "/kept-private" in
+        Alcotest.(check int) "first renders" 1 n;
+        check_true "warns"
+          (List.exists (fun m -> contains m "page /kept-private reads the request") !logged);
+        let r, n = kept_get "/kept-private" in
+        Alcotest.(check int) "second renders" 1 n;
+        check_true "session page" (contains r.body "cycle-session") );
+    ( "a revalidation during the render keeps nothing",
+      fun () ->
+        Server.revalidate_tag "products";
+        let a = call (request "/kept/0") in
+        check_true "pending" (Async.status a = Async.Pending);
+        Server.revalidate_tag "unrelated";
+        List.iter (fun f -> f ()) !App.waiting;
+        (match Async.status a with
+        | Async.Done r -> check_status r 200
+        | _ -> Alcotest.fail "not done");
+        let before = !App.kept_loads in
+        let b = call (request "/kept/0") in
+        List.iter (fun f -> f ()) !App.waiting;
+        ignore b;
+        Alcotest.(check int) "renders again" 1 (!App.kept_loads - before) );
+    ( "keep_bytes bounds the kept pages, oldest first",
+      fun () ->
+        Server.revalidate_tag "products";
+        let probe, _ = kept_get "/kept/1" in
+        Server.revalidate_tag "products";
+        let config = config_with ~assets:modules ~public:[ ("/static", "pub") ] ~styles:[ "/static/s.css" ]
+            ~keep_bytes:((2 * String.length probe.body) - 1) () in
+        ignore (kept_get ~config "/kept/1");
+        ignore (kept_get ~config "/kept/2");
+        Alcotest.(check int) "newest kept" 0 (snd (kept_get ~config "/kept/2"));
+        Alcotest.(check int) "oldest dropped" 1 (snd (kept_get ~config "/kept/1"));
+        let tiny = config_with ~assets:modules ~keep_bytes:1 () in
+        ignore (kept_get ~config:tiny "/kept/3");
+        Alcotest.(check int) "too large is not kept" 1 (snd (kept_get ~config:tiny "/kept/3")) );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -2128,4 +2229,5 @@ let () =
       ("speculation", cases speculation);
       ("layout values", cases layout_values);
       ("request api", cases request_api);
+      ("keep", cases keep);
     ]

@@ -44,6 +44,12 @@ let rules_11 =
 let rules_12 =
   Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(minute) [@warning "-33"]) ~prerender:false ()
 
+let rules_13 =
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(keep ~tags:["products"] no_cache) [@warning "-33"]) ~prerender:false ()
+
+let rules_14 =
+  Yuka.Server.Generated.rules ~headers:[ root_headers ] ~cache:(Yuka.Server.(keep no_cache) [@warning "-33"]) ~prerender:false ()
+
 let layer_0 : Yuka.Server.Generated.layer =
   { Yuka.Server.Generated.key = "L0"; data = false; wrap = (fun children -> Layouts.root ~children ()) }
 
@@ -592,10 +598,52 @@ let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.S
                      overlay = None;
                    }));
         }
+  | Cycle_shared.Routes.Kept { n } ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_13;
+          guards = [];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let kept = App.Loaders.kept req ~n in
+              Yuka.Server.Generated.loaded kept (fun kept ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                       ];
+                     page = App.Pages.kept ~n ~kept ();
+                     overlay = None;
+                   })));
+        }
+  | Cycle_shared.Routes.Kept_private ->
+      Yuka.Server.Generated.Page
+        {
+          rules = rules_14;
+          guards = [];
+          fallback = fallback_0;
+          load =
+            (fun () ->
+              let kept_private = App.Loaders.kept_private req in
+              Yuka.Server.Generated.loaded kept_private (fun kept_private ->
+              Yuka.Async.return
+                (Stdlib.Ok
+                   {
+                     Yuka.Server.Generated.layers =
+                       [
+                         layer_0;
+                       ];
+                     page = App.Pages.kept_private ~kept_private ();
+                     overlay = None;
+                   })));
+        }
 
 let app =
-  Yuka.Server.Generated.app ~build:"2d53ad3f23eacd4073daefba6ec49e76"
+  Yuka.Server.Generated.app ~build:"09c15f50a8a05555fadc81afc798a706"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
-    ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11; rules_12 ]
+    ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_8; rules_10; rules_11; rules_12; rules_13; rules_14 ]
     ~find:Cycle_shared.Routes.find ~resolve ~missing:fallback_0

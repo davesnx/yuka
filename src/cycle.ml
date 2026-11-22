@@ -18,17 +18,20 @@ let page ?(title = "") ?(head = "") body = { title; head; body }
 type layer = { key : string; data : bool; wrap : server Kind.element -> server Kind.element }
 type plan = { layers : layer list; page : page; overlay : page option }
 
-type cache = string
+type cache = { control : string; keep : string list option }
 
-let no_store = "no-store"
-let no_cache = "no-cache"
-let private_cache ~max_age = "private, max-age=" ^ string_of_int max_age
+let control control = { control; keep = None }
+let no_store = control "no-store"
+let no_cache = control "no-cache"
+let private_cache ~max_age = control ("private, max-age=" ^ string_of_int max_age)
 
 let public ?s_max_age ~max_age () =
-  "public, max-age=" ^ string_of_int max_age
-  ^ match s_max_age with Some s -> ", s-maxage=" ^ string_of_int s | None -> ""
+  control
+    ("public, max-age=" ^ string_of_int max_age
+    ^ match s_max_age with Some s -> ", s-maxage=" ^ string_of_int s | None -> "")
 
-let immutable = "public, max-age=31536000, immutable"
+let immutable = control "public, max-age=31536000, immutable"
+let keep ?(tags = []) (c : cache) = { c with keep = Some tags }
 
 let same_name a b = String.equal (String.lowercase_ascii a) (String.lowercase_ascii b)
 
@@ -44,7 +47,8 @@ let merge_headers lists =
 
 type rules = {
   headers : (string * string) list;
-  cache : cache option;
+  cache : string option;
+  keep : string list option;
   prefetch : Prefetch.level;
   prerender : bool;
 }
@@ -64,12 +68,14 @@ let lasting cache =
 
 let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
   let headers = merge_headers headers in
+  let keep = Option.bind cache (fun (c : cache) -> c.keep) in
+  let cache = Option.map (fun (c : cache) -> c.control) cache in
   let prefetch =
     match prefetch with
     | `Idle when not (Option.fold ~none:false ~some:lasting (answer_cache headers cache)) -> `Visible
     | p -> p
   in
-  { headers; cache; prefetch; prerender }
+  { headers; cache; keep; prefetch; prerender }
 
 type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
 type response = { status : int; headers : (string * string) list; body : body }
@@ -252,6 +258,7 @@ type config = {
   prerendered : string option;
   origins : string list option;
   log : (Types.log_level -> string -> unit) option;
+  keep_bytes : int;
   prerendering : bool;
   warned : string list ref;
 }
@@ -271,8 +278,9 @@ let public_prefix (prefix, dir) =
 let bots = [ "bot"; "crawl"; "spider"; "slurp"; "facebookexternalhit"; "whatsapp" ]
 
 let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head = "") ?(timeout = 10.)
-    ?(bots = bots) ?(dev = false) ?origins ?log () =
+    ?(bots = bots) ?(dev = false) ?origins ?log ?(keep_bytes = 67_108_864) () =
   {
+    keep_bytes;
     dev = (if dev then Some (dev_state ()) else None);
     origins;
     log;
@@ -345,7 +353,7 @@ let allow ms =
   in
   String.concat ", " unique
 
-let no_store_header = ("cache-control", no_store)
+let no_store_header = ("cache-control", no_store.control)
 
 let plain status message headers =
   {
@@ -357,6 +365,8 @@ let plain status message headers =
 let method_not_allowed allowed = plain 405 "Method Not Allowed" [ ("allow", allowed) ]
 let reply r = Async.return (Respond r)
 let empty status headers = { status; headers; body = String "" }
+
+type watch = { mutable on : bool; mutable read : bool; mutable timed_out : bool }
 
 type env = {
   config : config;
@@ -376,6 +386,8 @@ type env = {
   context : Types.context;
   node : Live_server.node;
   live_used : bool ref;
+  watch : watch;
+  kept : bool;
 }
 
 let outlet key inner =
@@ -500,7 +512,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
               { status; headers; body = String (if mentions body {|data-yuka-context="route"|} then body else script ^ body) })
             (Server.settled ?preload ?form:env.form ?csrf:env.csrf ~context:env.context ~id_prefix:(if overlay then "overlay-" else outlet ^ "-") ~current ~timeout ~sleep:env.sleep
                below))
-  | None when env.bot || Option.fold ~none:false ~some:shared_cache (answer_cache headers None) ->
+  | None when env.bot || env.kept || Option.fold ~none:false ~some:shared_cache (answer_cache headers None) ->
       Async.map
         (fun (body, islands) -> { status; headers; body = String (head "" ^ body ^ close islands) })
         (Server.settle ?preload ?entry ?form:env.form ?csrf:env.csrf ~context:env.context ~current ~timeout
@@ -725,6 +737,50 @@ let live_checked env fallback ~path (resp : response) =
         Async.return { resp with headers = set_header ("cache-control", "private, no-store") resp.headers }
     | _ -> Async.return resp
 
+let keep_tags env (rules : rules) (r : request) ~status =
+  match (rules.keep, r.meth) with
+  | Some tags, (`GET | `HEAD)
+    when status = 200 && Option.is_none env.form && Option.is_none env.config.dev && not env.config.prerendering ->
+      Some tags
+  | _ -> None
+
+let kept_key env (r : request) =
+  String.concat "\n"
+    [
+      env.build;
+      r.target;
+      (match env.navigate with None -> "" | Some keys -> "navigate " ^ String.concat " " keys);
+      (if env.overlay then "overlay" else "");
+    ]
+
+let kept_render env ~path ~key ~tags fresh =
+  let since = Kept.generation () in
+  let watch = env.watch in
+  watch.on <- true;
+  let sleep seconds =
+    Async.map
+      (fun () -> if watch.on then watch.timed_out <- true)
+      (env.sleep seconds)
+  in
+  Async.map
+    (fun (resp : response) ->
+      watch.on <- false;
+      (match resp with
+      | { status = 200; headers; body = String body } ->
+          if watch.read || !(env.live_used) then begin
+            if not (List.mem ("keep " ^ path) !(env.config.warned)) then begin
+              env.config.warned := ("keep " ^ path) :: !(env.config.warned);
+              log_quietly env.config `Warn
+                ("page " ^ path
+               ^ " reads the request (a header, a cookie, the session or live data) under a keep rule; it is not kept")
+            end
+          end
+          else if not watch.timed_out then
+            Kept.add ~limit:env.config.keep_bytes ~since key ~tags:(tags @ !(env.context.page_tags)) { headers; body }
+      | _ -> ());
+      resp)
+    (fresh { env with kept = true; sleep })
+
 let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
     ~(load : unit -> (plan, stop) result Async.t) ~(fallback : fallback) =
   let page_or_error a = Async.map (fun resp -> Respond resp) a in
@@ -733,22 +789,30 @@ let serve_page env (r : request) ~path ~query ~status ~(rules : rules) ~guards
     | Ok () -> (
         let headers = rule_cache rules (html_headers rules.headers []) in
         let headers = if status = 200 then headers else set_header no_store_header headers in
+        let fresh env =
+          Async.bind (protect load) (function
+            | Error stop -> stopped env fallback path stop
+            | Ok plan ->
+                let overlay =
+                  match (plan.overlay, env.navigate) with
+                  | Some page, Some sent when env.overlay && shared sent plan.layers > 0 -> Some page
+                  | _ -> None
+                in
+                Async.bind
+                  (show ~overlay:(Option.is_some overlay) env ~status ~headers ~fallback plan.layers (fun () ->
+                       Option.value overlay ~default:plan.page))
+                  (live_checked env fallback ~path))
+        in
         match prerendered_file env rules r ~path ~query with
         | Some (root, file) -> Async.return (File { root; path = file; headers })
-        | None ->
-            page_or_error
-              (Async.bind (protect load) (function
-                | Error stop -> stopped env fallback path stop
-                | Ok plan ->
-                    let overlay =
-                      match (plan.overlay, env.navigate) with
-                      | Some page, Some sent when env.overlay && shared sent plan.layers > 0 -> Some page
-                      | _ -> None
-                    in
-                    Async.bind
-                      (show ~overlay:(Option.is_some overlay) env ~status ~headers ~fallback plan.layers (fun () ->
-                           Option.value overlay ~default:plan.page))
-                      (live_checked env fallback ~path)))))
+        | None -> (
+            match keep_tags env rules r ~status with
+            | None -> page_or_error (fresh env)
+            | Some tags -> (
+                let key = kept_key env r in
+                match Kept.find key with
+                | Some { headers; body } -> reply { status; headers; body = String body }
+                | None -> page_or_error (kept_render env ~path ~key ~tags fresh)))))
 
 let is_form ct = Server.media_type ct = Some "application/x-www-form-urlencoded"
 
@@ -791,7 +855,9 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
                                   | exception e -> Async.failed (Web.exn_to_string e)
                                 in
                                 recover_with env.config ~last:(fun () -> Respond (internal_error ()))
-                                  (Async.bind answer (function
+                                  (Async.bind answer (fun outcome ->
+                                    Kept.drop !(context.tags);
+                                    match outcome with
                                     | Server.Saved location ->
                                         let location = Option.value location ~default:(path ^ query_suffix query) in
                                         if Server.local_location ?origins:env.config.origins ~host:(r.header "host") location then
@@ -958,14 +1024,19 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
   let path, query = Router.split_target r.target in
   Live_server.use_log node (log config);
   let live_used = ref false in
+  let watch = { on = false; read = false; timed_out = false } in
+  let watched f x =
+    if watch.on then watch.read <- true;
+    f x
+  in
   let rec context : Types.context =
     {
       meth = r.meth;
       path;
       target = r.target;
-      header = r.header;
+      header = watched r.header;
       body = r.body;
-      session = r.session;
+      session = watched r.session;
       log = log config;
       live =
         (fun name key ->
@@ -973,6 +1044,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
           Live_server.ssr_state ~sleep node context name key);
       backend = Some r.backend;
       tags = ref [];
+      page_tags = ref [];
     }
   in
   let env =
@@ -1009,6 +1081,8 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
       context;
       node;
       live_used;
+      watch;
+      kept = false;
     }
   in
   let parts = String.split_on_char '/' path in
@@ -1053,7 +1127,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
                           {
                             status = 200;
                             headers =
-                              [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable) ];
+                              [ ("content-type", "text/css; charset=utf-8"); ("cache-control", immutable.control) ];
                             body = String text;
                           }
                     | None -> reply (asset_miss ()))
@@ -1065,8 +1139,8 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (r
                 static (fun () ->
                     let headers =
                       match file_path rest with
-                      | Some p when assets.immutable p -> [ ("cache-control", immutable) ]
-                      | _ -> [ ("cache-control", no_cache) ]
+                      | Some p when assets.immutable p -> [ ("cache-control", immutable.control) ]
+                      | _ -> [ ("cache-control", no_cache.control) ]
                     in
                     serve_file r.meth ~root:assets.dir ~headers rest))
         | _ -> reply (asset_miss ()))
@@ -1275,6 +1349,8 @@ let missing_page config (App a) ~sleep =
       context = Server.empty_context ();
       node = Live_server.main ();
       live_used = ref false;
+      watch = { on = false; read = false; timed_out = false };
+      kept = false;
     }
   in
   not_found_page env a.missing "/404.html"

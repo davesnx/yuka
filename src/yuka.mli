@@ -1403,7 +1403,9 @@ module Server : sig
         the data that the action changed. The answer sends them
         ([{"ok": output, "tags": tags}]), and each {!Remote.make} use with
         one of these tags sends its query again. [Action.call] on the server
-        gives them to the {!Remote} uses of the process. Call it before the
+        gives them to the {!Remote} uses of the process. The kept pages
+        with one of these tags are dropped ({!revalidate_tag}), also for a
+        form post. Call it before the
         [Async] of the implementation is done; a later call, a call outside
         an implementation, and tags of a failed action are ignored. *)
 
@@ -1643,6 +1645,49 @@ module Server : sig
   val immutable : cache
   (** [public, max-age=31536000, immutable] *)
 
+  val keep : ?tags:string list -> cache -> cache
+  (** [keep ~tags c] sends the [cache-control] of [c] and also keeps the
+      rendered page in the server process:
+      [~cache:(keep ~tags:["products"] no_cache)]. The rule applies to
+      pages only; a [Router.get] handler gets the [cache-control] of [c]
+      and nothing is kept.
+
+      The first [GET] or [HEAD] of a path and query renders the page,
+      settled (as for a bot: no stream, no fill script), and keeps the
+      answer. A later request with the same path, query, [Yuka-Navigate]
+      and [Yuka-Overlay] headers gets the kept answer: the guards run, the
+      loaders and the page do not. A new build is a new key.
+
+      The cycle does not keep an answer when its status is not 200, when
+      the render reads the request (a header, a cookie or the session, by
+      {!Request}, also in an action that the render calls) or renders a
+      {!Yuka.Live.make}, or when [config ~timeout] ends the render. A page
+      that reads the request logs one [`Warn] for its path. The guards are
+      not watched: a guard can read the session to refuse the page. The
+      request of the server that an adapter gives (as
+      [Yuka_dream.request]) is not watched either: do not use it in a kept
+      page. Nothing is kept with [config ~dev] or in a prerender.
+
+      The tags of an answer are [tags] and the tags that the request gets
+      from {!tag}. {!revalidate_tag}, and {!Action.invalidate} in an action
+      that succeeds, drop the kept answers with that tag. One process
+      keeps at most [config ~keep_bytes]; when a new answer needs more,
+      the oldest answers are dropped first. Each process has its own kept
+      answers: on many servers, each server renders the page once, and
+      [revalidate_tag] drops the answers of its own process only. *)
+
+  val tag : request -> string list -> unit
+  (** [tag request tags], in a loader, a guard or the page of a {!keep}
+      route, adds tags to the kept answer of this request:
+      [tag request ["product:" ^ id]]. These are the tags of
+      {!Action.invalidate}: one name for the data in both. Without {!keep}
+      it does nothing. *)
+
+  val revalidate_tag : string -> unit
+  (** Drops each kept answer ({!keep}) of this process that has the tag.
+      The next request renders the page again. An answer whose render
+      started before the call is not kept. *)
+
   type body =
     | String of string
     | Stream of ((string -> unit Async.t) -> unit Async.t)
@@ -1731,6 +1776,7 @@ module Server : sig
     ?dev:bool ->
     ?origins:string list ->
     ?log:(log_level -> string -> unit) ->
+    ?keep_bytes:int ->
     unit ->
     config
   (** [public] maps URL prefixes to directories ([("/static", "static")]).
@@ -1782,7 +1828,12 @@ module Server : sig
       header) or [`Warn], and the {!Yuka.Console} calls of a server render
       of a request. Without it, the adapter may give its own log
       ({!Adapter.default_log}); else messages go to the default sink: one
-      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug]. *)
+      line on stderr, [yuka: LEVEL MESSAGE], without [`Debug].
+
+      [keep_bytes] (default 64 MiB) bounds the pages that {!keep} rules
+      keep in the process: the bytes of the bodies, the headers and the
+      keys. The kept pages are one store for the process; each request
+      applies the bound of its config. *)
 
   val set_default_log : (log_level -> string -> unit) -> unit
   (** Replaces the default sink: where messages go outside a request (a

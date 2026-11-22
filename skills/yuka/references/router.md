@@ -181,7 +181,9 @@ Rules, on any node except a redirect. `Router.post`, `Router.put`,
   replaces a header of the same name set above it.
 - `~cache`: `no_store`, `no_cache`, `private_cache ~max_age:5`,
   `public ~max_age:60 ()` (with an optional `~s_max_age`) or
-  `immutable`. The nearest one wins.
+  `immutable`. The nearest one wins. `keep ~tags c` sends the
+  `Cache-Control` of `c` and keeps the rendered page in the server (see
+  "Kept pages").
 - `~prerender:true`: the prerender step can write the page as a static
   file (see `Yuka.Server.Prerender`).
 - `~cross_origin:true`, on `Router.post`, `Router.put`, `Router.patch` and
@@ -550,6 +552,58 @@ allow the rule under a `Content-Security-Policy`, see
 
 A prefetch runs the guards and loaders of the page for a link that the
 user may never click: they must have no side effects.
+
+## Kept pages
+
+A `keep` cache rule keeps the rendered page in the server process. The
+first request renders the page; the next requests get the kept answer
+until a tag drops it. Use it for many pages that change only when their
+data changes, such as 50,000 product pages:
+
+```ocaml
+(* Routes.ml *)
+Router.route Product ~path:"/product/:id<string>" ~page:Pages.product
+  ~loader:Loaders.product ~cache:(keep ~tags:[ "products" ] no_cache)
+
+(* loaders.ml *)
+let product req ~id =
+  Yuka.Server.tag req [ "product:" ^ id ];
+  Store.product id
+
+(* when the product changes *)
+Yuka.Server.revalidate_tag ("product:" ^ id)
+```
+
+- The key is the build, the path and query, and the `Yuka-Navigate` and
+  `Yuka-Overlay` headers. Only `GET` and `HEAD` with status 200 are
+  kept. A kept page is settled before it is kept: it is not streamed.
+- The guards run for each request. The loaders and the page run only
+  when the page is not kept.
+- The key has no cookie and no session, so a kept page must be the same
+  for every user. When the loaders or the page read a header, a cookie or
+  the session (also in an action that they call), or render a
+  `Yuka.Live.make`, the answer is sent but not kept, and the server logs
+  a warning one time for the path. The request of the server
+  (`Yuka_dream.request req`) is not watched: do not read it in a kept
+  page.
+- The tags of a page are the `~tags` of `keep` and the tags of
+  `Yuka.Server.tag` in its loaders, guards or page.
+  `Yuka.Server.revalidate_tag tag` drops each kept page with the tag. An
+  action that calls `Yuka.Server.Action.invalidate request tags` and
+  succeeds drops them too: pages and `Remote` queries share one set of tag
+  names (see "Tags" in `data.md`).
+- A render that started before a drop is not kept, so a page never keeps
+  data that was older than the drop.
+- `Yuka.Server.config ~keep_bytes` (default 64 MiB) bounds the kept pages
+  of the process. When a new page needs more room, the oldest kept pages
+  are dropped first. A page larger than the bound is not kept.
+- Nothing is kept with `~dev:true` or in a prerender.
+- Each server process has its own kept pages. With many servers, each
+  server renders a page one time, and `revalidate_tag` and
+  `Action.invalidate` drop the pages of the process that runs them only.
+  Send the drop to every server (for example, publish the tag on your
+  own bus and call `revalidate_tag` on each server), or use a shared
+  cache such as a CDN with `public ~s_max_age`.
 
 ## Limitations
 

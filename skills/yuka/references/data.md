@@ -322,9 +322,13 @@ Yuka.Server.Action.implement Issue.rename (fun request { id; title } ->
   same input share one request. Uses that do not have one of the tags,
   disposed uses and uses with `enabled` false do not send again.
 - A failed action sends no tags.
-- Tags work only for `Yuka.Remote.make` uses in islands (and in tests,
-  for `Yuka.Action.call` on the server). A server-rendered page does not
-  change.
+- In the browser, tags work only for `Yuka.Remote.make` uses in islands
+  (and in tests, for `Yuka.Action.call` on the server). A server-rendered
+  page in the browser does not change.
+- On the server, the same tags drop the pages that a `keep` rule keeps
+  (see "Kept pages" in `router.md`). Pages and queries use one set of tag
+  names: tag a kept page with `Yuka.Server.tag request [ "issue:" ^ id ]`
+  in its loader, and the action above drops it too.
 
 ## Show a status
 
