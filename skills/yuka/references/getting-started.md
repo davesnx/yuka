@@ -288,9 +288,24 @@ dune build
 server changed, the browser gets the page again as a client navigation
 and changes only the markup that is different: the scroll position and
 the state of each island that did not change stay. When the client code
-changed (a file in an `--assets` directory that is not a `.css` file),
-or the change adds, removes or changes an island, the browser reloads
-the page. It starts the server with `YUKA_DEV=1`, so `main.ml` passes
+changed (a file in an `--assets` directory that is not a `.css` file, with
+other content) and each changed JavaScript file is the module of an
+island, the browser imports the new modules at a new URL and starts the
+islands of those modules again. Then it changes the markup of the page as
+above. The other islands and the scroll position stay. A State of a
+restarted island starts with its initial value, unless the island keeps
+it with `Yuka.Dev.keep`:
+
+```ocaml
+let opened = Yuka.State.make false |> Yuka.Dev.keep Yuka.Codec.bool
+```
+
+The kept States get the values of the old island in the order of their
+`keep` calls. A value that the new codec does not decode, for example
+after a change of the type, starts again. When another client file
+changed, or the change adds, removes or changes an island, the browser
+reloads the page. `Dev.keep` does nothing in a production bundle.
+`yuka dev` starts the server with `YUKA_DEV=1`, so `main.ml` passes
 `~dev:true` to the config:
 
 ```sh

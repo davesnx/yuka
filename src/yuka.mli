@@ -7,6 +7,25 @@ val with_owner : (unit -> 'a) -> 'a * (unit -> unit)
     so call the returned function yourself. An exception in an effect of the
     new owner goes to the same {!Catch} or island as the current owner. *)
 
+module Dev : sig
+  val keep : 'a Codec.t -> 'a State.t -> 'a State.t
+  (** [keep codec state] is [state]. Use it for a State of an island:
+      [let open_ = State.make false |> Dev.keep Codec.bool].
+
+      Under [yuka dev], a client build that changes the module of an island
+      starts its islands again with the new code. The kept States of the new
+      island get the values of the kept States of the old island, in the
+      order of their [keep] calls: the n-th kept State gets the value of the
+      n-th old one, encoded with the old codec and decoded with the new
+      codec. When the decode fails, for example because the type changed,
+      the State starts with its initial value, and a warning goes to the
+      console. A State without [keep] always starts with its initial value.
+
+      Call [keep] where the island or a component that it shows makes the
+      State, not in an effect or a hole that runs again. In other cases, and
+      in a production bundle (see {!render}), it does nothing. *)
+end
+
 module State = State
 
 val batch : (unit -> 'a) -> 'a
@@ -764,9 +783,9 @@ module Private : sig
     state:(unit -> string) -> sleep:(float -> unit Async.t) -> (string -> unit Async.t) -> unit Async.t
   (** The body of [/_yuka/dev] for a state function (tests). *)
 
-  val dev_script : string -> string
+  val dev_script : ?islands:string list -> string -> string
   (** The script that a page gets with [Server.config ~dev:true], for the
-      state JSON given (tests). *)
+      state JSON given and the URLs of the island modules (tests). *)
 
   val element : node -> 'kind element
 

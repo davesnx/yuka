@@ -2,7 +2,8 @@ let on : bool = [%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|
 
 let report : (Web.node -> string -> Web.node option -> unit[@u]) =
   [%mel.raw
-    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function (parent, expected, found) {
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function report(parent, expected, found) {
+      if (report.quiet) return;
       if (found != null) {
         if (found.__yuka_mismatch && expected === "nothing") return;
         found.__yuka_mismatch = true;
@@ -27,6 +28,10 @@ let report : (Web.node -> string -> Web.node option -> unit[@u]) =
 
 let mismatch parent expected found = report parent expected found [@u]
 
+external set_quiet : (Web.node -> string -> Web.node option -> unit[@u]) -> bool -> unit = "quiet" [@@mel.set]
+
+let quiet b = set_quiet report b
+
 let untracked : (unit -> unit[@u]) =
   [%mel.raw
     {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? function () {
@@ -34,3 +39,51 @@ let untracked : (unit -> unit[@u]) =
     } : 0|}]
 
 let untracked_get () = untracked () [@u]
+
+let hot_parts : (Obj.t -> Web.node -> unit[@u]) * (Obj.t -> Obj.t -> Obj.t -> unit[@u]) * (Obj.t -> unit[@u]) =
+  [%mel.raw
+    {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__ ? (function () {
+      var roots = new WeakMap();
+      var root = function (owner, el) { roots.set(owner, el); el.__yuka_kept = []; };
+      var keep = function (owner, encode, restore) {
+        for (var o = owner; o; o = o.parent) {
+          var el = roots.get(o);
+          if (el) {
+            var i = el.__yuka_kept.length, saved = el.__yuka_saved;
+            el.__yuka_kept.push(encode);
+            if (saved && i < saved.length && saved[i] !== undefined) {
+              var m = restore(saved[i]);
+              if (m !== undefined) console.warn("yuka dev: island " + el.getAttribute("data-name") + ": kept State " + (i + 1) + " starts again: " + m);
+            }
+            return;
+          }
+        }
+      };
+      var hot = function (swap) {
+        window.__yuka_hot = function (urls) {
+          return Promise.all(urls.map(function (u) { return import(u); })).then(function (ms) {
+            var es = ms.map(function (m) {
+              var e = m && m.register;
+              return e && typeof e.name === "string" && typeof e.decode === "function" ? e : null;
+            });
+            if (es.indexOf(null) >= 0) return false;
+            es.forEach(function (e) {
+              var els = Array.prototype.filter.call(document.querySelectorAll("yuka-island"), function (el) {
+                return el.getAttribute("data-name") === e.name;
+              });
+              els.forEach(function (el) {
+                el.__yuka_saved = (el.__yuka_kept || []).map(function (f) { try { return f(); } catch (x) { return undefined; } });
+              });
+              try { swap(e, Promise.resolve(e)); }
+              finally { els.forEach(function (el) { delete el.__yuka_saved; }); }
+            });
+            return true;
+          });
+        };
+      };
+      return [root, keep, hot];
+    })() : 0|}]
+
+let root owner el = (let f, _, _ = hot_parts in f) (Obj.repr owner) el [@u]
+let keep owner encode restore = (let _, f, _ = hot_parts in f) (Obj.repr owner) (Obj.repr encode) (Obj.repr restore) [@u]
+let hot swap = (let _, _, f = hot_parts in f) (Obj.repr swap) [@u]

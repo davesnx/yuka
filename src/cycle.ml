@@ -167,6 +167,7 @@ type assets = {
   import_map : (string * string) list;
   preload : string -> string list;
   immutable : string -> bool;
+  islands : string list;
 }
 
 let fingerprint text =
@@ -191,6 +192,10 @@ let modules ~dir ~entry ~manifest ~packages ~digest =
         import_map = Server.import_map ~url:"/_yuka/app" packages;
         preload;
         immutable = (fun _ -> false);
+        islands =
+          (match Json.of_string manifest with
+          | Ok (`Assoc fields) -> List.concat_map (fun (name, _) -> preload name) fields
+          | _ -> []);
       })
     (Server.preload_urls ~manifest ~base ())
 
@@ -217,6 +222,7 @@ let bundle ~dir ~entry ~manifest ~metafile =
       import_map = [];
       preload;
       immutable = (fun path -> List.exists (String.equal path) hashed);
+      islands = [];
     }
 
 type dev = { state : unit -> string }
@@ -235,10 +241,11 @@ let dev_state () =
   in
   { state }
 
-let dev_script state =
-  let json = String.concat "\\u003c" (String.split_on_char '<' state) in
-  "<script>(function(){var s=" ^ json
-  ^ {|,b=s.build,p=s.page,v=s.server,k="yuka-dev-scroll",o=null,c=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}|}
+let dev_script ?(islands = []) state =
+  let safe text = String.concat "\\u003c" (String.split_on_char '<' text) in
+  "<script>(function(){var s=" ^ safe state ^ ",I="
+  ^ safe (Json.to_string (`List (List.map (fun u -> `String u) islands)))
+  ^ {|.map(function(u){return new URL(u,location.href).pathname}),b=s.build,p=s.page,v=s.server,k="yuka-dev-scroll",o=null,c=null;try{var y=sessionStorage.getItem(k);if(y!==null){sessionStorage.removeItem(k);addEventListener("load",function(){scrollTo(0,+y)})}}catch(e){}|}
   ^ {|function show(t){if(!t){if(o){o.remove();o=null}return}if(!o){o=document.createElement("pre");o.id="yuka-dev-error";o.style.cssText="position:fixed;inset:0;z-index:2147483647;margin:0;padding:16px;overflow:auto;background:rgba(30,0,0,.94);color:#fdd;font:13px/1.4 monospace;white-space:pre-wrap"}o.textContent=t;(document.body||document.documentElement).appendChild(o)}|}
   ^ {|function reload(){if(c){c.abort();c=null}try{sessionStorage.setItem(k,String(scrollY))}catch(x){}location.reload()}|}
   ^ {|function skip(n){return n.nodeType===1&&(n.id==="yuka-dev-error"||n.id==="yuka-announcer"||n.localName==="yuka-overlay"||n.localName==="link"&&n.hasAttribute("data-yuka-css"))}|}
@@ -251,11 +258,13 @@ let dev_script state =
   ^ {|if(a.nodeType!==1){if(go&&a.nodeValue!==b.nodeValue)a.nodeValue=b.nodeValue;return true}|}
   ^ {|if(go&&!same(a,b)){for(i=a.attributes.length-1;i>=0;i--)if(!b.hasAttribute(a.attributes[i].name))a.removeAttribute(a.attributes[i].name);for(i=0;i<b.attributes.length;i++)a.setAttribute(b.attributes[i].name,b.attributes[i].value)}|}
   ^ {|var x=kids(a),z=kids(b),r=x.length?x[x.length-1].nextSibling:a.firstChild;for(i=0;i<x.length||i<z.length;i++){if(i>=z.length){if(has(x[i]))return false;if(go)a.removeChild(x[i])}else if(i>=x.length){if(has(z[i]))return false;if(go)a.insertBefore(document.importNode(z[i],true),r)}else if(!patch(x[i],z[i],go,P,Q))return false}return true}|}
-  ^ {|function swap(){if(c)c.abort();var a=c=new AbortController();fetch(location.href,{headers:{"Yuka-Navigate":"-"},credentials:"same-origin",cache:"no-store",signal:a.signal}).then(function(r){return r.text().then(function(t){if(a!==c)return;|}
-  ^ {|var m=document.querySelector('meta[name="yuka-build"]'),h=(r.headers.get("content-type")||"").toLowerCase();if(r.redirected||r.status<200||r.status>299||h.indexOf("text/html")!==0||!m||m.getAttribute("content")!==r.headers.get("yuka-build")||document.querySelector("yuka-overlay"))return reload();|}
-  ^ {|var n=new DOMParser().parseFromString(t,"text/html"),P=props(document),Q=props(n);if(!patch(document.body,n.body,false,P,Q))return reload();patch(document.body,n.body,true,P,Q);document.title=n.title;|}
+  ^ {|function swap(F){if(c)c.abort();var a=c=new AbortController();fetch(location.href,{headers:{"Yuka-Navigate":"-"},credentials:"same-origin",cache:"no-store",signal:a.signal}).then(function(r){return r.text().then(function(t){if(a!==c)return;|}
+  ^ {|var m=document.querySelector('meta[name="yuka-build"]'),B=r.headers.get("yuka-build"),h=(r.headers.get("content-type")||"").toLowerCase();if(r.redirected||r.status<200||r.status>299||h.indexOf("text/html")!==0||!m||!B||!F&&m.getAttribute("content")!==B||document.querySelector("yuka-overlay"))return reload();|}
+  ^ {|var n=new DOMParser().parseFromString(t,"text/html"),P=props(document),Q=props(n);if(!patch(document.body,n.body,false,P,Q))return reload();patch(document.body,n.body,true,P,Q);if(F)m.setAttribute("content",B);document.title=n.title;|}
   ^ {|n.querySelectorAll("link[data-yuka-css]").forEach(function(l){var u=l.getAttribute("href");if(!Array.prototype.some.call(document.querySelectorAll("link[data-yuka-css]"),function(e){return e.getAttribute("href")===u}))document.head.appendChild(document.importNode(l,true))});c=null})}).catch(function(){if(a===c)reload()})}|}
-  ^ {|var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session||d.page>p){s.session=d.session;p=d.page;reload();return}if(d.server>v){v=d.server;swap()}|}
+  ^ {|function update(d){var f=window.__yuka_hot,u=[],ok=typeof f==="function"&&Array.isArray(d.files);if(ok)d.files.forEach(function(x){if(/\.css$/.test(x))return;var a=new URL("/_yuka/app/"+x,location.href).pathname;if(I.indexOf(a)<0)ok=false;else u.push(a+"?v="+d.page)});|}
+  ^ {|if(!ok||!u.length)return reload();f(u).then(function(r){if(r)swap(true);else reload()},reload)}|}
+  ^ {|var e=new EventSource("/_yuka/dev");e.onmessage=function(m){var d=JSON.parse(m.data);show(d.error);if(d.error)return;if(d.session!==s.session){s.session=d.session;p=d.page;reload();return}if(d.page>p){p=d.page;update(d)}else if(d.server>v){v=d.server;swap()}|}
   ^ {|if(d.build>b){b=d.build;document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){if(l.hasAttribute("data-yuka-css"))return;var u=new URL(l.getAttribute("href"),location.href);if(u.origin!==location.origin)return;u.searchParams.set("v",String(b));l.href=u.href})}}})()</script>|}
 
 type config = {
@@ -457,7 +466,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
         ^ (if env.prefetch = Prefetch.default then ""
            else "<meta name=\"yuka-prefetch\" content=\"" ^ Prefetch.name env.prefetch ^ "\">")
         ^ (match (env.config.dev, env.navigate) with
-          | Some dev, None -> dev_script (dev.state ())
+          | Some dev, None -> dev_script ?islands:(Option.map (fun (a : assets) -> a.islands) assets) (dev.state ())
           | _ -> "")
         ^ extra)
       ~head:(env.config.head ^ page.head) ~import_map ~title:page.title ~styles:env.config.styles ()

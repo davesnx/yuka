@@ -23,13 +23,15 @@ Arguments:
 
 A fake dune prints build results and changes files between them; a fake
 server logs its starts and stops, with the state it sees. The session is
-random per run. A new client file sets "page" (the browser reloads); a new
-server only sets "server" (the browser swaps the markup). The state changes
-after the old server stopped:
+random per run. A new client file sets "page" and "files", the changed
+files relative to their --assets directory (the browser swaps the islands of
+those files, or reloads); a new server only sets "server" (the browser swaps
+the markup). A file with a new time and the same content is no change. The
+state changes after the old server stopped:
 
   $ mkdir static
   $ echo 'body{}' > static/a.css
-  $ echo 'js' > static/a.js
+  $ mkdir static/sub && echo 'js' > static/sub/a.js
   $ cat > server <<'X'
   > #!/bin/sh
   > echo "start $YUKA_DEV $(sed 's/"session":"[0-9a-f]*"/"session":S/' $YUKA_DEV_FILE)" >> log
@@ -45,9 +47,11 @@ after the old server stopped:
   > echo "Success, waiting for filesystem changes..."; step
   > echo 'body{color:red}' > static/a.css
   > echo "Success, waiting for filesystem changes..."; step
-  > echo 'js2' > static/a.js
+  > perl -e '$t = time + 2 * 3600; utime $t, $t, @ARGV' static/sub/a.js
   > echo "Success, waiting for filesystem changes..."; step
-  > rm static/a.js
+  > echo 'js2' > static/sub/a.js
+  > echo "Success, waiting for filesystem changes..."; step
+  > rm static/sub/a.js
   > echo "Success, waiting for filesystem changes..."; step
   > echo "Success, waiting for filesystem changes..."; step
   > echo "********** NEW BUILD (page.ml changed) **********"
@@ -63,23 +67,24 @@ after the old server stopped:
   $ yuka dev --build './fake-dune build --watch @x' --assets static --state deep/er/state -- ./server 2> err
   $ cat log
   args: build --watch @x
-  start 1 {"session":S,"build":1,"page":1,"server":0,"error":null}
-  state {"session":S,"build":1,"page":1,"server":0,"error":null}
-  state {"session":S,"build":2,"page":1,"server":0,"error":null}
-  stop {"session":S,"build":2,"page":1,"server":0,"error":null}
-  start 1 {"session":S,"build":3,"page":3,"server":0,"error":null}
-  state {"session":S,"build":3,"page":3,"server":0,"error":null}
-  stop {"session":S,"build":3,"page":3,"server":0,"error":null}
-  start 1 {"session":S,"build":4,"page":4,"server":0,"error":null}
-  state {"session":S,"build":4,"page":4,"server":0,"error":null}
-  state {"session":S,"build":4,"page":4,"server":0,"error":null}
-  state {"session":S,"build":4,"page":4,"server":0,"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
-  stop {"session":S,"build":4,"page":4,"server":0,"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
-  start 1 {"session":S,"build":5,"page":4,"server":5,"error":null}
-  state {"session":S,"build":5,"page":4,"server":5,"error":null}
-  start 1 {"session":S,"build":6,"page":4,"server":6,"error":null}
-  state {"session":S,"build":6,"page":4,"server":6,"error":null}
-  stop {"session":S,"build":6,"page":4,"server":6,"error":null}
+  start 1 {"session":S,"build":1,"page":1,"server":0,"files":[],"error":null}
+  state {"session":S,"build":1,"page":1,"server":0,"files":[],"error":null}
+  state {"session":S,"build":2,"page":1,"server":0,"files":[],"error":null}
+  state {"session":S,"build":2,"page":1,"server":0,"files":[],"error":null}
+  stop {"session":S,"build":2,"page":1,"server":0,"files":[],"error":null}
+  start 1 {"session":S,"build":3,"page":3,"server":0,"files":["sub/a.js"],"error":null}
+  state {"session":S,"build":3,"page":3,"server":0,"files":["sub/a.js"],"error":null}
+  stop {"session":S,"build":3,"page":3,"server":0,"files":["sub/a.js"],"error":null}
+  start 1 {"session":S,"build":4,"page":4,"server":0,"files":["sub/a.js"],"error":null}
+  state {"session":S,"build":4,"page":4,"server":0,"files":["sub/a.js"],"error":null}
+  state {"session":S,"build":4,"page":4,"server":0,"files":["sub/a.js"],"error":null}
+  state {"session":S,"build":4,"page":4,"server":0,"files":["sub/a.js"],"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
+  stop {"session":S,"build":4,"page":4,"server":0,"files":["sub/a.js"],"error":"File \"page.ml\", line 1:\u000aError: \"boom\""}
+  start 1 {"session":S,"build":5,"page":4,"server":5,"files":["sub/a.js"],"error":null}
+  state {"session":S,"build":5,"page":4,"server":5,"files":["sub/a.js"],"error":null}
+  start 1 {"session":S,"build":6,"page":4,"server":6,"files":["sub/a.js"],"error":null}
+  state {"session":S,"build":6,"page":4,"server":6,"files":["sub/a.js"],"error":null}
+  stop {"session":S,"build":6,"page":4,"server":6,"files":["sub/a.js"],"error":null}
   $ grep -c "restarting the server" err
   3
 
@@ -130,7 +135,7 @@ An error after the server started stops it and dune:
   $ yuka dev --build './fake-dune5 build --watch' --state s5dir/state -- ./server 2>&1 | grep -c "yuka dev: Sys_error"
   1
   $ sleep 2.5; cat log
-  start 1 {"session":S,"build":1,"page":1,"server":0,"error":null}
+  start 1 {"session":S,"build":1,"page":1,"server":0,"files":[],"error":null}
   stop 
 
 A server that ignores SIGTERM is killed after --kill-after, also when the
@@ -174,7 +179,7 @@ DUNE_BUILD_DIR when no --state is given:
   $ head -1 log
   args: build --watch --profile=dev @a b
   $ sed 's/"session":"[0-9a-f]*"/"session":S/' out/.yuka-dev
-  {"session":S,"build":1,"page":1,"server":0,"error":null}
+  {"session":S,"build":1,"page":1,"server":0,"files":[],"error":null}
 
 The build command is any shell command: an assignment, a cd and a pipeline
 work, and yuka dev stops every process of the command:

@@ -2,6 +2,20 @@ module Json = Json
 module Async = Async
 module Status = Status
 module Codec = Codec
+module Dev = struct
+  let keep codec (s : _ State.t) =
+    if Dev.on then
+      Dev.keep !(Base.current_owner ())
+        (fun [@u] () -> Codec.encode codec (State.peek s))
+        (fun [@u] json ->
+          match Codec.decode codec json with
+          | Ok v ->
+              Signal.quiet_set (State.signal s) v;
+              None
+          | Error m -> Some m);
+    s
+end
+
 module State = State
 module Effect = struct
   include Base.Effect

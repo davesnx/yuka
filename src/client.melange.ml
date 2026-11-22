@@ -866,6 +866,7 @@ let boot entries props island =
               let o = Base.new_owner () in
               o.catch <- Some catch;
               o.env <- Scheduler.Root (Option.value (Web.get_attribute island "data-ctx") ~default:"");
+              if Dev.on then Dev.root o island;
               match Base.with_owner o (fun () -> Types.with_browser_ids (id ^ "-") (fun () -> hydrate island (Kind.of_fn build))) with
               | d when !failed ->
                   stop d;
@@ -1011,7 +1012,31 @@ let script_props script =
   | Some id -> Some (id, Web.text_content script)
   | None -> None
 
+let swap lazies (entry : entry) loaded =
+  List.iter (fun l -> if l.lazy_name = entry.name then l.loading <- Some loaded) lazies;
+  let props = Web.table () in
+  Array.iter
+    (fun script -> match script_props script with Some (id, text) -> Web.table_set props id text | None -> ())
+    (Web.query_all (Web.document ()) "script[data-yuka-props]");
+  List.iter
+    (fun island ->
+      match Web.get_attribute island "data-name" with
+      | Some name when name = entry.name ->
+          stop_within island;
+          Web.clear island "";
+          Web.set_bool island started_key true;
+          live_islands := island :: !live_islands;
+          let id = register ignore in
+          Web.set_prop island cleanup_key id;
+          Dev.quiet true;
+          let booted = boot [ entry ] props island in
+          Dev.quiet false;
+          (match booted with Some dispose -> set_cleanup id dispose | None -> drop_cleanup id)
+      | _ -> ())
+    !live_islands
+
 let start ?(lazy_entries = []) entries =
+  if Dev.on then Dev.hot (fun [@u] entry loaded -> swap lazy_entries entry loaded);
   Bridge.send := (fun name input k -> !transport_hook name input k);
   Types.async_source := (fun id -> !async_hook id);
   let props = Web.table () in

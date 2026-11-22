@@ -1275,6 +1275,148 @@ let dev_swap_error finish =
   check "no fetch while the build fails" "0" (ints (calls ()));
   finish ()
 
+external register : m -> runtime_entry = "register" [@@mel.get]
+
+let here : string -> string = [%mel.raw {|function (f) { return require("path").join(__dirname, f) }|}]
+
+let hot_import : string array -> (string -> unit) -> unit =
+  [%mel.raw
+    {|function (files, k) {
+  var p = require("path"), f = window.__yuka_hot;
+  if (typeof f !== "function") return k("no hot hook");
+  f(files.map(function (x) { return p.join(__dirname, x) })).then(function (r) { k(String(r)) }, function (e) { k("hot: " + e.message) });
+}|}]
+
+let hot_files files k = hot_import files (fun r -> try k r with e -> !fail_hook e)
+
+let catch_warnings : unit -> unit =
+  [%mel.raw
+    {|function () {
+  if (!globalThis.__warnSaved) globalThis.__warnSaved = console.warn;
+  var w = globalThis.__warnSaved;
+  globalThis.__warn = [];
+  console.warn = function (m) { if (String(m).indexOf("yuka") === 0) globalThis.__warn.push(String(m)); else w.apply(console, arguments) };
+}|}]
+
+let warned : unit -> string = [%mel.raw {|function () { return globalThis.__warn.join("|") }|}]
+
+let hot_island =
+  {|<yuka-island data-name="Hot" data-id="i1" style="display:contents"><!--[--><button id="hb">a 0 0 </button><!--]--></yuka-island><script type="application/json" data-yuka-props="i1">1</script>|}
+
+let hot_start k =
+  setup "";
+  catch_warnings ();
+  set_body
+    ("<main>" ^ hot_island
+   ^ {|<yuka-island data-name="Rerender" data-id="i2" style="display:contents"><!--[--><button id="b">0</button><!--]--></yuka-island><script type="application/json" data-yuka-props="i2">1</script>|}
+   ^ "</main>");
+  let registry =
+    Yuka.runtime_registry
+      ~lazy_entries:
+        [ runtime_lazy_entry ~name:"Hot" (fun () -> runtime_promise_map register (import (here "hot_a.js"))) ]
+      [ rerender_entry ]
+  in
+  render ~islands:registry ~navigation:false ();
+  until "the island loads" (fun () -> attr_text "#hb" = "a 0 0 ")
+    (fun () ->
+      ignore (click "#hb" "");
+      ignore (click "#b" "");
+      tick (fun () ->
+          check "the island has state" "a 1 1 x" (attr_text "#hb");
+          check "the other island has state" "1" (attr_text "#b");
+          k registry))
+    100
+
+let hot_keeps finish =
+  hot_start (fun _ ->
+      hot_files [| "hot_b.js" |] (fun swapped ->
+          check "an island module is swapped" "true" swapped;
+          check "new markup; kept States keep their values, the other State starts again" "b 1 0 x" (attr_text "#hb");
+          check "the other island keeps its state" "1" (attr_text "#b");
+          check "no warning, also no hydration mismatch" "" (warned ());
+          ignore (click "#hb" "");
+          tick (fun () ->
+              check "the new island runs" "b 2 1 xx" (attr_text "#hb");
+              finish ())))
+
+let hot_type finish =
+  hot_start (fun _ ->
+      hot_files [| "hot_c.js" |] (fun swapped ->
+          check "an island module is swapped" "true" swapped;
+          check "a kept State whose type changed starts again; the next one keeps its value" "c - 0 x"
+            (attr_text "#hb");
+          check "a warning names the island and the State" "true"
+            (bools (String.starts_with ~prefix:"yuka dev: island Hot: kept State 1 starts again: " (warned ())));
+          finish ()))
+
+let hot_not_island finish =
+  hot_start (fun _ ->
+      hot_files [| "hot_b.js"; "hot_plain.js" |] (fun swapped ->
+          check "a module that is not an island: no swap" "false" swapped;
+          check "the island keeps its code and state" "a 1 1 x" (attr_text "#hb");
+          finish ()))
+
+let hot_next_start finish =
+  hot_start (fun registry ->
+      hot_files [| "hot_b.js" |] (fun swapped ->
+          check "an island module is swapped" "true" swapped;
+          Yuka.stop ();
+          set_body ("<main>" ^ hot_island ^ "</main>");
+          render ~islands:registry ~navigation:false ();
+          until "a later start of the island uses the new module" (fun () -> attr_text "#hb" = "b 0 0 ") finish 100))
+
+let fake_hot : bool -> unit =
+  [%mel.raw
+    {|function (answer) {
+  globalThis.__hot = [];
+  window.__yuka_hot = function (urls) { globalThis.__hot.push(urls.join(",")); return Promise.resolve(answer) };
+}|}]
+
+let hot_calls : unit -> string = [%mel.raw {|function () { return globalThis.__hot.join("|") }|}]
+
+let dev_hot_page answer =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<nav><a id="home" href="/">home</a></nav><main><h1 id="h">old</h1>|} ^ dev_island 1 ^ "</main>");
+  render ~islands:(runtime_registry [ rerender_entry ]) ();
+  fake_hot answer;
+  run_dev
+    (Private.dev_script ~islands:[ "/_yuka/app/demo/client/../shared/hot.js" ]
+       {|{"session":"a","build":2,"page":1,"server":1,"files":[],"error":null}|})
+
+let dev_hot finish =
+  dev_hot_page true;
+  dev_send
+    {|{"session":"a","build":3,"page":3,"server":1,"files":["demo/shared/hot.js","demo/static/s.css"],"error":null}|};
+  tick (fun () ->
+      check "the changed island module is imported again at a new URL" "/_yuka/app/demo/shared/hot.js?v=3"
+        (hot_calls ());
+      let i = calls () - 1 in
+      check "then the page is fetched" "-" (call_header i);
+      resolve_headers i (dev_markup "new" "new" (dev_island 1)) 200 [| ("yuka-build", "b2") |];
+      tick (fun () ->
+          check "no reload" "" (log_read ());
+          check "the markup is swapped" "new" (attr_text "#h");
+          check "the page takes the new build" "b2" (attr "meta[name=yuka-build]" "content");
+          finish ()))
+
+let dev_hot_other finish =
+  dev_hot_page true;
+  dev_send
+    {|{"session":"a","build":3,"page":3,"server":1,"files":["demo/shared/hot.js","demo/client/main.js"],"error":null}|};
+  check "a changed module that is not an island reloads" "assign" (log_read ());
+  check "nothing is imported" "" (hot_calls ());
+  finish ()
+
+let dev_hot_refused finish =
+  dev_hot_page false;
+  dev_send {|{"session":"a","build":3,"page":3,"server":1,"files":["demo/shared/hot.js"],"error":null}|};
+  tick (fun () ->
+      check "the module is imported" "/_yuka/app/demo/shared/hot.js?v=3" (hot_calls ());
+      check "the runtime refuses it: a reload" "assign" (log_read ());
+      finish ())
+
 let not_a_page status type_ finish =
   setup (page {|<a id="a" href="/a">a</a>|});
   plain_start ();
@@ -3269,6 +3411,13 @@ let all =
     ("dev: a server build with a new client build reloads", dev_swap_build);
     ("dev: a server build with no answer reloads", dev_swap_down);
     ("dev: a build error with a server build shows the overlay", dev_swap_error);
+    ("dev: a client build of island modules swaps them and the page", dev_hot);
+    ("dev: a client build of another module reloads", dev_hot_other);
+    ("dev: a client build that the runtime refuses reloads", dev_hot_refused);
+    ("hot: a new island module starts again and keeps its kept States", hot_keeps);
+    ("hot: a kept State of a changed type starts again", hot_type);
+    ("hot: a module that is not an island swaps nothing", hot_not_island);
+    ("hot: a later start of the island uses the new module", hot_next_start);
     ("css: sheets of a partial navigation move to the head", partial_css);
     ("css: sheets of a full swap move to the head", full_swap_css);
     ("css: sheets of the first page move to the head at start", first_load_css);

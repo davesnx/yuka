@@ -1569,6 +1569,14 @@ let dev =
             check_true "with the script" (contains r.body "EventSource");
             let r = get ~config:(config_with ~assets:modules ~prerendered:"pre" ()) "/plain" in
             check_true "without dev: the file" (String.equal r.body "prerendered plain")) );
+    ( "with ~dev: the script lists the island modules of the assets",
+      fun () ->
+        with_dev
+          ~make:(fun () -> config_with ~dev:true ~assets:modules ())
+          (fun config ->
+            check_true "the island module URL" (contains (get ~config "/plain").body {|,I=["/_yuka/app/app/counter.js"].map(|}));
+        with_dev (fun config ->
+            check_true "no assets: no island" (contains (get ~config "/plain").body {|,I=[].map(|})) );
     ( "with ~dev: the script in full pages only",
       fun () ->
         let file = state_file {|{"build":3,"page":2,"error":"<\/script>"}|} in

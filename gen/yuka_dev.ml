@@ -35,10 +35,11 @@ let parse argv =
 
 let log fmt = Printf.ksprintf (fun s -> prerr_endline ("yuka dev: " ^ s)) fmt
 
-let write_state file ~session ~build ~page ~server ~error =
+let write_state file ~session ~build ~page ~server ~files ~error =
   let text =
-    Printf.sprintf {|{"session":%s,"build":%d,"page":%d,"server":%d,"error":%s}|} (Source_text.json_string session) build
-      page server
+    Printf.sprintf {|{"session":%s,"build":%d,"page":%d,"server":%d,"files":[%s],"error":%s}|}
+      (Source_text.json_string session) build page server
+      (String.concat "," (List.map Source_text.json_string files))
       (match error with None -> "null" | Some e -> Source_text.json_string e)
   in
   let tmp = file ^ ".tmp" in
@@ -97,14 +98,28 @@ let rec files dir =
              if Sys.is_directory p then files p else [ p ])
   | exception Sys_error _ -> []
 
-let snapshot dirs = List.concat_map files dirs |> List.map (fun p -> (p, stamp p))
+let digest path = match Digest.file path with d -> Some d | exception Sys_error _ -> None
+
+let snapshot before dirs =
+  List.concat_map files dirs
+  |> List.map (fun p ->
+         let s = stamp p in
+         match List.assoc_opt p before with
+         | Some (s', d) when s' = s -> (p, (s, d))
+         | _ -> (p, (s, digest p)))
 
 let changed before after =
-  let differs (p, s) other = match List.assoc_opt p other with Some s' -> s' <> s | None -> true in
+  let differs (p, (_, d)) other = match List.assoc_opt p other with Some (_, d') -> d' <> d | None -> true in
   List.filter_map (fun (p, s) -> if differs (p, s) before then Some p else None) after
   @ List.filter_map (fun (p, _) -> if List.mem_assoc p after then None else Some p) before
 
 let plain_css p = Filename.check_suffix p ".css"
+
+let relative dirs path =
+  let prefixes = List.map (fun dir -> Filename.concat dir "") dirs in
+  match List.find_opt (fun prefix -> String.starts_with ~prefix path) prefixes with
+  | Some prefix -> String.sub path (String.length prefix) (String.length path - String.length prefix)
+  | None -> path
 
 type server = { mutable pid : int option }
 
@@ -173,11 +188,11 @@ let run o =
   let session = session_id () in
   let server = { pid = None } in
   let build = ref 0 and page = ref 0 and served = ref 0 in
-  let exe = ref None and assets = ref [] in
+  let exe = ref None and assets = ref [] and files = ref [] in
   let output = Buffer.create 1024 in
   let watched = executable o in
   mkdir_p (Filename.dirname o.state);
-  let write ~error = write_state o.state ~session ~build:!build ~page:!page ~server:!served ~error in
+  let write ~error = write_state o.state ~session ~build:!build ~page:!page ~server:!served ~files:!files ~error in
   let r, w = Unix.pipe ~cloexec:true () in
   let dune_pid =
     match Unix.fork () with
@@ -211,7 +226,7 @@ let run o =
   Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> finish 143));
   let input = Unix.in_channel_of_descr r in
   let success () =
-    let now_exe = stamp watched and now_assets = snapshot o.assets in
+    let now_exe = stamp watched and now_assets = snapshot !assets o.assets in
     let first = !build = 0 in
     let moved = if first then [] else changed !assets now_assets in
     let client = first || not (List.for_all plain_css moved) in
@@ -220,7 +235,11 @@ let run o =
     assets := now_assets;
     if restart then begin
       incr build;
-      if client then page := !build else served := !build;
+      if client then begin
+        page := !build;
+        files := List.map (relative o.assets) moved
+      end
+      else served := !build;
       if server.pid <> None then log "restarting the server";
       stop o server;
       write ~error:None;
