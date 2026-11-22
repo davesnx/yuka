@@ -16,9 +16,16 @@ let late_script inner req =
 let theme_script =
   let open Demo_shared.Theme in
   let pattern slugs = "/^(" ^ String.concat "|" slugs ^ ")$/" in
+  let stored (preference : Demo_shared.Preference.t) =
+    Printf.sprintf {|["%s",%s]|} preference.key
+      (pattern (List.filter_map (fun (slug, _) -> if slug = "" then None else Some slug) preference.choices))
+  in
   Printf.sprintf
-    {|<script>(function(){var root=document.documentElement,theme,code;try{theme=localStorage.getItem("%s");code=localStorage.getItem("%s")}catch(error){}if(!%s.test(theme))theme=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";root.setAttribute("%s",theme);if(%s.test(code))root.setAttribute("%s",code)})()</script>|}
-    storage_key Code.storage_key (pattern (List.map slug all)) attribute (pattern (List.map Code.slug Code.all)) Code.attribute
+    {|<script>(function(){var root=document.documentElement,theme,code;try{theme=localStorage.getItem("%s");code=localStorage.getItem("%s");[%s].forEach(function(p){var value=localStorage.getItem("%s"+p[0]);if(p[1].test(value))root.setAttribute("%s"+p[0],value)})}catch(error){}if(!%s.test(theme))theme=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";root.setAttribute("%s",theme);if(%s.test(code))root.setAttribute("%s",code)})()</script>|}
+    storage_key Code.storage_key
+    (String.concat "," (List.map stored Demo_shared.Preference.stored))
+    (Demo_shared.Preference.storage_key "") (Demo_shared.Preference.attribute "")
+    (pattern (List.map slug all)) attribute (pattern (List.map Code.slug Code.all)) Code.attribute
 
 let refresh_store inner req =
   let target = Dream.target req in

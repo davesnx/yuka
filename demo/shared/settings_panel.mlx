@@ -1,0 +1,25 @@
+module Css = [%yuka.css "settings_panel.css"]
+
+let[@client] make () =
+  let row (preference : Preference.t) =
+    Yuka.Effect.after (fun () -> Yuka.State.set preference.value (Preference.current preference));
+    let id = "setting-" ^ preference.key in
+    <div class_=Css.row>
+      <span id class_=Css.name>(Yuka.text preference.name)</span>
+      <div class_=Css.choices role=`group aria_labelledby=id data_setting=preference.key>
+        (Yuka.fragment
+           (List.map
+              (fun (slug, label) ->
+                <button class_=Css.choice type_=`button
+                  aria_pressed=(if Yuka.State.get preference.value = slug then `true_ else `false_)
+                  on_click=(fun _ -> Preference.apply preference slug)>
+                  (Yuka.text label)
+                </button>)
+              preference.choices))
+      </div>
+    </div>
+  in
+  <section class_=Css.settings data_settings="true">
+    <header class_="page-header">"Settings"</header>
+    (Yuka.fragment (List.map row Preference.all))
+  </section>

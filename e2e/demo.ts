@@ -300,7 +300,7 @@ await step("3c. partial navigation", async () => {
   await page.evaluate(() => ((document.querySelector("[data-nav-progress]") as any).__kept = true));
   check("3c.1 the progress bar (Idle) started without interaction and is idle", (await bar()).state === "idle", JSON.stringify(await bar()));
   const current = () => page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null", await current());
+  check("3c.2 Issues link is current on /", (await current()) === "/=page /my=null /insights=null /report=null /canvas=null /settings=null", await current());
   const buttonInView = () =>
     page.evaluate(() => {
       const rect = document.querySelector(".new-issue-button")!.getBoundingClientRect();
@@ -333,7 +333,7 @@ await step("3c. partial navigation", async () => {
     });
   const onIssue = await focusState();
   check("3c.5a after a client navigation the focus is on the h1 of the new page and its title is announced", onIssue.cls === "issue-title" && onIssue.live === "YUK-3", JSON.stringify(onIssue));
-  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null", await current());
+  check("3c.6 no link is current on an issue page", (await current()) === "/=null /my=null /insights=null /report=null /canvas=null /settings=null", await current());
   await page.locator(".new-issue-button").click();
   await page.waitForSelector(".dialog");
   check("3c.7 New_issue in the kept sidebar still opens", (await page.locator(".dialog").count()) === 1);
@@ -343,7 +343,7 @@ await step("3c. partial navigation", async () => {
   await page.waitForSelector(".row");
   const onMy = await focusState();
   check("3c.8a a page with no h1: the focus moves from the sidebar link into the new content, the title is announced", onMy.inOutlet && onMy.live === onMy.title && onMy.title !== "YUK-3", JSON.stringify(onMy));
-  check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null", await current());
+  check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null /settings=null", await current());
   check("3c.9 progress bar still kept", (await bar()).kept === true, JSON.stringify(await bar()));
   const y0 = await page.evaluate(() => Math.round(window.scrollY));
   check("3c.10 a new page starts at the top", y0 === 0, String(y0));
@@ -370,27 +370,39 @@ await step("3l. overlay route", async () => {
   await page.waitForSelector(".row");
   await page.evaluate(() => ((window as any).__marker = "alive"));
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
-  await page.evaluate(() => window.scrollTo(0, 200));
   const state = () =>
     page.evaluate(() => ({
       path: location.pathname,
-      report: document.querySelectorAll("yuka-overlay .overlay-dialog [data-report]").length,
-      insights: document.querySelectorAll("yuka-overlay .overlay-dialog [data-insights]").length,
+      settings: document.querySelectorAll("yuka-overlay .overlay-dialog [data-settings]").length,
+      page: document.querySelectorAll("yuka-outlet [data-settings]").length,
       overlays: document.querySelectorAll("yuka-overlay").length,
       rows: document.querySelectorAll("yuka-outlet .row").length,
       y: Math.round(window.scrollY),
       title: document.title,
     }));
-  const opened = page.waitForResponse((r) => r.url().endsWith("/report"));
-  await page.locator('.nav-link[href="/report"]').click();
+  for (const [path, selector] of [["/report", "[data-report]"], ["/insights", "[data-insights]"]]) {
+    const answer = page.waitForResponse((r) => r.url().endsWith(path));
+    await page.locator(`.nav-link[href="${path}"]`).click();
+    const layer = (await answer).headers()["yuka-layer"];
+    await page.waitForURL("**" + path);
+    await page.waitForSelector("yuka-outlet " + selector);
+    const shown = await state();
+    check(`3l.0 a click on ${path} shows it as a page, with no overlay`, layer === undefined && shown.overlays === 0 && shown.rows === 0 && (await marker()) === "alive", JSON.stringify({ layer, ...shown }));
+  }
+  await page.locator('.nav-link[href="/"]').click();
+  await page.waitForURL(base + "/");
+  await page.waitForSelector("yuka-outlet .row");
+  await page.evaluate(() => window.scrollTo(0, 200));
+  const opened = page.waitForResponse((r) => r.url().endsWith("/settings"));
+  await page.locator('.nav-link[href="/settings"]').click();
   const answer = await opened;
-  await page.waitForURL("**/report");
-  await page.waitForSelector("yuka-overlay .overlay-dialog [data-report]");
+  await page.waitForURL("**/settings");
+  await page.waitForSelector("yuka-overlay .overlay-dialog [data-settings]");
   const open = await state();
   const y = open.y;
   check(
-    "3l.1 a click on Report shows it over the list, with its URL and title",
-    answer.headers()["yuka-layer"] === "overlay" && open.report === 1 && open.rows > 0 && y > 0 && open.title === "Report" && (await marker()) === "alive",
+    "3l.1 a click on Settings shows it over the list, with its URL and title",
+    answer.headers()["yuka-layer"] === "overlay" && open.settings === 1 && open.rows > 0 && y > 0 && open.title === "Settings" && (await marker()) === "alive",
     JSON.stringify(open),
   );
   await page.mouse.move(1270, 790);
@@ -404,10 +416,10 @@ await step("3l. overlay route", async () => {
     allRequests.slice(mark).filter((r) => r.navigate).length === 0 && back.path === "/" && back.rows > 0 && back.y === y && (await marker()) === "alive",
     JSON.stringify({ ...back, y0: y, requests: allRequests.slice(mark).map((r) => r.url) }),
   );
-  check("3l.2b the focus is back on the link that opened the overlay", await page.evaluate(() => !!document.activeElement?.closest('.nav-link[href="/report"]')));
+  check("3l.2b the focus is back on the link that opened the overlay", await page.evaluate(() => !!document.activeElement?.closest('.nav-link[href="/settings"]')));
   await page.goForward();
-  await page.waitForSelector("yuka-overlay .overlay-dialog [data-report]");
-  check("3l.3 Forward shows the overlay again", (await state()).report === 1 && page.url().endsWith("/report"), JSON.stringify(await state()));
+  await page.waitForSelector("yuka-overlay .overlay-dialog [data-settings]");
+  check("3l.3 Forward shows the overlay again", (await state()).settings === 1 && page.url().endsWith("/settings"), JSON.stringify(await state()));
   await page.waitForSelector("yuka-overlay .close-button");
   await page.waitForFunction(() => (document.querySelector("yuka-overlay .close-button")?.closest("yuka-island") as any)?.__yuka_started);
   mark = allRequests.length;
@@ -418,37 +430,98 @@ await step("3l. overlay route", async () => {
     allRequests.slice(mark).filter((r) => r.navigate).length === 0 && new URL(page.url()).pathname === "/" && (await marker()) === "alive",
     page.url(),
   );
-  await page.locator('.nav-link[href="/report"]').click();
-  await page.waitForSelector("yuka-overlay .overlay-dialog [data-report]");
-  await page.locator('yuka-overlay a[href="/insights"]').click();
-  await page.waitForURL("**/insights");
-  await page.waitForSelector("yuka-overlay .overlay-dialog [data-insights]");
-  const replaced = await state();
-  check(
-    "3l.5 the Insights link inside the Report overlay replaces the overlay",
-    replaced.overlays === 1 && replaced.insights === 1 && replaced.report === 0 && replaced.rows > 0 && replaced.title === "Insights" && (await marker()) === "alive",
-    JSON.stringify(replaced),
-  );
-  await page.waitForFunction(() => (document.querySelector("yuka-overlay .close-button")?.closest("yuka-island") as any)?.__yuka_started);
+  await page.locator('.nav-link[href="/settings"]').click();
+  await page.waitForSelector("yuka-overlay .overlay-dialog [data-settings]");
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay .overlay-backdrop")?.closest("yuka-island") as any)?.__yuka_started);
   mark = allRequests.length;
-  await page.locator("yuka-overlay .close-button").click();
-  await page.waitForURL(base + "/");
+  await page.locator("yuka-overlay .overlay-backdrop").click({ position: { x: 5, y: 5 } });
   await page.waitForSelector("yuka-overlay", { state: "detached" });
   check(
-    "3l.6 the close button after a replaced overlay loads the list without an overlay",
-    allRequests.slice(mark).some((r) => r.navigate && new URL(r.url).pathname === "/") && (await state()).rows > 0,
-    JSON.stringify(allRequests.slice(mark).map((r) => r.url)),
+    "3l.5 a click on the backdrop removes the overlay with no request",
+    allRequests.slice(mark).filter((r) => r.navigate).length === 0 && new URL(page.url()).pathname === "/" && (await state()).rows > 0 && (await marker()) === "alive",
+    page.url(),
   );
-  await page.locator('.nav-link[href="/insights"]').click();
-  await page.waitForSelector("yuka-overlay .overlay-dialog [data-insights]");
-  await page.reload({ waitUntil: "networkidle" });
-  await page.waitForSelector("yuka-outlet [data-insights]");
-  const reloaded = await state();
+  const selected = () => page.evaluate(() => document.querySelector("yuka-outlet .row.selected")?.getAttribute("data-id"));
+  await page.keyboard.press("j");
+  await until(async () => (await selected()) !== undefined, 5_000);
+  const first = await selected();
+  await page.locator('.nav-link[href="/settings"]').click();
+  await page.waitForSelector("yuka-overlay .overlay-dialog [data-settings]");
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay [data-settings]")?.closest("yuka-island") as any)?.__yuka_started);
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay .close-button")?.closest("yuka-island") as any)?.__yuka_started);
+  await page.locator('yuka-overlay [data-setting="motion"] button', { hasText: "Full" }).focus();
+  mark = allRequests.length;
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("j");
+  await page.waitForTimeout(500);
   check(
-    "3l.7 a reload of the overlay URL shows the full Insights page",
-    reloaded.path === "/insights" && reloaded.overlays === 0 && reloaded.rows === 0,
-    JSON.stringify(reloaded),
+    "3l.5b Enter on a Settings button in the overlay does not open the issue selected in the list, and j does not move the selection",
+    allRequests.slice(mark).filter((r) => r.url.includes("/issue/")).length === 0 && new URL(page.url()).pathname === "/settings" && (await state()).settings === 1 && (await selected()) === first,
+    JSON.stringify({ url: page.url(), first, selected: await selected(), requests: allRequests.slice(mark).map((r) => r.url) }),
   );
+  await page.locator("yuka-overlay .close-button").click();
+  await page.waitForSelector("yuka-overlay", { state: "detached" });
+  await page.keyboard.press("j");
+  await until(async () => (await selected()) !== first, 5_000);
+  check("3l.5c after the overlay closes, j moves the selection in the list again", (await selected()) !== first && (await selected()) !== undefined, JSON.stringify({ first, selected: await selected() }));
+  const look = () =>
+    page.evaluate(() => ({
+      theme: document.documentElement.getAttribute("data-theme"),
+      fontSize: document.documentElement.getAttribute("data-font-size"),
+      ids: document.documentElement.getAttribute("data-issue-ids"),
+      background: getComputedStyle(document.body).backgroundColor,
+      zoom: getComputedStyle(document.body).zoom,
+      stored: [localStorage.getItem("yuka-demo-theme"), localStorage.getItem("yuka-demo-font-size")],
+    }));
+  const choose = async (scope: string, setting: string, label: string) => {
+    const button = page.locator(`${scope} [data-setting="${setting}"] button`, { hasText: label });
+    await button.click();
+    await page.waitForFunction((b) => b?.getAttribute("aria-pressed") === "true", await button.elementHandle());
+  };
+  await page.locator('.nav-link[href="/settings"]').click();
+  await page.waitForSelector("yuka-overlay .overlay-dialog [data-settings]");
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay [data-settings]")?.closest("yuka-island") as any)?.__yuka_started);
+  const before = await look();
+  await choose("yuka-overlay", "theme", before.theme === "light" ? "Dark" : "Light");
+  await choose("yuka-overlay", "font-size", "Large");
+  const after = await look();
+  check(
+    "3l.6 Settings in the overlay applies the theme and the font size to the whole page and stores them",
+    after.theme !== before.theme && after.background !== before.background && after.fontSize === "large" && after.zoom === "1.125" && after.stored[0] === after.theme && after.stored[1] === "large" && (await state()).rows > 0,
+    JSON.stringify({ before, after }),
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("yuka-outlet [data-settings]");
+  await page.waitForFunction(() => (document.querySelector("yuka-outlet [data-settings]")?.closest("yuka-island") as any)?.__yuka_started);
+  const reloaded = await state();
+  const kept = await look();
+  const pressed = await page.locator('yuka-outlet [data-setting="font-size"] button[aria-pressed="true"]').textContent();
+  check(
+    "3l.7 a reload of /settings shows the full Settings page, with the stored theme and font size",
+    reloaded.path === "/settings" && reloaded.overlays === 0 && reloaded.page === 1 && reloaded.rows === 0 && kept.theme === after.theme && kept.zoom === "1.125" && pressed === "Large",
+    JSON.stringify({ reloaded, kept, pressed }),
+  );
+  const themeRow = () => page.locator('yuka-outlet [data-setting="theme"] button[aria-pressed="true"]').textContent();
+  const menuTheme = kept.theme === "gray" ? "pale" : "gray";
+  await page.click("#theme-button");
+  await page.waitForSelector("[role=menu]");
+  await page.click(`#theme-${menuTheme}`);
+  await until(async () => (await themeRow())?.toLowerCase() === menuTheme, 5_000);
+  check("3l.7a a theme chosen in the header menu shows as chosen on the Settings page", (await themeRow())?.toLowerCase() === menuTheme, JSON.stringify({ menuTheme, row: await themeRow() }));
+  await choose("yuka-outlet", "theme", "Light");
+  await page.click("#theme-button");
+  await page.waitForSelector("[role=menu]");
+  check("3l.7c a theme chosen on the Settings page shows as checked in the header menu", (await page.getAttribute("#theme-light", "aria-checked")) === "true" && (await page.getAttribute(`#theme-${menuTheme}`, "aria-checked")) === "false");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("[role=menu]", { state: "detached" });
+  await choose("yuka-outlet", "issue-ids", "Hide");
+  await choose("yuka-outlet", "font-size", "Default");
+  await page.locator('.nav-link[href="/"]').click();
+  await page.waitForURL(base + "/");
+  await page.waitForSelector("yuka-outlet .row");
+  const list = await page.evaluate(() => ({ id: getComputedStyle(document.querySelector(".row-id")!).display, zoom: getComputedStyle(document.body).zoom, fontSize: document.documentElement.getAttribute("data-font-size") }));
+  check("3l.7b Hide issue IDs hides them in the list, and Default font size removes the zoom", list.id === "none" && list.zoom === "1" && list.fontSize === null, JSON.stringify(list));
+  await page.evaluate(() => ["theme", "font-size", "issue-ids"].forEach((key) => localStorage.removeItem("yuka-demo-" + key)));
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
   await page.locator('.row[data-id="YUK-4"] .row-title').click();
@@ -587,8 +660,8 @@ await step("3j. themes and the navigation progress bar", async () => {
   const at = (needle: string) => html.indexOf(needle);
   const script = html.slice(html.lastIndexOf("<script", at("yuka-demo-theme")), html.indexOf("</script>", at("yuka-demo-theme")));
   check(
-    "3j.2 one script in the head, before the stylesheet and the body, restores the theme and the code style",
-    at("yuka-demo-theme") > 0 && at("yuka-demo-theme") < at('rel="stylesheet"') && at("yuka-demo-theme") < at("<body") && script.includes("yuka-demo-code-theme") && script.length < 600 && !html.includes("data-code-style"),
+    "3j.2 one script in the head, before the stylesheet and the body, restores the theme, the code style and the settings",
+    at("yuka-demo-theme") > 0 && at("yuka-demo-theme") < at('rel="stylesheet"') && at("yuka-demo-theme") < at("<body") && script.includes("yuka-demo-code-theme") && script.includes('["font-size",') && script.length < 700 && !html.includes("data-code-style"),
     `${script.length} ${script}`,
   );
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: "dark" });
@@ -1300,7 +1373,7 @@ await step("6g. workspaces", async () => {
       return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
     }),
   );
-  check("6g.7b at 390 px each nav link stays on one line", navLines.length === 5 && navLines.every((lines) => lines === 1), navLines.join(","));
+  check("6g.7b at 390 px each nav link stays on one line", navLines.length === 6 && navLines.every((lines) => lines === 1), navLines.join(","));
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.locator(".filter").fill("speed up");
   const filtered = await page.locator(".row").count();
@@ -1352,7 +1425,7 @@ await step("6g. workspaces", async () => {
   await page.waitForSelector(".row");
   check("6g.16 the new stress issue is still in stress", (await page.locator(".row", { hasText: title }).count()) === 1);
   const nav = await page.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("6g.17 the sidebar links stay in the workspace", nav === "/w/stress=page /w/stress/my=null /w/stress/insights=null /w/stress/report=null /w/stress/canvas=null", nav);
+  check("6g.17 the sidebar links stay in the workspace", nav === "/w/stress=page /w/stress/my=null /w/stress/insights=null /w/stress/report=null /w/stress/canvas=null /w/stress/settings=null", nav);
 });
 
 await step("6i. the label menu", async () => {
@@ -1413,7 +1486,7 @@ await step("6h. insights", async () => {
   await pg.goto(base + "/insights", { waitUntil: "networkidle" });
   await pg.waitForFunction(() => !!(document.querySelector("button.chip") as any)?.__yuka_click);
   const nav = await pg.evaluate(() => [...document.querySelectorAll(".nav-link")].map((a) => `${a.getAttribute("href")}=${a.getAttribute("aria-current")}`).join(" "));
-  check("6h.2 the sidebar marks Insights", nav === "/=null /my=null /insights=page /report=null /canvas=null", nav);
+  check("6h.2 the sidebar marks Insights", nav === "/=null /my=null /insights=page /report=null /canvas=null /settings=null", nav);
   const amounts = () => pg.evaluate(() => [...document.querySelectorAll('[data-chart="status"] g[data-key]')].map((g) => g.querySelector("text")?.textContent).join(","));
   const points = () => pg.locator('[data-chart="scatter"] circle').count();
   const all = await amounts();
@@ -1572,14 +1645,14 @@ await step("6i. report and canvas", async () => {
   const html = await (await report.request.get(base + "/report")).text();
   const charts = (html.match(/data-chart="/g) ?? []).length;
   check("6i.1 /report has the seven charts in the server HTML, with no island or data for them", charts === 7 && !html.includes("data-yuka-answer") && !html.includes("Demo_shared.Insights") && (await report.locator('[data-chart="scatter"] circle').count()) >= 25, `charts=${charts} bytes=${html.length}`);
-  check("6i.2 the sidebar marks Report", (await nav(report)) === "/=null /my=null /insights=null /report=page /canvas=null", await nav(report));
+  check("6i.2 the sidebar marks Report", (await nav(report)) === "/=null /my=null /insights=null /report=page /canvas=null /settings=null", await nav(report));
   await report.close();
   const A = await open("/canvas");
   const B = await open("/canvas");
   await liveOpen(A);
   await liveOpen(B);
   await A.waitForFunction(() => !!(document.querySelector("[data-canvas] [data-id]") as any)?.__yuka_pointerdown);
-  check("6i.3 the sidebar marks Canvas", (await nav(A)) === "/=null /my=null /insights=null /report=null /canvas=page", await nav(A));
+  check("6i.3 the sidebar marks Canvas", (await nav(A)) === "/=null /my=null /insights=null /report=null /canvas=page /settings=null", await nav(A));
   const at = (style: string | null) => (/translate\((-?\d+)px, ?(-?\d+)px\)/.exec(style ?? "") ?? []).slice(1).map(Number);
   const grip = await A.evaluate(() => {
     for (const card of document.querySelectorAll<HTMLElement>("[data-canvas] [data-id]")) {

@@ -107,11 +107,18 @@ let navigation () =
   List.iter
     (fun (layout, path) ->
       let _, response, html = call ~headers:[ ("Yuka-Navigate", layout); ("Yuka-Overlay", "1") ] path in
+      Alcotest.(check (option string)) ("a page " ^ path) None (header response "yuka-layer");
+      lacks html "class=\"overlay-dialog\"")
+    [ ("L0", "/insights"); ("L0", "/report"); ("L1/stress", "/w/stress/report") ];
+  List.iter
+    (fun (layout, path) ->
+      let _, response, html = call ~headers:[ ("Yuka-Navigate", layout); ("Yuka-Overlay", "1") ] path in
       Alcotest.(check (option string)) ("overlay " ^ path) (Some "overlay") (header response "yuka-layer");
-      has html "class=\"overlay-dialog\"";
+      has html "class=\"overlay-dialog\" role=\"dialog\" aria-label=\"Settings\"";
       has html "data-name=\"Demo_shared.Close_button\"";
+      has html "data-name=\"Demo_shared.Settings_panel\"";
       lacks html "class=\"sidebar\"")
-    [ ("L0", "/insights"); ("L0", "/report"); ("L1/stress", "/w/stress/report") ]
+    [ ("L0", "/settings"); ("L1/stress", "/w/stress/settings") ]
 
 let not_found () =
   let status, response, html = call "/issue/NOPE" in
@@ -234,6 +241,19 @@ let report () =
   let html = get "/w/stress/report" in
   has html {|<a class="nav-link" href="/w/stress/report" aria-current="page">Report</a>|};
   Alcotest.(check int) "a point per stress issue" 2000 (count html {| r="2"|})
+
+let settings () =
+  let html = get "/settings" in
+  has html "<title>Settings</title>";
+  has html {|<a class="nav-link" href="/settings" aria-current="page">Settings</a>|};
+  has html {|data-name="Demo_shared.Settings_panel"|};
+  lacks html "class=\"overlay-dialog\"";
+  List.iter
+    (fun (preference : Preference.t) -> has html (Printf.sprintf {|data-setting="%s"|} preference.key))
+    Preference.all;
+  let html = get "/w/stress/settings" in
+  has html {|<a class="nav-link" href="/w/stress/settings" aria-current="page">Settings</a>|};
+  has html {|data-name="Demo_shared.Settings_panel"|}
 
 let canvas () =
   let html = get "/canvas" in
@@ -706,6 +726,7 @@ let () =
           Alcotest.test_case "stress issue page" `Quick stress_issue;
           Alcotest.test_case "insights" `Quick insights;
           Alcotest.test_case "report" `Quick report;
+          Alcotest.test_case "settings" `Quick settings;
           Alcotest.test_case "canvas" `Quick canvas;
           Alcotest.test_case "about has no JavaScript" `Quick about;
           Alcotest.test_case "redirect, 405, HEAD, endpoint, assets" `Quick rules;

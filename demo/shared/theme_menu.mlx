@@ -15,7 +15,6 @@ let index_of choice = Option.value (List.find_index (fun candidate -> candidate 
 
 let[@client] make () =
   let opened = Yuka.State.make false in
-  let current = Yuka.State.make Theme.Dark in
   let code = Yuka.State.make None in
   let active = Yuka.State.make 0 in
   let close ~refocus =
@@ -24,7 +23,7 @@ let[@client] make () =
   in
   let open_menu () =
     let theme = Theme.current () in
-    Yuka.State.set current theme;
+    Yuka.State.set Theme.chosen (Theme.slug theme);
     Yuka.State.set code (Theme.current_code ());
     Yuka.State.set active (index_of (Ui theme));
     Yuka.State.set opened true;
@@ -38,9 +37,7 @@ let[@client] make () =
   in
   let choose choice =
     (match choice with
-    | Ui theme ->
-        Theme.apply theme;
-        Yuka.State.set current theme
+    | Ui theme -> Theme.apply theme
     | Code choice ->
         Theme.apply_code choice;
         Yuka.State.set code choice);
@@ -67,7 +64,7 @@ let[@client] make () =
             | _ -> ()));
   let item choice =
     let checked =
-      match choice with Ui theme -> Yuka.State.get current = theme | Code choice -> Yuka.State.get code = choice
+      match choice with Ui theme -> Yuka.State.get Theme.chosen = Theme.slug theme | Code choice -> Yuka.State.get code = choice
     in
     <button id=(item_id choice) class_="menu-item" type_=`button role=`menuitemradio
       tabindex=(if Yuka.State.get active = index_of choice then 0 else -1)
@@ -75,7 +72,7 @@ let[@client] make () =
       on_click=(fun _ -> choose choice)>
       (match choice with
       | Ui theme -> <span class_=Css.swatch data_theme=(Theme.slug theme) />
-      | Code None -> <span class_=Css.swatch data_theme=(Theme.slug (Yuka.State.get current)) />
+      | Code None -> <span class_=Css.swatch data_theme=(Yuka.State.get Theme.chosen) />
       | Code (Some code) -> <span class_=(Css.swatch ^ " " ^ Css.code_swatch) data_code=(Theme.Code.slug code) />)
       (Yuka.text
          (match choice with
