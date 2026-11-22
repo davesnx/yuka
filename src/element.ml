@@ -69,6 +69,13 @@ let hole_attr_unchecked name f =
   Dynamic (name, f)
 let on name handler = Handler (name, handler)
 
+let prop name codec f =
+  let lower = Web.lowercase name in
+  if (not (Url.valid_name name)) || lower = "innerhtml" || lower = "outerhtml" then
+    invalid_arg ("Yuka: refused property name " ^ name);
+  Client.use_props ();
+  Dynamic ("/" ^ name, fun () -> Some (Json.to_string (Codec.encode codec (f ()))))
+
 let each ?(equal = Signal.same) ~key items render =
   Kind.of_node (Each { items; key; equal; render = Kind.fn render })
 

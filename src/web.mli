@@ -33,6 +33,7 @@ val remove_attribute : node -> string -> unit
 val set_string : node -> string -> string -> unit
 val set_bool : node -> string -> bool -> unit
 val set_prop : node -> string -> 'a -> unit
+val set_json : node -> string -> string -> unit
 val get_prop : node -> string -> 'a option
 val add_listener : node -> string -> (event -> unit) -> unit
 val remove_listener : node -> string -> (event -> unit) -> unit

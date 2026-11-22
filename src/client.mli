@@ -43,3 +43,4 @@ val use_catch : unit -> unit
 val use_actions : unit -> unit
 
 val use_url_check : unit -> unit
+val use_props : unit -> unit

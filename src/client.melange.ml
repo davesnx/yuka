@@ -679,7 +679,7 @@ let mount_element pos tag attrs children =
     else if svg then Web.create_element_ns pos.doc svg_ns tag
     else Web.create_element pos.doc tag
   in
-  let attrs = if is_adopted then (!keep_hook) el tag attrs [@u] else attrs in
+  let attrs = (!keep_hook) el tag attrs [@u] in
   let inner_svg = svg && tag <> "foreignObject" in
   let inner =
     if is_adopted then { pos with parent = el; cur = first_child el; svg = inner_svg }
@@ -708,6 +708,26 @@ let use_url_check () = url_hook := fun [@u] tag name v -> Url.check ~tag ~log:Ty
 let use_element () =
   use_url_check ();
   element_hook := fun [@u] pos tag attrs children -> mount_element pos tag attrs children
+
+let bind_property el tag = function
+  | Dynamic (name, f) when Types.is_property name ->
+      let name = Web.sub name 1 (String.length name - 1) and tag = Web.lowercase tag in
+      if (not (String.contains tag '-')) && Url.checked ~tag (Web.lowercase name) then
+        invalid_arg ("Yuka: refused property " ^ name ^ " of " ^ tag);
+      Base.run_effect Scheduler.queue (fun () -> Option.iter (Web.set_json el name) (f ()));
+      false
+  | _ -> true
+
+let props_hook = ref None
+
+let use_props () =
+  let next = !keep_hook in
+  match !props_hook with
+  | Some hook when hook == next -> ()
+  | _ ->
+      let hook = fun [@u] el tag attrs -> next el tag (List.filter (bind_property el tag) attrs) [@u] in
+      props_hook := Some hook;
+      keep_hook := hook
 
 let use_await () =
   await_hook := { run = (fun [@u] pos async loading failed render -> mount_await pos async loading failed render) }

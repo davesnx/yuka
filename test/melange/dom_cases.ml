@@ -2023,8 +2023,98 @@ let set_cookie () =
   check "nothing was written for the lone surrogate" "false" (string_of_bool (Cases.contains (cookies ()) "lone="));
   check "nothing was written by a refused call" "false" (string_of_bool (Cases.contains (cookies ()) "n=x"))
 
+let property_json : node -> string -> string =
+  [%mel.raw {|function (el, name) { const v = el[name]; return v === undefined ? "undefined" : (typeof v) + " " + JSON.stringify(v) }|}]
+
+let user_codec =
+  Codec.make
+    ~encode:(fun (name, id) -> `Assoc [ ("name", `String name); ("id", `Int id) ])
+    ~decode:(fun _ -> Error "unused")
+
+let user_card user =
+  element "user-card" [ attr "label" "card"; prop "user" user_codec (fun () -> State.get user) ] []
+
+let property_render () =
+  let user = State.make ("Ada", 1) in
+  let c = container "" in
+  let dispose = Yuka.Private.render (as_element c) (fun () -> div [] [ user_card user ]) in
+  let card = query c "user-card" in
+  check "set on mount" {|object {"name":"Ada","id":1}|} (property_json card "user");
+  check "no attribute" "none" (Option.value (get_attribute card "user") ~default:"none");
+  check "html" {|<div><user-card label="card"></user-card></div>|} (html c);
+  State.set user ("Grace", 2);
+  check "follows the State" {|object {"name":"Grace","id":2}|} (property_json card "user");
+  dispose ();
+  State.set user ("Linus", 3);
+  check "stops after dispose" {|object {"name":"Grace","id":2}|} (property_json card "user")
+
+let property_hydrate () =
+  let user = State.make ("Ada", 1) in
+  let count = State.make 1 in
+  let tree () =
+    div []
+      [
+        user_card user;
+        element "x-count" [ prop "count" Codec.int (fun () -> State.get count) ] [];
+      ]
+  in
+  let server_html = server (tree ()) in
+  check "server prints nothing" {|<div><user-card label="card"></user-card><x-count></x-count></div>|} server_html;
+  let c = container server_html in
+  let card = query c "user-card" in
+  check "no property before hydrate" "undefined" (property_json card "user");
+  let dispose = Yuka.Private.hydrate (as_element c) tree in
+  same "card adopted" card (query c "user-card");
+  check "set on hydrate" {|object {"name":"Ada","id":1}|} (property_json card "user");
+  check "a number" "number 1" (property_json (query c "x-count") "count");
+  check "html unchanged" server_html (html c);
+  State.set user ("Grace", 2);
+  State.set count 5;
+  check "follows the State" {|object {"name":"Grace","id":2}|} (property_json card "user");
+  check "number follows" "number 5" (property_json (query c "x-count") "count");
+  dispose ()
+
+let property_after_other_hydrate () =
+  let shown = State.make false in
+  let a = container "" in
+  let dispose_a =
+    Yuka.Private.hydrate (as_element a) (fun () ->
+        div []
+          [ hole (fun () -> if State.get shown then element "x-late" [ prop "n" Codec.int (fun () -> 7) ] [] else empty) ])
+  in
+  let b = container (server (div [] [ text "b" ])) in
+  let dispose_b = Yuka.Private.hydrate (as_element b) (fun () -> div [] [ text "b" ]) in
+  State.set shown true;
+  check "set in a hole after another hydrate" "number 7" (property_json (query a "x-late") "n");
+  dispose_a ();
+  dispose_b ()
+
+let property_names () =
+  let invalid f = match f () with _ -> "ran" | exception Invalid_argument _ -> "invalid" in
+  check "innerHTML" "invalid" (invalid (fun () -> prop "innerHTML" Codec.string (fun () -> "")));
+  check "outerhtml" "invalid" (invalid (fun () -> prop "outerhtml" Codec.string (fun () -> "")));
+  check "on name" "invalid" (invalid (fun () -> prop "onclick" Codec.string (fun () -> "")));
+  check "empty" "invalid" (invalid (fun () -> prop "" Codec.string (fun () -> "")));
+  let mount tag name =
+    let c = container "" in
+    invalid (fun () ->
+        let dispose =
+          Yuka.Private.render (as_element c) (fun () -> element tag [ prop name Codec.string (fun () -> "javascript:x") ] [])
+        in
+        dispose ())
+  in
+  check "href of a" "invalid" (mount "a" "href");
+  check "src of img" "invalid" (mount "img" "src");
+  check "srcdoc of iframe" "invalid" (mount "iframe" "srcdoc");
+  check "data of a custom element" "ran" (mount "x-chart" "data");
+  check "title of a" "ran" (mount "a" "title")
+
 let all =
   [
+    ("property: set on render, follows the State", property_render);
+    ("property: server prints nothing, set on hydrate", property_hydrate);
+    ("property: set in a hole after another island hydrates", property_after_other_hydrate);
+    ("property: refused names", property_names);
     ("Browser.set_cookie", set_cookie);
     ("handlers run in a batch", handler_batched);
     ("after: reads the DOM of the same change", after_sees_dom);

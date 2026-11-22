@@ -208,6 +208,8 @@ type backend = ..
     s.invalid <- invalid;
     s.invalid_focused <- invalid_focused
 
+let is_property name = String.length name > 1 && String.unsafe_get name 0 = '/'
+
 let warned = ref false
 
 let log name value =

@@ -216,6 +216,21 @@ val hole_attr : string -> (unit -> string option) -> client attribute
     client, [value], [checked] and [selected] are set as properties. A URL
     attribute gets the check of {!attr} on each value. *)
 
+val prop : string -> 'a Codec.t -> (unit -> 'a) -> client attribute
+(** [prop name codec f]: a JavaScript property of the element, not an
+    attribute. In the browser, Yuka sets [element.name] to the JSON value
+    of [f ()], written with [codec] (an object, an array, a string, a
+    number, a boolean or [null]). It sets the property when it mounts or
+    hydrates the element, and again when a State that [f] reads changes.
+    Each change sets a new value. The server prints nothing for it and does
+    not call [f].
+
+    Use it in the attributes of {!val-element}. A [name] that {!attr}
+    refuses, [innerHTML] or [outerHTML] (any case) raises
+    [Invalid_argument]. On an element with no [-] in its tag, a URL name of
+    {!attr} (as [href] or [src]), [srcdoc] of [iframe] and [href] of [base]
+    raise [Invalid_argument] when the element mounts. *)
+
 val with_unique_id : (string -> 'k element) -> 'k element
 (** [with_unique_id (fun id -> element)]: [element] with an [id] for [for],
     [aria-labelledby], [aria-describedby] or [aria-controls]. The [id] is

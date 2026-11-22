@@ -145,6 +145,49 @@ attribute inside that reads a State is a hole of its own and updates. An element
 island has started (a new list row, an `Await` value that arrives later)
 gets a new id, which the server never printed.
 
+## Custom elements
+
+A custom element has a `-` in its tag, as `user-card`. `.mlx` does not
+parse such a tag, and the ppx accepts only HTML and SVG tags. Make the
+element with `Yuka.element`, and its attributes with `Yuka.attr`,
+`Yuka.hole_attr`, `Yuka.prop` and `Yuka.on`. Put it in markup as a child:
+
+```ocaml
+(* shared/model.ml *)
+module User = struct
+  type t = { name : string; id : int } [@@deriving codec]
+end
+```
+
+```ocaml
+(* shared/card.mlx *)
+let[@client] make ~(user : Model.User.t) () =
+  let user = Yuka.State.make user and picked = Yuka.State.make 0 in
+  <div>
+    (Yuka.element "user-card"
+       [ Yuka.attr "label" "Owner";
+         Yuka.prop "user" Model.User.codec (fun () -> Yuka.State.get user);
+         Yuka.on "card-select" (fun _ -> Yuka.State.update picked succ) ]
+       [ Yuka.hole (fun () -> Yuka.int (Yuka.State.get picked)) ])
+  </div>
+```
+
+- The server prints the tag, the attributes and the children. The browser
+  keeps that element when it hydrates.
+- `Yuka.prop "user" codec f` sets the JavaScript property `user` of the
+  element, not an attribute. The value is the JSON of `f ()`, written with
+  the codec: here the object `{"name": ..., "id": ...}`. Yuka sets it when
+  it hydrates or mounts the element, and again when a State that `f`
+  reads changes. The server prints nothing for it. `innerHTML`,
+  `outerHTML` and the names that start with `on` are refused. On an
+  element with no `-` in its tag, the URL attributes of `Yuka.attr` (as
+  `href` or `src`) are refused too.
+- `Yuka.on "card-select"` receives a custom event. Yuka listens for it on
+  the document, so the element must dispatch it with `bubbles: true`. A
+  custom event that does not bubble does not reach the handler.
+  `Yuka.Event` has no function for `detail`: read it with a Melange
+  external.
+
 ## Form errors
 
 [Data](data.md#form-errors) explains how `Yuka.Form` shows field errors

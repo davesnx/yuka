@@ -447,6 +447,7 @@ open Base
                           | Part_attr i -> (
                               match parts.(i) with
                               | Attribute (Static (n, v)) -> add n v
+                              | Attribute (Dynamic (n, _)) when Types.is_property n -> ()
                               | Attribute (Dynamic (n, f)) -> Option.iter (add n) (f ())
                               | Attribute (Handler _) | Child _ | No_attribute -> ()))
                         attrs;
@@ -461,6 +462,7 @@ open Base
                             | Part_attr i -> (
                                 match parts.(i) with
                                 | Attribute (Static (n, v)) -> add false n v
+                                | Attribute (Dynamic (n, _)) when Types.is_property n -> ()
                                 | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f ())
                                 | Attribute (Handler _) | Child _ | No_attribute -> ()))
                           attrs
@@ -601,6 +603,7 @@ open Base
           List.iter
             (function
               | Static (name, v) -> add_attr b ~tag name v
+              | Dynamic (name, _) when Types.is_property name -> ()
               | Dynamic (name, f) -> Option.iter (add_attr b ~tag name) (f ())
               | Handler _ -> ())
             attrs;
@@ -621,6 +624,7 @@ open Base
                     List.iter
                       (function
                         | Static (name, v) -> add false name v
+                        | Dynamic (name, _) when Types.is_property name -> ()
                         | Dynamic (name, f) -> Option.iter (add false name) (f ())
                         | Handler _ -> ())
                       attrs)
@@ -678,6 +682,7 @@ open Base
         List.filter_map
           (function
             | Static (name, value) -> Some (name, value)
+            | Dynamic (name, _) when Types.is_property name -> None
             | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f ())
             | Handler _ -> None)
           attrs

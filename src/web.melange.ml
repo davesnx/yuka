@@ -29,6 +29,7 @@ external remove_attribute : node -> string -> unit = "removeAttribute" [@@mel.se
 external set_string : node -> string -> string -> unit = "" [@@mel.set_index]
 external set_bool : node -> string -> bool -> unit = "" [@@mel.set_index]
 external set_prop : node -> string -> 'a -> unit = "" [@@mel.set_index]
+let set_json : node -> string -> string -> unit = [%mel.raw "function (n, k, s) { n[k] = JSON.parse(s) }"]
 external get_prop : node -> string -> 'a option = "" [@@mel.get_index] [@@mel.return nullable]
 external add_listener : node -> string -> (event -> unit) -> unit = "addEventListener" [@@mel.send]
 external remove_listener : node -> string -> (event -> unit) -> unit = "removeEventListener" [@@mel.send]
