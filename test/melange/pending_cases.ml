@@ -355,6 +355,30 @@ let hydrate_then_change () =
     (String.concat " | " [ at_start; running; Dom_cases.text_content c ]);
   dispose ()
 
+let held_view_stays_live () =
+  let tab = State.make "list" and clicks = State.make 0 in
+  let c, _, _, dispose =
+    render (fun () ->
+        fallback "F"
+          ~children:(fun () ->
+            hole (fun () ->
+                match State.get tab with
+                | "list" ->
+                    element "button"
+                      [ on "click" (fun _ -> State.set clicks (State.peek clicks + 1)) ]
+                      [ hole (fun () -> text ("clicks=" ^ string_of_int (State.get clicks))) ]
+                | t -> fragment [ text (t ^ "="); view (Async.memo (fun () -> call t)) ]))
+          ())
+  in
+  State.set tab "detail";
+  let held = Dom_cases.text_content c in
+  Dom_cases.click (Dom_cases.query c "button");
+  let clicked = Dom_cases.text_content c in
+  resolve "detail" 5;
+  check "the old view of a held hole updates and takes events until the switch"
+    "clicks=0 | clicks=1 | detail=5" (String.concat " | " [ held; clicked; Dom_cases.text_content c ]);
+  dispose ()
+
 let all =
   [
     ("pending: T2 three refetches, one switch", three_sources_one_switch);
@@ -362,6 +386,7 @@ let all =
     ("pending: T3b nested, outer settles first", nested_outer_first);
     ("pending: T6 busy () of the nearest boundary", busy_nearest);
     ("pending: T5b a held hole", held_hole);
+    ("pending: the old view of a held hole stays live", held_view_stays_live);
     ("pending: a source made at mount holds the fallback", source_in_a_hole);
     ("pending: Await with no loading joins", await_without_loading);
     ("pending: Await with no loading and no boundary", await_without_boundary);

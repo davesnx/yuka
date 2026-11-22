@@ -443,8 +443,8 @@ the nearest `Pending` above it.
   source has its new value, all new values show in one step. A failure
   changes with the others.
 - A hole whose new content makes new sources keeps its old content until
-  they are ready. During that time the old content does not update and
-  its event handlers do not run.
+  they are ready. During that time the old content stays live: it
+  updates and its event handlers run.
 - A State that is not a source changes at once. The filter input above
   shows the new text at once. To keep a part in step with the data, read
   the input from the data: for example, make the memo give the filter

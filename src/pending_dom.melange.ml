@@ -56,42 +56,62 @@ let rec hold (p : boundary) n =
   | Provide { pending = Some _; _ } | Text _ | Island _ | Slot _ -> n
 
 and held p f =
-  let shown = ref [||] and mounted = ref false in
+  let shown = ref [||] and mounted = ref false and current = ref ignore and waiting = ref ignore in
   fun () ->
     let changed = p.mark () in
-    let n = hold p (f ()) in
+    let host = Option.bind !(Base.current_owner ()) (fun (c : Base.owner) -> c.parent) in
+    let o = Base.new_owner () in
+    let cell = Option.map (fun h -> (h, Base.add_disposer h (fun () -> Base.dispose_owner o))) host in
+    let release () =
+      Option.iter (fun (h, c) -> Base.remove_disposer h c) cell;
+      Base.dispose_owner o
+    in
+    let n = Base.with_owner o (fun () -> hold p (f ())) in
     let client pos =
       let pos : pos = Obj.obj pos in
-      (if not !mounted then begin
-         mounted := true;
-         if pos.adopt then begin
-           let first = pos.cur in
-           mount_node pos n;
-           shown := nodes_from first pos.cur
-         end
-         else begin
-           let frag, next = off_page_mount pos n in
-           shown := next;
-           insert pos.parent frag pos.cur
-         end
-       end
-       else
-         let frag, next = off_page_mount pos n in
-         if changed () then begin
-           let stop = pos.cur and old = !shown and live = ref true in
-           Base.own (fun () -> live := false);
-           Array.iter (fun x -> insert pos.parent x stop) old;
-           p.on_switch (fun () ->
-               if !live then begin
-                 Array.iter Web.remove old;
-                 insert pos.parent frag stop;
-                 shown := next
-               end)
-         end
-         else begin
-           insert pos.parent frag pos.cur;
-           shown := next
-         end);
+      Base.with_owner o (fun () ->
+          if not !mounted then begin
+            mounted := true;
+            current := release;
+            if pos.adopt then begin
+              let first = pos.cur in
+              mount_node pos n;
+              shown := nodes_from first pos.cur
+            end
+            else begin
+              let frag, next = off_page_mount pos n in
+              shown := next;
+              insert pos.parent frag pos.cur
+            end
+          end
+          else begin
+            !waiting ();
+            waiting := ignore;
+            let frag, next = off_page_mount pos n in
+            if changed () then begin
+              let stop = pos.cur and old = !shown and live = ref true in
+              waiting :=
+                (fun () ->
+                  live := false;
+                  release ());
+              Array.iter (fun x -> insert pos.parent x stop) old;
+              p.on_switch (fun () ->
+                  if !live then begin
+                    waiting := ignore;
+                    Array.iter Web.remove old;
+                    !current ();
+                    current := release;
+                    insert pos.parent frag stop;
+                    shown := next
+                  end)
+            end
+            else begin
+              !current ();
+              current := release;
+              insert pos.parent frag pos.cur;
+              shown := next
+            end
+          end);
       Fragment []
     in
     Provide { add = (fun e -> e); children = (fun () -> n); client; pending = None }
