@@ -34,7 +34,11 @@ let refresh_store base inner req =
   inner req
 
 let with_index index config app req =
-  match Yuka.Server.Prerender.path config (Dream.target req) with Some _ -> app req | None -> index req
+  let target = Dream.target req in
+  match Yuka.Server.Prerender.path config target with
+  | Some _ -> app req
+  | None when String.starts_with ~prefix:"/_yuka/" target -> Dream.empty `Not_Found
+  | None -> index req
 
 let node_name () =
   Printf.sprintf "%s-%d-%s" (Unix.gethostname ()) (Unix.getpid ()) Demo_shared.Store.process_id
@@ -130,6 +134,8 @@ let () =
   in
   let index = Yuka_dream.handler (Yuka.Server.config ~head:Demo_index.Pages.head ()) Demo_index.Yuka_routes.app in
   let base = !base in
+  if base <> "" && not (List.exists (fun (demo : Demo_index.Pages.demo) -> demo.path = base) Demo_index.Pages.demos) then
+    stop ("--base must be the path of a demo in the index: " ^ base);
   let config =
     match
       Yuka.Server.config ~base ~assets
