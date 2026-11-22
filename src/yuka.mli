@@ -1790,7 +1790,7 @@ module Server : sig
     ?dev:bool ->
     ?origins:string list ->
     ?log:(log_level -> string -> unit) ->
-    ?csp:[ `Nonce ] ->
+    ?csp:[ `Nonce | `Hash ] ->
     unit ->
     config
   (** [public] maps URL prefixes to directories ([("/static", "static")]).
@@ -1842,7 +1842,16 @@ module Server : sig
       [<script] start tag in [head]. JSON scripts do not get it. A
       navigation answer has no nonce and no header: the client does not run
       the scripts of an answer. A prerendered file and a prerender do not
-      get a nonce ({!Prerender.config}). *)
+      get a nonce ({!Prerender.config}).
+
+      With [`Hash], the cycle does the same as with [`Nonce], and a
+      prerender writes the policy into each page that it renders: a
+      [<meta http-equiv="Content-Security-Policy">] after the viewport
+      meta, with ['sha256-H'] of the text of each inline JavaScript
+      [<script>], import map and speculation rules of the page in place of
+      the nonce. The module script of the page is an inline script that
+      adds it, so ['strict-dynamic'] lets it load. A prerendered file does
+      not change from one request to the next, so a cache can keep it. *)
 
   val set_default_log : (log_level -> string -> unit) -> unit
   (** Replaces the default sink: where messages go outside a request (a
@@ -2044,10 +2053,14 @@ module Server : sig
       a server. *)
 
   module Prerender : sig
-    val config : config -> config
+    val config : sha256:(string -> string) -> config -> config
     (** The config a prerender renders with: [dev] off, whatever [~dev]
         says, so no static file gets the dev script or the dev state; [csp]
-        off, so no static file has a nonce that every visitor shares; and a
+        off, so no static file has a nonce that every visitor shares; with
+        [~csp:`Hash], each page gets a policy with the hashes of its inline
+        scripts, made with [sha256] (the 32 bytes of the SHA-256 digest of
+        a string, not encoded), and the page is complete before it is given:
+        it does not stream; and a
         page that renders a {!Yuka.Live.make} gives the 500 page and a log
         message instead of a file, since its state depends on the request.
         {!missing_page} uses it too. *)

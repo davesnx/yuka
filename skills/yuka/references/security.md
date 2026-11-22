@@ -47,8 +47,9 @@
   start tag and read the text as markup.
 - A page with no island ends with an inline
   `<script type="speculationrules">` (see "Prefetch" in
-  [Router](router.md)). With ``~csp:`Nonce`` (see below) it has the nonce
-  of the page. An app that sets its own `script-src` must allow this
+  [Router](router.md)). With ``~csp:`Nonce`` or ``~csp:`Hash`` (see
+  below) it has the nonce of the page, or its hash is in the policy of a
+  prerendered page. An app that sets its own `script-src` must allow this
   element: add the hash of its text, `'sha256-noc9jWPkx7Sf6fj4Eowojtg1qcTXxDSHRgItGG0axUw='`. The hash
   works in every browser that runs the rule. It is the hash of the text of
   this release and changes when the text changes. In tests with Chromium
@@ -90,10 +91,47 @@ these scripts load (`import()` of an island) need no nonce.
 - Each response gets a new nonce, also an error or a not-found page.
   Do not give a page with a nonce a shared cache rule (`Server.public`): a
   cache would give the same nonce to all its readers.
-- A prerender (`Yuka.Server.Prerender.config`) turns `csp` off, and a
-  prerendered file is sent with no header.
+- With ``~csp:`Nonce``, a prerender (`Yuka.Server.Prerender.config`)
+  turns `csp` off, and a prerendered file is sent with no header.
 - When the route rules also give a `Content-Security-Policy` header, the
   response has the two headers, and the browser applies the two. Do not
   give a `script-src` there that blocks the scripts of Yuka.
 - When the server cannot read `/dev/urandom`, the page is a 500 and the
   log tells why.
+
+### Prerendered pages: ``~csp:`Hash``
+
+A prerendered page is a static file: all its readers get the same bytes,
+and a static host sends no header for each request. A nonce cannot work
+there. ``Yuka.Server.config ~csp:`Hash`` gives the pages that the cycle
+renders the same nonce and header as ``~csp:`Nonce``. In addition, a
+prerender writes the policy into each page that it writes (also
+`404.html`), as the first element after the viewport meta:
+
+```
+<meta http-equiv="Content-Security-Policy" content="script-src 'sha256-H1' 'sha256-H2' 'strict-dynamic'; object-src 'none'; base-uri 'none'">
+```
+
+- Each `'sha256-H'` is the SHA-256 (base64) of the text of an inline
+  script of the page: each JavaScript `<script>` without `src`, the import
+  map, the speculation rules, the fill script and each streamed fill.
+  JSON scripts get no hash. Each hash is in the list one time.
+- The module script of the page is not `<script type="module" src>`:
+  with `'strict-dynamic'`, the browser blocks a script with `src` that
+  is in the HTML and has no nonce. It is an inline script (with its hash in
+  the policy) that adds the module script. `'strict-dynamic'` lets a
+  script that an allowed script adds run, and also the modules that it
+  imports.
+- A `<script src>` that you write in `~head` gets no hash, and the
+  browser blocks it. Load it from an inline script in `~head`.
+- The page has no nonce, and it is the same for each request, so a
+  cache can keep it.
+- The policy is in a `<meta>`, not in a header, so it works on every
+  static host and when the cycle sends the file (`prerendered`). A
+  `<meta>` policy cannot hold `frame-ancestors`, `report-uri`,
+  `report-to` or `sandbox`. To use them, send them as a header from your
+  host or proxy.
+- The page is complete before the prerender writes it: it does not
+  stream.
+- `Yuka_dream.prerender` makes the hashes with Digestif. Another adapter
+  gives the SHA-256 function to `Yuka.Server.Prerender.config ~sha256`.

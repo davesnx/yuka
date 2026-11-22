@@ -40,7 +40,8 @@ val prerender :
 
     It renders with [Yuka.Server.Prerender.config]: dev mode is off, and a
     page that renders a [Yuka.Live.make] is a 500 with a log message, so it is
-    not written. A file in the [prerendered] directory of the config is not
+    not written. With [~csp:`Hash], each page has the policy with the
+    hashes of its inline scripts (SHA-256 from Digestif). A file in the [prerendered] directory of the config is not
     read. Files already in [out] are replaced; running it twice gives the
     same files. Gives [Error] with a message that names the directory, and
     writes nothing, when [out] is inside a directory of

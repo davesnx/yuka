@@ -13,6 +13,7 @@ depends: [
   "ocaml" {>= "5.4"}
   "yuka" {= version}
   "dream" {>= "1.0.0~alpha8"}
+  "digestif"
   "lwt"
   "mlx" {with-test & >= "0.12"}
   "alcotest" {with-test}

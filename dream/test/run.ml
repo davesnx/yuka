@@ -129,6 +129,32 @@ let prerender_dev_off () =
   check_true "no dev script in a page" (not (contains (read "index.html") "EventSource"));
   check_true "no dev script in 404.html" (not (contains (read "404.html") "EventSource"))
 
+let prerender_csp_hash () =
+  let out = Filename.temp_dir "yuka_out" "" in
+  let config = Yuka.Server.config ~csp:`Hash ~head:"<script>window.h=1</script>" () in
+  ignore
+    (with_stderr (fun () ->
+         match Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app) with
+         | Ok () -> ()
+         | Error m -> Alcotest.fail m));
+  let read name = In_channel.with_open_bin (Filename.concat out name) In_channel.input_all in
+  List.iter
+    (fun name ->
+      let page = read name in
+      check_true (name ^ ": the policy with the SHA-256 of the head script and of the speculation rules")
+        (contains page
+           {|<meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="script-src 'sha256-z9dxGau2HJDQDksB0x5j3weTbs9kxMvoQ5Nk8KkQV8I=' 'sha256-noc9jWPkx7Sf6fj4Eowojtg1qcTXxDSHRgItGG0axUw=' 'strict-dynamic'; object-src 'none'; base-uri 'none'"><title>|});
+      check_true (name ^ ": no nonce") (not (contains page "nonce")))
+    [ "index.html"; "404.html" ];
+  let handler = Yuka_dream.handler (Yuka.Server.config ~prerendered:out ~csp:`Hash ()) Yuka_routes.app in
+  let call () =
+    let response = Dream.test handler (Dream.request ~target:"/" "") in
+    (Dream.header response "content-security-policy", Lwt_main.run (Dream.body response))
+  in
+  let first = call () in
+  Alcotest.(check (pair (option string) string)) "the file, with no header" (None, read "index.html") first;
+  Alcotest.(check (pair (option string) string)) "the same answer each time" first (call ())
+
 let out_inside_a_served_dir () =
   let dir = Filename.temp_dir "yuka_static" "" in
   Out_channel.with_open_bin (Filename.concat dir "s.css") (fun oc -> output_string oc "x");
@@ -283,6 +309,7 @@ let () =
           Alcotest.test_case "YUKA_DEV=1 does not turn on dev mode" `Quick dev_env_ignored;
           Alcotest.test_case "a prerender with ~dev:true writes no dev script" `Quick prerender_dev_off;
           Alcotest.test_case "out inside a served directory is refused" `Quick out_inside_a_served_dir;
+          Alcotest.test_case "a prerender with ~csp:`Hash writes the policy with the hashes in each page" `Quick prerender_csp_hash;
         ] );
       ("body", [ Alcotest.test_case "the body limit" `Quick body_limit ]);
       ("log", [ Alcotest.test_case "Console reaches the Dream log" `Quick dream_log ]);

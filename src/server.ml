@@ -23,6 +23,8 @@ let import_map ~url packages =
     (fun pkg -> (pkg ^ "/", url ^ "/node_modules/" ^ pkg ^ "/"))
     packages
 
+let viewport_meta = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+
 let head ?nonce ~extra ?head ?(html = "") ?(early = false) ?(import_map = []) ?(title = "")
     ?(styles = []) ?(scripts = []) () =
   let attr = Printer.escape ~quote:true in
@@ -42,7 +44,7 @@ let head ?nonce ~extra ?head ?(html = "") ?(early = false) ?(import_map = []) ?(
   String.concat ""
     ([ "<!DOCTYPE html><html";
        html;
-       "><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>";
+       "><head><meta charset=\"utf-8\">"; viewport_meta; "<title>";
        Printer.escape ~quote:false title;
        "</title>" ]
     @ import_map_script ?nonce import_map

@@ -223,7 +223,9 @@ let write_pages ~out config app =
   Lwt.return_unit
 
 let prerender ~out config app =
-  let config = Yuka.Server.Prerender.config config in
+  let config =
+    Yuka.Server.Prerender.config ~sha256:(fun s -> Digestif.SHA256.(to_raw_string (digest_string s))) config
+  in
   match check_out out config with
   | Error _ as e -> Lwt.return e
   | Ok () -> Lwt.map Result.ok (write_pages ~out config app)

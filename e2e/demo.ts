@@ -2,9 +2,10 @@ import type { Page, Response } from "/home/me/workplace/davesnx/sancho.dev/node_
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { request } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { connect } from "node:net";
-import { readFileSync, writeFileSync, openSync } from "node:fs";
+import { readFileSync, writeFileSync, openSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const playwrightPath =
   process.env.PLAYWRIGHT_CORE ??
@@ -509,6 +510,46 @@ await step("3c2. Content-Security-Policy nonce", async () => {
   const ran = await injected.evaluate(() => (window as any).__injected === 1);
   const reported = await until(() => cspViolations.length > before, 5000);
   check("3c2.3 the policy holds and a violation is seen: an inline script with no nonce does not run and is reported", !ran && reported, `ran=${ran} ${cspViolations.slice(before).join(" | ")}`);
+  cspViolations.length = before;
+  await ctx.close();
+});
+
+await step("3c3. a prerendered page has a Content-Security-Policy with the hashes of its scripts", async () => {
+  const out = mkdtempSync(join(tmpdir(), "yuka_e2e_prerender_"));
+  const run = spawnSync((process.env.YUKA_E2E_SERVER ?? "").split(" ")[0], ["--prerender", out], { encoding: "utf8" });
+  check("3c3.0 the demo prerenders", run.status === 0, `${run.status} ${run.stderr}`);
+  const html = readFileSync(join(out, "about", "index.html"), "utf8");
+  rmSync(out, { recursive: true, force: true });
+  const served = (body: string) => (route: any) =>
+    route.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8" }, body });
+  const ctx = await browser.newContext();
+  await ctx.route(base + "/about", served(html));
+  const before = cspViolations.length;
+  const pg = await ctx.newPage();
+  const res = await pg.goto(base + "/about", { waitUntil: "networkidle" });
+  const state = await pg.evaluate(() => ({
+    policy: document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute("content") ?? "",
+    theme: document.documentElement.getAttribute("data-theme"),
+    nonces: [...document.scripts].filter((s) => s.hasAttribute("nonce")).length,
+    rules: document.querySelectorAll('script[type="speculationrules"]').length,
+  }));
+  check(
+    "3c3.1 the file has no header and no nonce, its meta policy lists sha256 hashes, and its inline scripts run",
+    res?.headers()["content-security-policy"] === undefined
+      && /^script-src ('sha256-[A-Za-z0-9+/]+=*' )+'strict-dynamic'; object-src 'none'; base-uri 'none'$/.test(state.policy)
+      && state.theme !== null && state.nonces === 0 && state.rules === 1,
+    JSON.stringify(state),
+  );
+  await pg.waitForTimeout(500);
+  check("3c3.2 the prerendered page has no CSP violation", cspViolations.length === before, cspViolations.slice(before).join(" | "));
+  await pg.close();
+  await ctx.unroute(base + "/about");
+  await ctx.route(base + "/about", served(html.replace("</body>", "<script>window.__injected=1</script></body>")));
+  const injected = await ctx.newPage();
+  await injected.goto(base + "/about", { waitUntil: "networkidle" });
+  const ran = await injected.evaluate(() => (window as any).__injected === 1);
+  const reported = await until(() => cspViolations.length > before, 5000);
+  check("3c3.3 the meta policy holds: an inline script with no hash does not run and is reported", !ran && reported, `ran=${ran} ${cspViolations.slice(before).join(" | ")}`);
   cspViolations.length = before;
   await ctx.close();
 });

@@ -54,6 +54,7 @@
    (= :version))
   (dream
    (>= 1.0.0~alpha8))
+  digestif
   lwt
   (mlx
    (and

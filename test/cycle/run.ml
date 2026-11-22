@@ -845,7 +845,7 @@ let reviewed =
         check_header r "cache-control" [ "no-store" ] );
     ( "a prerender refuses a page with live state and has no dev script",
       fun () ->
-        let pre = Server.Prerender.config (config_with ~dev:true ~assets:modules ()) in
+        let pre = Server.Prerender.config ~sha256:Fun.id (config_with ~dev:true ~assets:modules ()) in
         let r = get ~config:pre ~headers:[ ("x-user", "ann") ] "/live" in
         check_status r 500;
         check_true "no state" (not (contains r.body "secret of ann"));
@@ -2108,6 +2108,38 @@ let csp =
         else check_true ("nonce on " ^ tag) (contains tag (" nonce=\"" ^ nonce ^ "\"")))
       tags
   in
+  let hashed body =
+    let start = {|<meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="script-src |} in
+    let at = index body start in
+    check_true "policy after the viewport meta" (at >= 0);
+    let from = at + String.length start in
+    let policy = String.sub body from (String.index_from body from '"' - from) in
+    check_true ("policy end " ^ policy)
+      (String.ends_with ~suffix:" 'strict-dynamic'; object-src 'none'; base-uri 'none'" policy);
+    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" in
+    let decode s =
+      let b = Buffer.create 64 and bits = ref 0 and n = ref 0 in
+      String.iter
+        (fun c ->
+          match String.index_opt alphabet c with
+          | Some v ->
+              bits := (!bits lsl 6) lor v;
+              n := !n + 6;
+              if !n >= 8 then begin
+                n := !n - 8;
+                Buffer.add_char b (Char.chr ((!bits lsr !n) land 255))
+              end
+          | None -> ())
+        s;
+      Buffer.contents b
+    in
+    List.filter_map
+      (fun source ->
+        if String.starts_with ~prefix:"'sha256-" source then
+          Some (decode (String.sub source 8 (String.length source - 9)))
+        else None)
+      (String.split_on_char ' ' policy)
+  in
   let streamed config value =
     let a = call ~config (request "/slow") in
     App.finish_slow value;
@@ -2173,9 +2205,44 @@ let csp =
           [ "L0"; "-" ] );
     ( "a prerender has no nonce and no header",
       fun () ->
-        let r = get ~config:(Server.Prerender.config (with_csp ())) "/plain" in
+        let r = get ~config:(Server.Prerender.config ~sha256:Fun.id (with_csp ())) "/plain" in
         check_header r "content-security-policy" [];
         check_true "no nonce" (not (contains r.body "nonce")) );
+    ( "a prerender with ~csp:`Hash puts a policy with the hash of each inline script in the page",
+      fun () ->
+        let config =
+          Server.Prerender.config ~sha256:Fun.id
+            (config_with ~assets:modules ~csp:`Hash
+               ~head:{|<script>window.h=1</script><script type="application/json">{}</script>|} ())
+        in
+        let r = get ~config "/islands" in
+        check_header r "content-security-policy" [];
+        check_true "no nonce" (not (contains r.body "nonce"));
+        let texts = hashed r.body in
+        check_true "head script" (List.mem "window.h=1" texts);
+        check_true "import map" (List.exists (fun t -> String.starts_with ~prefix:{|{"imports"|} t) texts);
+        check_true "the module script is an inline script that adds it"
+          (List.exists (fun t -> contains t {|createElement("script")|} && contains t {|"/_yuka/app/app/main.js"|}) texts);
+        check_true "no module script with src" (not (contains r.body {|<script type="module" async src=|}));
+        check_true "no JSON script" (not (List.mem "{}" texts));
+        let inline =
+          List.filter (fun tag -> not (contains tag "src=" || contains tag "json")) (script_tags r.body)
+        in
+        Alcotest.(check int) "one hash per inline script" (List.length inline) (List.length texts);
+        Alcotest.(check string) "the same page each time" r.body (get ~config "/islands").body );
+    ( "a prerender with ~csp:`Hash hashes the fill scripts and the scripts of a fill",
+      fun () ->
+        let config = Server.Prerender.config ~sha256:Fun.id (config_with ~assets:modules ~csp:`Hash ()) in
+        let r = streamed config "scripts" in
+        let texts = hashed r.body in
+        check_true "fill script" (List.exists (fun t -> String.starts_with ~prefix:"window.__yukaFill=" t) texts);
+        check_true "fill call" (List.exists (fun t -> String.starts_with ~prefix:"__yukaFill(\"" t) texts);
+        check_true "page script" (List.mem "window.a=1" texts);
+        check_true "no JSON script" (not (List.mem "{}" texts)) );
+    ( "a prerender with ~csp:`Nonce has no policy in the page",
+      fun () ->
+        let r = get ~config:(Server.Prerender.config ~sha256:Fun.id (with_csp ())) "/plain" in
+        check_true "no meta" (not (contains r.body "Content-Security-Policy")) );
     ( "without ~csp: no nonce and no header",
       fun () ->
         let r = streamed config "scripts" in

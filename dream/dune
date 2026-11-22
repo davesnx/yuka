@@ -1,4 +1,4 @@
 (library
  (name yuka_dream)
  (public_name yuka-dream)
- (libraries yuka dream lwt lwt.unix))
+ (libraries yuka dream digestif lwt lwt.unix))

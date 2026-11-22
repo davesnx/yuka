@@ -261,7 +261,8 @@ type config = {
   log : (Types.log_level -> string -> unit) option;
   prerendering : bool;
   warned : string list ref;
-  csp : [ `Nonce ] option;
+  csp : [ `Nonce | `Hash ] option;
+  sha256 : (string -> string) option;
 }
 
 let valid_file_segment s =
@@ -280,6 +281,7 @@ let config ?assets ?(public = []) ?prerendered ?(styles = []) ?(css = []) ?(head
     ?(dev = false) ?origins ?log ?csp () =
   {
     csp;
+    sha256 = None;
     dev = (if dev then Some (dev_state ()) else None);
     origins;
     log;
@@ -307,7 +309,10 @@ let build_id config (App a) =
 let log config = match config.log with Some f -> f | None -> fun level m -> !Types.default_log level m
 let default_log sink config = match config.log with Some _ -> config | None -> { config with log = Some sink }
 
-let prerender_config config = { config with dev = None; prerendering = true; csp = None }
+let prerendering config = { config with dev = None; prerendering = true; csp = None }
+
+let prerender_config ~sha256 config =
+  { (prerendering config) with sha256 = (match config.csp with Some `Hash -> Some sha256 | _ -> config.sha256) }
 
 let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
@@ -430,27 +435,133 @@ let rec shared sent (layers : layer list) =
 let speculation_rules nonce =
   {|<script type="speculationrules"|} ^ Printer.nonce_attr nonce ^ {|>{"prefetch":[{"where":{"and":[{"href_matches":"/*"},{"not":{"selector_matches":"[data-yuka-prefetch=off],[download],[target]"}}]},"eagerness":"conservative"}]}</script>|}
 
-let csp_policy nonce = "script-src 'nonce-" ^ nonce ^ "' 'strict-dynamic'; object-src 'none'; base-uri 'none'"
+let csp_policy sources =
+  "script-src "
+  ^ (match sources with [] -> "'none'" | sources -> String.concat " " sources ^ " 'strict-dynamic'")
+  ^ "; object-src 'none'; base-uri 'none'"
+
+let base64 raw =
+  let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" in
+  let n = String.length raw in
+  String.init
+    ((n + 2) / 3 * 4)
+    (fun i ->
+      let group = i / 4 * 3 in
+      let byte k = if group + k < n then Char.code raw.[group + k] else 0 in
+      let bits = (byte 0 lsl 16) lor (byte 1 lsl 8) lor byte 2 in
+      if group + (i mod 4) - 1 >= n then '=' else alphabet.[(bits lsr (18 - (6 * (i mod 4)))) land 63])
+
+let at_ci html i part =
+  let n = String.length part in
+  i + n <= String.length html && String.lowercase_ascii (String.sub html i n) = part
+
+let script_end html i =
+  i + 7 > String.length html
+  || match html.[i + 7] with ' ' | '\t' | '\n' | '\r' | '\012' | '>' | '/' -> true | _ -> false
+
+let start_tag_attributes html from =
+  let n = String.length html in
+  let rec skip i = if i < n && String.contains " \t\n\r\012/" html.[i] then skip (i + 1) else i in
+  let rec ws i = if i < n && String.contains " \t\n\r\012" html.[i] then ws (i + 1) else i in
+  let rec name_end i = if i < n && not (String.contains " \t\n\r\012/>=" html.[i]) then name_end (i + 1) else i in
+  let rec attrs i acc =
+    let i = skip i in
+    if i >= n then (List.rev acc, n)
+    else if html.[i] = '>' then (List.rev acc, i + 1)
+    else
+      let j = name_end i in
+      let name = String.lowercase_ascii (String.sub html i (j - i)) in
+      let k = ws j in
+      if k < n && html.[k] = '=' then
+        let v = ws (k + 1) in
+        let value, after =
+          if v < n && (html.[v] = '"' || html.[v] = '\'') then
+            match String.index_from_opt html (v + 1) html.[v] with
+            | Some e -> (String.sub html (v + 1) (e - v - 1), e + 1)
+            | None -> (String.sub html (v + 1) (n - v - 1), n)
+          else
+            let e = name_end v in
+            (String.sub html v (e - v), e)
+        in
+        attrs after ((name, value) :: acc)
+      else attrs (max j (i + 1)) ((name, "") :: acc)
+  in
+  attrs from []
+
+let newlines text =
+  let b = Buffer.create (String.length text) in
+  String.iteri
+    (fun i c ->
+      if c <> '\r' then Buffer.add_char b c
+      else if not (i + 1 < String.length text && text.[i + 1] = '\n') then Buffer.add_char b '\n')
+    text;
+  Buffer.contents b
+
+let inline_scripts html =
+  let n = String.length html in
+  let rec closing i =
+    if i >= n then n else if at_ci html i "</script" && script_end html (i + 1) then i else closing (i + 1)
+  in
+  let rec go i acc =
+    if i >= n then List.rev acc
+    else if at_ci html i "<script" && script_end html i then
+      let attrs, start = start_tag_attributes html (i + 7) in
+      let stop = closing start in
+      let acc =
+        if List.mem_assoc "src" attrs || not (Printer.executable (List.assoc_opt "type" attrs)) then acc
+        else newlines (String.sub html start (stop - start)) :: acc
+      in
+      go stop acc
+    else go (i + 1) acc
+  in
+  go 0 []
+
+let hash_policy sha256 html =
+  let sources =
+    List.fold_left
+      (fun acc text ->
+        let source = "'sha256-" ^ base64 (sha256 text) ^ "'" in
+        if List.exists (String.equal source) acc then acc else acc @ [ source ])
+      [] (inline_scripts html)
+  in
+  let meta =
+    "<meta http-equiv=\"Content-Security-Policy\" content=\""
+    ^ Printer.escape ~quote:true (csp_policy sources)
+    ^ "\">"
+  in
+  match Server.find_from html Server.viewport_meta 0 with
+  | Some i ->
+      let at = i + String.length Server.viewport_meta in
+      String.sub html 0 at ^ meta ^ String.sub html at (String.length html - at)
+  | None -> html
+
+let module_loader url =
+  let literal = String.concat "\\u003c" (String.split_on_char '<' (Json.to_string (`String url))) in
+  Printer.inline_script
+    ("document.head.appendChild(Object.assign(document.createElement(\"script\"),{type:\"module\",src:" ^ literal ^ "}))")
 
 let render ?(overlay = false) env ~status ~headers layers (page : page) =
   match
     match (env.config.csp, env.navigate) with
-    | Some `Nonce, None -> Option.map Option.some (Web.random_hex 16)
+    | Some (`Nonce | `Hash), None -> Option.map Option.some (Web.random_hex 16)
     | _ -> Some None
   with
   | None -> Async.failed "Content-Security-Policy nonce: cannot read random bytes from /dev/urandom"
   | Some nonce ->
   let headers =
-    match nonce with Some n -> headers @ [ ("content-security-policy", csp_policy n) ] | None -> headers
+    match nonce with Some n -> headers @ [ ("content-security-policy", csp_policy [ "'nonce-" ^ n ^ "'" ]) ] | None -> headers
   in
   let assets = env.config.assets in
   let preload = Option.map (fun (a : assets) -> a.preload) assets in
   let entry =
     Option.map
       (fun (a : assets) ->
-        "<script type=\"module\" async src=\""
-        ^ Printer.escape ~quote:true ("/_yuka/app/" ^ a.entry)
-        ^ "\"" ^ Printer.nonce_attr nonce ^ "></script>")
+        match env.config.sha256 with
+        | Some _ -> module_loader ("/_yuka/app/" ^ a.entry)
+        | None ->
+            "<script type=\"module\" async src=\""
+            ^ Printer.escape ~quote:true ("/_yuka/app/" ^ a.entry)
+            ^ "\"" ^ Printer.nonce_attr nonce ^ "></script>")
       assets
   in
   let import_map = match assets with Some a -> a.import_map | None -> [] in
@@ -528,11 +639,15 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
     let close islands =
       (if islands || env.prefetch = `Off then "" else speculation_rules nonce) ^ "</body></html>"
     in
+    let whole islands =
+      early := close islands :: !early;
+      let body = written () in
+      { status; headers; body = String (match env.config.sha256 with Some f -> hash_policy f body | None -> body) }
+    in
     match Async.status finished with
     | Async.Failed m -> Async.failed m
-    | Async.Done islands ->
-        early := close islands :: !early;
-        Async.return { status; headers; body = String (written ()) }
+    | Async.Done islands -> Async.return (whole islands)
+    | Async.Pending when Option.is_some env.config.sha256 -> Async.map whole finished
     | Async.Pending ->
     let stream w =
       let flushed = w (written ()) in
@@ -1241,7 +1356,7 @@ let links html =
   scan 0 []
 
 let missing_page config (App a) ~sleep =
-  let config = prerender_config config in
+  let config = prerendering config in
   let env =
     {
       config;
