@@ -16,9 +16,9 @@ let cancel_pending () =
       Navigation_web.abort c
   | None -> ()
 
-let assign url =
-  Navigation_state.set false;
-  Web.location_assign url
+let assign ~replace url =
+  Navigation_state.set None;
+  Web.navigate replace url
 
 let save_scroll = Navigation_stub.save_scroll
 
@@ -74,14 +74,32 @@ let html header =
   | Some t -> Navigation_web.is_html t
   | None -> false
 
-type answer = { final : string; status : int; header : string -> string option; text : string }
+type stream = {
+  mutable parts : (string * string) list;
+  mutable result : bool option;
+  mutable next : (string * string) option -> unit;
+  mutable cancel : unit -> unit;
+}
+
+type answer = { final : string; status : int; header : string -> string option; text : string; stream : stream option }
+
+let stream cancel = { parts = []; result = None; next = ignore; cancel }
+
+let got s id html =
+  s.parts <- (id, html) :: s.parts;
+  s.next (Some (id, html))
+
+let ended s broke complete =
+  s.result <- Some complete;
+  if not complete then broke ();
+  s.next None
 
 let swappable a =
   let stale = match a.header "yuka-build" with Some b -> not (is b (build ())) | None -> false in
   let shown = (a.status >= 200 && a.status < 300) || a.status >= 400 in
   match outlet a.header with
   | Some None -> None
-  | _ when stale || (not shown) || not (html a.header) -> None
+  | _ when stale || (not shown) || (not (Navigation_stub.inside a.final)) || not (Option.is_some a.stream || html a.header) -> None
   | target -> Some (Option.join target)
 
 let warm a = if Option.is_some (swappable a) then Navigation_web.warm a.final a.text
@@ -177,7 +195,13 @@ let take key =
 
 let opened () =
   let n = ref 0 in
-  Array.iter (fun e -> if Option.is_none e.answer then incr n) (Web.table_values (cache ()));
+  Array.iter
+    (fun e ->
+      match e.answer with
+      | None -> incr n
+      | Some { stream = Some { result = None; _ }; _ } when e.prefetched -> incr n
+      | Some _ -> ())
+    (Web.table_values (cache ()));
   !n
 
 let allowed () =
@@ -201,9 +225,10 @@ let rec start (trigger : Prefetch.level) key url =
       List.iter (fun f -> f a) (List.rev w);
       pump ()
     in
+    let s = stream ignore in
     Navigation_web.fetch_page (url, keys (), Prefetch.name trigger, low, e.controller, true)
-      (fun final status header text ->
-        let a = { final; status; header; text } and waited = match e.waiters with [] -> false | _ -> true in
+      (fun final status header text streamed ->
+        let a = { final; status; header; text; stream = (if streamed then Some s else None) } and waited = match e.waiters with [] -> false | _ -> true in
         if status = 204 then begin
           drop e;
           Option.iter
@@ -223,6 +248,10 @@ let rec start (trigger : Prefetch.level) key url =
           settle e.answer;
           if e.warm && not waited then warm a
         end)
+      (got s)
+      (fun complete ->
+        ended s (fun () -> drop e) complete;
+        pump ())
       (fun () ->
         drop e;
         settle None)
@@ -294,14 +323,80 @@ let pass () =
     true
   end
 
-let show ~dir ~push ~restore url a =
+let following : (Web.node * (unit -> unit)) list ref = ref []
+let broken : Web.node list ref = ref []
+let owners = ref 0
+
+let report () =
+  let value = match (!following, !broken) with _ :: _, _ -> `Filling | [], _ :: _ -> `Broken | [], [] -> `Done in
+  Scheduler.batch (fun () -> Signal.set Navigation_state.stream value)
+
+let unfollow gone =
+  let page = Web.document () in
+  let gone r = gone r || not (Web.contains page r) in
+  following := without (fun (r, stop) -> gone r && (stop (); true)) !following;
+  broken := without gone !broken;
+  report ()
+
+let break root =
+  Array.iter (fun (id, html) -> Client.stop_within (Navigation_web.put root id html)) (Navigation_web.failed_views root);
+  Navigation_web.fail_values root;
+  Navigation_web.adopt_stylesheets ();
+  broken := root :: !broken
+
+let follow root place s =
+  incr owners;
+  let owner = !owners and live = ref true and place = ref place in
+  let unlisten = ref ignore in
+  let rec stop () =
+    live := false;
+    !unlisten ();
+    following := without (fun (_, f) -> f == stop) !following;
+    s.next <- ignore;
+    s.cancel ();
+    Navigation_web.hold root owner true
+  in
+  let put (id, html) =
+    Client.stop_within (Navigation_web.put root id html);
+    Navigation_web.adopt_stylesheets ()
+  in
+  List.iter put (List.rev s.parts);
+  (match s.result with Some false -> break root | _ -> ());
+  !place ();
+  if Option.is_none s.result then begin
+    Navigation_web.hold root owner false;
+    following := (root, stop) :: !following;
+    unlisten := Navigation_web.on_input (fun () -> place := ignore);
+    s.next <-
+      (fun p ->
+        if !live then
+          match p with
+          | Some (("", _) as p) ->
+              put p;
+              !place ()
+          | Some p ->
+              put p;
+              !place ();
+              Navigation_web.hold root owner false;
+              !start_islands ()
+          | None ->
+              !unlisten ();
+              following := without (fun (_, f) -> f == stop) !following;
+              (match s.result with Some false -> break root | _ -> ());
+              Navigation_web.hold root owner true;
+              !start_islands ();
+              report ())
+  end;
+  report ()
+
+let show ~dir ~push ~replace ~restore ~refresh url a =
   let final =
     match hash_of url with
     | "" -> a.final
     | h -> Navigation_web.no_hash a.final ^ h
   in
   match swappable a with
-  | None -> assign final
+  | None -> assign ~replace final
   | Some target ->
       let over = is "overlay" (a.header "yuka-layer") in
       if push then begin
@@ -318,18 +413,24 @@ let show ~dir ~push ~restore url a =
                   title = Navigation_web.title ();
                   focus = Navigation_web.active ();
                   route = Navigation_web.route_script ();
-                  direct = true;
+                  direct = not replace;
                 })
             :: !overlays;
-        Web.history_push_key key final;
-        current_key := key
+        if replace || String.equal (Navigation_web.no_hash final) (Web.current_url ()) then begin
+          Web.table_delete (scrolls ()) !current_key;
+          Navigation_web.replace_entry key final
+        end
+        else Web.history_push_key key final;
+        current_key := key;
+        Navigation_stub.at := Web.history_at ()
       end;
       let gen = !nav in
       let apply () =
         if !nav = gen then begin
+          let kept = if refresh then Navigation_web.hold_focus () else fun () -> false in
           loaded := Web.current_url ();
           shown_key := !current_key;
-          Navigation_state.set false;
+          Navigation_state.set None;
           let target =
             if over then begin
               let el = Navigation_web.layer () in
@@ -341,22 +442,32 @@ let show ~dir ~push ~restore url a =
               hide ();
               swap target final a.header a.text;
               Platform.kept := [];
-              (match restore with
-              | Some y -> Navigation_web.scroll_to y
-              | None -> Navigation_web.scroll_to_hash (hash_of final));
               target
             end
           in
+          let root = Option.value target ~default:(Web.document ()) in
+          unfollow (Web.contains root);
+          let place =
+            match (over, restore, hash_of final) with
+            | true, _, _ -> ignore
+            | false, Some y, _ -> fun () -> Navigation_web.scroll_to y
+            | false, None, "" ->
+                Navigation_web.scroll_to 0.;
+                ignore
+            | false, None, h -> fun () -> Navigation_web.scroll_to_hash h
+          in
+          (match a.stream with Some s -> follow root place s | None -> place ());
           !Platform.swapped target;
           !start_islands ();
           Navigation_web.live ();
-          Navigation_web.settle (Option.value target ~default:(Web.document ())) (hash_of final)
+          if not (kept ()) then Navigation_web.settle root (hash_of final) (not refresh)
         end
+        else Option.iter (fun s -> s.cancel ()) a.stream
       in
       if !transitions_on then Navigation_web.transition dir apply else apply ()
 
-let load ~overlay ~dir ~push ~restore url =
-  if not !started then assign url
+let load ~overlay ~dir ~push ~replace ~restore ~refresh url =
+  if not !started then assign ~replace url
   else begin
     cancel_pending ();
     !hover ();
@@ -365,29 +476,34 @@ let load ~overlay ~dir ~push ~restore url =
     let gen = !nav in
     let apply = function
       | _ when !nav <> gen -> ()
-      | Some a -> show ~dir ~push ~restore url a
-      | None -> assign url
+      | Some a -> show ~dir ~push ~replace ~restore ~refresh url a
+      | None -> assign ~replace url
     in
     let key = page_key url in
     take key;
     let fetch () =
       let controller = Navigation_web.new_controller () in
-      let asked = !era in
+      let asked = !era and s = stream (fun () -> Navigation_web.abort controller) and cached = ref None in
       pending := Some controller;
       Navigation_web.fetch_page (url, keys (), "", false, controller, overlay)
-        (fun final status header text ->
+        (fun final status header text streamed ->
           pending := None;
-          let a = { final; status; header; text } in
+          let a = { final; status; header; text; stream = (if streamed then Some s else None) } in
           if max_age header > 0 && asked = !era then begin
-            add { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false; overlay; warm = false };
+            let e = { key; answer = Some a; waiters = []; controller; at = Navigation_web.now (); prefetched = false; overlay; warm = false } in
+            s.cancel <- ignore;
+            cached := Some e;
+            add e;
             pump ()
           end;
           apply (Some a))
+        (got s)
+        (ended s (fun () -> Option.iter drop !cached))
         (fun () ->
           pending := None;
-          assign url)
+          assign ~replace url)
     in
-    match lookup overlay key with
+    match if refresh then None else lookup overlay key with
     | Some e -> (
         let use = function
           | Some a when e.prefetched && a.status = 204 -> if !nav = gen then fetch ()
@@ -401,15 +517,21 @@ let load ~overlay ~dir ~push ~restore url =
     | None -> fetch ()
   end
 
-let navigate url =
+let go ~replace ~keep_scroll ~refresh url =
   save_scroll ();
-  load ~overlay:true ~dir:"push" ~push:true ~restore:None url
+  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some (Web.scroll_y ()) else None) ~refresh url
+
+let navigate ~replace ~keep_scroll url = go ~replace ~keep_scroll ~refresh:false url
+let refresh () = go ~replace:true ~keep_scroll:true ~refresh:true (Web.current_url ())
 
 let back () =
   match showing () with
   | Some o when not o.direct ->
-      save_scroll ();
-      load ~overlay:false ~dir:"back" ~push:true ~restore:None o.url
+      if not (List.exists (fun check -> check o.url) !Navigation_stub.blocks) then begin
+        save_scroll ();
+        Navigation_state.set (Some { Navigation_state.url = o.url; from = !loaded; kind = `Push });
+        load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None ~refresh:false o.url
+      end
   | _ -> Web.history_back ()
 
 let on_over e =
@@ -468,10 +590,11 @@ let on_popstate _ =
     shown_key := next;
     cancel_pending ();
     incr nav;
-    Navigation_state.set false;
+    Navigation_state.set None;
     Option.iter
       (fun o ->
         hide ();
+        unfollow (fun _ -> false);
         Navigation_web.set_title o.title;
         Option.iter
           (fun r ->
@@ -490,8 +613,8 @@ let on_popstate _ =
   else
     load
       ~overlay:(List.exists (fun (o : overlay) -> String.equal o.key next && String.equal o.under (beneath ())) !overlays)
-      ~dir ~push:false
-      ~restore:(Some y) (Web.current_url ())
+      ~dir ~push:false ~replace:false
+      ~restore:(Some y) ~refresh:false (Web.current_url ())
 
 let handle e =
   match Navigation_web.event_type e with
@@ -531,8 +654,11 @@ let boot (transitions, islands) =
 
 let stop () =
   cancel_pending ();
+  List.iter (fun (_, f) -> f ()) !following;
+  broken := [];
+  report ();
   started := false;
-  Navigation_state.set false;
+  Navigation_state.set None;
   start_islands := (fun () -> ());
   on_out ();
   !unwatch ();
@@ -541,8 +667,8 @@ let stop () =
   untrack := ignore;
   incr nav;
   overlays := [];
-  Array.iter (fun e -> if Option.is_none e.answer then Navigation_web.abort e.controller) (Web.table_values (cache ()));
+  Array.iter (fun e -> Navigation_web.abort e.controller) (Web.table_values (cache ()));
   clear ();
   Platform.acted := ignore
 
-let router : Types.router = { boot; navigate; back; handle; stop }
+let router : Types.router = { boot; navigate; refresh; prefetch; back; handle; stop }

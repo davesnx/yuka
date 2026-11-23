@@ -149,6 +149,8 @@ module Awaiting = struct
 
   let optional_failed = <Yuka.Await async=comments loading="wait" ?failed>(fun v -> <b>"x"</b>)</Yuka.Await>
 
+  let not_blocking = <Yuka.Await async=comments loading="wait" blocking=`No>(fun v -> <b>"x"</b>)</Yuka.Await>
+
   let inside_element = <div class_="c"><Yuka.Await async=comments loading="wait">(fun v -> <i>(State.get n)</i>)</Yuka.Await></div>
 end
 

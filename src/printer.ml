@@ -92,13 +92,13 @@ open Base
     | _ -> refuse ()
 
   let fill_script =
-    "<script>window.__yukaFill=function(id){var t=document.querySelector('template[data-yuka-fill=\"'+id+'\"]'),w=document.createTreeWalker(document,128),c;while(c=w.nextNode())if(c.data==='['+id)break;if(!t||!c)return;var d=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')d++;else if(n.data===']'&&--d===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}n.parentNode.insertBefore(t.content,n);t.remove();if(document.currentScript)document.currentScript.remove()};</script>"
+    {|<script>(function(d){var g=function(id){var w=d.createTreeWalker(d,128),c;while(c=w.nextNode())if(c.data==='['+id)return c},p=function(c,f){var k=1,n=c.nextSibling,x;while(n){if(n.nodeType===8){if(n.data.charAt(0)==='[')k++;else if(n.data===']'&&--k===0)break}x=n.nextSibling;n.parentNode.removeChild(n);n=x}c.parentNode.insertBefore(f,n)};window.__yukaFill=function(id){var t=d.querySelector('template[data-yuka-fill="'+id+'"]'),c=g(id),b=d.querySelector('template[data-yuka-failed="'+id+'"]');if(b)b.remove();if(!t||!c)return;p(c,t.content);t.remove();if(d.currentScript)d.currentScript.remove()};d.addEventListener('DOMContentLoaded',function(){var f=d.querySelectorAll('template[data-yuka-failed]'),i,c,s,m,e,r=/"\$async":"([^"\\]*)"\}/g;if(!f.length)return;for(i=0;i<f.length;i++){c=g(f[i].getAttribute('data-yuka-failed'));if(c){p(c,f[i].content);c.data='['}f[i].remove()}s=d.querySelectorAll('script[type="application/json"]');for(i=0;i<s.length;i++)while(m=r.exec(s[i].textContent))if(!d.querySelector('script[data-yuka-async="'+m[1]+'"]')){e=d.createElement('script');e.type='application/json';e.setAttribute('data-yuka-async',m[1]);e.textContent='{"error":"broken"}';d.body.appendChild(e)}})})(document)</script>|}
 
   let session ~streaming ~islands_only =
     { streaming; islands_only; islands = 0; asyncs = 0; awaits = 0; pending = []; preload = None;
       preloaded = []; depth = 0; queued = []; id_prefix = ""; entry = None;
       current = None; in_fill = false; answers = []; answered = []; select_value = None; form = None;
-      csrf = None; sheets = []; held = []; context = None; shared = []; contexts = 0;
+      csrf = None; sheets = []; held = []; context = None; shared = []; route_printed = false; contexts = 0;
       id_scope = "p-"; id_count = 0; page_scope = "p-"; page_count = 0;
       invalid = []; invalid_focused = false }
 
@@ -134,6 +134,9 @@ open Base
       (fun (name, b) ->
         match List.assq_opt b s.shared with
         | Some id -> (name, id, "")
+        | None when s.route_printed && String.equal name route_name ->
+            s.shared <- (b, "route") :: s.shared;
+            (name, "route", "")
         | None ->
             let id =
               if String.equal name route_name then "route"
@@ -334,7 +337,7 @@ open Base
           marker "<!--[-->";
           go (f ());
           marker "<!--]-->"
-      | Await { async; loading; failed; render } -> (
+      | Await { async; loading; failed; render; blocking } -> (
           let ids = next_id () ^ "-" in
           let in_ids f =
             let scope = s.id_scope and count = s.id_count in
@@ -388,7 +391,26 @@ open Base
                     fill = (fun () -> held (fun () -> in_ids (fun () -> print ~env s body)));
                     fill_failed =
                       (fun m -> held (fun () -> in_ids (fun () -> print ~env s (fun () -> failed m))));
+                    fill_broken =
+                      (fun () ->
+                        let saved = snapshot s in
+                        let keep () =
+                          let islands = s.islands and asyncs = s.asyncs and awaits = s.awaits in
+                          restore s saved;
+                          s.islands <- islands;
+                          s.asyncs <- asyncs;
+                          s.awaits <- awaits
+                        in
+                        match held (fun () -> in_ids (fun () -> print ~env s (fun () -> failed "broken"))) with
+                        | html ->
+                            let links = take_answers s ^ take_links s in
+                            keep ();
+                            links ^ html
+                        | exception e ->
+                            keep ();
+                            raise e);
                     inside_island = inside;
+                    blocking;
                   }
                 :: s.pending;
               let start = Buffer.length b and outer_held = s.held in

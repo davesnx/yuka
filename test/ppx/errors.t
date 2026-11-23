@@ -431,7 +431,7 @@ Await with an unknown prop:
   File "w5.mlx", line 1, characters 8-19:
   1 | let x = <Yuka.Await async=a loading="l" other=1>(fun v -> <p />)</Yuka.Await>
               ^^^^^^^^^^^
-  Error: [yuka] Yuka.Await takes async, loading and failed
+  Error: [yuka] Yuka.Await takes async, loading, failed and blocking
   [1]
 
 Nested let[@client] in a module:

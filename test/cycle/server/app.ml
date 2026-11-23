@@ -41,6 +41,17 @@ let finish_second v =
   let _, resolve, _ = !second_state in
   resolve v
 
+let fast_state : (string Async.t * (string -> unit) * (string -> unit)) ref =
+  ref (Async.make ())
+
+let finish_fast v =
+  let _, resolve, _ = !fast_state in
+  resolve v
+
+let fail_slow m =
+  let _, _, fail = !slow_state in
+  fail m
+
 let fail_first = ref false
 let in_home = ref ignore
 let typed_links = ref false
@@ -52,7 +63,8 @@ let reset () =
   events := [];
   waiting := [];
   slow_state := Async.make ();
-  second_state := Async.make ()
+  second_state := Async.make ();
+  fast_state := Async.make ()
 
 let el tag ?(attrs = []) children =
   Yuka.element tag (List.map (fun (k, v) -> Yuka.attr k v) attrs) children
@@ -164,12 +176,26 @@ module Pages = struct
               ();
             island "Related" ])
 
+  let live_island () =
+    Yuka.runtime_island ~name:"Live" ~props:`Null (fun () ->
+        let t = Yuka.Live.make mine (fun () -> "ann") in
+        let shown =
+          match Yuka.State.get (Yuka.Live.state t) with
+          | Yuka.Status.Ready { data; _ } -> "data " ^ data
+          | Yuka.Status.Failed { error = Yuka.Status.Forbidden; _ } -> "forbidden"
+          | _ -> "other"
+        in
+        el "p" [ text shown ])
+
   let slow () =
     Server.page ~title:"Slow" (fun () ->
         Yuka.Await.make ~async:(slow ()) ~loading:(text "wait")
           ~failed:(fun _ -> failwith "timeout secret")
           ~children:(fun v ->
-            if v = "explode" then failwith "fill secret" else if v = "island" then island "Late" else text v)
+            if v = "explode" then failwith "fill secret"
+            else if v = "island" then island "Late"
+            else if v = "live" then live_island ()
+            else text v)
           ())
 
   let twice () =
@@ -181,6 +207,14 @@ module Pages = struct
     in
     let first, _, _ = !slow_state and second, _, _ = !second_state in
     Server.page ~title:"Twice" (fun () -> el "main" [ await first; await second ])
+
+  let blocking () =
+    let await blocking async =
+      Yuka.Await.make ~async ~loading:(text "wait") ~failed:(fun _ -> text "failed") ~blocking ~children:text ()
+    in
+    let first, _, _ = !slow_state and second, _, _ = !second_state and third, _, _ = !fast_state in
+    Server.page ~title:"Blocking" (fun () ->
+        el "main" [ await `Yes first; await `No second; await (`Timeout 0.5) third ])
 
   let broken () = Server.page ~title:"Broken" (fun () -> failwith "shell secret")
   let boom ~exploding () = Server.page (fun () -> text exploding)
@@ -207,17 +241,7 @@ module Pages = struct
 
   let error () = Server.page ~title:"Error" (fun () -> el "p" [ text "error page" ])
 
-  let live () =
-    Server.page ~title:"Live" (fun () ->
-        Yuka.runtime_island ~name:"Live" ~props:`Null (fun () ->
-            let t = Yuka.Live.make mine (fun () -> "ann") in
-            let shown =
-              match Yuka.State.get (Yuka.Live.state t) with
-              | Yuka.Status.Ready { data; _ } -> "data " ^ data
-              | Yuka.Status.Failed { error = Yuka.Status.Forbidden; _ } -> "forbidden"
-              | _ -> "other"
-            in
-            el "p" [ text shown ]))
+  let live () = Server.page ~title:"Live" live_island
 end
 
 let last_request : Server.request option ref = ref None

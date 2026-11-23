@@ -15,11 +15,18 @@ val new_controller : unit -> controller
 val abort : controller -> unit
 val fetch_page :
   string * string * string * bool * controller * bool ->
-  (string -> int -> (string -> string option) -> string -> unit) ->
+  (string -> int -> (string -> string option) -> string -> bool -> unit) ->
+  (string -> string -> unit) ->
+  (bool -> unit) ->
   (unit -> unit) ->
   unit
+val put : node -> string -> string -> node
+val failed_views : node -> (string * string) array
+val fail_values : node -> unit
+val hold : node -> int -> bool -> unit
 val hash_of : string -> string
 val no_hash : string -> string
+val replace_entry : string -> string -> unit
 val path_of : string -> string
 val keys : unit -> string
 val is_html : string -> bool
@@ -33,10 +40,12 @@ val after : int -> (unit -> unit) -> unit -> unit
 val save_data : unit -> bool
 val hidden_or_slow : unit -> bool
 val on_visible : (unit -> unit) -> unit -> unit
+val on_input : (unit -> unit) -> unit -> unit
 val observe : node array -> (node -> bool -> (unit -> unit) -> unit) -> unit -> unit
 val trajectory : (node -> string) -> (string -> unit) -> unit -> unit
 val warm : string -> string -> unit
 val transition : string -> (unit -> unit) -> unit
 val adopt_stylesheets : unit -> unit
 val live : unit -> unit
-val settle : node -> string -> unit
+val settle : node -> string -> bool -> unit
+val hold_focus : unit -> unit -> bool

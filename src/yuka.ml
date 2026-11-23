@@ -39,6 +39,7 @@ module Router = struct
 end
 
 let runtime_route_current find = Route.current find
+let runtime_route_pending find = Route.pending find
 let runtime_route_replace = Route.replace
 let runtime_route_push = Route.push
 

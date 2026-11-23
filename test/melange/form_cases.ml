@@ -105,7 +105,6 @@ let view () =
     ()
 
 let navigated = ref []
-let here : unit -> string = [%mel.raw "function () { return window.location.pathname + window.location.search }"]
 let use_on_ok = ref true
 
 let plain_view key () =
@@ -170,7 +169,12 @@ let island_of name view = runtime_island ~name ~props:`Null view
 
 let record_navigation () =
   navigated := [];
-  Private.platform := { !Private.platform with navigate = (fun u -> navigated := !navigated @ [ u ]) }
+  Private.platform :=
+    {
+      !Private.platform with
+      navigate = (fun ~replace:_ ~keep_scroll:_ u -> navigated := !navigated @ [ u ]);
+      refresh = (fun () -> navigated := !navigated @ [ "refresh" ]);
+    }
 
 let submit_in : string -> unit =
   [%mel.raw
@@ -357,7 +361,7 @@ let async =
             finish (fun () ->
                 check "not followed" "" (String.concat "," !navigated);
                 Yuka.stop ())) );
-    ( "form: with no redirect and no on_ok, reload the page URL",
+    ( "form: with no redirect and no on_ok, refresh the page URL",
       fun finish ->
         start (Server.to_string (fun () -> island_of "First" (plain_view "a")));
         set_input_in "a" "x";
@@ -365,7 +369,7 @@ let async =
         respond 0 200 {|{"ok":{"value":1}}|};
         after_ms 10 (fun () ->
             finish (fun () ->
-                check "client navigation to the page URL" (here ()) (String.concat "," !navigated);
+                check "a refresh of the page" "refresh" (String.concat "," !navigated);
                 Yuka.stop ())) );
     ( "form: the submit button's name and value are sent",
       fun finish ->

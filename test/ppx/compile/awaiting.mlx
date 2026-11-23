@@ -5,6 +5,11 @@ let view (comments : string list Yuka.Async.t) : Yuka.server Yuka.element =
     </Yuka.Await>
   </div>
 
+let with_timeout (comments : string list Yuka.Async.t) : Yuka.server Yuka.element =
+  <Yuka.Await async=comments loading="wait" blocking=(`Timeout 0.5)>
+    (fun items -> <b>(Yuka.text (String.concat "," items))</b>)
+  </Yuka.Await>
+
 let with_failed (comments : string list Yuka.Async.t) : Yuka.server Yuka.element =
   <Yuka.Await async=comments loading="wait" failed=(fun msg -> <p>(Yuka.text msg)</p>)>
     (fun items -> <b>(Yuka.text (String.concat "," items))</b>)
