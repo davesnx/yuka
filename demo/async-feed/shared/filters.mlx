@@ -8,20 +8,62 @@ let[@client] make () =
     | Some (Routes.Feed { project; team; assignee; _ }) ->
         last := (project, team, assignee);
         !last
-    | Some (Routes.Item _) | None -> !last
+    | Some (Routes.Item _ | Routes.Embed _) | None -> !last
   in
   let go (project, team, assignee) = Yuka.Browser.navigate (Routes.feed ~project ~team ~assignee ()) in
   let projects () = let project, _, _ = current () in project in
   let teams () = let _, team, _ = current () in team in
   let assignees () = let _, _, assignee = current () in assignee in
+  let any_active () = projects () <> [] || teams () <> [] || assignees () <> [] in
   <nav class_="filters" aria_label="Filters">
-    <Dropdown id="project" label="Project" options=Model.projects selected=projects
-      toggle=(fun value -> go (flip value (projects ()), teams (), assignees ()))
-      clear=(fun () -> go ([], teams (), assignees ())) />
-    <Dropdown id="team" label="Team" options=Model.teams selected=teams
-      toggle=(fun value -> go (projects (), flip value (teams ()), assignees ()))
-      clear=(fun () -> go (projects (), [], assignees ())) />
-    <Dropdown id="assignee" label="Assignee" options=Model.people selected=assignees
-      toggle=(fun value -> go (projects (), teams (), flip value (assignees ())))
-      clear=(fun () -> go (projects (), teams (), [])) />
+    <div class_="filters-head">
+      <span class_="filters-heading">"Filters"</span>
+      (if any_active () then
+         <button class_="link-button filters-reset" type_=`button on_click=(fun _ -> go ([], [], []))>"Reset"</button>
+       else Yuka.empty)
+    </div>
+    <div class_="filter-group">
+      <span class_="filter-label">"Team"</span>
+      <Dropdown id="team" label="Team" options=Model.teams selected=teams
+        toggle=(fun value -> go (projects (), flip value (teams ()), assignees ()))
+        clear=(fun () -> go (projects (), [], assignees ())) />
+    </div>
+    <div class_="filter-group">
+      <span class_="filter-label">"Project"</span>
+      <Dropdown id="project" label="Project" options=Model.projects selected=projects
+        toggle=(fun value -> go (flip value (projects ()), teams (), assignees ()))
+        clear=(fun () -> go ([], teams (), assignees ())) />
+    </div>
+    <div class_="filter-group filter-assignees">
+      <div class_="filter-group-head">
+        <span class_="filter-label">"Assignee"</span>
+        (if assignees () <> [] then
+           <button class_="link-button filters-clear" type_=`button
+             on_click=(fun _ -> go (projects (), teams (), []))>
+             "Clear"
+           </button>
+         else Yuka.empty)
+      </div>
+      <ul class_="assignee-list" aria_label="Assignee">
+        (Yuka.fragment
+           (List.map
+              (fun person ->
+                let active () = List.mem person (assignees ()) in
+                <li>
+                  <button type_=`button
+                    class_=(if active () then "assignee-item chosen" else "assignee-item")
+                    aria_pressed=(if active () then `true_ else `false_)
+                    on_click=(fun _ -> go (projects (), teams (), flip person (assignees ())))>
+                    <Avatar name=person size=22 />
+                    <span class_="assignee-name">(Yuka.text person)</span>
+                    (if active () then
+                       <svg class_="check assignee-check" view_box="0 0 14 14" width="14" height="14" aria_hidden=true>
+                         <path d="M3 7.5 L6 10.5 L11 4" fill="none" stroke="currentColor" stroke_width="1.75" />
+                       </svg>
+                     else Yuka.empty)
+                  </button>
+                </li>)
+              Model.people))
+      </ul>
+    </div>
   </nav>

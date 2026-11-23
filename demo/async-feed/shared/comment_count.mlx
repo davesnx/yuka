@@ -1,0 +1,11 @@
+let[@client] make ~(id : int) ~(count : int) () =
+  let label () =
+    match Feed.count ~id count with
+    | 1 -> "1 comment"
+    | n -> Int.to_string n ^ " comments"
+  in
+  let current () = Feed.count ~id count in
+  <span class_=(if current () > 0 then "comment-count has-comments" else "comment-count")
+    data_count=(Int.to_string (current ()))>
+    (Yuka.text (label ()))
+  </span>

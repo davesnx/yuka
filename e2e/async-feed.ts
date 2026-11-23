@@ -47,10 +47,15 @@ const settled = (p: Page) => p.waitForFunction(() => !document.documentElement.h
 const timeOf = (p: Page, id: string) => p.locator(`.card[data-id="${id}"] time`).first().textContent();
 
 let A: Page;
-await step("a1. the feed loads with dates in the chosen zone", async () => {
+await step("a1. the feed loads chronologically (newest at bottom) with logos, avatars, no descriptions", async () => {
   A = await open();
-  check("a1.1 one page of cards", (await A.locator(".feed .card").count()) === 50);
-  check("a1.2 newest first", (await A.locator(".feed .card").first().getAttribute("data-id")) === "5000");
+  check("a1.1 one page of cards", (await A.locator(".feed:not(.feed-live) .card").count()) === 50);
+  check("a1.2 oldest of page at top, newest at bottom",
+    (await A.locator(".feed:not(.feed-live) .card").first().getAttribute("data-id")) === "4951" &&
+    (await A.locator(".feed:not(.feed-live) .card").last().getAttribute("data-id")) === "5000");
+  check("a1.2b no Notifications header or event count", (await A.locator(".feed-head, .feed-count").count()) === 0);
+  check("a1.2c descriptions hidden on main feed", (await A.locator(".card .card-text").count()) === 0);
+  check("a1.2d avatars rendered on cards and sidebar", (await A.locator(".user-avatar").count()) > 50);
   const text = await timeOf(A, "5000");
   check("a1.3 the time is in Asia/Tokyo", text === "Nov 20, 2026, 18:01:40 GMT+9", text ?? "");
   const time = A.locator('.card[data-id="5000"] time');
@@ -58,7 +63,7 @@ await step("a1. the feed loads with dates in the chosen zone", async () => {
   check("a1.5 the title has the full timestamp", ((await time.getAttribute("title")) ?? "").includes("(Asia/Tokyo)"), (await time.getAttribute("title")) ?? "");
 });
 
-await step("a2. Simulate events streams cards one by one to every open page", async () => {
+await step("a2. Simulate events streams cards one by one to the bottom of every open page", async () => {
   const B = await open();
   const arrivals = A.evaluate(
     () =>
@@ -85,9 +90,9 @@ await step("a2. Simulate events streams cards one by one to every open page", as
   check("a2.1 the cards arrive one at a time", counts.join(",") === "1,2,3,4", counts.join(","));
   const gaps = times.slice(1).map((t, i) => t - times[i]);
   check("a2.2 with a delay between each", gaps.length === 3 && gaps.every((g) => g > 300), times.join(" "));
-  const first = await A.locator(".card").first().getAttribute("data-id");
-  check("a2.3 the newest card is at the top", first === "5004", first ?? "");
-  check("a2.4 a new card has the enter class", (await A.locator(".feed-live .card").first().getAttribute("class"))?.includes("card-new") ?? false);
+  const last = await A.locator(".card").last().getAttribute("data-id");
+  check("a2.3 the newest card is at the bottom", last === "5004", last ?? "");
+  check("a2.4 a new card has the enter class", (await A.locator(".feed-live .card").last().getAttribute("class"))?.includes("card-new") ?? false);
   const zoned = await timeOf(A, "5004");
   check("a2.5 a new card shows its time in the zone", (zoned ?? "").endsWith("GMT+9"), zoned ?? "");
   const other = await B.waitForFunction(() => document.querySelectorAll(".feed-live .card").length === 4, null, { timeout: 5000 }).then(() => true, () => false);
@@ -102,7 +107,7 @@ await step("a2. Simulate events streams cards one by one to every open page", as
   const live = await A.locator(".feed-live .card").count();
   check("a2.8 after 10 clicks all 40 live cards stay", live === 40, String(live));
   const ids = await A.locator(".feed-live .card").evaluateAll((cards) => cards.map((c) => Number(c.getAttribute("data-id"))));
-  check("a2.9 the live cards are the newest 40", ids[0] === 5040 && ids[39] === 5001, `${ids[0]} ${ids[39]}`);
+  check("a2.9 the live cards are chronological (5001..5040)", ids[0] === 5001 && ids[39] === 5040, `${ids[0]} ${ids[39]}`);
   const zone = (await timeOf(A, "5040")) ?? "";
   check("a2.10 a live card shows its time in the zone", zone.endsWith("GMT+9"), zone);
 });
@@ -116,14 +121,18 @@ await step("a8. an older page opens no live socket", async () => {
   await O.waitForTimeout(500);
   check("a8.1 no live feed on an older page", (await O.locator(".feed-live").count()) === 0);
   check("a8.2 no WebSocket", sockets.length === 0, sockets.join(" "));
-  const header = (await O.locator(".feed-count time").textContent()) ?? "";
-  check("a8.3 the feed header date is in the zone", header === "Nov 20, 2026, 18:01:40 GMT+9", header);
+  check("a8.3 Back to latest link is shown", (await O.getByRole("link", { name: "Back to latest" }).count()) === 1);
   await O.close();
 });
 
-await step("a3. the project filter works with the keyboard", async () => {
+await step("a3. sidebar filters: project/team dropdowns and direct assignee list", async () => {
   await A.goto(app, { waitUntil: "networkidle" });
   await started(A);
+  const sidebarBox = await A.locator(".sidebar").boundingBox();
+  const mainBox = await A.locator(".main").boundingBox();
+  check("a3.0 filters are on the left side", !!sidebarBox && !!mainBox && sidebarBox.x < mainBox.x);
+  check("a3.0b assignee is a direct list, not a dropdown", (await A.locator(".assignee-list .assignee-item").count()) === 8 && (await A.locator("#assignee-button").count()) === 0);
+
   await A.locator("#project-button").focus();
   await A.keyboard.press("ArrowDown");
   await A.locator("#project-input").waitFor();
@@ -167,25 +176,33 @@ await step("a3. the project filter works with the keyboard", async () => {
   check("a3.7 End reaches Clear selection", ((await A.locator("#project-list .option.active").textContent()) ?? "").includes("Clear selection"));
   await A.keyboard.press("Enter");
   await A.waitForURL((url) => !url.searchParams.has("project"));
-  await A.waitForFunction(() => document.querySelector(".feed-count")?.textContent?.includes("of 5040 events"));
-  check("a3.8 Clear removes the filter", (await A.locator(".feed .card").first().getAttribute("data-id")) === "5040");
+  await A.waitForFunction(() => document.querySelector('.feed .card[data-id="5040"]') !== null);
+  check("a3.8 Clear removes the filter", (await A.locator(".feed:not(.feed-live) .card").last().getAttribute("data-id")) === "5040");
+
+  await A.locator(".assignee-item", { hasText: "Ana Ruiz" }).click();
+  await A.waitForURL((url) => url.searchParams.getAll("assignee").join() === "Ana Ruiz");
+  await settled(A);
+  const assigneeTags = await A.locator(".feed .card").evaluateAll((cards) => cards.every((c) => c.textContent!.includes("Ana Ruiz")));
+  check("a3.9 clicking an assignee filters directly", assigneeTags && (await A.locator(".feed .card").count()) > 0);
+  await A.locator(".filters-clear").click();
+  await A.waitForURL((url) => !url.searchParams.has("assignee"));
+  await settled(A);
 });
 
-await step("a4. the settings change the time zone and jump to a date", async () => {
-  await A.getByRole("button", { name: "Settings" }).click();
-  await A.locator("#settings-zone").selectOption("America/New_York");
+await step("a4. timezone and date live directly in the header", async () => {
+  await A.locator("#header-zone").selectOption("America/New_York");
   const text = await timeOf(A, "5000");
   check("a4.1 every date follows the new zone", text === "Nov 20, 2026, 04:01:40 EST", text ?? "");
-  await A.locator("#settings-date").fill("2026-11-01T12:00");
+  await A.locator("#header-date").fill("2026-11-01T12:00");
   await A.getByRole("button", { name: "Go" }).click();
   await A.waitForURL((url) => url.searchParams.has("before"));
-  await A.waitForFunction(() => document.querySelector(".feed-count")?.textContent?.includes("before"));
+  await settled(A);
   const before = Number(new URL(A.url()).searchParams.get("before"));
   check("a4.2 the date is read in the zone", before === Date.UTC(2026, 10, 1, 17, 1) / 1000, String(before));
-  const first = Date.parse((await A.locator(".feed .card time").first().getAttribute("datetime")) ?? "") / 1000;
-  check("a4.3 the feed starts at that date", first < before && before - first < 1200, `${first} ${before}`);
+  const last = Date.parse((await A.locator(".feed .card time").last().getAttribute("datetime")) ?? "") / 1000;
+  check("a4.3 the feed ends right before that date", last < before && before - last < 1200, `${last} ${before}`);
   await A.reload({ waitUntil: "networkidle" });
-  check("a4.4 the zone is kept after a reload", ((await A.locator(".feed .card time").first().textContent()) ?? "").endsWith("EST"));
+  check("a4.4 the zone is kept after a reload", ((await A.locator(".feed .card time").last().textContent()) ?? "").endsWith("EST"));
 });
 
 await step("a5. the theme toggle", async () => {
@@ -212,20 +229,25 @@ await step("a5. the theme toggle", async () => {
   await dark.close();
 });
 
-await step("a7. the comments panel of a notification", async () => {
+await step("a7. full-card click opens rich 80% split-view panel with embeds, graphs, and comments", async () => {
   const P = await open();
   const base = new URL(app).pathname;
-  const button = P.locator('.card[data-id="4999"] .comment-button');
-  const count = Number(await button.textContent());
-  check("a7.1 a card shows its comment count", count === 2, String(count));
+  const card = P.locator('.card[data-id="4999"] .card-link');
+  const countEl = P.locator('.card[data-id="4999"] .comment-count');
+  check("a7.1 a card shows its comment count without an icon", (await countEl.textContent())?.trim() === "2 comments", (await countEl.textContent()) ?? "");
   const sheet = P.locator(".sheet-panel");
-  await button.click();
+  await card.click();
   await P.waitForURL((url) => url.pathname === `${base}/item/4999`);
   await sheet.waitFor();
   await started(P);
   await settled(P);
-  check("a7.2 the icon opens the panel at the item URL", (await P.getByRole("dialog", { name: /New post in r\/acme/ }).count()) === 1, P.url());
-  check("a7.3 the feed stays under the panel", (await P.locator(".feed .card").count()) === 50);
+  check("a7.2 clicking the card opens the panel at the item URL", (await P.getByRole("dialog", { name: /New post in r\/acme/ }).count()) === 1, P.url());
+  const sheetBox = await sheet.boundingBox();
+  check("a7.2b the panel is ~80% of the screen width", !!sheetBox && sheetBox.width >= 960 && sheetBox.width <= 1100, String(sheetBox?.width));
+  const mainBox = await sheet.locator(".sheet-main").boundingBox();
+  const metaBox = await sheet.locator(".sheet-meta").boundingBox();
+  check("a7.2c metadata is rendered in a split view alongside main content", !!mainBox && !!metaBox && metaBox.x > mainBox.x);
+  check("a7.3 the feed stays under the panel", (await P.locator(".feed:not(.feed-live) .card").count()) === 50);
   const moved = await sheet.evaluate((e) => getComputedStyle(e).animationName);
   check("a7.4 the panel slides in", moved === "sheet-in", moved);
   const link = sheet.locator(".source-link");
@@ -235,11 +257,13 @@ await step("a7. the comments panel of a notification", async () => {
     (await link.getAttribute("href")) ?? "",
   );
   check("a7.6 the details have source fields", (await sheet.locator("dt", { hasText: "Subreddit" }).count()) === 1);
+  const redditFrame = sheet.frameLocator("iframe.embed-reddit");
+  check("a7.6b Reddit iframe renders the OG preview card", (await redditFrame.locator(".og-card").count()) === 1);
   const zoned = (await sheet.locator(".detail-time").textContent()) ?? "";
   check("a7.7 the time is in the chosen zone", zoned.endsWith("EST"), zoned);
   const said = (await sheet.locator(".comment-time").first().textContent()) ?? "";
   check("a7.7b a comment time is in the chosen zone", said.endsWith("EST"), said);
-  check("a7.8 the seeded comments show", (await sheet.locator(".comment").count()) === 2);
+  check("a7.8 the seeded comments show with avatars", (await sheet.locator(".comment").count()) === 2 && (await sheet.locator(".comment .user-avatar").count()) === 2);
   if (shots) {
     await P.waitForTimeout(700);
     await P.evaluate(() => (document.getElementById("theme") as HTMLElement).click());
@@ -258,15 +282,15 @@ await step("a7. the comments panel of a notification", async () => {
   const added = (await sheet.locator(".comment .comment-time").last().textContent()) ?? "";
   check("a7.10b a comment added in the browser shows the chosen zone", added.endsWith("EST"), added);
   check("a7.11 the field is empty again", (await P.locator("#overlay-comment-text").inputValue()) === "");
-  check("a7.12 the card count updates", (await button.textContent())?.trim() === "3", (await button.textContent()) ?? "");
+  check("a7.12 the card count updates", (await countEl.textContent())?.trim() === "3 comments", (await countEl.textContent()) ?? "");
 
   await P.goBack();
   await P.waitForURL((url) => url.pathname === base || url.pathname === `${base}/`);
   await sheet.waitFor({ state: "detached" });
   check("a7.13 Back closes the panel", (await P.locator(".sheet").count()) === 0);
-  check("a7.14 the count stays after Back", (await button.textContent())?.trim() === "3");
+  check("a7.14 the count stays after Back", (await countEl.textContent())?.trim() === "3 comments");
 
-  await button.click();
+  await card.click();
   await sheet.waitFor();
   await started(P);
   await settled(P);
@@ -274,7 +298,7 @@ await step("a7. the comments panel of a notification", async () => {
   await sheet.waitFor({ state: "detached" });
   check("a7.15 Escape closes the panel", !P.url().includes("/item/"), P.url());
 
-  await button.click();
+  await card.click();
   await sheet.waitFor();
   await started(P);
   await settled(P);
@@ -283,13 +307,26 @@ await step("a7. the comments panel of a notification", async () => {
   check("a7.16 a click on the backdrop closes the panel", !P.url().includes("/item/"), P.url());
   await P.close();
 
+  const NR = await open("/item/5000");
+  check("a7.16b New Relic item renders uptime graph and error chart",
+    (await NR.locator(".sheet-panel .uptime-bars .uptime-bar").count()) === 48 &&
+    (await NR.locator(".sheet-panel .chart-svg").count()) === 1);
+  if (shots) await NR.screenshot({ path: `${shots}/async-feed-newrelic.png` });
+  await NR.close();
+
+  const FG = await open("/item/4");
+  const figmaFrame = FG.frameLocator("iframe.embed-figma");
+  check("a7.16c Figma item renders embedded canvas iframe", (await figmaFrame.locator(".figma-artboard").count()) === 1);
+  if (shots) await FG.screenshot({ path: `${shots}/async-feed-figma.png` });
+  await FG.close();
+
   const D = await open("/item/4999");
-  check("a7.17 a direct load shows the panel over the feed", (await D.locator(".sheet-panel").count()) === 1 && (await D.locator(".feed .card").count()) === 50);
+  check("a7.17 a direct load shows the panel over the feed", (await D.locator(".sheet-panel").count()) === 1 && (await D.locator(".feed:not(.feed-live) .card").count()) === 50);
   check("a7.18 the comment is kept by the server", (await D.locator(".sheet-panel .comment").count()) === 3);
   await D.getByRole("button", { name: "Close" }).click();
   await D.waitForURL((url) => !url.pathname.includes("/item/"));
   await D.locator(".sheet").waitFor({ state: "detached" });
-  check("a7.19 Close after a direct load shows the feed", (await D.locator(".feed .card").count()) === 50);
+  check("a7.19 Close after a direct load shows the feed", (await D.locator(".feed:not(.feed-live) .card").count()) === 50);
   await D.close();
 });
 

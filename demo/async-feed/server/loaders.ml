@@ -3,6 +3,13 @@ open Async_feed_shared
 let item (_ : Yuka.Server.request) ~id =
   Yuka.Async.return (match Store.find id with Some event -> Ok event | None -> Error Yuka.Server.Not_found)
 
+type embed_data = { event : Model.event; theme : Model.theme option }
+
+let embed request ~id =
+  let theme = Option.bind (Yuka.Server.Request.cookie request Model.theme_cookie) Model.theme_of_string in
+  Yuka.Async.return
+    (match Store.find id with Some event -> Ok { event; theme } | None -> Error Yuka.Server.Not_found)
+
 let zone_char = function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '/' | '_' | '+' | '-' -> true | _ -> false
 
 let settings request =

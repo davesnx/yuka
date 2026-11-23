@@ -79,3 +79,15 @@ let to_time ~zone value =
       let time = time -. (wall zone time -. guess) in
       Some (int_of_float (Float.floor (time /. 1000.)))
   | _ -> None
+
+let sync_embed_theme : string -> unit =
+  [%mel.raw
+    {|function (theme) {
+      document.querySelectorAll("iframe.embed-frame").forEach(function (frame) {
+        try {
+          const doc = frame.contentDocument;
+          const root = doc && doc.querySelector(".embed-doc");
+          if (root) root.setAttribute("data-theme", theme);
+        } catch (_) {}
+      });
+    }|}]

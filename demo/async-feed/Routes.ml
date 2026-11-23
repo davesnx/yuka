@@ -9,4 +9,6 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
         Router.group ~path:"/item/:id<int>" ~loader:Loaders.item
           [ Router.route Item ~path:"/" ~page:Pages.item ?overlay:Pages.item_panel ];
       ];
+    Router.group ~path:"/embed/:id<int>" ~loader:Loaders.embed
+      [ Router.route Embed ~path:"/" ~page:Pages.embed ];
   ]

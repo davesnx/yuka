@@ -1,13 +1,6 @@
-let initials name =
-  String.split_on_char ' ' name
-  |> List.filter (fun part -> part <> "")
-  |> List.filteri (fun index _ -> index < 2)
-  |> List.map (fun part -> String.make 1 (Char.uppercase_ascii part.[0]))
-  |> String.concat ""
-
 let comment ~time (entry : Model.comment) =
   <li class_="comment">
-    <span class_="comment-avatar" aria_hidden=true>(Yuka.text (initials entry.author))</span>
+    <Avatar name=entry.author size=28 class_="comment-avatar" />
     <div class_="comment-body">
       <div class_="comment-meta">
         <span class_="comment-author">(Yuka.text entry.author)</span>
@@ -60,7 +53,7 @@ let[@client] make ~(item : int) ~(count : int) ~children () =
         Yuka.Event.prevent_default event;
         submit ())>
       <label class_="sr-only" for_="overlay-comment-text">"Add a comment"</label>
-      <textarea id="overlay-comment-text" name="text" rows=2 placeholder="Add a comment..."
+      <textarea id="overlay-comment-text" name="text" rows=1 placeholder="Add a comment..."
         aria_invalid=(if Yuka.State.get error = None then `false_ else `true_) aria_describedby="overlay-comment-error"
         value=(Yuka.State.get draft)
         on_input=(fun event -> Yuka.State.set draft (Yuka.Event.target_value event))

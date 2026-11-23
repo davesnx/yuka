@@ -13,7 +13,8 @@ type page = { events : Model.event list; total : int }
 let page ~filter ~before ~limit =
   let older (event : Model.event) = match before with Some time -> event.time < time | None -> true in
   let matching = Seq.filter (Model.matches filter) (all ()) in
-  { events = List.of_seq (Seq.take limit (Seq.filter older matching)); total = Seq.length matching }
+  let newest_first = List.of_seq (Seq.take limit (Seq.filter older matching)) in
+  { events = List.rev newest_first; total = Seq.length matching }
 
 let recent () = List.filteri (fun index _ -> index < Feed.kept) !simulated
 

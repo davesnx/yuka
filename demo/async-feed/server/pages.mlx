@@ -13,90 +13,146 @@ let shell ~(settings : Model.settings) ~children () =
         </svg>
         <span>"Async"</span>
       </a>
-      <Yuka.Client><Filters /></Yuka.Client>
+      <Yuka.Client><Header_controls /></Yuka.Client>
       <div class_="header-end">
-        <span class_="avatar" role=`img aria_label="Signed in as Ana Ruiz" title="Ana Ruiz">"AR"</span>
-        <Yuka.Client><Settings_menu /></Yuka.Client>
         <Yuka.Client><Theme_toggle theme=settings.theme /></Yuka.Client>
+        <span class_="header-user" title="Ana Ruiz">
+          <Avatar name="Ana Ruiz" size=28 decorative=false title="Signed in as Ana Ruiz" />
+        </span>
       </div>
     </header>
-    <main class_="main">children</main>
+    <div class_="workspace">
+      <aside class_="sidebar">
+        <Yuka.Client><Filters /></Yuka.Client>
+      </aside>
+      <main class_="main">children</main>
+    </div>
   </div>
   </Yuka.Context.Provide>
 
 let time ~class_ time = <Yuka.Client><Local_time time class_ /></Yuka.Client>
 
-let summary ~shown ~total ~before =
-  <p class_="feed-count">
-    (Yuka.text (Printf.sprintf "%d of %d events" shown total))
-    (match before with Some before -> Yuka.fragment [ Yuka.text ", before "; time ~class_:"feed-before" before ] | None -> Yuka.empty)
-  </p>
-
 let card (event : Model.event) =
-  <Card event time=(time ~class_:"card-time" event.time) comments=(<Yuka.Client><Comment_button id=event.id count=(Store.comment_count event) /></Yuka.Client>) />
+  <Card event time=(time ~class_:"card-time" event.time)
+    comments=(<Yuka.Client><Comment_count id=event.id count=(Store.comment_count event) /></Yuka.Client>) />
 
 let feed_view ~project ~team ~assignee ~before =
   let filter = { Model.projects = project; teams = team; assignees = assignee } in
-  let { Store.events; total } = Store.page ~filter ~before ~limit:page_size in
+  let { Store.events; _ } = Store.page ~filter ~before ~limit:page_size in
   let since = Store.newest_id () in
   let top = before = None in
   let older =
-    match List.rev events with
-    | (last : Model.event) :: _ when List.length events = page_size ->
-        <a class_="pager" href=(Routes.feed ~project ~team ~assignee ~before:last.time ())>"Older events"</a>
+    match events with
+    | (first : Model.event) :: _ when List.length events = page_size ->
+        <div class_="feed-pager-top">
+          <a class_="pager" href=(Routes.feed ~project ~team ~assignee ~before:first.time ())>"Older events"</a>
+        </div>
     | _ -> Yuka.empty
   in
   <section class_="feed-wrap">
-    <div class_="feed-head">
-      <h1>"Notifications"</h1>
-      (summary ~shown:(List.length events) ~total ~before)
-      (if top then Yuka.empty
-       else <a class_="pager" href=(Routes.feed ~project ~team ~assignee ())>"Back to latest"</a>)
-    </div>
-    (if top then <Yuka.Client><Live_feed filter since /></Yuka.Client> else Yuka.empty)
+    older
     <ol class_="feed">(Yuka.fragment (List.map card events))</ol>
     (if events = [] then <p class_="empty">"No event matches these filters."</p> else Yuka.empty)
-    older
+    (if top then <Yuka.Client><Live_feed filter since /></Yuka.Client>
+     else
+       <div class_="feed-pager-bottom">
+         <a class_="pager" href=(Routes.feed ~project ~team ~assignee ())>"Back to latest"</a>
+       </div>)
   </section>
 
 let feed ~project ~team ~assignee ~before ~settings:_ () =
   Yuka.Server.page ~title:"Async" (fun () -> feed_view ~project ~team ~assignee ~before)
 
+let meta_person name =
+  <span class_="meta-person">
+    <Avatar name size=18 />
+    <span>(Yuka.text name)</span>
+  </span>
+
 let sheet ~layer (event : Model.event) =
   let label = Model.source_label event.source in
   <Yuka.Client>
-    <Sheet title=event.title layer>
-      <article class_="detail">
-        <div class_="detail-meta">
-          (Card.logo event.source)
-          <div>
-            <div class_="detail-source">(Yuka.text label)</div>
-            <div class_="detail-author">(Yuka.text event.author)</div>
-          </div>
-          (time ~class_:"detail-time" event.time)
+    <Sheet title=event.title source=label layer>
+      <div class_="sheet-split">
+        <div class_="sheet-main">
+          <article class_="detail">
+            <div class_="detail-head">
+              (Card.logo ~size:36 event.source)
+              <div class_="detail-head-text">
+                <h2 class_="detail-title">(Yuka.text event.title)</h2>
+                <div class_="detail-byline">
+                  <span class_="detail-author">
+                    <Avatar name=event.author size=20 />
+                    <span>(Yuka.text event.author)</span>
+                  </span>
+                  <span class_="detail-sep" aria_hidden=true>"·"</span>
+                  <span class_="detail-source">(Yuka.text label)</span>
+                  (time ~class_:"detail-time" event.time)
+                </div>
+              </div>
+            </div>
+            <div class_="detail-description">
+              <p class_="detail-text">(Yuka.text event.description)</p>
+              <dl class_="detail-notes">
+                (Yuka.fragment
+                   (List.map
+                      (fun (heading, body) ->
+                        <div class_="detail-note">
+                          <dt>(Yuka.text heading)</dt>
+                          <dd>(Yuka.text body)</dd>
+                        </div>)
+                      (Data.notes event)))
+              </dl>
+            </div>
+            (Preview.main_visual event)
+          </article>
+          (let thread = Store.thread event in
+           <Yuka.Client>
+             <Comment_thread item=event.id count=(List.length thread)>
+               (Yuka.fragment (List.map (Comment_thread.comment ~time:(time ~class_:"comment-time")) thread))
+             </Comment_thread>
+           </Yuka.Client>)
         </div>
-        <h2 class_="detail-title">(Yuka.text event.title)</h2>
-        <p class_="detail-text">(Yuka.text event.description)</p>
-        <a class_="small-button source-link" href=(Data.link event) target=`_blank rel="noopener">
-          (Yuka.text ("Open in " ^ label))
-          <svg view_box="0 0 16 16" width="12" height="12" aria_hidden=true>
-            <path d="M6 3.5h6.5V10M12.5 3.5 4 12" fill="none" stroke="currentColor" stroke_width="1.5" />
-          </svg>
-        </a>
-        <dl class_="details">
-          (Yuka.fragment
-             (List.map
-                (fun (name, value) -> <div><dt>(Yuka.text name)</dt><dd>(Yuka.text value)</dd></div>)
-                (Data.details event
-                @ [ ("Project", event.project); ("Team", event.team); ("Assignee", event.assignee) ])))
-        </dl>
-      </article>
-      (let thread = Store.thread event in
-       <Yuka.Client>
-         <Comment_thread item=event.id count=(List.length thread)>
-           (Yuka.fragment (List.map (Comment_thread.comment ~time:(time ~class_:"comment-time")) thread))
-         </Comment_thread>
-       </Yuka.Client>)
+        <aside class_="sheet-meta" aria_label="Metadata">
+          <a class_="small-button source-link" href=(Data.link event) target=`_blank rel="noopener">
+            (Yuka.text ("Open in " ^ label))
+            <svg view_box="0 0 16 16" width="12" height="12" aria_hidden=true>
+              <path d="M6 3.5h6.5V10M12.5 3.5 4 12" fill="none" stroke="currentColor" stroke_width="1.5" />
+            </svg>
+          </a>
+          <div class_="meta-section">
+            <h3 class_="meta-heading">"Properties"</h3>
+            <dl class_="details">
+              <div>
+                <dt>"Platform"</dt>
+                <dd>
+                  <span class_="meta-platform">
+                    (Card.logo ~size:18 event.source)
+                    <span>(Yuka.text label)</span>
+                  </span>
+                </dd>
+              </div>
+              <div><dt>"Project"</dt><dd>(Yuka.text event.project)</dd></div>
+              <div><dt>"Team"</dt><dd>(Yuka.text event.team)</dd></div>
+              <div><dt>"Assignee"</dt><dd>(meta_person event.assignee)</dd></div>
+              <div><dt>"Author"</dt><dd>(meta_person event.author)</dd></div>
+            </dl>
+          </div>
+          <div class_="meta-section">
+            <h3 class_="meta-heading">(Yuka.text (label ^ " details"))</h3>
+            <dl class_="details">
+              (Yuka.fragment
+                 (List.map
+                    (fun (name, value) ->
+                      <div>
+                        <dt>(Yuka.text name)</dt>
+                        <dd>(if name = "Reviewer" then meta_person value else Yuka.text value)</dd>
+                      </div>)
+                    (Data.details event)))
+            </dl>
+          </div>
+        </aside>
+      </div>
     </Sheet>
   </Yuka.Client>
 
@@ -105,6 +161,9 @@ let item ~id:_ ~item ~settings:_ () =
       Yuka.fragment [ feed_view ~project:[] ~team:[] ~assignee:[] ~before:None; sheet ~layer:false item ])
 
 let item_panel ~id:_ ~item ~settings:_ () = Yuka.Server.page ~title:item.Model.title (fun () -> sheet ~layer:true item)
+
+let embed ~id:_ ~(embed : Loaders.embed_data) () =
+  Yuka.Server.page ~title:embed.event.Model.title (fun () -> Preview.embed_page ~theme:embed.theme embed.event)
 
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
