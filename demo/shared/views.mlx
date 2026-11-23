@@ -178,9 +178,11 @@ module Not_found = struct
 end
 
 module Issue_form = struct
-  let make ~workspace ~form () : _ Yuka.element =
-    let sent_status = match Yuka.Form.value form `Status with "" -> "todo" | value -> value in
-    let sent_priority = match Yuka.Form.value form `Priority with "" -> "no-priority" | value -> value in
+  let make ~workspace ~form ~pickers () : _ Yuka.element =
+    let sent_status = match Yuka.Form.value form `Status with "" -> Issue.status_slug Issue.Todo | value -> value in
+    let sent_priority =
+      match Yuka.Form.value form `Priority with "" -> Issue.priority_slug Issue.No_priority | value -> value
+    in
     <div class_="issue-form">
       <input type_=`hidden name="workspace" value=(Workspace.slug workspace) />
       <label class_="visually-hidden" for_="dialog-title">"Title"</label>
@@ -192,26 +194,7 @@ module Issue_form = struct
            [ <label class_="visually-hidden" for_=id>"Description"</label>;
              <textarea class_="dialog-description" id name="description" placeholder="Description" rows=4
                value=(Yuka.Form.value form `Description) /> ]))
-      <div class_="dialog-row">
-        <select class_="select" aria_label="Status" name="status">
-          (Yuka.fragment
-             (List.map
-                (fun status ->
-                  <option value=(Issue.status_slug status) selected=(Issue.status_slug status = sent_status)>
-                    (Yuka.text (Issue.status_label status))
-                  </option>)
-                Issue.all_statuses))
-        </select>
-        <select class_="select" aria_label="Priority" name="priority">
-          (Yuka.fragment
-             (List.map
-                (fun priority ->
-                  <option value=(Issue.priority_slug priority) selected=(Issue.priority_slug priority = sent_priority)>
-                    (Yuka.text (Issue.priority_label priority))
-                  </option>)
-                Issue.all_priorities))
-        </select>
-      </div>
+      (pickers ~status:sent_status ~priority:sent_priority)
       (Yuka.Form.form_errors_view form (fun message -> <p class_="error">(Yuka.text message)</p>))
     </div>
 end

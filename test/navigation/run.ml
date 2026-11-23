@@ -330,6 +330,34 @@ let scrolling finish =
                           check "restored on second back" "scroll:300" (log_read ());
                           finish ()))))))
 
+let scrolling_container finish =
+  setup {|<div id="scroller" style="overflow-y:auto"><yuka-outlet data-k="L0"><a id="a" href="/a">a</a></yuka-outlet></div>|};
+  plain_start ();
+  let set_container_scroll : float -> unit =
+    [%mel.raw "function (y) { document.getElementById('scroller').scrollTop = y }"]
+  in
+  let get_container_scroll : unit -> float =
+    [%mel.raw "function () { return document.getElementById('scroller').scrollTop }"]
+  in
+  set_container_scroll 300.;
+  ignore (click "#a" "");
+  resolve_headers 0 {|<a id="b" href="/b">b</a>|} 200 [| ("yuka-outlet", "L0"); ("yuka-title", "A") |];
+  tick (fun () ->
+      check "container scrolled to top on new page" "0" (ints (int_of_float (get_container_scroll ())));
+      set_container_scroll 50.;
+      ignore (click "#b" "");
+      resolve_headers 1 "<p>b</p>" 200 [| ("yuka-outlet", "L0"); ("yuka-title", "B") |];
+      tick (fun () ->
+          back (fun () ->
+              resolve_headers 2 {|<a id="b" href="/b">b</a>|} 200 [| ("yuka-outlet", "L0"); ("yuka-title", "A") |];
+              tick (fun () ->
+                  check "container scroll restored on back" "50" (ints (int_of_float (get_container_scroll ())));
+                  back (fun () ->
+                      resolve_headers 3 {|<a id="a" href="/a">a</a>|} 200 [| ("yuka-outlet", "L0"); ("yuka-title", "S") |];
+                      tick (fun () ->
+                          check "container scroll restored on second back" "300" (ints (int_of_float (get_container_scroll ())));
+                          finish ()))))))
+
 let fragment_scroll finish =
   setup (page {|<a id="a" href="/a#sec">a</a>|});
   plain_start ();
@@ -4191,6 +4219,7 @@ let all =
     ("stop then start", stop_then_start);
     ("history and popstate", history_and_popstate);
     ("scroll top and restore", scrolling);
+    ("scroll top and restore in overflow-y:auto container", scrolling_container);
     ("scroll to fragment", fragment_scroll);
     ("a fragment that does not decode", malformed_fragment);
     ("superseded navigation aborts", superseded);

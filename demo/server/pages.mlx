@@ -17,12 +17,11 @@ let issue_list ~q ~label workspace view =
 let index ~q ~label () = issue_list ~q ~label Model.Workspace.default Queries.All
 let my_issues ~q ~label () = issue_list ~q ~label Model.Workspace.default Queries.Mine
 
-let overlay ~title (page : unit -> Yuka.server Yuka.element) () : Yuka.server Yuka.element =
+let overlay ~title (page : Yuka.server Yuka.element -> Yuka.server Yuka.element) () : Yuka.server Yuka.element =
   <div class_="overlay">
     <Yuka.Client><Overlay_backdrop /></Yuka.Client>
     <div class_="overlay-dialog" role=`dialog aria_label=title>
-      <div class_="overlay-bar"><Yuka.Client><Close_button /></Yuka.Client></div>
-      (page ())
+      (page <Yuka.Client><Close_button /></Yuka.Client>)
     </div>
   </div>
 
@@ -32,9 +31,11 @@ let insights_in workspace =
 let insights () = insights_in Model.Workspace.default
 let report_in workspace = Yuka.Server.page ~title:"Report" (fun () -> Report.view workspace (Store.issues workspace))
 let report () = report_in Model.Workspace.default
-let settings_view () : Yuka.server Yuka.element = <Yuka.Client><Settings_panel /></Yuka.Client>
-let settings () = Yuka.Server.page ~title:"Settings" settings_view
-let settings_dialog () = Yuka.Server.page ~title:"Settings" (overlay ~title:"Settings" settings_view)
+let settings_view ?(close = Yuka.empty) () : Yuka.server Yuka.element =
+  <Yuka.Client><Settings_panel>close</Settings_panel></Yuka.Client>
+let settings () = Yuka.Server.page ~title:"Settings" (fun () -> settings_view ())
+let settings_dialog () =
+  Yuka.Server.page ~title:"Settings" (overlay ~title:"Settings" (fun close -> settings_view ~close ()))
 let canvas_in workspace =
   Yuka.Server.page ~title:"Canvas" (fun () ->
       <Yuka.Client>
@@ -118,7 +119,8 @@ let create_in workspace =
         <Yuka.Form action=Actions.create_issue>
           (fun form ->
             <div>
-              <Views.Issue_form workspace form />
+              <Views.Issue_form workspace form
+                pickers=(fun ~status ~priority -> <Yuka.Client><Issue_pickers status priority /></Yuka.Client>) />
               <button class_="button primary" type_=`submit>"Create issue"</button>
             </div>)
         </Yuka.Form>

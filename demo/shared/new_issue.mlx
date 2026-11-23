@@ -37,7 +37,8 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
                Yuka.Browser.navigate (Links.issue issue.workspace ~id:issue.id))>
              (fun form ->
                <div>
-                 <Views.Issue_form workspace form />
+                 <Views.Issue_form workspace form
+                   pickers=(fun ~status ~priority -> <Issue_pickers status priority />) />
                  <div class_="dialog-actions">
                    <button class_="button" type_=`button on_click=(fun _ -> close ())>"Cancel"</button>
                    (Yuka.hole (fun () ->

@@ -22,14 +22,17 @@ type controller
 
 let scroll_to = Web.scroll_to
 
-let scroll_to_hash : string -> unit =
+let scroll_to_hash_el : string -> bool =
   [%mel.raw
     {|function (hash) {
   let id = hash.slice(1);
   try { id = decodeURIComponent(id) } catch (e) {}
   const el = id ? document.getElementById(id) : null;
-  if (el) el.scrollIntoView(); else window.scrollTo(0, 0);
+  if (el) { el.scrollIntoView(); return true; }
+  return false;
 }|}]
+
+let scroll_to_hash hash = if not (scroll_to_hash_el hash) then scroll_to 0.
 
 let new_controller : unit -> controller =
   [%mel.raw
