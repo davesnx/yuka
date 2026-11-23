@@ -357,12 +357,21 @@ await step("3m. GET forms", async () => {
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
   const kept = () => page.evaluate(() => !!(document.querySelector(".sidebar-extra yuka-island") as any)?.__kept);
   const entries = await page.evaluate(() => history.length);
-  await page.fill(".search input", "keyboard");
-  await page.press(".search input", "Enter");
+  check("3m.0 no search input in the sidebar", (await page.locator(".sidebar .search, .sidebar input[type=search]").count()) === 0);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.id = "e2e-search";
+    f.method = "get";
+    f.action = "/";
+    f.innerHTML = '<input type="search" name="q">';
+    document.body.prepend(f);
+  });
+  await page.fill("#e2e-search input", "keyboard");
+  await page.press("#e2e-search input", "Enter");
   await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=keyboard");
   await page.waitForFunction(() => (document.querySelector(".filter") as HTMLInputElement | null)?.value === "keyboard").catch(() => {});
   const after = await page.evaluate(() => ({ filter: (document.querySelector(".filter") as HTMLInputElement | null)?.value, rows: document.querySelectorAll(".row").length, entries: history.length }));
-  check("3m.1 the sidebar search form is a client navigation that keeps the layout island", (await marker()) === "alive" && (await kept()) && after.filter === "keyboard" && after.entries === entries + 1, `marker=${await marker()} kept=${await kept()} ${JSON.stringify(after)}`);
+  check("3m.1 a GET form is a client navigation that keeps the layout island", (await marker()) === "alive" && (await kept()) && after.filter === "keyboard" && after.entries === entries + 1, `marker=${await marker()} kept=${await kept()} ${JSON.stringify(after)}`);
   await page.evaluate(() => {
     const f = document.createElement("form");
     f.id = "e2e-get";
@@ -396,13 +405,17 @@ await step("3m. GET forms", async () => {
   check("3m.4 a form with target=_blank is not intercepted", new URL(popup.url()).pathname === "/my" && new URL(page.url()).search === "?q=sync" && (await marker()) === "alive", `${popup.url()} current=${page.url()}`);
   await popup.close();
   await page.evaluate(() => {
-    const f = document.querySelector(".search") as HTMLFormElement;
+    const f = document.createElement("form");
+    f.id = "e2e-reload";
+    f.method = "get";
+    f.action = "/";
     f.setAttribute("data-yuka-reload", "");
-    (f.querySelector("input") as HTMLInputElement).value = "full";
+    f.innerHTML = '<input name="q" value="full">';
+    document.body.prepend(f);
   });
-  await Promise.all([page.waitForEvent("load"), page.press(".search input", "Enter")]);
+  await Promise.all([page.waitForEvent("load"), page.press("#e2e-reload input", "Enter")]);
   check("3m.5 a form with data-yuka-reload does a full page load", new URL(page.url()).search === "?q=full" && (await marker()) === undefined, `${page.url()} marker=${await marker()}`);
-  await page.waitForSelector(".search input");
+  await page.waitForSelector(".filter");
   await page.evaluate(() => {
     (window as any).__marker = "alive";
     const f = document.createElement("form");
@@ -416,7 +429,7 @@ await step("3m. GET forms", async () => {
   await page.waitForTimeout(300);
   check("3m.7 a submit that a document listener prevents is left alone", new URL(page.url()).search === "?q=full" && (await marker()) === "alive", `${page.url()} marker=${await marker()}`);
   await page.route("http://e2e-other.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<p id=other>other</p>" }));
-  await page.waitForSelector(".search input");
+  await page.waitForSelector(".filter");
   await page.evaluate(() => {
     (window as any).__marker = "alive";
     const f = document.createElement("form");
@@ -1546,12 +1559,16 @@ await step("6j. a draft blocks leaving", async () => {
   check("6j.3 a link click asks with the dialog of the app; Cancel stays", dialogs.at(-1) === "confirm:Discard the new issue?" && kept.url === "/my" && kept.title === "Draft" && kept.marker === marker, JSON.stringify({ dialogs, kept }));
   dialogs.length = 0;
   await p.evaluate(() => {
-    const f = document.querySelector(".search") as HTMLFormElement;
-    (f.querySelector("input") as HTMLInputElement).value = "blocked";
+    const f = document.createElement("form");
+    f.id = "e2e-draft-search";
+    f.method = "get";
+    f.action = "/";
+    f.innerHTML = '<input name="q" value="blocked">';
+    document.body.prepend(f);
     f.requestSubmit();
   });
   await p.waitForTimeout(300);
-  const searched = { url: new URL(p.url()).pathname + new URL(p.url()).search, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft), pending: await p.evaluate(() => document.querySelector(".search")!.hasAttribute("data-yuka-pending")) };
+  const searched = { url: new URL(p.url()).pathname + new URL(p.url()).search, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft), pending: await p.evaluate(() => document.querySelector("#e2e-draft-search")!.hasAttribute("data-yuka-pending")) };
   check("6j.3b a GET form submit asks too; Cancel stays", dialogs.join() === "confirm:Discard the new issue?" && searched.url === "/my" && searched.title === "Draft" && searched.marker === marker && !searched.pending, JSON.stringify({ dialogs, searched }));
   dialogs.length = 0;
   await p.evaluate(() => { location.reload(); }).catch(() => {});

@@ -225,10 +225,6 @@ a.version:hover { color: var(--text); }
 .nav-link:hover { background: var(--bg-hover); color: var(--text); }
 .nav-link[aria-current=page] { background: var(--bg-selected); color: var(--text); }
 
-.search { display: flex; padding: 8px 0; }
-.search input { flex: 1; min-width: 0; background: var(--bg-hover); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font: inherit; outline: none; }
-.search input:focus { border-color: var(--accent); }
-
 .sidebar-extra {
   margin-top: auto; padding: 5px 10px; display: flex; flex-direction: column; gap: 10px;
   position: sticky; bottom: 0; z-index: 20;
@@ -276,8 +272,9 @@ a.version:hover { color: var(--text); }
 .row-date { width: 58px; text-align: right; color: var(--muted); flex: none; }
 
 .icon { flex: none; width: 17px; height: 17px; }
-.bar { fill: var(--border); }
+.bar { fill: var(--border-hover); }
 .bar.on { fill: var(--muted); }
+.priority-none .bar { fill: var(--text-soft); }
 .priority-urgent .bar.on { fill: var(--urgent); }
 .priority-high .bar.on { fill: var(--high); }
 .priority-medium .bar.on { fill: var(--medium); }

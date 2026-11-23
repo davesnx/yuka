@@ -24,15 +24,29 @@ end
 
 module Priority_icon = struct
   let make ~priority () : _ Yuka.element =
-    let level = match priority with
-      | Issue.Urgent -> 4 | High -> 3 | Medium -> 2 | Low -> 1 | No_priority -> 0 in
-    let bar index =
-      let height = 3 + (index * 3) in
-      <rect x=(Int.to_string ((index - 1) * 4 + 1)) y=(Int.to_string (14 - height)) width="3" height=(Int.to_string height) rx="1"
-        class_=(if index <= level then "bar on" else "bar") />
+    let bars =
+      match priority with
+      | Issue.No_priority ->
+          [
+            <rect x="1" y="6" width="3" height="2" rx="1" class_="bar" />;
+            <rect x="5.5" y="6" width="3" height="2" rx="1" class_="bar" />;
+            <rect x="10" y="6" width="3" height="2" rx="1" class_="bar" />;
+          ]
+      | _ ->
+          let level =
+            match priority with
+            | Issue.Urgent -> 4 | High -> 3 | Medium -> 2 | Low -> 1 | No_priority -> 0
+          in
+          List.map
+            (fun index ->
+              let height = 3 + (index * 3) in
+              <rect x=(Int.to_string ((index - 1) * 4 + 1)) y=(Int.to_string (14 - height)) width="3"
+                height=(Int.to_string height) rx="1"
+                class_=(if index <= level then "bar on" else "bar") />)
+            [ 1; 2; 3 ]
     in
     <svg class_=("icon priority-" ^ Issue.priority_slug priority) view_box="0 0 14 14" width="14" height="14">
-      (Yuka.fragment (List.map bar [ 1; 2; 3 ]))
+      (Yuka.fragment bars)
     </svg>
 end
 
@@ -123,9 +137,6 @@ module Shell = struct
           <nav class_="nav">
             (Yuka.fragment (List.map (fun (href, label) -> <a class_="nav-link" href>(Yuka.text label)</a>) links))
           </nav>
-          <form class_="search" method_=`get action=(Links.issues workspace) role=`search>
-            <input type_=`search name="q" placeholder="Search issues" aria_label="Search issues" />
-          </form>
           <div class_="sidebar-extra">sidebar</div>
         </aside>
         <main class_="main">children</main>
