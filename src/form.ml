@@ -225,7 +225,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
         if Dev.on then Web.console_error ("yuka: refused a redirect to another site: " ^ location);
         State.set form.failed [ (None, Status.error_to_string (Protocol "refused a redirect")) ]
     | Some location -> Browser.navigate location
-    | None -> Browser.navigate (Web.current_url ())
+    | None -> Browser.refresh ()
   in
   Base.Effect.after (fun () ->
       let failed = State.get form.failed in

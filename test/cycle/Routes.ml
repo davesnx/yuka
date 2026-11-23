@@ -15,7 +15,10 @@ let routes =
         ~search:{ q = optional string; tag = many string };
       Router.route Islands ~path:"/islands" ~page:App.Pages.islands;
       Router.route Slow ~path:"/slow" ~page:App.Pages.slow;
+      Router.route Slow_public ~path:"/slow-public" ~page:App.Pages.slow ~cache:minute;
       Router.route Twice ~path:"/twice" ~page:App.Pages.twice;
+      Router.route Blocking ~path:"/blocking" ~page:App.Pages.blocking;
+      Router.route Blocking_public ~path:"/blocking-public" ~page:App.Pages.blocking ~cache:minute;
       Router.route Broken ~path:"/broken" ~page:App.Pages.broken;
       Router.route Boom ~path:"/boom" ~page:App.Pages.boom
         ~loader:App.Loaders.exploding;

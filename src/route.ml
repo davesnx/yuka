@@ -22,6 +22,9 @@ let current find =
   | Some url -> State.memo (fun () -> typed find (State.get url))
   | None -> State.read_only (State.make None)
 
+let pending find =
+  State.memo (fun () -> Option.bind (State.get Browser.navigation) (fun n -> typed find n.Browser.url))
+
 let moved () = Page_context.set "route" Types.route_name (`String (Web.current_url ()))
 let same_page url = String.equal (fst (Router.split_target url)) (fst (Router.split_target (Web.current_url ())))
 
@@ -31,7 +34,7 @@ let replace url =
     Platform.loaded := Web.current_url ();
     moved ()
   end
-  else Browser.navigate url
+  else Browser.navigate ~replace:true url
 
 let push url =
   if same_page url then begin
@@ -39,6 +42,7 @@ let push url =
     let before = Web.history_key () and key = Web.fresh_key () in
     Web.history_push_key key url;
     Navigation_stub.current_key := key;
+    Navigation_stub.at := Web.history_at ();
     Navigation_stub.shown_key := key;
     Platform.kept := key :: before :: !Platform.kept;
     Platform.moved := moved;

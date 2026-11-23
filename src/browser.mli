@@ -2,12 +2,82 @@ val on_window : string -> (Event.t -> unit) -> unit
 (** Listens on [window] until the current owner is disposed. The handler
     runs in a {!Yuka.batch}. Browser only: call it inside [Effect.after]. *)
 
-val navigate : string -> unit
+val navigate : ?replace:bool -> ?keep_scroll:bool -> string -> unit
 (** Browser only: raises [Invalid_argument] on native. Loads the URL. After [render ~islands] with navigation (the default), it
     is a client navigation, as a click on a link; see {!Yuka.render}. Otherwise it
-    does [location.assign url]. A [javascript:], [vbscript:] or [data:]
+    does [location.assign url]. The navigation adds a history entry, except
+    to the URL shown, where it replaces the current entry. With
+    [~replace:true] (default [false]) it always replaces the current entry
+    and does [location.replace url] in place of [location.assign url], so
+    Back goes to the page before. With [~keep_scroll:true] (default
+    [false]) a client navigation does not scroll to the top or to the URL
+    fragment, so the scroll position stays as it was; focus and the
+    announcer change as for other navigations. A [javascript:], [vbscript:] or [data:]
     URL (read as {!Yuka.attr} reads a URL) does nothing; a dev build logs the
     first one. *)
+
+val refresh : unit -> unit
+(** Browser only: raises [Invalid_argument] on native. Loads the URL shown
+    again from the server (the fragment does not count), with no cached
+    answer, and swaps in the new content. Use it after an [Action.call]
+    to show the new server data. After [render ~islands] with navigation,
+    it is a client navigation that replaces the current history entry,
+    does not scroll, does not change the announcer, and keeps the focus:
+    on the focused element when it is still in the page, else on the new
+    element with the same [id], else on the new element at the same place
+    with the same tag. When it finds no such element, the focus moves as
+    for other navigations. {!navigating} is [true] until the new content
+    shows, as for other navigations. Otherwise it does
+    [location.replace] with the URL shown, a full page load. A form
+    success with no redirect and no [on_ok] calls it. *)
+
+val block : (target:string -> bool) -> unit
+(** [block check] keeps the user on the page until the current owner is
+    disposed. Browser only: call it inside [Effect.after]. Before a client
+    navigation starts (a click on a link, the submit of a GET form or
+    {!navigate}), it calls [check ~target], with [target] as in
+    {!navigation}. When [check] gives [true], the user stays: the navigation does not start. When it gives
+    [false], the navigation continues. With more than one [block], the
+    navigation stops at the first [check] that gives [true]. Back and
+    Forward to a page with another path or query, and a Back or {!back}
+    that closes an overlay, call [check] too: the URL already shows the
+    target, and when [check] gives [true], the history moves back to the
+    entry the user left, so the page and the URL stay as they were.
+    {!refresh} and a Back or Forward to the same page do not call
+    [check].
+
+    While one or more [block]s exist, closing or reloading the tab, and a
+    full page load, show the prompt of the browser. The browser does not
+    show it before the user interacted with the page. Register the [block]
+    only while there is something to lose, for example:
+    {[
+      Effect.after (fun () ->
+          if State.get dirty then
+            Browser.block (fun ~target:_ -> not (Browser.confirm "Discard the draft?")))
+    ]} *)
+
+val confirm : string -> bool
+(** [confirm message] shows [message] in the dialog of the browser
+    ([window.confirm]) and gives [true] when the user accepts. Browser
+    only: raises [Invalid_argument] on native. *)
+
+val prefetch : string -> unit
+(** Fetches the page at the URL into the navigation cache, as a hover
+    on a link to it does, so a client navigation to it later uses the
+    answer with no second request. Use it when the page knows the next
+    URL before a link shows it, for example in a list with keyboard
+    navigation. The same rules apply as for the prefetch of a link (see
+    {!Yuka.render}): the request has [Yuka-Prefetch: hover]; it is not
+    sent when the page level is [`Off] ([<meta name="yuka-prefetch"
+    content="off">]), under [saveData], when the server refused this
+    level for the URL before ([204] with [Yuka-Prefetch]), or when the
+    cache holds an answer or a request for the URL. A refused answer is
+    not used, and the navigation fetches the page. When the navigation
+    code is not loaded yet, the call loads it and prefetches after.
+    Does nothing for a URL of another origin, without client navigation
+    (before {!Yuka.render}, with [~navigation:false], after {!Yuka.stop})
+    and on the server. A [javascript:], [vbscript:] or [data:] URL does
+    nothing; a dev build logs the first one. *)
 
 val back : unit -> unit
 (** Browser only: raises [Invalid_argument] on native. Closes the overlay
@@ -20,11 +90,45 @@ val back : unit -> unit
 val navigating : bool State.read
 (** [true] while a client navigation is in flight: from the click on a
     link, [popstate] or {!navigate} (also while the navigation code
-    loads) until the new page is shown, a full page load starts in its
-    place, or {!Yuka.stop}. A navigation that a newer one aborts leaves it
+    loads) until the new page is shown (for a streamed answer, its first
+    part, with the [loading] content of the pending [await]s), a full page
+    load starts in its place, or {!Yuka.stop}. A navigation that a newer one aborts leaves it
     [true] for the newer one. Read it with {!Yuka.State.get} in an island, for
     example to show a progress bar. Always [false] on the server and
     without client navigation. *)
+
+type navigation = {
+  url : string;
+      (** The target: the path and query for a URL of the page origin (the fragment does not count), else the full URL. *)
+  from : string;  (** The path and query of the page shown when the navigation started. *)
+  kind : [ `Push | `Replace | `Traverse | `Reload ];
+      (** [`Push] adds a history entry. [`Replace] replaces the current
+          entry: {!navigate} with [~replace:true], a link with
+          [data-yuka-replace], or a navigation to the URL shown.
+          [`Traverse] is Back or Forward ([popstate]). [`Reload] is {!refresh}. *)
+}
+
+val navigation : navigation option State.read
+(** The client navigation in flight: [Some] for the same time as
+    {!navigating} is [true], else [None]. A newer navigation replaces the
+    value. Read it with {!Yuka.State.get} in an island, for example to
+    mark the link of the target while the page loads, to show no progress
+    bar for a [`Reload], or to animate Back and Forward. [Routes.pending]
+    gives the target as a typed route. Always [None] on the server and
+    without client navigation. *)
+
+val stream : [ `Filling | `Done | `Broken ] State.read
+(** The fills of the page shown after a client navigation.
+    [`Filling] while a streamed answer that the page shows still sends
+    the fills of its pending [await]s; [`Broken] when such a stream broke
+    before its end; else [`Done]. It changes when the page shows a new
+    answer, when a stream ends and when {!Yuka.stop} runs. When a stream
+    breaks, each pending [await] in the content that it fills shows its
+    [failed] view with the message ["broken"], as for a rejected value: the
+    server sends that view with the page, and the client puts it in place
+    of the [loading] content. Use [`Broken] to offer a reload, for
+    example with {!refresh}. Always [`Done] on the server, without client
+    navigation and for the first page load. *)
 
 val replace_url : string -> unit
 (** Browser only: raises [Invalid_argument] on native. Sets the URL of the current

@@ -247,6 +247,7 @@ module Await : sig
     async:'a Async.t ->
     loading:'k element ->
     ?failed:(string -> 'k element) ->
+    ?blocking:[ `Yes | `No | `Timeout of float ] ->
     children:('a -> 'k element) ->
     unit ->
     'k element
@@ -256,7 +257,32 @@ module Await : sig
       In a server render, [message] is the message of a
       {!Server.Action.reject}, else ["server error"], and the failure
       message goes to the [log] of {!Server.val-config}, so the HTML never has the
-      detail. *)
+      detail.
+
+      [blocking] says how long the server waits for the value before it
+      sends the page, on a first load and on a client navigation:
+      - [`Yes]: until the value settles, or the request timeout ends;
+      - [`No]: it does not wait; the value comes later in the same
+        response;
+      - [`Timeout s] (default [`Timeout 0.1]): up to [s] seconds from when
+        the [Await] is printed.
+
+      The server sends the page when each pending value is settled or past
+      its own limit, so the page waits at most the largest limit among the
+      values still pending. A value that settles before the page is sent
+      is in the page, whatever its own limit; the others show [loading]
+      and come later. The wait delays the first byte of the page: a page
+      with a slow value sends its first byte up to its largest limit later.
+      A page whose [Cache-Control] is shared ([public] or [s-maxage])
+      waits for every value, whatever [blocking] says.
+
+      With each pending value it sends, the server also sends [failed
+      "broken"], in a [<template data-yuka-failed="ID">]. When the
+      response stops before the value comes (the connection breaks), the
+      browser shows that view in place of [loading], on a first load
+      and on a client navigation, and an async value of an island that did
+      not come fails with ["broken"]. If [failed] raises, the view is
+      empty. *)
 end
 
 module Catch : sig
@@ -670,6 +696,7 @@ module Private : sig
         loading : node;
         failed : string -> node;
         render : 'a -> node;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
         -> node
     | Slot of slot
@@ -789,14 +816,20 @@ module Private : sig
         subscribe : (unit -> unit) -> unit;
         fill : unit -> string;
         fill_failed : string -> string;
+        fill_broken : unit -> string;
         inside_island : bool;
+        blocking : [ `Yes | `No | `Timeout of float ];
       }
     | Pending_async of { id : string; async : Json.t Async.t }
     | Pending_answer of { key : string; answer : Json.t Async.t }
 
   val fill_script : string
   (** The inline script that streaming writes in the head. It defines
-      [window.__yukaFill(id)]. *)
+      [window.__yukaFill(id)], which also removes the
+      [<template data-yuka-failed="ID">] of the fill. At [DOMContentLoaded]
+      it puts each such template that is left in place of the [loading]
+      content of its [await], and fails each async value that did not come
+      with ["broken"]. *)
 
   type session
   (** One server render. Counts ids and collects pending parts. *)
@@ -821,7 +854,10 @@ module Private : sig
       session, a pending [Await] is printed as [<!--[sN-->] loading
       [<!--]-->] and recorded as [Pending_await]; [fill] prints the settled
       content later with the same session, and [fill_failed message] prints
-      the [failed] element instead (for a timeout). *)
+      the [failed] element instead (for a timeout). [fill_broken ()] prints
+      [failed "broken"] with its links and leaves the session as it was,
+      except for its id counters: the client shows it when the stream
+      breaks. *)
 
   val take_pending : session -> pending list
   (** The parts recorded since the last call, in order. *)
@@ -903,7 +939,8 @@ module Private : sig
     alt_key : Event.t -> bool;
     client_x : Event.t -> float;
     client_y : Event.t -> float;
-    navigate : string -> unit;
+    navigate : replace:bool -> keep_scroll:bool -> string -> unit;
+    refresh : unit -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
   }
@@ -1122,12 +1159,18 @@ val runtime_route_current :
   (Router.meth -> string list -> (string * string) list -> 'r Router.lookup) -> 'r option State.read
 (** [Routes.current]: the route of the page that the framework provides, typed by [find]. *)
 
+val runtime_route_pending :
+  (Router.meth -> string list -> (string * string) list -> 'r Router.lookup) -> 'r option State.read
+(** [Routes.pending]: the target of {!Browser.navigation}, typed by [find]. *)
+
 val runtime_route_replace : string -> unit
 (** [Routes.replace]: a URL of the page shown is written with [history.replaceState] and sets
-    the route; another page is a client navigation. *)
+    the route; another page is a client navigation that replaces the current history entry,
+    as [Browser.navigate ~replace:true]. *)
 
 val runtime_route_push : string -> unit
-(** [Routes.push]: as {!runtime_route_replace}, with [history.pushState]. *)
+(** [Routes.push]: as {!runtime_route_replace}, with [history.pushState]; another page is
+    a client navigation that adds a history entry. *)
 
 (**/**)
 
@@ -1182,9 +1225,26 @@ val render :
       event is already prevented, a modifier key is down, the link has a
       [target] other than [_self], a [download] attribute or a
       [data-yuka-reload] attribute, the URL is on another origin, or the URL
-      differs from the current one only by its fragment.
+      differs from the current one only by its fragment. A link with a
+      [data-yuka-replace] attribute replaces the current history entry, as
+      [Browser.navigate ~replace:true]. A link with a [data-yuka-keep-scroll]
+      attribute keeps the scroll position, as
+      [Browser.navigate ~keep_scroll:true]. The clicked link has a
+      [data-yuka-pending] attribute until the new page (or the first part
+      of a streamed page) is shown, the navigation fails or becomes a full
+      page load, or a newer navigation starts.
+    - A submit of a [<form>] whose method is [get] (or not set) is a client
+      navigation to the action URL with the form fields as query, unless:
+      the event is already prevented or does not come from the browser, the
+      form has a [target] other than [_self] or a [data-yuka-reload]
+      attribute, or the URL is on another origin. The [formmethod],
+      [formaction] and [formtarget] attributes and the name and value of the
+      submit button count, as in the browser. The form has a
+      [data-yuka-pending] attribute as a clicked link has.
     - [popstate] loads the entry's URL without pushing history.
-    - {!Browser.navigate} is a client navigation.
+    - {!Browser.navigate} is a client navigation. {!Browser.refresh} is a
+      client navigation to the URL shown that keeps the history entry, the
+      scroll and the focus.
 
     A client navigation loads the URL with the header [Yuka-Navigate] set
     to the [data-k] keys of the [<yuka-outlet>] elements of the page, in
@@ -1198,8 +1258,9 @@ val render :
     outside the outlet keep running. If that outlet is not on the page, it
     does [location.assign]. Without [Yuka-Outlet] it stops every island and
     replaces [<body>] and [document.title] with those of the response. Then it starts
-    the new islands, pushes a history entry (after the page loaded) and
-    scrolls to the fragment or to the top. It then writes the new
+    the new islands, pushes a history entry (after the page loaded; when
+    the new URL without its fragment is the URL shown, it replaces the
+    current entry) and scrolls to the fragment or to the top. It then writes the new
     [document.title] (or, when it is empty, the text of the first [h1] of
     the new content) into a visually hidden
     [<div id="yuka-announcer" aria-live="assertive" aria-atomic="true">],
@@ -1214,9 +1275,38 @@ val render :
     neither. A navigation started while
     another one loads aborts the first. Any 2xx or 4xx/5xx status is shown
     in place. If the request fails, the status is 1xx or 3xx, the response
-    is not [text/html], its [Yuka-Build] differs from the
+    is not [text/html] or streamed, its [Yuka-Build] differs from the
     [<meta name="yuka-build">] of the page, or it was redirected to another
     origin, it does [location.assign url].
+
+    A streamed answer ([Yuka-Stream: 1], see {!Server.Adapter.Make}) is
+    shown as soon as its first line comes: the page with the [loading]
+    content of each pending [await]. The title, history, scroll,
+    announcer and focus change then, {!Browser.navigating} becomes
+    [false] and {!Browser.navigation} becomes [None]. On Back or Forward, the fills that the navigation cache
+    holds are put in place before the scroll to the saved position, and
+    the page scrolls to that position again after each later fill, until
+    a [wheel], [touchstart], [keydown] or [pointerdown] event or the end
+    of the stream. A fragment whose element comes in a later fill is
+    scrolled to by the same rule. Each fill that comes later replaces the
+    [loading] content of its [await] inside the new content (the outlet, the overlay or
+    [<body>]), each async value is added at its end, and the islands of a
+    fill start when it comes. An island that holds a pending [await]
+    starts after the fill of that [await], so it hydrates the settled
+    content, as on a first load. The stream keeps going while a newer
+    navigation loads. It stops when a newer answer replaces the content
+    that it fills or the element that holds it, and when a newer
+    navigation replaces its page before it is shown; then the request of
+    a navigation is aborted. A stream that breaks keeps the content that
+    came, shows the [failed] view of each [await] that is still pending
+    (see {!Await.make}), and starts the islands that it held;
+    {!Browser.stream} is then [`Broken]. The navigation cache keeps
+    a streamed answer with its fills: a later navigation to it shows the
+    fills that came and takes the others as they come, and a stream that
+    breaks leaves the cache. So that the cache entry is complete, the
+    request of a prefetch, or of a navigation whose answer has
+    [max-age] above 0, is read to its end even when no page shows it;
+    {!stop} aborts it.
 
     Prefetch: the [~prefetch] rule of [Routes.ml] sets the level of each
     page route ([`Off], [`Hover], [`Trajectory] (default), [`Visible] or
@@ -1253,6 +1343,7 @@ val render :
     and starts after every waiting visible link. After an action call that succeeds,
     the links in view are prefetched again. [data-yuka-prefetch="off"] on a link
     and the highest level [`Off] turn it off, and so does [navigator.connection.saveData].
+    {!Browser.prefetch} sends a hover prefetch for a URL, by the same rules.
     A navigation to a URL whose prefetch is in flight waits for it.
     When a hover, focus or press prefetch arrives, the browser starts to
     load the island chunks ([<link rel="modulepreload">]) and the
@@ -1758,7 +1849,9 @@ module Server : sig
         [<meta name="yuka-base" content="BASE">]; the browser reads it for
         the action, CSRF and live socket URLs, {!Router.url}, the route of
         [Routes.current], and client navigation and prefetch, which take
-        only links under the base.
+        only URLs under the base: another link, GET form, {!Browser.navigate}
+        or redirect is a full page load, and {!Browser.prefetch} of it
+        does nothing.
       - Typed links ([Routes.issue ~id ()]) call {!Router.url}. A URL that
         the app writes itself is used as written: a location of a guard,
         a loader, a [?redirect] or {!see_other}, the [styles] and [head]
@@ -1942,16 +2035,28 @@ module Server : sig
           + With a [Yuka-Navigate] header (the outlet keys of the page):
             let [shared] be the length of the common prefix of the sent keys and
             the layer keys of the page (or of the fallback, for a 404 or
-            500). [shared = 0]: the settled document in one string. [shared >= 1]:
-            only what goes inside outlet [shared], settled, with the headers
+            500). [shared = 0]: the document. [shared >= 1]:
+            only what goes inside outlet [shared], with the headers
             [Yuka-Outlet] (its key) and [Yuka-Title] (percent-encoded);
             island, await and async ids get the prefix [KEY-]. Both have
-            [Yuka-Build] ({!build_id}).
+            [Yuka-Build] ({!build_id}). The server waits 100 ms for every
+            [await] and async value to settle. When they do, the answer is
+            settled, in one string, as above. When they do not, the answer
+            is streamed, with [Yuka-Stream: 1] and [content-type:
+            application/x-ndjson; charset=utf-8], one JSON value on each
+            line: first a string, the answer with the [loading] content of
+            each pending [await] (in [<!--[ID-->] ... [<!--]-->] markers)
+            and the fills and values that settled in time; then
+            [["ID","HTML"]] for each fill when it settles, and [["","HTML"]]
+            for HTML to add at the end (an async value, an answer, a
+            stylesheet or module link); then [[]] when everything has
+            settled. A failure after the first line goes to [log] and ends
+            the stream without [[]].
           + With [Yuka-Overlay: 1] as well, a route with an overlay page
             and [shared >= 1]: the overlay page, rendered inside the layers
-            and cut out of the innermost outlet, settled, with the headers
+            and cut out of the innermost outlet, with the headers
             [Yuka-Layer: overlay] and [Yuka-Title]; ids get the prefix
-            [overlay-]. Page answers have [vary: Yuka-Navigate,
+            [overlay-]. It is settled or streamed as above. Page answers have [vary: Yuka-Navigate,
             Yuka-Prefetch, Yuka-Overlay].
 
           A 404 or 500 page has the root [headers] and [no-store]. A
