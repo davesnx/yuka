@@ -52,7 +52,7 @@ let seconds_of_ms = function None -> 0. | Some ms -> Float.of_int (Int.min 6_000
 let issue_view ~delay ~comments (issue : Model.Issue.t) : Yuka.server Yuka.element =
   let all = comments = Some "all" in
   let comments =
-    <Yuka.Await async=(Store.thread_async ~delay ~all issue.id)
+    <Yuka.Await async=(Store.thread_async ~delay ~all issue.id) blocking=`No
       loading=(<Views.Skeleton lines=3 />)
       failed=(fun message -> <p class_="error">(Yuka.text ("Could not load comments: " ^ message))</p>)>
       (fun (thread : Comment.thread) ->

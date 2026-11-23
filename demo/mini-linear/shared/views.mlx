@@ -123,6 +123,9 @@ module Shell = struct
           <nav class_="nav">
             (Yuka.fragment (List.map (fun (href, label) -> <a class_="nav-link" href>(Yuka.text label)</a>) links))
           </nav>
+          <form class_="search" method_=`get action=(Links.issues workspace) role=`search>
+            <input type_=`search name="q" placeholder="Search issues" aria_label="Search issues" />
+          </form>
           <div class_="sidebar-extra">sidebar</div>
         </aside>
         <main class_="main">children</main>

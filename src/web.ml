@@ -96,7 +96,8 @@ let decode_uri s =
 let contains : node -> node -> bool = fun _ _ -> browser_only ()
 let fetch_post : string -> string -> (int -> string -> unit) -> (bool -> string -> unit) -> unit -> unit = fun _ _ _ _ _ -> browser_only ()
 let watch_added : (node array -> bool) -> unit -> unit = fun _ _ -> browser_only ()
-let navigate : string -> unit = fun _ -> browser_only ()
+let navigate : bool -> string -> unit = fun _ _ -> browser_only ()
+let confirm : string -> bool = fun _ -> browser_only ()
 let focus : string -> unit = fun _ -> browser_only ()
 let focus_node : node -> unit = fun _ -> browser_only ()
 let scroll_into_view : string -> unit = fun _ -> browser_only ()
@@ -116,21 +117,26 @@ let fire : node -> unit = fun _ -> browser_only ()
 let promise_map : ('a -> 'b) -> 'a promise -> 'b promise = fun _ _ -> browser_only ()
 let promise_then : ('a -> unit) -> (string -> unit) -> 'a promise -> unit = fun _ _ _ -> browser_only ()
 
-let location_assign : string -> unit = fun _ -> browser_only ()
 let current_url : unit -> string = fun _ -> browser_only ()
+let local_url : string -> string = fun _ -> browser_only ()
 let same_origin : string -> bool = fun _ -> browser_only ()
 let fresh_key : unit -> string = fun _ -> browser_only ()
 let history_key : unit -> string = fun _ -> browser_only ()
 let history_replace_key : string -> unit = fun _ -> browser_only ()
 let history_push_key : string -> string -> unit = fun _ _ -> browser_only ()
 let scroll_y : unit -> float = fun _ -> browser_only ()
+let scroll_to : float -> unit = fun _ -> browser_only ()
 let set_cookie : string -> unit = fun _ -> browser_only ()
+let history_at : unit -> int = fun _ -> browser_only ()
+let history_go : int -> unit = fun _ -> browser_only ()
 let history_back : unit -> unit = fun _ -> browser_only ()
 let history_replace_url : string -> unit = fun _ -> browser_only ()
 let manual_scroll : unit -> unit = fun _ -> browser_only ()
 let plain_click : event -> bool = fun _ -> browser_only ()
 let link_href : bool -> node -> string = fun _ _ -> browser_only ()
 let base : unit -> string = fun _ -> browser_only ()
+let link : node -> node = fun _ -> browser_only ()
+let form_url : event -> string = fun _ -> browser_only ()
 type 'a table = (string, 'a) Hashtbl.t
 
 let table () = Hashtbl.create 8
@@ -141,6 +147,8 @@ let table_delete = Hashtbl.remove
 let table_size = Hashtbl.length
 let table_values t = Array.of_seq (Hashtbl.to_seq_values t)
 let table_clear = Hashtbl.reset
+let stored_scrolls : unit -> float table = fun _ -> browser_only ()
+let store_scrolls : float table -> unit = fun _ -> browser_only ()
 
 type ('k, 'v) keyed = {
   equal : 'k -> 'k -> bool;

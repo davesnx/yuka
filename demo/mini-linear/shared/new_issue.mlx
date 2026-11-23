@@ -1,11 +1,23 @@
 let[@client] make ~(workspace : Model.Workspace.t) () =
-  let close () = Yuka.State.set Ui.dialog_open false in
+  let typed = Yuka.State.make false in
+  let close () =
+    Yuka.State.set typed false;
+    Yuka.State.set Ui.dialog_open false
+  in
   let open_ () =
     Yuka.State.set Ui.dialog_open true;
     Yuka.Browser.focus "dialog-title"
   in
   Yuka.Effect.after (fun () ->
       Yuka.Browser.on_window "keydown" (fun event -> if Yuka.Event.key event = "Escape" then close ()));
+  Yuka.Effect.after (fun () ->
+      if Yuka.State.get typed then
+        Yuka.Browser.block (fun ~target:_ ->
+            if Yuka.Browser.confirm "Discard the new issue?" then begin
+              close ();
+              false
+            end
+            else true));
   Yuka.Effect.after (fun () ->
       if Yuka.State.get Ui.dialog_asked then begin
         Yuka.State.set Ui.dialog_asked false;
@@ -16,7 +28,7 @@ let[@client] make ~(workspace : Model.Workspace.t) () =
     (if Yuka.State.get Ui.dialog_open then
        <div class_="dialog-wrap">
          <div class_="backdrop dim" on_click=(fun _ -> close ()) />
-         <div class_="dialog">
+         <div class_="dialog" on_input=(fun _ -> Yuka.State.set typed true)>
            <h2>"New issue"</h2>
            <Yuka.Form action=Actions.create_issue
              on_ok=(fun (issue : Model.Issue.t) ->

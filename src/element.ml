@@ -74,9 +74,9 @@ let each ?(equal = Signal.same) ~key items render =
   Kind.of_node (Each { items; key; equal; render = Kind.fn render })
 
 module Await = struct
-  let make ~async ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ~children () =
+  let make ~async ~loading ?(failed = Kind.of_fn (fun _ -> Fragment [])) ?(blocking = `Timeout 0.1) ~children () =
     Client.use_await ();
-    Kind.of_node (Await { async; loading = Kind.to_node loading; failed = Kind.fn failed; render = Kind.fn children })
+    Kind.of_node (Await { async; loading = Kind.to_node loading; failed = Kind.fn failed; render = Kind.fn children; blocking })
 end
 
 module Catch = struct

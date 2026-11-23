@@ -64,10 +64,22 @@ page.on("console", (m) => {
   if (m.text().includes("hydration mismatch")) mismatches.push(m.text());
 });
 page.on("pageerror", (e) => pageErrors.push(String(e)));
-page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url()} ${r.failure()?.errorText}`));
+const streamed = new Set<unknown>();
+const streamEnds: { id: string; how: string }[] = [];
+const streamFailures: { id: string; line: string; at: string }[] = [];
+await page.exposeBinding("__streamEnded", (_source, id: string, how: string) => {
+  streamEnds.push({ id, how });
+});
+page.on("requestfailed", (r) => {
+  const line = `${r.method()} ${r.url()} ${r.failure()?.errorText}`;
+  if (streamed.has(r) && r.failure()?.errorText === "net::ERR_ABORTED")
+    streamFailures.push({ id: r.headers()["x-e2e-request"] ?? "", line, at: page.url() });
+  else failedRequests.push(line);
+});
 const responses: Response[] = [];
 page.on("response", (r) => {
   responses.push(r);
+  if (r.headers()["yuka-stream"] === "1") streamed.add(r.request());
   if (r.status() >= 400 && r.status() !== expectedFailures) failedRequests.push(`${r.status()} ${r.url()}`);
 });
 const allRequests: { url: string; t: number; navigate: boolean; keys?: string; prefetch?: string }[] = [];
@@ -117,6 +129,41 @@ const installProbes = () => {
   } as typeof IntersectionObserver;
 };
 await page.addInitScript(installProbes);
+await page.addInitScript(() => {
+  const w = window as any;
+  const f = w.fetch;
+  let count = 0;
+  w.fetch = function (input: any, init: any) {
+    const id = `${performance.timeOrigin}-${++count}`;
+    if (init && init.headers && "Yuka-Navigate" in init.headers) init = { ...init, headers: { ...init.headers, "X-E2E-Request": id } };
+    let streamed = false, ended = false;
+    if (init && init.signal)
+      init.signal.addEventListener("abort", () => {
+        if (streamed && !ended) w.__streamEnded(id, "aborted by the page");
+      });
+    return f.call(this, input, init).then((r: any) => {
+      if (r.headers.get("yuka-stream") !== "1" || !r.body) return r;
+      streamed = true;
+      const decoder = new TextDecoder();
+      let text = "";
+      const watched = r.body.pipeThrough(
+        new TransformStream({
+          transform(chunk: any, out: any) {
+            text += decoder.decode(chunk, { stream: true });
+            out.enqueue(chunk);
+          },
+          flush() {
+            ended = true;
+            if (text.endsWith("\n[]\n")) w.__streamEnded(id, "complete");
+          },
+        }),
+      );
+      const answer = new Response(watched, { status: r.status, statusText: r.statusText, headers: r.headers });
+      Object.defineProperty(answer, "url", { value: r.url });
+      return answer;
+    });
+  };
+});
 
 const routerLoaded = async (p: Page) => {
   const loaded = p.waitForResponse((r) => /\/navigation(-[^/]*)?\.js$/.test(new URL(r.url()).pathname)).then(() => true, () => false);
@@ -279,11 +326,108 @@ await step("3b. router", async () => {
     ctx.waitForEvent("page"),
     page.locator('.row[data-id="YUK-2"] .row-title').click({ modifiers: ["Control"] }),
   ]);
-  await popup.waitForLoadState();
+  await popup.waitForURL("**/issue/YUK-2").catch(() => {});
   check("3b.10 ctrl-click is not intercepted (opens a new page)", popup.url().endsWith("/issue/YUK-2") && new URL(page.url()).pathname === "/", `${popup.url()} current=${page.url()}`);
   await popup.close();
   const reloadLinks = await page.locator("a[data-yuka-reload]").count();
   console.log(`SKIP  3b.11 data-yuka-reload: the demo has no such link (${reloadLinks} found)`);
+  const entries = await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.id = "e2e-replace";
+    a.href = "/issue/YUK-3";
+    a.setAttribute("data-yuka-replace", "");
+    a.textContent = "replace";
+    document.body.prepend(a);
+    return history.length;
+  });
+  await page.locator("#e2e-replace").click();
+  await page.waitForURL("**/issue/YUK-3");
+  await page.waitForSelector(".comment-input");
+  const replaced = await page.evaluate(() => history.length);
+  check("3b.12 a link with data-yuka-replace is a client navigation that replaces the entry", replaced === entries && (await marker()) === "alive", `history.length ${entries} -> ${replaced} marker=${await marker()}`);
+});
+
+await step("3m. GET forms", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+  await page.waitForSelector(".row");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    (document.querySelector(".sidebar-extra yuka-island") as any).__kept = true;
+  });
+  const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
+  const kept = () => page.evaluate(() => !!(document.querySelector(".sidebar-extra yuka-island") as any)?.__kept);
+  const entries = await page.evaluate(() => history.length);
+  await page.fill(".search input", "keyboard");
+  await page.press(".search input", "Enter");
+  await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=keyboard");
+  await page.waitForFunction(() => (document.querySelector(".filter") as HTMLInputElement | null)?.value === "keyboard").catch(() => {});
+  const after = await page.evaluate(() => ({ filter: (document.querySelector(".filter") as HTMLInputElement | null)?.value, rows: document.querySelectorAll(".row").length, entries: history.length }));
+  check("3m.1 the sidebar search form is a client navigation that keeps the layout island", (await marker()) === "alive" && (await kept()) && after.filter === "keyboard" && after.entries === entries + 1, `marker=${await marker()} kept=${await kept()} ${JSON.stringify(after)}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.id = "e2e-get";
+    f.action = "/nowhere";
+    f.innerHTML = '<input name="q" value="a b"><button id="e2e-get-submit" name="label" value="bug" formaction="/my">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-get-submit").click();
+  await page.waitForURL((u) => u.pathname === "/my");
+  const my = new URL(page.url());
+  check("3m.2 a form with no method uses the submitter name, value and formaction", (await marker()) === "alive" && my.searchParams.get("q") === "a b" && my.searchParams.get("label") === "bug", `${my.pathname}${my.search} marker=${await marker()}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.method = "post";
+    f.action = "/";
+    f.innerHTML = '<button id="e2e-post-get" formmethod="get" name="q" value="sync">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-post-get").click();
+  await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=sync");
+  check("3m.3 formmethod=get on the submitter of a POST form is a client navigation", (await marker()) === "alive", `marker=${await marker()}`);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.action = "/my";
+    f.target = "_blank";
+    f.innerHTML = '<input name="q" value="new"><button id="e2e-blank">go</button>';
+    document.body.prepend(f);
+  });
+  const [popup] = await Promise.all([page.context().waitForEvent("page"), page.locator("#e2e-blank").click()]);
+  await popup.waitForLoadState();
+  check("3m.4 a form with target=_blank is not intercepted", new URL(popup.url()).pathname === "/my" && new URL(page.url()).search === "?q=sync" && (await marker()) === "alive", `${popup.url()} current=${page.url()}`);
+  await popup.close();
+  await page.evaluate(() => {
+    const f = document.querySelector(".search") as HTMLFormElement;
+    f.setAttribute("data-yuka-reload", "");
+    (f.querySelector("input") as HTMLInputElement).value = "full";
+  });
+  await Promise.all([page.waitForEvent("load"), page.press(".search input", "Enter")]);
+  check("3m.5 a form with data-yuka-reload does a full page load", new URL(page.url()).search === "?q=full" && (await marker()) === undefined, `${page.url()} marker=${await marker()}`);
+  await page.waitForSelector(".search input");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    const f = document.createElement("form");
+    f.action = "/my";
+    f.innerHTML = '<input name="q" value="kept"><button id="e2e-prevented">go</button>';
+    document.body.prepend(f);
+    document.addEventListener("submit", (e) => { if (e.target === f) { e.preventDefault(); (window as any).__prevented = location.href; } });
+  });
+  await page.locator("#e2e-prevented").click();
+  await page.waitForFunction(() => (window as any).__prevented !== undefined);
+  await page.waitForTimeout(300);
+  check("3m.7 a submit that a document listener prevents is left alone", new URL(page.url()).search === "?q=full" && (await marker()) === "alive", `${page.url()} marker=${await marker()}`);
+  await page.route("http://e2e-other.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<p id=other>other</p>" }));
+  await page.waitForSelector(".search input");
+  await page.evaluate(() => {
+    (window as any).__marker = "alive";
+    const f = document.createElement("form");
+    f.action = "http://e2e-other.test/find";
+    f.innerHTML = '<input name="q" value="x"><button id="e2e-other">go</button>';
+    document.body.prepend(f);
+  });
+  await page.locator("#e2e-other").click();
+  await page.waitForSelector("#other");
+  check("3m.6 a form to another origin does a full page load", page.url() === "http://e2e-other.test/find?q=x", page.url());
+  await page.unroute("http://e2e-other.test/**");
 });
 
 await step("3c. partial navigation", async () => {
@@ -322,9 +466,18 @@ await step("3c. partial navigation", async () => {
   await page.waitForURL("**/issue/YUK-3");
   await page.unroute("**/issue/YUK-3");
   await page.waitForSelector(".comment-input");
-  check("3c.3 partial response for the shell outlet", response.headers()["yuka-outlet"] === "L0" && !(await response.text()).includes("<!DOCTYPE"), String(response.headers()["yuka-outlet"]));
-  await page.waitForSelector("[data-nav-progress=finished]");
-  check("3c.4 the shell progress bar kept its element and its state (finished)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
+  const headers = response.headers();
+  check("3c.3 partial response for the shell outlet", headers["yuka-outlet"] === "L0", String(headers["yuka-outlet"]));
+  check("3c.3a the issue answer streams", headers["yuka-stream"] === "1" && headers["content-type"] === "application/x-ndjson; charset=utf-8", JSON.stringify(headers));
+  await page.waitForSelector("[data-nav-progress]:not([data-nav-progress=loading])", { state: "attached" });
+  check("3c.4 the shell progress bar kept its element and its state (finished, or idle when the streamed page came within the bar delay)", (await bar()).kept === true && (await marker()) === "alive", JSON.stringify(await bar()));
+  await page.waitForFunction(() =>
+    !document.querySelector("yuka-outlet .skeleton") && [...document.querySelectorAll("yuka-outlet yuka-island")].every((i) => (i as any).__yuka_started), undefined, { timeout: 10000 });
+  const filled = await page.evaluate(() => ({
+    comments: document.querySelectorAll("yuka-outlet .comment").length,
+    islands: document.querySelectorAll("yuka-outlet yuka-island").length,
+  }));
+  check("3c.3b the fills replace the skeleton in the outlet and every island there starts", filled.comments > 0 && filled.islands > 0, JSON.stringify(filled));
   check("3c.5 title changed", (await page.title()) === "YUK-3", await page.title());
   const focusState = () =>
     page.evaluate(() => {
@@ -405,7 +558,7 @@ await step("3l. overlay route", async () => {
     answer.headers()["yuka-layer"] === "overlay" && open.settings === 1 && open.rows > 0 && y > 0 && open.title === "Settings" && (await marker()) === "alive",
     JSON.stringify(open),
   );
-  await page.mouse.move(1270, 790);
+  await page.mouse.move(20, 790);
   let mark = allRequests.length;
   await page.goBack();
   await page.waitForSelector("yuka-overlay", { state: "detached" });
@@ -532,6 +685,42 @@ await step("3l. overlay route", async () => {
   await page.locator(".crumb").click();
   await page.waitForURL(base + "/");
   await page.waitForSelector("yuka-outlet .row");
+});
+
+await step("3m. scroll positions survive a reload and a cross-document Back", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const pg = await ctx.newPage();
+  await pg.goto(base + "/", { waitUntil: "networkidle" });
+  await islandsStarted(pg);
+  const scrollTo = async (y: number) => {
+    await pg.evaluate((y) => window.scrollTo(0, y), y);
+    return pg.evaluate(() => Math.round(window.scrollY));
+  };
+  const near = (y: number) => pg.waitForFunction((y) => Math.abs(Math.round(scrollY) - y) <= 2, y, { timeout: 5000 }).catch(() => {});
+  const seen = () => pg.evaluate(() => ({ y: Math.round(scrollY), fresh: (window as any).__scrollMarker === undefined }));
+  const y1 = await scrollTo(300);
+  await pg.evaluate(() => {
+    (window as any).__scrollMarker = 1;
+    addEventListener("pagehide", () => {
+      const kept = JSON.parse(sessionStorage.getItem("yuka-scroll") ?? "[]");
+      sessionStorage.setItem("yuka-scroll", JSON.stringify([...Array.from({ length: 150 }, (_, i) => ["old" + i, i]), ...kept]));
+    });
+  });
+  await pg.reload({ waitUntil: "networkidle" });
+  await near(y1);
+  const reloaded = await seen();
+  check("3m.1 a reload of a scrolled page restores its position", reloaded.fresh && y1 > 0 && Math.abs(reloaded.y - y1) <= 2, `before=${y1} after=${JSON.stringify(reloaded)}`);
+  const y2 = await scrollTo(150);
+  const key = await pg.evaluate(() => history.state?.yukaKey);
+  await pg.evaluate(() => ((window as any).__scrollMarker = 1));
+  await pg.goto("about:blank");
+  await pg.goBack({ waitUntil: "networkidle" });
+  await near(y2);
+  const back = await seen();
+  check("3m.2 Back from another origin (no bfcache) restores the position", back.fresh && y2 > 0 && y2 !== y1 && Math.abs(back.y - y2) <= 2 && new URL(pg.url()).pathname === "/", `before=${y2} after=${JSON.stringify(back)}`);
+  const stored = await pg.evaluate(() => JSON.parse(sessionStorage.getItem("yuka-scroll") ?? "[]") as [string, number][]);
+  check("3m.3 the stored table keeps at most 100 entries and the last one shown", stored.length === 100 && stored[stored.length - 1][0] === key && Math.abs(stored[stored.length - 1][1] - y2) <= 2, `${stored.length} last=${JSON.stringify(stored[stored.length - 1])} key=${key}`);
+  await ctx.close();
 });
 
 await step("3d. a page with no island loads no script", async () => {
@@ -1318,6 +1507,77 @@ await step("6. new issue dialog", async () => {
   check("6e keyboard works after dialog closed", (await page.locator(".row.selected").count()) === 1);
 });
 
+await step("6j. a draft blocks leaving", async () => {
+  const p = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const dialogs: string[] = [];
+  let answer = false;
+  p.on("dialog", (d) => {
+    dialogs.push(`${d.type()}:${d.message()}`);
+    void (answer ? d.accept() : d.dismiss());
+  });
+  await p.goto(base + "/", { waitUntil: "networkidle" });
+  await p.waitForSelector(".row");
+  await p.locator(".new-issue-button").click();
+  await p.waitForSelector(".dialog");
+  const leaveByLink = () => p.evaluate(() => (document.querySelector('.nav-link[href="/my"]') as HTMLElement).click());
+  await leaveByLink();
+  check("6j.1 with an empty dialog a link leaves with no question", dialogs.length === 0, dialogs.join(" | "));
+  await p.waitForURL("**/my");
+  await p.locator(".dialog-title").fill("Draft");
+  check("6j.2 the dialog is still open on the kept sidebar and has the draft", (await p.inputValue(".dialog-title")) === "Draft");
+  const marker = await p.evaluate(() => ((window as any).__draft = "alive"));
+  await p.evaluate(() => (document.querySelector('.nav-link[href="/"]') as HTMLElement).click());
+  await p.waitForTimeout(300);
+  const kept = { url: new URL(p.url()).pathname, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft) };
+  check("6j.3 a link click asks with the dialog of the app; Cancel stays", dialogs.at(-1) === "confirm:Discard the new issue?" && kept.url === "/my" && kept.title === "Draft" && kept.marker === marker, JSON.stringify({ dialogs, kept }));
+  dialogs.length = 0;
+  await p.evaluate(() => {
+    const f = document.querySelector(".search") as HTMLFormElement;
+    (f.querySelector("input") as HTMLInputElement).value = "blocked";
+    f.requestSubmit();
+  });
+  await p.waitForTimeout(300);
+  const searched = { url: new URL(p.url()).pathname + new URL(p.url()).search, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft), pending: await p.evaluate(() => document.querySelector(".search")!.hasAttribute("data-yuka-pending")) };
+  check("6j.3b a GET form submit asks too; Cancel stays", dialogs.join() === "confirm:Discard the new issue?" && searched.url === "/my" && searched.title === "Draft" && searched.marker === marker && !searched.pending, JSON.stringify({ dialogs, searched }));
+  dialogs.length = 0;
+  await p.evaluate(() => { location.reload(); }).catch(() => {});
+  await p.waitForTimeout(300);
+  const after = { url: new URL(p.url()).pathname, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft) };
+  check("6j.4 a reload shows the prompt of the browser; Cancel stays", dialogs.length === 1 && dialogs[0].startsWith("beforeunload:"), JSON.stringify({ dialogs, after }));
+  check("6j.5 the page and the draft stay", after.title === "Draft" && after.marker === "alive", JSON.stringify(after));
+  dialogs.length = 0;
+  await p.keyboard.press("Escape");
+  await p.waitForSelector(".dialog", { state: "detached" });
+  await p.evaluate(() => (document.querySelector('.nav-link[href="/"]') as HTMLElement).click());
+  await p.waitForURL(base + "/");
+  await p.reload({ waitUntil: "networkidle" });
+  check("6j.6 after the dialog closes, a link and a reload ask nothing", dialogs.length === 0, dialogs.join(" | "));
+  await p.locator(".new-issue-button").click();
+  await p.waitForSelector(".dialog");
+  await p.locator(".dialog-title").fill("Draft");
+  answer = true;
+  await p.evaluate(() => (document.querySelector('.nav-link[href="/my"]') as HTMLElement).click());
+  await p.waitForURL("**/my");
+  check("6j.7 OK leaves and discards the draft", dialogs.join() === "confirm:Discard the new issue?" && (await p.locator(".dialog").count()) === 0, dialogs.join(" | "));
+  dialogs.length = 0;
+  answer = false;
+  await p.locator(".new-issue-button").click();
+  await p.waitForSelector(".dialog");
+  await p.locator(".dialog-title").fill("Draft");
+  await p.evaluate(() => ((window as any).__draft = "back"));
+  await p.evaluate(() => history.back());
+  await p.waitForTimeout(500);
+  const backed = { url: new URL(p.url()).pathname, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft) };
+  check("6j.8 Back asks with the dialog of the app; Cancel keeps the URL, the page and the draft", dialogs.join() === "confirm:Discard the new issue?" && backed.url === "/my" && backed.title === "Draft" && backed.marker === "back", JSON.stringify({ dialogs, backed }));
+  dialogs.length = 0;
+  answer = true;
+  await p.evaluate(() => history.back());
+  await p.waitForURL(base + "/");
+  await p.waitForSelector(".row");
+  check("6j.9 Back with OK goes back and discards the draft", dialogs.join() === "confirm:Discard the new issue?" && (await p.locator(".dialog").count()) === 0 && (await p.evaluate(() => (window as any).__draft)) === "back", dialogs.join(" | "));
+  await p.close();
+});
+
 const issuePath = "/issue/YUK-1";
 await step("6f. new issue form with JavaScript off", async () => {
   const ctx = await browser.newContext({ javaScriptEnabled: false });
@@ -1744,7 +2004,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   await page.keyboard.press("Escape");
   check("6h.7 Escape closes the card", (await openCard()) === "");
   await trigger.click();
-  await page.mouse.click(100, 790);
+  await page.mouse.click(20, 790);
   check("6h.8 a click outside closes the card", (await openCard()) === "" && page.url().endsWith("/w/stress"));
   await trigger.focus();
   await page.keyboard.press("Enter");
@@ -2643,6 +2903,83 @@ await step("8e. a client that leaves during a streamed page", async () => {
   check("8e.1 the server still answers after clients closed their connections during streamed responses", status === 200, String(status));
 });
 
+await step("8f. a stream that breaks shows the failed view of each pending Await", async () => {
+  const errorsOf = (p: Page) => {
+    const errors: string[] = [];
+    p.on("console", (m) => {
+      if (m.type() === "error" || m.text().includes("hydration mismatch")) errors.push(m.text());
+    });
+    p.on("pageerror", (e) => errors.push(String(e)));
+    return errors;
+  };
+  const shown = (p: Page, text: string) =>
+    p.waitForFunction((t) => [...document.querySelectorAll(".error")].some((e) => e.textContent === t), text, { timeout: 5000 }).then(() => true, () => false);
+  const nav = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const navErrors = errorsOf(nav);
+  await nav.addInitScript(() => {
+    const w = window as any, f = w.fetch;
+    w.fetch = function (input: any, init: any) {
+      return f.call(this, input, init).then((r: any) => {
+        if (r.headers.get("yuka-stream") !== "1" || !r.body) return r;
+        let seen = "";
+        const cut = r.body.pipeThrough(
+          new TransformStream({
+            transform(chunk: any, out: any) {
+              seen += new TextDecoder().decode(chunk);
+              const i = seen.indexOf("\n");
+              if (i < 0) return;
+              out.enqueue(new TextEncoder().encode(seen.slice(0, i + 1)));
+              out.error(new Error("cut by the test"));
+            },
+          }),
+        );
+        const answer = new Response(cut, { status: r.status, statusText: r.statusText, headers: r.headers });
+        Object.defineProperty(answer, "url", { value: r.url });
+        return answer;
+      });
+    };
+  });
+  await nav.goto(base + "/", { waitUntil: "networkidle" });
+  await nav.waitForSelector(".row");
+  await routerLoaded(nav);
+  await nav.evaluate(() => ((window as any).__marker = "alive"));
+  await nav.route("**/issue/YUK-8", (route) => route.continue({ url: route.request().url() + "?delay=600" }));
+  await nav.locator('.row[data-id="YUK-8"] .row-title').click();
+  await nav.waitForURL("**/issue/YUK-8");
+  const navComments = await shown(nav, "Could not load comments: broken");
+  const navRelated = await shown(nav, "Could not load: broken");
+  const navState = await nav.evaluate(() => ({
+    marker: (window as any).__marker,
+    skeletons: document.querySelectorAll(".issue-page .skeleton").length,
+    templates: document.querySelectorAll("template[data-yuka-failed]").length,
+  }));
+  check("8f.1 a client navigation whose stream breaks shows the failed view of each pending Await, in the page and in an island", navComments && navRelated && navState.marker === "alive" && navState.skeletons === 0 && navState.templates === 0, JSON.stringify({ navComments, navRelated, ...navState }));
+  check("8f.2 no console error or hydration mismatch after the break", navErrors.length === 0, navErrors.join(" | "));
+  await nav.close();
+
+  const first = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const firstErrors = errorsOf(first);
+  await first.route((url) => url.pathname === "/issue/YUK-3", async (route) => {
+    const r = await route.fetch();
+    const body = await r.text();
+    const i = body.indexOf("<template data-yuka-fill");
+    const headers = { ...r.headers() };
+    delete headers["content-length"];
+    delete headers["transfer-encoding"];
+    await route.fulfill({ status: r.status(), headers, body: i < 0 ? body : body.slice(0, i) });
+  });
+  await first.goto(base + "/issue/YUK-3?delay=600", { waitUntil: "domcontentloaded" });
+  const firstComments = await shown(first, "Could not load comments: broken");
+  const firstRelated = await shown(first, "Could not load: broken");
+  const firstState = await first.evaluate(() => ({
+    skeletons: document.querySelectorAll(".issue-page .skeleton").length,
+    templates: document.querySelectorAll("template[data-yuka-failed]").length,
+  }));
+  check("8f.3 a first load whose stream breaks shows the failed view of each pending Await, in the page and in an island", firstComments && firstRelated && firstState.skeletons === 0 && firstState.templates === 0, JSON.stringify({ firstComments, firstRelated, ...firstState }));
+  check("8f.4 no console error or hydration mismatch after the break", firstErrors.length === 0, firstErrors.join(" | "));
+  await first.close();
+});
+
 await step("9. screenshots", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" });
   await page.waitForSelector(".row");
@@ -2660,6 +2997,11 @@ check("10 no page errors in whole run", pageErrors.length === 0, pageErrors.join
 const lateConsole = consoleErrors.filter((e) => !/status of (500|404)/.test(e));
 check("11 no unexpected console errors in whole run", lateConsole.length === 0, lateConsole.join(" | "));
 check("11b no hydration mismatch in whole run", mismatches.length === 0, mismatches.join(" | "));
+for (const f of streamFailures) {
+  const i = streamEnds.findIndex((e) => e.id === f.id);
+  if (i >= 0) streamEnds.splice(i, 1);
+  else failedRequests.push(`${f.line} (stream neither complete nor aborted by the page, page ${f.at})`);
+}
 check("12 no unexpected failed requests in whole run", failedRequests.length === 0, failedRequests.join(" | "));
 
 await browser.close();

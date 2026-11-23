@@ -51,6 +51,8 @@ let fill id html =
     "<template data-yuka-fill=\"%s\">%s</template><script>__yukaFill(\"%s\")</script>"
     id html id
 
+let failed_template id html = Printf.sprintf "<template data-yuka-failed=\"%s\">%s</template>" id html
+
 let island a =
   Yuka.runtime_island ~name:"Widget"
     ~props:(Yuka.Codec.encode (Yuka.Codec.async Yuka.Codec.int) a)
@@ -460,7 +462,8 @@ let stream_cases =
           && String.sub head 0 15 = "<!DOCTYPE html>"
           && contains head Yuka.Private.fill_script);
         check string "shell"
-          "<div><!--[s1-->La<!--]--><!--[s2-->Lb<!--]--></div>" shell
+          ("<div><!--[s1-->La<!--]--><!--[s2-->Lb<!--]--></div>" ^ failed_template "s1" "" ^ failed_template "s2" "")
+          shell
     | l -> failf "expected 2 chunks, got %d" (List.length l));
     check bool "running" true (is_pending p);
     resolve_b 2;
@@ -498,8 +501,8 @@ let stream_cases =
     resolve_inner 2;
     get p;
     check list_of "chunks"
-      [ "<!--[s1-->Lo<!--]-->";
-        fill "s1" "<p>1<!--[s2-->Li<!--]--></p>";
+      [ "<!--[s1-->Lo<!--]-->" ^ failed_template "s1" "";
+        failed_template "s2" "" ^ fill "s1" "<p>1<!--[s2-->Li<!--]--></p>";
         fill "s2" "i2";
         "</body></html>" ]
       (List.tl (chunks ()))
@@ -520,7 +523,7 @@ let stream_cases =
     fail_a "boom";
     get p;
     check list_of "failure chunks"
-      [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->";
+      [ "<!--[s1-->La<!--]--><!--[s2-->Lb<!--]-->" ^ failed_template "s1" "E:broken" ^ failed_template "s2" "";
         fill "s2" "";
         fill "s1" "E:server error";
         "</body></html>" ]
@@ -939,7 +942,7 @@ let timeout_cases =
     fire ();
     get p;
     check list_of "timeout chunks"
-      [ island_html "i1" "{\"$async\":\"a1\"}" ^ "<!--[s1-->La<!--]-->";
+      [ island_html "i1" "{\"$async\":\"a1\"}" ^ "<!--[s1-->La<!--]-->" ^ failed_template "s1" "E:broken";
         value_script "a1" "{\"error\":\"timeout\"}";
         fill "s1" "E:timeout";
         "</body></html>" ]
@@ -975,8 +978,8 @@ let timeout_cases =
     fire ();
     get p;
     check list_of "inner times out too"
-      [ "<!--[s1-->Lo<!--]-->";
-        fill "s1" "<!--[s2-->Li<!--]-->";
+      [ "<!--[s1-->Lo<!--]-->" ^ failed_template "s1" "";
+        failed_template "s2" "" ^ fill "s1" "<!--[s2-->Li<!--]-->";
         fill "s2" "";
         "</body></html>" ]
       (List.tl (chunks ()))
@@ -999,9 +1002,9 @@ let timeout_cases =
     fire ();
     get p;
     check list_of "await in the failed element is timed out too"
-      [ "<!--[s1-->Lo<!--]-->";
-        fill "s1" "<!--[s2-->Li<!--]-->";
-        fill "s2" "";
+      [ "<!--[s1-->Lo<!--]-->" ^ failed_template "s1" "<!--[s2-->Li<!--]-->";
+        failed_template "s3" "" ^ fill "s1" "<!--[s3-->Li<!--]-->";
+        fill "s3" "";
         "</body></html>" ]
       (List.tl (chunks ()))
   in
@@ -1024,7 +1027,7 @@ let timeout_cases =
     get p;
     fire ();
     check list_of "the late timer does nothing"
-      [ "<!--[s1-->La<!--]-->"; fill "s1" "a1"; "</body></html>" ]
+      [ "<!--[s1-->La<!--]-->" ^ failed_template "s1" ""; fill "s1" "a1"; "</body></html>" ]
       (List.tl (chunks ()))
   in
   [ test_case "never-settling values time out" `Quick never_settles;
@@ -1747,7 +1750,7 @@ let css_cases =
     in
     let p, chunks = shell (fun () -> Yuka.element "div" [] [ await () ]) in
     check string "the link of the loading part is before the region the fill replaces"
-      ("<div>" ^ link "x" ^ "<!--[s1--><span>L</span><!--]--></div>")
+      ("<div>" ^ link "x" ^ "<!--[s1--><span>L</span><!--]--></div>" ^ failed_template "s1" "")
       (List.nth (chunks ()) 1);
     resolve 2;
     get p;
