@@ -15,7 +15,7 @@ let zone_char = function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '/' | '_' | '+' 
 let settings request =
   let cookie name = Yuka.Server.Request.cookie request name in
   let zone =
-    match Option.map Dream.from_percent_encoded (cookie Zone.cookie) with
+    match Option.bind (cookie Zone.cookie) Yuka.Url.decode_uri_component with
     | Some zone when zone <> "" && String.length zone <= 64 && String.for_all zone_char zone -> Some zone
     | _ -> None
   in

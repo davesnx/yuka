@@ -521,6 +521,24 @@ module Form = Form
 
 module Browser = Browser
 
+(** Percent-encoding with the names and rules of the browser, on the server
+    and in the browser. *)
+module Url : sig
+  val encode_uri_component : string -> string option
+  (** As [encodeURIComponent]: each UTF-8 byte of the text is written as
+      [%XX] with uppercase hex, except [A-Z a-z 0-9 - _ . ! ~ * ' ( )].
+      [None] when the text has no UTF-8 form: in the browser, a string with
+      a lone surrogate (where [encodeURIComponent] throws [URIError]); on
+      the server, bytes that are not valid UTF-8. *)
+
+  val decode_uri_component : string -> string option
+  (** As [decodeURIComponent]: each [%XX] becomes its byte, and the bytes
+      must be UTF-8. [+] stays [+]. [None] where [decodeURIComponent]
+      throws [URIError]: a [%] without two hex digits after it, or bytes
+      that are not valid UTF-8 (a truncated sequence, an overlong form, an
+      encoded surrogate, a code point above U+10FFFF). *)
+end
+
 module Console : sig
   (** Messages for the developer, from code that runs on the server and in
       the browser. In the browser, each function calls the [console] method
@@ -921,9 +939,6 @@ module Private : sig
 
   val in_browser : bool
   (** True in the browser build. *)
-
-  val decode_uri : string -> string option
-  (** As [decodeURIComponent]; [None] where it throws. *)
 
   type platform = {
     target_value : Event.t -> string;
