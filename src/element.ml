@@ -87,7 +87,7 @@ module Catch = struct
         match at with
         | Some n ->
             let n : Host.node = Obj.obj n in
-            Host.node_type n = 8 && Host.data n = "[!"
+            Web.DOM.Node.nodeType n = 8 && Web.DOM.CharacterData.data (Host.as_data n) = "[!"
         | None -> false
       in
       let error = State.make (if failed then Some "server error" else None) in

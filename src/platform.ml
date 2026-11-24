@@ -26,7 +26,7 @@ let platform =
         (fun e ->
           Host.set_flag e stopped_key true;
           Host.stop_propagation e);
-      target_tag = (fun e -> Host.local_name (Host.target e));
+      target_tag = (fun e -> Web.DOM.Element.localName (Host.target e));
       shift_key = Host.shift_key;
       alt_key = Host.alt_key;
       client_x = Host.client_x;
@@ -39,6 +39,6 @@ let platform =
       scroll_into_view = Host.scroll_into_view;
       on_window =
         (fun name handler ->
-          Host.add_listener (Host.window ()) name handler;
-          fun () -> Host.remove_listener (Host.window ()) name handler);
+          Web.DOM.Window.addEventListener name handler Web.DOM.window;
+          fun () -> Web.DOM.Window.removeEventListener name handler Web.DOM.window);
     }

@@ -23,30 +23,30 @@ let assign ~replace url =
 let save_scroll = Navigation_stub.save_scroll
 
 let hash_of = Navigation_web.hash_of
-let outlets () = Host.query_all (Host.document ()) "yuka-outlet"
+let outlets () = Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "yuka-outlet" Web.DOM.document)
 let is value = function Some v -> String.equal v value | None -> false
 let keys = Navigation_web.keys
 
 let build () =
-  match Host.query_all (Host.document ()) "meta[name=yuka-build]" with
-  | [| meta |] -> Host.get_attribute meta "content"
+  match (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-build]" Web.DOM.document)) with
+  | [| meta |] -> Web.DOM.Element.getAttribute "content" meta
   | _ -> None
 
 let mark_links outlet path =
-  let doc = Host.document () in
-  let islands = Host.query_all doc "yuka-island" in
+  let doc = Web.DOM.document in
+  let islands = Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "yuka-island" doc) in
   Array.iter
     (fun a ->
-      if not (Host.contains outlet a || Array.exists (fun i -> Host.contains i a) islands) then
-        match (is path (Host.get_attribute a "href"), Host.get_attribute a "aria-current") with
-        | true, None -> Host.set_attribute a "aria-current" "page"
-        | false, Some "page" -> Host.remove_attribute a "aria-current"
+      if not (Web.DOM.Node.contains a outlet || Array.exists (fun i -> Web.DOM.Node.contains a i) islands) then
+        match (is path (Web.DOM.Element.getAttribute "href" a), Web.DOM.Element.getAttribute "aria-current" a) with
+        | true, None -> Web.DOM.Element.setAttribute ~name:"aria-current" ~value:"page" a
+        | false, Some "page" -> Web.DOM.Element.removeAttribute "aria-current" a
         | _ -> ())
-    (Host.query_all doc "a")
+    (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "a" doc))
 
 let outlet header =
   Option.map
-    (fun key -> Array.find_opt (fun o -> is key (Host.get_attribute o "data-k")) (outlets ()))
+    (fun key -> Array.find_opt (fun o -> is key (Web.DOM.Element.getAttribute "data-k" o)) (outlets ()))
     (header "yuka-outlet")
 
 let fill el header text =
@@ -55,7 +55,7 @@ let fill el header text =
   in
   Client.stop_within el;
   Navigation_web.adopt_stylesheets ();
-  Host.set_inner_html el text;
+  Web.DOM.Element.setInnerHTML el text;
   Navigation_web.adopt_stylesheets ();
   Option.iter Navigation_web.set_title title
 
@@ -175,8 +175,8 @@ let hide () =
   Array.iter
     (fun el ->
       Client.stop_within el;
-      Host.remove el)
-    (Host.query_all (Host.document ()) "yuka-overlay")
+      Web.DOM.Element.remove el)
+    (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "yuka-overlay" Web.DOM.document))
 
 let prefetching = ref Prefetch.default
 let transitions_on = ref false
@@ -317,7 +317,7 @@ let pass () =
               fresh := { link = a; key; url = href; trigger = `Idle; unobserve = ignore } :: !fresh
             end
         | _ -> ())
-      (Host.query_all (Host.document ()) "a[href]");
+      (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "a[href]" Web.DOM.document));
     queued := List.rev_append (List.rev !queued) (List.rev !fresh);
     pump ();
     true
@@ -332,8 +332,8 @@ let report () =
   Scheduler.batch (fun () -> Signal.set Navigation_state.stream value)
 
 let unfollow gone =
-  let page = Host.document () in
-  let gone r = gone r || not (Host.contains page r) in
+  let page = Web.DOM.document in
+  let gone r = gone r || not (Web.DOM.Node.contains r page) in
   following := without (fun (r, stop) -> gone r && (stop (); true)) !following;
   broken := without gone !broken;
   report ()
@@ -447,8 +447,15 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
               target
             end
           in
-          let root = Option.value target ~default:(Host.document ()) in
-          unfollow (Host.contains root);
+          let root =
+            match target with
+            | Some t -> t
+            | None -> (
+                match Web.DOM.Document.body Web.DOM.document with
+                | Some b -> b
+                | None -> Web.DOM.Document.documentElement Web.DOM.document)
+          in
+          unfollow (fun n -> Web.DOM.Node.contains n root);
           let place =
             match (over, restore, hash_of final) with
             | true, _, _ -> ignore
@@ -559,7 +566,7 @@ let watch () =
   !unwatch ();
   unwatch := ignore;
   queued := [];
-  let observe () = Navigation_web.observe (Host.query_all (Host.document ()) "a[href]") seen in
+  let observe () = Navigation_web.observe (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "a[href]" Web.DOM.document)) seen in
   match !prefetching with
   | `Visible -> unwatch := observe ()
   | `Idle ->
@@ -635,8 +642,8 @@ let boot (transitions, islands) =
   shown_key := !current_key;
   Host.table_clear (limits ());
   (prefetching :=
-     match Host.query_all (Host.document ()) "meta[name=yuka-prefetch]" with
-     | [| m |] -> Option.value (Option.bind (Host.get_attribute m "content") Prefetch.of_name) ~default:Prefetch.default
+     match (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-prefetch]" Web.DOM.document)) with
+     | [| m |] -> Option.value (Option.bind (Web.DOM.Element.getAttribute "content" m) Prefetch.of_name) ~default:Prefetch.default
      | _ -> Prefetch.default);
   transitions_on := transitions;
   !untrack ();

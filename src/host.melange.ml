@@ -1,5 +1,9 @@
-type node
-type event
+type node = Web.DOM.element
+type event = Web.DOM.event
+
+external as_element : 'a Web.DOM.node_like -> node = "%identity"
+external as_elements : Web.DOM.node option -> node option = "%identity"
+external as_data : 'a Web.DOM.node_like -> Web.DOM.characterData = "%identity"
 type 'a promise = 'a Js.Promise.t
 type any
 
@@ -9,32 +13,16 @@ external global_window : node = "window"
 external global_document : node = "document"
 external global_this : node = "globalThis"
 
-let window () = global_window
 external owner_document : node -> node = "ownerDocument" [@@mel.get]
 external create_element : node -> string -> node = "createElement" [@@mel.send]
-external create_element_ns : node -> string -> string -> node = "createElementNS" [@@mel.send]
-external create_text : node -> string -> node = "createTextNode" [@@mel.send]
-external create_comment : node -> string -> node = "createComment" [@@mel.send]
 external node_type : node -> int = "nodeType" [@@mel.get]
 external local_name : node -> string = "localName" [@@mel.get]
-external data : node -> string = "data" [@@mel.get]
-external set_data : node -> string -> unit = "data" [@@mel.set]
-external first_child : node -> node option = "firstChild"
-[@@mel.get] [@@mel.return nullable]
-external next_sibling : node -> node option = "nextSibling"
-[@@mel.get] [@@mel.return nullable]
-external parent_node : node -> node option = "parentNode"
-[@@mel.get] [@@mel.return nullable]
 external append_child : node -> node -> unit = "appendChild" [@@mel.send]
-external insert_before : node -> node -> node -> unit = "insertBefore" [@@mel.send]
-external remove : node -> unit = "remove" [@@mel.send]
-external clear : node -> string -> unit = "textContent" [@@mel.set]
 external set_attribute : node -> string -> string -> unit = "setAttribute" [@@mel.send]
-external remove_attribute : node -> string -> unit = "removeAttribute" [@@mel.send]
 external set_string : node -> string -> string -> unit = "" [@@mel.set_index]
 external set_bool : node -> string -> bool -> unit = "" [@@mel.set_index]
-external set_prop : node -> string -> 'a -> unit = "" [@@mel.set_index]
-external get_prop : node -> string -> 'a option = "" [@@mel.get_index] [@@mel.return nullable]
+external set_prop : 'o -> string -> 'a -> unit = "" [@@mel.set_index]
+external get_prop : 'o -> string -> 'a option = "" [@@mel.get_index] [@@mel.return nullable]
 external add_listener : node -> string -> (event -> unit) -> unit = "addEventListener" [@@mel.send]
 external remove_listener : node -> string -> (event -> unit) -> unit = "removeEventListener" [@@mel.send]
 external target : event -> node = "target" [@@mel.get]
@@ -45,12 +33,8 @@ external meta_key : event -> bool = "metaKey" [@@mel.get]
 external ctrl_key : event -> bool = "ctrlKey" [@@mel.get]
 external prevent_default : event -> unit = "preventDefault" [@@mel.send]
 
-let document () = global_document
 
 external query_all : node -> string -> node array = "querySelectorAll" [@@mel.send]
-external get_attribute : node -> string -> string option = "getAttribute"
-[@@mel.send] [@@mel.return nullable]
-external text_content : node -> string = "textContent" [@@mel.get]
 external console_error : string -> unit = "error" [@@mel.scope "console"]
 external console_warn : string -> unit = "warn" [@@mel.scope "console"]
 external console_info : string -> unit = "info" [@@mel.scope "console"]
@@ -214,11 +198,7 @@ let focus id = match get_element_by_id global_document id with Some el -> focus_
 let scroll_into_view id =
   match get_element_by_id global_document id with Some el -> scroll_into_view_node el | None -> ()
 
-external first_element_child : node -> node option = "firstElementChild"
-[@@mel.get] [@@mel.return nullable]
 
-external element_by_id : node -> string -> node option = "getElementById"
-[@@mel.send] [@@mel.return nullable]
 
 let has_intersection_observer el =
   is_function (field (default_view (owner_document el)) "IntersectionObserver")
@@ -331,17 +311,8 @@ let on_dom_ready f =
   add_listener global_document "DOMContentLoaded" handler;
   fun () -> remove_listener global_document "DOMContentLoaded" handler
 
-external set_inner_html : node -> string -> unit = "innerHTML" [@@mel.set]
-external content : node -> node = "content" [@@mel.get]
-external import_node : node -> node -> bool -> node = "importNode" [@@mel.send]
-external child_nodes : node -> node array = "childNodes" [@@mel.get]
 
-let child_at n i = Array.unsafe_get (child_nodes n) i
 
-external previous_sibling : node -> node option = "previousSibling"
-[@@mel.get] [@@mel.return nullable]
-external last_child : node -> node option = "lastChild"
-[@@mel.get] [@@mel.return nullable]
 external clone_node : node -> bool -> node = "cloneNode" [@@mel.send]
 external first_child_node : node -> node = "firstChild" [@@mel.get]
 external next_sibling_node : node -> node = "nextSibling" [@@mel.get]

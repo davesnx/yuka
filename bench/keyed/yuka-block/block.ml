@@ -64,10 +64,10 @@ let template_of doc component =
   match Js.Null.toOption component.template with
   | Some root -> root
   | None ->
-      let holder = Host.create_element doc "template" in
-      Host.set_inner_html holder component.markup;
+      let holder = Web.DOM.Document.createElement "template" doc in
+      Web.DOM.Element.setInnerHTML holder component.markup;
       let root =
-        match Host.first_child (Host.content holder) with
+        match (Host.as_elements (Web.DOM.Node.firstChild (Web.DOM.HTMLTemplateElement.content holder))) with
         | Some root -> root
         | None -> invalid_arg ("Block: empty template " ^ component.markup)
       in
@@ -124,7 +124,7 @@ let lis order =
 let rec create doc (component : Obj.t component) props parent anchor (above : Scheduler.owner) =
   let owner = { Scheduler.last = None; gen = 0; catch = above.catch; env = above.env; parent = Some above } in
   let view = setup owner component props in
-  let root = Host.clone_node (template_of doc component) true in
+  let root = Web.DOM.Node.cloneNode ~deep:true (template_of doc component) in
   let walked = Host.walk root component.walk in
   let count = Array.length component.kinds in
   let instance =
@@ -159,9 +159,9 @@ and render doc instance =
 and patch doc instance i value =
   let node = get instance.nodes i in
   match get instance.component.kinds i with
-  | Text -> Host.set_data node (Obj.magic value)
+  | Text -> Web.DOM.CharacterData.setData (Host.as_data node) (Obj.magic value)
   | Class -> set_class node (Obj.magic value)
-  | Attr name -> Host.set_attribute node name (Obj.magic value)
+  | Attr name -> Web.DOM.Element.setAttribute ~name:name ~value:(Obj.magic value) node
   | Click -> set_click node (Obj.magic value)
   | Child component -> (
       match get instance.mounted i with
@@ -224,7 +224,7 @@ and reconcile doc component parent rows (each : (Obj.t, Obj.t) each) owner =
   else if !start > !last then
     for old = !start to !old_last do
       dispose (get old_entries old);
-      Host.remove (get old_entries old).root
+      Web.DOM.Element.remove (get old_entries old).root
     done
   else begin
     let at = Host.table () in
@@ -243,7 +243,7 @@ and reconcile doc component parent rows (each : (Obj.t, Obj.t) each) owner =
     let anchor = ref after in
     if !reused = 0 && !start = 0 && !old_last = old_length - 1 then begin
       Array.iter dispose old_entries;
-      Host.clear parent "";
+      Web.DOM.Node.setTextContent parent "";
       anchor := Js.null
     end
     else
@@ -251,7 +251,7 @@ and reconcile doc component parent rows (each : (Obj.t, Obj.t) each) owner =
         (fun old ->
           let entry = get old_entries old in
           dispose entry;
-          Host.remove entry.root)
+          Web.DOM.Element.remove entry.root)
         (Host.table_values at);
     let stay = lis order in
     for j = !last downto !start do
@@ -275,7 +275,7 @@ let rec dispatch event node =
     if parent != Js.null then dispatch event (Js.Null.getExn parent)
 
 let mount container (component : (unit * unit) component) =
-  let doc = Host.owner_document container in
-  Host.add_listener doc "click" (fun event -> dispatch event (Host.target event));
-  Host.clear container "";
+  let doc = match Web.DOM.Node.ownerDocument container with Some d -> d | None -> Web.DOM.document in
+  Web.DOM.EventTarget.addEventListener "click" (fun event -> dispatch event (Host.target event)) doc;
+  Web.DOM.Node.setTextContent container "";
   ignore (Scheduler.batch (fun () -> create doc (Obj.magic component) (Obj.repr ((), ())) container Js.null (Base.new_owner ())))

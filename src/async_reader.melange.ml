@@ -28,19 +28,19 @@ let async_value id =
   let find () =
     let found =
       List.find_opt
-        (fun s -> has_value (Host.get_attribute s "data-yuka-async") id)
+        (fun s -> has_value (Web.DOM.Element.getAttribute "data-yuka-async" s) id)
         (Array.to_list
-           (Host.query_all (Host.document ()) "script[data-yuka-async]"))
+           (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "script[data-yuka-async]" Web.DOM.document)))
     in
     match found with
     | None -> false
-    | Some script when Host.text_content script = "" -> false
+    | Some script when (Web.DOM.Node.textContent script) = "" -> false
     | Some script when
         Host.ready_state () = "loading"
-        && Result.is_error (Json.of_string (Host.text_content script)) ->
+        && Result.is_error (Json.of_string (Web.DOM.Node.textContent script)) ->
         false
     | Some script ->
-        (match Json.of_string (Host.text_content script) with
+        (match Json.of_string (Web.DOM.Node.textContent script) with
         | Ok (`Assoc fields) -> (
             match (field "ok" fields, field "error" fields) with
             | Some value, _ -> resolve value
@@ -55,10 +55,10 @@ let async_value id =
     let touches nodes =
       Array.exists
         (fun n ->
-          let own = if Host.local_name n = "script" then [| n |] else [||] in
+          let own = if Web.DOM.Element.localName n = "script" then [| n |] else [||] in
           Array.exists
-            (fun s -> has_value (Host.get_attribute s "data-yuka-async") id)
-            (Array.append own (Host.query_all n "script[data-yuka-async]")))
+            (fun s -> has_value (Web.DOM.Element.getAttribute "data-yuka-async" s) id)
+            (Array.append own (Web.DOM.NodeList.toArray (Web.DOM.Element.querySelectorAll "script[data-yuka-async]" n))))
         nodes
     in
     let disconnect =

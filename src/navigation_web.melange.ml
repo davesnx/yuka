@@ -675,6 +675,8 @@ external dom_parser : unit -> parser = "DOMParser" [@@mel.new] [@@mel.scope "doc
 external parse_html : parser -> string -> (_[@mel.as "text/html"]) -> node = "parseFromString" [@@mel.send]
 external body_node : node -> node = "body" [@@mel.get]
 
+(* Keeps the body element and replaces its children: the router follows a streamed full page into
+   the body element it held before the swap. *)
 let swap_page text =
   let parsed = parse_html (dom_parser ()) text in
   set_document_title global_document (document_title parsed);

@@ -1,42 +1,20 @@
-type node
-type event
+(* An element, or a node of any kind that the renderer walks and checks by nodeType. *)
+type node = Web.DOM.element
+type event = Web.DOM.event
+
+(* Unchecked casts, for code that knows the node type from nodeType. *)
+external as_element : 'a Web.DOM.node_like -> node = "%identity"
+external as_elements : Web.DOM.node option -> node option = "%identity"
+external as_data : 'a Web.DOM.node_like -> Web.DOM.characterData = "%identity"
 type 'a promise
 
 val in_browser : bool
-val window : unit -> node
-val document : unit -> node
-val owner_document : node -> node
-val create_element : node -> string -> node
-val create_element_ns : node -> string -> string -> node
-val create_text : node -> string -> node
-val create_comment : node -> string -> node
-val node_type : node -> int
-val local_name : node -> string
-val data : node -> string
-val set_data : node -> string -> unit
-val first_child : node -> node option
-val next_sibling : node -> node option
-val parent_node : node -> node option
-val first_element_child : node -> node option
-val element_by_id : node -> string -> node option
-val child_at : node -> int -> node
-val previous_sibling : node -> node option
-val last_child : node -> node option
-val clone_node : node -> bool -> node
 val walk : node -> int array -> node array
 val delete_between : node -> node -> node -> unit
-val append_child : node -> node -> unit
-val insert_before : node -> node -> node -> unit
-val remove : node -> unit
-val clear : node -> string -> unit
-val set_attribute : node -> string -> string -> unit
-val remove_attribute : node -> string -> unit
 val set_string : node -> string -> string -> unit
 val set_bool : node -> string -> bool -> unit
-val set_prop : node -> string -> 'a -> unit
-val get_prop : node -> string -> 'a option
-val add_listener : node -> string -> (event -> unit) -> unit
-val remove_listener : node -> string -> (event -> unit) -> unit
+val set_prop : 'o -> string -> 'a -> unit
+val get_prop : 'o -> string -> 'a option
 val target : event -> node
 val value : node -> string
 val checked : node -> bool
@@ -52,12 +30,6 @@ val prevent_default : event -> unit
 val stop_propagation : event -> unit
 val set_flag : event -> string -> bool -> unit
 val get_flag : event -> string -> bool option
-val query_all : node -> string -> node array
-val get_attribute : node -> string -> string option
-val text_content : node -> string
-val set_inner_html : node -> string -> unit
-val content : node -> node
-val import_node : node -> node -> bool -> node
 val console_error : string -> unit
 val console_warn : string -> unit
 val console_info : string -> unit
@@ -67,7 +39,6 @@ val exn_to_string : exn -> string
 val encode_uri : string -> string
 val decode_uri : string -> string option
 val encode_cookie_value : string -> string option
-val contains : node -> node -> bool
 val fetch_post :
   string ->
   string ->

@@ -13,8 +13,8 @@ let selector = "script[data-yuka-context]"
 let drop t e =
   Host.table_delete t e.id;
   Array.iter
-    (fun s -> if Option.equal String.equal (Host.get_attribute s "data-yuka-context") (Some e.id) then Host.set_bool s seen false)
-    (Host.query_all (Host.document ()) selector);
+    (fun s -> if Option.equal String.equal (Web.DOM.Element.getAttribute "data-yuka-context" s) (Some e.id) then Host.set_bool s seen false)
+    (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll selector Web.DOM.document));
   List.iter (fun f -> f ()) e.drops
 
 let put t id name text =
@@ -44,21 +44,21 @@ let scan root =
   let t = table () in
   Array.iter
     (fun s ->
-      let text = Host.text_content s in
+      let text = Web.DOM.Node.textContent s in
       if
         (match Host.get_prop s seen with Some true -> false | _ -> true)
         && (Host.ready_state () <> "loading" || Result.is_ok (Json.of_string text))
       then begin
         Host.set_bool s seen true;
         put t
-          (Option.value (Host.get_attribute s "data-yuka-context") ~default:"")
-          (Option.value (Host.get_attribute s "data-name") ~default:"")
+          (Option.value (Web.DOM.Element.getAttribute "data-yuka-context" s) ~default:"")
+          (Option.value (Web.DOM.Element.getAttribute "data-name" s) ~default:"")
           text
       end)
-    (Host.query_all root selector);
+    (Web.DOM.NodeList.toArray (Web.DOM.Element.querySelectorAll selector root));
   t
 
-let set id name json = Scheduler.batch (fun () -> put (scan (Host.document ())) id name (Json.to_string json))
+let set id name json = Scheduler.batch (fun () -> put (scan (Web.DOM.Document.documentElement Web.DOM.document)) id name (Json.to_string json))
 
 let clear () =
   Option.iter (fun t -> Array.iter (drop t) (Host.table_values t)) !page;
@@ -67,31 +67,31 @@ let clear () =
 let listed doc =
   Array.fold_left
     (fun acc island ->
-      match Host.get_attribute island "data-ctx" with
+      match (Web.DOM.Element.getAttribute "data-ctx" island) with
       | Some ctx ->
           List.filter_map
             (fun pair -> match String.index_opt pair '=' with Some i -> Some (String.sub pair (i + 1) (String.length pair - i - 1)) | None -> None)
             (String.split_on_char ' ' ctx)
           @ acc
       | None -> acc)
-    [] (Host.query_all doc "yuka-island")
+    [] (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "yuka-island" doc))
 
 let swapped = function
   | None -> ()
   | Some region ->
-      let doc = Host.document () in
-      let fresh = Host.query_all region selector in
+      let doc = Web.DOM.document in
+      let fresh = Web.DOM.NodeList.toArray (Web.DOM.Element.querySelectorAll selector region) in
       Array.iter
         (fun old ->
           if
-            (not (Host.contains region old))
+            (not (Web.DOM.Node.contains old region))
             && Array.exists
                  (fun s ->
-                   Option.equal String.equal (Host.get_attribute s "data-yuka-context")
-                     (Host.get_attribute old "data-yuka-context"))
+                   Option.equal String.equal (Web.DOM.Element.getAttribute "data-yuka-context" s)
+                     (Web.DOM.Element.getAttribute "data-yuka-context" old))
                  fresh
-          then Host.remove old)
-        (Host.query_all doc selector);
+          then Web.DOM.Element.remove old)
+        (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll selector doc));
       Option.iter
         (fun t ->
           Scheduler.batch (fun () -> ignore (scan region));
@@ -119,7 +119,7 @@ let reader name (codec : 'a Codec.t) =
         match Host.table_get values id with
         | Some v -> Some v
         | None -> (
-            let t = match !page with Some t when Host.table_has t id -> t | _ -> scan (Host.document ()) in
+            let t = match !page with Some t when Host.table_has t id -> t | _ -> scan (Web.DOM.Document.documentElement Web.DOM.document) in
             match Host.table_get t id with
             | None -> None
             | Some e -> (

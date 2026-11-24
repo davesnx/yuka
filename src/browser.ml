@@ -8,11 +8,11 @@ let refresh () = !platform.refresh ()
 let block check =
   let open Navigation_stub in
   let f target = check ~target in
-  if List.is_empty !blocks then Host.add_listener (Host.window ()) "beforeunload" hold;
+  if List.is_empty !blocks then Web.DOM.Window.addEventListener "beforeunload" hold Web.DOM.window;
   blocks := f :: !blocks;
   Base.own (fun () ->
       blocks := List.filter (fun g -> g != f) !blocks;
-      if List.is_empty !blocks then Host.remove_listener (Host.window ()) "beforeunload" hold)
+      if List.is_empty !blocks then Web.DOM.Window.removeEventListener "beforeunload" hold Web.DOM.window)
 
 let confirm message = Host.confirm message
 let prefetch url = if Url.unsafe ~tag:"a" "href" url then Types.log "prefetch" url else Navigation_stub.prefetch url
@@ -76,9 +76,9 @@ let on_frame handler =
              Base.in_frame := false;
              raise e))
 let on_visible id handler =
-  match Host.element_by_id (Host.document ()) id with
+  match (Web.DOM.Document.getElementById id Web.DOM.document) with
   | Some element when Host.has_intersection_observer element ->
       Host.on_visible element (fun () -> Scheduler.batch handler)
   | _ -> ignore
 let now () = Host.now ()
-let count_elements selector = Array.length (Host.query_all (Host.document ()) selector)
+let count_elements selector = Array.length (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll selector Web.DOM.document))

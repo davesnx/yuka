@@ -26,7 +26,7 @@ let failed = ref false
 let timer : (unit -> unit) option ref = ref None
 let waiting : ((router -> unit) * (unit -> unit)) list ref = ref []
 let settings = ref (false, ignore)
-let listening : Host.node option ref = ref None
+let listening : Web.DOM.document option ref = ref None
 let link_events = [ "pointerover"; "focusin"; "pointerdown"; "touchstart" ]
 let leave_events = [ "pointerout"; "focusout" ]
 
@@ -40,7 +40,7 @@ let rec cancel () =
   | Some c ->
       timer := None;
       c ();
-      Host.remove_listener (Host.window ()) "beforeunload" on_unload
+      Web.DOM.Window.removeEventListener "beforeunload" on_unload Web.DOM.window
   | None -> ()
 
 and on_unload _ =
@@ -109,7 +109,7 @@ let go ?link kind url f fail =
       waiting := (f, fail) :: !waiting;
       if Option.is_none !timer then begin
         timer := Some (Host.set_timeout 3000 (fun () -> give_up "no answer in 3 s"));
-        Host.add_listener (Host.window ()) "beforeunload" on_unload
+        Web.DOM.Window.addEventListener "beforeunload" on_unload Web.DOM.window
       end;
       load ()
 
@@ -133,7 +133,7 @@ let refresh () = go `Reload (Host.current_url ()) (fun r -> r.refresh ()) Platfo
 
 let prefetch url =
   if !on && Host.same_origin url && inside (Host.local_url url)
-     && Array.length (Host.query_all (Host.document ()) "meta[name=yuka-prefetch][content=off]") = 0
+     && Array.length (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-prefetch][content=off]" Web.DOM.document)) = 0
   then use (fun r -> r.prefetch url)
 
 let on_click e =
@@ -142,7 +142,7 @@ let on_click e =
     | "" -> ()
     | href ->
         let link = Host.link (Host.target e) in
-        let flag name = Option.is_some (Host.get_attribute link name) in
+        let flag name = Option.is_some (Web.DOM.Element.getAttribute name link) in
         Host.prevent_default e;
         navigate ~link ~replace:(flag "data-yuka-replace") ~keep_scroll:(flag "data-yuka-keep-scroll") href
 
@@ -160,7 +160,7 @@ let on_link e =
 
 let rec on_move e =
   if Host.pointer_type e = "mouse" then begin
-    Host.remove_listener (Host.document ()) "pointermove" on_move;
+    Web.DOM.EventTarget.removeEventListener "pointermove" on_move Web.DOM.document;
     use ignore
   end
 
@@ -217,18 +217,18 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
   shown_key := !current_key;
   at := Host.history_at ();
   loaded := Host.current_url ();
-  let doc = Host.document () in
+  let doc = Web.DOM.document in
   (match !listening with
   | Some d when d == doc -> ()
   | _ ->
       listening := Some doc;
-      Host.add_listener (Host.window ()) "click" on_click;
-      List.iter (fun n -> Host.add_listener doc n on_link) link_events;
-      List.iter (fun n -> Host.add_listener doc n on_leave) leave_events;
-      Host.add_listener (Host.window ()) "submit" on_submit;
-      Host.add_listener (Host.window ()) "popstate" on_popstate;
-      Host.add_listener (Host.window ()) "pagehide" on_pagehide;
-      Host.add_listener (Host.window ()) "pageshow" on_pageshow);
+      Web.DOM.Window.addEventListener "click" on_click Web.DOM.window;
+      List.iter (fun n -> Web.DOM.EventTarget.addEventListener n on_link doc) link_events;
+      List.iter (fun n -> Web.DOM.EventTarget.addEventListener n on_leave doc) leave_events;
+      Web.DOM.Window.addEventListener "submit" on_submit Web.DOM.window;
+      Web.DOM.Window.addEventListener "popstate" on_popstate Web.DOM.window;
+      Web.DOM.Window.addEventListener "pagehide" on_pagehide Web.DOM.window;
+      Web.DOM.Window.addEventListener "pageshow" on_pageshow Web.DOM.window);
   islands ();
   (match !scroll_table with
   | None ->
@@ -240,10 +240,10 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
   Platform.client_refresh := refresh;
   match !router with
   | Some r -> r.boot !settings
-  | None when Array.length (Host.query_all doc "meta[name=yuka-prefetch][content=visible],meta[name=yuka-prefetch][content=idle]") > 0 ->
+  | None when Array.length (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-prefetch][content=visible],meta[name=yuka-prefetch][content=idle]" doc)) > 0 ->
       use ignore
-  | None when Array.length (Host.query_all doc "meta[name=yuka-prefetch]") = 0 ->
-      Host.add_listener doc "pointermove" on_move
+  | None when Array.length (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-prefetch]" doc)) = 0 ->
+      Web.DOM.EventTarget.addEventListener "pointermove" on_move doc
   | None -> ()
 
 let stop () =
@@ -258,14 +258,14 @@ let stop () =
   (match !listening with
   | Some doc ->
       listening := None;
-      Host.remove_listener (Host.window ()) "click" on_click;
-      List.iter (fun n -> Host.remove_listener doc n on_link) link_events;
-      List.iter (fun n -> Host.remove_listener doc n on_leave) leave_events;
-      Host.remove_listener doc "pointermove" on_move;
-      Host.remove_listener (Host.window ()) "submit" on_submit;
-      Host.remove_listener (Host.window ()) "popstate" on_popstate;
-      Host.remove_listener (Host.window ()) "pagehide" on_pagehide;
-      Host.remove_listener (Host.window ()) "pageshow" on_pageshow
+      Web.DOM.Window.removeEventListener "click" on_click Web.DOM.window;
+      List.iter (fun n -> Web.DOM.EventTarget.removeEventListener n on_link doc) link_events;
+      List.iter (fun n -> Web.DOM.EventTarget.removeEventListener n on_leave doc) leave_events;
+      Web.DOM.EventTarget.removeEventListener "pointermove" on_move doc;
+      Web.DOM.Window.removeEventListener "submit" on_submit Web.DOM.window;
+      Web.DOM.Window.removeEventListener "popstate" on_popstate Web.DOM.window;
+      Web.DOM.Window.removeEventListener "pagehide" on_pagehide Web.DOM.window;
+      Web.DOM.Window.removeEventListener "pageshow" on_pageshow Web.DOM.window
   | None -> ());
   Option.iter (fun r -> r.stop ()) !router;
   Client.stop ()

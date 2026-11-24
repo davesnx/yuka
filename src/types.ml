@@ -79,7 +79,7 @@ type backend = ..
 
   and part = Child of node | Attribute of attr | No_attribute
 
-  and cache = Empty | Compiled of Host.node * compiled option
+  and cache = Empty | Compiled of Web.DOM.document * compiled option
 
   and compiled = { root : Host.node; kid_svg : int; attr_svg : int }
 

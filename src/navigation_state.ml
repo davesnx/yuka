@@ -6,9 +6,9 @@ let navigation : navigation option Signal.t = Signal.make None
 let link : Host.node option ref = ref None
 
 let set ?link:a value =
-  (match !link with Some l -> Host.remove_attribute l "data-yuka-pending" | None -> ());
+  (match !link with Some l -> Web.DOM.Element.removeAttribute "data-yuka-pending" l | None -> ());
   link := a;
-  (match a with Some l -> Host.set_attribute l "data-yuka-pending" "" | None -> ());
+  (match a with Some l -> Web.DOM.Element.setAttribute ~name:"data-yuka-pending" ~value:"" l | None -> ());
   Scheduler.batch (fun () ->
       Signal.set navigating (Option.is_some value);
       Signal.set navigation value)

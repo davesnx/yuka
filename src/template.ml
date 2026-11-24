@@ -14,9 +14,9 @@ let part_attr i = Part_attr i
 let rec same_tree shape n =
   match shape with
   | Fixed_element { tag; attrs; children } ->
-      Host.node_type n = 1
-      && Host.local_name n = tag
-      && (Template_build.void_or_value tag attrs || same_children children (Host.first_child n))
+      Web.DOM.Node.nodeType n = 1
+      && Web.DOM.Element.localName n = tag
+      && (Template_build.void_or_value tag attrs || same_children children (Host.as_elements (Web.DOM.Node.firstChild n)))
   | Fixed_text _ | Part _ -> false
 
 and same_children children cur =
@@ -28,15 +28,15 @@ and same_children children cur =
           if not after_text then cur
           else
             match cur with
-            | Some c when Host.node_type c = 8 -> Host.next_sibling c
+            | Some c when (Web.DOM.Node.nodeType c) = 8 -> Host.as_elements (Web.DOM.Node.nextSibling c)
             | _ -> None
         in
         match cur with
-        | Some c -> Host.node_type c = 3 && Host.data c = t && go true (Host.next_sibling c) rest
+        | Some c -> Web.DOM.Node.nodeType c = 3 && Web.DOM.CharacterData.data (Host.as_data c) = t && go true (Host.as_elements (Web.DOM.Node.nextSibling c)) rest
         | None -> false)
     | (Fixed_element _ as e) :: rest -> (
         match cur with
-        | Some c -> same_tree e c && go false (Host.next_sibling c) rest
+        | Some c -> same_tree e c && go false (Host.as_elements (Web.DOM.Node.nextSibling c)) rest
         | None -> false)
   in
   go false cur children
