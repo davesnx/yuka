@@ -10,14 +10,15 @@ val sessions : ?secure:bool -> ?lifetime:float -> ?max_lifetime:float -> secret:
     session cookie and the CSRF tokens: give every process the same one,
     keep it across restarts and keep it out of the source code. A new
     secret ends every session. Raises [Invalid_argument] when [secret] is
-    shorter than 32 bytes, when [lifetime] is not a positive number of at
-    most 10{^12} seconds, or when [max_lifetime] is not a number from
+    shorter than 32 bytes, when [lifetime] is not a number from 1 to
+    10{^12} seconds, or when [max_lifetime] is not a number from
     [lifetime] to 10{^12} seconds.
 
     - The cookie is [yuka-session], with [Path=/], [HttpOnly] and
       [SameSite=Lax]. Its value holds a random id of 18 bytes, the time the
       session started, the time the cookie expires and an HMAC-SHA256 of
-      the three.
+      the three. Both times are whole seconds, rounded down, so a cookie
+      never outlives [max_lifetime] from the real start.
     - [lifetime] (default: 14 days) is the life of a cookie in seconds. A
       session with less than half of it left gets a new cookie with the same
       id and the same start time.
@@ -32,6 +33,11 @@ val sessions : ?secure:bool -> ?lifetime:float -> ?max_lifetime:float -> secret:
       asks for the session or a CSRF token, so a page that does not ask gets
       no [set-cookie] and can be cached. A cookie that is absent, expired or
       not signed with [secret] gives a new session.
+    - The [set-cookie] goes in the head of the answer. A stream that asks
+      for the session or a CSRF token for the first time after its head was
+      sent gets a new id that the client never receives (the server logs a
+      warning), so the next request has another session: ask before the
+      head, in a loader or a guard, when the client must keep the session.
 
     There is no store, so one session cannot be ended before it expires: a
     stolen cookie is valid until then, and a holder who uses it at least
@@ -99,7 +105,10 @@ val handler :
     that is not a number, gets 400 with [connection: close] before the
     cycle runs. A body that ends before its framing ends fails, so it never
     reaches an action. A body that the cycle did not read is dropped by its
-    framing, never parsed as a next request. The server sets the framing of
+    framing, never parsed as a next request. A request with
+    [Expect: 100-continue] gets [100 Continue] when the cycle starts to read
+    its body; one refused before that (a declared length over the limit)
+    gets its final answer without it. The server sets the framing of
     each answer: the [content-length] and [transfer-encoding] of the app are
     dropped (an answer to [HEAD] keeps the headers that the cycle gave). An
     answer to [HEAD], and a 1xx, 204 or 304 answer, has no body bytes. An

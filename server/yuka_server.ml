@@ -37,8 +37,7 @@ let to_lwt async =
   Yuka.Async.on_result async (function Ok v -> Lwt.wakeup w v | Error m -> Lwt.wakeup_exn w (Failure m));
   p
 
-let default_config = lazy (Yuka.Server.config ())
-let default_log level message = try Yuka.Server.Adapter.log (Lazy.force default_config) level message with _ -> ()
+let default_log level message = try Yuka.Server.Adapter.default_sink level message with _ -> ()
 
 let address = function
   | Unix.ADDR_INET (a, port) -> Printf.sprintf "%s:%d" (Unix.string_of_inet_addr a) port
@@ -158,6 +157,21 @@ let flush writer =
   Writer.flush writer (function `Written -> ok () | `Closed -> fail client_closed);
   result
 
+let expects_continue r =
+  List.exists
+    (fun value ->
+      List.exists (fun v -> String.lowercase_ascii (String.trim v) = "100-continue") (String.split_on_char ',' value))
+    (Ache.Headers.get_multi (ache_request r).headers "expect")
+
+let continue r =
+  let request = ache_request r in
+  if
+    expects_continue r
+    && Ache.Version.compare request.version Ache.Version.v1_1 >= 0
+    && Ache.Request.body_length request <> `Fixed 0L
+    && Reqd.response r.reqd = None
+  then Reqd.respond_with_informational r.reqd (Ache.Response.create `Continue)
+
 module Backend = struct
   type nonrec request = request
   type nonrec reply = reply
@@ -183,6 +197,7 @@ module Backend = struct
     | `Error `Bad_request -> Yuka.Async.failed "the request body has no valid length"
     | `Fixed n when Int64.compare n (Int64.of_int limit) > 0 -> refuse ()
     | `Fixed _ | `Chunked ->
+        continue r;
         let result, ok, fail = Yuka.Async.make () in
         let buffer = Buffer.create 1024 in
         let rec next () =

@@ -106,7 +106,11 @@ let dechunk text pos =
           Alcotest.(check string) "the end of the chunks" "\r\n" (String.sub text (eol + 2) 2);
           (String.concat "" (List.rev acc), eol + 4)
         end
-        else chunks (eol + 2 + size + 2) (String.sub text (eol + 2) size :: acc)
+        else begin
+          if eol + 2 + size + 2 > String.length text then Alcotest.failf "a chunk cut at %d in %S" pos text;
+          Alcotest.(check string) "the end of a chunk" "\r\n" (String.sub text (eol + 2 + size) 2);
+          chunks (eol + 2 + size + 2) (String.sub text (eol + 2) size :: acc)
+        end
   in
   chunks pos []
 
@@ -132,6 +136,8 @@ let parse_one ~head text pos =
       in
       let start = stop + 4 in
       let r = { status; headers; body = "" } in
+      if List.mem_assoc "transfer-encoding" headers && List.mem_assoc "content-length" headers then
+        Alcotest.failf "both transfer-encoding and content-length at %d: %S" pos status_line;
       if head || status < 200 || status = 204 || status = 304 then (r, start)
       else
         match (List.assoc_opt "transfer-encoding" headers, List.assoc_opt "content-length" headers) with
@@ -393,6 +399,25 @@ let body_limit () =
   Alcotest.(check int) "a declared length over the limit is refused before reading" 413 (fst (post ~length:2_000_000 (quoted 4)));
   Alcotest.(check (pair int string)) "a small declared length" (200, {|{"ok":2}|}) (post ~length:4 (quoted 4))
 
+let expect_continue () =
+  let handler = make config in
+  let head = "POST /_yuka/action/echo HTTP/1.1\r\nHost: app.test\r\nOrigin: http://app.test\r\nContent-Type: application/json\r\nExpect: 100-continue\r\nConnection: close\r\n" in
+  Lwt_main.run
+    (let client, served = pair handler in
+     let* () = write_all client (head ^ "Content-Length: 4\r\n\r\n") in
+     let buffer = Buffer.create 256 in
+     let* () = read_until client buffer "\r\n\r\n" in
+     Alcotest.(check string) "100 Continue before the body" "HTTP/1.1 100 Continue\r\n\r\n" (Buffer.contents buffer);
+     let* () = write_all client {|"ab"|} in
+     let* rest = bounded "the answer" (read_all client) in
+     let r = one ~head:false rest in
+     Alcotest.(check (pair int string)) "then the answer" (200, {|{"ok":2}|}) (r.status, r.body);
+     let* () = bounded "the end of the connection" served in
+     Lwt_unix.close client);
+  let refused = Lwt_main.run (exchange ~ended:false handler (head ^ "Content-Length: 2000000\r\n\r\n")) in
+  check_true "no 100 Continue for a body that is refused" (not (contains refused "100 Continue"));
+  Alcotest.(check int) "a body over the limit" 413 (one ~head:false refused).status
+
 let smuggled = request_text ~headers:[ ("Host", "app.test") ] "/docs"
 
 let refused_body_framing () =
@@ -595,9 +620,17 @@ let request_log () =
   ignore (call (quiet config) "/docs");
   Alcotest.(check int) "log_requests:false" 0 (List.length (List.filter (fun (level, _) -> level = `Info) !got))
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_dir prefix "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Array.iter (fun name -> Sys.remove (Filename.concat dir name)) (Sys.readdir dir);
+      Sys.rmdir dir)
+    (fun () -> f dir)
+
 let failure_logs () =
+  with_temp_dir "yuka_shrink" @@ fun shrink ->
   let got = ref [] in
-  let shrink = Filename.temp_dir "yuka_shrink" "" in
   let file = Filename.concat shrink "s.bin" in
   Out_channel.with_open_bin file (fun oc -> output_string oc (String.make (16 * 1024 * 1024) 's'));
   let handler = make (Yuka.Server.config ~public:[ ("/shrink", shrink) ] ~log:(fun level m -> got := (level, m) :: !got) ()) in
@@ -785,7 +818,7 @@ let short_secret () =
       match Yuka_server.sessions ~lifetime ~secret () with
       | _ -> Alcotest.failf "lifetime %f accepted" lifetime
       | exception Invalid_argument _ -> ())
-    [ 0.; -1.; Float.nan; Float.infinity; 1e14 ]
+    [ 0.; 0.5; -1.; Float.nan; Float.infinity; 1e14 ]
 
 
 let session_and_token handler =
@@ -887,7 +920,7 @@ let live_client_stops_reading () =
        let start = Unix.gettimeofday () in
        let rec flood n = if n = 0 then Lwt.return_unit else Lwt.bind (Ws.send ws {|{"t":"ping"}|}) (fun () -> flood (n - 1)) in
        let flood = Lwt.catch (fun () -> flood 5000) (function Unix.Unix_error (Unix.EPIPE, _, _) -> Lwt.return_unit | e -> Lwt.fail e) in
-       let* () = Lwt.pick [ flood; served ] in
+       let* () = bounded "the flood or the end of the connection" (Lwt.pick [ flood; Lwt.protected served ]) in
        let* () = bounded "the server closes a client that stopped reading" served in
        let elapsed = Unix.gettimeofday () -. start in
        let* () = Lwt_unix.close client in
@@ -997,6 +1030,7 @@ let lifetime () =
   | f -> Alcotest.failf "the token with the renewed cookie: %s" (Ws.show f));
   Unix.sleepf 1.3;
   Alcotest.(check string) "an expired token" "close 4403" (Ws.show (live_hello handler ~cookie:(cookie_text renewed) token));
+  Alcotest.(check string) "the renewed cookie keeps the session" id (fst (session_id handler (with_cookie renewed)));
   let got, cookies = session_id handler (with_cookie cookie) in
   check_true "an expired cookie: a new session" (got <> id && List.length cookies = 1)
 
@@ -1005,6 +1039,7 @@ let absolute_limit () =
     Yuka_server.handler ~sessions:(Yuka_server.sessions ~lifetime:2. ~max_lifetime:3. ~secret ()) ~log_requests:false config
       Yuka_routes.app
   in
+  Unix.sleepf (1.05 -. Float.rem (Unix.gettimeofday ()) 1.);
   let started = Unix.gettimeofday () in
   let r = call handler "/session" in
   let id = r.body in
@@ -1017,7 +1052,8 @@ let absolute_limit () =
     else use (match set_cookies r with [] -> cookie | _ -> cookie_of r)
   in
   let at, r = use (cookie_of r) in
-  check_true (Printf.sprintf "a new session after the absolute limit, not before (%.1f s)" at) (at >= 2.4);
+  check_true (Printf.sprintf "a new session after the absolute limit, not before (%.1f s)" at) (at >= 2.9);
+  check_true (Printf.sprintf "a new session at the first request after the limit (%.1f s)" at) (at < 4.);
   Alcotest.(check string) "the new session is kept" r.body (fst (session_id handler (with_cookie (cookie_of r))))
 
 let error_handler () =
@@ -1034,7 +1070,12 @@ let error_handler () =
   Alcotest.(check (pair int string)) "a leaked exception" (500, "Internal Server Error") (r.status, r.body);
   Alcotest.(check (option string)) "closed" (Some "close") (header "connection" r);
   check_true "no exception text sent" (not (contains !output secret));
-  check_true ("the exception in the log: " ^ log) (contains log secret)
+  check_true ("the exception in the log: " ^ log) (contains log secret);
+  let _ = Yuka.Server.config ~base:"/demo" () in
+  ignore (Lwt_main.run (exchange (make config) "GET / HTTP/1.1\r\nbad header\r\n\r\n"));
+  let url = Yuka.Router.url "/x" in
+  ignore (Yuka.Server.config ());
+  Alcotest.(check string) "a logged error keeps the base of the last config" "/demo/x" url
 
 let connect port =
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -1124,7 +1165,7 @@ let reset socket =
   Lwt_unix.close socket
 
 let reset_mid_answer () =
-  let dir = Filename.temp_dir "yuka_huge" "" in
+  with_temp_dir "yuka_huge" @@ fun dir ->
   Out_channel.with_open_bin (Filename.concat dir "huge.bin") (fun oc -> output_string oc (String.make (16 * 1024 * 1024) 'h'));
   let handler = make (Yuka.Server.config ~public:[ ("/huge", dir) ] ()) in
   App.flood_result := None;
@@ -1379,6 +1420,31 @@ let free_port () =
   Unix.close s;
   port
 
+let connect_child port =
+  let rec connect_to tries =
+    let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Unix.setsockopt_float s Unix.SO_RCVTIMEO bound;
+    Unix.setsockopt_float s Unix.SO_SNDTIMEO bound;
+    match Unix.connect s (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
+    | () -> s
+    | exception Unix.Unix_error (Unix.ECONNREFUSED, _, _) when tries > 0 ->
+        Unix.close s;
+        Unix.sleepf 0.05;
+        connect_to (tries - 1)
+  in
+  connect_to
+
+let with_child pid f =
+  Fun.protect
+    ~finally:(fun () ->
+      match Unix.waitpid [ Unix.WNOHANG ] pid with
+      | 0, _ ->
+          Unix.kill pid Sys.sigkill;
+          ignore (Unix.waitpid [] pid)
+      | _ -> ()
+      | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ())
+    f
+
 let run_child port =
   Sys.set_signal Sys.sigpipe Sys.Signal_default;
   Yuka_server.run ~port ~sessions (Yuka.Server.config ()) Yuka_routes.app;
@@ -1390,15 +1456,8 @@ let run_stops () =
     Unix.create_process Sys.executable_name [| Sys.executable_name; "run-child"; string_of_int port |] Unix.stdin Unix.stdout
       (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0)
   in
-  let rec connect_to tries =
-    let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    match Unix.connect s (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
-    | () -> s
-    | exception Unix.Unix_error (Unix.ECONNREFUSED, _, _) when tries > 0 ->
-        Unix.close s;
-        Unix.sleepf 0.05;
-        connect_to (tries - 1)
-  in
+  let connect_to = connect_child port in
+  with_child pid @@ fun () ->
   let s = connect_to 200 in
   let request = "GET /flood HTTP/1.1\r\nHost: x\r\n\r\n" in
   ignore (Unix.write_substring s request 0 (String.length request));
@@ -1425,15 +1484,8 @@ let second_signal () =
     Unix.create_process Sys.executable_name [| Sys.executable_name; "run-child"; string_of_int port |] Unix.stdin Unix.stdout
       (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0)
   in
-  let rec connect_to tries =
-    let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    match Unix.connect s (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
-    | () -> s
-    | exception Unix.Unix_error (Unix.ECONNREFUSED, _, _) when tries > 0 ->
-        Unix.close s;
-        Unix.sleepf 0.05;
-        connect_to (tries - 1)
-  in
+  let connect_to = connect_child port in
+  with_child pid @@ fun () ->
   let s = connect_to 200 in
   let request = "GET /stuck HTTP/1.1\r\nHost: x\r\n\r\n" in
   ignore (Unix.write_substring s request 0 (String.length request));
@@ -1525,6 +1577,7 @@ let () =
       ( "body",
         [
           case "the body limit" body_limit;
+          case "Expect: 100-continue" expect_continue;
           case "a refused body is skipped by its framing" refused_body_framing;
           case "an unread body is not a next request" unread_body;
           case "a cut chunked body does not run the action" cut_chunked_body;

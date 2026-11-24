@@ -66,8 +66,11 @@
   the secret can make a valid cookie: keep it out of the source code. Set
   `~secure:true` on HTTPS: without it the cookie has no `Secure` and no
   `__Host-` name, so a page on another subdomain can set its own valid
-  cookie for the site. A page that reads the session under a shared cache
-  rule (`public`, `s-maxage`) puts a `set-cookie` on a cacheable answer.
+  cookie for the site. Do not give a shared cache rule (`public`,
+  `s-maxage`) to a page that reads the session or a CSRF token: its answer
+  depends on the session, and a valid session that needs no new cookie
+  sends no `set-cookie`, so a shared cache can give the answer of one user
+  to another.
 - `yuka-server` limits the time to send a request head (10 seconds),
   the time a connection waits for a next request and a request body sends
   no byte (60 seconds), the time a write of an answer sends no byte

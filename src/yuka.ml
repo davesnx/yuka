@@ -126,6 +126,7 @@ module Server = struct
 
     let default_log = Cycle.default_log
     let log = Cycle.log
+    let default_sink level message = !Types.default_log level message
 
     let build_id = Cycle.build_id
   end

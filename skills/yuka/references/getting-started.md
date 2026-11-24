@@ -269,7 +269,7 @@ let bus = Yuka_live_pg.bus ~conninfo:"host=db dbname=app user=app" ~channel:"app
 Lwt_main.run (Yuka_server.to_lwt (Yuka.Server.Live.use_bus ~name bus));
 ```
 
-`Yuka_server.run config Yuka_routes.app` then uses the default live
+`Yuka_server.run ~sessions config Yuka_routes.app` then uses the default live
 node, which is on the bus. The name must be unique to the process.
 
 ### Static files and prerender
@@ -345,16 +345,20 @@ let () = Yuka.render ~islands ()
 ```
 
 Build, then run the server from the project root and open
-`http://localhost:8080`:
+`http://localhost:8080`. The server exits when `YUKA_SECRET` is not set:
+make a secret of at least 32 bytes once, and keep it across restarts (a
+new secret ends every session):
 
 ```sh
+export YUKA_SECRET="$(openssl rand -hex 32)"
 dune build
 ./_build/default/server/main.exe
 ```
 
 `yuka dev` rebuilds on change, restarts the server and reloads the
 browser. It starts the server with `YUKA_DEV=1`, so `main.ml` passes
-`~dev:true` to the config:
+`~dev:true` to the config, and with the environment of the shell, so
+export `YUKA_SECRET` first:
 
 ```sh
 yuka dev --build 'dune build --watch' --assets _build/default/client/out \

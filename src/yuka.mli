@@ -2161,6 +2161,12 @@ module Server : sig
         sink ({!set_default_log}). An adapter sends its own messages there,
         so they go where the messages of the cycle go. *)
 
+    val default_sink : log_level -> string -> unit
+    (** The default sink ({!set_default_log}), for a message of an adapter
+        that has no config at hand. Unlike {!log}, it needs no config, so
+        it does not make one (making a config sets the base of
+        {!Router.url}). *)
+
     val build_id : config -> app -> string
     (** The build id: a digest of the route tree and, with [assets], of the
         entry, the manifest and the packages or the metafile. Every full

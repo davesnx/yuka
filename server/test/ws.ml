@@ -36,6 +36,9 @@ let write fd text =
   in
   from 0
 
+(* The accept value of RFC 6455 for the key below. *)
+let accept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
 let connect fd ~host ~cookie =
   let t = { fd; input = "" } in
   let request =
@@ -54,7 +57,28 @@ let connect fd ~host ~cookie =
   in
   let* () = write fd request in
   let* text = head t in
-  Lwt.return (t, List.hd (String.split_on_char '\r' text))
+  let lines = List.map String.trim (String.split_on_char '\n' text) in
+  let status = List.hd lines in
+  (if String.starts_with ~prefix:"HTTP/1.1 101 " status then
+     let field name =
+       List.find_map
+         (fun line ->
+           match String.index_opt line ':' with
+           | Some i when String.lowercase_ascii (String.sub line 0 i) = name ->
+               Some (String.trim (String.sub line (i + 1) (String.length line - i - 1)))
+           | _ -> None)
+         (List.tl lines)
+     in
+     let has_token name token =
+       match field name with
+       | Some v -> List.exists (fun t -> String.lowercase_ascii (String.trim t) = token) (String.split_on_char ',' v)
+       | None -> false
+     in
+     if field "sec-websocket-accept" <> Some accept then
+       failwith ("Ws.connect: a 101 without the right Sec-WebSocket-Accept: " ^ text);
+     if not (has_token "upgrade" "websocket") then failwith ("Ws.connect: a 101 without Upgrade: websocket: " ^ text);
+     if not (has_token "connection" "upgrade") then failwith ("Ws.connect: a 101 without Connection: Upgrade: " ^ text));
+  Lwt.return (t, status)
 
 let frame ~opcode payload =
   let n = String.length payload in

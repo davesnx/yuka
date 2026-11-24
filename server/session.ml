@@ -4,8 +4,8 @@ let longest = 1e12
 
 let make ?(secure = false) ?(lifetime = 14. *. 86400.) ?max_lifetime ~secret () =
   if String.length secret < 32 then invalid_arg "Yuka_server.sessions: the secret must have at least 32 bytes";
-  if not (Float.is_finite lifetime && lifetime > 0. && lifetime <= longest) then
-    invalid_arg "Yuka_server.sessions: the lifetime must be a positive number of seconds, at most 1e12";
+  if not (Float.is_finite lifetime && lifetime >= 1. && lifetime <= longest) then
+    invalid_arg "Yuka_server.sessions: the lifetime must be a number of seconds from 1 to 1e12";
   let max_lifetime = Option.value max_lifetime ~default:(Float.max lifetime (30. *. 86400.)) in
   if not (Float.is_finite max_lifetime && max_lifetime >= lifetime && max_lifetime <= longest) then
     invalid_arg "Yuka_server.sessions: max_lifetime must be a number of seconds from lifetime to 1e12";
@@ -28,15 +28,22 @@ let signed t parts given =
   | Some given -> Digestif.SHA256.equal (Digestif.SHA256.hmac_string ~key:t.secret (String.concat "\n" parts)) given
   | None -> false
 
-let seconds f = Printf.sprintf "%.0f" (Float.round f)
+let seconds f = Printf.sprintf "%.0f" f
 
-let left t ~issued ~now = Float.min t.lifetime (issued +. t.max_lifetime -. now)
+(* Times in a cookie are whole seconds, rounded down: the start goes back,
+   so the absolute limit never moves past [max_lifetime] from the real
+   start, and the expiry goes back, so it never passes that limit. *)
+let expiry t ~issued ~now = Float.floor (Float.min (now +. t.lifetime) (issued +. t.max_lifetime))
 
 let set_cookie t ~id ~issued ~now =
-  let issued_text = seconds issued and max_age = left t ~issued ~now in
-  let expires = seconds (now +. max_age) in
-  let value = String.concat "." [ "v2"; id; issued_text; expires; mac t [ "yuka-session"; id; issued_text; expires ] ] in
-  match Yuka.Server.Cookie.set ~max_age:(int_of_float (Float.round max_age)) ~secure:t.secure t.cookie value with
+  let issued = Float.floor issued in
+  let expires = expiry t ~issued ~now in
+  let issued_text = seconds issued and expires_text = seconds expires in
+  let value =
+    String.concat "." [ "v2"; id; issued_text; expires_text; mac t [ "yuka-session"; id; issued_text; expires_text ] ]
+  in
+  let max_age = int_of_float (Float.max 0. (Float.floor (Float.min t.lifetime (issued +. t.max_lifetime -. now)))) in
+  match Yuka.Server.Cookie.set ~max_age ~secure:t.secure t.cookie value with
   | Ok (_, header) -> header
   | Error message -> invalid_arg message
 
@@ -48,7 +55,7 @@ let check t ~now value =
     when String.length id = 36 && is_hex id && is_digits issued_text && is_digits expires ->
       let at = float_of_string expires and issued = float_of_string issued_text in
       if at > now && issued +. t.max_lifetime > now && signed t [ "yuka-session"; id; issued_text; expires ] given then
-        Some { valid_id = id; issued; renew = at -. now < t.lifetime /. 2. && Float.round (now +. left t ~issued ~now) > at }
+        Some { valid_id = id; issued; renew = at -. now < t.lifetime /. 2. && expiry t ~issued ~now > at }
       else None
   | _ -> None
 
@@ -75,7 +82,7 @@ let find t ~now cookie_header =
   | None -> fresh (random_hex 18) ~issued:now
 
 let token t ~id ~now =
-  let expires = seconds (now +. Float.min token_lifetime t.lifetime) and nonce = random_hex 8 in
+  let expires = seconds (Float.floor (now +. Float.min token_lifetime t.lifetime)) and nonce = random_hex 8 in
   String.concat "." [ "v1"; expires; nonce; mac t [ "yuka-csrf"; id; expires; nonce ] ]
 
 let verify t ~id ~now token =
