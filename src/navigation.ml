@@ -51,7 +51,7 @@ let outlet header =
 
 let fill el header text =
   let title =
-    Option.map (fun t -> match Web.decode_uri t with Some d -> d | None -> t) (header "yuka-title")
+    Option.map (fun t -> match Web.decode_uri_component t with Some d -> d | None -> t) (header "yuka-title")
   in
   Client.stop_within el;
   Navigation_web.adopt_stylesheets ();
