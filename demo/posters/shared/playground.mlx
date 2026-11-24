@@ -1,6 +1,6 @@
 let number event f = match int_of_string_opt (Yuka.Event.target_value event) with Some n -> f n | None -> ()
 
-let slider ~id ~label ~low ~high ~(value : unit -> int) ~update : Yuka.client Yuka.element =
+let slider ~id ~label ~range:(low, high) ~(value : unit -> int) ~update : Yuka.client Yuka.element =
   <div class_="field">
     <div class_="field-row">
       <label for_=id>(Yuka.text label)</label>
@@ -25,23 +25,31 @@ let color_field ~id ~label ~(value : unit -> string) ~update : Yuka.client Yuka.
   </div>
 
 let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) () =
-  let grid = Yuka.State.make ~equal:( = ) initial.grid in
-  let mix = Yuka.State.make ~equal:( = ) initial.mix in
+  let layout = Yuka.State.make ~equal:( = ) initial.layout in
+  let art = Yuka.State.make ~equal:( = ) initial.art in
   let colours = Yuka.State.make ~equal:( = ) initial.colours in
   let text = Yuka.State.make ~equal:( = ) initial.text in
-  let set_grid f = Yuka.State.update grid (fun g -> Pattern.normal_grid (f g)) in
-  let set_mix f = Yuka.State.update mix (fun m -> Pattern.normal_mix (f m)) in
+  let set_layout f = Yuka.State.update layout (fun l -> Pattern.normal_layout (f l)) in
+  let set_art f = Yuka.State.update art (fun a -> Pattern.normal_art (f a)) in
   let set_colours f = Yuka.State.update colours (fun c -> Pattern.normal_colours ~defaults (f c)) in
   let set_text f = Yuka.State.update text (fun t -> Pattern.normal_text (f t)) in
   let route =
     Yuka.State.memo ~equal:( = ) (fun () ->
         Link.route ~defaults
-          { grid = Yuka.State.get grid; mix = Yuka.State.get mix; colours = Yuka.State.get colours; text = Yuka.State.get text })
+          { layout = Yuka.State.get layout; art = Yuka.State.get art; colours = Yuka.State.get colours; text = Yuka.State.get text })
   in
   Yuka.Effect.on_change route (fun ~prev:_ ~next -> Routes.replace next);
-  let cells = Yuka.State.memo (fun () -> Pattern.cells (Yuka.State.get grid) (Yuka.State.get mix)) in
+  let kind = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.kind (Yuka.State.get art)) in
+  let shapes = Yuka.State.memo (fun () -> Pattern.shapes (Yuka.State.get layout) (Yuka.State.get art)) in
   let labels = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.labels (Yuka.State.get text)) in
-  let file extension = "poster-" ^ Int.to_string (Yuka.State.get grid).seed ^ "." ^ extension in
+  let file extension = "poster-" ^ Int.to_string (Yuka.State.get layout).seed ^ "." ^ extension in
+  let kind_button k : Yuka.client Yuka.element =
+    <button class_="preset" type_=`button
+      aria_pressed=(if Yuka.State.get kind = k then `true_ else `false_)
+      on_click=(fun _ -> set_art (fun a -> if Pattern.kind a = k then a else Pattern.start ~defaults k))>
+      (Yuka.text (Pattern.Kind.label k))
+    </button>
+  in
   let preset ~label ~(colours_of : Pattern.colours) : Yuka.client Yuka.element =
     <button class_="preset" type_=`button
       aria_pressed=(if Yuka.State.get colours = colours_of then `true_ else `false_)
@@ -50,45 +58,103 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
       (Yuka.text label)
     </button>
   in
+  let lines read write =
+    (fun () -> match Yuka.State.get art with Pattern.Lines a -> read a | _ -> 0),
+    fun n -> set_art (function Pattern.Lines a -> Pattern.Lines (write a n) | other -> other)
+  in
+  let blocks read write =
+    (fun () -> match Yuka.State.get art with Pattern.Blocks a -> read a | _ -> 0),
+    fun n -> set_art (function Pattern.Blocks a -> Pattern.Blocks (write a n) | other -> other)
+  in
+  let clouds read write =
+    (fun () -> match Yuka.State.get art with Pattern.Clouds a -> read a | _ -> 0),
+    fun n -> set_art (function Pattern.Clouds a -> Pattern.Clouds (write a n) | other -> other)
+  in
+  let lightning read write =
+    (fun () -> match Yuka.State.get art with Pattern.Lightning a -> read a | _ -> 0),
+    fun n -> set_art (function Pattern.Lightning a -> Pattern.Lightning (write a n) | other -> other)
+  in
+  let param ~id ~label ~range (value, update) = slider ~id ~label ~range ~value ~update in
+  let parameters = function
+    | Pattern.Kind.Lines ->
+        Yuka.fragment
+          [
+            param ~id:"lines" ~label:"Lines" ~range:Pattern.Range.lines (lines (fun a -> a.lines) (fun a lines -> { a with lines }));
+            param ~id:"amplitude" ~label:"Curviness" ~range:Pattern.Range.amplitude
+              (lines (fun a -> a.amplitude) (fun a amplitude -> { a with amplitude }));
+            param ~id:"waves" ~label:"Waves" ~range:Pattern.Range.waves (lines (fun a -> a.waves) (fun a waves -> { a with waves }));
+            param ~id:"stroke" ~label:"Stroke" ~range:Pattern.Range.stroke (lines (fun a -> a.stroke) (fun a stroke -> { a with stroke }));
+          ]
+    | Pattern.Kind.Blocks ->
+        Yuka.fragment
+          [
+            param ~id:"blocks" ~label:"Blocks" ~range:Pattern.Range.blocks (blocks (fun a -> a.blocks) (fun a blocks -> { a with blocks }));
+            param ~id:"gap" ~label:"Gap" ~range:Pattern.Range.gap (blocks (fun a -> a.gap) (fun a gap -> { a with gap }));
+            param ~id:"filled" ~label:"Filled share" ~range:Pattern.Range.filled
+              (blocks (fun a -> a.filled) (fun a filled -> { a with filled }));
+            param ~id:"squareness" ~label:"Squareness" ~range:Pattern.Range.squareness
+              (blocks (fun a -> a.squareness) (fun a squareness -> { a with squareness }));
+          ]
+    | Pattern.Kind.Clouds ->
+        Yuka.fragment
+          [
+            param ~id:"clouds" ~label:"Clouds" ~range:Pattern.Range.clouds (clouds (fun a -> a.clouds) (fun a clouds -> { a with clouds }));
+            param ~id:"puffs" ~label:"Puffs" ~range:Pattern.Range.puffs (clouds (fun a -> a.puffs) (fun a puffs -> { a with puffs }));
+            param ~id:"size" ~label:"Size" ~range:Pattern.Range.size (clouds (fun a -> a.size) (fun a size -> { a with size }));
+            param ~id:"solid" ~label:"Filled share" ~range:Pattern.Range.solid (clouds (fun a -> a.solid) (fun a solid -> { a with solid }));
+          ]
+    | Pattern.Kind.Lightning ->
+        Yuka.fragment
+          [
+            param ~id:"bolts" ~label:"Bolts" ~range:Pattern.Range.bolts (lightning (fun a -> a.bolts) (fun a bolts -> { a with bolts }));
+            param ~id:"branches" ~label:"Branches" ~range:Pattern.Range.branches
+              (lightning (fun a -> a.branches) (fun a branches -> { a with branches }));
+            param ~id:"jaggedness" ~label:"Jaggedness" ~range:Pattern.Range.jaggedness
+              (lightning (fun a -> a.jaggedness) (fun a jaggedness -> { a with jaggedness }));
+            param ~id:"thickness" ~label:"Thickness" ~range:Pattern.Range.thickness
+              (lightning (fun a -> a.thickness) (fun a thickness -> { a with thickness }));
+          ]
+  in
   <div class_="playground">
+    <aside class_="panel text-panel" aria_label="Poster text">
+      <section class_="group">
+        <h2>"Text"</h2>
+        (text_field ~id:"title" ~label:"Title" ~value:(fun () -> (Yuka.State.get text).title)
+           ~update:(fun title -> set_text (fun t -> { t with title })))
+        (text_field ~id:"subtitle" ~label:"Subtitle" ~value:(fun () -> (Yuka.State.get text).subtitle)
+           ~update:(fun subtitle -> set_text (fun t -> { t with subtitle })))
+        (text_field ~id:"year" ~label:"Line 1" ~value:(fun () -> (Yuka.State.get text).year)
+           ~update:(fun year -> set_text (fun t -> { t with year })))
+        (text_field ~id:"day" ~label:"Line 2" ~value:(fun () -> (Yuka.State.get text).day)
+           ~update:(fun day -> set_text (fun t -> { t with day })))
+        (text_field ~id:"weekday" ~label:"Line 3" ~value:(fun () -> (Yuka.State.get text).weekday)
+           ~update:(fun weekday -> set_text (fun t -> { t with weekday })))
+      </section>
+    </aside>
     <figure class_="preview">
       <Poster
         background=(fun () -> (Yuka.State.get colours).background)
         foreground=(fun () -> (Yuka.State.get colours).foreground)
         labels=(fun () -> Yuka.State.get labels)
-        grid=(Yuka.each ~key:(fun (cell : Pattern.cell) -> Int.to_string cell.index)
-                ~equal:(fun (a : Pattern.cell) b -> String.equal a.d b.d)
-                (fun () -> Yuka.State.get cells)
-                Poster.cell) />
+        art=(Yuka.each ~key:(fun (s : Pattern.shape) -> Int.to_string s.index)
+               ~equal:(fun (a : Pattern.shape) b -> String.equal a.d b.d && a.paint = b.paint)
+               (fun () -> Yuka.State.get shapes)
+               Poster.shape) />
     </figure>
-    <aside class_="panel" aria_label="Poster settings">
+    <aside class_="panel settings-panel" aria_label="Poster settings">
       <section class_="group">
         <h2>"Pattern"</h2>
-        <div class_="field">
-          <label for_="seed">"Seed"</label>
-          <div class_="seed-row">
-            <input id="seed" class_="input mono" type_=`number min="0" max=(Int.to_string Pattern.max_seed)
-              value=(Int.to_string (Yuka.State.get grid).seed)
-              on_input=(fun event -> number event (fun seed -> set_grid (fun g -> { g with seed }))) />
-            <button class_="button" type_=`button
-              on_click=(fun _ -> set_grid (fun g -> { g with seed = Pattern.shuffle g.seed }))>"Shuffle"</button>
-          </div>
+        <div class_="kinds" role=`group aria_label="Kind">
+          (Yuka.fragment (List.map kind_button Pattern.Kind.all))
         </div>
-        (slider ~id:"columns" ~label:"Columns" ~low:4 ~high:24 ~value:(fun () -> (Yuka.State.get grid).columns)
-           ~update:(fun columns -> set_grid (fun g -> { g with columns })))
-        (slider ~id:"rows" ~label:"Rows" ~low:4 ~high:30 ~value:(fun () -> (Yuka.State.get grid).rows)
-           ~update:(fun rows -> set_grid (fun g -> { g with rows })))
+        <button class_="button" type_=`button
+          on_click=(fun _ -> set_layout (fun l -> { l with seed = Pattern.shuffle l.seed }))>"Shuffle"</button>
+        (slider ~id:"padding" ~label:"Padding" ~range:Pattern.Range.padding ~value:(fun () -> (Yuka.State.get layout).padding)
+           ~update:(fun padding -> set_layout (fun l -> { l with padding })))
       </section>
       <section class_="group">
-        <h2>"Shape mix"</h2>
-        (slider ~id:"half" ~label:"Half discs" ~low:0 ~high:100 ~value:(fun () -> (Yuka.State.get mix).half)
-           ~update:(fun half -> set_mix (fun m -> { m with half })))
-        (slider ~id:"empty" ~label:"Empty" ~low:0 ~high:100 ~value:(fun () -> (Yuka.State.get mix).empty)
-           ~update:(fun empty -> set_mix (fun m -> { m with empty })))
-        (slider ~id:"block" ~label:"Blocks" ~low:0 ~high:100 ~value:(fun () -> (Yuka.State.get mix).block)
-           ~update:(fun block -> set_mix (fun m -> { m with block })))
-        (slider ~id:"bar" ~label:"Bars" ~low:0 ~high:100 ~value:(fun () -> (Yuka.State.get mix).bar)
-           ~update:(fun bar -> set_mix (fun m -> { m with bar })))
+        <h2>(Yuka.text (Pattern.Kind.label (Yuka.State.get kind)))</h2>
+        (parameters (Yuka.State.get kind))
       </section>
       <section class_="group">
         <h2>"Colours"</h2>
@@ -104,19 +170,6 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
            ~update:(fun background -> set_colours (fun c -> { c with background })))
         (color_field ~id:"foreground" ~label:"Shapes and text" ~value:(fun () -> (Yuka.State.get colours).foreground)
            ~update:(fun foreground -> set_colours (fun c -> { c with foreground })))
-      </section>
-      <section class_="group">
-        <h2>"Text"</h2>
-        (text_field ~id:"title" ~label:"Title" ~value:(fun () -> (Yuka.State.get text).title)
-           ~update:(fun title -> set_text (fun t -> { t with title })))
-        (text_field ~id:"subtitle" ~label:"Subtitle" ~value:(fun () -> (Yuka.State.get text).subtitle)
-           ~update:(fun subtitle -> set_text (fun t -> { t with subtitle })))
-        (text_field ~id:"year" ~label:"Line 1" ~value:(fun () -> (Yuka.State.get text).year)
-           ~update:(fun year -> set_text (fun t -> { t with year })))
-        (text_field ~id:"day" ~label:"Line 2" ~value:(fun () -> (Yuka.State.get text).day)
-           ~update:(fun day -> set_text (fun t -> { t with day })))
-        (text_field ~id:"weekday" ~label:"Line 3" ~value:(fun () -> (Yuka.State.get text).weekday)
-           ~update:(fun weekday -> set_text (fun t -> { t with weekday })))
       </section>
       <div class_="actions">
         <a class_="button primary" href=(Link.svg (Yuka.State.get route)) download=(file "svg")>"Download SVG"</a>
