@@ -51,7 +51,7 @@ let make ~(event : Model.event) ?(fresh = false) ?(day = Yuka.empty) ~time () =
       <div class_="card-body">
         <div class_="card-meta">
           <span class_="card-author">
-            <Avatar name=event.author size=16 />
+            <Avatar name=event.author size=12 />
             <span>(Yuka.text event.author)</span>
           </span>
           <div class_="card-tags">
