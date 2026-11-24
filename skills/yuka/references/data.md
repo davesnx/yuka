@@ -16,6 +16,78 @@ Each kind of data has two parts with one name:
 - The implementation, in the server: `Yuka.Server.Action.implement`,
   `Yuka.Server.Form.implement` or `Yuka.Server.Live.implement`.
 
+## Async values
+
+`'a Yuka.Async.t` is a value that may not be ready yet. The server and the
+browser use the same type. Loaders, guards, handlers and actions give an
+`Async`, and `<Yuka.Await>` shows one.
+
+An `Async` has one of three statuses:
+
+- `Pending`: the value is not ready.
+- `Done value`: the value is ready.
+- `Failed message`: the work failed. A failure is a value with a message,
+  not an exception.
+
+An `Async` settles one time. When it is `Done` or `Failed`, a later
+resolve or fail does nothing.
+
+To make an `Async`:
+
+- `Yuka.Async.return value` gives one that is `Done`.
+- `Yuka.Async.failed message` gives one that is `Failed`.
+- `Yuka.Async.make ()` gives one that is `Pending`, with the functions
+  that resolve and fail it. Use it to wrap an API that takes callbacks.
+
+`Yuka.Async.map` and `Yuka.Async.bind` change the value when it is
+`Done`. A failure keeps its message. When the function raises, the result
+is `Failed` with the exception as text:
+
+```ocaml
+let title = Yuka.Async.map (fun (issue : Model.Issue.t) -> issue.title) issue
+```
+
+To read an `Async`:
+
+- `Yuka.Async.on_result async f` calls `f` with `Ok value` or
+  `Error message` when the `Async` settles. When it is already settled,
+  `f` runs at once.
+- `Yuka.Async.status async` gives the status now.
+- `Yuka.Async.watch async` gives a State that follows the status, for an
+  island that renders each status. To show a value that loads, use
+  [`<Yuka.Await>`](#values-that-load-await).
+
+### Lwt and Eio
+
+Each adapter converts between `Async` and the concurrency library of its
+server.
+
+With Dream, `Yuka_dream.to_async` turns an Lwt promise into an `Async`,
+and `Yuka_dream.to_lwt` turns an `Async` into a promise. A failed promise
+gives a failed `Async` with the exception text. A failed `Async` gives a
+promise that fails with `Failure`:
+
+```ocaml
+let after delay compute =
+  Yuka_dream.to_async (Lwt.map compute (Lwt_unix.sleep delay))
+```
+
+With tapak, you write direct-style Eio code. `Yuka_tapak.async ~sw f` runs
+`f` in a new fiber and gives its result as an `Async`. An exception gives
+a failed `Async`. `Yuka_tapak.switch_exn ()` gives the switch of the
+current request:
+
+```ocaml
+let data =
+  Yuka_tapak.async ~sw:(Yuka_tapak.switch_exn ()) (fun () ->
+      Eio_unix.sleep 1.;
+      "loaded after one second")
+```
+
+`Yuka_tapak.await async` waits for the `Async` in the current fiber and
+gives `Ok value` or `Error message`. `Yuka_tapak.await_exn` raises
+`Failure` in place of `Error`.
+
 ## Actions
 
 An action is a function of the server that the browser calls. Declare it
