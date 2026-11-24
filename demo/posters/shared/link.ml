@@ -18,10 +18,12 @@ let route ?defaults (s : settings) =
       amplitude = field (function Lines a -> Some a.amplitude | _ -> None);
       waves = field (function Lines a -> Some a.waves | _ -> None);
       stroke = field (function Lines a -> Some a.stroke | _ -> None);
+      direction = field (function Lines a -> Some a.direction | _ -> None);
       blocks = field (function Blocks a -> Some a.blocks | _ -> None);
       gap = field (function Blocks a -> Some a.gap | _ -> None);
       filled = field (function Blocks a -> Some a.filled | _ -> None);
       squareness = field (function Blocks a -> Some a.squareness | _ -> None);
+      radius = field (function Blocks a -> Some a.radius | _ -> None);
       clouds = field (function Clouds a -> Some a.clouds | _ -> None);
       puffs = field (function Clouds a -> Some a.puffs | _ -> None);
       size = field (function Clouds a -> Some a.size | _ -> None);
@@ -30,6 +32,12 @@ let route ?defaults (s : settings) =
       branches = field (function Lightning a -> Some a.branches | _ -> None);
       jaggedness = field (function Lightning a -> Some a.jaggedness | _ -> None);
       thickness = field (function Lightning a -> Some a.thickness | _ -> None);
+      columns = field (function Circles a -> Some a.columns | _ -> None);
+      rows = field (function Circles a -> Some a.rows | _ -> None);
+      half = field (function Circles a -> Some a.half | _ -> None);
+      empty = field (function Circles a -> Some a.empty | _ -> None);
+      block = field (function Circles a -> Some a.block | _ -> None);
+      bar = field (function Circles a -> Some a.bar | _ -> None);
       bg = color s.colours.background (fun d -> d.colours.background);
       fg = color s.colours.foreground (fun d -> d.colours.foreground);
       title = keep s.text.title (fun d -> d.text.title);
@@ -45,9 +53,24 @@ let settings ~(defaults : settings) = function
       let color value default = match value with Some hex -> "#" ^ hex | None -> default in
       let art =
         match start ~defaults (r.kind |? kind defaults.art) with
-        | Lines d -> Lines { lines = r.lines |? d.lines; amplitude = r.amplitude |? d.amplitude; waves = r.waves |? d.waves; stroke = r.stroke |? d.stroke }
+        | Lines d ->
+            Lines
+              {
+                lines = r.lines |? d.lines;
+                amplitude = r.amplitude |? d.amplitude;
+                waves = r.waves |? d.waves;
+                stroke = r.stroke |? d.stroke;
+                direction = r.direction |? d.direction;
+              }
         | Blocks d ->
-            Blocks { blocks = r.blocks |? d.blocks; gap = r.gap |? d.gap; filled = r.filled |? d.filled; squareness = r.squareness |? d.squareness }
+            Blocks
+              {
+                blocks = r.blocks |? d.blocks;
+                gap = r.gap |? d.gap;
+                filled = r.filled |? d.filled;
+                squareness = r.squareness |? d.squareness;
+                radius = r.radius |? d.radius;
+              }
         | Clouds d -> Clouds { clouds = r.clouds |? d.clouds; puffs = r.puffs |? d.puffs; size = r.size |? d.size; solid = r.solid |? d.solid }
         | Lightning d ->
             Lightning
@@ -56,6 +79,16 @@ let settings ~(defaults : settings) = function
                 branches = r.branches |? d.branches;
                 jaggedness = r.jaggedness |? d.jaggedness;
                 thickness = r.thickness |? d.thickness;
+              }
+        | Circles d ->
+            Circles
+              {
+                columns = r.columns |? d.columns;
+                rows = r.rows |? d.rows;
+                half = r.half |? d.half;
+                empty = r.empty |? d.empty;
+                block = r.block |? d.block;
+                bar = r.bar |? d.bar;
               }
       in
       normalize ~defaults
@@ -77,3 +110,8 @@ let settings ~(defaults : settings) = function
 let query href = match String.index_opt href '?' with Some i -> String.sub href i (String.length href - i) | None -> ""
 let svg route = Routes.poster_svg () ^ query (Routes.href route)
 let file (s : settings) extension = "poster-" ^ Int.to_string s.layout.seed ^ "." ^ extension
+
+let download ~defaults (s : settings) =
+  match route ~defaults s with
+  | Routes.Home r -> svg (Routes.Home { r with year = Some s.text.year; day = Some s.text.day; weekday = Some s.text.weekday })
+  | other -> svg other

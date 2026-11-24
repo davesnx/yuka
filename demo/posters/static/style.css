@@ -169,7 +169,17 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 .button.primary:hover { background: #262626; }
 
 .presets { display: flex; gap: 8px; }
-.kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.kinds .preset { padding: 0 4px; }
+
+.dial { width: 96px; height: 96px; align-self: center; border-radius: 999px; cursor: grab; touch-action: none; }
+.dial:active { cursor: grabbing; }
+.dial svg { display: block; width: 100%; height: 100%; }
+.dial-face { fill: var(--panel); stroke: var(--border); stroke-width: 2; }
+.dial-ticks { stroke: var(--ring); stroke-width: 2; }
+.dial-hand { stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
+.dial-pin { fill: var(--accent); }
+.field-label { font-weight: 500; }
 .preset { flex: 1; padding: 0 8px; }
 .preset[aria-pressed="true"] { border-color: var(--ring); background: var(--hover); }
 

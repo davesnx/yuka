@@ -22,12 +22,12 @@ let today () =
   let now = Unix.gmtime (Unix.time ()) in
   Pattern.defaults ~year:(now.tm_year + 1900) ~month:now.tm_mon ~day:now.tm_mday ~weekday:now.tm_wday
 
-let home ~kind ~seed ~padding ~lines ~amplitude ~waves ~stroke ~blocks ~gap ~filled ~squareness ~clouds ~puffs ~size ~solid ~bolts ~branches ~jaggedness ~thickness ~bg ~fg ~title ~subtitle ~year ~day ~weekday () =
+let home ~kind ~seed ~padding ~lines ~amplitude ~waves ~stroke ~direction ~blocks ~gap ~filled ~squareness ~radius ~clouds ~puffs ~size ~solid ~bolts ~branches ~jaggedness ~thickness ~columns ~rows ~half ~empty ~block ~bar ~bg ~fg ~title ~subtitle ~year ~day ~weekday () =
   let defaults = today () in
   let initial =
     Link.settings ~defaults
       (Routes.Home
-         { kind; seed; padding; lines; amplitude; waves; stroke; blocks; gap; filled; squareness; clouds; puffs; size; solid; bolts; branches; jaggedness; thickness; bg; fg; title; subtitle; year; day; weekday })
+         { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; solid; bolts; branches; jaggedness; thickness; columns; rows; half; empty; block; bar; bg; fg; title; subtitle; year; day; weekday })
   in
   Yuka.Server.page ~title:"Posters" (fun () -> <Yuka.Client><Playground initial defaults /></Yuka.Client>)
 

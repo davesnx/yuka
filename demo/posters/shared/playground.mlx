@@ -24,6 +24,41 @@ let color_field ~id ~label ~(value : unit -> string) ~update : Yuka.client Yuka.
     <span class_="field-value mono">(Yuka.text (value ()))</span>
   </div>
 
+let dial ~id ~label ~(value : unit -> int) ~update : Yuka.client Yuka.element =
+  let turn event = match !Dial.angle event with Some degrees -> update degrees | None -> () in
+  let key event =
+    let set degrees =
+      Yuka.Event.prevent_default event;
+      update (((degrees mod 360) + 360) mod 360)
+    in
+    let step = if Yuka.Event.shift_key event then 15 else 1 in
+    match Yuka.Event.key event with
+    | "ArrowRight" | "ArrowUp" -> set (value () + step)
+    | "ArrowLeft" | "ArrowDown" -> set (value () - step)
+    | "PageUp" -> set (value () + 15)
+    | "PageDown" -> set (value () - 15)
+    | "Home" -> set 0
+    | "End" -> set 359
+    | _ -> ()
+  in
+  <div class_="field">
+    <div class_="field-row">
+      <span class_="field-label" id=(id ^ "-label")>(Yuka.text label)</span>
+      <span class_="field-value">(Yuka.text (Int.to_string (value ())))</span>
+    </div>
+    <div id class_="dial" role=`slider tabindex=0 aria_labelledby=(id ^ "-label") aria_valuemin=0 aria_valuemax=359
+      aria_valuenow=(value ()) aria_valuetext=(Int.to_string (value ()) ^ " degrees")
+      on_keydown=key on_pointerdown=turn on_pointermove=turn>
+      <svg view_box="0 0 100 100" aria_hidden=true>
+        <circle class_="dial-face" cx="50" cy="50" r="46" />
+        <path class_="dial-ticks" d="M50 6V14M94 50H86M50 94V86M6 50H14" />
+        <line class_="dial-hand" x1="50" y1="50" x2="50" y2="14"
+          transform=("rotate(" ^ Int.to_string (value ()) ^ " 50 50)") />
+        <circle class_="dial-pin" cx="50" cy="50" r="5" />
+      </svg>
+    </div>
+  </div>
+
 let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) () =
   let layout = Yuka.State.make ~equal:( = ) initial.layout in
   let art = Yuka.State.make ~equal:( = ) initial.art in
@@ -33,14 +68,15 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
   let set_art f = Yuka.State.update art (fun a -> Pattern.normal_art (f a)) in
   let set_colours f = Yuka.State.update colours (fun c -> Pattern.normal_colours ~defaults (f c)) in
   let set_text f = Yuka.State.update text (fun t -> Pattern.normal_text (f t)) in
-  let route =
-    Yuka.State.memo ~equal:( = ) (fun () ->
-        Link.route ~defaults
-          { layout = Yuka.State.get layout; art = Yuka.State.get art; colours = Yuka.State.get colours; text = Yuka.State.get text })
+  let settings () : Pattern.settings =
+    { layout = Yuka.State.get layout; art = Yuka.State.get art; colours = Yuka.State.get colours; text = Yuka.State.get text }
   in
+  let route = Yuka.State.memo ~equal:( = ) (fun () -> Link.route ~defaults (settings ())) in
+  let download = Yuka.State.memo ~equal:String.equal (fun () -> Link.download ~defaults (settings ())) in
   Yuka.Effect.on_change route (fun ~prev:_ ~next -> Routes.replace next);
   let kind = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.kind (Yuka.State.get art)) in
   let shapes = Yuka.State.memo (fun () -> Pattern.shapes (Yuka.State.get layout) (Yuka.State.get art)) in
+  let rotation = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.rotation (Yuka.State.get art)) in
   let labels = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.labels (Yuka.State.get text)) in
   let file extension = "poster-" ^ Int.to_string (Yuka.State.get layout).seed ^ "." ^ extension in
   let kind_button k : Yuka.client Yuka.element =
@@ -74,6 +110,10 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
     (fun () -> match Yuka.State.get art with Pattern.Lightning a -> read a | _ -> 0),
     fun n -> set_art (function Pattern.Lightning a -> Pattern.Lightning (write a n) | other -> other)
   in
+  let circles read write =
+    (fun () -> match Yuka.State.get art with Pattern.Circles a -> read a | _ -> 0),
+    fun n -> set_art (function Pattern.Circles a -> Pattern.Circles (write a n) | other -> other)
+  in
   let param ~id ~label ~range (value, update) = slider ~id ~label ~range ~value ~update in
   let parameters = function
     | Pattern.Kind.Lines ->
@@ -84,6 +124,8 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
               (lines (fun a -> a.amplitude) (fun a amplitude -> { a with amplitude }));
             param ~id:"waves" ~label:"Waves" ~range:Pattern.Range.waves (lines (fun a -> a.waves) (fun a waves -> { a with waves }));
             param ~id:"stroke" ~label:"Stroke" ~range:Pattern.Range.stroke (lines (fun a -> a.stroke) (fun a stroke -> { a with stroke }));
+            (let value, update = lines (fun a -> a.direction) (fun a direction -> { a with direction }) in
+             dial ~id:"direction" ~label:"Direction (degrees)" ~value ~update);
           ]
     | Pattern.Kind.Blocks ->
         Yuka.fragment
@@ -94,6 +136,8 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
               (blocks (fun a -> a.filled) (fun a filled -> { a with filled }));
             param ~id:"squareness" ~label:"Squareness" ~range:Pattern.Range.squareness
               (blocks (fun a -> a.squareness) (fun a squareness -> { a with squareness }));
+            param ~id:"radius" ~label:"Corner radius" ~range:Pattern.Range.radius
+              (blocks (fun a -> a.radius) (fun a radius -> { a with radius }));
           ]
     | Pattern.Kind.Clouds ->
         Yuka.fragment
@@ -113,6 +157,17 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
               (lightning (fun a -> a.jaggedness) (fun a jaggedness -> { a with jaggedness }));
             param ~id:"thickness" ~label:"Thickness" ~range:Pattern.Range.thickness
               (lightning (fun a -> a.thickness) (fun a thickness -> { a with thickness }));
+          ]
+    | Pattern.Kind.Circles ->
+        Yuka.fragment
+          [
+            param ~id:"columns" ~label:"Columns" ~range:Pattern.Range.columns
+              (circles (fun a -> a.columns) (fun a columns -> { a with columns }));
+            param ~id:"rows" ~label:"Rows" ~range:Pattern.Range.rows (circles (fun a -> a.rows) (fun a rows -> { a with rows }));
+            param ~id:"half" ~label:"Half discs" ~range:Pattern.Range.share (circles (fun a -> a.half) (fun a half -> { a with half }));
+            param ~id:"empty" ~label:"Empty" ~range:Pattern.Range.share (circles (fun a -> a.empty) (fun a empty -> { a with empty }));
+            param ~id:"block" ~label:"Squares" ~range:Pattern.Range.share (circles (fun a -> a.block) (fun a block -> { a with block }));
+            param ~id:"bar" ~label:"Bars" ~range:Pattern.Range.share (circles (fun a -> a.bar) (fun a bar -> { a with bar }));
           ]
   in
   <div class_="playground">
@@ -136,6 +191,8 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
         background=(fun () -> (Yuka.State.get colours).background)
         foreground=(fun () -> (Yuka.State.get colours).foreground)
         labels=(fun () -> Yuka.State.get labels)
+        padding=(fun () -> (Yuka.State.get layout).padding)
+        rotation=(fun () -> Yuka.State.get rotation)
         art=(Yuka.each ~key:(fun (s : Pattern.shape) -> Int.to_string s.index)
                ~equal:(fun (a : Pattern.shape) b -> String.equal a.d b.d && a.paint = b.paint)
                (fun () -> Yuka.State.get shapes)
@@ -172,9 +229,9 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
            ~update:(fun foreground -> set_colours (fun c -> { c with foreground })))
       </section>
       <div class_="actions">
-        <a class_="button primary" href=(Link.svg (Yuka.State.get route)) download=(file "svg")>"Download SVG"</a>
+        <a class_="button primary" href=(Yuka.State.get download) download=(file "svg")>"Download SVG"</a>
         <button class_="button" type_=`button
-          on_click=(fun _ -> !Download.png (file "png") (Link.svg (Yuka.State.peek route)))>"Download PNG"</button>
+          on_click=(fun _ -> !Download.png (file "png") (Yuka.State.peek download))>"Download PNG"</button>
       </div>
       <a class_="gallery-link" href=(Routes.gallery ())>"Browse the gallery"</a>
     </aside>

@@ -14,10 +14,12 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
               amplitude = optional int;
               waves = optional int;
               stroke = optional int;
+              direction = optional int;
               blocks = optional int;
               gap = optional int;
               filled = optional int;
               squareness = optional int;
+              radius = optional int;
               clouds = optional int;
               puffs = optional int;
               size = optional int;
@@ -26,6 +28,12 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
               branches = optional int;
               jaggedness = optional int;
               thickness = optional int;
+              columns = optional int;
+              rows = optional int;
+              half = optional int;
+              empty = optional int;
+              block = optional int;
+              bar = optional int;
               bg = optional string;
               fg = optional string;
               title = optional string;

@@ -31,15 +31,19 @@ const started = (p: Page) =>
     return islands.length > 0 && islands.every((i) => (i as any).__yuka_started);
   });
 const pathKey = (d: string, fill: string, width: string) => `${d}/${fill}/${width}`;
-const grid = (p: Page) =>
-  p
+const turn = (p: Page) => p.locator(".poster-art > g").evaluate((g) => g.getAttribute("transform") ?? "");
+const grid = async (p: Page) =>
+  (await turn(p)) +
+  "#" +
+  (await p
     .locator(".poster-art path")
-    .evaluateAll((ps) => ps.map((x) => `${x.getAttribute("d")}/${x.getAttribute("fill") ?? ""}/${x.getAttribute("stroke-width") ?? ""}`).join("|"));
+    .evaluateAll((ps) => ps.map((x) => `${x.getAttribute("d")}/${x.getAttribute("fill") ?? ""}/${x.getAttribute("stroke-width") ?? ""}`).join("|")));
 const attr = (tag: string, name: string) => tag.match(new RegExp(` ${name}="([^"]*)"`))?.[1] ?? "";
 const paths = (text: string) => {
   const start = text.indexOf('class="poster-art"');
   const part = text.slice(start, text.indexOf("</g>", start));
-  return [...part.matchAll(/<path [^>]*>/g)].map((m) => pathKey(attr(m[0], "d"), attr(m[0], "fill"), attr(m[0], "stroke-width"))).join("|");
+  const inner = part.match(/<g[^>]*>/)?.[0] ?? "";
+  return attr(inner, "transform") + "#" + [...part.matchAll(/<path [^>]*>/g)].map((m) => pathKey(attr(m[0], "d"), attr(m[0], "fill"), attr(m[0], "stroke-width"))).join("|");
 };
 const served = async (search: string) => paths(await (await fetch(app + search)).text());
 const svgOf = async (query: string) => {
@@ -64,21 +68,28 @@ await step("p1. the playground loads with the server poster", async () => {
   await P.goto(app, { waitUntil: "networkidle" });
   await started(P);
   first = await grid(P);
-  check("p1.1 the preview has one path per line", (await count(P)) === 22, String(await count(P)));
+  check("p1.1 the preview has one path per line", (await count(P)) === 32, String(await count(P)));
   check("p1.2 the island keeps the server poster", first === (await served("")));
   check("p1.3 the default URL has no settings", new URL(P.url()).search === "", P.url());
-  check("p1.4 the SVG link has no settings", (await P.getByRole("link", { name: "Download SVG" }).getAttribute("href"))?.endsWith("/posters/poster.svg") ?? false);
+  const link = new URL((await P.getByRole("link", { name: "Download SVG" }).getAttribute("href")) ?? "", app);
+  const date = [await P.locator("#year").inputValue(), await P.locator("#day").inputValue(), await P.locator("#weekday").inputValue()];
+  check(
+    "p1.4 the SVG link has only the date of the page",
+    link.pathname.endsWith("/posters/poster.svg") && [...link.searchParams.keys()].join() === "year,day,weekday" && ["year", "day", "weekday"].every((k, i) => link.searchParams.get(k) === date[i]),
+    link.search,
+  );
   check("p1.5 there is no seed input", (await P.locator("#seed").count()) === 0);
-  check("p1.6 only the sliders of Lines show", (await P.locator("#waves").count()) === 1 && (await P.locator("#gap, #puffs, #bolts").count()) === 0);
+  check("p1.6 only the sliders of Lines show", (await P.locator("#waves").count()) === 1 && (await P.locator("#gap, #puffs, #bolts, #columns").count()) === 0);
   if (shots) await P.screenshot({ path: `${shots}/posters-lines.png` });
 });
 
 await step("p2. each kind draws its shapes, shows its sliders and matches the server", async () => {
   for (const [name, slider, others] of [
-    ["Blocks", "#squareness", "#waves, #puffs, #bolts"],
-    ["Clouds", "#puffs", "#waves, #gap, #bolts"],
-    ["Lightning", "#jaggedness", "#waves, #gap, #puffs"],
-    ["Lines", "#amplitude", "#gap, #puffs, #bolts"],
+    ["Blocks", "#radius", "#waves, #puffs, #bolts, #columns"],
+    ["Clouds", "#puffs", "#waves, #gap, #bolts, #columns"],
+    ["Lightning", "#jaggedness", "#waves, #gap, #puffs, #columns"],
+    ["Circles", "#columns", "#waves, #gap, #puffs, #bolts"],
+    ["Lines", "#direction", "#gap, #puffs, #bolts, #columns"],
   ] as const) {
     const before = await grid(P);
     await P.getByRole("button", { name, exact: true }).click();
@@ -92,6 +103,55 @@ await step("p2. each kind draws its shapes, shows its sliders and matches the se
     if (shots) await P.screenshot({ path: `${shots}/posters-${kind}.png` });
   }
   check("p2 back on Lines, the poster of the start", (await grid(P)) === first);
+});
+
+await step("p2b. the direction dial turns the lines and nothing else", async () => {
+  const dial = P.locator("#direction");
+  await mark(P);
+  const [, total] = await kept(P);
+  await dial.focus();
+  await P.keyboard.press("ArrowRight");
+  await P.waitForURL((url) => url.searchParams.get("direction") === "91");
+  check("p2b.1 an arrow key turns the dial by one degree", (await dial.getAttribute("aria-valuenow")) === "91" && (await turn(P)) === "rotate(1 500 600)", await turn(P));
+  await P.keyboard.press("Shift+ArrowRight");
+  await P.waitForURL((url) => url.searchParams.get("direction") === "106");
+  check("p2b.2 Shift turns it by 15", (await dial.getAttribute("aria-valuenow")) === "106");
+  const [same] = await kept(P);
+  check("p2b.3 a turn keeps every line node", same === total && total === 32, `${same} of ${total}`);
+  const face = await box(P, "#direction");
+  await P.mouse.click(face.x + face.width / 2, face.y + face.height - 4);
+  await P.waitForURL((url) => url.searchParams.get("direction") === "180");
+  check("p2b.4 a click on the bottom of the dial points it down", (await dial.getAttribute("aria-valuenow")) === "180");
+  await P.mouse.move(face.x + face.width / 2, face.y + face.height - 4);
+  await P.mouse.down();
+  await P.mouse.move(face.x + 4, face.y + face.height / 2, { steps: 4 });
+  await P.mouse.up();
+  await P.waitForURL((url) => url.searchParams.get("direction") === "270");
+  check("p2b.5 a drag to the left side points it left", (await dial.getAttribute("aria-valuenow")) === "270");
+  check("p2b.6 the browser turns the lines as the server does", (await grid(P)) === (await served(new URL(P.url()).search)));
+  if (shots) await P.screenshot({ path: `${shots}/posters-direction.png` });
+  await dial.focus();
+  await P.keyboard.press("Home");
+  await P.waitForURL((url) => url.searchParams.get("direction") === "0");
+  for (let k = 0; k < 6; k++) await P.keyboard.press("Shift+ArrowRight");
+  await P.waitForURL((url) => !url.searchParams.has("direction"));
+  check("p2b.7 back at 90 the poster of the start", (await grid(P)) === first);
+});
+
+await step("p2c. a larger count adds shapes and keeps the others", async () => {
+  for (const [query, id, value] of [["?kind=clouds&size=25", "#clouds", "8"], ["?kind=lightning", "#bolts", "3"]] as const) {
+    await P.goto(app + query, { waitUntil: "networkidle" });
+    await started(P);
+    const before = await count(P);
+    await mark(P);
+    await P.locator(id).fill(value);
+    await P.waitForURL((url) => url.searchParams.get(id.slice(1)) === value);
+    const [same, total] = await kept(P);
+    check(`p2c ${id}: every earlier node stays and new ones come`, same === before && total > before, `${same} of ${total}, ${before} before`);
+    check(`p2c ${id}: it matches the server`, (await grid(P)) === (await served(new URL(P.url()).search)));
+  }
+  await P.goto(app, { waitUntil: "networkidle" });
+  await started(P);
 });
 
 let shuffled = "";
@@ -119,6 +179,13 @@ await step("p4. a slider of the kind and the padding", async () => {
   await P.waitForURL((url) => url.searchParams.get("filled") === "80");
   const [same, total] = await kept(P);
   check("p4.4 a filled share change renders only the blocks that changed", same > 0 && same < total, `${same} of ${total} nodes kept`);
+  await mark(P);
+  await P.locator("#blocks").fill("15");
+  await P.waitForURL((url) => url.searchParams.get("blocks") === "15");
+  const [kept14, total15] = await kept(P);
+  check("p4.8 one more block cuts one block in two and keeps the others", kept14 === 13 && total15 === 15, `${kept14} of ${total15}`);
+  await P.locator("#blocks").fill("14");
+  await P.waitForURL((url) => !url.searchParams.has("blocks"));
   await P.locator("#padding").fill("20");
   await P.waitForURL((url) => url.searchParams.get("padding") === "20");
   blocks = await grid(P);
@@ -134,7 +201,7 @@ await step("p5. the light preset changes attributes only", async () => {
   await P.waitForURL((url) => url.searchParams.get("bg") === "f4f4f4");
   const [same, total] = await kept(P);
   check("p5.1 every shape node stays", same === total && total > 0, `${same} of ${total}`);
-  check("p5.2 the card is light", (await P.locator(".poster rect").first().getAttribute("fill")) === "#f4f4f4");
+  check("p5.2 the card is light", (await P.locator(".poster > rect").getAttribute("fill")) === "#f4f4f4");
   check("p5.3 the shapes are dark", (await P.locator(".poster-art").getAttribute("fill")) === "#333333");
   check("p5.4 the colour input follows", (await P.locator("#background").inputValue()) === "#f4f4f4");
   check("p5.5 the preset is pressed", (await P.getByRole("button", { name: "Light", exact: true }).getAttribute("aria-pressed")) === "true");
@@ -163,7 +230,7 @@ await step("p7. a reload shows the same poster", async () => {
   await P.reload({ waitUntil: "networkidle" });
   await started(P);
   check("p7.1 same shapes", (await grid(P)) === blocks);
-  check("p7.2 same colours", (await P.locator(".poster rect").first().getAttribute("fill")) === "#f4f4f4");
+  check("p7.2 same colours", (await P.locator(".poster > rect").getAttribute("fill")) === "#f4f4f4");
   check("p7.3 same controls", (await P.locator("#gap").inputValue()) === "30" && (await P.locator("#padding").inputValue()) === "20");
   check("p7.4 the kind stays pressed", (await P.getByRole("button", { name: "Blocks", exact: true }).getAttribute("aria-pressed")) === "true");
   if (shots) await P.screenshot({ path: `${shots}/posters-light.png` });
@@ -174,7 +241,13 @@ await step("p8. Download SVG is a link to the poster.svg route; PNG draws it on 
   const href = (await link.getAttribute("href")) ?? "";
   const query = href.slice(href.indexOf("?"));
   check("p8.1 the link is /posters/poster.svg with the settings", href.startsWith("/posters/poster.svg?") || href.startsWith("/poster.svg?"), href);
-  check("p8.2 it has the settings of the page", query === new URL(P.url()).search, `${query} vs ${new URL(P.url()).search}`);
+  const page = new URL(P.url()).searchParams;
+  const sent = new URLSearchParams(query);
+  check(
+    "p8.2 it has the settings of the page and the date",
+    [...page].every(([k, v]) => sent.get(k) === v) && ["year", "day", "weekday"].every((k) => sent.has(k) && !page.has(k)),
+    `${query} vs ${new URL(P.url()).search}`,
+  );
   const answer = await svgOf(query);
   check("p8.3 the route answers an SVG with a public cache", answer.type.startsWith("image/svg+xml") && answer.cache.startsWith("public"), `${answer.type}; ${answer.cache}`);
   check("p8.4 the SVG has the shapes of the preview", paths(answer.text) === blocks && answer.text.includes(">HELLO</text>"));
@@ -192,7 +265,7 @@ await step("p9. the gallery", async () => {
   const G = await ctx.newPage();
   G.on("pageerror", (e) => problems.push(String(e)));
   await G.goto(app + "/gallery", { waitUntil: "networkidle" });
-  check("p9.1 eight posters", (await G.locator(".gallery-item .poster").count()) === 8);
+  check("p9.1 ten posters", (await G.locator(".gallery-item .poster").count()) === 10);
   check("p9.2 no JavaScript file", (await G.locator('script[type="module"]').count()) === 0);
   if (shots) await G.screenshot({ path: `${shots}/posters-gallery.png`, fullPage: true });
   const card = G.locator(".gallery-item").nth(3);

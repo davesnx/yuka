@@ -8,11 +8,22 @@ let label (l : Pattern.label) =
     font_weight=(if l.bold then "700" else "400") letter_spacing=(Int.to_string l.spacing)
     text_anchor=(if l.end_ then "end" else "start")>(Yuka.text l.text)</text>
 
-let make ~(background : unit -> string) ~(foreground : unit -> string) ~(labels : unit -> Pattern.label list) ~art () =
+let make ~(background : unit -> string) ~(foreground : unit -> string) ~(labels : unit -> Pattern.label list)
+    ~(padding : unit -> int) ~(rotation : unit -> string option) ~art () =
   <svg xmlns="http://www.w3.org/2000/svg" class_="poster" width=(Int.to_string Pattern.width)
     height=(Int.to_string Pattern.height) view_box=Pattern.view_box role=`img aria_label="Poster">
+    <defs>
+      <clipPath id=(Pattern.clip_id (padding ()))>
+        <rect x=(Int.to_string (padding ())) y=(Int.to_string (padding ()))
+          width=(Int.to_string (Pattern.width - (2 * padding ())))
+          height=(Int.to_string (Pattern.art_bottom - (2 * padding ()))) />
+      </clipPath>
+    </defs>
     <rect width=(Int.to_string Pattern.width) height=(Int.to_string Pattern.height) fill=(background ()) />
-    <g class_="poster-art" fill=(foreground ()) stroke=(foreground ()) stroke_linecap=`round stroke_linejoin=`round>art</g>
+    <g class_="poster-art" fill=(foreground ()) stroke=(foreground ()) stroke_linecap=`round stroke_linejoin=`round
+      style=("clip-path:url(#" ^ Pattern.clip_id (padding ()) ^ ")")>
+      <g ?transform=(rotation ())>art</g>
+    </g>
     <g class_="poster-text" fill=(foreground ()) font_family=Pattern.font>
       (Yuka.fragment (List.map label (labels ())))
     </g>
@@ -23,5 +34,7 @@ let still (s : Pattern.settings) =
     ~background:(fun () -> s.colours.background)
     ~foreground:(fun () -> s.colours.foreground)
     ~labels:(fun () -> Pattern.labels s.text)
+    ~padding:(fun () -> s.layout.padding)
+    ~rotation:(fun () -> Pattern.rotation s.art)
     ~art:(Yuka.fragment (Array.to_list (Array.map shape (Pattern.shapes s.layout s.art))))
     ()

@@ -66,14 +66,15 @@ let same_seed () =
 let keys () =
   List.iter
     (fun (name, s) ->
-      let all = shapes s in
-      Alcotest.(check (list int)) (name ^ ": keys are the shape indexes") (List.init (Array.length all) Fun.id)
-        (Array.to_list (Array.map (fun (x : Pattern.shape) -> x.index) all)))
+      let all = Array.to_list (Array.map (fun (x : Pattern.shape) -> x.index) (shapes s)) in
+      Alcotest.(check (list int)) (name ^ ": keys grow, so they are unique") (List.sort_uniq compare all) all)
     kinds;
   Alcotest.(check int) "one shape per line" 30 (Array.length (shapes (with_art (Lines { Pattern.lines_default with lines = 30 }))));
   Alcotest.(check int) "one shape per block" 20 (Array.length (shapes (with_art (Blocks { Pattern.blocks_default with blocks = 20 }))));
   Alcotest.(check int) "one shape per bolt and branch" 15
-    (Array.length (shapes (with_art (Lightning { Pattern.lightning_default with bolts = 3; branches = 4 }))))
+    (Array.length (shapes (with_art (Lightning { Pattern.lightning_default with bolts = 3; branches = 4 }))));
+  Alcotest.(check int) "one shape per cell" (9 * 7)
+    (Array.length (shapes (with_art (Circles { columns = 9; rows = 7; half = 1; empty = 0; block = 0; bar = 0 }))))
 
 let not_crossing d =
   match commands d with
@@ -95,36 +96,206 @@ let lines_do_not_cross_themselves () =
     (fun (lines, amplitude, waves, padding) ->
       List.iter
         (fun seed ->
-          let s = { (with_seed seed (with_art (Lines { lines; amplitude; waves; stroke = 4 }))) with layout = { seed; padding } } in
+          let s = { (with_seed seed (with_art (Lines { lines; amplitude; waves; stroke = 4; direction = 90 }))) with layout = { seed; padding } } in
           List.iter
             (fun d -> Alcotest.(check bool) (Printf.sprintf "x grows along %s" (String.sub d 0 20)) true (not_crossing d))
             (ds s))
         [ 0; 1; 42; 2019; 999_999 ])
     [ (22, 60, 3, 80); (2, 100, 10, 200); (60, 100, 1, 0); (10, 0, 6, 40) ]
 
+let in_box padding paint d =
+  let w = match paint with Pattern.Fill -> 0 | Pattern.Stroke w -> w in
+  let in_x x = (2 * x) - w >= 2 * padding && (2 * x) + w <= 2 * (Pattern.width - padding) in
+  let in_y y = (2 * y) - w >= 2 * padding && (2 * y) + w <= 2 * (Pattern.art_bottom - padding) in
+  let rec pairs = function x :: y :: rest -> in_x x && in_y y && pairs rest | [] -> true | [ _ ] -> false in
+  List.for_all
+    (fun (c, ns) ->
+      match (c, ns) with
+      | 'H', _ -> List.for_all in_x ns
+      | 'V', _ -> List.for_all in_y ns
+      | 'z', _ -> ns = []
+      | 'A', [ _; _; _; _; _; x; y ] -> in_x x && in_y y
+      | 'A', _ -> false
+      | _ -> pairs ns)
+    (commands d)
+
 let inside () =
-  let in_box padding d =
-    List.for_all
-      (fun (c, ns) ->
-        let rec pairs = function
-          | x :: y :: rest -> x >= padding && x <= Pattern.width - padding && y >= padding && y <= Pattern.art_bottom - padding && pairs rest
-          | [] -> true
-          | [ _ ] -> false
-        in
-        match c with 'H' -> List.for_all (fun x -> x >= padding && x <= Pattern.width - padding) ns | 'V' -> true | 'z' -> true | _ -> pairs ns)
-      (commands d)
-  in
+  Alcotest.(check bool) "the check rejects a block below the art area" false (in_box 80 Pattern.Fill "M80 80H920V1200H80z");
+  Alcotest.(check bool) "the check rejects a stroke on the padding" false (in_box 80 (Pattern.Stroke 6) "M80 80L120 120");
+  Alcotest.(check bool) "the check takes a block on the padding" true (in_box 80 Pattern.Fill "M80 80H920V1120H80z");
   List.iter
     (fun padding ->
       List.iter
         (fun art ->
           let s = { (with_art art) with layout = { seed = 3; padding } } in
-          List.iter (fun d -> Alcotest.(check bool) (Printf.sprintf "inside padding %d: %s" padding (String.sub d 0 12)) true (in_box padding d)) (ds s))
-        [ Pattern.Lines Pattern.lines_default; Pattern.Blocks { Pattern.blocks_default with gap = 0 }; Pattern.Lightning Pattern.lightning_default ])
-    [ 0; 80; 200 ];
+          Array.iter
+            (fun (x : Pattern.shape) ->
+              let margin = if padding = 0 then 0 else padding in
+              Alcotest.(check bool)
+                (Printf.sprintf "inside padding %d: %s" padding (String.sub x.d 0 12))
+                true
+                (in_box margin (if padding = 0 then Pattern.Fill else x.paint) x.d))
+            (shapes s))
+        [
+          Pattern.Blocks { Pattern.blocks_default with gap = 0 };
+          Pattern.Blocks { Pattern.blocks_default with radius = 60; filled = 50 };
+          Pattern.Circles Pattern.circles_default;
+          Pattern.Circles { Pattern.circles_default with columns = 24; rows = 4 };
+          Pattern.Blocks { Pattern.blocks_default with gap = 1; filled = 0 };
+          Pattern.Lightning Pattern.lightning_default;
+          Pattern.Lightning { Pattern.lightning_default with thickness = 24; jaggedness = 100; branches = 12 };
+        ])
+    [ 0; 1; 80; 200 ];
+  List.iter
+    (fun padding ->
+      let s = { (with_art (Pattern.Lines { Pattern.lines_default with stroke = 24 })) with layout = { seed = 3; padding } } in
+      let svg = svg s in
+      let clip = Printf.sprintf {|<clipPath id="art-%d"><rect x="%d" y="%d" width="%d" height="%d">|} padding padding padding
+          (Pattern.width - (2 * padding)) (Pattern.art_bottom - (2 * padding)) in
+      check_has svg (Printf.sprintf "lines are clipped to the art area at padding %d" padding) clip;
+      check_has svg "the art uses the clip" (Printf.sprintf {|style="clip-path:url(#art-%d)"|} padding);
+      Alcotest.(check (list string)) "the padding does not move the lines" (ds { s with layout = { s.layout with padding = 0 } }) (ds s))
+    [ 0; 1; 80; 200 ];
   let wide = ds { (with_art (Pattern.Blocks Pattern.blocks_default)) with layout = { seed = 3; padding = 0 } } in
   let narrow = ds { (with_art (Pattern.Blocks Pattern.blocks_default)) with layout = { seed = 3; padding = 150 } } in
   Alcotest.(check bool) "padding moves the art" false (wide = narrow)
+
+let painted (x : Pattern.shape) =
+  match commands x.d with
+  | [ ('M', [ left; top ]); ('H', [ right ]); ('V', [ bottom ]); ('H', _); ('z', []) ] ->
+      let half = match x.paint with Pattern.Fill -> 0 | Pattern.Stroke w -> w / 2 in
+      (left - half, top - half, right + half, bottom + half)
+  | _ -> failwith ("not a rectangle: " ^ x.d)
+
+let block_count () =
+  List.iter
+    (fun (padding, gap, blocks, squareness, seed) ->
+      let s = { (with_art (Pattern.Blocks { blocks; gap; filled = 50; squareness; radius = 0 })) with layout = { seed; padding } } in
+      let all = Array.map painted (shapes s) in
+      Alcotest.(check int) (Printf.sprintf "padding %d gap %d squareness %d seed %d" padding gap squareness seed) blocks (Array.length all);
+      Alcotest.(check bool) "no empty block" true (Array.for_all (fun (l, t, r, b) -> r > l && b > t) all))
+    (List.concat_map
+       (fun padding ->
+         List.concat_map
+           (fun gap ->
+             List.concat_map
+               (fun blocks -> List.concat_map (fun squareness -> List.map (fun seed -> (padding, gap, blocks, squareness, seed)) [ 0; 1; 42; 2019; 999_999 ]) [ 0; 100 ])
+               [ 1; 80 ])
+           [ 0; 60 ])
+       [ 0; 200 ])
+
+let gap_of_one () =
+  let s = { (with_art (Pattern.Blocks { Pattern.blocks_default with gap = 1 })) with layout = { seed = 3; padding = 80 } } in
+  let all = Array.to_list (Array.map painted (shapes s)) in
+  let apart (l1, t1, r1, b1) (l2, t2, r2, b2) =
+    let dx = max (l2 - r1) (l1 - r2) and dy = max (t2 - b1) (t1 - b2) in
+    max dx dy
+  in
+  let distances = List.concat_map (fun a -> List.filter_map (fun b -> if a == b then None else Some (apart a b)) all) all in
+  Alcotest.(check int) "neighbouring blocks are 1 apart" 1 (List.fold_left min max_int distances);
+  Alcotest.(check bool) "there are neighbours" true (List.mem 1 distances)
+
+let shape_count (s : Pattern.settings) = Array.length (shapes s)
+let with_padding padding (s : Pattern.settings) = { s with layout = { s.layout with padding } }
+let by_key s = List.map (fun (x : Pattern.shape) -> (x.index, x.d)) (Array.to_list (shapes s))
+
+let keeps_count () =
+  List.iter
+    (fun (name, base, changes) ->
+      List.iter
+        (fun (change, art) ->
+          List.iter
+            (fun seed ->
+              let s = with_seed seed (with_art base) in
+              let t = with_seed seed (with_art art) in
+              Alcotest.(check int) (Printf.sprintf "%s: %s keeps the number of shapes (seed %d)" name change seed) (shape_count s) (shape_count t);
+              Alcotest.(check int) (Printf.sprintf "%s: padding keeps the number of shapes (seed %d)" name seed) (shape_count s)
+                (shape_count (with_padding 160 s)))
+            [ 1; 42; 2019 ])
+        changes)
+    [
+      ( "lines",
+        Pattern.Lines Pattern.lines_default,
+        [
+          ("amplitude", Pattern.Lines { Pattern.lines_default with amplitude = 10 });
+          ("waves", Pattern.Lines { Pattern.lines_default with waves = 8 });
+          ("stroke", Pattern.Lines { Pattern.lines_default with stroke = 20 });
+          ("direction", Pattern.Lines { Pattern.lines_default with direction = 10 });
+        ] );
+      ( "blocks",
+        Pattern.Blocks Pattern.blocks_default,
+        [
+          ("gap", Pattern.Blocks { Pattern.blocks_default with gap = 50 });
+          ("filled", Pattern.Blocks { Pattern.blocks_default with filled = 95 });
+          ("squareness", Pattern.Blocks { Pattern.blocks_default with squareness = 0 });
+          ("radius", Pattern.Blocks { Pattern.blocks_default with radius = 40 });
+        ] );
+      ("clouds", Pattern.Clouds Pattern.clouds_default, [ ("solid", Pattern.Clouds { Pattern.clouds_default with solid = 0 }) ]);
+      ( "lightning",
+        Pattern.Lightning Pattern.lightning_default,
+        [
+          ("jaggedness", Pattern.Lightning { Pattern.lightning_default with jaggedness = 100 });
+          ("thickness", Pattern.Lightning { Pattern.lightning_default with thickness = 24 });
+        ] );
+      ("circles", Pattern.Circles Pattern.circles_default, [ ("nothing", Pattern.Circles Pattern.circles_default) ]);
+    ]
+
+let prefix a b = List.filteri (fun k _ -> k < List.length a) b = a
+
+let count_keeps_shapes () =
+  List.iter
+    (fun seed ->
+      let clouds n = by_key (with_seed seed (with_art (Pattern.Clouds { Pattern.clouds_default with clouds = n; size = 25 }))) in
+      Alcotest.(check bool) (Printf.sprintf "more clouds keep the clouds (seed %d)" seed) true (prefix (clouds 4) (clouds 9));
+      let bolts n b = by_key (with_seed seed (with_art (Pattern.Lightning { Pattern.lightning_default with bolts = n; branches = b }))) in
+      Alcotest.(check bool) (Printf.sprintf "more bolts keep the bolts (seed %d)" seed) true (prefix (bolts 2 4) (bolts 5 4));
+      Alcotest.(check bool) (Printf.sprintf "more branches keep the branches (seed %d)" seed) true
+        (List.for_all (fun shape -> List.mem shape (bolts 2 7)) (bolts 2 4));
+      let blocks n = ds (with_seed seed (with_art (Pattern.Blocks { Pattern.blocks_default with blocks = n }))) in
+      List.iter
+        (fun n ->
+          let before = blocks n and after = blocks (n + 1) in
+          let kept = List.length (List.filter Fun.id (List.mapi (fun k d -> List.nth after k = d) before)) in
+          Alcotest.(check (pair int int)) (Printf.sprintf "block %d is cut in two, the others stay (seed %d)" n seed) (n - 1, n + 1)
+            (kept, List.length after))
+        (List.init 79 (fun k -> k + 1));
+      let cells half bar = by_key (with_seed seed (with_art (Pattern.Circles { Pattern.circles_default with half; bar }))) in
+      let before = cells 80 6 and after = cells 79 7 in
+      let changed = List.length (List.filter (fun shape -> not (List.mem shape after)) before) in
+      Alcotest.(check bool) (Printf.sprintf "a small mix change redraws few cells (%d of %d, seed %d)" changed (List.length before) seed) true
+        (changed * 20 < List.length before);
+      let grid columns = by_key (with_seed seed (with_padding 0 (with_art (Pattern.Circles { Pattern.circles_default with columns; rows = 30 })))) in
+      let kinds_of cells = List.map (fun (key, d) -> (key, (commands d |> List.map fst))) cells in
+      Alcotest.(check bool) (Printf.sprintf "more columns keep the shape of each cell (seed %d)" seed) true
+        (List.for_all (fun cell -> List.mem cell (kinds_of (grid 24))) (kinds_of (grid 20))))
+    [ 1; 42; 2019; 999_999 ]
+
+let gradual () =
+  let points d = List.concat_map snd (commands d) in
+  let moved a b = List.fold_left2 (fun m x y -> max m (abs (x - y))) 0 (points a) (points b) in
+  let most a b = List.fold_left2 (fun m x y -> max m (moved x y)) 0 (ds a) (ds b) in
+  List.iter
+    (fun seed ->
+      let lines amplitude = with_seed seed (with_art (Pattern.Lines { Pattern.lines_default with amplitude })) in
+      Alcotest.(check bool) (Printf.sprintf "one step of curviness moves the lines a little (seed %d)" seed) true
+        (most (lines 60) (lines 61) <= 6);
+      let bolts jaggedness = with_seed seed (with_art (Pattern.Lightning { Pattern.lightning_default with jaggedness })) in
+      Alcotest.(check bool) (Printf.sprintf "one step of jaggedness moves the bolts a little (seed %d)" seed) true
+        (most (bolts 55) (bolts 56) <= 16);
+      let blocks squareness = with_seed seed (with_art (Pattern.Blocks { Pattern.blocks_default with squareness })) in
+      let rects gap filled =
+        Array.to_list (Array.map painted (shapes (with_seed seed (with_art (Pattern.Blocks { Pattern.blocks_default with gap; filled; radius = 0 })))))
+      in
+      Alcotest.(check bool) (Printf.sprintf "gap and filled share do not move the cuts (seed %d)" seed) true
+        (List.for_all2
+           (fun (l, t, r, b) (l', t', r', b') -> l <= l' && t <= t' && r >= r' && b >= b' && l' - l <= 30 && r - r' <= 30 && t' - t <= 30 && b - b' <= 30)
+           (rects 0 100) (rects 60 100));
+      Alcotest.(check int) (Printf.sprintf "squareness keeps the number of blocks (seed %d)" seed) (shape_count (blocks 0)) (shape_count (blocks 100));
+      let direction d = with_seed seed (with_art (Pattern.Lines { Pattern.lines_default with direction = d })) in
+      Alcotest.(check (list string)) "the direction does not change the lines" (ds (direction 90)) (ds (direction 17));
+      check_has (svg (direction 135)) "the direction turns the lines" {|<g transform="rotate(45 500 600)">|};
+      Alcotest.(check bool) "direction 90 has no turn" false (contains (svg (direction 90)) "rotate("))
+    [ 1; 42; 2019 ]
 
 let date () =
   Alcotest.(check (list string)) "date lines" [ "2019"; "March, 1"; "Friday" ] [ defaults.text.year; defaults.text.day; defaults.text.weekday ]
@@ -138,14 +309,26 @@ let normalize () =
   Alcotest.(check string) "bad colour" defaults.colours.background s.colours.background;
   let art a = Pattern.normal_art a in
   Alcotest.(check bool) "lines" true
-    (art (Lines { lines = 0; amplitude = 500; waves = -1; stroke = 99 }) = Lines { lines = 2; amplitude = 100; waves = 1; stroke = 24 });
+    (art (Lines { lines = 0; amplitude = 500; waves = -1; stroke = 99; direction = 360 })
+    = Lines { lines = 2; amplitude = 100; waves = 1; stroke = 24; direction = 359 });
   Alcotest.(check bool) "blocks" true
-    (art (Blocks { blocks = 900; gap = -5; filled = 101; squareness = -1 }) = Blocks { blocks = 80; gap = 0; filled = 100; squareness = 0 });
+    (art (Blocks { blocks = 900; gap = -5; filled = 101; squareness = -1; radius = 61 })
+    = Blocks { blocks = 80; gap = 0; filled = 100; squareness = 0; radius = 60 });
+  Alcotest.(check bool) "circles" true
+    (art (Circles { columns = 1; rows = 99; half = -1; empty = 101; block = 0; bar = 100 })
+    = Circles { columns = 4; rows = 30; half = 0; empty = 100; block = 0; bar = 100 });
   Alcotest.(check bool) "clouds" true
     (art (Clouds { clouds = 0; puffs = 1; size = 1; solid = 200 }) = Clouds { clouds = 1; puffs = 3; size = 10; solid = 100 });
   Alcotest.(check bool) "lightning" true
     (art (Lightning { bolts = 50; branches = -2; jaggedness = 300; thickness = 0 })
     = Lightning { bolts = 8; branches = 0; jaggedness = 100; thickness = 1 })
+
+let cut () =
+  let title t = (Pattern.normal_text { defaults.text with title = t }).title in
+  Alcotest.(check string) "40 ASCII letters stay" (String.make 40 'a') (title (String.make 40 'a'));
+  Alcotest.(check string) "41 ASCII letters lose one" (String.make 40 'a') (title (String.make 41 'a'));
+  Alcotest.(check string) "a cut never splits a character" (String.make 39 'a') (title (String.make 39 'a' ^ "\xc3\xa9"));
+  Alcotest.(check string) "a two-byte character that fits stays" (String.make 38 'a' ^ "\xc3\xa9") (title (String.make 38 'a' ^ "\xc3\xa9b"))
 
 let escaped () =
   let svg = svg { defaults with text = { defaults.text with subtitle = "<b>&" } } in
@@ -158,6 +341,11 @@ let links () =
   Alcotest.(check string) "another kind with its defaults" "/?kind=blocks" (href (with_art (Pattern.fresh Blocks)));
   Alcotest.(check string) "a changed parameter" "/?kind=clouds&padding=20&puffs=9"
     (href { (with_art (Clouds { Pattern.clouds_default with puffs = 9 })) with layout = { defaults.layout with padding = 20 } });
+  Alcotest.(check string) "the direction of the lines" "/?direction=45"
+    (href (with_art (Lines { Pattern.lines_default with direction = 45 })));
+  Alcotest.(check string) "circles and the corner radius" "/?kind=circles&columns=9&bar=20"
+    (href (with_art (Circles { Pattern.circles_default with columns = 9; bar = 20 })));
+  Alcotest.(check string) "the corner radius" "/?kind=blocks&radius=12" (href (with_art (Blocks { Pattern.blocks_default with radius = 12 })));
   Alcotest.(check string) "a parameter of the default kind" "/?seed=42&waves=5"
     (href (with_seed 42 (with_art (Lines { Pattern.lines_default with waves = 5 }))));
   let light = { (with_seed 42 defaults) with colours = Pattern.light } in
@@ -176,6 +364,18 @@ let links () =
       Alcotest.(check bool) (name ^ " round trip with defaults") true (Link.settings ~defaults (Link.route ~defaults s) = s))
     (Pattern.presets @ kinds)
 
+let amp href = String.concat "&amp;" (String.split_on_char '&' href)
+
+let download () =
+  let link = Link.download ~defaults defaults in
+  Alcotest.(check bool) "the download link names the date" true
+    (String.starts_with ~prefix:"/poster.svg?year=2019&" link && contains link "day=" && contains link "weekday=Friday");
+  let _, body = get link in
+  check_has body "a later day draws the date of the page: year" ">2019</text>";
+  check_has body "day" ">March, 1</text>";
+  check_has body "weekday" ">Friday</text>";
+  Alcotest.(check bool) "the page URL keeps the date out" false (contains (Routes.href (Link.route ~defaults defaults)) "year")
+
 let page () =
   let status, html = get "/" in
   Alcotest.(check int) "status" 200 status;
@@ -186,9 +386,12 @@ let page () =
   Alcotest.(check bool) "no seed input" false (contains html {|id="seed"|});
   check_has html "padding slider" {|id="padding"|};
   check_has html "lines slider" {|id="waves"|};
+  check_has html "direction dial" {|id="direction" class="dial" role="slider" tabindex="0"|};
+  check_has html "the dial names its value" {|aria-valuenow="90"|};
   Alcotest.(check bool) "no slider of another kind" false (contains html {|id="gap"|});
   check_has html "colour input" {|type="color"|};
-  check_has html "download svg link" {|href="/poster.svg"|};
+  check_has html "download svg link with the date" ({|href="|} ^ amp (Link.download ~defaults:(Pages.today ()) (Pages.today ())) ^ {|"|});
+  Alcotest.(check bool) "the date is in the link" true (contains html {|href="/poster.svg?year=|});
   check_has html "download png" ">Download PNG</button>"
 
 let page_with_params () =
@@ -201,7 +404,7 @@ let page_with_params () =
   check_has html "light background" {|fill="#f4f4f4"|};
   check_has html "title" ">HELLO</text>";
   check_has html "svg link keeps the settings"
-    {|href="/poster.svg?kind=blocks&amp;seed=42&amp;padding=20&amp;gap=30&amp;bg=f4f4f4&amp;fg=333333&amp;title=Hello"|}
+    {|href="/poster.svg?kind=blocks&amp;seed=42&amp;padding=20&amp;gap=30&amp;bg=f4f4f4&amp;fg=333333&amp;title=Hello&amp;year=|}
 
 let svg_route () =
   let response = Dream.test handler (Dream.request ~target:"/poster.svg?kind=lightning&seed=42&bolts=3&bg=f4f4f4" "") in
@@ -247,13 +450,20 @@ let () =
           Alcotest.test_case "keys and counts" `Quick keys;
           Alcotest.test_case "lines do not cross themselves" `Quick lines_do_not_cross_themselves;
           Alcotest.test_case "shapes stay inside the padding" `Quick inside;
+          Alcotest.test_case "block count at the extremes" `Quick block_count;
+          Alcotest.test_case "settings keep the number of shapes" `Quick keeps_count;
+          Alcotest.test_case "counts keep the shapes" `Quick count_keeps_shapes;
+          Alcotest.test_case "settings move shapes gradually" `Quick gradual;
+          Alcotest.test_case "a gap of 1" `Quick gap_of_one;
           Alcotest.test_case "date lines" `Quick date;
+          Alcotest.test_case "cut at a character" `Quick cut;
           Alcotest.test_case "normalize" `Quick normalize;
           Alcotest.test_case "escaped text" `Quick escaped;
           Alcotest.test_case "links" `Quick links;
         ] );
       ( "pages",
         [
+          Alcotest.test_case "download link" `Quick download;
           Alcotest.test_case "playground" `Quick page;
           Alcotest.test_case "settings in the URL" `Quick page_with_params;
           Alcotest.test_case "poster.svg" `Quick svg_route;
