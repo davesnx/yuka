@@ -18,6 +18,7 @@ val first_child : node -> node option
 val next_sibling : node -> node option
 val parent_node : node -> node option
 val first_element_child : node -> node option
+val element_by_id : node -> string -> node option
 val child_at : node -> int -> node
 val previous_sibling : node -> node option
 val last_child : node -> node option
@@ -111,7 +112,8 @@ val history_at : unit -> int
 val history_go : int -> unit
 val history_back : unit -> unit
 val history_replace_url : string -> unit
-val manual_scroll : unit -> unit
+val scroll_restoration : string -> unit
+val persisted : event -> bool
 val plain_click : event -> bool
 val link_href : bool -> node -> string
 val link : node -> node

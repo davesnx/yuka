@@ -1,0 +1,25 @@
+(library
+ (name infinite_scroll_app)
+ (modules pages yuka_routes serve)
+ (libraries infinite_scroll_shared yuka yuka-dream dream lwt lwt.unix)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Infinite_scroll_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
+
+(executable
+ (name infinite_scroll_server)
+ (modules infinite_scroll_server)
+ (libraries infinite_scroll_app dream))

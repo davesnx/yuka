@@ -145,6 +145,9 @@ let scroll_into_view : string -> unit =
 external first_element_child : node -> node option = "firstElementChild"
 [@@mel.get] [@@mel.return nullable]
 
+external element_by_id : node -> string -> node option = "getElementById"
+[@@mel.send] [@@mel.return nullable]
+
 let has_intersection_observer : node -> bool =
   [%mel.raw "function (el) { return typeof el.ownerDocument.defaultView.IntersectionObserver === 'function' }"]
 
@@ -397,9 +400,11 @@ let history_replace_url : string -> unit =
   [%mel.raw
     "function (url) { window.history.replaceState(window.history.state, '', url) }"]
 
-let manual_scroll : unit -> unit =
+let scroll_restoration : string -> unit =
   [%mel.raw
-    "function () { try { window.history.scrollRestoration = 'manual' } catch (e) {} }"]
+    "function (mode) { try { window.history.scrollRestoration = mode } catch (e) {} }"]
+
+let persisted : event -> bool = [%mel.raw "function (e) { return e.persisted === true }"]
 
 let plain_click : event -> bool =
   [%mel.raw

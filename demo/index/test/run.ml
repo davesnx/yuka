@@ -19,6 +19,8 @@ let home () =
     (contains html {|<a href="/async-feed" target="_blank" rel="noopener">Async</a>|});
   Alcotest.(check bool) "Posters in a new tab" true
     (contains html {|<a href="/posters" target="_blank" rel="noopener">Posters</a>|});
+  Alcotest.(check bool) "Infinite scroll in a new tab" true
+    (contains html {|<a href="/infinite-scroll" target="_blank" rel="noopener">Infinite scroll</a>|});
   Alcotest.(check bool) "no script" false (contains html "<script")
 
 let () = Alcotest.run "demo index" [ ("pages", [ Alcotest.test_case "home lists the demos" `Quick home ]) ]

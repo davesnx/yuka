@@ -179,6 +179,19 @@ val on_frame : (float -> unit) -> unit
     time of the frame in milliseconds, on the clock of {!now}. The handler
     runs in a {!Yuka.batch}. Browser only: call it inside [Effect.after]. *)
 
+val on_visible : string -> (unit -> unit) -> unit -> unit
+(** [on_visible id handler] calls [handler] one time, in a {!Yuka.batch},
+    when the element with this id comes into view
+    ([IntersectionObserver]), and gives the function that stops the
+    watch. It does nothing, and gives a function that does nothing, when
+    no element has the id or the browser has no [IntersectionObserver].
+    Browser only: call it inside [Effect.after], and give the stop
+    function to [~cleanup]:
+    {[
+      Effect.after ~cleanup:(fun stop -> stop ()) (fun () ->
+          Browser.on_visible "next-page" (fun () -> Browser.navigate ~replace:true ~keep_scroll:true next))
+    ]} *)
+
 val now : unit -> float
 (** Milliseconds since the page opened, with a fraction
     ([performance.now]). Browser only: raises [Invalid_argument] on native. *)

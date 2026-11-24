@@ -3362,10 +3362,11 @@ let keep_scroll finish =
       set_scroll 120.;
       log_clear ();
       Browser.navigate ~keep_scroll:true "/b";
+      set_scroll 450.;
       resolve_call 1 (doc "B" (page {|<h1 id="hb">B</h1>|})) "";
       tick (fun () ->
-          check "Browser.navigate ~keep_scroll:true keeps the scroll" "true"
-            (bools (List.mem (log_scrolls ()) [ ""; "scroll:120" ]));
+          check "Browser.navigate ~keep_scroll:true keeps the scroll the user made while the page loaded" "true"
+            (bools (List.mem (log_scrolls ()) [ ""; "scroll:450" ]));
           check "at its URL" "/b" (location_ ());
           check "the focus still moves to the h1" "hb" (focused ());
           check "the title is still announced" "B" (announced ());

@@ -428,6 +428,8 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
       let apply () =
         if !nav = gen then begin
           let kept = if refresh then Navigation_web.hold_focus () else fun () -> false in
+          (* Read before the swap, which can move the scroll. *)
+          let restore = Option.map (fun y -> y ()) restore in
           loaded := Web.current_url ();
           shown_key := !current_key;
           Navigation_state.set None;
@@ -519,7 +521,7 @@ let load ~overlay ~dir ~push ~replace ~restore ~refresh url =
 
 let go ~replace ~keep_scroll ~refresh url =
   save_scroll ();
-  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some (Web.scroll_y ()) else None) ~refresh url
+  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some Web.scroll_y else None) ~refresh url
 
 let navigate ~replace ~keep_scroll url = go ~replace ~keep_scroll ~refresh:false url
 let refresh () = go ~replace:true ~keep_scroll:true ~refresh:true (Web.current_url ())
@@ -614,11 +616,14 @@ let on_popstate _ =
     load
       ~overlay:(List.exists (fun (o : overlay) -> String.equal o.key next && String.equal o.under (beneath ())) !overlays)
       ~dir ~push:false ~replace:false
-      ~restore:(Some y) ~refresh:false (Web.current_url ())
+      ~restore:(Some (fun () -> y)) ~refresh:false (Web.current_url ())
+
+let on_pagehide _ = if Option.is_none (showing ()) then Web.scroll_restoration "auto"
 
 let handle e =
   match Navigation_web.event_type e with
   | "popstate" -> on_popstate e
+  | "pagehide" -> on_pagehide e
   | "pointerover" | "focusin" -> on_over e
   | "pointerdown" -> on_down e
   | "touchstart" -> on_touch e

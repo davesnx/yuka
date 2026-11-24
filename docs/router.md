@@ -370,10 +370,24 @@ from the server, keep the scroll position: use
 <a href=(Routes.blog ~tag:"bug" ()) data_yuka_keep_scroll="">(Yuka.text "Bugs")</a>
 ```
 
-The page does not scroll to the top or to the fragment. The focus and
+The page does not scroll to the top or to the fragment: it stays
+where the user scrolled while the new page loaded. The focus and
 the announcer change as for other navigations. You can use both
 attributes on one link. Without client navigation, the full page load
 scrolls as the browser does.
+
+An infinite list can load its next page this way when the end of the
+list comes into view. `Yuka.Browser.on_visible id handler` calls
+`handler` one time when the element with this id comes into view, and
+gives the function that stops the watch:
+
+```ocaml
+Yuka.Effect.after ~cleanup:(fun stop -> stop ()) (fun () ->
+    Yuka.Browser.on_visible "next-page" (fun () ->
+        Yuka.Browser.navigate ~replace:true ~keep_scroll:true next))
+```
+
+The Infinite scroll demo (`demo/infinite-scroll`) does this.
 
 A form with `method="get"` (or with no method) is also a client
 navigation. When the user submits it, Yuka makes the URL from the action

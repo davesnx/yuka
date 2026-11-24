@@ -1,0 +1,107 @@
+open Infinite_scroll_shared
+
+(* A gallery of colour palettes, made from their number, so each load has the same ones. *)
+
+let per_page = 24
+let max_pages = 40
+
+let hex hue saturation lightness =
+  let hue = Float.rem hue 360. in
+  let chroma = (1. -. Float.abs ((2. *. lightness) -. 1.)) *. saturation in
+  let x = chroma *. (1. -. Float.abs (Float.rem (hue /. 60.) 2. -. 1.)) in
+  let r, g, b =
+    if hue < 60. then (chroma, x, 0.)
+    else if hue < 120. then (x, chroma, 0.)
+    else if hue < 180. then (0., chroma, x)
+    else if hue < 240. then (0., x, chroma)
+    else if hue < 300. then (x, 0., chroma)
+    else (chroma, 0., x)
+  in
+  let m = lightness -. (chroma /. 2.) in
+  let byte value = Int.max 0 (Int.min 255 (Float.to_int (Float.round ((value +. m) *. 255.)))) in
+  Printf.sprintf "#%02X%02X%02X" (byte r) (byte g) (byte b)
+
+let adjectives = [| "Quiet"; "Electric"; "Dusty"; "Velvet"; "Tidal"; "Golden"; "Misty"; "Neon"; "Rusted"; "Lunar"; "Coral"; "Faded"; "Wild"; "Paper"; "Polar"; "Smoky"; "Candied"; "Ember" |]
+let nouns = [| "Harbor"; "Orchard"; "Dunes"; "Lagoon"; "Meadow"; "Canyon"; "Arcade"; "Glacier"; "Market"; "Garden"; "Reef"; "Summit"; "Atlas"; "Prairie"; "Bloom"; "Signal"; "Tundra" |]
+
+type palette = { number : int; name : string; colors : string list }
+
+let palette number =
+  let hue = Float.rem (Float.of_int number *. 137.508) 360. in
+  let spread = 18. +. Float.of_int (number * 7 mod 40) in
+  let saturation = 0.55 +. (Float.of_int (number * 13 mod 35) /. 100.) in
+  {
+    number;
+    name = adjectives.(number * 7 mod Array.length adjectives) ^ " " ^ nouns.(number * 11 mod Array.length nouns);
+    colors =
+      List.init 5 (fun k ->
+          let k = Float.of_int k in
+          hex (hue +. (k *. spread)) saturation (0.28 +. (k *. 0.13)));
+  }
+
+(* The server waits before it answers a later page, as a slow database would, so the
+   skeleton cards show and the user can scroll while the page loads. *)
+let palettes pages =
+  let count = pages * per_page in
+  let list () = List.init count (fun i -> palette (i + 1)) in
+  if pages = 1 then Yuka.Async.return (list ()) else Yuka_dream.to_async (Lwt.map list (Lwt_unix.sleep 1.))
+
+let card (palette : palette) =
+  <article class_="card">
+    <div class_="swatches">
+      (Yuka.fragment (List.map (fun color -> <span style=("background:" ^ color) />) palette.colors))
+    </div>
+    <div class_="card-body">
+      <div class_="card-title">
+        <h2>(Yuka.text palette.name)</h2>
+        <span class_="number">(Yuka.text (Printf.sprintf "#%03d" palette.number))</span>
+      </div>
+      <ul class_="codes">
+        (Yuka.fragment
+           (List.map (fun color -> <li><span class_="dot" style=("background:" ^ color) />(Yuka.text color)</li>) palette.colors))
+      </ul>
+    </div>
+  </article>
+
+let skeleton_parts =
+  Yuka.fragment [ <div class_="swatches" />; <div class_="card-body"><div class_="line wide" /><div class_="line" /></div> ]
+
+(* The first one is the element Load_more watches. *)
+let skeleton ~first =
+  if first then <article id=Load_more.skeleton_id class_="card skeleton" aria_hidden=true>skeleton_parts</article>
+  else <article class_="card skeleton" aria_hidden=true>skeleton_parts</article>
+
+let gallery ~pages () =
+  let pages = Int.max 1 (Int.min max_pages pages) in
+  Yuka.Server.page ~title:"Swatch, an infinite gallery" (fun () ->
+      <div class_="page">
+        <header class_="hero">
+          <a class_="brand" href=(Routes.gallery ())><span class_="logo" />"Swatch"</a>
+          <h1>"Endless palettes"</h1>
+          <p>
+            "An infinite gallery made with Yuka. Scroll down: when the first grey card comes into view, the next page loads from the server, and the page stays where you scrolled."
+          </p>
+        </header>
+        <Yuka.Await async=(palettes pages) blocking=`Yes loading=Yuka.empty>
+          (fun list ->
+            let next = if pages < max_pages then Some (Routes.gallery ~pages:(pages + 1) ()) else None in
+            <div>
+              <p class_="count">(Yuka.text (Printf.sprintf "%d palettes, page %d of %d" (List.length list) pages max_pages))</p>
+              <section class_="grid">
+                (Yuka.fragment (List.map card list))
+                (if next = None then Yuka.empty
+                 else Yuka.fragment (List.init 8 (fun i -> skeleton ~first:(i = 0))))
+              </section>
+              <Yuka.Client><Load_more next page=pages /></Yuka.Client>
+            </div>)
+        </Yuka.Await>
+      </div>)
+
+let not_found ~path () =
+  Yuka.Server.page ~title:"Not found" (fun () ->
+      <div class_="page">
+        <header class_="hero">
+          <h1>"Not found"</h1>
+          <p>(Yuka.text ("No page at " ^ path ^ ". ")) <a href=(Routes.gallery ())>"Back to the gallery"</a></p>
+        </header>
+      </div>)
