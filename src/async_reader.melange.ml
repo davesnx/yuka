@@ -1,15 +1,15 @@
-let cleanup_table : (unit -> unit) Web.table option ref = ref None
+let cleanup_table : (unit -> unit) Host.table option ref = ref None
 
 let cleanups () =
   match !cleanup_table with
   | Some t -> t
   | None ->
-      let t = Web.table () in
+      let t = Host.table () in
       cleanup_table := Some t;
       t
 
-let set_cleanup id f = Web.table_set (cleanups ()) (string_of_int id) f
-let drop_cleanup id = Web.table_delete (cleanups ()) (string_of_int id)
+let set_cleanup id f = Host.table_set (cleanups ()) (string_of_int id) f
+let drop_cleanup id = Host.table_delete (cleanups ()) (string_of_int id)
 
 let next_cleanup = ref 0
 
@@ -28,19 +28,19 @@ let async_value id =
   let find () =
     let found =
       List.find_opt
-        (fun s -> has_value (Web.get_attribute s "data-yuka-async") id)
+        (fun s -> has_value (Host.get_attribute s "data-yuka-async") id)
         (Array.to_list
-           (Web.query_all (Web.document ()) "script[data-yuka-async]"))
+           (Host.query_all (Host.document ()) "script[data-yuka-async]"))
     in
     match found with
     | None -> false
-    | Some script when Web.text_content script = "" -> false
+    | Some script when Host.text_content script = "" -> false
     | Some script when
-        Web.ready_state () = "loading"
-        && Result.is_error (Json.of_string (Web.text_content script)) ->
+        Host.ready_state () = "loading"
+        && Result.is_error (Json.of_string (Host.text_content script)) ->
         false
     | Some script ->
-        (match Json.of_string (Web.text_content script) with
+        (match Json.of_string (Host.text_content script) with
         | Ok (`Assoc fields) -> (
             match (field "ok" fields, field "error" fields) with
             | Some value, _ -> resolve value
@@ -55,14 +55,14 @@ let async_value id =
     let touches nodes =
       Array.exists
         (fun n ->
-          let own = if Web.local_name n = "script" then [| n |] else [||] in
+          let own = if Host.local_name n = "script" then [| n |] else [||] in
           Array.exists
-            (fun s -> has_value (Web.get_attribute s "data-yuka-async") id)
-            (Array.append own (Web.query_all n "script[data-yuka-async]")))
+            (fun s -> has_value (Host.get_attribute s "data-yuka-async") id)
+            (Array.append own (Host.query_all n "script[data-yuka-async]")))
         nodes
     in
     let disconnect =
-      Web.watch_added (fun nodes ->
+      Host.watch_added (fun nodes ->
           touches nodes
           && find ()
           && (drop_cleanup cleanup_id;

@@ -2302,7 +2302,7 @@ let all =
     ("effect writing its own State settles", effect_writing_own_state_settles);
     ("effect writing its own State stops at a limit", effect_writing_own_state_stops);
     ("html escaping", html_escaping);
-    ("Web.decode_uri", decode_uri);
+    ("Host.decode_uri", decode_uri);
     ("html adjacent texts", html_adjacent_texts);
     ("html empty text", html_empty_text);
     ("html hole markers", html_hole);

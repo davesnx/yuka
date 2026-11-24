@@ -1,4 +1,4 @@
-open Web
+open Host
 
 type any
 
@@ -112,7 +112,7 @@ let layer () =
 
 type controller
 
-let scroll_to = Web.scroll_to
+let scroll_to = Host.scroll_to
 
 let decoded_id hash =
   let id = slice_from hash 1 in

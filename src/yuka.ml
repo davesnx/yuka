@@ -44,12 +44,12 @@ let runtime_route_replace = Route.replace
 let runtime_route_push = Route.push
 
 module Console = struct
-  let send level browser message = if Web.in_browser then browser message else Types.log_message level message
-  let log = send `Info Web.console_log
-  let info = send `Info Web.console_info
-  let warn = send `Warn Web.console_warn
-  let error = send `Error Web.console_error
-  let debug = send `Debug Web.console_debug
+  let send level browser message = if Host.in_browser then browser message else Types.log_message level message
+  let log = send `Info Host.console_log
+  let info = send `Info Host.console_info
+  let warn = send `Warn Host.console_warn
+  let error = send `Error Host.console_error
+  let debug = send `Debug Host.console_debug
 end
 
 module Server = struct
@@ -155,7 +155,7 @@ module Server = struct
 end
 
 let render ?islands ?navigation ?transitions ?on_error ?root () =
-  if not Web.in_browser then invalid_arg "Yuka.render: browser only";
+  if not Host.in_browser then invalid_arg "Yuka.render: browser only";
   match (islands, root) with
   | None, None -> invalid_arg "Yuka.render: no ~islands and no ~root"
   | _ -> (
@@ -289,8 +289,8 @@ module Private = struct
     Base.with_owner o f
 
   let server_rendering () = !(Base.server_rendering ())
-  let in_browser = Web.in_browser
-  let decode_uri = Web.decode_uri
+  let in_browser = Host.in_browser
+  let decode_uri = Host.decode_uri
   let platform = Platform.platform
   let entry_name (e : Island.entry) = e.name
   let entry_decode (e : Island.entry) j = e.decode j

@@ -45,7 +45,7 @@
                 | Pending -> ()
                 | Failed e -> fail e
                 | Done x -> resolve x)
-          | exception e -> fail (Web.exn_to_string e)));
+          | exception e -> fail (Host.exn_to_string e)));
     r
 
   let map f t = bind t (fun v -> return (f v))
@@ -55,4 +55,4 @@
     on_settled t (fun st -> State.set s st);
     State.read_only s
 
-  let guard f x = match f x with a -> a | exception e -> failed (Web.exn_to_string e)
+  let guard f x = match f x with a -> a | exception e -> failed (Host.exn_to_string e)

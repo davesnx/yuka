@@ -1,6 +1,6 @@
 type server
 type client
-type event = Web.event
+type event = Host.event
 type trigger = [ `Idle | `Visible | `Interaction ]
 type start = [ `Load | trigger | `Lazy of trigger ]
 type log_level = [ `Error | `Warn | `Info | `Debug ]
@@ -79,9 +79,9 @@ type backend = ..
 
   and part = Child of node | Attribute of attr | No_attribute
 
-  and cache = Empty | Compiled of Web.node * compiled option
+  and cache = Empty | Compiled of Host.node * compiled option
 
-  and compiled = { root : Web.node; kid_svg : int; attr_svg : int }
+  and compiled = { root : Host.node; kid_svg : int; attr_svg : int }
 
   and attr =
     | Static of string * string
@@ -219,12 +219,12 @@ let warned = ref false
 let log name value =
   if Dev.on && not !warned then begin
     warned := true;
-    Web.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
+    Host.console_error ("yuka: blocked an unsafe URL in " ^ name ^ ": " ^ value)
   end
 
 let current_session : session option ref = ref None
-let local_session = if Scheduler.js then None else Some (Web.local (fun () -> ref None))
-let current_session () = match local_session with Some k when not Scheduler.js -> Web.local_get k | _ -> current_session
+let local_session = if Scheduler.js then None else Some (Host.local (fun () -> ref None))
+let current_session () = match local_session with Some k when not Scheduler.js -> Host.local_get k | _ -> current_session
 
 type ids = { mutable scope : string; mutable count : int }
 
@@ -270,7 +270,7 @@ let log_in session level message =
 
 let log_message level message = log_in !(current_session ()) level message
 
-let reject_prefix = lazy ("yuka.reject." ^ Web.nonce () ^ ":")
+let reject_prefix = lazy ("yuka.reject." ^ Host.nonce () ^ ":")
 
 let reject message = Lazy.force reject_prefix ^ message
 

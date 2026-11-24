@@ -5,21 +5,21 @@ external stringify : string -> string = "stringify" [@@mel.scope "JSON"]
 external warn : string -> unit = "warn" [@@mel.scope "console"]
 external error_with : string -> Js.Exn.t -> unit = "error" [@@mel.scope "console"]
 external make_error : string -> Js.Exn.t = "Error" [@@mel.new]
-external node_type : Web.node -> int = "nodeType" [@@mel.get]
-external local_name : Web.node -> string = "localName" [@@mel.get]
-external node_name : Web.node -> string = "nodeName" [@@mel.get]
-external data : Web.node -> string = "data" [@@mel.get]
+external node_type : Host.node -> int = "nodeType" [@@mel.get]
+external local_name : Host.node -> string = "localName" [@@mel.get]
+external node_name : Host.node -> string = "nodeName" [@@mel.get]
+external data : Host.node -> string = "data" [@@mel.get]
 external slice : string -> int -> int -> string = "slice" [@@mel.send]
-external get_attribute : Web.node -> string -> string Js.null = "getAttribute" [@@mel.send]
-external parent_node : Web.node -> Web.node Js.null = "parentNode" [@@mel.get]
-external previous_element_sibling : Web.node -> Web.node Js.null = "previousElementSibling" [@@mel.get]
-external marked : Web.node -> bool Js.undefined = "__yuka_mismatch" [@@mel.get]
-external mark : Web.node -> bool -> unit = "__yuka_mismatch" [@@mel.set]
+external get_attribute : Host.node -> string -> string Js.null = "getAttribute" [@@mel.send]
+external parent_node : Host.node -> Host.node Js.null = "parentNode" [@@mel.get]
+external previous_element_sibling : Host.node -> Host.node Js.null = "previousElementSibling" [@@mel.get]
+external marked : Host.node -> bool Js.undefined = "__yuka_mismatch" [@@mel.get]
+external mark : Host.node -> bool -> unit = "__yuka_mismatch" [@@mel.set]
 external unshift : string array -> string -> unit = "unshift" [@@mel.send]
 external join : string array -> string -> string = "join" [@@mel.send]
 
 (* Melange represents [Some n] of a DOM node as [n] itself and [None] as [undefined]. *)
-external nullable_of_option : Web.node option -> Web.node Js.nullable = "%identity"
+external nullable_of_option : Host.node option -> Host.node Js.nullable = "%identity"
 
 let describe n =
   match Js.Nullable.toOption n with

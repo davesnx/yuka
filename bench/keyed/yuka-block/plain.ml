@@ -1,7 +1,7 @@
 open Yuka
 open Store
 
-external get_element_by_id : string -> Yuka__Web.node = "getElementById" [@@mel.scope "document"]
+external get_element_by_id : string -> Yuka__Host.node = "getElementById" [@@mel.scope "document"]
 
 let row_props ~item ~selected () = (item, selected)
 

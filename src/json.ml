@@ -30,7 +30,7 @@
   let float_repr f =
     if f <> f || f = infinity || f = neg_infinity then "null"
     else
-      let s = Web.shortest_float f in
+      let s = Host.shortest_float f in
       if String.contains s '.' || String.contains s 'e' || String.contains s 'E'
       then s
       else s ^ ".0"
@@ -66,9 +66,9 @@
     go v;
     Buffer.contents b
 
-  let of_string : string -> (t, string) result = Web.parse_json
+  let of_string : string -> (t, string) result = Host.parse_json
 
 let mismatch what (j : t) =
   let s = to_string j in
-  let s = if String.length s > 40 then Web.sub s 0 40 ^ "..." else s in
+  let s = if String.length s > 40 then Host.sub s 0 40 ^ "..." else s in
   Error ("expected " ^ what ^ ", got " ^ s)

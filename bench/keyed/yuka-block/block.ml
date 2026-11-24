@@ -1,4 +1,4 @@
-module Web = Yuka__Web
+module Host = Yuka__Host
 module Scheduler = Yuka__Scheduler
 module Base = Yuka__Base
 
@@ -7,12 +7,12 @@ type slot
 external text : string -> slot = "%identity"
 external class_name : string -> slot = "%identity"
 external attr : string -> slot = "%identity"
-external on_click : (Web.event -> unit) -> slot = "%identity"
-external insert : Web.node -> Web.node -> Web.node Js.null -> unit = "insertBefore" [@@mel.send]
-external set_class : Web.node -> string -> unit = "className" [@@mel.set]
-external set_click : Web.node -> (Web.event -> unit) -> unit = "__click" [@@mel.set]
-external click_of : Web.node -> (Web.event -> unit) Js.undefined = "__click" [@@mel.get]
-external parent_of : Web.node -> Web.node Js.null = "parentNode" [@@mel.get]
+external on_click : (Host.event -> unit) -> slot = "%identity"
+external insert : Host.node -> Host.node -> Host.node Js.null -> unit = "insertBefore" [@@mel.send]
+external set_class : Host.node -> string -> unit = "className" [@@mel.set]
+external set_click : Host.node -> (Host.event -> unit) -> unit = "__click" [@@mel.set]
+external click_of : Host.node -> (Host.event -> unit) Js.undefined = "__click" [@@mel.get]
+external parent_of : Host.node -> Host.node Js.null = "parentNode" [@@mel.get]
 external alloc : int -> 'a array = "Array" [@@mel.new]
 let get = Array.unsafe_get
 let set = Array.unsafe_set
@@ -32,7 +32,7 @@ and 'p component = {
   targets : int array;
   kinds : kind array;
   setup : 'p -> 'p -> slot array;
-  mutable template : Web.node Js.null;
+  mutable template : Host.node Js.null;
 }
 
 type ('a, 'p) each = { items : 'a array; key : 'a -> string; props : 'a -> 'p }
@@ -42,8 +42,8 @@ type instance = {
   mutable props : Obj.t;
   view : Obj.t -> slot array;
   owner : Scheduler.owner;
-  root : Web.node;
-  nodes : Web.node array;
+  root : Host.node;
+  nodes : Host.node array;
   mutable slots : slot array;
   mounted : mounted array;
   node : Scheduler.node;
@@ -64,10 +64,10 @@ let template_of doc component =
   match Js.Null.toOption component.template with
   | Some root -> root
   | None ->
-      let holder = Web.create_element doc "template" in
-      Web.set_inner_html holder component.markup;
+      let holder = Host.create_element doc "template" in
+      Host.set_inner_html holder component.markup;
       let root =
-        match Web.first_child (Web.content holder) with
+        match Host.first_child (Host.content holder) with
         | Some root -> root
         | None -> invalid_arg ("Block: empty template " ^ component.markup)
       in
@@ -124,8 +124,8 @@ let lis order =
 let rec create doc (component : Obj.t component) props parent anchor (above : Scheduler.owner) =
   let owner = { Scheduler.last = None; gen = 0; catch = above.catch; env = above.env; parent = Some above } in
   let view = setup owner component props in
-  let root = Web.clone_node (template_of doc component) true in
-  let walked = Web.walk root component.walk in
+  let root = Host.clone_node (template_of doc component) true in
+  let walked = Host.walk root component.walk in
   let count = Array.length component.kinds in
   let instance =
     {
@@ -159,9 +159,9 @@ and render doc instance =
 and patch doc instance i value =
   let node = get instance.nodes i in
   match get instance.component.kinds i with
-  | Text -> Web.set_data node (Obj.magic value)
+  | Text -> Host.set_data node (Obj.magic value)
   | Class -> set_class node (Obj.magic value)
-  | Attr name -> Web.set_attribute node name (Obj.magic value)
+  | Attr name -> Host.set_attribute node name (Obj.magic value)
   | Click -> set_click node (Obj.magic value)
   | Child component -> (
       match get instance.mounted i with
@@ -224,26 +224,26 @@ and reconcile doc component parent rows (each : (Obj.t, Obj.t) each) owner =
   else if !start > !last then
     for old = !start to !old_last do
       dispose (get old_entries old);
-      Web.remove (get old_entries old).root
+      Host.remove (get old_entries old).root
     done
   else begin
-    let at = Web.table () in
+    let at = Host.table () in
     for old = !start to !old_last do
-      Web.table_set at (get old_keys old) old
+      Host.table_set at (get old_keys old) old
     done;
     let order = fill (alloc (!last - !start + 1)) (-1) and reused = ref 0 in
     for j = !start to !last do
-      match Web.table_get at (get keys j) with
+      match Host.table_get at (get keys j) with
       | Some old ->
           set order (j - !start) old;
-          Web.table_delete at (get keys j);
+          Host.table_delete at (get keys j);
           incr reused
       | None -> ()
     done;
     let anchor = ref after in
     if !reused = 0 && !start = 0 && !old_last = old_length - 1 then begin
       Array.iter dispose old_entries;
-      Web.clear parent "";
+      Host.clear parent "";
       anchor := Js.null
     end
     else
@@ -251,8 +251,8 @@ and reconcile doc component parent rows (each : (Obj.t, Obj.t) each) owner =
         (fun old ->
           let entry = get old_entries old in
           dispose entry;
-          Web.remove entry.root)
-        (Web.table_values at);
+          Host.remove entry.root)
+        (Host.table_values at);
     let stay = lis order in
     for j = !last downto !start do
       let old = get order (j - !start) in
@@ -275,7 +275,7 @@ let rec dispatch event node =
     if parent != Js.null then dispatch event (Js.Null.getExn parent)
 
 let mount container (component : (unit * unit) component) =
-  let doc = Web.owner_document container in
-  Web.add_listener doc "click" (fun event -> dispatch event (Web.target event));
-  Web.clear container "";
+  let doc = Host.owner_document container in
+  Host.add_listener doc "click" (fun event -> dispatch event (Host.target event));
+  Host.clear container "";
   ignore (Scheduler.batch (fun () -> create doc (Obj.magic component) (Obj.repr ((), ())) container Js.null (Base.new_owner ())))

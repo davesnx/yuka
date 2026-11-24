@@ -1,4 +1,4 @@
-module Web = Yuka__Web
+module Host = Yuka__Host
 
 type kind =
   | Text
@@ -45,7 +45,7 @@ let instance (component : 'p Block.component) (props : 'p) = Instance (Obj.magic
 let many blocks = Many blocks
 let empty = Empty
 
-external on_event : (Web.event -> unit) -> Block.slot = "%identity"
+external on_event : (Host.event -> unit) -> Block.slot = "%identity"
 external node : block -> Block.slot = "%identity"
 external rows_slot : 'a rows -> Block.slot = "%identity"
 

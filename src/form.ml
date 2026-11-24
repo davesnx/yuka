@@ -116,49 +116,49 @@ let parse_sent sent =
 
 let forms_of name key =
   List.filter
-    (fun el -> Web.get_attribute el "data-yuka-action" = Some name && Web.get_attribute el "data-yuka-key" = Some key)
-    (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-action]"))
+    (fun el -> Host.get_attribute el "data-yuka-action" = Some name && Host.get_attribute el "data-yuka-key" = Some key)
+    (Array.to_list (Host.query_all (Host.document ()) "form[data-yuka-action]"))
 
 let mark ~action ~key ~focus ~whole names form_el =
   let focused = ref (not focus) in
   Array.iter
     (fun el ->
-      match (Web.local_name el, Web.get_attribute el "name") with
+      match (Host.local_name el, Host.get_attribute el "name") with
       | ("input" | "select" | "textarea"), Some name ->
           let id = error_id ~action ~key name in
-          let tokens = String.split_on_char ' ' (Option.value (Web.get_attribute el "aria-describedby") ~default:"") in
+          let tokens = String.split_on_char ' ' (Option.value (Host.get_attribute el "aria-describedby") ~default:"") in
           let others = List.filter (fun token -> token <> "" && token <> id) tokens in
           if List.exists (String.equal name) names then begin
-            Web.set_attribute el "aria-invalid" "true";
-            Web.set_attribute el "aria-describedby" (String.concat " " (others @ [ id ]));
-            match Web.get_attribute el "type" with
+            Host.set_attribute el "aria-invalid" "true";
+            Host.set_attribute el "aria-describedby" (String.concat " " (others @ [ id ]));
+            match Host.get_attribute el "type" with
             | Some "hidden" -> ()
             | _ when !focused -> ()
             | _ ->
                 focused := true;
-                Web.focus_node el
+                Host.focus_node el
           end
           else if List.mem id tokens then begin
-            Web.remove_attribute el "aria-invalid";
+            Host.remove_attribute el "aria-invalid";
             match others with
-            | [] -> Web.remove_attribute el "aria-describedby"
-            | _ -> Web.set_attribute el "aria-describedby" (String.concat " " others)
+            | [] -> Host.remove_attribute el "aria-describedby"
+            | _ -> Host.set_attribute el "aria-describedby" (String.concat " " others)
           end
       | _ -> ())
-    (Web.query_all form_el "[name]");
+    (Host.query_all form_el "[name]");
   if whole && not !focused then
-    match Web.query_all form_el "[data-yuka-errors]" with [||] -> () | found -> Web.focus_node found.(0)
+    match Host.query_all form_el "[data-yuka-errors]" with [||] -> () | found -> Host.focus_node found.(0)
 
 let read_sent name key =
   List.find_map
     (fun el ->
-      let sent = Option.value (Web.get_attribute el "data-yuka-sent") ~default:"" in
+      let sent = Option.value (Host.get_attribute el "data-yuka-sent") ~default:"" in
       match parse_sent sent with
       | Some state -> Some state
       | None ->
-          if Dev.on then Web.console_error ("yuka: ignored a bad data-yuka-sent on form " ^ name ^ ": " ^ sent);
+          if Dev.on then Host.console_error ("yuka: ignored a bad data-yuka-sent on form " ^ name ^ ": " ^ sent);
           None)
-    (List.filter (fun el -> Option.is_some (Web.get_attribute el "data-yuka-sent")) (forms_of name key))
+    (List.filter (fun el -> Option.is_some (Host.get_attribute el "data-yuka-sent")) (forms_of name key))
 
 let sent_state name key =
   match !(current_session ()) with
@@ -166,7 +166,7 @@ let sent_state name key =
       match s.form with
       | Some (n, k, values, errors) when String.equal n name && String.equal k key -> Some (values, errors)
       | _ -> None)
-  | None when Web.in_browser -> read_sent name key
+  | None when Host.in_browser -> read_sent name key
   | None -> None
 
 let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(children : (o, f) form -> 'k) () =
@@ -186,9 +186,9 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
   let gone = ref false in
   Base.own (fun () -> gone := true);
   let rec submit ev =
-    Web.prevent_default ev;
-    Web.remove_attribute (Web.target ev) "data-yuka-sent";
-    match decode t (Array.to_list (Web.form_values ev)) with
+    Host.prevent_default ev;
+    Host.remove_attribute (Host.target ev) "data-yuka-sent";
+    match decode t (Array.to_list (Host.form_values ev)) with
     | Error e -> State.set form.failed e
     | Ok input -> (
         State.set form.failed [];
@@ -221,8 +221,8 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
     in
     ()
   and follow = function
-    | Some location when not (Web.same_origin location) ->
-        if Dev.on then Web.console_error ("yuka: refused a redirect to another site: " ^ location);
+    | Some location when not (Host.same_origin location) ->
+        if Dev.on then Host.console_error ("yuka: refused a redirect to another site: " ^ location);
         State.set form.failed [ (None, Status.error_to_string (Protocol "refused a redirect")) ]
     | Some location -> Browser.navigate location
     | None -> Browser.refresh ()
@@ -233,7 +233,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
       let whole = List.exists (fun (g, _) -> Option.is_none g) failed in
       let focus = not !first in
       if !first && Dev.on && List.length (forms_of (Action.name action) key) > 1 then
-        Web.console_error
+        Host.console_error
           ("yuka: two forms on this page have the action " ^ Action.name action ^ " and the key \"" ^ key
          ^ "\": give each a different key");
       first := false;
@@ -242,7 +242,7 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
           (mark ~action:(Action.name action) ~key ~focus ~whole names)
           (List.filter
              (fun el -> Client.has_handler el "submit" submit)
-             (Array.to_list (Web.query_all (Web.document ()) "form[data-yuka-action]"))));
+             (Array.to_list (Host.query_all (Host.document ()) "form[data-yuka-action]"))));
   let sent_attr =
     match sent with
     | Some (values, errors) ->

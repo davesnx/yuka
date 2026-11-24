@@ -4,10 +4,10 @@ let stopped_key = "__yuka_stopped"
 let acted : (unit -> unit) ref = ref ignore
 let live_mark : ((string * Json.t) list -> unit) ref = ref ignore
 let client_navigate : (replace:bool -> keep_scroll:bool -> string -> unit) option ref = ref None
-let reload () = Web.navigate true (Web.current_url ())
+let reload () = Host.navigate true (Host.current_url ())
 let client_refresh = ref reload
 let loaded = ref ""
-let no_swap (_ : Web.node option) = ()
+let no_swap (_ : Host.node option) = ()
 let swapped = ref no_swap
 let cleared : (unit -> unit) ref = ref ignore
 let kept : string list ref = ref []
@@ -16,29 +16,29 @@ let moved : (unit -> unit) ref = ref ignore
 let platform =
   ref
     {
-      target_value = (fun e -> Web.value (Web.target e));
-      target_checked = (fun e -> Web.checked (Web.target e));
-      key = Web.key;
-      meta_key = Web.meta_key;
-      ctrl_key = Web.ctrl_key;
-      prevent_default = Web.prevent_default;
+      target_value = (fun e -> Host.value (Host.target e));
+      target_checked = (fun e -> Host.checked (Host.target e));
+      key = Host.key;
+      meta_key = Host.meta_key;
+      ctrl_key = Host.ctrl_key;
+      prevent_default = Host.prevent_default;
       stop_propagation =
         (fun e ->
-          Web.set_flag e stopped_key true;
-          Web.stop_propagation e);
-      target_tag = (fun e -> Web.local_name (Web.target e));
-      shift_key = Web.shift_key;
-      alt_key = Web.alt_key;
-      client_x = Web.client_x;
-      client_y = Web.client_y;
+          Host.set_flag e stopped_key true;
+          Host.stop_propagation e);
+      target_tag = (fun e -> Host.local_name (Host.target e));
+      shift_key = Host.shift_key;
+      alt_key = Host.alt_key;
+      client_x = Host.client_x;
+      client_y = Host.client_y;
       navigate =
         (fun ~replace ~keep_scroll url ->
-          match !client_navigate with Some f -> f ~replace ~keep_scroll url | None -> Web.navigate replace url);
+          match !client_navigate with Some f -> f ~replace ~keep_scroll url | None -> Host.navigate replace url);
       refresh = (fun () -> !client_refresh ());
-      focus = Web.focus;
-      scroll_into_view = Web.scroll_into_view;
+      focus = Host.focus;
+      scroll_into_view = Host.scroll_into_view;
       on_window =
         (fun name handler ->
-          Web.add_listener (Web.window ()) name handler;
-          fun () -> Web.remove_listener (Web.window ()) name handler);
+          Host.add_listener (Host.window ()) name handler;
+          fun () -> Host.remove_listener (Host.window ()) name handler);
     }

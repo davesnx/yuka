@@ -14,9 +14,9 @@ let part_attr i = Part_attr i
 let rec same_tree shape n =
   match shape with
   | Fixed_element { tag; attrs; children } ->
-      Web.node_type n = 1
-      && Web.local_name n = tag
-      && (Template_build.void_or_value tag attrs || same_children children (Web.first_child n))
+      Host.node_type n = 1
+      && Host.local_name n = tag
+      && (Template_build.void_or_value tag attrs || same_children children (Host.first_child n))
   | Fixed_text _ | Part _ -> false
 
 and same_children children cur =
@@ -28,20 +28,20 @@ and same_children children cur =
           if not after_text then cur
           else
             match cur with
-            | Some c when Web.node_type c = 8 -> Web.next_sibling c
+            | Some c when Host.node_type c = 8 -> Host.next_sibling c
             | _ -> None
         in
         match cur with
-        | Some c -> Web.node_type c = 3 && Web.data c = t && go true (Web.next_sibling c) rest
+        | Some c -> Host.node_type c = 3 && Host.data c = t && go true (Host.next_sibling c) rest
         | None -> false)
     | (Fixed_element _ as e) :: rest -> (
         match cur with
-        | Some c -> same_tree e c && go false (Web.next_sibling c) rest
+        | Some c -> same_tree e c && go false (Host.next_sibling c) rest
         | None -> false)
   in
   go false cur children
 
-let check : (t -> Web.node -> bool) ref = ref (fun _ _ -> true)
+let check : (t -> Host.node -> bool) ref = ref (fun _ _ -> true)
 
 let expander : (t -> Types.part array -> node) ref =
   ref (fun t _ ->

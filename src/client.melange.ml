@@ -2,31 +2,31 @@ include Island
 open Types
 open Async_reader
 
-type container = Web.node
-type 'a promise = 'a Web.promise
+type container = Host.node
+type 'a promise = 'a Host.promise
 
-let promise_map = Web.promise_map
+let promise_map = Host.promise_map
 
-type cur = Web.node Js.null
+type cur = Host.node Js.null
 
-external next_sibling : Web.node -> cur = "nextSibling" [@@mel.get]
-external first_child : Web.node -> cur = "firstChild" [@@mel.get]
-external previous_sibling : Web.node -> Web.node = "previousSibling" [@@mel.get]
-external last_child : Web.node -> Web.node = "lastChild" [@@mel.get]
-external insert : Web.node -> Web.node -> cur -> unit = "insertBefore" [@@mel.send]
-external node_of : cur -> Web.node = "%identity"
+external next_sibling : Host.node -> cur = "nextSibling" [@@mel.get]
+external first_child : Host.node -> cur = "firstChild" [@@mel.get]
+external previous_sibling : Host.node -> Host.node = "previousSibling" [@@mel.get]
+external last_child : Host.node -> Host.node = "lastChild" [@@mel.get]
+external insert : Host.node -> Host.node -> cur -> unit = "insertBefore" [@@mel.send]
+external node_of : cur -> Host.node = "%identity"
 external alloc : int -> 'a array = "Array" [@@mel.new]
 external fill : 'a array -> 'a -> 'a array = "fill" [@@mel.send]
 external push : 'a array -> 'a -> unit = "push" [@@mel.send]
 external filter : 'a array -> ('a -> bool) -> 'a array = "filter" [@@mel.send]
-external parent : Web.node -> cur = "parentNode" [@@mel.get]
-external prop : Web.node -> string -> 'a Js.undefined = "" [@@mel.get_index]
-external flag : Web.event -> string -> bool Js.undefined = "" [@@mel.get_index]
-external find : 'a Web.table -> string -> 'a Js.undefined = "get" [@@mel.send]
+external parent : Host.node -> cur = "parentNode" [@@mel.get]
+external prop : Host.node -> string -> 'a Js.undefined = "" [@@mel.get_index]
+external flag : Host.event -> string -> bool Js.undefined = "" [@@mel.get_index]
+external find : 'a Host.table -> string -> 'a Js.undefined = "get" [@@mel.send]
 external defined : 'a Js.undefined -> 'a = "%identity"
 
-external present : Web.node -> Obj.t option = "%identity"
-external by_id : string -> Web.node Js.nullable = "getElementById" [@@mel.scope "document"]
+external present : Host.node -> Obj.t option = "%identity"
+external by_id : string -> Host.node Js.nullable = "getElementById" [@@mel.scope "document"]
 
 let container id = Js.Nullable.toOption (by_id id)
 
@@ -37,8 +37,8 @@ let set = Array.unsafe_set
 let some n : cur = Js.Null.return n
 
 type pos = {
-  doc : Web.node;
-  parent : Web.node;
+  doc : Host.node;
+  parent : Host.node;
   mutable cur : cur;
   adopt : bool;
   svg : bool;
@@ -47,8 +47,8 @@ type pos = {
 type 'a row = {
   key : string;
   mutable value : 'a;
-  mutable first : Web.node;
-  mutable last : Web.node;
+  mutable first : Host.node;
+  mutable last : Host.node;
   mutable dispose : unit -> unit;
 }
 
@@ -65,9 +65,9 @@ let handlers_key event = "__yuka_" ^ event
 
 let skip pos n = pos.cur <- next_sibling n
 
-let take pos kind (matches : Web.node -> bool [@u]) : cur =
+let take pos kind (matches : Host.node -> bool [@u]) : cur =
   let c = pos.cur in
-  if pos.adopt && c != Js.null && Web.node_type (node_of c) = kind && matches (node_of c) [@u]
+  if pos.adopt && c != Js.null && Host.node_type (node_of c) = kind && matches (node_of c) [@u]
   then begin
     skip pos (node_of c);
     c
@@ -75,12 +75,12 @@ let take pos kind (matches : Web.node -> bool [@u]) : cur =
   else Js.null
 
 let comment_where pos (matches : string -> bool [@u]) data =
-  let n = take pos 8 (fun [@u] n -> matches (Web.data n) [@u]) in
+  let n = take pos 8 (fun [@u] n -> matches (Host.data n) [@u]) in
   if n != Js.null then node_of n
   else begin
     if Dev.on then if pos.adopt then
       Dev.mismatch pos.parent ("<!--" ^ data ^ "-->") (Js.Null.toOption pos.cur);
-    let n = Web.create_comment pos.doc data in
+    let n = Host.create_comment pos.doc data in
     insert pos.parent n pos.cur;
     n
   end
@@ -91,12 +91,12 @@ let opens d = String.length d > 0 && String.unsafe_get d 0 = '['
 
 let hole_start pos = comment_where pos (fun [@u] d -> opens d) "["
 
-let walk_region pos (visit : Web.node -> unit [@u]) =
+let walk_region pos (visit : Host.node -> unit [@u]) =
   let rec go depth =
     let c = pos.cur in
     if c != Js.null then begin
       let n = node_of c in
-      let d = if Web.node_type n = 8 then Web.data n else "" in
+      let d = if Host.node_type n = 8 then Host.data n else "" in
       if not (d = "]" && depth = 0) then begin
         skip pos n;
         visit n [@u];
@@ -116,7 +116,7 @@ let drop_to_end pos =
   if pos.adopt then (!drop_rest) pos [@u]
 
 let adopt_slot_now pos slot =
-  take pos 8 (fun [@u] n -> Web.data n = "[$") != Js.null
+  take pos 8 (fun [@u] n -> Host.data n = "[$") != Js.null
   && begin
        let nodes = ref [] in
        walk_region pos (fun [@u] n -> nodes := Obj.repr n :: !nodes);
@@ -132,7 +132,7 @@ let mount_slot pos slot =
   else begin
     if Dev.on then if pos.adopt then
       Dev.mismatch pos.parent "<!--[$-->" (Js.Null.toOption pos.cur);
-    let start = Web.create_comment pos.doc "[$" in
+    let start = Host.create_comment pos.doc "[$" in
     insert pos.parent start pos.cur;
     let rec place = function
       | [] -> ()
@@ -148,18 +148,18 @@ let text pos s =
   let n = if s = "" then Js.null else take pos 3 (fun [@u] _ -> true) in
   if n != Js.null then begin
     let n = node_of n in
-    if Web.data n <> s then begin
+    if Host.data n <> s then begin
       if Dev.on then
-        if not (List.mem (Web.local_name pos.parent) [ "script"; "style" ]) then
+        if not (List.mem (Host.local_name pos.parent) [ "script"; "style" ]) then
           Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Some n);
-      Web.set_data n s
+      Host.set_data n s
     end;
     n
   end
   else begin
     if Dev.on then if pos.adopt && s <> "" then
       Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Js.Null.toOption pos.cur);
-    let n = Web.create_text pos.doc s in
+    let n = Host.create_text pos.doc s in
     insert pos.parent n pos.cur;
     n
   end
@@ -167,14 +167,14 @@ let text pos s =
 let rec remove_between start stop =
   let n = next_sibling start in
   if n != Js.null && node_of n != stop then begin
-    Web.remove (node_of n);
+    Host.remove (node_of n);
     remove_between start stop
   end
 
 let remove_range first last =
   if first != last then remove_between first last;
-  Web.remove first;
-  if first != last then Web.remove last
+  Host.remove first;
+  if first != last then Host.remove last
 
 let move_range parent first last anchor =
   let rec go n =
@@ -221,26 +221,26 @@ let url_hook : (string -> string -> string -> string [@u]) ref =
 let set_attr svg el name value =
   let value =
     match value with
-    | Some v -> Some ((!url_hook) (Web.lowercase (Web.local_name el)) (Web.lowercase name) v [@u])
+    | Some v -> Some ((!url_hook) (Host.lowercase (Host.local_name el)) (Host.lowercase name) v [@u])
     | None -> None
   in
   match name with
   | _ when svg -> (
       match value with
-      | Some v -> Web.set_attribute el name v
-      | None -> Web.remove_attribute el name)
-  | "value" -> Web.set_string el "value" (match value with Some v -> v | None -> "")
+      | Some v -> Host.set_attribute el name v
+      | None -> Host.remove_attribute el name)
+  | "value" -> Host.set_string el "value" (match value with Some v -> v | None -> "")
   | "checked" | "selected" ->
-      Web.set_bool el name
+      Host.set_bool el name
         (match value with None | Some "false" -> false | Some _ -> true)
   | _ -> (
       match value with
-      | Some v -> Web.set_attribute el name v
-      | None -> Web.remove_attribute el name)
+      | Some v -> Host.set_attribute el name v
+      | None -> Host.remove_attribute el name)
 
 let stopped_key = Platform.stopped_key
 
-type handler = { run : Web.event -> unit; owner : Base.owner; gen : int }
+type handler = { run : Host.event -> unit; owner : Base.owner; gen : int }
 
 let live h = h.owner.gen = h.gen
 let acting : Base.owner option ref = ref None
@@ -263,7 +263,7 @@ let handle owner f ev =
     with e -> Some e
   in
   let report = function
-    | Some e -> ( try Base.fail owner e with e -> Web.microtask (fun () -> raise e))
+    | Some e -> ( try Base.fail owner e with e -> Host.microtask (fun () -> raise e))
     | None -> ()
   in
   report !first;
@@ -279,7 +279,7 @@ let dispatch event ev =
       for i = 0 to Array.length hs - 1 do
         let h = get hs i in
         if live h && handle h.owner (acting_as (Some h.owner) h.run) ev then
-          Web.set_flag ev stopped_key true
+          Host.set_flag ev stopped_key true
       done
     end;
     if flag ev stopped_key != Js.Undefined.return true then begin
@@ -287,13 +287,13 @@ let dispatch event ev =
       if p != Js.null then go (node_of p)
     end
   in
-  go (Web.target ev)
+  go (Host.target ev)
 
 let delegate doc event =
   let mark = "__yuka_delegation_" ^ event in
   if (prop doc mark : bool Js.undefined) == Js.undefined then begin
-    Web.set_prop doc mark true;
-    Web.add_listener doc event (dispatch event)
+    Host.set_prop doc mark true;
+    Host.add_listener doc event (dispatch event)
   end
 
 let add_handler doc el event handler =
@@ -301,8 +301,8 @@ let add_handler doc el event handler =
   if non_bubbling event then begin
     let handler = acting_as !(Base.current_owner ()) handler in
     let handler ev = ignore (handle owner handler ev) in
-    Web.add_listener el event handler;
-    on_dispose (fun () -> Web.remove_listener el event handler)
+    Host.add_listener el event handler;
+    on_dispose (fun () -> Host.remove_listener el event handler)
   end
   else begin
     delegate doc event;
@@ -310,11 +310,11 @@ let add_handler doc el event handler =
     let key = handlers_key event in
     let h = { run = handler; owner; gen = owner.gen } in
     let hs = prop el key in
-    if hs == Js.undefined then Web.set_prop el key [| h |]
+    if hs == Js.undefined then Host.set_prop el key [| h |]
     else begin
       let hs = filter (defined hs) live in
       push hs h;
-      Web.set_prop el key hs
+      Host.set_prop el key hs
     end
   end
 
@@ -332,17 +332,17 @@ let has_handler el event run =
 
 
 let compile doc svg (template : template) =
-  let t = Web.create_element doc "template" in
-  Web.set_inner_html t
+  let t = Host.create_element doc "template" in
+  Host.set_inner_html t
     (if svg then "<svg>" ^ template.markup ^ "</svg>" else template.markup);
   let only c = if c != Js.null && next_sibling (node_of c) == Js.null then c else Js.null in
-  let top = only (first_child (Web.content t)) in
+  let top = only (first_child (Host.content t)) in
   let parsed = if svg && top != Js.null then only (first_child (node_of top)) else top in
   if Dev.on then
     if template.code <> "" && not (parsed != Js.null && Template.same_shape template (node_of parsed)) then
-      Dev.mismatch (Web.content t)
+      Dev.mismatch (Host.content t)
         ("the tree of the template " ^ template.markup ^ if svg then " inside <svg>" else "")
-        (Js.Null.toOption (first_child (Web.content t)));
+        (Js.Null.toOption (first_child (Host.content t)));
   if
     parsed != Js.null
     && (template.code <> ""
@@ -350,7 +350,7 @@ let compile doc svg (template : template) =
   then
     Some
       {
-        root = Web.import_node doc (node_of parsed) true;
+        root = Host.import_node doc (node_of parsed) true;
         kid_svg =
           (if svg then Template_build.kid_svg_in_svg else Template_build.kid_svg_in_html);
         attr_svg =
@@ -438,8 +438,8 @@ and mount_children pos = function
 and instantiate pos (template : template) c parts =
   let doc = pos.doc in
   let { Template_build.walk; kids; attrs; values } = template.plan in
-  let root = Web.clone_node c.root true in
-  let nodes = Web.walk root walk in
+  let root = Host.clone_node c.root true in
+  let nodes = Host.walk root walk in
   let last = ref false in
   let k = ref 0 in
   while !k < Array.length kids do
@@ -460,8 +460,8 @@ and instantiate pos (template : template) c parts =
           mount_node inner last n;
           if anchor != Js.null then
             match get kids (i + 4) with
-            | 1 -> if not !last then Web.remove (node_of anchor)
-            | 2 -> if !last then insert inner.parent (Web.create_comment doc "") anchor
+            | 1 -> if not !last then Host.remove (node_of anchor)
+            | 2 -> if !last then insert inner.parent (Host.create_comment doc "") anchor
             | _ -> ()
         end
     | Attribute _ | No_attribute -> ()
@@ -516,10 +516,10 @@ and mount_hole pos owned f =
         match n with
         | Text s when !text_node != Js.null ->
             let t = node_of !text_node in
-            if Web.data t <> s then Web.set_data t s
+            if Host.data t <> s then Host.set_data t s
         | _ ->
             if start == Js.null then begin
-              Web.clear pos.parent "";
+              Host.clear pos.parent "";
               place { pos with cur = Js.null; adopt = false } n
             end
             else begin
@@ -570,44 +570,44 @@ and mount_each :
   in
   on_dispose (fun () -> dispose_all !entries);
   let first = State.peek source in
-  let seen = Web.table () in
+  let seen = Host.table () in
   for i = 0 to Array.length first - 1 do
     let v = get first i in
     let k = key v in
-    if not (Web.table_has seen k) then begin
-      Web.table_set seen k true;
+    if not (Host.table_has seen k) then begin
+      Host.table_set seen k true;
       push !entries (make_entry pos k v)
     end
   done;
   let stop = if owned then (drop_to_end pos; Js.null) else some (comment pos "]") in
   let clear_all () =
-    if start == Js.null then Web.clear pos.parent ""
-    else Web.delete_between pos.parent (node_of start) (node_of stop)
+    if start == Js.null then Host.clear pos.parent ""
+    else Host.delete_between pos.parent (node_of start) (node_of stop)
   in
   let reconcile source =
-    let items = [||] and keys = [||] and wanted = Web.table () in
+    let items = [||] and keys = [||] and wanted = Host.table () in
     for j = 0 to Array.length source - 1 do
       let v = get source j in
       let k = key v in
-      if Web.table_has wanted k then begin
+      if Host.table_has wanted k then begin
         if Dev.on then
-          Web.console_error ("yuka: each: duplicate key " ^ k ^ ", the later item is left out")
+          Host.console_error ("yuka: each: duplicate key " ^ k ^ ", the later item is left out")
       end
       else begin
-        Web.table_set wanted k true;
+        Host.table_set wanted k true;
         push items v;
         push keys k
       end
     done;
     let n = Array.length items in
     let es = !entries in
-    let old = Web.table () in
+    let old = Host.table () in
     let removed = [||] in
     for i = 0 to Array.length es - 1 do
       let e = get es i in
-      if Web.table_has wanted e.key then Web.table_set old e.key (i, e) else push removed e
+      if Host.table_has wanted e.key then Host.table_set old e.key (i, e) else push removed e
     done;
-    if Web.table_size old = 0 && Array.length es > 0 then begin
+    if Host.table_size old = 0 && Array.length es > 0 then begin
       dispose_all es;
       clear_all ()
     end
@@ -661,23 +661,23 @@ and mount_each :
           if Dev.on then Scheduler.body := false;
           reconcile next))
 
-let keep_hook : (Web.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
+let keep_hook : (Host.node -> string -> attr list -> attr list [@u]) ref = ref (fun [@u] _ _ a -> a)
 
 let mount_element pos tag attrs children =
   let svg = pos.svg || tag = "svg" in
-  let raw = Web.lowercase tag in
+  let raw = Host.lowercase tag in
   if raw = "script" || raw = "style" then (
     match children with
     | [] | [ Text _ ] | [ Hole _ ] -> ()
     | _ -> invalid_arg "Yuka: <script> and <style> take one text or one hole");
-  let adopted = take pos 1 (fun [@u] n -> Web.local_name n = tag) in
+  let adopted = take pos 1 (fun [@u] n -> Host.local_name n = tag) in
   let is_adopted = adopted != Js.null in
   if Dev.on then if pos.adopt && not is_adopted then
     Dev.mismatch pos.parent ("<" ^ tag ^ ">") (Js.Null.toOption pos.cur);
   let el =
     if is_adopted then node_of adopted
-    else if svg then Web.create_element_ns pos.doc svg_ns tag
-    else Web.create_element pos.doc tag
+    else if svg then Host.create_element_ns pos.doc svg_ns tag
+    else Host.create_element pos.doc tag
   in
   let attrs = if is_adopted then (!keep_hook) el tag attrs [@u] else attrs in
   let inner_svg = svg && tag <> "foreignObject" in
@@ -715,12 +715,12 @@ let use_slot () = slot_hook := fun [@u] pos slot -> mount_slot pos slot
 let use_catch () = catch_hook := fun [@u] pos last client -> mount_catch pos last client
 
 let start ~adopt container f =
-  let doc = Web.owner_document container in
+  let doc = Host.owner_document container in
   let (), dispose =
     Scheduler.batch (fun () ->
         Base.mount (fun () ->
             let n = if Dev.on then Scheduler.with_body true f else f () in
-            if not adopt then Web.clear container "";
+            if not adopt then Host.clear container "";
             let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
             if Dev.on then begin
               mount_node pos (ref false) n;
@@ -731,7 +731,7 @@ let start ~adopt container f =
   dispose
 
 let render container f = start ~adopt:false container (Kind.fn f)
-let changed : Web.node list ref = ref []
+let changed : Host.node list ref = ref []
 
 let rec keep el = function
   | Dynamic (("value" | "checked" | "selected") as name, f) :: rest ->
@@ -747,19 +747,19 @@ let hydrate container f =
   use_element ();
   keep_hook :=
     (fun [@u] el tag attrs ->
-      match Web.touched el tag with
+      match Host.touched el tag with
       | 0 -> attrs
       | k ->
           if k = 2 then changed := el :: !changed;
           keep el attrs);
-  drop_rest := (fun [@u] pos -> walk_region pos (fun [@u] n -> Web.remove n));
+  drop_rest := (fun [@u] pos -> walk_region pos (fun [@u] n -> Host.remove n));
   adopt_slot := (fun [@u] pos slot -> adopt_slot_now pos slot);
   Template.expander := (fun t p -> Template.expand t p);
   changed := [];
   let dispose = start ~adopt:true container (Kind.fn f) in
   let els = !changed in
   changed := [];
-  List.iter Web.fire (List.rev els);
+  List.iter Host.fire (List.rev els);
   dispose
 
 let roots : (unit -> unit [@u]) ref = ref (fun [@u] () -> ())
@@ -778,14 +778,14 @@ let stop_roots () =
 
 let on_error : (string -> unit) ref = ref ignore
 
-let live_islands : Web.node list ref = ref []
+let live_islands : Host.node list ref = ref []
 
 let transport name input k =
   let id = register ignore in
   let finish () = drop_cleanup id in
   let abort =
-    Web.fetch_post
-    (Web.base () ^ "/_yuka/action/" ^ Web.encode_uri name)
+    Host.fetch_post
+    (Host.base () ^ "/_yuka/action/" ^ Host.encode_uri name)
     (Json.to_string input)
     (fun status body ->
       finish ();
@@ -801,7 +801,7 @@ let transport name input k =
       finish ();
       k (Error (Status.Network (if cancelled then "cancelled" else message))))
   in
-  if Web.table_has (cleanups ()) (string_of_int id) then set_cleanup id abort;
+  if Host.table_has (cleanups ()) (string_of_int id) then set_cleanup id abort;
   abort
 
 let own_call result abort =
@@ -813,7 +813,7 @@ let own_call result abort =
   | Some owner ->
       let rec chain (o : Base.owner) = (o, o.gen) :: (match o.parent with Some p -> chain p | None -> []) in
       let owners = chain owner in
-      Web.microtask (fun () ->
+      Host.microtask (fun () ->
           match List.find_opt (fun ((o : Base.owner), gen) -> o.gen = gen) owners with
           | Some (o, _) -> tie o
           | None -> abort ())
@@ -824,21 +824,21 @@ let is_true = function Some true -> true | Some false | None -> false
 
 type lazy_entry = {
   lazy_name : string;
-  load : unit -> Island.entry Web.promise;
-  mutable loading : Island.entry Web.promise option;
+  load : unit -> Island.entry Host.promise;
+  mutable loading : Island.entry Host.promise option;
 }
 
 let lazy_entry ~name load = { lazy_name = name; load; loading = None }
 
 let boot entries props island =
-  let id = Option.value (Web.get_attribute island "data-id") ~default:"" in
-  let name = Option.value (Web.get_attribute island "data-name") ~default:"" in
+  let id = Option.value (Host.get_attribute island "data-id") ~default:"" in
+  let name = Option.value (Host.get_attribute island "data-name") ~default:"" in
   let fail reason =
-    Web.console_error ("yuka island " ^ id ^ " (" ^ name ^ "): " ^ reason);
+    Host.console_error ("yuka island " ^ id ^ " (" ^ name ^ "): " ^ reason);
     None
   in
   let entry = List.find_opt (fun e -> e.name = name) entries in
-  match (entry, Web.table_get props id) with
+  match (entry, Host.table_get props id) with
   | None, _ -> fail "unknown island name"
   | _, None -> fail "props script not found"
   | Some entry, Some text -> (
@@ -850,8 +850,8 @@ let boot entries props island =
           | Ok build -> (
               let failed = ref false and dispose = ref ignore in
               let report e =
-                let m = "yuka island " ^ id ^ " (" ^ name ^ "): " ^ Web.exn_to_string e in
-                Web.console_error m;
+                let m = "yuka island " ^ id ^ " (" ^ name ^ "): " ^ Host.exn_to_string e in
+                Host.console_error m;
                 try !on_error m with _ -> ()
               in
               let stop d = try d () with e -> report e in
@@ -865,7 +865,7 @@ let boot entries props island =
               in
               let o = Base.new_owner () in
               o.catch <- Some catch;
-              o.env <- Scheduler.Root (Option.value (Web.get_attribute island "data-ctx") ~default:"");
+              o.env <- Scheduler.Root (Option.value (Host.get_attribute island "data-ctx") ~default:"");
               match Base.with_owner o (fun () -> Types.with_browser_ids (id ^ "-") (fun () -> hydrate island (Kind.of_fn build))) with
               | d when !failed ->
                   stop d;
@@ -884,11 +884,11 @@ let boot entries props island =
 
 let schedule strategy island run =
   match strategy with
-  | Some "idle" -> Web.on_idle run
+  | Some "idle" -> Host.on_idle run
   | Some "visible" -> (
-      match Web.first_element_child island with
-      | Some child when Web.has_intersection_observer island ->
-          Web.on_visible child run
+      match Host.first_element_child island with
+      | Some child when Host.has_intersection_observer island ->
+          Host.on_visible child run
       | _ ->
           run ();
           ignore)
@@ -899,41 +899,41 @@ let schedule strategy island run =
         ignore ev;
         if not !fired then begin
           fired := true;
-          List.iter (fun e -> Web.remove_listener island e listener) events;
+          List.iter (fun e -> Host.remove_listener island e listener) events;
           run ()
         end
       in
-      List.iter (fun e -> Web.add_listener island e listener) events;
-      fun () -> List.iter (fun e -> Web.remove_listener island e listener) events
+      List.iter (fun e -> Host.add_listener island e listener) events;
+      fun () -> List.iter (fun e -> Host.remove_listener island e listener) events
   | _ ->
       run ();
       ignore
 
 let stop () =
-  let pending = Web.table_values (cleanups ()) in
-  Web.table_clear (cleanups ());
+  let pending = Host.table_values (cleanups ()) in
+  Host.table_clear (cleanups ());
   Array.iter (fun f -> f ()) pending;
-  List.iter (fun island -> Web.set_bool island started_key false) !live_islands;
+  List.iter (fun island -> Host.set_bool island started_key false) !live_islands;
   live_islands := [];
   !Platform.cleared ()
 
 let cleanup_key = "__yuka_cleanup"
 
 let stop_within el =
-  let inside, outside = List.partition (fun island -> Web.contains el island) !live_islands in
+  let inside, outside = List.partition (fun island -> Host.contains el island) !live_islands in
   live_islands := outside;
   List.iter
     (fun island ->
-      (match (Web.get_prop island cleanup_key : int option) with
+      (match (Host.get_prop island cleanup_key : int option) with
       | Some id -> (
           let key = string_of_int id in
-          match Web.table_get (cleanups ()) key with
+          match Host.table_get (cleanups ()) key with
           | Some f ->
-              Web.table_delete (cleanups ()) key;
+              Host.table_delete (cleanups ()) key;
               f ()
           | None -> ())
       | None -> ());
-      Web.set_bool island started_key false)
+      Host.set_bool island started_key false)
     inside
 
 let load_lazy lazies name =
@@ -946,14 +946,14 @@ let load_lazy lazies name =
       Some (p, fun () -> l.loading <- None)
 
 let start_island entries lazy_entries props island =
-  Web.set_bool island started_key true;
+  Host.set_bool island started_key true;
   live_islands := island :: !live_islands;
   let id = register ignore in
-  Web.set_prop island cleanup_key id;
+  Host.set_prop island cleanup_key id;
   let fired = ref false in
-  let name = Option.value (Web.get_attribute island "data-name") ~default:"" in
+  let name = Option.value (Host.get_attribute island "data-name") ~default:"" in
   let known = List.exists (fun e -> e.name = name) entries in
-  let strategy = Web.get_attribute island "data-start" in
+  let strategy = Host.get_attribute island "data-start" in
   let deferred =
     (not known)
     || (match strategy with
@@ -961,7 +961,7 @@ let start_island entries lazy_entries props island =
        | _ -> false)
   in
   let drop_events, replay_events =
-    if deferred then Web.record_events island else (ignore, ignore)
+    if deferred then Host.record_events island else (ignore, ignore)
   in
   let finish = function
     | Some dispose ->
@@ -982,12 +982,12 @@ let start_island entries lazy_entries props island =
             drop_events ());
         let report reason =
           finish None;
-          Web.console_error
+          Host.console_error
             ("yuka island "
-            ^ Option.value (Web.get_attribute island "data-id") ~default:""
+            ^ Option.value (Host.get_attribute island "data-id") ~default:""
             ^ " (" ^ name ^ "): cannot load code: " ^ reason)
         in
-        Web.promise_then
+        Host.promise_then
           (fun entry ->
             if not !cancelled then finish (boot [ entry ] props island))
           (fun message ->
@@ -1007,32 +1007,32 @@ let transport_hook : (string -> Json.t -> ((Json.t, Status.error) result -> unit
 let use_actions () = transport_hook := transport
 
 let script_props script =
-  match Web.get_attribute script "data-yuka-props" with
-  | Some id -> Some (id, Web.text_content script)
+  match Host.get_attribute script "data-yuka-props" with
+  | Some id -> Some (id, Host.text_content script)
   | None -> None
 
 let start ?(lazy_entries = []) entries =
   Bridge.send := (fun name input k -> !transport_hook name input k);
   Types.async_source := (fun id -> !async_hook id);
-  let props = Web.table () in
+  let props = Host.table () in
   let waiting = ref [] in
   let island_id island =
-    Option.value (Web.get_attribute island "data-id") ~default:""
+    Option.value (Host.get_attribute island "data-id") ~default:""
   in
   let start_waiting ~final =
     let ready, rest =
-      List.partition (fun (id, _) -> final || Web.table_has props id) !waiting
+      List.partition (fun (id, _) -> final || Host.table_has props id) !waiting
     in
     waiting := rest;
     List.iter
       (fun (_, island) ->
-        let started : bool option = Web.get_prop island started_key in
+        let started : bool option = Host.get_prop island started_key in
         if not (is_true started) then
           start_island entries lazy_entries props island)
       (List.rev ready)
   in
   let note_island island =
-    let started : bool option = Web.get_prop island started_key in
+    let started : bool option = Host.get_prop island started_key in
     if not (is_true started) then begin
       let id = island_id island in
       waiting :=
@@ -1045,16 +1045,16 @@ let start ?(lazy_entries = []) entries =
     match script_props script with
     | Some (id, text) ->
         if final || Result.is_ok (Json.of_string text) then
-          Web.table_set props id text
+          Host.table_set props id text
     | None -> ()
   in
   let full ~final =
-    let doc = Web.document () in
-    Array.iter (note_script ~final) (Web.query_all doc "script[data-yuka-props]");
-    Array.iter note_island (Web.query_all doc "yuka-island");
+    let doc = Host.document () in
+    Array.iter (note_script ~final) (Host.query_all doc "script[data-yuka-props]");
+    Array.iter note_island (Host.query_all doc "yuka-island");
     start_waiting ~final
   in
-  let parsed = Web.ready_state () <> "loading" in
+  let parsed = Host.ready_state () <> "loading" in
   full ~final:parsed;
   if not parsed then begin
     let id = register ignore in
@@ -1065,19 +1065,19 @@ let start ?(lazy_entries = []) entries =
       drop_cleanup id
     in
     disconnect :=
-      Web.watch_added (fun nodes ->
+      Host.watch_added (fun nodes ->
           Array.iter
             (fun n ->
-              if Web.local_name n = "yuka-island" then note_island n;
-              if Web.local_name n = "script" then note_script ~final:false n;
-              Array.iter note_island (Web.query_all n "yuka-island");
+              if Host.local_name n = "yuka-island" then note_island n;
+              if Host.local_name n = "script" then note_script ~final:false n;
+              Array.iter note_island (Host.query_all n "yuka-island");
               Array.iter (note_script ~final:false)
-                (Web.query_all n "script[data-yuka-props]"))
+                (Host.query_all n "script[data-yuka-props]"))
             nodes;
           start_waiting ~final:false;
           false);
     remove_ready :=
-      Web.on_dom_ready (fun () ->
+      Host.on_dom_ready (fun () ->
           full ~final:true;
           release ());
     set_cleanup id release
