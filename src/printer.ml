@@ -12,7 +12,7 @@ open Base
 
   let add_escaped b ~quote s =
     let n = String.length s in
-    let start = ref 0 and i = ref (Web.skip_clean s 0) in
+    let start = ref 0 and i = ref (Host.skip_clean s 0) in
     while !i < n do
       (match String.unsafe_get s !i with
       | '&' -> start := put b s !start !i "&amp;"
@@ -20,7 +20,7 @@ open Base
       | '>' when not quote -> start := put b s !start !i "&gt;"
       | '"' when quote -> start := put b s !start !i "&quot;"
       | _ -> ());
-      i := Web.skip_clean s (!i + 1)
+      i := Host.skip_clean s (!i + 1)
     done;
     Buffer.add_substring b s !start (n - !start)
 
@@ -34,7 +34,7 @@ open Base
 
   let add_attr b ?(literal = false) ~tag name value =
     if not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ String.escaped name);
-    let tag = Web.lowercase tag and lname = Web.lowercase name in
+    let tag = Host.lowercase tag and lname = Host.lowercase name in
     let value = if literal && Url.html_sink ~tag lname then value else Url.check ~tag ~log:log_blocked lname value in
     Buffer.add_char b ' ';
     Buffer.add_string b name;
@@ -180,7 +180,7 @@ open Base
     l
 
   let needs_special tag =
-    match Web.lowercase tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
+    match Host.lowercase tag with "select" | "textarea" | "option" | "a" -> true | _ -> false
 
   type namespace = Html | Svg | Math | Select
 
@@ -215,7 +215,7 @@ open Base
       let fixed = List.filter_map (function Fixed (n, v) -> Some (n, v) | Part_attr _ -> None) attrs in
       if (not (needs_special tag))
          && List.length fixed = List.length attrs
-         && not (Web.lowercase tag = "input" && List.mem_assoc "name" fixed)
+         && not (Host.lowercase tag = "input" && List.mem_assoc "name" fixed)
       then begin
         Buffer.add_char raw '<';
         Buffer.add_string raw tag;
@@ -241,7 +241,7 @@ open Base
     t.ops
 
   let kept_buffer = 1_048_576
-  let rendering = Web.local (fun () -> Atomic.make 0)
+  let rendering = Host.local (fun () -> Atomic.make 0)
 
   let rec print ?env s build =
     let owner = new_owner () in
@@ -257,7 +257,7 @@ open Base
           owner.env <- old;
           raise x
     in
-    let b = match Web.take_buffer () with Some b -> b | None -> Buffer.create 4096 in
+    let b = match Host.take_buffer () with Some b -> b | None -> Buffer.create 4096 in
     let peak = ref 0 in
     let cut n =
       peak := max !peak (Buffer.length b);
@@ -266,7 +266,7 @@ open Base
     let release () =
       if max !peak (Buffer.length b) <= kept_buffer then begin
         Buffer.clear b;
-        Web.give_buffer b
+        Host.give_buffer b
       end
     in
     let after_text = ref false in
@@ -279,13 +279,13 @@ open Base
     in
     let field_attrs ~tag each add =
       let field =
-        match (s.invalid, Web.lowercase tag) with
+        match (s.invalid, Host.lowercase tag) with
         | [], _ -> None
         | invalid, ("input" | "select" | "textarea") ->
             let name = ref None and hidden = ref false in
             each (fun _ n v ->
                 if n = "name" && Option.is_none !name then name := Some v
-                else if n = "type" && Web.lowercase v = "hidden" then hidden := true);
+                else if n = "type" && Host.lowercase v = "hidden" then hidden := true);
             Option.map (fun id -> (id, !hidden)) (Option.bind !name (fun n -> List.assoc_opt n invalid))
         | _ -> None
       in
@@ -294,7 +294,7 @@ open Base
       | Some (id, hidden) ->
           let described = ref false and focused = ref false in
           each (fun literal n v ->
-              match Web.lowercase n with
+              match Host.lowercase n with
               | "aria-invalid" -> ()
               | "aria-describedby" ->
                   described := true;
@@ -505,7 +505,7 @@ open Base
             after_text := text;
             foreign := context;
             restore s saved;
-            log_message `Error ("Yuka.Catch: " ^ Web.exn_to_string e);
+            log_message `Error ("Yuka.Catch: " ^ Host.exn_to_string e);
             marker "<!--[!-->";
             go (fallback ~error:"server error" ~reset:ignore);
             marker "<!--]-->")
@@ -653,7 +653,7 @@ open Base
           let outer = s.invalid in
           (match s.form with
           | Some (action, key, _, errors)
-            when Web.lowercase tag = "form"
+            when Host.lowercase tag = "form"
                  && List.exists (function Static ("data-yuka-action", a) -> a = action | _ -> false) attrs
                  && List.exists (function Static ("data-yuka-key", k) -> k = key | _ -> false) attrs ->
               s.invalid <-
@@ -752,7 +752,7 @@ open Base
     in
     let server_rendering = server_rendering () and current_session = current_session () in
     let current_owner = current_owner () and listener = Scheduler.listener () in
-    let rendering = Web.local_get rendering in
+    let rendering = Host.local_get rendering in
     let previous = !server_rendering in
     let previous_session = !current_session in
     let previous_listener = !listener in

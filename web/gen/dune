@@ -1,0 +1,5 @@
+(executable
+ (name native_side)
+ (libraries ppxlib)
+ (preprocess
+  (pps ppxlib.metaquot)))

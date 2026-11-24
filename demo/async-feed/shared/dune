@@ -2,6 +2,7 @@
  (name async_feed_shared)
  (modes native melange)
  (libraries yuka)
+ (melange.libraries yuka yuka.web)
  (preprocess
   (pps yuka.ppx))
  (melange.preprocess

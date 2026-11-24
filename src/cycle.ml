@@ -99,7 +99,7 @@ let json ?status ?headers codec v =
 let see_other location =
   Async.return { status = 303; headers = [ ("location", location) ]; body = String "" }
 
-let tree_digest = Web.tree_digest
+let tree_digest = Host.tree_digest
 
 type fallback = { layers : layer list; not_found : string -> page; error : unit -> page }
 
@@ -147,7 +147,7 @@ let app ~build ~headers ~prerender ~pages ~find ~resolve ~missing =
       missing;
     }
 
-let failure e = Fail (Web.exn_to_string e)
+let failure e = Fail (Host.exn_to_string e)
 
 let settle a =
   let r, resolve, _ = Async.make () in
@@ -240,7 +240,7 @@ let dev_state () =
     match file with
     | None -> dev_default
     | Some f -> (
-        match Option.map String.trim (Web.read_file f) with
+        match Option.map String.trim (Host.read_file f) with
         | None | Some "" -> dev_default
         | Some text -> String.concat " " (String.split_on_char '\n' text))
   in
@@ -573,7 +573,7 @@ let recover_with config ~last a f =
               | Async.Done v -> resolve v
               | Async.Failed m -> give_up m
               | Async.Pending -> ())
-        | exception e -> give_up (Web.exn_to_string e))
+        | exception e -> give_up (Host.exn_to_string e))
     | Async.Pending -> ());
   r
 
@@ -587,7 +587,7 @@ let error_page env (fallback : fallback) =
   in
     match render env ~status:500 ~headers fallback.layers (fallback.error ()) with
     | a -> recover env a give_up
-    | exception e -> give_up (Web.exn_to_string e)
+    | exception e -> give_up (Host.exn_to_string e)
 
 let fail_page env fallback message =
   log env.config `Error message;
@@ -596,7 +596,7 @@ let fail_page env fallback message =
 let show ?overlay env ~status ~headers ~fallback layers (page : unit -> page) =
     match render ?overlay env ~status ~headers layers (page ()) with
     | a -> recover env a (fail_page env fallback)
-    | exception e -> fail_page env fallback (Web.exn_to_string e)
+    | exception e -> fail_page env fallback (Host.exn_to_string e)
 
 let not_found_page env (fallback : fallback) target =
   show env ~status:404 ~headers:(html_headers env.root_headers [ no_store_header ]) ~fallback
@@ -771,7 +771,7 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
   match a.find `GET segments (Router.query r.target) with
   | Router.Found found -> (
       match a.resolve env.context found with
-      | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
+      | exception e -> page_or_error (fail_page env a.missing (Host.exn_to_string e))
       | Handler _ -> reply (method_not_allowed allowed)
       | Page { rules; guards; load; fallback } ->
           let plain status message = plain status message rules.headers in
@@ -802,7 +802,7 @@ let form_post env (App a) (r : request) ~path ~segments ~query ~allowed =
                                 let answer =
                                   match run context values with
                                   | a -> a
-                                  | exception e -> Async.failed (Web.exn_to_string e)
+                                  | exception e -> Async.failed (Host.exn_to_string e)
                                 in
                                 recover_with env.config ~last:(fun () -> Respond (internal_error ()))
                                   (Async.bind answer (function
@@ -871,7 +871,7 @@ let route env (App a) (r : request) ~path ~raw ~query =
       | _ -> reply (method_not_allowed (allow ms)))
   | Router.Found found -> (
       match a.resolve env.context found with
-      | exception e -> page_or_error (fail_page env a.missing (Web.exn_to_string e))
+      | exception e -> page_or_error (fail_page env a.missing (Host.exn_to_string e))
       | Page { rules; _ }
         when Option.fold ~none:false
                ~some:(fun v -> Prefetch.rank (Prefetch.trigger v) > Prefetch.rank rules.prefetch)
@@ -895,7 +895,7 @@ let route env (App a) (r : request) ~path ~raw ~query =
                     let ran =
                       match run () with
                       | resp -> Async.map (fun x -> Ok x) resp
-                      | exception e -> Async.return (Error (Web.exn_to_string e))
+                      | exception e -> Async.return (Error (Host.exn_to_string e))
                     in
                     recover env
                       (Async.bind ran (function
@@ -917,7 +917,7 @@ let dev_events ~log ~state ~sleep write =
   let rec step last idle =
     match state () with
     | exception e ->
-        (try log `Error ("Yuka dev: cannot read the dev state: " ^ Web.exn_to_string e) with _ -> ());
+        (try log `Error ("Yuka dev: cannot read the dev state: " ^ Host.exn_to_string e) with _ -> ());
         resolve ()
     | now ->
     let message =
@@ -1120,7 +1120,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (s
             log config `Error m;
             reply (internal_error ()))
     | exception e ->
-        log_quietly config `Error (Web.exn_to_string e);
+        log_quietly config `Error (Host.exn_to_string e);
         Async.return (last ())
   in
   Async.map (fun o -> checked_headers config (bodyless o)) answer

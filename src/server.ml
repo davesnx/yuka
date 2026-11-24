@@ -75,7 +75,7 @@ let broken session items =
                match fill_broken () with
                | html -> html
                | exception e ->
-                   (try Types.log_in (Some session) `Error ("await " ^ id ^ " failed view failed: " ^ Web.exn_to_string e)
+                   (try Types.log_in (Some session) `Error ("await " ^ id ^ " failed view failed: " ^ Host.exn_to_string e)
                     with _ -> ());
                    ""
              in
@@ -118,7 +118,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
     if not !finished then begin
       finished := true;
       on_timeout := None;
-      let message = Web.exn_to_string exn in
+      let message = Host.exn_to_string exn in
       Async.on_settled !chain (fun _ -> fail message)
     end
   in

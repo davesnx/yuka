@@ -12,26 +12,26 @@ let default_retry = { attempts = 2; delay_ms = (fun n -> if n = 1 then 500 else 
 let no_retry = { attempts = 0; delay_ms = (fun _ -> 0) }
 
 let fetch name input k =
-  Web.fetch_post
-    (Web.base () ^ "/_yuka/action/" ^ Web.encode_uri name)
+  Host.fetch_post
+    (Host.base () ^ "/_yuka/action/" ^ Host.encode_uri name)
     (Json.to_string input)
     (fun status body -> k (Bridge.of_response status (Bridge.fields body)))
     (fun cancelled message -> if not cancelled then k (Error (Status.Network message)))
 
-let send () = if Web.in_browser then fetch else !Bridge.send
+let send () = if Host.in_browser then fetch else !Bridge.send
 
-let table : (int * (unit -> unit)) list Web.table option ref = ref None
+let table : (int * (unit -> unit)) list Host.table option ref = ref None
 let next_use = ref 0
 
 let uses () =
   match !table with
   | Some t -> t
   | None ->
-      let t = Web.table () in
+      let t = Host.table () in
       table := Some t;
       t
 
-let listed name = Option.value (Web.table_get (uses ()) name) ~default:[]
+let listed name = Option.value (Host.table_get (uses ()) name) ~default:[]
 
 let decode (q : (_, _, _) Action.t) last = function
   | Ok j -> (
@@ -73,7 +73,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
       if g = !generation then
         match r with
         | Error (Status.Network _ | Status.Server) when n <= retry.attempts ->
-            stop := Web.set_timeout (retry.delay_ms n) (fun () -> if g = !generation then attempt g input (n + 1))
+            stop := Host.set_timeout (retry.delay_ms n) (fun () -> if g = !generation then attempt g input (n + 1))
         | r -> finish g r
     in
     let embedded g input r =
@@ -81,7 +81,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
       match r with
       | Error (Status.Network _ | Status.Server) when retry.attempts >= 1 ->
           stop :=
-            Web.set_timeout (retry.delay_ms 1) (fun () ->
+            Host.set_timeout (retry.delay_ms 1) (fun () ->
                 if g = !generation then begin
                   State.set base (Status.Loading (Status.data (State.peek base)));
                   attempt g input 2
@@ -105,7 +105,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
               !stop_ready ()
             in
             stop_watch :=
-              Web.watch_added (fun nodes ->
+              Host.watch_added (fun nodes ->
                   match Answers.find_added key nodes with
                   | Some r ->
                       !stop_ready ();
@@ -113,7 +113,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
                       true
                   | None -> false);
             stop_ready :=
-              Web.on_dom_ready (fun () ->
+              Host.on_dom_ready (fun () ->
                   !stop_watch ();
                   if g = !generation then
                     match Answers.find key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
@@ -128,7 +128,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
           | Some (k, _) when String.equal k key -> ()
           | _ ->
               current := Some (key, input);
-              let read = !first && Web.in_browser in
+              let read = !first && Host.in_browser in
               first := false;
               start input ~read
         end
@@ -140,10 +140,10 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
         end);
     incr next_use;
     let id = !next_use in
-    Web.table_set (uses ()) (Action.name q) ((id, refetch) :: listed (Action.name q));
+    Host.table_set (uses ()) (Action.name q) ((id, refetch) :: listed (Action.name q));
     Base.own (fun () ->
         cancel ();
-        Web.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
+        Host.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
     { state; base; changes; refetch }
   end
 

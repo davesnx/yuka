@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias bench-keyed)
- (libraries yuka)
+ (libraries yuka yuka.web)
  (compile_flags
   (:standard -I src/.yuka.objs/melange))
  (preprocess

@@ -25,13 +25,13 @@ let current find =
 let pending find =
   State.memo (fun () -> Option.bind (State.get Browser.navigation) (fun n -> typed find n.Browser.url))
 
-let moved () = Page_context.set "route" Types.route_name (`String (Web.current_url ()))
-let same_page url = String.equal (fst (Router.split_target url)) (fst (Router.split_target (Web.current_url ())))
+let moved () = Page_context.set "route" Types.route_name (`String (Host.current_url ()))
+let same_page url = String.equal (fst (Router.split_target url)) (fst (Router.split_target (Host.current_url ())))
 
 let replace url =
   if same_page url then begin
-    Web.history_replace_url url;
-    Platform.loaded := Web.current_url ();
+    Host.history_replace_url url;
+    Platform.loaded := Host.current_url ();
     moved ()
   end
   else Browser.navigate ~replace:true url
@@ -39,14 +39,14 @@ let replace url =
 let push url =
   if same_page url then begin
     Navigation_stub.save_scroll ();
-    let before = Web.history_key () and key = Web.fresh_key () in
-    Web.history_push_key key url;
+    let before = Host.history_key () and key = Host.fresh_key () in
+    Host.history_push_key key url;
     Navigation_stub.current_key := key;
-    Navigation_stub.at := Web.history_at ();
+    Navigation_stub.at := Host.history_at ();
     Navigation_stub.shown_key := key;
     Platform.kept := key :: before :: !Platform.kept;
     Platform.moved := moved;
-    Platform.loaded := Web.current_url ();
+    Platform.loaded := Host.current_url ();
     moved ()
   end
   else Browser.navigate url

@@ -21,7 +21,7 @@ let log = Types.log
 
 let valid name =
   Client.use_url_check ();
-  if Web.in_browser && not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ name)
+  if Host.in_browser && not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ name)
 
 let url_attr _tag name value =
   valid name;
@@ -29,7 +29,7 @@ let url_attr _tag name value =
 let attr name value = url_attr "" name value
 
 let attr_unchecked name value =
-  Web.refuse_url_name name;
+  Host.refuse_url_name name;
   Static (name, value)
 let hole f = Kind.of_node (Hole (Kind.fn f))
 let with_unique_id f = Kind.of_node (Hole (fun () -> Kind.to_node (Scheduler.untrack (fun () -> f (Types.next_id ())))))
@@ -56,7 +56,7 @@ let use_css href body =
          [ Kind.to_node (element "link" [ Static ("rel", "stylesheet"); Static ("href", href); Static ("data-yuka-css", "") ] []);
            Kind.to_node body ])
   else begin
-    if Web.in_browser then Web.add_stylesheet href;
+    if Host.in_browser then Host.add_stylesheet href;
     body
   end
 
@@ -66,7 +66,7 @@ let url_hole_attr _tag name f =
 
 let hole_attr name f = url_hole_attr "" name f
 let hole_attr_unchecked name f =
-  Web.refuse_url_name name;
+  Host.refuse_url_name name;
   Dynamic (name, f)
 let on name handler = Handler (name, handler)
 
@@ -86,8 +86,8 @@ module Catch = struct
       let failed =
         match at with
         | Some n ->
-            let n : Web.node = Obj.obj n in
-            Web.node_type n = 8 && Web.data n = "[!"
+            let n : Host.node = Obj.obj n in
+            Web.DOM.Node.nodeType n = 8 && Web.DOM.CharacterData.data (Host.as_data n) = "[!"
         | None -> false
       in
       let error = State.make (if failed then Some "server error" else None) in
@@ -102,11 +102,11 @@ module Catch = struct
           match State.get error with
           | Some m -> show o m
           | None -> (
-              o.catch <- Some (fun e -> State.set error (Some (Web.exn_to_string e)));
+              o.catch <- Some (fun e -> State.set error (Some (Host.exn_to_string e)));
               match Scheduler.untrack children with
               | n -> Kind.to_node n
               | exception e ->
-                  let m = Web.exn_to_string e in
+                  let m = Host.exn_to_string e in
                   Base.dispose_owner o;
                   Signal.quiet_set (State.signal error) (Some m);
                   show o m))

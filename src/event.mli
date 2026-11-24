@@ -1,4 +1,4 @@
-type t = Web.event
+type t = Host.event
 
 val target_value : t -> string
 

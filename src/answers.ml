@@ -42,26 +42,26 @@ let of_json text =
   | _ -> None
 
 let mine key elements =
-  List.filter (fun el -> Web.get_attribute el "data-yuka-answer" = Some key) elements
+  List.filter (fun el -> Web.DOM.Element.getAttribute "data-yuka-answer" el = Some key) elements
 
 let full key elements =
-  match List.find_opt (fun el -> Web.get_attribute el "data-pending" = None) (mine key elements) with
-  | Some el -> of_json (Web.text_content el)
+  match List.find_opt (fun el -> Web.DOM.Element.getAttribute "data-pending" el = None) (mine key elements) with
+  | Some el -> of_json (Web.DOM.Node.textContent el)
   | None -> None
 
 let find key =
-  let elements = Array.to_list (Web.query_all (Web.document ()) "script[data-yuka-answer]") in
+  let elements = Array.to_list (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "script[data-yuka-answer]" Web.DOM.document)) in
   match full key elements with
   | Some r -> Found r
-  | None when mine key elements <> [] && Web.ready_state () = "loading" -> Pending
+  | None when mine key elements <> [] && Host.ready_state () = "loading" -> Pending
   | None -> Absent
 
 let find_added key nodes =
   full key
     (List.concat_map
        (fun n ->
-         (if Web.local_name n = "script" then [ n ] else [])
-         @ Array.to_list (Web.query_all n "script[data-yuka-answer]"))
+         (if Web.DOM.Element.localName n = "script" then [ n ] else [])
+         @ Array.to_list (Web.DOM.NodeList.toArray (Web.DOM.Element.querySelectorAll "script[data-yuka-answer]" n)))
        (Array.to_list nodes))
 
 let slot key =

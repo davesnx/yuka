@@ -2,8 +2,8 @@
  (name yuka)
  (public_name yuka)
  (modes native melange)
- (libraries threads.posix)
- (melange.libraries)
+ (libraries threads.posix yuka.web)
+ (melange.libraries yuka.web)
  (private_modules
   action
   answers

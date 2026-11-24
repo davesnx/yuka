@@ -1,0 +1,23 @@
+(library
+ (name web)
+ (public_name yuka.web)
+ (modes native melange)
+ (melange.modules
+  (:standard \ dom_native))
+ (melange.libraries melange.dom)
+ (melange.preprocess
+  (pps melange.ppx)))
+
+(rule
+ (targets DOM.ml)
+ (action
+  (with-stdout-to
+   DOM.ml
+   (run gen/native_side.exe %{dep:DOM.melange.ml}))))
+
+(rule
+ (targets storage.ml)
+ (action
+  (with-stdout-to
+   storage.ml
+   (run gen/native_side.exe %{dep:storage.melange.ml}))))

@@ -75,7 +75,7 @@ let key =
   if js then None
   else
     Some
-      (Web.local (fun () ->
+      (Host.local (fun () ->
            {
              stack = ref 0;
              listener = ref None;
@@ -90,7 +90,7 @@ let key =
              rendering = ref false;
            }))
 
-let here r f = match key with Some k when not js -> f (Web.local_get k) | _ -> r
+let here r f = match key with Some k when not js -> f (Host.local_get k) | _ -> r
 let stack () = here stack (fun d -> d.stack)
 let listener () = here listener (fun d -> d.listener)
 let mine q = here q (fun d -> if q == late then d.late else if q == selects then d.selects else d.queue)

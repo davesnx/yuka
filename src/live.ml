@@ -21,7 +21,7 @@ type 's t = {
 }
 
 type manager = {
-  mutable socket : Web.socket option;
+  mutable socket : Host.socket option;
   mutable live : bool;
   mutable node : string;
   mutable uses : use list;
@@ -70,7 +70,7 @@ let get () =
 
 let send m (fields : (string * Json.t) list) =
   match m.socket with
-  | Some s when m.live -> Web.socket_send s (Json.to_string (`Assoc fields))
+  | Some s when m.live -> Host.socket_send s (Json.to_string (`Assoc fields))
   | _ -> ()
 
 let last_mark : Json.t option ref = ref None
@@ -132,7 +132,7 @@ let rec connect m =
       List.iter (fun u -> u.ended <- true) m.uses
   | None ->
   if m.uses != [] && Option.is_none m.dead && Option.is_none m.socket then
-    match Web.socket_open (Web.live_url () ^ Web.base () ^ "/_yuka/live") (fun () -> opened m) (fun text -> heard m text) (fun code -> closed m code) with
+    match Host.socket_open (Host.live_url () ^ Host.base () ^ "/_yuka/live") (fun () -> opened m) (fun text -> heard m text) (fun code -> closed m code) with
     | s -> m.socket <- Some s
     | exception _ -> retry m
 
@@ -146,9 +146,9 @@ and opened m =
 and beat m =
   m.ping ();
   m.ping <-
-    Web.set_timeout 25_000 (fun () ->
+    Host.set_timeout 25_000 (fun () ->
         send m [ ("t", `String "ping") ];
-        m.pong <- Web.set_timeout 10_000 (fun () -> hang_up m 4000);
+        m.pong <- Host.set_timeout 10_000 (fun () -> hang_up m 4000);
         beat m)
 
 and heard m text =
@@ -227,7 +227,7 @@ and closed m code =
   | Some Status.Forbidden when not m.renewed ->
       m.renewed <- true;
       List.iter (fun u -> if not u.ended then u.on_stale ()) m.uses;
-      Web.fetch_text (Web.base () ^ "/_yuka/csrf")
+      Host.fetch_text (Host.base () ^ "/_yuka/csrf")
         (fun status body ->
           match (status, Json.of_string body) with
           | 200, Ok (`Assoc [ ("csrf", `String t) ]) ->
@@ -247,7 +247,7 @@ and give_up m error =
 and hang_up m code =
   match m.socket with
   | Some s ->
-      Web.socket_close s code;
+      Host.socket_close s code;
       closed m code
   | None -> ()
 
@@ -255,14 +255,14 @@ and retry m =
   if m.uses != [] && Option.is_none m.dead then begin
     let d = delays.(min m.attempt (Array.length delays - 1)) in
     m.attempt <- m.attempt + 1;
-    let delay = int_of_float (float_of_int d *. (0.5 +. (Web.random () /. 2.))) in
+    let delay = int_of_float (float_of_int d *. (0.5 +. (Host.random () /. 2.))) in
     m.wait ();
     m.waiting <- true;
     m.wait <-
-      (if Web.online () then Web.set_timeout delay (fun () -> connect m)
+      (if Host.online () then Host.set_timeout delay (fun () -> connect m)
        else
-         let timer = Web.set_timeout (Array.get delays (Array.length delays - 1)) (fun () -> connect m) in
-         let online = Web.on_online (fun () -> connect m) in
+         let timer = Host.set_timeout (Array.get delays (Array.length delays - 1)) (fun () -> connect m) in
+         let online = Host.on_online (fun () -> connect m) in
          fun () ->
            timer ();
            online ())
@@ -287,7 +287,7 @@ let detach m u =
   if m.uses == [] then begin
     m.closing ();
     m.closing <-
-      Web.set_timeout 2000 (fun () ->
+      Host.set_timeout 2000 (fun () ->
           m.closing <- ignore;
           if m.uses == [] then hang_up m 1000)
   end
@@ -331,7 +331,7 @@ let on_server (topic : (_, _) Topic.t) key base =
 
 let make (topic : ('k, 's) Topic.t) (args : unit -> 'k) : 's t =
   let base, changes, state = Optimistic.make () in
-  if !(Base.server_rendering ()) || not Web.in_browser then begin
+  if !(Base.server_rendering ()) || not Host.in_browser then begin
     on_server topic (Codec.encode (Topic.key topic) (args ())) base;
     { state; changes; use = None }
   end

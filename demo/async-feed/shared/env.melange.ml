@@ -3,7 +3,6 @@ type date
 type options
 type part = { kind : string; [@mel.as "type"] value : string }
 type resolved = { timeZone : string }
-type media = { matches : bool }
 
 external options :
   ?timeZone:string ->
@@ -27,11 +26,10 @@ external date : float -> date = "Date" [@@mel.new]
 external format : format -> date -> string = "format" [@@mel.send]
 external parts : format -> date -> part array = "formatToParts" [@@mel.send]
 external utc : int -> int -> int -> int -> int -> int -> float = "UTC" [@@mel.scope "Date"]
-external match_media : string -> media = "matchMedia" [@@mel.scope "window"]
 
 let default_zone () = (resolved (make "en-US" (options ()))).timeZone
 let valid_zone zone = match make "en-US" (options ~timeZone:zone ()) with _ -> true | exception _ -> false
-let prefers_dark () = (match_media "(prefers-color-scheme: dark)").matches
+let prefers_dark () = Web.DOM.(window |> Window.matchMedia "(prefers-color-scheme: dark)" |> MediaQueryList.matches)
 
 type formats = { zone : string; short : format; day : format; weekday : format; clock : format; long : format; numeric : format }
 
@@ -95,14 +93,16 @@ let to_time ~zone value =
       Some (int_of_float (Float.floor (time /. 1000.)))
   | _ -> None
 
-let sync_embed_theme : string -> unit =
-  [%mel.raw
-    {|function (theme) {
-      document.querySelectorAll("iframe.embed-frame").forEach(function (frame) {
-        try {
-          const doc = frame.contentDocument;
-          const root = doc && doc.querySelector(".embed-doc");
-          if (root) root.setAttribute("data-theme", theme);
-        } catch (_) {}
-      });
-    }|}]
+let sync_embed_theme theme =
+  let open Web.DOM in
+  document
+  |> Document.querySelectorAll "iframe.embed-frame"
+  |> NodeList.forEach (fun frame ->
+         try
+           match HTMLIFrameElement.contentDocument frame with
+           | Some doc -> (
+               match Document.querySelector ".embed-doc" doc with
+               | Some root -> Element.setAttribute ~name:"data-theme" ~value:theme root
+               | None -> ())
+           | None -> ()
+         with _ -> ())

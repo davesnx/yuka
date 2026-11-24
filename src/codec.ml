@@ -48,7 +48,7 @@ open Types
             let rec go acc next = function
               | [] ->
                   let decoded = List.rev acc in
-                  if Web.in_browser then last := (Array.of_list l, Array.of_list decoded);
+                  if Host.in_browser then last := (Array.of_list l, Array.of_list decoded);
                   Ok decoded
               | x :: rest -> (
                   if next < size && inputs.(next) == x then go (outputs.(next) :: acc) (next + 1) rest
@@ -136,7 +136,7 @@ let state c : 'a State.read t =
           (fun v ->
             let s = State.make v in
             !state_target (fun j ->
-                match c.decode j with Ok v -> State.set s v | Error m -> Web.console_error ("yuka: Codec.state: " ^ m));
+                match c.decode j with Ok v -> State.set s v | Error m -> Host.console_error ("yuka: Codec.state: " ^ m));
             State.read_only s)
           (c.decode j));
   }
