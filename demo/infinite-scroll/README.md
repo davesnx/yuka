@@ -27,9 +27,13 @@ the other demos, in one process. To run this demo alone, at the root:
 - While there is a next page, the grid ends with skeleton cards.
   `shared/load_more.mlx` watches the first one with
   `Yuka.Browser.on_visible` and then calls
-  `Yuka.Browser.navigate ~replace:true ~keep_scroll:true` with the URL of
-  the next page. The navigation replaces the history entry, and the page
-  stays where the user scrolled while it loaded.
+  `Yuka.Browser.navigate ~replace:true ~keep_scroll:true ~transition:false`
+  with the URL of the next page. The navigation replaces the history entry,
+  and the page stays where the user scrolled while it loaded.
+- `client/main.ml` turns on view transitions (`Yuka.render
+  ~transitions:true`), so a click on the Swatch logo, back to the first
+  page, cross-fades. The next page has `~transition:false`: the new cards
+  show at once, with no cross-fade of the whole page.
 - The island also shows a status while `Yuka.Browser.navigating` is
   `true`, and a line at the end of the gallery.
 
