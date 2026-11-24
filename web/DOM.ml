@@ -1,20 +1,27 @@
 (* The native side of DOM.melange.ml, so that code built for both the server and the browser
-   can call it. Every function raises. The types are unit here: the browser build checks them. *)
+   can call it. Every function raises. The types are abstract, with the same phantom parameters as
+   Melange's Dom, so the native build checks them too. *)
 
-type 'a node_like = unit
-type 'a element_like = unit
-type 'a document_like = unit
-type node = unit
-type element = unit
-type document = unit
-type window = unit
-type event = unit
+type _baseClass
+type 'a eventTarget_like
+type 'a _node
+type 'a node_like = 'a _node eventTarget_like
+type node = _baseClass node_like
+type 'a _element
+type 'a element_like = 'a _element node_like
+type element = _baseClass element_like
+type 'a _document
+type 'a document_like = 'a _document node_like
+type document = _baseClass document_like
+type window
+type 'a event_like
+type event = _baseClass event_like
 
-let window : window = ()
-let document : document = ()
+let window : window = Obj.magic ()
+let document : document = Obj.magic ()
 
 module NodeList = struct
-  type 'a t = unit
+  type 'a t
 
   let length (_ : 'a t) : int = invalid_arg "Web.DOM: browser only"
   let item (_ : int) (_ : 'a t) : 'a option = invalid_arg "Web.DOM: browser only"
@@ -39,7 +46,7 @@ module HTMLIFrameElement = struct
 end
 
 module MediaQueryList = struct
-  type t = unit
+  type t
 
   let matches (_ : t) : bool = invalid_arg "Web.DOM: browser only"
 end

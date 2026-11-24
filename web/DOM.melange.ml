@@ -5,13 +5,19 @@
    is the last argument, so calls pipe with |>; arguments of the same type have labels. A null
    result is None. DOM.ml is the native side, where every function raises. *)
 
+type _baseClass = Dom._baseClass
+type 'a eventTarget_like = 'a Dom.eventTarget_like
+type 'a _node = 'a Dom._node
 type 'a node_like = 'a Dom.node_like
-type 'a element_like = 'a Dom.element_like
-type 'a document_like = 'a Dom.document_like
 type node = Dom.node
+type 'a _element = 'a Dom._element
+type 'a element_like = 'a Dom.element_like
 type element = Dom.element
+type 'a _document = 'a Dom._document
+type 'a document_like = 'a Dom.document_like
 type document = Dom.document
 type window = Dom.window
+type 'a event_like = 'a Dom.event_like
 type event = Dom.event
 
 external window : window = "window"
