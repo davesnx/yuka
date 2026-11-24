@@ -56,8 +56,6 @@ external parent_element : node -> node option = "parentElement"
 external closest : node -> string -> node Js.null = "closest" [@@mel.send]
 external query_selector : node -> string -> node option = "querySelector"
 [@@mel.send] [@@mel.return nullable]
-external get_element_by_id : node -> string -> node option = "getElementById"
-[@@mel.send] [@@mel.return nullable]
 external get_attribute_null : node -> string -> string Js.null = "getAttribute" [@@mel.send]
 external has_attribute : node -> string -> bool = "hasAttribute" [@@mel.send]
 external dispatch : node -> event -> unit = "dispatchEvent" [@@mel.send]
@@ -193,10 +191,10 @@ external confirm : string -> bool = "confirm" [@@mel.scope "window"]
 external focus_node : node -> unit = "focus" [@@mel.send]
 external scroll_into_view_node : node -> unit = "scrollIntoView" [@@mel.send]
 
-let focus id = match get_element_by_id global_document id with Some el -> focus_node el | None -> ()
+let focus id = match Web.DOM.Document.getElementById id Web.DOM.document with Some el -> focus_node el | None -> ()
 
 let scroll_into_view id =
-  match get_element_by_id global_document id with Some el -> scroll_into_view_node el | None -> ()
+  match Web.DOM.Document.getElementById id Web.DOM.document with Some el -> scroll_into_view_node el | None -> ()
 
 
 

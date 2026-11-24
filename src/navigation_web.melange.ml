@@ -59,7 +59,6 @@ external active_element : node Js.null = "activeElement" [@@mel.scope "document"
 external location_href : string = "href" [@@mel.scope "window", "location"]
 external location_origin : string = "origin" [@@mel.scope "window", "location"]
 external query_selector : node -> string -> node Js.null = "querySelector" [@@mel.send]
-external get_element_by_id : node -> string -> node Js.null = "getElementById" [@@mel.send]
 external get_attribute_null : node -> string -> string Js.null = "getAttribute" [@@mel.send]
 external has_attribute : node -> string -> bool = "hasAttribute" [@@mel.send]
 external parent_node_null : node -> node Js.null = "parentNode" [@@mel.get]
@@ -120,7 +119,7 @@ let decoded_id hash =
 
 let scroll_to_hash hash =
   let id = decoded_id hash in
-  match Js.Null.toOption (if id <> "" then get_element_by_id global_document id else Js.null) with
+  match if id <> "" then Web.DOM.Document.getElementById id Web.DOM.document else None with
   | Some el -> scroll_into_view el
   | None -> scroll_to 0.
 
@@ -755,7 +754,7 @@ let settle root hash say =
     if
       not
         (focus_on (query_selector root "[autofocus]")
-        || focus_on (if id <> "" then get_element_by_id global_document id else Js.null)
+        || focus_on (if id <> "" then Js.Null.fromOption (Web.DOM.Document.getElementById id Web.DOM.document) else Js.null)
         || focus_on h
         || focus_on (Js.Null.return root))
     then
@@ -786,7 +785,7 @@ let hold_focus () =
           if is_connected a then Js.Null.return a
           else
             let id = element_id a in
-            if id <> "" then get_element_by_id global_document id
+            if id <> "" then Js.Null.fromOption (Web.DOM.Document.getElementById id Web.DOM.document)
             else
               let t = ref document_body_null in
               for j = 0 to Array.length p - 1 do

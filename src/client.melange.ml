@@ -26,9 +26,8 @@ external find : 'a Host.table -> string -> 'a Js.undefined = "get" [@@mel.send]
 external defined : 'a Js.undefined -> 'a = "%identity"
 
 external present : Host.node -> Obj.t option = "%identity"
-external by_id : string -> Host.node Js.nullable = "getElementById" [@@mel.scope "document"]
 
-let container id = Js.Nullable.toOption (by_id id)
+let container id = Web.DOM.Document.getElementById id Web.DOM.document
 
 let uncurry2 : ('a -> 'b -> 'c) -> ('a -> 'b -> 'c [@u]) = Obj.magic
 
