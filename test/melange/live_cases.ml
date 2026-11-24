@@ -521,6 +521,32 @@ let expired_token finish =
           stop ();
           uninstall ()))
 
+let socket_url : int -> string = [%mel.raw "function (i) { return globalThis.__ws[i].url }"]
+
+let set_base : string -> unit =
+  [%mel.raw
+    {|function (b) {
+  delete document.__yukaBase;
+  document.querySelectorAll('meta[name="yuka-base"]').forEach(function (m) { m.remove() });
+  if (b) { const m = document.createElement("meta"); m.name = "yuka-base"; m.content = b; document.head.appendChild(m) }
+}|}]
+
+let under_base finish =
+  fresh ();
+  set_base "/app";
+  let a, stop = use "a" in
+  let url = socket_url 0 in
+  ws_open 0;
+  ws_close 0 4403;
+  let fetches = fetched () in
+  set_base "";
+  ignore (show a);
+  finish (fun () ->
+      check "socket under the base" "ws://localhost/app/_yuka/live" url;
+      check "token under the base" "/app/_yuka/csrf" fetches;
+      stop ();
+      uninstall ())
+
 let second_forbidden finish =
   fresh ();
   let a, stop = use "a" in
@@ -583,4 +609,5 @@ let async =
     ("live: the sync of an optimistic change carries the mark of the action answer", optimistic_sync_carries_mark);
     ("live: an expired token is renewed once through /_yuka/csrf", expired_token);
     ("live: a second 4403 gives up until a new use brings a fresh token", second_forbidden);
+    ("live: the socket and the token URL are under the base", under_base);
   ]

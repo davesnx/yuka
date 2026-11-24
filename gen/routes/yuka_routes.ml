@@ -666,8 +666,9 @@ let search_pairs f =
         f.fname
 
 let href nodes =
-  "let href = function"
-    :: List.concat_map
+  [ "let href ="; "  let path = function" ]
+  @ indent 2
+      (List.concat_map
          (fun (name, segs, search) ->
            let head =
              match fields segs search with
@@ -692,7 +693,8 @@ let href nodes =
                indent 2
                  ((sprintf "| %s ->" head :: indent 4 [ "Yuka.Router.with_query " ^ path ])
                  @ indent 6 pairs))
-         (named nodes)
+            (named nodes))
+  @ [ "  in"; "  fun route -> Yuka.Router.url (path route)" ]
 
 let helpers nodes =
   List.concat_map

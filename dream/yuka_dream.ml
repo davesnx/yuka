@@ -189,7 +189,7 @@ let write_pages ~out config app =
     match Queue.take_opt queue with
     | None -> Lwt.return_unit
     | Some path -> (
-        let* response = to_lwt (Fresh.handler config app (Dream.request ~method_:`GET ~target:path "")) in
+        let* response = to_lwt (Fresh.handler config app (Dream.request ~method_:`GET ~target:(Yuka.Server.Prerender.target config path) "")) in
         let status = Dream.status_to_int (Dream.status response) in
         let* body = Dream.body response in
         let ok = status >= 200 && status < 300 in
@@ -199,9 +199,10 @@ let write_pages ~out config app =
             if is_html response then
               List.iter
                 (fun link ->
-                  if (not (Hashtbl.mem seen link))
-                     && Yuka.Server.Prerender.prerenderable config app link
-                  then add link)
+                  match Yuka.Server.Prerender.path config link with
+                  | Some link when (not (Hashtbl.mem seen link)) && Yuka.Server.Prerender.prerenderable config app link ->
+                      add link
+                  | _ -> ())
                 (Yuka.Server.Prerender.links body);
             visit ()
         | None when ok ->

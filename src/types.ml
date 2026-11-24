@@ -142,6 +142,7 @@ type backend = ..
     log : log_level -> string -> unit;
     live : string -> Json.t -> (Json.t * (string * int) option, Status_error.t) result Async.t;
     backend : backend option;
+    base : string;
   }
 
   type session = {
@@ -292,6 +293,7 @@ let async_error ?session id message = shown ?session ("async value " ^ id) messa
 type Scheduler.binding += Coded of { name : string; json : unit -> Json.t; inner : Scheduler.binding }
 
 let route_name = "yuka.route"
+let config_base = ref ""
 let state_target : ((Json.t -> unit) -> unit) ref = ref ignore
 
 let async_source : (string -> Json.t Async.t) ref =

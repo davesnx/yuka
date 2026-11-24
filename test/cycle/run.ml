@@ -2374,6 +2374,187 @@ let request_api =
           [ ("content-type", "text/plain; charset=utf-8"); ("x-a", "1") ] r.headers );
   ]
 
+let based =
+  let base = "/demo/lux" in
+  let based = config_with ~base ~assets:modules ~public:[ ("/static", "pub") ] () in
+  let get_based ?meth ?headers ?body target = get ~config:based ?meth ?headers ?body target in
+  let typed config target =
+    let r = request target in
+    App.typed_links := true;
+    match Async.status (call ~config r) with Async.Done v -> v | _ -> Alcotest.failf "%s not done" target
+  in
+  let same_origin = [ ("sec-fetch-site", "same-origin") ] in
+  [
+    ( "a base must be a clean path prefix",
+      fun () ->
+        List.iter (fun b -> ignore (config_with ~base:b ())) [ ""; "/a"; "/demo/lux"; "/a-b_c.d~e/%41" ];
+        List.iter
+          (fun b ->
+            match config_with ~base:b () with
+            | _ -> Alcotest.failf "base %S accepted" b
+            | exception Invalid_argument m ->
+                check_true m (String.starts_with ~prefix:"Yuka.Server.config: base " m && contains m (Printf.sprintf "%S" b)))
+          [ "a"; "/"; "/a/"; "//a"; "/a//b"; "/a?b"; "/a#b"; "/a/../b"; "/.."; "/a/."; "/%2e%2E"; "/a%2Fb"; "/a b"; "/a<b"; "/a\\b"; "/a\"b";
+            "/a(b)"; "/a*"; "/a+"; "/a:b"; "/a{b}" ] );
+    ( "a request outside the base is the not-found page",
+      fun () ->
+        List.iter
+          (fun target ->
+            let r = get_based target in
+            check_status r 404;
+            check_true (target ^ " is the not-found page") (contains r.body "<!DOCTYPE html>");
+            check_events [];
+            Alcotest.(check (list string)) (target ^ " asks no file") [] !file_calls)
+          [ "/"; "/plain"; "/demo"; "/demo/luxe"; "/demo/luxe/plain"; "/_yuka/app/app/main.js"; "/static/s.css"; "/_yuka/csrf"; "/demo/plain" ] );
+    ( "pages, redirects and the trailing slash under the base",
+      fun () ->
+        let r = get_based "/demo/lux" in
+        check_status r 200;
+        check_true "home" (contains r.body "home");
+        check_true "meta" (contains r.body {|<meta name="yuka-base" content="/demo/lux">|});
+        check_status (get_based "/demo/lux?x=1") 200;
+        check_true "plain" (contains (get_based "/demo/lux/plain").body "<p>plain</p>");
+        List.iter
+          (fun (target, status, location) ->
+            let r = get_based target in
+            check_status r status;
+            check_header r "location" [ location ])
+          [
+            ("/demo/lux/", 308, "/demo/lux");
+            ("/demo/lux/?q=1", 308, "/demo/lux?q=1");
+            ("/demo/lux/plain/", 308, "/demo/lux/plain");
+            ("/demo/lux/old", 308, "/demo/lux");
+            ("/demo/lux/tmp/x?y=1", 307, "/demo/lux/team/x/json?y=1");
+          ];
+        check_true "no meta without a base" (not (contains (get "/plain").body "yuka-base")) );
+    ( "client files, public files and the import map under the base",
+      fun () ->
+        let r = get_based "/demo/lux/_yuka/app/app/main.js" in
+        check_status r 200;
+        Alcotest.(check string) "body" "main" r.body;
+        Alcotest.(check (list string)) "file" [ "js/app/main.js" ] !file_calls;
+        Alcotest.(check string) "public" "css" (get_based "/demo/lux/static/s.css").body;
+        let r = get_based "/demo/lux/islands" in
+        check_true "entry" (contains r.body {|<script type="module" async src="/demo/lux/_yuka/app/app/main.js"></script>|});
+        check_true "preload" (contains r.body {|<link rel="modulepreload" href="/demo/lux/_yuka/app/app/counter.js">|});
+        check_true "import map" (contains r.body {|"pkg/":"/demo/lux/_yuka/app/node_modules/pkg/"|}) );
+    ( "action, CSRF and live endpoints under the base",
+      fun () ->
+        let r =
+          get_based ~meth:`POST
+            ~headers:
+              [ ("content-type", "application/json"); ("origin", "http://app.example"); ("host", "app.example"); ("x-user", "ana") ]
+            ~body:"null" "/demo/lux/_yuka/action/whoami"
+        in
+        check_status r 200;
+        Alcotest.(check string) "the action sees the path without the base"
+          {|{"ok":"ana cycle-session POST /_yuka/action/whoami"}|} r.body;
+        let r = get_based ~headers:same_origin "/demo/lux/_yuka/csrf" in
+        check_status r 200;
+        check_true "token" (contains r.body "cycle-token");
+        let r = get_based ~headers:(("upgrade", "websocket") :: same_origin) "/demo/lux/_yuka/live" in
+        check_status r 101 );
+    ( "typed links, Router.url, css links and aria-current have the base",
+      fun () ->
+        let css = config_with ~base ~css:[ ("a-1234.css", ".a{}") ] () in
+        ignore (config_with ~base:"/other" ());
+        let r = typed css "/demo/lux" in
+        check_true "home link is current" (contains r.body {|<a href="/demo/lux" aria-current="page">typed home</a>|});
+        check_true "member link" (contains r.body {|<a href="/demo/lux/team/a/1">typed member</a>|});
+        check_true "url" (contains r.body {|src="/demo/lux/static/s.png"|});
+        check_true "css link" (contains r.body {|<link rel="stylesheet" href="/demo/lux/_yuka/css/a-1234.css" data-yuka-css>|});
+        Alcotest.(check string) "the css file is under the base" ".a{}" (get ~config:css "/demo/lux/_yuka/css/a-1234.css").body;
+        let r = typed (config_with ~css:[ ("a-1234.css", ".a{}") ] ()) "/" in
+        check_true "no base: home" (contains r.body {|<a href="/" aria-current="page">typed home</a>|});
+        check_true "no base: member" (contains r.body {|<a href="/team/a/1">typed member</a>|});
+        check_true "no base: url" (contains r.body {|src="/static/s.png"|});
+        check_true "no base: css" (contains r.body {|href="/_yuka/css/a-1234.css"|}) );
+    ( "outside a render, Router.url uses the base of the last config, before any request",
+      fun () ->
+        ignore (config_with ~base:"/made" ());
+        Alcotest.(check string) "a config with a base" "/made/x" (Yuka.Router.url "/x");
+        ignore (get_based "/demo/lux/plain");
+        Alcotest.(check string) "a request of another config does not change it" "/made/x" (Yuka.Router.url "/x");
+        ignore (config_with ());
+        Alcotest.(check string) "a config without a base" "/x" (Yuka.Router.url "/x") );
+    ( "the dev script of Private takes the base",
+      fun () ->
+        check_true "base" (contains (Yuka.Private.dev_script ~base "{}") {|new EventSource("/demo/lux/_yuka/dev")|});
+        check_true "no base" (contains (Yuka.Private.dev_script "{}") {|new EventSource("/_yuka/dev")|}) );
+    ( "a trailing-slash 308 never gives a protocol-relative location",
+      fun () ->
+        List.iter
+          (fun (config, target, location) ->
+            let r = get ~config target in
+            check_status r 308;
+            check_header r "location" [ location ])
+          [
+            (config, "//evil.com/", "/evil.com");
+            (config, "//evil.com", "/evil.com");
+            (config, "///evil.com//x/", "/evil.com/x");
+            (based, "/demo/lux//evil.com/", "/demo/lux/evil.com");
+            (based, "/demo/lux//evil.com", "/demo/lux/evil.com");
+            (based, "/demo/lux//", "/demo/lux");
+          ] );
+    ( "Router.url forms",
+      fun () ->
+        ignore (config_with ~base ());
+        List.iter
+          (fun (path, expected) -> Alcotest.(check string) path expected (Yuka.Router.url path))
+          [
+            ("/", "/demo/lux"); ("/a", "/demo/lux/a"); ("/?q=1", "/demo/lux?q=1"); ("/#top", "/demo/lux#top");
+            ("", ""); ("a", "a"); ("//host/a", "//host/a"); ("https://x.example/a", "https://x.example/a");
+          ] );
+    ( "the route of the page has the base and Routes.current reads through it",
+      fun () ->
+        let seen = ref None in
+        let r = request "/demo/lux?x=1" in
+        App.in_home := (fun () -> seen := Some (Yuka.State.peek (Cycle_shared.Routes.current ())));
+        ignore (call ~config:based r);
+        match !seen with
+        | Some (Some Cycle_shared.Routes.Home) -> ()
+        | Some _ -> Alcotest.fail "another route"
+        | None -> Alcotest.fail "home did not render" );
+    ( "dev reload and speculation rules under the base",
+      fun () ->
+        let dev = config_with ~base ~dev:true () in
+        check_true "dev script" (contains (get ~config:dev "/demo/lux/plain").body {|new EventSource("/demo/lux/_yuka/dev")|});
+        let r = get ~config:dev ~meth:`HEAD "/demo/lux/_yuka/dev" in
+        check_status r 200;
+        check_header r "content-type" [ "text/event-stream" ];
+        check_true "rules" (contains (get_based "/demo/lux/plain").body {|{"href_matches":"/demo/lux{/*}?"}|});
+        check_true "no base: rules" (contains (get "/plain").body {|{"href_matches":"/*"}|}) );
+    ( "a form without a redirect goes back under the base",
+      fun () ->
+        let r =
+          get_based ~meth:`POST
+            ~headers:[ ("content-type", "application/x-www-form-urlencoded"); ("origin", "http://app.example"); ("host", "app.example") ]
+            ~body:"_yuka_action=jot&body=hi" "/demo/lux/entry?x=1"
+        in
+        check_status r 303;
+        check_header r "location" [ "/demo/lux/entry?x=1" ] );
+    ( "a handler sees the path without the base",
+      fun () ->
+        App.last_request := None;
+        check_status (get_based ~meth:`POST "/demo/lux/hook") 200;
+        match !App.last_request with
+        | None -> Alcotest.fail "the handler did not run"
+        | Some req ->
+            Alcotest.(check string) "path" "/hook" (Server.Request.path req);
+            Alcotest.(check string) "target" "/hook" (Server.Request.target req);
+            Alcotest.(check (option string)) "the adapter request" (Some "/demo/lux/hook")
+              (Option.map (fun (r : Test_adapter.request) -> r.target) (Cycle.backend_request req)) );
+    ( "prerender targets and paths under the base",
+      fun () ->
+        Alcotest.(check string) "target" "/demo/lux/plain" (Server.Prerender.target based "/plain");
+        Alcotest.(check string) "root" "/demo/lux" (Server.Prerender.target based "/");
+        List.iter
+          (fun (link, expected) -> Alcotest.(check (option string)) link expected (Server.Prerender.path based link))
+          [ ("/demo/lux/plain", Some "/plain"); ("/demo/lux", Some "/"); ("/demo/luxe", None); ("/plain", None) ];
+        Alcotest.(check (option string)) "no base" (Some "/plain") (Server.Prerender.path config "/plain");
+        Alcotest.(check string) "no base target" "/plain" (Server.Prerender.target config "/plain") );
+  ]
+
 let cases tests = List.map (fun (name, f) -> Alcotest.test_case name `Quick f) tests
 
 let () =
@@ -2397,4 +2578,5 @@ let () =
       ("speculation", cases speculation);
       ("layout values", cases layout_values);
       ("request api", cases request_api);
+      ("base", cases based);
     ]

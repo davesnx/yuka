@@ -37,6 +37,10 @@ val prerender :
       is rendered once.
     - It writes [404.html] ([Yuka.Server.Prerender.missing_page]) and
       copies [Yuka.Server.Prerender.served_dirs] under their prefixes.
+    - With a [base] in the config, it requests each path under the base
+      ([Yuka.Server.Prerender.target]) and follows only links under it
+      ([Yuka.Server.Prerender.path]); file names do not have the base, so
+      [out] is the site to serve at the base.
 
     It renders with [Yuka.Server.Prerender.config]: dev mode is off, and a
     page that renders a [Yuka.Live.make] is a 500 with a log message, so it is

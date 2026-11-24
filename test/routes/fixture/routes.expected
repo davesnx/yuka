@@ -14,41 +14,44 @@ type t =
   | Clear_feed
   | Missing
 
-let href = function
-  | Home -> "/"
-  | Blog { lang; tag; page; label; draft } ->
-      Yuka.Router.with_query "/blog"
-        (Stdlib.List.concat
-           [
-             (match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []);
-             (match tag with Some v -> [ ("tag", Yuka.Router.encode v) ] | None -> []);
-             (if Stdlib.( = ) page (1) then [] else [ ("page", Stdlib.string_of_int page) ]);
-             Stdlib.List.map (fun v -> ("label", Yuka.Router.encode v)) label;
-             (if Stdlib.( = ) draft (false) then [] else [ ("draft", Stdlib.string_of_bool draft) ]);
-           ])
-  | Post { slug; lang } ->
-      Yuka.Router.with_query (Stdlib.( ^ ) "/blog/" (Yuka.Router.segment slug))
-        ((match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []))
-  | New_post { lang } ->
-      Yuka.Router.with_query "/blog/new"
-        ((match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []))
-  | Issue { id; tab; seen; view } ->
-      Yuka.Router.with_query (Stdlib.( ^ ) "/issue/" (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)))
-        (Stdlib.List.concat
-           [
-             (match tab with Some v -> [ ("tab", Yuka.Router.encode (Yuka.Router.Param.encode Params.Tab.param v)) ] | None -> []);
-             Stdlib.List.map (fun v -> ("seen", Stdlib.string_of_int v)) seen;
-             (if Stdlib.( = ) (Yuka.Router.Param.encode Params.Tab.param view) (Yuka.Router.Param.encode Params.Tab.param (Params.Tab.Overview)) then [] else [ ("view", Yuka.Router.encode (Yuka.Router.Param.encode Params.Tab.param view)) ]);
-           ])
-  | Close_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/close")
-  | Issue_json { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/json")
-  | Update_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/json")
-  | Page_n { n } -> Stdlib.( ^ ) "/page/" (Stdlib.string_of_int n)
-  | Cafe -> "/caf%C3%A9"
-  | Doc { parts } -> Stdlib.( ^ ) "/docs" (Yuka.Router.segments parts)
-  | Feed -> "/feed.xml"
-  | Clear_feed -> "/feed.xml"
-  | Missing -> "/missing"
+let href =
+  let path = function
+    | Home -> "/"
+    | Blog { lang; tag; page; label; draft } ->
+        Yuka.Router.with_query "/blog"
+          (Stdlib.List.concat
+             [
+               (match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []);
+               (match tag with Some v -> [ ("tag", Yuka.Router.encode v) ] | None -> []);
+               (if Stdlib.( = ) page (1) then [] else [ ("page", Stdlib.string_of_int page) ]);
+               Stdlib.List.map (fun v -> ("label", Yuka.Router.encode v)) label;
+               (if Stdlib.( = ) draft (false) then [] else [ ("draft", Stdlib.string_of_bool draft) ]);
+             ])
+    | Post { slug; lang } ->
+        Yuka.Router.with_query (Stdlib.( ^ ) "/blog/" (Yuka.Router.segment slug))
+          ((match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []))
+    | New_post { lang } ->
+        Yuka.Router.with_query "/blog/new"
+          ((match lang with Some v -> [ ("lang", Yuka.Router.encode v) ] | None -> []))
+    | Issue { id; tab; seen; view } ->
+        Yuka.Router.with_query (Stdlib.( ^ ) "/issue/" (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)))
+          (Stdlib.List.concat
+             [
+               (match tab with Some v -> [ ("tab", Yuka.Router.encode (Yuka.Router.Param.encode Params.Tab.param v)) ] | None -> []);
+               Stdlib.List.map (fun v -> ("seen", Stdlib.string_of_int v)) seen;
+               (if Stdlib.( = ) (Yuka.Router.Param.encode Params.Tab.param view) (Yuka.Router.Param.encode Params.Tab.param (Params.Tab.Overview)) then [] else [ ("view", Yuka.Router.encode (Yuka.Router.Param.encode Params.Tab.param view)) ]);
+             ])
+    | Close_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/close")
+    | Issue_json { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/json")
+    | Update_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/json")
+    | Page_n { n } -> Stdlib.( ^ ) "/page/" (Stdlib.string_of_int n)
+    | Cafe -> "/caf%C3%A9"
+    | Doc { parts } -> Stdlib.( ^ ) "/docs" (Yuka.Router.segments parts)
+    | Feed -> "/feed.xml"
+    | Clear_feed -> "/feed.xml"
+    | Missing -> "/missing"
+  in
+  fun route -> Yuka.Router.url (path route)
 
 let home ?fragment () = Yuka.Router.with_fragment (href Home) fragment
 

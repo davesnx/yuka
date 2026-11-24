@@ -7,7 +7,7 @@ cd "$root" || exit 2
 opam exec ${SWITCH:+--switch=$SWITCH} -- dune build --root . --build-dir "$build" @demo/all || { echo "build failed"; exit 2; }
 [ -n "${YUKA_DEMO_DATABASE:-}" ] || echo "YUKA_DEMO_DATABASE is not set: each server keeps its own data in memory, and the checks fail"
 second=$((port + 1))
-server="$root/$build/default/demo/server/demo_server.exe"
+server="$root/$build/default/demo/mini-linear/server/demo_server.exe"
 log="${TMPDIR:-/tmp}/yuka_e2e_shared_$port"
 "$server" --port "$port" >"$log.first.log" 2>&1 &
 first_pid=$!

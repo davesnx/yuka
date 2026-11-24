@@ -129,7 +129,7 @@ async function get(url: string): Promise<Response> {
 }
 
 async function pageScripts(paths: string[]): Promise<Map<string, string[]>> {
-  const exe = join(buildDir, "default/demo/server/demo_server.exe");
+  const exe = join(buildDir, "default/demo/mini-linear/server/demo_server.exe");
   if (!existsSync(exe)) throw new Error(`size: ${exe} does not exist; build it with: dune build @demo/all`);
   const port = await freePort();
   const nonce = randomBytes(16).toString("hex");
@@ -182,7 +182,7 @@ async function pageScripts(paths: string[]): Promise<Map<string, string[]>> {
         urls.map((u) => {
           const pathname = new URL(u, base).pathname;
           if (!pathname.startsWith("/_yuka/app/")) throw new Error(`size: ${path} loads ${u}, outside /_yuka/app/`);
-          return join(buildDir, "default/demo/client/out", pathname.slice("/_yuka/app/".length));
+          return join(buildDir, "default/demo/mini-linear/client/out", pathname.slice("/_yuka/app/".length));
         }),
       );
     }
@@ -201,7 +201,7 @@ const keyed = await bundle(
   join(outDir, "keyed"),
   false,
 );
-const demoMain = join(buildDir, "default/demo/client/out/demo/client/main.js");
+const demoMain = join(buildDir, "default/demo/mini-linear/client/out/demo/mini-linear/client/main.js");
 const demo = await bundle(demoMain, join(outDir, "demo"), true);
 const fixtures = [
   { dir: "page", island: "counter", title: "page: counter island" },

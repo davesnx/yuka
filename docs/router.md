@@ -270,6 +270,52 @@ Routes.find `GET [ "hello"; "Yuka" ] []        (* Found (Hello { name = "Yuka" }
 `find` gives `Found`, `Wrong_method`, `Redirect` or `Missing`, all in
 `Yuka.Router`.
 
+## Base path
+
+An app can be served under a path prefix, for example behind a proxy
+that sends `/demo/lux/...` to it with the prefix unchanged. Give the
+prefix to the server config:
+
+```ocaml
+Yuka.Server.config ~base:"/demo/lux" ~assets ()
+```
+
+The base starts with `/` and has no trailing `/`, and no empty, `.` or
+`..` segment. It holds only `A-Z a-z 0-9 - . _ ~ % ! $ & ' , ; = @`;
+another value raises `Invalid_argument`. Without
+`~base` (or with `""`), the app is at the root of its origin.
+
+With a base:
+
+- `Routes.ml` does not change: routes, redirects and `public` prefixes
+  are paths of the app. The server removes the base from each request
+  before it matches, so `Yuka.Server.Request.path` is `/issue/1` for a
+  request of `/demo/lux/issue/1`. A request that is not under the base
+  gets the not-found page, and `/demo/lux/` is a 308 to `/demo/lux`.
+- Links have the base: `Routes.issue ~id:"1" ()` is
+  `"/demo/lux/issue/1"` and `Routes.home ()` is `"/demo/lux"`.
+  `Routes.find` and `Routes.current` read paths without it.
+- For a path that the app writes by hand, call `Yuka.Router.url`:
+  `Yuka.Router.url "/static/logo.svg"` is `"/demo/lux/static/logo.svg"`.
+  The server config strings (`~styles`, `~head`) and the locations of
+  guards, loaders, `?redirect` and `Server.see_other` are used as
+  written; use typed links or `Yuka.Router.url` there.
+- The client script, the import map, preloads, `[%yuka.css]` sheets, the
+  action, CSRF and live socket URLs and the dev reload script are under
+  the base. Each page has `<meta name="yuka-base" content="/demo/lux">`;
+  the browser reads it, so one build serves any base. Client navigation
+  and prefetch take only URLs under the base; another link, GET form,
+  `Browser.navigate` or redirect is a full page load, and
+  `Browser.prefetch` of it does nothing.
+- A prerender (`Yuka_dream.prerender`) requests each page under the base
+  and writes files without it: serve the output directory at the base.
+
+On the server, `Yuka.Router.url` uses the base of the request that it
+renders; in a loader, guard, handler or module it uses the base of the
+last config that `Yuka.Server.config` made, so one process serves one
+base. A link made at module initialization, before the config, has no
+base: make links in functions, as `let home () = Routes.home ()`.
+
 ## Navigation in the browser
 
 On a page with an island, `Yuka.render ~islands ()` makes a click on a
@@ -784,7 +830,8 @@ user may never click: they must have no side effects.
 
 - After `Routes.push`, Back and Forward set the route only when client
   navigation is on (`Yuka.render ~islands ()` without `~navigation:false`).
-- There is no base path: the app is served at the root of its origin.
+- Cookies are not under the base: `Yuka.Browser.set_cookie` defaults to
+  the path `/`, and the session cookie of the adapter is its own.
 - An editor does not check `Routes.ml`. `yuka routes` reports each error
   with its location:
 

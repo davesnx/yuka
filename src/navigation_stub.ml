@@ -119,9 +119,13 @@ let go ?link kind url f fail =
 let blocks : (string -> bool) list ref = ref []
 let hold = Web.prevent_default
 
+let inside url = Option.is_some (Site.strip (Web.base ()) url)
+
 let navigate ?link ~replace ~keep_scroll href =
   let url = Web.local_url href in
-  if not (List.exists (fun check -> check url) !blocks) then
+  if List.exists (fun check -> check url) !blocks then ()
+  else if not (inside url) then Web.navigate replace href
+  else
     go ?link
       (if replace || String.equal url (Web.current_url ()) then `Replace else `Push)
       url
@@ -131,7 +135,7 @@ let navigate ?link ~replace ~keep_scroll href =
 let refresh () = go `Reload (Web.current_url ()) (fun r -> r.refresh ()) Platform.reload
 
 let prefetch url =
-  if !on && Web.same_origin url
+  if !on && Web.same_origin url && inside (Web.local_url url)
      && Array.length (Web.query_all (Web.document ()) "meta[name=yuka-prefetch][content=off]") = 0
   then use (fun r -> r.prefetch url)
 

@@ -74,6 +74,38 @@ let pages () =
       Alcotest.(check bool) path expected (Yuka.Server.Prerender.prerenderable config Yuka_routes.app path))
     [ ("/guide", true); ("/static/s.css", false); ("/_yuka/app/main.js", false); ("/_yuka", false) ]
 
+let based () =
+  let out = Filename.temp_dir "yuka_out" "" in
+  let config = Yuka.Server.config ~base:"/demo/x" ~public:[ ("/static", static) ] ~css:[ ("w-0a1b.css", ".w_0a1b{}") ] () in
+  let warnings =
+    with_stderr (fun () ->
+        match Lwt_main.run (Yuka_dream.prerender ~out config Yuka_routes.app) with
+        | Ok () -> ()
+        | Error m -> Alcotest.fail m)
+  in
+  let written = files out "" in
+  Alcotest.(check (list string))
+    "files have no base"
+    [
+      "404.html";
+      "_yuka/css/w-0a1b.css";
+      "docs/index.html";
+      "feed.xml";
+      "guide/index.html";
+      "index.html";
+      "post/hello/index.html";
+      "post/world/index.html";
+      "static/s.css";
+      "whoami.txt";
+    ]
+    (List.map fst written);
+  let file name = List.assoc name written in
+  check_true "links have the base" (contains (file "index.html") {|<a href="/demo/x/post/hello">|});
+  check_true "crawled from a crawled page" (contains (file "post/world/index.html") "post world");
+  Alcotest.(check string) "requested under the base" "/demo/x/whoami.txt -" (file "whoami.txt");
+  check_true "404 page" (contains (file "404.html") "missing /404.html");
+  check_true "warning names the path of the app" (contains warnings "/post/missing answered 404")
+
 let twice () =
   let out = Filename.temp_dir "yuka_out" "" in
   ignore (with_stderr (fun () -> prerender out));
@@ -279,6 +311,7 @@ let () =
         [
           Alcotest.test_case "seeds, crawled links, 404.html, assets" `Quick pages;
           Alcotest.test_case "twice gives the same files" `Quick twice;
+          Alcotest.test_case "under a base: requests and links have it, file names do not" `Quick based;
           Alcotest.test_case "the handler serves prerendered files" `Quick serve;
           Alcotest.test_case "YUKA_DEV=1 does not turn on dev mode" `Quick dev_env_ignored;
           Alcotest.test_case "a prerender with ~dev:true writes no dev script" `Quick prerender_dev_off;

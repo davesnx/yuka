@@ -163,6 +163,36 @@ let action_case ~mode ~status ~body expected_status expected_call =
               {|["/_yuka/action/create%20issue","POST","application/json","\"hi\"",1]|}
               (calls ())))
 
+let set_base : string -> unit =
+  [%mel.raw
+    {|function (b) {
+  delete document.__yukaBase;
+  document.querySelectorAll('meta[name="yuka-base"]').forEach(function (m) { m.remove() });
+  if (b) { const m = document.createElement("meta"); m.name = "yuka-base"; m.content = b; document.head.appendChild(m) }
+}|}]
+
+let move_base : string -> unit =
+  [%mel.raw {|function (b) { document.querySelector('meta[name="yuka-base"]').content = b }|}]
+
+let action_under_base finish =
+  reset_body ();
+  start_islands [];
+  install_fetch "ok" 200 {|{"ok":42}|};
+  set_base "/app";
+  let urls = (Router.url "/x", Router.url "/") in
+  move_base "/moved";
+  let kept = Router.url "/x" in
+  Async.on_settled (Action.call action "hi") (fun st ->
+      set_base "";
+      finish (fun () ->
+          check "Router.url" "/app/x /app" (fst urls ^ " " ^ snd urls);
+          check "the base is read once per document" "/app/x" kept;
+          check "Router.url without a base" "/x" (Router.url "/x");
+          check "result" "done 42" (status_text st);
+          check "request"
+            {|["/app/_yuka/action/create%20issue","POST","application/json","\"hi\"",1]|}
+            (calls ())))
+
 let action_contains ~mode ~status ~body part =
  fun finish ->
   reset_body ();
@@ -1120,6 +1150,7 @@ let async =
 
     ( "action ok",
       action_case ~mode:"ok" ~status:200 ~body:{|{"ok":42}|} "done 42" true );
+    ("action and Router.url under a base", action_under_base);
     ( "action rejected in a 400",
       action_case ~mode:"ok" ~status:400 ~body:{|{"error":"title is empty"}|} "error title is empty" false );
     ( "action origin check in a 403",

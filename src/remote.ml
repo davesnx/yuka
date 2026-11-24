@@ -13,7 +13,7 @@ let no_retry = { attempts = 0; delay_ms = (fun _ -> 0) }
 
 let fetch name input k =
   Web.fetch_post
-    ("/_yuka/action/" ^ Web.encode_uri name)
+    (Web.base () ^ "/_yuka/action/" ^ Web.encode_uri name)
     (Json.to_string input)
     (fun status body -> k (Bridge.of_response status (Bridge.fields body)))
     (fun cancelled message -> if not cancelled then k (Error (Status.Network message)))

@@ -114,7 +114,7 @@ module Header = struct
           <span class_="topbar-label">"GitHub"</span>
         </a>
         <a class_="topbar-link" href="https://x.com/davesnx" target=`_blank rel="noopener">
-          <img class_="profile-avatar" src="/static/davesnx.jpg" alt="" width="22" height="22" />
+          <img class_="profile-avatar" src=(Yuka.Router.url "/static/davesnx.jpg") alt="" width="22" height="22" />
           <span>"@davesnx"</span>
         </a>
       </div>

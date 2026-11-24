@@ -49,6 +49,7 @@ type stylesheet = string
 let stylesheet href = href
 
 let use_css href body =
+  let href = Site.url href in
   if !(Base.server_rendering ()) then
     Kind.of_node
       (Fragment

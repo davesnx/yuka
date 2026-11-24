@@ -99,7 +99,7 @@ let swappable a =
   let shown = (a.status >= 200 && a.status < 300) || a.status >= 400 in
   match outlet a.header with
   | Some None -> None
-  | _ when stale || (not shown) || not (Option.is_some a.stream || html a.header) -> None
+  | _ when stale || (not shown) || (not (Navigation_stub.inside a.final)) || not (Option.is_some a.stream || html a.header) -> None
   | target -> Some (Option.join target)
 
 let warm a = if Option.is_some (swappable a) then Navigation_web.warm a.final a.text

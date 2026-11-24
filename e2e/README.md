@@ -19,5 +19,13 @@ The server keeps data in memory. Use a fresh server for each run, because the
 check creates an issue and a comment. Each step prints PASS or FAIL. The exit
 code is 1 when any step fails. Screenshots go to `e2e/screenshots/`.
 
-`BUNDLE=1 e2e/run.sh` runs `demo/bundle.sh` and starts the server with
+After `demo.ts`, `run.sh` starts a second server with `--base /mini-linear`
+on port `PORT + 2` and runs `base.ts`: a small proxy on `PORT + 3` forwards
+the paths under the prefix to it unchanged and answers any other path itself.
+It checks the page, a client navigation, an action and a live update across
+two pages, all through the proxy:
+
+    node e2e/base.ts http://127.0.0.1:8125 8126 /mini-linear
+
+`BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh` and starts the server with
 `--bundle`. The check then expects one script and no import map.
