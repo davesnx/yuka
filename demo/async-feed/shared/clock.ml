@@ -1,3 +1,8 @@
+let weekdays = [| "Sunday"; "Monday"; "Tuesday"; "Wednesday"; "Thursday"; "Friday"; "Saturday" |]
+
+let long_months =
+  [| "January"; "February"; "March"; "April"; "May"; "June"; "July"; "August"; "September"; "October"; "November"; "December" |]
+
 let months = [| "Jan"; "Feb"; "Mar"; "Apr"; "May"; "Jun"; "Jul"; "Aug"; "Sep"; "Oct"; "Nov"; "Dec" |]
 
 let civil days =
@@ -32,3 +37,10 @@ let utc_day time =
 let utc_clock time =
   let _, _, _, hour, minute, second = split time in
   Printf.sprintf "%d:%02d:%02d" hour minute second
+
+let utc_key time = String.sub (iso time) 0 10
+
+let utc_weekday time =
+  let _, month, day, _, _, _ = split time in
+  let days = if time >= 0 then time / 86400 else ((time + 1) / 86400) - 1 in
+  Printf.sprintf "%s, %s %d" weekdays.(((days mod 7) + 11) mod 7) long_months.(month - 1) day

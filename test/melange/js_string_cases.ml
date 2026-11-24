@@ -22,9 +22,15 @@ let template_wide_strings () =
     (Cases.shape_html
        Private.Template.(element "p" [ fixed "title" (wide ^ "\"&") ] [ text ("&" ^ wide ^ "<") ]))
 
+let lone_surrogate () =
+  let lone : string = [%mel.raw {|"a\uD800b"|}] in
+  check "encode a lone surrogate" "None"
+    (match Url.encode_uri_component lone with Some s -> s | None -> "None")
+
 let all =
   [
     ("json: UTF-16 strings", json_wide_strings);
     ("codec: error cut in UTF-16 strings", codec_cuts_wide_strings);
     ("template: UTF-16 strings", template_wide_strings);
+    ("url: lone surrogate", lone_surrogate);
   ]

@@ -61,7 +61,9 @@ let exn_to_string : exn -> string =
     }|}]
 
 external encode_uri : string -> string = "encodeURIComponent"
-let decode_uri : string -> string option =
+let encode_uri_component : string -> string option =
+  [%mel.raw "function (s) { try { return encodeURIComponent(s) } catch (e) { return undefined } }"]
+let decode_uri_component : string -> string option =
   [%mel.raw "function (s) { try { return decodeURIComponent(s) } catch (e) { return undefined } }"]
 let encode_cookie_value : string -> string option =
   [%mel.raw

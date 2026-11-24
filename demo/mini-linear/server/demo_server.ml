@@ -73,6 +73,7 @@ let () =
   let base = ref "" in
   let async_feed = ref (Filename.concat here "../../async-feed") in
   let infinite_scroll = ref (Filename.concat here "../../infinite-scroll") in
+  let posters = ref (Filename.concat here "../../posters") in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
   let database =
     ref
@@ -110,6 +111,7 @@ let () =
       ( "--infinite-scroll",
         Arg.Set_string infinite_scroll,
         "With --base: directory of the Infinite scroll demo (client/ and static/), served under /infinite-scroll" );
+      ("--posters", Arg.Set_string posters, "With --base: directory of the Posters demo (client/ and static/), served under /posters");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
         Arg.Set_int second,
@@ -146,6 +148,7 @@ let () =
     if base = "" then []
     else if base = "/async-feed" then stop "--base /async-feed is the path of the Async demo"
     else if base = "/infinite-scroll" then stop "--base /infinite-scroll is the path of the Infinite scroll demo"
+    else if base = "/posters" then stop "--base /posters is the path of the Posters demo"
     else
       let dev = !prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1" in
       let async =
@@ -161,7 +164,12 @@ let () =
         | Ok infinite -> (infinite.config, infinite.handler)
         | Error message -> stop ("the Infinite scroll demo: " ^ message)
       in
-      [ async; infinite ]
+      let posters =
+        match Posters_app.Serve.make ~base:"/posters" ~bundle:!bundle ~dir:!posters ~dev () with
+        | Ok posters -> (posters.config, posters.handler)
+        | Error message -> stop ("the Posters demo: " ^ message)
+      in
+      [ async; infinite; posters ]
   in
   let config =
     match

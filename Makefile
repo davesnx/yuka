@@ -67,15 +67,20 @@ demo-build-watch: ## Build the demo in watch mode
 demo-bundle: demo-build ## Bundle the demo client with esbuild
 	BUILD_DIR=$(BUILD_DIR) demo/mini-linear/bundle.sh
 	BUILD_DIR=$(BUILD_DIR) demo/async-feed/bundle.sh
+	BUILD_DIR=$(BUILD_DIR) demo/posters/bundle.sh
 	BUILD_DIR=$(BUILD_DIR) demo/infinite-scroll/bundle.sh
 
 .PHONY: demo-serve
-demo-serve: demo-build ## Serve the demos on PORT: the list at /, Mini Linear at /mini-linear, Async at /async-feed, Infinite scroll at /infinite-scroll
+demo-serve: demo-build ## Serve the demos on PORT: the list at /, Mini Linear at /mini-linear, Async at /async-feed, Posters at /posters, Infinite scroll at /infinite-scroll
 	$(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: async-feed-serve
 async-feed-serve: demo-build ## Serve the Async demo alone, at the root, on PORT
 	$(BUILD_DIR)/default/demo/async-feed/server/async_server.exe --port $(PORT)
+
+.PHONY: posters-serve
+posters-serve: demo-build ## Serve the Posters demo alone, at the root, on PORT
+	$(BUILD_DIR)/default/demo/posters/server/posters_server.exe --port $(PORT)
 
 .PHONY: infinite-scroll-serve
 infinite-scroll-serve: demo-build ## Serve the Infinite scroll demo alone, at the root, on PORT
@@ -88,6 +93,7 @@ demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browse
 	  --build 'dune build --watch --profile=dev @demo/all' \
 	  --assets $(BUILD_DIR)/default/demo/mini-linear/static --assets $(BUILD_DIR)/default/demo/mini-linear/client/out \
 	  --assets $(BUILD_DIR)/default/demo/async-feed/static --assets $(BUILD_DIR)/default/demo/async-feed/client/out \
+	  --assets $(BUILD_DIR)/default/demo/posters/static --assets $(BUILD_DIR)/default/demo/posters/client/out \
 	  --assets $(BUILD_DIR)/default/demo/infinite-scroll/static --assets $(BUILD_DIR)/default/demo/infinite-scroll/client/out \
 	  -- $(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 

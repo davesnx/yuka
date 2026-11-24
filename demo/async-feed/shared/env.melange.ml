@@ -7,6 +7,7 @@ type media = { matches : bool }
 
 external options :
   ?timeZone:string ->
+  ?weekday:string ->
   ?year:string ->
   ?month:string ->
   ?day:string ->
@@ -32,7 +33,7 @@ let default_zone () = (resolved (make "en-US" (options ()))).timeZone
 let valid_zone zone = match make "en-US" (options ~timeZone:zone ()) with _ -> true | exception _ -> false
 let prefers_dark () = (match_media "(prefers-color-scheme: dark)").matches
 
-type formats = { zone : string; short : format; day : format; clock : format; long : format; numeric : format }
+type formats = { zone : string; short : format; day : format; weekday : format; clock : format; long : format; numeric : format }
 
 let last = ref None
 
@@ -48,6 +49,7 @@ let formats zone =
               (options ~timeZone:zone ~year:"numeric" ~month:"short" ~day:"numeric" ~hour:"2-digit" ~minute:"2-digit"
                  ~second:"2-digit" ~hourCycle:"h23" ~timeZoneName:"short" ());
           day = make "en-GB" (options ~timeZone:zone ~day:"numeric" ~month:"short" ());
+          weekday = make "en-US" (options ~timeZone:zone ~weekday:"long" ~month:"long" ~day:"numeric" ());
           clock =
             make "en-GB"
               (options ~timeZone:zone ~hour:"numeric" ~minute:"2-digit" ~second:"2-digit" ~hourCycle:"h23" ());
@@ -64,6 +66,7 @@ let formats zone =
 let instant time = date (float_of_int time *. 1000.)
 let short ~zone time = format (formats zone).short (instant time)
 let day ~zone time = format (formats zone).day (instant time)
+let weekday ~zone time = format (formats zone).weekday (instant time)
 let clock ~zone time = format (formats zone).clock (instant time)
 let long ~zone time = format (formats zone).long (instant time) ^ " (" ^ zone ^ ")"
 
@@ -75,6 +78,12 @@ let wall zone ms =
       0 fields
   in
   utc (get "year") (get "month" - 1) (get "day") (get "hour") (get "minute") (get "second")
+
+let day_key ~zone time =
+  let fields = parts (formats zone).numeric (instant time) in
+  let get kind = Array.fold_left (fun found part -> if part.kind = kind then part.value else found) "" fields in
+  let pad value = if String.length value = 1 then "0" ^ value else value in
+  get "year" ^ "-" ^ pad (get "month") ^ "-" ^ pad (get "day")
 
 let to_time ~zone value =
   let field start length = if String.length value >= start + length then int_of_string_opt (String.sub value start length) else None in
