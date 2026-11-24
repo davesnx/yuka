@@ -171,6 +171,8 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 .presets { display: flex; gap: 8px; }
 .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .kinds .preset { padding: 0 4px; }
+.kind-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.kind-icon .solid { fill: currentColor; }
 
 .dial { width: 96px; height: 96px; align-self: center; border-radius: 999px; cursor: grab; touch-action: none; }
 .dial:active { cursor: grabbing; }
@@ -209,7 +211,6 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 16px; }
 
-.gallery-link { padding: 0 16px 16px; color: var(--muted); font-size: 13px; }
 
 .gallery { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 .gallery-head { display: flex; flex-direction: column; gap: 4px; }

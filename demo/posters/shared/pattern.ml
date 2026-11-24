@@ -1,8 +1,8 @@
 type layout = { seed : int; padding : int } [@@deriving codec]
 type lines = { lines : int; amplitude : int; waves : int; stroke : int; direction : int } [@@deriving codec]
 type blocks = { blocks : int; gap : int; filled : int; squareness : int; radius : int } [@@deriving codec]
-type clouds = { clouds : int; puffs : int; size : int; solid : int } [@@deriving codec]
-type lightning = { bolts : int; branches : int; jaggedness : int; thickness : int } [@@deriving codec]
+type clouds = { clouds : int; puffs : int; size : int } [@@deriving codec]
+type lightning = { bolts : int; branches : int; jaggedness : int; thickness : int; direction : int; length : int } [@@deriving codec]
 type circles = { columns : int; rows : int; half : int; empty : int; block : int; bar : int } [@@deriving codec]
 
 type art =
@@ -83,11 +83,11 @@ module Range = struct
   let clouds = (1, 20)
   let puffs = (3, 14)
   let size = (10, 100)
-  let solid = (0, 100)
   let bolts = (1, 8)
   let branches = (0, 12)
   let jaggedness = (0, 100)
   let thickness = (1, 24)
+  let length = (20, 100)
   let columns = (4, 24)
   let rows = (4, 30)
   let share = (0, 100)
@@ -95,8 +95,8 @@ end
 
 let lines_default = { lines = 32; amplitude = 60; waves = 3; stroke = 6; direction = 90 }
 let blocks_default = { blocks = 14; gap = 16; filled = 45; squareness = 50; radius = 0 }
-let clouds_default = { clouds = 6; puffs = 6; size = 45; solid = 50 }
-let lightning_default = { bolts = 2; branches = 4; jaggedness = 55; thickness = 7 }
+let clouds_default = { clouds = 6; puffs = 6; size = 45 }
+let lightning_default = { bolts = 2; branches = 4; jaggedness = 55; thickness = 7; direction = 180; length = 100 }
 let circles_default = { columns = 13; rows = 15; half = 80; empty = 12; block = 2; bar = 6 }
 
 let fresh = function
@@ -164,7 +164,7 @@ let normal_art = function
         }
   | Clouds c ->
       Clouds
-        { clouds = fit Range.clouds c.clouds; puffs = fit Range.puffs c.puffs; size = fit Range.size c.size; solid = fit Range.solid c.solid }
+        { clouds = fit Range.clouds c.clouds; puffs = fit Range.puffs c.puffs; size = fit Range.size c.size }
   | Lightning l ->
       Lightning
         {
@@ -172,6 +172,8 @@ let normal_art = function
           branches = fit Range.branches l.branches;
           jaggedness = fit Range.jaggedness l.jaggedness;
           thickness = fit Range.thickness l.thickness;
+          direction = fit Range.direction l.direction;
+          length = fit Range.length l.length;
         }
   | Circles c ->
       Circles
@@ -374,6 +376,10 @@ let cloud random ~id ~w ~h ~puffs =
 
 let overlaps a b = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 
+let most_shrinks = 24
+let smallest_cloud = 16
+let scan_step = 8
+
 let sky random box (c : clouds) =
   let bw = box.right - box.left and bh = box.bottom - box.top in
   let placed = ref [] in
@@ -386,27 +392,67 @@ let sky random box (c : clouds) =
       if (bounds.right - bounds.left <= bw && bounds.bottom - bounds.top <= bh) || tries = 0 then (bounds, path)
       else shaped (w * 3 / 4) (tries - 1)
     in
-    let bounds, path = shaped (bw * c.size / 100 * scale / 100) 6 in
-    let room_x = bw - (bounds.right - bounds.left) and room_y = bh - (bounds.bottom - bounds.top) in
-    let rec place attempt =
-      if attempt = 60 || room_x < 0 || room_y < 0 then None
-      else
-        let x = random [ 3; 7; id; attempt ] (room_x + 1) in
-        let y = random [ 3; 8; id; attempt ] (room_y + 1) in
+    let rec fitted w smaller =
+      let bounds, path = shaped w 6 in
+      let room_x = bw - (bounds.right - bounds.left) and room_y = bh - (bounds.bottom - bounds.top) in
+      let at x y =
         let dx = box.left + x - bounds.left and dy = box.top + y - bounds.top in
         let spot = { left = bounds.left + dx - 12; top = bounds.top + dy - 12; right = bounds.right + dx + 12; bottom = bounds.bottom + dy + 12 } in
-        if List.exists (fun (other, _) -> overlaps spot other) !placed then place (attempt + 1) else Some (spot, path (dx, dy))
+        if List.exists (fun (other, _) -> overlaps spot other) !placed then None else Some (spot, path (dx, dy))
+      in
+      let rec place attempt =
+        if attempt = 60 then None
+        else
+          let tries = if smaller = 0 then [ id; attempt ] else [ id; attempt; smaller ] in
+          match at (random (3 :: 7 :: tries) (room_x + 1)) (random (3 :: 8 :: tries) (room_y + 1)) with
+          | None -> place (attempt + 1)
+          | found -> found
+      in
+      let scan () =
+        let columns = (room_x / scan_step) + 1 and rows = (room_y / scan_step) + 1 in
+        let start = random [ 3; 10; id; smaller ] (columns * rows) in
+        let rec go k =
+          if k = columns * rows then None
+          else
+            let cell = (start + k) mod (columns * rows) in
+            match at (cell mod columns * scan_step) (cell / columns * scan_step) with None -> go (k + 1) | found -> found
+        in
+        go 0
+      in
+      let found = if room_x < 0 || room_y < 0 then None else match place 0 with None -> scan () | found -> found in
+      match found with
+      | None when smaller < most_shrinks && w > smallest_cloud -> fitted (w * 4 / 5) (smaller + 1)
+      | found -> found
     in
-    match place 0 with
-    | Some (spot, d) ->
-        let paint = if random [ 3; 9; id ] 100 < c.solid then Fill else Stroke 6 in
-        placed := (spot, { index = id; d; paint }) :: !placed
+    let widest = min (bw * c.size / 100) (bw * 9 / isqrt (100 * (id + 1))) in
+    match fitted (widest * scale / 100) 0 with
+    | Some (spot, d) -> placed := (spot, { index = id; d; paint = Fill }) :: !placed
     | None -> ()
   done;
   Array.of_list (List.rev_map snd !placed)
 
-let storm random box (l : lightning) =
+let sine degrees =
+  let d = ((degrees mod 360) + 360) mod 360 in
+  let half d = 4000 * d * (180 - d) / (40500 - (d * (180 - d))) in
+  if d <= 180 then half d else -half (d - 180)
+
+let cosine degrees = sine (degrees + 90)
+let turn (l : lightning) = l.direction - 180
+
+let turned box degrees =
   let w = box.right - box.left and h = box.bottom - box.top in
+  let c = abs (cosine degrees) and s = abs (sine degrees) in
+  let bw = ((w * c) + (h * s)) / 1000 and bh = ((w * s) + (h * c)) / 1000 in
+  let h' = min (w * bh * 1000 / ((bw * c) + (bh * s))) (h * bh * 1000 / ((bw * s) + (bh * c))) in
+  let h' = if c = 0 || s = 0 then h' else h' * 98 / 100 in
+  let w' = h' * bw / bh in
+  let x = (box.left + box.right) / 2 and y = (box.top + box.bottom) / 2 in
+  { left = x - (w' / 2); top = y - (h' / 2); right = x + (w' / 2); bottom = y + (h' / 2) }
+
+let storm random box (l : lightning) =
+  let box = if turn l = 0 then box else turned box (turn l) in
+  let w = box.right - box.left and h = box.bottom - box.top in
+  let reach = h * l.length / 100 in
   let fold x = clamp box.left box.right (if x < box.left then (2 * box.left) - x else if x > box.right then (2 * box.right) - x else x) in
   let split ~bolt ~slot a b depth spread =
     let rec go (ax, ay) (bx, by) depth spread node =
@@ -427,7 +473,7 @@ let storm random box (l : lightning) =
     (List.init l.bolts (fun bolt ->
          let sx = box.left + random [ 4; 1; bolt ] (w + 1) in
          let ex = clamp box.left box.right (sx + random [ 4; 2; bolt ] ((w / 2) + 1) - (w / 4)) in
-         let ey = box.bottom - random [ 4; 3; bolt ] ((h / 4) + 1) in
+         let ey = box.top + reach - random [ 4; 3; bolt ] ((reach / 4) + 1) in
          let start = (sx, box.top) in
          let points = start :: split ~bolt ~slot:0 start (ex, ey) 6 ((ey - box.top) * l.jaggedness / 400) in
          { index = bolt * slots; d = polyline points; paint = Stroke l.thickness }
@@ -436,7 +482,7 @@ let storm random box (l : lightning) =
                 let at = List.nth points (6 + random [ 4; 5; bolt; slot ] 36) in
                 let side = if random [ 4; 6; bolt; slot ] 2 = 0 then 1 else -1 in
                 let dx = (w / 20) + random [ 4; 7; bolt; slot ] ((w / 6) + 1) in
-                let dy = (h / 8) + random [ 4; 8; bolt; slot ] ((h / 4) + 1) in
+                let dy = (reach / 8) + random [ 4; 8; bolt; slot ] ((reach / 4) + 1) in
                 let ending = (fold (fst at + (side * dx)), min box.bottom (snd at + dy)) in
                 {
                   index = (bolt * slots) + slot;
@@ -498,8 +544,11 @@ let grid random box (c : circles) =
 let area padding = { left = padding; top = padding; right = width - padding; bottom = art_bottom - padding }
 let clip_id padding = "art-" ^ i padding
 
+let rotate degrees = Some ("rotate(" ^ i degrees ^ " " ^ point (centre_x, centre_y) ^ ")")
+
 let rotation = function
-  | Lines l when l.direction <> 90 -> Some ("rotate(" ^ i (l.direction - 90) ^ " " ^ point (centre_x, centre_y) ^ ")")
+  | Lines l when l.direction <> 90 -> rotate (l.direction - 90)
+  | Lightning l when turn l <> 0 -> rotate (turn l)
   | _ -> None
 
 let shapes (l : layout) art =
@@ -544,13 +593,13 @@ let presets =
       ~date:("2026", "June, 12", "Friday");
     preset ~name:"Overcast" ~seed:314 ~padding:80 ~art:(Clouds clouds_default) ~colours:light ~title:"Overcast"
       ~subtitle:"Puffs from arcs" ~date:("2026", "July, 3", "Friday");
-    preset ~name:"Cumulus" ~seed:90210 ~padding:60 ~art:(Clouds { clouds = 12; puffs = 7; size = 32; solid = 100 })
+    preset ~name:"Cumulus" ~seed:90210 ~padding:60 ~art:(Clouds { clouds = 12; puffs = 7; size = 32 })
       ~colours:{ background = "#8ecae6"; foreground = "#ffffff" } ~title:"Cumulus" ~subtitle:"Solid clouds"
       ~date:("2026", "August, 21", "Friday");
     preset ~name:"Storm" ~seed:555 ~padding:80 ~art:(Lightning lightning_default) ~colours:dark ~title:"Storm"
       ~subtitle:"Bolts with branches" ~date:("2026", "October, 30", "Friday");
     preset ~name:"Voltage" ~seed:2718 ~padding:40
-      ~art:(Lightning { bolts = 4; branches = 3; jaggedness = 75; thickness = 5 })
+      ~art:(Lightning { lightning_default with bolts = 4; branches = 3; jaggedness = 75; thickness = 5 })
       ~colours:{ background = "#283618"; foreground = "#fefae0" } ~title:"Voltage" ~subtitle:"Jagged and thin"
       ~date:("2026", "November, 20", "Friday");
     preset ~name:"Classic" ~seed:2019 ~padding:0 ~art:(Circles circles_default) ~colours:dark ~title:"Classic"

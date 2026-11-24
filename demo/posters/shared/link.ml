@@ -18,7 +18,7 @@ let route ?defaults (s : settings) =
       amplitude = field (function Lines a -> Some a.amplitude | _ -> None);
       waves = field (function Lines a -> Some a.waves | _ -> None);
       stroke = field (function Lines a -> Some a.stroke | _ -> None);
-      direction = field (function Lines a -> Some a.direction | _ -> None);
+      direction = field (function Lines a -> Some a.direction | Lightning a -> Some a.direction | _ -> None);
       blocks = field (function Blocks a -> Some a.blocks | _ -> None);
       gap = field (function Blocks a -> Some a.gap | _ -> None);
       filled = field (function Blocks a -> Some a.filled | _ -> None);
@@ -27,11 +27,11 @@ let route ?defaults (s : settings) =
       clouds = field (function Clouds a -> Some a.clouds | _ -> None);
       puffs = field (function Clouds a -> Some a.puffs | _ -> None);
       size = field (function Clouds a -> Some a.size | _ -> None);
-      solid = field (function Clouds a -> Some a.solid | _ -> None);
       bolts = field (function Lightning a -> Some a.bolts | _ -> None);
       branches = field (function Lightning a -> Some a.branches | _ -> None);
       jaggedness = field (function Lightning a -> Some a.jaggedness | _ -> None);
       thickness = field (function Lightning a -> Some a.thickness | _ -> None);
+      length = field (function Lightning a -> Some a.length | _ -> None);
       columns = field (function Circles a -> Some a.columns | _ -> None);
       rows = field (function Circles a -> Some a.rows | _ -> None);
       half = field (function Circles a -> Some a.half | _ -> None);
@@ -71,7 +71,7 @@ let settings ~(defaults : settings) = function
                 squareness = r.squareness |? d.squareness;
                 radius = r.radius |? d.radius;
               }
-        | Clouds d -> Clouds { clouds = r.clouds |? d.clouds; puffs = r.puffs |? d.puffs; size = r.size |? d.size; solid = r.solid |? d.solid }
+        | Clouds d -> Clouds { clouds = r.clouds |? d.clouds; puffs = r.puffs |? d.puffs; size = r.size |? d.size }
         | Lightning d ->
             Lightning
               {
@@ -79,6 +79,8 @@ let settings ~(defaults : settings) = function
                 branches = r.branches |? d.branches;
                 jaggedness = r.jaggedness |? d.jaggedness;
                 thickness = r.thickness |? d.thickness;
+                direction = r.direction |? d.direction;
+                length = r.length |? d.length;
               }
         | Circles d ->
             Circles

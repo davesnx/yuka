@@ -43,11 +43,19 @@ variant with one parameter record per kind:
   apart and the outer blocks touch the art area.
 - Clouds: puffs of `A` arcs, each close to a half circle, over a dome
   made from the rational parametrization of a circle. Each cloud has its
-  own width, height, number of puffs and puff sizes. A cloud that would
-  overlap an earlier one tries another place, up to 60 times, and is not
-  drawn if none fits.
+  own width, height, number of puffs and puff sizes, and every cloud is
+  filled. A cloud is at most `size` wide, and cloud `n` (from 0) at most
+  `9 / sqrt (n + 1)` tenths of the art width, so later clouds are smaller
+  and an earlier cloud never depends on the count. A cloud
+  that would overlap an earlier one tries 60 random places, then every
+  place on an 8 px grid, and then the same at four fifths of its width,
+  so each cloud of the count is drawn.
 - Lightning: bolts from the top of the art area, made jagged by midpoint
-  displacement, with branches.
+  displacement, with branches. `length` is the share of the height that
+  a bolt goes down. The direction turns the bolts like the lines, with
+  `transform="rotate(...)"`; the bolts are drawn in the box of the art
+  area turned by that angle, with an integer sine, so they still cover
+  the art area.
 - Circles: the first poster of this demo, a grid of half discs on one of
   their four edges, squares and half-cell bars, picked with the weights of
   the mix.
@@ -67,7 +75,8 @@ moves each shape a little and does not shuffle the poster:
 - More columns or rows keep the shape of each cell; a cell keeps its key,
   `row * 24 + column`.
 - More lines spread the stack over the same area, so each line moves a
-  little. The direction and the padding do not change the lines at all.
+  little. The direction and the padding do not change the lines at all,
+  and a half turn of the bolts draws the same bolts.
 
 The padding is the space between the edge of the poster and the art
 area. The art is clipped to the art area with a `clipPath` (its id is
@@ -142,11 +151,12 @@ URL. `/poster.svg` reads the same params: `Router.get` takes no
   | clouds | `clouds` | 1 to 20 | 6 |
   | | `puffs` | 3 to 14 | 6 |
   | | `size` (percent of the width) | 10 to 100 | 45 |
-  | | `solid` (filled percent) | 0 to 100 | 50 |
   | lightning | `bolts` | 1 to 8 | 2 |
   | | `branches` (per bolt) | 0 to 12 | 4 |
   | | `jaggedness` | 0 to 100 | 55 |
   | | `thickness` | 1 to 24 | 7 |
+  | | `length` (percent of the height) | 20 to 100 | 100 |
+  | | `direction` (degrees, 180 is down) | 0 to 359 | 180 |
   | circles | `columns` | 4 to 24 | 13 |
   | | `rows` | 4 to 30 | 15 |
   | | `half`, `empty`, `block`, `bar` (weights of the mix) | 0 to 100 | 80, 12, 2, 6 |
@@ -166,7 +176,8 @@ its default.
 
 `test/run.ml` checks the generators (for each kind, the same settings
 give the same SVG and another seed another poster; the keys and the shape
-counts; the block count at the extreme settings; a gap of 1; that
+counts; the block count at the extreme settings; every cloud of the
+count drawn; the turn and length of the bolts; a gap of 1; that
 settings keep the number of shapes, that a larger count keeps the shapes,
 and that one step of a setting moves the shapes a little; the direction;
 the clip; the lines
@@ -176,7 +187,8 @@ scheme, a round trip for each preset and kind, and the date in the
 download link), the playground, `/poster.svg` and the
 gallery. `e2e/posters.ts` (run by `make e2e`) switches the kinds and
 checks that the browser draws what the server draws, turns the dial with
-keys, a click and a drag, adds clouds, bolts and a block and checks that
+keys, a click and a drag, turns and shortens the bolts, draws twelve
+large clouds, adds clouds, bolts and a block and checks that
 the other nodes stay, shuffles, changes a slider of the kind, the padding, the colours and the title, checks which
 shape nodes stay and the place of the text column, reloads, checks both
 downloads and the gallery, and times a slider change with 60 lines.
