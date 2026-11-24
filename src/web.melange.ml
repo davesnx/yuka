@@ -377,9 +377,9 @@ let scroll_y : unit -> float =
   return window.scrollY || 0;
 }|}]
 
-let scroll_to : float -> unit =
+let scroll_set : bool -> float -> unit =
   [%mel.raw
-    {|function (y) {
+    {|function (w, y) {
   const gcs = window.getComputedStyle;
   if (gcs) {
     const outlets = document.querySelectorAll("yuka-outlet");
@@ -389,8 +389,11 @@ let scroll_to : float -> unit =
       if (oy === "auto" || oy === "scroll") { el.scrollTop = y; return; }
     }
   }
-  window.scrollTo(0, y);
+  if (w) window.scrollTo(0, y);
 }|}]
+
+let scroll_to y = scroll_set true y
+let scroll_box_to y = scroll_set false y
 
 let set_cookie : string -> unit = [%mel.raw "function (cookie) { document.cookie = cookie }"]
 

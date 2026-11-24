@@ -107,6 +107,7 @@ val history_replace_key : string -> unit
 val history_push_key : string -> string -> unit
 val scroll_y : unit -> float
 val scroll_to : float -> unit
+val scroll_box_to : float -> unit
 val set_cookie : string -> unit
 val history_at : unit -> int
 val history_go : int -> unit

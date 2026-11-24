@@ -190,8 +190,9 @@ let on_popstate e =
           (fun () -> if Web.current_url () <> !loaded then Web.navigate false (Web.current_url ()))
       end
 
-(* The browser restores the scroll of a reload, or of a return from another document, before
-   any script runs, also while a streamed page grows; client navigation sets [manual] again in
+(* The browser restores the window scroll of a reload, or of a return from another document,
+   before any script runs, also while a streamed page grows, but not the scroll of an element:
+   [start] sets the element that scrolls the outlet. Client navigation sets [manual] again in
    [save_scroll], before each history change it makes. The router keeps [manual] while an
    overlay is shown, since the window then has the scroll of the page under it. *)
 let on_pagehide e =
@@ -229,7 +230,12 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
       Web.add_listener (Web.window ()) "pagehide" on_pagehide;
       Web.add_listener (Web.window ()) "pageshow" on_pageshow);
   islands ();
-  if Option.is_none !scroll_table then scroll_table := Some (Web.stored_scrolls ());
+  (match !scroll_table with
+  | None ->
+      let t = Web.stored_scrolls () in
+      scroll_table := Some t;
+      Option.iter Web.scroll_box_to (Web.table_get t !shown_key)
+  | Some _ -> ());
   Platform.client_navigate := Some (navigate ?link:None);
   Platform.client_refresh := refresh;
   match !router with
