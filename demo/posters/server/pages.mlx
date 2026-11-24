@@ -1,0 +1,67 @@
+open Posters_shared
+
+let shell ~children () =
+  <div class_="app">
+    <header class_="header">
+      <a class_="brand" href=(Routes.home ())>
+        <svg class_="brand-mark" view_box="0 0 24 24" width="22" height="22" aria_hidden=true>
+          <rect width="24" height="24" rx="6" />
+          <path d="M4 4h8a4 4 0 0 1-8 0zM12 12a4 4 0 0 1 8 0zM12 20a4 4 0 0 1-8 0z" />
+        </svg>
+        <span>"Posters"</span>
+      </a>
+      <nav class_="nav">
+        <a href=(Routes.home ())>"Playground"</a>
+        <a href=(Routes.gallery ())>"Gallery"</a>
+      </nav>
+    </header>
+    <main class_="main">children</main>
+  </div>
+
+let today () =
+  let now = Unix.gmtime (Unix.time ()) in
+  Pattern.defaults ~year:(now.tm_year + 1900) ~month:now.tm_mon ~day:now.tm_mday ~weekday:now.tm_wday
+
+let home ~kind ~seed ~padding ~lines ~amplitude ~waves ~stroke ~direction ~blocks ~gap ~filled ~squareness ~radius ~clouds ~puffs ~size ~solid ~bolts ~branches ~jaggedness ~thickness ~columns ~rows ~half ~empty ~block ~bar ~bg ~fg ~title ~subtitle ~year ~day ~weekday () =
+  let defaults = today () in
+  let initial =
+    Link.settings ~defaults
+      (Routes.Home
+         { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; solid; bolts; branches; jaggedness; thickness; columns; rows; half; empty; block; bar; bg; fg; title; subtitle; year; day; weekday })
+  in
+  Yuka.Server.page ~title:"Posters" (fun () -> <Yuka.Client><Playground initial defaults /></Yuka.Client>)
+
+let gallery () =
+  Yuka.Server.page ~title:"Poster gallery" (fun () ->
+      <section class_="gallery">
+        <div class_="gallery-head">
+          <h1>"Gallery"</h1>
+          <p>"Two presets for each kind, drawn on the server. Open one in the playground to change it."</p>
+        </div>
+        <ul class_="gallery-grid">
+          (Yuka.fragment
+             (List.map
+                (fun (name, (settings : Pattern.settings)) ->
+                  <li class_="gallery-item">
+                    <a href=(Routes.href (Link.route settings)) aria_label=("Open " ^ name ^ " in the playground")>
+                      (Poster.still settings)
+                    </a>
+                    <div class_="gallery-caption">
+                      <span>(Yuka.text name)</span>
+                      <a class_="gallery-svg" href=(Link.svg (Link.route settings)) download=(Link.file settings "svg")>"SVG"</a>
+                    </div>
+                  </li>)
+                Pattern.presets))
+        </ul>
+      </section>)
+
+let message ~title ~text =
+  Yuka.Server.page ~title (fun () ->
+      <section class_="message">
+        <h1>(Yuka.text title)</h1>
+        <p>(Yuka.text text)</p>
+        <a class_="button" href=(Routes.home ())>"Back to the playground"</a>
+      </section>)
+
+let not_found ~path () = message ~title:"Page not found" ~text:("There is no page at " ^ path ^ ".")
+let error () = message ~title:"Something went wrong" ~text:"The poster could not be drawn."
