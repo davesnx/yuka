@@ -70,6 +70,13 @@ let read_at_least fd n =
 
 let open_fds () = Array.length (Sys.readdir "/dev/fd")
 
+let within seconds what p =
+  Lwt.pick
+    [
+      p;
+      Lwt.bind (Lwt_unix.sleep seconds) (fun () -> Lwt.fail (Failure (Printf.sprintf "%s: nothing after %.1f s" what seconds)));
+    ]
+
 let exchange ?(ended = true) handler text =
   let client, served = pair handler in
   let sent = write_all client text in
@@ -846,8 +853,93 @@ let live_client_stops_reading () =
   check_true (Printf.sprintf "closed after %.1f s" elapsed) (elapsed < 15.);
   Lwt_main.run (wait_for "the server socket is closed" (fun () -> open_fds () <= baseline))
 
+let small_buffers client server =
+  Lwt_unix.setsockopt_int server Unix.SO_SNDBUF 4096;
+  Lwt_unix.setsockopt_int client Unix.SO_RCVBUF 4096
+
+let stalled_pair ?(write_timeout = 0.2) handler =
+  let client, server = Lwt_unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  small_buffers client server;
+  (client, Yuka_server.connection ~write_timeout handler (Unix.ADDR_UNIX "") server)
+
+let never_reads () =
+  let handler = make config in
+  App.flood_result := None;
+  let baseline = open_fds () in
+  Lwt_main.run
+    (let leave_unread target =
+       let client, served = stalled_pair handler in
+       let* () = write_all client ("GET " ^ target ^ " HTTP/1.1\r\nHost: app.test\r\n\r\n") in
+       let* () = within 3. ("the server closes a client that does not read " ^ target) served in
+       Lwt_unix.close client
+     in
+     let* () = leave_unread "/static/big.bin" in
+     let* () = leave_unread "/flood" in
+     let* () = wait_for "the stream producer sees the failed write" (fun () -> !App.flood_result <> None) in
+     wait_for "the file and the sockets are closed" (fun () -> open_fds () <= baseline))
+
+let slow_reader () =
+  let body, elapsed =
+    Lwt_main.run
+      (let client, served = stalled_pair ~write_timeout:1. (make config) in
+       let* () = write_all client "GET /static/big.bin HTTP/1.1\r\nHost: app.test\r\nConnection: close\r\n\r\n" in
+       let buffer = Buffer.create 4096 and chunk = Bytes.create 16384 in
+       let started = Unix.gettimeofday () in
+       let rec next () =
+         let* n = Lwt_unix.read client chunk 0 (Bytes.length chunk) in
+         if n = 0 then Lwt.return_unit
+         else begin
+           Buffer.add_subbytes buffer chunk 0 n;
+           let* () = Lwt_unix.sleep 0.1 in
+           next ()
+         end
+       in
+       let* () = bounded "the slow download" (next ()) in
+       let elapsed = Unix.gettimeofday () -. started in
+       let* () = bounded "the end of the connection" served in
+       let* () = Lwt_unix.close client in
+       Lwt.return (Buffer.contents buffer, elapsed))
+  in
+  check_true (Printf.sprintf "longer than the write timeout (%.1f s)" elapsed) (elapsed > 1.2);
+  let r = one ~head:false body in
+  let big = In_channel.with_open_bin (Filename.concat static "big.bin") In_channel.input_all in
+  check_true "a slow reader gets the whole file" (r.status = 200 && r.body = big)
+
+let live_silent () =
+  let handler = make config in
+  let cookie, token = session_and_token handler in
+  let baseline = open_fds () in
+  let elapsed =
+    Lwt_main.run
+      (let client, server = Lwt_unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+       let served = Yuka_server.connection ~live_timeout:0.6 handler (Unix.ADDR_UNIX "") server in
+       let* ws, _ = bounded "the handshake" (Ws.connect client ~host:"app.test" ~cookie:(cookie_text cookie)) in
+       let* () = Ws.send ws (hello token) in
+       let* _ = expect_text "hello" ws in
+       let last_sent = ref 0. in
+       let rec pings n =
+         if n = 0 then Lwt.return_unit
+         else
+           let* () = Lwt_unix.sleep 0.1 in
+           last_sent := Unix.gettimeofday ();
+           let* () = Ws.send ws {|{"t":"ping"}|} in
+           let* _ = expect_text "pong" ws in
+           pings (n - 1)
+       in
+       let* () = pings 8 in
+       check_true "a client that sends stays open" (Lwt.is_sleeping served);
+       let started = !last_sent in
+       let* () = within 3. "the server closes a silent live socket" served in
+       let elapsed = Unix.gettimeofday () -. started in
+       let* () = Lwt_unix.close client in
+       Lwt.return elapsed)
+  in
+  check_true (Printf.sprintf "closed after the live timeout (%.2f s)" elapsed) (elapsed >= 0.55);
+  Lwt_main.run (wait_for "the server socket is closed" (fun () -> open_fds () <= baseline))
+
 let lifetime () =
   let handler = Yuka_server.handler ~sessions:(Yuka_server.sessions ~lifetime:2. ~secret ()) ~log_requests:false config Yuka_routes.app in
+  Unix.sleepf (1.05 -. Float.rem (Unix.gettimeofday ()) 1.);
   let cookie, token = session_and_token handler in
   let id, _ = session_id handler (with_cookie cookie) in
   let got, cookies = session_id handler (with_cookie cookie) in
@@ -961,12 +1053,22 @@ let bad_arguments () =
       ("a host name", fun () -> ignore (Yuka_server.serve ~interface:"localhost" (make config)));
       ("port 65536", fun () -> ignore (Yuka_server.serve ~port:65536 (make config)));
       ("port -1", fun () -> ignore (Yuka_server.serve ~port:(-1) (make config)));
+      ("a write timeout of 0", fun () -> ignore (Yuka_server.serve ~write_timeout:0. (make config)));
+      ("a live timeout of nan", fun () -> ignore (Yuka_server.serve ~live_timeout:Float.nan (make config)));
+      ("a negative drain timeout", fun () -> ignore (Yuka_server.serve ~drain_timeout:(-1.) (make config)));
+      ("no connection", fun () -> ignore (Yuka_server.serve ~max_connections:0 (make config)));
+      ( "a connection with a write timeout of 0",
+        fun () ->
+          let a, b = Lwt_unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+          Fun.protect
+            ~finally:(fun () -> Unix.close (Lwt_unix.unix_file_descr a); Unix.close (Lwt_unix.unix_file_descr b))
+            (fun () -> ignore (Yuka_server.connection ~write_timeout:0. (make config) (Unix.ADDR_UNIX "") b)) );
     ]
 
-let with_server ?(handler = make config) f =
+let with_server ?(handler = make config) ?max_connections f =
   Lwt_main.run
     (let stop, stopping = Lwt.wait () and ready, listening = Lwt.wait () in
-     let server = Yuka_server.serve ~stop ~listening:(Lwt.wakeup listening) ~port:0 handler in
+     let server = Yuka_server.serve ~stop ~listening:(Lwt.wakeup listening) ~port:0 ?max_connections handler in
      let* port = bounded "listening" ready in
      Lwt.finalize
        (fun () -> f port)
@@ -1022,6 +1124,110 @@ let client_closes_first () =
       let* output = get_over_tcp port "/feed.xml" in
       check_true "still answers" (String.starts_with ~prefix:"HTTP/1.1 200" output);
       Lwt.return_unit)
+
+let connection_limit () =
+  with_server ~max_connections:2 (fun port ->
+      let* a = connect port in
+      let* b = connect port in
+      let* () = write_all b "GET /feed.xml HTTP/1.1\r\nHost: app.test\r\n\r\n" in
+      let* () = read_until b (Buffer.create 256) "<rss/>" in
+      let* c = connect port in
+      let* () = write_all c "GET /feed.xml HTTP/1.1\r\nHost: app.test\r\nConnection: close\r\n\r\n" in
+      let answer = read_all c in
+      let* () = Lwt_unix.sleep 0.3 in
+      check_true "no answer over the limit" (Lwt.is_sleeping answer);
+      let* () = Lwt_unix.close a in
+      let* output = bounded "the answer after a connection closed" answer in
+      check_true "answered when a connection closed" (String.starts_with ~prefix:"HTTP/1.1 200" output);
+      let* () = Lwt_unix.close b in
+      Lwt_unix.close c)
+
+let refused port =
+  let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  let* refused =
+    Lwt.catch
+      (fun () -> Lwt.map (fun () -> false) (bounded "connect" (Lwt_unix.connect socket (Unix.ADDR_INET (Unix.inet_addr_loopback, port)))))
+      (function Unix.Unix_error (Unix.ECONNREFUSED, _, _) -> Lwt.return true | e -> Lwt.fail e)
+  in
+  let* () = Lwt_unix.close socket in
+  Lwt.return refused
+
+let start_gated port =
+  let* busy = connect port in
+  let* () = write_all busy "GET /gated HTTP/1.1\r\nHost: app.test\r\n\r\n" in
+  let seen = Buffer.create 4096 in
+  let* () = read_until busy seen "loading" in
+  Lwt.return (busy, seen)
+
+exception Stop_failed
+
+let drain () =
+  let gate, open_gate, _ = Yuka.Async.make () in
+  App.gate := gate;
+  let handler = make config in
+  let cookie, token = session_and_token handler in
+  Lwt_main.run
+    (let stop, stopping = Lwt.wait () and ready, listening = Lwt.wait () in
+     let server = Yuka_server.serve ~stop ~listening:(Lwt.wakeup listening) ~port:0 ~drain_timeout:10. handler in
+     let* port = bounded "listening" ready in
+     let* busy, seen = start_gated port in
+     let* idle = connect port in
+     let* () = write_all idle "GET /feed.xml HTTP/1.1\r\nHost: app.test\r\n\r\n" in
+     let* () = read_until idle (Buffer.create 256) "<rss/>" in
+     let* live = connect port in
+     let* ws, _ = bounded "the handshake" (Ws.connect live ~host:"app.test" ~cookie:(cookie_text cookie)) in
+     let* () = Ws.send ws (hello token) in
+     let* _ = expect_text "hello" ws in
+     Lwt.wakeup stopping ();
+     let* f = within 3. "the close of the live socket" (Ws.receive ws) in
+     Alcotest.(check string) "a live socket gets 1001" "close 1001" (Ws.show f);
+     let* () = Ws.close ws 1001 in
+     let* rest = within 3. "the end of an idle connection" (read_all idle) in
+     Alcotest.(check string) "an idle connection is closed with no bytes" "" rest;
+     let* refused = refused port in
+     check_true "no new connection" refused;
+     check_true "serve waits for the answer in progress" (Lwt.is_sleeping server);
+     open_gate ();
+     let* rest = within 3. "the end of the answer in progress" (read_all busy) in
+     let r = one ~head:false (Buffer.contents seen ^ rest) in
+     check_true "the answer in progress ends whole" (r.status = 200 && contains r.body "<p>gated data</p>" && String.ends_with ~suffix:"</body></html>" r.body);
+     let* () = within 3. "the end of serve" server in
+     Lwt_list.iter_s Lwt_unix.close [ busy; idle; live ])
+
+let drain_failed_stop () =
+  Lwt_main.run
+    (let stop, stopping = Lwt.wait () and ready, listening = Lwt.wait () in
+     let server = Yuka_server.serve ~stop ~listening:(Lwt.wakeup listening) ~port:0 ~drain_timeout:10. (make config) in
+     let* port = bounded "listening" ready in
+     let* idle = connect port in
+     let* () = write_all idle "GET /feed.xml HTTP/1.1\r\nHost: app.test\r\n\r\n" in
+     let* () = read_until idle (Buffer.create 256) "<rss/>" in
+     Lwt.wakeup_exn stopping Stop_failed;
+     let* rest = within 3. "the end of an idle connection after a failed stop" (read_all idle) in
+     Alcotest.(check string) "an idle connection is closed with no bytes" "" rest;
+     let* outcome = within 3. "the end of serve" (Lwt.catch (fun () -> Lwt.map (fun () -> None) server) (fun e -> Lwt.return (Some e))) in
+     check_true "serve fails with the exception of stop" (outcome = Some Stop_failed);
+     Lwt_unix.close idle)
+
+let drain_limit () =
+  let gate, _, _ = Yuka.Async.make () in
+  App.gate := gate;
+  let elapsed =
+    Lwt_main.run
+      (let stop, stopping = Lwt.wait () and ready, listening = Lwt.wait () in
+       let server = Yuka_server.serve ~stop ~listening:(Lwt.wakeup listening) ~port:0 ~drain_timeout:0.3 (make config) in
+       let* port = bounded "listening" ready in
+       let* busy, _ = start_gated port in
+       let started = Unix.gettimeofday () in
+       Lwt.wakeup stopping ();
+       let* () = within 3. "the end of serve after the drain timeout" server in
+       let elapsed = Unix.gettimeofday () -. started in
+       let* _ = within 3. "the end of the answer cut by the drain timeout" (read_all busy) in
+       let* () = Lwt_unix.close busy in
+       Lwt.return elapsed)
+  in
+  App.gate := Yuka.Async.return ();
+  check_true (Printf.sprintf "serve ends at the drain timeout (%.2f s)" elapsed) (elapsed >= 0.25 && elapsed < 2.)
 
 let emfile_child () =
   let ok =
@@ -1120,7 +1326,41 @@ let run_stops () =
   Unix.kill pid Sys.sigterm;
   exited_0 (wait_child pid)
 
-exception Stop_failed
+let second_signal () =
+  let port = free_port () in
+  let pid =
+    Unix.create_process Sys.executable_name [| Sys.executable_name; "run-child"; string_of_int port |] Unix.stdin Unix.stdout
+      (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0)
+  in
+  let rec connect_to tries =
+    let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    match Unix.connect s (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
+    | () -> s
+    | exception Unix.Unix_error (Unix.ECONNREFUSED, _, _) when tries > 0 ->
+        Unix.close s;
+        Unix.sleepf 0.05;
+        connect_to (tries - 1)
+  in
+  let s = connect_to 200 in
+  let request = "GET /stuck HTTP/1.1\r\nHost: x\r\n\r\n" in
+  ignore (Unix.write_substring s request 0 (String.length request));
+  let chunk = Bytes.create 4096 in
+  ignore (Unix.read s chunk 0 4096);
+  Unix.kill pid Sys.sigterm;
+  Unix.sleepf 0.3;
+  (match Unix.waitpid [ Unix.WNOHANG ] pid with
+  | 0, _ -> ()
+  | _ -> Alcotest.fail "the server ended at the first signal with a request in progress");
+  let started = Unix.gettimeofday () in
+  Unix.kill pid Sys.sigterm;
+  let status = wait_child pid in
+  Unix.close s;
+  let elapsed = Unix.gettimeofday () -. started in
+  check_true (Printf.sprintf "the second signal ends the process at once (%.2f s)" elapsed) (elapsed < 2.);
+  match status with
+  | Unix.WEXITED 1 -> ()
+  | Unix.WEXITED n -> Alcotest.failf "the server process exited with %d, not 1" n
+  | Unix.WSIGNALED n | Unix.WSTOPPED n -> Alcotest.failf "the server process got signal %d" n
 
 let serve_failures () =
   Lwt_main.run
@@ -1229,6 +1469,7 @@ let () =
           case "a token is bound to its session" live_refused;
           case "a message over the limit" live_limit;
           case "a client that stops reading is closed" live_client_stops_reading;
+          case "a silent client is closed" live_silent;
         ] );
       ( "server",
         [
@@ -1240,5 +1481,12 @@ let () =
           case "a reset during an answer" reset_mid_answer;
           case "clients that close first" client_closes_first;
           case "run until SIGTERM" run_stops;
+          case "a second signal exits at once" second_signal;
+          case "a client that never reads is closed" never_reads;
+          case "a slow reader gets the whole answer" slow_reader;
+          case "the connection limit" connection_limit;
+          case "the drain lets answers in progress end" drain;
+          case "the drain stops at its timeout" drain_limit;
+          case "a failed stop drains" drain_failed_stop;
         ] );
     ]

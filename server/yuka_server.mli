@@ -94,30 +94,65 @@ val error_handler : connection -> Ache.Server_connection.error_handler
     fixed plain text and [connection: close]. The exception text is never
     sent. Each error goes to the default sink of Yuka. *)
 
-val connection : handler -> Unix.sockaddr -> Lwt_unix.file_descr -> unit Lwt.t
+val connection :
+  ?write_timeout:float -> ?live_timeout:float -> handler -> Unix.sockaddr -> Lwt_unix.file_descr -> unit Lwt.t
 (** Serves one accepted socket with the handler and {!error_handler}, for
     example from [Lwt_io.establish_server_with_client_socket]. Ignore
-    [SIGPIPE] first. A request head must be complete 10 seconds after its
-    first byte (else 408), and a connection with no request for 60 seconds
-    is closed. The promise resolves when the connection is closed. *)
+    [SIGPIPE] first. The promise resolves when the connection is closed.
+    Raises [Invalid_argument] when a timeout is not a positive number.
+
+    Time limits, in seconds:
+    - A request head must be complete 10 seconds after its first byte (else
+      408).
+    - A connection with no request for 60 seconds is closed, and so is a
+      request body that sends no byte for 60 seconds.
+    - [write_timeout] (default: 30): a write of an answer (its head, a part
+      of a file, a part of a stream or a live message) that sends no byte
+      for that long closes the connection; the file of the answer is closed
+      and the stream gets a failed write. A slow client that reads keeps
+      going: only a write with no progress counts, not the whole answer.
+    - [live_timeout] (default: 60): a live socket that receives no byte for
+      that long is closed. The browser client of {!Yuka.Live} sends a ping
+      every 25 seconds, so a client that is gone without closing the socket
+      is closed after at most this time. The server sends no WebSocket
+      ping: [Ache_lwt.Websocket] has no way to send one. *)
 
 val serve :
   ?interface:string ->
   ?port:int ->
   ?stop:unit Lwt.t ->
   ?listening:(int -> unit) ->
+  ?write_timeout:float ->
+  ?live_timeout:float ->
+  ?max_connections:int ->
+  ?drain_timeout:float ->
   handler ->
   unit Lwt.t
 (** Listens on [interface] (an IP address, default ["127.0.0.1"]) and
-    [port] (default 8080) until [stop] resolves (default: never), then
-    closes the listening socket. When [stop] fails, it closes the socket and
-    fails with that exception. Port 0 lets the system choose; [listening]
-    gets the real port. Ignores [SIGPIPE] for the whole process. A bind that
-    fails (a port in use) closes the socket and fails. An accept that fails
-    (no file descriptor left) goes to the default sink once and is tried
-    again after 0.1 seconds, so the process does not stop. Raises
-    [Invalid_argument] when [interface] is not an IP address or [port] is
-    not in 0-65535. There is no limit on the number of connections. *)
+    [port] (default 8080) until [stop] resolves (default: never). Port 0
+    lets the system choose; [listening] gets the real port. Ignores
+    [SIGPIPE] for the whole process. Each connection is served by
+    {!connection} with [write_timeout] and [live_timeout].
+
+    - At most [max_connections] (default: 1024) connections are open at a
+      time. At the limit, the server accepts no connection until one
+      closes; the system queues the next ones (up to 1024) and answers
+      nothing. Keep it under the file descriptor limit of the process
+      ([ulimit -n]).
+    - An accept that fails (no file descriptor left) goes to the default
+      sink once and is tried again after 0.1 seconds, so the process does
+      not stop.
+    - Drain: when [stop] resolves, the server closes the listening socket,
+      closes the connections that wait for a next request, sends close code
+      1001 on each live socket, and lets the answers in progress end, then
+      resolves. A connection still open [drain_timeout] (default: 10)
+      seconds after [stop] is closed.
+    - A bind that fails (a port in use) closes the socket and fails. When
+      [stop] fails, [serve] drains and fails with that exception.
+
+    Raises [Invalid_argument] when [interface] is not an IP address, [port]
+    is not in 0-65535, a timeout is not a positive number or
+    [max_connections] is less than 1. *)
 
 val run :
   ?interface:string ->
@@ -125,10 +160,16 @@ val run :
   ?sessions:sessions ->
   ?node:Yuka.Server.Live.node ->
   ?log_requests:bool ->
+  ?write_timeout:float ->
+  ?live_timeout:float ->
+  ?max_connections:int ->
+  ?drain_timeout:float ->
   Yuka.Server.config ->
   Yuka.Server.app ->
   unit
-(** [serve] of {!handler} under [Lwt_main.run], until SIGINT or SIGTERM. *)
+(** [serve] of {!handler} under [Lwt_main.run], until SIGINT or SIGTERM.
+    The first signal starts the drain of {!serve} and returns when it ends;
+    a second signal exits the process at once with code 1. *)
 
 val request : Yuka.Server.request -> Ache.Request_descriptor.t option
 (** The ache request of a request that {!handler} made, for a loader,

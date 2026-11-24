@@ -5,7 +5,19 @@ type sessions = Session.t
 
 let sessions = Session.make
 
-type connection = { fd : Lwt_unix.file_descr; peer : Unix.sockaddr; closed : unit Lwt.t; close_done : unit Lwt.u }
+type connection = {
+  fd : Lwt_unix.file_descr;
+  peer : Unix.sockaddr;
+  closed : unit Lwt.t;
+  close_done : unit Lwt.u;
+  write_timer : Ache_lwt.Timeout.t;
+  live_timeout : float;
+  mutable heard : Ache_lwt.Timeout.t option;
+  mutable request : Reqd.t option;
+  mutable going_away : (unit -> unit) option;
+  mutable winding_down : bool;
+}
+
 type handler = connection -> Reqd.t -> unit
 
 let peer c = c.peer
@@ -29,17 +41,25 @@ let address = function
 
 let mark_closed c = if Lwt.is_sleeping c.closed then Lwt.wakeup_later c.close_done ()
 
+let close_socket c =
+  mark_closed c;
+  match Lwt_unix.state c.fd with
+  | Lwt_unix.Closed -> Lwt.return_unit
+  | Lwt_unix.Opened | Lwt_unix.Aborted _ ->
+      (try Lwt_unix.shutdown c.fd Unix.SHUTDOWN_ALL with Unix.Unix_error _ -> ());
+      Lwt.catch (fun () -> Lwt_unix.close c.fd) (fun _ -> Lwt.return_unit)
+
+let force_close c =
+  if Lwt.is_sleeping c.closed then begin
+    (try Lwt_unix.shutdown c.fd Unix.SHUTDOWN_ALL with Unix.Unix_error _ -> ());
+    Lwt.async (fun () -> close_socket c)
+  end
+
 module Io = struct
   type socket = connection
   type addr = connection
 
-  let close c =
-    mark_closed c;
-    match Lwt_unix.state c.fd with
-    | Lwt_unix.Closed -> Lwt.return_unit
-    | Lwt_unix.Opened | Lwt_unix.Aborted _ ->
-        (try Lwt_unix.shutdown c.fd Unix.SHUTDOWN_ALL with Unix.Unix_error _ -> ());
-        Lwt.catch (fun () -> Lwt_unix.close c.fd) (fun _ -> Lwt.return_unit)
+  let close = close_socket
 
   let read c buffer ~off ~len =
     Lwt.bind
@@ -48,16 +68,38 @@ module Io = struct
          (function
            | Unix.Unix_error ((Unix.EBADF | Unix.ECONNRESET | Unix.ENOTCONN), _, _) -> Lwt.return 0
            | e -> Lwt.fail e))
-      (function 0 -> Lwt.fail End_of_file | n -> Lwt.return n)
+      (function
+        | 0 -> Lwt.fail End_of_file
+        | n ->
+            Option.iter Ache_lwt.Timeout.set c.heard;
+            Lwt.return n)
 
   let writev c iovecs =
     let vectors = Lwt_unix.IO_vectors.create () in
     List.iter (fun { Ache.IOVec.buffer; off; len } -> Lwt_unix.IO_vectors.append_bigarray vectors buffer off len) iovecs;
-    Lwt.catch
-      (fun () -> Lwt.map (fun n -> `Ok n) (Lwt_unix.writev c.fd vectors))
-      (function
-        | Unix.Unix_error ((Unix.EBADF | Unix.EPIPE | Unix.ECONNRESET | Unix.ENOTCONN), _, _) -> Lwt.return `Closed
-        | e -> Lwt.fail e)
+    let writing =
+      Lwt.catch
+        (fun () -> Lwt.map (fun n -> `Ok n) (Lwt_unix.writev c.fd vectors))
+        (function
+          | Unix.Unix_error ((Unix.EBADF | Unix.EPIPE | Unix.ECONNRESET | Unix.ENOTCONN), _, _) -> Lwt.return `Closed
+          | e -> Lwt.fail e)
+    in
+    if not (Lwt.is_sleeping writing) then writing
+    else begin
+      Ache_lwt.Timeout.set c.write_timer;
+      let stalled =
+        Lwt.map
+          (fun () ->
+            force_close c;
+            `Closed)
+          (Ache_lwt.Timeout.expired c.write_timer)
+      in
+      Lwt.finalize
+        (fun () -> Lwt.pick [ writing; stalled ])
+        (fun () ->
+          Ache_lwt.Timeout.stop c.write_timer;
+          Lwt.return_unit)
+    end
 
   let shutdown_receive c =
     if Lwt_unix.state c.fd = Lwt_unix.Opened then
@@ -66,12 +108,6 @@ end
 
 module Ache_io = Ache_lwt.Make (Io)
 module Server = Ache_io.Server
-
-let force_close c =
-  if Lwt.is_sleeping c.closed then begin
-    (try Lwt_unix.shutdown c.fd Unix.SHUTDOWN_ALL with Unix.Unix_error _ -> ());
-    Lwt.async (fun () -> Io.close c)
-  end
 
 type session = Unasked | Known of Session.found
 
@@ -341,6 +377,21 @@ let upgrade r run =
         | closing -> to_async closing
         | exception Invalid_argument m -> Yuka.Async.failed m
       in
+      let heard = Ache_lwt.Timeout.create r.conn.live_timeout in
+      Ache_lwt.Timeout.set heard;
+      r.conn.heard <- Some heard;
+      r.conn.going_away <- Some (fun () -> ignore (close 1001));
+      Lwt.async (fun () ->
+          Lwt.pick
+            [
+              Lwt.protected r.conn.closed;
+              Lwt.map
+                (fun () ->
+                  r.log `Debug ("Yuka_server: the live socket of " ^ address r.conn.peer ^ " was silent; closed");
+                  force_close r.conn)
+                (Ache_lwt.Timeout.expired heard);
+            ]
+          |> Lwt.map (fun () -> Ache_lwt.Timeout.stop heard));
       let connection =
         Yuka.Server.Live.connection
           ~send:(fun text -> to_async (Ache_lwt.Websocket.send ws text))
@@ -427,38 +478,105 @@ let error_handler conn ?request error start =
 
 let config = { Ache.Config.default with read_buffer_size = 0x4000 }
 
-let connection handler peer fd =
+let positive fn name seconds =
+  if not (seconds > 0. && seconds < infinity) then
+    invalid_arg (Printf.sprintf "Yuka_server.%s: %s %g is not a positive number of seconds" fn name seconds)
+
+let open_connection ~write_timeout ~live_timeout ~opened handler peer fd =
   let closed, close_done = Lwt.wait () in
-  let conn = { fd; peer; closed; close_done } in
+  let conn =
+    {
+      fd;
+      peer;
+      closed;
+      close_done;
+      write_timer = Ache_lwt.Timeout.create write_timeout;
+      live_timeout;
+      heard = None;
+      request = None;
+      going_away = None;
+      winding_down = false;
+    }
+  in
+  opened conn;
   (try Lwt_unix.setsockopt fd Unix.TCP_NODELAY true with Unix.Unix_error _ -> ());
   Lwt.catch
     (fun () ->
       Server.create_connection_handler ~config ~idle_timeout:60. ~head_timeout:10.
-        ~request_handler:(fun conn reqd -> try handler conn reqd with e -> Reqd.report_exn reqd e)
+        ~request_handler:(fun conn reqd ->
+          conn.request <- Some reqd;
+          try handler conn reqd with e -> Reqd.report_exn reqd e)
         ~error_handler conn conn)
     (fun e ->
       default_log `Error ("Yuka_server: connection of " ^ address peer ^ ": " ^ Printexc.to_string e);
       Io.close conn)
 
-let serve ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) ?(listening = ignore) handler =
+let connection ?(write_timeout = 30.) ?(live_timeout = 60.) handler peer fd =
+  positive "connection" "write_timeout" write_timeout;
+  positive "connection" "live_timeout" live_timeout;
+  open_connection ~write_timeout ~live_timeout ~opened:ignore handler peer fd
+
+let reading_body c =
+  match c.request with Some reqd -> not (Ache.Body.Reader.is_closed (Reqd.request_body reqd)) | None -> false
+
+let wind_down c =
+  if not (c.winding_down || reading_body c) then begin
+    c.winding_down <- true;
+    match c.going_away with Some go -> go () | None -> Io.shutdown_receive c
+  end
+
+let rec settle connections deadline =
+  if Hashtbl.length connections = 0 || not (Lwt.is_sleeping deadline) then Lwt.return_unit
+  else begin
+    Hashtbl.iter (fun _ c -> wind_down c) connections;
+    Lwt.bind (Lwt.pick [ Lwt_unix.sleep 0.05; Lwt.protected deadline ]) (fun () -> settle connections deadline)
+  end
+
+let rec closed_all connections =
+  if Hashtbl.length connections = 0 then Lwt.return_unit
+  else Lwt.bind (Lwt_unix.sleep 0.01) (fun () -> closed_all connections)
+
+let drain connections drain_timeout =
+  Lwt.bind (settle connections (Lwt_unix.sleep drain_timeout)) (fun () ->
+      Hashtbl.iter (fun _ c -> force_close c) connections;
+      closed_all connections)
+
+let serve ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) ?(listening = ignore) ?(write_timeout = 30.)
+    ?(live_timeout = 60.) ?(max_connections = 1024) ?(drain_timeout = 10.) handler =
   let address =
     match Unix.inet_addr_of_string interface with
     | a -> a
     | exception Failure _ -> invalid_arg (Printf.sprintf "Yuka_server.serve: %S is not an IP address" interface)
   in
   if port < 0 || port > 65535 then invalid_arg (Printf.sprintf "Yuka_server.serve: port %d is not in 0-65535" port);
+  positive "serve" "write_timeout" write_timeout;
+  positive "serve" "live_timeout" live_timeout;
+  positive "serve" "drain_timeout" drain_timeout;
+  if max_connections < 1 then invalid_arg (Printf.sprintf "Yuka_server.serve: max_connections %d is not positive" max_connections);
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let address = Unix.ADDR_INET (address, port) in
   let socket = Lwt_unix.socket (Unix.domain_of_sockaddr address) Unix.SOCK_STREAM 0 in
+  let connections = Hashtbl.create 64 and freed = Lwt_condition.create () and next_id = ref 0 in
+  let opened c =
+    let id = !next_id in
+    incr next_id;
+    Hashtbl.replace connections id c;
+    Lwt.on_termination c.closed (fun () ->
+        Hashtbl.remove connections id;
+        Lwt_condition.signal freed ())
+  in
+  let stop_settled () = Lwt.catch (fun () -> Lwt.protected stop) (fun _ -> Lwt.return_unit) in
+  let stopped () = Lwt.map (fun () -> `Stop) (stop_settled ()) in
   let rec accept failing =
     match Lwt.state stop with
-    | Lwt.Return () -> Lwt.return_unit
-    | Lwt.Fail e -> Lwt.fail e
+    | Lwt.Return () | Lwt.Fail _ -> Lwt.return_unit
+    | Lwt.Sleep when Hashtbl.length connections >= max_connections ->
+        Lwt.bind (Lwt.pick [ stopped (); Lwt.map (fun () -> `Freed) (Lwt_condition.wait freed) ]) (fun _ -> accept failing)
     | Lwt.Sleep ->
         Lwt.bind
           (Lwt.pick
              [
-               Lwt.map (fun () -> `Stop) (Lwt.protected stop);
+               stopped ();
                Lwt.catch
                  (fun () -> Lwt.map (fun c -> `Accepted c) (Lwt_unix.accept ~cloexec:true socket))
                  (function Unix.Unix_error (e, _, _) -> Lwt.return (`Failed e) | e -> Lwt.fail e);
@@ -466,25 +584,46 @@ let serve ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) 
           (function
             | `Stop -> accept failing
             | `Accepted (fd, client) ->
-                Lwt.async (fun () -> connection handler client fd);
+                Lwt.async (fun () -> open_connection ~write_timeout ~live_timeout ~opened handler client fd);
                 accept false
             | `Failed e ->
                 if not failing then default_log `Error ("Yuka_server: accept failed, trying again: " ^ Unix.error_message e);
-                Lwt.bind (Lwt.pick [ Lwt_unix.sleep 0.1; Lwt.protected stop ]) (fun () -> accept true))
+                Lwt.bind (Lwt.pick [ Lwt_unix.sleep 0.1; stop_settled () ]) (fun () -> accept true))
   in
-  Lwt.finalize
-    (fun () ->
-      Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
-      Lwt.bind (Lwt_unix.bind socket address) (fun () ->
-          Lwt_unix.listen socket 1024;
-          (match Lwt_unix.getsockname socket with Unix.ADDR_INET (_, port) -> listening port | Unix.ADDR_UNIX _ -> ());
-          accept false))
-    (fun () -> Lwt_unix.close socket)
+  let listened = ref false in
+  Lwt.bind
+    (Lwt.catch
+       (fun () ->
+         Lwt.map Result.ok
+           (Lwt.finalize
+              (fun () ->
+                Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
+                Lwt.bind (Lwt_unix.bind socket address) (fun () ->
+                    Lwt_unix.listen socket 1024;
+                    listened := true;
+                    (match Lwt_unix.getsockname socket with Unix.ADDR_INET (_, port) -> listening port | Unix.ADDR_UNIX _ -> ());
+                    accept false))
+              (fun () -> Lwt_unix.close socket)))
+       (fun e -> Lwt.return (Error e)))
+    (fun outcome ->
+      Lwt.bind (if !listened then drain connections drain_timeout else Lwt.return_unit) (fun () ->
+          match (outcome, Lwt.state stop) with
+          | Error e, _ | Ok (), Lwt.Fail e -> Lwt.fail e
+          | Ok (), (Lwt.Return () | Lwt.Sleep) -> Lwt.return_unit))
 
-let run ?interface ?port ?sessions ?node ?log_requests config app =
+let run ?interface ?port ?sessions ?node ?log_requests ?write_timeout ?live_timeout ?max_connections ?drain_timeout config app =
   let stop, stopping = Lwt.wait () in
-  let quit _ = if Lwt.is_sleeping stop then Lwt.wakeup_later stopping () in
+  let quit _ =
+    if Lwt.is_sleeping stop then begin
+      default_log `Info "Yuka_server: stopping after the answers in progress; a second signal stops at once";
+      Lwt.wakeup_later stopping ()
+    end
+    else exit 1
+  in
   let signals = List.map (fun signal -> Lwt_unix.on_signal signal quit) [ Sys.sigint; Sys.sigterm ] in
   Fun.protect
     ~finally:(fun () -> List.iter Lwt_unix.disable_signal_handler signals)
-    (fun () -> Lwt_main.run (serve ?interface ?port ~stop (handler ?node ?sessions ?log_requests config app)))
+    (fun () ->
+      Lwt_main.run
+        (serve ?interface ?port ~stop ?write_timeout ?live_timeout ?max_connections ?drain_timeout
+           (handler ?node ?sessions ?log_requests config app)))

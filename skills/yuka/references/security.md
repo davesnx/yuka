@@ -68,7 +68,13 @@
   `__Host-` name, so a page on another subdomain can set its own valid
   cookie for the site. A page that reads the session under a shared cache
   rule (`public`, `s-maxage`) puts a `set-cookie` on a cacheable answer.
-- `yuka-server` limits the time to send a request head (10 seconds) and
-  the time a connection waits for a next request (60 seconds), but not
-  the time to send a body and not the number of connections. Put a proxy
-  in front of a public server.
+- `yuka-server` limits the time to send a request head (10 seconds),
+  the time a connection waits for a next request and a request body sends
+  no byte (60 seconds), the time a write of an answer sends no byte
+  (`~write_timeout`, 30 seconds), the time a live socket receives no byte
+  (`~live_timeout`, 60 seconds) and the number of open connections
+  (`~max_connections`, 1024; over it the server accepts nothing until one
+  closes). It does not limit the whole time of a body or an answer, so a
+  client that sends or reads a few bytes at a time keeps its connection,
+  and it does not limit the connections of one address. Put a proxy in
+  front of a public server.
