@@ -1,4 +1,4 @@
-open Infinite_shared
+open Infinite_scroll_shared
 
 (* A gallery of colour palettes, made from their number, so each load has the same ones. *)
 

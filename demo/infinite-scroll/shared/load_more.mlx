@@ -8,7 +8,7 @@ let skeleton_id = "next-page"
 let[@client] make ~(next : string option) ~(page : int) () =
   Yuka.Effect.after ~cleanup:(fun stop -> stop ()) (fun () ->
       match next with
-      | Some url -> !Browser.on_visible skeleton_id (fun () -> Yuka.Browser.navigate ~replace:true ~keep_scroll:true url)
+      | Some url -> Yuka.Browser.on_visible skeleton_id (fun () -> Yuka.Browser.navigate ~replace:true ~keep_scroll:true url)
       | None -> fun () -> ());
   match next with
   | Some _ ->

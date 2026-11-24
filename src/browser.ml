@@ -75,5 +75,10 @@ let on_frame handler =
          | exception e ->
              Base.in_frame := false;
              raise e))
+let on_visible id handler =
+  match Web.element_by_id (Web.document ()) id with
+  | Some element when Web.has_intersection_observer element ->
+      Web.on_visible element (fun () -> Scheduler.batch handler)
+  | _ -> ignore
 let now () = Web.now ()
 let count_elements selector = Array.length (Web.query_all (Web.document ()) selector)

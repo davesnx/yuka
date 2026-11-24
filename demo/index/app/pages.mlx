@@ -12,6 +12,11 @@ let demos =
       description = "A feed of notifications from many sources, with filters in the URL and events streamed live.";
       path = "/async-feed";
     };
+    {
+      name = "Infinite scroll";
+      description = "An endless gallery of palettes: the next page loads when the end of the list comes into view.";
+      path = "/infinite-scroll";
+    };
   ]
 
 let head =

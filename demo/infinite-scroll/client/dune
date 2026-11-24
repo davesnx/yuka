@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias infinite-scroll-client)
- (libraries infinite_shared yuka)
+ (libraries infinite_scroll_shared yuka)
  (preprocess
   (pps yuka.ppx melange.ppx))
  (module_systems

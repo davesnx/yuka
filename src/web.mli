@@ -18,6 +18,7 @@ val first_child : node -> node option
 val next_sibling : node -> node option
 val parent_node : node -> node option
 val first_element_child : node -> node option
+val element_by_id : node -> string -> node option
 val child_at : node -> int -> node
 val previous_sibling : node -> node option
 val last_child : node -> node option

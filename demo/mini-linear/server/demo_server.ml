@@ -72,6 +72,7 @@ let () =
   let bus = ref "memory" in
   let base = ref "" in
   let async_feed = ref (Filename.concat here "../../async-feed") in
+  let infinite_scroll = ref (Filename.concat here "../../infinite-scroll") in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
   let database =
     ref
@@ -106,6 +107,9 @@ let () =
       ("--prerendered", Arg.Set_string prerendered, "Serve the prerendered pages of DIR");
       ("--base", Arg.Set_string base, "Serve the app under this path prefix, as /mini-linear, and the list of demos at every other path (default: none)");
       ("--async-feed", Arg.Set_string async_feed, "With --base: directory of the Async demo (client/ and static/), served under /async-feed");
+      ( "--infinite-scroll",
+        Arg.Set_string infinite_scroll,
+        "With --base: directory of the Infinite scroll demo (client/ and static/), served under /infinite-scroll" );
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
         Arg.Set_int second,
@@ -141,14 +145,23 @@ let () =
   let others =
     if base = "" then []
     else if base = "/async-feed" then stop "--base /async-feed is the path of the Async demo"
+    else if base = "/infinite-scroll" then stop "--base /infinite-scroll is the path of the Infinite scroll demo"
     else
-      match
-        Async_feed_app.Serve.make ~base:"/async-feed" ~bundle:!bundle ~dir:!async_feed ~secret:!secret
-          ~dev:(!prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1")
-          ()
-      with
-      | Ok async -> [ (async.config, async.handler) ]
-      | Error message -> stop ("the Async demo: " ^ message)
+      let dev = !prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1" in
+      let async =
+        match Async_feed_app.Serve.make ~base:"/async-feed" ~bundle:!bundle ~dir:!async_feed ~secret:!secret ~dev () with
+        | Ok async -> (async.config, async.handler)
+        | Error message -> stop ("the Async demo: " ^ message)
+      in
+      let infinite =
+        match
+          Infinite_scroll_app.Serve.make ~base:"/infinite-scroll" ~bundle:!bundle ~dir:!infinite_scroll ~secret:!secret
+            ~dev ()
+        with
+        | Ok infinite -> (infinite.config, infinite.handler)
+        | Error message -> stop ("the Infinite scroll demo: " ^ message)
+      in
+      [ async; infinite ]
   in
   let config =
     match

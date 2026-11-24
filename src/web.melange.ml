@@ -145,6 +145,9 @@ let scroll_into_view : string -> unit =
 external first_element_child : node -> node option = "firstElementChild"
 [@@mel.get] [@@mel.return nullable]
 
+external element_by_id : node -> string -> node option = "getElementById"
+[@@mel.send] [@@mel.return nullable]
+
 let has_intersection_observer : node -> bool =
   [%mel.raw "function (el) { return typeof el.ownerDocument.defaultView.IntersectionObserver === 'function' }"]
 
