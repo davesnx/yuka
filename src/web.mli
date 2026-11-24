@@ -111,7 +111,8 @@ val history_at : unit -> int
 val history_go : int -> unit
 val history_back : unit -> unit
 val history_replace_url : string -> unit
-val manual_scroll : unit -> unit
+val scroll_restoration : string -> unit
+val persisted : event -> bool
 val plain_click : event -> bool
 val link_href : bool -> node -> string
 val link : node -> node

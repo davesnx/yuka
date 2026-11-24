@@ -397,9 +397,11 @@ let history_replace_url : string -> unit =
   [%mel.raw
     "function (url) { window.history.replaceState(window.history.state, '', url) }"]
 
-let manual_scroll : unit -> unit =
+let scroll_restoration : string -> unit =
   [%mel.raw
-    "function () { try { window.history.scrollRestoration = 'manual' } catch (e) {} }"]
+    "function (mode) { try { window.history.scrollRestoration = mode } catch (e) {} }"]
+
+let persisted : event -> bool = [%mel.raw "function (e) { return e.persisted === true }"]
 
 let plain_click : event -> bool =
   [%mel.raw
