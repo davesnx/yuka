@@ -19,7 +19,7 @@ Most internal modules are private:
   $ printf 'let _ = Yuka__Signal.create\n' > native/main.ml
   $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Signal'
   Unbound module Yuka__Signal
-  $ printf 'let _ = Yuka__Web.in_browser\n' > native/main.ml
+  $ printf 'let _ = Yuka__Host.in_browser\n' > native/main.ml
   $ dune build --root . ./native/main.exe
   $ printf 'let _ = Yuka__Form_core.get\n' > native/main.ml
   $ dune build --root . ./native/main.exe 2>&1 | grep -o 'Unbound module Yuka__Form_core'
