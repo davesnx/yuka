@@ -3,8 +3,9 @@ module Links = Demo_shared.Links
 module Queries = Demo_shared.Queries
 module Topics = Demo_shared.Topics
 open Demo_shared.Model
-open Demo_shared.Issue_list
 module State = Yuka.State
+
+type menu = Status of string | Priority of string
 
 let backdrop_template =
   Block_stubs.template ~markup:{|<div class="backdrop"></div>|} ~walk:[||] ~targets:[| 0 |] ~kinds:[| Block_stubs.Click |]

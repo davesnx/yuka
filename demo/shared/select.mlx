@@ -1,0 +1,237 @@
+module Css = [%yuka.css "select.css"]
+
+type state = {
+  id : string;
+  trigger_id : string;
+  list_id : string;
+  option_id : int -> string;
+  index_of : string -> int;
+  label : string;
+  value : string Yuka.State.read;
+  opened : bool Yuka.State.t;
+  highlighted : int Yuka.State.t;
+  toggle : unit -> unit;
+  close : refocus:bool -> unit;
+  select : string -> unit;
+  on_trigger_keydown : Yuka.Event.t -> unit;
+  on_popup_keydown : Yuka.Event.t -> unit;
+}
+
+let context : state Yuka.Context.t = Yuka.Context.make ~name:"select" ()
+let item_context : string Yuka.Context.t = Yuka.Context.make ~name:"select-item" ()
+
+let matches_prefix prefix candidate =
+  let p = String.lowercase_ascii prefix and c = String.lowercase_ascii candidate in
+  String.length p > 0 && String.starts_with ~prefix:p c
+
+module Root = struct
+  let make ?value ?(default_value = "") ?on_value_change ?name ~label ~values ?(full = false) ?(class_ = "") ~children () :
+      Yuka.client Yuka.element =
+    let internal = Yuka.State.make default_value in
+    let current = match value with Some state -> state | None -> Yuka.State.read_only internal in
+    let opened = Yuka.State.make false in
+    let highlighted = Yuka.State.make 0 in
+    let root_class =
+      let base = if full then Css.root ^ " " ^ Css.full else Css.root in
+      if class_ = "" then base else base ^ " " ^ class_
+    in
+    Yuka.with_unique_id (fun id ->
+        let trigger_id = id ^ "-trigger" in
+        let list_id = id ^ "-list" in
+        let option_id index = id ^ "-opt-" ^ Int.to_string index in
+        let index_of v = Option.value (List.find_index (String.equal v) values) ~default:0 in
+        let close ~refocus =
+          Yuka.State.set opened false;
+          if refocus then Yuka.Browser.focus trigger_id
+        in
+        let open_at index =
+          let count = List.length values in
+          let idx = if count = 0 then 0 else max 0 (min (count - 1) index) in
+          Yuka.State.set highlighted idx;
+          Yuka.State.set opened true;
+          if count > 0 then Yuka.Browser.focus (option_id idx)
+        in
+        let open_ () = open_at (index_of (Yuka.State.peek current)) in
+        let toggle () = if Yuka.State.peek opened then close ~refocus:false else open_ () in
+        let move step =
+          let count = List.length values in
+          if count > 0 then begin
+            let next = (Yuka.State.peek highlighted + step + count) mod count in
+            Yuka.State.set highlighted next;
+            Yuka.Browser.focus (option_id next)
+          end
+        in
+        let jump index =
+          let count = List.length values in
+          if count > 0 then begin
+            let next = max 0 (min (count - 1) index) in
+            Yuka.State.set highlighted next;
+            Yuka.Browser.focus (option_id next)
+          end
+        in
+        let select v =
+          if Option.is_none value then Yuka.State.set internal v;
+          Option.iter (fun f -> f v) on_value_change;
+          close ~refocus:true
+        in
+        let on_trigger_keydown event =
+          match Yuka.Event.key event with
+          | "ArrowDown" | "ArrowUp" ->
+              Yuka.Event.prevent_default event;
+              Yuka.Event.stop_propagation event;
+              open_ ()
+          | _ -> ()
+        in
+        let on_popup_keydown event =
+          let key = Yuka.Event.key event in
+          match key with
+          | "Escape" ->
+              Yuka.Event.prevent_default event;
+              Yuka.Event.stop_propagation event;
+              close ~refocus:true
+          | "Tab" -> close ~refocus:false
+          | "ArrowDown" ->
+              Yuka.Event.prevent_default event;
+              Yuka.Event.stop_propagation event;
+              move 1
+          | "ArrowUp" ->
+              Yuka.Event.prevent_default event;
+              Yuka.Event.stop_propagation event;
+              move (-1)
+          | "Home" ->
+              Yuka.Event.prevent_default event;
+              Yuka.Event.stop_propagation event;
+              jump 0
+          | "End" ->
+              Yuka.Event.prevent_default event;
+              Yuka.Event.stop_propagation event;
+              jump (List.length values - 1)
+          | "Enter" | " " -> Yuka.Event.stop_propagation event
+          | _ ->
+              Yuka.Event.stop_propagation event;
+              if String.length key = 1 then
+                let count = List.length values in
+                if count > 0 then
+                  let start = Yuka.State.peek highlighted in
+                  let rec find offset =
+                    if offset > count then ()
+                    else
+                      let idx = (start + offset) mod count in
+                      if matches_prefix key (List.nth values idx) then jump idx else find (offset + 1)
+                  in
+                  find 1
+        in
+        let ctx =
+          {
+            id;
+            trigger_id;
+            list_id;
+            option_id;
+            index_of;
+            label;
+            value = current;
+            opened;
+            highlighted;
+            toggle;
+            close;
+            select;
+            on_trigger_keydown;
+            on_popup_keydown;
+          }
+        in
+        <div class_=root_class>
+          (match name with
+          | Some name -> <input type_=`hidden name value=(Yuka.State.get current) />
+          | None -> Yuka.empty)
+          <Yuka.Context.Provide context value=ctx>children</Yuka.Context.Provide>
+        </div>)
+end
+
+module Trigger = struct
+  let make ?class_ ~children () : Yuka.client Yuka.element =
+    Yuka.hole (fun () ->
+        let ctx = Yuka.Context.get_exn context in
+        let cls = match class_ with Some c -> c | None -> Css.trigger in
+        <button id=ctx.trigger_id class_=cls type_=`button role=`combobox
+          aria_haspopup=`listbox
+          aria_label=ctx.label
+          aria_expanded=(Yuka.State.get ctx.opened)
+          aria_controls=ctx.list_id
+          data_value=(Yuka.State.get ctx.value)
+          style=("anchor-name:--" ^ ctx.id)
+          on_click=(fun event ->
+            Yuka.Event.stop_propagation event;
+            ctx.toggle ())
+          on_keydown=ctx.on_trigger_keydown>
+          children
+        </button>)
+end
+
+module Value = struct
+  let make ~children () : Yuka.client Yuka.element =
+    Yuka.hole (fun () ->
+        let ctx = Yuka.Context.get_exn context in
+        <span class_=Css.value>(children (Yuka.State.get ctx.value))</span>)
+end
+
+module Icon = struct
+  let make () : Yuka.client Yuka.element =
+    <svg class_=Css.icon view_box="0 0 12 12" width="12" height="12" aria_hidden=true>
+      <path d="M2.5 4.5 L6 8 L9.5 4.5" fill="none" stroke="currentColor" stroke_width="1.5" stroke_linecap=`round
+        stroke_linejoin=`round />
+    </svg>
+end
+
+module Popup = struct
+  let make ?(class_ = "") ~children () : Yuka.client Yuka.element =
+    Yuka.hole (fun () ->
+        let ctx = Yuka.Context.get_exn context in
+        if Yuka.State.get ctx.opened then
+          Yuka.fragment
+            [
+              <div class_=Css.backdrop
+                on_click=(fun event ->
+                  Yuka.Event.stop_propagation event;
+                  ctx.close ~refocus:false) />;
+              <div id=ctx.list_id
+                class_=(if class_ = "" then Css.popup else Css.popup ^ " " ^ class_)
+                style=("position-anchor:--" ^ ctx.id)
+                role=`listbox
+                aria_label=ctx.label
+                tabindex=(-1)
+                on_keydown=ctx.on_popup_keydown>
+                children
+              </div>;
+            ]
+        else Yuka.empty)
+end
+
+module Item = struct
+  let make ~(value : string) ~children () : Yuka.client Yuka.element =
+    Yuka.hole (fun () ->
+        let ctx = Yuka.Context.get_exn context in
+        let index = ctx.index_of value in
+        <button id=(ctx.option_id index) class_=("menu-item " ^ Css.item) type_=`button role=`option
+          data_value=value
+          aria_selected=(Yuka.State.get ctx.value = value)
+          data_highlighted=(if Yuka.State.get ctx.highlighted = index then "true" else "false")
+          tabindex=(if Yuka.State.get ctx.highlighted = index then 0 else -1)
+          on_mouseenter=(fun _ -> Yuka.State.set ctx.highlighted index)
+          on_click=(fun event ->
+            Yuka.Event.stop_propagation event;
+            ctx.select value)>
+          <Yuka.Context.Provide context=item_context value>children</Yuka.Context.Provide>
+        </button>)
+end
+
+module Item_indicator = struct
+  let make () : Yuka.client Yuka.element =
+    Yuka.hole (fun () ->
+        let ctx = Yuka.Context.get_exn context in
+        let item_value = Yuka.Context.get_exn item_context in
+        if Yuka.State.get ctx.value = item_value then
+          <svg class_=Css.indicator view_box="0 0 14 14" width="14" height="14" aria_hidden=true>
+            <path d="M3 7.5 L6 10.5 L11 4" fill="none" stroke="currentColor" stroke_width="1.75" />
+          </svg>
+        else Yuka.empty)
+end

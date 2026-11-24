@@ -1,6 +1,6 @@
 module Css = [%yuka.css "settings_panel.css"]
 
-let[@client] make () =
+let[@client] make ~children () =
   let row (preference : Preference.t) =
     Yuka.Effect.after (fun () -> Yuka.State.set preference.value (Preference.current preference));
     let id = "setting-" ^ preference.key in
@@ -20,6 +20,9 @@ let[@client] make () =
     </div>
   in
   <section class_=Css.settings data_settings="true">
-    <header class_="page-header">"Settings"</header>
+    <header class_="page-header">
+      <span>"Settings"</span>
+      children
+    </header>
     (Yuka.fragment (List.map row Preference.all))
   </section>
