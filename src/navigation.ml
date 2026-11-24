@@ -616,9 +616,12 @@ let on_popstate _ =
       ~dir ~push:false ~replace:false
       ~restore:(Some y) ~refresh:false (Web.current_url ())
 
+let on_pagehide _ = if Option.is_none (showing ()) then Web.scroll_restoration "auto"
+
 let handle e =
   match Navigation_web.event_type e with
   | "popstate" -> on_popstate e
+  | "pagehide" -> on_pagehide e
   | "pointerover" | "focusin" -> on_over e
   | "pointerdown" -> on_down e
   | "touchstart" -> on_touch e

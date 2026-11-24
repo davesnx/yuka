@@ -12,12 +12,9 @@ let table r =
       t
 
 let scroll_table : float Web.table option ref = ref None
-let save_scroll () = Web.table_set (table scroll_table) !shown_key (Web.scroll_y ())
-
-let on_pagehide _ =
-  Web.table_delete (table scroll_table) !shown_key;
-  save_scroll ();
-  Web.store_scrolls (table scroll_table)
+let save_scroll () =
+  Web.scroll_restoration "manual";
+  Web.table_set (table scroll_table) !shown_key (Web.scroll_y ())
 
 let loaded = Platform.loaded
 let on = ref false
@@ -189,13 +186,24 @@ let on_popstate e =
           (fun () -> if Web.current_url () <> !loaded then Web.navigate false (Web.current_url ()))
       end
 
+(* The browser restores the scroll of a reload, or of a return from another document, before
+   any script runs, also while a streamed page grows; client navigation sets [manual] again in
+   [save_scroll], before each history change it makes. The router keeps [manual] while an
+   overlay is shown, since the window then has the scroll of the page under it. *)
+let on_pagehide e =
+  Web.table_delete (table scroll_table) !shown_key;
+  save_scroll ();
+  Web.store_scrolls (table scroll_table);
+  match !router with Some r -> r.handle e | None -> Web.scroll_restoration "auto"
+
+let on_pageshow e = if Web.persisted e then Web.scroll_restoration "manual"
+
 let start ~load ?lazy_entries ?(transitions = false) entries =
   on := true;
   failed := false;
   loader := load;
   let islands () = Client.start ?lazy_entries entries in
   settings := (transitions, islands);
-  Web.manual_scroll ();
   current_key := Web.history_key ();
   if !current_key = "" then begin
     current_key := Web.fresh_key ();
@@ -214,14 +222,10 @@ let start ~load ?lazy_entries ?(transitions = false) entries =
       List.iter (fun n -> Web.add_listener doc n on_leave) leave_events;
       Web.add_listener (Web.window ()) "submit" on_submit;
       Web.add_listener (Web.window ()) "popstate" on_popstate;
-      Web.add_listener (Web.window ()) "pagehide" on_pagehide);
+      Web.add_listener (Web.window ()) "pagehide" on_pagehide;
+      Web.add_listener (Web.window ()) "pageshow" on_pageshow);
   islands ();
-  (match !scroll_table with
-  | None ->
-      let t = Web.stored_scrolls () in
-      scroll_table := Some t;
-      Option.iter Web.scroll_to (Web.table_get t !shown_key)
-  | Some _ -> ());
+  if Option.is_none !scroll_table then scroll_table := Some (Web.stored_scrolls ());
   Platform.client_navigate := Some (navigate ?link:None);
   Platform.client_refresh := refresh;
   match !router with
@@ -250,7 +254,8 @@ let stop () =
       Web.remove_listener doc "pointermove" on_move;
       Web.remove_listener (Web.window ()) "submit" on_submit;
       Web.remove_listener (Web.window ()) "popstate" on_popstate;
-      Web.remove_listener (Web.window ()) "pagehide" on_pagehide
+      Web.remove_listener (Web.window ()) "pagehide" on_pagehide;
+      Web.remove_listener (Web.window ()) "pageshow" on_pageshow
   | None -> ());
   Option.iter (fun r -> r.stop ()) !router;
   Client.stop ()
