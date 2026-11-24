@@ -42,7 +42,9 @@ Under `/async-feed` with `make demo-serve`, at `/` alone:
   route: clicking a card opens it over the feed with a client
   navigation, and Back, Escape, a click beside it or Close remove it. A
   direct load or a reload shows it over the newest events; Close then goes
-  to the feed.
+  to the feed. While it is open the feed under it does not scroll:
+  `Scroll_lock` hides the scrollbars of the page and of `.main`, and adds
+  the width of each one to the right padding, so the feed does not move.
 
 ## Layout
 

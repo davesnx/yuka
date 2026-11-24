@@ -338,6 +338,36 @@ await step("a7. full-card click opens rich 80% split-view panel with embeds and 
 
 check("a6 no console errors, page errors, hydration mismatches or failed requests", problems.length === 0, problems.join(" | "));
 
+await step("a9. opening the panel hides the scrollbar without moving the feed", async () => {
+  // Headless Chromium hides scrollbars; without them nothing would move.
+  const visible = await chromium.launch({ headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
+  for (const width of [1280, 600]) {
+    const S = await (await visible.newContext({ viewport: { width, height: 800 }, timezoneId: "UTC" })).newPage();
+    await S.goto(app, { waitUntil: "networkidle" });
+    // The steps before added live events, so take a card the page has.
+    const id = await S.locator(".feed:not(.feed-live) .card").nth(10).getAttribute("data-id");
+    await S.locator(`.card[data-id="${id}"]`).scrollIntoViewIfNeeded();
+    const measure = () => S.evaluate((id) => {
+      const main = document.querySelector(".main")!;
+      const title = document.querySelector(`.card[data-id="${id}"] .card-title`)!.getBoundingClientRect();
+      const gap = main.offsetWidth - main.clientWidth + innerWidth - document.documentElement.clientWidth;
+      return { left: title.left, width: title.width, gap };
+    }, id);
+    const before = await measure();
+    await S.locator(`.card[data-id="${id}"] .card-link`).click();
+    await S.locator(".sheet-panel").waitFor();
+    const open = await measure();
+    check(`a9.1 at ${width}px the scrollbar goes and the feed stays`, before.gap > 0 && open.gap === 0 && open.left === before.left && open.width === before.width, JSON.stringify({ before, open }));
+    await S.keyboard.press("Escape");
+    await S.locator(".sheet").waitFor({ state: "detached" });
+    const closed = await measure();
+    const inline = await S.evaluate(() => [document.querySelector(".main")!, document.body, document.documentElement].map((e) => e.getAttribute("style") ?? "").join(""));
+    check(`a9.2 at ${width}px closing gives the scrollbar back`, closed.gap === before.gap && closed.width === before.width && inline === "", JSON.stringify({ closed, inline }));
+    await S.close();
+  }
+  await visible.close();
+});
+
 await browser.close();
 console.log(failures === 0 ? "\nASYNC FEED ALL PASS" : `\n${failures} FAILED (async feed)`);
 process.exit(failures === 0 ? 0 : 1);

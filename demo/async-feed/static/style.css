@@ -515,8 +515,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .simulate:disabled .pulse { animation: none; }
 }
 
-:root:has(.sheet) { overflow: hidden; }
-
 .sheet { position: fixed; inset: 0; z-index: 30; }
 .sheet-backdrop {
   position: absolute;
