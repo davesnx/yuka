@@ -1,0 +1,25 @@
+(executable
+ (name main)
+ (libraries infinite_shared yuka yuka-dream dream lwt lwt.unix)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Infinite_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
+
+(rule
+ (alias all)
+ (deps main.exe ../client/yuka_islands.json (alias ../client/infinite-scroll-client) (alias ../static/all))
+ (action
+  (progn)))

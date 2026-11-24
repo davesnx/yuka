@@ -85,6 +85,11 @@ demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browse
 	  --assets $(BUILD_DIR)/default/demo/async-feed/static --assets $(BUILD_DIR)/default/demo/async-feed/client/out \
 	  -- $(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
+.PHONY: infinite-scroll-serve
+infinite-scroll-serve: ## Serve the infinite scroll example (examples/infinite-scroll) on PORT
+	$(DUNE) build --profile=dev @examples/infinite-scroll/all
+	$(BUILD_DIR)/default/examples/infinite-scroll/server/main.exe --port $(PORT)
+
 .PHONY: demo-test
 demo-test: ## Run the demo tests
 	$(DUNE) build @demo/runtest --force

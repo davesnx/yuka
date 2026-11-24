@@ -370,7 +370,8 @@ from the server, keep the scroll position: use
 <a href=(Routes.blog ~tag:"bug" ()) data_yuka_keep_scroll="">(Yuka.text "Bugs")</a>
 ```
 
-The page does not scroll to the top or to the fragment. The focus and
+The page does not scroll to the top or to the fragment: it stays
+where the user scrolled while the new page loaded. The focus and
 the announcer change as for other navigations. You can use both
 attributes on one link. Without client navigation, the full page load
 scrolls as the browser does.
