@@ -1,0 +1,521 @@
+open Async_feed_shared
+
+let rng seed step =
+  let x = ((seed * 1103515245) + (step * 12345) + 0x9e3779b9) land 0x3fffffff in
+  let x = (x lxor (x lsr 13)) * 1274126177 land 0x3fffffff in
+  x lxor (x lsr 16)
+
+let range seed step lo hi =
+  if hi <= lo then lo else lo + (rng seed step mod (hi - lo + 1))
+
+let fmt f = Printf.sprintf "%.1f" f
+
+let polyline_points xs ys =
+  List.map2 (fun x y -> Printf.sprintf "%s,%s" (fmt x) (fmt y)) xs ys |> String.concat " "
+
+let area_path xs ys baseline =
+  match (xs, ys) with
+  | [], _ | _, [] -> ""
+  | x0 :: _, _ ->
+      let last_x = List.hd (List.rev xs) in
+      let pts = List.map2 (fun x y -> Printf.sprintf "L%s,%s" (fmt x) (fmt y)) xs ys |> String.concat " " in
+      Printf.sprintf "M%s,%s %s L%s,%s Z" (fmt x0) (fmt baseline) pts (fmt last_x) (fmt baseline)
+
+let new_relic_visual (event : Model.event) =
+  let n = event.id in
+  let thresh = float_of_int (Data.percent n) in
+  let service = Data.service n in
+  let uptime_pct = 98.4 +. (float_of_int (range n 3 0 154) /. 100.0) in
+  let p95_ms = range n 7 140 680 in
+  let bars =
+    List.init 48 (fun i ->
+        let status =
+          if i >= 45 then "down"
+          else if i = 44 then "degraded"
+          else
+            let r = rng n (100 + i) mod 100 in
+            if r < 3 then "down" else if r < 11 then "degraded" else "up"
+        in
+        let h = if status = "down" then 14 else if status = "degraded" then 22 else 28 in
+        (i, status, h))
+  in
+  let count = 28 in
+  let max_y = Float.max (thresh *. 2.2) 10.0 in
+  let values =
+    List.init count (fun i ->
+        let base = 0.4 +. (float_of_int (range n (200 + i) 0 18) /. 10.0) in
+        let spike =
+          if i >= count - 6 then
+            let k = float_of_int (i - (count - 6)) /. 5.0 in
+            (thresh *. (0.7 +. (0.85 *. k))) +. (float_of_int (range n (300 + i) 0 14) /. 10.0)
+          else 0.0
+        in
+        Float.min max_y (base +. spike))
+  in
+  let peak = List.fold_left Float.max 0.0 values in
+  let w = 560.0 and h = 132.0 and pad_l = 36.0 and pad_r = 12.0 and pad_t = 12.0 and pad_b = 22.0 in
+  let plot_w = w -. pad_l -. pad_r and plot_h = h -. pad_t -. pad_b in
+  let xs = List.init count (fun i -> pad_l +. (plot_w *. float_of_int i /. float_of_int (count - 1))) in
+  let y_of v = pad_t +. plot_h -. (plot_h *. (v /. max_y)) in
+  let ys = List.map y_of values in
+  let thresh_y = y_of thresh in
+  let baseline = pad_t +. plot_h in
+  <div class_="visual-stack">
+    <section class_="visual-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">(Yuka.text ("Uptime · " ^ service))</h3>
+          <p class_="visual-sub">"Last 48 checks (24h rolling window)"</p>
+        </div>
+        <span class_="status-pill status-danger">"Incident active"</span>
+      </div>
+      <div class_="kpi-row">
+        <div class_="kpi">
+          <span class_="kpi-label">"30d uptime"</span>
+          <strong class_="kpi-value">(Yuka.text (Printf.sprintf "%.2f%%" uptime_pct))</strong>
+        </div>
+        <div class_="kpi">
+          <span class_="kpi-label">"Peak error rate"</span>
+          <strong class_="kpi-value kpi-danger">(Yuka.text (Printf.sprintf "%.1f%%" peak))</strong>
+        </div>
+        <div class_="kpi">
+          <span class_="kpi-label">"P95 latency"</span>
+          <strong class_="kpi-value">(Yuka.text (Printf.sprintf "%dms" p95_ms))</strong>
+        </div>
+        <div class_="kpi">
+          <span class_="kpi-label">"Errors (5m)"</span>
+          <strong class_="kpi-value">(Yuka.text (Int.to_string (Data.errors n)))</strong>
+        </div>
+      </div>
+      <div class_="uptime-bars" role=`img aria_label=(Printf.sprintf "Uptime bar chart for %s" service)>
+        (Yuka.fragment
+           (List.map
+              (fun (i, status, bar_h) ->
+                <span class_=("uptime-bar uptime-" ^ status)
+                  title=(Printf.sprintf "Window -%dm: %s" ((48 - i) * 30) status)
+                  data_h=(Int.to_string bar_h) />)
+              bars))
+      </div>
+      <div class_="uptime-legend">
+        <span>"24h ago"</span>
+        <span class_="uptime-legend-mid">
+          <i class_="dot dot-up" /> " Operational "
+          <i class_="dot dot-degraded" /> " Degraded "
+          <i class_="dot dot-down" /> " Outage"
+        </span>
+        <span>"Now"</span>
+      </div>
+    </section>
+    <section class_="visual-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">"Error rate vs alert threshold"</h3>
+          <p class_="visual-sub">(Yuka.text (Printf.sprintf "Alert threshold: > %d%% · Policy: Production errors" (Data.percent n)))</p>
+        </div>
+      </div>
+      <svg class_="chart-svg" view_box="0 0 560 132" role=`img aria_label="Error rate over the last 60 minutes">
+        <line class_="chart-grid" x1="36" y1="12" x2="548" y2="12" />
+        <line class_="chart-grid" x1="36" y1="61" x2="548" y2="61" />
+        <line class_="chart-grid" x1="36" y1="110" x2="548" y2="110" />
+        <line class_="chart-threshold" x1="36" y1=(fmt thresh_y) x2="548" y2=(fmt thresh_y) />
+        <path d=(area_path xs ys baseline) fill="#ef4444" opacity="0.14" />
+        <polyline points=(polyline_points xs ys) fill="none" stroke="#ef4444" stroke_width="2" stroke_linejoin=`round stroke_linecap=`round />
+        <circle cx=(fmt (List.hd (List.rev xs))) cy=(fmt (List.hd (List.rev ys))) r="3.5" fill="#ef4444" />
+        <text class_="chart-label" x="30" y="16" text_anchor="end">(Yuka.text (Printf.sprintf "%.0f%%" max_y))</text>
+        <text class_="chart-label" x="30" y=(fmt (thresh_y +. 3.5)) text_anchor="end">(Yuka.text (Printf.sprintf "%d%%" (Data.percent n)))</text>
+        <text class_="chart-label" x="30" y="113" text_anchor="end">"0%"</text>
+        <text class_="chart-label" x="36" y="128" text_anchor="start">"-60m"</text>
+        <text class_="chart-label" x="206" y="128" text_anchor="middle">"-40m"</text>
+        <text class_="chart-label" x="377" y="128" text_anchor="middle">"-20m"</text>
+        <text class_="chart-label" x="548" y="128" text_anchor="end">"Now"</text>
+      </svg>
+    </section>
+  </div>
+
+let vercel_visual (event : Model.event) =
+  let n = event.id in
+  let total_s = Data.build_seconds n in
+  let is_failed = Data.failed n in
+  let w1 = max 3 (total_s * 18 / 100) in
+  let w2 = max 4 (total_s * 22 / 100) in
+  let w3 = max 5 (total_s * 34 / 100) in
+  let w4 = max 3 (total_s * 16 / 100) in
+  let w5 = max 2 (total_s - w1 - w2 - w3 - w4) in
+  let stages =
+    [
+      ("Install deps", 0, w1, false);
+      ("Typecheck", w1, w2, false);
+      ("Build & compile", w1 + w2, w3, is_failed);
+      ("Bundle assets", w1 + w2 + w3, w4, false);
+      ("Edge deploy", w1 + w2 + w3 + w4, w5, false);
+    ]
+  in
+  let count = 24 in
+  let latencies = List.init count (fun i -> float_of_int (range n (400 + i) 24 145)) in
+  let avg_ttfb =
+    int_of_float (List.fold_left ( +. ) 0.0 latencies /. float_of_int count)
+  in
+  let cache_hit = 91.2 +. (float_of_int (range n 19 0 85) /. 10.0) in
+  let max_y = 180.0 in
+  let w = 560.0 and pad_l = 36.0 and pad_r = 12.0 and pad_t = 12.0 and pad_b = 22.0 in
+  let plot_w = w -. pad_l -. pad_r and plot_h = 132.0 -. pad_t -. pad_b in
+  let xs = List.init count (fun i -> pad_l +. (plot_w *. float_of_int i /. float_of_int (count - 1))) in
+  let ys = List.map (fun v -> pad_t +. plot_h -. (plot_h *. (v /. max_y))) latencies in
+  let baseline = pad_t +. plot_h in
+  <div class_="visual-stack">
+    <section class_="visual-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">"Build pipeline waterfall"</h3>
+          <p class_="visual-sub">
+            (Yuka.text (Printf.sprintf "acme-%s-%s.vercel.app · %ds total" (Data.slug '-' event.project) (Data.hash n) total_s))
+          </p>
+        </div>
+        <span class_=(if is_failed then "status-pill status-danger" else "status-pill status-ok")>
+          (Yuka.text (if is_failed then "Build failed" else "Ready"))
+        </span>
+      </div>
+      <div class_="waterfall">
+        (Yuka.fragment
+           (List.mapi
+              (fun idx (name, start_s, dur_s, fail) ->
+                let skipped = is_failed && idx > 2 in
+                let left_pct = float_of_int start_s /. float_of_int (max 1 total_s) *. 100.0 in
+                let width_pct = Float.max 4.0 (float_of_int dur_s /. float_of_int (max 1 total_s) *. 100.0) in
+                let bar_cls =
+                  if fail then "wf-bar wf-fail"
+                  else if skipped then "wf-bar wf-skip"
+                  else "wf-bar wf-ok"
+                in
+                <div class_="wf-row">
+                  <span class_="wf-name">(Yuka.text name)</span>
+                  <div class_="wf-track">
+                    <span class_=bar_cls
+                      style=(Printf.sprintf "left:%.1f%%;width:%.1f%%" left_pct width_pct) />
+                  </div>
+                  <span class_="wf-dur">
+                    (Yuka.text (if skipped then "—" else Printf.sprintf "%ds" dur_s))
+                  </span>
+                </div>)
+              stages))
+      </div>
+    </section>
+    <section class_="visual-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">"Edge TTFB & throughput"</h3>
+          <p class_="visual-sub">"Global edge latency across iad1, fra1, hnd1, sfo1"</p>
+        </div>
+      </div>
+      <div class_="kpi-row">
+        <div class_="kpi">
+          <span class_="kpi-label">"Median TTFB"</span>
+          <strong class_="kpi-value">(Yuka.text (Printf.sprintf "%dms" avg_ttfb))</strong>
+        </div>
+        <div class_="kpi">
+          <span class_="kpi-label">"Edge cache hit"</span>
+          <strong class_="kpi-value kpi-ok">(Yuka.text (Printf.sprintf "%.1f%%" cache_hit))</strong>
+        </div>
+        <div class_="kpi">
+          <span class_="kpi-label">"Build duration"</span>
+          <strong class_="kpi-value">(Yuka.text (Printf.sprintf "%ds" total_s))</strong>
+        </div>
+      </div>
+      <svg class_="chart-svg" view_box="0 0 560 132" role=`img aria_label="Edge TTFB latency chart">
+        <line class_="chart-grid" x1="36" y1="12" x2="548" y2="12" />
+        <line class_="chart-grid" x1="36" y1="61" x2="548" y2="61" />
+        <line class_="chart-grid" x1="36" y1="110" x2="548" y2="110" />
+        <path d=(area_path xs ys baseline) fill="#3b82f6" opacity="0.14" />
+        <polyline points=(polyline_points xs ys) fill="none" stroke="#3b82f6" stroke_width="2" stroke_linejoin=`round stroke_linecap=`round />
+        <text class_="chart-label" x="30" y="16" text_anchor="end">"180ms"</text>
+        <text class_="chart-label" x="30" y="64" text_anchor="end">"90ms"</text>
+        <text class_="chart-label" x="30" y="113" text_anchor="end">"0ms"</text>
+        <text class_="chart-label" x="36" y="128" text_anchor="start">"-12h"</text>
+        <text class_="chart-label" x="292" y="128" text_anchor="middle">"-6h"</text>
+        <text class_="chart-label" x="548" y="128" text_anchor="end">"Now"</text>
+      </svg>
+    </section>
+  </div>
+
+let github_visual (event : Model.event) =
+  let n = event.id in
+  let slug = Data.slug '_' event.project in
+  let file_names =
+    [
+      Printf.sprintf "src/%s/handler.ml" slug;
+      Printf.sprintf "src/%s/store.ml" slug;
+      Printf.sprintf "src/%s/view.mlx" slug;
+      Printf.sprintf "test/%s_test.ml" slug;
+      Printf.sprintf "static/%s.css" slug;
+      "dune-project";
+    ]
+  in
+  let shown = min 6 (max 3 (Data.changed n)) in
+  let rows =
+    List.init shown (fun i ->
+        let name = List.nth file_names i in
+        let add = range n (500 + (i * 2)) 8 180 in
+        let del = range n (501 + (i * 2)) 2 90 in
+        (name, add, del))
+  in
+  let max_churn =
+    List.fold_left (fun acc (_, a, d) -> max acc (a + d)) 1 rows |> float_of_int
+  in
+  let is_merged = Data.merged n in
+  <div class_="visual-stack">
+    <section class_="visual-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">(Yuka.text (Printf.sprintf "PR #%d diff activity" (Data.pull n)))</h3>
+          <p class_="visual-sub">
+            (Yuka.text (Printf.sprintf "%d files changed · +%d −%d" (Data.changed n) (Data.additions n) (Data.deletions n)))
+          </p>
+        </div>
+        <span class_=(if is_merged then "status-pill status-purple" else "status-pill status-ok")>
+          (Yuka.text (if is_merged then "Merged" else "Open"))
+        </span>
+      </div>
+      <div class_="checks-strip">
+        <span class_="check-chip"><i class_="dot dot-up" />"build"</span>
+        <span class_="check-chip"><i class_="dot dot-up" />"unit-tests"</span>
+        <span class_="check-chip"><i class_="dot dot-up" />"typecheck"</span>
+        <span class_="check-chip"><i class_="dot dot-up" />"e2e"</span>
+      </div>
+      <svg class_="chart-svg" view_box="0 0 560 138" role=`img aria_label="Code additions and deletions per file">
+        (Yuka.fragment
+           (List.mapi
+              (fun i (name, add, del) ->
+                let y = 10.0 +. (float_of_int i *. 21.0) in
+                let bar_max = 260.0 in
+                let add_w = Float.max 4.0 (float_of_int add /. max_churn *. bar_max) in
+                let del_w = Float.max 3.0 (float_of_int del /. max_churn *. bar_max) in
+                <g>
+                  <text class_="chart-file" x="4" y=(fmt (y +. 11.0))>(Yuka.text name)</text>
+                  <rect x="210" y=(fmt (y +. 2.0)) width=(fmt add_w) height="10" rx="2" fill="#22c55e" />
+                  <rect x=(fmt (212.0 +. add_w)) y=(fmt (y +. 2.0)) width=(fmt del_w) height="10" rx="2" fill="#ef4444" />
+                  <text class_="chart-label" x="556" y=(fmt (y +. 11.0)) text_anchor="end">
+                    (Yuka.text (Printf.sprintf "+%d −%d" add del))
+                  </text>
+                </g>)
+              rows))
+      </svg>
+    </section>
+  </div>
+
+let reddit_visual (event : Model.event) =
+  let n = event.id in
+  let target = float_of_int (Data.upvotes n) in
+  let count = 16 in
+  let curve =
+    List.init count (fun i ->
+        let t = float_of_int i /. float_of_int (count - 1) in
+        let eased = 1.0 -. ((1.0 -. t) *. (1.0 -. t)) in
+        let jitter = float_of_int (range n (600 + i) (-6) 6) in
+        Float.max 1.0 ((target *. eased) +. jitter))
+  in
+  let max_y = Float.max 20.0 (List.fold_left Float.max target curve *. 1.15) in
+  let w = 560.0 and pad_l = 36.0 and pad_r = 12.0 and pad_t = 12.0 and pad_b = 22.0 in
+  let plot_w = w -. pad_l -. pad_r and plot_h = 120.0 -. pad_t -. pad_b in
+  let xs = List.init count (fun i -> pad_l +. (plot_w *. float_of_int i /. float_of_int (count - 1))) in
+  let ys = List.map (fun v -> pad_t +. plot_h -. (plot_h *. (v /. max_y))) curve in
+  let baseline = pad_t +. plot_h in
+  <div class_="visual-stack">
+    <iframe class_="embed-frame embed-reddit" src=(Routes.embed ~id:event.id ()) title=("Reddit embed: " ^ event.title) />
+    <section class_="visual-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">"Upvote velocity"</h3>
+          <p class_="visual-sub">
+            (Yuka.text (Printf.sprintf "%d upvotes · %d replies · %d%% upvoted" (Data.upvotes n) (Data.replies n) (84 + (n * 3 mod 15))))
+          </p>
+        </div>
+      </div>
+      <svg class_="chart-svg" view_box="0 0 560 120" role=`img aria_label="Upvote velocity over the first 24 hours">
+        <line class_="chart-grid" x1="36" y1="12" x2="548" y2="12" />
+        <line class_="chart-grid" x1="36" y1="55" x2="548" y2="55" />
+        <line class_="chart-grid" x1="36" y1="98" x2="548" y2="98" />
+        <path d=(area_path xs ys baseline) fill="#ff4500" opacity="0.14" />
+        <polyline points=(polyline_points xs ys) fill="none" stroke="#ff4500" stroke_width="2" stroke_linejoin=`round stroke_linecap=`round />
+        <text class_="chart-label" x="30" y="16" text_anchor="end">(Yuka.text (Printf.sprintf "%.0f" max_y))</text>
+        <text class_="chart-label" x="30" y="101" text_anchor="end">"0"</text>
+        <text class_="chart-label" x="36" y="116" text_anchor="start">"0h"</text>
+        <text class_="chart-label" x="292" y="116" text_anchor="middle">"12h"</text>
+        <text class_="chart-label" x="548" y="116" text_anchor="end">"24h"</text>
+      </svg>
+    </section>
+  </div>
+
+let figma_visual (event : Model.event) =
+  let n = event.id in
+  let days = [ "Mon"; "Tue"; "Wed"; "Thu"; "Fri"; "Sat"; "Sun" ] in
+  let counts = List.init 7 (fun i -> range n (700 + i) 3 26) in
+  let max_c = List.fold_left max 1 counts |> float_of_int in
+  <div class_="visual-stack">
+    <section class_="visual-card embed-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">(Yuka.text ("Figma canvas · " ^ Data.file n))</h3>
+          <p class_="visual-sub">(Yuka.text (Data.figma_frame n))</p>
+        </div>
+        <span class_="status-pill status-purple">"Live embed"</span>
+      </div>
+      <iframe class_="embed-frame embed-figma" src=(Routes.embed ~id:event.id ()) title=("Figma embed: " ^ event.title) />
+    </section>
+    <section class_="visual-card">
+      <div class_="visual-head">
+        <div>
+          <h3 class_="visual-title">"Frame revisions this week"</h3>
+          <p class_="visual-sub">
+            (Yuka.text (Printf.sprintf "%d edits across %s" (List.fold_left ( + ) 0 counts) (Data.figma_page n)))
+          </p>
+        </div>
+      </div>
+      <svg class_="chart-svg" view_box="0 0 560 112" role=`img aria_label="Weekly frame revisions">
+        <line class_="chart-grid" x1="24" y1="86" x2="536" y2="86" />
+        (Yuka.fragment
+           (List.mapi
+              (fun i c ->
+                let x = 40.0 +. (float_of_int i *. 72.0) in
+                let bar_h = Float.max 6.0 (float_of_int c /. max_c *. 68.0) in
+                let y = 86.0 -. bar_h in
+                <g>
+                  <rect x=(fmt x) y=(fmt y) width="36" height=(fmt bar_h) rx="4" fill="#a259ff" opacity=(if i = 6 then "1" else "0.55") />
+                  <text class_="chart-label" x=(fmt (x +. 18.0)) y=(fmt (y -. 4.0)) text_anchor="middle">(Yuka.text (Int.to_string c))</text>
+                  <text class_="chart-label" x=(fmt (x +. 18.0)) y="104" text_anchor="middle">(Yuka.text (List.nth days i))</text>
+                </g>)
+              counts))
+      </svg>
+    </section>
+  </div>
+
+let main_visual (event : Model.event) =
+  match event.source with
+  | Model.New_relic -> new_relic_visual event
+  | Vercel -> vercel_visual event
+  | Figma -> figma_visual event
+  | Reddit -> reddit_visual event
+  | Github -> github_visual event
+
+let reddit_embed_body (event : Model.event) =
+  let n = event.id in
+  let subject = Data.subject n in
+  let accent =
+    match n mod 4 with
+    | 0 -> "#ff4500"
+    | 1 -> "#6366f1"
+    | 2 -> "#0ea5e9"
+    | _ -> "#10b981"
+  in
+  let slug = Data.slug '-' event.project in
+  <div class_="reddit-embed">
+    <div class_="reddit-votes">
+      <svg view_box="0 0 16 16" width="16" height="16" aria_hidden=true>
+        <path d="M8 3 L13 9 H9.8 V13 H6.2 V9 H3 Z" fill="#ff4500" />
+      </svg>
+      <strong>(Yuka.text (Int.to_string (Data.upvotes n)))</strong>
+      <svg view_box="0 0 16 16" width="16" height="16" aria_hidden=true>
+        <path d="M8 13 L3 7 H6.2 V3 H9.8 V7 H13 Z" fill="currentColor" opacity="0.35" />
+      </svg>
+    </div>
+    <div class_="reddit-main">
+      <div class_="reddit-meta">
+        (Card.logo ~size:18 Model.Reddit)
+        <span class_="reddit-sub">"r/acme"</span>
+        <span>"·"</span>
+        <Avatar name=event.author size=16 />
+        <span>(Yuka.text event.author)</span>
+        <span class_="reddit-flair">(Yuka.text (Data.flair n))</span>
+      </div>
+      <h1 class_="reddit-title">(Yuka.text subject)</h1>
+      <div class_="og-card">
+        <div class_="og-image" style=(Printf.sprintf "background:linear-gradient(135deg,%s,#111827)" accent)>
+          <svg class_="og-art" view_box="0 0 420 140" role=`img aria_label=("OpenGraph preview for " ^ subject)>
+            <circle cx="355" cy="24" r="76" fill="#ffffff" opacity="0.08" />
+            <circle cx="385" cy="112" r="54" fill="#ffffff" opacity="0.06" />
+            <rect x="24" y="22" width="66" height="20" rx="10" fill="#ffffff" opacity="0.18" />
+            <text x="57" y="36" fill="#ffffff" font_size="10" font_weight="600" text_anchor="middle">"ACME.DEV"</text>
+            <text x="24" y="76" fill="#ffffff" font_size="18" font_weight="700">(Yuka.text subject)</text>
+            <text x="24" y="100" fill="#ffffff" opacity="0.82" font_size="12">
+              (Yuka.text (Printf.sprintf "Roadmap · %s · %s team" event.project event.team))
+            </text>
+            <rect x="24" y="114" width="96" height="6" rx="3" fill="#ffffff" opacity="0.35" />
+            <rect x="128" y="114" width="54" height="6" rx="3" fill="#ffffff" opacity="0.2" />
+          </svg>
+        </div>
+        <div class_="og-footer">
+          <span class_="og-domain">(Yuka.text (Printf.sprintf "acme.dev/roadmap/%s" slug))</span>
+          <span class_="og-stats">(Yuka.text (Printf.sprintf "%d comments · %d%% upvoted" (Data.replies n) (84 + (n * 3 mod 15))))</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+let figma_embed_body (event : Model.event) =
+  let n = event.id in
+  let file_name = Data.file n in
+  let frame_name = Data.figma_frame n in
+  let accent =
+    match n mod 4 with
+    | 0 -> "#a259ff"
+    | 1 -> "#1abcfe"
+    | 2 -> "#0acf83"
+    | _ -> "#f24e1e"
+  in
+  let pad_px = 8 + (n mod 3 * 4) in
+  <div class_="figma-embed">
+    <div class_="figma-toolbar">
+      <div class_="figma-toolbar-left">
+        (Card.logo ~size:18 Model.Figma)
+        <span class_="figma-crumb">(Yuka.text file_name)</span>
+        <span class_="figma-sep">"/"</span>
+        <span class_="figma-frame-label">(Yuka.text frame_name)</span>
+      </div>
+      <div class_="figma-toolbar-right">
+        <Avatar name=event.author size=18 />
+        <Avatar name=event.assignee size=18 />
+        <span class_="figma-zoom">"100%"</span>
+      </div>
+    </div>
+    <div class_="figma-canvas">
+      <div class_="figma-artboard">
+        <div class_="figma-artboard-label">(Yuka.text frame_name)</div>
+        <div class_="figma-frame-box">
+          <div class_="figma-wire-header">
+            <span class_="figma-wire-dot" style=("background:" ^ accent) />
+            <span class_="figma-wire-bar" style="width:92px" />
+            <span class_="figma-wire-pill" />
+          </div>
+          <div class_="figma-wire-grid">
+            <div class_="figma-wire-card">
+              <div class_="figma-wire-hero" style=("background:" ^ accent) />
+              <span class_="figma-wire-bar" style="width:78%" />
+              <span class_="figma-wire-bar muted" style="width:52%" />
+            </div>
+            <div class_="figma-wire-card figma-wire-selected">
+              <div class_="figma-spacing-tag">(Yuka.text (Printf.sprintf "%dpx · 8px grid" pad_px))</div>
+              <span class_="figma-wire-bar" style="width:70%" />
+              <span class_="figma-wire-bar muted" style="width:88%" />
+              <span class_="figma-wire-cta" style=("background:" ^ accent) />
+            </div>
+          </div>
+          <div class_="figma-pin">
+            <Avatar name=event.author size=22 />
+            <div class_="figma-pin-bubble">
+              <strong>(Yuka.text event.author)</strong>
+              <span>(Yuka.text event.description)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+let embed_page ~(theme : Model.theme option) (event : Model.event) =
+  let theme_attr = match theme with Some v -> Model.theme_to_string v | None -> "system" in
+  let body =
+    match event.source with
+    | Model.Reddit -> reddit_embed_body event
+    | Figma -> figma_embed_body event
+    | New_relic | Vercel | Github -> main_visual event
+  in
+  <div class_="embed-doc" data_theme=theme_attr>body</div>

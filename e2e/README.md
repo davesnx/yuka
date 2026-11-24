@@ -27,5 +27,16 @@ two pages, all through the proxy:
 
     node e2e/base.ts http://127.0.0.1:8125 8126 /mini-linear
 
-`BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh` and starts the server with
+Then it runs `async-feed.ts` against the same server, under
+`/async-feed`: the feed, "Simulate events" (the cards arrive one by one,
+also on a second page), a filter used with the keyboard, the time zone,
+the theme, and the comments panel (open from a card, its URL, Back, Escape,
+a direct load, a new comment and the card count).
+`ASYNC_FEED_SCREENSHOTS=DIR` saves light and dark screenshots of the feed
+and of the panel to `DIR`:
+
+    node e2e/async-feed.ts http://127.0.0.1:8125/async-feed
+
+`BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh` and
+`demo/async-feed/bundle.sh` and starts the server with
 `--bundle`. The check then expects one script and no import map.

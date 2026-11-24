@@ -1,0 +1,19 @@
+let[@client] make ~(time : int) ~(class_ : string) ~(stacked : bool) () =
+  let saved = Zone.saved_zone () in
+  let ready = Yuka.State.make false in
+  Yuka.Effect.after (fun () -> Yuka.State.set ready true);
+  if stacked then
+    <time class_ datetime=(Clock.iso time)
+      title=(if Yuka.State.get ready then Env.long ~zone:(Zone.current saved) time else Clock.iso time)>
+      <span class_="card-date">
+        (Yuka.text (if Yuka.State.get ready then Env.day ~zone:(Zone.current saved) time else Clock.utc_day time))
+      </span>
+      <span class_="card-clock">
+        (Yuka.text (if Yuka.State.get ready then Env.clock ~zone:(Zone.current saved) time else Clock.utc_clock time))
+      </span>
+    </time>
+  else
+    <time class_ datetime=(Clock.iso time)
+      title=(if Yuka.State.get ready then Env.long ~zone:(Zone.current saved) time else Clock.iso time)>
+      (Yuka.text (if Yuka.State.get ready then Env.short ~zone:(Zone.current saved) time else Clock.utc time))
+    </time>

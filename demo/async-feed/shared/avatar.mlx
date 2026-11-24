@@ -1,0 +1,127 @@
+let normalize name =
+  let trimmed = String.trim name in
+  if String.starts_with ~prefix:"u/" trimmed then
+    let rest = String.sub trimmed 2 (String.length trimmed - 2) in
+    String.split_on_char '_' rest
+    |> List.filter (fun s -> s <> "")
+    |> List.map String.capitalize_ascii
+    |> String.concat " "
+  else trimmed
+
+type palette = {
+  bg : string;
+  shirt : string;
+  skin : string;
+  hair : string;
+  accent : string;
+  style : [ `Bob | `Short | `Parted | `Curly | `Buzz | `Hijab | `Beard | `Bun ];
+  glasses : bool;
+}
+
+let palette_of name =
+  match normalize name with
+  | "Ana Ruiz" ->
+      { bg = "#ede9fe"; shirt = "#7c3aed"; skin = "#e0a984"; hair = "#2d1b18"; accent = "#db2777"; style = `Bob; glasses = false }
+  | "Ben Okafor" ->
+      { bg = "#dbeafe"; shirt = "#1d4ed8"; skin = "#8d5524"; hair = "#1a1412"; accent = "#60a5fa"; style = `Buzz; glasses = true }
+  | "Chen Wei" ->
+      { bg = "#d1fae5"; shirt = "#047857"; skin = "#f1c7a4"; hair = "#18181b"; accent = "#34d399"; style = `Parted; glasses = true }
+  | "Dana Levi" ->
+      { bg = "#fce7f3"; shirt = "#be185d"; skin = "#e9bc9a"; hair = "#5c3317"; accent = "#f472b6"; style = `Curly; glasses = false }
+  | "Eli Novak" ->
+      { bg = "#fef3c7"; shirt = "#b45309"; skin = "#f3cfb3"; hair = "#6b4423"; accent = "#f59e0b"; style = `Short; glasses = false }
+  | "Fatima Zahra" ->
+      { bg = "#ccfbf1"; shirt = "#0f766e"; skin = "#d49a73"; hair = "#0d9488"; accent = "#2dd4bf"; style = `Hijab; glasses = false }
+  | "Gus Moreau" ->
+      { bg = "#ffedd5"; shirt = "#c2410c"; skin = "#ebbfa0"; hair = "#4a2c1a"; accent = "#fb923c"; style = `Beard; glasses = false }
+  | "Hana Sato" ->
+      { bg = "#e0e7ff"; shirt = "#4338ca"; skin = "#f5d3b8"; hair = "#1e1b2e"; accent = "#818cf8"; style = `Bun; glasses = false }
+  | _ ->
+      let h = Hashtbl.hash name in
+      let bgs = [| "#e0f2fe"; "#fae8ff"; "#dcfce7"; "#fef9c3"; "#fee2e2" |] in
+      let shirts = [| "#0369a1"; "#a21caf"; "#15803d"; "#a16207"; "#b91c1c" |] in
+      let skins = [| "#f1c7a4"; "#d49a73"; "#8d5524"; "#ebbfa0" |] in
+      let hairs = [| "#18181b"; "#4a2c1a"; "#2d1b18"; "#5c3317" |] in
+      {
+        bg = bgs.(h mod Array.length bgs);
+        shirt = shirts.(h mod Array.length shirts);
+        skin = skins.(h / 3 mod Array.length skins);
+        hair = hairs.(h / 5 mod Array.length hairs);
+        accent = shirts.(h mod Array.length shirts);
+        style = `Short;
+        glasses = h mod 3 = 0;
+      }
+
+let hair_back p =
+  match p.style with
+  | `Bob -> <path d="M8.5 14.5 C8.5 7.5 23.5 7.5 23.5 14.5 L24.2 22 C24.2 23 22 23.5 21 22.5 L11 22.5 C10 23.5 7.8 23 7.8 22 Z" fill=p.hair />
+  | `Curly ->
+      <g fill=p.hair>
+        <circle cx="9.5" cy="12" r="3.4" />
+        <circle cx="22.5" cy="12" r="3.4" />
+        <circle cx="8.8" cy="16.2" r="3" />
+        <circle cx="23.2" cy="16.2" r="3" />
+        <circle cx="12.5" cy="8.8" r="3.4" />
+        <circle cx="19.5" cy="8.8" r="3.4" />
+        <circle cx="16" cy="8" r="3.5" />
+      </g>
+  | `Hijab -> <path d="M7.5 15 C7.5 7.2 24.5 7.2 24.5 15 L25.5 26 C25.5 28 22 30 16 30 C10 30 6.5 28 6.5 26 Z" fill=p.hair />
+  | `Bun ->
+      <g fill=p.hair>
+        <circle cx="16" cy="6.2" r="3.4" />
+        <path d="M9.5 14.5 C9.5 8.5 22.5 8.5 22.5 14.5 L22.5 18 L9.5 18 Z" />
+      </g>
+  | `Short | `Parted | `Buzz | `Beard -> Yuka.empty
+
+let hair_front p =
+  match p.style with
+  | `Bob -> <path d="M9.8 13.5 C10 9.5 13 8.5 16 8.5 C19 8.5 22 9.5 22.2 13.5 C20.5 11.4 18.2 10.8 15 11 C12.8 11.2 11 12 9.8 13.5 Z" fill=p.hair />
+  | `Short -> <path d="M10 13.2 C10 8.8 12.6 7.5 16 7.5 C19.4 7.5 22 8.8 22 13.2 C20.8 10.8 18.5 10.2 16 10.2 C13.5 10.2 11.2 10.8 10 13.2 Z" fill=p.hair />
+  | `Parted -> <path d="M9.8 13.4 C9.8 8.6 12.6 7.4 16 7.4 C19.6 7.4 22.2 8.8 22.2 13.4 C20.5 11.2 18.4 10.3 14.6 10.4 L12.5 12 C11.4 11.6 10.5 12.2 9.8 13.4 Z" fill=p.hair />
+  | `Buzz -> <path d="M10.2 12.6 C10.4 9.2 12.8 8 16 8 C19.2 8 21.6 9.2 21.8 12.6 C20.4 10.8 18.4 10.2 16 10.2 C13.6 10.2 11.6 10.8 10.2 12.6 Z" fill=p.hair />
+  | `Curly -> <path d="M10.4 12.2 C11.6 10.2 13.6 9.8 16 10 C18.4 9.8 20.4 10.2 21.6 12.2 C20.2 10.8 18 10.6 16 10.8 C14 10.6 11.8 10.8 10.4 12.2 Z" fill=p.hair />
+  | `Hijab -> <path d="M9.5 14.5 C10.5 9.8 21.5 9.8 22.5 14.5 C22.5 10.2 19.6 8.2 16 8.2 C12.4 8.2 9.5 10.2 9.5 14.5 Z" fill=p.accent opacity="0.55" />
+  | `Beard ->
+      <g fill=p.hair>
+        <path d="M10 13 C10.2 8.8 12.6 7.6 16 7.6 C19.4 7.6 21.8 8.8 22 13 C20.6 10.8 18.4 10.2 16 10.2 C13.6 10.2 11.4 10.8 10 13 Z" />
+        <path d="M10.6 16.2 C10.8 19.4 13 21.6 16 21.6 C19 21.6 21.2 19.4 21.4 16.2 C20.4 18 18.5 19.2 16 19.2 C13.5 19.2 11.6 18 10.6 16.2 Z" opacity="0.88" />
+      </g>
+  | `Bun -> <path d="M10 13.2 C10.5 9.6 13 8.8 16 8.8 C19 8.8 21.5 9.6 22 13.2 C20.2 11 18.2 10.5 16 10.5 C13.8 10.5 11.8 11 10 13.2 Z" fill=p.hair />
+
+let glasses p =
+  if p.glasses then
+    <g fill="none" stroke="#18181b" stroke_width="0.95" opacity="0.85">
+      <rect x="11.3" y="13.8" width="3.7" height="2.6" rx="1" />
+      <rect x="17" y="13.8" width="3.7" height="2.6" rx="1" />
+      <path d="M15 15 H17" />
+    </g>
+  else Yuka.empty
+
+let bot_avatar ~size ~cls ~label ~decorative =
+  <svg class_=cls view_box="0 0 32 32" width=size height=size
+    aria_hidden=decorative role=(if decorative then `presentation else `img) aria_label=label>
+    <circle cx="16" cy="16" r="16" fill="#132026" />
+    <path d="M16 7 L23.8 11.5 V20.5 L16 25 L13.4 23.5 V17.5 L18.6 14.5 V11.5 L16 10 L10.8 13 V19 L8.2 17.5 V11.5 Z" fill="#1ce783" />
+    <path d="M8.2 17.5 L13.4 20.5 V23.5 L8.2 20.5 Z" fill="#ffffff" />
+  </svg>
+
+let make ~name ?(size = 24) ?(class_ = "") ?(decorative = true) ?title () =
+  let size_s = Int.to_string size in
+  let cls = if class_ = "" then "user-avatar" else "user-avatar " ^ class_ in
+  let label = Option.value title ~default:(normalize name) in
+  if name = "New Relic" then bot_avatar ~size:size_s ~cls ~label ~decorative
+  else
+    let p = palette_of name in
+    <svg class_=cls view_box="0 0 32 32" width=size_s height=size_s
+      aria_hidden=decorative role=(if decorative then `presentation else `img) aria_label=label>
+      <circle cx="16" cy="16" r="16" fill=p.bg />
+      (hair_back p)
+      <path d="M6.5 30.5 C7.5 23.5 11.2 21.8 16 21.8 C20.8 21.8 24.5 23.5 25.5 30.5 Z" fill=p.shirt />
+      <rect x="14" y="19.2" width="4" height="3.8" rx="1.5" fill=p.skin />
+      <circle cx="16" cy="15" r="5.8" fill=p.skin />
+      <circle cx="13.4" cy="15" r="0.85" fill="#18181b" />
+      <circle cx="18.6" cy="15" r="0.85" fill="#18181b" />
+      <path d="M14.1 17.7 Q16 19.1 17.9 17.7" fill="none" stroke="#6b3a2e" stroke_width="0.95" stroke_linecap=`round />
+      (hair_front p)
+      (glasses p)
+    </svg>

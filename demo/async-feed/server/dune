@@ -1,0 +1,25 @@
+(library
+ (name async_feed_app)
+ (modules data store loaders handlers preview pages yuka_routes serve)
+ (libraries async_feed_shared yuka yuka-dream dream lwt lwt.unix unix)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Async_feed_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
+
+(executable
+ (name async_server)
+ (modules async_server)
+ (libraries async_feed_app dream))

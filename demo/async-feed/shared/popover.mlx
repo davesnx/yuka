@@ -1,0 +1,8 @@
+let make ~(opened : bool Yuka.State.t) ~(close : unit -> unit) ~children () =
+  Yuka.hole (fun () ->
+      if Yuka.State.get opened then
+        <div>
+          <div class_="backdrop" on_click=(fun _ -> close ()) />
+          children
+        </div>
+      else Yuka.empty)

@@ -164,7 +164,15 @@ needs the request of the server gets it from the adapter:
   while they do not change.
 - `~loaded` are the loader results. Each result is labelled with the last
   name of the loader: `~loader:Loaders.post` gives `~post`. A layout gets
-  the results of the loaders on its group and above.
+  the results of the loaders on its group and above. The loaders run on
+  each client navigation, and the navigation keeps the layout only while
+  its results stay the same: the key of its outlet holds an MD5 digest of
+  a random secret of the process and the results written with `Marshal`,
+  so the page does not show a plain digest of results it does not render,
+  and the server renders the layout again when the digest differs. Results that `Marshal` refuses (a custom
+  block such as a mutex or a channel) make the layout render again on each
+  navigation. Another server process has another secret: the first
+  navigation that reaches it renders the layout again.
 - Params, search fields and loader results share one set of labels: a
   name used twice is an error. `href`, `fragment`, `with_query`,
   `with_fragment`, `req` and `children` are reserved labels.

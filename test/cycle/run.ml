@@ -1083,11 +1083,11 @@ let render =
         let r = get "/team/a/1" in
         let l0 = index r.body {|<yuka-outlet data-k="L0" style="display:contents">|} in
         let team = index r.body {|class="team"|} in
-        let l1 = index r.body {|<yuka-outlet data-k="L1/a" style="display:contents">|} in
+        let l1 = index r.body {|<yuka-outlet data-k="L1/a#|} in
         let page = index r.body "a 1 of a" in
         check_true "order" (0 <= l0 && l0 < team && team < l1 && l1 < page);
         let r = get "/team/a%2Fb/1" in
-        check_true "key is encoded" (contains r.body {|data-k="L1/a%2Fb"|}) );
+        check_true "key is encoded" (contains r.body {|data-k="L1/a%2Fb#|}) );
     ( "aria-current only on the exact path",
       fun () ->
         let r = get "/plain?x=1" in
@@ -1517,15 +1517,35 @@ let navigation =
         check_header r "yuka-outlet" [ "L2/acme" ];
         check_true "no org layout" (not (contains r.body {|class="org"|}));
         check_true "page" (contains r.body "acme 2 item") );
-    ( "a layout that takes a loader result is rendered again",
+    ( "a layout that takes a loader result is kept while the result stays the same",
       fun () ->
-        let r = nav "L0 L1/a" "/team/a/2" in
-        check_header r "yuka-outlet" [ "L0" ];
-        check_true "team layout with fresh data" (contains r.body {|<section class="team">squad of a|});
+        let key body =
+          let start = index body {|data-k="L1/|} + String.length {|data-k="|} in
+          String.sub body start (String.index_from body start '"' - start)
+        in
+        let a = key (get "/team/a/1").body in
+        check_true "the key has a digest of the result" (String.starts_with ~prefix:"L1/a#" a && String.length a = 37);
+        let r = nav ("L0 " ^ a) "/team/a/2" in
+        check_header r "yuka-outlet" [ a ];
+        check_true "no team layout" (not (contains r.body {|class="team"|}));
         check_true "page" (contains r.body "a 2 of a");
-        let r = nav "L0 L1/a" "/team/b/1" in
+        App.Loaders.squad_version := " v2";
+        let r = nav ("L0 " ^ a) "/team/a/2" in
+        App.Loaders.squad_version := "";
         check_header r "yuka-outlet" [ "L0" ];
-        check_true "team layout again" (contains r.body {|<yuka-outlet data-k="L1/b" style="display:contents">|}) );
+        check_true "team layout with the new result" (contains r.body {|<section class="team">squad of a v2|});
+        check_true "a new key" (not (contains r.body a));
+        let r = nav ("L0 " ^ a) "/team/b/1" in
+        check_header r "yuka-outlet" [ "L0" ];
+        check_true "team layout of another team" (contains r.body {|<yuka-outlet data-k="L1/b#|}) );
+    ( "data_key: a digest of equal data is equal, and data that Marshal refuses never matches",
+      fun () ->
+        let k = Server.Generated.data_key in
+        Alcotest.(check string) "equal data" (k "L0" ("a", [ 1 ])) (k "L0" ("a", [ 1 ]));
+        check_true "other data" (k "L0" ("a", [ 1 ]) <> k "L0" ("a", [ 2 ]));
+        check_true "not a plain digest"
+          (k "L0" ("a", [ 1 ]) <> "L0#" ^ Digest.to_hex (Digest.string (Marshal.to_string ("a", [ 1 ]) [ Marshal.Closures ])));
+        Alcotest.(check string) "a custom block" "L0#-" (k "L0" (Mutex.create ())) );
     ( "unknown, empty or old keys give a full document with the build",
       fun () ->
         List.iter
@@ -2194,8 +2214,8 @@ let layout_values =
           else inner)
     in
     let layers =
-      [ { Server.Generated.key = "L0"; data = false; wrap = wrap "L0" };
-        { Server.Generated.key = "L1"; data = false; wrap = (fun c -> el "section" [ c ]) } ]
+      [ { Server.Generated.key = "L0"; wrap = wrap "L0" };
+        { Server.Generated.key = "L1"; wrap = (fun c -> el "section" [ c ]) } ]
     in
     let page () =
       Server.page ~title:"Values" (fun () ->
