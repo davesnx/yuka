@@ -1,4 +1,96 @@
-type demo = { name : string; description : string; path : string }
+type demo = {
+  name : string;
+  description : string;
+  path : string;
+  tags : string list;
+  illustration : unit -> Yuka.server Yuka.element;
+}
+
+let window_chrome ~title : Yuka.server Yuka.element =
+  <g>
+    <rect class_="frame" x="0.5" y="0.5" width="439" height="259" rx="10" />
+    <line class_="rule" x1="0" y1="28.5" x2="440" y2="28.5" />
+    <circle class_="dot" cx="16" cy="14" r="4" />
+    <circle class_="dot" cx="30" cy="14" r="4" />
+    <circle class_="dot" cx="44" cy="14" r="4" />
+    <text class_="caption" x="220" y="18" text_anchor="middle">(Yuka.text title)</text>
+  </g>
+
+let issue_row ~y ~id ~width ~status ~priority ~selected : Yuka.server Yuka.element =
+  let y_ = Int.to_string y in
+  let mid = Int.to_string (y + 13) in
+  <g>
+    (if selected then
+       <rect class_="selected" x="116" y=y_ width="312" height="26" rx="5" />
+     else Yuka.fragment [])
+    <circle class_=status cx="132" cy=mid r="5" />
+    <text class_="caption" x="146" y=(Int.to_string (y + 17))>(Yuka.text id)</text>
+    <rect class_="bar" x="184" y=(Int.to_string (y + 9)) width=(Int.to_string width) height="8" rx="4" />
+    <rect class_=(if priority >= 1 then "prio on" else "prio") x="380" y=(Int.to_string (y + 14)) width="3" height="5" />
+    <rect class_=(if priority >= 2 then "prio on" else "prio") x="385" y=(Int.to_string (y + 11)) width="3" height="8" />
+    <rect class_=(if priority >= 3 then "prio on" else "prio") x="390" y=(Int.to_string (y + 8)) width="3" height="11" />
+    <circle class_="avatar" cx="412" cy=mid r="6" />
+  </g>
+
+let mini_linear () : Yuka.server Yuka.element =
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="An issue list with a sidebar">
+    (window_chrome ~title:"mini-linear")
+    <line class_="rule" x1="104.5" y1="28" x2="104.5" y2="260" />
+    <rect class_="accent-fill" x="14" y="42" width="14" height="14" rx="4" />
+    <rect class_="bar strong" x="34" y="45" width="48" height="8" rx="4" />
+    <rect class_="nav-active" x="8" y="68" width="88" height="20" rx="5" />
+    <rect class_="bar" x="16" y="74" width="54" height="8" rx="4" />
+    <rect class_="bar" x="16" y="100" width="64" height="8" rx="4" />
+    <rect class_="bar" x="16" y="122" width="44" height="8" rx="4" />
+    <rect class_="bar" x="16" y="144" width="58" height="8" rx="4" />
+    <text class_="caption" x="116" y="52">"In progress"</text>
+    <text class_="caption muted" x="196" y="52">"3"</text>
+    <line class_="rule" x1="104" y1="62.5" x2="440" y2="62.5" />
+    (issue_row ~y:70 ~id:"YK-12" ~width:150 ~status:"status progress" ~priority:3 ~selected:true)
+    (issue_row ~y:100 ~id:"YK-9" ~width:112 ~status:"status progress" ~priority:2 ~selected:false)
+    (issue_row ~y:130 ~id:"YK-7" ~width:170 ~status:"status progress" ~priority:1 ~selected:false)
+    <text class_="caption" x="116" y="180">"Done"</text>
+    <text class_="caption muted" x="150" y="180">"2"</text>
+    <line class_="rule" x1="104" y1="190.5" x2="440" y2="190.5" />
+    (issue_row ~y:198 ~id:"YK-4" ~width:96 ~status:"status done" ~priority:1 ~selected:false)
+    (issue_row ~y:228 ~id:"YK-2" ~width:136 ~status:"status done" ~priority:2 ~selected:false)
+  </svg>
+
+let feed_item ~y ~source ~width ~time : Yuka.server Yuka.element =
+  let y_ = Int.to_string y in
+  <g>
+    <rect class_="item" x="16.5" y=(y_ ^ ".5") width="246" height="44" rx="7" />
+    <rect class_=("source " ^ source) x="28" y=(Int.to_string (y + 12)) width="20" height="20" rx="5" />
+    <rect class_="bar strong" x="58" y=(Int.to_string (y + 13)) width=(Int.to_string width) height="7" rx="3.5" />
+    <rect class_="bar" x="58" y=(Int.to_string (y + 26)) width=(Int.to_string (width + 40)) height="6" rx="3" />
+    <text class_="caption muted" x="250" y=(Int.to_string (y + 20)) text_anchor="end">(Yuka.text time)</text>
+  </g>
+
+let async_feed () : Yuka.server Yuka.element =
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A feed of notifications with filters and a live chart">
+    (window_chrome ~title:"async-feed")
+    <rect class_="chip on" x="16.5" y="40.5" width="38" height="18" rx="9" />
+    <text class_="caption on" x="35.5" y="53" text_anchor="middle">"All"</text>
+    <rect class_="chip" x="60.5" y="40.5" width="50" height="18" rx="9" />
+    <text class_="caption" x="85.5" y="53" text_anchor="middle">"Errors"</text>
+    <rect class_="chip" x="116.5" y="40.5" width="50" height="18" rx="9" />
+    <text class_="caption" x="141.5" y="53" text_anchor="middle">"Deploys"</text>
+    <circle class_="live" cx="388" cy="49.5" r="3.5" />
+    <text class_="caption" x="424" y="53" text_anchor="end">"LIVE"</text>
+    (feed_item ~y:68 ~source:"s1" ~width:120 ~time:"now")
+    (feed_item ~y:114 ~source:"s2" ~width:90 ~time:"2m")
+    (feed_item ~y:160 ~source:"s3" ~width:138 ~time:"5m")
+    <g opacity="0.45">(feed_item ~y:206 ~source:"s4" ~width:104 ~time:"9m")</g>
+    <rect class_="item" x="276.5" y="68.5" width="148" height="136" rx="7" />
+    <rect class_="bar strong" x="288" y="82" width="64" height="7" rx="3.5" />
+    <line class_="grid" x1="288" y1="118.5" x2="412" y2="118.5" />
+    <line class_="grid" x1="288" y1="150.5" x2="412" y2="150.5" />
+    <line class_="grid" x1="288" y1="182.5" x2="412" y2="182.5" />
+    <path class_="area" d="M288 170 L304 160 L320 166 L336 140 L352 148 L368 120 L384 128 L400 104 L412 110 L412 182 L288 182 Z" />
+    <polyline class_="line" points="288,170 304,160 320,166 336,140 352,148 368,120 384,128 400,104 412,110" />
+    <circle class_="accent-fill" cx="412" cy="110" r="3.5" />
+    <rect class_="bar" x="288" y="190" width="40" height="6" rx="3" />
+  </svg>
 
 let demos =
   [
@@ -6,11 +98,15 @@ let demos =
       name = "Mini Linear";
       description = "An issue tracker: streamed pages, islands, live updates and a shared store.";
       path = "/mini-linear";
+      tags = [ "Streaming"; "Islands"; "Live"; "Store" ];
+      illustration = mini_linear;
     };
     {
       name = "Async";
       description = "A feed of notifications from many sources, with filters in the URL and events streamed live.";
       path = "/async-feed";
+      tags = [ "URL state"; "Yuka.Live"; "Async" ];
+      illustration = async_feed;
     };
     {
       name = "Infinite scroll";
@@ -19,21 +115,83 @@ let demos =
     };
   ]
 
-let head =
-  {|<meta name="viewport" content="width=device-width, initial-scale=1"><style>:root{color-scheme:light dark}body{font-family:system-ui,sans-serif;line-height:1.5;max-width:40rem;margin:4rem auto;padding:0 16px}</style>|}
+let style =
+  {|
+:root{color-scheme:light dark;--bg:#fafafa;--fg:#0b0b0f;--muted:#6b6b76;--line:#e4e4e9;--panel:#ffffff;--soft:#f1f1f4;--accent:#6f4cff;--accent-soft:rgba(111,76,255,.12);--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#0a0a0c;--fg:#ededf0;--muted:#8a8a96;--line:#25252b;--panel:#111114;--soft:#1a1a1f;--accent:#8f74ff;--accent-soft:rgba(143,116,255,.16)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
+.page{max-width:calc(960px + 50px);margin:0 auto;padding:96px 24px 120px;border-inline:1px dashed var(--line);min-height:100vh}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 16px}
+h1{font-size:44px;line-height:1.1;letter-spacing:-.03em;font-weight:600;margin:0}
+.lede{color:var(--muted);font-size:17px;max-width:36rem;margin:16px 0 0}
+.gallery{list-style:none;padding:0;margin:64px 0 0;display:grid;gap:32px}
+.card{position:relative;display:grid;grid-template-columns:1fr 1.15fr;min-height:300px;background:var(--panel);border:1px solid var(--line);border-radius:14px;color:inherit;text-decoration:none;overflow:hidden;transition:border-color .2s,box-shadow .2s,transform .2s}
+.card:hover{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft);transform:translateY(-2px)}
+.card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.body{display:flex;flex-direction:column;padding:32px}
+.index{font:500 12px/1 var(--mono);color:var(--muted)}
+h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:20px 0 8px}
+.description{color:var(--muted);margin:0;font-size:15px}
+.tags{list-style:none;padding:0;margin:20px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.tags li{font:500 11px/1 var(--mono);padding:6px 8px;border:1px solid var(--line);border-radius:6px;color:var(--muted);background:var(--soft)}
+.open{margin-top:auto;padding-top:28px;font:500 13px/1 var(--mono);color:var(--fg);display:flex;align-items:center;gap:8px}
+.open .arrow{transition:transform .2s}
+.card:hover .open{color:var(--accent)}
+.card:hover .arrow{transform:translateX(4px)}
+.preview{border-left:1px solid var(--line);background-color:var(--soft);background-image:radial-gradient(var(--line) 1px,transparent 1px);background-size:16px 16px;display:grid;place-items:center;padding:28px}
+.art{width:100%;height:auto;max-width:440px;filter:drop-shadow(0 8px 24px rgba(0,0,0,.08))}
+.art .frame{fill:var(--panel);stroke:var(--line)}
+.art .rule,.art .grid{stroke:var(--line)}
+.art .dot{fill:var(--line)}
+.art .caption{font:500 10px var(--mono);fill:var(--muted)}
+.art .caption.muted{opacity:.6}
+.art .caption.on{fill:#fff}
+.art .bar{fill:var(--line)}
+.art .bar.strong{fill:var(--muted);opacity:.55}
+.art .nav-active{fill:var(--soft)}
+.art .selected{fill:var(--accent-soft)}
+.art .accent-fill{fill:var(--accent)}
+.art .status{fill:none;stroke-width:2}
+.art .status.progress{stroke:#f2a33a}
+.art .status.done{stroke:var(--accent);fill:var(--accent)}
+.art .prio{fill:var(--line)}
+.art .prio.on{fill:var(--muted)}
+.art .avatar{fill:var(--line)}
+.art .chip{fill:var(--panel);stroke:var(--line)}
+.art .chip.on{fill:var(--accent);stroke:var(--accent)}
+.art .live{fill:#22c55e}
+.art .item{fill:var(--panel);stroke:var(--line)}
+.art .source.s1{fill:#ef4444}.art .source.s2{fill:#3b82f6}.art .source.s3{fill:var(--accent)}.art .source.s4{fill:#22c55e}
+.art .area{fill:var(--accent-soft)}
+.art .line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+footer{margin-top:64px;font:500 12px/1 var(--mono);color:var(--muted)}
+@media (max-width:720px){.page{padding-top:56px}h1{font-size:34px}.card{grid-template-columns:1fr}.preview{border-left:0;border-top:1px solid var(--line);order:-1}.body{padding:24px}}
+@media (prefers-reduced-motion:reduce){.card,.arrow{transition:none}.card:hover{transform:none}}
+|}
+
+let head = {|<meta name="viewport" content="width=device-width, initial-scale=1"><style>|} ^ style ^ {|</style>|}
+
+let card index demo : Yuka.server Yuka.element =
+  <li>
+    <a class_="card" href=demo.path target=`_blank rel="noopener">
+      <div class_="body">
+        <span class_="index">(Yuka.text (Printf.sprintf "%02d / Demo" (index + 1)))</span>
+        <h2>(Yuka.text demo.name)</h2>
+        <p class_="description">(Yuka.text demo.description)</p>
+        <ul class_="tags">(Yuka.fragment (List.map (fun tag -> <li>(Yuka.text tag)</li>) demo.tags))</ul>
+        <span class_="open">"Open demo" <span class_="arrow" aria_hidden=true>"→"</span></span>
+      </div>
+      <div class_="preview">(demo.illustration ())</div>
+    </a>
+  </li>
 
 let home () =
   Yuka.Server.page ~title:"Yuka demos" (fun () ->
-      <main>
+      <main class_="page">
+        <p class_="eyebrow">"Yuka · Demos"</p>
         <h1>"Yuka demos"</h1>
-        <ul>
-          (Yuka.fragment
-             (List.map
-                (fun demo ->
-                  <li>
-                    <a href=demo.path target=`_blank rel="noopener">(Yuka.text demo.name)</a>
-                    (Yuka.text (": " ^ demo.description))
-                  </li>)
-                demos))
-        </ul>
+        <p class_="lede">"Small apps built with Yuka. Each one runs on its own, with its own routes and client bundle."</p>
+        <ul class_="gallery">(Yuka.fragment (List.mapi card demos))</ul>
+        <footer>(Yuka.text (Printf.sprintf "%d demos" (List.length demos)))</footer>
       </main>)
