@@ -424,7 +424,7 @@ let sky random box (c : clouds) =
       | None when smaller < most_shrinks && w > smallest_cloud -> fitted (w * 4 / 5) (smaller + 1)
       | found -> found
     in
-    let widest = min (bw * c.size / 100) (bw * 12 / isqrt (100 * c.clouds)) in
+    let widest = min (bw * c.size / 100) (bw * 9 / isqrt (100 * (id + 1))) in
     match fitted (widest * scale / 100) 0 with
     | Some (spot, d) -> placed := (spot, { index = id; d; paint = Fill }) :: !placed
     | None -> ()

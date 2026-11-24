@@ -44,8 +44,9 @@ variant with one parameter record per kind:
 - Clouds: puffs of `A` arcs, each close to a half circle, over a dome
   made from the rational parametrization of a circle. Each cloud has its
   own width, height, number of puffs and puff sizes, and every cloud is
-  filled. The widest cloud is the smaller of `size` and a width that
-  leaves room for the count, so more clouds make smaller clouds. A cloud
+  filled. A cloud is at most `size` wide, and cloud `n` (from 0) at most
+  `9 / sqrt (n + 1)` tenths of the art width, so later clouds are smaller
+  and an earlier cloud never depends on the count. A cloud
   that would overlap an earlier one tries 60 random places, then every
   place on an 8 px grid, and then the same at four fifths of its width,
   so each cloud of the count is drawn.

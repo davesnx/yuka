@@ -252,8 +252,15 @@ let prefix a b = List.filteri (fun k _ -> k < List.length a) b = a
 let count_keeps_shapes () =
   List.iter
     (fun seed ->
-      let clouds n = by_key (with_seed seed (with_art (Pattern.Clouds { Pattern.clouds_default with clouds = n; size = 25 }))) in
-      Alcotest.(check bool) (Printf.sprintf "more clouds keep the clouds (seed %d)" seed) true (prefix (clouds 4) (clouds 9));
+      List.iter
+        (fun size ->
+          let clouds n = by_key (with_seed seed (with_art (Pattern.Clouds { Pattern.clouds_default with clouds = n; size }))) in
+          List.iter
+            (fun n ->
+              Alcotest.(check bool) (Printf.sprintf "cloud %d keeps the clouds before it (size %d, seed %d)" (n + 1) size seed) true
+                (prefix (clouds n) (clouds (n + 1))))
+            (List.init 19 (fun k -> k + 1)))
+        [ 25; 45; 100 ];
       let bolts n b = by_key (with_seed seed (with_art (Pattern.Lightning { Pattern.lightning_default with bolts = n; branches = b }))) in
       Alcotest.(check bool) (Printf.sprintf "more bolts keep the bolts (seed %d)" seed) true (prefix (bolts 2 4) (bolts 5 4));
       Alcotest.(check bool) (Printf.sprintf "more branches keep the branches (seed %d)" seed) true
@@ -324,7 +331,12 @@ let bolt_turn () =
   Alcotest.(check bool) "direction 180 has no turn" false (contains (svg same) "rotate(");
   check_has (svg (bolts (fun l -> { l with direction = 270 }))) "the direction turns the bolts" {|<g transform="rotate(90 500 600)">|};
   check_has (svg (bolts (fun l -> { l with direction = 0 }))) "up" {|<g transform="rotate(-180 500 600)">|};
-  Alcotest.(check (list string)) "the defaults draw the bolts of before" (ds same) (ds (bolts (fun l -> { l with direction = 180; length = 100 })));
+  List.iter2
+    (fun seed digest ->
+      Alcotest.(check string) (Printf.sprintf "the defaults draw the bolts of before (seed %d)" seed) digest
+        (Digest.to_hex (Digest.string (String.concat "\n" (ds (with_padding 80 (bolts ~seed Fun.id)))))))
+    [ 1; 42; 2019 ]
+    [ "afeb5c86d339645fe0535ea81756efbf"; "f87b1e1c1017ccbdbf2def9f904663b0"; "9d002cb5b41726e20977812f894c2ae5" ];
   Alcotest.(check (list string)) "a half turn draws the same bolts upside down" (ds same) (ds (bolts (fun l -> { l with direction = 0 })));
   List.iter
     (fun seed ->
