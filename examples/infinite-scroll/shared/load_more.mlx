@@ -1,0 +1,19 @@
+(* Loads [next], the same gallery with one more page, when the first skeleton card
+   (the element with id [skeleton_id]) comes into view. It is a client navigation that
+   replaces the history entry and keeps the scroll, so the URL keeps the number of pages:
+   a reload or Back shows them all. *)
+
+let skeleton_id = "next-page"
+
+let[@client] make ~(next : string option) ~(page : int) () =
+  Yuka.Effect.after ~cleanup:(fun stop -> stop ()) (fun () ->
+      match next with
+      | Some url -> !Browser.on_visible skeleton_id (fun () -> Yuka.Browser.navigate ~replace:true ~keep_scroll:true url)
+      | None -> fun () -> ());
+  match next with
+  | Some _ ->
+      <div class_=(if Yuka.State.get Yuka.Browser.navigating then "status visible" else "status") role=`status>
+        <span class_="spinner" />
+        (Yuka.text ("Loading page " ^ Int.to_string (page + 1)))
+      </div>
+  | None -> <p class_="end">"You reached the end of the gallery."</p>
