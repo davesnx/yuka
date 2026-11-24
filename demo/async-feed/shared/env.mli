@@ -2,6 +2,8 @@ val default_zone : unit -> string
 val valid_zone : string -> bool
 val short : zone:string -> int -> string
 val day : zone:string -> int -> string
+val weekday : zone:string -> int -> string
+val day_key : zone:string -> int -> string
 val clock : zone:string -> int -> string
 val long : zone:string -> int -> string
 val to_time : zone:string -> string -> int option

@@ -27,6 +27,10 @@ Under `/async-feed` with `make demo-serve`, at `/` alone:
   made from the event number in `server/data.ml`, with no randomness, so
   each start has the same data. The page shows 50 events and links to
   the next 50 ("Older events"); there is no virtual list.
+  The events are 90 minutes apart, so the first page covers 4 days. A
+  divider starts each day, in the chosen time zone: each card has a
+  `Day_divider` island that shows the day when it differs from the day
+  of the card before.
 - `/async-feed?project=Billing&team=Growth&assignee=Ana%20Ruiz`: the
   filters. Each one can repeat, and an event must match one value of each
   filter. The dropdowns in the header write them to the URL, and the
@@ -40,13 +44,17 @@ Under `/async-feed` with `make demo-serve`, at `/` alone:
   direct load or a reload shows it over the newest events; Close then goes
   to the feed.
 
-## Header
+## Layout
 
-- The filters: Project, Team and Assignee. Each dropdown opens a list with a
+The sidebar sits on the page background; the feed is a bordered panel that
+scrolls on its own, with a toolbar on top.
+
+- The sidebar: the brand, the theme toggle and the user, then the filters:
+  Team and Project, and the list of assignees. Each dropdown opens a list with a
   search field. Keys: ArrowDown or ArrowUp on the button opens it; in the
   list, arrows, Home and End move, Enter picks or drops a value, Escape
   closes. "Clear selection" drops the values of that filter.
-- Settings: the time zone, and a date and time to jump to (read in that
+- The toolbar: the time zone, and a date and time to jump to (read in that
   zone). Each date of the feed shows in the zone, with the full time in the
   `title` and the instant in `datetime`.
 - The theme toggle: light or dark. Without a choice the page follows the

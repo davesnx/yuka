@@ -37,7 +37,7 @@ let flair n = pick [ "Feature request"; "Question"; "Feedback"; "Bug" ] n
 let figma_page n = pick [ "Flows"; "Components"; "Explorations"; "Handoff" ] n
 let figma_frame n = Printf.sprintf "%s / Frame %d" (pick files (n + 2)) (1 + (n mod 12))
 
-let time n = newest - ((count - n) * 600) + (n * 7919 mod 300)
+let time n = newest - ((count - n) * 5400) + (n * 7919 mod 300)
 
 let text n source =
   let person = pick people (n * 3) and subject = subject n in
