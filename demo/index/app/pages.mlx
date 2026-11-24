@@ -92,6 +92,52 @@ let async_feed () : Yuka.server Yuka.element =
     <rect class_="bar" x="288" y="190" width="40" height="6" rx="3" />
   </svg>
 
+let palettes =
+  [
+    [ "#6f4cff"; "#9b85ff"; "#c7baff"; "#ece7ff" ];
+    [ "#0f766e"; "#14b8a6"; "#5eead4"; "#ccfbf1" ];
+    [ "#c2410c"; "#f97316"; "#fdba74"; "#ffedd5" ];
+    [ "#be123c"; "#f43f5e"; "#fda4af"; "#ffe4e6" ];
+    [ "#1d4ed8"; "#3b82f6"; "#93c5fd"; "#dbeafe" ];
+    [ "#a16207"; "#eab308"; "#fde047"; "#fef9c3" ];
+  ]
+
+let palette_card ~x ~y colors : Yuka.server Yuka.element =
+  let px = Int.to_string in
+  <g>
+    <rect class_="item" x=(px x ^ ".5") y=(px y ^ ".5") width="124" height="72" rx="7" />
+    (Yuka.fragment
+       (List.mapi
+          (fun i color ->
+            <rect x=(px (x + 8 + (i * 27))) y=(px (y + 8)) width="27" height="40" fill=color />)
+          colors))
+    <rect class_="bar strong" x=(px (x + 8)) y=(px (y + 56)) width="56" height="7" rx="3.5" />
+  </g>
+
+let skeleton_card ~x ~y : Yuka.server Yuka.element =
+  let px = Int.to_string in
+  <g>
+    <rect class_="skeleton" x=(px x ^ ".5") y=(px y ^ ".5") width="124" height="36" rx="7" />
+    <rect class_="bar" x=(px (x + 8)) y=(px (y + 8)) width="108" height="20" rx="4" />
+  </g>
+
+let infinite_scroll () : Yuka.server Yuka.element =
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A grid of colour palettes ending in skeleton cards">
+    (window_chrome ~title:"infinite-scroll")
+    (Yuka.fragment
+       (List.mapi
+          (fun i colors -> palette_card ~x:(16 + (i mod 3 * 138)) ~y:(42 + (i / 3 * 84)) colors)
+          palettes))
+    <g opacity="0.7">
+      (skeleton_card ~x:16 ~y:210)
+      (skeleton_card ~x:154 ~y:210)
+      (skeleton_card ~x:292 ~y:210)
+    </g>
+    <line class_="sentinel" x1="16" y1="205.5" x2="424" y2="205.5" />
+    <rect class_="chip on" x="182.5" y="196.5" width="76" height="18" rx="9" />
+    <text class_="caption on" x="220.5" y="209" text_anchor="middle">"Loading…"</text>
+  </svg>
+
 let demos =
   [
     {
@@ -112,6 +158,8 @@ let demos =
       name = "Infinite scroll";
       description = "An endless gallery of palettes: the next page loads when the end of the list comes into view.";
       path = "/infinite-scroll";
+      tags = [ "on_visible"; "keep_scroll"; "URL state" ];
+      illustration = infinite_scroll;
     };
   ]
 
@@ -163,6 +211,8 @@ h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:20px 0 8px}
 .art .live{fill:#22c55e}
 .art .item{fill:var(--panel);stroke:var(--line)}
 .art .source.s1{fill:#ef4444}.art .source.s2{fill:#3b82f6}.art .source.s3{fill:var(--accent)}.art .source.s4{fill:#22c55e}
+.art .skeleton{fill:var(--panel);stroke:var(--line);stroke-dasharray:4 3}
+.art .sentinel{stroke:var(--accent);stroke-dasharray:4 4}
 .art .area{fill:var(--accent-soft)}
 .art .line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 footer{margin-top:64px;font:500 12px/1 var(--mono);color:var(--muted)}
