@@ -86,14 +86,21 @@ let to_time ~zone value =
       Some (int_of_float (Float.floor (time /. 1000.)))
   | _ -> None
 
-let sync_embed_theme : string -> unit =
-  [%mel.raw
-    {|function (theme) {
-      document.querySelectorAll("iframe.embed-frame").forEach(function (frame) {
-        try {
-          const doc = frame.contentDocument;
-          const root = doc && doc.querySelector(".embed-doc");
-          if (root) root.setAttribute("data-theme", theme);
-        } catch (_) {}
-      });
-    }|}]
+type element
+type frame_document
+
+external frames : string -> element array = "querySelectorAll" [@@mel.scope "document"]
+external content_document : element -> frame_document Js.null = "contentDocument" [@@mel.get]
+external embed_root : frame_document -> string -> element Js.null = "querySelector" [@@mel.send]
+external set_theme : element -> (_[@mel.as "data-theme"]) -> string -> unit = "setAttribute" [@@mel.send]
+
+let sync_embed_theme theme =
+  Array.iter
+    (fun frame ->
+      try
+        match Js.Null.toOption (content_document frame) with
+        | Some doc -> (
+            match Js.Null.toOption (embed_root doc ".embed-doc") with Some root -> set_theme root theme | None -> ())
+        | None -> ()
+      with _ -> ())
+    (frames "iframe.embed-frame")

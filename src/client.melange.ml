@@ -78,7 +78,7 @@ let comment_where pos (matches : string -> bool [@u]) data =
   let n = take pos 8 (fun [@u] n -> matches (Web.data n) [@u]) in
   if n != Js.null then node_of n
   else begin
-    if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
+    if Dev.on then if pos.adopt then
       Dev.mismatch pos.parent ("<!--" ^ data ^ "-->") (Js.Null.toOption pos.cur);
     let n = Web.create_comment pos.doc data in
     insert pos.parent n pos.cur;
@@ -110,7 +110,7 @@ let drop_rest : (pos -> unit [@u]) ref = ref (fun [@u] _ -> ())
 let adopt_slot : (pos -> slot -> bool [@u]) ref = ref (fun [@u] _ _ -> false)
 
 let drop_to_end pos =
-  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
+  if Dev.on then if pos.adopt then
     walk_region { pos with cur = pos.cur } (fun [@u] n ->
         Dev.mismatch pos.parent "nothing" (Some n));
   if pos.adopt then (!drop_rest) pos [@u]
@@ -130,7 +130,7 @@ let mount_slot pos slot =
   let dom = slot.dom in
   if pos.adopt && (!adopt_slot) pos slot [@u] then ()
   else begin
-    if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt then
+    if Dev.on then if pos.adopt then
       Dev.mismatch pos.parent "<!--[$-->" (Js.Null.toOption pos.cur);
     let start = Web.create_comment pos.doc "[$" in
     insert pos.parent start pos.cur;
@@ -149,7 +149,7 @@ let text pos s =
   if n != Js.null then begin
     let n = node_of n in
     if Web.data n <> s then begin
-      if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then
+      if Dev.on then
         if not (List.mem (Web.local_name pos.parent) [ "script"; "style" ]) then
           Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Some n);
       Web.set_data n s
@@ -157,7 +157,7 @@ let text pos s =
     n
   end
   else begin
-    if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt && s <> "" then
+    if Dev.on then if pos.adopt && s <> "" then
       Dev.mismatch pos.parent ("\"" ^ s ^ "\"") (Js.Null.toOption pos.cur);
     let n = Web.create_text pos.doc s in
     insert pos.parent n pos.cur;
@@ -338,7 +338,7 @@ let compile doc svg (template : template) =
   let only c = if c != Js.null && next_sibling (node_of c) == Js.null then c else Js.null in
   let top = only (first_child (Web.content t)) in
   let parsed = if svg && top != Js.null then only (first_child (node_of top)) else top in
-  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then
+  if Dev.on then
     if template.code <> "" && not (parsed != Js.null && Template.same_shape template (node_of parsed)) then
       Dev.mismatch (Web.content t)
         ("the tree of the template " ^ template.markup ^ if svg then " inside <svg>" else "")
@@ -590,7 +590,7 @@ and mount_each :
       let v = get source j in
       let k = key v in
       if Web.table_has wanted k then begin
-        if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then
+        if Dev.on then
           Web.console_error ("yuka: each: duplicate key " ^ k ^ ", the later item is left out")
       end
       else begin
@@ -672,7 +672,7 @@ let mount_element pos tag attrs children =
     | _ -> invalid_arg "Yuka: <script> and <style> take one text or one hole");
   let adopted = take pos 1 (fun [@u] n -> Web.local_name n = tag) in
   let is_adopted = adopted != Js.null in
-  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if pos.adopt && not is_adopted then
+  if Dev.on then if pos.adopt && not is_adopted then
     Dev.mismatch pos.parent ("<" ^ tag ^ ">") (Js.Null.toOption pos.cur);
   let el =
     if is_adopted then node_of adopted
@@ -686,7 +686,7 @@ let mount_element pos tag attrs children =
     else { pos with parent = el; cur = Js.null; adopt = false; svg = inner_svg }
   in
   mount_children inner children;
-  if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then if is_adopted && tag <> "textarea" then
+  if Dev.on then if is_adopted && tag <> "textarea" then
     walk_region inner (fun [@u] n -> Dev.mismatch el "nothing" (Some n));
   mount_attrs pos.doc svg el is_adopted attrs;
   if not is_adopted then insert pos.parent el pos.cur
@@ -722,7 +722,7 @@ let start ~adopt container f =
             let n = if Dev.on then Scheduler.with_body true f else f () in
             if not adopt then Web.clear container "";
             let pos = { doc; parent = container; cur = first_child container; adopt; svg = false } in
-            if (([%mel.raw {|typeof __YUKA_DEV__ === "undefined" || __YUKA_DEV__|}]) : bool) then begin
+            if Dev.on then begin
               mount_node pos (ref false) n;
               if adopt then walk_region pos (fun [@u] x -> Dev.mismatch container "nothing" (Some x))
             end

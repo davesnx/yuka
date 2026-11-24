@@ -1,13 +1,17 @@
-let read_attribute : string -> string =
-  [%mel.raw {|function (name) { return document.documentElement.getAttribute(name) || "" }|}]
+type element
 
-let write_attribute : string -> string -> string -> unit =
-  [%mel.raw
-    {|function (name, key, value) {
-  if (value) document.documentElement.setAttribute(name, value);
-  else document.documentElement.removeAttribute(name);
-  try { if (value) localStorage.setItem(key, value); else localStorage.removeItem(key) } catch (error) {}
-}|}]
+external root : element = "documentElement" [@@mel.scope "document"]
+external get_attribute : element -> string -> string Js.null = "getAttribute" [@@mel.send]
+external set_attribute : element -> string -> string -> unit = "setAttribute" [@@mel.send]
+external remove_attribute : element -> string -> unit = "removeAttribute" [@@mel.send]
+external store : string -> string -> unit = "setItem" [@@mel.scope "localStorage"]
+external unstore : string -> unit = "removeItem" [@@mel.scope "localStorage"]
+
+let read_attribute name = match Js.Null.toOption (get_attribute root name) with Some v -> v | None -> ""
+
+let write_attribute name key value =
+  if value <> "" then set_attribute root name value else remove_attribute root name;
+  try if value <> "" then store key value else unstore key with _ -> ()
 
 let () =
   Demo_shared.Theme.read := read_attribute;
