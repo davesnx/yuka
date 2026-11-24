@@ -26,8 +26,7 @@ let[@client] make ~(filter : Model.filter) ~(since : int) () =
       (Yuka.each ~key:(fun (event : Model.event) -> Int.to_string event.id)
          (fun () -> Array.of_list (fresh ()))
          (fun (event : Model.event) ->
-           <Card event fresh=true time=(<Local_time time=event.time class_="card-time" />)
-             comments=(<Comment_count id=event.id count=0 />) />))
+           <Card event fresh=true time=(<Local_time time=event.time class_="card-time" stacked=true />) />))
     </ol>
     <div id="feed-bottom" class_="feed-bottom" />
     <button class_="simulate" type_=`button disabled=(Yuka.State.get running) on_click=simulate>

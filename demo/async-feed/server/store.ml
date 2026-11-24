@@ -27,16 +27,3 @@ let add ~now =
 let find id =
   if id >= 1 && id <= Data.count then Some generated.(id - 1)
   else List.find_opt (fun (event : Model.event) -> event.id = id) !simulated
-
-let added : (int, Model.comment list) Hashtbl.t = Hashtbl.create 16
-
-let thread (event : Model.event) =
-  (if event.id <= Data.count then Data.comments event else [])
-  @ List.rev (Option.value (Hashtbl.find_opt added event.id) ~default:[])
-
-let comment_count event = List.length (thread event)
-
-let comment (event : Model.event) ~author ~now text =
-  let previous = Option.value (Hashtbl.find_opt added event.id) ~default:[] in
-  Hashtbl.replace added event.id ({ Model.author; time = now; text } :: previous);
-  thread event

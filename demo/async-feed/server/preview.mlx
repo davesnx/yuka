@@ -320,16 +320,7 @@ let reddit_visual (event : Model.event) =
   let ys = List.map (fun v -> pad_t +. plot_h -. (plot_h *. (v /. max_y))) curve in
   let baseline = pad_t +. plot_h in
   <div class_="visual-stack">
-    <section class_="visual-card embed-card">
-      <div class_="visual-head">
-        <div>
-          <h3 class_="visual-title">"Embedded Reddit post & OG preview"</h3>
-          <p class_="visual-sub">(Yuka.text (Printf.sprintf "r/acme · %s" (Data.flair n)))</p>
-        </div>
-        <span class_="status-pill status-reddit">"r/acme"</span>
-      </div>
-      <iframe class_="embed-frame embed-reddit" src=(Routes.embed ~id:event.id ()) title=("Reddit embed: " ^ event.title) />
-    </section>
+    <iframe class_="embed-frame embed-reddit" src=(Routes.embed ~id:event.id ()) title=("Reddit embed: " ^ event.title) />
     <section class_="visual-card">
       <div class_="visual-head">
         <div>

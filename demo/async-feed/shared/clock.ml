@@ -24,3 +24,11 @@ let iso time =
 let utc time =
   let year, month, day, hour, minute, second = split time in
   Printf.sprintf "%s %d, %d, %02d:%02d:%02d UTC" months.(month - 1) day year hour minute second
+
+let utc_day time =
+  let _, month, day, _, _, _ = split time in
+  Printf.sprintf "%d %s" day months.(month - 1)
+
+let utc_clock time =
+  let _, _, _, hour, minute, second = split time in
+  Printf.sprintf "%d:%02d:%02d" hour minute second

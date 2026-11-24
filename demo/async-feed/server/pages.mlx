@@ -30,11 +30,10 @@ let shell ~(settings : Model.settings) ~children () =
   </div>
   </Yuka.Context.Provide>
 
-let time ~class_ time = <Yuka.Client><Local_time time class_ /></Yuka.Client>
+let time ?(stacked = false) ~class_ time = <Yuka.Client><Local_time time class_ stacked /></Yuka.Client>
 
 let card (event : Model.event) =
-  <Card event time=(time ~class_:"card-time" event.time)
-    comments=(<Yuka.Client><Comment_count id=event.id count=(Store.comment_count event) /></Yuka.Client>) />
+  <Card event time=(time ~stacked:true ~class_:"card-time" event.time) />
 
 let feed_view ~project ~team ~assignee ~before =
   let filter = { Model.projects = project; teams = team; assignees = assignee } in
@@ -106,12 +105,6 @@ let sheet ~layer (event : Model.event) =
             </div>
             (Preview.main_visual event)
           </article>
-          (let thread = Store.thread event in
-           <Yuka.Client>
-             <Comment_thread item=event.id count=(List.length thread)>
-               (Yuka.fragment (List.map (Comment_thread.comment ~time:(time ~class_:"comment-time")) thread))
-             </Comment_thread>
-           </Yuka.Client>)
         </div>
         <aside class_="sheet-meta" aria_label="Metadata">
           <a class_="small-button source-link" href=(Data.link event) target=`_blank rel="noopener">

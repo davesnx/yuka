@@ -32,7 +32,7 @@ let default_zone () = (resolved (make "en-US" (options ()))).timeZone
 let valid_zone zone = match make "en-US" (options ~timeZone:zone ()) with _ -> true | exception _ -> false
 let prefers_dark () = (match_media "(prefers-color-scheme: dark)").matches
 
-type formats = { zone : string; short : format; long : format; numeric : format }
+type formats = { zone : string; short : format; day : format; clock : format; long : format; numeric : format }
 
 let last = ref None
 
@@ -47,6 +47,10 @@ let formats zone =
             make "en-US"
               (options ~timeZone:zone ~year:"numeric" ~month:"short" ~day:"numeric" ~hour:"2-digit" ~minute:"2-digit"
                  ~second:"2-digit" ~hourCycle:"h23" ~timeZoneName:"short" ());
+          day = make "en-GB" (options ~timeZone:zone ~day:"numeric" ~month:"short" ());
+          clock =
+            make "en-GB"
+              (options ~timeZone:zone ~hour:"numeric" ~minute:"2-digit" ~second:"2-digit" ~hourCycle:"h23" ());
           long = make "en-US" (options ~timeZone:zone ~dateStyle:"full" ~timeStyle:"long" ());
           numeric =
             make "en-US"
@@ -59,6 +63,8 @@ let formats zone =
 
 let instant time = date (float_of_int time *. 1000.)
 let short ~zone time = format (formats zone).short (instant time)
+let day ~zone time = format (formats zone).day (instant time)
+let clock ~zone time = format (formats zone).clock (instant time)
 let long ~zone time = format (formats zone).long (instant time) ^ " (" ^ zone ^ ")"
 
 let wall zone ms =

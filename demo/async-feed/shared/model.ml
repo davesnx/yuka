@@ -13,7 +13,6 @@ type event = {
 }
 [@@deriving codec]
 
-type comment = { author : string; time : int; text : string } [@@deriving codec]
 type theme = Light | Dark [@@deriving codec]
 type settings = { theme : theme option; zone : string option }
 
