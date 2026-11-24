@@ -1144,6 +1144,56 @@ let reset_mid_answer () =
       check_true "still answers" (String.starts_with ~prefix:"HTTP/1.1 200" output);
       Lwt.return_unit)
 
+let gone = Yuka.Topic.declare ~name:"gone" ~key:Yuka.Codec.string ~state:Yuka.Codec.int
+let () = Yuka.Server.Live.implement gone (fun _ -> Yuka.Async.return 0)
+
+(* Dream 1.0.0 spins at 100% CPU when it writes to a WebSocket whose client
+   is gone (camlworks/dream#467). Here a client subscribes, leaves in each
+   way, and the server publishes to it many times. *)
+let live_publish_after_client_left () =
+  let handler = make config in
+  let cookie, token = session_and_token handler in
+  with_server ~handler (fun port ->
+      let baseline = open_fds () in
+      let leave how =
+        let* socket = connect port in
+        let* ws, _ = bounded "the handshake" (Ws.connect socket ~host:"app.test" ~cookie:(cookie_text cookie)) in
+        let* () = Ws.send ws (hello token) in
+        let* _ = expect_text "hello" ws in
+        let* () = Ws.send ws {|{"t":"sub","id":1,"topic":"gone","key":"k"}|} in
+        let* _ = expect_text "state" ws in
+        Yuka.Server.Live.publish gone "k" 1000;
+        let* text = expect_text "1000" ws in
+        check_true ("subscribed: " ^ text) (contains text "1000");
+        (* No yield between leaving and the first publish: the server has not
+           seen the client leave when it writes. *)
+        let* () =
+          match how with
+          | `Reset ->
+              let fd = Lwt_unix.unix_file_descr socket in
+              Unix.setsockopt_optint fd Unix.SO_LINGER (Some 0);
+              Lwt.return (Unix.close fd)
+          | `Half_close -> Lwt.return (Lwt_unix.shutdown socket Unix.SHUTDOWN_SEND)
+          | `Close -> Lwt.return (Unix.close (Lwt_unix.unix_file_descr socket))
+        in
+        let rec publish n =
+          if n = 0 then Lwt.return_unit
+          else begin
+            Yuka.Server.Live.publish gone "k" n;
+            let* () = Lwt.pause () in
+            publish (n - 1)
+          end
+        in
+        let* () = publish 500 in
+        let* output = within 2. "an answer after the publishes" (get_over_tcp port "/feed.xml") in
+        check_true "still answers" (String.starts_with ~prefix:"HTTP/1.1 200" output);
+        match how with `Half_close -> Lwt_unix.close socket | `Reset | `Close -> Lwt.return_unit
+      in
+      let* () = leave `Reset in
+      let* () = leave `Half_close in
+      let* () = leave `Close in
+      wait_for "the server closes the live sockets" (fun () -> open_fds () <= baseline))
+
 let client_closes_first () =
   with_server (fun port ->
       let baseline = open_fds () in
@@ -1524,6 +1574,7 @@ let () =
           case "out of file descriptors" out_of_descriptors;
           case "a reset during an answer" reset_mid_answer;
           case "clients that close first" client_closes_first;
+          case "a publish to a client that left" live_publish_after_client_left;
           case "run until SIGTERM" run_stops;
           case "a second signal exits at once" second_signal;
           case "a client that never reads is closed" never_reads;
