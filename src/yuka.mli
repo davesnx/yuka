@@ -2094,6 +2094,11 @@ module Server : sig
         send messages to the log of its server ([Yuka_dream.handler] uses
         [Dream.sub_log "yuka"]). *)
 
+    val log : config -> log_level -> string -> unit
+    (** [log config] is the log of [config]: its [log], else the default
+        sink ({!set_default_log}). An adapter sends its own messages there,
+        so they go where the messages of the cycle go. *)
+
     val build_id : config -> app -> string
     (** The build id: a digest of the route tree and, with [assets], of the
         entry, the manifest and the packages or the metafile. Every full

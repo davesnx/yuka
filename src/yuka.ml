@@ -113,6 +113,7 @@ module Server = struct
     module Make = Cycle.Make
 
     let default_log = Cycle.default_log
+    let log = Cycle.log
 
     let build_id = Cycle.build_id
   end

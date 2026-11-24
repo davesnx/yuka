@@ -57,3 +57,18 @@
   works and has no prefetch, and each page with no island reports a CSP
   violation (in the console, and to `report-uri` or `report-to` when the
   policy has one).
+- Sessions of `yuka-server` (`Yuka_server.sessions`) are signed cookies
+  with no store: one session cannot be ended before it expires, so a
+  stolen cookie is valid until then (14 days by default). Each use in the
+  second half of that time gives a new cookie for the same session, so a
+  thief who uses the cookie keeps the session until its absolute limit,
+  `~max_lifetime` (30 days from its start by default). Anyone who has
+  the secret can make a valid cookie: keep it out of the source code. Set
+  `~secure:true` on HTTPS: without it the cookie has no `Secure` and no
+  `__Host-` name, so a page on another subdomain can set its own valid
+  cookie for the site. A page that reads the session under a shared cache
+  rule (`public`, `s-maxage`) puts a `set-cookie` on a cacheable answer.
+- `yuka-server` limits the time to send a request head (10 seconds) and
+  the time a connection waits for a next request (60 seconds), but not
+  the time to send a body and not the number of connections. Put a proxy
+  in front of a public server.

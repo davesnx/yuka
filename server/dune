@@ -1,0 +1,14 @@
+(library
+ (name yuka_server)
+ (public_name yuka-server)
+ (private_modules session)
+ (libraries
+  yuka
+  ache
+  ache-lwt
+  digestif
+  lwt
+  lwt.unix
+  magic-mime
+  mirage-crypto-rng.unix
+  unix))

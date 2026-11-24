@@ -146,7 +146,8 @@ Each attachment is a value path such as `Pages.home`, or `home` after
 calls it with labelled arguments. `req` is a `Yuka.Server.request`: read
 it with `Yuka.Server.Request` (see "The request" in `data.md`). Code that
 needs the request of the server gets it from the adapter:
-`Yuka_dream.request req` gives a `Dream.request option`.
+`Yuka_server.request req` gives an `Ache.Request_descriptor.t option`,
+and `Yuka_dream.request req` a `Dream.request option`.
 
 | Attachment | On | Shape |
 |---|---|---|
