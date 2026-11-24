@@ -78,3 +78,25 @@
   client that sends or reads a few bytes at a time keeps its connection,
   and it does not limit the connections of one address. Put a proxy in
   front of a public server.
+
+## Cookies
+
+- `Server.Cookie.set` gives a `set-cookie` header for the `headers` of a
+  handler answer. By default the cookie has `Path=/`, `HttpOnly` and
+  `SameSite=Lax`. Set `~secure:true` on HTTPS. It gives `Error` for a name
+  that is not a token, a path or domain that could add an attribute
+  (`;`, control characters), `SameSite=None` without `Secure`, and a
+  `__Secure-` or `__Host-` name without the attributes that browsers
+  require for it. The value is percent-encoded as `Browser.set_cookie`
+  encodes it, so it cannot end the cookie or add an attribute.
+  `Server.Cookie.get` decodes it; `Server.Request.cookie` gives the raw
+  value.
+- A client can change any cookie. `Yuka_server.Signed_cookie` adds an
+  HMAC-SHA256 of the name and the value, made with the secret of
+  `Yuka_server.sessions`, and `get` gives `None` when the value or the
+  name changed. The value is not encrypted: do not put a secret in it. A
+  signed value has no time limit of its own: a copy stays valid until the
+  secret changes, whatever its `max_age`.
+- Pages, loaders, guards, actions and form actions cannot set a cookie.
+  Set it in a handler (`Router.get`, `Router.post`), or in the browser
+  with `Browser.set_cookie`, which cannot set `HttpOnly`.

@@ -38,6 +38,33 @@ val sessions : ?secure:bool -> ?lifetime:float -> ?max_lifetime:float -> secret:
     once in each half [lifetime] keeps the session until [max_lifetime]
     from its start. *)
 
+(** Cookies signed with the secret of {!sessions}, so a client cannot
+    change their value: the value stays readable, it is not encrypted.
+    The signature is an HMAC-SHA256 of the name and the value; it is
+    separate from those of the session cookie and the CSRF tokens. A
+    signed value has no time limit of its own: [max_age] limits only how
+    long the browser keeps it, and a copy of the cookie stays valid until
+    the secret changes. *)
+module Signed_cookie : sig
+  val set :
+    sessions ->
+    ?max_age:int ->
+    ?path:string ->
+    ?domain:string ->
+    ?same_site:[ `Lax | `Strict | `None ] ->
+    ?secure:bool ->
+    ?http_only:bool ->
+    string ->
+    string ->
+    (string * string, string) result
+  (** As {!Yuka.Server.Cookie.set}, with the signature after the value. *)
+
+  val get : sessions -> Yuka.Server.request -> string -> string option
+  (** The value of a cookie that {!set} wrote with the same secret and
+      the same name. [None] when the request has no cookie of this name, or
+      when its signature is not valid. *)
+end
+
 type connection
 (** One accepted socket. *)
 

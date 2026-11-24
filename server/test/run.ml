@@ -734,6 +734,49 @@ let secure () =
   let plain = call ~headers:(with_cookie ("yuka-session", snd (cookie_of (call (make config) "/session")))) handler "/session" in
   Alcotest.(check int) "the plain cookie name is not read" 1 (List.length (set_cookies plain))
 
+let signed_cookies () =
+  let request cookie = Yuka.Server.Testing.request ~header:(function "cookie" -> Some cookie | _ -> None) () in
+  let pair = function
+    | Ok (_, header) -> List.hd (String.split_on_char ';' header)
+    | Error message -> Alcotest.fail message
+  in
+  let read ?(sessions = sessions) ?(name = "pref") cookie = Yuka_server.Signed_cookie.get sessions (request cookie) name in
+  let value = {js|dark; é.1|js} in
+  let written = Yuka_server.Signed_cookie.set sessions "pref" value in
+  let header = match written with Ok (_, h) -> h | Error m -> Alcotest.fail m in
+  Alcotest.(check (list string)) "the attributes of Server.Cookie.set" [ "Path=/"; "HttpOnly"; "SameSite=Lax" ]
+    (List.tl (List.map String.trim (String.split_on_char ';' header)));
+  Alcotest.(check (option string)) "valid" (Some value) (read (pair written));
+  Alcotest.(check (option string)) "valid among other cookies" (Some value) (read ("a=1; " ^ pair written ^ "; b=2"));
+  let encoded = String.sub (pair written) 5 (String.length (pair written) - 5) in
+  let dot = String.rindex encoded '.' in
+  let data = String.sub encoded 0 dot and mac = String.sub encoded (dot + 1) (String.length encoded - dot - 1) in
+  let flip c = if c = '0' then '1' else '0' in
+  List.iter
+    (fun (label, cookie) -> Alcotest.(check (option string)) label None (read cookie))
+    [
+      ("a tampered value", "pref=" ^ String.map (fun c -> if c = 'd' then 'l' else c) data ^ "." ^ mac);
+      ("a tampered signature", "pref=" ^ data ^ "." ^ String.mapi (fun i c -> if i = 0 then flip c else c) mac);
+      ("no signature", "pref=" ^ data);
+      ("an empty signature", "pref=" ^ data ^ ".");
+      ("a value that does not decode", "pref=%ZZ." ^ mac);
+      ("no cookie", "other=1");
+    ];
+  Alcotest.(check (option string)) "the value of another name" None
+    (read ~name:"other" ("other=" ^ encoded));
+  let other = Yuka_server.sessions ~secret:(String.make 40 'z') () in
+  Alcotest.(check (option string)) "another secret" None (read ~sessions:other (pair written));
+  Alcotest.(check (option string)) "valid with its own secret" (Some value)
+    (read ~sessions:other (pair (Yuka_server.Signed_cookie.set other "pref" value)));
+  let session_name, session_value = cookie_of (call (make config) "/session") in
+  let fields = String.split_on_char '.' session_value in
+  let session_mac = List.nth fields 4 in
+  let forged = String.concat "\n" [ List.nth fields 1; List.nth fields 2; List.nth fields 3 ] ^ "." ^ session_mac in
+  Alcotest.(check (option string)) "a MAC of the session cookie, with the session label" None
+    (read ~name:session_name (session_name ^ "=" ^ Option.get (Yuka.Url.encode_uri_component forged)));
+  Alcotest.(check bool) "an invalid name is an Error" true
+    (Result.is_error (Yuka_server.Signed_cookie.set sessions "a b" "v"))
+
 let short_secret () =
   Alcotest.check_raises "31 bytes" (Invalid_argument "Yuka_server.sessions: the secret must have at least 32 bytes") (fun () ->
       ignore (Yuka_server.sessions ~secret:(String.make 31 's') ()));
@@ -1459,6 +1502,7 @@ let () =
           case "bad cookies give a new session" bad_cookies;
           case "no sessions" no_sessions;
           case "secure cookies" secure;
+          case "signed cookies" signed_cookies;
           case "a short secret is refused" short_secret;
           case "renewal and expiry" lifetime;
           case "renewal stops at the absolute limit" absolute_limit;

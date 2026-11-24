@@ -5,6 +5,11 @@ type sessions = Session.t
 
 let sessions = Session.make
 
+module Signed_cookie = struct
+  let set = Session.signed_cookie
+  let get = Session.verified_cookie
+end
+
 type connection = {
   fd : Lwt_unix.file_descr;
   peer : Unix.sockaddr;

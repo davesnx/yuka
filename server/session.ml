@@ -35,15 +35,10 @@ let left t ~issued ~now = Float.min t.lifetime (issued +. t.max_lifetime -. now)
 let set_cookie t ~id ~issued ~now =
   let issued_text = seconds issued and max_age = left t ~issued ~now in
   let expires = seconds (now +. max_age) in
-  String.concat "; "
-    ([
-       t.cookie ^ "=" ^ String.concat "." [ "v2"; id; issued_text; expires; mac t [ "yuka-session"; id; issued_text; expires ] ];
-       "Path=/";
-       "Max-Age=" ^ seconds max_age;
-       "HttpOnly";
-       "SameSite=Lax";
-     ]
-    @ if t.secure then [ "Secure" ] else [])
+  let value = String.concat "." [ "v2"; id; issued_text; expires; mac t [ "yuka-session"; id; issued_text; expires ] ] in
+  match Yuka.Server.Cookie.set ~max_age:(int_of_float (Float.round max_age)) ~secure:t.secure t.cookie value with
+  | Ok (_, header) -> header
+  | Error message -> invalid_arg message
 
 type valid = { valid_id : string; issued : float; renew : bool }
 
@@ -88,3 +83,16 @@ let verify t ~id ~now token =
   | [ "v1"; expires; nonce; given ] when is_digits expires && String.length nonce = 16 && is_hex nonce ->
       float_of_string expires > now && signed t [ "yuka-csrf"; id; expires; nonce ] given
   | _ -> false
+
+let cookie_mac t ~name value = mac t [ "yuka-cookie"; name; value ]
+
+let signed_cookie t ?max_age ?path ?domain ?same_site ?secure ?http_only name value =
+  Yuka.Server.Cookie.set ?max_age ?path ?domain ?same_site ?secure ?http_only name
+    (value ^ "." ^ cookie_mac t ~name value)
+
+let verified_cookie t request name =
+  Option.bind (Yuka.Server.Cookie.get request name) (fun text ->
+      Option.bind (String.rindex_opt text '.') (fun i ->
+          let value = String.sub text 0 i in
+          if signed t [ "yuka-cookie"; name; value ] (String.sub text (i + 1) (String.length text - i - 1)) then Some value
+          else None))
