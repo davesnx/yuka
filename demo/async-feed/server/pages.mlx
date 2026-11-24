@@ -93,12 +93,6 @@ let sheet ~layer (event : Model.event) =
               <div class_="detail-head-text">
                 <h2 class_="detail-title">(Yuka.text event.title)</h2>
                 <div class_="detail-byline">
-                  <span class_="detail-author">
-                    <Avatar name=event.author size=20 />
-                    <span>(Yuka.text event.author)</span>
-                  </span>
-                  <span class_="detail-sep" aria_hidden=true>"·"</span>
-                  <span class_="detail-source">(Yuka.text label)</span>
                   (time ~class_:"detail-time" event.time)
                 </div>
               </div>
