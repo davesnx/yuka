@@ -11,6 +11,7 @@ if [ "${BUNDLE:-}" = 1 ]; then
   BUILD_DIR="$build" "$root/demo/mini-linear/bundle.sh" || { echo "bundle failed"; exit 2; }
   BUILD_DIR="$build" "$root/demo/async-feed/bundle.sh" || { echo "bundle failed"; exit 2; }
   BUILD_DIR="$build" "$root/demo/posters/bundle.sh" || { echo "bundle failed"; exit 2; }
+  BUILD_DIR="$build" "$root/demo/infinite-scroll/bundle.sh" || { echo "bundle failed"; exit 2; }
   mode=bundle
   flags=--bundle
 fi
