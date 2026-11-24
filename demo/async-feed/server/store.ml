@@ -13,7 +13,8 @@ type page = { events : Model.event list; total : int }
 let page ~filter ~before ~limit =
   let older (event : Model.event) = match before with Some time -> event.time < time | None -> true in
   let matching = Seq.filter (Model.matches filter) (all ()) in
-  { events = List.of_seq (Seq.take limit (Seq.filter older matching)); total = Seq.length matching }
+  let newest_first = List.of_seq (Seq.take limit (Seq.filter older matching)) in
+  { events = List.rev newest_first; total = Seq.length matching }
 
 let recent () = List.filteri (fun index _ -> index < Feed.kept) !simulated
 
@@ -26,16 +27,3 @@ let add ~now =
 let find id =
   if id >= 1 && id <= Data.count then Some generated.(id - 1)
   else List.find_opt (fun (event : Model.event) -> event.id = id) !simulated
-
-let added : (int, Model.comment list) Hashtbl.t = Hashtbl.create 16
-
-let thread (event : Model.event) =
-  (if event.id <= Data.count then Data.comments event else [])
-  @ List.rev (Option.value (Hashtbl.find_opt added event.id) ~default:[])
-
-let comment_count event = List.length (thread event)
-
-let comment (event : Model.event) ~author ~now text =
-  let previous = Option.value (Hashtbl.find_opt added event.id) ~default:[] in
-  Hashtbl.replace added event.id ({ Model.author; time = now; text } :: previous);
-  thread event

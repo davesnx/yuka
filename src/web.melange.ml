@@ -359,8 +359,35 @@ let history_at : unit -> int =
 
 external history_go : int -> unit = "go" [@@mel.scope "window", "history"]
 
-let scroll_y : unit -> float = [%mel.raw "function () { return window.scrollY || 0 }"]
-let scroll_to : float -> unit = [%mel.raw "function (y) { window.scrollTo(0, y) }"]
+let scroll_y : unit -> float =
+  [%mel.raw
+    {|function () {
+  const gcs = window.getComputedStyle;
+  if (gcs) {
+    const outlets = document.querySelectorAll("yuka-outlet");
+    const outlet = outlets.length ? outlets[outlets.length - 1] : null;
+    for (let el = outlet && outlet.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      const oy = gcs(el).overflowY;
+      if (oy === "auto" || oy === "scroll") return el.scrollTop || 0;
+    }
+  }
+  return window.scrollY || 0;
+}|}]
+
+let scroll_to : float -> unit =
+  [%mel.raw
+    {|function (y) {
+  const gcs = window.getComputedStyle;
+  if (gcs) {
+    const outlets = document.querySelectorAll("yuka-outlet");
+    const outlet = outlets.length ? outlets[outlets.length - 1] : null;
+    for (let el = outlet && outlet.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      const oy = gcs(el).overflowY;
+      if (oy === "auto" || oy === "scroll") { el.scrollTop = y; return; }
+    }
+  }
+  window.scrollTo(0, y);
+}|}]
 
 let set_cookie : string -> unit = [%mel.raw "function (cookie) { document.cookie = cookie }"]
 

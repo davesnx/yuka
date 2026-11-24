@@ -1,0 +1,49 @@
+let[@client] make () =
+  let saved = Zone.saved_zone () in
+  let moment = Yuka.State.make "" in
+  let route = Routes.current () in
+  let jump before =
+    match Yuka.State.peek route with
+    | Some (Routes.Feed { project; team; assignee; _ }) ->
+        Yuka.Browser.navigate (Routes.feed ~project ~team ~assignee ?before ())
+    | Some (Routes.Item _ | Routes.Embed _) | None -> Yuka.Browser.navigate (Routes.feed ?before ())
+  in
+  let has_before () =
+    match Yuka.State.get route with
+    | Some (Routes.Feed { before = Some _; _ }) -> true
+    | _ -> false
+  in
+  let zones () =
+    let current = Zone.current saved in
+    if List.mem current Zone.zones then Zone.zones else current :: Zone.zones
+  in
+  <div class_="header-controls">
+    <label class_="header-field" title="Time zone">
+      <svg class_="header-field-icon" view_box="0 0 16 16" width="14" height="14" aria_hidden=true>
+        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke_width="1.3" />
+        <path d="M2.5 8h11M8 2a9 9 0 0 1 0 12M8 2a9 9 0 0 0 0 12" fill="none" stroke="currentColor" stroke_width="1.2" />
+      </svg>
+      <span class_="sr-only">"Time zone"</span>
+      <select id="header-zone" class_="header-select" aria_label="Time zone"
+        on_change=(fun event -> Zone.choose (Yuka.Event.target_value event))>
+        (Yuka.fragment
+           (List.map
+              (fun name -> <option value=name selected=(name = Zone.current saved)>(Yuka.text name)</option>)
+              (zones ())))
+      </select>
+    </label>
+    <form class_="header-date"
+      on_submit=(fun event ->
+        Yuka.Event.prevent_default event;
+        match Env.to_time ~zone:(Zone.current saved) (Yuka.State.peek moment) with
+        | Some time -> jump (Some (time + 60))
+        | None -> ())>
+      <label class_="sr-only" for_="header-date">"Jump to date"</label>
+      <input id="header-date" class_="header-input" type_=`datetime_local aria_label="Jump to date"
+        on_input=(fun event -> Yuka.State.set moment (Yuka.Event.target_value event)) />
+      <button class_="small-button" type_=`submit>"Go"</button>
+      (if has_before () then
+         <button class_="small-button header-latest" type_=`button on_click=(fun _ -> jump None)>"Latest"</button>
+       else Yuka.empty)
+    </form>
+  </div>

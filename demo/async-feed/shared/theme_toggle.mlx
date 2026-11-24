@@ -7,8 +7,10 @@ let[@client] make ~(theme : Model.theme option) () =
     aria_pressed=(if dark (Yuka.State.get theme) then `true_ else `false_)
     on_click=(fun _ ->
       let next = if dark (Yuka.State.peek theme) then Model.Light else Dark in
+      let value = Model.theme_to_string next in
       Yuka.State.set theme (Some next);
-      ignore (Yuka.Browser.set_cookie ~max_age:31536000 Model.theme_cookie (Model.theme_to_string next)))>
+      Env.sync_embed_theme value;
+      ignore (Yuka.Browser.set_cookie ~max_age:31536000 Model.theme_cookie value))>
     <svg class_="sun" view_box="0 0 16 16" width="16" height="16" aria_hidden=true>
       <circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke_width="1.5" />
       <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"

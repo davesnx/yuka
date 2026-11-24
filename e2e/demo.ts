@@ -100,7 +100,7 @@ const installProbes = () => {
     if (n.nodeType !== 1) return;
     const el = n as Element;
     const mark = (e: Element) => {
-      if (e.matches(".row, .filter, .list, .toolbar, .new-issue-button, .comment-input, .comment, .props, .props select, [class^=related_], [class^=related-list_] li"))
+      if (e.matches(".row, .filter, .list, .toolbar, .new-issue-button, .comment-input, .comment, .props, .props [role=combobox], [class^=related_], [class^=related-list_] li"))
         (e as any).__tag = "server";
     };
     mark(el);
@@ -271,8 +271,8 @@ await step("3b. router", async () => {
   await page.evaluate(() => ((window as any).__marker = "alive"));
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
   const titleBefore = await page.title();
-  await page.evaluate(() => window.scrollTo(0, 250));
-  const y = await page.evaluate(() => Math.round(window.scrollY));
+  await page.evaluate(() => { document.querySelector(".main")!.scrollTop = 250; });
+  const y = await page.evaluate(() => Math.round(document.querySelector(".main")!.scrollTop));
   const mark = allRequests.length;
   const loadedAtMove = allRequests.slice(moved, mark).filter(routerCode).length;
   await page.locator('.row[data-id="YUK-8"] .row-title').click();
@@ -285,11 +285,11 @@ await step("3b. router", async () => {
   const titleAfter = await page.title();
   check("3b.3 URL and title changed", page.url().endsWith("/issue/YUK-8") && titleAfter !== titleBefore, `"${titleBefore}" -> "${titleAfter}"`);
   await page.locator(".props .property").first().hover();
-  await page.waitForFunction(() => !!(document.querySelector(".props select") as any)?.__yuka_change && !!(document.querySelector(".comment-input") as any)?.__yuka_input).catch(() => {});
+  await page.waitForFunction(() => !!(document.querySelector(".props [role=combobox]") as any)?.__yuka_click && !!(document.querySelector(".comment-input") as any)?.__yuka_input).catch(() => {});
   await page.locator(".comment-input").fill("hello");
   await page.waitForFunction(() => !(document.querySelector(".comment-box button.primary") as HTMLButtonElement | null)?.disabled).catch(() => {});
   const islands = await page.evaluate(() => ({
-    props: !!(document.querySelector(".props select") as any)?.__yuka_change,
+    props: !!(document.querySelector(".props [role=combobox]") as any)?.__yuka_click,
     comments: !!(document.querySelector(".comment-input") as any)?.__yuka_input,
     sendEnabled: !(document.querySelector(".comment-box button.primary") as HTMLButtonElement | null)?.disabled,
     count: document.querySelectorAll("yuka-island").length,
@@ -297,10 +297,10 @@ await step("3b. router", async () => {
   check("3b.4 islands on the new page work (Issue_props, Comments)", islands.props && islands.comments && islands.sendEnabled, JSON.stringify(islands));
   await page.goBack();
   await page.waitForSelector(".row");
-  await page.waitForFunction((y) => location.pathname === "/" && Math.abs(Math.round(scrollY) - y) <= 2, y).catch(() => {});
-  const back = await page.evaluate(() => ({ y: Math.round(window.scrollY), path: location.pathname }));
+  await page.waitForFunction((y) => location.pathname === "/" && Math.abs(Math.round(document.querySelector(".main")!.scrollTop) - y) <= 2, y).catch(() => {});
+  const back = await page.evaluate(() => ({ y: Math.round(document.querySelector(".main")!.scrollTop), winY: Math.round(window.scrollY), path: location.pathname }));
   check("3b.5 back returns to / with the marker", back.path === "/" && (await marker()) === "alive", JSON.stringify(back));
-  check("3b.6 scroll restored", Math.abs(back.y - y) <= 2 && y > 0, `before=${y} after=${back.y}`);
+  check("3b.6 scroll restored", Math.abs(back.y - y) <= 2 && y > 0 && back.winY === 0, `before=${y} after=${back.y} winY=${back.winY}`);
   const total = await page.locator(".row").count();
   await page.fill(".filter", "keyboard");
   await rowsBetween(page, 0, total - 1);
@@ -357,12 +357,21 @@ await step("3m. GET forms", async () => {
   const marker = () => page.evaluate(() => (window as any).__marker as string | undefined);
   const kept = () => page.evaluate(() => !!(document.querySelector(".sidebar-extra yuka-island") as any)?.__kept);
   const entries = await page.evaluate(() => history.length);
-  await page.fill(".search input", "keyboard");
-  await page.press(".search input", "Enter");
+  check("3m.0 no search input in the sidebar", (await page.locator(".sidebar .search, .sidebar input[type=search]").count()) === 0);
+  await page.evaluate(() => {
+    const f = document.createElement("form");
+    f.id = "e2e-search";
+    f.method = "get";
+    f.action = "/";
+    f.innerHTML = '<input type="search" name="q">';
+    document.body.prepend(f);
+  });
+  await page.fill("#e2e-search input", "keyboard");
+  await page.press("#e2e-search input", "Enter");
   await page.waitForURL((u) => u.pathname === "/" && u.search === "?q=keyboard");
   await page.waitForFunction(() => (document.querySelector(".filter") as HTMLInputElement | null)?.value === "keyboard").catch(() => {});
   const after = await page.evaluate(() => ({ filter: (document.querySelector(".filter") as HTMLInputElement | null)?.value, rows: document.querySelectorAll(".row").length, entries: history.length }));
-  check("3m.1 the sidebar search form is a client navigation that keeps the layout island", (await marker()) === "alive" && (await kept()) && after.filter === "keyboard" && after.entries === entries + 1, `marker=${await marker()} kept=${await kept()} ${JSON.stringify(after)}`);
+  check("3m.1 a GET form is a client navigation that keeps the layout island", (await marker()) === "alive" && (await kept()) && after.filter === "keyboard" && after.entries === entries + 1, `marker=${await marker()} kept=${await kept()} ${JSON.stringify(after)}`);
   await page.evaluate(() => {
     const f = document.createElement("form");
     f.id = "e2e-get";
@@ -396,13 +405,17 @@ await step("3m. GET forms", async () => {
   check("3m.4 a form with target=_blank is not intercepted", new URL(popup.url()).pathname === "/my" && new URL(page.url()).search === "?q=sync" && (await marker()) === "alive", `${popup.url()} current=${page.url()}`);
   await popup.close();
   await page.evaluate(() => {
-    const f = document.querySelector(".search") as HTMLFormElement;
+    const f = document.createElement("form");
+    f.id = "e2e-reload";
+    f.method = "get";
+    f.action = "/";
     f.setAttribute("data-yuka-reload", "");
-    (f.querySelector("input") as HTMLInputElement).value = "full";
+    f.innerHTML = '<input name="q" value="full">';
+    document.body.prepend(f);
   });
-  await Promise.all([page.waitForEvent("load"), page.press(".search input", "Enter")]);
+  await Promise.all([page.waitForEvent("load"), page.press("#e2e-reload input", "Enter")]);
   check("3m.5 a form with data-yuka-reload does a full page load", new URL(page.url()).search === "?q=full" && (await marker()) === undefined, `${page.url()} marker=${await marker()}`);
-  await page.waitForSelector(".search input");
+  await page.waitForSelector(".filter");
   await page.evaluate(() => {
     (window as any).__marker = "alive";
     const f = document.createElement("form");
@@ -416,7 +429,7 @@ await step("3m. GET forms", async () => {
   await page.waitForTimeout(300);
   check("3m.7 a submit that a document listener prevents is left alone", new URL(page.url()).search === "?q=full" && (await marker()) === "alive", `${page.url()} marker=${await marker()}`);
   await page.route("http://e2e-other.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<p id=other>other</p>" }));
-  await page.waitForSelector(".search input");
+  await page.waitForSelector(".filter");
   await page.evaluate(() => {
     (window as any).__marker = "alive";
     const f = document.createElement("form");
@@ -448,15 +461,23 @@ await step("3c. partial navigation", async () => {
   const buttonInView = () =>
     page.evaluate(() => {
       const rect = document.querySelector(".new-issue-button")!.getBoundingClientRect();
-      return { top: Math.round(rect.top), bottom: Math.round(rect.bottom), scrollY: Math.round(scrollY), height: innerHeight };
+      const main = document.querySelector(".main")!;
+      return {
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom),
+        mainScroll: Math.round(main.scrollTop),
+        winScroll: Math.round(window.scrollY),
+        pageScrollable: document.documentElement.scrollHeight > window.innerHeight,
+        height: innerHeight,
+      };
     });
   const atTop = await buttonInView();
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.evaluate(() => { const m = document.querySelector(".main")!; m.scrollTop = m.scrollHeight; });
   const atEnd = await buttonInView();
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => { document.querySelector(".main")!.scrollTop = 0; });
   check(
-    "3c.2b the new issue button stays in the viewport on a long list",
-    [atTop, atEnd].every((box) => box.top >= 0 && box.bottom <= box.height) && atEnd.scrollY > 0,
+    "3c.2b the page itself does not scroll; .main scrolls while the sidebar and new issue button stay in the viewport",
+    [atTop, atEnd].every((box) => box.top >= 0 && box.bottom <= box.height && !box.pageScrollable && box.winScroll === 0) && atEnd.mainScroll > 0,
     JSON.stringify({ atTop, atEnd }),
   );
   await page.route("**/issue/YUK-3", (route) => route.continue({ url: route.request().url() + "?delay=600" }));
@@ -498,8 +519,8 @@ await step("3c. partial navigation", async () => {
   check("3c.8a a page with no h1: the focus moves from the sidebar link into the new content, the title is announced", onMy.inOutlet && onMy.live === onMy.title && onMy.title !== "YUK-3", JSON.stringify(onMy));
   check("3c.8 aria-current moves to My issues", (await current()) === "/=null /my=page /insights=null /report=null /canvas=null /settings=null", await current());
   check("3c.9 progress bar still kept", (await bar()).kept === true, JSON.stringify(await bar()));
-  const y0 = await page.evaluate(() => Math.round(window.scrollY));
-  check("3c.10 a new page starts at the top", y0 === 0, String(y0));
+  const y0 = await page.evaluate(() => ({ main: Math.round(document.querySelector(".main")!.scrollTop), win: Math.round(window.scrollY) }));
+  check("3c.10 a new page starts at the top", y0.main === 0 && y0.win === 0, JSON.stringify(y0));
   await page.route("**/my", async (route) => {
     const real = await route.fetch();
     await route.fulfill({ response: real, headers: { ...real.headers(), "yuka-build": "changed" } });
@@ -530,7 +551,7 @@ await step("3l. overlay route", async () => {
       page: document.querySelectorAll("yuka-outlet [data-settings]").length,
       overlays: document.querySelectorAll("yuka-overlay").length,
       rows: document.querySelectorAll("yuka-outlet .row").length,
-      y: Math.round(window.scrollY),
+      y: Math.round(document.querySelector(".main")!.scrollTop),
       title: document.title,
     }));
   for (const [path, selector] of [["/report", "[data-report]"], ["/insights", "[data-insights]"]]) {
@@ -545,7 +566,7 @@ await step("3l. overlay route", async () => {
   await page.locator('.nav-link[href="/"]').click();
   await page.waitForURL(base + "/");
   await page.waitForSelector("yuka-outlet .row");
-  await page.evaluate(() => window.scrollTo(0, 200));
+  await page.evaluate(() => { document.querySelector(".main")!.scrollTop = 200; });
   const opened = page.waitForResponse((r) => r.url().endsWith("/settings"));
   await page.locator('.nav-link[href="/settings"]').click();
   const answer = await opened;
@@ -558,7 +579,7 @@ await step("3l. overlay route", async () => {
     answer.headers()["yuka-layer"] === "overlay" && open.settings === 1 && open.rows > 0 && y > 0 && open.title === "Settings" && (await marker()) === "alive",
     JSON.stringify(open),
   );
-  await page.mouse.move(20, 790);
+  await page.mouse.move(5, 5);
   let mark = allRequests.length;
   await page.goBack();
   await page.waitForSelector("yuka-overlay", { state: "detached" });
@@ -573,10 +594,16 @@ await step("3l. overlay route", async () => {
   await page.goForward();
   await page.waitForSelector("yuka-overlay .overlay-dialog [data-settings]");
   check("3l.3 Forward shows the overlay again", (await state()).settings === 1 && page.url().endsWith("/settings"), JSON.stringify(await state()));
-  await page.waitForSelector("yuka-overlay .close-button");
-  await page.waitForFunction(() => (document.querySelector("yuka-overlay .close-button")?.closest("yuka-island") as any)?.__yuka_started);
+  await page.waitForSelector("yuka-overlay .page-header .close-button");
+  await page.waitForFunction(() => (document.querySelector("yuka-overlay .page-header .close-button")?.closest("yuka-island") as any)?.__yuka_started);
+  const settingsClose = await page.evaluate(() => {
+    const header = document.querySelector("yuka-overlay .page-header")!.getBoundingClientRect();
+    const close = document.querySelector("yuka-overlay .page-header .close-button")!.getBoundingClientRect();
+    return { gap: header.right - close.right, left: close.left, half: header.left + header.width / 2 };
+  });
+  check("3l.3b the Settings overlay close button sits at the right of the header", settingsClose.gap < 40 && settingsClose.left > settingsClose.half, JSON.stringify(settingsClose));
   mark = allRequests.length;
-  await page.locator("yuka-overlay .close-button").click();
+  await page.locator("yuka-overlay .page-header .close-button").click();
   await page.waitForSelector("yuka-overlay", { state: "detached" });
   check(
     "3l.4 the close button (Browser.back) removes the overlay with no request",
@@ -693,11 +720,11 @@ await step("3m. scroll positions survive a reload and a cross-document Back", as
   await pg.goto(base + "/", { waitUntil: "networkidle" });
   await islandsStarted(pg);
   const scrollTo = async (y: number) => {
-    await pg.evaluate((y) => window.scrollTo(0, y), y);
-    return pg.evaluate(() => Math.round(window.scrollY));
+    await pg.evaluate((y) => { document.querySelector(".main")!.scrollTop = y; }, y);
+    return pg.evaluate(() => Math.round(document.querySelector(".main")!.scrollTop));
   };
-  const near = (y: number) => pg.waitForFunction((y) => Math.abs(Math.round(scrollY) - y) <= 2, y, { timeout: 5000 }).catch(() => {});
-  const seen = () => pg.evaluate(() => ({ y: Math.round(scrollY), fresh: (window as any).__scrollMarker === undefined }));
+  const near = (y: number) => pg.waitForFunction((y) => Math.abs(Math.round(document.querySelector(".main")!.scrollTop) - y) <= 2, y, { timeout: 5000 }).catch(() => {});
+  const seen = () => pg.evaluate(() => ({ y: Math.round(document.querySelector(".main")!.scrollTop), winY: Math.round(window.scrollY), fresh: (window as any).__scrollMarker === undefined }));
   const y1 = await scrollTo(300);
   await pg.evaluate(() => {
     (window as any).__scrollMarker = 1;
@@ -1532,12 +1559,16 @@ await step("6j. a draft blocks leaving", async () => {
   check("6j.3 a link click asks with the dialog of the app; Cancel stays", dialogs.at(-1) === "confirm:Discard the new issue?" && kept.url === "/my" && kept.title === "Draft" && kept.marker === marker, JSON.stringify({ dialogs, kept }));
   dialogs.length = 0;
   await p.evaluate(() => {
-    const f = document.querySelector(".search") as HTMLFormElement;
-    (f.querySelector("input") as HTMLInputElement).value = "blocked";
+    const f = document.createElement("form");
+    f.id = "e2e-draft-search";
+    f.method = "get";
+    f.action = "/";
+    f.innerHTML = '<input name="q" value="blocked">';
+    document.body.prepend(f);
     f.requestSubmit();
   });
   await p.waitForTimeout(300);
-  const searched = { url: new URL(p.url()).pathname + new URL(p.url()).search, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft), pending: await p.evaluate(() => document.querySelector(".search")!.hasAttribute("data-yuka-pending")) };
+  const searched = { url: new URL(p.url()).pathname + new URL(p.url()).search, title: await p.inputValue(".dialog-title"), marker: await p.evaluate(() => (window as any).__draft), pending: await p.evaluate(() => document.querySelector("#e2e-draft-search")!.hasAttribute("data-yuka-pending")) };
   check("6j.3b a GET form submit asks too; Cancel stays", dialogs.join() === "confirm:Discard the new issue?" && searched.url === "/my" && searched.title === "Draft" && searched.marker === marker && !searched.pending, JSON.stringify({ dialogs, searched }));
   dialogs.length = 0;
   await p.evaluate(() => { location.reload(); }).catch(() => {});
@@ -1859,7 +1890,7 @@ await step("6h. insights", async () => {
   check("6h.20 after a change the node counts are the counts of the page", nodeCounts.svg === nodeCounts.svgPage && nodeCounts.svg > hundredPoints && nodeCounts.dom === nodeCounts.domPage, JSON.stringify(nodeCounts));
   const hud = pg.locator("aside[data-hud]");
   const toggle = hud.locator("button[aria-controls]");
-  await pg.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await pg.evaluate(() => { const m = document.querySelector(".main")!; m.scrollTop = m.scrollHeight; });
   const pinned = await hud.evaluate((element) => {
     const box = element.getBoundingClientRect();
     return { style: getComputedStyle(element).position, live: element.getAttribute("aria-live"), right: innerWidth - box.right, bottom: innerHeight - box.bottom };
@@ -1877,7 +1908,7 @@ await step("6h. insights", async () => {
   await pg.locator("button", { hasText: /^1x$/ }).click();
   await pg.waitForFunction((text) => document.querySelector('[data-metric="points"]')?.textContent === text, stress.toLocaleString("en-US"));
   await pg.setViewportSize({ width: 390, height: 800 });
-  await pg.evaluate(() => window.scrollTo(0, 0));
+  await pg.evaluate(() => { document.querySelector(".main")!.scrollTop = 0; });
   await dates.click();
   await pg.waitForSelector("#insights-dates:popover-open");
   const narrow = await pg.evaluate(() => {
@@ -1987,7 +2018,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   await page.waitForSelector('.row[data-id="STR-2"]');
   await started();
   await page.locator('.row[data-id="STR-2"] button[aria-label="Change status"]').click();
-  check("6h.2 the status button in a row opens its menu and does not navigate", (await page.locator(".menu").count()) === 1 && page.url().endsWith("/w/stress"), page.url());
+  check("6h.2 the status button in a row opens its menu and does not navigate", (await page.locator('[role="listbox"]').count()) === 1 && page.url().endsWith("/w/stress"), page.url());
   await page.keyboard.press("Escape");
   const unassigned = await page.evaluate(() => [...document.querySelectorAll(".row")].filter((r) => r.querySelector(".avatar.empty")).map((r) => !!r.querySelector("[popovertarget]")));
   check("6h.3 unassigned rows have no user popup", unassigned.length > 0 && unassigned.every((has) => !has), String(unassigned.length));
@@ -2012,7 +2043,7 @@ await step("6h. issue list: row link, user popup, filter in the URL", async () =
   await page.keyboard.press("Escape");
   const last = page.locator(".row:has([popovertarget])").last();
   await last.scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.evaluate(() => { const m = document.querySelector(".main")!; m.scrollTop = m.scrollHeight; });
   await last.locator("[popovertarget]").click();
   await page.waitForSelector("[popover]:popover-open dd");
   const inside = await page.evaluate(() => {
@@ -2164,7 +2195,7 @@ await step("7b. start strategies", async () => {
       const box = related.getBoundingClientRect();
       return {
         navProgress: handler("[data-nav-progress]", "animationstart"),
-        props: handler(".props select", "change"),
+        props: handler(".props [role=combobox]", "click"),
         io: ((window as any).__ioFired as { cls: string; t: number }[]).filter((x) => /related/.test(x.cls)),
         relatedTop: Math.round(box.top),
         vh: window.innerHeight,
@@ -2177,7 +2208,7 @@ await step("7b. start strategies", async () => {
   check("7b.2b before interaction: no issue_props or related chunk requested", !names().includes("issue_props") && !names().includes("related"), names());
   await p.locator(".props .property").first().hover();
   await until(() => names().includes("issue_props"));
-  await p.waitForFunction(() => !!(document.querySelector(".props select") as any)?.__yuka_change).catch(() => {});
+  await p.waitForFunction(() => !!(document.querySelector(".props [role=combobox]") as any)?.__yuka_click).catch(() => {});
   check("7b.2c issue_props chunk requested after hover, related not yet", names().includes("issue_props") && !names().includes("related"), names());
   const hovered = await state();
   check("7b.4 Issue_props started after hover", hovered.props, JSON.stringify(hovered));
@@ -2223,11 +2254,11 @@ await step("7c. Issue_props status change", async () => {
   await pg.goto(base + "/issue/YUK-6", { waitUntil: "networkidle" });
   await pg.waitForSelector("[class^=related-list_] li");
   const icon = () => pg.locator(".props .property").first().locator("svg").first().getAttribute("class");
-  const select = pg.locator('.props select[aria-label="Status"]');
+  const select = pg.locator('.props button[role="combobox"][aria-label="Status"]');
   const beforeStatus = statusSlug(await icon());
-  const preValue = await select.inputValue();
-  const preHandler = await pg.evaluate(() => !!(document.querySelector(".props select") as any)?.__yuka_change);
-  check("7c.0 status select shows the saved status before hydration", !preHandler && preValue === beforeStatus, `select=${preValue} icon=${beforeStatus} hydrated=${preHandler}`);
+  const preValue = await select.getAttribute("data-value");
+  const preHandler = await pg.evaluate(() => !!(document.querySelector(".props [role=combobox]") as any)?.__yuka_click);
+  check("7c.0 status select shows the saved status before hydration and uses no native select", !preHandler && preValue === beforeStatus && (await pg.locator(".props select").count()) === 0, `select=${preValue} icon=${beforeStatus} hydrated=${preHandler}`);
   const relatedBefore = await pg.locator("[class^=related-list_] li").count();
   const target = beforeStatus === "done" ? "todo" : "done";
   const held = gate();
@@ -2235,8 +2266,15 @@ await step("7c. Issue_props status change", async () => {
     await held.opened;
     await route.continue();
   });
-  await pg.locator(".props .property").first().hover();
-  await select.selectOption({ value: target });
+  await select.hover();
+  await pg.waitForFunction(() => !!(document.querySelector(".props [role=combobox]") as any)?.__yuka_click).catch(() => {});
+  check("7c.0b hovering status combobox hydrates without opening the dropdown", (await pg.locator('[role="listbox"]').count()) === 0 && (await select.getAttribute("aria-expanded")) === "false");
+  await select.click();
+  check("7c.0c clicking opens the listbox with the current value selected", (await pg.locator('[role="listbox"]').count()) === 1 && (await select.getAttribute("aria-expanded")) === "true" && (await pg.locator(`[role="option"][data-value="${beforeStatus}"][aria-selected="true"]`).count()) === 1);
+  await pg.keyboard.press("Escape");
+  check("7c.0d Escape closes the listbox and returns focus to the trigger", (await pg.locator('[role="listbox"]').count()) === 0 && (await pg.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Status");
+  await select.click();
+  await pg.locator(`[role="option"][data-value="${target}"]`).click();
   try {
     await pg.waitForFunction(
       (t) => document.querySelector(".props .property svg")?.getAttribute("class")?.includes("status-" + t),
@@ -2246,14 +2284,14 @@ await step("7c. Issue_props status change", async () => {
     held.open();
     const dbg = await pg.evaluate(() => ({
       icon: document.querySelector(".props .property svg")?.getAttribute("class"),
-      handler: !!(document.querySelector(".props select") as any)?.__yuka_change,
-      value: (document.querySelector('.props select[aria-label="Status"]') as HTMLSelectElement | null)?.value,
+      handler: !!(document.querySelector(".props [role=combobox]") as any)?.__yuka_click,
+      value: document.querySelector('.props button[role="combobox"][aria-label="Status"]')?.getAttribute("data-value"),
     }));
     check("7c.1 status icon updates at once", false, `target=${target} state=${JSON.stringify(dbg)} errors=${errors.join(" | ")}`);
     await p.close();
     return;
   }
-  check("7c.1 status icon updates at once", posts.length === 0, `${beforeStatus} -> ${target} with the response held, responses so far=${posts.length}`);
+  check("7c.1 status icon updates at once and closes listbox", posts.length === 0 && (await pg.locator('[role="listbox"]').count()) === 0, `${beforeStatus} -> ${target} with the response held, responses so far=${posts.length}`);
   held.open();
   await until(() => posts.length > 0);
   await pg.waitForTimeout(300);
@@ -2270,7 +2308,21 @@ await step("7c. Issue_props status change", async () => {
   check("7c.3 Related island intact after Issue_props re-render", relatedBefore > 0 && slot.items === relatedBefore && slot.tagged === relatedBefore && slot.related && slot.links, JSON.stringify(slot));
   await pg.reload({ waitUntil: "networkidle" });
   await pg.waitForSelector("[class^=related-list_] li");
-  check("7c.4 status persists after reload", statusSlug(await icon()) === target && (await select.inputValue()) === target, `${beforeStatus} -> ${statusSlug(await icon())}`);
+  check("7c.4 status persists after reload", statusSlug(await icon()) === target && (await select.getAttribute("data-value")) === target, `${beforeStatus} -> ${statusSlug(await icon())}`);
+  await pg.locator(".new-issue-button").click();
+  await pg.waitForSelector(".dialog");
+  const dialogStatus = pg.locator('.dialog button[role="combobox"][aria-label="Status"]');
+  await dialogStatus.hover();
+  const dialogPre = { selects: await pg.locator(".dialog select").count(), open: await pg.locator('.dialog [role="listbox"]').count() };
+  await dialogStatus.click();
+  const dialogOpen = await pg.locator('.dialog [role="listbox"]').count();
+  await pg.keyboard.press("Escape");
+  const afterEsc = { listbox: await pg.locator('.dialog [role="listbox"]').count(), dialog: await pg.locator(".dialog").count() };
+  await dialogStatus.click();
+  await pg.locator('.dialog [role="option"][data-value="in-progress"]').click();
+  const hiddenStatus = await pg.locator('.dialog input[type="hidden"][name="status"]').inputValue();
+  check("7c.4b New_issue dialog uses custom Status/Priority dropdowns, Escape closes only the dropdown, and selection updates form input", dialogPre.selects === 0 && dialogPre.open === 0 && dialogOpen === 1 && afterEsc.listbox === 0 && afterEsc.dialog === 1 && hiddenStatus === "in-progress", JSON.stringify({ dialogPre, dialogOpen, afterEsc, hiddenStatus }));
+  await pg.keyboard.press("Escape");
   check("7c.5 no errors", errors.length === 0, errors.join(" | "));
   await p.close();
 });
@@ -2341,16 +2393,16 @@ await step("7g. generated island registry", async () => {
   check("7g.1 lazy New_issue not started before interaction", !(await has(".new-issue-button", "click")));
   check("7g.2 eager Nav_progress (Idle) hydrated", await has("[data-nav-progress]", "animationstart"));
   check("7g.5 lazy Comments (Load) hydrated", await has(".comment-input", "input"));
-  check("7g.7 lazy Issue_props not started before interaction", !(await has(".props select", "change")));
+  check("7g.7 lazy Issue_props not started before interaction", !(await has(".props [role=combobox]", "click")));
   check("7g.8 only the comments chunk is requested before interaction", lazyNames() === "comments", lazyNames());
 
   check("7g.9 non-lazy Nav_progress module requested at load", seen.includes("nav_progress"), seen.join(","));
   check("7g.9b Issue_list module not requested on a page without it", !seen.includes("issue_list"), seen.join(","));
 
   await p.locator(".props .property").first().hover();
-  await p.waitForFunction(() => !!(document.querySelector(".props select") as any)?.__yuka_change).catch(() => {});
+  await p.waitForFunction(() => !!(document.querySelector(".props [role=combobox]") as any)?.__yuka_click).catch(() => {});
   await until(() => seen.includes("issue_props"));
-  check("7g.10 Issue_props live after hover", await has(".props select", "change"));
+  check("7g.10 Issue_props live after hover", await has(".props [role=combobox]", "click"));
   check("7g.11 issue_props chunk requested after hover, related not yet", lazyNames() === "comments,issue_props", lazyNames());
   check(
     "7g.12 Related not started below the fold",
