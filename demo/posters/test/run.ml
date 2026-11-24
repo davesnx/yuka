@@ -22,6 +22,11 @@ let count html needle =
   go 0 0
 
 let contains html needle = count html needle > 0
+
+let find html needle =
+  let n = String.length needle in
+  let rec go i = if i + n > String.length html then None else if String.sub html i n = needle then Some i else go (i + 1) in
+  go 0
 let check_has html name needle = Alcotest.(check bool) name true (contains html needle)
 let defaults = Pattern.defaults ~year:2019 ~month:2 ~day:1 ~weekday:5
 let svg (s : Pattern.settings) = Yuka.Server.to_string (fun () -> Poster.still s)
@@ -230,12 +235,14 @@ let keeps_count () =
           ("squareness", Pattern.Blocks { Pattern.blocks_default with squareness = 0 });
           ("radius", Pattern.Blocks { Pattern.blocks_default with radius = 40 });
         ] );
-      ("clouds", Pattern.Clouds Pattern.clouds_default, [ ("solid", Pattern.Clouds { Pattern.clouds_default with solid = 0 }) ]);
+      ("clouds", Pattern.Clouds Pattern.clouds_default, [ ("size", Pattern.Clouds { Pattern.clouds_default with size = 100 }) ]);
       ( "lightning",
         Pattern.Lightning Pattern.lightning_default,
         [
           ("jaggedness", Pattern.Lightning { Pattern.lightning_default with jaggedness = 100 });
           ("thickness", Pattern.Lightning { Pattern.lightning_default with thickness = 24 });
+          ("length", Pattern.Lightning { Pattern.lightning_default with length = 30 });
+          ("direction", Pattern.Lightning { Pattern.lightning_default with direction = 45 });
         ] );
       ("circles", Pattern.Circles Pattern.circles_default, [ ("nothing", Pattern.Circles Pattern.circles_default) ]);
     ]
@@ -297,6 +304,69 @@ let gradual () =
       Alcotest.(check bool) "direction 90 has no turn" false (contains (svg (direction 90)) "rotate("))
     [ 1; 42; 2019 ]
 
+let every_cloud () =
+  List.iter
+    (fun (seed, size, padding) ->
+      List.iter
+        (fun n ->
+          let s = with_padding padding (with_seed seed (with_art (Pattern.Clouds { Pattern.clouds_default with clouds = n; size }))) in
+          Alcotest.(check int) (Printf.sprintf "%d clouds drawn (size %d, padding %d, seed %d)" n size padding seed) n (shape_count s))
+        (List.init 20 (fun k -> k + 1)))
+    [ (2019, 45, 80); (42, 100, 80); (7, 100, 200); (314, 10, 0); (1, 70, 160) ];
+  Alcotest.(check bool) "every cloud is filled" true
+    (Array.for_all (fun (x : Pattern.shape) -> x.paint = Pattern.Fill) (shapes (with_art (Pattern.Clouds Pattern.clouds_default))))
+
+let lowest d = List.fold_left (fun m (_, ns) -> List.fold_left max m (List.filteri (fun k _ -> k mod 2 = 1) ns)) min_int (commands d)
+
+let bolt_turn () =
+  let bolts ?(seed = 2019) changes = with_seed seed (with_art (Pattern.Lightning (changes Pattern.lightning_default))) in
+  let same = bolts Fun.id in
+  Alcotest.(check bool) "direction 180 has no turn" false (contains (svg same) "rotate(");
+  check_has (svg (bolts (fun l -> { l with direction = 270 }))) "the direction turns the bolts" {|<g transform="rotate(90 500 600)">|};
+  check_has (svg (bolts (fun l -> { l with direction = 0 }))) "up" {|<g transform="rotate(-180 500 600)">|};
+  Alcotest.(check (list string)) "the defaults draw the bolts of before" (ds same) (ds (bolts (fun l -> { l with direction = 180; length = 100 })));
+  Alcotest.(check (list string)) "a half turn draws the same bolts upside down" (ds same) (ds (bolts (fun l -> { l with direction = 0 })));
+  List.iter
+    (fun seed ->
+      let ends length =
+        List.map (fun (x : Pattern.shape) -> lowest x.d) (Array.to_list (shapes (bolts ~seed (fun d -> { d with length; branches = 0 }))))
+      in
+      let top = 84 and height = 1032 in
+      Alcotest.(check bool) (Printf.sprintf "full length ends in the lower quarter (seed %d)" seed) true
+        (List.for_all (fun y -> y >= top + (height * 3 / 4) && y <= top + height) (ends 100));
+      Alcotest.(check bool) (Printf.sprintf "length 40 ends by 40%% of the height (seed %d)" seed) true
+        (List.for_all (fun y -> y >= top + (height * 40 / 100 * 3 / 4) && y <= top + (height * 40 / 100)) (ends 40)))
+    [ 1; 42; 2019 ];
+  List.iter
+    (fun direction ->
+      List.iter
+        (fun padding ->
+          let s = with_padding padding (bolts ~seed:42 (fun l -> { l with direction; branches = 12; jaggedness = 100 })) in
+          let a = Float.of_int (direction - 180) *. Float.pi /. 180. in
+          let turn x y =
+            let x = Float.of_int x -. 500. and y = Float.of_int y -. 600. in
+            ((x *. cos a) -. (y *. sin a) +. 500., (x *. sin a) +. (y *. cos a) +. 600.)
+          in
+          let low = Float.of_int padding -. 1. in
+          let inside (x, y) = x >= low && y >= low && x <= 1001. -. low && y <= 1201. -. low in
+          Array.iter
+            (fun (x : Pattern.shape) ->
+              List.iter
+                (fun (_, ns) ->
+                  let rec pairs = function x :: y :: rest -> (x, y) :: pairs rest | _ -> [] in
+                  List.iter
+                    (fun (px, py) ->
+                      Alcotest.(check bool)
+                        (Printf.sprintf "a turned bolt stays in the art area (direction %d, padding %d)" direction padding)
+                        true (inside (turn px py)))
+                    (pairs ns))
+                (commands x.d))
+            (shapes s))
+        [ 0; 80; 200 ])
+    [ 0; 30; 45; 90; 135; 200; 225; 270; 315; 359 ];
+  Alcotest.(check bool) "sine" true
+    (List.map Pattern.sine [ 0; 30; 90; 180; 270; 360; -90 ] = [ 0; 500; 1000; 0; -1000; 0; -1000 ])
+
 let date () =
   Alcotest.(check (list string)) "date lines" [ "2019"; "March, 1"; "Friday" ] [ defaults.text.year; defaults.text.day; defaults.text.weekday ]
 
@@ -317,11 +387,10 @@ let normalize () =
   Alcotest.(check bool) "circles" true
     (art (Circles { columns = 1; rows = 99; half = -1; empty = 101; block = 0; bar = 100 })
     = Circles { columns = 4; rows = 30; half = 0; empty = 100; block = 0; bar = 100 });
-  Alcotest.(check bool) "clouds" true
-    (art (Clouds { clouds = 0; puffs = 1; size = 1; solid = 200 }) = Clouds { clouds = 1; puffs = 3; size = 10; solid = 100 });
+  Alcotest.(check bool) "clouds" true (art (Clouds { clouds = 0; puffs = 1; size = 1 }) = Clouds { clouds = 1; puffs = 3; size = 10 });
   Alcotest.(check bool) "lightning" true
-    (art (Lightning { bolts = 50; branches = -2; jaggedness = 300; thickness = 0 })
-    = Lightning { bolts = 8; branches = 0; jaggedness = 100; thickness = 1 })
+    (art (Lightning { bolts = 50; branches = -2; jaggedness = 300; thickness = 0; direction = 400; length = 5 })
+    = Lightning { bolts = 8; branches = 0; jaggedness = 100; thickness = 1; direction = 359; length = 20 })
 
 let cut () =
   let title t = (Pattern.normal_text { defaults.text with title = t }).title in
@@ -345,6 +414,8 @@ let links () =
     (href (with_art (Lines { Pattern.lines_default with direction = 45 })));
   Alcotest.(check string) "circles and the corner radius" "/?kind=circles&columns=9&bar=20"
     (href (with_art (Circles { Pattern.circles_default with columns = 9; bar = 20 })));
+  Alcotest.(check string) "the direction and length of the bolts" "/?kind=lightning&direction=90&length=60"
+    (href (with_art (Lightning { Pattern.lightning_default with direction = 90; length = 60 })));
   Alcotest.(check string) "the corner radius" "/?kind=blocks&radius=12" (href (with_art (Blocks { Pattern.blocks_default with radius = 12 })));
   Alcotest.(check string) "a parameter of the default kind" "/?seed=42&waves=5"
     (href (with_seed 42 (with_art (Lines { Pattern.lines_default with waves = 5 }))));
@@ -383,6 +454,11 @@ let page () =
   check_has html "settings panel" {|aria-label="Poster settings"|};
   check_has html "text panel" {|aria-label="Poster text"|};
   check_has html "shuffle" ">Shuffle</button>";
+  Alcotest.(check bool) "Shuffle is in the section of the kind, after its settings" true
+    (let at needle = Option.get (find html needle) in
+     at {|<h2>Lines</h2>|} < at ">Shuffle</button>" && at {|id="padding"|} < at {|<h2>Lines</h2>|});
+  Alcotest.(check int) "an icon on each kind" (List.length Pattern.Kind.all) (count html {|class="kind-icon"|});
+  Alcotest.(check bool) "no gallery link in the playground" false (contains html "Browse the gallery");
   Alcotest.(check bool) "no seed input" false (contains html {|id="seed"|});
   check_has html "padding slider" {|id="padding"|};
   check_has html "lines slider" {|id="waves"|};
@@ -454,6 +530,8 @@ let () =
           Alcotest.test_case "settings keep the number of shapes" `Quick keeps_count;
           Alcotest.test_case "counts keep the shapes" `Quick count_keeps_shapes;
           Alcotest.test_case "settings move shapes gradually" `Quick gradual;
+          Alcotest.test_case "every cloud is drawn" `Quick every_cloud;
+          Alcotest.test_case "the direction and length of the bolts" `Quick bolt_turn;
           Alcotest.test_case "a gap of 1" `Quick gap_of_one;
           Alcotest.test_case "date lines" `Quick date;
           Alcotest.test_case "cut at a character" `Quick cut;

@@ -23,11 +23,11 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
               clouds = optional int;
               puffs = optional int;
               size = optional int;
-              solid = optional int;
               bolts = optional int;
               branches = optional int;
               jaggedness = optional int;
               thickness = optional int;
+              length = optional int;
               columns = optional int;
               rows = optional int;
               half = optional int;

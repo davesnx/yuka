@@ -59,6 +59,31 @@ let dial ~id ~label ~(value : unit -> int) ~update : Yuka.client Yuka.element =
     </div>
   </div>
 
+let kind_icon : Pattern.Kind.t -> Yuka.client Yuka.element = function
+  | Lines ->
+      <svg class_="kind-icon" view_box="0 0 24 24" aria_hidden=true>
+        <path d="M3 8C7 4 9 12 13 8S19 4 21 7M3 13C7 9 9 17 13 13S19 9 21 12M3 18C7 14 9 22 13 18S19 14 21 17" fill="none" />
+      </svg>
+  | Blocks ->
+      <svg class_="kind-icon" view_box="0 0 24 24" aria_hidden=true>
+        <rect x="3" y="3" width="10" height="8" class_="solid" />
+        <rect x="15" y="3" width="6" height="8" fill="none" />
+        <rect x="3" y="13" width="6" height="8" fill="none" />
+        <rect x="11" y="13" width="10" height="8" class_="solid" />
+      </svg>
+  | Clouds ->
+      <svg class_="kind-icon" view_box="0 0 24 24" aria_hidden=true>
+        <path class_="solid" d="M5 18A3.5 3.5 0 0 1 5.5 11A5 5 0 0 1 14.5 8.5A4 4 0 0 1 20 13A2.5 2.5 0 0 1 19 18Z" />
+      </svg>
+  | Lightning ->
+      <svg class_="kind-icon" view_box="0 0 24 24" aria_hidden=true>
+        <path d="M13 2L8 11L13 12L9 22M11 12L16 17" fill="none" />
+      </svg>
+  | Circles ->
+      <svg class_="kind-icon" view_box="0 0 24 24" aria_hidden=true>
+        <path class_="solid" d="M3 11A4 4 0 0 1 11 11ZM13 3A4 4 0 0 0 13 11ZM3 13A4 4 0 0 0 11 13ZM13 13H21V21H13Z" />
+      </svg>
+
 let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) () =
   let layout = Yuka.State.make ~equal:( = ) initial.layout in
   let art = Yuka.State.make ~equal:( = ) initial.art in
@@ -83,6 +108,7 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
     <button class_="preset" type_=`button
       aria_pressed=(if Yuka.State.get kind = k then `true_ else `false_)
       on_click=(fun _ -> set_art (fun a -> if Pattern.kind a = k then a else Pattern.start ~defaults k))>
+      (kind_icon k)
       (Yuka.text (Pattern.Kind.label k))
     </button>
   in
@@ -145,7 +171,6 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
             param ~id:"clouds" ~label:"Clouds" ~range:Pattern.Range.clouds (clouds (fun a -> a.clouds) (fun a clouds -> { a with clouds }));
             param ~id:"puffs" ~label:"Puffs" ~range:Pattern.Range.puffs (clouds (fun a -> a.puffs) (fun a puffs -> { a with puffs }));
             param ~id:"size" ~label:"Size" ~range:Pattern.Range.size (clouds (fun a -> a.size) (fun a size -> { a with size }));
-            param ~id:"solid" ~label:"Filled share" ~range:Pattern.Range.solid (clouds (fun a -> a.solid) (fun a solid -> { a with solid }));
           ]
     | Pattern.Kind.Lightning ->
         Yuka.fragment
@@ -157,6 +182,9 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
               (lightning (fun a -> a.jaggedness) (fun a jaggedness -> { a with jaggedness }));
             param ~id:"thickness" ~label:"Thickness" ~range:Pattern.Range.thickness
               (lightning (fun a -> a.thickness) (fun a thickness -> { a with thickness }));
+            param ~id:"length" ~label:"Length" ~range:Pattern.Range.length (lightning (fun a -> a.length) (fun a length -> { a with length }));
+            (let value, update = lightning (fun a -> a.direction) (fun a direction -> { a with direction }) in
+             dial ~id:"direction" ~label:"Direction (degrees)" ~value ~update);
           ]
     | Pattern.Kind.Circles ->
         Yuka.fragment
@@ -204,14 +232,14 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
         <div class_="kinds" role=`group aria_label="Kind">
           (Yuka.fragment (List.map kind_button Pattern.Kind.all))
         </div>
-        <button class_="button" type_=`button
-          on_click=(fun _ -> set_layout (fun l -> { l with seed = Pattern.shuffle l.seed }))>"Shuffle"</button>
         (slider ~id:"padding" ~label:"Padding" ~range:Pattern.Range.padding ~value:(fun () -> (Yuka.State.get layout).padding)
            ~update:(fun padding -> set_layout (fun l -> { l with padding })))
       </section>
       <section class_="group">
         <h2>(Yuka.text (Pattern.Kind.label (Yuka.State.get kind)))</h2>
         (parameters (Yuka.State.get kind))
+        <button class_="button" type_=`button
+          on_click=(fun _ -> set_layout (fun l -> { l with seed = Pattern.shuffle l.seed }))>"Shuffle"</button>
       </section>
       <section class_="group">
         <h2>"Colours"</h2>
@@ -233,6 +261,5 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
         <button class_="button" type_=`button
           on_click=(fun _ -> !Download.png (file "png") (Yuka.State.peek download))>"Download PNG"</button>
       </div>
-      <a class_="gallery-link" href=(Routes.gallery ())>"Browse the gallery"</a>
     </aside>
   </div>

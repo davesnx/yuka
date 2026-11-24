@@ -154,6 +154,35 @@ await step("p2c. a larger count adds shapes and keeps the others", async () => {
   await started(P);
 });
 
+await step("p2d. Lightning turns and shortens; every cloud is drawn and filled", async () => {
+  await P.goto(app + "?kind=lightning", { waitUntil: "networkidle" });
+  await started(P);
+  await P.locator("#length").fill("50");
+  await P.waitForURL((url) => url.searchParams.get("length") === "50");
+  check("p2d.1 the length matches the server", (await grid(P)) === (await served(new URL(P.url()).search)));
+  const dial = P.locator("#direction");
+  check("p2d.2 the bolts start pointing down", (await dial.getAttribute("aria-valuenow")) === "180");
+  await dial.focus();
+  await P.keyboard.press("Shift+ArrowRight");
+  await P.waitForURL((url) => url.searchParams.get("direction") === "195");
+  check("p2d.3 the dial turns the bolts", (await turn(P)) === "rotate(15 500 600)", await turn(P));
+  const want = await served(new URL(P.url()).search);
+  let drawn = await grid(P);
+  for (let k = 0; k < 20 && drawn !== want; k++) drawn = (await P.waitForTimeout(100), await grid(P));
+  check("p2d.4 the turned bolts match the server", drawn === want);
+  await P.goto(app + "?kind=clouds&size=100", { waitUntil: "networkidle" });
+  await started(P);
+  check("p2d.5 no filled share slider", (await P.locator("#solid").count()) === 0);
+  await P.locator("#clouds").fill("12");
+  await P.waitForURL((url) => url.searchParams.get("clouds") === "12");
+  check("p2d.6 twelve large clouds are twelve clouds", (await count(P)) === 12, String(await count(P)));
+  check("p2d.7 they match the server", (await grid(P)) === (await served(new URL(P.url()).search)));
+  const strokes = await P.locator(".poster-art path[fill='none']").count();
+  check("p2d.8 every cloud is filled", strokes === 0, String(strokes));
+  await P.goto(app, { waitUntil: "networkidle" });
+  await started(P);
+});
+
 let shuffled = "";
 await step("p3. Shuffle picks another seed and writes it in the URL", async () => {
   await P.getByRole("button", { name: "Blocks", exact: true }).click();
