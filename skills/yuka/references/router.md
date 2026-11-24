@@ -389,6 +389,32 @@ Yuka.Effect.after ~cleanup:(fun stop -> stop ()) (fun () ->
 
 The Infinite scroll demo (`demo/infinite-scroll`) does this.
 
+`Yuka.render ~transitions:true` runs each client navigation in a view
+transition, where the browser has `document.startViewTransition`. While
+it runs, `<html>` has `data-yuka-nav="push"`, `"back"` or `"forward"`,
+so CSS can animate each direction:
+
+```css
+html[data-yuka-nav="back"]::view-transition-old(root) { animation-name: slide-out-right; }
+```
+
+To choose for one navigation, pass `~transition` to
+`Yuka.Browser.navigate`, or give the link a `data-yuka-transition`
+attribute. `~transition:false` and `data-yuka-transition="off"` show the
+new page with no view transition; `~transition:true` and another value
+of the attribute run one, also without `~transitions:true`. With
+neither, `render ~transitions` decides. An infinite list turns it off
+for its next page, so the whole page does not cross-fade each time a
+page loads:
+
+```ocaml
+Yuka.Browser.navigate ~replace:true ~keep_scroll:true ~transition:false next
+```
+
+```ocaml
+<a href=(Routes.blog ~tag:"bug" ()) data_yuka_transition="off">(Yuka.text "Bugs")</a>
+```
+
 A form with `method="get"` (or with no method) is also a client
 navigation. When the user submits it, Yuka makes the URL from the action
 of the form and its fields, as the browser does, and loads that URL as a
