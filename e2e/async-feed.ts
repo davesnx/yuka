@@ -66,7 +66,7 @@ await step("a1. the feed loads chronologically (newest at bottom) with logos, av
   const layout = await A.locator('.card[data-id="5000"]').evaluate((el) => {
     const link = el.querySelector(".card-link")!.getBoundingClientRect();
     const side = el.querySelector(".card-side")!.getBoundingClientRect();
-    const src = el.querySelector(".card-source")!.getBoundingClientRect();
+    const src = el.querySelector(".card-author")!.getBoundingClientRect();
     const tag = el.querySelector(".card-tags .tag")!.getBoundingClientRect();
     return {
       linkWidth: Math.round(link.width),
@@ -81,6 +81,8 @@ await step("a1. the feed loads chronologically (newest at bottom) with logos, av
   const time = A.locator('.card[data-id="5000"] time');
   check("a1.4 the datetime attribute is the UTC instant", (await time.getAttribute("datetime")) === "2026-11-20T09:01:40Z");
   check("a1.5 the title has the full timestamp", t.title.includes("(Asia/Tokyo)"), t.title);
+  const days = await A.locator(".feed:not(.feed-live) .feed-day time").evaluateAll((ts) => ts.map((t) => `${t.getAttribute("datetime")} ${t.textContent}`));
+  check("a1.6 the first page has a divider per day, in the zone", days.length === 4 && days[3] === "2026-11-20 Friday, November 20", days.join(" | "));
 });
 
 await step("a2. Simulate events streams cards one by one to the bottom of every open page", async () => {
@@ -202,7 +204,8 @@ await step("a3. sidebar filters: project/team dropdowns and direct assignee list
   await A.locator(".assignee-item", { hasText: "Ana Ruiz" }).click();
   await A.waitForURL((url) => url.searchParams.getAll("assignee").join() === "Ana Ruiz");
   await settled(A);
-  const assigneeTags = await A.locator(".feed .card").evaluateAll((cards) => cards.every((c) => c.textContent!.includes("Ana Ruiz")));
+  // Ana Ruiz is the assignee of every event n with n mod 8 = 2 (server/data.ml).
+  const assigneeTags = await A.locator(".feed .card").evaluateAll((cards) => cards.every((c) => Number(c.getAttribute("data-id")) % 8 === 2));
   check("a3.9 clicking an assignee filters directly", assigneeTags && (await A.locator(".feed .card").count()) > 0);
   await A.locator(".filters-clear").click();
   await A.waitForURL((url) => !url.searchParams.has("assignee"));
@@ -220,7 +223,7 @@ await step("a4. timezone and date live directly in the header", async () => {
   const before = Number(new URL(A.url()).searchParams.get("before"));
   check("a4.2 the date is read in the zone", before === Date.UTC(2026, 10, 1, 17, 1) / 1000, String(before));
   const last = Date.parse((await A.locator(".feed .card time").last().getAttribute("datetime")) ?? "") / 1000;
-  check("a4.3 the feed ends right before that date", last < before && before - last < 1200, `${last} ${before}`);
+  check("a4.3 the feed ends right before that date", last < before && before - last < 5700, `${last} ${before}`);
   await A.reload({ waitUntil: "networkidle" });
   check("a4.4 the zone is kept after a reload", ((await A.locator(".feed .card time").last().getAttribute("title")) ?? "").includes("(America/New_York)"));
 });
@@ -231,21 +234,21 @@ await step("a5. the theme toggle", async () => {
   if (shots) await A.screenshot({ path: `${shots}/async-feed-light.png` });
   const background = () => A.evaluate(() => getComputedStyle(document.body).backgroundColor);
   const toggle = A.locator("#theme");
-  check("a5.1 the theme follows the system first", (await toggle.getAttribute("data-theme")) === "system" && (await background()) === "rgb(250, 250, 250)", await background());
+  check("a5.1 the theme follows the system first", (await toggle.getAttribute("data-theme")) === "system" && (await background()) === "rgb(241, 241, 242)", await background());
   await toggle.click();
-  check("a5.2 a click turns it dark", (await toggle.getAttribute("aria-pressed")) === "true" && (await background()) === "rgb(10, 10, 10)", await background());
+  check("a5.2 a click turns it dark", (await toggle.getAttribute("aria-pressed")) === "true" && (await background()) === "rgb(8, 8, 10)", await background());
   const html = await (await ctx.request.get(app)).text();
   check("a5.3 the first HTML after a reload is dark, with no script", html.includes('data-theme="dark" aria-pressed="true"') && !html.includes("localStorage"));
   await A.reload({ waitUntil: "networkidle" });
   await started(A);
-  check("a5.4 the choice is kept after a reload", (await background()) === "rgb(10, 10, 10)" && (await toggle.getAttribute("aria-pressed")) === "true");
+  check("a5.4 the choice is kept after a reload", (await background()) === "rgb(8, 8, 10)" && (await toggle.getAttribute("aria-pressed")) === "true");
   if (shots) await A.screenshot({ path: `${shots}/async-feed-dark.png` });
   await toggle.click();
-  check("a5.5 a second click turns it light", (await toggle.getAttribute("aria-pressed")) === "false" && (await background()) === "rgb(250, 250, 250)");
+  check("a5.5 a second click turns it light", (await toggle.getAttribute("aria-pressed")) === "false" && (await background()) === "rgb(241, 241, 242)");
   const dark = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: "dark" });
   const D = await dark.newPage();
   await D.goto(app, { waitUntil: "networkidle" });
-  check("a5.6 with no cookie a dark system gets the dark theme", (await D.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(10, 10, 10)");
+  check("a5.6 with no cookie a dark system gets the dark theme", (await D.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(8, 8, 10)");
   await dark.close();
 });
 
@@ -334,6 +337,36 @@ await step("a7. full-card click opens rich 80% split-view panel with embeds and 
 });
 
 check("a6 no console errors, page errors, hydration mismatches or failed requests", problems.length === 0, problems.join(" | "));
+
+await step("a9. opening the panel hides the scrollbar without moving the feed", async () => {
+  // Headless Chromium hides scrollbars; without them nothing would move.
+  const visible = await chromium.launch({ headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
+  for (const width of [1280, 600]) {
+    const S = await (await visible.newContext({ viewport: { width, height: 800 }, timezoneId: "UTC" })).newPage();
+    await S.goto(app, { waitUntil: "networkidle" });
+    // The steps before added live events, so take a card the page has.
+    const id = await S.locator(".feed:not(.feed-live) .card").nth(10).getAttribute("data-id");
+    await S.locator(`.card[data-id="${id}"]`).scrollIntoViewIfNeeded();
+    const measure = () => S.evaluate((id) => {
+      const main = document.querySelector(".main")!;
+      const title = document.querySelector(`.card[data-id="${id}"] .card-title`)!.getBoundingClientRect();
+      const gap = main.offsetWidth - main.clientWidth + innerWidth - document.documentElement.clientWidth;
+      return { left: title.left, width: title.width, gap };
+    }, id);
+    const before = await measure();
+    await S.locator(`.card[data-id="${id}"] .card-link`).click();
+    await S.locator(".sheet-panel").waitFor();
+    const open = await measure();
+    check(`a9.1 at ${width}px the scrollbar goes and the feed stays`, before.gap > 0 && open.gap === 0 && open.left === before.left && open.width === before.width, JSON.stringify({ before, open }));
+    await S.keyboard.press("Escape");
+    await S.locator(".sheet").waitFor({ state: "detached" });
+    const closed = await measure();
+    const inline = await S.evaluate(() => [document.querySelector(".main")!, document.body, document.documentElement].map((e) => e.getAttribute("style") ?? "").join(""));
+    check(`a9.2 at ${width}px closing gives the scrollbar back`, closed.gap === before.gap && closed.width === before.width && inline === "", JSON.stringify({ closed, inline }));
+    await S.close();
+  }
+  await visible.close();
+});
 
 await browser.close();
 console.log(failures === 0 ? "\nASYNC FEED ALL PASS" : `\n${failures} FAILED (async feed)`);

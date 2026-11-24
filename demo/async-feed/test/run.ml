@@ -40,7 +40,10 @@ let clock () =
   Alcotest.(check string) "iso" "2000-02-29T13:05:09Z" (Clock.iso 951829509);
   Alcotest.(check string) "newest" "Nov 20, 2026, 09:01:40 UTC" (Clock.utc 1795165300);
   Alcotest.(check string) "utc day" "20 Nov" (Clock.utc_day 1795165300);
-  Alcotest.(check string) "utc clock" "9:01:40" (Clock.utc_clock 1795165300)
+  Alcotest.(check string) "utc clock" "9:01:40" (Clock.utc_clock 1795165300);
+  Alcotest.(check string) "utc weekday" "Friday, November 20" (Clock.utc_weekday 1795165300);
+  Alcotest.(check string) "epoch weekday" "Thursday, January 1" (Clock.utc_weekday 0);
+  Alcotest.(check string) "utc key" "2026-11-20" (Clock.utc_key 1795165300)
 
 let outlet_key html =
   let start = String.length {|<yuka-outlet data-k="|} + Option.get (find html {|<yuka-outlet data-k="|}) in
@@ -70,7 +73,7 @@ let kept_layout () =
   let key = outlet_key (snd (get "/")) in
   let _, response, html = call ~headers:[ ("Yuka-Navigate", key) ] "/?project=Billing" in
   Alcotest.(check (option string)) "a filter navigation keeps the layout" (Some key) (Dream.header response "yuka-outlet");
-  Alcotest.(check bool) "no header" false (contains html {|class="header"|});
+  Alcotest.(check bool) "no sidebar" false (contains html {|class="sidebar"|});
   let _, response, _ = call ~headers:[ ("Yuka-Navigate", key); ("Cookie", "async-feed-theme=dark") ] "/?project=Billing" in
   Alcotest.(check (option string)) "another theme renders the layout again" None (Dream.header response "yuka-outlet")
 
@@ -100,6 +103,11 @@ let feed () =
   Alcotest.(check bool) "no 50 of 5000 events count" false (contains html "of 5000 events");
   Alcotest.(check bool) "description hidden on feed" false (contains html {|class="card-text"|});
   Alcotest.(check int) "a time island on each card" 50 (count html {|{"time":|});
+  Alcotest.(check int) "the first page spans 4 days" 4 (count html {|class="feed-day"|});
+  Alcotest.(check int) "a day island on each card" 50 (count html "Async_feed_shared.Day_divider");
+  check_has html "the newest day" ">Friday, November 20</time>";
+  Alcotest.(check bool) "no source name on cards" false (contains html {|class="card-source"|});
+  Alcotest.(check bool) "no assignee on cards" false (contains html {|class="tag tag-assignee"|});
   check_has html "sidebar filters" {|class="sidebar"|};
   check_has html "filters nav" {|aria-label="Filters"|};
   check_has html "project dropdown" {|id="project-button"|};

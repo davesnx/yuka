@@ -1,0 +1,15 @@
+let[@client] make ~(at : int) ~(previous : int option) () =
+  let saved = Zone.saved_zone () in
+  let ready = Yuka.State.make false in
+  Yuka.Effect.after (fun () -> Yuka.State.set ready true);
+  let zone () = if Yuka.State.get ready then Some (Zone.current saved) else None in
+  let key time = match zone () with Some zone -> Env.day_key ~zone time | None -> Clock.utc_key time in
+  let label () = match zone () with Some zone -> Env.weekday ~zone at | None -> Clock.utc_weekday at in
+  let starts () = match previous with None -> true | Some time -> key time <> key at in
+  <div class_="feed-day-slot">
+    (if starts () then
+       <div class_="feed-day">
+         <time class_="feed-day-label" datetime=(key at)>(Yuka.text (label ()))</time>
+       </div>
+     else Yuka.empty)
+  </div>
