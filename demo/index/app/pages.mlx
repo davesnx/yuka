@@ -138,6 +138,40 @@ let infinite_scroll () : Yuka.server Yuka.element =
     <text class_="caption on" x="220.5" y="209" text_anchor="middle">"Loading…"</text>
   </svg>
 
+let poster_line y =
+  Printf.sprintf "M116 %d C140 %d 160 %d 182 %d S224 %d 240 %d" y (y - 18) (y + 18) y (y - 14) (y - 4)
+
+let posters () : Yuka.server Yuka.element =
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A poster of flowing lines next to its settings">
+    (window_chrome ~title:"posters")
+    <rect class_="poster" x="104" y="40" width="148" height="208" rx="4" />
+    (Yuka.fragment
+       (List.init 7 (fun i -> <path class_="poster-line" d=(poster_line (78 + (i * 16))) />)))
+    <rect class_="poster-title" x="116" y="208" width="84" height="9" rx="2" />
+    <rect class_="poster-text" x="116" y="224" width="56" height="6" rx="2" />
+    <rect class_="bar strong" x="16" y="48" width="64" height="7" rx="3.5" />
+    <rect class_="item" x="16.5" y="62.5" width="72" height="18" rx="4" />
+    <rect class_="bar" x="16" y="94" width="48" height="7" rx="3.5" />
+    <rect class_="item" x="16.5" y="108.5" width="72" height="18" rx="4" />
+    <rect class_="chip on" x="272.5" y="44.5" width="44" height="18" rx="9" />
+    <text class_="caption on" x="294.5" y="57" text_anchor="middle">"Lines"</text>
+    <rect class_="chip" x="322.5" y="44.5" width="48" height="18" rx="9" />
+    <text class_="caption" x="346.5" y="57" text_anchor="middle">"Blocks"</text>
+    <rect class_="chip" x="376.5" y="44.5" width="48" height="18" rx="9" />
+    <text class_="caption" x="400.5" y="57" text_anchor="middle">"Clouds"</text>
+    <text class_="caption" x="272" y="90">"Lines"</text>
+    <line class_="rule" x1="272" y1="104.5" x2="424" y2="104.5" />
+    <circle class_="accent-fill" cx="352" cy="104.5" r="5" />
+    <text class_="caption" x="272" y="130">"Direction"</text>
+    <circle class_="item" cx="300" cy="162" r="18" />
+    <line class_="line" x1="300" y1="162" x2="312" y2="150" />
+    <text class_="caption" x="272" y="206">"Theme"</text>
+    <rect class_="chip on" x="272.5" y="214.5" width="44" height="18" rx="9" />
+    <text class_="caption on" x="294.5" y="227" text_anchor="middle">"Dark"</text>
+    <rect class_="chip" x="322.5" y="214.5" width="44" height="18" rx="9" />
+    <text class_="caption" x="344.5" y="227" text_anchor="middle">"Light"</text>
+  </svg>
+
 let demos =
   [
     {
@@ -155,6 +189,14 @@ let demos =
       illustration = async_feed;
     };
     {
+      name = "Posters";
+      description =
+        "A generative poster playground: one Poster component in an island, an SVG route and a prerendered gallery.";
+      path = "/posters";
+      tags = [ "Islands"; "URL state"; "SVG"; "Prerender" ];
+      illustration = posters;
+    };
+    {
       name = "Infinite scroll";
       description = "An endless gallery of palettes: the next page loads when the end of the list comes into view.";
       path = "/infinite-scroll";
@@ -169,24 +211,17 @@ let style =
 @media (prefers-color-scheme:dark){:root{--bg:#0a0a0c;--fg:#ededf0;--muted:#8a8a96;--line:#25252b;--panel:#111114;--soft:#1a1a1f;--accent:#8f74ff;--accent-soft:rgba(143,116,255,.16)}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
-.page{max-width:calc(960px + 50px);margin:0 auto;padding:96px 24px 120px;border-inline:1px dashed var(--line);min-height:100vh}
-.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 16px}
+.page{max-width:calc(960px + 50px);margin:0 auto;padding:96px 24px 120px;min-height:100vh}
 h1{font-size:44px;line-height:1.1;letter-spacing:-.03em;font-weight:600;margin:0}
-.lede{color:var(--muted);font-size:17px;max-width:36rem;margin:16px 0 0}
 .gallery{list-style:none;padding:0;margin:64px 0 0;display:grid;gap:32px}
-.card{position:relative;display:grid;grid-template-columns:1fr 1.15fr;min-height:300px;background:var(--panel);border:1px solid var(--line);border-radius:14px;color:inherit;text-decoration:none;overflow:hidden;transition:border-color .2s,box-shadow .2s,transform .2s}
-.card:hover{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft);transform:translateY(-2px)}
+.card{position:relative;display:grid;grid-template-columns:1fr 1.15fr;min-height:300px;background:var(--panel);border:1px solid var(--line);border-radius:14px;color:inherit;text-decoration:none;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+.card:hover{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
 .card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .body{display:flex;flex-direction:column;padding:32px}
-.index{font:500 12px/1 var(--mono);color:var(--muted)}
-h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:20px 0 8px}
+h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:0 0 8px}
 .description{color:var(--muted);margin:0;font-size:15px}
 .tags{list-style:none;padding:0;margin:20px 0 0;display:flex;flex-wrap:wrap;gap:6px}
 .tags li{font:500 11px/1 var(--mono);padding:6px 8px;border:1px solid var(--line);border-radius:6px;color:var(--muted);background:var(--soft)}
-.open{margin-top:auto;padding-top:28px;font:500 13px/1 var(--mono);color:var(--fg);display:flex;align-items:center;gap:8px}
-.open .arrow{transition:transform .2s}
-.card:hover .open{color:var(--accent)}
-.card:hover .arrow{transform:translateX(4px)}
 .preview{border-left:1px solid var(--line);background-color:var(--soft);background-image:radial-gradient(var(--line) 1px,transparent 1px);background-size:16px 16px;display:grid;place-items:center;padding:28px}
 .art{width:100%;height:auto;max-width:440px;filter:drop-shadow(0 8px 24px rgba(0,0,0,.08))}
 .art .frame{fill:var(--panel);stroke:var(--line)}
@@ -214,23 +249,24 @@ h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:20px 0 8px}
 .art .skeleton{fill:var(--panel);stroke:var(--line);stroke-dasharray:4 3}
 .art .sentinel{stroke:var(--accent);stroke-dasharray:4 4}
 .art .area{fill:var(--accent-soft)}
+.art .poster{fill:#111114}
+.art .poster-line{fill:none;stroke:#f2a33a;stroke-width:3;stroke-linecap:round}
+.art .poster-title{fill:#ededf0}
+.art .poster-text{fill:#8a8a96}
 .art .line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
-footer{margin-top:64px;font:500 12px/1 var(--mono);color:var(--muted)}
 @media (max-width:720px){.page{padding-top:56px}h1{font-size:34px}.card{grid-template-columns:1fr}.preview{border-left:0;border-top:1px solid var(--line);order:-1}.body{padding:24px}}
-@media (prefers-reduced-motion:reduce){.card,.arrow{transition:none}.card:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){.card{transition:none}}
 |}
 
 let head = {|<meta name="viewport" content="width=device-width, initial-scale=1"><style>|} ^ style ^ {|</style>|}
 
-let card index demo : Yuka.server Yuka.element =
+let card demo : Yuka.server Yuka.element =
   <li>
     <a class_="card" href=demo.path target=`_blank rel="noopener">
       <div class_="body">
-        <span class_="index">(Yuka.text (Printf.sprintf "%02d / Demo" (index + 1)))</span>
         <h2>(Yuka.text demo.name)</h2>
         <p class_="description">(Yuka.text demo.description)</p>
         <ul class_="tags">(Yuka.fragment (List.map (fun tag -> <li>(Yuka.text tag)</li>) demo.tags))</ul>
-        <span class_="open">"Open demo" <span class_="arrow" aria_hidden=true>"→"</span></span>
       </div>
       <div class_="preview">(demo.illustration ())</div>
     </a>
@@ -239,9 +275,6 @@ let card index demo : Yuka.server Yuka.element =
 let home () =
   Yuka.Server.page ~title:"Yuka demos" (fun () ->
       <main class_="page">
-        <p class_="eyebrow">"Yuka · Demos"</p>
         <h1>"Yuka demos"</h1>
-        <p class_="lede">"Small apps built with Yuka. Each one runs on its own, with its own routes and client bundle."</p>
-        <ul class_="gallery">(Yuka.fragment (List.mapi card demos))</ul>
-        <footer>(Yuka.text (Printf.sprintf "%d demos" (List.length demos)))</footer>
+        <ul class_="gallery">(Yuka.fragment (List.map card demos))</ul>
       </main>)

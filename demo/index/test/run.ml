@@ -19,10 +19,15 @@ let home () =
   Alcotest.(check bool) "Async in a new tab" true
     (contains html {|<a class="card" href="/async-feed" target="_blank" rel="noopener">|});
   Alcotest.(check bool) "Async name" true (contains html "<h2>Async</h2>");
+  Alcotest.(check bool) "Posters in a new tab" true
+    (contains html {|<a class="card" href="/posters" target="_blank" rel="noopener">|});
+  Alcotest.(check bool) "Posters name" true (contains html "<h2>Posters</h2>");
   Alcotest.(check bool) "Infinite scroll in a new tab" true
     (contains html {|<a class="card" href="/infinite-scroll" target="_blank" rel="noopener">|});
   Alcotest.(check bool) "Infinite scroll name" true (contains html "<h2>Infinite scroll</h2>");
   Alcotest.(check bool) "an illustration per card" true (contains html {|<svg class="art"|});
+  Alcotest.(check bool) "no card number" false (contains html "/ Demo");
+  Alcotest.(check bool) "no open link label" false (contains html "Open demo");
   Alcotest.(check bool) "no script" false (contains html "<script")
 
 let () = Alcotest.run "demo index" [ ("pages", [ Alcotest.test_case "home lists the demos" `Quick home ]) ]
