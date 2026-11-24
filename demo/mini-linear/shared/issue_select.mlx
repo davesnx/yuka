@@ -1,0 +1,87 @@
+open Model
+
+let status_values = List.map Issue.status_slug Issue.all_statuses
+let priority_values = List.map Issue.priority_slug Issue.all_priorities
+
+module Status = struct
+  let make ?value ?default_value ?name ?(label = "Status") ?(compact = false) ?(full = false) ?on_change () :
+      Yuka.client Yuka.element =
+    let on_value_change =
+      Option.map (fun f slug -> Option.iter f (Issue.status_of_slug slug)) on_change
+    in
+    <Select.Root ?value ?default_value ?name label values=status_values full ?on_value_change>
+      (if compact then
+         <Select.Trigger class_="icon-button">
+           <Select.Value>
+             (fun slug ->
+               match Issue.status_of_slug slug with
+               | Some status -> <Views.Status_icon status />
+               | None -> Yuka.empty)
+           </Select.Value>
+         </Select.Trigger>
+       else
+         <Select.Trigger>
+           <Select.Value>
+             (fun slug ->
+               match Issue.status_of_slug slug with
+               | Some status ->
+                   Yuka.fragment [ <Views.Status_icon status />; <span>(Yuka.text (Issue.status_label status))</span> ]
+               | None -> Yuka.empty)
+           </Select.Value>
+           <Select.Icon />
+         </Select.Trigger>)
+      <Select.Popup>
+        (Yuka.fragment
+           (List.map
+              (fun status ->
+                <Select.Item value=(Issue.status_slug status)>
+                  <Views.Status_icon status />
+                  <span>(Yuka.text (Issue.status_label status))</span>
+                  <Select.Item_indicator />
+                </Select.Item>)
+              Issue.all_statuses))
+      </Select.Popup>
+    </Select.Root>
+end
+
+module Priority = struct
+  let make ?value ?default_value ?name ?(label = "Priority") ?(compact = false) ?(full = false) ?on_change () :
+      Yuka.client Yuka.element =
+    let on_value_change =
+      Option.map (fun f slug -> Option.iter f (Issue.priority_of_slug slug)) on_change
+    in
+    <Select.Root ?value ?default_value ?name label values=priority_values full ?on_value_change>
+      (if compact then
+         <Select.Trigger class_="icon-button">
+           <Select.Value>
+             (fun slug ->
+               match Issue.priority_of_slug slug with
+               | Some priority -> <Views.Priority_icon priority />
+               | None -> Yuka.empty)
+           </Select.Value>
+         </Select.Trigger>
+       else
+         <Select.Trigger>
+           <Select.Value>
+             (fun slug ->
+               match Issue.priority_of_slug slug with
+               | Some priority ->
+                   Yuka.fragment
+                     [ <Views.Priority_icon priority />; <span>(Yuka.text (Issue.priority_label priority))</span> ]
+               | None -> Yuka.empty)
+           </Select.Value>
+           <Select.Icon />
+         </Select.Trigger>)
+      <Select.Popup>
+        (Yuka.fragment
+           (List.map
+              (fun priority ->
+                <Select.Item value=(Issue.priority_slug priority)>
+                  <Views.Priority_icon priority />
+                  <span>(Yuka.text (Issue.priority_label priority))</span>
+                  <Select.Item_indicator />
+                </Select.Item>)
+              Issue.all_priorities))
+      </Select.Popup>
+    </Select.Root>
+end

@@ -1,0 +1,44 @@
+.root { position: relative; display: inline-flex; min-width: 0; }
+.full { flex: 1; }
+.trigger {
+  display: inline-flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
+  padding: 6px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.trigger:hover { background: var(--bg-hover); border-color: var(--border-hover); }
+.trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.trigger[aria-expanded="true"] { border-color: var(--accent); background: var(--bg-hover); }
+.value {
+  display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.icon { flex: none; margin-left: auto; color: var(--muted); transition: transform 0.12s ease; }
+.trigger[aria-expanded="true"] .icon { transform: rotate(180deg); color: var(--text); }
+.backdrop { position: fixed; inset: 0; z-index: 29; }
+.popup {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+  min-width: 192px; max-width: calc(100vw - 16px); max-height: min(320px, 60vh);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 5px; background: var(--bg-menu); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 7px;
+  box-shadow: 0 10px 29px var(--shadow);
+  display: flex; flex-direction: column; gap: 1px;
+  outline: none;
+}
+@supports (position-area: bottom) {
+  .popup {
+    position: fixed; inset: auto; margin: 4px 0;
+    position-area: bottom span-right;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  }
+}
+.item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px;
+  background: none; border: 0; border-radius: 5px; color: var(--text);
+  font: inherit; cursor: pointer; text-align: left; white-space: nowrap;
+}
+.item[data-highlighted="true"], .item:hover, .item:focus-visible {
+  background: var(--bg-selected); outline: none;
+}
+.indicator { margin-left: auto; flex: none; color: var(--accent); }

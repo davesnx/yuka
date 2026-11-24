@@ -726,8 +726,11 @@ open Base
           add_attr b ~tag name v);
       value
     and contents = function
-      | [ Hole f ] -> go (f ())
-      | [ Each { items; key; equal = _; render } ] -> rows items key render
+      | [ n ] -> (
+          match unwrap n with
+          | Hole f -> go (f ())
+          | Each { items; key; equal = _; render } -> rows items key render
+          | n -> go n)
       | children -> List.iter go children
     and rows : type a. (unit -> a array) -> (a -> string) -> (a -> node) -> unit =
      fun items key render ->

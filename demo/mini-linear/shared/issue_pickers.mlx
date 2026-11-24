@@ -1,0 +1,5 @@
+let[@client] make ~(status : string) ~(priority : string) () =
+  <div class_="dialog-row">
+    <Issue_select.Status default_value=status name="status" full=true />
+    <Issue_select.Priority default_value=priority name="priority" full=true />
+  </div>
