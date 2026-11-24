@@ -544,7 +544,7 @@ let back () =
   | _ -> Host.history_back ()
 
 let on_over e =
-  match Host.link_href true (Host.target e) with
+  match Host.link_href true (Host.target_element (Web.DOM.Event.target e)) with
   | "" -> ()
   | href ->
       !hover ();
@@ -555,7 +555,7 @@ let on_out _ =
   hover := ignore
 
 let on_touch e =
-  match Host.link_href true (Host.target e) with "" -> () | href -> prefetch href
+  match Host.link_href true (Host.target_element (Web.DOM.Event.target e)) with "" -> () | href -> prefetch href
 
 let on_down e = if Host.plain_click e then on_touch e
 

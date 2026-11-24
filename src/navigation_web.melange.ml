@@ -15,11 +15,6 @@ external remove_attribute : node -> string -> unit = "removeAttribute" [@@mel.se
 external set_string : node -> string -> string -> unit = "" [@@mel.set_index]
 external set_bool : node -> string -> bool -> unit = "" [@@mel.set_index]
 external set_prop : node -> string -> 'a -> unit = "" [@@mel.set_index]
-external add_listener : node -> string -> (event -> unit) -> unit = "addEventListener" [@@mel.send]
-external remove_listener : node -> string -> (event -> unit) -> unit = "removeEventListener" [@@mel.send]
-external client_x : event -> float = "clientX" [@@mel.get]
-external client_y : event -> float = "clientY" [@@mel.get]
-external pointer_type : event -> string = "pointerType" [@@mel.get]
 external query_all : node -> string -> node array = "querySelectorAll" [@@mel.send]
 external text_content : node -> string = "textContent" [@@mel.get]
 external set_inner_html : node -> string -> unit = "innerHTML" [@@mel.set]
@@ -79,10 +74,6 @@ external tag_name : node -> string = "tagName" [@@mel.get]
 external element_id : node -> string = "id" [@@mel.get]
 external children : node -> node array = "children" [@@mel.get]
 external child_element : node array -> int -> node Js.undefined = "" [@@mel.get_index]
-external add_listener_with : node -> string -> (event -> unit) -> < .. > Js.t -> unit = "addEventListener"
-[@@mel.send]
-external remove_listener_with : node -> string -> (event -> unit) -> < .. > Js.t -> unit = "removeEventListener"
-[@@mel.send]
 external replace_state : < .. > Js.t -> string -> string -> unit = "replaceState" [@@mel.scope "window", "history"]
 
 let throw : Js.Exn.t -> unit = [%mel.raw "function (e) { throw e }"]
@@ -415,19 +406,20 @@ let hidden_or_slow () =
 
 let on_visible f =
   let h _ = if not document_hidden then f () in
-  add_listener global_document "visibilitychange" h;
-  fun () -> remove_listener global_document "visibilitychange" h
+  Web.DOM.EventTarget.addEventListener "visibilitychange" h Web.DOM.document;
+  fun () -> Web.DOM.EventTarget.removeEventListener "visibilitychange" h Web.DOM.document
 
 let input_names = [| "wheel"; "touchstart"; "keydown"; "pointerdown" |]
 
 let on_input f =
-  let o = [%mel.obj { capture = true; passive = true }] in
-  let rec off () = Array.iter (fun n -> remove_listener_with global_window n h o) input_names
+  let o = Web.DOM.EventTarget.options ~capture:true ~passive:true () in
+  let rec off () =
+    Array.iter (fun n -> Web.DOM.Window.removeEventListenerWithOptions n h o Web.DOM.window) input_names
   and h _ =
     off ();
     f ()
   in
-  Array.iter (fun n -> add_listener_with global_window n h o) input_names;
+  Array.iter (fun n -> Web.DOM.Window.addEventListenerWithOptions n h o Web.DOM.window) input_names;
   off
 
 type observer
@@ -474,7 +466,6 @@ let observe els f =
 
 type link = { el : node; h : string; r : rect }
 
-external time_stamp : event -> float = "timeStamp" [@@mel.get]
 external check_visibility : node -> < .. > Js.t -> bool = "checkVisibility" [@@mel.send]
 external some : 'a array -> ('a -> bool[@mel.uncurry]) -> bool = "some" [@@mel.send]
 external hypot : float -> float -> float = "hypot" [@@mel.scope "Math"]
@@ -529,11 +520,11 @@ let trajectory href go =
         done
     in
     let move e =
-      let t = time_stamp e in
+      let t = Web.DOM.Event.timeStamp e in
       let gap = t -. !last in
-      if pointer_type e = "mouse" && gap >= 50. then (
+      if Web.DOM.PointerEvent.pointerType e = "mouse" && gap >= 50. then (
         last := t;
-        let x = client_x e and y = client_y e and now = date_now () in
+        let x = Web.DOM.MouseEvent.clientX e and y = Web.DOM.MouseEvent.clientY e and now = date_now () in
         if
           ((match Js.Null.toOption !o with None -> true | Some _ -> false) || now -. !at > 1000.)
           && (now -. !at > 300. || some !links (fun l -> not (is_connected l.el)))
@@ -577,12 +568,12 @@ let trajectory href go =
           if !best <> "" && !best = !was then go !best;
           was := !best))
     in
-    add_listener_with global_document "pointermove" move [%mel.obj { passive = true }];
-    add_listener_with global_window "scroll" reset [%mel.obj { capture = true; passive = true }];
+    Web.DOM.EventTarget.(addEventListenerWithOptions "pointermove" move (options ~passive:true ()) Web.DOM.document);
+    Web.DOM.(Window.addEventListenerWithOptions "scroll" reset (EventTarget.options ~capture:true ~passive:true ()) window);
     fun () ->
       stop ();
-      remove_listener global_document "pointermove" move;
-      remove_listener_with global_window "scroll" reset [%mel.obj { capture = true }]
+      Web.DOM.EventTarget.removeEventListener "pointermove" move Web.DOM.document;
+      Web.DOM.(Window.removeEventListenerWithOptions "scroll" reset (EventTarget.options ~capture:true ()) window)
 
 type 'a set
 

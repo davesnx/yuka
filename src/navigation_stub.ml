@@ -114,8 +114,9 @@ let go ?link kind url f fail =
       load ()
 
 let blocks : (string -> bool) list ref = ref []
-let hold = Host.prevent_default
+let hold = Web.DOM.Event.preventDefault
 
+let target e = Host.target_element (Web.DOM.Event.target e)
 let inside url = Option.is_some (Site.strip (Host.base ()) url)
 
 let navigate ?link ~replace ~keep_scroll href =
@@ -138,12 +139,12 @@ let prefetch url =
 
 let on_click e =
   if (not !failed) && Host.plain_click e then
-    match Host.link_href false (Host.target e) with
+    match Host.link_href false (target e) with
     | "" -> ()
     | href ->
-        let link = Host.link (Host.target e) in
+        let link = Host.link (target e) in
         let flag name = Option.is_some (Web.DOM.Element.getAttribute name link) in
-        Host.prevent_default e;
+        Web.DOM.Event.preventDefault e;
         navigate ~link ~replace:(flag "data-yuka-replace") ~keep_scroll:(flag "data-yuka-keep-scroll") href
 
 let on_submit e =
@@ -151,15 +152,15 @@ let on_submit e =
     match Host.form_url e with
     | "" -> ()
     | href ->
-        Host.prevent_default e;
-        navigate ~link:(Host.target e) ~replace:false ~keep_scroll:false href
+        Web.DOM.Event.preventDefault e;
+        navigate ~link:(target e) ~replace:false ~keep_scroll:false href
 
 let on_link e =
-  if Option.is_some !router || Host.link_href true (Host.target e) <> "" then
+  if Option.is_some !router || Host.link_href true (target e) <> "" then
     use (fun r -> r.handle e)
 
 let rec on_move e =
-  if Host.pointer_type e = "mouse" then begin
+  if Web.DOM.PointerEvent.pointerType e = "mouse" then begin
     Web.DOM.EventTarget.removeEventListener "pointermove" on_move Web.DOM.document;
     use ignore
   end
@@ -201,7 +202,7 @@ let on_pagehide e =
   Host.store_scrolls (table scroll_table);
   match !router with Some r -> r.handle e | None -> Host.scroll_restoration "auto"
 
-let on_pageshow e = if Host.persisted e then Host.scroll_restoration "manual"
+let on_pageshow e = if Web.DOM.PageTransitionEvent.persisted e then Host.scroll_restoration "manual"
 
 let start ~load ?lazy_entries ?(transitions = false) entries =
   on := true;

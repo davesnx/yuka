@@ -46,6 +46,120 @@ module EventTarget = struct
   external removeEventListener : string -> ('b event_like -> unit) -> ('a eventTarget_like[@mel.this]) -> unit
     = "removeEventListener"
   [@@mel.send]
+
+  type options
+
+  external options : ?capture:bool -> ?passive:bool -> unit -> options = "" [@@mel.obj]
+
+  external addEventListenerWithOptions :
+    string -> ('b event_like -> unit) -> options -> ('a eventTarget_like[@mel.this]) -> unit = "addEventListener"
+  [@@mel.send]
+
+  external removeEventListenerWithOptions :
+    string -> ('b event_like -> unit) -> options -> ('a eventTarget_like[@mel.this]) -> unit = "removeEventListener"
+  [@@mel.send]
+
+  external addEventListenerUseCapture :
+    string -> ('b event_like -> unit) -> (_[@mel.as {json|true|json}]) -> ('a eventTarget_like[@mel.this]) -> unit
+    = "addEventListener"
+  [@@mel.send]
+
+  external removeEventListenerUseCapture :
+    string -> ('b event_like -> unit) -> (_[@mel.as {json|true|json}]) -> ('a eventTarget_like[@mel.this]) -> unit
+    = "removeEventListener"
+  [@@mel.send]
+
+  external dispatchEvent : 'b event_like -> ('a eventTarget_like[@mel.this]) -> bool = "dispatchEvent" [@@mel.send]
+end
+
+(* Events. A constructor takes the window whose Event class it uses (the one of the target's
+   document, ownerDocument.defaultView), so an event made for a node of another document is of
+   that document. *)
+module Event = struct
+  type init
+
+  external init : ?bubbles:bool -> ?cancelable:bool -> unit -> init = "" [@@mel.obj]
+  external make : string -> init -> (window[@mel.this]) -> event = "Event" [@@mel.new] [@@mel.send]
+  external type_ : 'a event_like -> string = "type" [@@mel.get]
+  external target : 'a event_like -> eventTarget = "target" [@@mel.get]
+  external timeStamp : 'a event_like -> float = "timeStamp" [@@mel.get]
+  external isTrusted : 'a event_like -> bool = "isTrusted" [@@mel.get]
+  external defaultPrevented : 'a event_like -> bool = "defaultPrevented" [@@mel.get]
+  external preventDefault : 'a event_like -> unit = "preventDefault" [@@mel.send]
+  external stopPropagation : 'a event_like -> unit = "stopPropagation" [@@mel.send]
+end
+
+module MouseEvent = struct
+  type init
+
+  external init :
+    ?bubbles:bool ->
+    ?cancelable:bool ->
+    ?clientX:float ->
+    ?clientY:float ->
+    ?button:int ->
+    ?shiftKey:bool ->
+    ?ctrlKey:bool ->
+    ?altKey:bool ->
+    ?metaKey:bool ->
+    unit ->
+    init = ""
+  [@@mel.obj]
+
+  external make : string -> init -> (window[@mel.this]) -> event = "MouseEvent" [@@mel.new] [@@mel.send]
+  external clientX : 'a event_like -> float = "clientX" [@@mel.get]
+  external clientY : 'a event_like -> float = "clientY" [@@mel.get]
+  external button : 'a event_like -> int = "button" [@@mel.get]
+  external shiftKey : 'a event_like -> bool = "shiftKey" [@@mel.get]
+  external ctrlKey : 'a event_like -> bool = "ctrlKey" [@@mel.get]
+  external altKey : 'a event_like -> bool = "altKey" [@@mel.get]
+  external metaKey : 'a event_like -> bool = "metaKey" [@@mel.get]
+end
+
+module KeyboardEvent = struct
+  type init
+
+  external init :
+    ?bubbles:bool ->
+    ?cancelable:bool ->
+    ?key:string ->
+    ?code:string ->
+    ?repeat:bool ->
+    ?shiftKey:bool ->
+    ?ctrlKey:bool ->
+    ?altKey:bool ->
+    ?metaKey:bool ->
+    unit ->
+    init = ""
+  [@@mel.obj]
+
+  external make : string -> init -> (window[@mel.this]) -> event = "KeyboardEvent" [@@mel.new] [@@mel.send]
+  external key : 'a event_like -> string = "key" [@@mel.get]
+  external code : 'a event_like -> string = "code" [@@mel.get]
+  external repeat : 'a event_like -> bool = "repeat" [@@mel.get]
+end
+
+module PointerEvent = struct
+  external pointerType : 'a event_like -> string = "pointerType" [@@mel.get]
+end
+
+module InputEvent = struct
+  type init
+
+  external init : ?bubbles:bool -> ?cancelable:bool -> ?data:string -> ?inputType:string -> unit -> init = ""
+  [@@mel.obj]
+
+  external make : string -> init -> (window[@mel.this]) -> event = "InputEvent" [@@mel.new] [@@mel.send]
+  external data : 'a event_like -> string option = "data" [@@mel.get] [@@mel.return nullable]
+  external inputType : 'a event_like -> string = "inputType" [@@mel.get]
+end
+
+module SubmitEvent = struct
+  external submitter : 'a event_like -> element option = "submitter" [@@mel.get] [@@mel.return nullable]
+end
+
+module PageTransitionEvent = struct
+  external persisted : 'a event_like -> bool = "persisted" [@@mel.get]
 end
 
 module Node = struct
@@ -96,6 +210,11 @@ module Element = struct
   [@@mel.send]
 
   external setInnerHTML : 'a element_like -> string -> unit = "innerHTML" [@@mel.set]
+
+  external closest : string -> ('a element_like[@mel.this]) -> element option = "closest"
+  [@@mel.send] [@@mel.return nullable]
+
+  external hasAttribute : string -> ('a element_like[@mel.this]) -> bool = "hasAttribute" [@@mel.send]
   external remove : 'a element_like -> unit = "remove" [@@mel.send]
 end
 
@@ -121,6 +240,44 @@ module Document = struct
 
   external querySelectorAll : string -> ('a document_like[@mel.this]) -> element NodeList.t = "querySelectorAll"
   [@@mel.send]
+end
+
+module HTMLCollection = struct
+  type 'a t
+
+  external length : 'a t -> int = "length" [@@mel.get]
+  external toArray : 'a t -> 'a array = "from" [@@mel.scope "Array"]
+end
+
+module HTMLInputElement = struct
+  external value : 'a element_like -> string = "value" [@@mel.get]
+  external setValue : 'a element_like -> string -> unit = "value" [@@mel.set]
+  external checked : 'a element_like -> bool = "checked" [@@mel.get]
+  external setChecked : 'a element_like -> bool -> unit = "checked" [@@mel.set]
+  external type_ : 'a element_like -> string = "type" [@@mel.get]
+  external name : 'a element_like -> string = "name" [@@mel.get]
+  external defaultValue : 'a element_like -> string = "defaultValue" [@@mel.get]
+  external defaultChecked : 'a element_like -> bool = "defaultChecked" [@@mel.get]
+end
+
+module HTMLSelectElement = struct
+  external options : 'a element_like -> element HTMLCollection.t = "options" [@@mel.get]
+end
+
+module HTMLOptionElement = struct
+  external selected : 'a element_like -> bool = "selected" [@@mel.get]
+end
+
+module HTMLAnchorElement = struct
+  external href : 'a element_like -> string = "href" [@@mel.get]
+  external origin : 'a element_like -> string = "origin" [@@mel.get]
+  external pathname : 'a element_like -> string = "pathname" [@@mel.get]
+  external search : 'a element_like -> string = "search" [@@mel.get]
+  external hash : 'a element_like -> string = "hash" [@@mel.get]
+end
+
+module HTMLMetaElement = struct
+  external content : 'a element_like -> string = "content" [@@mel.get]
 end
 
 module HTMLTemplateElement = struct
@@ -153,6 +310,14 @@ module Window = struct
 
   external removeEventListener : string -> ('b event_like -> unit) -> (window[@mel.this]) -> unit
     = "removeEventListener"
+  [@@mel.send]
+
+  external addEventListenerWithOptions :
+    string -> ('b event_like -> unit) -> EventTarget.options -> (window[@mel.this]) -> unit = "addEventListener"
+  [@@mel.send]
+
+  external removeEventListenerWithOptions :
+    string -> ('b event_like -> unit) -> EventTarget.options -> (window[@mel.this]) -> unit = "removeEventListener"
   [@@mel.send]
 
   external matchMedia : string -> (window[@mel.this]) -> MediaQueryList.t = "matchMedia" [@@mel.send]

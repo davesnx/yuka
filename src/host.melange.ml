@@ -4,6 +4,8 @@ type event = Web.DOM.event
 external as_element : 'a Web.DOM.node_like -> node = "%identity"
 external as_elements : Web.DOM.node option -> node option = "%identity"
 external as_data : 'a Web.DOM.node_like -> Web.DOM.characterData = "%identity"
+external target_element : Web.DOM.eventTarget -> node = "%identity"
+external as_window : node -> Web.DOM.window = "%identity"
 type 'a promise = 'a Js.Promise.t
 type any
 
@@ -25,13 +27,6 @@ external set_prop : 'o -> string -> 'a -> unit = "" [@@mel.set_index]
 external get_prop : 'o -> string -> 'a option = "" [@@mel.get_index] [@@mel.return nullable]
 external add_listener : node -> string -> (event -> unit) -> unit = "addEventListener" [@@mel.send]
 external remove_listener : node -> string -> (event -> unit) -> unit = "removeEventListener" [@@mel.send]
-external target : event -> node = "target" [@@mel.get]
-external value : node -> string = "value" [@@mel.get]
-external checked : node -> bool = "checked" [@@mel.get]
-external key : event -> string = "key" [@@mel.get]
-external meta_key : event -> bool = "metaKey" [@@mel.get]
-external ctrl_key : event -> bool = "ctrlKey" [@@mel.get]
-external prevent_default : event -> unit = "preventDefault" [@@mel.send]
 
 
 external query_all : node -> string -> node array = "querySelectorAll" [@@mel.send]
@@ -58,7 +53,6 @@ external query_selector : node -> string -> node option = "querySelector"
 [@@mel.send] [@@mel.return nullable]
 external get_attribute_null : node -> string -> string Js.null = "getAttribute" [@@mel.send]
 external has_attribute : node -> string -> bool = "hasAttribute" [@@mel.send]
-external dispatch : node -> event -> unit = "dispatchEvent" [@@mel.send]
 external has_own : 'o -> string -> bool = "hasOwnProperty" [@@mel.send]
 external has_key : node -> string -> bool = "has" [@@mel.scope "Reflect"]
 external delete_key : node -> string -> unit = "deleteProperty" [@@mel.scope "Reflect"]
@@ -174,12 +168,6 @@ let watch_added check =
   observe_mutations observer global_document [%mel.obj { childList = true; subtree = true; characterData = true }];
   fun () -> disconnect_mutations observer
 
-external shift_key : event -> bool = "shiftKey" [@@mel.get]
-external alt_key : event -> bool = "altKey" [@@mel.get]
-external client_x : event -> float = "clientX" [@@mel.get]
-external client_y : event -> float = "clientY" [@@mel.get]
-external pointer_type : event -> string = "pointerType" [@@mel.get]
-external stop_propagation : event -> unit = "stopPropagation" [@@mel.send]
 external set_flag : event -> string -> bool -> unit = "" [@@mel.set_index]
 external get_flag : event -> string -> bool option = "" [@@mel.get_index] [@@mel.return nullable]
 external location_replace : string -> unit = "replace" [@@mel.scope "window", "location"]
@@ -209,14 +197,15 @@ external form_data_of : node -> node -> form_data = "FormData" [@@mel.new] [@@me
 external form_data_each : form_data -> (form_value -> string -> unit[@mel.uncurry]) -> unit = "forEach"
 [@@mel.send]
 external form_text : form_value -> string = "%identity"
-external submitter : event -> node option = "submitter" [@@mel.get] [@@mel.return nullable]
-external name : node -> string = "name" [@@mel.get]
 
 let form_values ev =
-  let el = target ev and out = [||] in
+  let el = target_element (Web.DOM.Event.target ev) and out = [||] in
   form_data_each (form_data_of (default_view (owner_document el)) el) (fun v k ->
       if Js.typeof v = "string" then push out (k, form_text v));
-  (match submitter ev with Some s when truthy (name s) -> push out (name s, value s) | _ -> ());
+  (match Web.DOM.SubmitEvent.submitter ev with
+  | Some s when truthy (Web.DOM.HTMLInputElement.name s) ->
+      push out (Web.DOM.HTMLInputElement.name s, Web.DOM.HTMLInputElement.value s)
+  | _ -> ());
   out
 
 external microtask : (unit -> unit) -> unit = "queueMicrotask"
@@ -352,72 +341,40 @@ type recorded = {
   ticked : bool Js.undefined;
 }
 
-external event_type : event -> string = "type" [@@mel.get]
-external button : event -> int = "button" [@@mel.get]
-external code : event -> string = "code" [@@mel.get]
-external repeat : event -> bool = "repeat" [@@mel.get]
-external input_data : event -> string Js.null = "data" [@@mel.get]
-external input_type : event -> string = "inputType" [@@mel.get]
 external checked_undefined : node -> bool Js.undefined = "checked" [@@mel.get]
-external set_value : node -> string -> unit = "value" [@@mel.set]
-external set_checked : node -> bool -> unit = "checked" [@@mel.set]
-external input_kind : node -> string = "type" [@@mel.get]
-external add_capture : node -> string -> (event -> unit) -> (_[@mel.as {json|true|json}]) -> unit = "addEventListener"
-[@@mel.send]
-external remove_capture : node -> string -> (event -> unit) -> (_[@mel.as {json|true|json}]) -> unit
-  = "removeEventListener"
-[@@mel.send]
-external new_event : node -> string -> < .. > Js.t -> event = "Event" [@@mel.new] [@@mel.send]
-external new_mouse_event : node -> string -> < .. > Js.t -> event = "MouseEvent" [@@mel.new] [@@mel.send]
-external new_keyboard_event : node -> string -> < .. > Js.t -> event = "KeyboardEvent" [@@mel.new] [@@mel.send]
-external new_input_event : node -> string -> < .. > Js.t -> event = "InputEvent" [@@mel.new] [@@mel.send]
 
 let recorded_types = [| "click"; "input"; "change"; "submit"; "keydown" |]
 
 let copy_event w kind ev =
   if kind = "click" then
-    new_mouse_event w kind
-      [%mel.obj
-        {
-          bubbles = true;
-          cancelable = true;
-          clientX = client_x ev;
-          clientY = client_y ev;
-          button = button ev;
-          shiftKey = shift_key ev;
-          ctrlKey = ctrl_key ev;
-          altKey = alt_key ev;
-          metaKey = meta_key ev;
-        }]
+    Web.DOM.MouseEvent.make kind
+      (Web.DOM.MouseEvent.init ~bubbles:true ~cancelable:true ~clientX:(Web.DOM.MouseEvent.clientX ev) ~clientY:(Web.DOM.MouseEvent.clientY ev)
+         ~button:(Web.DOM.MouseEvent.button ev) ~shiftKey:(Web.DOM.MouseEvent.shiftKey ev) ~ctrlKey:(Web.DOM.MouseEvent.ctrlKey ev)
+         ~altKey:(Web.DOM.MouseEvent.altKey ev) ~metaKey:(Web.DOM.MouseEvent.metaKey ev) ())
+      w
   else if kind = "keydown" then
-    new_keyboard_event w kind
-      [%mel.obj
-        {
-          bubbles = true;
-          cancelable = true;
-          key = key ev;
-          code = code ev;
-          repeat = repeat ev;
-          shiftKey = shift_key ev;
-          ctrlKey = ctrl_key ev;
-          altKey = alt_key ev;
-          metaKey = meta_key ev;
-        }]
+    Web.DOM.KeyboardEvent.make kind
+      (Web.DOM.KeyboardEvent.init ~bubbles:true ~cancelable:true ~key:(Web.DOM.KeyboardEvent.key ev) ~code:(Web.DOM.KeyboardEvent.code ev)
+         ~repeat:(Web.DOM.KeyboardEvent.repeat ev) ~shiftKey:(Web.DOM.MouseEvent.shiftKey ev) ~ctrlKey:(Web.DOM.MouseEvent.ctrlKey ev)
+         ~altKey:(Web.DOM.MouseEvent.altKey ev) ~metaKey:(Web.DOM.MouseEvent.metaKey ev) ())
+      w
   else if kind = "input" && truthy (field w "InputEvent") then
-    new_input_event w kind [%mel.obj { bubbles = true; cancelable = true; data = input_data ev; inputType = input_type ev }]
-  else new_event w kind [%mel.obj { bubbles = true; cancelable = true }]
+    Web.DOM.InputEvent.make kind
+      (Web.DOM.InputEvent.init ~bubbles:true ~cancelable:true ?data:(Web.DOM.InputEvent.data ev) ~inputType:(Web.DOM.InputEvent.inputType ev) ())
+      w
+  else Web.DOM.Event.make kind (Web.DOM.Event.init ~bubbles:true ~cancelable:true ()) w
 
 let record_events island =
   let queue = ref [||] in
   let listener ev =
-    let t = target ev in
+    let t = target_element (Web.DOM.Event.target ev) in
     let mine =
       if truthy (field t "closest") then
         Js.Null.return island == closest t "yuka-island"
       else true
     in
     if mine then (
-        let kind = event_type ev in
+        let kind = Web.DOM.Event.type_ ev in
         let is_field = (kind = "input" || kind = "change") && truthy t && has_key t "value" in
         if is_field then set_prop t "__yukaRecorded" 1;
         push !queue
@@ -426,14 +383,14 @@ let record_events island =
             node = t;
             ev;
             is_field;
-            text = (if is_field then value t else "");
+            text = (if is_field then Web.DOM.HTMLInputElement.value t else "");
             ticked = (if is_field then checked_undefined t else Js.undefined);
           })
   in
   let each f = Array.iter f recorded_types in
-  each (fun t -> add_capture island t listener);
+  each (fun t -> Web.DOM.EventTarget.addEventListenerUseCapture t listener island);
   let stop () =
-    each (fun t -> remove_capture island t listener);
+    each (fun t -> Web.DOM.EventTarget.removeEventListenerUseCapture t listener island);
     Array.iter (fun i -> delete_key i.node "__yukaRecorded") !queue
   in
   let drop () =
@@ -444,26 +401,23 @@ let record_events island =
     stop ();
     let items = !queue in
     queue := [||];
-    let w = default_view (owner_document island) in
+    let w = as_window (default_view (owner_document island)) in
     Array.iter
       (fun { kind; node; ev; is_field; text; ticked } ->
         if contains island node then (
           if is_field then (
-            set_value node text;
-            match Js.Undefined.toOption ticked with Some c -> set_checked node c | None -> ());
+            Web.DOM.HTMLInputElement.setValue node text;
+            match Js.Undefined.toOption ticked with Some c -> Web.DOM.HTMLInputElement.setChecked node c | None -> ());
           let copy = copy_event w kind ev in
-          let toggles = kind = "click" && (input_kind node = "checkbox" || input_kind node = "radio") in
-          let before = toggles && checked node in
-          dispatch node copy;
-          if toggles then set_checked node before))
+          let kind_of = Web.DOM.HTMLInputElement.type_ node in
+          let toggles = kind = "click" && (kind_of = "checkbox" || kind_of = "radio") in
+          let before = toggles && Web.DOM.HTMLInputElement.checked node in
+          ignore (Web.DOM.EventTarget.dispatchEvent copy node);
+          if toggles then Web.DOM.HTMLInputElement.setChecked node before))
       items
   in
   (drop, replay)
 
-external options : node -> node array = "options" [@@mel.get]
-external selected : node -> bool = "selected" [@@mel.get]
-external default_checked : node -> bool = "defaultChecked" [@@mel.get]
-external default_value : node -> string = "defaultValue" [@@mel.get]
 
 let touched n tag =
   if tag = "option" then
@@ -471,7 +425,9 @@ let touched n tag =
   else
     let changed =
       if tag = "select" then (
+        let options n = Web.DOM.HTMLCollection.toArray (Web.DOM.HTMLSelectElement.options n) in
         let d = options (clone_node n true) and o = options n in
+        let selected = Web.DOM.HTMLOptionElement.selected in
         let rec differs i =
           i < Array.length o
           && (selected (Array.unsafe_get o i) <> selected (Array.unsafe_get d i) || differs (i + 1))
@@ -480,18 +436,22 @@ let touched n tag =
         set_bool n "__yukaKept" c;
         c)
       else if tag = "input" || tag = "textarea" then
-        let t = input_kind n in
-        if t = "checkbox" || t = "radio" then checked n <> default_checked n else value n <> default_value n
+        let open Web.DOM.HTMLInputElement in
+        let t = type_ n in
+        if t = "checkbox" || t = "radio" then checked n <> defaultChecked n else value n <> defaultValue n
       else false
     in
     if not changed then 0
-    else if truthy (field n "__yukaRecorded") || (input_kind n = "radio" && not (checked n)) then 1
+    else if
+      truthy (field n "__yukaRecorded")
+      || (Web.DOM.HTMLInputElement.type_ n = "radio" && not (Web.DOM.HTMLInputElement.checked n))
+    then 1
     else 2
 
 let fire n =
-  let w = default_view (owner_document n) in
-  dispatch n (new_event w "input" [%mel.obj { bubbles = true }]);
-  dispatch n (new_event w "change" [%mel.obj { bubbles = true }])
+  let w = as_window (default_view (owner_document n)) in
+  ignore (Web.DOM.EventTarget.dispatchEvent (Web.DOM.Event.make "input" (Web.DOM.Event.init ~bubbles:true ()) w) n);
+  ignore (Web.DOM.EventTarget.dispatchEvent (Web.DOM.Event.make "change" (Web.DOM.Event.init ~bubbles:true ()) w) n)
 
 type url
 
@@ -596,17 +556,14 @@ external set_scroll_restoration : node -> string -> unit = "scrollRestoration" [
 
 let scroll_restoration mode = try set_scroll_restoration window_history mode with _ -> ()
 
-external persisted_field : event -> bool Js.undefined = "persisted" [@@mel.get]
 
-let persisted e = persisted_field e == Js.Undefined.return true
-
-external default_prevented : event -> bool = "defaultPrevented" [@@mel.get]
 
 let plain_click e =
-  not (default_prevented e || button e <> 0 || meta_key e || ctrl_key e || shift_key e || alt_key e)
+  not
+    (Web.DOM.Event.defaultPrevented e || Web.DOM.MouseEvent.button e <> 0 || Web.DOM.MouseEvent.metaKey e || Web.DOM.MouseEvent.ctrlKey e
+   || Web.DOM.MouseEvent.shiftKey e || Web.DOM.MouseEvent.altKey e)
 
 external yuka_base : node -> string option = "__yukaBase" [@@mel.get] [@@mel.return undefined_to_opt]
-external meta_content : node -> string = "content" [@@mel.get]
 
 let base () =
   match yuka_base global_document with
@@ -614,17 +571,12 @@ let base () =
   | None ->
       let b =
         match query_selector global_document {|meta[name="yuka-base"]|} with
-        | Some m -> meta_content m
+        | Some m -> Web.DOM.HTMLMetaElement.content m
         | None -> ""
       in
       set_string global_document "__yukaBase" b;
       b
 
-external anchor_origin : node -> string = "origin" [@@mel.get]
-external anchor_pathname : node -> string = "pathname" [@@mel.get]
-external anchor_search : node -> string = "search" [@@mel.get]
-external anchor_hash : node -> string = "hash" [@@mel.get]
-external anchor_href : node -> string = "href" [@@mel.get]
 external starts_with : string -> string -> bool = "startsWith" [@@mel.send]
 
 let other_target t = match Js.Null.toOption t with Some t -> t <> "" && t <> "_self" | None -> false
@@ -642,19 +594,17 @@ let link_in prefetch t b =
         || (prefetch && is_off (get_attribute_null a "data-yuka-prefetch"))
       then ""
       else
-        let path = anchor_pathname a in
-        if anchor_origin a <> location_origin || (b <> "" && path <> b && not (starts_with path (b ^ "/"))) then
-          ""
-        else if anchor_hash a <> "" && path = location_pathname && anchor_search a = location_search then ""
-        else anchor_href a
+        let open Web.DOM.HTMLAnchorElement in
+        let path = pathname a in
+        if origin a <> location_origin || (b <> "" && path <> b && not (starts_with path (b ^ "/"))) then ""
+        else if hash a <> "" && path = location_pathname && search a = location_search then ""
+        else href a
 
 let link_href prefetch t = link_in prefetch t (base ())
+let link t = Option.get (Web.DOM.Element.closest "a[href]" t)
 
-external link : node -> (_[@mel.as "a[href]"]) -> node = "closest" [@@mel.send]
-external is_trusted : event -> bool = "isTrusted" [@@mel.get]
 external form_prototype : node = "prototype" [@@mel.scope "HTMLFormElement"]
 external is_prototype_of : node -> node -> bool = "isPrototypeOf" [@@mel.send]
-external submitter_nullable : event -> node Js.nullable = "submitter" [@@mel.get]
 external base_uri : string = "baseURI" [@@mel.scope "document"]
 external form_data_with : node -> node Js.nullable -> form_data = "FormData" [@@mel.new]
 external form_pairs : form_data -> (form_entry -> string * string[@mel.uncurry]) -> (string * string) array = "from"
@@ -667,8 +617,10 @@ external search_params : (string * string) array -> search_params = "URLSearchPa
 external search_text : search_params -> string = "toString" [@@mel.send]
 
 let form_url e =
-  let f = target e and s = submitter_nullable e in
-  if default_prevented e || (not (is_trusted e)) || not (is_prototype_of form_prototype f) then ""
+  let f = target_element (Web.DOM.Event.target e)
+  and s = Js.Nullable.fromOption (Web.DOM.SubmitEvent.submitter e) in
+  if Web.DOM.Event.defaultPrevented e || (not (Web.DOM.Event.isTrusted e)) || not (is_prototype_of form_prototype f)
+  then ""
   else
     let attr n =
       match Js.Nullable.toOption s with

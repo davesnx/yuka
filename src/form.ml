@@ -186,8 +186,8 @@ let make (type i o f) ~(action : (i, o, f) action) ?(key = "") ?run ?on_ok ~(chi
   let gone = ref false in
   Base.own (fun () -> gone := true);
   let rec submit ev =
-    Host.prevent_default ev;
-    Web.DOM.Element.removeAttribute "data-yuka-sent" (Host.target ev);
+    Web.DOM.Event.preventDefault ev;
+    Web.DOM.Element.removeAttribute "data-yuka-sent" (Host.target_element (Web.DOM.Event.target ev));
     match decode t (Array.to_list (Host.form_values ev)) with
     | Error e -> State.set form.failed e
     | Ok input -> (

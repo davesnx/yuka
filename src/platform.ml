@@ -13,24 +13,26 @@ let cleared : (unit -> unit) ref = ref ignore
 let kept : string list ref = ref []
 let moved : (unit -> unit) ref = ref ignore
 
+let target e = Host.target_element (Web.DOM.Event.target e)
+
 let platform =
   ref
     {
-      target_value = (fun e -> Host.value (Host.target e));
-      target_checked = (fun e -> Host.checked (Host.target e));
-      key = Host.key;
-      meta_key = Host.meta_key;
-      ctrl_key = Host.ctrl_key;
-      prevent_default = Host.prevent_default;
+      target_value = (fun e -> Web.DOM.HTMLInputElement.value (target e));
+      target_checked = (fun e -> Web.DOM.HTMLInputElement.checked (target e));
+      key = (fun e -> Web.DOM.KeyboardEvent.key e);
+      meta_key = (fun e -> Web.DOM.MouseEvent.metaKey e);
+      ctrl_key = (fun e -> Web.DOM.MouseEvent.ctrlKey e);
+      prevent_default = (fun e -> Web.DOM.Event.preventDefault e);
       stop_propagation =
         (fun e ->
           Host.set_flag e stopped_key true;
-          Host.stop_propagation e);
-      target_tag = (fun e -> Web.DOM.Element.localName (Host.target e));
-      shift_key = Host.shift_key;
-      alt_key = Host.alt_key;
-      client_x = Host.client_x;
-      client_y = Host.client_y;
+          Web.DOM.Event.stopPropagation e);
+      target_tag = (fun e -> Web.DOM.Element.localName (target e));
+      shift_key = (fun e -> Web.DOM.MouseEvent.shiftKey e);
+      alt_key = (fun e -> Web.DOM.MouseEvent.altKey e);
+      client_x = (fun e -> Web.DOM.MouseEvent.clientX e);
+      client_y = (fun e -> Web.DOM.MouseEvent.clientY e);
       navigate =
         (fun ~replace ~keep_scroll url ->
           match !client_navigate with Some f -> f ~replace ~keep_scroll url | None -> Host.navigate replace url);

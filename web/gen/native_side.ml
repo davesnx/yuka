@@ -7,6 +7,16 @@ open Ppxlib
 
 let loc = Location.none
 
+(* An argument typed [_ [@mel.as ...]] is a constant that Melange writes in the call, not one the
+   caller passes, so the native side has no such argument. *)
+let rec drop_constants ty =
+  match ty.ptyp_desc with
+  | Ptyp_arrow (label, arg, rest) ->
+      let rest = drop_constants rest in
+      if List.exists (fun a -> a.attr_name.txt = "mel.as") arg.ptyp_attributes then rest
+      else { ty with ptyp_desc = Ptyp_arrow (label, arg, rest) }
+  | _ -> ty
+
 let rewrite =
   object
     inherit Ast_traverse.map as super
@@ -19,7 +29,7 @@ let rewrite =
     method! structure_item item =
       match item.pstr_desc with
       | Pstr_primitive { pval_name; pval_type; _ } ->
-          let ty = super#core_type pval_type in
+          let ty = super#core_type (drop_constants pval_type) in
           let rec stub ty =
             match ty.ptyp_desc with
             | Ptyp_arrow (label, _, rest) ->

@@ -286,7 +286,7 @@ let dispatch event ev =
       if p != Js.null then go (node_of p)
     end
   in
-  go (Host.target ev)
+  go (Host.target_element (Web.DOM.Event.target ev))
 
 let delegate doc event =
   let mark = "__yuka_delegation_" ^ event in

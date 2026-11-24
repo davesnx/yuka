@@ -276,6 +276,6 @@ let rec dispatch event node =
 
 let mount container (component : (unit * unit) component) =
   let doc = match Web.DOM.Node.ownerDocument container with Some d -> d | None -> Web.DOM.document in
-  Web.DOM.EventTarget.addEventListener "click" (fun event -> dispatch event (Host.target event)) doc;
+  Web.DOM.EventTarget.addEventListener "click" (fun event -> dispatch event (Host.target_element (Web.DOM.Event.target event))) doc;
   Web.DOM.Node.setTextContent container "";
   ignore (Scheduler.batch (fun () -> create doc (Obj.magic component) (Obj.repr ((), ())) container Js.null (Base.new_owner ())))

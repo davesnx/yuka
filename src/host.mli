@@ -6,6 +6,8 @@ type event = Web.DOM.event
 external as_element : 'a Web.DOM.node_like -> node = "%identity"
 external as_elements : Web.DOM.node option -> node option = "%identity"
 external as_data : 'a Web.DOM.node_like -> Web.DOM.characterData = "%identity"
+external target_element : Web.DOM.eventTarget -> node = "%identity"
+external as_window : node -> Web.DOM.window = "%identity"
 type 'a promise
 
 val in_browser : bool
@@ -15,19 +17,6 @@ val set_string : node -> string -> string -> unit
 val set_bool : node -> string -> bool -> unit
 val set_prop : 'o -> string -> 'a -> unit
 val get_prop : 'o -> string -> 'a option
-val target : event -> node
-val value : node -> string
-val checked : node -> bool
-val key : event -> string
-val meta_key : event -> bool
-val ctrl_key : event -> bool
-val shift_key : event -> bool
-val alt_key : event -> bool
-val client_x : event -> float
-val client_y : event -> float
-val pointer_type : event -> string
-val prevent_default : event -> unit
-val stop_propagation : event -> unit
 val set_flag : event -> string -> bool -> unit
 val get_flag : event -> string -> bool option
 val console_error : string -> unit
@@ -85,7 +74,6 @@ val history_go : int -> unit
 val history_back : unit -> unit
 val history_replace_url : string -> unit
 val scroll_restoration : string -> unit
-val persisted : event -> bool
 val plain_click : event -> bool
 val link_href : bool -> node -> string
 val link : node -> node
