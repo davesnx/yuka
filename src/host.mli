@@ -26,7 +26,8 @@ val console_log : string -> unit
 val console_debug : string -> unit
 val exn_to_string : exn -> string
 val encode_uri : string -> string
-val decode_uri : string -> string option
+val encode_uri_component : string -> string option
+val decode_uri_component : string -> string option
 val encode_cookie_value : string -> string option
 val fetch_post :
   string ->

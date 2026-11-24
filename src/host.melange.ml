@@ -76,7 +76,8 @@ let exn_to_string e =
 external encode_uri : string -> string = "encodeURIComponent"
 external decode_uri_exn : string -> string = "decodeURIComponent"
 
-let decode_uri s = try Some (decode_uri_exn s) with _ -> None
+let encode_uri_component s = try Some (encode_uri s) with _ -> None
+let decode_uri_component s = try Some (decode_uri_exn s) with _ -> None
 
 external replace_by : string -> Js.Re.t -> (string -> string[@mel.uncurry]) -> string = "replace"
 [@@mel.send]

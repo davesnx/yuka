@@ -31,6 +31,12 @@ module Live = Live
 module Form = Form
 module Event = Event
 module Browser = Browser
+
+module Url = struct
+  let encode_uri_component = Host.encode_uri_component
+  let decode_uri_component = Host.decode_uri_component
+end
+
 module Router = struct
   include Router
   module Param = Router_param
@@ -290,7 +296,6 @@ module Private = struct
 
   let server_rendering () = !(Base.server_rendering ())
   let in_browser = Host.in_browser
-  let decode_uri = Host.decode_uri
   let platform = Platform.platform
   let entry_name (e : Island.entry) = e.name
   let entry_decode (e : Island.entry) j = e.decode j

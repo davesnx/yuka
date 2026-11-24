@@ -30,7 +30,22 @@ let console_debug : string -> unit = fun _ -> browser_only ()
 let exn_to_string = Printexc.to_string
 let encode_uri : string -> string = fun _ -> browser_only ()
 let encode_cookie_value : string -> string option = fun _ -> browser_only ()
-let decode_uri s =
+let encode_uri_component s =
+  if not (String.is_valid_utf_8 s) then None
+  else
+    let b = Buffer.create (String.length s) in
+    String.iter
+      (function
+        | ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')') as c ->
+            Buffer.add_char b c
+        | c ->
+            let n = Char.code c in
+            Buffer.add_char b '%';
+            Buffer.add_char b "0123456789ABCDEF".[n lsr 4];
+            Buffer.add_char b "0123456789ABCDEF".[n land 15])
+      s;
+    Some (Buffer.contents b)
+let decode_uri_component s =
   let n = String.length s and out = Buffer.create (String.length s) and run = Buffer.create 4 in
   let hex i =
     if i >= n then -1

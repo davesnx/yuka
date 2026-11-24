@@ -205,24 +205,58 @@ let html_escaping () =
   check "attribute" "<a href=\"x&amp;y&quot;&lt;>\"></a>"
     (html (element "a" [ attr "href" "x&y\"<>" ] []))
 
-let decode_uri () =
-  let decoded s = match Private.decode_uri s with Some d -> d | None -> "None" in
-  let valid s = string_of_bool (Option.is_some (Private.decode_uri s)) in
-  check "plain" "a+b" (decoded "a+b");
-  check "escapes" "a b/?#" (decoded "a%20b%2F%3f%23");
-  check "two bytes" "true" (valid "%C3%A9");
-  check "four bytes" "true" (valid "%F0%9F%98%80");
-  if not Private.in_browser then check "two bytes, native" "\xc3\xa9" (decoded "%C3%A9");
-  check "percent at the end" "None" (decoded "100%");
-  check "one hex digit" "None" (decoded "%E0%A4%A");
-  check "not hex" "None" (decoded "%zz");
-  check "lead byte alone" "None" (decoded "%C3");
-  check "lead byte then text" "None" (decoded "%C3a");
-  check "continuation byte alone" "None" (decoded "%A9");
-  check "overlong" "None" (decoded "%C0%AF");
-  check "surrogate" "None" (decoded "%ED%A0%80");
-  check "over U+10FFFF" "None" (decoded "%F4%90%80%80");
-  check "five-byte lead" "None" (decoded "%F8%88%80%80%80")
+let uri_component () =
+  let show = function Some s -> s | None -> "None" in
+  let encode s = show (Url.encode_uri_component s) and decode s = show (Url.decode_uri_component s) in
+  List.iter
+    (fun (name, text, encoded) ->
+      check (name ^ ": encode") encoded (encode text);
+      check (name ^ ": decode") text (decode encoded);
+      check (name ^ ": round trip") text (decode (encode text)))
+    [
+      ("empty", "", "");
+      ("ASCII", "abcXYZ019", "abcXYZ019");
+      ("unreserved", "-_.!~*'()", "-_.!~*'()");
+      ("reserved", ";,/?:@&=+$#", "%3B%2C%2F%3F%3A%40%26%3D%2B%24%23");
+      ("space", "a b", "a%20b");
+      ("plus", "a+b", "a%2Bb");
+      ("percent", "100%", "100%25");
+      ("control bytes", "\000\n\127", "%00%0A%7F");
+      ("two bytes", {js|é|js}, "%C3%A9");
+      ("three bytes", {js|€|js}, "%E2%82%AC");
+      ("four bytes", {js|𐍈|js}, "%F0%90%8D%88");
+      ("emoji", {js|😀|js}, "%F0%9F%98%80");
+      ("mixed", {js|a é/€😀|js}, "a%20%C3%A9%2F%E2%82%AC%F0%9F%98%80");
+    ];
+  List.iter
+    (fun (name, encoded, text) -> check (name ^ ": decode") text (decode encoded))
+    [
+      ("plus stays plus", "a+b", "a+b");
+      ("encoded plus", "%2B", "+");
+      ("lowercase hex", "%c3%a9%2b", {js|é+|js});
+      ("unreserved escaped", "%41%7E%2A", "A~*");
+      ("percent at the end", "100%", "None");
+      ("one hex digit", "%E0%A4%A", "None");
+      ("not hex", "%G1", "None");
+      ("not hex, second digit", "%1G", "None");
+      ("lone percent", "%", "None");
+      ("truncated", "%E2%82", "None");
+      ("lead byte alone", "%C3", "None");
+      ("lead byte then text", "%C3a", "None");
+      ("continuation byte alone", "%A9", "None");
+      ("overlong", "%C0%AF", "None");
+      ("overlong three bytes", "%E0%80%AF", "None");
+      ("surrogate", "%ED%A0%80", "None");
+      ("low surrogate", "%ED%B0%80", "None");
+      ("over U+10FFFF", "%F4%90%80%80", "None");
+      ("five-byte lead", "%F8%88%80%80%80", "None");
+      ("byte FF", "%FF", "None");
+    ];
+  check "U+10FFFF: round trip" "%F4%8F%BF%BF" (encode (decode "%F4%8F%BF%BF"));
+  if not Private.in_browser then
+    List.iter
+      (fun (name, text) -> check (name ^ ": encode") "None" (encode text))
+      [ ("invalid byte", "\xff"); ("truncated", "\xe2\x82"); ("surrogate bytes", "\xed\xa0\x80") ]
 
 let html_adjacent_texts () =
   check "separator" "<p>a<!---->b<!---->c</p>"
@@ -2302,7 +2336,7 @@ let all =
     ("effect writing its own State settles", effect_writing_own_state_settles);
     ("effect writing its own State stops at a limit", effect_writing_own_state_stops);
     ("html escaping", html_escaping);
-    ("Host.decode_uri", decode_uri);
+    ("Url: encodeURIComponent and decodeURIComponent", uri_component);
     ("html adjacent texts", html_adjacent_texts);
     ("html empty text", html_empty_text);
     ("html hole markers", html_hole);

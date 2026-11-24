@@ -1,4 +1,4 @@
-let[@client] make ~(filter : Model.filter) ~(since : int) () =
+let[@client] make ~(filter : Model.filter) ~(since : int) ~(last : int option) () =
   let live = Yuka.Live.make Feed.recent (fun () -> ()) in
   let running = Yuka.State.make false in
   let seen = ref (-1) in
@@ -9,6 +9,14 @@ let[@client] make ~(filter : Model.filter) ~(since : int) () =
         |> List.filter (fun (event : Model.event) -> event.id > since && Model.matches filter event)
         |> List.rev
     | _ -> []
+  in
+  let with_previous () =
+    let _, pairs =
+      List.fold_left
+        (fun (previous, pairs) (event : Model.event) -> (Some event.time, (previous, event) :: pairs))
+        (last, []) (fresh ())
+    in
+    Array.of_list (List.rev pairs)
   in
   Yuka.Effect.after (fun () ->
       let count = List.length (fresh ()) in
@@ -23,10 +31,13 @@ let[@client] make ~(filter : Model.filter) ~(since : int) () =
   in
   <div class_="feed-live-wrap">
     <ol class_="feed feed-live" aria_live=`polite>
-      (Yuka.each ~key:(fun (event : Model.event) -> Int.to_string event.id)
-         (fun () -> Array.of_list (fresh ()))
-         (fun (event : Model.event) ->
-           <Card event fresh=true time=(<Local_time time=event.time class_="card-time" stacked=true />) />))
+      (Yuka.each
+         ~equal:(fun (p1, (e1 : Model.event)) (p2, (e2 : Model.event)) -> p1 = p2 && e1.id = e2.id)
+         ~key:(fun (_, (event : Model.event)) -> Int.to_string event.id)
+         with_previous
+         (fun (previous, (event : Model.event)) ->
+           <Card event fresh=true day=(<Day_divider at=event.time previous />)
+             time=(<Local_time time=event.time class_="card-time" stacked=true />) />))
     </ol>
     <div id="feed-bottom" class_="feed-bottom" />
     <button class_="simulate" type_=`button disabled=(Yuka.State.get running) on_click=simulate>

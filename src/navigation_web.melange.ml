@@ -106,7 +106,7 @@ let scroll_to = Host.scroll_to
 
 let decoded_id hash =
   let id = slice_from hash 1 in
-  match decode_uri id with Some d -> d | None -> id
+  match decode_uri_component id with Some d -> d | None -> id
 
 let scroll_to_hash hash =
   let id = decoded_id hash in

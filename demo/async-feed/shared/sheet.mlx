@@ -1,5 +1,6 @@
 let[@client] make ~(title : string) ~(source : string) ~(layer : bool) ~children () =
   let close () = if layer then Yuka.Browser.back () else Yuka.Browser.navigate (Routes.feed ()) in
+  Yuka.Effect.after ~cleanup:(fun unlock -> unlock ()) (Scroll_lock.lock ~containers:[ ".main" ]);
   Yuka.Effect.after (fun () ->
       Yuka.Browser.on_window "keydown" (fun event -> if Yuka.Event.key event = "Escape" then close ()));
   <div class_="sheet">
