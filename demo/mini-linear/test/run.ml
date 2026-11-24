@@ -75,23 +75,23 @@ let issue_page () =
   lacks html "class=\"skeleton\"";
   List.iter (fun path -> lacks (get path) "class=\"skeleton\"") [ "/issue/YUK-1?delay=-600"; "/issue/YUK-1?delay=abc"; "/issue/YUK-1?delay=0" ]
 
+let index_of html needle =
+  let needle_length = String.length needle in
+  let rec go index =
+    if index + needle_length > String.length html then Alcotest.failf "no %S" needle
+    else if String.sub html index needle_length = needle then index
+    else go (index + 1)
+  in
+  go 0
+
 let streaming () =
   let html = get "/issue/YUK-1?delay=600" in
-  let index_of needle =
-    let needle_length = String.length needle in
-    let rec go index =
-      if index + needle_length > String.length html then Alcotest.failf "no %S" needle
-      else if String.sub html index needle_length = needle then index
-      else go (index + 1)
-    in
-    go 0
-  in
-  let shell = index_of "<div class=\"skeleton\">" in
-  let fill = index_of "data-yuka-fill=\"s1\"" in
-  let related = index_of "data-yuka-async=\"a1\"" in
+  let shell = index_of html "<div class=\"skeleton\">" in
+  let fill = index_of html "data-yuka-fill=\"s1\"" in
+  let related = index_of html "data-yuka-async=\"a1\"" in
   Alcotest.(check bool) "shell first" true (shell < fill);
   Alcotest.(check bool) "comments before related" true (fill < related);
-  Alcotest.(check bool) "fill script" true (index_of "__yukaFill" < shell);
+  Alcotest.(check bool) "fill script" true (index_of html "__yukaFill" < shell);
   has (get "/w/stress/issue/STR-1?delay=50") "<div class=\"skeleton\">"
 
 let navigation () =
@@ -122,8 +122,13 @@ let navigation () =
       let _, response, html = call ~headers:[ ("Yuka-Navigate", layout); ("Yuka-Overlay", "1") ] path in
       Alcotest.(check (option string)) ("overlay " ^ path) (Some "overlay") (header response "yuka-layer");
       has html "class=\"overlay-dialog\" role=\"dialog\" aria-label=\"Settings\"";
+      lacks html "class=\"overlay-bar\"";
       has html "data-name=\"Demo_shared.Close_button\"";
       has html "data-name=\"Demo_shared.Settings_panel\"";
+      let header_start = index_of html "<header class=\"page-header\">" in
+      let close_pos = index_of html "data-name=\"Demo_shared.Close_button\"" in
+      let header_end = index_of html "</header>" in
+      Alcotest.(check bool) ("close button in header " ^ path) true (header_start < close_pos && close_pos < header_end);
       lacks html "class=\"sidebar\"")
     [ ("L0", "/settings"); ("L1/stress", "/w/stress/settings") ]
 
@@ -295,7 +300,9 @@ let form_post () =
   Alcotest.(check int) "422" 422 status;
   has html "Title is required";
   has html "kept text";
-  has html {|<option value="done" selected="">|};
+  has html {|<input type="hidden" name="status" value="done">|};
+  has html {|role="combobox"|};
+  lacks html "<select";
   let status, response, _ =
     call ~meth:`POST ~headers ~body:"_yuka_action=create_issue&workspace=yuka&title=From+a+form&description=&status=todo&priority=low" "/new"
   in
