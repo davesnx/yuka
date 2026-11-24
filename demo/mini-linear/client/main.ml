@@ -1,17 +1,14 @@
-type element
+open Web
 
-external root : element = "documentElement" [@@mel.scope "document"]
-external get_attribute : element -> string -> string Js.null = "getAttribute" [@@mel.send]
-external set_attribute : element -> string -> string -> unit = "setAttribute" [@@mel.send]
-external remove_attribute : element -> string -> unit = "removeAttribute" [@@mel.send]
-external store : string -> string -> unit = "setItem" [@@mel.scope "localStorage"]
-external unstore : string -> unit = "removeItem" [@@mel.scope "localStorage"]
-
-let read_attribute name = match Js.Null.toOption (get_attribute root name) with Some v -> v | None -> ""
+let root = DOM.(Document.documentElement document)
+let read_attribute name = Option.value (DOM.Element.getAttribute name root) ~default:""
 
 let write_attribute name key value =
-  if value <> "" then set_attribute root name value else remove_attribute root name;
-  try if value <> "" then store key value else unstore key with _ -> ()
+  if value <> "" then DOM.Element.setAttribute ~name ~value root else DOM.Element.removeAttribute name root;
+  try
+    if value <> "" then Storage.setItem ~key ~value Storage.localStorage
+    else Storage.removeItem key Storage.localStorage
+  with _ -> ()
 
 let () =
   Demo_shared.Theme.read := read_attribute;
