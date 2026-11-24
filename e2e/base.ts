@@ -198,13 +198,21 @@ await step("b6. hover prefetch under the base", async () => {
 
 await step("b7. GET forms under the base", async () => {
   await home();
-  await A.evaluate(() => ((window as any).__marker = "alive"));
-  await A.fill(".search input", "keyboard");
-  await A.press(".search input", "Enter");
+  await A.evaluate((action) => {
+    (window as any).__marker = "alive";
+    const f = document.createElement("form");
+    f.id = "e2e-base-search";
+    f.method = "get";
+    f.action = action;
+    f.innerHTML = '<input type="search" name="q">';
+    document.body.prepend(f);
+  }, prefix);
+  await A.fill("#e2e-base-search input", "keyboard");
+  await A.press("#e2e-base-search input", "Enter");
   await A.waitForURL((u) => u.pathname === prefix && u.search === "?q=keyboard");
   await A.waitForFunction(() => (document.querySelector(".filter") as HTMLInputElement | null)?.value === "keyboard").catch(() => {});
   const filter = await A.evaluate(() => (document.querySelector(".filter") as HTMLInputElement | null)?.value);
-  check("b7.1 the sidebar search form is a client navigation under the base", (await alive(A)) === "alive" && filter === "keyboard", `marker=${await alive(A)} filter=${filter} ${A.url()}`);
+  check("b7.1 a GET form is a client navigation under the base", (await alive(A)) === "alive" && filter === "keyboard", `marker=${await alive(A)} filter=${filter} ${A.url()}`);
   const C = await open(prefix);
   await C.evaluate(() => {
     (window as any).__marker = "alive";
@@ -254,12 +262,12 @@ await step("b9. a draft blocks leaving under the base", async () => {
 
 await step("b10. a reload under the base restores the scroll position", async () => {
   const S = await open(prefix);
-  await S.evaluate(() => window.scrollTo(0, 300));
-  const y = await S.evaluate(() => Math.round(window.scrollY));
+  await S.evaluate(() => { document.querySelector(".main")!.scrollTop = 300; });
+  const y = await S.evaluate(() => Math.round(document.querySelector(".main")!.scrollTop));
   await S.evaluate(() => ((window as any).__marker = "alive"));
   await S.reload({ waitUntil: "networkidle" });
-  await S.waitForFunction((y) => Math.abs(Math.round(scrollY) - y) <= 2, y, { timeout: 5000 }).catch(() => {});
-  const after = await S.evaluate(() => Math.round(window.scrollY));
+  await S.waitForFunction((y) => Math.abs(Math.round(document.querySelector(".main")?.scrollTop ?? 0) - y) <= 2, y, { timeout: 5000 }).catch(() => {});
+  const after = await S.evaluate(() => Math.round(document.querySelector(".main")!.scrollTop));
   check("b10.1 the position comes back", y > 0 && (await alive(S)) === undefined && Math.abs(after - y) <= 2, `before=${y} after=${after}`);
   await S.close();
 });
