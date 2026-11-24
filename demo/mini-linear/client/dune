@@ -1,7 +1,7 @@
 (melange.emit
  (target out)
  (alias demo-client)
- (libraries demo_shared yuka)
+ (libraries demo_shared yuka yuka.web)
  (preprocess
   (pps yuka.ppx melange.ppx))
  (module_systems

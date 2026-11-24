@@ -1,11 +1,11 @@
 include Island
 
-type container = Web.node
+type container = Host.node
 
 let container _ = None
-type 'a promise = 'a Web.promise
+type 'a promise = 'a Host.promise
 
-let promise_map = Web.promise_map
+let promise_map = Host.promise_map
 
 type lazy_entry = unit
 

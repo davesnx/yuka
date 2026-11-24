@@ -37,14 +37,14 @@ let run_waiting () =
 let after_paint job =
   if not !frame then begin
     let task () =
-      let (_ : unit -> unit) = Web.set_timeout 0 run_waiting in
+      let (_ : unit -> unit) = Host.set_timeout 0 run_waiting in
       ()
     in
     if !Base.in_frame then task ()
     else begin
       let stop = ref ignore in
       stop :=
-        Web.on_frame (fun _ ->
+        Host.on_frame (fun _ ->
             !stop ();
             task ())
     end;
@@ -53,7 +53,7 @@ let after_paint job =
   waiting := job :: !waiting
 
 let deferred ?equal (source : (_, _) signal) =
-  if not Web.in_browser then memo ?equal (fun () -> get source)
+  if not Host.in_browser then memo ?equal (fun () -> get source)
   else begin
     let watch = Scheduler.make (Some Scheduler.queue) Scheduler.never in
     let first =
@@ -99,9 +99,9 @@ let select_with_size (source : (_, _) signal) =
         Scheduler.dispose watch;
         raise e
   in
-  let keys = Web.keyed Signal.same and limit = ref 16 and live = ref true in
+  let keys = Host.keyed Signal.same and limit = ref 16 and live = ref true in
   let write key answer =
-    match Web.keyed_get keys key with Some s -> Signal.set s answer | None -> ()
+    match Host.keyed_get keys key with Some s -> Signal.set s answer | None -> ()
   in
   watch.level <- -1;
   watch.fn <-
@@ -117,18 +117,18 @@ let select_with_size (source : (_, _) signal) =
   Base.own (fun () ->
       live := false;
       Scheduler.dispose watch;
-      Web.keyed_clear keys);
+      Host.keyed_clear keys);
   let entry key =
-    match Web.keyed_get keys key with
+    match Host.keyed_get keys key with
     | Some s -> s
     | None ->
-        if Web.keyed_size keys >= !limit then begin
-          Web.keyed_keep keys (fun (s : bool Signal.t) -> s.node.first != None);
-          let size = Web.keyed_size keys in
+        if Host.keyed_size keys >= !limit then begin
+          Host.keyed_keep keys (fun (s : bool Signal.t) -> s.node.first != None);
+          let size = Host.keyed_size keys in
           limit := if size > 8 then 2 * size else 16
         end;
         let s = Signal.make (Signal.same !current key) in
-        Web.keyed_set keys key s;
+        Host.keyed_set keys key s;
         s
   in
   let read key =
@@ -143,7 +143,7 @@ let select_with_size (source : (_, _) signal) =
     end
     else Signal.same (if !live then get source else !current) key
   in
-  (read, fun () -> Web.keyed_size keys)
+  (read, fun () -> Host.keyed_size keys)
 
 let select source = fst (select_with_size source)
 

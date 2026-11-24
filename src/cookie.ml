@@ -19,9 +19,9 @@ let header ~who ?max_age ~path ?domain ~(same_site : [ `Lax | `Strict | `None ])
   if not (valid_name name) then Error (who ^ ": invalid cookie name " ^ name)
   else if not (valid_path path) then Error (who ^ ": invalid path " ^ path)
   else
-    match (domain, Web.encode_cookie_value value) with
+    match (domain, Host.encode_cookie_value value) with
     | Some domain, _ when not (valid_domain domain) -> Error (who ^ ": invalid domain " ^ domain)
-    | _, None -> Error (who ^ ": invalid value, not valid " ^ if Web.in_browser then "UTF-16" else "UTF-8")
+    | _, None -> Error (who ^ ": invalid value, not valid " ^ if Host.in_browser then "UTF-16" else "UTF-8")
     | _, Some encoded ->
         Ok
           (name ^ "=" ^ encoded ^ "; Path=" ^ path

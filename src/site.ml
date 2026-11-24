@@ -1,5 +1,5 @@
 let base () =
-  if Web.in_browser then Web.base ()
+  if Host.in_browser then Host.base ()
   else match !(Types.current_session ()) with Some { context = Some c; _ } -> c.base | _ -> !Types.config_base
 
 let join base path =

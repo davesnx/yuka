@@ -18,44 +18,44 @@ let cancel_pending () =
 
 let assign ~replace url =
   Navigation_state.set None;
-  Web.navigate replace url
+  Host.navigate replace url
 
 let save_scroll = Navigation_stub.save_scroll
 
 let hash_of = Navigation_web.hash_of
-let outlets () = Web.query_all (Web.document ()) "yuka-outlet"
+let outlets () = Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "yuka-outlet" Web.DOM.document)
 let is value = function Some v -> String.equal v value | None -> false
 let keys = Navigation_web.keys
 
 let build () =
-  match Web.query_all (Web.document ()) "meta[name=yuka-build]" with
-  | [| meta |] -> Web.get_attribute meta "content"
+  match (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-build]" Web.DOM.document)) with
+  | [| meta |] -> Web.DOM.Element.getAttribute "content" meta
   | _ -> None
 
 let mark_links outlet path =
-  let doc = Web.document () in
-  let islands = Web.query_all doc "yuka-island" in
+  let doc = Web.DOM.document in
+  let islands = Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "yuka-island" doc) in
   Array.iter
     (fun a ->
-      if not (Web.contains outlet a || Array.exists (fun i -> Web.contains i a) islands) then
-        match (is path (Web.get_attribute a "href"), Web.get_attribute a "aria-current") with
-        | true, None -> Web.set_attribute a "aria-current" "page"
-        | false, Some "page" -> Web.remove_attribute a "aria-current"
+      if not (Web.DOM.Node.contains a outlet || Array.exists (fun i -> Web.DOM.Node.contains a i) islands) then
+        match (is path (Web.DOM.Element.getAttribute "href" a), Web.DOM.Element.getAttribute "aria-current" a) with
+        | true, None -> Web.DOM.Element.setAttribute ~name:"aria-current" ~value:"page" a
+        | false, Some "page" -> Web.DOM.Element.removeAttribute "aria-current" a
         | _ -> ())
-    (Web.query_all doc "a")
+    (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "a" doc))
 
 let outlet header =
   Option.map
-    (fun key -> Array.find_opt (fun o -> is key (Web.get_attribute o "data-k")) (outlets ()))
+    (fun key -> Array.find_opt (fun o -> is key (Web.DOM.Element.getAttribute "data-k" o)) (outlets ()))
     (header "yuka-outlet")
 
 let fill el header text =
   let title =
-    Option.map (fun t -> match Web.decode_uri_component t with Some d -> d | None -> t) (header "yuka-title")
+    Option.map (fun t -> match Host.decode_uri_component t with Some d -> d | None -> t) (header "yuka-title")
   in
   Client.stop_within el;
   Navigation_web.adopt_stylesheets ();
-  Web.set_inner_html el text;
+  Web.DOM.Element.setInnerHTML el text;
   Navigation_web.adopt_stylesheets ();
   Option.iter Navigation_web.set_title title
 
@@ -115,17 +115,17 @@ type entry = {
   mutable warm : bool;
 }
 
-let cache_table : entry Web.table option ref = ref None
+let cache_table : entry Host.table option ref = ref None
 let cache () = table cache_table
 
-let limit_table : Prefetch.level Web.table option ref = ref None
+let limit_table : Prefetch.level Host.table option ref = ref None
 let limits () = table limit_table
 
 let max_age header = Navigation_web.max_age (Option.value (header "cache-control") ~default:"")
 
 let drop e =
-  match Web.table_get (cache ()) e.key with
-  | Some x when x == e -> Web.table_delete (cache ()) e.key
+  match Host.table_get (cache ()) e.key with
+  | Some x when x == e -> Host.table_delete (cache ()) e.key
   | _ -> ()
 
 let discard e =
@@ -135,7 +135,7 @@ let discard e =
 let era = ref 0
 
 let lookup overlay key =
-  match Web.table_get (cache ()) key with
+  match Host.table_get (cache ()) key with
   | Some e -> (
       match e.answer with
       | None -> if e.overlay = overlay then Some e else None
@@ -152,8 +152,8 @@ let lookup overlay key =
 
 let add e =
   let t = cache () in
-  if Web.table_size t >= 30 && not (Web.table_has t e.key) then discard (Web.table_values t).(0);
-  Web.table_set t e.key e
+  if Host.table_size t >= 30 && not (Host.table_has t e.key) then discard (Host.table_values t).(0);
+  Host.table_set t e.key e
 
 let page_key url = Navigation_web.absolute url ^ " " ^ keys ()
 
@@ -162,8 +162,8 @@ type overlay = {
   under : string;
   url : string;
   title : string;
-  focus : Web.node;
-  route : (Web.node * Web.node) option;
+  focus : Host.node;
+  route : (Host.node * Host.node) option;
   direct : bool;
 }
 
@@ -175,15 +175,15 @@ let hide () =
   Array.iter
     (fun el ->
       Client.stop_within el;
-      Web.remove el)
-    (Web.query_all (Web.document ()) "yuka-overlay")
+      Web.DOM.Element.remove el)
+    (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "yuka-overlay" Web.DOM.document))
 
 let prefetching = ref Prefetch.default
 let transitions_on = ref false
 let nav = ref 0
 let hover = ref ignore
 
-type waiting = { link : Web.node; key : string; url : string; trigger : Prefetch.level; unobserve : unit -> unit }
+type waiting = { link : Host.node; key : string; url : string; trigger : Prefetch.level; unobserve : unit -> unit }
 
 let queued : waiting list ref = ref []
 
@@ -201,14 +201,14 @@ let opened () =
       | None -> incr n
       | Some { stream = Some { result = None; _ }; _ } when e.prefetched -> incr n
       | Some _ -> ())
-    (Web.table_values (cache ()));
+    (Host.table_values (cache ()));
   !n
 
 let allowed () =
   !started && (match !prefetching with `Off -> false | _ -> true) && not (Navigation_web.save_data ())
 
 let under trigger page =
-  match Web.table_get (limits ()) page with Some l -> Prefetch.rank trigger <= Prefetch.rank l | None -> true
+  match Host.table_get (limits ()) page with Some l -> Prefetch.rank trigger <= Prefetch.rank l | None -> true
 
 let rec start (trigger : Prefetch.level) key url =
   let low = match trigger with `Visible | `Idle -> true | _ -> false in
@@ -234,8 +234,8 @@ let rec start (trigger : Prefetch.level) key url =
           Option.iter
             (fun l ->
               let t = limits () in
-              if Web.table_size t >= 200 then Web.table_clear t;
-              Web.table_set t page l)
+              if Host.table_size t >= 200 then Host.table_clear t;
+              Host.table_set t page l)
             (Option.bind (header "yuka-prefetch") Prefetch.of_name);
           settle (Some a);
           match trigger with
@@ -288,7 +288,7 @@ let predict url =
 
 let seen a inside unobserve =
   queued := without (fun w -> w.link == a && match w.trigger with `Visible -> true | _ -> false) !queued;
-  match Web.link_href true a with
+  match Host.link_href true a with
   | href when inside && href <> "" && allowed () ->
       let key = page_key href in
       if opened () < 4 || Option.is_some (lookup true key) then begin
@@ -303,10 +303,10 @@ let rec waits key = function [] -> false | w :: rest -> String.equal w.key key |
 let pass () =
   allowed () && (not (Navigation_web.hidden_or_slow ()))
   && begin
-    let here = Navigation_web.absolute (Web.current_url ()) and fresh = ref [] and n = ref 0 in
+    let here = Navigation_web.absolute (Host.current_url ()) and fresh = ref [] and n = ref 0 in
     Array.iter
       (fun a ->
-        match Web.link_href true a with
+        match Host.link_href true a with
         | href when href <> "" && !n < 15 ->
             let key = page_key href and page = Navigation_web.absolute href in
             if (not (String.equal page here)) && under `Idle page
@@ -317,14 +317,14 @@ let pass () =
               fresh := { link = a; key; url = href; trigger = `Idle; unobserve = ignore } :: !fresh
             end
         | _ -> ())
-      (Web.query_all (Web.document ()) "a[href]");
+      (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "a[href]" Web.DOM.document));
     queued := List.rev_append (List.rev !queued) (List.rev !fresh);
     pump ();
     true
   end
 
-let following : (Web.node * (unit -> unit)) list ref = ref []
-let broken : Web.node list ref = ref []
+let following : (Host.node * (unit -> unit)) list ref = ref []
+let broken : Host.node list ref = ref []
 let owners = ref 0
 
 let report () =
@@ -332,8 +332,8 @@ let report () =
   Scheduler.batch (fun () -> Signal.set Navigation_state.stream value)
 
 let unfollow gone =
-  let page = Web.document () in
-  let gone r = gone r || not (Web.contains page r) in
+  let page = Web.DOM.document in
+  let gone r = gone r || not (Web.DOM.Node.contains r page) in
   following := without (fun (r, stop) -> gone r && (stop (); true)) !following;
   broken := without gone !broken;
   report ()
@@ -400,7 +400,7 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
   | Some target ->
       let over = is "overlay" (a.header "yuka-layer") in
       if push then begin
-        let key = Web.fresh_key () in
+        let key = Host.fresh_key () in
         if over then
           overlays :=
             (match showing () with
@@ -416,13 +416,13 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
                   direct = not replace;
                 })
             :: !overlays;
-        if replace || String.equal (Navigation_web.no_hash final) (Web.current_url ()) then begin
-          Web.table_delete (scrolls ()) !current_key;
+        if replace || String.equal (Navigation_web.no_hash final) (Host.current_url ()) then begin
+          Host.table_delete (scrolls ()) !current_key;
           Navigation_web.replace_entry key final
         end
-        else Web.history_push_key key final;
+        else Host.history_push_key key final;
         current_key := key;
-        Navigation_stub.at := Web.history_at ()
+        Navigation_stub.at := Host.history_at ()
       end;
       let gen = !nav in
       let apply () =
@@ -430,7 +430,7 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
           let kept = if refresh then Navigation_web.hold_focus () else fun () -> false in
           (* Read before the swap, which can move the scroll. *)
           let restore = Option.map (fun y -> y ()) restore in
-          loaded := Web.current_url ();
+          loaded := Host.current_url ();
           shown_key := !current_key;
           Navigation_state.set None;
           let target =
@@ -447,8 +447,15 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
               target
             end
           in
-          let root = Option.value target ~default:(Web.document ()) in
-          unfollow (Web.contains root);
+          let root =
+            match target with
+            | Some t -> t
+            | None -> (
+                match Web.DOM.Document.body Web.DOM.document with
+                | Some b -> b
+                | None -> Web.DOM.Document.documentElement Web.DOM.document)
+          in
+          unfollow (fun n -> Web.DOM.Node.contains n root);
           let place =
             match (over, restore, hash_of final) with
             | true, _, _ -> ignore
@@ -521,10 +528,10 @@ let load ~overlay ~dir ~push ~replace ~restore ~refresh url =
 
 let go ~replace ~keep_scroll ~refresh url =
   save_scroll ();
-  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some Web.scroll_y else None) ~refresh url
+  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some Host.scroll_y else None) ~refresh url
 
 let navigate ~replace ~keep_scroll url = go ~replace ~keep_scroll ~refresh:false url
-let refresh () = go ~replace:true ~keep_scroll:true ~refresh:true (Web.current_url ())
+let refresh () = go ~replace:true ~keep_scroll:true ~refresh:true (Host.current_url ())
 
 let back () =
   match showing () with
@@ -534,10 +541,10 @@ let back () =
         Navigation_state.set (Some { Navigation_state.url = o.url; from = !loaded; kind = `Push });
         load ~overlay:false ~dir:"back" ~push:true ~replace:false ~restore:None ~refresh:false o.url
       end
-  | _ -> Web.history_back ()
+  | _ -> Host.history_back ()
 
 let on_over e =
-  match Web.link_href true (Web.target e) with
+  match Host.link_href true (Host.target_element (Web.DOM.Event.target e)) with
   | "" -> ()
   | href ->
       !hover ();
@@ -548,9 +555,9 @@ let on_out _ =
   hover := ignore
 
 let on_touch e =
-  match Web.link_href true (Web.target e) with "" -> () | href -> prefetch href
+  match Host.link_href true (Host.target_element (Web.DOM.Event.target e)) with "" -> () | href -> prefetch href
 
-let on_down e = if Web.plain_click e then on_touch e
+let on_down e = if Host.plain_click e then on_touch e
 
 let unwatch = ref ignore
 let untrack = ref ignore
@@ -559,13 +566,13 @@ let watch () =
   !unwatch ();
   unwatch := ignore;
   queued := [];
-  let observe () = Navigation_web.observe (Web.query_all (Web.document ()) "a[href]") seen in
+  let observe () = Navigation_web.observe (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "a[href]" Web.DOM.document)) seen in
   match !prefetching with
   | `Visible -> unwatch := observe ()
   | `Idle ->
       let skipped = ref false in
       let run () = skipped := not (pass ()) in
-      let off = observe () and cancel = Web.on_idle run in
+      let off = observe () and cancel = Host.on_idle run in
       let unlisten = Navigation_web.on_visible (fun () -> if !skipped then run () else pump ()) in
       unwatch :=
         fun () ->
@@ -577,18 +584,18 @@ let watch () =
 let clear () =
   incr era;
   queued := [];
-  Array.iter discard (Web.table_values (cache ()));
-  Web.table_clear (cache ())
+  Array.iter discard (Host.table_values (cache ()));
+  Host.table_clear (cache ())
 
 let on_popstate _ =
   save_scroll ();
-  let next = Web.history_key () in
+  let next = Host.history_key () in
   let dir = if Navigation_web.key_before next !current_key then "back" else "forward" in
   current_key := next;
-  let y = Option.value (Web.table_get (scrolls ()) !current_key) ~default:0. in
+  let y = Option.value (Host.table_get (scrolls ()) !current_key) ~default:0. in
   let shown = showing () in
   let closing = match shown with Some o -> String.equal next o.under | None -> false in
-  if closing || Web.current_url () = !loaded || List.exists (String.equal next) !Platform.kept then begin
+  if closing || Host.current_url () = !loaded || List.exists (String.equal next) !Platform.kept then begin
     shown_key := next;
     cancel_pending ();
     incr nav;
@@ -606,8 +613,8 @@ let on_popstate _ =
         Navigation_web.refocus o.focus;
         on_out ())
       shown;
-    if Web.current_url () <> !loaded then begin
-      loaded := Web.current_url ();
+    if Host.current_url () <> !loaded then begin
+      loaded := Host.current_url ();
       !Platform.moved ()
     end;
     if not closing then Navigation_web.scroll_to y
@@ -616,9 +623,9 @@ let on_popstate _ =
     load
       ~overlay:(List.exists (fun (o : overlay) -> String.equal o.key next && String.equal o.under (beneath ())) !overlays)
       ~dir ~push:false ~replace:false
-      ~restore:(Some (fun () -> y)) ~refresh:false (Web.current_url ())
+      ~restore:(Some (fun () -> y)) ~refresh:false (Host.current_url ())
 
-let on_pagehide _ = if Option.is_none (showing ()) then Web.scroll_restoration "auto"
+let on_pagehide _ = if Option.is_none (showing ()) then Host.scroll_restoration "auto"
 
 let handle e =
   match Navigation_web.event_type e with
@@ -633,16 +640,16 @@ let boot (transitions, islands) =
   cancel_pending ();
   started := true;
   shown_key := !current_key;
-  Web.table_clear (limits ());
+  Host.table_clear (limits ());
   (prefetching :=
-     match Web.query_all (Web.document ()) "meta[name=yuka-prefetch]" with
-     | [| m |] -> Option.value (Option.bind (Web.get_attribute m "content") Prefetch.of_name) ~default:Prefetch.default
+     match (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-prefetch]" Web.DOM.document)) with
+     | [| m |] -> Option.value (Option.bind (Web.DOM.Element.getAttribute "content" m) Prefetch.of_name) ~default:Prefetch.default
      | _ -> Prefetch.default);
   transitions_on := transitions;
   !untrack ();
   (untrack :=
      match !prefetching with
-     | `Trajectory | `Visible | `Idle -> Navigation_web.trajectory (Web.link_href true) predict
+     | `Trajectory | `Visible | `Idle -> Navigation_web.trajectory (Host.link_href true) predict
      | `Off | `Hover -> ignore);
   (Platform.acted :=
      fun () ->
@@ -672,7 +679,7 @@ let stop () =
   untrack := ignore;
   incr nav;
   overlays := [];
-  Array.iter (fun e -> Navigation_web.abort e.controller) (Web.table_values (cache ()));
+  Array.iter (fun e -> Navigation_web.abort e.controller) (Host.table_values (cache ()));
   clear ();
   Platform.acted := ignore
 

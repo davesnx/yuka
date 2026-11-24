@@ -37,6 +37,18 @@ and of the panel to `DIR`:
 
     node e2e/async-feed.ts http://127.0.0.1:8125/async-feed
 
-`BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh` and
-`demo/async-feed/bundle.sh` and starts the server with
-`--bundle`. The check then expects one script and no import map.
+Last, `posters.ts` runs under `/posters`: each of the four kinds, Shuffle,
+the sliders of a kind, the padding, the light preset and the title change
+the preview and the URL, and the browser draws the same shapes as the
+server. A colour or text change keeps every shape node, the text column is
+left of the poster and goes under it on a narrow screen, a reload keeps the
+poster, the Download SVG link points to `/poster.svg` with the same query,
+Download PNG gives a PNG, the gallery opens a preset in the playground, and
+it prints the time of a slider change with 60 lines of 10 waves. `POSTERS_SCREENSHOTS=DIR` saves the playground (dark and light) and
+the gallery to `DIR`:
+
+    node e2e/posters.ts http://127.0.0.1:8125/posters
+
+`BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh`,
+`demo/async-feed/bundle.sh` and `demo/posters/bundle.sh` and starts the
+server with `--bundle`. The check then expects one script and no import map.
