@@ -2497,6 +2497,36 @@ let transitions_off finish =
           check "no API: plain swap" (page "<p>two</p>") (body_html ());
           finish ()))
 
+let transitions_per_navigation finish =
+  setup {|<a id="l" href="/two" data-yuka-transition="off">two</a><a id="m" href="/three">three</a>|};
+  stub_transition ();
+  render ~islands:(runtime_registry []) ~transitions:true ();
+  ignore (click "#l" "");
+  resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+  tick (fun () ->
+      check "data-yuka-transition=off: no transition" "scroll:0" (log_read ());
+      log_clear ();
+      Browser.navigate ~transition:false "/three";
+      resolve_call 1 (doc "Three" (page "<p>three</p>")) "";
+      tick (fun () ->
+          check "~transition:false: no transition" "scroll:0" (log_read ());
+          check "~transition:false: shown" (page "<p>three</p>") (body_html ());
+          log_clear ();
+          Browser.navigate "/four";
+          resolve_call 2 (doc "Four" (page "<p>four</p>")) "";
+          tick (fun () ->
+              check "no override: the render default" "vt:push|scroll:0" (log_read ());
+              setup links;
+              stub_transition ();
+              plain_start ();
+              log_clear ();
+              Browser.navigate ~transition:true "/two";
+              resolve_call 0 (doc "Two" (page "<p>two</p>")) "";
+              tick (fun () ->
+                  check "~transition:true without ~transitions" "vt:push|scroll:0" (log_read ());
+                  check "attribute removed" "null" (nav_attr ());
+                  finish ()))))
+
 let down_cancels_hover finish =
   setup links;
   plain_start ();
@@ -4371,6 +4401,7 @@ let all =
     ("a navigation waits for the prefetch in flight", waits_for_prefetch);
     ("view transitions when enabled", transitions_on);
     ("no view transition by default or without the API", transitions_off);
+    ("view transition chosen per navigation", transitions_per_navigation);
     ("stop aborts prefetches and clears the cache", unmount_clears);
     ("a navigation cancels the hover timer", down_cancels_hover);
     ("at most 30 entries, the oldest goes first", thirty_entries);

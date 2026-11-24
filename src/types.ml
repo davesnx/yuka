@@ -103,7 +103,7 @@ type backend = ..
     alt_key : event -> bool;
     client_x : event -> float;
     client_y : event -> float;
-    navigate : replace:bool -> keep_scroll:bool -> string -> unit;
+    navigate : replace:bool -> keep_scroll:bool -> transition:bool option -> string -> unit;
     refresh : unit -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
@@ -111,7 +111,7 @@ type backend = ..
 
   type router = {
     boot : bool * (unit -> unit) -> unit;
-    navigate : replace:bool -> keep_scroll:bool -> string -> unit;
+    navigate : replace:bool -> keep_scroll:bool -> transition:bool option -> string -> unit;
     refresh : unit -> unit;
     prefetch : string -> unit;
     back : unit -> unit;

@@ -844,7 +844,7 @@ let platform_override_survives () =
   let c = Dom_cases.container (Dom_cases.server (page [ select_island () ])) in
   start_islands [ select_entry ];
   Private.platform :=
-    { !Private.platform with navigate = (fun ~replace:_ ~keep_scroll:_ url -> navigations := url :: !navigations) };
+    { !Private.platform with navigate = (fun ~replace:_ ~keep_scroll:_ ~transition:_ url -> navigations := url :: !navigations) };
   fire (Dom_cases.query c "select") "pointerover";
   Browser.navigate "/next";
   check "the override is still installed after an island started" "/next"
