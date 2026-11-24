@@ -517,7 +517,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
           (respond ?id_prefix ?route_printed ?entry build)
       in
       match shared sent layers with
-      | 0 -> answer headers (fun body -> head "" ^ body ^ "</body></html>") ?entry build
+      | 0 -> answer headers (fun body -> String.concat "" [ head ""; body; "</body></html>" ]) ?entry build
       | n ->
           let n = if overlay then List.length layers else n in
           let outlet = List.nth keys (n - 1) in
@@ -550,7 +550,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
       in
       Async.map
         (function
-          | Server.Settled { body; islands } -> { status; headers; body = String (head "" ^ body ^ close islands) }
+          | Server.Settled { body; islands } -> { status; headers; body = String (String.concat "" [ head ""; body; close islands ]) }
           | Server.Streamed { shell; fills; rest } ->
               let piece = function Server.Fill (id, html) -> Server.fill_chunk id html | Server.Value html -> html in
               { status; headers; body = Stream (streamed (head (if fills then Printer.fill_script else "") ^ shell) piece close rest) })

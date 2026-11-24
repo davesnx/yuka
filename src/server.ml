@@ -350,7 +350,7 @@ let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix 
   Async.on_settled driven_result (function
     | Async.Done islands ->
         finish islands;
-        decide (fun () -> resolve (Settled { body = !document ^ Buffer.contents values; islands }))
+        decide (fun () -> resolve (Settled { body = (match Buffer.contents values with "" -> !document | v -> !document ^ v); islands }))
     | Async.Failed m ->
         fail_finished m;
         decide (fun () -> fail m)
