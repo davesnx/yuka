@@ -419,11 +419,14 @@ module Out = struct
     if words && n <= 32 then begin
       ensure b (n + 8);
       let buf = b.buf and pos = b.pos in
-      let i = ref 0 in
-      while !i < n do
-        set64_out buf (pos + !i) (get64_out s !i);
-        i := !i + 8
-      done;
+      set64_out buf pos (get64_out s 0);
+      if n > 8 then begin
+        set64_out buf (pos + 8) (get64_out s 8);
+        if n > 16 then begin
+          set64_out buf (pos + 16) (get64_out s 16);
+          if n > 24 then set64_out buf (pos + 24) (get64_out s 24)
+        end
+      end;
       b.pos <- pos + n
     end
     else begin
@@ -458,46 +461,51 @@ module Out = struct
   (* Entities are at most 6 bytes: one word read from the literal, one store. *)
   let[@inline] put_entity buf pos e = set64_out buf pos (get64_out e 0)
 
+  (* At most [chunk] bytes of [s] at a time, with room for each one to become
+     a 6-byte entity stored as a whole word: one [ensure] per chunk. [chunk] is
+     a multiple of 8, so the word reads stay aligned on the start of [s]. *)
+  let chunk = 1024
+
   let add_escaped b ~quote s =
     let n = String.length s in
     let padded = (n land lnot 7) + 8 in
     let i = ref 0 in
     while !i < n do
-      if words && !i + 8 <= padded && clean_word (get64_out s !i) then begin
-        ensure b 8;
-        set64_out b.buf b.pos (get64_out s !i);
-        let k = if n - !i < 8 then n - !i else 8 in
-        b.pos <- b.pos + k;
-        i := !i + k
-      end
-      else begin
-        (* Eight bytes give at most 48 bytes of entities, and the last entity is
-           stored as a whole word. *)
-        ensure b 56;
-        let buf = b.buf in
-        let stop = if n - !i < 8 then n else !i + 8 in
-        let pos = ref b.pos in
-        while !i < stop do
-          (match String.unsafe_get s !i with
-          | '&' ->
-              put_entity buf !pos "&amp;";
-              pos := !pos + 5
-          | '<' ->
-              put_entity buf !pos "&lt;";
-              pos := !pos + 4
-          | '>' when not quote ->
-              put_entity buf !pos "&gt;";
-              pos := !pos + 4
-          | '"' when quote ->
-              put_entity buf !pos "&quot;";
-              pos := !pos + 6
-          | c ->
-              Bytes.unsafe_set buf !pos c;
-              incr pos);
-          incr i
-        done;
-        b.pos <- !pos
-      end
+      let stop = if n - !i > chunk then !i + chunk else n in
+      ensure b ((6 * (stop - !i)) + 8);
+      let buf = b.buf in
+      let pos = ref b.pos in
+      while !i < stop do
+        if words && !i + 8 <= padded && clean_word (get64_out s !i) then begin
+          set64_out buf !pos (get64_out s !i);
+          let k = if n - !i < 8 then n - !i else 8 in
+          pos := !pos + k;
+          i := !i + k
+        end
+        else begin
+          let last = if n - !i < 8 then n else !i + 8 in
+          while !i < last do
+            (match String.unsafe_get s !i with
+            | '&' ->
+                put_entity buf !pos "&amp;";
+                pos := !pos + 5
+            | '<' ->
+                put_entity buf !pos "&lt;";
+                pos := !pos + 4
+            | '>' when not quote ->
+                put_entity buf !pos "&gt;";
+                pos := !pos + 4
+            | '"' when quote ->
+                put_entity buf !pos "&quot;";
+                pos := !pos + 6
+            | c ->
+                Bytes.unsafe_set buf !pos c;
+                incr pos);
+            incr i
+          done
+        end
+      done;
+      b.pos <- !pos
     done
 
   let sub b off len =

@@ -576,9 +576,6 @@ type runtime_template
 (** A compiled element tree: the ppx makes one per lowercase JSX tree, at
     the top of the module. *)
 
-type 'kind runtime_part
-(** The value of one part of a {!type-runtime_template}. *)
-
 type runtime_entry
 (** What the browser knows about an island. The island modules expose it
     as [register]. *)
@@ -641,15 +638,6 @@ val runtime_template :
     The browser clones [html] as given and the server prints a fixed
     [srcdoc] or [base] [href] as given. The client decodes [code] only to
     hydrate and in a dev build. Part numbers count from 0. *)
-
-val runtime_child : 'kind element -> 'kind runtime_part
-val runtime_attribute : 'kind attribute -> 'kind runtime_part
-val runtime_attribute_option : 'kind attribute option -> 'kind runtime_part
-(** [None] writes no attribute. *)
-
-val runtime_instance : runtime_template -> 'kind runtime_part array -> 'kind element
-(** The tree of the template with its parts filled in. It prints and
-    hydrates as the same tree made with {!val-element}. *)
 
 val runtime_stylesheet : string -> stylesheet
 (** The sheet served at this URL. *)
@@ -1041,6 +1029,20 @@ module Private : sig
       name, the expected and the found node, and a short path. Returns a
       function that stops all effects and handlers. Browser only. *)
 end
+
+type 'kind runtime_part = private Private.part
+(** The value of one part of a {!type-runtime_template}. A private
+    abbreviation, so that the array of parts that the ppx writes is built
+    as an array of blocks, without the run-time check for floats. *)
+
+val runtime_child : 'kind element -> 'kind runtime_part
+val runtime_attribute : 'kind attribute -> 'kind runtime_part
+val runtime_attribute_option : 'kind attribute option -> 'kind runtime_part
+(** [None] writes no attribute. *)
+
+val runtime_instance : runtime_template -> 'kind runtime_part array -> 'kind element
+(** The tree of the template with its parts filled in. It prints and
+    hydrates as the same tree made with {!val-element}. *)
 
 (**/**)
 

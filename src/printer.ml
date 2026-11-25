@@ -18,15 +18,18 @@ open Base
   (* The attribute names printed last, checked once: most names come back on
      every element. [plain] means that Url.check gives back the value
      unchanged whatever the tag. *)
-  type known = { name : string; lname : string; plain : bool }
+  type known = { name : string; lname : string; plain : bool; prefix : string }
 
-  let known = Array.make 16 { name = ""; lname = ""; plain = false }
+  let known = Array.make 16 { name = ""; lname = ""; plain = false; prefix = "" }
   let known_slot name = (String.length name + Char.code (String.unsafe_get name 0)) land 15
 
   let learn name =
     if not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ String.escaped name);
     let lname = Host.lowercase name in
-    let k = { name; lname; plain = not (Url.url_name lname || lname = "srcdoc" || Url.animation_name lname) } in
+    let k =
+      { name; lname; plain = not (Url.url_name lname || lname = "srcdoc" || Url.animation_name lname);
+        prefix = " " ^ name ^ "=\"" }
+    in
     Array.unsafe_set known (known_slot name) k;
     k
 
@@ -34,19 +37,30 @@ open Base
     if String.length name = 0 then learn name
     else
       let k = Array.unsafe_get known (known_slot name) in
-      if String.equal k.name name then k else learn name
+      if k.name == name || String.equal k.name name then k else learn name
+
+  (* The tag lowercased last: the tags of an element come back as the same
+     string, most of them literals. One pair, replaced as a whole. *)
+  let last_tag = ref ("", "")
+
+  let lower_tag tag =
+    let t, lt = !last_tag in
+    if t == tag then lt
+    else begin
+      let lt = Host.lowercase tag in
+      last_tag := (tag, lt);
+      lt
+    end
 
   let add_attr b ?(literal = false) ~tag name value =
     let k = lookup name in
     let value =
       if k.plain then value
       else
-        let tag = Host.lowercase tag in
+        let tag = lower_tag tag in
         if literal && Url.html_sink ~tag k.lname then value else Url.check ~tag ~log:log_blocked k.lname value
     in
-    Buffer.add_char b ' ';
-    Buffer.add_string b name;
-    Buffer.add_string b "=\"";
+    Buffer.add_string b k.prefix;
     add_escaped b ~quote:true value;
     Buffer.add_char b '"'
 
@@ -331,11 +345,14 @@ open Base
       end
     in
     let rec unwrap n =
-      match sheet_of n with
-      | Some (href, body) ->
-          use_sheet href;
-          unwrap body
-      | None -> n
+      match n with
+      | Fragment [ Element _; _ ] -> (
+          match sheet_of n with
+          | Some (href, body) ->
+              use_sheet href;
+              unwrap body
+          | None -> n)
+      | _ -> n
     in
     let rec go n =
       match unwrap n with
