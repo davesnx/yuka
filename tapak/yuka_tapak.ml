@@ -126,8 +126,8 @@ module Base = struct
     Yuka.Async.return
       (match body with
       | Yuka.Server.String text -> Tapak.Response.of_string ~headers ~status text
-      | Yuka.Server.Print { length; print } ->
-          Tapak.Response.of_string ~headers ~status (Yuka.Server.print_to_string ~length print)
+      | Yuka.Server.Fixed { length; write } ->
+          Tapak.Response.of_string ~headers ~status (Yuka.Server.fixed_to_string ~length write)
       | Yuka.Server.Stream f ->
           Tapak.Response.stream ~headers ~status (fun write flush ->
               await_exn

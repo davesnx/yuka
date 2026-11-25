@@ -1818,17 +1818,17 @@ module Server : sig
     | Stream of ((string -> unit Async.t) -> unit Async.t)
         (** The adapter calls the function with its write function and ends
             the response when the result settles. *)
-    | Print of { length : int; print : (string -> int -> int -> unit) -> unit }
-        (** A body of [length] bytes, held in a pooled buffer: the cycle
-            answers a settled page with it. The adapter calls [print] once
-            with a write function that copies [len] bytes of the string from
-            [off] before it returns; the buffer goes back to the pool when
-            [print] returns, so the string must not be kept. An adapter that
-            needs one string uses {!print_to_string}. *)
+    | Fixed of { length : int; write : (string -> int -> int -> unit) -> unit }
+        (** A body of exactly [length] bytes, sent with [content-length] and
+            held in a pooled buffer: the cycle answers a settled page with it.
+            The adapter calls [write] once with a sink that copies [len] bytes
+            of the string from [off] before it returns; the buffer goes back
+            to the pool when [write] returns, so the string must not be kept.
+            An adapter that needs one string uses {!fixed_to_string}. *)
 
-  val print_to_string : length:int -> ((string -> int -> int -> unit) -> unit) -> string
-  (** [print_to_string ~length print]: the bytes of a [Print] body as one
-      string. It calls [print]. *)
+  val fixed_to_string : length:int -> ((string -> int -> int -> unit) -> unit) -> string
+  (** [fixed_to_string ~length write]: the bytes of a [Fixed] body as one
+      string. It calls [write]. *)
 
   type response = private { status : int; headers : (string * string) list; body : body }
   (** A handler's answer. A header name may repeat (two [set-cookie]). A
@@ -2150,7 +2150,7 @@ module Server : sig
           ends the response normally. When the error page itself fails, the
           answer is a plain-text 500. Every answer to [HEAD] has an empty
           body. A [HEAD] on a page renders it as for [GET]: when the [GET]
-          answer is one string or a [Print], [HEAD] has its [content-length]; when [GET]
+          answer is one string or [Fixed], [HEAD] has its [content-length]; when [GET]
           streams, so does [HEAD], with no body. For a file, the cycle
           answers 200 with the headers it knows (no [content-type] for a
           client or public file) when [exists] says so, else the plain 404.

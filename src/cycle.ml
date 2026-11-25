@@ -85,17 +85,17 @@ let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
 type body =
   | String of string
   | Stream of ((string -> unit Async.t) -> unit Async.t)
-  | Print of { length : int; print : (string -> int -> int -> unit) -> unit }
+  | Fixed of { length : int; write : (string -> int -> int -> unit) -> unit }
 
-let print_to_string ~length print =
+let fixed_to_string ~length write =
   let out = Bytes.create length and at = ref 0 in
-  print (fun s off len ->
+  write (fun s off len ->
       Bytes.blit_string s off out !at len;
       at := !at + len);
-  if !at <> length then invalid_arg "Yuka.Server.print_to_string: the body does not have its length";
+  if !at <> length then invalid_arg "Yuka.Server.fixed_to_string: the body does not have its length";
   Bytes.unsafe_to_string out
 
-let discard print = print (fun _ _ _ -> ())
+let discard write = write (fun _ _ _ -> ())
 type response = { status : int; headers : (string * string) list; body : body }
 
 let response ?(status = 200) ?(headers = []) body = Async.return { status; headers; body }
@@ -570,20 +570,20 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
         framed := true;
         (head "", close islands)
       in
-      let keep length print = kept := Some (length, print) in
+      let keep length write = kept := Some (length, write) in
       let taken () =
         match !kept with
-        | Some (length, print) ->
+        | Some (length, write) ->
             kept := None;
-            print_to_string ~length print
+            fixed_to_string ~length write
         | None -> ""
       in
       Async.map
         (function
           | Server.Settled { body = ""; _ } when !framed && Option.is_some !kept ->
-              let length, print = Option.get !kept in
+              let length, write = Option.get !kept in
               kept := None;
-              { status; headers; body = Print { length; print } }
+              { status; headers; body = Fixed { length; write } }
           | Server.Settled { body; _ } when !framed -> { status; headers; body = String (taken () ^ body) }
           | Server.Settled { body; islands } -> { status; headers; body = String (String.concat "" [ head ""; body; close islands ]) }
           | Server.Streamed { shell; fills; rest } ->
@@ -1142,8 +1142,8 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (s
           else r.headers @ [ ("content-length", string_of_int (String.length text)) ]
         in
         Respond { r with headers; body = String "" }
-    | Respond ({ body = Print { length; print }; _ } as r) when env.head_only ->
-        discard print;
+    | Respond ({ body = Fixed { length; write }; _ } as r) when env.head_only ->
+        discard write;
         let headers =
           if has_header "content-length" r.headers then r.headers
           else r.headers @ [ ("content-length", string_of_int length) ]
