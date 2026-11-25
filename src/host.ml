@@ -370,7 +370,148 @@ let fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit =
 let add_stylesheet : string -> unit = fun _ -> browser_only ()
 let read_file path = try Some (In_channel.with_open_bin path In_channel.input_all) with Sys_error _ -> None
 
-let buffers : Stdlib.Buffer.t list ref = ref []
+external get64_out : string -> int -> int64 = "%caml_string_get64u"
+(* The word-at-a-time paths read the padding of a string block, which is 8 bytes wide
+   only on 64-bit targets. *)
+let words = Sys.word_size = 64
+external set64_out : bytes -> int -> int64 -> unit = "%caml_bytes_set64u"
+
+(* A word has none of the four special bytes when this is true; see [skip_clean]. *)
+let[@inline] clean_word w =
+  let a = Int64.logxor (Int64.logor w 0x0404040404040404L) 0x2626262626262626L
+  and l = Int64.logxor (Int64.logor w 0x0202020202020202L) 0x3e3e3e3e3e3e3e3eL in
+  Int64.equal 0L
+    (Int64.logand 0x8080808080808080L
+       (Int64.logor
+          (Int64.logand (Int64.sub a 0x0101010101010101L) (Int64.lognot a))
+          (Int64.logand (Int64.sub l 0x0101010101010101L) (Int64.lognot l))))
+
+module Out = struct
+  type t = { mutable buf : bytes; mutable pos : int }
+
+  let create n = { buf = Bytes.create (max n 64); pos = 0 }
+  let[@inline] length b = b.pos
+  let clear b = b.pos <- 0
+  let truncate b n = if n < 0 || n > b.pos then invalid_arg "Out.truncate" else b.pos <- n
+
+  let grow b more =
+    let need = b.pos + more in
+    let len = ref (Bytes.length b.buf) in
+    while !len < need do
+      len := 2 * !len
+    done;
+    let nb = Bytes.create !len in
+    Bytes.unsafe_blit b.buf 0 nb 0 b.pos;
+    b.buf <- nb
+
+  let[@inline] ensure b more = if b.pos + more > Bytes.length b.buf then grow b more
+
+  let[@inline] add_char b c =
+    ensure b 1;
+    Bytes.unsafe_set b.buf b.pos c;
+    b.pos <- b.pos + 1
+
+  (* Short strings are copied a word at a time: the reads stay inside the block
+     of [s] (its padding, see [skip_clean]) and the writes inside [buf], past
+     [pos] but before the end, where the bytes are not in use yet. *)
+  let add_string b s =
+    let n = String.length s in
+    if words && n <= 32 then begin
+      ensure b (n + 8);
+      let buf = b.buf and pos = b.pos in
+      let i = ref 0 in
+      while !i < n do
+        set64_out buf (pos + !i) (get64_out s !i);
+        i := !i + 8
+      done;
+      b.pos <- pos + n
+    end
+    else begin
+      ensure b n;
+      Bytes.unsafe_blit_string s 0 b.buf b.pos n;
+      b.pos <- b.pos + n
+    end
+
+  let add_substring b s off len =
+    if off < 0 || len < 0 || off > String.length s - len then invalid_arg "Out.add_substring";
+    if words && len <= 32 then begin
+      ensure b (len + 8);
+      let buf = b.buf and pos = b.pos in
+      let padded = (String.length s land lnot 7) + 8 in
+      let i = ref 0 in
+      while !i < len && off + !i + 8 <= padded do
+        set64_out buf (pos + !i) (get64_out s (off + !i));
+        i := !i + 8
+      done;
+      while !i < len do
+        Bytes.unsafe_set buf (pos + !i) (String.unsafe_get s (off + !i));
+        incr i
+      done;
+      b.pos <- pos + len
+    end
+    else begin
+      ensure b len;
+      Bytes.unsafe_blit_string s off b.buf b.pos len;
+      b.pos <- b.pos + len
+    end
+
+  (* Entities are at most 6 bytes: one word read from the literal, one store. *)
+  let[@inline] put_entity buf pos e = set64_out buf pos (get64_out e 0)
+
+  let add_escaped b ~quote s =
+    let n = String.length s in
+    let padded = (n land lnot 7) + 8 in
+    let i = ref 0 in
+    while !i < n do
+      if words && !i + 8 <= padded && clean_word (get64_out s !i) then begin
+        ensure b 8;
+        set64_out b.buf b.pos (get64_out s !i);
+        let k = if n - !i < 8 then n - !i else 8 in
+        b.pos <- b.pos + k;
+        i := !i + k
+      end
+      else begin
+        (* Eight bytes give at most 48 bytes of entities, and the last entity is
+           stored as a whole word. *)
+        ensure b 56;
+        let buf = b.buf in
+        let stop = if n - !i < 8 then n else !i + 8 in
+        let pos = ref b.pos in
+        while !i < stop do
+          (match String.unsafe_get s !i with
+          | '&' ->
+              put_entity buf !pos "&amp;";
+              pos := !pos + 5
+          | '<' ->
+              put_entity buf !pos "&lt;";
+              pos := !pos + 4
+          | '>' when not quote ->
+              put_entity buf !pos "&gt;";
+              pos := !pos + 4
+          | '"' when quote ->
+              put_entity buf !pos "&quot;";
+              pos := !pos + 6
+          | c ->
+              Bytes.unsafe_set buf !pos c;
+              incr pos);
+          incr i
+        done;
+        b.pos <- !pos
+      end
+    done
+
+  let sub b off len =
+    if off < 0 || len < 0 || off > b.pos - len then invalid_arg "Out.sub";
+    Bytes.sub_string b.buf off len
+
+  let contents b = Bytes.sub_string b.buf 0 b.pos
+
+  let blit b src dst dst_off len =
+    if src < 0 || len < 0 || src > b.pos - len then invalid_arg "Out.blit";
+    Bytes.blit b.buf src dst dst_off len
+end
+
+let buffers : Out.t list ref = ref []
 let buffers_lock = Mutex.create ()
 
 let take_buffer () =
@@ -382,6 +523,20 @@ let take_buffer () =
       | [] -> None)
 
 let give_buffer b = Mutex.protect buffers_lock (fun () -> buffers := b :: !buffers)
+let pages : Bytes.t list ref = ref []
+
+let take_bytes n =
+  let b = Mutex.protect buffers_lock (fun () ->
+      match !pages with
+      | b :: rest ->
+          pages := rest;
+          Some b
+      | [] -> None)
+  in
+  match b with Some b when Bytes.length b >= n -> b | _ -> Bytes.create ((n + 4095) land lnot 4095)
+
+let give_bytes b =
+  Mutex.protect buffers_lock (fun () -> if List.compare_length_with !pages 8 < 0 then pages := b :: !pages)
 
 module Threads = Ephemeron.K1.Make (struct
   type t = Thread.t
@@ -431,7 +586,7 @@ external get64 : string -> int -> int64 = "%caml_string_get64u"
    padding is zero bytes and a last byte of 0 to 7, never one of the four. *)
 let skip_clean s from =
   let n = String.length s in
-  let padded = (n land lnot 7) + 8 in
+  let padded = if words then (n land lnot 7) + 8 else 0 in
   let i = ref from in
   while
     !i + 8 <= padded

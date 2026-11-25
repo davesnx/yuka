@@ -83,7 +83,7 @@ let broken session items =
          | Types.Pending_async _ | Types.Pending_answer _ -> None)
        items)
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ?on_ready ?frame
+let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ?on_ready ?frame ?keep
     ?(shown = false) ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.context <- context;
@@ -100,7 +100,7 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
     | Some f -> Some (fun (s : Types.session) -> if s.pending = [] then Some (f ~islands:(s.islands > 0)) else None)
     | None -> None
   in
-  let shell = Printer.print ?frame session (fun () -> build ()) in
+  let shell = Printer.print ?frame ?keep session (fun () -> build ()) in
   let fills = List.exists is_await session.pending in
   let result, resolve, fail = Async.make () in
   let shown = ref shown in
@@ -302,7 +302,7 @@ type page =
 let line (json : Json.t) = Json.to_string json ^ "\n"
 let part id html = line (`List [ `String id; `String html ])
 
-let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ?frame ~sleep build =
+let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ?frame ?keep ~sleep build =
   let document = ref "" and values = Buffer.create 64 and streaming = ref false in
   let early = ref [] in
   let writer = ref (fun piece ->
@@ -331,7 +331,7 @@ let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix 
         resolve (Streamed { shell = !document ^ Buffer.contents values ^ failed; fills; rest }))
   in
   let driven_result =
-    drive ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ?frame ~timeout ~sleep
+    drive ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ?frame ?keep ~timeout ~sleep
       ?on_ready:(if stream then Some (fun ~fills ~failed -> if !driven then send_shell ~fills ~failed else ready := Some (fills, failed)) else None)
       (fun () -> build ())
       ~on_shell:(fun ~fills:_ ~failed:_ shell ->

@@ -60,6 +60,8 @@ module Adapter = struct
     to_async
       (match body with
       | Yuka.Server.String text -> Dream.respond ~code:status ~headers text
+      | Yuka.Server.Print { length; print } ->
+          Dream.respond ~code:status ~headers (Yuka.Server.print_to_string ~length print)
       | Yuka.Server.Stream f ->
           Dream.stream ~code:status ~headers (fun stream ->
               to_lwt
@@ -146,6 +148,7 @@ let is_html response =
 let drain (r : Yuka.Server.response) =
   match r.body with
   | Yuka.Server.String text -> Yuka.Async.return text
+  | Yuka.Server.Print { length; print } -> Yuka.Async.return (Yuka.Server.print_to_string ~length print)
   | Yuka.Server.Stream f ->
       let b = Buffer.create 4096 in
       Yuka.Async.map
