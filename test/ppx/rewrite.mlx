@@ -286,3 +286,13 @@ end
 open Yuka
 
 let own_module_after_open_yuka = <p>(Yuka.text (String.uppercase_ascii "x"))</p>
+
+let srcdoc_hole_on_iframe = <iframe srcdoc=(State.get s) />
+
+let non_ascii_static = <p data_é="x"><div /></p>
+
+let non_ascii_hole = <div aria_é=(if State.get on then "a" else "b") />
+
+let non_ascii_call = <div data_é=(Model.slug item) />
+
+let non_ascii_optional = <div ?data_é />
