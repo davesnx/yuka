@@ -6,13 +6,19 @@ Yuka is not on opam yet. Pin it from GitHub:
 
 ```sh
 opam pin add yuka git+https://github.com/davesnx/yuka.git
-opam pin add yuka-dream git+https://github.com/davesnx/yuka.git
+opam pin add yuka-server git+https://github.com/davesnx/yuka.git
 ```
 
-`yuka` brings Melange, mlx and the `yuka` command. `yuka-dream` runs an
-app on [Dream](https://github.com/camlworks/dream). Pin these the same
-way when you need them:
+`yuka` brings Melange, mlx and the `yuka` command. `yuka-server` runs an
+app on its own HTTP/1.1 server ([ache](https://github.com/davesnx/ache)
+on Lwt), with signed cookie sessions and the live socket. ache is not on
+opam: pin `ache` and `ache-lwt` first, to the `main` branch that
+`make pin-list` of the Yuka repository prints. Pin these the same way
+when you need them:
 
+- `yuka-dream` runs an app on [Dream](https://github.com/camlworks/dream)
+  (`Yuka_dream.handler`), and has the prerender
+  (`Yuka_dream.prerender`). See "Run on Dream" below.
 - `yuka-tapak` runs an app on [tapak](https://github.com/syaiful6/tapak),
   in direct style on Eio (`Yuka_tapak.handler`). tapak and cows are not
   on opam: pin them at the commits that `make pin-list` of the Yuka
@@ -116,7 +122,7 @@ can fail now and then:
 ```
 (executable
  (name main)
- (libraries app_shared yuka yuka-dream dream)
+ (libraries app_shared yuka yuka-server)
  (preprocess
   (pps yuka.ppx)))
 
@@ -156,7 +162,7 @@ let not_found ~path () =
       <p>(Yuka.text ("No page at " ^ path))</p>)
 ```
 
-`server/main.ml` runs the app on Dream:
+`server/main.ml` runs the app on the server of `yuka-server`:
 
 ```ocaml
 let read file = In_channel.with_open_bin file In_channel.input_all
@@ -180,6 +186,67 @@ let () =
       ~dev:(Sys.getenv_opt "YUKA_DEV" = Some "1")
       ()
   in
+  match Sys.getenv_opt "YUKA_SECRET" with
+  | None ->
+      prerr_endline "set YUKA_SECRET (at least 32 bytes)";
+      exit 1
+  | Some secret ->
+      let sessions = Yuka_server.sessions ~secret () in
+      Yuka_server.run ~port:8080 ~sessions config Yuka_routes.app
+```
+
+`Yuka_server.run` listens on `127.0.0.1` (`~interface:"0.0.0.0"` for every
+address) until SIGINT or SIGTERM. The config has no `~log`, so the
+messages of Yuka, and of `Yuka.Console` during a request, go to stderr,
+with one line for each request (`~log_requests:false` turns these lines
+off).
+
+### Sessions
+
+`Yuka_server.sessions` keeps the session in a signed cookie
+(`yuka-session`), with no store on the server. The live socket and
+`/_yuka/csrf` need it; without `~sessions` they answer 500. The secret
+signs the cookie and the CSRF tokens:
+
+- Give every process the same secret, keep it across restarts, and keep
+  it out of the source code. A new secret ends every session.
+- On HTTPS, give `~secure:true`: the cookie gets `Secure` and the name
+  `__Host-yuka-session`, so that another subdomain cannot set it.
+- A session lives 14 days (`~lifetime`, in seconds) and gets a new cookie
+  when less than half of it is left. One session cannot be ended before
+  it expires: a stolen cookie is valid until then.
+- A page that does not ask for the session or a CSRF token gets no
+  `set-cookie`, so it can be cached.
+
+### Your own routes on the server
+
+`Yuka_server.handler` gives a function that answers one request. Write a
+function of the same type that answers your routes and calls it for the
+rest, and serve it with `Yuka_server.serve` (add `ache` to the
+`libraries` of `server/dune`):
+
+```ocaml
+let yuka = Yuka_server.handler ~sessions config Yuka_routes.app
+
+let handler connection reqd =
+  match (Ache.Request_descriptor.request reqd).target with
+  | "/health" ->
+      Ache.Request_descriptor.respond_with_string reqd
+        (Ache.Response.create `OK) "ok"
+  | _ -> yuka connection reqd
+
+let () = Lwt_main.run (Yuka_server.serve ~port:8080 handler)
+```
+
+The server has no TLS and no HTTP/2: put a proxy in front for those.
+
+### Run on Dream
+
+To run the app on Dream, use `yuka-dream` in place of `yuka-server`
+(`(libraries app_shared yuka yuka-dream dream)`), and end `main.ml`
+with:
+
+```ocaml
   Dream.run @@ Dream.logger @@ Dream.set_secret "change-me"
   @@ Dream.cookie_sessions
   @@ Yuka_dream.handler config Yuka_routes.app
@@ -194,15 +261,15 @@ name `yuka`.
 With more than one server process, each process joins a bus before it
 serves, so that a publish reaches the pages on every process (see
 [Data](data.md#nodes-and-the-bus)). Add `yuka-live-pg` and `unix` to the
-`libraries` of `server/dune`, and in `main.ml`, before `Dream.run`:
+`libraries` of `server/dune`, and in `main.ml`, before `Yuka_server.run`:
 
 ```ocaml
 let name = Printf.sprintf "%s-%d" (Unix.gethostname ()) (Unix.getpid ()) in
 let bus = Yuka_live_pg.bus ~conninfo:"host=db dbname=app user=app" ~channel:"app_live" () in
-Lwt_main.run (Yuka_dream.to_lwt (Yuka.Server.Live.use_bus ~name bus));
+Lwt_main.run (Yuka_server.to_lwt (Yuka.Server.Live.use_bus ~name bus));
 ```
 
-`Yuka_dream.handler config Yuka_routes.app` then uses the default live
+`Yuka_server.run ~sessions config Yuka_routes.app` then uses the default live
 node, which is on the bus. The name must be unique to the process.
 
 ### Static files and prerender
@@ -222,8 +289,9 @@ A prerender writes each page whose rules say `~prerender:true` (see
 [Router](router.md)) to a directory. It starts from the nodes with no
 param, follows the links of each page to other such pages, writes
 `404.html`, and copies the client JavaScript and the `public`
-directories. A page that uses `Yuka.Live.make` is not written. Run it as a
-build step, with the config and app of the server:
+directories. A page that uses `Yuka.Live.make` is not written. The
+prerender is in `yuka-dream` only. Run it as a build step, with the config
+and app of the server:
 
 ```ocaml
 match Lwt_main.run (Yuka_dream.prerender ~out:"_build/site" config Yuka_routes.app) with
@@ -277,16 +345,20 @@ let () = Yuka.render ~islands ()
 ```
 
 Build, then run the server from the project root and open
-`http://localhost:8080`:
+`http://localhost:8080`. The server exits when `YUKA_SECRET` is not set:
+make a secret of at least 32 bytes once, and keep it across restarts (a
+new secret ends every session):
 
 ```sh
+export YUKA_SECRET="$(openssl rand -hex 32)"
 dune build
 ./_build/default/server/main.exe
 ```
 
 `yuka dev` rebuilds on change, restarts the server and reloads the
 browser. It starts the server with `YUKA_DEV=1`, so `main.ml` passes
-`~dev:true` to the config:
+`~dev:true` to the config, and with the environment of the shell, so
+export `YUKA_SECRET` first:
 
 ```sh
 yuka dev --build 'dune build --watch' --assets _build/default/client/out \

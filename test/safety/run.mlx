@@ -115,7 +115,7 @@ let attribute_names () =
       raises ("unchecked: " ^ String.escaped name) (fun () -> runtime_attr name "x");
       raises ("hole unchecked: " ^ String.escaped name) (fun () -> runtime_hole_attr name (fun () -> None));
       raises ("template: " ^ String.escaped name) (fun () -> Private.template Private.Template.(element "a" [ fixed name "x" ] [])))
-    [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
+    [ "href\t"; "href "; "x onclick=alert(1)"; ""; "\x00"; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
   check_html "a valid name" {|<a data-x:y_z.1="x"></a>|} (element "a" [ attr "data-x:y_z.1" "x" ] [])
 
 let unchecked_names () =

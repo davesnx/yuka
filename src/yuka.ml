@@ -68,6 +68,12 @@ module Server = struct
   let to_string build = Server.to_string (Kind.fn build)
   let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
 
+  module Cookie = struct
+    let set = Cookie.set
+    let drop = Cookie.drop
+    let get r name = Option.bind (Request.cookie r name) Host.decode_uri_component
+  end
+
   module Action = struct
     let implement = Server.implement
     let reject = Server.reject
@@ -119,6 +125,8 @@ module Server = struct
     module Make = Cycle.Make
 
     let default_log = Cycle.default_log
+    let log = Cycle.log
+    let default_sink level message = !Types.default_log level message
 
     let build_id = Cycle.build_id
   end

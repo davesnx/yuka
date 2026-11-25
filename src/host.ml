@@ -29,22 +29,23 @@ let console_log : string -> unit = fun _ -> browser_only ()
 let console_debug : string -> unit = fun _ -> browser_only ()
 let exn_to_string = Printexc.to_string
 let encode_uri : string -> string = fun _ -> browser_only ()
-let encode_cookie_value : string -> string option = fun _ -> browser_only ()
-let encode_uri_component s =
+let percent_encode keep s =
   if not (String.is_valid_utf_8 s) then None
   else
     let b = Buffer.create (String.length s) in
     String.iter
-      (function
-        | ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')') as c ->
-            Buffer.add_char b c
-        | c ->
-            let n = Char.code c in
-            Buffer.add_char b '%';
-            Buffer.add_char b "0123456789ABCDEF".[n lsr 4];
-            Buffer.add_char b "0123456789ABCDEF".[n land 15])
+      (fun c ->
+        if keep c then Buffer.add_char b c
+        else
+          let n = Char.code c in
+          Buffer.add_char b '%';
+          Buffer.add_char b "0123456789ABCDEF".[n lsr 4];
+          Buffer.add_char b "0123456789ABCDEF".[n land 15])
       s;
     Some (Buffer.contents b)
+let unreserved = function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' | '~' -> true | _ -> false
+let encode_cookie_value = percent_encode unreserved
+let encode_uri_component = percent_encode (function '!' | '*' | '\'' | '(' | ')' -> true | c -> unreserved c)
 let decode_uri_component s =
   let n = String.length s and out = Buffer.create (String.length s) and run = Buffer.create 4 in
   let hex i =
@@ -426,11 +427,14 @@ let lowercase s = if has_upper s 0 then String.lowercase_ascii s else s
 
 external get64 : string -> int -> int64 = "%caml_string_get64u"
 
+(* The words may run past the end of [s] into the padding of its block: the
+   padding is zero bytes and a last byte of 0 to 7, never one of the four. *)
 let skip_clean s from =
   let n = String.length s in
+  let padded = (n land lnot 7) + 8 in
   let i = ref from in
   while
-    !i + 8 <= n
+    !i + 8 <= padded
     &&
     let w = get64 s !i in
     let a = Int64.logxor (Int64.logor w 0x0404040404040404L) 0x2626262626262626L
@@ -446,7 +450,7 @@ let skip_clean s from =
   while !i < n && match String.unsafe_get s !i with '&' | '<' | '>' | '"' -> false | _ -> true do
     incr i
   done;
-  !i
+  if !i > n then n else !i
 
 let rec refused_byte s i =
   i < String.length s

@@ -488,9 +488,9 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
   let shared_rule = List.exists (fun (n, v) -> same_name n "cache-control" && shared_cache v) headers in
-  let respond ?id_prefix ?route_printed ?entry build =
+  let respond ?id_prefix ?route_printed ?entry ?frame build =
     Server.page ~stream:(not shared_rule) ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
-      ~context:env.context ~current ~timeout ~sleep:env.sleep build
+      ~context:env.context ~current ?frame ~timeout ~sleep:env.sleep build
   in
   let streamed first piece last rest write =
     let ( >>= ) = Async.bind in
@@ -552,13 +552,19 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
       let close islands =
         (if islands || env.prefetch = `Off then "" else speculation_rules base) ^ "</body></html>"
       in
+      let framed = ref false in
+      let frame ~islands =
+        framed := true;
+        (head "", close islands)
+      in
       Async.map
         (function
+          | Server.Settled { body; _ } when !framed -> { status; headers; body = String body }
           | Server.Settled { body; islands } -> { status; headers; body = String (String.concat "" [ head ""; body; close islands ]) }
           | Server.Streamed { shell; fills; rest } ->
               let piece = function Server.Fill (id, html) -> Server.fill_chunk id html | Server.Value html -> html in
               { status; headers; body = Stream (streamed (head (if fills then Printer.fill_script else "") ^ shell) piece close rest) })
-        (respond ?entry build)
+        (respond ?entry ~frame build)
 
 let internal_error () = plain 500 "Internal Server Error" []
 

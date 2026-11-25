@@ -25,7 +25,7 @@
  (name yuka)
  (synopsis "Web framework for OCaml, server-rendered, with islands")
  (description
-  "Yuka renders pages on the server and streams slow parts as they become ready. It does not depend on a web server: the yuka-dream package runs an app on Dream, and another server needs one small adapter. Parts that need interaction are islands: small components that Melange compiles to JavaScript and that hydrate in the browser. Components are written in mlx (JSX for OCaml) and use signals, so a component runs once and only the parts that read a signal update.")
+  "Yuka renders pages on the server and streams slow parts as they become ready. It does not depend on a web server: the yuka-server package runs an app on its own HTTP server, the yuka-dream package on Dream, and another server needs one small adapter. Parts that need interaction are islands: small components that Melange compiles to JavaScript and that hydrate in the browser. Components are written in mlx (JSX for OCaml) and use signals, so a component runs once and only the parts that read a signal update.")
  (depends
   (ocaml
    (>= 5.4))
@@ -79,6 +79,27 @@
   http
   logs
   (eio_main :with-test)
+  (alcotest :with-test)
+  (odoc :with-doc)))
+
+(package
+ (name yuka-server)
+ (synopsis "Run a Yuka app on its own HTTP server (ache, Lwt)")
+ (description
+  "The request cycle of Yuka on the ache HTTP/1.1 library and Lwt, with no other web framework: one handler that serves the routes of Routes.ml, the client JavaScript, public files and the live socket, with signed cookie sessions and CSRF tokens, and a function that starts the server.")
+ (depends
+  (ocaml
+   (>= 5.4))
+  (yuka
+   (= :version))
+  ache
+  ache-lwt
+  lwt
+  (digestif
+   (>= 1.0.0))
+  magic-mime
+  (mirage-crypto-rng
+   (>= 1.2.0))
   (alcotest :with-test)
   (odoc :with-doc)))
 

@@ -57,3 +57,49 @@
   works and has no prefetch, and each page with no island reports a CSP
   violation (in the console, and to `report-uri` or `report-to` when the
   policy has one).
+- Sessions of `yuka-server` (`Yuka_server.sessions`) are signed cookies
+  with no store: one session cannot be ended before it expires, so a
+  stolen cookie is valid until then (14 days by default). Each use in the
+  second half of that time gives a new cookie for the same session, so a
+  thief who uses the cookie keeps the session until its absolute limit,
+  `~max_lifetime` (30 days from its start by default). Anyone who has
+  the secret can make a valid cookie: keep it out of the source code. Set
+  `~secure:true` on HTTPS: without it the cookie has no `Secure` and no
+  `__Host-` name, so a page on another subdomain can set its own valid
+  cookie for the site. Do not give a shared cache rule (`public`,
+  `s-maxage`) to a page that reads the session or a CSRF token: its answer
+  depends on the session, and a valid session that needs no new cookie
+  sends no `set-cookie`, so a shared cache can give the answer of one user
+  to another.
+- `yuka-server` limits the time to send a request head (10 seconds),
+  the time a connection waits for a next request and a request body sends
+  no byte (60 seconds), the time a write of an answer sends no byte
+  (`~write_timeout`, 30 seconds), the time a live socket receives no byte
+  (`~live_timeout`, 60 seconds) and the number of open connections
+  (`~max_connections`, 1024; over it the server accepts nothing until one
+  closes). It does not limit the whole time of a body or an answer, so a
+  client that sends or reads a few bytes at a time keeps its connection,
+  and it does not limit the connections of one address. Put a proxy in
+  front of a public server.
+
+## Cookies
+
+- `Server.Cookie.set` gives a `set-cookie` header for the `headers` of a
+  handler answer. By default the cookie has `Path=/`, `HttpOnly` and
+  `SameSite=Lax`. Set `~secure:true` on HTTPS. It gives `Error` for a name
+  that is not a token, a path or domain that could add an attribute
+  (`;`, control characters), `SameSite=None` without `Secure`, and a
+  `__Secure-` or `__Host-` name without the attributes that browsers
+  require for it. The value is percent-encoded as `Browser.set_cookie`
+  encodes it, so it cannot end the cookie or add an attribute.
+  `Server.Cookie.get` decodes it; `Server.Request.cookie` gives the raw
+  value.
+- A client can change any cookie. `Yuka_server.Signed_cookie` adds an
+  HMAC-SHA256 of the name and the value, made with the secret of
+  `Yuka_server.sessions`, and `get` gives `None` when the value or the
+  name changed. The value is not encrypted: do not put a secret in it. A
+  signed value has no time limit of its own: a copy stays valid until the
+  secret changes, whatever its `max_age`.
+- Pages, loaders, guards, actions and form actions cannot set a cookie.
+  Set it in a handler (`Router.get`, `Router.post`), or in the browser
+  with `Browser.set_cookie`, which cannot set `HttpOnly`.

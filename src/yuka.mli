@@ -1489,7 +1489,7 @@ module Server : sig
     val cookie : request -> string -> string option
     (** The value of a cookie from the [cookie] header, not decoded. Double
         quotes around the value are removed. [None] when the request has no
-        cookie of this name. *)
+        cookie of this name. {!Cookie.get} decodes it. *)
 
     val body : request -> limit:int -> (string, [ `Too_large ]) result Async.t
     (** The request body, read from the client one time only. A later call
@@ -1508,6 +1508,53 @@ module Server : sig
         1 MiB, the limit of an action body. [`Too_large] as for {!body};
         [`Invalid_json] when the body is not JSON; [`Invalid_value] when
         the codec does not accept the JSON. Each message tells why. *)
+  end
+
+  (** Cookies that the server reads and sets. A handler puts the header
+      of {!set} or {!drop} in the [headers] of its answer; [set-cookie] may
+      repeat. Values are encoded as {!Browser.set_cookie} encodes them, so
+      {!get} reads a cookie of the server and a cookie of the browser in
+      the same way. For a signed cookie, see [Yuka_server.Signed_cookie]. *)
+  module Cookie : sig
+    val set :
+      ?max_age:int ->
+      ?path:string ->
+      ?domain:string ->
+      ?same_site:[ `Lax | `Strict | `None ] ->
+      ?secure:bool ->
+      ?http_only:bool ->
+      string ->
+      string ->
+      (string * string, string) result
+    (** [set name value] is the header [("set-cookie", ...)] that writes
+        the cookie. Each byte of the UTF-8 [value] other than
+        [A-Z a-z 0-9 - . _ ~] becomes [%XX]. [max_age] is in seconds;
+        without it the cookie ends with the browser session. [path]
+        defaults to ["/"], [same_site] to [`Lax], [secure] to [false] and
+        [http_only] to [true]. The attributes come in this order: [Path],
+        [Domain], [Max-Age], [HttpOnly], [SameSite], [Secure].
+
+        Gives [Error] with a message for: a name that is not a cookie token
+        (letters, digits and [! # $ % & ' * + - . ^ _ ` | ~]); a path that
+        does not start with ['/'] or holds a [';'] or a control character;
+        a domain with a character other than letters, digits, ['-'] and
+        ['.']; a value that is not valid UTF-8 (in the browser: a lone
+        surrogate); [`None] without [~secure:true]; a name that starts
+        with [__Secure-] without [~secure:true]; a name that starts with
+        [__Host-] without [~secure:true], with a [path] other than ["/"] or
+        with a [domain]. The prefixes are compared without case, as
+        browsers do. *)
+
+    val drop : ?path:string -> ?domain:string -> string -> (string * string, string) result
+    (** [drop name] is the header that removes the cookie: an empty value
+        and [Max-Age=0]. [path] and [domain] must be those of the cookie.
+        A name with the [__Secure-] or [__Host-] prefix gets [Secure].
+        [Error] as for {!set}. *)
+
+    val get : request -> string -> string option
+    (** The value of the cookie, percent-decoded as
+        {!Url.decode_uri_component} decodes it. [None] when the request has
+        no cookie of this name or its value does not decode. *)
   end
 
   module Action : sig
@@ -2108,6 +2155,17 @@ module Server : sig
         when [config] has no [log], else [config]. An adapter calls it to
         send messages to the log of its server ([Yuka_dream.handler] uses
         [Dream.sub_log "yuka"]). *)
+
+    val log : config -> log_level -> string -> unit
+    (** [log config] is the log of [config]: its [log], else the default
+        sink ({!set_default_log}). An adapter sends its own messages there,
+        so they go where the messages of the cycle go. *)
+
+    val default_sink : log_level -> string -> unit
+    (** The default sink ({!set_default_log}), for a message of an adapter
+        that has no config at hand. Unlike {!log}, it needs no config, so
+        it does not make one (making a config sets the base of
+        {!Router.url}). *)
 
     val build_id : config -> app -> string
     (** The build id: a digest of the route tree and, with [assets], of the
