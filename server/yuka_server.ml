@@ -621,8 +621,7 @@ let drain connections drain_timeout =
       Hashtbl.iter (fun _ c -> force_close c) connections;
       closed_all connections)
 
-let serve ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) ?(listening = ignore) ?(write_timeout = 30.)
-    ?(live_timeout = 60.) ?(max_connections = 1024) ?(drain_timeout = 10.) handler =
+let check_serve ~interface ~port ~write_timeout ~live_timeout ~max_connections ~drain_timeout =
   let address =
     match Unix.inet_addr_of_string interface with
     | a -> a
@@ -633,8 +632,12 @@ let serve ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) 
   positive "serve" "live_timeout" live_timeout;
   positive "serve" "drain_timeout" drain_timeout;
   if max_connections < 1 then invalid_arg (Printf.sprintf "Yuka_server.serve: max_connections %d is not positive" max_connections);
+  Unix.ADDR_INET (address, port)
+
+let serve_on ~reuse_port ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) ?(listening = ignore)
+    ?(write_timeout = 30.) ?(live_timeout = 60.) ?(max_connections = 1024) ?(drain_timeout = 10.) handler =
+  let address = check_serve ~interface ~port ~write_timeout ~live_timeout ~max_connections ~drain_timeout in
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let address = Unix.ADDR_INET (address, port) in
   let socket = Lwt_unix.socket (Unix.domain_of_sockaddr address) Unix.SOCK_STREAM 0 in
   let connections = Hashtbl.create 64 and freed = Lwt_condition.create () and next_id = ref 0 in
   let opened c =
@@ -678,6 +681,7 @@ let serve ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) 
            (Lwt.finalize
               (fun () ->
                 Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
+                if reuse_port then Lwt_unix.setsockopt socket Unix.SO_REUSEPORT true;
                 Lwt.bind (Lwt_unix.bind socket address) (fun () ->
                     Lwt_unix.listen socket 1024;
                     listened := true;
@@ -691,19 +695,228 @@ let serve ?(interface = "127.0.0.1") ?(port = 8080) ?(stop = fst (Lwt.wait ())) 
           | Error e, _ | Ok (), Lwt.Fail e -> Lwt.fail e
           | Ok (), (Lwt.Return () | Lwt.Sleep) -> Lwt.return_unit))
 
-let run ?interface ?port ?sessions ?node ?log_requests ?write_timeout ?live_timeout ?max_connections ?drain_timeout config app =
+let serve = serve_on ~reuse_port:false
+
+(* [second] runs on a second signal. [installed] runs once the handlers are in place (a
+   worker unblocks its signals there). [parent] is a pipe that the parent never writes to:
+   its end (the parent died) starts the drain as a signal does. *)
+let until_signal ?(second = fun () -> exit 1) ?(installed = ignore) ?parent ~signals serving =
   let stop, stopping = Lwt.wait () in
-  let quit _ =
+  let start message =
     if Lwt.is_sleeping stop then begin
-      default_log `Info "Yuka_server: stopping after the answers in progress; a second signal stops at once";
+      default_log `Info message;
       Lwt.wakeup_later stopping ()
     end
-    else exit 1
   in
-  let signals = List.map (fun signal -> Lwt_unix.on_signal signal quit) [ Sys.sigint; Sys.sigterm ] in
+  let quit _ =
+    if Lwt.is_sleeping stop then start "Yuka_server: stopping after the answers in progress; a second signal stops at once"
+    else second ()
+  in
+  let handlers = List.map (fun signal -> Lwt_unix.on_signal signal quit) signals in
+  installed ();
+  let watch fd =
+    Unix.set_nonblock fd;
+    let fd = Lwt_unix.of_unix_file_descr ~blocking:false fd in
+    Lwt.bind
+      (Lwt.catch (fun () -> Lwt.map ignore (Lwt_unix.read fd (Bytes.create 1) 0 1)) (fun _ -> Lwt.return_unit))
+      (fun () ->
+        start "Yuka_server: the parent process ended; stopping after the answers in progress";
+        Lwt.return_unit)
+  in
   Fun.protect
-    ~finally:(fun () -> List.iter Lwt_unix.disable_signal_handler signals)
+    ~finally:(fun () -> List.iter Lwt_unix.disable_signal_handler handlers)
     (fun () ->
       Lwt_main.run
-        (serve ?interface ?port ~stop ?write_timeout ?live_timeout ?max_connections ?drain_timeout
-           (handler ?node ?sessions ?log_requests config app)))
+        (Option.iter (fun fd -> Lwt.async (fun () -> watch fd)) parent;
+         serving stop))
+
+let status_text = function
+  | Unix.WEXITED n -> Printf.sprintf "exited with code %d" n
+  | Unix.WSIGNALED n -> Printf.sprintf "was killed by signal %d" n
+  | Unix.WSTOPPED n -> Printf.sprintf "was stopped by signal %d" n
+
+(* A worker is a child of [Lwt_unix.fork] that serves until SIGTERM (SIGINT is ignored:
+   the parent forwards it as SIGTERM, so a Ctrl-C to the process group counts once), then
+   leaves with [Unix._exit]: the at_exit functions of the parent never run twice. The
+   parent forks with SIGINT and SIGTERM blocked; the worker unblocks them once its own
+   handlers are in place, so a signal sent meanwhile is delivered then, not lost. *)
+let fork_worker ~closing work =
+  flush_all ();
+  match Lwt_unix.fork () with
+  | 0 ->
+      List.iter (fun fd -> try Unix.close fd with Unix.Unix_error _ -> ()) closing;
+      Sys.set_signal Sys.sigint Sys.Signal_ignore;
+      let code =
+        match work () with
+        | () -> 0
+        | exception e ->
+            default_log `Error (Printf.sprintf "Yuka_server: worker %d failed: %s" (Unix.getpid ()) (Printexc.to_string e));
+            1
+      in
+      flush_all ();
+      Unix._exit code
+  | pid -> pid
+
+let restart_after = 1.
+let restart_limit = 10
+let restart_window = 60.
+
+let supervise ~workers ~address ~listening work =
+  let holder = Unix.socket ~cloexec:true (Unix.domain_of_sockaddr address) Unix.SOCK_STREAM 0 in
+  let parent = Unix.getpid () and live = Hashtbl.create workers and stopping = ref false and failed = ref None and port = ref 0 in
+  (* Only this process holds the write end: a worker reads the end of the file when this
+     process ends, even by SIGKILL, and drains. *)
+  let alive_in, alive_out = Unix.pipe ~cloexec:true () in
+  let deaths = Queue.create () in
+  let spawn ~closing ready =
+    let blocked = Unix.sigprocmask Unix.SIG_BLOCK [ Sys.sigint; Sys.sigterm ] in
+    let unblock () = ignore (Unix.sigprocmask Unix.SIG_SETMASK blocked) in
+    (* A signal that came before the block set [stopping]: no worker then, it would miss it. *)
+    Fun.protect ~finally:unblock (fun () ->
+        if not !stopping then begin
+          let pid = fork_worker ~closing:(alive_out :: holder :: closing) (work !port ready alive_in unblock) in
+          Hashtbl.replace live pid (Unix.gettimeofday ())
+        end)
+  in
+  let forward () = Hashtbl.iter (fun pid _ -> try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ()) live in
+  let quit _ =
+    if Unix.getpid () = parent then
+      if !stopping then begin
+        forward ();
+        exit 1
+      end
+      else begin
+        stopping := true;
+        default_log `Info "Yuka_server: stopping the workers after the answers in progress; a second signal stops at once";
+        forward ()
+      end
+  in
+  let previous = List.map (fun signal -> (signal, Sys.signal signal (Sys.Signal_handle quit))) [ Sys.sigint; Sys.sigterm ] in
+  let stop_all reason =
+    if not !stopping then begin
+      stopping := true;
+      failed := Some reason;
+      forward ()
+    end
+  in
+  let rec reap () =
+    if Hashtbl.length live > 0 then begin
+      let ended =
+        Hashtbl.fold
+          (fun pid started ended ->
+            match Unix.waitpid [ Unix.WNOHANG ] pid with
+            | 0, _ -> ended
+            | _, status -> (pid, started, status) :: ended
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> ended
+            | exception Unix.Unix_error (Unix.ECHILD, _, _) -> (pid, started, Unix.WEXITED 0) :: ended)
+          live []
+      in
+      List.iter
+        (fun (pid, started, status) ->
+          Hashtbl.remove live pid;
+          if !stopping then begin
+            if status <> Unix.WEXITED 0 then default_log `Warn (Printf.sprintf "Yuka_server: worker %d %s" pid (status_text status))
+          end
+          else if Unix.gettimeofday () -. started < restart_after then begin
+            let reason = Printf.sprintf "Yuka_server.run: worker %d %s at its start" pid (status_text status) in
+            default_log `Error (reason ^ "; stopping the other workers");
+            stop_all reason
+          end
+          else begin
+            let now = Unix.gettimeofday () in
+            Queue.push now deaths;
+            while now -. Queue.peek deaths > restart_window do
+              ignore (Queue.pop deaths)
+            done;
+            if Queue.length deaths > restart_limit then begin
+              let reason =
+                Printf.sprintf "Yuka_server.run: workers ended %d times within %.0f seconds; the last, worker %d, %s"
+                  (Queue.length deaths) restart_window pid (status_text status)
+              in
+              default_log `Error (reason ^ "; stopping the other workers");
+              stop_all reason
+            end
+            else begin
+              default_log `Error (Printf.sprintf "Yuka_server: worker %d %s; starting another" pid (status_text status));
+              spawn ~closing:[] None
+            end
+          end)
+        ended;
+      (try Unix.sleepf 0.05 with Unix.Unix_error (Unix.EINTR, _, _) -> ());
+      reap ()
+    end
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun (signal, behavior) -> Sys.set_signal signal behavior) previous;
+      Unix.close alive_out;
+      Unix.close alive_in;
+      Unix.close holder)
+    (fun () ->
+      (* The holder keeps the port (chosen by the system for port 0) for the life of [run];
+         it never listens, so the kernel spreads connections over the listening workers only. *)
+      Unix.setsockopt holder Unix.SO_REUSEADDR true;
+      Unix.setsockopt holder Unix.SO_REUSEPORT true;
+      Unix.bind holder address;
+      (match Unix.getsockname holder with Unix.ADDR_INET (_, p) -> port := p | Unix.ADDR_UNIX _ -> ());
+      let ready_in, ready_out = Unix.pipe ~cloexec:true () in
+      (* A signal during this loop stops it: the handler runs when [spawn] unblocks, after
+         the new worker is in [live], so every forked worker gets SIGTERM. *)
+      let rec start n =
+        if n < workers && not !stopping then begin
+          spawn ~closing:[ ready_in ] (Some ready_out);
+          start (n + 1)
+        end
+        else n
+      in
+      let started = start 0 in
+      Unix.close ready_out;
+      let buffer = Bytes.create workers in
+      let rec count n =
+        if n >= started then n
+        else
+          match Unix.read ready_in buffer 0 workers with
+          | 0 -> n
+          | k -> count (n + k)
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> count n
+      in
+      let ready = count 0 in
+      Unix.close ready_in;
+      if ready < started then stop_all "Yuka_server.run: a worker stopped before it listened"
+      else if not !stopping then listening !port;
+      reap ();
+      Option.iter failwith !failed)
+
+let run ?interface ?port ?listening ?(workers = 1) ?sessions ?node ?log_requests ?write_timeout ?live_timeout ?max_connections
+    ?drain_timeout config app =
+  if workers < 1 then invalid_arg (Printf.sprintf "Yuka_server.run: workers %d is not positive" workers);
+  let handler = handler ?node ?sessions ?log_requests config app in
+  if workers = 1 then
+    until_signal ~signals:[ Sys.sigint; Sys.sigterm ] (fun stop ->
+        serve ?interface ?port ~stop ?listening ?write_timeout ?live_timeout ?max_connections ?drain_timeout handler)
+  else begin
+    let address =
+      check_serve ~interface:(Option.value interface ~default:"127.0.0.1") ~port:(Option.value port ~default:8080)
+        ~write_timeout:(Option.value write_timeout ~default:30.) ~live_timeout:(Option.value live_timeout ~default:60.)
+        ~max_connections:(Option.value max_connections ~default:1024) ~drain_timeout:(Option.value drain_timeout ~default:10.)
+    in
+    Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+    let work port ready parent unblock () =
+      let listening _ =
+        Option.iter
+          (fun fd ->
+            (try ignore (Unix.write_substring fd "r" 0 1) with Unix.Unix_error _ -> ());
+            try Unix.close fd with Unix.Unix_error _ -> ())
+          ready
+      in
+      until_signal
+        ~second:(fun () ->
+          flush_all ();
+          Unix._exit 1)
+        ~installed:unblock ~parent ~signals:[ Sys.sigterm ]
+        (fun stop ->
+          serve_on ~reuse_port:true ?interface ~port ~stop ~listening ?write_timeout ?live_timeout ?max_connections
+            ?drain_timeout handler)
+    in
+    supervise ~workers ~address ~listening:(Option.value listening ~default:ignore) work
+  end

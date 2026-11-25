@@ -1141,6 +1141,7 @@ let bad_arguments () =
       ("a live timeout of nan", fun () -> ignore (Yuka_server.serve ~live_timeout:Float.nan (make config)));
       ("a negative drain timeout", fun () -> ignore (Yuka_server.serve ~drain_timeout:(-1.) (make config)));
       ("no connection", fun () -> ignore (Yuka_server.serve ~max_connections:0 (make config)));
+      ("no worker", fun () -> Yuka_server.run ~workers:0 config Yuka_routes.app);
       ( "a connection with a write timeout of 0",
         fun () ->
           let a, b = Lwt_unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
@@ -1507,6 +1508,103 @@ let second_signal () =
   | Unix.WEXITED n -> Alcotest.failf "the server process exited with %d, not 1" n
   | Unix.WSIGNALED n | Unix.WSTOPPED n -> Alcotest.failf "the server process got signal %d" n
 
+let workers_child () =
+  Sys.set_signal Sys.sigpipe Sys.Signal_default;
+  Yuka_server.run ~workers:2 ~port:0
+    ~listening:(fun port ->
+      print_endline (string_of_int port);
+      flush stdout)
+    ~sessions (Yuka.Server.config ()) Yuka_routes.app;
+  exit 0
+
+let children pid =
+  let file = Printf.sprintf "/proc/%d/task/%d/children" pid pid in
+  if not (Sys.file_exists file) then None
+  else
+    let ic = open_in file in
+    let line = Fun.protect ~finally:(fun () -> close_in ic) (fun () -> try input_line ic with End_of_file -> "") in
+    Some (List.filter_map int_of_string_opt (String.split_on_char ' ' line))
+
+let workers () =
+  let out, into = Unix.pipe ~cloexec:true () in
+  let pid =
+    Unix.create_process Sys.executable_name [| Sys.executable_name; "workers-child" |] Unix.stdin into
+      (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0)
+  in
+  Unix.close into;
+  let ic = Unix.in_channel_of_descr out in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  with_child pid @@ fun () ->
+  let port = int_of_string (input_line ic) in
+  check_true "a real port" (port > 0);
+  let get () =
+    let s = connect_child port 0 in
+    let request = "GET /feed.xml HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" in
+    ignore (Unix.write_substring s request 0 (String.length request));
+    let chunk = Bytes.create 4096 in
+    let n = Unix.read s chunk 0 4096 in
+    Unix.close s;
+    String.starts_with ~prefix:"HTTP/1.1 200" (Bytes.sub_string chunk 0 n)
+  in
+  check_true "every worker answers once listening is called" (List.for_all Fun.id (List.init 20 (fun _ -> get ())));
+  let gone worker = match Unix.kill worker 0 with () -> false | exception Unix.Unix_error (Unix.ESRCH, _, _) -> true in
+  let all_workers =
+    match children pid with
+    | None -> []
+    | Some first ->
+        Alcotest.(check int) "two worker processes" 2 (List.length first);
+        Unix.sleepf 1.1;
+        let killed = List.hd first in
+        Unix.kill killed Sys.sigkill;
+        let deadline = Unix.gettimeofday () +. bound in
+        let rec replaced () =
+          match children pid with
+          | Some now when List.length now = 2 && not (List.mem killed now) -> now
+          | _ when Unix.gettimeofday () < deadline ->
+              Unix.sleepf 0.05;
+              replaced ()
+          | _ -> Alcotest.fail "a killed worker is not replaced"
+        in
+        let now = replaced () in
+        check_true "the workers answer after a replacement" (List.for_all Fun.id (List.init 10 (fun _ -> get ())));
+        now
+  in
+  Unix.kill pid Sys.sigterm;
+  exited_0 (wait_child pid);
+  check_true "every worker ended with the parent" (List.for_all gone all_workers)
+
+let workers_orphaned () =
+  let out, into = Unix.pipe ~cloexec:true () in
+  let pid =
+    Unix.create_process Sys.executable_name [| Sys.executable_name; "workers-child" |] Unix.stdin into
+      (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0)
+  in
+  Unix.close into;
+  let ic = Unix.in_channel_of_descr out in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  with_child pid @@ fun () ->
+  ignore (int_of_string (input_line ic));
+  match children pid with
+  | None -> ()
+  | Some workers ->
+      Alcotest.(check int) "two worker processes" 2 (List.length workers);
+      Unix.kill pid Sys.sigkill;
+      ignore (Unix.waitpid [] pid);
+      let gone worker = match Unix.kill worker 0 with () -> false | exception Unix.Unix_error (Unix.ESRCH, _, _) -> true in
+      let deadline = Unix.gettimeofday () +. 5. in
+      let rec wait () =
+        if List.for_all gone workers then ()
+        else if Unix.gettimeofday () < deadline then begin
+          Unix.sleepf 0.05;
+          wait ()
+        end
+        else begin
+          List.iter (fun w -> try Unix.kill w Sys.sigkill with Unix.Unix_error _ -> ()) workers;
+          Alcotest.fail "the workers serve on after their parent was killed"
+        end
+      in
+      wait ()
+
 let serve_failures () =
   Lwt_main.run
     (let taken = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -1555,6 +1653,7 @@ let () =
   (match Array.to_list Sys.argv with
   | [ _; "emfile-child" ] -> emfile_child ()
   | [ _; "run-child"; port ] -> run_child (int_of_string port)
+  | [ _; "workers-child" ] -> workers_child ()
   | _ -> ());
   let case name f = Alcotest.test_case name `Quick f in
   Alcotest.run "yuka-server"
@@ -1630,6 +1729,8 @@ let () =
           case "a publish to a client that left" live_publish_after_client_left;
           case "run until SIGTERM" run_stops;
           case "a second signal exits at once" second_signal;
+          case "run with two workers on port 0" workers;
+          case "the workers end when their parent is killed" workers_orphaned;
           case "a client that never reads is closed" never_reads;
           case "a slow reader gets the whole answer" slow_reader;
           case "the connection limit" connection_limit;

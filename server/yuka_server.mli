@@ -193,6 +193,8 @@ val serve :
 val run :
   ?interface:string ->
   ?port:int ->
+  ?listening:(int -> unit) ->
+  ?workers:int ->
   ?sessions:sessions ->
   ?node:Yuka.Server.Live.node ->
   ?log_requests:bool ->
@@ -205,7 +207,54 @@ val run :
   unit
 (** [serve] of {!handler} under [Lwt_main.run], until SIGINT or SIGTERM.
     The first signal starts the drain of {!serve} and returns when it ends;
-    a second signal exits the process at once with code 1. *)
+    a second signal exits the process at once with code 1. [listening] is
+    called once with the real port, when the server accepts connections.
+
+    [workers] (default: 1) is the number of server processes. With 1, the
+    server runs in this process as above. With more, [run] binds the port
+    (so port 0 gets one real port), then starts [workers] processes with
+    [Lwt_unix.fork], before any Lwt loop of theirs. Each one listens on the
+    same port with [SO_REUSEPORT], so Linux spreads the new connections
+    evenly over them, and serves as {!serve}. On macOS and the BSDs,
+    [SO_REUSEPORT] does not balance: the connections may all go to one
+    worker. [SO_REUSEPORT] also lets another process of the same user (a
+    second instance started by mistake, for example) bind the same port
+    and share its connections, where [workers = 1] fails with
+    [EADDRINUSE]. [listening] is called in this
+    process once all workers listen. This process serves nothing and
+    supervises:
+    - SIGINT or SIGTERM is sent to each worker as SIGTERM (a worker ignores
+      SIGINT, so a Ctrl-C to the process group counts once); each worker
+      drains as above; [run] returns when all have ended. A second signal
+      is sent on too, and exits at once with code 1 (a worker that gets a
+      second SIGTERM leaves at once with code 1 too).
+    - A worker that ends without a signal is logged at [`Error] and
+      replaced by a new one. A worker that ends less than 1 second after
+      its start (a bind that fails, an exception at start), or a 11th
+      worker end within 60 seconds, stops the others, and [run] fails
+      with [Failure] once they have ended.
+    - A worker leaves with [Unix._exit] after flushing the standard
+      channels: functions of [at_exit] run in this process only.
+    - When this process ends without stopping them (SIGKILL), each worker
+      sees it and drains as on SIGTERM.
+
+    Per worker: [max_connections] is the limit of each worker (the server
+    holds up to [workers * max_connections] connections), and so is the
+    [ulimit -n] that it must stay under. When a worker ends, the
+    connections still in its accept queue are reset. Sessions are signed
+    cookies, so any worker reads them. The Live [node] is per process: the
+    default in-process node only reaches the live clients of the same
+    worker; a publish that must reach every client needs a node with a bus
+    ({!Yuka.Server.Live.use_bus}), such as the Postgres bus of
+    [yuka-live-pg].
+
+    The handler, and the [node] and any bus, are built in this process
+    before the fork, and each worker gets a copy. So with more than one
+    worker, an app must not open connections (a database, a bus) or start
+    threads or domains before [run]: a forked connection is shared by every
+    worker, and a forked process has no copy of the other threads.
+    [Lwt_unix.fork] fails after a [Domain.spawn]. Raises [Invalid_argument] as {!serve}
+    does, and when [workers] is less than 1. *)
 
 val request : Yuka.Server.request -> Ache.Request_descriptor.t option
 (** The ache request of a request that {!handler} made, for a loader,
