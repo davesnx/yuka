@@ -426,11 +426,14 @@ let lowercase s = if has_upper s 0 then String.lowercase_ascii s else s
 
 external get64 : string -> int -> int64 = "%caml_string_get64u"
 
+(* The words may run past the end of [s] into the padding of its block: the
+   padding is zero bytes and a last byte of 0 to 7, never one of the four. *)
 let skip_clean s from =
   let n = String.length s in
+  let padded = (n land lnot 7) + 8 in
   let i = ref from in
   while
-    !i + 8 <= n
+    !i + 8 <= padded
     &&
     let w = get64 s !i in
     let a = Int64.logxor (Int64.logor w 0x0404040404040404L) 0x2626262626262626L
@@ -446,7 +449,7 @@ let skip_clean s from =
   while !i < n && match String.unsafe_get s !i with '&' | '<' | '>' | '"' -> false | _ -> true do
     incr i
   done;
-  !i
+  if !i > n then n else !i
 
 let rec refused_byte s i =
   i < String.length s
