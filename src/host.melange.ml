@@ -880,7 +880,21 @@ let add_stylesheet href =
 
 let read_file (_ : string) : string option = None
 
-let buffers : Stdlib.Buffer.t list ref = ref []
+module Out = struct
+  include Stdlib.Buffer
+
+  let add_escaped b ~quote s =
+    String.iter
+      (function
+        | '&' -> add_string b "&amp;"
+        | '<' -> add_string b "&lt;"
+        | '>' when not quote -> add_string b "&gt;"
+        | '"' when quote -> add_string b "&quot;"
+        | c -> add_char b c)
+      s
+end
+
+let buffers : Out.t list ref = ref []
 
 let take_buffer () =
   match !buffers with
@@ -890,6 +904,16 @@ let take_buffer () =
   | [] -> None
 
 let give_buffer b = buffers := b :: !buffers
+let pages : Bytes.t list ref = ref []
+
+let take_bytes n =
+  match !pages with
+  | b :: rest when Bytes.length b >= n ->
+      pages := rest;
+      b
+  | _ -> Bytes.create n
+
+let give_bytes b = pages := b :: !pages
 
 type 'a local = 'a
 

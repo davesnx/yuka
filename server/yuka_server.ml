@@ -287,6 +287,65 @@ let respond_string r status headers text =
   | Some () -> r.finish status
   | None -> ()
 
+let pages : Ache.Bigstring.t list ref = ref []
+let pages_lock = Mutex.create ()
+let kept_page = 1_048_576
+
+let take_page n =
+  let page =
+    Mutex.protect pages_lock (fun () ->
+        match !pages with
+        | p :: rest ->
+            pages := rest;
+            Some p
+        | [] -> None)
+  in
+  match page with Some p when Ache.Bigstring.length p >= n -> p | _ -> Ache.Bigstring.create ((n + 4095) land lnot 4095)
+
+let give_page p =
+  if Ache.Bigstring.length p <= kept_page then
+    Mutex.protect pages_lock (fun () -> if List.compare_length_with !pages 8 < 0 then pages := p :: !pages)
+
+let respond_print r status headers length print =
+  let discard () = print (fun _ _ _ -> ()) in
+  if is_head r || bodyless status then begin
+    discard ();
+    respond_string r status headers ""
+  end
+  else
+    let page = take_page length and at = ref 0 in
+    let copied =
+      match
+        print (fun s off len ->
+            if len > length - !at then invalid_arg "Yuka_server: a Print body is longer than its length";
+            Ache.Bigstring.blit_from_string s ~src_off:off page ~dst_off:!at ~len;
+            at := !at + len)
+      with
+      | () when !at = length -> Ok ()
+      | () -> Error (Invalid_argument "Yuka_server: a Print body is shorter than its length")
+      | exception e -> Error e
+    in
+    match copied with
+    | Error e ->
+        give_page page;
+        raise e
+    | Ok () -> (
+        let sent = ref false in
+        let respond res =
+          let res =
+            { res with Ache.Response.headers = Ache.Headers.add res.Ache.Response.headers "content-length" (string_of_int length) }
+          in
+          let writer = Reqd.respond_with_streaming r.reqd res in
+          sent := true;
+          Writer.schedule_bigstring writer ~off:0 ~len:length page;
+          (* On `Closed a write of the page may still be in flight: drop it. *)
+          Writer.flush writer (function `Written -> give_page page | `Closed -> ());
+          Writer.close writer
+        in
+        match start r ~status ~headers:(answer_headers r status headers) respond with
+        | Some () -> r.finish status
+        | None -> if not !sent then give_page page)
+
 let stream_headers r status headers =
   let headers = answer_headers r status headers in
   if
@@ -426,6 +485,7 @@ let upgrade r run =
 let send r = function
   | Respond { status; headers; body = Yuka.Server.String text } -> respond_string r status headers text
   | Respond { status; headers; body = Yuka.Server.Stream produce } -> respond_stream r status headers produce
+  | Respond { status; headers; body = Yuka.Server.Print { length; print } } -> respond_print r status headers length print
   | File { path; headers } ->
       Lwt.async (fun () ->
           Lwt.catch

@@ -38,6 +38,8 @@ module Test_adapter = struct
   let respond (r : Server.response) =
     match r.body with
     | Server.String s -> Async.return { status = r.status; headers = r.headers; body = s }
+    | Server.Print { length; print } ->
+        Async.return { status = r.status; headers = r.headers; body = Server.print_to_string ~length print }
     | Server.Stream f ->
         let b = Buffer.create 64 in
         Async.map
@@ -76,6 +78,10 @@ module Held_adapter = struct
   let respond (r : Server.response) =
     match r.body with
     | Server.String s ->
+        Async.return
+          { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.return () }
+    | Server.Print { length; print } ->
+        let s = Server.print_to_string ~length print in
         Async.return
           { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.return () }
     | Server.Stream f ->
@@ -1133,6 +1139,9 @@ let render =
           match Async.status (Raw.handler config Cycle_server.Yuka_routes.app (request target)) with
           | Async.Done { body = Server.String text; status; _ } ->
               Printf.sprintf "string %d %b" status (String.ends_with ~suffix:"</body></html>" text)
+          | Async.Done { body = Server.Print { length; print }; status; _ } ->
+              let text = Server.print_to_string ~length print in
+              Printf.sprintf "string %d %b" status (String.ends_with ~suffix:"</body></html>" text)
           | Async.Done { body = Server.Stream _; status; _ } -> Printf.sprintf "stream %d" status
           | _ -> "other"
         in
@@ -1288,6 +1297,8 @@ let blocking =
   let one_string (a : Server.response Async.t) =
     match Async.status a with
     | Async.Done { body = Server.String text; headers; status } -> { status; headers; body = text }
+    | Async.Done { body = Server.Print { length; print }; headers; status } ->
+        { status; headers; body = Server.print_to_string ~length print }
     | Async.Done { body = Server.Stream _; _ } -> Alcotest.fail "a stream, not one string"
     | _ -> Alcotest.fail "no response"
   in
@@ -1850,6 +1861,8 @@ let dev =
         ignore (f (fun s -> written := !written @ [ s ]; write s));
         (status, headers, written)
     | Async.Done { status; headers; body = Server.String s } -> (status, headers, ref [ s ])
+    | Async.Done { status; headers; body = Server.Print { length; print } } ->
+        (status, headers, ref [ Server.print_to_string ~length print ])
     | _ -> Alcotest.fail "no response"
   in
   [
@@ -2387,7 +2400,7 @@ let request_api =
         Alcotest.(check (list (pair string string))) "headers" [ ("content-type", "application/json") ] r.headers;
         (match r.body with
         | Server.String s -> Alcotest.(check string) "body" "[1,2]" s
-        | Server.Stream _ -> Alcotest.fail "stream");
+        | Server.Print _ | Server.Stream _ -> Alcotest.fail "stream");
         let r = run_request (Server.text ~headers:[ ("x-a", "1") ] "hi") in
         Alcotest.(check int) "text status" 200 r.status;
         Alcotest.(check (list (pair string string))) "text headers"

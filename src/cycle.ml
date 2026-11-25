@@ -82,7 +82,20 @@ let rules ~headers ?cache ?(prefetch = Prefetch.default) ~prerender () =
   in
   { headers; cache; prefetch; prerender }
 
-type body = String of string | Stream of ((string -> unit Async.t) -> unit Async.t)
+type body =
+  | String of string
+  | Stream of ((string -> unit Async.t) -> unit Async.t)
+  | Print of { length : int; print : (string -> int -> int -> unit) -> unit }
+
+let print_to_string ~length print =
+  let out = Bytes.create length and at = ref 0 in
+  print (fun s off len ->
+      Bytes.blit_string s off out !at len;
+      at := !at + len);
+  if !at <> length then invalid_arg "Yuka.Server.print_to_string: the body does not have its length";
+  Bytes.unsafe_to_string out
+
+let discard print = print (fun _ _ _ -> ())
 type response = { status : int; headers : (string * string) list; body : body }
 
 let response ?(status = 200) ?(headers = []) body = Async.return { status; headers; body }
@@ -488,9 +501,9 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
   let shared_rule = List.exists (fun (n, v) -> same_name n "cache-control" && shared_cache v) headers in
-  let respond ?id_prefix ?route_printed ?entry ?frame build =
+  let respond ?id_prefix ?route_printed ?entry ?frame ?keep build =
     Server.page ~stream:(not shared_rule) ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
-      ~context:env.context ~current ?frame ~timeout ~sleep:env.sleep build
+      ~context:env.context ~current ?frame ?keep ~timeout ~sleep:env.sleep build
   in
   let streamed first piece last rest write =
     let ( >>= ) = Async.bind in
@@ -552,19 +565,32 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
       let close islands =
         (if islands || env.prefetch = `Off then "" else speculation_rules base) ^ "</body></html>"
       in
-      let framed = ref false in
+      let framed = ref false and kept = ref None in
       let frame ~islands =
         framed := true;
         (head "", close islands)
       in
+      let keep length print = kept := Some (length, print) in
+      let taken () =
+        match !kept with
+        | Some (length, print) ->
+            kept := None;
+            print_to_string ~length print
+        | None -> ""
+      in
       Async.map
         (function
-          | Server.Settled { body; _ } when !framed -> { status; headers; body = String body }
+          | Server.Settled { body = ""; _ } when !framed && Option.is_some !kept ->
+              let length, print = Option.get !kept in
+              kept := None;
+              { status; headers; body = Print { length; print } }
+          | Server.Settled { body; _ } when !framed -> { status; headers; body = String (taken () ^ body) }
           | Server.Settled { body; islands } -> { status; headers; body = String (String.concat "" [ head ""; body; close islands ]) }
           | Server.Streamed { shell; fills; rest } ->
+              let shell = taken () ^ shell in
               let piece = function Server.Fill (id, html) -> Server.fill_chunk id html | Server.Value html -> html in
               { status; headers; body = Stream (streamed (head (if fills then Printer.fill_script else "") ^ shell) piece close rest) })
-        (respond ?entry ~frame build)
+        (respond ?entry ~frame ~keep build)
 
 let internal_error () = plain 500 "Internal Server Error" []
 
@@ -1114,6 +1140,13 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (s
         let headers =
           if has_header "content-length" r.headers then r.headers
           else r.headers @ [ ("content-length", string_of_int (String.length text)) ]
+        in
+        Respond { r with headers; body = String "" }
+    | Respond ({ body = Print { length; print }; _ } as r) when env.head_only ->
+        discard print;
+        let headers =
+          if has_header "content-length" r.headers then r.headers
+          else r.headers @ [ ("content-length", string_of_int length) ]
         in
         Respond { r with headers; body = String "" }
     | Respond ({ body = Stream _; _ } as r) when env.head_only ->

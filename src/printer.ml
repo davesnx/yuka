@@ -1,28 +1,11 @@
-module Buffer = Stdlib.Buffer
+module Buffer = Host.Out
 
 open Types
 open Base
 
   let escape = Template_build.escape
 
-  let put b s start i entity =
-    Buffer.add_substring b s start (i - start);
-    Buffer.add_string b entity;
-    i + 1
-
-  let add_escaped b ~quote s =
-    let n = String.length s in
-    let start = ref 0 and i = ref (Host.skip_clean s 0) in
-    while !i < n do
-      (match String.unsafe_get s !i with
-      | '&' -> start := put b s !start !i "&amp;"
-      | '<' -> start := put b s !start !i "&lt;"
-      | '>' when not quote -> start := put b s !start !i "&gt;"
-      | '"' when quote -> start := put b s !start !i "&quot;"
-      | _ -> ());
-      i := Host.skip_clean s (!i + 1)
-    done;
-    Buffer.add_substring b s !start (n - !start)
+  let add_escaped = Buffer.add_escaped
 
   let blocked_logged = ref false
 
@@ -268,7 +251,7 @@ open Base
   let kept_buffer = 1_048_576
   let rendering = Host.local (fun () -> Atomic.make 0)
 
-  let rec print ?env ?frame s build =
+  let rec print ?env ?frame ?keep s build =
     let owner = new_owner () in
     Option.iter (fun e -> owner.env <- e) env;
     let scoped e f =
@@ -844,11 +827,21 @@ open Base
       | None -> Buffer.contents b
       | Some (before, after) ->
           let n = Buffer.length b and k = String.length before in
-          let out = Bytes.create (k + n + String.length after) in
+          let length = k + n + String.length after in
+          let pooled = Option.is_some keep && length <= kept_buffer in
+          let out = if pooled then Host.take_bytes length else Bytes.create length in
           Bytes.blit_string before 0 out 0 k;
           Buffer.blit b 0 out k n;
           Bytes.blit_string after 0 out (k + n) (String.length after);
-          Bytes.unsafe_to_string out
+          (match keep with
+          | Some keep when pooled ->
+              let used = ref false in
+              keep length (fun write ->
+                  if !used then invalid_arg "Yuka.Server: a Print body was printed twice";
+                  used := true;
+                  Fun.protect ~finally:(fun () -> Host.give_bytes out) (fun () -> write (Bytes.unsafe_to_string out) 0 length));
+              ""
+          | _ -> Bytes.unsafe_to_string out)
     in
     release ();
     html
