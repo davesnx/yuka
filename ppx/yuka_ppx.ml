@@ -550,6 +550,13 @@ let find_prop ~loc tag label =
           Location.raise_errorf ~loc
             "[yuka] The attribute '%s' is not valid on a '%s' element.%s" label tag hint)
 
+(* [Host.refuse_url_name] refuses these names at runtime: a literal name it
+   accepts needs no runtime check. A name with a byte of 0x80 or more keeps the
+   check: the Melange check refuses Unicode whitespace with JS [\s]. *)
+let refused_name dom =
+  let l = String.lowercase_ascii dom in
+  (not (Url.valid_name dom)) || Url.url_name l || l = "srcdoc" || String.exists (fun c -> Char.code c >= 0x80) dom
+
 let rewrite_attribute ~self ~loc tag (label, value) =
   let name, optional =
     match label with
@@ -575,11 +582,21 @@ let rewrite_attribute ~self ~loc tag (label, value) =
       let hole = not (constant value) in
       let url = Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) in
       let tag_e = estring ~loc tag in
-      let attr = if url then [%expr Yuka.runtime_url_attr [%e tag_e]] else [%expr Yuka.runtime_attr] in
-      let hole_attr = if url then [%expr Yuka.runtime_url_hole_attr [%e tag_e]] else [%expr Yuka.runtime_hole_attr] in
+      let refused = refused_name dom in
+      let attr =
+        if url then [%expr Yuka.runtime_url_attr [%e tag_e]]
+        else if refused then [%expr Yuka.runtime_attr]
+        else [%expr Yuka.runtime_attr_checked]
+      in
+      let hole_attr =
+        if url then [%expr Yuka.runtime_url_hole_attr [%e tag_e]]
+        else if refused then [%expr Yuka.runtime_hole_attr]
+        else [%expr Yuka.runtime_hole_attr_checked]
+      in
       match (hole, call value) with
       | true, Some (f, x) when (not url) && (not optional) && kind = String ->
-          Plain [%expr Yuka.runtime_call_attr [%e dom_e] [%e self#expression f] [%e self#expression x]]
+          let call_attr = if refused then [%expr Yuka.runtime_call_attr] else [%expr Yuka.runtime_call_attr_checked] in
+          Plain [%expr [%e call_attr] [%e dom_e] [%e self#expression f] [%e self#expression x]]
       | true, _ ->
           let value = hole_scope (fun () -> self#expression value) in
           Plain [%expr [%e hole_attr] [%e dom_e] (fun () -> [%e option_string ~loc ~optional kind value])]
@@ -840,7 +857,8 @@ let rec lower_shape ~loc parts shape =
         | Template_build.Fixed (dom, v) ->
             if Url.checked ~tag:(String.lowercase_ascii tag) (String.lowercase_ascii dom) then
               Plain [%expr Yuka.runtime_url_attr [%e estring ~loc tag] [%e estring ~loc dom] [%e estring ~loc v]]
-            else Plain [%expr Yuka.runtime_attr [%e estring ~loc dom] [%e estring ~loc v]]
+            else if refused_name dom then Plain [%expr Yuka.runtime_attr [%e estring ~loc dom] [%e estring ~loc v]]
+            else Plain [%expr Yuka.runtime_attr_checked [%e estring ~loc dom] [%e estring ~loc v]]
         | Part_attr i -> (
             match parts.(i) with
             | Attribute_part p -> p

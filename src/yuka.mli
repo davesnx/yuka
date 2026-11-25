@@ -601,6 +601,13 @@ val runtime_hole_attr : string -> (unit -> string option) -> 'kind attribute
     SVG animation elements: there the client checks the value, or raises
     [Failure] when the app links no URL check. *)
 
+val runtime_attr_checked : string -> string -> 'kind attribute
+val runtime_hole_attr_checked : string -> (unit -> string option) -> 'kind attribute
+val runtime_call_attr_checked : string -> ('a -> string) -> 'a -> 'kind attribute
+(** {!runtime_attr}, {!runtime_hole_attr} and {!runtime_call_attr} without
+    the runtime name check, for a literal name that the ppx proved those
+    functions accept. *)
+
 val runtime_url_attr : string -> string -> string -> 'kind attribute
 val runtime_url_hole_attr : string -> string -> (unit -> string option) -> 'kind attribute
 (** [runtime_url_attr tag name value] is {!attr} that knows the element. *)
