@@ -34,7 +34,9 @@ let shapes (s : Pattern.settings) = Pattern.shapes s.layout s.art
 let ds s = Array.to_list (Array.map (fun (x : Pattern.shape) -> x.d) (shapes s))
 let with_art art = { defaults with art }
 let with_seed seed (s : Pattern.settings) = { s with layout = { s.layout with seed } }
-let kinds = List.map (fun k -> (Pattern.Kind.name k, with_art (Pattern.fresh k))) Pattern.Kind.all
+let kinds =
+  List.map (fun k -> (Pattern.Kind.name k, with_art (Pattern.fresh k))) Pattern.Kind.all
+  @ [ ("fragments", with_art (Pattern.Circles Pattern.fragments_default)) ]
 
 let commands d =
   let out = ref [] and current = ref None and number = Buffer.create 8 in
@@ -79,7 +81,7 @@ let keys () =
   Alcotest.(check int) "one shape per bolt and branch" 15
     (Array.length (shapes (with_art (Lightning { Pattern.lightning_default with bolts = 3; branches = 4 }))));
   Alcotest.(check int) "one shape per cell" (9 * 7)
-    (Array.length (shapes (with_art (Circles { columns = 9; rows = 7; half = 1; empty = 0; block = 0; bar = 0 }))))
+    (Array.length (shapes (with_art (Circles { Pattern.circles_default with columns = 9; rows = 7; half = 1; empty = 0; block = 0; bar = 0 }))))
 
 let not_crossing d =
   match commands d with
@@ -109,7 +111,7 @@ let lines_do_not_cross_themselves () =
     [ (22, 60, 3, 80); (2, 100, 10, 200); (60, 100, 1, 0); (10, 0, 6, 40) ]
 
 let in_box padding paint d =
-  let w = match paint with Pattern.Fill -> 0 | Pattern.Stroke w -> w in
+  let w = match paint with Pattern.Stroke w -> w | Pattern.Fill | Pattern.Tint _ -> 0 in
   let in_x x = (2 * x) - w >= 2 * padding && (2 * x) + w <= 2 * (Pattern.width - padding) in
   let in_y y = (2 * y) - w >= 2 * padding && (2 * y) + w <= 2 * (Pattern.art_bottom - padding) in
   let rec pairs = function x :: y :: rest -> in_x x && in_y y && pairs rest | [] -> true | [ _ ] -> false in
@@ -146,6 +148,9 @@ let inside () =
           Pattern.Blocks { Pattern.blocks_default with radius = 60; filled = 50 };
           Pattern.Circles Pattern.circles_default;
           Pattern.Circles { Pattern.circles_default with columns = 24; rows = 4 };
+          Pattern.Circles Pattern.fragments_default;
+          Pattern.Circles { Pattern.fragments_default with columns = 24; rows = 30; merge = 100; round = 100; gap = 0; accent = 6 };
+          Pattern.Circles { Pattern.fragments_default with columns = 2; rows = 2; gap = 40 };
           Pattern.Blocks { Pattern.blocks_default with gap = 1; filled = 0 };
           Pattern.Lightning Pattern.lightning_default;
           Pattern.Lightning { Pattern.lightning_default with thickness = 24; jaggedness = 100; branches = 12 };
@@ -168,7 +173,7 @@ let inside () =
 let painted (x : Pattern.shape) =
   match commands x.d with
   | [ ('M', [ left; top ]); ('H', [ right ]); ('V', [ bottom ]); ('H', _); ('z', []) ] ->
-      let half = match x.paint with Pattern.Fill -> 0 | Pattern.Stroke w -> w / 2 in
+      let half = match x.paint with Pattern.Stroke w -> w / 2 | Pattern.Fill | Pattern.Tint _ -> 0 in
       (left - half, top - half, right + half, bottom + half)
   | _ -> failwith ("not a rectangle: " ^ x.d)
 
@@ -397,12 +402,66 @@ let normalize () =
     (art (Blocks { blocks = 900; gap = -5; filled = 101; squareness = -1; radius = 61 })
     = Blocks { blocks = 80; gap = 0; filled = 100; squareness = 0; radius = 60 });
   Alcotest.(check bool) "circles" true
-    (art (Circles { columns = 1; rows = 99; half = -1; empty = 101; block = 0; bar = 100 })
-    = Circles { columns = 4; rows = 30; half = 0; empty = 100; block = 0; bar = 100 });
+    (art
+       (Circles
+          {
+            Pattern.fragments_default with
+            columns = 1;
+            rows = 99;
+            half = -1;
+            empty = 101;
+            block = 0;
+            bar = 100;
+            merge = 101;
+            round = -1;
+            gap = 41;
+            accent = 7;
+            tint = "red";
+          })
+    = Circles
+        {
+          Pattern.fragments_default with
+          columns = 2;
+          rows = 30;
+          half = 0;
+          empty = 100;
+          block = 0;
+          bar = 100;
+          merge = 100;
+          round = 0;
+          gap = 40;
+          accent = 6;
+          tint = Pattern.accent_default;
+        });
   Alcotest.(check bool) "clouds" true (art (Clouds { clouds = 0; puffs = 1; size = 1 }) = Clouds { clouds = 1; puffs = 3; size = 10 });
   Alcotest.(check bool) "lightning" true
     (art (Lightning { bolts = 50; branches = -2; jaggedness = 300; thickness = 0; direction = 400; length = 5 })
     = Lightning { bolts = 8; branches = 0; jaggedness = 100; thickness = 1; direction = 359; length = 20 })
+
+let fragments () =
+  let art c = with_seed 3 (with_art (Pattern.Circles c)) in
+  let tiles c = Array.to_list (shapes (art c)) in
+  let fill c = List.filter (fun (x : Pattern.shape) -> x.paint = Pattern.Fill) (tiles c) in
+  let base = { Pattern.fragments_default with columns = 5; rows = 6; accent = 0 } in
+  Alcotest.(check int) "no long tiles: one tile per cell" 30 (List.length (fill { base with merge = 0 }));
+  let long = List.length (fill { base with merge = 100 }) in
+  Alcotest.(check bool) (Printf.sprintf "all long tiles: at most one cell alone per row (%d tiles)" long) true (long >= 15 && long <= 18);
+  let square = { base with merge = 0; round = 0 } and round = { base with merge = 0; round = 100 } in
+  Alcotest.(check bool) "round 0 draws no arc" true (List.for_all (fun (x : Pattern.shape) -> not (String.contains x.d 'A')) (fill square));
+  Alcotest.(check bool) "round 100 draws four arcs per tile" true
+    (List.for_all (fun (x : Pattern.shape) -> List.length (List.filter (fun (c, _) -> c = 'A') (commands x.d)) = 4) (fill round));
+  let accents c = List.filter (fun (x : Pattern.shape) -> x.paint <> Pattern.Fill) (tiles c) in
+  Alcotest.(check int) "no accent" 0 (List.length (accents base));
+  Alcotest.(check bool) "an accent is a tinted circle in place of a tile" true
+    (match accents { base with accent = 1; tint = "#0066ff" } with
+    | [ { paint = Pattern.Tint "#0066ff"; d; _ } ] -> List.map fst (commands d) = [ 'M'; 'A'; 'A'; 'z' ]
+    | _ -> false);
+  Alcotest.(check int) "an accent replaces its tile, it does not add one" 30
+    (List.length (tiles { base with merge = 0; accent = 6 }));
+  Alcotest.(check bool) "more accents keep the accents" true
+    (List.for_all (fun x -> List.mem x (accents { base with accent = 6 })) (accents { base with accent = 3 }));
+  let svg = svg (art { base with accent = 1; tint = "#0066ff" }) in
+  check_has svg "the accent is filled with its colour" {|fill="#0066ff"|}
 
 let cut () =
   let title t = (Pattern.normal_text { defaults.text with title = t }).title in
@@ -426,6 +485,19 @@ let links () =
     (href (with_art (Lines { Pattern.lines_default with direction = 45 })));
   Alcotest.(check string) "circles and the corner radius" "/?kind=circles&columns=9&bar=20"
     (href (with_art (Circles { Pattern.circles_default with columns = 9; bar = 20 })));
+  Alcotest.(check string) "fragments with their defaults" "/?kind=circles&style=fragments"
+    (href (with_art (Circles Pattern.fragments_default)));
+  Alcotest.(check string) "a fragments parameter" "/?kind=circles&gap=20&style=fragments&accent=3&tint=0066ff"
+    (href (with_art (Circles { Pattern.fragments_default with gap = 20; accent = 3; tint = "#0066ff" })));
+  List.iter
+    (fun art ->
+      let s = with_seed 5 (with_art art) in
+      Alcotest.(check bool) "fragments come back from the link" true (Link.settings ~defaults (Link.route ~defaults s) = s))
+    [
+      Pattern.Circles Pattern.fragments_default;
+      Pattern.Circles { Pattern.fragments_default with columns = 7; merge = 0; round = 100; tint = "#0066ff" };
+      Pattern.Circles { Pattern.circles_default with columns = 9 };
+    ];
   Alcotest.(check string) "the direction and length of the bolts" "/?kind=lightning&direction=90&length=60"
     (href (with_art (Lightning { Pattern.lightning_default with direction = 90; length = 60 })));
   Alcotest.(check string) "the corner radius" "/?kind=blocks&radius=12" (href (with_art (Blocks { Pattern.blocks_default with radius = 12 })));
@@ -513,8 +585,8 @@ let gallery () =
   let status, html = get "/gallery" in
   Alcotest.(check int) "status" 200 status;
   Alcotest.(check int) "one poster per preset" (List.length Pattern.presets) (count html {|<svg xmlns="http://www.w3.org/2000/svg" class="poster"|});
-  Alcotest.(check (list string)) "two presets per kind"
-    (List.concat_map (fun k -> [ Pattern.Kind.name k; Pattern.Kind.name k ]) Pattern.Kind.all)
+  Alcotest.(check (list string)) "two presets per kind, and Fragments"
+    (List.concat_map (fun k -> [ Pattern.Kind.name k; Pattern.Kind.name k ]) Pattern.Kind.all @ [ "circles" ])
     (List.map (fun (_, (s : Pattern.settings)) -> Pattern.Kind.name (Pattern.kind s.art)) Pattern.presets);
   Alcotest.(check bool) "no module script" false (contains html {|<script type="module"|});
   List.iter
@@ -546,6 +618,7 @@ let () =
           Alcotest.test_case "the direction and length of the bolts" `Quick bolt_turn;
           Alcotest.test_case "a gap of 1" `Quick gap_of_one;
           Alcotest.test_case "date lines" `Quick date;
+          Alcotest.test_case "fragments" `Quick fragments;
           Alcotest.test_case "cut at a character" `Quick cut;
           Alcotest.test_case "normalize" `Quick normalize;
           Alcotest.test_case "escaped text" `Quick escaped;

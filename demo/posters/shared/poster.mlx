@@ -2,6 +2,7 @@ let shape (s : Pattern.shape) =
   match s.paint with
   | Fill -> <path d=s.d stroke="none" />
   | Stroke w -> <path d=s.d fill="none" stroke_width=(Int.to_string w) />
+  | Tint colour -> <path d=s.d fill=colour stroke="none" />
 
 let label (l : Pattern.label) =
   <text x=(Int.to_string l.x) y=(Int.to_string l.y) font_size=(Int.to_string l.size)

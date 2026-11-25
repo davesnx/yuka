@@ -1,7 +1,7 @@
 # Posters demo
 
 A generator for a magazine poster series: lines, blocks, clouds,
-lightning or a grid of half discs on a dark or light card, with a title block. One island
+lightning or a grid of half discs or rounded tiles on a dark or light card, with a title block. One island
 (`shared/playground.mlx`) holds the preview and the controls: the text on
 the left, the poster in the middle, the other settings on the right. Below
 1100 px the text goes under the settings, and below 860 px everything is
@@ -56,9 +56,15 @@ variant with one parameter record per kind:
   `transform="rotate(...)"`; the bolts are drawn in the box of the art
   area turned by that angle, with an integer sine, so they still cover
   the art area.
-- Circles: the first poster of this demo, a grid of half discs on one of
-  their four edges, squares and half-cell bars, picked with the weights of
-  the mix.
+- Circles: a grid in one of two styles.
+  - Halves, the first poster of this demo: half discs on one of their four
+    edges, squares and half-cell bars, picked with the weights of the mix.
+  - Fragments, after the Fragments poster by Vratislav Pecka: tiles of one
+    cell, or of two cells side by side or stacked (`merge` is the share of
+    long tiles), each corner square or rounded to half the short side
+    (`round` is the share of rounded corners), with `gap` between tiles.
+    `accent` cells are a full circle in the accent colour, in place of a
+    tile; a long tile never takes an accent cell.
 
 All the math is on integers, so native code and JavaScript give the same
 SVG for the same settings. Each random number is a hash of the seed, the

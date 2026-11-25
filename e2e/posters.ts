@@ -105,6 +105,25 @@ await step("p2. each kind draws its shapes, shows its sliders and matches the se
   check("p2 back on Lines, the poster of the start", (await grid(P)) === first);
 });
 
+await step("p2f. the Fragments style of Circles", async () => {
+  await P.getByRole("button", { name: "Circles", exact: true }).click();
+  await P.waitForURL((url) => url.searchParams.get("kind") === "circles");
+  const halves = await grid(P);
+  await P.getByRole("button", { name: "Fragments", exact: true }).click();
+  await P.waitForURL((url) => url.searchParams.get("style") === "fragments");
+  check("p2f.1 the preview changes", (await grid(P)) !== halves);
+  check("p2f.2 the browser draws what the server draws", (await grid(P)) === (await served(new URL(P.url()).search)));
+  check("p2f.3 its sliders show, the Halves mix does not", (await P.locator("#merge, #round, #tile-gap, #accent").count()) === 4 && (await P.locator("#half, #bar").count()) === 0);
+  check("p2f.4 one accent circle in the accent colour", (await P.locator('.preview path[fill="#e8481c"]').count()) === 1);
+  if (shots) await P.screenshot({ path: `${shots}/posters-fragments.png` });
+  await P.getByRole("button", { name: "Halves", exact: true }).click();
+  await P.waitForURL((url) => !url.searchParams.has("style"));
+  check("p2f.5 back on Halves, the same poster", (await grid(P)) === halves);
+  await P.getByRole("button", { name: "Lines", exact: true }).click();
+  await P.waitForURL((url) => !url.searchParams.has("kind"));
+  check("p2f.6 back on Lines, the poster of the start", (await grid(P)) === first);
+});
+
 await step("p2b. the direction dial turns the lines and nothing else", async () => {
   const dial = P.locator("#direction");
   await mark(P);
@@ -138,7 +157,7 @@ await step("p2b. the direction dial turns the lines and nothing else", async () 
   check("p2b.7 back at 90 the poster of the start", (await grid(P)) === first);
 });
 
-await step("p2c. a larger count adds shapes and keeps the others", async () => {
+await step("p2a. a larger count adds shapes and keeps the others", async () => {
   for (const [query, id, value] of [["?kind=clouds&size=25", "#clouds", "8"], ["?kind=lightning", "#bolts", "3"]] as const) {
     await P.goto(app + query, { waitUntil: "networkidle" });
     await started(P);
@@ -294,7 +313,7 @@ await step("p9. the gallery", async () => {
   const G = await ctx.newPage();
   G.on("pageerror", (e) => problems.push(String(e)));
   await G.goto(app + "/gallery", { waitUntil: "networkidle" });
-  check("p9.1 ten posters", (await G.locator(".gallery-item .poster").count()) === 10);
+  check("p9.1 eleven posters", (await G.locator(".gallery-item .poster").count()) === 11);
   check("p9.2 no JavaScript file", (await G.locator('script[type="module"]').count()) === 0);
   if (shots) await G.screenshot({ path: `${shots}/posters-gallery.png`, fullPage: true });
   const card = G.locator(".gallery-item").nth(3);
