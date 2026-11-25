@@ -479,7 +479,7 @@ let with_redirect j location = match j with `Assoc fields -> `Assoc (fields @ [ 
 let registry : (string * (Types.context -> Json.t -> answer Async.t)) list ref = ref []
 
 let find_action name =
-  Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
+  match List.find_opt (fun (n, _) -> String.equal n name) !registry with Some (_, f) -> Some f | None -> None
 
 
 type failure = Unknown | Bad of string | Refused of string | Broke of string
@@ -556,7 +556,7 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ 
     | Ok input ->
         Async.map
           (function
-            | Ok o -> Saved (Option.map (fun r -> r o) redirect)
+            | Ok o -> Saved (match redirect with Some r -> Some (r o) | None -> None)
             | Error e -> Unprocessable (Form_core.named t e))
           (call f context input)
   in
@@ -591,13 +591,15 @@ module Request = struct
       let n = String.length v in
       if n >= 2 && v.[0] = '"' && v.[n - 1] = '"' then String.sub v 1 (n - 2) else v
     in
-    Option.bind (r.header "cookie") (fun h ->
+    match r.header "cookie" with
+    | Some h ->
         List.find_map
           (fun pair ->
             match Router.cut pair '=' with
             | k, Some v when String.equal (String.trim k) name -> Some (unquote (String.trim v))
             | _ -> None)
-          (String.split_on_char ';' h))
+          (String.split_on_char ';' h)
+    | None -> None
 
   let body (r : Types.context) ~limit = r.body ~limit
 

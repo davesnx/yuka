@@ -107,8 +107,8 @@ let parse_sent sent =
   match Json.of_string sent with
   | Ok (`Assoc fields) -> (
       match
-        ( Option.bind (List.assoc_opt "fields" fields) pairs_of_json,
-          Option.map names_of_json (List.assoc_opt "errors" fields) )
+        ( (match List.assoc_opt "fields" fields with Some f -> pairs_of_json f | None -> None),
+          match List.assoc_opt "errors" fields with Some e -> Some (names_of_json e) | None -> None )
       with
       | Some values, Some (Ok errors) -> Some (values, errors)
       | _ -> None)

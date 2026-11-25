@@ -59,7 +59,7 @@ let set_cookie ?max_age ?(path = "/") ?(same_site = `Lax) ?(secure = false) name
         in
         Host.set_cookie
           (name ^ "=" ^ encoded ^ "; Path=" ^ path
-          ^ attribute (Option.map (fun seconds -> "Max-Age=" ^ string_of_int seconds) max_age)
+          ^ attribute (match max_age with Some seconds -> Some ("Max-Age=" ^ string_of_int seconds) | None -> None)
           ^ (match same_site with `Lax -> "; SameSite=Lax" | `Strict -> "; SameSite=Strict" | `None -> "; SameSite=None")
           ^ if secure || same_site = `None then "; Secure" else "");
         Ok ()

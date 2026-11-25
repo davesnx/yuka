@@ -112,9 +112,12 @@ let rec block defs ~tight (node : Block.t) : Markup.node list =
       ]
   | Block.Code_block (code, _) | Block.Ext_math_block (code, _) ->
       let language =
-        match Option.bind (Block.Code_block.info_string code) (fun (info, _) -> Block.Code_block.language_of_info_string info) with
-        | Some (language, _) -> language
+        match Block.Code_block.info_string code with
         | None -> ""
+        | Some (info, _) -> (
+        match Block.Code_block.language_of_info_string info with
+        | Some (language, _) -> language
+        | None -> "")
       in
       [ Code_style.block ~language (String.concat "\n" (List.map Block_line.to_string (Block.Code_block.code code))) ]
   | Block.Html_block (lines, _) -> [ element "p" [ Text (String.concat "\n" (List.map Block_line.to_string lines)) ] ]

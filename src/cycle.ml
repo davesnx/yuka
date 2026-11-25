@@ -240,9 +240,11 @@ let dev_state () =
     match file with
     | None -> dev_default
     | Some f -> (
-        match Option.map String.trim (Host.read_file f) with
-        | None | Some "" -> dev_default
-        | Some text -> String.concat " " (String.split_on_char '\n' text))
+        match Host.read_file f with
+        | None -> dev_default
+        | Some text when String.trim text = "" -> dev_default
+        | Some text ->
+            let text = String.trim text in String.concat " " (String.split_on_char '\n' text))
   in
   { state }
 
@@ -334,7 +336,7 @@ let prerender_config config = { config with dev = None; prerendering = true }
 let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
 let served_dirs config =
-  Option.to_list (Option.map (fun (a : assets) -> ("/_yuka/app", a.dir)) config.assets)
+  (match config.assets with Some (a : assets) -> [ ("/_yuka/app", a.dir) ] | None -> [])
   @ List.map (fun (prefix, dir) -> ("/" ^ String.concat "/" prefix, dir)) config.public
 
 type request = {
@@ -451,17 +453,19 @@ let speculation_rules base =
 let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let assets = env.config.assets and base = env.config.base in
   let preload =
-    Option.map
-      (fun (a : assets) -> if base = "" then a.preload else fun name -> List.map (Site.join base) (a.preload name))
-      assets
+    match assets with
+    | Some (a : assets) ->
+        Some (if base = "" then a.preload else fun name -> List.map (Site.join base) (a.preload name))
+    | None -> None
   in
   let entry =
-    Option.map
-      (fun (a : assets) ->
-        "<script type=\"module\" async src=\""
-        ^ Printer.escape ~quote:true (base ^ "/_yuka/app/" ^ a.entry)
-        ^ "\"></script>")
-      assets
+    match assets with
+    | Some (a : assets) ->
+        Some
+          ("<script type=\"module\" async src=\""
+          ^ Printer.escape ~quote:true (base ^ "/_yuka/app/" ^ a.entry)
+          ^ "\"></script>")
+    | None -> None
   in
   let import_map =
     match assets with Some a -> List.map (fun (k, v) -> (k, Site.join base v)) a.import_map | None -> []
@@ -837,7 +841,8 @@ let sf_key k =
   && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '*' -> true | _ -> false) k
 
 let speculative (r : request) =
-  match (r.header "sec-purpose", Option.map String.trim (r.header "sec-fetch-dest")) with
+  let dest = match r.header "sec-fetch-dest" with Some d -> Some (String.trim d) | None -> None in
+  match (r.header "sec-purpose", dest) with
   | Some v, Some "document" -> (
       match String.split_on_char ';' (String.trim v) with
       | "prefetch" :: params ->
@@ -954,7 +959,7 @@ let live_answer env (r : request) =
   match r.meth with
   | `GET ->
       if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden" [])
-      else if Option.map String.lowercase_ascii (r.header "upgrade") <> Some "websocket" then
+      else if (match r.header "upgrade" with Some u -> String.lowercase_ascii u <> "websocket" | None -> true) then
         reply (plain 426 "Upgrade Required" [ ("upgrade", "websocket") ])
       else (
         match r.session () with
@@ -1000,9 +1005,9 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (s
       sleep;
       head_only = (match r.meth with `HEAD -> true | _ -> false);
       navigate =
-        Option.map
-          (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
-          (r.header "yuka-navigate");
+        (match r.header "yuka-navigate" with
+        | Some v -> Some (List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
+        | None -> None);
       overlay = r.header "yuka-overlay" = Some "1";
       build = build_id config (App a);
       prefetch = a.prefetch;
@@ -1063,7 +1068,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (s
             static (fun () ->
                 match r.meth with
                 | `GET | `HEAD -> (
-                    match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
+                    match match file_path rest with Some f -> List.assoc_opt f config.css | None -> None with
                     | Some text ->
                         reply
                           {

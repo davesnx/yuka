@@ -272,9 +272,9 @@ module Private = struct
     let o = Base.new_owner () in
     let parent = !(Base.current_owner ()) in
     let id =
-      Option.map
-        (fun p -> (p, Base.add_disposer p (fun () -> Base.dispose_owner o)))
-        parent
+      match parent with
+      | Some p -> Some (p, Base.add_disposer p (fun () -> Base.dispose_owner o))
+      | None -> None
     in
     let forget () = Option.iter (fun (p, c) -> Base.remove_disposer p c) id in
     match Base.with_owner o f with

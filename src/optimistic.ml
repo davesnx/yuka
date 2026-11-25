@@ -14,9 +14,9 @@ let status t (base : _ Status.t) : _ Status.t =
     let f = apply (fun d f -> f d) t in
     match base with
     | Idle -> Idle
-    | Loading d -> Loading (Option.map f d)
+    | Loading d -> Loading (match d with Some d -> Some (f d) | None -> None)
     | Ready { data; stale } -> Ready { data = f data; stale }
-    | Failed { error; last } -> Failed { error; last = Option.map f last }
+    | Failed { error; last } -> Failed { error; last = (match last with Some l -> Some (f l) | None -> None) }
 
 let make () =
   let base = State.make (Status.Loading None) and changes = State.make empty in

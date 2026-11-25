@@ -286,7 +286,9 @@ open Base
             each (fun _ n v ->
                 if n = "name" && Option.is_none !name then name := Some v
                 else if n = "type" && Host.lowercase v = "hidden" then hidden := true);
-            Option.map (fun id -> (id, !hidden)) (Option.bind !name (fun n -> List.assoc_opt n invalid))
+            (match !name with
+            | Some n -> ( match List.assoc_opt n invalid with Some id -> Some (id, !hidden) | None -> None)
+            | None -> None)
         | _ -> None
       in
       match field with
@@ -700,7 +702,7 @@ open Base
         List.filter_map
           (function
             | Static (name, value) -> Some (name, value)
-            | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f ())
+            | Dynamic (name, f) -> ( match f () with Some v -> Some (name, v) | None -> None)
             | Handler _ -> None)
           attrs
       in

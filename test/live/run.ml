@@ -173,7 +173,7 @@ let hello_cases =
         accept true;
         Alcotest.(check (list string)) "messages" [ "hello"; "state" ] (kinds f);
         Alcotest.(check (option string)) "token" (Some {|"T2"|})
-          (Option.map Json.to_string (field "csrf" (List.hd f.out)));
+          (match field "csrf" (List.hd f.out) with Some j -> Some (Json.to_string j) | None -> None);
         check_states "state" [ (1, "4") ] f;
         hang_up f );
     ( "with no token, hello and pong have no csrf field",
@@ -183,7 +183,7 @@ let hello_cases =
         push f {|{"t":"ping"}|};
         Alcotest.(check (list string)) "messages" [ "hello"; "pong" ] (kinds f);
         Alcotest.(check (list (option string))) "no token" [ None; None ]
-          (List.map (fun t -> Option.map Json.to_string (field "csrf" t)) f.out);
+          (List.map (fun t -> match field "csrf" t with Some j -> Some (Json.to_string j) | None -> None) f.out);
         Alcotest.(check (option int)) "open" None f.closed;
         hang_up f );
   ]
@@ -380,7 +380,7 @@ let review_cases =
         resolve 1;
         Alcotest.(check (list string)) "one synced" [ "state"; "synced" ] (kinds a);
         Alcotest.(check (option string)) "latest ref" (Some "5")
-          (Option.map Json.to_string (field "ref" (List.nth a.out 1)));
+          (match field "ref" (List.nth a.out 1) with Some j -> Some (Json.to_string j) | None -> None);
         hang_up a );
     ( "a socket that never sends closes after 10 s",
       fun () ->
@@ -804,9 +804,9 @@ let diff_cases =
           let ops = Server.Testing.json_diff a b in
           let shown = Json.to_string a ^ " -> " ^ Json.to_string b in
           Alcotest.(check (option string)) shown (Some (Json.to_string b))
-            (Option.map Json.to_string (Server.Testing.json_patch a (`List ops)));
+            (match Server.Testing.json_patch a (`List ops) with Some j -> Some (Json.to_string j) | None -> None);
           Alcotest.(check (option string)) ("wire " ^ shown) (Some (Json.to_string b))
-            (Option.map Json.to_string (Server.Testing.json_patch a (wire ops)))
+            (match Server.Testing.json_patch a (wire ops) with Some j -> Some (Json.to_string j) | None -> None)
         done );
     ( "one changed field of one item of a long list is one op",
       fun () ->
@@ -822,7 +822,7 @@ let diff_cases =
     ( "ops that do not apply give None",
       fun () ->
         let none ops = Alcotest.(check (option string)) ops None
-            (Option.map Json.to_string (Server.Testing.json_patch (`List [ `Int 1 ]) (wire_of ops))) in
+            (match Server.Testing.json_patch (`List [ `Int 1 ]) (wire_of ops) with Some j -> Some (Json.to_string j) | None -> None) in
         none {|[["x",[1]]]|};
         none {|[["r",[0,"a"],1]]|};
         none {|[["a",[2],1]]|};
@@ -848,12 +848,12 @@ let replay ?(from = None) f =
       | "patch" ->
           if int_field "from" text <> seq then Alcotest.fail ("patch from a seq the client does not have: " ^ text);
           ( int_field "seq" text,
-            Option.bind state (fun j -> Option.bind (field "ops" text) (Server.Testing.json_patch j)) )
+            match (state, field "ops" text) with Some j, Some ops -> Server.Testing.json_patch j ops | _ -> None )
       | _ -> (seq, state))
     (match from with Some (seq, j) -> (seq, Some j) | None -> (0, None))
     f.out
 
-let replayed ?from f = Option.map Json.to_string (snd (replay ?from f))
+let replayed ?from f = match snd (replay ?from f) with Some j -> Some (Json.to_string j) | None -> None
 let encoded list = Some (Json.to_string (Codec.encode (Codec.list Codec.string) list))
 
 let open_with_node ?node () =

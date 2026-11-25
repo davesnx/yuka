@@ -66,11 +66,13 @@ let fields ~names ~decode ~encode = { names; read = decode; write = encode }
 let decode t values = t.read { values; failed = [] }
 let encode t v = t.write v
 let name t f = snd (List.find (fun (g, _) -> g == f) t.names)
-let of_name t n = Option.map fst (List.find_opt (fun (_, m) -> String.equal m n) t.names)
-let named t (errors : _ errors) = List.map (fun (f, m) -> (Option.map (name t) f, m)) errors
+let of_name t n = match List.find_opt (fun (_, m) -> String.equal m n) t.names with Some (f, _) -> Some f | None -> None
+
+let named t (errors : _ errors) =
+  List.map (fun (f, m) -> ((match f with Some f -> Some (name t f) | None -> None), m)) errors
 
 let unnamed t errors =
   List.map
     (fun (n, m) ->
-      match Option.bind n (of_name t) with Some f -> (Some f, m) | None -> (None, m))
+      match n with Some n -> (of_name t n, m) | None -> (None, m))
     errors
