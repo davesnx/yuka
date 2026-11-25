@@ -306,8 +306,8 @@ let give_page p =
   if Ache.Bigstring.length p <= kept_page then
     Mutex.protect pages_lock (fun () -> if List.compare_length_with !pages 8 < 0 then pages := p :: !pages)
 
-let respond_print r status headers length print =
-  let discard () = print (fun _ _ _ -> ()) in
+let respond_fixed r status headers length write =
+  let discard () = write (fun _ _ _ -> ()) in
   if is_head r || bodyless status then begin
     discard ();
     respond_string r status headers ""
@@ -316,13 +316,13 @@ let respond_print r status headers length print =
     let page = take_page length and at = ref 0 in
     let copied =
       match
-        print (fun s off len ->
-            if len > length - !at then invalid_arg "Yuka_server: a Print body is longer than its length";
+        write (fun s off len ->
+            if len > length - !at then invalid_arg "Yuka_server: a Fixed body is longer than its length";
             Ache.Bigstring.blit_from_string s ~src_off:off page ~dst_off:!at ~len;
             at := !at + len)
       with
       | () when !at = length -> Ok ()
-      | () -> Error (Invalid_argument "Yuka_server: a Print body is shorter than its length")
+      | () -> Error (Invalid_argument "Yuka_server: a Fixed body is shorter than its length")
       | exception e -> Error e
     in
     match copied with
@@ -485,7 +485,7 @@ let upgrade r run =
 let send r = function
   | Respond { status; headers; body = Yuka.Server.String text } -> respond_string r status headers text
   | Respond { status; headers; body = Yuka.Server.Stream produce } -> respond_stream r status headers produce
-  | Respond { status; headers; body = Yuka.Server.Print { length; print } } -> respond_print r status headers length print
+  | Respond { status; headers; body = Yuka.Server.Fixed { length; write } } -> respond_fixed r status headers length write
   | File { path; headers } ->
       Lwt.async (fun () ->
           Lwt.catch

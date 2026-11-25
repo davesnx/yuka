@@ -854,7 +854,7 @@ open Base
           | Some keep when pooled ->
               let used = ref false in
               keep length (fun write ->
-                  if !used then invalid_arg "Yuka.Server: a Print body was printed twice";
+                  if !used then invalid_arg "Yuka.Server: a Fixed body was written twice";
                   used := true;
                   Fun.protect ~finally:(fun () -> Host.give_bytes out) (fun () -> write (Bytes.unsafe_to_string out) 0 length));
               ""
