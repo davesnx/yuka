@@ -21,7 +21,7 @@ let seed =
       description;
       status;
       priority;
-      assignee = Option.map user assignee;
+      assignee = (match assignee with Some a -> Some (user a) | None -> None);
       labels;
       created_at;
     }
@@ -249,7 +249,10 @@ let board workspace : Board_types.t =
   in
   let notes =
     List.filter_map
-      (fun (id, text) -> Option.map (fun (x, y) -> { Board_types.id; x; y; content = Note text }) (Hashtbl.find_opt spots id))
+      (fun (id, text) ->
+        match Hashtbl.find_opt spots id with
+        | Some (x, y) -> Some { Board_types.id; x; y; content = Note text }
+        | None -> None)
       saved.notes
   in
   cards @ notes

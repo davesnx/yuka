@@ -630,8 +630,8 @@ let literal_value (kind : Html_attributes.kind) e =
       match int_of_string_opt s with
       | Some n when n >= -0x4000_0000 && n < 0x4000_0000 -> Some (Some (string_of_int n))
       | _ -> None)
-  | Bool, _ -> Option.map (fun b -> if b then Some "" else None) (bool_literal ())
-  | BooleanishString, _ -> Option.map (fun b -> Some (string_of_bool b)) (bool_literal ())
+  | Bool, _ -> ( match bool_literal () with Some b -> Some (if b then Some "" else None) | None -> None)
+  | BooleanishString, _ -> ( match bool_literal () with Some b -> Some (Some (string_of_bool b)) | None -> None)
   | Polyvariant options, Pexp_variant (t, None) ->
       List.find_map
         (fun (o : Html_attributes.polyvariant) ->
@@ -715,8 +715,11 @@ let rec template_element ~self ~parts ~fnloc tag args =
       match label with
       | Labelled name when constant value -> (
           match find_prop ~loc:value.pexp_loc tag name with
-          | Attribute { type_; name = dom; _ } | Rich_attribute { type_; name = dom; _ } ->
-              Option.map (Option.map (fun v -> (dom, v))) (literal_value type_ value)
+          | Attribute { type_; name = dom; _ } | Rich_attribute { type_; name = dom; _ } -> (
+              match literal_value type_ value with
+              | Some (Some v) -> Some (Some (dom, v))
+              | Some None -> Some None
+              | None -> None)
           | Event _ -> None)
       | _ -> None
     in

@@ -415,7 +415,7 @@ let parse text =
                 List.filter_map (function `List [ `String n; `Int p ] -> Some (n, p) | _ -> None) marks
             | _ -> []
           in
-          Option.map (fun r -> Sync { id; r; after }) (int "ref")
+          (match int "ref" with Some r -> Some (Sync { id; r; after }) | None -> None)
       | Some "ping", _ -> Some Ping
       | _ -> None)
   | _ -> None
@@ -692,7 +692,7 @@ let mark ?node () =
   let node = pick node in
   match node.bus with Some _ -> Some (node.name, node.notes) | None -> None
 
-let mark_json node () = Option.map (fun (n, p) -> `List [ `String n; `Int p ]) (mark ~node ())
+let mark_json node () = match mark ~node () with Some (n, p) -> Some (`List [ `String n; `Int p ]) | None -> None
 
 type memory = { mutable listeners : (string -> unit) list; mutable restarts : (unit -> unit) list; mutable down : bool }
 

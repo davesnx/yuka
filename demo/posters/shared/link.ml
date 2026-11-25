@@ -4,11 +4,11 @@ let route ?defaults (s : settings) =
   let keep value default =
     match defaults with Some (d : settings) when value = default d -> None | _ -> Some value
   in
-  let base = Option.map (fun d -> start ~defaults:d (kind s.art)) defaults in
+  let base = match defaults with Some d -> Some (start ~defaults:d (kind s.art)) | None -> None in
   let field get =
-    match (get s.art, Option.bind base get) with Some value, Some default when value = default -> None | value, _ -> value
+    match (get s.art, match base with Some b -> get b | None -> None) with Some value, Some default when value = default -> None | value, _ -> value
   in
-  let color value default = Option.map (fun c -> String.sub c 1 6) (keep value default) in
+  let color value default = match keep value default with Some c -> Some (String.sub c 1 6) | None -> None in
   Routes.Home
     {
       kind = keep (kind s.art) (fun d -> kind d.art);

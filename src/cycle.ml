@@ -240,9 +240,11 @@ let dev_state () =
     match file with
     | None -> dev_default
     | Some f -> (
-        match Option.map String.trim (Host.read_file f) with
-        | None | Some "" -> dev_default
-        | Some text -> String.concat " " (String.split_on_char '\n' text))
+        match Host.read_file f with
+        | None -> dev_default
+        | Some text when String.trim text = "" -> dev_default
+        | Some text ->
+            let text = String.trim text in String.concat " " (String.split_on_char '\n' text))
   in
   { state }
 
@@ -334,7 +336,7 @@ let prerender_config config = { config with dev = None; prerendering = true }
 let css_files config = List.map (fun (file, text) -> ("_yuka/css/" ^ file, text)) config.css
 
 let served_dirs config =
-  Option.to_list (Option.map (fun (a : assets) -> ("/_yuka/app", a.dir)) config.assets)
+  (match config.assets with Some (a : assets) -> [ ("/_yuka/app", a.dir) ] | None -> [])
   @ List.map (fun (prefix, dir) -> ("/" ^ String.concat "/" prefix, dir)) config.public
 
 type request = {
@@ -451,17 +453,19 @@ let speculation_rules base =
 let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let assets = env.config.assets and base = env.config.base in
   let preload =
-    Option.map
-      (fun (a : assets) -> if base = "" then a.preload else fun name -> List.map (Site.join base) (a.preload name))
-      assets
+    match assets with
+    | Some (a : assets) ->
+        Some (if base = "" then a.preload else fun name -> List.map (Site.join base) (a.preload name))
+    | None -> None
   in
   let entry =
-    Option.map
-      (fun (a : assets) ->
-        "<script type=\"module\" async src=\""
-        ^ Printer.escape ~quote:true (base ^ "/_yuka/app/" ^ a.entry)
-        ^ "\"></script>")
-      assets
+    match assets with
+    | Some (a : assets) ->
+        Some
+          ("<script type=\"module\" async src=\""
+          ^ Printer.escape ~quote:true (base ^ "/_yuka/app/" ^ a.entry)
+          ^ "\"></script>")
+    | None -> None
   in
   let import_map =
     match assets with Some a -> List.map (fun (k, v) -> (k, Site.join base v)) a.import_map | None -> []
@@ -484,9 +488,9 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
   let build = routed (nest layers page.body) in
   let timeout = env.config.timeout and current = env.current in
   let shared_rule = List.exists (fun (n, v) -> same_name n "cache-control" && shared_cache v) headers in
-  let respond ?id_prefix ?route_printed ?entry build =
+  let respond ?id_prefix ?route_printed ?entry ?frame build =
     Server.page ~stream:(not shared_rule) ?preload ?entry ?id_prefix ?route_printed ?form:env.form ?csrf:env.csrf
-      ~context:env.context ~current ~timeout ~sleep:env.sleep build
+      ~context:env.context ~current ?frame ~timeout ~sleep:env.sleep build
   in
   let streamed first piece last rest write =
     let ( >>= ) = Async.bind in
@@ -517,7 +521,7 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
           (respond ?id_prefix ?route_printed ?entry build)
       in
       match shared sent layers with
-      | 0 -> answer headers (fun body -> head "" ^ body ^ "</body></html>") ?entry build
+      | 0 -> answer headers (fun body -> String.concat "" [ head ""; body; "</body></html>" ]) ?entry build
       | n ->
           let n = if overlay then List.length layers else n in
           let outlet = List.nth keys (n - 1) in
@@ -548,13 +552,19 @@ let render ?(overlay = false) env ~status ~headers layers (page : page) =
       let close islands =
         (if islands || env.prefetch = `Off then "" else speculation_rules base) ^ "</body></html>"
       in
+      let framed = ref false in
+      let frame ~islands =
+        framed := true;
+        (head "", close islands)
+      in
       Async.map
         (function
-          | Server.Settled { body; islands } -> { status; headers; body = String (head "" ^ body ^ close islands) }
+          | Server.Settled { body; _ } when !framed -> { status; headers; body = String body }
+          | Server.Settled { body; islands } -> { status; headers; body = String (String.concat "" [ head ""; body; close islands ]) }
           | Server.Streamed { shell; fills; rest } ->
               let piece = function Server.Fill (id, html) -> Server.fill_chunk id html | Server.Value html -> html in
               { status; headers; body = Stream (streamed (head (if fills then Printer.fill_script else "") ^ shell) piece close rest) })
-        (respond ?entry build)
+        (respond ?entry ~frame build)
 
 let internal_error () = plain 500 "Internal Server Error" []
 
@@ -837,7 +847,8 @@ let sf_key k =
   && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '*' -> true | _ -> false) k
 
 let speculative (r : request) =
-  match (r.header "sec-purpose", Option.map String.trim (r.header "sec-fetch-dest")) with
+  let dest = match r.header "sec-fetch-dest" with Some d -> Some (String.trim d) | None -> None in
+  match (r.header "sec-purpose", dest) with
   | Some v, Some "document" -> (
       match String.split_on_char ';' (String.trim v) with
       | "prefetch" :: params ->
@@ -954,7 +965,7 @@ let live_answer env (r : request) =
   match r.meth with
   | `GET ->
       if not (Server.trusted_origin ?origins:env.config.origins r.header) then reply (plain 403 "Forbidden" [])
-      else if Option.map String.lowercase_ascii (r.header "upgrade") <> Some "websocket" then
+      else if (match r.header "upgrade" with Some u -> String.lowercase_ascii u <> "websocket" | None -> true) then
         reply (plain 426 "Upgrade Required" [ ("upgrade", "websocket") ])
       else (
         match r.session () with
@@ -1000,9 +1011,9 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (s
       sleep;
       head_only = (match r.meth with `HEAD -> true | _ -> false);
       navigate =
-        Option.map
-          (fun v -> List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
-          (r.header "yuka-navigate");
+        (match r.header "yuka-navigate" with
+        | Some v -> Some (List.filter (fun k -> k <> "") (String.split_on_char ' ' v))
+        | None -> None);
       overlay = r.header "yuka-overlay" = Some "1";
       build = build_id config (App a);
       prefetch = a.prefetch;
@@ -1063,7 +1074,7 @@ let handle ?(node = Live_server.main ()) config (App a as app) ~sleep ~exists (s
             static (fun () ->
                 match r.meth with
                 | `GET | `HEAD -> (
-                    match Option.bind (file_path rest) (fun f -> List.assoc_opt f config.css) with
+                    match match file_path rest with Some f -> List.assoc_opt f config.css | None -> None with
                     | Some text ->
                         reply
                           {

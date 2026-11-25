@@ -40,9 +40,12 @@ module Adapter = struct
             Buffer.add_string buffer chunk;
             if Buffer.length buffer > limit then refuse () else read ())
     in
-    match Option.bind (Dream.header request "Content-Length") int_of_string_opt with
-    | Some n when n > limit -> to_async (refuse ())
-    | _ -> to_async (read ())
+    match Dream.header request "Content-Length" with
+    | Some length -> (
+        match int_of_string_opt length with
+        | Some n when n > limit -> to_async (refuse ())
+        | _ -> to_async (read ()))
+    | None -> to_async (read ())
 
   let without_session f request =
     match f request with v -> Some v | exception Failure m when m = "Missing session middleware" -> None

@@ -2333,7 +2333,7 @@ let request_api =
         | None -> Alcotest.fail "the handler did not run"
         | Some req ->
             Alcotest.(check (option string)) "the adapter request" (Some "/hook")
-              (Option.map (fun (r : Test_adapter.request) -> r.target) (Cycle.backend_request req));
+              (match Cycle.backend_request req with Some (r : Test_adapter.request) -> Some r.target | None -> None);
             check_true "another Make" (Option.is_none (Held.backend_request req));
             check_true "a Testing request" (Option.is_none (Cycle.backend_request (Server.Testing.request ()))) );
     ( "target, query and query_param of a request",
@@ -2563,7 +2563,7 @@ let based =
             Alcotest.(check string) "path" "/hook" (Server.Request.path req);
             Alcotest.(check string) "target" "/hook" (Server.Request.target req);
             Alcotest.(check (option string)) "the adapter request" (Some "/demo/lux/hook")
-              (Option.map (fun (r : Test_adapter.request) -> r.target) (Cycle.backend_request req)) );
+              (match Cycle.backend_request req with Some (r : Test_adapter.request) -> Some r.target | None -> None) );
     ( "prerender targets and paths under the base",
       fun () ->
         Alcotest.(check string) "target" "/demo/lux/plain" (Server.Prerender.target based "/plain");

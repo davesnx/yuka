@@ -1,12 +1,9 @@
 let fields body = match Json.of_string body with Ok (`Assoc f) -> Some f | _ -> None
 
 let of_response status fields : (Json.t, Status.error) result =
-  let message () =
-    match Option.bind fields (List.assoc_opt "error") with
-    | Some (`String m) -> m
-    | _ -> "HTTP " ^ string_of_int status
-  in
-  match (status, Option.bind fields (List.assoc_opt "ok")) with
+  let field name = match fields with Some f -> List.assoc_opt name f | None -> None in
+  let message () = match field "error" with Some (`String m) -> m | _ -> "HTTP " ^ string_of_int status in
+  match (status, field "ok") with
   | 200, Some v -> Ok v
   | 400, _ -> Error (Status.Rejected (message ()))
   | 403, _ -> Error Status.Forbidden

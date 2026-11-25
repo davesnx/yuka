@@ -76,7 +76,7 @@ let block ~language source =
   | Some node -> node
   | None ->
       let grammar = grammar_of_language language in
-      let children = match Option.bind grammar (fun grammar -> highlight grammar source) with Some nodes -> nodes | None -> [ Markup.Text source ] in
+      let children = match match grammar with Some grammar -> highlight grammar source | None -> None with Some nodes -> nodes | None -> [ Markup.Text source ] in
       let attributes = ("class", "code-block") :: ("tabindex", "0") :: (if language = "" then [] else [ ("data-language", language) ]) in
       let node = Markup.Element { tag = "pre"; attributes; children = [ Element { tag = "code"; attributes = []; children } ] } in
       Hashtbl.replace cache key node;

@@ -5,7 +5,7 @@ let rec to_json = function
   | Element { tag; attributes; children } ->
       `List (`String tag :: `Assoc (List.map (fun (name, value) -> (name, `String value)) attributes) :: List.map to_json children)
 
-let rec all = function [] -> Some [] | Some value :: rest -> Option.map (fun values -> value :: values) (all rest) | None :: _ -> None
+let rec all = function [] -> Some [] | Some value :: rest -> ( match all rest with Some values -> Some (value :: values) | None -> None) | None :: _ -> None
 
 let rec of_json = function
   | `String text -> Some (Text text)

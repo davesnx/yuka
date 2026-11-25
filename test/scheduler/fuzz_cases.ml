@@ -1384,7 +1384,7 @@ let execute seed graph ops =
       let n = new_node t ~expr:None ~loose:false in
       n.value <- v;
       n.writer <- Some (State.make v);
-      n.handle <- Option.map State.read_only n.writer)
+      n.handle <- (match n.writer with Some w -> Some (State.read_only w) | None -> None))
     (graph.sources @ List.init graph.sinks (fun _ -> 0));
   begin_op t;
   let root = ref ignore in

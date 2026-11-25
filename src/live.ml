@@ -158,7 +158,7 @@ and heard m text =
   | Ok (`Assoc f) -> (
       let int k = match List.assoc_opt k f with Some (`Int i) -> Some i | _ -> None in
       let str k = match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None in
-      let use () = Option.bind (int "id") (fun id -> List.assoc_opt id m.ids) in
+      let use () = match int "id" with Some id -> List.assoc_opt id m.ids | None -> None in
       match str "t" with
       | Some ("hello" | "pong") as t ->
           if t = Some "hello" then begin
@@ -174,7 +174,10 @@ and heard m text =
       | Some "patch" -> (
           match (use (), int "seq", int "from", List.assoc_opt "ops" f) with
           | Some u, Some seq, Some from, Some ops when seq > u.last_seq -> (
-              match if from = u.last_seq then Option.bind u.json (fun j -> Json_patch.apply j ops) else None with
+              let patched =
+                match u.json with Some j when from = u.last_seq -> Json_patch.apply j ops | _ -> None
+              in
+              match patched with
               | Some state -> take m u seq state
               | None ->
                   u.json <- None;
@@ -184,7 +187,7 @@ and heard m text =
           | _ -> ())
       | Some "resumed" -> (
           match (use (), int "seq") with
-          | Some u, Some seq when u.last_seq = 0 && Option.map snd u.at = Some seq ->
+          | Some u, Some seq when u.last_seq = 0 && (match u.at with Some (_, at) -> at = seq | None -> false) ->
               u.last_seq <- seq;
               u.on_resumed ()
           | _ -> ())
