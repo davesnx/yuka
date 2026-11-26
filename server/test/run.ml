@@ -1382,6 +1382,8 @@ let emfile_child () =
        List.iter Unix.close (List.tl spare);
        let* () = write_all socket "GET /feed.xml HTTP/1.1\r\nHost: app.test\r\nConnection: close\r\n\r\n" in
        let* output = bounded "the answer" (read_all socket) in
+       if not (String.starts_with ~prefix:"HTTP/1.1 200" output) then
+         prerr_endline (Printf.sprintf "emfile-child: answer %S" (String.sub output 0 (min 300 (String.length output))));
        Lwt.return (String.starts_with ~prefix:"HTTP/1.1 200" output))
   in
   exit (if ok then 0 else 1)
