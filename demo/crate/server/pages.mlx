@@ -110,7 +110,7 @@ let album ~id:_ ~(album : album) ~track () =
           <a class_="back" href=(Routes.shelf ())>"← All records"</a>
           <article class_="album">
             <div class_="sleeve">
-              <div class_="disc" />
+              <div class_=(if playing = None then "disc" else "disc spinning") />
               (cover ~size:"large" album)
             </div>
             <div class_="details">

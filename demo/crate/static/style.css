@@ -95,6 +95,10 @@ a { color: inherit; }
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   view-transition-name: disc;
 }
+/* While a track plays the record turns at 33 rpm (1.8 s a turn): the light on the grooves turns
+   with it. */
+.disc.spinning { animation: spin 1.8s linear infinite; }
+
 .details h1 { font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.03em; line-height: 1.05; margin: 6px 0 6px; }
 .meta { color: var(--accent); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; margin: 0; }
 .artist { color: var(--muted); font-size: 1.1rem; margin: 0 0 28px; }
@@ -173,6 +177,7 @@ html[data-yuka-nav="back"]::view-transition-new(*.content):only-child { animatio
 @keyframes to-right { to { transform: translateX(32px); } }
 @keyframes disc-out { from { transform: translateX(-30%) rotate(-90deg); opacity: 0; } }
 @keyframes disc-in { to { transform: translateX(-30%) rotate(-90deg); opacity: 0; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 760px) {
   .album { grid-template-columns: 1fr; gap: 32px; }
@@ -184,5 +189,6 @@ html[data-yuka-nav="back"]::view-transition-new(*.content):only-child { animatio
 
 @media (prefers-reduced-motion: reduce) {
   .card .cover { transition: none; }
+  .disc.spinning { animation: none; }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
 }
