@@ -1,0 +1,6 @@
+(* A bar at the top of the page while a client navigation loads. It is also the island of
+   every page: a page with no island loads no JavaScript, so its links would load full pages,
+   with no view transition. *)
+
+let[@client] make () =
+  <div class_=(if Yuka.State.get Yuka.Browser.navigating then "progress on" else "progress") aria_hidden=true />

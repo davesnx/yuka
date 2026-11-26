@@ -1,0 +1,25 @@
+(library
+ (name crate_app)
+ (modules catalog pages yuka_routes serve)
+ (libraries crate_shared yuka yuka-dream dream)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Crate_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
+
+(executable
+ (name crate_server)
+ (modules crate_server)
+ (libraries crate_app dream))

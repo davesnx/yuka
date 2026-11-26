@@ -1,0 +1,177 @@
+:root {
+  color-scheme: dark;
+  --bg: #0d0c0b;
+  --panel: #171513;
+  --line: #2a2723;
+  --text: #f1ece4;
+  --muted: #958d82;
+  --accent: #f2a33a;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: radial-gradient(900px 500px at 80% -10%, rgba(242, 163, 58, 0.12), transparent 70%), var(--bg);
+  background-repeat: no-repeat;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+/* After a client navigation Yuka moves the focus to the first h1, with tabindex="-1": it is for
+   screen readers, and a ring around the title after each arrow key or Back would distract. */
+[tabindex="-1"]:focus { outline: none; }
+
+.page { max-width: 1100px; margin: 0 auto; padding: 28px 24px 96px; }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 48px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; letter-spacing: -0.01em; }
+.logo {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: radial-gradient(circle, var(--accent) 0 18%, #111 19% 30%, #2b2824 31% 34%, #111 35%);
+  box-shadow: 0 0 20px rgba(242, 163, 58, 0.35);
+}
+.tagline { color: var(--muted); font-size: 0.85rem; }
+.progress {
+  position: fixed; top: 0; left: 0; height: 2px; width: 100%; z-index: 10;
+  background: var(--accent); transform-origin: left; transform: scaleX(0); opacity: 0;
+  transition: transform 0.2s ease, opacity 0.3s ease 0.1s;
+}
+.progress.on { transform: scaleX(0.7); opacity: 1; transition: transform 2s cubic-bezier(0.1, 0.6, 0.3, 1), opacity 0s; }
+
+.intro { max-width: 620px; margin-bottom: 32px; }
+.intro h1 { font-size: clamp(2.2rem, 5vw, 3.2rem); line-height: 1.05; letter-spacing: -0.03em; margin: 0 0 14px; }
+.intro p { color: var(--muted); font-size: 1.05rem; line-height: 1.6; margin: 0; }
+.intro p a { color: var(--accent); }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+.tab {
+  padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line);
+  color: var(--muted); text-decoration: none; font-size: 0.9rem;
+}
+.tab:hover { color: var(--text); border-color: #45403a; }
+.tab.on { background: var(--text); border-color: var(--text); color: var(--bg); }
+
+.grid { list-style: none; padding: 0; margin: 0; display: grid; gap: 28px 20px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.card { display: flex; flex-direction: column; gap: 4px; text-decoration: none; }
+.card .cover { margin-bottom: 8px; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.card:hover .cover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55); }
+.card-text { display: flex; flex-direction: column; gap: 4px; }
+.card-title { font-weight: 600; letter-spacing: -0.01em; }
+.card-artist { color: var(--muted); font-size: 0.85rem; }
+
+.cover {
+  position: relative; aspect-ratio: 1; width: 100%; border-radius: 6px; overflow: hidden;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  view-transition-class: cover;
+}
+.cover-title {
+  position: absolute; left: 8%; bottom: 7%; right: 8%;
+  font-weight: 800; font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+.cover.large .cover-title { font-size: 1.4rem; }
+.cover.small { width: 56px; flex: none; border-radius: 4px; }
+.cover.small .cover-title { display: none; }
+
+.back { display: inline-block; color: var(--muted); text-decoration: none; margin-bottom: 28px; font-size: 0.9rem; }
+.back:hover { color: var(--text); }
+
+.album { display: grid; grid-template-columns: minmax(0, 420px) 1fr; gap: 104px; align-items: start; }
+.sleeve { position: relative; }
+.cover.large { z-index: 1; border-radius: 8px; }
+.disc {
+  position: absolute; top: 4%; right: -18%; width: 92%; aspect-ratio: 1; border-radius: 50%;
+  background:
+    radial-gradient(circle, #0a0a0a 0 1.5%, var(--accent) 2% 14%, #0a0a0a 14.5% 16%, transparent 16.5%),
+    conic-gradient(from 30deg, transparent 0 10%, rgba(255, 255, 255, 0.1) 14%, transparent 20% 60%, rgba(255, 255, 255, 0.08) 64%, transparent 70%),
+    repeating-radial-gradient(circle, #1e1e1e 0 2px, #2a2a2a 2px 3px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  view-transition-name: disc;
+}
+.details h1 { font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.03em; line-height: 1.05; margin: 6px 0 6px; }
+.meta { color: var(--accent); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; margin: 0; }
+.artist { color: var(--muted); font-size: 1.1rem; margin: 0 0 28px; }
+
+.tracks { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
+.track {
+  display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 8px;
+  padding: 12px 6px; border-bottom: 1px solid var(--line); text-decoration: none;
+}
+.track:hover { background: rgba(255, 255, 255, 0.03); }
+.track.on { color: var(--accent); }
+.track-number, .track-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+.track.on .track-number { color: var(--accent); }
+.now { color: var(--muted); font-size: 0.85rem; margin: 16px 0 0; }
+
+.neighbours {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px;
+  margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--line);
+}
+.neighbour { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.neighbour:last-child { flex-direction: row-reverse; text-align: right; }
+.neighbour > span { display: flex; flex-direction: column; font-weight: 600; }
+.neighbour-label { color: var(--muted); font-size: 0.75rem; font-weight: 400; }
+.keys { color: var(--muted); font-size: 0.8rem; margin: 0; display: flex; align-items: center; gap: 4px; }
+kbd {
+  display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px;
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+  font: 0.75rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+}
+
+/* View transitions. Yuka sets data-yuka-nav on <html> while one runs: "push" for a link or
+   navigate, "back" and "forward" for history. The page slides with the direction, and each
+   cover-N moves on its own, from its place on the old page to its place on the new one. */
+
+::view-transition-old(root) { animation: 0.3s ease both fade-out; }
+::view-transition-new(root) { animation: 0.3s ease both fade-in; }
+html[data-yuka-nav="push"]::view-transition-old(root),
+html[data-yuka-nav="forward"]::view-transition-old(root) { animation-name: fade-out, to-left; }
+html[data-yuka-nav="push"]::view-transition-new(root),
+html[data-yuka-nav="forward"]::view-transition-new(root) { animation-name: fade-in, from-right; }
+html[data-yuka-nav="back"]::view-transition-old(root) { animation-name: fade-out, to-right; }
+html[data-yuka-nav="back"]::view-transition-new(root) { animation-name: fade-in, from-left; }
+
+/* The header, the intro and the tabs have their own names, so they stay in place instead of
+   sliding with the page: on a genre tab they are the same on both pages and do not move. The
+   title and artist under a cover have a name per record too, so they move with the cover. */
+.top { view-transition-name: top; }
+.intro { view-transition-name: intro; }
+.tabs { view-transition-name: tabs; }
+
+::view-transition-group(*) { animation-duration: 0.45s; animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* During a view transition each named element is drawn in its own layer above the page, and
+   the z-index of the cover does not reach these layers: give them one so the disc stays behind
+   the cover. Each cover has view-transition-class cover. */
+::view-transition-group(disc) { z-index: 1; }
+::view-transition-group(*.cover) { z-index: 2; }
+
+/* The record slides out of its sleeve, and back in when the page goes away. */
+::view-transition-new(disc) { animation: 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.1s both disc-out; }
+::view-transition-old(disc) { animation: 0.25s ease both disc-in; }
+
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes from-right { from { transform: translateX(32px); } }
+@keyframes from-left { from { transform: translateX(-32px); } }
+@keyframes to-left { to { transform: translateX(-32px); } }
+@keyframes to-right { to { transform: translateX(32px); } }
+@keyframes disc-out { from { transform: translateX(-30%) rotate(-90deg); opacity: 0; } }
+@keyframes disc-in { to { transform: translateX(-30%) rotate(-90deg); opacity: 0; } }
+
+@media (max-width: 760px) {
+  .album { grid-template-columns: 1fr; gap: 32px; }
+  .disc { right: -14%; }
+  .sleeve { max-width: 320px; }
+  .neighbours { grid-template-columns: 1fr 1fr; }
+  .keys { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card .cover { transition: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
+}

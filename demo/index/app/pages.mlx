@@ -138,6 +138,25 @@ let infinite_scroll () : Yuka.server Yuka.element =
     <text class_="caption on" x="220.5" y="209" text_anchor="middle">"Loading…"</text>
   </svg>
 
+let crate () : Yuka.server Yuka.element =
+  let small ~x ~y ~fill = <rect x=(Int.to_string x) y=(Int.to_string y) width="40" height="40" rx="3" fill /> in
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A small record cover growing into a large one">
+    (window_chrome ~title:"crate")
+    (small ~x:24 ~y:56 ~fill:"#f2a33a")
+    (small ~x:72 ~y:56 ~fill:"#5b8def")
+    (small ~x:24 ~y:116 ~fill:"#3fb68b")
+    <rect class_="sentinel" x="72.5" y="116.5" width="39" height="39" rx="3" fill="none" />
+    (small ~x:24 ~y:176 ~fill:"#e0607e")
+    (small ~x:72 ~y:176 ~fill:"#8f74ff")
+    <path class_="line" d="M120 136 C160 136 170 110 206 110" stroke_dasharray="4 4" />
+    <path class_="line" d="M200 104 L208 110 L200 116" />
+    <circle cx="348" cy="138" r="78" fill="#2b2b31" />
+    <circle cx="348" cy="138" r="56" fill="none" stroke="#3a3a42" />
+    <circle cx="348" cy="138" r="14" class_="accent-fill" />
+    <rect x="220" y="62" width="150" height="150" rx="5" fill="#8f74ff" />
+    <rect x="232" y="186" width="70" height="8" rx="2" fill="#ffffff" opacity="0.85" />
+  </svg>
+
 let poster_line y =
   Printf.sprintf "M116 %d C140 %d 160 %d 182 %d S224 %d 240 %d" y (y - 18) (y + 18) y (y - 14) (y - 4)
 
@@ -202,6 +221,14 @@ let demos =
       path = "/infinite-scroll";
       tags = [ "on_visible"; "keep_scroll"; "URL state" ];
       illustration = infinite_scroll;
+    };
+    {
+      name = "Crate";
+      description =
+        "A crate of records with view transitions: a cover grows into its album page, and Back puts it in its slot.";
+      path = "/crate";
+      tags = [ "View transitions"; "~transitions"; "data-yuka-transition" ];
+      illustration = crate;
     };
   ]
 
