@@ -25,7 +25,10 @@ a { color: inherit; }
    screen readers, and a ring around the title after each arrow key or Back would distract. */
 [tabindex="-1"]:focus { outline: none; }
 
-.page { max-width: 1100px; margin: 0 auto; padding: 28px 24px 96px; }
+/* Centred on the width of the window (100vw), not of the space left by the scrollbar: a scrollbar
+   that comes or goes, on the shelf and not on an album page or for a moment while a view
+   transition captures the new page, does not move the column sideways. */
+.page { max-width: 1100px; margin: 0 0 0 max(0px, (100vw - 1100px) / 2); padding: 28px 24px 96px; }
 
 .top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 48px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; letter-spacing: -0.01em; }
@@ -123,22 +126,30 @@ kbd {
 }
 
 /* View transitions. Yuka sets data-yuka-nav on <html> while one runs: "push" for a link or
-   navigate, "back" and "forward" for history. The page slides with the direction, and each
-   cover-N moves on its own, from its place on the old page to its place on the new one. */
+   navigate, "back" and "forward" for history. The page itself, with its background and glow,
+   does not move. Its content (main) is named after the page (shelf, album) with the class
+   content: from the shelf to an album page and back, it is only on one side (:only-child) and
+   slides with the direction. From one album to the next it is on both sides and cross-fades in
+   place, as the layout stays the same: a slide would only shift it left and back. Each cover-N
+   moves on its own, from its place on the old page to its place on the new one. */
 
-::view-transition-old(root) { animation: 0.3s ease both fade-out; }
-::view-transition-new(root) { animation: 0.3s ease both fade-in; }
-html[data-yuka-nav="push"]::view-transition-old(root),
-html[data-yuka-nav="forward"]::view-transition-old(root) { animation-name: fade-out, to-left; }
-html[data-yuka-nav="push"]::view-transition-new(root),
-html[data-yuka-nav="forward"]::view-transition-new(root) { animation-name: fade-in, from-right; }
-html[data-yuka-nav="back"]::view-transition-old(root) { animation-name: fade-out, to-right; }
-html[data-yuka-nav="back"]::view-transition-new(root) { animation-name: fade-in, from-left; }
+.content { view-transition-class: content; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-old(*.content):only-child { animation: 0.3s ease both fade-out; }
+::view-transition-new(*.content):only-child { animation: 0.3s ease both fade-in; }
+html[data-yuka-nav="push"]::view-transition-old(*.content):only-child,
+html[data-yuka-nav="forward"]::view-transition-old(*.content):only-child { animation-name: fade-out, to-left; }
+html[data-yuka-nav="push"]::view-transition-new(*.content):only-child,
+html[data-yuka-nav="forward"]::view-transition-new(*.content):only-child { animation-name: fade-in, from-right; }
+html[data-yuka-nav="back"]::view-transition-old(*.content):only-child { animation-name: fade-out, to-right; }
+html[data-yuka-nav="back"]::view-transition-new(*.content):only-child { animation-name: fade-in, from-left; }
 
-/* The header, the intro and the tabs have their own names, so they stay in place instead of
-   sliding with the page: on a genre tab they are the same on both pages and do not move. The
-   title and artist under a cover have a name per record too, so they move with the cover. */
+/* The header, the intro, the tabs and the footer of an album page have their own names, so they
+   stay in place instead of sliding with the content: on a genre tab, or from one album to the
+   next, they are at the same place on both pages and do not move. The title and artist under a
+   cover have a name per record too, so they move with the cover. */
 .top { view-transition-name: top; }
+.neighbours { view-transition-name: neighbours; }
 .intro { view-transition-name: intro; }
 .tabs { view-transition-name: tabs; }
 

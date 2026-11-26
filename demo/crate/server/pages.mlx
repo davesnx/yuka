@@ -51,17 +51,19 @@ let shelf ~genre () =
   Yuka.Server.page ~title:"Crate" (fun () ->
       <div class_="page">
         (header ())
-        <section class_="intro">
-          <h1>"Dig through the crate"</h1>
-          <p>
-            "Every click here is a client navigation in a view transition. Open a record: its cover grows into the album page, and Back puts it in its slot. The tabs move the covers to their new places."
-          </p>
-        </section>
-        <nav class_="tabs" aria_label="Genres">
-          (tab ~current:genre "All" None)
-          (Yuka.fragment (List.map (fun name -> tab ~current:genre name (Some name)) genres))
-        </nav>
-        <ul class_="grid">(Yuka.fragment (List.map card shown))</ul>
+        <main class_="content" style="view-transition-name:shelf">
+          <section class_="intro">
+            <h1>"Dig through the crate"</h1>
+            <p>
+              "Every click here is a client navigation in a view transition. Open a record: its cover grows into the album page, and Back puts it in its slot. The tabs move the covers to their new places."
+            </p>
+          </section>
+          <nav class_="tabs" aria_label="Genres">
+            (tab ~current:genre "All" None)
+            (Yuka.fragment (List.map (fun name -> tab ~current:genre name (Some name)) genres))
+          </nav>
+          <ul class_="grid">(Yuka.fragment (List.map card shown))</ul>
+        </main>
       </div>)
 
 let duration album index = Printf.sprintf "%d:%02d" (2 + ((album.id + index) * 7 mod 5)) (((album.id * 13) + (index * 29)) mod 60)
@@ -90,10 +92,12 @@ let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->
       <div class_="page">
         (header ())
-        <section class_="intro">
-          <h1>"Not in the crate"</h1>
-          <p>(Yuka.text ("No page at " ^ path ^ ". ")) <a href=(Routes.shelf ())>"Back to the shelf"</a></p>
-        </section>
+        <main class_="content" style="view-transition-name:missing">
+          <section class_="intro">
+            <h1>"Not in the crate"</h1>
+            <p>(Yuka.text ("No page at " ^ path ^ ". ")) <a href=(Routes.shelf ())>"Back to the shelf"</a></p>
+          </section>
+        </main>
       </div>)
 
 let album ~id:_ ~(album : album) ~track () =
@@ -102,29 +106,31 @@ let album ~id:_ ~(album : album) ~track () =
   Yuka.Server.page ~title:(album.title ^ " · Crate") (fun () ->
       <div class_="page">
         (header ())
-        <a class_="back" href=(Routes.shelf ())>"← All records"</a>
-        <article class_="album">
-          <div class_="sleeve">
-            <div class_="disc" />
-            (cover ~size:"large" album)
-          </div>
-          <div class_="details">
-            <p class_="meta">(Yuka.text (Printf.sprintf "%s · %d" album.genre album.year))</p>
-            <h1>(Yuka.text album.title)</h1>
-            <p class_="artist">(Yuka.text album.artist)</p>
-            <ol class_="tracks">(Yuka.fragment (List.mapi (track_row album ~playing) album.tracks))</ol>
-            <p class_="now">
-              (match playing with
-              | Some n -> Yuka.text ("Now playing: " ^ List.nth album.tracks (n - 1))
-              | None -> Yuka.text "Pick a track.")
-            </p>
-          </div>
-        </article>
-        <nav class_="neighbours" aria_label="More records">
-          (neighbour "Previous" previous)
-          <Yuka.Client>
-            <Keys previous=(Routes.album ~id:previous.id ()) next=(Routes.album ~id:next.id ()) />
-          </Yuka.Client>
-          (neighbour "Next" next)
-        </nav>
+        <main class_="content" style="view-transition-name:album">
+          <a class_="back" href=(Routes.shelf ())>"← All records"</a>
+          <article class_="album">
+            <div class_="sleeve">
+              <div class_="disc" />
+              (cover ~size:"large" album)
+            </div>
+            <div class_="details">
+              <p class_="meta">(Yuka.text (Printf.sprintf "%s · %d" album.genre album.year))</p>
+              <h1>(Yuka.text album.title)</h1>
+              <p class_="artist">(Yuka.text album.artist)</p>
+              <ol class_="tracks">(Yuka.fragment (List.mapi (track_row album ~playing) album.tracks))</ol>
+              <p class_="now">
+                (match playing with
+                | Some n -> Yuka.text ("Now playing: " ^ List.nth album.tracks (n - 1))
+                | None -> Yuka.text "Pick a track.")
+              </p>
+            </div>
+          </article>
+          <nav class_="neighbours" aria_label="More records">
+            (neighbour "Previous" previous)
+            <Yuka.Client>
+              <Keys previous=(Routes.album ~id:previous.id ()) next=(Routes.album ~id:next.id ()) />
+            </Yuka.Client>
+            (neighbour "Next" next)
+          </nav>
+        </main>
       </div>)
