@@ -1,1 +1,1 @@
-let () = Yuka.render ~islands ~transitions:true ()
+let () = Yuka.render ~islands ()

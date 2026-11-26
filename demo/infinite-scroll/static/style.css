@@ -109,5 +109,4 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .skeleton .swatches, .skeleton .line, .spinner { animation: none; }
   .status, .swatches span, .card { transition: none; }
-  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
 }
