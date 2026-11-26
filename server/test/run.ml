@@ -1380,11 +1380,20 @@ let emfile_child () =
        let* socket = connect port in
        let* () = Lwt_unix.sleep 0.5 in
        List.iter Unix.close (List.tl spare);
-       let* () = write_all socket "GET /feed.xml HTTP/1.1\r\nHost: app.test\r\nConnection: close\r\n\r\n" in
+       let request = "GET /feed.xml HTTP/1.1\r\nHost: app.test\r\nConnection: close\r\n\r\n" in
+       let* () = write_all socket request in
        let* output = bounded "the answer" (read_all socket) in
+       (* Linux keeps the connection that accept could not take, and the server answers it
+          once descriptors are free. macOS closes it in the failed accept, so there the
+          server must answer the next connection. *)
+       let* output = if output = "" then tcp port request else Lwt.return output in
        Lwt.return (String.starts_with ~prefix:"HTTP/1.1 200" output))
   in
   exit (if ok then 0 else 1)
+
+(* A blocking waitpid that goes on after EINTR: Lwt_main.run installs a SIGCHLD
+   handler, and on macOS the end of the child interrupts the waitpid. *)
+let rec reap pid = match Unix.waitpid [] pid with _ -> () | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap pid
 
 let wait_child pid =
   let deadline = Unix.gettimeofday () +. bound in
@@ -1395,7 +1404,7 @@ let wait_child pid =
         wait ()
     | 0, _ ->
         Unix.kill pid Sys.sigkill;
-        ignore (Unix.waitpid [] pid);
+        reap pid;
         Alcotest.fail "the server process did not end"
     | _, status -> status
   in
@@ -1441,7 +1450,7 @@ let with_child pid f =
       match Unix.waitpid [ Unix.WNOHANG ] pid with
       | 0, _ ->
           Unix.kill pid Sys.sigkill;
-          ignore (Unix.waitpid [] pid)
+          reap pid
       | _ -> ()
       | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ())
     f
@@ -1589,7 +1598,7 @@ let workers_orphaned () =
   | Some workers ->
       Alcotest.(check int) "two worker processes" 2 (List.length workers);
       Unix.kill pid Sys.sigkill;
-      ignore (Unix.waitpid [] pid);
+      reap pid;
       let gone worker = match Unix.kill worker 0 with () -> false | exception Unix.Unix_error (Unix.ESRCH, _, _) -> true in
       let deadline = Unix.gettimeofday () +. 5. in
       let rec wait () =
