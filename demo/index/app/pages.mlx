@@ -206,13 +206,31 @@ let utop () : Yuka.server Yuka.element =
 let top_row ~y ~width ~cpu ~hot : Yuka.server Yuka.element =
   let px = Int.to_string in
   <g>
-    <rect class_="bar code" x="116" y=(px y) width="24" height="6" rx="3" />
-    <rect class_=(if hot then "bar hot" else "bar strong") x="152" y=(px y) width=(px cpu) height="6" rx="3" />
-    <rect class_="bar" x="236" y=(px y) width=(px width) height="6" rx="3" />
+    <rect class_="bar code" x="240" y=(px y) width="14" height="5" rx="2.5" />
+    <rect class_="bar" x="262" y=(px y) width=(px width) height="5" rx="2.5" />
+    <rect class_=(if hot then "bar hot" else "bar strong") x=(px (422 - cpu)) y=(px y) width=(px cpu) height="5" rx="2.5" />
+  </g>
+
+(* The CPU graph of the top demo: a column of dots per value. *)
+let top_graph () : Yuka.server Yuka.element =
+  let heights = [ 10; 16; 12; 22; 18; 30; 24; 14; 20; 34; 28; 18; 12; 26; 40; 32; 22; 16; 24; 36; 20; 14; 18; 28; 44; 30 ] in
+  Yuka.fragment
+    (List.mapi
+       (fun i height ->
+         let px = Int.to_string in
+         <rect class_=(if height >= 36 then "bar hot" else "meter-used") x=(px (122 + (i * 7))) y=(px (108 - height))
+           width="3" height=(px height) rx="1.5" />)
+       heights)
+
+let top_core ~y ~used : Yuka.server Yuka.element =
+  let px = Int.to_string in
+  <g>
+    <rect class_="meter" x="330.5" y=(px y) width="90" height="5" rx="1" />
+    <rect class_="meter-used" x="331" y=(px y) width=(px used) height="5" rx="1" />
   </g>
 
 let top () : Yuka.server Yuka.element =
-  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A process monitor in an editor window, with a host panel">
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A process monitor with boxes for the CPU, the memory, the network and the processes">
     (window_chrome ~title:"top")
     <line class_="rule" x1="104.5" y1="28" x2="104.5" y2="260" />
     <rect class_="bar" x="16" y="44" width="50" height="7" rx="3.5" />
@@ -221,20 +239,28 @@ let top () : Yuka.server Yuka.element =
     <rect class_="bar strong" x="30" y="70" width="40" height="6" rx="3" />
     <rect class_="bar" x="30" y="92" width="48" height="6" rx="3" />
     <rect class_="bar" x="30" y="114" width="30" height="6" rx="3" />
-    <text class_="caption" x="116" y="50">"%Cpu"</text>
-    <rect class_="meter" x="160.5" y="43.5" width="268" height="8" rx="2" />
-    <rect class_="meter-used" x="161" y="44" width="92" height="7" rx="2" />
-    <text class_="caption" x="116" y="68">"Mem"</text>
-    <rect class_="meter" x="160.5" y="61.5" width="268" height="8" rx="2" />
-    <rect class_="meter-used" x="161" y="62" width="70" height="7" rx="2" />
-    <rect class_="meter-cache" x="231" y="62" width="96" height="7" />
-    <rect class_="nav-active" x="112" y="84" width="320" height="14" rx="2" />
-    (top_row ~y:110 ~width:150 ~cpu:62 ~hot:true)
-    (top_row ~y:128 ~width:110 ~cpu:44 ~hot:false)
-    (top_row ~y:146 ~width:170 ~cpu:30 ~hot:false)
-    (top_row ~y:164 ~width:90 ~cpu:22 ~hot:false)
-    (top_row ~y:182 ~width:130 ~cpu:14 ~hot:false)
-    (top_row ~y:200 ~width:100 ~cpu:8 ~hot:false)
+    <rect class_="tbox cpu" x="112.5" y="38.5" width="319" height="78" rx="4" />
+    <text class_="caption" x="120" y="54">"cpu"</text>
+    (top_graph ())
+    <rect class_="tbox" x="322.5" y="46.5" width="104" height="62" rx="3" />
+    (top_core ~y:54 ~used:40)
+    (top_core ~y:66 ~used:62)
+    (top_core ~y:78 ~used:28)
+    (top_core ~y:90 ~used:50)
+    <rect class_="tbox mem" x="112.5" y="126.5" width="110" height="44" rx="4" />
+    <rect class_="meter-used" x="122" y="138" width="40" height="5" rx="1" />
+    <rect class_="meter-cache" x="122" y="148" width="72" height="5" rx="1" />
+    <rect class_="bar code" x="122" y="158" width="52" height="5" rx="1" />
+    <rect class_="tbox net" x="112.5" y="178.5" width="110" height="40" rx="4" />
+    <path class_="net-line" d="M120 200 L132 196 L144 199 L156 188 L168 197 L180 192 L192 198 L204 186 L214 195" />
+    <rect class_="tbox proc" x="230.5" y="126.5" width="201" height="92" rx="4" />
+    <rect class_="selected" x="235" y="148" width="192" height="11" rx="2" />
+    (top_row ~y:138 ~width:90 ~cpu:40 ~hot:true)
+    (top_row ~y:151 ~width:70 ~cpu:28 ~hot:false)
+    (top_row ~y:164 ~width:100 ~cpu:18 ~hot:false)
+    (top_row ~y:177 ~width:60 ~cpu:12 ~hot:false)
+    (top_row ~y:190 ~width:84 ~cpu:8 ~hot:false)
+    (top_row ~y:203 ~width:76 ~cpu:4 ~hot:false)
     <line class_="rule" x1="104" y1="226.5" x2="440" y2="226.5" />
     <rect class_="chip on" x="116.5" y="232.5" width="30" height="14" rx="3" />
     <rect class_="chip" x="150.5" y="232.5" width="30" height="14" rx="3" />
@@ -284,7 +310,7 @@ let demos =
     {
       name = "top";
       description =
-        "A fake top in a Zed window: the server renders the first screen, the browser a new one every second.";
+        "A fake top in the layout of btop, in a full-screen Zed window: live graphs, a process table and a detail per process.";
       path = "/top";
       tags = [ "Islands"; "Yuka.each"; "on_frame"; "Zed" ];
       illustration = top;
@@ -346,6 +372,12 @@ h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:0 0 8px}
 .art .meter{fill:none;stroke:var(--line)}
 .art .meter-used{fill:#3f953a}
 .art .meter-cache{fill:#d2b67c}
+.art .tbox{fill:none;stroke:var(--line)}
+.art .tbox.cpu{stroke:#3f953a}
+.art .tbox.mem{stroke:#d2b67c}
+.art .tbox.net{stroke:#b477cf}
+.art .tbox.proc{stroke:var(--accent)}
+.art .net-line{fill:none;stroke:#b477cf;stroke-width:1.5;stroke-linejoin:round}
 .art .line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 @media (max-width:720px){.page{padding-top:56px}h1{font-size:34px}.card{grid-template-columns:1fr}.preview{border-left:0;border-top:1px solid var(--line);order:-1}.body{padding:24px}}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}

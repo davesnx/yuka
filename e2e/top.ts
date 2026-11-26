@@ -41,76 +41,109 @@ const started = (p: Page) =>
     const islands = [...document.querySelectorAll("yuka-island")];
     return islands.length > 0 && islands.every((i) => (i as any).__yuka_started);
   });
-const clock = (p: Page) => p.locator(".summary .value").first().innerText();
+const clock = (p: Page) => p.locator(".clock").innerText();
 const rows = (p: Page) => p.locator('.proc[role="row"][data-pid]');
 const column = async (p: Page, index: number) =>
   (await rows(p).locator(`.cell:nth-child(${index})`).allInnerTexts()).map((t) => t.trim());
 const sortedDown = (values: number[]) => values.every((v, i) => i === 0 || values[i - 1] >= v);
+const dialog = (p: Page) => p.locator('[role="dialog"]');
 
 const P = await open("dark");
 
 await step("the first screen", async () => {
   await P.goto(app + "/");
-  const server = await P.locator(".summary").innerText();
+  const server = await P.locator(".box.mem").innerText();
   await started(P);
-  check("the island keeps the server screen", (await P.locator(".summary").innerText()) === server);
+  check("the island keeps the server screen", (await P.locator(".box.mem").innerText()) === server);
   check("the clock of the laptop", (await clock(P)) === "18:42:07", await clock(P));
-  check("28 processes", (await rows(P).count()) === 28, String(await rows(P).count()));
-  check("sorted by %CPU", sortedDown((await column(P, 9)).map(Number)));
-  check("graphs", (await P.locator(".meter").count()) === 3, String(await P.locator(".meter").count()));
+  check("at least 28 processes", (await rows(P).count()) >= 28, String(await rows(P).count()));
+  check("sorted by %CPU", sortedDown((await column(P, 8)).map(Number)));
+  check("four boxes", (await P.locator("section.box").count()) === 4);
+  check("a full CPU graph", (await P.locator(".box.cpu .graph-line").count()) === 13);
+  check("8 cores", (await P.locator(".core").count()) === 8);
+  const height = await P.locator(".window").evaluate((e) => e.getBoundingClientRect().height);
+  check("the window fills the screen", height === 980, String(height));
   check("Lilex loads", await P.evaluate(() => document.fonts.check("13px Lilex")));
   if (shots) await P.screenshot({ path: shots + "/top-dark.png" });
 });
 
 await step("a new screen each second", async () => {
   const before = await clock(P);
-  await P.waitForFunction((b) => document.querySelector(".summary .value")?.textContent !== b, before, {
-    timeout: 3000,
-  });
+  await P.waitForFunction((b) => document.querySelector(".clock")?.textContent !== b, before, { timeout: 3000 });
   check("the clock moves", (await clock(P)) !== before, `${before} -> ${await clock(P)}`);
 });
 
 await step("sort", async () => {
-  await P.keyboard.press("M");
-  check("M sorts by memory", (await P.locator(".sortable.on").innerText()).trim() === "%MEM");
   await P.keyboard.press("Space");
-  check("Space pauses", (await P.locator(".message").innerText()).includes("Paused"));
-  check("sorted by %MEM", sortedDown((await column(P, 10)).map(Number)));
-  await P.locator('.sortable[title^="Sort by PID"]').click();
-  check("a click on PID sorts by PID", sortedDown((await column(P, 1)).map(Number)));
-  await P.locator('.sortable[title^="Sort by PID"]').click();
+  check("Space pauses", (await P.locator(".rate").innerText()).includes("paused"));
+  await P.keyboard.press("M");
+  check("M sorts by memory", (await P.locator(".sortable.on").innerText()).trim() === "MemB");
+  check("the sort on the border", (await P.locator(".sort-tag").innerText()).trim() === "mem");
+  await P.locator('.sortable[title^="Sort by Pid"]').click();
+  check("a click on Pid sorts by PID", sortedDown((await column(P, 1)).map(Number)));
+  await P.locator('.sortable[title^="Sort by Pid"]').click();
   const pids = (await column(P, 1)).map(Number);
   check("a second click reverses", pids[0] === 1, String(pids[0]));
+  await P.locator(".key", { hasText: "reverse" }).click();
   await P.keyboard.press("Space");
-});
-
-await step("graphs and cores", async () => {
-  await P.keyboard.press("t");
-  check("t shows text", (await P.locator(".meter").count()) === 0);
-  check("the CPU line", (await P.locator(".summary").innerText()).includes("%Cpu(s):"));
-  await P.keyboard.press("1");
-  check("1 shows 8 cores", (await P.locator(".cores .line").count()) === 8);
-  await P.keyboard.press("1");
-  await P.keyboard.press("t");
-});
-
-await step("select and kill", async () => {
+  check("Space after a click on a key goes to top", !(await P.locator(".rate").innerText()).includes("paused"));
+  await P.keyboard.press("Space");
+  await P.locator(".key", { hasText: "reverse" }).click();
   await P.keyboard.press("P");
+});
+
+await step("filter", async () => {
+  await P.keyboard.press("f");
+  check("f focuses the filter", await P.evaluate(() => document.activeElement?.id === "proc-filter"));
+  await P.keyboard.type("fire");
+  await P.waitForFunction(() => document.querySelectorAll('.proc[data-pid]').length < 5);
+  const value = await P.locator("#proc-filter").inputValue();
+  const commands = await column(P, 3);
+  check("only firefox", commands.length === 1 && commands[0] === "firefox", commands.join(",") + " for " + value);
+  check("the count", (await P.locator(".box-foot .dim").innerText()).startsWith("1/"));
+  await P.keyboard.press("Escape");
+  check("Escape clears", (await rows(P).count()) >= 28);
+  await P.locator("#proc-filter").blur();
+});
+
+await step("the detail of a process", async () => {
   await P.keyboard.press("Space");
+  check("Space goes on", !(await P.locator(".rate").innerText()).includes("paused"));
   await P.locator('.proc[data-pid="1"]').click();
-  check("a click selects", (await P.locator(".proc.selected").getAttribute("data-pid")) === "1");
+  check("a click opens the detail", await dialog(P).isVisible());
+  check("its title", (await P.locator("#proc-title").innerText()) === "systemd");
+  check("the close button has the focus", await P.evaluate(() => document.activeElement?.id === "proc-close"));
+  check("the row is selected", (await P.locator(".proc.selected").getAttribute("data-pid")) === "1");
   await P.keyboard.press("k");
   check("root's process stays", (await P.locator('.proc[data-pid="1"]').count()) === 1);
-  check("not permitted", (await P.locator(".message").innerText()).includes("Operation not permitted"));
+  check("not permitted", (await dialog(P).innerText()).includes("Operation not permitted"));
+  const frame = await dialog(P).elementHandle();
+  await P.waitForFunction((b) => document.querySelector(".clock")?.textContent !== b, await clock(P), {
+    timeout: 3000,
+  });
+  check("the detail stays across screens", await frame!.evaluate((e) => e.isConnected));
+  check("the focus stays on the close button", await P.evaluate(() => document.activeElement?.id === "proc-close"));
+  await P.keyboard.press("Escape");
+  check("Escape closes", (await dialog(P).count()) === 0);
+  await P.locator('.proc[data-pid="1"]').click();
+  await P.locator(".scrim").click({ position: { x: 5, y: 5 } });
+  check("a click outside closes", (await dialog(P).count()) === 0);
+});
+
+await step("kill", async () => {
   const firefox = P.locator(".proc", { hasText: "firefox" });
   const pid = await firefox.getAttribute("data-pid");
   await firefox.click();
-  await P.keyboard.press("k");
+  check("the command", (await P.locator(".cmdline").innerText()) === "firefox");
+  await dialog(P).getByRole("button", { name: "Kill" }).click();
+  check("the detail closes", (await dialog(P).count()) === 0);
   check("firefox is gone", (await P.locator(`.proc[data-pid="${pid}"]`).count()) === 0);
-  check("the message", (await P.locator(".message").innerText()).includes("SIGTERM to pid " + pid));
+  check("the message", (await P.locator(".box-foot .message").innerText()).includes("SIGKILL to pid " + pid));
   await P.keyboard.press("ArrowDown");
   check("ArrowDown selects", (await P.locator(".proc.selected").count()) === 1);
-  await P.keyboard.press("Space");
+  await P.keyboard.press("Enter");
+  check("Enter opens the detail", await dialog(P).isVisible());
+  await P.keyboard.press("Escape");
 });
 
 await step("another host", async () => {
@@ -119,15 +152,14 @@ await step("another host", async () => {
   await started(P);
   check("the clock of build-01", (await clock(P)) === "03:14:51", await clock(P));
   check("selected host", (await P.locator(".panel .row.selected .label").innerText()) === "build-01");
-  await P.keyboard.press("1");
-  check("32 cores", (await P.locator(".cores .line").count()) === 32);
+  check("32 cores", (await P.locator(".core").count()) === 32);
 });
 
 await step("quit and start again", async () => {
   await P.keyboard.press("q");
   check("exited", await P.locator(".exited").isVisible());
   await P.locator(".exited button").click();
-  check("the screen again", await P.locator(".summary").isVisible());
+  check("the boxes again", await P.locator(".box.cpu").isVisible());
 });
 
 await step("light theme", async () => {
@@ -136,6 +168,9 @@ await step("light theme", async () => {
   await started(L);
   const background = await L.locator(".center").evaluate((e) => getComputedStyle(e).backgroundColor);
   check("One Light terminal", background === "rgb(250, 250, 250)", background);
+  await L.locator(".proc", { hasText: "checkpointer" }).click();
+  check("the detail in the light theme", await dialog(L).isVisible());
+  await L.waitForTimeout(300);
   if (shots) await L.screenshot({ path: shots + "/top-light.png" });
 });
 

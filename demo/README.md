@@ -13,8 +13,9 @@ Each demo is its own Yuka app, in its own directory, with its own
   OCaml function on the server and in an island, with its settings in the URL.
 - [utop](utop/README.md): a fake OCaml toplevel in a Zed window, with
   Zed's colours, fonts and icons; the prompt answers in the browser.
-- [top](top/README.md): a fake top in the same Zed window, for three
-  made-up machines; the browser makes a new screen every second.
+- [top](top/README.md): a fake top in the layout of btop, in a Zed window
+  in full screen, for three made-up machines; the browser makes a new
+  screen every second, and a click on a process opens its detail.
 - `zed`: the design system of the utop and top demos (Zed's fonts,
   colours and icons, and the window), not a demo.
 - `index`: the list of demos. It has no island and loads no JavaScript.

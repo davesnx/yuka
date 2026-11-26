@@ -59,12 +59,14 @@ a dark and a light screenshot to `DIR`:
     node e2e/utop.ts http://127.0.0.1:8125/utop
 
 Then `top.ts` runs under `/top`: the first screen of the laptop and the
-same screen after the island starts, a new screen a second later, sorting
-by key and by a click on a column, graphs and one line per core, Space to
-pause, selecting and killing a process (and the refusal for a process of
-root), another host from the panel, `q` and "Start again", and the One
-Light colours with a light colour scheme. `TOP_SCREENSHOTS=DIR` saves a
-dark and a light screenshot to `DIR`:
+same screen after the island starts, the window at the size of the
+browser, a new screen a second later, sorting by key and by a click on a
+column, the filter, the detail of a process (a click, the focus on its
+close button, the refusal to kill a process of root, the same detail
+after a new screen, Escape and a click outside), killing a process from
+the detail, the arrows and Enter, another host from the panel, `q` and
+"Start again", and the One Light colours with a light colour scheme.
+`TOP_SCREENSHOTS=DIR` saves a dark and a light screenshot to `DIR`:
 
     node e2e/top.ts http://127.0.0.1:8125/top
 

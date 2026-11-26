@@ -1,139 +1,172 @@
-(* top: the summary of a machine and its processes, a new screen each second. The
+(* top in the layout of btop: a box for the CPU, the memory, the network and the
+   processes, a bar of keys under them, and the detail of a process over them. The
    server renders the first screen; in the browser, [Machine.step] makes the next
-   ones, and the keys of top sort, select, kill and quit. *)
+   ones. *)
 
 open Machine
+
+let icon = Zed_ui.icon
+
+let percent value = Int.to_string ((value + 5) / 10) ^ "%"
+
+let width value top = "width:" ^ Int.to_string (if top <= 0 then 0 else Graph.clamp 0 1000 (value * 1000 / top) / 10) ^ "%"
+
+(* Four colours from cool to hot, as the gradients of btop. *)
+let tier value top =
+  let share = if top <= 0 then 0 else value * 100 / top in
+  if share >= 85 then "t3" else if share >= 60 then "t2" else if share >= 30 then "t1" else "t0"
+
+(* A bar of squares, as the meters of btop; its width follows the box. *)
+let bar ?(class_ = "") ?colour value top =
+  let colour = match colour with Some colour -> colour | None -> tier value top in
+  <span class_=("seg " ^ class_) aria_hidden=true>
+    <span class_=("seg-on " ^ colour) style=(width value top) />
+  </span>
+
+(* A box of btop: a border with a title, and more text on the border. *)
+let box ~class_ ~number ~title ?(right = Yuka.empty) children =
+  <section class_=("box " ^ class_) aria_label=title>
+    <header class_="box-head">
+      <span class_="box-title"><span class_="box-number">(Yuka.text number)</span>(Yuka.text title)</span>
+      <span class_="spacer" />
+      right
+    </header>
+    children
+  </section>
+
+(* The lines of a braille graph; with [~tiers], each line has the colour of its height. *)
+let graph ?(hang = false) ?(tiers = false) ~class_ ~height ~top values =
+  <div class_=("graph " ^ class_) aria_hidden=true>
+    (Yuka.fragment
+       (List.mapi
+          (fun i line ->
+            let class_ =
+              if not tiers then "graph-line"
+              else
+                let from_bottom = (height - 1 - i) * 4 / height in
+                "graph-line t" ^ Int.to_string from_bottom
+            in
+            <div class_>(Yuka.text line)</div>)
+          (Graph.lines ~hang ~height ~top values)))
+  </div>
+
+(* The top of the CPU graph: 100%, or less on a quiet machine, so its graph is not flat. *)
+let scale history =
+  let peak = Array.fold_left max 0 history in
+  let rec fit top = if top >= 1000 || peak * 5 / 4 <= top then min top 1000 else fit (top * 2) in
+  fit 125
+
+let cpu_box ~paused (t : t) (host : host) =
+  let used = 1000 - t.total.id in
+  let top = scale t.history in
+  let l1, l5, l15 = t.load in
+  let rows = min 8 host.cores in
+  box ~class_:"cpu" ~number:{js|¹|js} ~title:"cpu"
+    ~right:
+      <span class_="box-info">
+        <span class_="clock">(Yuka.text (Machine.clock t.clock))</span>
+        <span class_=(if paused then "rate paused" else "rate")>
+          (icon (if paused then "debug_pause" else "play_filled"))
+          (Yuka.text (if paused then "paused" else Int.to_string (Machine.delay * 1000) ^ "ms"))
+        </span>
+      </span>
+    <div class_="cpu-body">
+      <div class_="cpu-graph">
+        <div class_="graph-label"><b>"CPU"</b>(Yuka.text (" " ^ percent used))</div>
+        <div class_="graph-scale">(Yuka.text (percent top))</div>
+        (graph ~tiers:true ~class_:"big" ~height:13 ~top t.history)
+      </div>
+      <div class_="cpu-side">
+        <div class_="cpu-head">
+          <b>(Yuka.text host.name)</b>
+          (bar used 1000)
+          <span class_=("num " ^ tier used 1000)>(Yuka.text (percent used))</span>
+        </div>
+        <div class_="cores" style=("grid-template-rows:repeat(" ^ Int.to_string rows ^ ",auto)")>
+          (Yuka.fragment
+             (Array.to_list
+                (Array.mapi
+                   (fun i (cpu : cpu) ->
+                     let used = 1000 - cpu.id in
+                     <div class_="core">
+                       <span class_="dim">(Yuka.text ("C" ^ Int.to_string i))</span>
+                       (bar used 1000)
+                       <span class_="num">(Yuka.text (pad 4 (percent used)))</span>
+                     </div>)
+                   t.cores)))
+        </div>
+        <div class_="load">
+          <span class_="dim">"Load AVG:"</span>
+          (Yuka.text (" " ^ hundredths l1 ^ "  " ^ hundredths l5 ^ "  " ^ hundredths l15))
+        </div>
+        <div class_="load"><span class_="dim">"up "</span>(Yuka.text (Machine.uptime t.uptime))</div>
+      </div>
+    </div>
+
+let mem_box (t : t) (host : host) =
+  let free = host.mem - t.used - t.cache in
+  let available = free + (t.cache * 4 / 5) in
+  let line name colour value =
+    <div class_="mem-line">
+      <span class_="dim">(Yuka.text (name ^ ":"))</span>
+      (bar ~colour value host.mem)
+      <span class_="num">(Yuka.text (percent (value * 1000 / host.mem)))</span>
+      <span class_="num value">(Yuka.text (Machine.gib value))</span>
+    </div>
+  in
+  box ~class_:"mem" ~number:{js|²|js} ~title:"mem"
+    ~right:<span class_="box-info"><span class_="dim">"Total "</span>(Yuka.text (Machine.gib host.mem))</span>
+    <div class_="mem-body">
+      (line "Used" "t3" t.used)
+      (line "Available" "t1" available)
+      (line "Cached" "c-cache" t.cache)
+      (line "Free" "t0" free)
+      (if host.swap = 0 then <div class_="mem-line"><span class_="dim">"Swap:"</span><span class_="dim">"off"</span></div>
+       else
+         <div class_="mem-line">
+           <span class_="dim">"Swap:"</span>
+           (bar ~colour:"c-swap" t.swap_used host.swap)
+           <span class_="num">(Yuka.text (percent (t.swap_used * 1000 / host.swap)))</span>
+           <span class_="num value">(Yuka.text (Machine.gib t.swap_used))</span>
+         </div>)
+    </div>
+
+let net_box (t : t) (host : host) =
+  let last values = values.(Array.length values - 1) in
+  let top values = Array.fold_left max (host.rx + host.tx) values in
+  box ~class_:"net" ~number:{js|³|js} ~title:"net" ~right:<span class_="box-info">(Yuka.text host.iface)</span>
+    <div class_="net-body">
+      <div class_="net-line down">
+        (icon "arrow_down") <span class_="dim">"Download"</span><span class_="spacer" />
+        <b>(Yuka.text (Machine.rate (last t.rx)))</b>
+      </div>
+      (graph ~class_:"down" ~height:7 ~top:(top t.rx) t.rx)
+      (graph ~hang:true ~class_:"up" ~height:7 ~top:(top t.tx) t.tx)
+      <div class_="net-line up">
+        (icon "arrow_up") <span class_="dim">"Upload"</span><span class_="spacer" />
+        <b>(Yuka.text (Machine.rate (last t.tx)))</b>
+      </div>
+      <div class_="net-line total">
+        <span class_="dim">"Total"</span><span class_="spacer" />
+        (Yuka.text (Machine.total_mib t.rx_total ^ {js| ↓  |js} ^ Machine.total_mib t.tx_total ^ {js| ↑|js}))
+      </div>
+    </div>
 
 type column = { title : string; class_ : string; sort : sort option; key : string }
 
 let columns =
   [
-    { title = "PID"; class_ = "num"; sort = Some Pid; key = "N" };
-    { title = "USER"; class_ = "user"; sort = None; key = "" };
-    { title = "PR"; class_ = "num"; sort = None; key = "" };
-    { title = "NI"; class_ = "num"; sort = None; key = "" };
-    { title = "VIRT"; class_ = "num"; sort = None; key = "" };
-    { title = "RES"; class_ = "num"; sort = None; key = "" };
-    { title = "SHR"; class_ = "num"; sort = None; key = "" };
-    { title = "S"; class_ = "state"; sort = None; key = "" };
-    { title = "%CPU"; class_ = "num"; sort = Some Cpu; key = "P" };
-    { title = "%MEM"; class_ = "num"; sort = Some Mem; key = "M" };
-    { title = "TIME+"; class_ = "num"; sort = Some Time; key = "T" };
-    { title = "COMMAND"; class_ = "command"; sort = Some Command; key = "C" };
+    { title = "Pid"; class_ = "num"; sort = Some Pid; key = "N" };
+    { title = "Program"; class_ = "program"; sort = Some Command; key = "C" };
+    { title = "Command"; class_ = "command"; sort = None; key = "" };
+    { title = "Thr"; class_ = "num"; sort = None; key = "" };
+    { title = "User"; class_ = "user"; sort = None; key = "" };
+    { title = "MemB"; class_ = "num"; sort = Some Mem; key = "M" };
+    { title = "Time+"; class_ = "num"; sort = Some Time; key = "T" };
+    { title = "Cpu%"; class_ = "num cpu"; sort = Some Cpu; key = "P" };
   ]
 
-let icon = Zed_ui.icon
-
-let value text = <b class_="value">(Yuka.text text)</b>
-
-let label text = <span class_="dim">(Yuka.text text)</span>
-
-(* A part of a summary line: the number, bold, then its name. *)
-let field ?(width = 5) number name =
-  let number = if String.length number >= width then " " ^ number else pad width number in
-  Yuka.fragment [ value number; label (" " ^ name) ]
-
-let comma = label ","
-
-let uptime_line (t : t) (host : host) =
-  let l1, l5, l15 = t.load in
-  <div class_="line">
-    <span class_="dim">"top - "</span>
-    (value (Machine.clock t.clock))
-    (label (" up " ^ Machine.uptime t.uptime ^ ", "))
-    (value (pad 2 (Int.to_string host.users)))
-    (label (if host.users = 1 then " user,  load average: " else " users,  load average: "))
-    (value (hundredths l1)) comma (value (" " ^ hundredths l5)) comma (value (" " ^ hundredths l15))
-  </div>
-
-let tasks_line (t : t) =
-  let total = Array.length t.procs and running = Machine.running t in
-  <div class_="line">
-    <span class_="dim">"Tasks: "</span>
-    (field ~width:3 (Int.to_string total) "total") comma
-    (field ~width:4 (Int.to_string running) "running") comma
-    (field ~width:4 (Int.to_string (total - running)) "sleeping") comma
-    (field ~width:4 "0" "stopped") comma
-    (field ~width:4 "0" "zombie")
-  </div>
-
-let cpu_text name (cpu : cpu) =
-  <div class_="line">
-    <span class_="dim">(Yuka.text name)</span>
-    (field (tenths cpu.us) "us") comma (field (tenths cpu.sy) "sy") comma (field (tenths cpu.ni) "ni") comma
-    (field (tenths cpu.id) "id") comma (field (tenths cpu.wa) "wa") comma (field (tenths cpu.hi) "hi") comma
-    (field (tenths cpu.si) "si") comma (field "0.0" "st")
-  </div>
-
-let percent part = "width:" ^ tenths part ^ "%"
-
-(* The bar of top's graph mode ([t]): user, system, nice and wait time. *)
-let cpu_graph name (cpu : cpu) =
-  let used = 1000 - cpu.id in
-  <div class_="line graph">
-    <span class_="dim">(Yuka.text name)</span>
-    (value (pad 5 (tenths (cpu.us + cpu.ni)) ^ "/" ^ tenths cpu.sy))
-    (value (pad 5 (Int.to_string ((used + 5) / 10))))
-    <span class_="meter" aria_hidden=true>
-      <span class_="fill us" style=(percent cpu.us) />
-      <span class_="fill ni" style=(percent cpu.ni) />
-      <span class_="fill sy" style=(percent cpu.sy) />
-      <span class_="fill wa" style=(percent cpu.wa) />
-    </span>
-  </div>
-
-let core_name i = "%Cpu" ^ Int.to_string i ^ String.make (if i < 10 then 3 else 2) ' ' ^ ": "
-
-let cpu_lines ~graphs ~per_core (t : t) =
-  let line = if graphs then cpu_graph else cpu_text in
-  if per_core then
-    <div class_=(if graphs then "cores graphs" else "cores")>
-      (Yuka.fragment (Array.to_list (Array.mapi (fun i cpu -> line (core_name i) cpu) t.cores)))
-    </div>
-  else line "%Cpu(s): " t.total
-
-let mem_lines ~graphs (t : t) (host : host) =
-  let free = host.mem - t.used - t.cache in
-  let swap_free = host.swap - t.swap_used in
-  let avail = free + (t.cache * 4 / 5) in
-  let share part whole = if whole = 0 then 0 else part * 1000 / whole in
-  if graphs then
-    Yuka.fragment
-      [
-        <div class_="line graph">
-          <span class_="dim">"MiB Mem : "</span>
-          (value (pad 5 (tenths (share t.used host.mem)) ^ "/" ^ tenths host.mem))
-          <span class_="meter" aria_hidden=true>
-            <span class_="fill used" style=(percent (share t.used host.mem)) />
-            <span class_="fill cache" style=(percent (share t.cache host.mem)) />
-          </span>
-        </div>;
-        <div class_="line graph">
-          <span class_="dim">"MiB Swap: "</span>
-          (value (pad 5 (tenths (share t.swap_used host.swap)) ^ "/" ^ tenths host.swap))
-          <span class_="meter" aria_hidden=true>
-            <span class_="fill swap" style=(percent (share t.swap_used host.swap)) />
-          </span>
-        </div>;
-      ]
-  else
-    Yuka.fragment
-      [
-        <div class_="line">
-          <span class_="dim">"MiB Mem : "</span>
-          (field ~width:8 (tenths host.mem) "total") comma (field ~width:8 (tenths free) "free") comma
-          (field ~width:8 (tenths t.used) "used") comma (field ~width:8 (tenths t.cache) "buff/cache")
-        </div>;
-        <div class_="line">
-          <span class_="dim">"MiB Swap: "</span>
-          (field ~width:8 (tenths host.swap) "total") comma (field ~width:8 (tenths swap_free) "free") comma
-          (field ~width:8 (tenths t.swap_used) "used.") (field ~width:8 (tenths avail) "avail Mem")
-        </div>;
-      ]
-
-let heat cpu = if cpu >= 500 then "cell num hot" else if cpu >= 100 then "cell num warm" else "cell num"
-
-let row ~selected ~on_select ~(me : string) (p : proc) =
+let row ~selected ~on_open ~(me : string) (p : proc) =
   let classes =
     String.concat " "
       (List.concat [ [ "proc" ]; (if p.state = 'R' then [ "running" ] else []); (if p.user = me then [ "mine" ] else []) ])
@@ -142,53 +175,146 @@ let row ~selected ~on_select ~(me : string) (p : proc) =
     class_=(if Yuka.State.get selected = Some p.pid then classes ^ " selected" else classes)
     role=`row data_pid=(Int.to_string p.pid)
     aria_selected=(Yuka.State.get selected = Some p.pid)
-    on_click=(fun _ -> on_select p.pid)>
+    on_click=(fun _ -> on_open p.pid)>
     <span class_="cell num pid" role=`cell>(Yuka.text (Int.to_string p.pid))</span>
-    <span class_="cell user" role=`cell>(Yuka.text (user p.user))</span>
-    <span class_="cell num" role=`cell>(Yuka.text (Int.to_string p.pr))</span>
-    <span class_="cell num" role=`cell>(Yuka.text (Int.to_string p.ni))</span>
-    <span class_="cell num" role=`cell>(Yuka.text (kib p.virt))</span>
-    <span class_="cell num" role=`cell>(Yuka.text (kib p.res))</span>
-    <span class_="cell num" role=`cell>(Yuka.text (kib p.shr))</span>
-    <span class_=("cell state state-" ^ String.make 1 p.state) role=`cell>(Yuka.text (String.make 1 p.state))</span>
-    <span class_=(heat p.cpu) role=`cell>(Yuka.text (tenths p.cpu))</span>
-    <span class_="cell num" role=`cell>(Yuka.text (tenths p.mem))</span>
-    <span class_="cell num" role=`cell>(Yuka.text (Machine.time p.time))</span>
+    <span class_="cell program" role=`cell>
+      <span class_=("dot state-" ^ String.make 1 p.state) title=(Machine.state_name p.state) />
+      (Yuka.text (Machine.program_name p.command))
+    </span>
     <span class_="cell command" role=`cell>(Yuka.text p.command)</span>
+    <span class_="cell num dim" role=`cell>(Yuka.text (Int.to_string p.threads))</span>
+    <span class_="cell user" role=`cell>(Yuka.text (user p.user))</span>
+    <span class_="cell num" role=`cell>(Yuka.text (Machine.size p.res))</span>
+    <span class_="cell num dim" role=`cell>(Yuka.text (Machine.time p.time))</span>
+    <span class_="cell num cpu" role=`cell>
+      (bar ~class_:"small" p.cpu 1000)<span class_=(tier p.cpu 1000)>(Yuka.text (tenths p.cpu))</span>
+    </span>
   </div>
 
-(* The keys of the bar under the screen; a click does what the key does. *)
+(* The detail of a process, over the boxes. The frame stays while the numbers
+   change, so the focus stays on its buttons. *)
+let detail ~(machine : host) ~snapshot ~message ~close ~signal pid =
+  let current = Yuka.State.memo ~equal:( = ) (fun () -> Machine.find_proc (Yuka.State.get snapshot) pid) in
+  let alive = Yuka.State.memo (fun () -> Yuka.State.get current <> None) in
+  let read f = match Yuka.State.get current with Some p -> f p | None -> "" in
+  let text f = Yuka.text (read f) in
+  let stat name f = <div class_="stat"><span class_="dim">(Yuka.text name)</span><b>(text f)</b></div> in
+  let first = Yuka.State.peek current in
+  let name = match first with Some p -> Machine.program_name p.command | None -> "Process " ^ Int.to_string pid in
+  <div class_="scrim" on_click=(fun _ -> close ())>
+    <div class_="dialog" role=`dialog aria_modal=true aria_labelledby="proc-title"
+      on_click=(fun event -> Yuka.Event.stop_propagation event)>
+      <header class_="dialog-head">
+        (icon "terminal")
+        <h2 id="proc-title">(Yuka.text name)</h2>
+        <span class_="pill">(Yuka.text ("PID " ^ Int.to_string pid))</span>
+        (match Yuka.State.get current with
+         | Some p -> <span class_=("pill state-" ^ String.make 1 p.state)>(Yuka.text (Machine.state_name p.state))</span>
+         | None -> <span class_="pill">"Ended"</span>)
+        <span class_="spacer" />
+        <button id="proc-close" class_="icon-button" type_=`button aria_label="Close" on_click=(fun _ -> close ())>
+          (icon "close")
+        </button>
+      </header>
+      (if not (Yuka.State.get alive) then
+         <p class_="dialog-gone">(icon "x_circle") "The process has ended."</p>
+       else
+         Yuka.fragment
+           [
+             <code class_="cmdline">(text (fun p -> p.command))</code>;
+             <div class_="dialog-graph">
+               <div class_="dialog-graph-head">
+                 <span class_="dim">"CPU"</span>
+                 <b class_=(match Yuka.State.get current with Some p -> tier p.cpu 1000 | None -> "")>
+                   (text (fun p -> tenths p.cpu ^ "%"))
+                 </b>
+                 <span class_="spacer" />
+                 <span class_="dim">
+                   (text (fun p ->
+                        "peak " ^ tenths (List.fold_left max 0 p.cpu_history) ^ "%, last "
+                        ^ Int.to_string Machine.proc_samples ^ " s"))
+                 </span>
+               </div>
+               (match Yuka.State.get current with
+                | None -> Yuka.empty
+                | Some p ->
+                    let top = max 100 (List.fold_left max 0 p.cpu_history) in
+                    graph ~tiers:true ~class_:"small" ~height:4 ~top (Array.of_list (List.rev p.cpu_history)))
+             </div>;
+             <div class_="dialog-graph-head">
+               <span class_="dim">"Memory"</span>
+               <b>(text (fun p -> Machine.size p.res))</b>
+               (match Yuka.State.get current with Some p -> bar ~colour:"t1" p.mem 1000 | None -> Yuka.empty)
+               <span class_="dim">(text (fun p -> tenths p.mem ^ "% of " ^ Machine.gib machine.mem))</span>
+             </div>;
+             <div class_="stats">
+               (stat "User" (fun p -> p.user))
+               (stat "Parent" (fun p -> Int.to_string p.ppid))
+               (stat "Threads" (fun p -> Int.to_string p.threads))
+               (stat "Nice" (fun p -> Int.to_string p.ni ^ " (PR " ^ Int.to_string p.pr ^ ")"))
+               (stat "Virtual" (fun p -> Machine.size p.virt))
+               (stat "Shared" (fun p -> Machine.size p.shr))
+               (stat "CPU time" (fun p -> Machine.time p.time))
+               (stat "Owner" (fun p -> if p.user = machine.user_name then "you" else "another user"))
+             </div>;
+           ])
+      (if Yuka.State.get message = "" then Yuka.empty
+       else <p class_="dialog-message" role=`status>(icon "warning")(Yuka.text (Yuka.State.get message))</p>)
+      <footer class_="dialog-actions">
+        <button class_="button" type_=`button on_click=(fun _ -> close ())><kbd>"Esc"</kbd>"Close"</button>
+        <span class_="spacer" />
+        <button class_="button" type_=`button disabled=(not (Yuka.State.get alive)) on_click=(fun _ -> signal "SIGTERM")>
+          <kbd>"t"</kbd>"Terminate"
+        </button>
+        <button class_="button danger" type_=`button disabled=(not (Yuka.State.get alive)) on_click=(fun _ -> signal "SIGKILL")>
+          <kbd>"k"</kbd>"Kill"
+        </button>
+      </footer>
+    </div>
+  </div>
+
+(* The keys of the bar under the boxes; a click does what the key does. *)
 let keys =
   [
-    ("P", "%CPU");
-    ("M", "%MEM");
-    ("T", "TIME+");
-    ("N", "PID");
-    ("R", "reverse");
-    ("t", "graphs");
-    ("1", "cores");
     ({js|↑↓|js}, "select");
+    ({js|↵|js}, "info");
+    ("f", "filter");
+    ("P", "cpu");
+    ("M", "mem");
+    ("T", "time");
+    ("N", "pid");
+    ("R", "reverse");
     ("k", "kill");
     ("Space", "pause");
     ("q", "quit");
   ]
+
+let filter_id = "proc-filter"
 
 let[@client] make ~(host : string) () =
   let machine = match Machine.find host with Some machine -> machine | None -> Machine.laptop in
   let snapshot = Yuka.State.make (Machine.start machine) in
   let sort = Yuka.State.make Cpu in
   let reverse = Yuka.State.make false in
-  let graphs = Yuka.State.make true in
-  let per_core = Yuka.State.make false in
   let paused = Yuka.State.make false in
   let quit = Yuka.State.make false in
+  let filter = Yuka.State.make "" in
   let selected = Yuka.State.make ~equal:( = ) None in
+  let info = Yuka.State.make ~equal:( = ) None in
   let message = Yuka.State.make "" in
   let rows =
     Yuka.State.memo (fun () ->
-        Machine.sorted ~sort:(Yuka.State.get sort) ~reverse:(Yuka.State.get reverse) (Yuka.State.get snapshot))
+        let filter = Yuka.State.get filter in
+        let all = Machine.sorted ~sort:(Yuka.State.get sort) ~reverse:(Yuka.State.get reverse) (Yuka.State.get snapshot) in
+        if filter = "" then all else Array.of_list (List.filter (Machine.matches ~filter) (Array.to_list all)))
   in
-  let tick () = Yuka.State.update snapshot Machine.step in
+  let tick () =
+    Yuka.State.update snapshot Machine.step;
+    (* A selected process that ended is no longer selected, unless its detail is open. *)
+    match (Yuka.State.peek selected, Yuka.State.peek info) with
+    | Some pid, None when Machine.find_proc (Yuka.State.peek snapshot) pid = None -> Yuka.State.set selected None
+    | _ -> ()
+  in
   let sort_by column =
     if Yuka.State.peek sort = column then Yuka.State.update reverse not
     else begin
@@ -200,37 +326,45 @@ let[@client] make ~(host : string) () =
     let list = Yuka.State.peek rows in
     let size = Array.length list in
     if size > 0 then begin
+      let rec find pid i = if i >= size then None else if list.(i).pid = pid then Some i else find pid (i + 1) in
       let index =
-        match Yuka.State.peek selected with
+        match Option.bind (Yuka.State.peek selected) (fun pid -> find pid 0) with
         | None -> if step > 0 then 0 else size - 1
-        | Some pid ->
-            let rec find i = if i >= size then 0 else if list.(i).pid = pid then i else find (i + 1) in
-            clamp 0 (size - 1) (find 0 + step)
+        | Some i -> clamp 0 (size - 1) (i + step)
       in
       let pid = list.(index).pid in
       Yuka.State.set selected (Some pid);
       Yuka.Browser.scroll_into_view ("pid-" ^ Int.to_string pid)
     end
   in
-  let kill () =
-    match Yuka.State.peek selected with
-    | None -> Yuka.State.set message "Select a process with the arrows or a click, then press k."
+  let open_info pid =
+    Yuka.State.set selected (Some pid);
+    Yuka.State.set message "";
+    Yuka.State.set info (Some pid);
+    Yuka.Browser.focus "proc-close"
+  in
+  let close_info () =
+    Yuka.State.set info None;
+    Yuka.State.set message ""
+  in
+  let signal name =
+    let target = match Yuka.State.peek info with Some pid -> Some pid | None -> Yuka.State.peek selected in
+    match target with
+    | None -> Yuka.State.set message "Select a process with the arrows or a click first."
     | Some pid -> (
-        match Array.to_list (Yuka.State.peek snapshot).procs |> List.find_opt (fun p -> p.pid = pid) with
-        | None -> Yuka.State.set selected None
+        match Machine.find_proc (Yuka.State.peek snapshot) pid with
+        | None -> close_info ()
         | Some p when p.user <> machine.user_name ->
             Yuka.State.set message
-              ("Failed signal pid '" ^ Int.to_string pid ^ "' with '15': Operation not permitted")
+              ("Failed signal pid '" ^ Int.to_string pid ^ "' with '" ^ name ^ "': Operation not permitted")
         | Some p ->
             Yuka.State.update snapshot (fun t -> Machine.kill t pid);
             Yuka.State.set selected None;
-            if String.length p.command >= 3 && String.sub p.command 0 3 = "top" then Yuka.State.set quit true
-            else Yuka.State.set message ("Sent signal SIGTERM to pid " ^ Int.to_string pid ^ " (" ^ p.command ^ ")"))
+            Yuka.State.set info None;
+            if starts_with "top" p.command then Yuka.State.set quit true
+            else Yuka.State.set message ("Sent " ^ name ^ " to pid " ^ Int.to_string pid ^ " (" ^ p.command ^ ")"))
   in
-  let toggle_pause () =
-    Yuka.State.update paused not;
-    Yuka.State.set message (if Yuka.State.peek paused then "Paused. Press Space to go on." else "")
-  in
+  let toggle_pause () = Yuka.State.update paused not in
   let press key =
     match key with
     | "P" -> sort_by Cpu
@@ -239,20 +373,28 @@ let[@client] make ~(host : string) () =
     | "N" -> sort_by Pid
     | "C" -> sort_by Command
     | "R" -> Yuka.State.update reverse not
-    | "t" -> Yuka.State.update graphs not
-    | "1" -> Yuka.State.update per_core not
+    | "f" | "/" -> Yuka.Browser.focus filter_id
     | "ArrowDown" | "j" -> move 1
     | "ArrowUp" -> move (-1)
-    | "k" -> kill ()
+    | "Enter" -> (
+        match (Yuka.State.peek info, Yuka.State.peek selected) with
+        | None, Some pid -> open_info pid
+        | None, None -> move 1
+        | Some _, _ -> ())
+    | "k" -> signal "SIGKILL"
+    | "t" -> if Yuka.State.peek info <> None then signal "SIGTERM"
     | " " | "Space" -> toggle_pause ()
-    | "Enter" -> tick ()
     | "q" -> Yuka.State.set quit true
-    | "Escape" -> Yuka.State.set selected None
+    | "Escape" -> if Yuka.State.peek info <> None then close_info () else Yuka.State.set selected None
     | _ -> ()
   in
+  (* A click on a button of a key or a column title does not focus it, so Space and
+     Enter after the click go to top, not to the button. *)
+  let keep_focus event = Yuka.Event.prevent_default event in
   let restart _ =
     Yuka.State.set snapshot (Machine.start machine);
     Yuka.State.set selected None;
+    Yuka.State.set info None;
     Yuka.State.set message "";
     Yuka.State.set paused false;
     Yuka.State.set quit false
@@ -269,84 +411,138 @@ let[@client] make ~(host : string) () =
           let modified = Yuka.Event.ctrl_key event || Yuka.Event.meta_key event || Yuka.Event.alt_key event in
           let known =
             match key with
-            | "P" | "M" | "T" | "N" | "C" | "R" | "t" | "1" | "ArrowDown" | "ArrowUp" | "j" | "k" | " " | "Enter"
-            | "q" | "Escape" ->
+            | "P" | "M" | "T" | "N" | "C" | "R" | "f" | "/" | "ArrowDown" | "ArrowUp" | "j" | "k" | "t" | " "
+            | "Enter" | "q" | "Escape" ->
                 true
             | _ -> false
           in
-          (* Space and Enter on a focused button press the button. *)
-          let on_button = Yuka.Event.target_tag event = "BUTTON" && (key = " " || key = "Enter") in
-          if known && (not modified) && (not on_button) && not (Yuka.State.peek quit) then begin
+          (* The filter takes the keys typed in it; Space and Enter on a button press it. *)
+          let tag = Yuka.Event.target_tag event in
+          let typing = tag = "input" in
+          let on_button = tag = "button" && (key = " " || key = "Enter") in
+          if known && (not modified) && (not typing) && (not on_button) && not (Yuka.State.peek quit) then begin
             Yuka.Event.prevent_default event;
             press key
           end));
-  <div class_="terminal">
+  let header =
+    <div class_="proc head" role=`row>
+      (Yuka.fragment
+         (List.map
+            (fun column ->
+              match column.sort with
+              | None -> <span class_=("cell " ^ column.class_) role=`columnheader>(Yuka.text column.title)</span>
+              | Some by ->
+                  let on = Yuka.State.get sort = by in
+                  let ascending = (by = Command) <> Yuka.State.get reverse in
+                  <button
+                    class_=("cell sortable " ^ column.class_ ^ if on then " on" else "")
+                    type_=`button tabindex=(-1) role=`columnheader on_mousedown=keep_focus
+                    aria_sort=(if not on then `none else if ascending then `ascending else `descending)
+                    title=("Sort by " ^ column.title ^ " (" ^ column.key ^ ")")
+                    on_click=(fun _ -> sort_by by)>
+                    (Yuka.text column.title)
+                    (if on then icon (if ascending then "arrow_up" else "arrow_down") else Yuka.empty)
+                  </button>)
+            columns))
+    </div>
+  in
+  <div class_="btop">
     (if Yuka.State.get quit then
-       <div class_="screen exited">
+       <div class_="exited">
          <span>(Yuka.text ("top exited. " ^ machine.user_name ^ "@" ^ machine.name ^ ":~$"))</span>
          <button class_="button" type_=`button on_click=restart>"Start again"</button>
        </div>
      else
-       <div class_="screen">
-         <div class_="summary" aria_label="Summary">
-           (uptime_line (Yuka.State.get snapshot) machine)
-           (tasks_line (Yuka.State.get snapshot))
-           (cpu_lines ~graphs:(Yuka.State.get graphs) ~per_core:(Yuka.State.get per_core) (Yuka.State.get snapshot))
-           (mem_lines ~graphs:(Yuka.State.get graphs) (Yuka.State.get snapshot) machine)
+       <div class_="boxes">
+         (cpu_box ~paused:(Yuka.State.get paused) (Yuka.State.get snapshot) machine)
+         <div class_="side">
+           (mem_box (Yuka.State.get snapshot) machine)
+           (net_box (Yuka.State.get snapshot) machine)
          </div>
-         <div class_="message" role=`status>(Yuka.text (Yuka.State.get message))</div>
-         <div class_="procs" role=`table aria_label="Processes">
-           <div class_="proc head" role=`row>
-             (Yuka.fragment
-                (List.map
-                   (fun column ->
-                     match column.sort with
-                     | None -> <span class_=("cell " ^ column.class_) role=`columnheader>(Yuka.text column.title)</span>
-                     | Some by ->
-                         let on = Yuka.State.get sort = by in
-                         <button
-                           class_=("cell sortable " ^ column.class_ ^ if on then " on" else "")
-                           type_=`button tabindex=(-1) role=`columnheader
-                           aria_sort=(if not on then `none
-                             else if (by = Command) <> Yuka.State.get reverse then `ascending
-                             else `descending)
-                           title=("Sort by " ^ column.title ^ " (" ^ column.key ^ ")")
-                           on_click=(fun _ -> sort_by by)>
-                           (Yuka.text column.title)
-                           (if on then icon (if (by = Command) <> Yuka.State.get reverse then "arrow_up" else "arrow_down")
-                            else Yuka.empty)
-                         </button>)
-                   columns))
-           </div>
-           (Yuka.each ~key:(fun (p : proc) -> Int.to_string p.pid)
-              (fun () -> Yuka.State.get rows)
-              (fun p ->
-                row ~selected ~me:machine.user_name
-                  ~on_select:(fun pid -> Yuka.State.set selected (Some pid))
-                  p))
-         </div>
+         (box ~class_:"procs" ~number:{js|⁴|js} ~title:"proc"
+            ~right:
+              <span class_="box-info">
+                <label class_="filter" for_=filter_id>
+                  (icon "magnifying_glass")
+                  <input id=filter_id type_=`text placeholder="filter" autocomplete="off" spellcheck=false
+                    value=(Yuka.State.get filter)
+                    on_input=(fun event ->
+                      Yuka.State.set filter (Yuka.Event.target_value event);
+                      Yuka.State.set selected None)
+                    on_keydown=(fun event ->
+                      match Yuka.Event.key event with
+                      | "Escape" ->
+                          Yuka.Event.prevent_default event;
+                          Yuka.State.set filter ""
+                      | "ArrowDown" | "Enter" ->
+                          Yuka.Event.prevent_default event;
+                          move 1
+                      | _ -> ()) />
+                </label>
+                <span class_="sort-tag">
+                  (Yuka.text
+                     (match Yuka.State.get sort with
+                      | Cpu -> "cpu"
+                      | Mem -> "mem"
+                      | Pid -> "pid"
+                      | Time -> "time"
+                      | Command -> "program"))
+                  (icon
+                     (if (Yuka.State.get sort = Command) <> Yuka.State.get reverse then "arrow_up" else "arrow_down"))
+                </span>
+              </span>
+            <div class_="procs-body">
+            <div class_="table" role=`table aria_label="Processes">
+              header
+              (Yuka.each ~key:(fun (p : proc) -> Int.to_string p.pid)
+                 (fun () -> Yuka.State.get rows)
+                 (fun p -> row ~selected ~me:machine.user_name ~on_open:open_info p))
+            </div>
+            <footer class_="box-foot">
+              <span class_="message" role=`status>
+                (Yuka.text (if Yuka.State.get info = None then Yuka.State.get message else ""))
+              </span>
+              <span class_="spacer" />
+              <span class_="dim">
+                (Yuka.text
+                   (Int.to_string (Array.length (Yuka.State.get rows)) ^ "/"
+                   ^ Int.to_string (Array.length (Yuka.State.get snapshot).procs)))
+              </span>
+            </footer>
+            </div>)
        </div>)
-    <div class_="keybar" aria_label="Keys">
+    <footer class_="keybar" aria_label="Keys">
       (Yuka.fragment
          (List.map
             (fun (key, name) ->
               let on =
                 match key with
-                | "t" -> Yuka.State.get graphs
-                | "1" -> Yuka.State.get per_core
                 | "R" -> Yuka.State.get reverse
                 | "Space" -> Yuka.State.get paused
+                | "P" -> Yuka.State.get sort = Cpu
+                | "M" -> Yuka.State.get sort = Mem
+                | "T" -> Yuka.State.get sort = Time
+                | "N" -> Yuka.State.get sort = Pid
                 | _ -> false
               in
-              <button class_=(if on then "key on" else "key") type_=`button tabindex=(-1)
-                on_click=(fun _ -> if key = {js|↑↓|js} then move 1 else press key)>
+              <button class_=(if on then "key on" else "key") type_=`button tabindex=(-1) on_mousedown=keep_focus
+                on_click=(fun _ ->
+                  if Yuka.State.peek quit then ()
+                  else if key = {js|↑↓|js} then move 1
+                  else if key = {js|↵|js} then press "Enter"
+                  else press key)>
                 <kbd>(Yuka.text key)</kbd>(Yuka.text name)
               </button>)
             keys))
       <span class_="spacer" />
-      <span class_="live">
-        (icon (if Yuka.State.get paused then "debug_pause" else "play_filled"))
-        (Yuka.text (if Yuka.State.get paused then "paused" else "every " ^ Int.to_string Machine.delay ^ " s"))
+      <span class_="tasks">
+        (Yuka.text
+           (let t = Yuka.State.get snapshot in
+            Int.to_string (Array.length t.procs) ^ " tasks, " ^ Int.to_string (Machine.running t) ^ " running"))
       </span>
-    </div>
+    </footer>
+    (match Yuka.State.get info with
+     | None -> Yuka.empty
+     | Some pid ->
+         detail ~machine ~snapshot ~message ~close:close_info ~signal pid)
   </div>

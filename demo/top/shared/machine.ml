@@ -17,6 +17,7 @@ type program = {
   shr : int;  (** Shared memory, in KiB. *)
   nice : int;
   life : int;  (** For a short-lived program, its life in ticks; else 0. *)
+  parent : string;  (** For a short-lived program, the start of the command of its parent. *)
 }
 
 type host = {
@@ -30,12 +31,17 @@ type host = {
   clock : int;  (** The clock of the first screen, in seconds after midnight. *)
   users : int;
   seed : int;
+  iface : string;  (** The network interface of the net box. *)
+  rx : int;  (** The usual download, in KiB/s. *)
+  tx : int;  (** The usual upload, in KiB/s. *)
   programs : program list;
   short_lived : program list;  (** Started now and then, as the compilers of a build. *)
 }
 
 type proc = {
   pid : int;
+  ppid : int;
+  threads : int;
   user : string;
   pr : int;
   ni : int;
@@ -50,6 +56,7 @@ type proc = {
   left : int;  (** Ticks before a short-lived process ends; 0 for the others. *)
   base : int;  (** The usual %CPU of the program. *)
   burst : int;
+  cpu_history : int list;  (** The %CPU of the last screens, the newest first. *)
 }
 
 type cpu = { us : int; sy : int; ni : int; id : int; wa : int; hi : int; si : int }
@@ -68,17 +75,29 @@ type t = {
   cache : int;
   swap_used : int;
   procs : proc array;
+  history : int array;  (** The CPU use of the last {!samples} screens, in tenths, the newest last. *)
+  rx : int array;  (** Download of the last {!samples} screens, in KiB/s, the newest last. *)
+  tx : int array;
+  rx_total : int;  (** MiB since the boot. *)
+  tx_total : int;
 }
 
 (* The delay between two screens, in seconds, as [top -d 1]. *)
 let delay = 1
 
+(* The screens that the graphs keep. [start] runs that many screens first, so the
+   graphs of the first screen are full. *)
+let samples = 200
+
+(* The %CPU of a process that its detail keeps. *)
+let proc_samples = 60
+
 (* The linear congruential generator of C's [rand], kept to 31 bits: the products keep
    the same low bits on 63 and on 32 bits. *)
 let next seed = ((seed * 1103515245) + 12345) land 0x7fffffff
 
-let program ?(nice = 0) ?(burst = 0) ?(life = 0) ~user ~cpu ~res ~virt ~shr command =
-  { user; command; cpu; burst; res; virt; shr; nice; life }
+let program ?(nice = 0) ?(burst = 0) ?(life = 0) ?(parent = "") ~user ~cpu ~res ~virt ~shr command =
+  { user; command; cpu; burst; res; virt; shr; nice; life; parent }
 
 let kernel ?(cpu = 0) ?(burst = 0) command =
   program ~user:"root" ~cpu ~burst ~res:0 ~virt:0 ~shr:0 command
@@ -96,6 +115,9 @@ let laptop =
     clock = (18 * 3600) + (42 * 60) + 7;
     users = 2;
     seed = 42;
+    iface = "wlan0";
+    rx = 180;
+    tx = 24;
     programs =
       [
         program ~user:"root" ~cpu:0 ~res:14_208 ~virt:23_440 ~shr:10_112 "systemd";
@@ -129,8 +151,8 @@ let laptop =
       ];
     short_lived =
       [
-        program ~user:me ~cpu:900 ~burst:99 ~res:96_256 ~virt:181_248 ~shr:9_216 ~life:2 "ocamlopt.opt";
-        program ~user:me ~cpu:400 ~burst:300 ~res:30_720 ~virt:92_160 ~shr:7_168 ~life:1 "git status";
+        program ~user:me ~cpu:900 ~burst:99 ~res:96_256 ~virt:181_248 ~shr:9_216 ~life:2 ~parent:"dune" "ocamlopt.opt";
+        program ~user:me ~cpu:400 ~burst:300 ~res:30_720 ~virt:92_160 ~shr:7_168 ~life:1 ~parent:"zed" "git status";
       ];
   }
 
@@ -148,6 +170,9 @@ let build =
     clock = (3 * 3600) + (14 * 60) + 51;
     users = 1;
     seed = 2024;
+    iface = "enp5s0";
+    rx = 2_400;
+    tx = 320;
     programs =
       [
         program ~user:"root" ~cpu:0 ~res:12_544 ~virt:22_016 ~shr:9_216 "systemd";
@@ -176,16 +201,16 @@ let build =
       ];
     short_lived =
       [
-        program ~user:me ~cpu:960 ~burst:40 ~res:212_992 ~virt:425_984 ~shr:12_288 ~life:3 "ocamlopt.opt";
-        program ~user:me ~cpu:900 ~burst:99 ~res:131_072 ~virt:262_144 ~shr:12_288 ~life:2 "ocamlc.opt";
-        program ~user:me ~cpu:990 ~burst:10 ~res:96_256 ~virt:180_224 ~shr:8_192 ~life:2 "cc1";
-        program ~user:me ~cpu:600 ~burst:300 ~res:40_960 ~virt:81_920 ~shr:6_144 ~life:1 "as";
-        program ~user:me ~cpu:800 ~burst:200 ~res:262_144 ~virt:409_600 ~shr:10_240 ~life:2 "ld";
+        program ~user:me ~cpu:960 ~burst:40 ~res:212_992 ~virt:425_984 ~shr:12_288 ~life:3 ~parent:"dune" "ocamlopt.opt";
+        program ~user:me ~cpu:900 ~burst:99 ~res:131_072 ~virt:262_144 ~shr:12_288 ~life:2 ~parent:"dune" "ocamlc.opt";
+        program ~user:me ~cpu:990 ~burst:10 ~res:96_256 ~virt:180_224 ~shr:8_192 ~life:2 ~parent:"dune" "cc1";
+        program ~user:me ~cpu:600 ~burst:300 ~res:40_960 ~virt:81_920 ~shr:6_144 ~life:1 ~parent:"dune" "as";
+        program ~user:me ~cpu:800 ~burst:200 ~res:262_144 ~virt:409_600 ~shr:10_240 ~life:2 ~parent:"dune" "ld";
       ];
   }
 
 let database =
-  let backend ?life name = program ?life ~user:"postgres" ~cpu:60 ~burst:350 ~res:262_144 ~virt:17_563_648 ~shr:249_856 name in
+  let backend ?life name = program ?life ~parent:"postgres -D" ~user:"postgres" ~cpu:60 ~burst:350 ~res:262_144 ~virt:17_563_648 ~shr:249_856 name in
   {
     name = "db-1";
     user_name = "yuka";
@@ -197,6 +222,9 @@ let database =
     clock = (11 * 3600) + (5 * 60) + 33;
     users = 3;
     seed = 7;
+    iface = "eth0";
+    rx = 900;
+    tx = 3_600;
     programs =
       [
         program ~user:"root" ~cpu:0 ~res:13_056 ~virt:167_936 ~shr:8_448 "systemd";
@@ -228,7 +256,7 @@ let database =
       [
         backend ~life:4 "postgres: yuka 10.0.0.7 SELECT";
         program ~user:"postgres" ~cpu:300 ~burst:500 ~res:524_288 ~virt:17_563_648 ~shr:262_144 ~life:3
-          "postgres: autovacuum worker issues";
+          ~parent:"postgres -D" "postgres: autovacuum worker issues";
       ];
   }
 
@@ -261,10 +289,15 @@ let state_of seed ~kernel ~cpu =
 (* %MEM in tenths. The memory is divided first, so the product stays under 2^31. *)
 let mem_of (host : host) res = res * 100 / (host.mem / 10 * 1024 / 10)
 
-let spawn seed (host : host) ~pid (program : program) =
+(* Threads: one for a kernel thread, more for a big program. *)
+let threads_of (program : program) = if program.virt = 0 then 1 else 1 + (program.virt / 262_144 mod 47)
+
+let spawn seed (host : host) ~pid ~ppid (program : program) =
   let cpu = cpu_of seed ~base:program.cpu ~burst:program.burst in
   {
     pid;
+    ppid;
+    threads = threads_of program;
     user = program.user;
     pr = 20 + program.nice;
     ni = program.nice;
@@ -279,6 +312,7 @@ let spawn seed (host : host) ~pid (program : program) =
     left = program.life;
     base = program.cpu;
     burst = program.burst;
+    cpu_history = [ cpu ];
   }
 
 let mib_of_kib kib = kib * 10 / 1024
@@ -311,13 +345,18 @@ let summarize seed (host : host) procs ~cache ~load:(l1, l5, l15) =
   let towards load keep = ((load * keep) + (running * (1000 - keep))) / 1000 in
   (total, cores, used, (towards l1 983, towards l5 997, towards l15 999))
 
-let start (host : host) =
+let starts_with prefix text =
+  String.length text >= String.length prefix && String.sub text 0 (String.length prefix) = prefix
+
+(* The first screen, [samples] screens before the one [start] shows. *)
+let first (host : host) =
   let seed = ref host.seed in
   let procs =
     List.mapi
       (fun i (program : program) ->
         let pid = if i = 0 then 1 else if program.virt = 0 then i + 1 else 300 + (i * 97) + draw seed 90 in
-        let p = spawn seed host ~pid program in
+        let ppid = if pid = 1 || program.command = "kthreadd" then 0 else if program.virt = 0 then 2 else 1 in
+        let p = spawn seed host ~pid ~ppid program in
         (* The CPU time so far, in hundredths: %CPU over a part of the uptime, or under
            a minute for a busy program, which started a moment ago. *)
         let time =
@@ -335,11 +374,14 @@ let start (host : host) =
   let total, cores, used, load = summarize seed host procs ~cache ~load:(l1, l5, l15) in
   let next_pid = 300 + (List.length host.programs * 97) + 1000 + draw seed 500 in
   let swap_used = if host.swap = 0 then 0 else draw seed (host.swap / 40) in
+  let days = host.boot / 86400 in
+  let rx_total = host.rx * days * 84 in
+  let tx_total = host.tx * days * 84 in
   {
     host = host.name;
     tick = 0;
-    clock = host.clock;
-    uptime = host.boot;
+    clock = (host.clock - (samples * delay) + 86400) mod 86400;
+    uptime = host.boot - (samples * delay);
     seed = !seed;
     next_pid;
     load;
@@ -349,7 +391,25 @@ let start (host : host) =
     cache;
     swap_used;
     procs;
+    history = Array.make samples 0;
+    rx = Array.make samples 0;
+    tx = Array.make samples 0;
+    rx_total;
+    tx_total;
   }
+
+(* The values of a graph with one more at the end; the oldest goes. *)
+let push history value =
+  let n = Array.length history in
+  Array.init n (fun i -> if i = n - 1 then value else history.(i + 1))
+
+let rec take n = function [] -> [] | x :: rest -> if n <= 0 then [] else x :: take (n - 1) rest
+
+(* Network traffic for one screen, in KiB/s: around [base], with a burst now and then. *)
+let traffic seed base =
+  let calm = base * (60 + draw seed 80) / 100 in
+  let spike = if draw seed 8 = 0 then draw seed ((base * 6) + 1) else 0 in
+  calm + spike
 
 (* The next screen, [delay] seconds later. *)
 let step (t : t) =
@@ -375,14 +435,20 @@ let step (t : t) =
                  state = state_of seed ~kernel:(p.virt = 0) ~cpu;
                  time = p.time + (cpu * delay / 10);
                  left = (if p.left > 1 then p.left - 1 else 0);
+                 cpu_history = take proc_samples (cpu :: p.cpu_history);
                })
+  in
+  let parent_of (program : program) =
+    match List.find_opt (fun p -> p.left = 0 && starts_with program.parent p.command) survivors with
+    | Some p -> p.pid
+    | None -> 1
   in
   let born =
     List.filter_map
       (fun program ->
         if draw seed 3 = 0 then begin
           next_pid := !next_pid + 1 + draw seed 40;
-          Some (spawn seed host ~pid:!next_pid program)
+          Some (spawn seed host ~pid:!next_pid ~ppid:(parent_of program) program)
         end
         else None)
       host.short_lived
@@ -390,6 +456,8 @@ let step (t : t) =
   let procs = Array.of_list (survivors @ born) in
   let cache = clamp (host.mem / 5) (host.mem / 2) (t.cache + draw seed 2001 - 1000) in
   let total, cores, used, load = summarize seed host procs ~cache ~load:t.load in
+  let rx = traffic seed host.rx in
+  let tx = traffic seed host.tx in
   {
     t with
     tick = t.tick + 1;
@@ -403,7 +471,18 @@ let step (t : t) =
     used;
     cache;
     procs;
+    history = push t.history (1000 - total.id);
+    rx = push t.rx rx;
+    tx = push t.tx tx;
+    rx_total = t.rx_total + ((rx * delay) / 1024);
+    tx_total = t.tx_total + ((tx * delay) / 1024);
   }
+
+(* The screen that the page shows first: [samples] screens after [first], so the
+   graphs are full. The clock and the uptime are those of the host. *)
+let start (host : host) =
+  let rec run n t = if n = 0 then t else run (n - 1) (step t) in
+  run samples (first host)
 
 let kill (t : t) pid =
   { t with procs = Array.of_list (List.filter (fun p -> p.pid <> pid) (Array.to_list t.procs)) }
@@ -444,6 +523,54 @@ let kib n = if n < 10_000_000 then Int.to_string n else tenths (n / 104_858) ^ "
 
 (* USER as top writes it: eight characters, the eighth a [+] when the name is longer. *)
 let user name = if String.length name <= 8 then name else String.sub name 0 7 ^ "+"
+
+(* Sizes as btop writes them: K, M or G, from KiB. *)
+let size kib =
+  if kib >= 1_048_576 then tenths (kib / 104_858) ^ "G"
+  else if kib >= 102_400 then Int.to_string (kib / 1024) ^ "M"
+  else if kib >= 1024 then tenths (kib * 10 / 1024) ^ "M"
+  else Int.to_string kib ^ "K"
+
+(* A size in tenths of a MiB, as GiB. *)
+let gib tenths_of_mib = tenths (tenths_of_mib / 1024) ^ " GiB"
+
+(* A rate in KiB/s. *)
+let rate kib =
+  if kib >= 1024 then tenths (kib * 10 / 1024) ^ " MiB/s" else Int.to_string kib ^ " KiB/s"
+
+(* A total in MiB. *)
+let total_mib mib =
+  if mib >= 1_048_576 then tenths (mib / 104_858) ^ " TiB"
+  else if mib >= 1024 then tenths (mib * 10 / 1024) ^ " GiB"
+  else Int.to_string mib ^ " MiB"
+
+let state_name = function
+  | 'R' -> "Running"
+  | 'S' -> "Sleeping"
+  | 'I' -> "Idle"
+  | 'D' -> "Disk sleep"
+  | _ -> "Unknown"
+
+(* The program of a command: its first word, without the directory. *)
+let program_name command =
+  let word = match String.index_opt command ' ' with Some i -> String.sub command 0 i | None -> command in
+  let n = String.length word in
+  let word = if n > 1 && word.[n - 1] = ':' then String.sub word 0 (n - 1) else word in
+  match String.rindex_opt word '/' with
+  | Some i when starts_with "/" word -> String.sub word (i + 1) (String.length word - i - 1)
+  | _ -> word
+
+let lowercase_contains ~needle haystack =
+  let needle = String.lowercase_ascii needle and haystack = String.lowercase_ascii haystack in
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  n = 0 || at 0
+
+let matches ~filter (p : proc) =
+  lowercase_contains ~needle:filter p.command || lowercase_contains ~needle:filter p.user
+  || lowercase_contains ~needle:filter (Int.to_string p.pid)
+
+let find_proc (t : t) pid = List.find_opt (fun p -> p.pid = pid) (Array.to_list t.procs)
 
 let running (t : t) = Array.fold_left (fun n p -> if p.state = 'R' then n + 1 else n) 0 t.procs
 

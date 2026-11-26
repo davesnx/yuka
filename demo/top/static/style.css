@@ -1,117 +1,414 @@
-/* The screen of top, in the window of ../../zed/static/zed.css. */
+/* top in the layout of btop, in a full-screen Zed window (../../zed/static/zed.css):
+   boxes for the CPU, the memory, the network and the processes, the keys under
+   them, and the detail of a process in a modal of Zed. */
 
-.terminal {
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  display: grid;
+}
+
+.fullscreen .window {
+  height: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.btop {
+  position: relative;
   display: grid;
   grid-template-rows: 1fr auto;
+  min-width: 0;
   min-height: 0;
   color: var(--terminal-text);
-  font: 13px/1.55 var(--mono);
+  font: 12.5px/1.5 var(--mono);
   font-feature-settings: "calt" 1;
   font-variant-numeric: tabular-nums;
 }
 
-.screen {
-  min-height: 0;
-  overflow: auto;
-  padding: 10px 16px 0;
-  scrollbar-color: var(--border) transparent;
-}
-
-.summary {
-  white-space: pre;
-  overflow-x: auto;
-}
-
-.line {
-  min-height: 1.55em;
-}
-
 .dim {
-  color: var(--text-muted);
+  color: var(--text-placeholder);
+}
+
+.num {
+  text-align: right;
+  white-space: pre;
 }
 
 .value {
+  color: var(--text);
+}
+
+b {
   font-weight: 600;
   color: var(--text);
 }
 
-.summary > .line:first-child .value:first-of-type {
-  color: var(--ansi-cyan);
+/* Cool to hot, as the gradients of btop */
+.t0 { color: var(--ansi-green); }
+.t1 { color: var(--ansi-yellow); }
+.t2 { color: var(--number); }
+.t3 { color: var(--error); }
+.c-cache { color: var(--accent); }
+.c-swap { color: var(--keyword); }
+
+/* The boxes */
+
+.boxes {
+  display: grid;
+  grid-template-columns: minmax(320px, 34%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "cpu cpu"
+    "side procs";
+  gap: 16px 10px;
+  min-height: 0;
+  padding: 16px 12px 10px;
 }
 
-/* Graph mode ([t]): the numbers, then a bar per line. */
-.line.graph {
+.side {
+  grid-area: side;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.box {
+  --box: var(--accent);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 12px 8px;
+  border: 1px solid color-mix(in srgb, var(--box) 40%, var(--border));
+  border-radius: 6px;
+}
+
+.box.cpu { --box: var(--ansi-green); grid-area: cpu; }
+.box.mem { --box: var(--ansi-yellow); }
+.box.net { --box: var(--keyword); }
+.box.procs { --box: var(--accent); grid-area: procs; }
+
+/* The title and the information sit on the top border, as in btop. */
+.box-head {
+  position: absolute;
+  top: -0.8em;
+  left: 10px;
+  right: 10px;
   display: flex;
   align-items: center;
+  gap: 8px;
+  pointer-events: none;
 }
 
-.meter {
-  display: flex;
+.box-title,
+.box-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  background: var(--terminal);
+  pointer-events: auto;
+}
+
+.box-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.box-number {
+  color: var(--box);
+  font-weight: 400;
+}
+
+.box-info {
+  color: var(--text-muted);
+}
+
+.spacer {
   flex: 1;
-  min-width: 80px;
-  height: 9px;
-  margin-left: 1.5ch;
+}
+
+/* A meter: dim squares, and the squares that are on in the colour of the value. */
+.seg {
+  position: relative;
+  flex: 1;
+  min-width: 32px;
+  height: 0.75em;
+  background: repeating-linear-gradient(90deg, var(--border-variant) 0 6px, transparent 6px 8px);
+}
+
+.seg-on {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: repeating-linear-gradient(90deg, currentColor 0 6px, transparent 6px 8px);
+  transition: width 0.5s ease;
+}
+
+/* Braille graphs: each line is right-aligned, so the newest value is at the right
+   edge and the oldest are cut on the left when the box is narrow. */
+/* Lilex has no braille; the font after it in --mono draws the dots, and a line as
+   high as the font joins the dots of two lines. */
+.graph {
+  min-width: 0;
   overflow: hidden;
-  border-radius: 2px;
-  background: var(--border-variant);
+  line-height: 1;
+  letter-spacing: 0;
 }
 
-.fill {
-  height: 100%;
-  transition: width 0.6s ease;
-}
-
-.fill.us,
-.fill.used { background: var(--ansi-green); }
-.fill.sy { background: var(--error); }
-.fill.ni { background: var(--accent); }
-.fill.wa,
-.fill.cache { background: var(--ansi-yellow); }
-.fill.swap { background: var(--keyword); }
-
-.cores.graphs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-  column-gap: 3ch;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fill {
-    transition: none;
-  }
-}
-
-/* Line 6 of top: the answer to the last key. */
-.message {
-  min-height: 1.55em;
-  color: var(--warning);
+.graph-line {
+  display: flex;
+  justify-content: flex-end;
   white-space: pre;
 }
 
-/* The processes: one grid per line, with the same columns. */
-.procs {
-  min-width: 860px;
-  padding-bottom: 12px;
+/* CPU */
+
+.cpu-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.cpu-graph {
+  position: relative;
+  min-width: 0;
+  align-self: end;
+}
+
+.graph-scale {
+  position: absolute;
+  top: 1.5em;
+  left: 0;
+  z-index: 1;
+  padding-right: 6px;
+  background: var(--terminal);
+  color: var(--text-placeholder);
+  font-size: 11px;
+}
+
+.graph-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  padding-right: 6px;
+  background: var(--terminal);
+  color: var(--text-muted);
+}
+
+.cpu-side {
+  min-width: 260px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-variant);
+  border-radius: 4px;
+}
+
+.cpu-head,
+.core {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+}
+
+.cpu-head {
+  margin-bottom: 2px;
+}
+
+.cpu-head b {
+  min-width: 9ch;
+}
+
+.cores {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 1fr);
+  column-gap: 3ch;
+}
+
+.core .dim {
+  width: 3ch;
+}
+
+.core .seg {
+  color: var(--ansi-green);
+}
+
+.core .num,
+.cpu-head .num {
+  width: 4ch;
+}
+
+.load {
+  white-space: pre;
+}
+
+.clock {
+  color: var(--text);
+}
+
+.rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rate .icon {
+  width: 10px;
+  height: 10px;
+  color: var(--success);
+}
+
+.rate.paused .icon {
+  color: var(--warning);
+}
+
+/* Memory */
+
+.mem-body {
+  display: grid;
+  gap: 2px;
+}
+
+.mem-line {
+  display: grid;
+  grid-template-columns: 10ch minmax(32px, 1fr) 4ch 9ch;
+  align-items: center;
+  column-gap: 1ch;
+}
+
+/* Network */
+
+.net-body {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 0;
+  height: 100%;
+}
+
+.net-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.net-line .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.net-line.down .icon,
+.graph.down {
+  color: var(--accent);
+}
+
+.net-line.up .icon,
+.graph.up {
+  color: var(--keyword);
+}
+
+.net-line.total {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+/* Processes */
+
+.procs-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid var(--border-variant);
+  border-radius: 4px;
+  background: var(--editor);
+  cursor: text;
+}
+
+.filter:focus-within {
+  border-color: var(--border-focused);
+}
+
+.filter .icon {
+  width: 11px;
+  height: 11px;
+}
+
+.filter input {
+  width: 16ch;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+}
+
+.filter input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.sort-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--accent);
+}
+
+.sort-tag .icon,
+.sortable .icon {
+  width: 11px;
+  height: 11px;
+}
+
+.table {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: var(--border) transparent;
 }
 
 .proc {
   display: grid;
-  grid-template-columns: 7ch 9ch 4ch 4ch 8ch 8ch 7ch 2ch 6ch 6ch 10ch minmax(0, 1fr);
+  grid-template-columns: 7ch 14ch minmax(10ch, 1fr) 4ch 9ch 7ch 10ch 12ch;
   column-gap: 1ch;
+  align-items: center;
+  min-width: 84ch;
   padding: 0 6px;
   border-radius: 3px;
   white-space: pre;
-  cursor: default;
+  cursor: pointer;
 }
 
 .proc.head {
   position: sticky;
   top: 0;
   z-index: 1;
-  margin-bottom: 2px;
-  background: var(--border-variant);
+  background: var(--terminal);
   color: var(--text);
   font-weight: 600;
+  cursor: default;
 }
 
 .cell {
@@ -119,12 +416,26 @@
   text-overflow: ellipsis;
 }
 
-.num {
+.cell.command {
+  color: var(--text-muted);
+}
+
+.cell.cpu {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1ch;
+}
+
+.cell.cpu > span:last-child {
+  width: 5ch;
   text-align: right;
 }
 
-.state {
-  text-align: center;
+.seg.small {
+  flex: none;
+  width: 5ch;
+  min-width: 0;
 }
 
 .sortable {
@@ -140,7 +451,7 @@
   cursor: pointer;
 }
 
-.sortable.command {
+.sortable.program {
   justify-content: flex-start;
 }
 
@@ -149,23 +460,19 @@
   color: var(--accent);
 }
 
-.sortable .icon {
-  width: 11px;
-  height: 11px;
-}
-
 .proc:not(.head):hover {
   background: var(--hover);
 }
 
-.proc.running {
-  font-weight: 600;
-  color: var(--text);
-}
-
-.proc.selected {
+.proc.selected,
+.proc.selected:hover {
   background: var(--selection);
   box-shadow: inset 2px 0 var(--accent);
+}
+
+.proc.running .program {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .pid {
@@ -176,28 +483,45 @@
   color: var(--text-placeholder);
 }
 
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 6px 1px 0;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+}
+
 .state-R { color: var(--ansi-green); }
+.state-S { color: var(--text-placeholder); }
 .state-D { color: var(--error); }
 .state-I { color: var(--comment); }
 
-.warm { color: var(--ansi-yellow); }
-.hot { color: var(--error); }
-
-.exited {
+.box-foot {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding-top: 12px;
-  color: var(--text-muted);
+  align-items: center;
+  gap: 8px;
+  min-height: 1.6em;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-variant);
 }
 
-/* The keys, under the screen, as the completion bar of utop */
+.message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--warning);
+}
+
+/* The keys, under the boxes */
+
 .keybar {
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 28px;
-  padding: 0 12px;
+  height: 30px;
+  padding: 0 10px;
   overflow: hidden;
   border-top: 1px solid var(--border-variant);
   color: var(--text-muted);
@@ -208,9 +532,9 @@
 .key {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex: none;
-  height: 20px;
+  height: 22px;
   padding: 0 6px;
   border: 0;
   border-radius: 4px;
@@ -230,7 +554,8 @@
   color: var(--text);
 }
 
-.key kbd {
+.key kbd,
+.button kbd {
   min-width: 16px;
   margin: 0;
   padding: 0 4px;
@@ -239,23 +564,257 @@
   background: var(--editor);
   color: var(--text);
   font: 11px/1.4 var(--mono);
+  text-align: center;
 }
 
-.live {
+.tasks {
+  flex: none;
+  font: 12px/1 var(--mono);
+}
+
+.exited {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  color: var(--text-muted);
+}
+
+/* The detail of a process: a modal of Zed over the boxes */
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 9vh 16px 16px;
+  background: rgb(0 0 0 / 28%);
+  animation: fade 0.12s ease-out;
+}
+
+.dialog {
+  width: min(640px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: 13px/1.5 var(--sans);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 12%), 0 24px 64px -12px rgb(0 0 0 / 45%);
+  animation: rise 0.16s ease-out;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(-6px) scale(0.99); }
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--border-variant);
+}
+
+.dialog-head h2 {
+  margin: 0;
+  font: 600 15px/1.3 var(--mono);
+}
+
+.pill {
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font: 11px/18px var(--mono);
+}
+
+.pill.state-R {
+  border-color: color-mix(in srgb, var(--ansi-green) 50%, var(--border));
+  color: var(--ansi-green);
+}
+
+.pill.state-D {
+  color: var(--error);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.icon-button:focus-visible,
+.button:focus-visible {
+  outline: 1px solid var(--border-focused);
+}
+
+.cmdline {
+  display: block;
+  margin: 12px 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-variant);
+  border-radius: 6px;
+  background: var(--editor);
+  color: var(--text);
+  font: 12px/1.5 var(--mono);
+  word-break: break-all;
+}
+
+.dialog-graph {
+  margin: 0 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-variant);
+  border-radius: 6px;
+  background: var(--editor);
+}
+
+.dialog-graph .graph {
+  font: 12px/1 var(--mono);
+}
+
+.dialog-graph-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.dialog-graph + .dialog-graph-head {
+  margin: 12px 14px 0;
+}
+
+.dialog-graph-head .seg {
+  color: var(--ansi-yellow);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 14px;
+}
+
+.stat {
+  display: grid;
+  min-width: 0;
+}
+
+.stat .dim {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 13px/1.5 var(--mono);
+}
+
+.dialog-message,
+.dialog-gone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.dialog-gone {
+  margin-top: 14px;
+  color: var(--text-muted);
+  background: var(--editor);
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-variant);
+}
+
+.dialog-actions .button {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  flex: none;
+  gap: 6px;
 }
 
-.live .icon {
-  width: 11px;
-  height: 11px;
-  color: var(--success);
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
-@media (max-width: 760px) {
-  .terminal {
-    font-size: 12px;
+.button.danger {
+  border-color: color-mix(in srgb, var(--error) 45%, var(--border));
+  color: var(--error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seg-on {
+    transition: none;
+  }
+  .scrim,
+  .dialog {
+    animation: none;
+  }
+}
+
+/* A narrow window: the boxes one under the other, in a scroll. */
+@media (max-width: 900px) {
+  .boxes {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .box,
+  .side {
+    flex: none;
+  }
+  .side {
+    display: flex;
+    flex-direction: column;
+  }
+  .box.procs {
+    height: 75vh;
+  }
+  .net-body {
+    height: auto;
+  }
+  .cpu-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cpu-side {
+    min-width: 0;
+  }
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

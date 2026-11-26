@@ -27,24 +27,11 @@ let window (current : Machine.host) =
       ]
     <Yuka.Client><Monitor host=current.name /></Yuka.Client>
 
-let keys =
-  [
-    ([ "P"; "M"; "T" ], "sort by CPU, memory or time");
-    ([ "t" ], "graphs");
-    ([ "1" ], "one line per core");
-    ([ "↑"; "↓" ], "select");
-    ([ "k" ], "kill");
-    ([ "Space" ], "pause");
-  ]
-
+(* The window fills the browser, as a Zed window in full screen. *)
 let host ~host () =
   let current = match Option.bind host Machine.find with Some host -> host | None -> Machine.laptop in
   Yuka.Server.page ~title:("top — " ^ current.name) (fun () ->
-      Zed_ui.page ~title:"top, in the browser"
-        ~lede:
-          (Yuka.text
-             "A fake top in a Zed window. Each host on the left is a machine made up in OCaml; the server renders the first screen, then the browser makes a new one every second. Sort, select and kill with the keys of top.")
-        ~window:(window current) ~keys)
+      <div class_="fullscreen"><h1 class_="visually-hidden">(Yuka.text ("top on " ^ current.name))</h1>(window current)</div>)
 
 let not_found ~path () =
   Yuka.Server.page ~title:"Not found" (fun () ->

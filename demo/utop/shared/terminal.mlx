@@ -153,7 +153,7 @@ let[@client] make ~(session : Session.t) () =
     set_input "";
     Yuka.Browser.focus input_id
   in
-  <div class_="terminal" on_click=(fun event -> if Yuka.Event.target_tag event <> "BUTTON" then Yuka.Browser.focus input_id)>
+  <div class_="terminal" on_click=(fun event -> if Yuka.Event.target_tag event <> "button" then Yuka.Browser.focus input_id)>
     <div class_="scroll">
       <div class_="screen">
         <pre class_="banner" aria_label=("utop " ^ Session.utop_version)>(Yuka.text banner)</pre>
