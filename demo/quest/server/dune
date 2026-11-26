@@ -1,0 +1,25 @@
+(library
+ (name quest_app)
+ (modules board story loaders pages yuka_routes serve)
+ (libraries quest_shared yuka yuka-dream dream lwt lwt.unix)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Quest_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
+
+(executable
+ (name quest_server)
+ (modules quest_server)
+ (libraries quest_app dream))

@@ -25,6 +25,9 @@ let home () =
   Alcotest.(check bool) "Infinite scroll in a new tab" true
     (contains html {|<a class="card" href="/infinite-scroll" target="_blank" rel="noopener">|});
   Alcotest.(check bool) "Infinite scroll name" true (contains html "<h2>Infinite scroll</h2>");
+  Alcotest.(check bool) "Quest in a new tab" true
+    (contains html {|<a class="card" href="/quest" target="_blank" rel="noopener">|});
+  Alcotest.(check bool) "Quest name" true (contains html "<h2>Quest</h2>");
   Alcotest.(check bool) "an illustration per card" true (contains html {|<svg class="art"|});
   Alcotest.(check bool) "no card number" false (contains html "/ Demo");
   Alcotest.(check bool) "no open link label" false (contains html "Open demo");

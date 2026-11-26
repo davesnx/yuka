@@ -172,6 +172,30 @@ let posters () : Yuka.server Yuka.element =
     <text class_="caption" x="344.5" y="227" text_anchor="middle">"Light"</text>
   </svg>
 
+let quest () : Yuka.server Yuka.element =
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A riddle on a stone panel, between a red and a blue globe">
+    (window_chrome ~title:"quest")
+    <rect class_="quest-floor" x="1" y="29" width="438" height="230" rx="9" />
+    <rect class_="quest-panel" x="120.5" y="44.5" width="200" height="176" />
+    <text class_="quest-title" x="220.5" y="74" text_anchor="middle">"THE BLIGHTED MOOR"</text>
+    <line class_="quest-rule" x1="160" y1="86.5" x2="281" y2="86.5" />
+    <rect class_="bar" x="150" y="98" width="140" height="6" rx="3" />
+    <rect class_="bar" x="170" y="110" width="100" height="6" rx="3" />
+    (Yuka.fragment
+       (List.init 3 (fun i ->
+            let y = 128 + (i * 28) in
+            <g>
+              <rect class_="quest-button" x="140.5" y=(Int.to_string y ^ ".5") width="160" height="20" />
+              <rect class_="quest-label" x=(Int.to_string (190 + (i * 6))) y=(Int.to_string (y + 8)) width=(Int.to_string (60 - (i * 12))) height="5" rx="2" />
+            </g>)))
+    <circle class_="quest-life" cx="40" cy="220" r="26" />
+    <circle class_="quest-mana" cx="400" cy="220" r="26" />
+    (Yuka.fragment
+       (List.init 25 (fun i ->
+            let x = 96 + (i * 10) + (i / 5 * 6) in
+            <rect class_=(if i < 7 then "quest-pip lit" else "quest-pip") x=(Int.to_string x) y="236" width="5" height="5" transform=(Printf.sprintf "rotate(45 %d.5 238.5)" x) />)))
+  </svg>
+
 let demos =
   [
     {
@@ -202,6 +226,14 @@ let demos =
       path = "/infinite-scroll";
       tags = [ "on_visible"; "keep_scroll"; "URL state" ];
       illustration = infinite_scroll;
+    };
+    {
+      name = "Quest";
+      description =
+        "A story of five acts of five riddles, and a duel at the end. The server holds the tree of scenes and streams each one.";
+      path = "/quest";
+      tags = [ "Server-driven"; "Streaming"; "Await"; "Fullscreen" ];
+      illustration = quest;
     };
   ]
 
@@ -254,6 +286,17 @@ h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:0 0 8px}
 .art .poster-title{fill:#ededf0}
 .art .poster-text{fill:#8a8a96}
 .art .line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.art .quest-floor{fill:#0d0907}
+.art .quest-panel{fill:#17120e;stroke:#5d4d33;stroke-width:2}
+.art .quest-title{font:700 11px Georgia,serif;letter-spacing:.08em;fill:#d6b765}
+.art .quest-rule{stroke:#5d4d33}
+.art .quest-panel~.bar{fill:#4a4036}
+.art .quest-button{fill:#221c17;stroke:#3a3128}
+.art .quest-label{fill:#c7b377;opacity:.7}
+.art .quest-life{fill:#a8120a;stroke:#4e412c;stroke-width:4}
+.art .quest-mana{fill:#2430b8;stroke:#4e412c;stroke-width:4}
+.art .quest-pip{fill:#0c0a08;stroke:#4a3f2c}
+.art .quest-pip.lit{fill:#e2ad48;stroke:#000}
 @media (max-width:720px){.page{padding-top:56px}h1{font-size:34px}.card{grid-template-columns:1fr}.preview{border-left:0;border-top:1px solid var(--line);order:-1}.body{padding:24px}}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}
 |}

@@ -1,0 +1,19 @@
+(* The part of the layout that runs in the browser: the fullscreen button (also
+   the F key), and a turning rune while the server streams the next scene. *)
+
+let[@client] make () =
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "keydown" (fun event ->
+          match Yuka.Event.key event with
+          | ("f" | "F") when not (Yuka.Event.ctrl_key event || Yuka.Event.meta_key event || Yuka.Event.alt_key event) ->
+              Fullscreen.toggle ()
+          | _ -> ()));
+  <div class_="hud">
+    <span class_=(if Yuka.State.get Yuka.Browser.navigating then "rune turning" else "rune") aria_hidden=true />
+    <button class_="fullscreen" type_=`button title="Fullscreen (F)" on_click=(fun _ -> Fullscreen.toggle ())>
+      <svg view_box="0 0 24 24" width="18" height="18" aria_hidden=true>
+        <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
+      </svg>
+      <span class_="visually-hidden">"Fullscreen"</span>
+    </button>
+  </div>

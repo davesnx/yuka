@@ -1,0 +1,230 @@
+open Quest_shared
+
+(* Each scene is a page that the server streams: the banner first, then the lines of
+   the tale one by one, then the exits. [step] is the time between two parts; the
+   tests set it to 0. *)
+let step = ref 0.45
+
+let later ~at (element : Yuka.server Yuka.element) =
+  let async =
+    if !step <= 0. then Yuka.Async.return element
+    else Yuka_dream.to_async (Lwt.map (fun () -> element) (Lwt_unix.sleep (Float.of_int at *. !step)))
+  in
+  <Yuka.Await async blocking=`No loading=Yuka.empty>(fun element -> element)</Yuka.Await>
+
+let lines ?(from = 0) texts =
+  Yuka.fragment (List.mapi (fun index text -> later ~at:(from + index) <p class_="line">(Yuka.text text)</p>) texts)
+
+let embers =
+  List.init 24 (fun index ->
+      let x = (index * 37) mod 100 and delay = (index * 7) mod 11 and drift = ((index * 13) mod 9) - 4 in
+      <span style=(Printf.sprintf "--x:%d%%;--delay:-%ds;--drift:%dvw;--size:%dpx" x delay drift (2 + (index mod 3))) />)
+
+let shell ~children () =
+  <div class_="world">
+    <div class_="embers" aria_hidden=true>(Yuka.fragment embers)</div>
+    <div class_="vignette" aria_hidden=true />
+    <Yuka.Client><Hud /></Yuka.Client>
+    <main class_="stage">children</main>
+  </div>
+
+let href (exit : Story.exit) =
+  if exit.target = Story.root.id then Routes.title () else Routes.scene ~id:exit.target ()
+
+let exit_link index (exit : Story.exit) =
+  <a class_=(if exit.up then "exit up" else "exit") href=(href exit)>
+    <kbd>(Yuka.int (index + 1))</kbd>
+    <span>(Yuka.text exit.label)</span>
+  </a>
+
+let exits ~at (scene : Story.scene) =
+  later ~at <nav class_="exits">(Yuka.fragment (List.mapi exit_link scene.exits))</nav>
+
+(* The URLs of the keys 1 to 9: the exits, or on the board one per cell. *)
+let hotkeys (scene : Story.scene) =
+  match scene.view with
+  | Duel _ ->
+      List.init 9 (fun cell ->
+          match List.find_opt (fun (exit : Story.exit) -> exit.label = Int.to_string cell) scene.exits with
+          | Some exit -> href exit
+          | None -> "")
+  | Ending _ | Opening | Act _ | Riddle _ | Death _ -> List.map href scene.exits
+
+let mark_svg (mark : Board.mark) =
+  match mark with
+  | X -> <svg view_box="0 0 40 40" aria_hidden=true><path d="M9 9L31 31M31 9L9 31" /></svg>
+  | O -> <svg view_box="0 0 40 40" aria_hidden=true><circle cx="20" cy="20" r="12" /></svg>
+
+let board ?(exits = []) ~(last : int option) (cells : Board.t) =
+  let line = Board.line cells in
+  <div class_="board">
+    (Yuka.fragment
+       (List.init 9 (fun cell ->
+            let extra = (if last = Some cell then " fresh" else "") ^ if List.mem cell line then " win" else "" in
+            match cells.(cell) with
+            | Some X -> <span class_=("cell frost" ^ extra) aria_label="Frost rune">(mark_svg X)</span>
+            | Some O -> <span class_=("cell fire" ^ extra) aria_label="Fire rune">(mark_svg O)</span>
+            | None -> (
+                match List.find_opt (fun (exit : Story.exit) -> exit.label = Int.to_string cell) exits with
+                | Some exit ->
+                    <a class_="cell open" href=(href exit) aria_label=("Carve rune " ^ Int.to_string (cell + 1))>
+                      <kbd>(Yuka.int (cell + 1))</kbd>
+                    </a>
+                | None -> <span class_="cell" />))))
+  </div>
+
+let banner ?sub ~over title =
+  <header class_="banner">
+    <p class_="over">(Yuka.text over)</p>
+    <h1>(Yuka.text title)</h1>
+    (match sub with Some sub -> <p class_="sub">(Yuka.text sub)</p> | None -> Yuka.empty)
+  </header>
+
+let panel (scene : Story.scene) =
+  let life = match scene.view with Death _ | Ending { outcome = Lost; _ } -> 0 | _ -> 100 in
+  let mana = scene.progress * 100 / Story.riddle_count in
+  let globe kind fill label =
+    <div class_=(if fill = 0 then "globe empty " ^ kind else "globe " ^ kind) style=(Printf.sprintf "--fill:%d%%" fill) role=`img aria_label=label>
+      <span class_="liquid" />
+      <span class_="glass" />
+    </div>
+  in
+  <footer class_="panel">
+    (globe "life" life (if life = 0 then "Life: none" else "Life: full"))
+    <div class_="belt" role=`img aria_label=(Printf.sprintf "%d of %d riddles solved" scene.progress Story.riddle_count)>
+      (Yuka.fragment
+         (List.init (Array.length Story.acts) (fun act ->
+              <div class_="act-pips">
+                <span class_="act-name">(Yuka.text (Story.roman act))</span>
+                (Yuka.fragment
+                   (List.init Story.riddles_per_act (fun number ->
+                        let index = (act * Story.riddles_per_act) + number in
+                        <span class_=(if index < scene.progress then "pip lit" else "pip") />)))
+              </div>)))
+    </div>
+    (globe "mana" mana (Printf.sprintf "Progress: %d%%" mana))
+  </footer>
+
+let duel_taunts =
+  [|
+    "The fire rune flares where you hoped he would not look.";
+    "\"Bold,\" he says, and the board hisses.";
+    "Embers drift up from the stone. He is enjoying this.";
+    "\"Careful, little frost,\" he murmurs.";
+  |]
+
+let content (scene : Story.scene) =
+  match scene.view with
+  | Opening ->
+      <section class_="scene opening">
+        <header class_="banner">
+          <p class_="over">"A server-driven tale in five acts"</p>
+          <h1 class_="logo">"Ashfall"</h1>
+        </header>
+        (lines
+           [
+             "Five acts. Five riddles in each. One game against the Ash King at the end.";
+             "Every scene is streamed from the server, which alone knows where each answer leads.";
+           ])
+        (exits ~at:2 scene)
+        <p class_="hint">"Keys 1 to 9 choose. F goes fullscreen."</p>
+      </section>
+  | Act { act } ->
+      <section class_="scene act">
+        (banner ~over:("Act " ^ Story.roman act) Story.acts.(act).name)
+        (lines Story.acts.(act).intro)
+        (exits ~at:(List.length Story.acts.(act).intro) scene)
+      </section>
+  | Riddle { act; number } ->
+      let riddle = List.nth Story.acts.(act).riddles number in
+      <section class_="scene riddle">
+        (banner
+           ~over:("Act " ^ Story.roman act)
+           ~sub:(Printf.sprintf "Riddle %d of %d" (number + 1) Story.riddles_per_act)
+           Story.acts.(act).name)
+        (lines [ riddle.asker ])
+        (later ~at:1 <blockquote class_="prompt">(Yuka.text riddle.prompt)</blockquote>)
+        (exits ~at:2 scene)
+      </section>
+  | Death { answer; line; _ } ->
+      <section class_="scene death">
+        (banner ~over:"Your answer was wrong" "You have died")
+        (lines [ "You answered \"" ^ answer ^ "\"."; line ])
+        (exits ~at:2 scene)
+      </section>
+  | Duel { board = cells; last } ->
+      let moves = Array.fold_left (fun count cell -> if cell = Some Board.O then count + 1 else count) 0 cells in
+      let tale = if moves = 0 then Story.duel_lines else [ duel_taunts.((moves - 1) mod Array.length duel_taunts) ] in
+      <section class_="scene duel">
+        (banner ~over:"The Frost Summit" ~sub:"Three runes in a row" "The Ash King")
+        (board ~exits:scene.exits ~last cells)
+        (lines tale)
+      </section>
+  | Ending { board = cells; last; outcome } ->
+      let over, title, tale, kind =
+        match outcome with
+        | Won ->
+            ( "The Ash King is defeated",
+              "Victory",
+              [
+                "Three frost runes burn cold in a row, and the fire on the board gutters out.";
+                "The Ash King stares at the stone for a long time. Then he laughs, and crumbles into ash.";
+                "The snow stops falling. Far below, the village begins to rebuild.";
+              ],
+              "victory" )
+        | Lost ->
+            ( "Three fire runes in a row",
+              "You have died",
+              [ "\"Again?\" the King asks, as you burn. \"They always ask for again.\"" ],
+              "death" )
+        | Drawn ->
+            ( "The board is full",
+              "Stalemate",
+              [ "\"A draw is a defeat with better manners,\" says the King. \"Again.\"" ],
+              "drawn" )
+      in
+      <section class_=("scene ending " ^ kind)>
+        (banner ~over title)
+        (board ~last cells)
+        (lines tale)
+        (exits ~at:(List.length tale) scene)
+      </section>
+
+let title_of (scene : Story.scene) =
+  match scene.view with
+  | Opening -> "Ashfall"
+  | Act { act } | Riddle { act; _ } -> Printf.sprintf "Act %s: %s · Ashfall" (Story.roman act) Story.acts.(act).name
+  | Death _ -> "You have died · Ashfall"
+  | Duel _ -> "The Ash King · Ashfall"
+  | Ending { outcome = Won; _ } -> "Victory · Ashfall"
+  | Ending { outcome = Lost; _ } -> "You have died · Ashfall"
+  | Ending { outcome = Drawn; _ } -> "Stalemate · Ashfall"
+
+let render (scene : Story.scene) =
+  Yuka.Server.page ~title:(title_of scene) (fun () ->
+      <div class_="frame">
+        (content scene)
+        <Yuka.Client><Hotkeys exits=(hotkeys scene) /></Yuka.Client>
+        (panel scene)
+      </div>)
+
+let title () = render Story.root
+let scene ~id:_ ~scene () = render scene
+
+let message ~title ~text =
+  Yuka.Server.page ~title:(title ^ " · Ashfall") (fun () ->
+      <div class_="world">
+        <main class_="stage">
+          <div class_="frame">
+            <section class_="scene death">
+              (banner ~over:"Ashfall" title)
+              <p class_="line">(Yuka.text text)</p>
+              <nav class_="exits"><a class_="exit up" href=(Routes.title ())><kbd>"1"</kbd><span>"Return to the start"</span></a></nav>
+              <Yuka.Client><Hotkeys exits=[ Routes.title () ] /></Yuka.Client>
+            </section>
+          </div>
+        </main>
+      </div>)
+
+let not_found ~path () = message ~title:"Lost in the ash" ~text:("No scene is at " ^ path ^ ".")
+let error () = message ~title:"Something went wrong" ~text:"The tale broke off. Try again from the start."

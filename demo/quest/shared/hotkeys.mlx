@@ -1,0 +1,13 @@
+(* The keys 1 to 9 follow the exits of the scene, in the order the server sent them.
+   An empty exit is a key that does nothing, as a taken cell of the board. *)
+
+let[@client] make ~(exits : string list) () =
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "keydown" (fun event ->
+          if not (Yuka.Event.ctrl_key event || Yuka.Event.meta_key event || Yuka.Event.alt_key event) then
+            match int_of_string_opt (Yuka.Event.key event) with
+            | Some n when n >= 1 && n <= List.length exits && List.nth exits (n - 1) <> "" ->
+                Yuka.Event.prevent_default event;
+                Yuka.Browser.navigate (List.nth exits (n - 1))
+            | Some _ | None -> ()));
+  Yuka.empty
