@@ -160,7 +160,14 @@ kbd {
    moves on its own, from its place on the old page to its place on the new one. */
 
 .content { view-transition-class: content; }
-::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+/* The root takes no part in the view transition: the parts of the page with no name (the page
+   background and its glow, the header, the footer of an album page) are not animated, the browser
+   just shows the new page there, and they stay in hit-testing, so their links work while a view
+   transition runs. The layer of the snapshots lets clicks through to them. The intro and the genre
+   tabs of the shelf are outside its content for that. Named elements, as the
+   content and the covers, still skip hit-testing while they animate. */
+:root { view-transition-name: none; }
+::view-transition { pointer-events: none; }
 ::view-transition-old(*.content):only-child { animation: 0.3s ease both fade-out; }
 ::view-transition-new(*.content):only-child { animation: 0.3s ease both fade-in; }
 html[data-yuka-nav="push"]::view-transition-old(*.content):only-child,
@@ -170,14 +177,9 @@ html[data-yuka-nav="forward"]::view-transition-new(*.content):only-child { anima
 html[data-yuka-nav="back"]::view-transition-old(*.content):only-child { animation-name: fade-out, to-right; }
 html[data-yuka-nav="back"]::view-transition-new(*.content):only-child { animation-name: fade-in, from-left; }
 
-/* The header, the intro, the tabs and the footer of an album page have their own names, so they
-   stay in place instead of sliding with the content: on a genre tab, or from one album to the
-   next, they are at the same place on both pages and do not move. The title and artist under a
-   cover have a name per record too, so they move with the cover. */
-.top { view-transition-name: top; }
-.neighbours { view-transition-name: neighbours; }
-.intro { view-transition-name: intro; }
-.tabs { view-transition-name: tabs; }
+/* The intro and the tabs of the shelf are outside its content and have no name, as the header:
+   on a genre tab they are the same on both pages and stay, and the tabs work while the covers
+   move. The title and artist under a cover have a name per record, so they move with the cover. */
 
 ::view-transition-group(*) { animation-duration: 0.45s; animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
 

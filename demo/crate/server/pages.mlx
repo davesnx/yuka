@@ -22,9 +22,9 @@ let cover ?(size = "") album =
     <span class_="cover-title">(Yuka.text album.title)</span>
   </div>
 
-let header () =
+let header ?(shelf = false) () =
   <header class_="top">
-    <Yuka.Client><Progress /></Yuka.Client>
+    <Yuka.Client><Progress shelf /></Yuka.Client>
     <a class_="brand" href=(Routes.shelf ())><span class_="logo" />"Crate"</a>
     <span class_="tagline">"View transitions with Yuka"</span>
   </header>
@@ -50,18 +50,18 @@ let shelf ~genre () =
   let shown = match genre with None -> albums | Some name -> List.filter (fun album -> album.genre = name) albums in
   Yuka.Server.page ~title:"Crate" (fun () ->
       <div class_="page">
-        (header ())
+        (header ~shelf:true ())
+        <section class_="intro">
+          <h1>"Dig through the crate"</h1>
+          <p>
+            "Every click here is a client navigation in a view transition. Open a record: its cover grows into the album page, and Back puts it in its slot. The tabs move the covers to their new places."
+          </p>
+        </section>
+        <nav class_="tabs" aria_label="Genres">
+          (tab ~current:genre "All" None)
+          (Yuka.fragment (List.map (fun name -> tab ~current:genre name (Some name)) genres))
+        </nav>
         <main class_="content" style="view-transition-name:shelf">
-          <section class_="intro">
-            <h1>"Dig through the crate"</h1>
-            <p>
-              "Every click here is a client navigation in a view transition. Open a record: its cover grows into the album page, and Back puts it in its slot. The tabs move the covers to their new places."
-            </p>
-          </section>
-          <nav class_="tabs" aria_label="Genres">
-            (tab ~current:genre "All" None)
-            (Yuka.fragment (List.map (fun name -> tab ~current:genre name (Some name)) genres))
-          </nav>
           <ul class_="grid">(Yuka.fragment (List.map card shown))</ul>
         </main>
       </div>)
@@ -90,7 +90,7 @@ let track_row album ~playing index name =
   </li>
 
 let neighbour label album =
-  <a class_="neighbour" href=(Routes.album ~id:album.id ())>
+  <a class_="neighbour" href=(Routes.album ~id:album.id ()) data_yuka_replace="">
     (cover ~size:"small" album)
     <span><span class_="neighbour-label">(Yuka.text label)</span>(Yuka.text album.title)</span>
   </a>
@@ -114,7 +114,7 @@ let album ~id:_ ~(album : album) ~track () =
       <div class_="page">
         (header ())
         <main class_="content" style="view-transition-name:album">
-          <a class_="back" href=(Routes.shelf ())>"← All records"</a>
+          <Yuka.Client><Back href=(Routes.shelf ()) /></Yuka.Client>
           <article class_="album">
             <div class_=(if playing = None then "sleeve" else "sleeve playing")>
               <div class_="disc" />
@@ -138,12 +138,12 @@ let album ~id:_ ~(album : album) ~track () =
               </p>
             </div>
           </article>
-          <nav class_="neighbours" aria_label="More records">
-            (neighbour "Previous" previous)
-            <Yuka.Client>
-              <Keys previous=(Routes.album ~id:previous.id ()) next=(Routes.album ~id:next.id ()) />
-            </Yuka.Client>
-            (neighbour "Next" next)
-          </nav>
         </main>
+        <nav class_="neighbours" aria_label="More records">
+          (neighbour "Previous" previous)
+          <Yuka.Client>
+            <Keys previous=(Routes.album ~id:previous.id ()) next=(Routes.album ~id:next.id ()) />
+          </Yuka.Client>
+          (neighbour "Next" next)
+        </nav>
       </div>)

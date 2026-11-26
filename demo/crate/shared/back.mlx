@@ -1,0 +1,18 @@
+(* The "All records" link of an album page. [from_shelf] is set when the shelf shows, and stays
+   set across client navigations: then the history entry before this page is the shelf (the
+   album page is opened from it, and Previous, Next, the arrow keys and the tracks replace the
+   entry), so the link does [history.back()], which shows the shelf as it was, with its genre and
+   scroll, in a view transition with data-yuka-nav="back". After a direct load or a reload of an
+   album page it is a link to the shelf. *)
+
+let from_shelf = ref false
+
+let[@client] make ~(href : string) () =
+  <a class_="back" href
+     on_click=(fun event ->
+       if !from_shelf then begin
+         Yuka.Event.prevent_default event;
+         Yuka.Browser.back ()
+       end)>
+    (Yuka.text {js|← All records|js})
+  </a>

@@ -41,8 +41,15 @@ other demos, in one process. To run this demo alone, at the root:
   `data-yuka-keep-scroll`): it changes one row, and a cross-fade of the
   whole page would only flash it.
 - `shared/keys.mlx` goes to the previous and next record with the arrow
-  keys through `Yuka.Browser.navigate`, which runs in a view transition
-  too. `shared/progress.mlx` shows a bar while a page loads; it is also
+  keys through `Yuka.Browser.navigate ~replace:true`, which runs in a view
+  transition too. Previous and Next replace the history entry as well, so
+  the entry before an album page is the shelf it was opened from:
+  `shared/back.mlx`, the "All records" link, then does
+  `Yuka.Browser.back ()`, which shows the shelf with its genre and scroll.
+  After a direct load of an album page it is a link to the shelf.
+- The root has no view transition name and `::view-transition` has
+  `pointer-events: none`, so the header, the intro, the genre tabs and the
+  footer, which have no name, keep working while a view transition runs. `shared/progress.mlx` shows a bar while a page loads; it is also
   the island of the shelf, as a page with no island loads no JavaScript
   and its links would load full pages.
 
