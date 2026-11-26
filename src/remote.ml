@@ -61,6 +61,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
   end
   else begin
     let send = send () in
+    let island = !Types.hydrating_island in
     let generation = ref 0 and stop = ref ignore and current = ref None and first = ref true in
     let cancel () =
       incr generation;
@@ -95,7 +96,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
       if not read then attempt g input 1
       else
         let key = Answers.key (Action.name q) input in
-        match Answers.find key with
+        match Answers.find ?island key with
         | Answers.Found r -> embedded g input r
         | Answers.Absent -> attempt g input 1
         | Answers.Pending ->
@@ -116,7 +117,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
               Host.on_dom_ready (fun () ->
                   !stop_watch ();
                   if g = !generation then
-                    match Answers.find key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
+                    match Answers.find ?island key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
             stop := release
     in
     let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in

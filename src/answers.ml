@@ -44,16 +44,34 @@ let of_json text =
 let mine key elements =
   List.filter (fun el -> Web.DOM.Element.getAttribute "data-yuka-answer" el = Some key) elements
 
-let full key elements =
-  match List.find_opt (fun el -> Web.DOM.Element.getAttribute "data-pending" el = None) (mine key elements) with
-  | Some el -> of_json (Web.DOM.Node.textContent el)
-  | None -> None
+let ready el = Web.DOM.Element.getAttribute "data-pending" el = None
 
-let find key =
-  let elements = Array.to_list (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "script[data-yuka-answer]" Web.DOM.document)) in
-  match full key elements with
+let first_ready answers =
+  match List.find_opt ready answers with Some el -> of_json (Web.DOM.Node.textContent el) | None -> None
+
+let full key elements = first_ready (mine key elements)
+
+let ordered ?island key =
+  let all selector = Array.to_list (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll selector Web.DOM.document)) in
+  match island with
+  | None -> mine key (all "script[data-yuka-answer]")
+  | Some id -> (
+      let elements = all "script[data-yuka-answer],script[data-yuka-props]" in
+      let rec split before = function
+        | [] -> None
+        | el :: rest when Web.DOM.Element.getAttribute "data-yuka-props" el = Some id -> Some (before, mine key rest)
+        | el :: rest -> split (if mine key [ el ] <> [] then el :: before else before) rest
+      in
+      match split [] elements with
+      | None -> mine key elements
+      | Some ((nearest :: _ as before), after) -> if ready nearest then before @ after else nearest :: after
+      | Some ([], after) -> after)
+
+let find ?island key =
+  let answers = ordered ?island key in
+  match first_ready answers with
   | Some r -> Found r
-  | None when mine key elements <> [] && Host.ready_state () = "loading" -> Pending
+  | None when answers <> [] && Host.ready_state () = "loading" -> Pending
   | None -> Absent
 
 let find_added key nodes =
