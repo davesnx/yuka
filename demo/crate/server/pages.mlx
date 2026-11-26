@@ -71,15 +71,22 @@ let duration album index = Printf.sprintf "%d:%02d" (2 + ((album.id + index) * 7
 let track_row album ~playing index name =
   let number = index + 1 in
   let on = playing = Some number in
-  (* No view transition: picking a track changes one row, and a cross-fade of the whole page
-     would only flash it. *)
+  let href = Routes.album ~id:album.id ~track:number () in
+  let class_ = if on then "track on" else "track" in
+  let row =
+    Yuka.fragment
+      [
+        <span class_="track-number">(if on then Yuka.text "▶" else Yuka.text (Int.to_string number))</span>;
+        <span class_="track-name">(Yuka.text name)</span>;
+        <span class_="track-time">(Yuka.text (duration album index))</span>;
+      ]
+  in
+  (* The first track picked runs a view transition: the record comes out of its sleeve onto the
+     turntable. Once a track plays, another one changes one row and nothing moves, so it has no
+     view transition: a cross-fade of the page would only flash it. *)
   <li>
-    <a class_=(if on then "track on" else "track") href=(Routes.album ~id:album.id ~track:number ())
-       data_yuka_transition="off" data_yuka_replace="" data_yuka_keep_scroll="">
-      <span class_="track-number">(if on then Yuka.text "▶" else Yuka.text (Int.to_string number))</span>
-      <span class_="track-name">(Yuka.text name)</span>
-      <span class_="track-time">(Yuka.text (duration album index))</span>
-    </a>
+    (if playing = None then <a class_ href data_yuka_replace="" data_yuka_keep_scroll="">row</a>
+     else <a class_ href data_yuka_transition="off" data_yuka_replace="" data_yuka_keep_scroll="">row</a>)
   </li>
 
 let neighbour label album =
@@ -109,8 +116,9 @@ let album ~id:_ ~(album : album) ~track () =
         <main class_="content" style="view-transition-name:album">
           <a class_="back" href=(Routes.shelf ())>"← All records"</a>
           <article class_="album">
-            <div class_="sleeve">
-              <div class_=(if playing = None then "disc" else "disc spinning") />
+            <div class_=(if playing = None then "sleeve" else "sleeve playing")>
+              <div class_="disc" />
+              <div class_="arm" aria_hidden=true />
               (cover ~size:"large" album)
             </div>
             <div class_="details">
@@ -120,7 +128,12 @@ let album ~id:_ ~(album : album) ~track () =
               <ol class_="tracks">(Yuka.fragment (List.mapi (track_row album ~playing) album.tracks))</ol>
               <p class_="now">
                 (match playing with
-                | Some n -> Yuka.text ("Now playing: " ^ List.nth album.tracks (n - 1))
+                | Some n ->
+                    Yuka.fragment
+                      [
+                        Yuka.text ("Now playing: " ^ List.nth album.tracks (n - 1) ^ " · ");
+                        <a class_="stop" href=(Routes.album ~id:album.id ()) data_yuka_replace="" data_yuka_keep_scroll="">"Stop"</a>;
+                      ]
                 | None -> Yuka.text "Pick a track.")
               </p>
             </div>

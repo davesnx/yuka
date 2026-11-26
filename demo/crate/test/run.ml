@@ -55,10 +55,12 @@ let album () =
     "its cover and the covers of the records around it, the first one after the last"
     [ "view-transition-name:cover-1"; "view-transition-name:cover-16"; "view-transition-name:cover-2" ]
     (List.sort compare (names_unique html));
-  check_count html "tracks change with no view transition" 5 {|data-yuka-transition="off"|};
+  check_count html "the first track picked runs a view transition" 0 {|data-yuka-transition="off"|};
   check_count html "the arrow keys" 1 {|"previous":"/album/16","next":"/album/2"|};
   let _, playing = get "/album/1?track=2" in
   check_count playing "the playing track" 1 "Now playing: Blue Hours";
+  check_count playing "another track changes with no view transition" 5 {|data-yuka-transition="off"|};
+  check_count playing "the record is on the turntable" 1 {|class="sleeve playing"|};
   let missing, _ = get "/album/99" in
   Alcotest.(check int) "an album that is not there" 404 missing
 

@@ -33,9 +33,13 @@ other demos, in one process. To run this demo alone, at the root:
   Yuka sets `data-yuka-nav` on `<html>` to `push`, `back` or `forward`
   while a view transition runs. The disc has its own name, so it slides
   out of the sleeve when an album page opens.
-- A click on a track has `data-yuka-transition="off"` (with
-  `data-yuka-replace` and `data-yuka-keep-scroll`): it changes one row,
-  and a cross-fade of the whole page would only flash it.
+- Picking the first track runs a view transition: the cover, the disc and
+  the tonearm have names, so the cover tips over into the corner, the
+  record comes out and spins, and the arm swings onto it. Stop puts them
+  back. Once a track plays, a click on another one has
+  `data-yuka-transition="off"` (with `data-yuka-replace` and
+  `data-yuka-keep-scroll`): it changes one row, and a cross-fade of the
+  whole page would only flash it.
 - `shared/keys.mlx` goes to the previous and next record with the arrow
   keys through `Yuka.Browser.navigate`, which runs in a view transition
   too. `shared/progress.mlx` shows a bar while a page loads; it is also
