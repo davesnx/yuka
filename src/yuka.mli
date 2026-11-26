@@ -949,7 +949,7 @@ module Private : sig
     alt_key : Event.t -> bool;
     client_x : Event.t -> float;
     client_y : Event.t -> float;
-    navigate : replace:bool -> keep_scroll:bool -> string -> unit;
+    navigate : replace:bool -> keep_scroll:bool -> transition:bool option -> string -> unit;
     refresh : unit -> unit;
     focus : string -> unit;
     scroll_into_view : string -> unit;
@@ -1253,7 +1253,10 @@ val render :
       [data-yuka-replace] attribute replaces the current history entry, as
       [Browser.navigate ~replace:true]. A link with a [data-yuka-keep-scroll]
       attribute keeps the scroll position, as
-      [Browser.navigate ~keep_scroll:true]. The clicked link has a
+      [Browser.navigate ~keep_scroll:true]. A link with
+      [data-yuka-transition="off"] shows its page with no view transition,
+      as [Browser.navigate ~transition:false]; with another value it runs
+      one, as [Browser.navigate ~transition:true]. The clicked link has a
       [data-yuka-pending] attribute until the new page (or the first part
       of a streamed page) is shown, the navigation fails or becomes a full
       page load, or a newer navigation starts.
@@ -1385,7 +1388,9 @@ val render :
     updates the page.
 
     With [~transitions:true], where [document.startViewTransition] exists,
-    the page update runs inside a view transition, and [<html>] has
+    the page update runs inside a view transition (a navigation can
+    override it with [Browser.navigate ~transition] or a
+    [data-yuka-transition] link attribute), and [<html>] has
     [data-yuka-nav="push"], ["back"] or ["forward"] until the last one
     ends. The URL, history and navigation state change before the
     transition starts; an exception in the update is thrown again in a

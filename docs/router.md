@@ -407,6 +407,41 @@ Yuka.Effect.after ~cleanup:(fun stop -> stop ()) (fun () ->
 
 The Infinite scroll demo (`demo/infinite-scroll`) does this.
 
+`Yuka.render ~transitions:true` runs each client navigation in a view
+transition, where the browser has `document.startViewTransition`. While
+it runs, `<html>` has `data-yuka-nav="push"`, `"back"` or `"forward"`,
+so CSS can animate each direction:
+
+```css
+html[data-yuka-nav="back"]::view-transition-old(root) { animation-name: slide-out-right; }
+```
+
+An element with the same `view-transition-name` on the old and the new
+page moves from its place on one to its place on the other, so a cover
+in a grid can grow into the large cover of its page. The name must be
+unique on a page, or the browser skips the view transition.
+
+To choose for one navigation, pass `~transition` to
+`Yuka.Browser.navigate`, or give the link a `data-yuka-transition`
+attribute. `~transition:false` and `data-yuka-transition="off"` show the
+new page with no view transition; `~transition:true` and another value
+of the attribute run one, also without `~transitions:true`. With
+neither, `render ~transitions` decides. An infinite list turns it off
+for its next page, so the whole page does not cross-fade each time a
+page loads:
+
+```ocaml
+Yuka.Browser.navigate ~replace:true ~keep_scroll:true ~transition:false next
+```
+
+```ocaml
+<a href=(Routes.blog ~tag:"bug" ()) data_yuka_transition="off">(Yuka.text "Bugs")</a>
+```
+
+The Crate demo (`demo/crate`) does all of this: its covers move between
+the shelf and the album pages, the page slides with the direction, and
+a click on a track has `data-yuka-transition="off"`.
+
 A form with `method="get"` (or with no method) is also a client
 navigation. When the user submits it, Yuka makes the URL from the action
 of the form and its fields, as the browser does, and loads that URL as a

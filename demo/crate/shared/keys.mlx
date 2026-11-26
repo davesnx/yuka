@@ -1,0 +1,17 @@
+(* The left and right arrow keys go to the album before and after, in place of the history
+   entry, as the Previous and Next links do. [Yuka.Browser.navigate]
+   is a client navigation, as a click on a link, so it runs in a view transition too. *)
+
+let[@client] make ~(previous : string) ~(next : string) () =
+  Yuka.Effect.after (fun () ->
+      Yuka.Browser.on_window "keydown" (fun event ->
+          let modified =
+            Yuka.Event.meta_key event || Yuka.Event.ctrl_key event || Yuka.Event.alt_key event
+            || Yuka.Event.shift_key event
+          in
+          if not modified then
+            match Yuka.Event.key event with
+            | "ArrowLeft" -> Yuka.Browser.navigate ~replace:true previous
+            | "ArrowRight" -> Yuka.Browser.navigate ~replace:true next
+            | _ -> ()));
+  <p class_="keys"><kbd>(Yuka.text {js|←|js})</kbd><kbd>(Yuka.text {js|→|js})</kbd>" to flip through the crate"</p>

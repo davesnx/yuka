@@ -119,7 +119,7 @@ let hold = Web.DOM.Event.preventDefault
 let target e = Host.target_element (Web.DOM.Event.target e)
 let inside url = Option.is_some (Site.strip (Host.base ()) url)
 
-let navigate ?link ~replace ~keep_scroll href =
+let navigate ?link ~replace ~keep_scroll ~transition href =
   let url = Host.local_url href in
   if List.exists (fun check -> check url) !blocks then ()
   else if not (inside url) then Host.navigate replace href
@@ -127,7 +127,7 @@ let navigate ?link ~replace ~keep_scroll href =
     go ?link
       (if replace || String.equal url (Host.current_url ()) then `Replace else `Push)
       url
-      (fun r -> r.navigate ~replace ~keep_scroll href)
+      (fun r -> r.navigate ~replace ~keep_scroll ~transition href)
       (fun () -> Host.navigate replace href)
 
 let refresh () = go `Reload (Host.current_url ()) (fun r -> r.refresh ()) Platform.reload
@@ -145,7 +145,13 @@ let on_click e =
         let link = Host.link (target e) in
         let flag name = Option.is_some (Web.DOM.Element.getAttribute name link) in
         Web.DOM.Event.preventDefault e;
-        navigate ~link ~replace:(flag "data-yuka-replace") ~keep_scroll:(flag "data-yuka-keep-scroll") href
+        let transition =
+          match Web.DOM.Element.getAttribute "data-yuka-transition" link with
+          | Some "off" -> Some false
+          | Some _ -> Some true
+          | None -> None
+        in
+        navigate ~link ~replace:(flag "data-yuka-replace") ~keep_scroll:(flag "data-yuka-keep-scroll") ~transition href
 
 let on_submit e =
   if not !failed then
@@ -153,7 +159,7 @@ let on_submit e =
     | "" -> ()
     | href ->
         Web.DOM.Event.preventDefault e;
-        navigate ~link:(target e) ~replace:false ~keep_scroll:false href
+        navigate ~link:(target e) ~replace:false ~keep_scroll:false ~transition:None href
 
 let on_link e =
   if Option.is_some !router || Host.link_href true (target e) <> "" then

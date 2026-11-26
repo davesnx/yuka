@@ -391,7 +391,7 @@ let follow root place s =
   end;
   report ()
 
-let show ~dir ~push ~replace ~restore ~refresh url a =
+let show ~dir ~push ~replace ~restore ~refresh ~transition url a =
   let final =
     match hash_of url with
     | "" -> a.final
@@ -475,9 +475,9 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
         end
         else Option.iter (fun s -> s.cancel ()) a.stream
       in
-      if !transitions_on then Navigation_web.transition dir apply else apply ()
+      if Option.value transition ~default:!transitions_on then Navigation_web.transition dir apply else apply ()
 
-let load ~overlay ~dir ~push ~replace ~restore ~refresh url =
+let load ?transition ~overlay ~dir ~push ~replace ~restore ~refresh url =
   if not !started then assign ~replace url
   else begin
     cancel_pending ();
@@ -487,7 +487,7 @@ let load ~overlay ~dir ~push ~replace ~restore ~refresh url =
     let gen = !nav in
     let apply = function
       | _ when !nav <> gen -> ()
-      | Some a -> show ~dir ~push ~replace ~restore ~refresh url a
+      | Some a -> show ~dir ~push ~replace ~restore ~refresh ~transition url a
       | None -> assign ~replace url
     in
     let key = page_key url in
@@ -528,11 +528,11 @@ let load ~overlay ~dir ~push ~replace ~restore ~refresh url =
     | None -> fetch ()
   end
 
-let go ~replace ~keep_scroll ~refresh url =
+let go ?transition ~replace ~keep_scroll ~refresh url =
   save_scroll ();
-  load ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some Host.scroll_y else None) ~refresh url
+  load ?transition ~overlay:true ~dir:"push" ~push:true ~replace ~restore:(if keep_scroll then Some Host.scroll_y else None) ~refresh url
 
-let navigate ~replace ~keep_scroll url = go ~replace ~keep_scroll ~refresh:false url
+let navigate ~replace ~keep_scroll ~transition url = go ?transition ~replace ~keep_scroll ~refresh:false url
 let refresh () = go ~replace:true ~keep_scroll:true ~refresh:true (Host.current_url ())
 
 let back () =

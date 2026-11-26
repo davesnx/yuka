@@ -1,8 +1,9 @@
 open Platform
 
 let on_window name handler = Base.own (!platform.on_window name (fun e -> Scheduler.batch (fun () -> handler e)))
-let navigate ?(replace = false) ?(keep_scroll = false) url =
-  if Url.unsafe ~tag:"a" "href" url then Types.log "navigate" url else !platform.navigate ~replace ~keep_scroll url
+let navigate ?(replace = false) ?(keep_scroll = false) ?transition url =
+  if Url.unsafe ~tag:"a" "href" url then Types.log "navigate" url
+  else !platform.navigate ~replace ~keep_scroll ~transition url
 let refresh () = !platform.refresh ()
 
 let block check =

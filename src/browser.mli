@@ -2,7 +2,7 @@ val on_window : string -> (Event.t -> unit) -> unit
 (** Listens on [window] until the current owner is disposed. The handler
     runs in a {!Yuka.batch}. Browser only: call it inside [Effect.after]. *)
 
-val navigate : ?replace:bool -> ?keep_scroll:bool -> string -> unit
+val navigate : ?replace:bool -> ?keep_scroll:bool -> ?transition:bool -> string -> unit
 (** Browser only: raises [Invalid_argument] on native. Loads the URL. After [render ~islands] with navigation (the default), it
     is a client navigation, as a click on a link; see {!Yuka.render}. Otherwise it
     does [location.assign url]. The navigation adds a history entry, except
@@ -12,7 +12,14 @@ val navigate : ?replace:bool -> ?keep_scroll:bool -> string -> unit
     Back goes to the page before. With [~keep_scroll:true] (default
     [false]) a client navigation does not scroll to the top or to the URL
     fragment, so the scroll position stays as it was; focus and the
-    announcer change as for other navigations. A [javascript:], [vbscript:] or [data:]
+    announcer change as for other navigations. [~transition] overrides
+    [render ~transitions] for this navigation: [~transition:false] shows
+    the new page with no view transition, as for an infinite list that
+    loads its next page, and [~transition:true] runs one where
+    [document.startViewTransition] exists, also without
+    [~transitions:true]. A link with [data-yuka-transition="off"] does as
+    [~transition:false], and with another value of the attribute as
+    [~transition:true]. A [javascript:], [vbscript:] or [data:]
     URL (read as {!Yuka.attr} reads a URL) does nothing; a dev build logs the
     first one. *)
 

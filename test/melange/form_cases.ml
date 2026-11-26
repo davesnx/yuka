@@ -172,7 +172,7 @@ let record_navigation () =
   Private.platform :=
     {
       !Private.platform with
-      navigate = (fun ~replace:_ ~keep_scroll:_ u -> navigated := !navigated @ [ u ]);
+      navigate = (fun ~replace:_ ~keep_scroll:_ ~transition:_ u -> navigated := !navigated @ [ u ]);
       refresh = (fun () -> navigated := !navigated @ [ "refresh" ]);
     }
 
