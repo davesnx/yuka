@@ -12,6 +12,7 @@ if [ "${BUNDLE:-}" = 1 ]; then
   BUILD_DIR="$build" "$root/demo/async-feed/bundle.sh" || { echo "bundle failed"; exit 2; }
   BUILD_DIR="$build" "$root/demo/posters/bundle.sh" || { echo "bundle failed"; exit 2; }
   BUILD_DIR="$build" "$root/demo/infinite-scroll/bundle.sh" || { echo "bundle failed"; exit 2; }
+  BUILD_DIR="$build" "$root/demo/genart/bundle.sh" || { echo "bundle failed"; exit 2; }
   mode=bundle
   flags=--bundle
 fi
@@ -42,4 +43,5 @@ status=$?
 node "$root/e2e/base.ts" "http://127.0.0.1:$based" "$proxy" "$prefix" || status=1
 node "$root/e2e/async-feed.ts" "http://127.0.0.1:$based/async-feed" || status=1
 node "$root/e2e/posters.ts" "http://127.0.0.1:$based/posters" || status=1
+node "$root/e2e/genart.ts" "http://127.0.0.1:$based/genart" || status=1
 exit $status

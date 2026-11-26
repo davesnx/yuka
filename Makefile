@@ -69,9 +69,10 @@ demo-bundle: demo-build ## Bundle the demo client with esbuild
 	BUILD_DIR=$(BUILD_DIR) demo/async-feed/bundle.sh
 	BUILD_DIR=$(BUILD_DIR) demo/posters/bundle.sh
 	BUILD_DIR=$(BUILD_DIR) demo/infinite-scroll/bundle.sh
+	BUILD_DIR=$(BUILD_DIR) demo/genart/bundle.sh
 
 .PHONY: demo-serve
-demo-serve: demo-build ## Serve the demos on PORT: the list at /, Mini Linear at /mini-linear, Async at /async-feed, Posters at /posters, Infinite scroll at /infinite-scroll
+demo-serve: demo-build ## Serve the demos on PORT: the list at /, Mini Linear at /mini-linear, Async at /async-feed, Posters at /posters, Infinite scroll at /infinite-scroll, Genart at /genart
 	$(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: async-feed-serve
@@ -86,6 +87,10 @@ posters-serve: demo-build ## Serve the Posters demo alone, at the root, on PORT
 infinite-scroll-serve: demo-build ## Serve the Infinite scroll demo alone, at the root, on PORT
 	$(BUILD_DIR)/default/demo/infinite-scroll/server/infinite_scroll_server.exe --port $(PORT)
 
+.PHONY: genart-serve
+genart-serve: demo-build ## Serve the Genart demo alone, at the root, on PORT
+	$(BUILD_DIR)/default/demo/genart/server/genart_server.exe --port $(PORT)
+
 .PHONY: demo-dev
 demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
 	$(DUNE) build --profile=dev ./gen/yuka_cli.exe
@@ -95,6 +100,7 @@ demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browse
 	  --assets $(BUILD_DIR)/default/demo/async-feed/static --assets $(BUILD_DIR)/default/demo/async-feed/client/out \
 	  --assets $(BUILD_DIR)/default/demo/posters/static --assets $(BUILD_DIR)/default/demo/posters/client/out \
 	  --assets $(BUILD_DIR)/default/demo/infinite-scroll/static --assets $(BUILD_DIR)/default/demo/infinite-scroll/client/out \
+	  --assets $(BUILD_DIR)/default/demo/genart/static --assets $(BUILD_DIR)/default/demo/genart/client/out \
 	  -- $(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: demo-test

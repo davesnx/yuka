@@ -1,0 +1,25 @@
+(library
+ (name genart_app)
+ (modules pages yuka_routes serve)
+ (libraries genart_shared yuka yuka-dream dream)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Genart_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
+
+(executable
+ (name genart_server)
+ (modules genart_server)
+ (libraries genart_app dream))

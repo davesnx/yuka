@@ -1,0 +1,28 @@
+(melange.emit
+ (target out)
+ (alias genart-client)
+ (libraries genart_shared yuka)
+ (preprocess
+  (pps yuka.ppx melange.ppx))
+ (module_systems
+  (esm js)))
+
+(rule
+ (targets yuka_islands.ml)
+ (deps
+  (source_tree ../shared)
+  (sandbox always))
+ (action
+  (with-stdout-to
+   yuka_islands.ml
+   (run %{bin:yuka} islands --dir ../shared))))
+
+(rule
+ (targets yuka_islands.json)
+ (deps
+  (source_tree ../shared)
+  (sandbox always))
+ (action
+  (with-stdout-to
+   yuka_islands.json
+   (run %{bin:yuka} islands --manifest --dir ../shared))))

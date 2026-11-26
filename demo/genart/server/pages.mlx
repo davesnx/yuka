@@ -1,0 +1,37 @@
+open Genart_shared
+
+let source = "https://github.com/amiechen/genart/blob/master/sketch-004.js"
+
+let home ~seed ~grid ~stroke ~palette () =
+  let default = Sketch.default in
+  let initial =
+    Sketch.normalize
+      {
+        seed = Option.value seed ~default:default.seed;
+        grid = Option.value grid ~default:default.grid;
+        stroke = Option.value stroke ~default:default.stroke;
+        palette;
+      }
+  in
+  Yuka.Server.page ~title:"Sketch 004" (fun () ->
+      <main class_="page">
+        <header class_="hero">
+          <a class_="brand" href=(Routes.home ())>"Genart"</a>
+          <h1>"Sketch 004"</h1>
+          <p>
+            "A grid of dots, each joined to itself or to a neighbour by a line of a random colour. "
+            <a href=source>"The original"</a>
+            " by Amie Chen draws on a canvas with canvas-sketch; this port draws SVG lines with a Yuka island. The server prints the lines of the seed, and the browser draws them again when a setting changes."
+          </p>
+        </header>
+        <Yuka.Client><Studio initial /></Yuka.Client>
+      </main>)
+
+let not_found ~path () =
+  Yuka.Server.page ~title:"Not found" (fun () ->
+      <main class_="page">
+        <header class_="hero">
+          <h1>"Not found"</h1>
+          <p>(Yuka.text ("No page at " ^ path ^ ". ")) <a href=(Routes.home ())>"Back to the sketch"</a></p>
+        </header>
+      </main>)

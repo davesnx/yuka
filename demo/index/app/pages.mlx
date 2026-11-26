@@ -172,6 +172,38 @@ let posters () : Yuka.server Yuka.element =
     <text class_="caption" x="344.5" y="227" text_anchor="middle">"Light"</text>
   </svg>
 
+let genart_colors = [| "#ff5f5d"; "#ffd166"; "#00afb9"; "#7c4dff"; "#f4f1de"; "#ff9a5c"; "#8cb369" |]
+
+(* The directions of the 25 lines of the illustration: 0 a dot, 1 right, 2 lower right, 3 down. *)
+let genart_directions = [| 1; 2; 0; 3; 2; 3; 1; 2; 2; 0; 2; 3; 1; 0; 3; 0; 2; 3; 1; 2; 3; 1; 2; 0; 1 |]
+
+let genart () : Yuka.server Yuka.element =
+  let at i = 52 + (i * 34) in
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A grid of coloured lines on black next to sliders">
+    (window_chrome ~title:"genart")
+    <rect x="24" y="40" width="210" height="210" rx="4" fill="#000" />
+    <g stroke_width="7" stroke_linecap=`round>
+      (Yuka.fragment
+         (List.init 25 (fun i ->
+              let col = i / 5 and row = i mod 5 in
+              let x = at col and y = at row + 24 in
+              let x2, y2 =
+                match genart_directions.(i) with 0 -> (x, y) | 1 -> (x + 34, y) | 2 -> (x + 34, y + 34) | _ -> (x, y + 34)
+              in
+              <line x1=(Int.to_string x) y1=(Int.to_string y) x2=(Int.to_string x2) y2=(Int.to_string y2)
+                stroke=genart_colors.(i * 3 mod Array.length genart_colors)
+                opacity=(if i mod 4 = 0 then "0.45" else "0.9") />)))
+    </g>
+    <text class_="caption" x="262" y="60">"Dots"</text>
+    <line class_="rule" x1="262" y1="74.5" x2="424" y2="74.5" />
+    <circle class_="accent-fill" cx="356" cy="74.5" r="5" />
+    <text class_="caption" x="262" y="104">"Width"</text>
+    <line class_="rule" x1="262" y1="118.5" x2="424" y2="118.5" />
+    <circle class_="accent-fill" cx="318" cy="118.5" r="5" />
+    <rect class_="chip on" x="262.5" y="214.5" width="162" height="18" rx="9" />
+    <text class_="caption on" x="343.5" y="227" text_anchor="middle">"Shuffle"</text>
+  </svg>
+
 let demos =
   [
     {
@@ -202,6 +234,14 @@ let demos =
       path = "/infinite-scroll";
       tags = [ "on_visible"; "keep_scroll"; "URL state" ];
       illustration = infinite_scroll;
+    };
+    {
+      name = "Genart";
+      description =
+        "Sketch 004 of Amie Chen's genart series, ported to a Yuka island: SVG lines drawn again in the browser on each change.";
+      path = "/genart";
+      tags = [ "Islands"; "Yuka.each"; "on_frame"; "URL state" ];
+      illustration = genart;
     };
   ]
 

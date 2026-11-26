@@ -1,0 +1,111 @@
+(* The drawing and its controls. The server prints the lines of the seed; in the
+   browser every change draws them again with Yuka: one keyed <line> per cell, so a
+   change touches only the lines that moved. *)
+
+let number event f = match int_of_string_opt (Yuka.Event.target_value event) with Some n -> f n | None -> ()
+
+let slider ~id ~label ~range:(low, high) ~(value : unit -> int) ~update : Yuka.client Yuka.element =
+  <div class_="field">
+    <div class_="field-row">
+      <label for_=id>(Yuka.text label)</label>
+      <span class_="field-value">(Yuka.text (Int.to_string (value ())))</span>
+    </div>
+    <input id type_=`range min=(Int.to_string low) max=(Int.to_string high) value=(Int.to_string (value ()))
+      on_input=(fun event -> number event update) />
+  </div>
+
+let line (s : Sketch.segment) =
+  <line x1=(Int.to_string s.x1) y1=(Int.to_string s.y1) x2=(Int.to_string s.x2) y2=(Int.to_string s.y2) stroke=s.color
+    opacity=(Sketch.opacity s.alpha) />
+
+let swatch ~label ~(colors : string array) ~(pressed : unit -> bool) ~on_click : Yuka.client Yuka.element =
+  <button class_="swatch" type_=`button title=label aria_label=label
+    aria_pressed=(if pressed () then `true_ else `false_) on_click>
+    (Yuka.fragment (Array.to_list (Array.map (fun color -> <span style=("background:" ^ color) />) colors)))
+  </button>
+
+let route (s : Sketch.settings) =
+  let unless_default value default = if value = default then None else Some value in
+  Routes.Home
+    {
+      seed = unless_default s.seed Sketch.default.seed;
+      grid = unless_default s.grid Sketch.default.grid;
+      stroke = unless_default s.stroke Sketch.default.stroke;
+      palette = s.palette;
+    }
+
+(* One frame in this many milliseconds draws lines again while the drift is on. *)
+let drift_every = 90.
+
+let[@client] make ~(initial : Sketch.settings) () =
+  let settings = Yuka.State.make ~equal:( = ) initial in
+  let versions = Yuka.State.make (Sketch.fresh ()) in
+  let drifting = Yuka.State.make false in
+  let set f = Yuka.State.update settings (fun s -> Sketch.normalize (f s)) in
+  let segments = Yuka.State.memo (fun () -> Sketch.segments (Yuka.State.get settings) (Yuka.State.get versions)) in
+  let url = Yuka.State.memo ~equal:( = ) (fun () -> route (Yuka.State.get settings)) in
+  Yuka.Effect.on_change url (fun ~prev:_ ~next -> Routes.replace next);
+  Yuka.Effect.after (fun () ->
+      if Yuka.State.get drifting then begin
+        let last = ref neg_infinity in
+        let tick = ref 0 in
+        Yuka.Browser.on_frame (fun time ->
+            if time -. !last >= drift_every then begin
+              last := time;
+              incr tick;
+              let s = Yuka.State.peek settings in
+              Yuka.State.update versions (Sketch.drift ~seed:s.seed ~grid:s.grid ~tick:!tick)
+            end)
+      end);
+  let shuffle _ =
+    Yuka.State.set versions (Sketch.fresh ());
+    set (fun s -> { s with seed = Sketch.shuffle s.seed })
+  in
+  let file () = "sketch-004-" ^ Int.to_string (Yuka.State.peek settings).seed ^ ".png" in
+  <div class_="studio">
+    <figure class_="frame">
+      <svg id="sketch" xmlns="http://www.w3.org/2000/svg" class_="art" view_box=Sketch.view_box role=`img
+        aria_label="Lines between the dots of a grid, in many colours, on black">
+        <rect width=(Int.to_string Sketch.size) height=(Int.to_string Sketch.size) fill="#000" />
+        <g stroke_linecap=`round stroke_width=(Int.to_string (Yuka.State.get settings).stroke)>
+          (Yuka.each ~key:(fun (s : Sketch.segment) -> s.key) ~equal:( = ) (fun () -> Yuka.State.get segments) line)
+        </g>
+      </svg>
+    </figure>
+    <aside class_="panel" aria_label="Settings">
+      <section class_="group">
+        <h2>"Grid"</h2>
+        (slider ~id:"grid" ~label:"Dots per side" ~range:Sketch.Range.grid
+           ~value:(fun () -> (Yuka.State.get settings).grid)
+           ~update:(fun grid -> set (fun s -> { s with grid })))
+        (slider ~id:"stroke" ~label:"Line width" ~range:Sketch.Range.stroke
+           ~value:(fun () -> (Yuka.State.get settings).stroke)
+           ~update:(fun stroke -> set (fun s -> { s with stroke })))
+      </section>
+      <section class_="group">
+        <h2>"Palette"</h2>
+        <div class_="swatches" role=`group aria_label="Palette">
+          (swatch ~label:"Mixed" ~colors:(Array.map (fun (_, colors) -> colors.(0)) (Array.sub Sketch.palettes 0 5))
+             ~pressed:(fun () -> (Yuka.State.get settings).palette = None)
+             ~on_click:(fun _ -> set (fun s -> { s with palette = None })))
+          (Yuka.fragment
+             (Array.to_list
+                (Array.mapi
+                   (fun i (label, colors) ->
+                     swatch ~label ~colors
+                       ~pressed:(fun () -> (Yuka.State.get settings).palette = Some i)
+                       ~on_click:(fun _ -> set (fun s -> { s with palette = Some i })))
+                   Sketch.palettes)))
+        </div>
+      </section>
+      <div class_="actions">
+        <button class_="button primary" type_=`button on_click=shuffle>"Shuffle"</button>
+        <button class_="button" type_=`button aria_pressed=(if Yuka.State.get drifting then `true_ else `false_)
+          on_click=(fun _ -> Yuka.State.update drifting not)>
+          (Yuka.text (if Yuka.State.get drifting then "Stop drift" else "Drift"))
+        </button>
+        <button class_="button" type_=`button on_click=(fun _ -> !Export.png (file ()))>"Download PNG"</button>
+      </div>
+      <p class_="seed">"Seed " <span class_="mono">(Yuka.text (Int.to_string (Yuka.State.get settings).seed))</span></p>
+    </aside>
+  </div>

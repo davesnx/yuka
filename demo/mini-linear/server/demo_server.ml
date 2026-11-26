@@ -74,6 +74,7 @@ let () =
   let async_feed = ref (Filename.concat here "../../async-feed") in
   let infinite_scroll = ref (Filename.concat here "../../infinite-scroll") in
   let posters = ref (Filename.concat here "../../posters") in
+  let genart = ref (Filename.concat here "../../genart") in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
   let database =
     ref
@@ -112,6 +113,7 @@ let () =
         Arg.Set_string infinite_scroll,
         "With --base: directory of the Infinite scroll demo (client/ and static/), served under /infinite-scroll" );
       ("--posters", Arg.Set_string posters, "With --base: directory of the Posters demo (client/ and static/), served under /posters");
+      ("--genart", Arg.Set_string genart, "With --base: directory of the Genart demo (client/ and static/), served under /genart");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
         Arg.Set_int second,
@@ -149,6 +151,7 @@ let () =
     else if base = "/async-feed" then stop "--base /async-feed is the path of the Async demo"
     else if base = "/infinite-scroll" then stop "--base /infinite-scroll is the path of the Infinite scroll demo"
     else if base = "/posters" then stop "--base /posters is the path of the Posters demo"
+    else if base = "/genart" then stop "--base /genart is the path of the Genart demo"
     else
       let dev = !prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1" in
       let async =
@@ -169,7 +172,12 @@ let () =
         | Ok posters -> (posters.config, posters.handler)
         | Error message -> stop ("the Posters demo: " ^ message)
       in
-      [ async; infinite; posters ]
+      let genart =
+        match Genart_app.Serve.make ~base:"/genart" ~bundle:!bundle ~dir:!genart ~dev () with
+        | Ok genart -> (genart.config, genart.handler)
+        | Error message -> stop ("the Genart demo: " ^ message)
+      in
+      [ async; infinite; posters; genart ]
   in
   let config =
     match

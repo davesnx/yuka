@@ -19,10 +19,11 @@ Flags: `--port` (default `$PORT`, or 8080), `--interface` (default
 prerendered pages to `DIR` and exit), `--prerendered DIR` (serve them),
 `--base PREFIX` (serve Mini Linear under `PREFIX`, the Async demo under
 `/async-feed`, the Infinite scroll demo under `/infinite-scroll`, the
-Posters demo under `/posters` and the list of demos at every other path),
-`--async-feed DIR` (with `--base`: the directory of the Async demo, with
-`client/` and `static/`), `--infinite-scroll DIR` and `--posters DIR` (the
-same for the Infinite scroll and Posters demos).
+Posters demo under `/posters`, the Genart demo under `/genart` and the list
+of demos at every other path), `--async-feed DIR` (with `--base`: the
+directory of the Async demo, with `client/` and `static/`),
+`--infinite-scroll DIR`, `--posters DIR` and `--genart DIR` (the same for
+the Infinite scroll, Posters and Genart demos).
 Defaults are relative to the executable, so any build directory works.
 
 ## Workspaces
