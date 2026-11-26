@@ -53,6 +53,12 @@ let routes =
       Router.route Live_public ~path:"/live-public" ~page:App.Pages.live
         ~cache:(public ~max_age:60 ());
       Router.route Plain_public ~path:"/plain-public" ~page:plain ~cache:minute ~prefetch:`Visible;
+      Router.group ~path:"/echo" ~search:{ lang = default string "en" }
+        [
+          Router.get Echo ~path:"/" ~handler:App.Api.echo
+            ~search:{ q = optional string; n = default int 1; tag = many string };
+          Router.post Echo_post ~path:"/" ~handler:App.Api.echo_post;
+        ];
       Router.get Cookies ~path:"/cookies" ~handler:App.Api.cookies;
       Router.get Bad_header ~path:"/bad-header" ~handler:App.Api.bad_header;
       Router.put Put_thing ~path:"/thing" ~handler:App.Api.thing

@@ -129,9 +129,10 @@ reaches the island through `Download.png`.
 Each setting that differs from its default is a search param, so a reload
 or a shared link shows the same poster, rendered by the server. The seed
 has no field in the playground ("Shuffle" changes it), but it is in the
-URL. `/poster.svg` reads the same params: `Router.get` takes no
-`~search`, so its handler decodes the query with the generated
-`Routes.find` of the playground route.
+URL. `/poster.svg` reads the same params: the playground route and the
+`Router.get` of `/poster.svg` are in one group that holds the search
+fields, so the handler gets them decoded and `Link.svg` builds its link
+with `Routes.Poster_svg`.
 
 - `/posters/gallery`: ten presets, two for each kind, each a link to the playground with
   its settings.

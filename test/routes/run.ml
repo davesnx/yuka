@@ -75,7 +75,8 @@ let samples : (Router.meth * Routes.t) list =
     (`GET, issue);
     (`GET, Issue { id = 7; tab = Some Activity; seen = [ 1; -2 ]; view = Activity });
     (`POST, Close_issue { id = 3 });
-    (`GET, Issue_json { id = 3 });
+    (`GET, Issue_json { id = 3; pretty = false; fields = [] });
+    (`GET, Issue_json { id = 3; pretty = true; fields = [ "title"; "a b" ] });
     (`PUT, Update_issue { id = 3 });
     (`GET, Page_n { n = 0 });
     (`GET, Page_n { n = -5 });
@@ -128,7 +129,9 @@ let href_cases =
           (Issue { id = 12; tab = Some Activity; seen = [ 1; -2 ]; view = Activity }));
     t "group search on every route below" (fun () ->
         check_href "new" "/blog/new?lang=en" (New_post { lang = Some "en" });
-        check_href "post" "/blog/x?lang=en" (Post { slug = "x"; lang = Some "en" }));
+        check_href "post" "/blog/x?lang=en" (Post { slug = "x"; lang = Some "en" });
+        check_href "method node" "/issue/YUK-3/json?pretty=true&fields=a&fields=b%20c"
+          (Issue_json { id = 3; pretty = true; fields = [ "a"; "b c" ] }));
   ]
 
 let helper_cases =
@@ -145,7 +148,9 @@ let helper_cases =
         same "int" (Routes.page_n ~n:(-5) ()) (Page_n { n = -5 }));
     t "custom param type" (fun () ->
         same "close" (Routes.close_issue ~id:3 ()) (Close_issue { id = 3 });
-        same "json" (Routes.issue_json ~id:3 ()) (Issue_json { id = 3 });
+        same "json" (Routes.issue_json ~id:3 ()) (Issue_json { id = 3; pretty = false; fields = [] });
+        same "json with search" (Routes.issue_json ~id:3 ~pretty:true ~fields:[ "a" ] ())
+          (Issue_json { id = 3; pretty = true; fields = [ "a" ] });
         same "update" (Routes.update_issue ~id:3 ()) (Update_issue { id = 3 }));
     t "catch-all" (fun () ->
         same "parts" (Routes.doc ~parts:[ "a b"; "c/d" ] ()) (Doc { parts = [ "a b"; "c/d" ] }));

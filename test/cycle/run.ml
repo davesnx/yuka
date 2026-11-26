@@ -543,6 +543,17 @@ let matching =
         check_true "page with the param" (contains r.body "no org page /org/acme/x/404 in acme");
         let r = get "/org/acme/x/1" in
         check_true "item" (contains r.body "acme 1 item") );
+    ( "a method node gets its search fields and those of its groups",
+      fun () ->
+        let r = get "/echo?q=a%20b&n=3&tag=x&tag=y&lang=fr" in
+        check_status r 200;
+        Alcotest.(check string) "fields" "fr a b 3 x,y" r.body;
+        let r = get "/echo?n=no" in
+        Alcotest.(check string) "defaults" "en - 1 " r.body;
+        let r = get ~meth:`POST ~headers:[ ("sec-fetch-site", "same-origin") ] "/echo?lang=de" in
+        Alcotest.(check string) "group field on a post" "posted de" r.body;
+        Alcotest.(check string) "typed link" "/echo?lang=fr&q=a%20b&tag=x&tag=y"
+          (Cycle_shared.Routes.echo ~lang:"fr" ~q:"a b" ~tag:[ "x"; "y" ] ()) );
     ( "a param that does not decode is 404",
       fun () ->
         let r = get "/team/BAD/1" in

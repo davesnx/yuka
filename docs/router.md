@@ -49,7 +49,8 @@ let post (_ : Yuka.Server.request) ~slug =
 - `Router.route Name ~path ~page`: a page. `?overlay:Pages.dialog` adds
   an overlay page (see "Overlay routes").
 - `Router.get Name ~path ~handler`: a response that is not a page, such
-  as JSON or a file. It answers `GET` and `HEAD`.
+  as JSON or a file. It answers `GET` and `HEAD`. `~search` gives it typed
+  search fields, as on a route.
 - `Router.post Name ~path ~handler`, and `Router.put`, `Router.patch` and
   `Router.delete` with the same arguments: a handler for that method, for
   a request that changes data. The answer is never cached.
@@ -137,7 +138,21 @@ Router.route Issue ~path:"/issue/:id<string>/:tab<Model.tab>" ~page:Pages.issue
 `optional T` gives a `T option`, `default T fallback` gives a `T` (`fallback` when the
 param is absent), and `many T` gives a `T list`. `T` is `string`, `int`,
 `bool` or your own type with its module path, as in a path. A value that
-does not decode counts as absent. Search fields go on a route or a group.
+does not decode counts as absent. Search fields go on a route, a group or
+a method node. A method node gets the search fields of the groups above it
+too, so a page and a handler that read the same query can share them in a
+group:
+
+```ocaml
+Router.group ~path:"/" ~search:{ seed = optional int; kind = optional Model.kind }
+  [
+    Router.route Home ~path:"/" ~page:Pages.home;
+    Router.get Poster ~path:"/poster.svg" ~handler:Handlers.poster;
+  ]
+```
+
+`Handlers.poster req ~seed ~kind` gets the decoded fields, and
+`Routes.poster ?seed ?kind ()` builds the link with the query.
 
 ## Attachments
 
@@ -156,13 +171,15 @@ and `Yuka_dream.request req` a `Dream.request option`.
 | `~layout` | make, group | `~params ~loaded ~children () -> Yuka.server Yuka.element` |
 | `~loader` | group, route | `req -> ~params -> ('a, Yuka.Server.stop) result Yuka.Async.t` |
 | `~guard` | all but redirect | `req -> ~params -> (unit, Yuka.Server.stop) result Yuka.Async.t` |
-| `~handler` | method nodes | `req -> ~params -> Yuka.Server.response Yuka.Async.t` |
+| `~handler` | method nodes | `req -> ~params -> ~search -> Yuka.Server.response Yuka.Async.t` |
 | `~not_found` | make, group | `~params ~path () -> Yuka.Server.page` |
 | `~error` | make, group | `~params () -> Yuka.Server.page` |
 
 - `~params` are the path params of the node and the groups above it. A
   layout gets those of its group, and a client navigation keeps it only
   while they do not change.
+- `~search` are the search fields of the node and the groups above it,
+  after the params.
 - `~loaded` are the loader results. Each result is labelled with the last
   name of the loader: `~loader:Loaders.post` gives `~post`. A layout gets
   the results of the loaders on its group and above. The loaders run on

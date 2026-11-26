@@ -475,15 +475,18 @@ let read ~server ~items names e =
             levels;
           }
     | "get" | "post" | "put" | "patch" | "delete" ->
-        let optional = if tag = "get" then [ "guard" ] @ rules else [ "guard"; "cross_origin"; "headers" ] in
+        let optional =
+          if tag = "get" then [ "guard"; "search" ] @ rules
+          else [ "guard"; "search"; "cross_origin"; "headers" ]
+        in
         check_props tag loc props ~required:[ "path"; "handler" ] ~optional;
         check_cross_origin props;
         let name = name () in
         let text, ploc, segs = own_path () in
-        ignore (add_labels ploc ctx.labels (seg_labels segs));
+        let search, _ = with_search (add_labels ploc ctx.labels (seg_labels segs)) in
         add
           {
-            kind = Named { name; meth = String.uppercase_ascii tag; search = [] };
+            kind = Named { name; meth = String.uppercase_ascii tag; search = ctx.search @ search };
             segs = ctx.prefix @ segs;
             path = join ctx.text text;
             loc;
@@ -1128,7 +1131,7 @@ let server_arm ~shared ~rule ~fallback n =
             sprintf "    guards = %s;" guards;
             sprintf "    run = (fun () -> %s req%s);"
               (expr (Option.get (prop "handler" leaf)))
-              (args (seg_labels n.segs));
+              (args labels);
             "  }";
           ]
       in

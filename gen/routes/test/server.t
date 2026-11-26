@@ -87,6 +87,32 @@ the param is bound
             };
             load =
 
+A method node takes ~search as a route does: the handler gets the search
+fields of the node and of the groups above it, after the path params
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [
+  >     Router.group ~path:"/u/:id<string>" ~search:{ lang = optional string }
+  >       [
+  >         Router.get Item ~path:"/item" ~handler:Handlers.item
+  >           ~search:{ q = optional string; page = default int 1 };
+  >         Router.post Save ~path:"/item" ~handler:Handlers.save;
+  >       ];
+  >   ]
+  > EOF
+  $ grep -E 'run =' out.ml
+            run = (fun () -> Handlers.item req ~id ~lang ~q ~page);
+            run = (fun () -> Handlers.save req ~id ~lang);
+
+  $ gen <<'EOF'
+  > Router.make
+  >   [ Router.get Item ~path:"/u/:id<string>" ~handler:Handlers.item ~search:{ id = optional int } ]
+  > EOF
+  File "Routes.ml", line 2, characters 74-95:
+  Error: label id is used twice in this branch (params, search fields and loader results share one set of labels)
+  [1]
+
 Router.get answers GET and HEAD and follows the cache rules; Router.post,
 Router.put, Router.patch and Router.delete are never cached. ~cross_origin:true
 skips the origin check
@@ -136,14 +162,14 @@ any other method is Wrong_method with the methods of the path
   > Router.make [ Router.get Feed ~path:"/feed" ~handler:Handlers.feed ~cross_origin:true ]
   > EOF
   File "Routes.ml", line 1, characters 81-85:
-  Error: Router.get has no argument ~cross_origin; its labelled arguments are ~path, ~handler, ~guard, ~headers, ~cache, ~prerender
+  Error: Router.get has no argument ~cross_origin; its labelled arguments are ~path, ~handler, ~guard, ~search, ~headers, ~cache, ~prerender
   [1]
 
   $ gen <<'EOF'
   > Router.make [ Router.post Hook ~path:"/hook" ~handler:Handlers.hook ~cache:no_store ]
   > EOF
   File "Routes.ml", line 1, characters 75-83:
-  Error: Router.post has no argument ~cache; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
+  Error: Router.post has no argument ~cache; its labelled arguments are ~path, ~handler, ~guard, ~search, ~cross_origin, ~headers
   [1]
 
 A cache value is read with Yuka.Server opened

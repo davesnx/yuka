@@ -132,8 +132,10 @@ let settings ~(defaults : settings) = function
         }
   | _ -> defaults
 
-let query href = match String.index_opt href '?' with Some i -> String.sub href i (String.length href - i) | None -> ""
-let svg route = Routes.poster_svg () ^ query (Routes.href route)
+let svg = function
+  | Routes.Home { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; bolts; branches; jaggedness; thickness; length; style; columns; rows; half; empty; block; bar; merge; round; accent; tint; bg; fg; title; subtitle; year; day; weekday } ->
+      Routes.href (Routes.Poster_svg { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; bolts; branches; jaggedness; thickness; length; style; columns; rows; half; empty; block; bar; merge; round; accent; tint; bg; fg; title; subtitle; year; day; weekday })
+  | _ -> Routes.poster_svg ()
 let file (s : settings) extension = "poster-" ^ Int.to_string s.layout.seed ^ "." ^ extension
 
 let download ~defaults (s : settings) =

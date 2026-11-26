@@ -536,6 +536,24 @@ let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.S
                      overlay = None;
                    }));
         }
+  | Cycle_shared.Routes.Echo { lang; q; n; tag } ->
+      Yuka.Server.Generated.Handler
+        {
+          rules = rules_0;
+          action = false;
+          cross_origin = false;
+          guards = [];
+          run = (fun () -> App.Api.echo req ~lang ~q ~n ~tag);
+        }
+  | Cycle_shared.Routes.Echo_post { lang } ->
+      Yuka.Server.Generated.Handler
+        {
+          rules = rules_0;
+          action = true;
+          cross_origin = false;
+          guards = [];
+          run = (fun () -> App.Api.echo_post req ~lang);
+        }
   | Cycle_shared.Routes.Cookies ->
       Yuka.Server.Generated.Handler
         {
@@ -632,7 +650,7 @@ let resolve (req : Yuka.Server.request) (route : Cycle_shared.Routes.t) : Yuka.S
         }
 
 let app =
-  Yuka.Server.Generated.app ~build:"e0218141d5cbd383a77c7b7bd7bfd005"
+  Yuka.Server.Generated.app ~build:"7f6903338d943f5e346dbd787eca68c9"
     ~headers:(root_headers)
     ~prerender:[ "/plain"; "/feed.xml" ]
     ~pages:[ rules_0; rules_1; rules_2; rules_3; rules_4; rules_5; rules_6; rules_7; rules_9; rules_11; rules_12 ]
