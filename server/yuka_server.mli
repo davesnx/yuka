@@ -140,8 +140,9 @@ val connection :
     Time limits, in seconds:
     - A request head must be complete 10 seconds after its first byte (else
       408).
-    - A connection with no request for 60 seconds is closed, and so is a
-      request body that sends no byte for 60 seconds.
+    - A connection with no request for 60 seconds (or [live_timeout], when
+      longer) is closed, and so is a request body that sends less than 2048
+      bytes in 60 seconds of waiting.
     - [write_timeout] (default: 30): a write of an answer (its head, a part
       of a file, a part of a stream or a live message) that sends no byte
       for that long closes the connection; the file of the answer is closed
@@ -151,7 +152,7 @@ val connection :
       that long is closed. The browser client of {!Yuka.Live} sends a ping
       every 25 seconds, so a client that is gone without closing the socket
       is closed after at most this time. The server sends no WebSocket
-      ping: [Ache_lwt.Websocket] has no way to send one. *)
+      ping. *)
 
 val serve :
   ?interface:string ->

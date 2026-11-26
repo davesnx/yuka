@@ -82,8 +82,10 @@ let exchange ?(ended = true) handler text =
   let sent = write_all client text in
   let* output = bounded "the answer" (read_all client) in
   let* () = bounded "the request" sent in
-  let* () = if ended then bounded "the end of the connection" served else Lwt.return_unit in
+  (* The client closes once it has the whole answer: ache waits for that before
+     it closes its own end (lingering close, RFC 9112 9.6). *)
   let* () = Lwt_unix.close client in
+  let* () = if ended then bounded "the end of the connection" served else Lwt.return_unit in
   Lwt.return output
 
 type response = { status : int; headers : (string * string) list; body : string }
@@ -293,8 +295,8 @@ let streamed () =
        let shell = Buffer.contents seen in
        open_gate ();
        let* rest = bounded "the rest" (read_all client) in
-       let* () = bounded "the end of the connection" served in
        let* () = Lwt_unix.close client in
+       let* () = bounded "the end of the connection" served in
        Lwt.return (shell, shell ^ rest))
   in
   check_true "the shell arrives before the await settles" (not (contains shell "gated data"));
@@ -412,8 +414,8 @@ let expect_continue () =
      let* rest = bounded "the answer" (read_all client) in
      let r = one ~head:false rest in
      Alcotest.(check (pair int string)) "then the answer" (200, {|{"ok":2}|}) (r.status, r.body);
-     let* () = bounded "the end of the connection" served in
-     Lwt_unix.close client);
+     let* () = Lwt_unix.close client in
+     bounded "the end of the connection" served);
   let refused = Lwt_main.run (exchange ~ended:false handler (head ^ "Content-Length: 2000000\r\n\r\n")) in
   check_true "no 100 Continue for a body that is refused" (not (contains refused "100 Continue"));
   Alcotest.(check int) "a body over the limit" 413 (one ~head:false refused).status
@@ -972,8 +974,8 @@ let slow_reader () =
        in
        let* () = bounded "the slow download" (next ()) in
        let elapsed = Unix.gettimeofday () -. started in
-       let* () = bounded "the end of the connection" served in
        let* () = Lwt_unix.close client in
+       let* () = bounded "the end of the connection" served in
        Lwt.return (Buffer.contents buffer, elapsed))
   in
   check_true (Printf.sprintf "longer than the write timeout (%.1f s)" elapsed) (elapsed > 1.2);
@@ -1326,8 +1328,9 @@ let drain () =
      let* rest = within 3. "the end of the answer in progress" (read_all busy) in
      let r = one ~head:false (Buffer.contents seen ^ rest) in
      check_true "the answer in progress ends whole" (r.status = 200 && contains r.body "<p>gated data</p>" && String.ends_with ~suffix:"</body></html>" r.body);
-     let* () = within 3. "the end of serve" server in
-     Lwt_list.iter_s Lwt_unix.close [ busy; idle; live ])
+     (* The clients close: each connection waits for that after its last answer. *)
+     let* () = Lwt_list.iter_s Lwt_unix.close [ busy; idle; live ] in
+     within 3. "the end of serve" server)
 
 let drain_failed_stop () =
   Lwt_main.run

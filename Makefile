@@ -208,11 +208,12 @@ dev-packages: ## List opam packages the benchmarks and the demo need that are no
 
 # dune 3.25.0 with https://github.com/ocaml/dune/pull/16699, 16939 and 16941; Melange 7.0.1-55 with
 # https://github.com/melange-re/melange/pull/2211, for https://github.com/ocaml/dune/issues/17020; ochre with
-# https://github.com/davesnx/ochre/pull/6, which ochre 1.1.0 lacks: its Oniguruma stubs return wrong matches after a GC
+# https://github.com/davesnx/ochre/pull/6, which ochre 1.1.0 lacks: its Oniguruma stubs return wrong matches after a GC;
+# ache at a commit, as its main changes Ache_lwt (the CI step "Rebuild ache at its pin" rebuilds a cached ache)
 .PHONY: pin-list
 pin-list: ## List pinned dependencies, one "<name> <target>" per line
-	@echo "ache git+https://github.com/davesnx/ache.git#main"
-	@echo "ache-lwt git+https://github.com/davesnx/ache.git#main"
+	@echo "ache git+https://github.com/davesnx/ache.git#d6c7e49d61f5be59ddfd5f0bd1ee5166491d17b0"
+	@echo "ache-lwt git+https://github.com/davesnx/ache.git#d6c7e49d61f5be59ddfd5f0bd1ee5166491d17b0"
 	@echo "cows git+https://github.com/syaiful6/cows.git#fc74ab9f372adf6b19d00feec60e4bc669ea10a8"
 	@echo "dune.3.25.0 git+https://github.com/davesnx/dune.git#1e6f26d4d6615e0d2770977a00d2f654fcc4dba3"
 	@echo "melange.7.0.1-55 git+https://github.com/davesnx/melange.git#16162e70268bf63cab1e12fd14f49f8d06983cf6"

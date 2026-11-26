@@ -73,6 +73,18 @@ jobs:
           with-doc: true
           with-dev-setup: false
 
+      # The opam cache of another pin list can be restored, and a new pin does not
+      # rebuild ache: rebuild it when its META names another commit than the pin.
+      - name: Rebuild ache at its pin
+        shell: bash
+        run: |
+          pin=$(make -s pin-list | awk '$1 == "ache" { sub(/.*#/, "", $2); print $2 }')
+          built=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$(opam var lib)/ache/META")
+          if [[ -z "$built" || "$pin" != "$built"* ]]; then
+            echo "ache was built at '$built', the pin is $pin: rebuilding"
+            opam reinstall -y ache ache-lwt
+          fi
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:

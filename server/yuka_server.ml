@@ -108,6 +108,16 @@ module Io = struct
   let shutdown_receive c =
     if Lwt_unix.state c.fd = Lwt_unix.Opened then
       try Lwt_unix.shutdown c.fd Unix.SHUTDOWN_RECEIVE with Unix.Unix_error _ -> ()
+
+  (* ache calls it once the last bytes are written, and then reads until the end
+     of input (a lingering close). On a live socket that is after the close frames
+     of both ends, and the server closes the TCP connection first (RFC 6455
+     7.1.1): both directions shut, so the read ends at once. [heard] is set only
+     on a live socket. *)
+  let shutdown_send c =
+    if Lwt_unix.state c.fd = Lwt_unix.Opened then
+      let how = if Option.is_some c.heard then Unix.SHUTDOWN_ALL else Unix.SHUTDOWN_SEND in
+      try Lwt_unix.shutdown c.fd how with Unix.Unix_error _ -> ()
 end
 
 module Ache_io = Ache_lwt.Make (Io)
@@ -433,54 +443,68 @@ let send_file r ~path ~headers =
 
 let linger = 5.
 
+(* The live socket of a request: ache answers 101 and runs [session]. When the
+   promise of [session] resolves, ache closes the socket with 1000 unless it
+   has ended. *)
 let upgrade r run =
-  match Ache_lwt.Websocket.upgrade r.reqd with
+  let session ws =
+    r.head_sent <- true;
+    r.finish 101;
+    let lingering = ref false in
+    let end_soon () =
+      if not !lingering then begin
+        lingering := true;
+        Lwt.async (fun () ->
+            Lwt.pick [ Lwt.protected r.conn.closed; Lwt.map (fun () -> force_close r.conn) (Lwt_unix.sleep linger) ])
+      end
+    in
+    let close code =
+      end_soon ();
+      match Ache_lwt.Websocket.close ws code with
+      | closing -> to_async closing
+      | exception Invalid_argument m -> Yuka.Async.failed m
+    in
+    (* The live protocol is text; a binary message is dropped. *)
+    let rec receive () =
+      Lwt.bind (Ache_lwt.Websocket.receive ws) (function
+        | Some (Ache.Websocket.Text text) -> Lwt.return (Some text)
+        | Some (Ache.Websocket.Binary _) -> receive ()
+        | None -> Lwt.return None)
+    in
+    let heard = Ache_lwt.Timeout.create r.conn.live_timeout in
+    Ache_lwt.Timeout.set heard;
+    r.conn.heard <- Some heard;
+    r.conn.going_away <- Some (fun () -> ignore (close 1001));
+    Lwt.async (fun () ->
+        Lwt.pick
+          [
+            Lwt.protected r.conn.closed;
+            Lwt.map
+              (fun () ->
+                r.log `Debug ("Yuka_server: the live socket of " ^ address r.conn.peer ^ " was silent; closed");
+                force_close r.conn)
+              (Ache_lwt.Timeout.expired heard);
+          ]
+        |> Lwt.map (fun () -> Ache_lwt.Timeout.stop heard));
+    let connection =
+      Yuka.Server.Live.connection
+        ~send:(fun text -> to_async (Ache_lwt.Websocket.send_text ws text))
+        ~receive:(fun () -> to_async (receive ()))
+        ~close
+    in
+    let ended, end_ = Lwt.wait () in
+    let ran = try run connection with e -> Yuka.Async.failed (Printexc.to_string e) in
+    Yuka.Async.on_result ran (fun result ->
+        (match result with Ok () -> () | Error m -> r.log `Error ("Yuka_server: the live socket failed: " ^ m));
+        end_soon ();
+        Lwt.wakeup_later end_ ());
+    ended
+  in
+  match Ache_lwt.Websocket.upgrade r.reqd session with
   | Error `Unsupported_version ->
       respond_string r 426 (("sec-websocket-version", "13") :: plain_headers) "Upgrade Required"
   | Error (`Not_get | `Not_websocket | `Invalid_key) -> respond_string r 400 plain_headers "Bad Request"
-  | Ok ws ->
-      r.head_sent <- true;
-      r.finish 101;
-      let lingering = ref false in
-      let end_soon () =
-        if not !lingering then begin
-          lingering := true;
-          Lwt.async (fun () ->
-              Lwt.pick
-                [ Lwt.protected r.conn.closed; Lwt.map (fun () -> force_close r.conn) (Lwt_unix.sleep linger) ])
-        end
-      in
-      let close code =
-        end_soon ();
-        match Ache_lwt.Websocket.close ws code with
-        | closing -> to_async closing
-        | exception Invalid_argument m -> Yuka.Async.failed m
-      in
-      let heard = Ache_lwt.Timeout.create r.conn.live_timeout in
-      Ache_lwt.Timeout.set heard;
-      r.conn.heard <- Some heard;
-      r.conn.going_away <- Some (fun () -> ignore (close 1001));
-      Lwt.async (fun () ->
-          Lwt.pick
-            [
-              Lwt.protected r.conn.closed;
-              Lwt.map
-                (fun () ->
-                  r.log `Debug ("Yuka_server: the live socket of " ^ address r.conn.peer ^ " was silent; closed");
-                  force_close r.conn)
-                (Ache_lwt.Timeout.expired heard);
-            ]
-          |> Lwt.map (fun () -> Ache_lwt.Timeout.stop heard));
-      let connection =
-        Yuka.Server.Live.connection
-          ~send:(fun text -> to_async (Ache_lwt.Websocket.send ws text))
-          ~receive:(fun () -> to_async (Ache_lwt.Websocket.receive ws))
-          ~close
-      in
-      let ran = try run connection with e -> Yuka.Async.failed (Printexc.to_string e) in
-      Yuka.Async.on_result ran (fun result ->
-          (match result with Ok () -> () | Error m -> r.log `Error ("Yuka_server: the live socket failed: " ^ m));
-          end_soon ())
+  | Ok () -> ()
 
 let send r = function
   | Respond { status; headers; body = Yuka.Server.String text } -> respond_string r status headers text
@@ -529,7 +553,7 @@ let handler ?node ?sessions ?(log_requests = true) config app : handler =
           | Error m -> fail (Failure m))
 
 let error_text = function
-  | `Bad_request -> (400, "Bad Request")
+  | `Bad_request _ -> (400, "Bad Request")
   | `Not_implemented -> (501, "Not Implemented")
   | `Http_version_not_supported -> (505, "HTTP Version Not Supported")
   | `Uri_too_long -> (414, "URI Too Long")
@@ -582,7 +606,11 @@ let open_connection ~write_timeout ~live_timeout ~opened handler peer fd =
   (try Lwt_unix.setsockopt fd Unix.TCP_NODELAY true with Unix.Unix_error _ -> ());
   Lwt.catch
     (fun () ->
-      Server.create_connection_handler ~config ~idle_timeout:60. ~head_timeout:10.
+      (* ache also closes a live socket that sends no frame for [idle_timeout]:
+         it must not come before [live_timeout]. *)
+      Server.create_connection_handler ~config
+        ~idle_timeout:(Some (Float.max 60. live_timeout))
+        ~head_timeout:(Some 10.)
         ~request_handler:(fun conn reqd ->
           conn.request <- Some reqd;
           try handler conn reqd with e -> Reqd.report_exn reqd e)
