@@ -1,0 +1,25 @@
+(library
+ (name top_demo_app)
+ (modules pages yuka_routes serve)
+ (libraries top_demo_shared zed_ui yuka yuka-dream dream)
+ (preprocess
+  (pps yuka.ppx)))
+
+(rule
+ (targets yuka_routes.ml)
+ (action
+  (with-stdout-to
+   yuka_routes.ml
+   (run
+    %{bin:yuka}
+    routes
+    --server
+    --shared-module
+    Top_demo_shared.Routes
+    --source
+    %{dep:../Routes.ml}))))
+
+(executable
+ (name top_demo_server)
+ (modules top_demo_server)
+ (libraries top_demo_app dream))

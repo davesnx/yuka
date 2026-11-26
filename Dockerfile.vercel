@@ -16,7 +16,9 @@ RUN sudo chown opam . \
       demo/mini-linear/server/demo_server.exe @demo/mini-linear/client/demo-client demo/mini-linear/client/yuka_islands.json \
       @demo/async-feed/client/async-feed-client demo/async-feed/client/yuka_islands.json \
       @demo/infinite-scroll/client/infinite-scroll-client demo/infinite-scroll/client/yuka_islands.json \
-      @demo/posters/client/posters-client demo/posters/client/yuka_islands.json
+      @demo/posters/client/posters-client demo/posters/client/yuka_islands.json \
+      @demo/utop/client/utop-client demo/utop/client/yuka_islands.json \
+      @demo/top/client/top-client demo/top/client/yuka_islands.json
 
 FROM node:22-bookworm-slim AS bundle
 WORKDIR /yuka
@@ -27,11 +29,15 @@ COPY demo/mini-linear/bundle.sh demo/mini-linear/bundle.sh
 COPY demo/async-feed/bundle.sh demo/async-feed/bundle.sh
 COPY demo/infinite-scroll/bundle.sh demo/infinite-scroll/bundle.sh
 COPY demo/posters/bundle.sh demo/posters/bundle.sh
+COPY demo/utop/bundle.sh demo/utop/bundle.sh
+COPY demo/top/bundle.sh demo/top/bundle.sh
 COPY --from=build /home/opam/yuka/_build/default/demo/mini-linear/client _build/default/demo/mini-linear/client
 COPY --from=build /home/opam/yuka/_build/default/demo/async-feed/client _build/default/demo/async-feed/client
 COPY --from=build /home/opam/yuka/_build/default/demo/infinite-scroll/client _build/default/demo/infinite-scroll/client
 COPY --from=build /home/opam/yuka/_build/default/demo/posters/client _build/default/demo/posters/client
-RUN demo/mini-linear/bundle.sh && demo/async-feed/bundle.sh && demo/infinite-scroll/bundle.sh && demo/posters/bundle.sh
+COPY --from=build /home/opam/yuka/_build/default/demo/utop/client _build/default/demo/utop/client
+COPY --from=build /home/opam/yuka/_build/default/demo/top/client _build/default/demo/top/client
+RUN demo/mini-linear/bundle.sh && demo/async-feed/bundle.sh && demo/infinite-scroll/bundle.sh && demo/posters/bundle.sh && demo/utop/bundle.sh && demo/top/bundle.sh
 
 FROM debian:12-slim
 RUN apt-get update \
@@ -54,7 +60,16 @@ COPY --from=build /home/opam/yuka/_build/default/demo/posters/client/yuka_island
 COPY --from=bundle /yuka/_build/default/demo/posters/client/meta.json /app/posters/client/meta.json
 COPY --from=bundle /yuka/_build/default/demo/posters/client/out/demo/posters/client/bundle /app/posters/client/out/demo/posters/client/bundle
 COPY demo/posters/static/style.css demo/posters/static/favicon.svg /app/posters/static/
-RUN /app/server/demo_server.exe --bundle --base /mini-linear --async-feed /app/async-feed --infinite-scroll /app/infinite-scroll --posters /app/posters --prerender /app/prerendered
+COPY --from=build /home/opam/yuka/_build/default/demo/utop/client/yuka_islands.json /app/utop/client/yuka_islands.json
+COPY --from=bundle /yuka/_build/default/demo/utop/client/meta.json /app/utop/client/meta.json
+COPY --from=bundle /yuka/_build/default/demo/utop/client/out/demo/utop/client/bundle /app/utop/client/out/demo/utop/client/bundle
+COPY demo/utop/static /app/utop/static
+COPY demo/zed/static /app/zed/static
+COPY --from=build /home/opam/yuka/_build/default/demo/top/client/yuka_islands.json /app/top/client/yuka_islands.json
+COPY --from=bundle /yuka/_build/default/demo/top/client/meta.json /app/top/client/meta.json
+COPY --from=bundle /yuka/_build/default/demo/top/client/out/demo/top/client/bundle /app/top/client/out/demo/top/client/bundle
+COPY demo/top/static /app/top/static
+RUN /app/server/demo_server.exe --bundle --base /mini-linear --async-feed /app/async-feed --infinite-scroll /app/infinite-scroll --posters /app/posters --utop /app/utop --top /app/top --prerender /app/prerendered
 USER nobody
 EXPOSE 8080
-ENTRYPOINT ["/app/server/demo_server.exe", "--bundle", "--base", "/mini-linear", "--async-feed", "/app/async-feed", "--infinite-scroll", "/app/infinite-scroll", "--posters", "/app/posters", "--interface", "0.0.0.0", "--prerendered", "/app/prerendered"]
+ENTRYPOINT ["/app/server/demo_server.exe", "--bundle", "--base", "/mini-linear", "--async-feed", "/app/async-feed", "--infinite-scroll", "/app/infinite-scroll", "--posters", "/app/posters", "--utop", "/app/utop", "--top", "/app/top", "--interface", "0.0.0.0", "--prerendered", "/app/prerendered"]

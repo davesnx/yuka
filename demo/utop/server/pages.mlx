@@ -1,0 +1,51 @@
+open Utop_demo_shared
+
+let window (current : Session.t) =
+  let active (session : Session.t) = session.file = current.file in
+  Zed_ui.window ~project:"yuka-scratch" ~branch:"main" ~panel_label:"Project"
+    ~panel:
+      (Zed_ui.folder ~icon:"folder_open" "scratch"
+       :: List.map
+            (fun (session : Session.t) ->
+              Zed_ui.row ~href:(Routes.session ~file:session.file ()) ~selected:(active session) ~icon:"ocaml"
+                session.file)
+            Session.all
+      @ [ Zed_ui.row ~icon:"file" ".ocamlinit"; Zed_ui.row ~icon:"file_code" "dune-project" ])
+    ~tabs:
+      (List.map
+         (fun (session : Session.t) ->
+           if active session then Zed_ui.tab ~icon:"terminal" ~detail:session.file "utop"
+           else Zed_ui.tab ~icon:"ocaml" ~href:(Routes.session ~file:session.file ()) session.file)
+         Session.all)
+    ~status:
+      [
+        Zed_ui.status ~icon:"repl_neutral" ("utop " ^ Session.utop_version);
+        Zed_ui.status ("OCaml " ^ Session.ocaml_version);
+      ]
+    <Yuka.Client><Terminal session=current /></Yuka.Client>
+
+let keys =
+  [
+    ([ "Enter" ], "runs a phrase that ends with ;;");
+    ([ "↑"; "↓" ], "walk the history");
+    ([ "Tab" ], "takes the first completion");
+    ([ "Ctrl"; "L" ], "clears the screen");
+  ]
+
+let session ~file () =
+  let current = match Option.bind file Session.find with Some session -> session | None -> Session.lists in
+  Yuka.Server.page ~title:(current.file ^ " — utop") (fun () ->
+      Zed_ui.page ~title:"utop, in the browser"
+        ~lede:
+          (Yuka.fragment
+             [
+               Yuka.text
+                 "A fake OCaml toplevel in a Zed window. Each file on the left is a session written in advance. The prompt answers the phrases of the history, integer arithmetic and ";
+               <code>"let x = 6 * 7;;"</code>;
+               Yuka.text ".";
+             ])
+        ~window:(window current) ~keys)
+
+let not_found ~path () =
+  Yuka.Server.page ~title:"Not found" (fun () ->
+      Zed_ui.not_found ~path ~home:(Routes.session ()) ~home_label:"Back to utop")

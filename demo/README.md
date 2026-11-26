@@ -11,15 +11,22 @@ Each demo is its own Yuka app, in its own directory, with its own
   palettes; the next page loads when the end of the list comes into view.
 - [Posters](posters/README.md): a generative poster playground, drawn by one
   OCaml function on the server and in an island, with its settings in the URL.
+- [utop](utop/README.md): a fake OCaml toplevel in a Zed window, with
+  Zed's colours, fonts and icons; the prompt answers in the browser.
+- [top](top/README.md): a fake top in the same Zed window, for three
+  made-up machines; the browser makes a new screen every second.
+- `zed`: the design system of the utop and top demos (Zed's fonts,
+  colours and icons, and the window), not a demo.
 - `index`: the list of demos. It has no island and loads no JavaScript.
   The list is `demos` in `index/app/pages.mlx`.
 
 One server runs all of them: `mini-linear/server/demo_server.exe --base
 /mini-linear` serves Mini Linear with `Yuka.Server.config ~base` under
 `/mini-linear`, Async with its own config under `/async-feed`, Infinite
-scroll under `/infinite-scroll`, Posters under `/posters`, and the index
-at every other path, so `/` is the list. Each app has its own client
-bundle. The Async, Infinite scroll and Posters configs are made before
+scroll under `/infinite-scroll`, Posters under `/posters`, utop under
+`/utop`, top under `/top`, and the index at every other path, so `/` is
+the list. Each app has its own client bundle. The Async, Infinite scroll,
+Posters, utop and top configs are made before
 the Mini Linear one, as
 `Yuka.Router.url` outside a render uses the last config. From the
 repository root:

@@ -1,0 +1,6 @@
+(library
+ (name zed_ui)
+ (modes native melange)
+ (libraries yuka)
+ (preprocess
+  (pps yuka.ppx)))

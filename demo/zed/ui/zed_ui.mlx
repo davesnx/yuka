@@ -1,0 +1,115 @@
+(* The parts of a Zed window, for the utop and top demos. The classes are those of
+   ../static/zed.css; each demo puts its own content in the window. *)
+
+(* An icon of Zed (static/icons), drawn with the text colour by a CSS mask. *)
+let icon name = <span class_=("icon icon-" ^ name) aria_hidden=true />
+
+(* A row of the panel: a link, or a muted row when [href] is [None]. *)
+let row ?href ?(selected = false) ?detail ?(indent = true) ~icon:name label =
+  let content =
+    Yuka.fragment
+      [
+        (if indent then <span class_="indent" /> else Yuka.empty);
+        icon name;
+        <span class_="label">(Yuka.text label)</span>;
+        (match detail with Some detail -> <span class_="row-detail">(Yuka.text detail)</span> | None -> Yuka.empty);
+      ]
+  in
+  match href with
+  | Some href ->
+      <li>
+        <a class_=(if selected then "row selected" else "row") href aria_current=(if selected then `page else `false_)>
+          content
+        </a>
+      </li>
+  | None -> <li><span class_=(if indent then "row muted" else "row")>content</span></li>
+
+(* The open folder at the top of the panel. *)
+let folder ~icon:name label =
+  <li><span class_="row">(icon "chevron_down")(icon name)<span class_="label">(Yuka.text label)</span></span></li>
+
+(* A tab: a link to [href], or the active tab, with a detail and a close icon. *)
+let tab ?detail ?href ~icon:name label =
+  match href with
+  | None ->
+    <div class_="tab active">
+      (icon name)<span>(Yuka.text label)</span>
+      (match detail with Some detail -> <span class_="tab-detail">(Yuka.text detail)</span> | None -> Yuka.empty)
+      (icon "close")
+    </div>
+  | Some href -> <a class_="tab" href>(icon name)<span>(Yuka.text label)</span></a>
+
+let status ?icon:name text =
+  <span class_="status-item">
+    (match name with Some name -> icon name | None -> Yuka.empty)(Yuka.text text)
+  </span>
+
+let window ~project ~branch ~panel_label ~panel ~tabs ~status content =
+  <div class_="window">
+    <header class_="titlebar">
+      <span class_="lights" aria_hidden=true><span /><span /><span /></span>
+      <span class_="title-item strong">(Yuka.text project)</span>
+      <span class_="title-item">(icon "git_branch")(Yuka.text branch)</span>
+      <span class_="spacer" />
+      <span class_="title-item">(icon "bell")</span>
+      <span class_="avatar" aria_hidden=true>"Y"</span>
+    </header>
+    <div class_="workspace">
+      <nav class_="panel" aria_label=panel_label>
+        <div class_="panel-head"><span>(Yuka.text panel_label)</span>(icon "ellipsis")</div>
+        <ul class_="tree">(Yuka.fragment panel)</ul>
+      </nav>
+      <main class_="center">
+        <div class_="tabs">
+          (Yuka.fragment tabs)
+          <span class_="spacer" />
+          <span class_="tab-tools">(icon "plus")(icon "split")(icon "maximize")</span>
+        </div>
+        content
+      </main>
+    </div>
+    <footer class_="statusbar">
+      <span class_="status-item">(icon "file_tree")</span>
+      <span class_="status-item">(icon "magnifying_glass")</span>
+      <span class_="status-item">(icon "x_circle") "0" (icon "warning") "0"</span>
+      <span class_="spacer" />
+      (Yuka.fragment status)
+      <span class_="status-item">(icon "terminal")</span>
+    </footer>
+  </div>
+
+(* The keys under the window: each item is the keys, then what they do. *)
+let keys items =
+  <ul class_="keys">
+    (Yuka.fragment
+       (List.map
+          (fun (keys, text) ->
+            <li>(Yuka.fragment (List.map (fun key -> <kbd>(Yuka.text key)</kbd>) keys))(Yuka.text (" " ^ text))</li>)
+          items))
+  </ul>
+
+(* The page: the intro of zed.dev, the window, then the keys. *)
+let page ~title ~lede ~window ~keys:items =
+  <div class_="page">
+    <header class_="intro">
+      <p class_="eyebrow">(icon "terminal") "A Yuka demo"</p>
+      <h1>(Yuka.text title)</h1>
+      <p class_="lede">lede</p>
+    </header>
+    window
+    (keys items)
+  </div>
+
+let not_found ~path ~home ~home_label =
+  <div class_="page">
+    <header class_="intro">
+      <h1>"Not found"</h1>
+      <p class_="lede">(Yuka.text ("No page at " ^ path ^ ". ")) <a href=home>(Yuka.text home_label)</a></p>
+    </header>
+  </div>
+
+(* The static files of this design, for [Yuka.Server.config ~public], next to the
+   directory of a demo, and the stylesheet. *)
+let public ~dir = ("/zed", Filename.concat dir "../zed/static")
+
+let stylesheet base = base ^ "/zed/zed.css"

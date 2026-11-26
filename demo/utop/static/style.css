@@ -1,0 +1,192 @@
+/* The utop terminal, in the window of ../../zed/static/zed.css. */
+
+.row.selected .icon-ocaml {
+  color: var(--number);
+}
+
+.terminal {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+  color: var(--terminal-text);
+  font: 13px/1.55 var(--mono);
+  font-feature-settings: "calt" 1;
+  cursor: text;
+}
+
+/* A reversed column keeps the scroll at the bottom while lines arrive. */
+.scroll {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 6px;
+  scrollbar-color: var(--border) transparent;
+}
+
+.banner {
+  margin: 0;
+  font: inherit;
+  color: var(--ansi-yellow);
+  white-space: pre;
+  overflow: hidden;
+}
+
+.hint {
+  margin: 12px 0 8px;
+}
+
+.phrase {
+  margin-top: 4px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  color: var(--text-placeholder);
+  white-space: pre;
+}
+
+.bar-time {
+  color: var(--ansi-cyan);
+}
+
+.bar-count {
+  color: var(--ansi-yellow);
+}
+
+.bar-fill {
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  margin: 0 0.1em;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+.prompt-line {
+  display: flex;
+  align-items: baseline;
+}
+
+.prompt {
+  flex: none;
+  color: var(--ansi-green);
+  white-space: pre;
+}
+
+.code {
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--terminal-text);
+}
+
+.answer {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The prompt: a transparent input over the highlighted text, so the caret is real. */
+.field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--accent);
+  font: inherit;
+}
+
+.input::selection {
+  color: transparent;
+  background: var(--selection);
+}
+
+.exited {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--text-muted);
+}
+
+.word:focus-visible {
+  outline: 1px solid var(--border-focused);
+}
+
+/* The completion bar of utop, at the bottom of the terminal */
+.completion {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 16px;
+  overflow: hidden;
+  border-top: 1px solid var(--border-variant);
+  color: var(--text-placeholder);
+  white-space: nowrap;
+}
+
+.edge {
+  margin-right: 2px;
+}
+
+.word {
+  flex: none;
+  padding: 0 6px;
+  border: 0;
+  border-right: 1px solid var(--border-variant);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.word:hover {
+  color: var(--text);
+}
+
+.word.on {
+  background: var(--selection);
+  color: var(--text);
+}
+
+/* Tokens, with the syntax colours of the One theme */
+.tk.keyword { color: var(--keyword); }
+.tk.string { color: var(--string); }
+.tk.number { color: var(--number); }
+.tk.type { color: var(--type); }
+.tk.constructor { color: var(--function); }
+.tk.name { color: var(--function); }
+.tk.comment,
+.tk.muted { color: var(--comment); }
+.tk.operator { color: var(--operator); }
+.tk.punctuation { color: var(--punctuation); }
+.tk.error { color: var(--error); font-weight: 600; }
+.tk.warning { color: var(--warning); }
+
+@media (max-width: 760px) {
+  .terminal {
+    font-size: 12px;
+  }
+}

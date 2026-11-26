@@ -69,9 +69,11 @@ demo-bundle: demo-build ## Bundle the demo client with esbuild
 	BUILD_DIR=$(BUILD_DIR) demo/async-feed/bundle.sh
 	BUILD_DIR=$(BUILD_DIR) demo/posters/bundle.sh
 	BUILD_DIR=$(BUILD_DIR) demo/infinite-scroll/bundle.sh
+	BUILD_DIR=$(BUILD_DIR) demo/utop/bundle.sh
+	BUILD_DIR=$(BUILD_DIR) demo/top/bundle.sh
 
 .PHONY: demo-serve
-demo-serve: demo-build ## Serve the demos on PORT: the list at /, Mini Linear at /mini-linear, Async at /async-feed, Posters at /posters, Infinite scroll at /infinite-scroll
+demo-serve: demo-build ## Serve the demos on PORT: the list at /, Mini Linear at /mini-linear, Async at /async-feed, Posters at /posters, Infinite scroll at /infinite-scroll, utop at /utop, top at /top
 	$(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: async-feed-serve
@@ -86,6 +88,14 @@ posters-serve: demo-build ## Serve the Posters demo alone, at the root, on PORT
 infinite-scroll-serve: demo-build ## Serve the Infinite scroll demo alone, at the root, on PORT
 	$(BUILD_DIR)/default/demo/infinite-scroll/server/infinite_scroll_server.exe --port $(PORT)
 
+.PHONY: utop-serve
+utop-serve: demo-build ## Serve the utop demo alone, at the root, on PORT
+	$(BUILD_DIR)/default/demo/utop/server/utop_demo_server.exe --port $(PORT)
+
+.PHONY: top-serve
+top-serve: demo-build ## Serve the top demo alone, at the root, on PORT
+	$(BUILD_DIR)/default/demo/top/server/top_demo_server.exe --port $(PORT)
+
 .PHONY: demo-dev
 demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browser on change (PORT)
 	$(DUNE) build --profile=dev ./gen/yuka_cli.exe
@@ -95,6 +105,9 @@ demo-dev: ## Run the demo under yuka dev: rebuild, restart and reload the browse
 	  --assets $(BUILD_DIR)/default/demo/async-feed/static --assets $(BUILD_DIR)/default/demo/async-feed/client/out \
 	  --assets $(BUILD_DIR)/default/demo/posters/static --assets $(BUILD_DIR)/default/demo/posters/client/out \
 	  --assets $(BUILD_DIR)/default/demo/infinite-scroll/static --assets $(BUILD_DIR)/default/demo/infinite-scroll/client/out \
+	  --assets $(BUILD_DIR)/default/demo/zed/static \
+	  --assets $(BUILD_DIR)/default/demo/utop/static --assets $(BUILD_DIR)/default/demo/utop/client/out \
+	  --assets $(BUILD_DIR)/default/demo/top/static --assets $(BUILD_DIR)/default/demo/top/client/out \
 	  -- $(BUILD_DIR)/default/demo/mini-linear/server/demo_server.exe --port $(PORT) --base /mini-linear
 
 .PHONY: demo-test

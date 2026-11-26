@@ -1,0 +1,51 @@
+open Top_demo_shared
+
+let cores (host : Machine.host) = Int.to_string host.cores ^ " cores"
+
+let window (current : Machine.host) =
+  let active (host : Machine.host) = host.name = current.name in
+  Zed_ui.window ~project:"yuka-ops" ~branch:"main" ~panel_label:"Remote hosts"
+    ~panel:
+      (Zed_ui.folder ~icon:"list_tree" "ssh"
+      :: List.map
+           (fun (host : Machine.host) ->
+             Zed_ui.row ~href:(Routes.host ~host:host.name ()) ~selected:(active host) ~detail:(cores host) ~icon:"server"
+               host.name)
+           Machine.hosts)
+    ~tabs:
+      (List.map
+         (fun (host : Machine.host) ->
+           if active host then
+             Zed_ui.tab ~icon:"terminal" ~detail:(host.user_name ^ "@" ^ host.name) "top"
+           else Zed_ui.tab ~icon:"server" ~href:(Routes.host ~host:host.name ()) host.name)
+         Machine.hosts)
+    ~status:
+      [
+        Zed_ui.status ~icon:"signal_high" ("ssh " ^ current.user_name ^ "@" ^ current.name);
+        Zed_ui.status ~icon:"linux" current.kernel;
+        Zed_ui.status (cores current);
+      ]
+    <Yuka.Client><Monitor host=current.name /></Yuka.Client>
+
+let keys =
+  [
+    ([ "P"; "M"; "T" ], "sort by CPU, memory or time");
+    ([ "t" ], "graphs");
+    ([ "1" ], "one line per core");
+    ([ "↑"; "↓" ], "select");
+    ([ "k" ], "kill");
+    ([ "Space" ], "pause");
+  ]
+
+let host ~host () =
+  let current = match Option.bind host Machine.find with Some host -> host | None -> Machine.laptop in
+  Yuka.Server.page ~title:("top — " ^ current.name) (fun () ->
+      Zed_ui.page ~title:"top, in the browser"
+        ~lede:
+          (Yuka.text
+             "A fake top in a Zed window. Each host on the left is a machine made up in OCaml; the server renders the first screen, then the browser makes a new one every second. Sort, select and kill with the keys of top.")
+        ~window:(window current) ~keys)
+
+let not_found ~path () =
+  Yuka.Server.page ~title:"Not found" (fun () ->
+      Zed_ui.not_found ~path ~home:(Routes.host ()) ~home_label:"Back to top")

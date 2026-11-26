@@ -1,0 +1,261 @@
+/* The screen of top, in the window of ../../zed/static/zed.css. */
+
+.terminal {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+  color: var(--terminal-text);
+  font: 13px/1.55 var(--mono);
+  font-feature-settings: "calt" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.screen {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 16px 0;
+  scrollbar-color: var(--border) transparent;
+}
+
+.summary {
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.line {
+  min-height: 1.55em;
+}
+
+.dim {
+  color: var(--text-muted);
+}
+
+.value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.summary > .line:first-child .value:first-of-type {
+  color: var(--ansi-cyan);
+}
+
+/* Graph mode ([t]): the numbers, then a bar per line. */
+.line.graph {
+  display: flex;
+  align-items: center;
+}
+
+.meter {
+  display: flex;
+  flex: 1;
+  min-width: 80px;
+  height: 9px;
+  margin-left: 1.5ch;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border-variant);
+}
+
+.fill {
+  height: 100%;
+  transition: width 0.6s ease;
+}
+
+.fill.us,
+.fill.used { background: var(--ansi-green); }
+.fill.sy { background: var(--error); }
+.fill.ni { background: var(--accent); }
+.fill.wa,
+.fill.cache { background: var(--ansi-yellow); }
+.fill.swap { background: var(--keyword); }
+
+.cores.graphs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  column-gap: 3ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    transition: none;
+  }
+}
+
+/* Line 6 of top: the answer to the last key. */
+.message {
+  min-height: 1.55em;
+  color: var(--warning);
+  white-space: pre;
+}
+
+/* The processes: one grid per line, with the same columns. */
+.procs {
+  min-width: 860px;
+  padding-bottom: 12px;
+}
+
+.proc {
+  display: grid;
+  grid-template-columns: 7ch 9ch 4ch 4ch 8ch 8ch 7ch 2ch 6ch 6ch 10ch minmax(0, 1fr);
+  column-gap: 1ch;
+  padding: 0 6px;
+  border-radius: 3px;
+  white-space: pre;
+  cursor: default;
+}
+
+.proc.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-bottom: 2px;
+  background: var(--border-variant);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.num {
+  text-align: right;
+}
+
+.state {
+  text-align: center;
+}
+
+.sortable {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sortable.command {
+  justify-content: flex-start;
+}
+
+.sortable:hover,
+.sortable.on {
+  color: var(--accent);
+}
+
+.sortable .icon {
+  width: 11px;
+  height: 11px;
+}
+
+.proc:not(.head):hover {
+  background: var(--hover);
+}
+
+.proc.running {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.proc.selected {
+  background: var(--selection);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.pid {
+  color: var(--ansi-cyan);
+}
+
+.proc:not(.mine) .user {
+  color: var(--text-placeholder);
+}
+
+.state-R { color: var(--ansi-green); }
+.state-D { color: var(--error); }
+.state-I { color: var(--comment); }
+
+.warm { color: var(--ansi-yellow); }
+.hot { color: var(--error); }
+
+.exited {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 12px;
+  color: var(--text-muted);
+}
+
+/* The keys, under the screen, as the completion bar of utop */
+.keybar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 12px;
+  overflow: hidden;
+  border-top: 1px solid var(--border-variant);
+  color: var(--text-muted);
+  font: 12px/1 var(--sans);
+  white-space: nowrap;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.key:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.key.on {
+  background: var(--selection);
+  color: var(--text);
+}
+
+.key kbd {
+  min-width: 16px;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--editor);
+  color: var(--text);
+  font: 11px/1.4 var(--mono);
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+
+.live .icon {
+  width: 11px;
+  height: 11px;
+  color: var(--success);
+}
+
+@media (max-width: 760px) {
+  .terminal {
+    font-size: 12px;
+  }
+}

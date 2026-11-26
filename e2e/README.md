@@ -49,6 +49,27 @@ the gallery to `DIR`:
 
     node e2e/posters.ts http://127.0.0.1:8125/posters
 
+Then `utop.ts` runs under `/utop`: the first session, `let` and integer
+arithmetic at the prompt, an unbound name, a phrase on two lines, the
+history with the arrow keys, completion with Tab, Ctrl+L, a click on
+another file of the project panel, `#quit;;` and "Start again", and the
+One Light colours with a light colour scheme. `UTOP_SCREENSHOTS=DIR` saves
+a dark and a light screenshot to `DIR`:
+
+    node e2e/utop.ts http://127.0.0.1:8125/utop
+
+Then `top.ts` runs under `/top`: the first screen of the laptop and the
+same screen after the island starts, a new screen a second later, sorting
+by key and by a click on a column, graphs and one line per core, Space to
+pause, selecting and killing a process (and the refusal for a process of
+root), another host from the panel, `q` and "Start again", and the One
+Light colours with a light colour scheme. `TOP_SCREENSHOTS=DIR` saves a
+dark and a light screenshot to `DIR`:
+
+    node e2e/top.ts http://127.0.0.1:8125/top
+
 `BUNDLE=1 e2e/run.sh` runs `demo/mini-linear/bundle.sh`,
-`demo/async-feed/bundle.sh` and `demo/posters/bundle.sh` and starts the
+`demo/async-feed/bundle.sh`, `demo/posters/bundle.sh`,
+`demo/infinite-scroll/bundle.sh`, `demo/utop/bundle.sh` and
+`demo/top/bundle.sh` and starts the
 server with `--bundle`. The check then expects one script and no import map.

@@ -1,0 +1,513 @@
+/* The design of zed.dev around a Zed window in the One theme: IBM Plex Serif and
+   IBM Plex Sans for text, Lilex for code, the brand blue #1348dc, the offgray scale
+   of zed.dev and the colours of One Dark and One Light from assets/themes/one/one.json
+   of the Zed repository. The icons in icons/ are Zed's (Lucide based, ISC).
+
+   The design system of the utop and top demos: the page, the window (title bar,
+   panel, tabs, status bar), the icons and the keys under the window. Each demo adds
+   the content of the window in its own style.css. */
+
+@font-face {
+  font-family: "Lilex";
+  src: url(fonts/lilex.woff2) format("woff2");
+  font-weight: 100 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url(fonts/ibm-plex-sans.woff2) format("woff2");
+  font-weight: 100 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Serif";
+  src: url(fonts/ibm-plex-serif.woff2) format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --serif: "IBM Plex Serif", Georgia, serif;
+  --mono: "Lilex", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --brand: #1348dc;
+
+  /* zed.dev, light */
+  --page: #fcfcfc;
+  --page-text: #474c55;
+  --page-muted: #626976;
+  --page-line: #e3e4e7;
+  --heading: #1348dc;
+
+  /* One Light */
+  --background: #dcdcdd;
+  --surface: #ebebec;
+  --editor: #fafafa;
+  --border: #c9c9ca;
+  --border-variant: #dfdfe0;
+  --border-focused: #7d82e8;
+  --text: #242529;
+  --text-muted: #58585a;
+  --text-placeholder: #7e8086;
+  --accent: #5c78e2;
+  --hover: #dfdfe0;
+  --selected: #cacaca;
+  --selection: #5c78e23d;
+  --terminal: #fafafa;
+  --terminal-text: #2a2c33;
+  --keyword: #a449ab;
+  --string: #649f57;
+  --number: #ad6e25;
+  --type: #3882b7;
+  --function: #5b79e3;
+  --comment: #a2a3a7;
+  --operator: #3882b7;
+  --punctuation: #242529;
+  --error: #d36151;
+  --warning: #a48819;
+  --success: #669f59;
+  --ansi-yellow: #a48819;
+  --ansi-green: #3f953a;
+  --ansi-cyan: #0997b3;
+  --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 24px 64px -16px rgb(19 72 220 / 18%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* zed.dev, dark */
+    --page: #0d0d0f;
+    --page-text: #c0c3ca;
+    --page-muted: #878e9b;
+    --page-line: #212328;
+    --heading: #90c5ff;
+
+    /* One Dark */
+    --background: #3b414d;
+    --surface: #2f343e;
+    --editor: #282c33;
+    --border: #464b57;
+    --border-variant: #363c46;
+    --border-focused: #47679e;
+    --text: #dce0e5;
+    --text-muted: #a9afbc;
+    --text-placeholder: #878a98;
+    --accent: #74ade8;
+    --hover: #363c46;
+    --selected: #454a56;
+    --selection: #74ade83d;
+    --terminal: #282c34;
+    --terminal-text: #abb2bf;
+    --keyword: #b477cf;
+    --string: #a1c181;
+    --number: #bf956a;
+    --type: #6eb4bf;
+    --function: #73ade9;
+    --comment: #5d636f;
+    --operator: #6eb4bf;
+    --punctuation: #acb2be;
+    --error: #d07277;
+    --warning: #dec184;
+    --success: #a1c181;
+    --ansi-yellow: #e5c07b;
+    --ansi-green: #98c379;
+    --ansi-cyan: #56b6c2;
+    --shadow: 0 0 0 1px #3d7df50d, 5px 5px 0 #3d7df50d, -5px -5px 0 #3a7df80d, 0 24px 64px -16px rgb(0 0 0 / 60%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--page-text);
+  font-family: var(--sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+::selection {
+  background: var(--selection);
+}
+
+.page {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 72px 24px 96px;
+}
+
+/* The intro, as the hero of zed.dev */
+
+.intro {
+  max-width: 680px;
+  margin-bottom: 40px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+  font: 400 13px/1 var(--mono);
+  color: var(--page-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+h1 {
+  margin: 0;
+  font: 400 clamp(36px, 6vw, 56px) / 1.05 var(--serif);
+  letter-spacing: -0.02em;
+  color: var(--heading);
+}
+
+.lede {
+  margin: 16px 0 0;
+  font-size: 17px;
+  color: var(--page-text);
+}
+
+.lede code {
+  font: 0.92em var(--mono);
+  white-space: nowrap;
+  padding: 1px 5px;
+  border: 1px solid var(--page-line);
+  border-radius: 4px;
+}
+
+.lede a {
+  color: var(--brand);
+}
+
+/* Icons of Zed: the SVG is a mask, the colour is the text colour. */
+
+.icon {
+  flex: none;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+
+.icon-arrow_down { --icon: url(icons/arrow_down.svg); }
+.icon-arrow_up { --icon: url(icons/arrow_up.svg); }
+.icon-bell { --icon: url(icons/bell.svg); }
+.icon-chevron_down { --icon: url(icons/chevron_down.svg); }
+.icon-close { --icon: url(icons/close.svg); }
+.icon-debug_pause { --icon: url(icons/debug_pause.svg); }
+.icon-ellipsis { --icon: url(icons/ellipsis.svg); }
+.icon-file { --icon: url(icons/file.svg); }
+.icon-file_code { --icon: url(icons/file_code.svg); }
+.icon-file_tree { --icon: url(icons/file_tree.svg); }
+.icon-folder_open { --icon: url(icons/folder_open.svg); }
+.icon-git_branch { --icon: url(icons/git_branch.svg); }
+.icon-linux { --icon: url(icons/linux.svg); }
+.icon-list_tree { --icon: url(icons/list_tree.svg); }
+.icon-magnifying_glass { --icon: url(icons/magnifying_glass.svg); }
+.icon-maximize { --icon: url(icons/maximize.svg); }
+.icon-ocaml { --icon: url(icons/ocaml.svg); }
+.icon-play_filled { --icon: url(icons/play_filled.svg); }
+.icon-plus { --icon: url(icons/plus.svg); }
+.icon-repl_neutral { --icon: url(icons/repl_neutral.svg); }
+.icon-server { --icon: url(icons/server.svg); }
+.icon-signal_high { --icon: url(icons/signal_high.svg); }
+.icon-split { --icon: url(icons/split.svg); }
+.icon-terminal { --icon: url(icons/terminal.svg); }
+.icon-warning { --icon: url(icons/warning.svg); }
+.icon-x_circle { --icon: url(icons/x_circle.svg); }
+
+/* The window */
+
+.window {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: min(720px, calc(100vh - 120px));
+  min-height: 480px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.lights {
+  display: flex;
+  gap: 8px;
+  margin-right: 12px;
+}
+
+.lights span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.title-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+.title-item.strong {
+  color: var(--text);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  font: 600 11px/1 var(--sans);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 0;
+}
+
+/* Project panel */
+
+.panel {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow: auto;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 10px;
+  color: var(--text-muted);
+}
+
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.row .icon {
+  color: var(--text-muted);
+}
+
+.row.muted {
+  color: var(--text-muted);
+}
+
+a.row:hover {
+  background: var(--hover);
+}
+
+a.row:focus-visible {
+  outline: none;
+  border-color: var(--border-focused);
+}
+
+.row.selected {
+  background: var(--selected);
+}
+
+.row.selected .icon {
+  color: var(--accent);
+}
+
+.row-detail {
+  margin-left: auto;
+  color: var(--text-placeholder);
+  font-size: 12px;
+}
+
+.indent {
+  width: 14px;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tabs */
+
+.center {
+  display: grid;
+  grid-template-rows: 32px 1fr;
+  min-width: 0;
+  min-height: 0;
+  background: var(--terminal);
+}
+
+.tabs {
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+a.tab:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.tab.active {
+  position: relative;
+  margin-bottom: -1px;
+  background: var(--terminal);
+  color: var(--text);
+}
+
+.tab-detail {
+  color: var(--text-placeholder);
+}
+
+.tab.active .icon-close {
+  width: 12px;
+  height: 12px;
+  margin-left: 4px;
+  color: var(--text-muted);
+}
+
+.tab-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  color: var(--text-muted);
+}
+
+
+.button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font: 400 12px/1.4 var(--sans);
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--hover);
+}
+
+.button:focus-visible {
+  outline: 1px solid var(--border-focused);
+}
+
+/* Status bar */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+/* Keys under the window */
+
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--page-muted);
+  font-size: 14px;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 22px;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--page-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font: 12px/1.5 var(--mono);
+  text-align: center;
+  color: var(--page-text);
+}
+
+@media (max-width: 760px) {
+  .page {
+    padding: 40px 12px 64px;
+  }
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .panel,
+  .tab:not(.active),
+  .tab-tools {
+    display: none;
+  }
+}

@@ -1,0 +1,206 @@
+(* The utop terminal: the history of a session, then a prompt that answers with
+   [Repl.evaluate]. Enter without ";;" continues the phrase on a new line, as in utop. *)
+
+type row = { index : int; entry : Session.entry }
+
+let input_id = "utop-input"
+
+let clock seconds =
+  let seconds = seconds mod 86400 in
+  Printf.sprintf "%02d:%02d:%02d" (seconds / 3600) (seconds / 60 mod 60) (seconds mod 60)
+
+(* Each command comes a few seconds after the one before. *)
+let time_of (session : Session.t) index = clock (session.started + (index * 9) + (index * index mod 7))
+
+let repeat text count = String.concat "" (List.init count (fun _ -> text))
+
+let banner =
+  let welcome =
+    Printf.sprintf "Welcome to utop version %s (using OCaml version %s)!" Session.utop_version
+      Session.ocaml_version
+  in
+  let width = String.length welcome + 2 in
+  String.concat "\n"
+    [
+      repeat {js|─|js} 7 ^ {js|┬|js} ^ repeat {js|─|js} width ^ {js|┬|js} ^ repeat {js|─|js} 7;
+      String.make 7 ' ' ^ {js|│ |js} ^ welcome ^ {js| │|js};
+      String.make 7 ' ' ^ {js|└|js} ^ repeat {js|─|js} width ^ {js|┘|js};
+    ]
+
+let token ((kind, text) : Highlight.token) =
+  <span class_=(Highlight.class_of kind)>(Yuka.text text)</span>
+
+let tokens list = Yuka.fragment (List.map token list)
+
+(* The line utop draws above each prompt. *)
+let bar ~time ~command =
+  <div class_="bar" aria_hidden=true>
+    <span>(Yuka.text {js|─( |js})</span><span class_="bar-time">(Yuka.text time)</span><span>(Yuka.text {js| )─< command |js})</span>
+    <span class_="bar-count">(Yuka.int command)</span><span>(Yuka.text {js| >─|js})</span>
+    <span class_="bar-fill" />
+    <span>"{ counter: "</span><span class_="bar-count">(Yuka.int command)</span><span>(Yuka.text {js| }─|js})</span>
+  </div>
+
+let phrase ~time ~command (entry : Session.entry) =
+  <section class_="phrase" aria_label=("Command " ^ Int.to_string command)>
+    (bar ~time ~command)
+    <div class_="prompt-line">
+      <span class_="prompt">"utop # "</span>
+      <code class_="code">(tokens (Highlight.phrase entry.input))</code>
+    </div>
+    (if entry.output = "" then Yuka.empty
+     else
+       <pre class_="answer">
+         (Yuka.fragment
+            (List.mapi
+               (fun i line -> Yuka.fragment [ (if i = 0 then Yuka.empty else Yuka.text "\n"); tokens line ])
+               (Highlight.answer entry.output)))
+       </pre>)
+  </section>
+
+let rows entries = Array.of_list (List.mapi (fun index entry -> { index; entry }) entries)
+
+let[@client] make ~(session : Session.t) () =
+  let answers = session.entries @ Session.extra in
+  let entries = Yuka.State.make (rows session.entries) in
+  let input = Yuka.State.make "" in
+  let pending = Yuka.State.make ~equal:( = ) [] in
+  let env = Yuka.State.make ~equal:( = ) [] in
+  let history = Yuka.State.make ~equal:( = ) (List.map (fun (e : Session.entry) -> e.input) session.entries) in
+  let cursor = Yuka.State.make ~equal:( = ) None in
+  let quit = Yuka.State.make false in
+  let count = Yuka.State.make (List.length session.entries) in
+  let candidates =
+    Yuka.State.memo ~equal:( = ) (fun () ->
+        let typed = Yuka.State.get input in
+        if typed = "" && Yuka.State.get pending <> [] then [] else Repl.candidates ~env:(Yuka.State.get env) typed)
+  in
+  let set_input text =
+    Yuka.State.set input text;
+    Yuka.State.set cursor None
+  in
+  let push (entry : Session.entry) =
+    let index = Yuka.State.peek count in
+    Yuka.State.set count (index + 1);
+    Yuka.State.update entries (fun rows -> Array.append rows [| { index; entry } |])
+  in
+  let submit () =
+    let line = Yuka.State.peek input in
+    let lines = Yuka.State.peek pending @ [ line ] in
+    let phrase = String.concat "\n" lines in
+    if String.trim phrase = "" then Yuka.State.set pending []
+    else if not (Repl.complete phrase) then (
+      Yuka.State.set pending lines;
+      set_input "")
+    else begin
+      let result = Repl.evaluate ~answers ~env:(Yuka.State.peek env) phrase in
+      push { input = phrase; output = result.output };
+      Yuka.State.set env result.env;
+      Yuka.State.update history (fun h -> h @ [ Repl.normalize phrase ]);
+      Yuka.State.set pending [];
+      Yuka.State.set quit result.quit;
+      set_input ""
+    end
+  in
+  let walk step =
+    let list = Yuka.State.peek history in
+    let size = List.length list in
+    if size > 0 then
+      let next =
+        match (Yuka.State.peek cursor, step) with
+        | None, -1 -> Some (size - 1)
+        | None, _ -> None
+        | Some i, _ when i + step < 0 -> Some 0
+        | Some i, _ when i + step >= size -> None
+        | Some i, _ -> Some (i + step)
+      in
+      Yuka.State.set input (match next with Some i -> List.nth list i | None -> "");
+      Yuka.State.set cursor next
+  in
+  let accept candidate = set_input (Repl.accept (Yuka.State.peek input) candidate) in
+  let key event =
+    match Yuka.Event.key event with
+    | "Enter" ->
+        Yuka.Event.prevent_default event;
+        submit ()
+    | "ArrowUp" ->
+        Yuka.Event.prevent_default event;
+        walk (-1)
+    | "ArrowDown" ->
+        Yuka.Event.prevent_default event;
+        walk 1
+    | "Tab" -> (
+        match Yuka.State.peek candidates with
+        | first :: _ when Yuka.State.peek input <> "" ->
+            Yuka.Event.prevent_default event;
+            accept first
+        | _ -> ())
+    | "l" when Yuka.Event.ctrl_key event ->
+        Yuka.Event.prevent_default event;
+        Yuka.State.set entries [||]
+    | "c" when Yuka.Event.ctrl_key event ->
+        Yuka.Event.prevent_default event;
+        Yuka.State.set pending [];
+        set_input ""
+    | _ -> ()
+  in
+  let restart _ =
+    Yuka.State.set entries [||];
+    Yuka.State.set count 0;
+    Yuka.State.set env [];
+    Yuka.State.set pending [];
+    Yuka.State.set quit false;
+    set_input "";
+    Yuka.Browser.focus input_id
+  in
+  <div class_="terminal" on_click=(fun event -> if Yuka.Event.target_tag event <> "BUTTON" then Yuka.Browser.focus input_id)>
+    <div class_="scroll">
+      <div class_="screen">
+        <pre class_="banner" aria_label=("utop " ^ Session.utop_version)>(Yuka.text banner)</pre>
+        <p class_="hint">"Type " <span class_="tk keyword">"#utop_help"</span> " for help about using utop."</p>
+        (Yuka.each ~key:(fun row -> Int.to_string row.index)
+           (fun () -> Yuka.State.get entries)
+           (fun row -> phrase ~time:(time_of session row.index) ~command:row.index row.entry))
+        (if Yuka.State.get quit then
+           <div class_="exited">
+             <span>"utop exited."</span>
+             <button class_="button" type_=`button on_click=restart>"Start again"</button>
+           </div>
+         else
+           <section class_="phrase live" aria_label="Prompt">
+             (bar ~time:(time_of session (Yuka.State.get count)) ~command:(Yuka.State.get count))
+             (Yuka.fragment
+                (List.mapi
+                   (fun i line ->
+                     <div class_="prompt-line">
+                       <span class_="prompt">(Yuka.text (if i = 0 then "utop # " else "       "))</span>
+                       <code class_="code">(tokens (Highlight.phrase line))</code>
+                     </div>)
+                   (Yuka.State.get pending)))
+             <div class_="prompt-line">
+               <label class_="prompt" for_=input_id>
+                 (Yuka.text (if Yuka.State.get pending = [] then "utop # " else "       "))
+               </label>
+               <div class_="field">
+                 <code class_="code overlay" aria_hidden=true>(tokens (Highlight.phrase (Yuka.State.get input)))</code>
+                 <input id=input_id class_="input" type_=`text autocomplete="off" spellcheck=false
+                   value=(Yuka.State.get input)
+                   on_input=(fun event -> set_input (Yuka.Event.target_value event))
+                   on_keydown=key />
+               </div>
+             </div>
+           </section>)
+      </div>
+    </div>
+    <div class_="completion" aria_label="Completions">
+      <span class_="edge">(Yuka.text {js|┤|js})</span>
+      (Yuka.fragment
+         (List.mapi
+            (fun i word ->
+              <button class_=(if i = 0 then "word on" else "word") type_=`button tabindex=(-1)
+                on_click=(fun _ -> accept word; Yuka.Browser.focus input_id)>
+                (Yuka.text word)
+              </button>)
+            (Yuka.State.get candidates)))
+    </div>
+  </div>

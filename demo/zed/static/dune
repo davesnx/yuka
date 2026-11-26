@@ -1,0 +1,8 @@
+(rule
+ (alias all)
+ (deps
+  zed.css
+  (source_tree icons)
+  (source_tree fonts))
+ (action
+  (progn)))

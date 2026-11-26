@@ -74,6 +74,8 @@ let () =
   let async_feed = ref (Filename.concat here "../../async-feed") in
   let infinite_scroll = ref (Filename.concat here "../../infinite-scroll") in
   let posters = ref (Filename.concat here "../../posters") in
+  let utop = ref (Filename.concat here "../../utop") in
+  let top = ref (Filename.concat here "../../top") in
   let variable name = match Sys.getenv_opt name with Some "" | None -> None | value -> value in
   let database =
     ref
@@ -112,6 +114,8 @@ let () =
         Arg.Set_string infinite_scroll,
         "With --base: directory of the Infinite scroll demo (client/ and static/), served under /infinite-scroll" );
       ("--posters", Arg.Set_string posters, "With --base: directory of the Posters demo (client/ and static/), served under /posters");
+      ("--utop", Arg.Set_string utop, "With --base: directory of the utop demo (client/ and static/), served under /utop");
+      ("--top", Arg.Set_string top, "With --base: directory of the top demo (client/ and static/), served under /top");
       ("--secret", Arg.Set_string secret, "Secret of the session cookies (default: $YUKA_DEMO_SECRET)");
       ( "--second-node",
         Arg.Set_int second,
@@ -149,6 +153,8 @@ let () =
     else if base = "/async-feed" then stop "--base /async-feed is the path of the Async demo"
     else if base = "/infinite-scroll" then stop "--base /infinite-scroll is the path of the Infinite scroll demo"
     else if base = "/posters" then stop "--base /posters is the path of the Posters demo"
+    else if base = "/utop" then stop "--base /utop is the path of the utop demo"
+    else if base = "/top" then stop "--base /top is the path of the top demo"
     else
       let dev = !prerender = "" && Sys.getenv_opt "YUKA_DEV" = Some "1" in
       let async =
@@ -169,7 +175,17 @@ let () =
         | Ok posters -> (posters.config, posters.handler)
         | Error message -> stop ("the Posters demo: " ^ message)
       in
-      [ async; infinite; posters ]
+      let utop =
+        match Utop_demo_app.Serve.make ~base:"/utop" ~bundle:!bundle ~dir:!utop ~dev () with
+        | Ok utop -> (utop.config, utop.handler)
+        | Error message -> stop ("the utop demo: " ^ message)
+      in
+      let top =
+        match Top_demo_app.Serve.make ~base:"/top" ~bundle:!bundle ~dir:!top ~dev () with
+        | Ok top -> (top.config, top.handler)
+        | Error message -> stop ("the top demo: " ^ message)
+      in
+      [ async; infinite; posters; utop; top ]
   in
   let config =
     match

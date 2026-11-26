@@ -172,6 +172,76 @@ let posters () : Yuka.server Yuka.element =
     <text class_="caption" x="344.5" y="227" text_anchor="middle">"Light"</text>
   </svg>
 
+let utop_line ~y ~width ~answer : Yuka.server Yuka.element =
+  let px = Int.to_string in
+  <g>
+    <text class_="caption prompt" x="116" y=(px y)>"utop #"</text>
+    <rect class_="bar strong" x="160" y=(px (y - 7)) width=(px width) height="7" rx="3.5" />
+    <rect class_="bar code" x="116" y=(px (y + 7)) width=(px answer) height="7" rx="3.5" />
+  </g>
+
+let utop () : Yuka.server Yuka.element =
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A toplevel in an editor window, with a file panel">
+    (window_chrome ~title:"utop")
+    <line class_="rule" x1="104.5" y1="28" x2="104.5" y2="260" />
+    <rect class_="nav-active" x="8" y="64" width="88" height="18" rx="4" />
+    <rect class_="bar" x="16" y="44" width="50" height="7" rx="3.5" />
+    <rect class_="accent-fill" x="16" y="69" width="8" height="8" rx="2" />
+    <rect class_="bar strong" x="30" y="70" width="48" height="6" rx="3" />
+    <rect class_="bar" x="30" y="92" width="56" height="6" rx="3" />
+    <rect class_="bar" x="30" y="114" width="52" height="6" rx="3" />
+    <rect class_="bar" x="30" y="136" width="60" height="6" rx="3" />
+    <rect class_="banner" x="116.5" y="40.5" width="200" height="22" rx="2" />
+    (utop_line ~y:84 ~width:150 ~answer:180)
+    (utop_line ~y:118 ~width:190 ~answer:130)
+    (utop_line ~y:152 ~width:120 ~answer:210)
+    <text class_="caption prompt" x="116" y="186">"utop #"</text>
+    <rect class_="accent-fill" x="160" y="178" width="2" height="10" />
+    <line class_="rule" x1="104" y1="226.5" x2="440" y2="226.5" />
+    <rect class_="chip on" x="116.5" y="232.5" width="30" height="14" rx="3" />
+    <rect class_="chip" x="150.5" y="232.5" width="40" height="14" rx="3" />
+    <rect class_="chip" x="194.5" y="232.5" width="36" height="14" rx="3" />
+  </svg>
+
+let top_row ~y ~width ~cpu ~hot : Yuka.server Yuka.element =
+  let px = Int.to_string in
+  <g>
+    <rect class_="bar code" x="116" y=(px y) width="24" height="6" rx="3" />
+    <rect class_=(if hot then "bar hot" else "bar strong") x="152" y=(px y) width=(px cpu) height="6" rx="3" />
+    <rect class_="bar" x="236" y=(px y) width=(px width) height="6" rx="3" />
+  </g>
+
+let top () : Yuka.server Yuka.element =
+  <svg class_="art" view_box="0 0 440 260" role=`img aria_label="A process monitor in an editor window, with a host panel">
+    (window_chrome ~title:"top")
+    <line class_="rule" x1="104.5" y1="28" x2="104.5" y2="260" />
+    <rect class_="bar" x="16" y="44" width="50" height="7" rx="3.5" />
+    <rect class_="nav-active" x="8" y="64" width="88" height="18" rx="4" />
+    <rect class_="accent-fill" x="16" y="69" width="8" height="8" rx="2" />
+    <rect class_="bar strong" x="30" y="70" width="40" height="6" rx="3" />
+    <rect class_="bar" x="30" y="92" width="48" height="6" rx="3" />
+    <rect class_="bar" x="30" y="114" width="30" height="6" rx="3" />
+    <text class_="caption" x="116" y="50">"%Cpu"</text>
+    <rect class_="meter" x="160.5" y="43.5" width="268" height="8" rx="2" />
+    <rect class_="meter-used" x="161" y="44" width="92" height="7" rx="2" />
+    <text class_="caption" x="116" y="68">"Mem"</text>
+    <rect class_="meter" x="160.5" y="61.5" width="268" height="8" rx="2" />
+    <rect class_="meter-used" x="161" y="62" width="70" height="7" rx="2" />
+    <rect class_="meter-cache" x="231" y="62" width="96" height="7" />
+    <rect class_="nav-active" x="112" y="84" width="320" height="14" rx="2" />
+    (top_row ~y:110 ~width:150 ~cpu:62 ~hot:true)
+    (top_row ~y:128 ~width:110 ~cpu:44 ~hot:false)
+    (top_row ~y:146 ~width:170 ~cpu:30 ~hot:false)
+    (top_row ~y:164 ~width:90 ~cpu:22 ~hot:false)
+    (top_row ~y:182 ~width:130 ~cpu:14 ~hot:false)
+    (top_row ~y:200 ~width:100 ~cpu:8 ~hot:false)
+    <line class_="rule" x1="104" y1="226.5" x2="440" y2="226.5" />
+    <rect class_="chip on" x="116.5" y="232.5" width="30" height="14" rx="3" />
+    <rect class_="chip" x="150.5" y="232.5" width="30" height="14" rx="3" />
+    <rect class_="chip" x="184.5" y="232.5" width="30" height="14" rx="3" />
+    <rect class_="chip" x="218.5" y="232.5" width="40" height="14" rx="3" />
+  </svg>
+
 let demos =
   [
     {
@@ -202,6 +272,22 @@ let demos =
       path = "/infinite-scroll";
       tags = [ "on_visible"; "keep_scroll"; "URL state" ];
       illustration = infinite_scroll;
+    };
+    {
+      name = "utop";
+      description =
+        "A fake OCaml toplevel in a Zed window: sessions written in advance, and a prompt that answers in the browser.";
+      path = "/utop";
+      tags = [ "Islands"; "Yuka.each"; "Keyboard"; "Zed" ];
+      illustration = utop;
+    };
+    {
+      name = "top";
+      description =
+        "A fake top in a Zed window: the server renders the first screen, the browser a new one every second.";
+      path = "/top";
+      tags = [ "Islands"; "Yuka.each"; "on_frame"; "Zed" ];
+      illustration = top;
     };
   ]
 
@@ -253,6 +339,13 @@ h2{font-size:24px;letter-spacing:-.02em;font-weight:600;margin:0 0 8px}
 .art .poster-line{fill:none;stroke:#f2a33a;stroke-width:3;stroke-linecap:round}
 .art .poster-title{fill:#ededf0}
 .art .poster-text{fill:#8a8a96}
+.art .prompt{fill:#3f953a}
+.art .bar.code{fill:var(--accent);opacity:.35}
+.art .banner{fill:none;stroke:#d2b67c;stroke-dasharray:3 2}
+.art .bar.hot{fill:#d07277}
+.art .meter{fill:none;stroke:var(--line)}
+.art .meter-used{fill:#3f953a}
+.art .meter-cache{fill:#d2b67c}
 .art .line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 @media (max-width:720px){.page{padding-top:56px}h1{font-size:34px}.card{grid-template-columns:1fr}.preview{border-left:0;border-top:1px solid var(--line);order:-1}.body{padding:24px}}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}
