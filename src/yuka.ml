@@ -68,6 +68,12 @@ module Server = struct
   let to_string build = Server.to_string (Kind.fn build)
   let page ?title ?head body = Cycle.page ?title ?head (Kind.fn body)
 
+  module Cookie = struct
+    let set = Cookie.set
+    let drop = Cookie.drop
+    let get r name = Option.bind (Request.cookie r name) Host.decode_uri_component
+  end
+
   module Action = struct
     let implement = Server.implement
     let reject = Server.reject
@@ -119,6 +125,8 @@ module Server = struct
     module Make = Cycle.Make
 
     let default_log = Cycle.default_log
+    let log = Cycle.log
+    let default_sink level message = !Types.default_log level message
 
     let build_id = Cycle.build_id
   end
@@ -188,6 +196,9 @@ let runtime_hole_attr = hole_attr_unchecked
 let runtime_hole = hole
 let runtime_text_call f x = hole (fun () -> text (f x))
 let runtime_call_attr name f x = hole_attr_unchecked name (fun () -> Some (f x))
+let runtime_attr_checked name value : _ attribute = Static (name, value)
+let runtime_hole_attr_checked name f : _ attribute = Dynamic (name, f)
+let runtime_call_attr_checked name f x : _ attribute = Dynamic (name, fun () -> Some (f x))
 let runtime_url_attr = url_attr
 let runtime_url_hole_attr = url_hole_attr
 let runtime_template = Template.coded
@@ -272,9 +283,9 @@ module Private = struct
     let o = Base.new_owner () in
     let parent = !(Base.current_owner ()) in
     let id =
-      Option.map
-        (fun p -> (p, Base.add_disposer p (fun () -> Base.dispose_owner o)))
-        parent
+      match parent with
+      | Some p -> Some (p, Base.add_disposer p (fun () -> Base.dispose_owner o))
+      | None -> None
     in
     let forget () = Option.iter (fun (p, c) -> Base.remove_disposer p c) id in
     match Base.with_owner o f with

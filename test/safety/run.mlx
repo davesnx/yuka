@@ -115,7 +115,7 @@ let attribute_names () =
       raises ("unchecked: " ^ String.escaped name) (fun () -> runtime_attr name "x");
       raises ("hole unchecked: " ^ String.escaped name) (fun () -> runtime_hole_attr name (fun () -> None));
       raises ("template: " ^ String.escaped name) (fun () -> Private.template Private.Template.(element "a" [ fixed name "x" ] [])))
-    [ "href\t"; "href "; "x onclick=alert(1)"; ""; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
+    [ "href\t"; "href "; "x onclick=alert(1)"; ""; "\x00"; "a\"b"; "a'b"; "a>b"; "a/b"; "a=b"; "a<b"; "a\x00b"; "a\x7fb" ];
   check_html "a valid name" {|<a data-x:y_z.1="x"></a>|} (element "a" [ attr "data-x:y_z.1" "x" ] [])
 
 let unchecked_names () =
@@ -259,7 +259,19 @@ let escapes () =
       Alcotest.(check string) ("attribute " ^ String.escaped s)
         ({|<p title="|} ^ escape_reference ~quote:true s ^ {|"></p>|})
         (html (element "p" [ attr "title" s ] [])))
-    escape_inputs
+    escape_inputs;
+  (* Long runs of entities, past the 8-byte steps of the escaper and the growth of its buffer. *)
+  List.iter
+    (fun n ->
+      List.iter
+        (fun unit ->
+          let s = String.concat "" (List.init n (fun _ -> unit)) in
+          Alcotest.(check string) ("text run " ^ unit) (escape_reference ~quote:false s) (html (text s));
+          Alcotest.(check string) ("attribute run " ^ unit)
+            ({|<p title="|} ^ escape_reference ~quote:true s ^ {|"></p>|})
+            (html (element "p" [ attr "title" s ] [])))
+        [ "\""; "&"; "<"; ">"; "a\""; "&<>\"x" ])
+    (List.init 120 (fun i -> i * 7))
 
 let raw_text () =
   check_html "script text is not HTML-escaped, its end tag and <!-- are made safe"

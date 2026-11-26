@@ -40,9 +40,12 @@ module Adapter = struct
             Buffer.add_string buffer chunk;
             if Buffer.length buffer > limit then refuse () else read ())
     in
-    match Option.bind (Dream.header request "Content-Length") int_of_string_opt with
-    | Some n when n > limit -> to_async (refuse ())
-    | _ -> to_async (read ())
+    match Dream.header request "Content-Length" with
+    | Some length -> (
+        match int_of_string_opt length with
+        | Some n when n > limit -> to_async (refuse ())
+        | _ -> to_async (read ()))
+    | None -> to_async (read ())
 
   let without_session f request =
     match f request with v -> Some v | exception Failure m when m = "Missing session middleware" -> None
@@ -57,6 +60,8 @@ module Adapter = struct
     to_async
       (match body with
       | Yuka.Server.String text -> Dream.respond ~code:status ~headers text
+      | Yuka.Server.Fixed { length; write } ->
+          Dream.respond ~code:status ~headers (Yuka.Server.fixed_to_string ~length write)
       | Yuka.Server.Stream f ->
           Dream.stream ~code:status ~headers (fun stream ->
               to_lwt
@@ -143,6 +148,7 @@ let is_html response =
 let drain (r : Yuka.Server.response) =
   match r.body with
   | Yuka.Server.String text -> Yuka.Async.return text
+  | Yuka.Server.Fixed { length; write } -> Yuka.Async.return (Yuka.Server.fixed_to_string ~length write)
   | Yuka.Server.Stream f ->
       let b = Buffer.create 4096 in
       Yuka.Async.map

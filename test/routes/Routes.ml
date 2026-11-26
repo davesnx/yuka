@@ -30,7 +30,8 @@ Router.make ~layout:Layouts.root ~not_found:Pages.not_found ~error:Pages.error
             };
         Router.post Close_issue ~path:"/close"
           ~handler:Actions.close;
-        Router.get Issue_json ~path:"/json" ~handler:Api.issue;
+        Router.get Issue_json ~path:"/json" ~handler:Api.issue
+          ~search:{ pretty = default bool false; fields = many string };
         Router.put Update_issue ~path:"/json"
           ~handler:Actions.update;
       ];

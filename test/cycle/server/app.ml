@@ -343,6 +343,12 @@ module Api = struct
   let clear _req = Server.text "cleared"
   let asset _req = Server.text "asset"
 
+  let echo _req ~lang ~q ~n ~tag =
+    Server.text
+      (String.concat " " [ lang; Option.value q ~default:"-"; string_of_int n; String.concat "," tag ])
+
+  let echo_post _req ~lang = Server.text ("posted " ^ lang)
+
   let cookies _req =
     Server.text ~headers:[ ("set-cookie", "a=1"); ("Set-Cookie", "b=2"); ("x-a", "mine") ] "two cookies"
 

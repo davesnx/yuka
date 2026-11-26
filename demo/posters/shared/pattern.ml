@@ -3,7 +3,23 @@ type lines = { lines : int; amplitude : int; waves : int; stroke : int; directio
 type blocks = { blocks : int; gap : int; filled : int; squareness : int; radius : int } [@@deriving codec]
 type clouds = { clouds : int; puffs : int; size : int } [@@deriving codec]
 type lightning = { bolts : int; branches : int; jaggedness : int; thickness : int; direction : int; length : int } [@@deriving codec]
-type circles = { columns : int; rows : int; half : int; empty : int; block : int; bar : int } [@@deriving codec]
+type style = Halves | Fragments [@@deriving codec]
+
+type circles = {
+  style : style;
+  columns : int;
+  rows : int;
+  half : int;
+  empty : int;
+  block : int;
+  bar : int;
+  merge : int;
+  round : int;
+  gap : int;
+  accent : int;
+  tint : string;
+}
+[@@deriving codec]
 
 type art =
   | Lines of lines
@@ -48,6 +64,19 @@ module Kind = struct
       ~encode:name
 end
 
+module Style = struct
+  type t = style
+
+  let all = [ Halves; Fragments ]
+  let name = function Halves -> "halves" | Fragments -> "fragments"
+  let label = function Halves -> "Halves" | Fragments -> "Fragments"
+
+  let param =
+    Yuka.Router.Param.make
+      ~decode:(function "halves" -> Some Halves | "fragments" -> Some Fragments | _ -> None)
+      ~encode:name
+end
+
 let kind = function
   | Lines _ -> Kind.Lines
   | Blocks _ -> Kind.Blocks
@@ -55,7 +84,7 @@ let kind = function
   | Lightning _ -> Kind.Lightning
   | Circles _ -> Kind.Circles
 
-type paint = Fill | Stroke of int
+type paint = Fill | Stroke of int | Tint of string
 type shape = { index : int; d : string; paint : paint }
 type label = { x : int; y : int; size : int; bold : bool; spacing : int; end_ : bool; text : string }
 type box = { left : int; top : int; right : int; bottom : int }
@@ -88,16 +117,39 @@ module Range = struct
   let jaggedness = (0, 100)
   let thickness = (1, 24)
   let length = (20, 100)
-  let columns = (4, 24)
-  let rows = (4, 30)
+  let columns = (2, 24)
+  let rows = (2, 30)
   let share = (0, 100)
+  let tile_gap = (0, 40)
+  let accent = (0, 6)
 end
 
 let lines_default = { lines = 32; amplitude = 60; waves = 3; stroke = 6; direction = 90 }
 let blocks_default = { blocks = 14; gap = 16; filled = 45; squareness = 50; radius = 0 }
 let clouds_default = { clouds = 6; puffs = 6; size = 45 }
 let lightning_default = { bolts = 2; branches = 4; jaggedness = 55; thickness = 7; direction = 180; length = 100 }
-let circles_default = { columns = 13; rows = 15; half = 80; empty = 12; block = 2; bar = 6 }
+let accent_default = "#e8481c"
+
+let circles_default =
+  {
+    style = Halves;
+    columns = 13;
+    rows = 15;
+    half = 80;
+    empty = 12;
+    block = 2;
+    bar = 6;
+    merge = 40;
+    round = 55;
+    gap = 12;
+    accent = 1;
+    tint = accent_default;
+  }
+
+let fragments_default = { circles_default with style = Fragments; columns = 3; rows = 4 }
+
+let restyle style (c : circles) =
+  if c.style = style then c else match style with Halves -> circles_default | Fragments -> fragments_default
 
 let fresh = function
   | Kind.Lines -> Lines lines_default
@@ -178,12 +230,18 @@ let normal_art = function
   | Circles c ->
       Circles
         {
+          style = c.style;
           columns = fit Range.columns c.columns;
           rows = fit Range.rows c.rows;
           half = fit Range.share c.half;
           empty = fit Range.share c.empty;
           block = fit Range.share c.block;
           bar = fit Range.share c.bar;
+          merge = fit Range.share c.merge;
+          round = fit Range.share c.round;
+          gap = fit Range.tile_gap c.gap;
+          accent = fit Range.accent c.accent;
+          tint = color ~default:accent_default c.tint;
         }
 
 let normal_colours ~(defaults : settings) (c : colours) =
@@ -259,6 +317,19 @@ let wave random (l : lines) =
 
 let rect r = "M" ^ point (r.left, r.top) ^ "H" ^ i r.right ^ "V" ^ i r.bottom ^ "H" ^ i r.left ^ "z"
 let arc ?(large = false) r (x, y) = "A" ^ i r ^ " " ^ i r ^ (if large then " 0 1 1 " else " 0 0 1 ") ^ point (x, y)
+
+let corners (tl, tr, br, bl) r =
+  let corner radius (x, y) = if radius = 0 then "L" ^ point (x, y) else arc radius (x, y) in
+  "M" ^ point (r.left + tl, r.top)
+  ^ "H" ^ i (r.right - tr)
+  ^ corner tr (r.right, r.top + tr)
+  ^ "V" ^ i (r.bottom - br)
+  ^ corner br (r.right - br, r.bottom)
+  ^ "H" ^ i (r.left + bl)
+  ^ corner bl (r.left, r.bottom - bl)
+  ^ "V" ^ i (r.top + tl)
+  ^ corner tl (r.left + tl, r.top)
+  ^ "z"
 
 let rounded radius r =
   if radius <= 0 then rect r
@@ -541,6 +612,65 @@ let grid random box (c : circles) =
   |> List.filter (fun s -> s.d <> "")
   |> Array.of_list
 
+let disc (x, y) r = "M" ^ point (x - r, y) ^ arc r (x + r, y) ^ arc r (x - r, y) ^ "z"
+
+let fragments random box (c : circles) =
+  let w = box.right - box.left and h = box.bottom - box.top in
+  let span, count = if w * c.rows <= h * c.columns then (w, c.columns) else (h, c.rows) in
+  let edge k = k * span / count in
+  let left = box.left + ((w - edge c.columns) / 2) and top = box.top + ((h - edge c.rows) / 2) in
+  let near = c.gap / 2 and far = c.gap - (c.gap / 2) in
+  let x k = left + edge k and y k = top + edge k in
+  let tile column row dx dy =
+    {
+      left = (x column + if column = 0 then 0 else near);
+      top = (y row + if row = 0 then 0 else near);
+      right = (x (column + dx) - if column + dx = c.columns then 0 else far);
+      bottom = (y (row + dy) - if row + dy = c.rows then 0 else far);
+    }
+  in
+  let accents = List.init c.accent (fun k -> random [ 6; 5; k ] (c.columns * c.rows)) in
+  let accent column row = List.mem ((row * c.columns) + column) accents in
+  let used = Array.make_matrix c.rows c.columns false in
+  let free column row = column < c.columns && row < c.rows && (not used.(row).(column)) && not (accent column row) in
+  let tiles = ref [] in
+  for row = 0 to c.rows - 1 do
+    for column = 0 to c.columns - 1 do
+      if not used.(row).(column) then begin
+        let key = (row * most_columns) + column in
+        let shape =
+          if accent column row then begin
+            used.(row).(column) <- true;
+            let r = tile column row 1 1 in
+            let radius = max 1 (min (r.right - r.left) (r.bottom - r.top) / 2) in
+            { index = key; d = disc ((r.left + r.right) / 2, (r.top + r.bottom) / 2) radius; paint = Tint c.tint }
+          end
+          else
+            let long = random [ 6; 1; column; row ] 100 < c.merge in
+            let across = random [ 6; 2; column; row ] 2 = 0 in
+            let wide = free (column + 1) row and tall = free column (row + 1) in
+            let dx, dy =
+              if not long then (1, 1)
+              else if (across && wide) || (wide && not tall) then (2, 1)
+              else if tall then (1, 2)
+              else (1, 1)
+            in
+            for r = row to row + dy - 1 do
+              for k = column to column + dx - 1 do
+                used.(r).(k) <- true
+              done
+            done;
+            let r = tile column row dx dy in
+            let radius = min (r.right - r.left) (r.bottom - r.top) / 2 in
+            let pick corner = if random [ 6; 3; key; corner ] 100 < c.round then radius else 0 in
+            { index = key; d = corners (pick 0, pick 1, pick 2, pick 3) r; paint = Fill }
+        in
+        tiles := shape :: !tiles
+      end
+    done
+  done;
+  Array.of_list (List.rev !tiles)
+
 let area padding = { left = padding; top = padding; right = width - padding; bottom = art_bottom - padding }
 let clip_id padding = "art-" ^ i padding
 
@@ -558,7 +688,8 @@ let shapes (l : layout) art =
   | Blocks a -> pack random box a
   | Clouds a -> sky random box a
   | Lightning a -> storm random (if l.padding = 0 then box else inset ((a.thickness + 1) / 2) box) a
-  | Circles a -> grid random box a
+  | Circles ({ style = Halves; _ } as a) -> grid random box a
+  | Circles ({ style = Fragments; _ } as a) -> fragments random box a
 
 let labels (t : text) =
   let line y text = { x = 918; y; size = 24; bold = false; spacing = 0; end_ = true; text } in
@@ -605,7 +736,10 @@ let presets =
     preset ~name:"Classic" ~seed:2019 ~padding:0 ~art:(Circles circles_default) ~colours:dark ~title:"Classic"
       ~subtitle:"Half discs, the first poster" ~date:("2019", "March, 1", "Friday");
     preset ~name:"Pebbles" ~seed:314 ~padding:80
-      ~art:(Circles { columns = 8; rows = 9; half = 100; empty = 0; block = 0; bar = 0 })
+      ~art:(Circles { circles_default with columns = 8; rows = 9; half = 100; empty = 0; block = 0; bar = 0 })
       ~colours:{ background = "#e76f51"; foreground = "#264653" } ~title:"Pebbles" ~subtitle:"Half discs only"
       ~date:("2026", "December, 4", "Friday");
+    preset ~name:"Fragments" ~seed:99 ~padding:80 ~art:(Circles fragments_default)
+      ~colours:{ background = "#f2f0ea"; foreground = "#222222" } ~title:"Fragments"
+      ~subtitle:"Rounded tiles and one accent" ~date:("2021", "July, 9", "Friday");
   ]

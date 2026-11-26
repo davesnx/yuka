@@ -1,11 +1,10 @@
 open Posters_shared
 
-let poster_svg req =
-  let defaults = Pages.today () in
+let poster_svg _req ~kind ~seed ~padding ~lines ~amplitude ~waves ~stroke ~direction ~blocks ~gap ~filled ~squareness ~radius ~clouds ~puffs ~size ~bolts ~branches ~jaggedness ~thickness ~length ~style ~columns ~rows ~half ~empty ~block ~bar ~merge ~round ~accent ~tint ~bg ~fg ~title ~subtitle ~year ~day ~weekday =
   let settings =
-    match Routes.find `GET [] (Yuka.Server.Request.query req) with
-    | Yuka.Router.Found route -> Link.settings ~defaults route
-    | _ -> defaults
+    Link.settings ~defaults:(Pages.today ())
+      (Routes.Home
+         { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; bolts; branches; jaggedness; thickness; length; style; columns; rows; half; empty; block; bar; merge; round; accent; tint; bg; fg; title; subtitle; year; day; weekday })
   in
   Yuka.Server.response
     ~headers:[ ("content-type", "image/svg+xml; charset=utf-8") ]

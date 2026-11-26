@@ -22,12 +22,12 @@ let today () =
   let now = Unix.gmtime (Unix.time ()) in
   Pattern.defaults ~year:(now.tm_year + 1900) ~month:now.tm_mon ~day:now.tm_mday ~weekday:now.tm_wday
 
-let home ~kind ~seed ~padding ~lines ~amplitude ~waves ~stroke ~direction ~blocks ~gap ~filled ~squareness ~radius ~clouds ~puffs ~size ~bolts ~branches ~jaggedness ~thickness ~length ~columns ~rows ~half ~empty ~block ~bar ~bg ~fg ~title ~subtitle ~year ~day ~weekday () =
+let home ~kind ~seed ~padding ~lines ~amplitude ~waves ~stroke ~direction ~blocks ~gap ~filled ~squareness ~radius ~clouds ~puffs ~size ~bolts ~branches ~jaggedness ~thickness ~length ~style ~columns ~rows ~half ~empty ~block ~bar ~merge ~round ~accent ~tint ~bg ~fg ~title ~subtitle ~year ~day ~weekday () =
   let defaults = today () in
   let initial =
     Link.settings ~defaults
       (Routes.Home
-         { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; bolts; branches; jaggedness; thickness; length; columns; rows; half; empty; block; bar; bg; fg; title; subtitle; year; day; weekday })
+         { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; bolts; branches; jaggedness; thickness; length; style; columns; rows; half; empty; block; bar; merge; round; accent; tint; bg; fg; title; subtitle; year; day; weekday })
   in
   Yuka.Server.page ~title:"Posters" (fun () -> <Yuka.Client><Playground initial defaults /></Yuka.Client>)
 
@@ -36,7 +36,7 @@ let gallery () =
       <section class_="gallery">
         <div class_="gallery-head">
           <h1>"Gallery"</h1>
-          <p>"Two presets for each kind, drawn on the server. Open one in the playground to change it."</p>
+          <p>"Presets for each kind, drawn on the server. Open one in the playground to change it."</p>
         </div>
         <ul class_="gallery-grid">
           (Yuka.fragment

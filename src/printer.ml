@@ -1,28 +1,11 @@
-module Buffer = Stdlib.Buffer
+module Buffer = Host.Out
 
 open Types
 open Base
 
   let escape = Template_build.escape
 
-  let put b s start i entity =
-    Buffer.add_substring b s start (i - start);
-    Buffer.add_string b entity;
-    i + 1
-
-  let add_escaped b ~quote s =
-    let n = String.length s in
-    let start = ref 0 and i = ref (Host.skip_clean s 0) in
-    while !i < n do
-      (match String.unsafe_get s !i with
-      | '&' -> start := put b s !start !i "&amp;"
-      | '<' -> start := put b s !start !i "&lt;"
-      | '>' when not quote -> start := put b s !start !i "&gt;"
-      | '"' when quote -> start := put b s !start !i "&quot;"
-      | _ -> ());
-      i := Host.skip_clean s (!i + 1)
-    done;
-    Buffer.add_substring b s !start (n - !start)
+  let add_escaped = Buffer.add_escaped
 
   let blocked_logged = ref false
 
@@ -32,13 +15,52 @@ open Base
       log_message `Warn ("printed " ^ Url.blocked ^ " for an unsafe URL in " ^ name ^ ": " ^ String.escaped value)
     end
 
-  let add_attr b ?(literal = false) ~tag name value =
+  (* The attribute names printed last, checked once: most names come back on
+     every element. [plain] means that Url.check gives back the value
+     unchanged whatever the tag. *)
+  type known = { name : string; lname : string; plain : bool; prefix : string }
+
+  let known = Array.make 16 { name = ""; lname = ""; plain = false; prefix = "" }
+  let known_slot name = (String.length name + Char.code (String.unsafe_get name 0)) land 15
+
+  let learn name =
     if not (Url.valid_name name) then invalid_arg ("Yuka: refused attribute name " ^ String.escaped name);
-    let tag = Host.lowercase tag and lname = Host.lowercase name in
-    let value = if literal && Url.html_sink ~tag lname then value else Url.check ~tag ~log:log_blocked lname value in
-    Buffer.add_char b ' ';
-    Buffer.add_string b name;
-    Buffer.add_string b "=\"";
+    let lname = Host.lowercase name in
+    let k =
+      { name; lname; plain = not (Url.url_name lname || lname = "srcdoc" || Url.animation_name lname);
+        prefix = " " ^ name ^ "=\"" }
+    in
+    Array.unsafe_set known (known_slot name) k;
+    k
+
+  let lookup name =
+    if String.length name = 0 then learn name
+    else
+      let k = Array.unsafe_get known (known_slot name) in
+      if k.name == name || String.equal k.name name then k else learn name
+
+  (* The tag lowercased last: the tags of an element come back as the same
+     string, most of them literals. One pair, replaced as a whole. *)
+  let last_tag = ref ("", "")
+
+  let lower_tag tag =
+    let t, lt = !last_tag in
+    if t == tag then lt
+    else begin
+      let lt = Host.lowercase tag in
+      last_tag := (tag, lt);
+      lt
+    end
+
+  let add_attr b ?(literal = false) ~tag name value =
+    let k = lookup name in
+    let value =
+      if k.plain then value
+      else
+        let tag = lower_tag tag in
+        if literal && Url.html_sink ~tag k.lname then value else Url.check ~tag ~log:log_blocked k.lname value
+    in
+    Buffer.add_string b k.prefix;
     add_escaped b ~quote:true value;
     Buffer.add_char b '"'
 
@@ -243,7 +265,7 @@ open Base
   let kept_buffer = 1_048_576
   let rendering = Host.local (fun () -> Atomic.make 0)
 
-  let rec print ?env s build =
+  let rec print ?env ?frame ?keep s build =
     let owner = new_owner () in
     Option.iter (fun e -> owner.env <- e) env;
     let scoped e f =
@@ -279,15 +301,19 @@ open Base
     in
     let field_attrs ~tag each add =
       let field =
-        match (s.invalid, Host.lowercase tag) with
-        | [], _ -> None
-        | invalid, ("input" | "select" | "textarea") ->
+        match s.invalid with
+        | [] -> None
+        | invalid -> (
+        match Host.lowercase tag with
+        | "input" | "select" | "textarea" ->
             let name = ref None and hidden = ref false in
             each (fun _ n v ->
                 if n = "name" && Option.is_none !name then name := Some v
                 else if n = "type" && Host.lowercase v = "hidden" then hidden := true);
-            Option.map (fun id -> (id, !hidden)) (Option.bind !name (fun n -> List.assoc_opt n invalid))
-        | _ -> None
+            (match !name with
+            | Some n -> ( match List.assoc_opt n invalid with Some id -> Some (id, !hidden) | None -> None)
+            | None -> None)
+        | _ -> None)
       in
       match field with
       | None -> each add
@@ -319,11 +345,14 @@ open Base
       end
     in
     let rec unwrap n =
-      match sheet_of n with
-      | Some (href, body) ->
-          use_sheet href;
-          unwrap body
-      | None -> n
+      match n with
+      | Fragment [ Element _; _ ] -> (
+          match sheet_of n with
+          | Some (href, body) ->
+              use_sheet href;
+              unwrap body
+          | None -> n)
+      | _ -> n
     in
     let rec go n =
       match unwrap n with
@@ -440,60 +469,7 @@ open Base
               marker "<!--[-->";
               in_ids (fun () -> go (body ()));
               marker "<!--]-->")
-      | Template { template; parts } ->
-          Array.iter
-            (function
-              | Raw r ->
-                  Buffer.add_string b r;
-                  after_text := false
-              | Static_text t ->
-                  if !after_text && hydrating () then Buffer.add_string b "<!---->";
-                  Buffer.add_string b t;
-                  after_text := true
-              | Child_part i -> ( match parts.(i) with Child n -> go n | Attribute _ | No_attribute -> ())
-              | Only_part i -> ( match parts.(i) with Child n -> contents [ n ] | Attribute _ | No_attribute -> ())
-              | Open (tag, attrs) ->
-                  Buffer.add_char b '<';
-                  Buffer.add_string b tag;
-                  (match s.current with
-                  | Some path when needs_special tag && not (hydrating ()) ->
-                      let href = ref None and current = ref false in
-                      let add n v =
-                        if n = "href" then (if Option.is_none !href then href := Some v)
-                        else if n = "aria-current" then current := true;
-                        add_attr b ~tag n v
-                      in
-                      List.iter
-                        (function
-                          | Fixed (n, v) -> add n v
-                          | Part_attr i -> (
-                              match parts.(i) with
-                              | Attribute (Static (n, v)) -> add n v
-                              | Attribute (Dynamic (n, f)) -> Option.iter (add n) (f ())
-                              | Attribute (Handler _) | Child _ | No_attribute -> ()))
-                        attrs;
-                      (match !href with
-                      | Some h when String.equal h path && not !current -> add_attr b ~tag "aria-current" "page"
-                      | _ -> ())
-                  | _ ->
-                      let each add =
-                        List.iter
-                          (function
-                            | Fixed (n, v) -> add true n v
-                            | Part_attr i -> (
-                                match parts.(i) with
-                                | Attribute (Static (n, v)) -> add false n v
-                                | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f ())
-                                | Attribute (Handler _) | Child _ | No_attribute -> ()))
-                          attrs
-                      in
-                      field_attrs ~tag each (fun literal n v -> add_attr b ~literal ~tag n v));
-                  Buffer.add_char b '>';
-                  after_text := false
-              | Subtree shape -> go (Template.expand_shape parts shape)
-              | Enter lt -> foreign := enter (namespace ()) lt :: !foreign
-              | Leave -> foreign := List.tl !foreign)
-            (ops template)
+      | Template { template; parts } -> run (ops template) parts 0
       | Catch { children; fallback; _ } -> (
           let length = Buffer.length b and text = !after_text and saved = snapshot s and context = !foreign in
           try
@@ -700,7 +676,7 @@ open Base
         List.filter_map
           (function
             | Static (name, value) -> Some (name, value)
-            | Dynamic (name, f) -> Option.map (fun v -> (name, v)) (f ())
+            | Dynamic (name, f) -> ( match f () with Some v -> Some (name, v) | None -> None)
             | Handler _ -> None)
           attrs
       in
@@ -725,13 +701,79 @@ open Base
       field_attrs ~tag (fun add -> List.iter (fun (name, v) -> add false name v) resolved) (fun _ name v ->
           add_attr b ~tag name v);
       value
-    and contents = function
-      | [ n ] -> (
-          match unwrap n with
-          | Hole f -> go (f ())
-          | Each { items; key; equal = _; render } -> rows items key render
-          | n -> go n)
-      | children -> List.iter go children
+    and contents = function [ n ] -> content n | children -> List.iter go children
+    and content n =
+      match unwrap n with
+      | Hole f -> go (f ())
+      | Each { items; key; equal = _; render } -> rows items key render
+      | n -> go n
+    and run ops parts i =
+      if i < Array.length ops then begin
+        (match Array.unsafe_get ops i with
+        | Raw r ->
+            Buffer.add_string b r;
+            after_text := false
+        | Static_text t ->
+            if !after_text && hydrating () then Buffer.add_string b "<!---->";
+            Buffer.add_string b t;
+            after_text := true
+        | Child_part i -> ( match parts.(i) with Child n -> go n | Attribute _ | No_attribute -> ())
+        | Only_part i -> ( match parts.(i) with Child n -> content n | Attribute _ | No_attribute -> ())
+        | Open (tag, attrs) ->
+            Buffer.add_char b '<';
+            Buffer.add_string b tag;
+            (match s.current with
+            | Some path when needs_special tag && not (hydrating ()) -> current_attrs ~tag ~path parts None false attrs
+            | _ when (match s.invalid with [] -> true | _ :: _ -> false) -> plain_attrs ~tag parts attrs
+            | _ ->
+                let each add =
+                  List.iter
+                    (function
+                      | Fixed (n, v) -> add true n v
+                      | Part_attr i -> (
+                          match parts.(i) with
+                          | Attribute (Static (n, v)) -> add false n v
+                          | Attribute (Dynamic (n, f)) -> Option.iter (add false n) (f ())
+                          | Attribute (Handler _) | Child _ | No_attribute -> ()))
+                    attrs
+                in
+                field_attrs ~tag each (fun literal n v -> add_attr b ~literal ~tag n v));
+            Buffer.add_char b '>';
+            after_text := false
+        | Subtree shape -> go (Template.expand_shape parts shape)
+        | Enter lt -> foreign := enter (namespace ()) lt :: !foreign
+        | Leave -> foreign := List.tl !foreign);
+        run ops parts (i + 1)
+      end
+    and plain_attrs ~tag parts = function
+      | [] -> ()
+      | Fixed (n, v) :: rest ->
+          add_attr b ~literal:true ~tag n v;
+          plain_attrs ~tag parts rest
+      | Part_attr i :: rest ->
+          (match parts.(i) with
+          | Attribute (Static (n, v)) -> add_attr b ~tag n v
+          | Attribute (Dynamic (n, f)) -> ( match f () with Some v -> add_attr b ~tag n v | None -> ())
+          | Attribute (Handler _) | Child _ | No_attribute -> ());
+          plain_attrs ~tag parts rest
+    and current_attrs ~tag ~path parts href current = function
+      | [] -> (
+          match href with
+          | Some h when String.equal h path && not current -> add_attr b ~tag "aria-current" "page"
+          | _ -> ())
+      | Fixed (n, v) :: rest -> current_attr ~tag ~path parts href current rest n v
+      | Part_attr i :: rest -> (
+          match parts.(i) with
+          | Attribute (Static (n, v)) -> current_attr ~tag ~path parts href current rest n v
+          | Attribute (Dynamic (n, f)) -> (
+              match f () with
+              | Some v -> current_attr ~tag ~path parts href current rest n v
+              | None -> current_attrs ~tag ~path parts href current rest)
+          | Attribute (Handler _) | Child _ | No_attribute -> current_attrs ~tag ~path parts href current rest)
+    and current_attr ~tag ~path parts href current rest n v =
+      add_attr b ~tag n v;
+      if n = "href" then current_attrs ~tag ~path parts (match href with None -> Some v | Some _ -> href) current rest
+      else current_attrs ~tag ~path parts href (current || n = "aria-current") rest
     and rows : type a. (unit -> a array) -> (a -> string) -> (a -> node) -> unit =
      fun items key render ->
       let seen = Hashtbl.create 8 in
@@ -796,7 +838,28 @@ open Base
       s.queued <- s.held @ s.queued;
       s.held <- []
     end;
-    let html = Buffer.contents b in
+    let framed = match frame with Some f -> ( try f s with e -> release (); raise e) | None -> None in
+    let html =
+      match framed with
+      | None -> Buffer.contents b
+      | Some (before, after) ->
+          let n = Buffer.length b and k = String.length before in
+          let length = k + n + String.length after in
+          let pooled = Option.is_some keep && length <= kept_buffer in
+          let out = if pooled then Host.take_bytes length else Bytes.create length in
+          Bytes.blit_string before 0 out 0 k;
+          Buffer.blit b 0 out k n;
+          Bytes.blit_string after 0 out (k + n) (String.length after);
+          (match keep with
+          | Some keep when pooled ->
+              let used = ref false in
+              keep length (fun write ->
+                  if !used then invalid_arg "Yuka.Server: a Fixed body was written twice";
+                  used := true;
+                  Fun.protect ~finally:(fun () -> Host.give_bytes out) (fun () -> write (Bytes.unsafe_to_string out) 0 length));
+              ""
+          | _ -> Bytes.unsafe_to_string out)
+    in
     release ();
     html
 

@@ -83,7 +83,7 @@ let broken session items =
          | Types.Pending_async _ | Types.Pending_answer _ -> None)
        items)
 
-let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ?on_ready
+let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?form ?csrf ?context ?on_ready ?frame ?keep
     ?(shown = false) ~timeout ~sleep build ~on_shell ~on_fill ~on_value =
   let session = Printer.session ~streaming:true ~islands_only:true in
   session.context <- context;
@@ -95,7 +95,12 @@ let drive ?preload ?entry ?current ?(id_prefix = "") ?(route_printed = false) ?f
   session.id_prefix <- id_prefix;
   session.route_printed <- route_printed;
   session.id_scope <- id_prefix ^ "p-";
-  let shell = Printer.print session (fun () -> build ()) in
+  let frame =
+    match frame with
+    | Some f -> Some (fun (s : Types.session) -> if s.pending = [] then Some (f ~islands:(s.islands > 0)) else None)
+    | None -> None
+  in
+  let shell = Printer.print ?frame ?keep session (fun () -> build ()) in
   let fills = List.exists is_await session.pending in
   let result, resolve, fail = Async.make () in
   let shown = ref shown in
@@ -297,7 +302,7 @@ type page =
 let line (json : Json.t) = Json.to_string json ^ "\n"
 let part id html = line (`List [ `String id; `String html ])
 
-let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~sleep build =
+let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ?frame ?keep ~sleep build =
   let document = ref "" and values = Buffer.create 64 and streaming = ref false in
   let early = ref [] in
   let writer = ref (fun piece ->
@@ -326,7 +331,7 @@ let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix 
         resolve (Streamed { shell = !document ^ Buffer.contents values ^ failed; fills; rest }))
   in
   let driven_result =
-    drive ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ~timeout ~sleep
+    drive ?preload ?entry ?current ?id_prefix ?route_printed ?form ?csrf ?context ?frame ?keep ~timeout ~sleep
       ?on_ready:(if stream then Some (fun ~fills ~failed -> if !driven then send_shell ~fills ~failed else ready := Some (fills, failed)) else None)
       (fun () -> build ())
       ~on_shell:(fun ~fills:_ ~failed:_ shell ->
@@ -350,7 +355,7 @@ let page ?(timeout = 10.) ?(stream = false) ?preload ?entry ?current ?id_prefix 
   Async.on_settled driven_result (function
     | Async.Done islands ->
         finish islands;
-        decide (fun () -> resolve (Settled { body = !document ^ Buffer.contents values; islands }))
+        decide (fun () -> resolve (Settled { body = (match Buffer.contents values with "" -> !document | v -> !document ^ v); islands }))
     | Async.Failed m ->
         fail_finished m;
         decide (fun () -> fail m)
@@ -479,7 +484,7 @@ let with_redirect j location = match j with `Assoc fields -> `Assoc (fields @ [ 
 let registry : (string * (Types.context -> Json.t -> answer Async.t)) list ref = ref []
 
 let find_action name =
-  Option.map snd (List.find_opt (fun (n, _) -> String.equal n name) !registry)
+  match List.find_opt (fun (n, _) -> String.equal n name) !registry with Some (_, f) -> Some f | None -> None
 
 
 type failure = Unknown | Bad of string | Refused of string | Broke of string
@@ -556,7 +561,7 @@ let implement_form (type i o f) (action : (i, (o, f Form_core.errors) result, [ 
     | Ok input ->
         Async.map
           (function
-            | Ok o -> Saved (Option.map (fun r -> r o) redirect)
+            | Ok o -> Saved (match redirect with Some r -> Some (r o) | None -> None)
             | Error e -> Unprocessable (Form_core.named t e))
           (call f context input)
   in
@@ -591,13 +596,15 @@ module Request = struct
       let n = String.length v in
       if n >= 2 && v.[0] = '"' && v.[n - 1] = '"' then String.sub v 1 (n - 2) else v
     in
-    Option.bind (r.header "cookie") (fun h ->
+    match r.header "cookie" with
+    | Some h ->
         List.find_map
           (fun pair ->
             match Router.cut pair '=' with
             | k, Some v when String.equal (String.trim k) name -> Some (unquote (String.trim v))
             | _ -> None)
-          (String.split_on_char ';' h))
+          (String.split_on_char ';' h)
+    | None -> None
 
   let body (r : Types.context) ~limit = r.body ~limit
 

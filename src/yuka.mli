@@ -576,9 +576,6 @@ type runtime_template
 (** A compiled element tree: the ppx makes one per lowercase JSX tree, at
     the top of the module. *)
 
-type 'kind runtime_part
-(** The value of one part of a {!type-runtime_template}. *)
-
 type runtime_entry
 (** What the browser knows about an island. The island modules expose it
     as [register]. *)
@@ -600,6 +597,13 @@ val runtime_hole_attr : string -> (unit -> string option) -> 'kind attribute
     not refuse [to], [from], [values] and [by], which are URL names only on
     SVG animation elements: there the client checks the value, or raises
     [Failure] when the app links no URL check. *)
+
+val runtime_attr_checked : string -> string -> 'kind attribute
+val runtime_hole_attr_checked : string -> (unit -> string option) -> 'kind attribute
+val runtime_call_attr_checked : string -> ('a -> string) -> 'a -> 'kind attribute
+(** {!runtime_attr}, {!runtime_hole_attr} and {!runtime_call_attr} without
+    the runtime name check, for a literal name that the ppx proved those
+    functions accept. *)
 
 val runtime_url_attr : string -> string -> string -> 'kind attribute
 val runtime_url_hole_attr : string -> string -> (unit -> string option) -> 'kind attribute
@@ -634,15 +638,6 @@ val runtime_template :
     The browser clones [html] as given and the server prints a fixed
     [srcdoc] or [base] [href] as given. The client decodes [code] only to
     hydrate and in a dev build. Part numbers count from 0. *)
-
-val runtime_child : 'kind element -> 'kind runtime_part
-val runtime_attribute : 'kind attribute -> 'kind runtime_part
-val runtime_attribute_option : 'kind attribute option -> 'kind runtime_part
-(** [None] writes no attribute. *)
-
-val runtime_instance : runtime_template -> 'kind runtime_part array -> 'kind element
-(** The tree of the template with its parts filled in. It prints and
-    hydrates as the same tree made with {!val-element}. *)
 
 val runtime_stylesheet : string -> stylesheet
 (** The sheet served at this URL. *)
@@ -1034,6 +1029,20 @@ module Private : sig
       name, the expected and the found node, and a short path. Returns a
       function that stops all effects and handlers. Browser only. *)
 end
+
+type 'kind runtime_part = private Private.part
+(** The value of one part of a {!type-runtime_template}. A private
+    abbreviation, so that the array of parts that the ppx writes is built
+    as an array of blocks, without the run-time check for floats. *)
+
+val runtime_child : 'kind element -> 'kind runtime_part
+val runtime_attribute : 'kind attribute -> 'kind runtime_part
+val runtime_attribute_option : 'kind attribute option -> 'kind runtime_part
+(** [None] writes no attribute. *)
+
+val runtime_instance : runtime_template -> 'kind runtime_part array -> 'kind element
+(** The tree of the template with its parts filled in. It prints and
+    hydrates as the same tree made with {!val-element}. *)
 
 (**/**)
 
@@ -1494,7 +1503,7 @@ module Server : sig
     val cookie : request -> string -> string option
     (** The value of a cookie from the [cookie] header, not decoded. Double
         quotes around the value are removed. [None] when the request has no
-        cookie of this name. *)
+        cookie of this name. {!Cookie.get} decodes it. *)
 
     val body : request -> limit:int -> (string, [ `Too_large ]) result Async.t
     (** The request body, read from the client one time only. A later call
@@ -1513,6 +1522,53 @@ module Server : sig
         1 MiB, the limit of an action body. [`Too_large] as for {!body};
         [`Invalid_json] when the body is not JSON; [`Invalid_value] when
         the codec does not accept the JSON. Each message tells why. *)
+  end
+
+  (** Cookies that the server reads and sets. A handler puts the header
+      of {!set} or {!drop} in the [headers] of its answer; [set-cookie] may
+      repeat. Values are encoded as {!Browser.set_cookie} encodes them, so
+      {!get} reads a cookie of the server and a cookie of the browser in
+      the same way. For a signed cookie, see [Yuka_server.Signed_cookie]. *)
+  module Cookie : sig
+    val set :
+      ?max_age:int ->
+      ?path:string ->
+      ?domain:string ->
+      ?same_site:[ `Lax | `Strict | `None ] ->
+      ?secure:bool ->
+      ?http_only:bool ->
+      string ->
+      string ->
+      (string * string, string) result
+    (** [set name value] is the header [("set-cookie", ...)] that writes
+        the cookie. Each byte of the UTF-8 [value] other than
+        [A-Z a-z 0-9 - . _ ~] becomes [%XX]. [max_age] is in seconds;
+        without it the cookie ends with the browser session. [path]
+        defaults to ["/"], [same_site] to [`Lax], [secure] to [false] and
+        [http_only] to [true]. The attributes come in this order: [Path],
+        [Domain], [Max-Age], [HttpOnly], [SameSite], [Secure].
+
+        Gives [Error] with a message for: a name that is not a cookie token
+        (letters, digits and [! # $ % & ' * + - . ^ _ ` | ~]); a path that
+        does not start with ['/'] or holds a [';'] or a control character;
+        a domain with a character other than letters, digits, ['-'] and
+        ['.']; a value that is not valid UTF-8 (in the browser: a lone
+        surrogate); [`None] without [~secure:true]; a name that starts
+        with [__Secure-] without [~secure:true]; a name that starts with
+        [__Host-] without [~secure:true], with a [path] other than ["/"] or
+        with a [domain]. The prefixes are compared without case, as
+        browsers do. *)
+
+    val drop : ?path:string -> ?domain:string -> string -> (string * string, string) result
+    (** [drop name] is the header that removes the cookie: an empty value
+        and [Max-Age=0]. [path] and [domain] must be those of the cookie.
+        A name with the [__Secure-] or [__Host-] prefix gets [Secure].
+        [Error] as for {!set}. *)
+
+    val get : request -> string -> string option
+    (** The value of the cookie, percent-decoded as
+        {!Url.decode_uri_component} decodes it. [None] when the request has
+        no cookie of this name or its value does not decode. *)
   end
 
   module Action : sig
@@ -1767,6 +1823,17 @@ module Server : sig
     | Stream of ((string -> unit Async.t) -> unit Async.t)
         (** The adapter calls the function with its write function and ends
             the response when the result settles. *)
+    | Fixed of { length : int; write : (string -> int -> int -> unit) -> unit }
+        (** A body of exactly [length] bytes, sent with [content-length] and
+            held in a pooled buffer: the cycle answers a settled page with it.
+            The adapter calls [write] once with a sink that copies [len] bytes
+            of the string from [off] before it returns; the buffer goes back
+            to the pool when [write] returns, so the string must not be kept.
+            An adapter that needs one string uses {!fixed_to_string}. *)
+
+  val fixed_to_string : length:int -> ((string -> int -> int -> unit) -> unit) -> string
+  (** [fixed_to_string ~length write]: the bytes of a [Fixed] body as one
+      string. It calls [write]. *)
 
   type response = private { status : int; headers : (string * string) list; body : body }
   (** A handler's answer. A header name may repeat (two [set-cookie]). A
@@ -2088,7 +2155,7 @@ module Server : sig
           ends the response normally. When the error page itself fails, the
           answer is a plain-text 500. Every answer to [HEAD] has an empty
           body. A [HEAD] on a page renders it as for [GET]: when the [GET]
-          answer is one string, [HEAD] has its [content-length]; when [GET]
+          answer is one string or [Fixed], [HEAD] has its [content-length]; when [GET]
           streams, so does [HEAD], with no body. For a file, the cycle
           answers 200 with the headers it knows (no [content-type] for a
           client or public file) when [exists] says so, else the plain 404.
@@ -2113,6 +2180,17 @@ module Server : sig
         when [config] has no [log], else [config]. An adapter calls it to
         send messages to the log of its server ([Yuka_dream.handler] uses
         [Dream.sub_log "yuka"]). *)
+
+    val log : config -> log_level -> string -> unit
+    (** [log config] is the log of [config]: its [log], else the default
+        sink ({!set_default_log}). An adapter sends its own messages there,
+        so they go where the messages of the cycle go. *)
+
+    val default_sink : log_level -> string -> unit
+    (** The default sink ({!set_default_log}), for a message of an adapter
+        that has no config at hand. Unlike {!log}, it needs no config, so
+        it does not make one (making a config sets the base of
+        {!Router.url}). *)
 
     val build_id : config -> app -> string
     (** The build id: a digest of the route tree and, with [assets], of the

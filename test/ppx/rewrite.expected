@@ -19,10 +19,10 @@ open
 let bool_and_optional =
   Yuka.runtime_instance __yuka_template_rewrite_1
     [|(Yuka.runtime_attribute_option
-         (Stdlib.Option.map (Yuka.runtime_attr "hidden")
+         (Stdlib.Option.map (Yuka.runtime_attr_checked "hidden")
             (if (flag : bool) then Some "" else None)));(Yuka.runtime_attribute_option
                                                            (Stdlib.Option.map
-                                                              (Yuka.runtime_attr
+                                                              (Yuka.runtime_attr_checked
                                                                  "placeholder")
                                                               (Stdlib.Option.map
                                                                  (fun v ->
@@ -32,7 +32,7 @@ let bool_and_optional =
                                                                  string
                                                                    option))));(
       Yuka.runtime_attribute_option
-        (Stdlib.Option.map (Yuka.runtime_attr "autofocus")
+        (Stdlib.Option.map (Yuka.runtime_attr_checked "autofocus")
            (match (autofocus : bool option) with
             | Some true -> Some ""
             | _ -> None)))|]
@@ -127,13 +127,13 @@ open
 let hole_attribute =
   Yuka.runtime_instance __yuka_template_rewrite_11
     [|(Yuka.runtime_attribute
-         (Yuka.runtime_hole_attr "class"
+         (Yuka.runtime_hole_attr_checked "class"
             (fun () -> Some (if State.get on then "a" else "b" : string))));(
       Yuka.runtime_attribute
-        (Yuka.runtime_hole_attr "hidden"
+        (Yuka.runtime_hole_attr_checked "hidden"
            (fun () -> if (State.get h : bool) then Some "" else None)));(
       Yuka.runtime_attribute
-        (Yuka.runtime_hole_attr "tabindex"
+        (Yuka.runtime_hole_attr_checked "tabindex"
            (fun () -> Some (Stdlib.string_of_int (State.get n : int)))))|]
 let component_plain = Ui.Badge.make ~tone:1 ~label:"x" ()
 open
@@ -1105,7 +1105,7 @@ open
 let select_hole =
   Yuka.runtime_instance __yuka_template_rewrite_22
     [|(Yuka.runtime_attribute
-         (Yuka.runtime_hole_attr "value"
+         (Yuka.runtime_hole_attr_checked "value"
             (fun () -> Some (State.get v : string))))|]
 open
   struct
@@ -1125,7 +1125,7 @@ open
 let textarea_hole =
   Yuka.runtime_instance __yuka_template_rewrite_24
     [|(Yuka.runtime_attribute
-         (Yuka.runtime_hole_attr "value"
+         (Yuka.runtime_hole_attr_checked "value"
             (fun () -> Some (State.get t : string))))|]
 module Templates =
   struct
@@ -1156,7 +1156,7 @@ module Templates =
     let fixed_hole_attr =
       Yuka.runtime_instance __yuka_template_rewrite_26
         [|(Yuka.runtime_attribute
-             (Yuka.runtime_hole_attr "class"
+             (Yuka.runtime_hole_attr_checked "class"
                 (fun () -> Some (State.get c : string))))|]
     open
       struct
@@ -1188,7 +1188,8 @@ module Templates =
       end
     let non_literal_attribute =
       Yuka.runtime_instance __yuka_template_rewrite_29
-        [|(Yuka.runtime_attribute (Yuka.runtime_attr "class" (cls : string)))|]
+        [|(Yuka.runtime_attribute
+             (Yuka.runtime_attr_checked "class" (cls : string)))|]
     open
       struct
         let __yuka_template_rewrite_30 =
@@ -1199,7 +1200,7 @@ module Templates =
     let optional_attribute =
       Yuka.runtime_instance __yuka_template_rewrite_30
         [|(Yuka.runtime_attribute_option
-             (Stdlib.Option.map (Yuka.runtime_attr "title")
+             (Stdlib.Option.map (Yuka.runtime_attr_checked "title")
                 (Stdlib.Option.map (fun v -> (v : string))
                    (title : string option))))|]
     open
@@ -1229,8 +1230,9 @@ module Templates =
       end
     let fixed_inside_not_fixed =
       Yuka.runtime_instance __yuka_template_rewrite_33
-        [|(Yuka.runtime_attribute (Yuka.runtime_attr "class" (cls : string)));(
-          Yuka.runtime_child label)|]
+        [|(Yuka.runtime_attribute
+             (Yuka.runtime_attr_checked "class" (cls : string)));(Yuka.runtime_child
+                                                                    label)|]
     open
       struct
         let __yuka_template_rewrite_34 =
@@ -1486,7 +1488,7 @@ let signup_form_view =
     ~children:(fun form ->
                  Yuka.runtime_instance __yuka_template_rewrite_49
                    [|(Yuka.runtime_attribute
-                        (Yuka.runtime_attr "value"
+                        (Yuka.runtime_attr_checked "value"
                            (Yuka.Form.value form `Name : string)))|]) ()
 open
   struct
@@ -1498,7 +1500,7 @@ let url_attrs u =
   Yuka.runtime_instance __yuka_template_rewrite_50
     [|(Yuka.runtime_attribute
          ((Yuka.runtime_url_attr "a") "href" (u : string)));(Yuka.runtime_attribute
-                                                               (Yuka.runtime_attr
+                                                               (Yuka.runtime_attr_checked
                                                                   "title"
                                                                   (u : 
                                                                   string)))|]
@@ -1534,8 +1536,8 @@ let style_parts c =
        (fun () ->
           Yuka.text (Stdlib.String.concat "" ["a{color:"; State.get c; "}"]))]
 let reparsed c =
-  Yuka.element "p" [Yuka.runtime_attr "class" "p"]
-    [Yuka.element "div" [Yuka.runtime_attr "id" (c : string)]
+  Yuka.element "p" [Yuka.runtime_attr_checked "class" "p"]
+    [Yuka.element "div" [Yuka.runtime_attr_checked "id" (c : string)]
        [Yuka.text "x";
        Yuka.element "a" [Yuka.runtime_url_attr "a" "href" "/y"] [Yuka.text c]]]
 open
@@ -1548,16 +1550,13 @@ open
 let pure_ops ~n ~label =
   Yuka.runtime_instance __yuka_template_rewrite_53
     [|(Yuka.runtime_attribute
-         (Yuka.runtime_attr "class" ("row-" ^ label : string)));(Yuka.runtime_attribute
-                                                                   (Yuka.runtime_attr
-                                                                    "title"
-                                                                    (if n > 1
-                                                                    then
-                                                                    "many"
-                                                                    else
-                                                                    "one" : 
-                                                                    string)));(
-      Yuka.runtime_child (Yuka.text (string_of_int (n + 1))))|]
+         (Yuka.runtime_attr_checked "class" ("row-" ^ label : string)));(
+      Yuka.runtime_attribute
+        (Yuka.runtime_attr_checked "title"
+           (if n > 1 then "many" else "one" : string)));(Yuka.runtime_child
+                                                           (Yuka.text
+                                                              (string_of_int
+                                                                 (n + 1))))|]
 open
   struct
     let __yuka_template_rewrite_54 =
@@ -1643,7 +1642,7 @@ open
 let helper_attr_call =
   Yuka.runtime_instance __yuka_template_rewrite_62
     [|(Yuka.runtime_attribute
-         (Yuka.runtime_call_attr "class" Model.slug item))|]
+         (Yuka.runtime_call_attr_checked "class" Model.slug item))|]
 open
   struct
     let __yuka_template_rewrite_63 =
@@ -1707,7 +1706,7 @@ open
 let field_error_value errors =
   Yuka.runtime_instance __yuka_template_rewrite_67
     [|(Yuka.runtime_attribute
-         (Yuka.runtime_attr "title"
+         (Yuka.runtime_attr_checked "title"
             (String.concat "," (Yuka.Form.form_errors errors) : string)));(
       Yuka.runtime_child
         (Yuka.text
@@ -1873,7 +1872,7 @@ open
 let optional_over_applied =
   Yuka.runtime_instance __yuka_template_rewrite_80
     [|(Yuka.runtime_attribute
-         (Yuka.runtime_hole_attr "title"
+         (Yuka.runtime_hole_attr_checked "title"
             (fun () -> Some (optional_format () () : string))))|]
 let optional_pure ?(sep= "") () = sep
 open
@@ -1948,7 +1947,7 @@ let unique_id_constant =
             (fun id ->
                Yuka.runtime_instance __yuka_template_rewrite_86
                  [|(Yuka.runtime_attribute
-                      (Yuka.runtime_attr "for" (id : string)))|])))|]
+                      (Yuka.runtime_attr_checked "for" (id : string)))|])))|]
 module String = struct let uppercase_ascii _ = State.get s end
 open Yuka
 open
@@ -1960,3 +1959,51 @@ open
 let own_module_after_open_yuka =
   Yuka.runtime_instance __yuka_template_rewrite_88
     [|(Yuka.runtime_child (Yuka.runtime_text_call String.uppercase_ascii "x"))|]
+open
+  struct
+    let __yuka_template_rewrite_89 =
+      Yuka.runtime_template "\001iframe\005\002\006"
+        ~html:"<iframe></iframe>" ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|]
+        ~values:[||] ~clones:3
+  end
+let srcdoc_hole_on_iframe =
+  Yuka.runtime_instance __yuka_template_rewrite_89
+    [|(Yuka.runtime_attribute
+         ((Yuka.runtime_url_hole_attr "iframe") "srcdoc"
+            (fun () -> Some (State.get s : string))))|]
+let non_ascii_static =
+  Yuka.element "p" [Yuka.runtime_attr "data-\195\169" "x"]
+    [Yuka.element "div" [] []]
+open
+  struct
+    let __yuka_template_rewrite_90 =
+      Yuka.runtime_template "\001div\005\002\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|] ~values:[||] ~clones:1
+  end
+let non_ascii_hole =
+  Yuka.runtime_instance __yuka_template_rewrite_90
+    [|(Yuka.runtime_attribute
+         (Yuka.runtime_hole_attr "aria-\195\169"
+            (fun () -> Some (if State.get on then "a" else "b" : string))))|]
+open
+  struct
+    let __yuka_template_rewrite_91 =
+      Yuka.runtime_template "\001div\005\002\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|] ~values:[||] ~clones:1
+  end
+let non_ascii_call =
+  Yuka.runtime_instance __yuka_template_rewrite_91
+    [|(Yuka.runtime_attribute
+         (Yuka.runtime_call_attr "data-\195\169" Model.slug item))|]
+open
+  struct
+    let __yuka_template_rewrite_92 =
+      Yuka.runtime_template "\001div\005\002\006" ~html:"<div></div>"
+        ~walk:[||] ~kids:[||] ~attrs:[|0;0;2|] ~values:[||] ~clones:1
+  end
+let non_ascii_optional =
+  Yuka.runtime_instance __yuka_template_rewrite_92
+    [|(Yuka.runtime_attribute_option
+         (Stdlib.Option.map (Yuka.runtime_attr "data-\195\169")
+            (Stdlib.Option.map (fun v -> (v : string))
+               (data_é : string option))))|]

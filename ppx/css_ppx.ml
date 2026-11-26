@@ -76,10 +76,14 @@ let rec wrap_function sheet e =
   | Pexp_function (params, c, Pfunction_cases (cases, loc, attrs)) ->
       let cases = List.map (fun c -> { c with pc_rhs = use sheet c.pc_rhs }) cases in
       Some { e with pexp_desc = Pexp_function (params, c, Pfunction_cases (cases, loc, attrs)) }
-  | Pexp_constraint (inner, t) ->
-      Option.map (fun inner -> { e with pexp_desc = Pexp_constraint (inner, t) }) (wrap_function sheet inner)
-  | Pexp_newtype (n, inner) ->
-      Option.map (fun inner -> { e with pexp_desc = Pexp_newtype (n, inner) }) (wrap_function sheet inner)
+  | Pexp_constraint (inner, t) -> (
+      match wrap_function sheet inner with
+      | Some inner -> Some { e with pexp_desc = Pexp_constraint (inner, t) }
+      | None -> None)
+  | Pexp_newtype (n, inner) -> (
+      match wrap_function sheet inner with
+      | Some inner -> Some { e with pexp_desc = Pexp_newtype (n, inner) }
+      | None -> None)
   | _ -> None
 
 let cannot_wrap (vb : value_binding) =

@@ -258,6 +258,104 @@ let uri_component () =
       (fun (name, text) -> check (name ^ ": encode") "None" (encode text))
       [ ("invalid byte", "\xff"); ("truncated", "\xe2\x82"); ("surrogate bytes", "\xed\xa0\x80") ]
 
+let cookies () =
+  let show = function Ok (name, value) -> name ^ ": " ^ value | Error message -> "Error " ^ message in
+  let value_of = function
+    | Ok (_, header) -> (
+        match String.index_opt header ';' with
+        | Some i -> String.sub header 0 i
+        | None -> header)
+    | Error message -> "Error " ^ message
+  in
+  let some = function Some s -> s | None -> "None" in
+  let request cookie = Server.Testing.request ~header:(function "cookie" -> Some cookie | _ -> None) () in
+  List.iter
+    (fun (name, text, encoded) ->
+      let written = Server.Cookie.set "n" text in
+      check (name ^ ": encode") ("n=" ^ encoded) (value_of written);
+      check (name ^ ": read back") text (some (Server.Cookie.get (request ("a=1; " ^ value_of written ^ "; b=2")) "n")))
+    [
+      ("empty", "", "");
+      ("ASCII", "abcXYZ019", "abcXYZ019");
+      ("unreserved", "-_.~", "-_.~");
+      ("kept by encodeURIComponent", "!'()*", "%21%27%28%29%2A");
+      ("reserved", ";,/?:@&=+$#", "%3B%2C%2F%3F%3A%40%26%3D%2B%24%23");
+      ("quote and backslash", "\"\\", "%22%5C");
+      ("space", "a b", "a%20b");
+      ("percent", "100%", "100%25");
+      ("control bytes", "\000\n\127", "%00%0A%7F");
+      ("two bytes", {js|é|js}, "%C3%A9");
+      ("three bytes", {js|€|js}, "%E2%82%AC");
+      ("four bytes", {js|𐍈|js}, "%F0%90%8D%88");
+      ("emoji", {js|😀|js}, "%F0%9F%98%80");
+      ("as Browser.set_cookie", {js|a b;c=d/é|js}, "a%20b%3Bc%3Dd%2F%C3%A9");
+      ("JS string as Browser.set_cookie", {js|é€😀|js} ^ "!'()*", "%C3%A9%E2%82%AC%F0%9F%98%80%21%27%28%29%2A");
+    ];
+  check "defaults" "set-cookie: n=v; Path=/; HttpOnly; SameSite=Lax" (show (Server.Cookie.set "n" "v"));
+  check "every attribute" "set-cookie: n=v; Path=/a; Domain=example.com; Max-Age=60; SameSite=Strict; Secure"
+    (show
+       (Server.Cookie.set ~max_age:60 ~path:"/a" ~domain:"example.com" ~same_site:`Strict ~secure:true ~http_only:false
+          "n" "v"));
+  check "SameSite=None with Secure" "set-cookie: n=v; Path=/; HttpOnly; SameSite=None; Secure"
+    (show (Server.Cookie.set ~same_site:`None ~secure:true "n" "v"));
+  check "__Host- with Secure" "set-cookie: __Host-n=v; Path=/; HttpOnly; SameSite=Lax; Secure"
+    (show (Server.Cookie.set ~secure:true "__Host-n" "v"));
+  check "__Secure- with Secure and a domain" "set-cookie: __Secure-n=v; Path=/a; Domain=example.com; HttpOnly; SameSite=Lax; Secure"
+    (show (Server.Cookie.set ~secure:true ~path:"/a" ~domain:"example.com" "__Secure-n" "v"));
+  let set = "Error Yuka.Server.Cookie.set: " in
+  List.iter
+    (fun (name, expected, result) -> check name expected (show result))
+    [
+      ("empty name", set ^ "invalid cookie name ", Server.Cookie.set "" "v");
+      ("name with a space", set ^ "invalid cookie name a b", Server.Cookie.set "a b" "v");
+      ("name with =", set ^ "invalid cookie name a=b", Server.Cookie.set "a=b" "v");
+      ("name with ;", set ^ "invalid cookie name a;b", Server.Cookie.set "a;b" "v");
+      ("name with a quote", set ^ "invalid cookie name a\"b", Server.Cookie.set "a\"b" "v");
+      ("name with a non-ASCII byte", set ^ {js|invalid cookie name é|js}, Server.Cookie.set {js|é|js} "v");
+      ("relative path", set ^ "invalid path x", Server.Cookie.set ~path:"x" "n" "v");
+      ("empty path", set ^ "invalid path ", Server.Cookie.set ~path:"" "n" "v");
+      ("path with ;", set ^ "invalid path /;Domain=evil", Server.Cookie.set ~path:"/;Domain=evil" "n" "v");
+      ("path with a newline", set ^ "invalid path /\n", Server.Cookie.set ~path:"/\n" "n" "v");
+      ("empty domain", set ^ "invalid domain ", Server.Cookie.set ~domain:"" "n" "v");
+      ("domain with ;", set ^ "invalid domain a;Secure", Server.Cookie.set ~domain:"a;Secure" "n" "v");
+      ("domain with a space", set ^ "invalid domain a b", Server.Cookie.set ~domain:"a b" "n" "v");
+      ("SameSite=None without Secure", set ^ "SameSite=None needs ~secure:true", Server.Cookie.set ~same_site:`None "n" "v");
+      ( "__Host- without Secure",
+        set ^ "a __Host- cookie needs ~secure:true, the path / and no domain",
+        Server.Cookie.set "__Host-n" "v" );
+      ( "__Host- with another path",
+        set ^ "a __Host- cookie needs ~secure:true, the path / and no domain",
+        Server.Cookie.set ~secure:true ~path:"/a" "__Host-n" "v" );
+      ( "__Host- with a domain",
+        set ^ "a __Host- cookie needs ~secure:true, the path / and no domain",
+        Server.Cookie.set ~secure:true ~domain:"example.com" "__Host-n" "v" );
+      ( "__host- in lowercase",
+        set ^ "a __Host- cookie needs ~secure:true, the path / and no domain",
+        Server.Cookie.set "__host-n" "v" );
+      ("__Secure- without Secure", set ^ "a __Secure- cookie needs ~secure:true", Server.Cookie.set "__Secure-n" "v");
+      ("__SECURE- in uppercase", set ^ "a __Secure- cookie needs ~secure:true", Server.Cookie.set "__SECURE-n" "v");
+    ];
+  if not Private.in_browser then
+    check "a value that is not UTF-8" (set ^ "invalid value, not valid UTF-8") (show (Server.Cookie.set "n" "\xff"));
+  check "drop" "set-cookie: n=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax" (show (Server.Cookie.drop "n"));
+  check "drop with a path and a domain" "set-cookie: n=; Path=/a; Domain=example.com; Max-Age=0; HttpOnly; SameSite=Lax"
+    (show (Server.Cookie.drop ~path:"/a" ~domain:"example.com" "n"));
+  check "drop a __Host- cookie" "set-cookie: __Host-n=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure"
+    (show (Server.Cookie.drop "__Host-n"));
+  check "drop a __Secure- cookie" "set-cookie: __Secure-n=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure"
+    (show (Server.Cookie.drop "__Secure-n"));
+  check "drop a __Host- cookie with a domain"
+    "Error Yuka.Server.Cookie.drop: a __Host- cookie needs ~secure:true, the path / and no domain"
+    (show (Server.Cookie.drop ~domain:"example.com" "__Host-n"));
+  check "drop with a bad name" "Error Yuka.Server.Cookie.drop: invalid cookie name a b" (show (Server.Cookie.drop "a b"));
+  let read cookie = some (Server.Cookie.get (request cookie) "n") in
+  check "drop reads back empty" "" (read (value_of (Server.Cookie.drop "n")));
+  check "no cookie" "None" (read "a=1");
+  check "a value that does not decode" "None" (read "n=%ZZ");
+  check "a value with bytes that are not UTF-8" "None" (read "n=%FF");
+  check "the raw value stays raw" "a%20b" (some (Server.Request.cookie (request "n=a%20b") "n"));
+  check "a quoted value" "a b" (read "n=\"a%20b\"")
+
 let html_adjacent_texts () =
   check "separator" "<p>a<!---->b<!---->c</p>"
     (html (element "p" [] [ text "a"; text "b"; text "c" ]));
@@ -2343,6 +2441,7 @@ let all =
     ("effect writing its own State stops at a limit", effect_writing_own_state_stops);
     ("html escaping", html_escaping);
     ("Url: encodeURIComponent and decodeURIComponent", uri_component);
+    ("Server.Cookie", cookies);
     ("html adjacent texts", html_adjacent_texts);
     ("html empty text", html_empty_text);
     ("html hole markers", html_hole);

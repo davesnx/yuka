@@ -4,7 +4,7 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
   [
     Router.group ~path:"/" ~layout:Pages.shell
       [
-        Router.route Home ~path:"/" ~page:Pages.home
+        Router.group ~path:"/"
           ~search:
             {
               kind = optional Pattern.Kind.t;
@@ -28,12 +28,17 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
               jaggedness = optional int;
               thickness = optional int;
               length = optional int;
+              style = optional Pattern.Style.t;
               columns = optional int;
               rows = optional int;
               half = optional int;
               empty = optional int;
               block = optional int;
               bar = optional int;
+              merge = optional int;
+              round = optional int;
+              accent = optional int;
+              tint = optional string;
               bg = optional string;
               fg = optional string;
               title = optional string;
@@ -41,8 +46,12 @@ Router.make ~not_found:Pages.not_found ~error:Pages.error
               year = optional string;
               day = optional string;
               weekday = optional string;
-            };
+            }
+          [
+            Router.route Home ~path:"/" ~page:Pages.home;
+            Router.get Poster_svg ~path:"/poster.svg" ~handler:Handlers.poster_svg
+              ~cache:(public ~max_age:3600 ());
+          ];
         Router.route Gallery ~path:"/gallery" ~page:Pages.gallery ~prerender:true;
       ];
-    Router.get Poster_svg ~path:"/poster.svg" ~handler:Handlers.poster_svg ~cache:(public ~max_age:3600 ());
   ]

@@ -82,7 +82,7 @@ end
 module Catch = struct
   let make ~fallback ~children () =
     let client at =
-      let outer = Option.bind !(Base.current_owner ()) (fun o -> o.catch) in
+      let outer = match !(Base.current_owner ()) with Some o -> o.catch | None -> None in
       let failed =
         match at with
         | Some n ->
@@ -175,7 +175,7 @@ module Context = struct
   let get c =
     let env = context_env () in
     match (find_binding c.prj (Option.is_some c.page) env, c.page) with
-    | None, Some read -> Option.bind (root env) read
+    | None, Some read -> ( match root env with Some r -> read r | None -> None)
     | v, _ -> v
 
   let get_exn c =

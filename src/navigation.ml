@@ -45,13 +45,15 @@ let mark_links outlet path =
     (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "a" doc))
 
 let outlet header =
-  Option.map
-    (fun key -> Array.find_opt (fun o -> is key (Web.DOM.Element.getAttribute "data-k" o)) (outlets ()))
-    (header "yuka-outlet")
+  match header "yuka-outlet" with
+  | Some key -> Some (Array.find_opt (fun o -> is key (Web.DOM.Element.getAttribute "data-k" o)) (outlets ()))
+  | None -> None
 
 let fill el header text =
   let title =
-    Option.map (fun t -> match Host.decode_uri_component t with Some d -> d | None -> t) (header "yuka-title")
+    match header "yuka-title" with
+    | Some t -> Some (match Host.decode_uri_component t with Some d -> d | None -> t)
+    | None -> None
   in
   Client.stop_within el;
   Navigation_web.adopt_stylesheets ();
@@ -236,7 +238,7 @@ let rec start (trigger : Prefetch.level) key url =
               let t = limits () in
               if Host.table_size t >= 200 then Host.table_clear t;
               Host.table_set t page l)
-            (Option.bind (header "yuka-prefetch") Prefetch.of_name);
+            (match header "yuka-prefetch" with Some p -> Prefetch.of_name p | None -> None);
           settle (Some a);
           match trigger with
           | (`Trajectory | `Visible | `Idle) when e.warm && (not waited) && allowed () -> start `Hover key url
@@ -429,7 +431,7 @@ let show ~dir ~push ~replace ~restore ~refresh ~transition url a =
         if !nav = gen then begin
           let kept = if refresh then Navigation_web.hold_focus () else fun () -> false in
           (* Read before the swap, which can move the scroll. *)
-          let restore = Option.map (fun y -> y ()) restore in
+          let restore = match restore with Some y -> Some (y ()) | None -> None in
           loaded := Host.current_url ();
           shown_key := !current_key;
           Navigation_state.set None;
@@ -643,7 +645,10 @@ let boot (transitions, islands) =
   Host.table_clear (limits ());
   (prefetching :=
      match (Web.DOM.NodeList.toArray (Web.DOM.Document.querySelectorAll "meta[name=yuka-prefetch]" Web.DOM.document)) with
-     | [| m |] -> Option.value (Option.bind (Web.DOM.Element.getAttribute "content" m) Prefetch.of_name) ~default:Prefetch.default
+     | [| m |] -> (
+         match Web.DOM.Element.getAttribute "content" m with
+         | Some c -> ( match Prefetch.of_name c with Some p -> p | None -> Prefetch.default)
+         | None -> Prefetch.default)
      | _ -> Prefetch.default);
   transitions_on := transitions;
   !untrack ();

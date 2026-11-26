@@ -8,7 +8,7 @@ let current : current Eio.Fiber.key = Eio.Fiber.create_key ()
 
 exception Request_ended
 
-let switch () = Option.map (fun c -> c.sw) (Eio.Fiber.get current)
+let switch () = match Eio.Fiber.get current with Some c -> Some c.sw | None -> None
 
 let switch_exn () =
   match switch () with
@@ -94,7 +94,8 @@ module Base = struct
   let header request name = Tapak.Request.header name request
 
   let body request ~limit =
-    match Option.bind (header request "content-length") int_of_string_opt with
+    let length = match header request "content-length" with Some h -> int_of_string_opt h | None -> None in
+    match length with
     | Some n when n > limit -> Yuka.Async.return None
     | _ ->
         guard (fun () ->
@@ -113,7 +114,9 @@ module Base = struct
   let session request = cookie request session_cookie
 
   let csrf_token request =
-    Option.map (fun _ -> fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request)) (cookie request csrf_cookie)
+    match cookie request csrf_cookie with
+    | Some _ -> Some (fst (Tapak.Csrf.input ~cookie_name:csrf_cookie request))
+    | None -> None
 
   let verify_csrf request token =
     Yuka.Async.return (Tapak.Csrf.verify_token ~cookie_name:csrf_cookie ~token request)
@@ -123,6 +126,8 @@ module Base = struct
     Yuka.Async.return
       (match body with
       | Yuka.Server.String text -> Tapak.Response.of_string ~headers ~status text
+      | Yuka.Server.Fixed { length; write } ->
+          Tapak.Response.of_string ~headers ~status (Yuka.Server.fixed_to_string ~length write)
       | Yuka.Server.Stream f ->
           Tapak.Response.stream ~headers ~status (fun write flush ->
               await_exn
@@ -191,8 +196,10 @@ let log level message =
 
 let has_body request =
   Tapak.Request.header "transfer-encoding" request <> None
-  || Option.fold ~none:false ~some:(fun n -> n > 0)
-       (Option.bind (Tapak.Request.header "content-length" request) int_of_string_opt)
+  ||
+  match Tapak.Request.header "content-length" request with
+  | Some h -> ( match int_of_string_opt h with Some n -> n > 0 | None -> false)
+  | None -> false
 
 let drain request =
   let reader = Tapak.Request.body request in

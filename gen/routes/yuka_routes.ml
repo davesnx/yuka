@@ -475,15 +475,18 @@ let read ~server ~items names e =
             levels;
           }
     | "get" | "post" | "put" | "patch" | "delete" ->
-        let optional = if tag = "get" then [ "guard" ] @ rules else [ "guard"; "cross_origin"; "headers" ] in
+        let optional =
+          if tag = "get" then [ "guard"; "search" ] @ rules
+          else [ "guard"; "search"; "cross_origin"; "headers" ]
+        in
         check_props tag loc props ~required:[ "path"; "handler" ] ~optional;
         check_cross_origin props;
         let name = name () in
         let text, ploc, segs = own_path () in
-        ignore (add_labels ploc ctx.labels (seg_labels segs));
+        let search, _ = with_search (add_labels ploc ctx.labels (seg_labels segs)) in
         add
           {
-            kind = Named { name; meth = String.uppercase_ascii tag; search = [] };
+            kind = Named { name; meth = String.uppercase_ascii tag; search = ctx.search @ search };
             segs = ctx.prefix @ segs;
             path = join ctx.text text;
             loc;
@@ -917,7 +920,7 @@ let key_text level =
   | _ -> sprintf "Stdlib.String.concat \"/\" [ %s ]" (String.concat "; " (base :: params))
 
 let loader_labels levels =
-  List.filter_map (fun l -> Option.map loader_label (prop "loader" l)) levels
+  List.filter_map (fun l -> match prop "loader" l with Some v -> Some (loader_label v) | None -> None) levels
 
 let layer_text ~loaders level =
   sprintf "{ Yuka.Server.Generated.key = %s; wrap = (fun children -> %s%s ~children ()) }"
@@ -971,11 +974,11 @@ let seed n =
         | Static s :: rest -> statics (encode s :: acc) rest
         | (Param _ | Rest _) :: _ -> None
       in
-      Option.map (fun parts -> "/" ^ String.concat "/" parts) (statics [] n.segs)
+      (match statics [] n.segs with Some parts -> Some ("/" ^ String.concat "/" parts) | None -> None)
   | _ -> None
 
 let rules_text levels =
-  let headers = List.filter_map (fun l -> Option.map expr (prop "headers" l)) levels in
+  let headers = List.filter_map (fun l -> match prop "headers" l with Some h -> Some (expr h) | None -> None) levels in
   let last name =
     List.fold_left (fun acc l -> match prop name l with Some v -> Some v | None -> acc) None levels
   in
@@ -1031,9 +1034,9 @@ let guards_text levels =
   let gs =
     List.filter_map
       (fun l ->
-        Option.map
-          (fun g -> sprintf "(fun () -> %s req%s)" (expr g) (scope_args l))
-          (prop "guard" l))
+        match prop "guard" l with
+        | Some g -> Some (sprintf "(fun () -> %s req%s)" (expr g) (scope_args l))
+        | None -> None)
       levels
   in
   match gs with [] -> "[]" | _ -> "[ " ^ String.concat "; " gs ^ " ]"
@@ -1086,9 +1089,9 @@ let server_arm ~shared ~rule ~fallback n =
           let loaders =
             List.filter_map
               (fun l ->
-                Option.map
-                  (fun v -> (loader_label v, sprintf "%s req%s" (expr v) (scope_args l)))
-                  (prop "loader" l))
+                match prop "loader" l with
+                | Some v -> Some (loader_label v, sprintf "%s req%s" (expr v) (scope_args l))
+                | None -> None)
               n.levels
           in
           let call v = sprintf "%s%s ()" (expr v) (args (labels @ List.map fst loaders)) in
@@ -1128,7 +1131,7 @@ let server_arm ~shared ~rule ~fallback n =
             sprintf "    guards = %s;" guards;
             sprintf "    run = (fun () -> %s req%s);"
               (expr (Option.get (prop "handler" leaf)))
-              (args (seg_labels n.segs));
+              (args labels);
             "  }";
           ]
       in

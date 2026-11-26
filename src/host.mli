@@ -129,8 +129,30 @@ val nonce : unit -> string
 val fetch_text : string -> (int -> string -> unit) -> (string -> unit) -> unit
 val add_stylesheet : string -> unit
 val read_file : string -> string option
-val take_buffer : unit -> Stdlib.Buffer.t option
-val give_buffer : Stdlib.Buffer.t -> unit
+(* The output buffer of the printer. *)
+module Out : sig
+  type t
+
+  val create : int -> t
+  val length : t -> int
+  val clear : t -> unit
+  val truncate : t -> int -> unit
+  val add_char : t -> char -> unit
+  val add_string : t -> string -> unit
+  val add_substring : t -> string -> int -> int -> unit
+
+  val add_escaped : t -> quote:bool -> string -> unit
+  (** Escapes the ampersand and less-than, plus greater-than when not [quote] or the double quote when [quote]. *)
+
+  val sub : t -> int -> int -> string
+  val contents : t -> string
+  val blit : t -> int -> bytes -> int -> int -> unit
+end
+
+val take_buffer : unit -> Out.t option
+val give_buffer : Out.t -> unit
+val take_bytes : int -> Bytes.t
+val give_bytes : Bytes.t -> unit
 
 type 'a local
 

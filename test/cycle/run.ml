@@ -38,6 +38,8 @@ module Test_adapter = struct
   let respond (r : Server.response) =
     match r.body with
     | Server.String s -> Async.return { status = r.status; headers = r.headers; body = s }
+    | Server.Fixed { length; write } ->
+        Async.return { status = r.status; headers = r.headers; body = Server.fixed_to_string ~length write }
     | Server.Stream f ->
         let b = Buffer.create 64 in
         Async.map
@@ -76,6 +78,10 @@ module Held_adapter = struct
   let respond (r : Server.response) =
     match r.body with
     | Server.String s ->
+        Async.return
+          { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.return () }
+    | Server.Fixed { length; write } ->
+        let s = Server.fixed_to_string ~length write in
         Async.return
           { reply = { status = r.status; headers = r.headers; body = s }; ended = Async.return () }
     | Server.Stream f ->
@@ -537,6 +543,17 @@ let matching =
         check_true "page with the param" (contains r.body "no org page /org/acme/x/404 in acme");
         let r = get "/org/acme/x/1" in
         check_true "item" (contains r.body "acme 1 item") );
+    ( "a method node gets its search fields and those of its groups",
+      fun () ->
+        let r = get "/echo?q=a%20b&n=3&tag=x&tag=y&lang=fr" in
+        check_status r 200;
+        Alcotest.(check string) "fields" "fr a b 3 x,y" r.body;
+        let r = get "/echo?n=no" in
+        Alcotest.(check string) "defaults" "en - 1 " r.body;
+        let r = get ~meth:`POST ~headers:[ ("sec-fetch-site", "same-origin") ] "/echo?lang=de" in
+        Alcotest.(check string) "group field on a post" "posted de" r.body;
+        Alcotest.(check string) "typed link" "/echo?lang=fr&q=a%20b&tag=x&tag=y"
+          (Cycle_shared.Routes.echo ~lang:"fr" ~q:"a b" ~tag:[ "x"; "y" ] ()) );
     ( "a param that does not decode is 404",
       fun () ->
         let r = get "/team/BAD/1" in
@@ -1133,6 +1150,9 @@ let render =
           match Async.status (Raw.handler config Cycle_server.Yuka_routes.app (request target)) with
           | Async.Done { body = Server.String text; status; _ } ->
               Printf.sprintf "string %d %b" status (String.ends_with ~suffix:"</body></html>" text)
+          | Async.Done { body = Server.Fixed { length; write }; status; _ } ->
+              let text = Server.fixed_to_string ~length write in
+              Printf.sprintf "string %d %b" status (String.ends_with ~suffix:"</body></html>" text)
           | Async.Done { body = Server.Stream _; status; _ } -> Printf.sprintf "stream %d" status
           | _ -> "other"
         in
@@ -1288,6 +1308,8 @@ let blocking =
   let one_string (a : Server.response Async.t) =
     match Async.status a with
     | Async.Done { body = Server.String text; headers; status } -> { status; headers; body = text }
+    | Async.Done { body = Server.Fixed { length; write }; headers; status } ->
+        { status; headers; body = Server.fixed_to_string ~length write }
     | Async.Done { body = Server.Stream _; _ } -> Alcotest.fail "a stream, not one string"
     | _ -> Alcotest.fail "no response"
   in
@@ -1850,6 +1872,8 @@ let dev =
         ignore (f (fun s -> written := !written @ [ s ]; write s));
         (status, headers, written)
     | Async.Done { status; headers; body = Server.String s } -> (status, headers, ref [ s ])
+    | Async.Done { status; headers; body = Server.Fixed { length; write } } ->
+        (status, headers, ref [ Server.fixed_to_string ~length write ])
     | _ -> Alcotest.fail "no response"
   in
   [
@@ -2333,7 +2357,7 @@ let request_api =
         | None -> Alcotest.fail "the handler did not run"
         | Some req ->
             Alcotest.(check (option string)) "the adapter request" (Some "/hook")
-              (Option.map (fun (r : Test_adapter.request) -> r.target) (Cycle.backend_request req));
+              (match Cycle.backend_request req with Some (r : Test_adapter.request) -> Some r.target | None -> None);
             check_true "another Make" (Option.is_none (Held.backend_request req));
             check_true "a Testing request" (Option.is_none (Cycle.backend_request (Server.Testing.request ()))) );
     ( "target, query and query_param of a request",
@@ -2387,7 +2411,7 @@ let request_api =
         Alcotest.(check (list (pair string string))) "headers" [ ("content-type", "application/json") ] r.headers;
         (match r.body with
         | Server.String s -> Alcotest.(check string) "body" "[1,2]" s
-        | Server.Stream _ -> Alcotest.fail "stream");
+        | Server.Fixed _ | Server.Stream _ -> Alcotest.fail "stream");
         let r = run_request (Server.text ~headers:[ ("x-a", "1") ] "hi") in
         Alcotest.(check int) "text status" 200 r.status;
         Alcotest.(check (list (pair string string))) "text headers"
@@ -2563,7 +2587,7 @@ let based =
             Alcotest.(check string) "path" "/hook" (Server.Request.path req);
             Alcotest.(check string) "target" "/hook" (Server.Request.target req);
             Alcotest.(check (option string)) "the adapter request" (Some "/demo/lux/hook")
-              (Option.map (fun (r : Test_adapter.request) -> r.target) (Cycle.backend_request req)) );
+              (match Cycle.backend_request req with Some (r : Test_adapter.request) -> Some r.target | None -> None) );
     ( "prerender targets and paths under the base",
       fun () ->
         Alcotest.(check string) "target" "/demo/lux/plain" (Server.Prerender.target based "/plain");

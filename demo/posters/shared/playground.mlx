@@ -100,6 +100,17 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
   let download = Yuka.State.memo ~equal:String.equal (fun () -> Link.download ~defaults (settings ())) in
   Yuka.Effect.on_change route (fun ~prev:_ ~next -> Routes.replace next);
   let kind = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.kind (Yuka.State.get art)) in
+  let style =
+    Yuka.State.memo ~equal:( = ) (fun () ->
+        match Yuka.State.get art with Pattern.Circles a -> a.style | _ -> Pattern.Halves)
+  in
+  let style_button (st : Pattern.style) : Yuka.client Yuka.element =
+    <button class_="preset" type_=`button
+      aria_pressed=(if Yuka.State.get style = st then `true_ else `false_)
+      on_click=(fun _ -> set_art (function Pattern.Circles a -> Pattern.Circles (Pattern.restyle st a) | other -> other))>
+      (Yuka.text (Pattern.Style.label st))
+    </button>
+  in
   let shapes = Yuka.State.memo (fun () -> Pattern.shapes (Yuka.State.get layout) (Yuka.State.get art)) in
   let rotation = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.rotation (Yuka.State.get art)) in
   let labels = Yuka.State.memo ~equal:( = ) (fun () -> Pattern.labels (Yuka.State.get text)) in
@@ -187,16 +198,40 @@ let[@client] make ~(initial : Pattern.settings) ~(defaults : Pattern.settings) (
              dial ~id:"direction" ~label:"Direction (degrees)" ~value ~update);
           ]
     | Pattern.Kind.Circles ->
-        Yuka.fragment
+        let grid =
           [
+            <div class_="presets" role=`group aria_label="Style">
+              (Yuka.fragment (List.map style_button Pattern.Style.all))
+            </div>;
             param ~id:"columns" ~label:"Columns" ~range:Pattern.Range.columns
               (circles (fun a -> a.columns) (fun a columns -> { a with columns }));
             param ~id:"rows" ~label:"Rows" ~range:Pattern.Range.rows (circles (fun a -> a.rows) (fun a rows -> { a with rows }));
-            param ~id:"half" ~label:"Half discs" ~range:Pattern.Range.share (circles (fun a -> a.half) (fun a half -> { a with half }));
-            param ~id:"empty" ~label:"Empty" ~range:Pattern.Range.share (circles (fun a -> a.empty) (fun a empty -> { a with empty }));
-            param ~id:"block" ~label:"Squares" ~range:Pattern.Range.share (circles (fun a -> a.block) (fun a block -> { a with block }));
-            param ~id:"bar" ~label:"Bars" ~range:Pattern.Range.share (circles (fun a -> a.bar) (fun a bar -> { a with bar }));
           ]
+        in
+        let mix =
+          match Yuka.State.get style with
+          | Pattern.Halves ->
+              [
+                param ~id:"half" ~label:"Half discs" ~range:Pattern.Range.share (circles (fun a -> a.half) (fun a half -> { a with half }));
+                param ~id:"empty" ~label:"Empty" ~range:Pattern.Range.share (circles (fun a -> a.empty) (fun a empty -> { a with empty }));
+                param ~id:"block" ~label:"Squares" ~range:Pattern.Range.share (circles (fun a -> a.block) (fun a block -> { a with block }));
+                param ~id:"bar" ~label:"Bars" ~range:Pattern.Range.share (circles (fun a -> a.bar) (fun a bar -> { a with bar }));
+              ]
+          | Pattern.Fragments ->
+              [
+                param ~id:"merge" ~label:"Long tiles" ~range:Pattern.Range.share
+                  (circles (fun a -> a.merge) (fun a merge -> { a with merge }));
+                param ~id:"round" ~label:"Round corners" ~range:Pattern.Range.share
+                  (circles (fun a -> a.round) (fun a round -> { a with round }));
+                param ~id:"tile-gap" ~label:"Gap" ~range:Pattern.Range.tile_gap (circles (fun a -> a.gap) (fun a gap -> { a with gap }));
+                param ~id:"accent" ~label:"Accent circles" ~range:Pattern.Range.accent
+                  (circles (fun a -> a.accent) (fun a accent -> { a with accent }));
+                color_field ~id:"tint" ~label:"Accent"
+                  ~value:(fun () -> match Yuka.State.get art with Pattern.Circles a -> a.tint | _ -> Pattern.accent_default)
+                  ~update:(fun tint -> set_art (function Pattern.Circles a -> Pattern.Circles { a with tint } | other -> other));
+              ]
+        in
+        Yuka.fragment (grid @ mix)
   in
   <div class_="playground">
     <aside class_="panel text-panel" aria_label="Poster text">

@@ -4,11 +4,19 @@ let route ?defaults (s : settings) =
   let keep value default =
     match defaults with Some (d : settings) when value = default d -> None | _ -> Some value
   in
-  let base = Option.map (fun d -> start ~defaults:d (kind s.art)) defaults in
-  let field get =
-    match (get s.art, Option.bind base get) with Some value, Some default when value = default -> None | value, _ -> value
+  let start = match defaults with Some d -> Some (start ~defaults:d (kind s.art)) | None -> None in
+  let base =
+    match (start, s.art) with
+    | Some (Circles b), Circles a -> Some (Circles (restyle a.style b))
+    | start, _ -> start
   in
-  let color value default = Option.map (fun c -> String.sub c 1 6) (keep value default) in
+  let against base get =
+    match (get s.art, match base with Some b -> get b | None -> None) with
+    | Some value, Some default when value = default -> None
+    | value, _ -> value
+  in
+  let field get = against base get in
+  let color value default = match keep value default with Some c -> Some (String.sub c 1 6) | None -> None in
   Routes.Home
     {
       kind = keep (kind s.art) (fun d -> kind d.art);
@@ -20,7 +28,7 @@ let route ?defaults (s : settings) =
       stroke = field (function Lines a -> Some a.stroke | _ -> None);
       direction = field (function Lines a -> Some a.direction | Lightning a -> Some a.direction | _ -> None);
       blocks = field (function Blocks a -> Some a.blocks | _ -> None);
-      gap = field (function Blocks a -> Some a.gap | _ -> None);
+      gap = field (function Blocks a -> Some a.gap | Circles a -> Some a.gap | _ -> None);
       filled = field (function Blocks a -> Some a.filled | _ -> None);
       squareness = field (function Blocks a -> Some a.squareness | _ -> None);
       radius = field (function Blocks a -> Some a.radius | _ -> None);
@@ -32,12 +40,20 @@ let route ?defaults (s : settings) =
       jaggedness = field (function Lightning a -> Some a.jaggedness | _ -> None);
       thickness = field (function Lightning a -> Some a.thickness | _ -> None);
       length = field (function Lightning a -> Some a.length | _ -> None);
+      style = against start (function Circles a -> Some a.style | _ -> None);
       columns = field (function Circles a -> Some a.columns | _ -> None);
       rows = field (function Circles a -> Some a.rows | _ -> None);
       half = field (function Circles a -> Some a.half | _ -> None);
       empty = field (function Circles a -> Some a.empty | _ -> None);
       block = field (function Circles a -> Some a.block | _ -> None);
       bar = field (function Circles a -> Some a.bar | _ -> None);
+      merge = field (function Circles a -> Some a.merge | _ -> None);
+      round = field (function Circles a -> Some a.round | _ -> None);
+      accent = field (function Circles a -> Some a.accent | _ -> None);
+      tint =
+        (match field (function Circles a -> Some a.tint | _ -> None) with
+        | Some c -> Some (String.sub c 1 6)
+        | None -> None);
       bg = color s.colours.background (fun d -> d.colours.background);
       fg = color s.colours.foreground (fun d -> d.colours.foreground);
       title = keep s.text.title (fun d -> d.text.title);
@@ -83,14 +99,21 @@ let settings ~(defaults : settings) = function
                 length = r.length |? d.length;
               }
         | Circles d ->
+            let d = match r.style with Some style -> restyle style d | None -> d in
             Circles
               {
+                style = r.style |? d.style;
                 columns = r.columns |? d.columns;
                 rows = r.rows |? d.rows;
                 half = r.half |? d.half;
                 empty = r.empty |? d.empty;
                 block = r.block |? d.block;
                 bar = r.bar |? d.bar;
+                merge = r.merge |? d.merge;
+                round = r.round |? d.round;
+                gap = r.gap |? d.gap;
+                accent = r.accent |? d.accent;
+                tint = color r.tint d.tint;
               }
       in
       normalize ~defaults
@@ -109,8 +132,10 @@ let settings ~(defaults : settings) = function
         }
   | _ -> defaults
 
-let query href = match String.index_opt href '?' with Some i -> String.sub href i (String.length href - i) | None -> ""
-let svg route = Routes.poster_svg () ^ query (Routes.href route)
+let svg = function
+  | Routes.Home { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; bolts; branches; jaggedness; thickness; length; style; columns; rows; half; empty; block; bar; merge; round; accent; tint; bg; fg; title; subtitle; year; day; weekday } ->
+      Routes.href (Routes.Poster_svg { kind; seed; padding; lines; amplitude; waves; stroke; direction; blocks; gap; filled; squareness; radius; clouds; puffs; size; bolts; branches; jaggedness; thickness; length; style; columns; rows; half; empty; block; bar; merge; round; accent; tint; bg; fg; title; subtitle; year; day; weekday })
+  | _ -> Routes.poster_svg ()
 let file (s : settings) extension = "poster-" ^ Int.to_string s.layout.seed ^ "." ^ extension
 
 let download ~defaults (s : settings) =

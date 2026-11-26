@@ -151,7 +151,7 @@ A method node takes its method from its name, not from ~method_
   > Router.make [ Router.post A ~path:"/a" ~method_:`POST ~handler:Handlers.a ]
   > EOF
   File "Routes.ml", line 1, characters 48-53:
-  Error: Router.post has no argument ~method_; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
+  Error: Router.post has no argument ~method_; its labelled arguments are ~path, ~handler, ~guard, ~search, ~cross_origin, ~headers
   [1]
 
 A catch-all that is not the last segment
@@ -907,14 +907,14 @@ No named node
   > Router.make [ Router.get A ~path:"/a" ~handler:Handlers.a ~prefetch:`Off ]
   > EOF
   File "Routes.ml", line 1, characters 68-72:
-  Error: Router.get has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~headers, ~cache, ~prerender
+  Error: Router.get has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~search, ~headers, ~cache, ~prerender
   [1]
 
   $ gen <<'EOF'
   > Router.make [ Router.post A ~path:"/a" ~handler:Handlers.a ~prefetch:`Off ]
   > EOF
   File "Routes.ml", line 1, characters 69-73:
-  Error: Router.post has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~cross_origin, ~headers
+  Error: Router.post has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~search, ~cross_origin, ~headers
   [1]
 
   $ gen <<'EOF'
@@ -928,7 +928,7 @@ No named node
   > Router.make [ Router.get A ~path:"/a" ~handler:Handlers.a ~prefetch:`Idle ]
   > EOF
   File "Routes.ml", line 1, characters 68-73:
-  Error: Router.get has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~headers, ~cache, ~prerender
+  Error: Router.get has no argument ~prefetch; its labelled arguments are ~path, ~handler, ~guard, ~search, ~headers, ~cache, ~prerender
   [1]
 
 `Idle needs a ~cache with a max-age: no ~cache, no_store and no_cache are

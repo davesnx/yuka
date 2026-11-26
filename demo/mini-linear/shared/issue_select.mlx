@@ -7,7 +7,7 @@ module Status = struct
   let make ?value ?default_value ?name ?(label = "Status") ?(compact = false) ?(full = false) ?on_change () :
       Yuka.client Yuka.element =
     let on_value_change =
-      Option.map (fun f slug -> Option.iter f (Issue.status_of_slug slug)) on_change
+      match on_change with Some f -> Some (fun slug -> Option.iter f (Issue.status_of_slug slug)) | None -> None
     in
     <Select.Root ?value ?default_value ?name label values=status_values full ?on_value_change>
       (if compact then
@@ -48,7 +48,7 @@ module Priority = struct
   let make ?value ?default_value ?name ?(label = "Priority") ?(compact = false) ?(full = false) ?on_change () :
       Yuka.client Yuka.element =
     let on_value_change =
-      Option.map (fun f slug -> Option.iter f (Issue.priority_of_slug slug)) on_change
+      match on_change with Some f -> Some (fun slug -> Option.iter f (Issue.priority_of_slug slug)) | None -> None
     in
     <Select.Root ?value ?default_value ?name label values=priority_values full ?on_value_change>
       (if compact then

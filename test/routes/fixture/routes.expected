@@ -5,7 +5,7 @@ type t =
   | New_post of { lang : string option }
   | Issue of { id : Params.issue_id; tab : Params.Tab.t option; seen : int list; view : Params.Tab.t }
   | Close_issue of { id : Params.issue_id }
-  | Issue_json of { id : Params.issue_id }
+  | Issue_json of { id : Params.issue_id; pretty : bool; fields : string list }
   | Update_issue of { id : Params.issue_id }
   | Page_n of { n : int }
   | Cafe
@@ -42,7 +42,13 @@ let href =
                (if Stdlib.( = ) (Yuka.Router.Param.encode Params.Tab.param view) (Yuka.Router.Param.encode Params.Tab.param (Params.Tab.Overview)) then [] else [ ("view", Yuka.Router.encode (Yuka.Router.Param.encode Params.Tab.param view)) ]);
              ])
     | Close_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/close")
-    | Issue_json { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/json")
+    | Issue_json { id; pretty; fields } ->
+        Yuka.Router.with_query (Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/json"))
+          (Stdlib.List.concat
+             [
+               (if Stdlib.( = ) pretty (false) then [] else [ ("pretty", Stdlib.string_of_bool pretty) ]);
+               Stdlib.List.map (fun v -> ("fields", Yuka.Router.encode v)) fields;
+             ])
     | Update_issue { id } -> Stdlib.( ^ ) "/issue/" (Stdlib.( ^ ) (Yuka.Router.segment (Yuka.Router.Param.encode Params.issue_id_param id)) "/json")
     | Page_n { n } -> Stdlib.( ^ ) "/page/" (Stdlib.string_of_int n)
     | Cafe -> "/caf%C3%A9"
@@ -65,7 +71,7 @@ let issue ~id ?tab ?(seen = []) ?(view = Params.Tab.Overview) ?fragment () = Yuk
 
 let close_issue ~id ?fragment () = Yuka.Router.with_fragment (href (Close_issue { id })) fragment
 
-let issue_json ~id ?fragment () = Yuka.Router.with_fragment (href (Issue_json { id })) fragment
+let issue_json ~id ?(pretty = false) ?(fields = []) ?fragment () = Yuka.Router.with_fragment (href (Issue_json { id; pretty; fields })) fragment
 
 let update_issue ~id ?fragment () = Yuka.Router.with_fragment (href (Update_issue { id })) fragment
 
@@ -164,7 +170,12 @@ let find (meth : Yuka.Router.meth) (path : string list)
       | `GET | `HEAD -> (
           match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
           | None -> Yuka.Router.Missing
-          | Some p1 -> Yuka.Router.Found (Issue_json { id = p1 }))
+          | Some p1 -> (
+              Yuka.Router.Found (Issue_json {
+                id = p1;
+                pretty = (match Yuka.Router.search query "pretty" with v :: _ -> (match (match v with "true" -> Some true | "false" -> Some false | _ -> None) with Some v -> v | None -> (false)) | [] -> (false));
+                fields = Yuka.Router.search query "fields";
+              })))
       | `PUT -> (
           match Yuka.Router.Param.decode Params.issue_id_param (Yuka.Router.of_segment p1) with
           | None -> Yuka.Router.Missing

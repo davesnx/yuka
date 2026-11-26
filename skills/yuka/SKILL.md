@@ -30,8 +30,9 @@ of the `docs/` directory of the Yuka repository.
 Read the one that matches the task:
 
 - [Getting started](references/getting-started.md): install, project
-  layout, every dune rule, the server and client entries, the Dream and
-  tapak adapters, the live bus, static files and prerender, `yuka dev`,
+  layout, every dune rule, the server and client entries, the built-in
+  server (`yuka-server`, sessions), the Dream and tapak adapters, the live
+  bus, static files and prerender, `yuka dev`,
   the production bundle. Read it to create an app or to fix a build rule.
 - [Islands](references/islands.md): `let[@client] make`, `<Yuka.Client>`,
   props and codecs, start strategies, children. Read it before you write
