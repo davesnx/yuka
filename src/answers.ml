@@ -82,6 +82,26 @@ let find_added key nodes =
          @ Array.to_list (Web.DOM.NodeList.toArray (Web.DOM.Element.querySelectorAll "script[data-yuka-answer]" n)))
        (Array.to_list nodes))
 
+let in_region region =
+  List.filter_map
+    (fun el ->
+      match (Web.DOM.Element.getAttribute "data-yuka-answer" el, of_json (Web.DOM.Node.textContent el)) with
+      | Some key, Some r -> Some (key, r)
+      | _ -> None)
+    (Array.to_list
+       (Web.DOM.NodeList.toArray (Web.DOM.Element.querySelectorAll "script[data-yuka-answer]:not([data-pending])" region)))
+
+let in_html html =
+  let mark = "data-yuka-answer" in
+  let n = String.length mark in
+  let rec has i = i + n <= String.length html && (String.sub html i n = mark || has (i + 1)) in
+  if not (has 0) then []
+  else begin
+    let parsed = Web.DOM.Document.createElement "div" Web.DOM.document in
+    Web.DOM.Element.setInnerHTML parsed html;
+    in_region parsed
+  end
+
 let slot key =
   match !(Types.current_session ()) with
   | Some s when s.depth > 0 && not (List.mem key s.answered) ->

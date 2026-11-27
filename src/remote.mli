@@ -32,7 +32,10 @@ val make :
       [Loading None]. Inside an island the answer is written in the page
       ([<script data-yuka-answer>], after the island), and the client
       reads it on the first run instead of sending a request; a pending
-      answer is streamed later.
+      answer is streamed later. After a client navigation, a use that
+      stays on the screen (in a kept layout) also reads an answer of its
+      key that came with the new content, also one streamed later; an
+      error answer does not replace its data.
     - Outside the browser and outside a render (tests), it calls the
       implementation directly. *)
 
