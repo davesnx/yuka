@@ -356,11 +356,17 @@ Yuka.Server.Action.implement User_popup.stats (fun _request { workspace; user } 
 
 - In a server render, the query runs once. Inside an island, the answer
   is written in the page, and the browser reads it with no request.
+  After a client navigation, a use in a kept layout reads the answer of
+  its key that the new page brings, so a layout island and a page island
+  with the same query show the same data.
 - A `Network` or `Server` error is tried again two times, after 500 ms
   and 1500 ms (`?retry`). `?enabled` stops the query while it is false.
-- `Yuka.Remote.refetch remote` sends it again. `Yuka.Remote.invalidate query`
-  sends again every use of the query on the page, for example after an
-  action changed the data.
+- `Yuka.Remote.refetch remote` sends it again, for every use with the
+  same input. `Yuka.Remote.invalidate query` sends again every use of the
+  query on the page, for example after an action changed the data. The
+  uses with the same input share one request: a use that starts waits on
+  the one in flight, and a refetch or an invalidate replaces it, so no
+  answer from before them is shown.
 - `Yuka.Remote.optimistic` shows a change at once and removes it when
   the action fails.
 

@@ -798,6 +798,62 @@ let partial finish =
       check "outer kept, inner stopped, new running" "g1/3|g1/1" (log_g ());
       finish ())
 
+let apps = Action.query ~name:"apps" ~input:Codec.string ~output:Codec.string
+
+let apps_entry =
+  runtime_entry ~name:"Apps" (fun json ->
+      Result.map
+        (fun () () ->
+          let r = Remote.make apps (fun () -> "x") in
+          element "b" [ Yuka.attr "id" "apps" ]
+            [
+              hole (fun () ->
+                  text
+                    (match State.get (Remote.state r) with
+                    | Status.Ready { data; _ } -> "ready " ^ data
+                    | Status.Loading _ -> "loading"
+                    | Status.Failed _ -> "failed"
+                    | Status.Idle -> "idle"));
+            ])
+        (Codec.decode Codec.unit json))
+
+let apps_answer json = {|<script type="application/json" data-yuka-answer="r:apps &quot;x&quot;">|} ^ json ^ "</script>"
+
+let text_of : string -> string =
+  [%mel.raw "function (sel) { const e = document.querySelector(sel); return e ? e.textContent : 'none' }"]
+
+let kept_remote_adopts_answer finish =
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<a id="two" href="/two">two</a><yuka-island data-name="Apps" data-id="i1" style="display:contents"><b id="apps">ready OLD</b></yuka-island>|}
+    ^ apps_answer {|{"ok":"OLD"}|}
+    ^ {|<script type="application/json" data-yuka-props="i1">null</script><yuka-outlet data-k="L0" style="display:contents"><p>one</p></yuka-outlet>|}
+    );
+  render ~islands:(runtime_registry [ apps_entry ]) ();
+  let hydrated = text_of "#apps" in
+  ignore (click "#two" "");
+  resolve_headers 0
+    ({|<p>two</p><yuka-island data-name="Apps" data-id="L0-i1" style="display:contents"><b id="apps">ready NEW</b></yuka-island>|}
+    ^ apps_answer {|{"ok":"NEW"}|}
+    ^ {|<script type="application/json" data-yuka-props="L0-i1">null</script>|})
+    200
+    [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+  tick (fun () ->
+      check "hydrated from the first answer" "ready OLD" hydrated;
+      check "the kept island reads the navigation's answer" "ready NEW" (text_of "body > yuka-island #apps");
+      check "the new island reads it too" "ready NEW" (text_of "yuka-outlet #apps");
+      check "no fetch but the navigation" "1" (ints (calls ()));
+      ignore (click "#two" "");
+      resolve_headers 1
+        ({|<p>three</p>|} ^ apps_answer {|{"error":{"kind":"server"}}|})
+        200
+        [| ("yuka-outlet", "L0"); ("yuka-build", "b1") |];
+      tick (fun () ->
+          check "an error answer keeps the data" "ready NEW" (text_of "body > yuka-island #apps");
+          check "still no fetch" "2" (ints (calls ()));
+          finish ()))
+
 let count_selector : string -> int = [%mel.raw "function (sel) { return document.querySelectorAll(sel).length }"]
 
 let resolve_stream : int -> (string * string) array -> unit =
@@ -860,6 +916,30 @@ let pending_link finish =
               stop ();
               check "cleared by stop" "null" (pending "#home");
               finish ())))
+
+let kept_remote_adopts_streamed_answer finish =
+  Yuka.stop ();
+  setup "";
+  set_head {|<title>start</title><meta name="yuka-build" content="b1">|};
+  set_body
+    ({|<a id="two" href="/two">two</a><yuka-island data-name="Apps" data-id="i1" style="display:contents"><b id="apps">ready OLD</b></yuka-island>|}
+    ^ apps_answer {|{"ok":"OLD"}|}
+    ^ {|<script type="application/json" data-yuka-props="i1">null</script><yuka-outlet data-k="L0" style="display:contents"><p>one</p></yuka-outlet>|}
+    );
+  render ~islands:(runtime_registry [ apps_entry ]) ();
+  ignore (click "#two" "");
+  resolve_stream 0 [| ("yuka-outlet", "L0") |];
+  push_text 0
+    (json_line {|<p id="new">two</p><script type="application/json" data-yuka-answer="r:apps &quot;x&quot;" data-pending></script>|});
+  tick (fun () ->
+      check "shell shown" "two" (text_of "#new");
+      check "a pending answer keeps the data" "ready OLD" (text_of "#apps");
+      push_text 0 (part_line "" (apps_answer {|{"ok":"NEW"}|}));
+      tick (fun () ->
+          check "the kept island reads the streamed answer" "ready NEW" (text_of "#apps");
+          check "no fetch but the navigation" "1" (ints (calls ()));
+          push_end 0;
+          tick finish))
 
 let streamed finish =
   Yuka.stop ();
@@ -4284,6 +4364,8 @@ let all =
     ("404 is shown in place", shown_in_place 404);
     ("500 is shown in place", shown_in_place 500);
     ("partial response replaces the outlet", partial);
+    ("a Remote of the kept layout reads the answer of its key that a navigation brings", kept_remote_adopts_answer);
+    ("a Remote of the kept layout reads an answer of its key streamed after the shell", kept_remote_adopts_streamed_answer);
     ("overlay: shown over the page, Back removes it with no request, Forward shows it", overlay);
     ("overlay: Routes.current and the focus follow the overlay", route_overlay);
     ("overlay: replaced from inside, Browser.back loads the background, a background link closes it", overlay_replaced);

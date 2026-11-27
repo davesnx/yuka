@@ -21,9 +21,12 @@ val make :
     is aborted.
 
     - The key of a request is the query name and the JSON of the input;
-      the query runs again only when the key changes. A new key,
-      {!refetch} or {!invalidate} aborts the request in flight, and only
-      the latest request writes the status.
+      the query runs again only when the key changes. The uses of a key
+      share one request in flight: a use that starts (mounted with no
+      answer in the page, enabled, a new key) waits on it, and
+      {!refetch} or {!invalidate} replaces it, so an answer from before
+      them is not written. A use that moves on stops waiting, and the
+      request is aborted when no use waits on it.
     - [enabled ()] false gives [Idle] and aborts the request.
     - [Network] and [Server] errors are tried again by [retry] (default
       {!default_retry}); the others fail at once.
@@ -32,7 +35,10 @@ val make :
       [Loading None]. Inside an island the answer is written in the page
       ([<script data-yuka-answer>], after the island), and the client
       reads it on the first run instead of sending a request; a pending
-      answer is streamed later.
+      answer is streamed later. After a client navigation, a use that
+      stays on the screen (in a kept layout) also reads an answer of its
+      key that came with the new content, also one streamed later; an
+      error answer does not replace its data.
     - Outside the browser and outside a render (tests), it calls the
       implementation directly. *)
 
@@ -41,10 +47,13 @@ val state : 'o t -> 'o Status.t State.read
     Read it with {!State.get}. *)
 
 val refetch : 'o t -> unit
-(** Sends the request again (the manual retry after [Failed]). *)
+(** Sends the request again (the manual retry after [Failed]), for every
+    use with the same key, with one request and this use's [retry]. *)
 
 val invalidate : (_, _, [ `Query ]) Action.t -> unit
-(** {!refetch} every mounted use of this query, for every input. *)
+(** Sends again every mounted use of this query, for every input, with one
+    request per key: the uses with the same input share it, with the
+    [retry] of the first. *)
 
 val optimistic :
   ?commit:('r -> 'o -> 'o) ->

@@ -360,7 +360,8 @@ let follow root place s =
   in
   let put (id, html) =
     Client.stop_within (Navigation_web.put root id html);
-    Navigation_web.adopt_stylesheets ()
+    Navigation_web.adopt_stylesheets ();
+    !Platform.answered (Platform.Part html)
   in
   List.iter put (List.rev s.parts);
   (match s.result with Some false -> break root | _ -> ());
@@ -469,6 +470,7 @@ let show ~dir ~push ~replace ~restore ~refresh url a =
           in
           (match a.stream with Some s -> follow root place s | None -> place ());
           !Platform.swapped target;
+          !Platform.answered (Platform.Region root);
           !start_islands ();
           Navigation_web.live ();
           if not (kept ()) then Navigation_web.settle root (hash_of final) (not refresh)

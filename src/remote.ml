@@ -20,8 +20,62 @@ let fetch name input k =
 
 let send () = if Host.in_browser then fetch else !Bridge.send
 
-let table : (int * (unit -> unit)) list Host.table option ref = ref None
+type answer = (Json.t, Status.error) result
+
+type flight = { mutable writers : (int * (answer -> unit)) list; mutable abort : unit -> unit }
+
+let flights : flight Host.table = Host.table ()
+
+let again retry n = function Error (Status.Network _ | Status.Server) -> n <= retry.attempts | _ -> false
+
+let join send name key input retry n writer =
+  match Host.table_get flights key with
+  | Some f -> f.writers <- writer :: f.writers
+  | None ->
+      let f = { writers = [ writer ]; abort = ignore } in
+      Host.table_set flights key f;
+      let live () = match f.writers with [] -> false | _ -> true in
+      let rec attempt n =
+        f.abort <-
+          send name input (fun r ->
+              if live () then
+                if again retry n r then
+                  f.abort <- Host.set_timeout (retry.delay_ms n) (fun () -> if live () then attempt (n + 1))
+                else begin
+                  Host.table_delete flights key;
+                  let writers = f.writers in
+                  f.writers <- [];
+                  List.iter (fun (_, write) -> write r) writers
+                end)
+      in
+      attempt n
+
+let leave key id =
+  match Host.table_get flights key with
+  | Some f -> (
+      f.writers <- List.filter (fun (i, _) -> i <> id) f.writers;
+      match f.writers with
+      | [] ->
+          Host.table_delete flights key;
+          f.abort ()
+      | _ -> ())
+  | None -> ()
+
+type use = { adopt : string -> answer -> unit; share : retry option -> (string -> bool) -> (unit -> unit) option }
+
+let table : use list Host.table option ref = ref None
 let next_use = ref 0
+
+let adopt t navigated =
+  let answers =
+    match navigated with
+    | Platform.Region region -> Answers.in_region region
+    | Platform.Part html -> Answers.in_html html
+  in
+  List.iter
+    (fun (key, r) ->
+      match r with Ok _ -> Array.iter (List.iter (fun u -> u.adopt key r)) (Host.table_values t) | Error _ -> ())
+    answers
 
 let uses () =
   match !table with
@@ -29,9 +83,17 @@ let uses () =
   | None ->
       let t = Host.table () in
       table := Some t;
+      Platform.answered := adopt t;
       t
 
 let listed name = Option.value (Host.table_get (uses ()) name) ~default:[]
+
+let refresh ?retry name wanted =
+  List.iter
+    (fun wait -> wait ())
+    (List.fold_left
+       (fun waits u -> match u.share retry wanted with Some w -> w :: waits | None -> waits)
+       [] (listed name))
 
 let decode (q : (_, _, _) Action.t) last = function
   | Ok j -> (
@@ -61,6 +123,10 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
   end
   else begin
     let send = send () in
+    let name = Action.name q in
+    incr next_use;
+    let id = !next_use in
+    let island = !Types.hydrating_island in
     let generation = ref 0 and stop = ref ignore and current = ref None and first = ref true in
     let cancel () =
       incr generation;
@@ -68,25 +134,20 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
       stop := ignore
     in
     let finish g r = if g = !generation then State.set base (decode q (Status.data (State.peek base)) r) in
-    let rec attempt g input n = stop := send (Action.name q) input (answered g input n)
-    and answered g input n r =
-      if g = !generation then
-        match r with
-        | Error (Status.Network _ | Status.Server) when n <= retry.attempts ->
-            stop := Host.set_timeout (retry.delay_ms n) (fun () -> if g = !generation then attempt g input (n + 1))
-        | r -> finish g r
+    let attempt ?(retry = retry) g input n =
+      let key = Answers.key name input in
+      stop := (fun () -> leave key id);
+      join send name key input retry n (id, finish g)
     in
     let embedded g input r =
       finish g r;
-      match r with
-      | Error (Status.Network _ | Status.Server) when retry.attempts >= 1 ->
-          stop :=
-            Host.set_timeout (retry.delay_ms 1) (fun () ->
-                if g = !generation then begin
-                  State.set base (Status.Loading (Status.data (State.peek base)));
-                  attempt g input 2
-                end)
-      | _ -> ()
+      if again retry 1 r then
+        stop :=
+          Host.set_timeout (retry.delay_ms 1) (fun () ->
+              if g = !generation then begin
+                State.set base (Status.Loading (Status.data (State.peek base)));
+                attempt g input 2
+              end)
     in
     let start input ~read =
       cancel ();
@@ -95,7 +156,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
       if not read then attempt g input 1
       else
         let key = Answers.key (Action.name q) input in
-        match Answers.find key with
+        match Answers.find ?island key with
         | Answers.Found r -> embedded g input r
         | Answers.Absent -> attempt g input 1
         | Answers.Pending ->
@@ -116,10 +177,10 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
               Host.on_dom_ready (fun () ->
                   !stop_watch ();
                   if g = !generation then
-                    match Answers.find key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
+                    match Answers.find ?island key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
             stop := release
     in
-    let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
+    let refetch () = match !current with Some (key, _) -> refresh ~retry name (String.equal key) | None -> () in
     Base.run_effect Scheduler.queue (fun () ->
         if enabled () then begin
           let input = Codec.encode (Action.input q) (args ()) in
@@ -138,19 +199,35 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
           cancel ();
           State.set base Status.Idle
         end);
-    incr next_use;
-    let id = !next_use in
-    Host.table_set (uses ()) (Action.name q) ((id, refetch) :: listed (Action.name q));
+    let adopt key r =
+      match !current with
+      | Some (k, input) when String.equal k key ->
+          cancel ();
+          embedded !generation input r
+      | _ -> ()
+    in
+    let share r wanted =
+      match !current with
+      | Some (key, input) when wanted key ->
+          cancel ();
+          let g = !generation in
+          State.set base (Status.Loading (Status.data (State.peek base)));
+          Some (fun () -> attempt ?retry:r g input 1)
+      | _ -> None
+    in
+    let use = { adopt; share } in
+    Host.table_set (uses ()) name (use :: listed name);
     Base.own (fun () ->
         cancel ();
-        Host.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
+        Host.table_set (uses ()) name (List.filter (fun u -> u != use) (listed name)));
     { state; base; changes; refetch }
   end
 
 let state r = r.state
 
-let refetch r = r.refetch ()
-let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed (Action.name q))
+let refetch (r : _ t) = r.refetch ()
+
+let invalidate (q : (_, _, [ `Query ]) Action.t) = refresh (Action.name q) (fun _ -> true)
 
 let optimistic ?commit r ~change run =
   let added, id = Optimistic.add (State.peek r.changes) change in
