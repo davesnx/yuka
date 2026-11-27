@@ -47,6 +47,16 @@ let fail i m =
   let _, (_, _, failure) = List.nth !gates i in
   failure m
 
+let gate_of input =
+  let rec go i = function [] -> raise Not_found | (k, _) :: _ when k = input -> i | _ :: t -> go (i + 1) t in
+  go 0 !gates
+
+(* Settles the requests still in flight, so a later test does not join one. *)
+let settle_rest () =
+  List.iter (fun (_, (a, resolve, _)) -> match Async.status a with Async.Pending -> resolve "rest" | _ -> ()) !gates
+
+let calls_of input = List.length (List.filter (String.equal input) !calls)
+
 let reset () =
   gates := [];
   calls := [];
@@ -128,7 +138,79 @@ let transport =
         Alcotest.(check bool) "a and b again" true (List.mem "a" added && List.mem "b" added);
         Alcotest.(check bool) "not the disposed c" false (List.mem "c" added);
         check_status "a keeps its data while loading" "loading A" a;
-        check_status "b" "loading B" b );
+        check_status "b" "loading B" b;
+        settle_rest () );
+    ( "invalidate sends one call per key for the uses on it",
+      fun () ->
+        reset ();
+        let a, dispose_a = in_owner (fun () -> Remote.make gated (fun () -> "k1")) in
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "k1")) in
+        let c, _ = in_owner (fun () -> Remote.make gated (fun () -> "other1")) in
+        settle (gate_of "k1") "A0";
+        settle (gate_of "other1") "C0";
+        reset ();
+        Remote.invalidate gated;
+        Alcotest.(check int) "one call for the shared key" 1 (calls_of "k1");
+        Alcotest.(check int) "one call for the other key" 1 (calls_of "other1");
+        check_status "a loading" "loading A0" a;
+        check_status "b loading" "loading A0" b;
+        dispose_a ();
+        settle (gate_of "k1") "K1";
+        settle (gate_of "other1") "O1";
+        check_status "a disposed keeps its state" "loading A0" a;
+        check_status "b reads the shared answer" "ready K1" b;
+        check_status "c" "ready O1" c;
+        settle_rest () );
+    ( "uses that start on the same key share one request; after they all leave, a new use sends again",
+      fun () ->
+        reset ();
+        let a, dispose_a = in_owner (fun () -> Remote.make gated (fun () -> "j")) in
+        let b, dispose_b = in_owner (fun () -> Remote.make gated (fun () -> "j")) in
+        Alcotest.(check int) "one request" 1 (calls_of "j");
+        check_status "a" "loading" a;
+        check_status "b" "loading" b;
+        dispose_a ();
+        dispose_b ();
+        let c, _ = in_owner (fun () -> Remote.make gated (fun () -> "j")) in
+        Alcotest.(check int) "the abandoned request is not joined" 2 (calls_of "j");
+        settle 1 "NEW";
+        settle 0 "OLD";
+        check_status "c reads its own request" "ready NEW" c );
+    ( "refetch on one use sends one request for every use on its key",
+      fun () ->
+        reset ();
+        let a, _ = in_owner (fun () -> Remote.make gated (fun () -> "k3")) in
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "k3")) in
+        let other, _ = in_owner (fun () -> Remote.make gated (fun () -> "o3")) in
+        settle (gate_of "k3") "A0";
+        settle (gate_of "o3") "O0";
+        reset ();
+        Remote.refetch a;
+        Alcotest.(check int) "one request for the key" 1 (calls_of "k3");
+        Alcotest.(check int) "none for another key" 0 (calls_of "o3");
+        check_status "b reloads too" "loading A0" b;
+        check_status "the other key stays" "ready O0" other;
+        settle 0 "A1";
+        check_status "a" "ready A1" a;
+        check_status "b" "ready A1" b );
+    ( "a refetch replaces the request in flight for its key",
+      fun () ->
+        reset ();
+        let a, _ = in_owner (fun () -> Remote.make gated (fun () -> "k2")) in
+        let b, _ = in_owner (fun () -> Remote.make gated (fun () -> "k2")) in
+        settle 0 "A0";
+        reset ();
+        Remote.invalidate gated;
+        let shared = gate_of "k2" in
+        Remote.refetch a;
+        Alcotest.(check int) "the shared request, then one that replaces it" 2 (calls_of "k2");
+        settle shared "OLD";
+        check_status "the old answer is dropped by a" "loading A0" a;
+        check_status "the old answer is dropped by b" "loading A0" b;
+        settle (List.length !gates - 1) "NEW";
+        check_status "a" "ready NEW" a;
+        check_status "b" "ready NEW" b;
+        settle_rest () );
     ( "Rejected is not retried",
       fun () ->
         reset ();
