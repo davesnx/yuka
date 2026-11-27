@@ -223,6 +223,19 @@ let log name value =
   end
 
 let current_session : session option ref = ref None
+
+let hydrating_island : string option ref = ref None
+
+let in_island id f =
+  let outer = !hydrating_island in
+  hydrating_island := Some id;
+  match f () with
+  | r ->
+      hydrating_island := outer;
+      r
+  | exception e ->
+      hydrating_island := outer;
+      raise e
 let local_session = if Scheduler.js then None else Some (Host.local (fun () -> ref None))
 let current_session () = match local_session with Some k when not Scheduler.js -> Host.local_get k | _ -> current_session
 
