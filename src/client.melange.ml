@@ -864,7 +864,7 @@ let boot entries props island =
               let o = Base.new_owner () in
               o.catch <- Some catch;
               o.env <- Scheduler.Root (Option.value (Web.DOM.Element.getAttribute "data-ctx" island) ~default:"");
-              match Base.with_owner o (fun () -> Types.with_browser_ids (id ^ "-") (fun () -> hydrate island (Kind.of_fn build))) with
+              match Base.with_owner o (fun () -> Types.with_browser_ids (id ^ "-") (fun () -> Types.in_island id (fun () -> hydrate island (Kind.of_fn build)))) with
               | d when !failed ->
                   stop d;
                   Base.dispose_owner o;

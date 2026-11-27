@@ -20,8 +20,21 @@ let fetch name input k =
 
 let send () = if Host.in_browser then fetch else !Bridge.send
 
-let table : (int * (unit -> unit)) list Host.table option ref = ref None
+type use = { id : int; refetch : unit -> unit; adopt : string -> (Json.t, Status.error) result -> unit }
+
+let table : use list Host.table option ref = ref None
 let next_use = ref 0
+
+let adopt t navigated =
+  let answers =
+    match navigated with
+    | Platform.Region region -> Answers.in_region region
+    | Platform.Part html -> Answers.in_html html
+  in
+  List.iter
+    (fun (key, r) ->
+      match r with Ok _ -> Array.iter (List.iter (fun u -> u.adopt key r)) (Host.table_values t) | Error _ -> ())
+    answers
 
 let uses () =
   match !table with
@@ -29,6 +42,7 @@ let uses () =
   | None ->
       let t = Host.table () in
       table := Some t;
+      Platform.answered := adopt t;
       t
 
 let listed name = Option.value (Host.table_get (uses ()) name) ~default:[]
@@ -61,6 +75,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
   end
   else begin
     let send = send () in
+    let island = !Types.hydrating_island in
     let generation = ref 0 and stop = ref ignore and current = ref None and first = ref true in
     let cancel () =
       incr generation;
@@ -95,7 +110,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
       if not read then attempt g input 1
       else
         let key = Answers.key (Action.name q) input in
-        match Answers.find key with
+        match Answers.find ?island key with
         | Answers.Found r -> embedded g input r
         | Answers.Absent -> attempt g input 1
         | Answers.Pending ->
@@ -116,7 +131,7 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
               Host.on_dom_ready (fun () ->
                   !stop_watch ();
                   if g = !generation then
-                    match Answers.find key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
+                    match Answers.find ?island key with Answers.Found r -> embedded g input r | _ -> attempt g input 1);
             stop := release
     in
     let refetch () = match !current with Some (_, input) -> start input ~read:false | None -> () in
@@ -138,19 +153,26 @@ let make ?(retry = default_retry) ?(enabled = fun () -> true) (q : ('i, 'o, [ `Q
           cancel ();
           State.set base Status.Idle
         end);
+    let adopt key r =
+      match !current with
+      | Some (k, input) when String.equal k key ->
+          cancel ();
+          embedded !generation input r
+      | _ -> ()
+    in
     incr next_use;
     let id = !next_use in
-    Host.table_set (uses ()) (Action.name q) ((id, refetch) :: listed (Action.name q));
+    Host.table_set (uses ()) (Action.name q) ({ id; refetch; adopt } :: listed (Action.name q));
     Base.own (fun () ->
         cancel ();
-        Host.table_set (uses ()) (Action.name q) (List.filter (fun (i, _) -> i <> id) (listed (Action.name q))));
+        Host.table_set (uses ()) (Action.name q) (List.filter (fun u -> u.id <> id) (listed (Action.name q))));
     { state; base; changes; refetch }
   end
 
 let state r = r.state
 
-let refetch r = r.refetch ()
-let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun (_, f) -> f ()) (listed (Action.name q))
+let refetch (r : _ t) = r.refetch ()
+let invalidate (q : (_, _, [ `Query ]) Action.t) = List.iter (fun u -> u.refetch ()) (listed (Action.name q))
 
 let optimistic ?commit r ~change run =
   let added, id = Optimistic.add (State.peek r.changes) change in

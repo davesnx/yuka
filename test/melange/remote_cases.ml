@@ -34,6 +34,9 @@ let append_html : string -> unit =
 let shown : unit -> string =
   [%mel.raw "function () { const b = document.querySelector('yuka-island b'); return b ? b.textContent : 'none' }"]
 
+let shown_all : unit -> string =
+  [%mel.raw "function () { return Array.from(document.querySelectorAll('yuka-island b'), function (b) { return b.textContent }).join(',') }"]
+
 let set_ready : string -> unit =
   [%mel.raw
     "function (v) { Object.defineProperty(document, 'readyState', { configurable: true, get: function () { return v } }) }"]
@@ -272,6 +275,24 @@ let async =
             check "no fetch" "0" (string_of_int (fetches ()));
             check "ready" "ready A" (shown ());
             check "no mismatch" "" logged;
+            Yuka.stop ()) );
+    ( "remote: each island reads the answer of its render, not an older one of the same key",
+      fun finish ->
+        Yuka.stop ();
+        setup_fetch false;
+        State.set input "a";
+        retry := Remote.default_retry;
+        let island id answer =
+          {|<yuka-island data-name="Query" data-id="|} ^ id ^ {|" style="display:contents"><b>ready NEW</b></yuka-island>|}
+          ^ answer ^ {|<script type="application/json" data-yuka-props="|} ^ id ^ {|">null</script>|}
+        in
+        (* The answer of a layout that a client navigation kept, then the new
+           page: i1 printed the answer, and i2, of the same render, has none. *)
+        set_body (answer_for "a" {|{"ok":"OLD"}|} ^ island "i1" (answer_for "a" {|{"ok":"NEW"}|}) ^ island "i2" "");
+        start ();
+        finish (fun () ->
+            check "no fetch" "0" (string_of_int (fetches ()));
+            check "both read the new answer" "ready NEW,ready NEW" (shown_all ());
             Yuka.stop ()) );
     ( "remote: an embedded error is read too",
       fun finish ->
